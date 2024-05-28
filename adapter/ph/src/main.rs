@@ -3,6 +3,13 @@ use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 use tokio::io;
 
+// TODO: make these all non-pub once everything is used
+mod config;
+pub mod buffer_stack;
+
+use buffer_stack::BufferStack;
+
+
 fn is_std_fd(rfd: RawFd) -> bool {
     rfd == std::io::stdin().as_raw_fd() ||
     rfd == std::io::stdout().as_raw_fd() ||
@@ -61,6 +68,9 @@ fn main() -> ExitCode {
         set_fd_nonblocking(rfd).expect("unable to set FD nonblocking");
         tun_fds.push(unsafe { BorrowedFd::borrow_raw(rfd) });
     }
+
+    let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
+    let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
 
     ExitCode::SUCCESS
 }
