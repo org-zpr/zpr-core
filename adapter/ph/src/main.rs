@@ -2,12 +2,18 @@ use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 use tokio::io;
+use tokio::sync::mpsc;
 
 // TODO: make these all non-pub once everything is used
 mod config;
 pub mod buffer_stack;
+mod packet;
+mod queues;
+mod assembly;
 
 use buffer_stack::BufferStack;
+use queues::*;
+use assembly::Assembly;
 
 
 fn is_std_fd(rfd: RawFd) -> bool {
@@ -69,8 +75,39 @@ fn main() -> ExitCode {
         tun_fds.push(unsafe { BorrowedFd::borrow_raw(rfd) });
     }
 
+    let inbound_recv_batch_size = 16;
+    let inbound_processor_batch_size = 16;
+    let inbound_send_batch_size = 4;
+    let outbound_recv_batch_size = 4;
+    let outbound_processor_batch_size = 16;
+    let outbound_send_batch_size = 16;
+
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
+
+    let (ip_inq, ip_outq) = mpsc::channel(inbound_processor_batch_size * 2);
+    let inbound_processor = InboundProcessor::new(ip_inq);
+
+    let mut is_inqs = Vec::new();
+    let mut is_outqs = Vec::new();
+    for _ in 0..tun_fds.len() {
+        let (is_inq, is_outq) = mpsc::channel(inbound_send_batch_size * 2);
+        // FIXME: maybe a way to do this with unzip but Rust couldn't infer types
+        is_inqs.push(is_inq);
+        is_outqs.push(is_outq);
+    }
+    let inbound_send = InboundSend::new(is_inqs.into_boxed_slice());
+
+    let (op_inq, op_outq) = mpsc::channel(outbound_processor_batch_size * 2);
+    let outbound_processor = OutboundProcessor::new(op_inq);
+
+    let (os_inq, os_outq) = mpsc::channel(outbound_send_batch_size * 2);
+    let outbound_send = OutboundSend::new(os_inq);
+
+    let asm = Box::leak(Box::new(Assembly{
+            buffer_stack, inbound_processor, inbound_send,
+            outbound_processor, outbound_send
+        }));
 
     ExitCode::SUCCESS
 }
