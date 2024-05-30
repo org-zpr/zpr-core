@@ -54,9 +54,6 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
                 let was_empty = bufs.is_empty();
                 bufs.push(first_buf);
                 bufs.extend(it);
-                /*for buf in it {
-                    bufs.push(buf);
-                }*/
                 drop(bufs);
                 if was_empty {
                     self.notify.notify_waiters();
