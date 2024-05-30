@@ -2,7 +2,7 @@
 use std::net::Ipv6Addr;
 use std::io::{Cursor, Error, ErrorKind, Read, Seek, SeekFrom};
 use std::time::SystemTime;
-use byteorder::{BigEndian, WriteBytesExt}; 
+use byteorder::{BigEndian, WriteBytesExt, ReadBytesExt}; 
 use base64::prelude::*;
 use ring::signature;
 use tracing::info;
@@ -76,12 +76,12 @@ pub async fn do_start_me_up(config: &Configuration) -> Result<StartMeUpResponse,
 
     let mut rdr = Cursor::new(&resp_buffer);
     rdr.seek(SeekFrom::Start(OFFSET_WG_PORT as u64))?;
-    let wg_port = rdr.read_u16().await?;        
+    let wg_port = ReadBytesExt::read_u16::<BigEndian>(&mut rdr)?;
 
     // read IPv6
     rdr.seek(SeekFrom::Start(OFFSET_IP_ADDR as u64))?;    
     let mut ip6 = [0u8; 16];
-    AsyncReadExt::read_exact(&mut rdr, &mut ip6).await?;
+    std::io::Read::read_exact(&mut rdr, &mut ip6)?;
     let ip6_addr = Ipv6Addr::from(ip6);
 
     let ipv6_mask = resp_buffer[OFFSET_NETMASK];
@@ -95,7 +95,8 @@ pub async fn do_start_me_up(config: &Configuration) -> Result<StartMeUpResponse,
     }
     
     rdr.seek(SeekFrom::Start(OFFSET_KEYLEN as u64))?;
-    let key_len = rdr.read_u16().await?;
+    let key_len = ReadBytesExt::read_u16::<BigEndian>(&mut rdr)?;
+
     if key_len as usize != NOISE_KEY_LEN {
         return Err(Error::new(
             ErrorKind::Other,
