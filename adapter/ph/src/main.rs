@@ -75,6 +75,10 @@ fn main() -> ExitCode {
         tun_fds.push(unsafe { BorrowedFd::borrow_raw(rfd) });
     }
 
+    // TODO: These batch sizes are placeholders for now.  So are the queue
+    // sizes below which are all just double the batch size.  Performance
+    // testing will inform us the correct values for these, which balance
+    // throughput with service time.
     let inbound_recv_batch_size = 16;
     let inbound_processor_batch_size = 16;
     let inbound_send_batch_size = 4;
