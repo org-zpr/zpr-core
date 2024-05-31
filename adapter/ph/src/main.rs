@@ -5,6 +5,7 @@ use tokio::io;
 use tokio::sync::mpsc;
 
 // TODO: make these all non-pub once everything is used
+pub mod ext;
 mod config;
 pub mod buffer_stack;
 mod packet;
