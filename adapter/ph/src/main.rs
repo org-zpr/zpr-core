@@ -2,14 +2,18 @@ use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 use tokio::io;
+use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 
 // TODO: make these all non-pub once everything is used
+pub mod ext;
 mod config;
 pub mod buffer_stack;
 mod packet;
 mod queues;
 mod assembly;
+mod inbound_recv_worker;
 
 use buffer_stack::BufferStack;
 use queues::*;
@@ -112,6 +116,25 @@ fn main() -> ExitCode {
             buffer_stack, inbound_processor, inbound_send,
             outbound_processor, outbound_send
         }));
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));
+            socket.connect(peer_addr).await.expect("unable to connect to peer addr");
+
+            let mut js = JoinSet::new();
+
+            js.spawn(inbound_recv_worker::launch(
+                    &inbound_recv_worker::Config{ batch_size: inbound_recv_batch_size },
+                    &*asm, &*socket));
+
+            while let Some(res) = js.join_next().await {
+                res.unwrap();
+            }
+        });
 
     ExitCode::SUCCESS
 }
