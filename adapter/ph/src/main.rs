@@ -5,6 +5,9 @@ use tokio::io;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
+use tokio::signal::unix::{signal, SignalKind};
+use std::io::Error;
+use std::process;
 
 // TODO: make these all non-pub once everything is used
 pub mod ext;
@@ -39,6 +42,13 @@ fn set_fd_nonblocking<T: AsRawFd>(fd: T) -> io::Result<()> {
     let flags_nb = nix::fcntl::OFlag::from_bits_retain(flags) | nix::fcntl::OFlag::O_NONBLOCK;
     nix::fcntl::fcntl(rfd, nix::fcntl::FcntlArg::F_SETFL(flags_nb))?;
     Ok(())
+}
+
+fn emit_counts(counts_arr:&[Counter]) {
+    let num_packets = counts_arr[0].get_count();
+    let num_dropped = counts_arr[1].get_count();
+    eprintln!("packets recieved: {num_packets}");
+    eprintln!("packets dropped: {num_dropped}");
 }
 
 fn main() -> ExitCode {
@@ -121,15 +131,15 @@ fn main() -> ExitCode {
             buffer_stack, inbound_processor, inbound_send,
             outbound_processor, outbound_send, counters
         }));
-
-    // TODO signal handler goes here
-
+    
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap()
         .block_on(async {
+            // TODO signal handler goes here
+            
             let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));
             socket.connect(peer_addr).await.expect("unable to connect to peer addr");
 
@@ -138,6 +148,18 @@ fn main() -> ExitCode {
             js.spawn(inbound_recv_worker::launch(
                     &inbound_recv_worker::Config{ batch_size: inbound_recv_batch_size },
                     &*asm, &*socket));
+            
+            let mut usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
+            let mut term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
+
+            js.spawn(async {
+                loop {
+                    tokio::select! {
+                        _ = usr1_stream.recv() => (emit_counts(&asm.counters)),
+                        _ = term_stream.recv() => (emit_counts(&asm.counters))
+                    }  
+                }
+            });
 
             js.spawn(inbound_processor_worker::launch(
                     &inbound_processor_worker::Config{ batch_size: inbound_processor_batch_size },
