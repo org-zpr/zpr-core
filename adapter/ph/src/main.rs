@@ -134,15 +134,16 @@ fn main() -> ExitCode {
             socket.connect(peer_addr).await.expect("unable to connect to peer addr");
             
             fs::remove_file(&sock_path);
-            let unix_socket =  Box::leak(Box::new(UnixListener::bind(sock_path).unwrap()));
+            let unix_socket =  Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
 
             let mut js1 = JoinSet::new();
-            let mut js2 = JoinSet::new();
+            let mut js2 = JoinSet::new(); //TODO not sure if these have to be different
 
             js1.spawn(inbound_recv_worker::launch(
                     &inbound_recv_worker::Config{ batch_size: inbound_recv_batch_size },
                     &*asm, &*socket));
-
+            
+            // Launches RPC worker program
             js2.spawn(rpc_worker::launch(
                 &rpc_worker::Config{ batch_size: inbound_recv_batch_size },
                 &*asm, &*unix_socket));
