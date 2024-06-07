@@ -157,7 +157,6 @@ fn main() -> ExitCode {
             fs::remove_file(&sock_path);
             let unix_socket =  Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
 
-            let async_tun_fds = tun_fds.into_iter().map(|tun_fd| AsyncFd::new(tun_fd).unwrap()).collect::<Vec<_>>().leak();
 
             let mut js = JoinSet::new();
 
