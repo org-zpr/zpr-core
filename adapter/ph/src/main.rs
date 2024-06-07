@@ -4,12 +4,14 @@ use std::process::ExitCode;
 use tokio::io;
 use tokio::io::unix::AsyncFd;
 use tokio::net::UdpSocket;
+use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
 use std::io::Error;
 use std::process;
 
+use std::fs;
 // TODO: make these all non-pub once everything is used
 pub mod ext;
 mod config;
@@ -21,6 +23,7 @@ mod inbound_recv_worker;
 mod counter;
 mod inbound_processor_worker;
 mod inbound_send_worker;
+mod rpc_worker;
 
 use buffer_stack::BufferStack;
 use queues::*;
@@ -58,10 +61,16 @@ fn main() -> ExitCode {
 
     let execname = args.next().unwrap();
 
-    if args.len() < 3 {
-        eprintln!("Usage: {execname} <self addr:port> <peer addr:port> <TUN fd> [<TUN fd>...]");
+    if args.len() < 4 {
+        eprintln!("Usage: {execname} <socket path> <self addr:port> <peer addr:port> <TUN fd> [<TUN fd>...]");
         return ExitCode::FAILURE;
     }
+
+    let Ok(sock_path) = args.next().unwrap().parse::<String>()
+    else {
+        eprintln!("Socket path parse failure");
+        return ExitCode::FAILURE;
+    };
 
     let Ok(self_addr) = args.next().unwrap().parse::<SocketAddr>()
     else {
@@ -144,6 +153,9 @@ fn main() -> ExitCode {
             
             let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));
             socket.connect(peer_addr).await.expect("unable to connect to peer addr");
+            
+            fs::remove_file(&sock_path);
+            let unix_socket =  Box::leak(Box::new(UnixListener::bind(sock_path).unwrap()));
 
             let async_tun_fds = tun_fds.into_iter().map(|tun_fd| AsyncFd::new(tun_fd).unwrap()).collect::<Vec<_>>().leak();
 
@@ -174,6 +186,10 @@ fn main() -> ExitCode {
                     &inbound_send_worker::Config{ batch_size: inbound_send_batch_size },
                     &*asm, is_outq, &*async_tun_fd));
             }
+
+            js.spawn(rpc_worker::launch(
+                &rpc_worker::Config{ batch_size: inbound_recv_batch_size },
+                &*asm, &*unix_socket));
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();
