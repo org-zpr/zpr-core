@@ -13,10 +13,8 @@ async fn worker<'pktbuf>(
 ) {
     let mut pkts = Vec::new();
 
-    while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
-        eprintln!("Inbound processing {count} packets!");
+    while let _count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         for pkt in pkts.drain(..) {
-            //eprintln!("Inbound packet: {}", std::str::from_utf8(&pkt.buf[..pkt.len]).unwrap());
             // TODO: consider enqueueing in parallel to avoid blocking all if one Q is full
             asm.inbound_send.enqueue(pkt).await;
         }

@@ -2,6 +2,7 @@ use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 use tokio::io;
+use tokio::io::unix::AsyncFd;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -15,6 +16,7 @@ mod queues;
 mod assembly;
 mod inbound_recv_worker;
 mod inbound_processor_worker;
+mod inbound_send_worker;
 
 use buffer_stack::BufferStack;
 use queues::*;
@@ -126,6 +128,8 @@ fn main() -> ExitCode {
             let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));
             socket.connect(peer_addr).await.expect("unable to connect to peer addr");
 
+            let async_tun_fds = tun_fds.into_iter().map(|tun_fd| AsyncFd::new(tun_fd).unwrap()).collect::<Vec<_>>().leak();
+
             let mut js = JoinSet::new();
 
             js.spawn(inbound_recv_worker::launch(
@@ -135,6 +139,12 @@ fn main() -> ExitCode {
             js.spawn(inbound_processor_worker::launch(
                     &inbound_processor_worker::Config{ batch_size: inbound_processor_batch_size },
                     &*asm, ip_outq));
+
+            for (async_tun_fd, is_outq) in async_tun_fds.iter().zip(is_outqs) {
+                js.spawn(inbound_send_worker::launch(
+                    &inbound_send_worker::Config{ batch_size: inbound_send_batch_size },
+                    &*asm, is_outq, &*async_tun_fd));
+            }
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();
