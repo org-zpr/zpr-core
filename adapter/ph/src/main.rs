@@ -5,8 +5,6 @@ use tokio::io;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use std::io::Error;
-use std::process;
 
 // TODO: make these all non-pub once everything is used
 pub mod ext;
