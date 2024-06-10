@@ -49,7 +49,15 @@ async fn worker(
 
         // enqueue received packets with packet processor
         for (buf, msg) in bufs.drain(..).zip(&msgs) {
-            if msg.1 { asm.buffer_stack.put_buffers([buf]); }  // packet was too large; drop TODO: count somewhere
+            asm.counters[0].increment();
+            println!("packet recieved");
+            asm.counters[0].print();
+            if msg.1 { 
+                asm.buffer_stack.put_buffers([buf]); 
+                asm.counters[1].increment();
+                println!("packet dropped");
+                asm.counters[1].print();
+            }  // packet was too large; drop TODO: count somewhere
             else { asm.inbound_processor.enqueue(Packet{ len: msg.0, buf }).await; }
         }
 

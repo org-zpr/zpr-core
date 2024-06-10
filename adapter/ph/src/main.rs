@@ -14,9 +14,12 @@ mod packet;
 mod queues;
 mod assembly;
 mod inbound_recv_worker;
+mod counter;
+mod inbound_processor_worker;
 
 use buffer_stack::BufferStack;
 use queues::*;
+use counter::*;
 use assembly::Assembly;
 
 
@@ -112,10 +115,15 @@ fn main() -> ExitCode {
     let (os_inq, os_outq) = mpsc::channel(outbound_send_batch_size * 2);
     let outbound_send = OutboundSend::new(os_inq);
 
+    let counters = [Counter::new(), Counter::new()];
+
     let asm = Box::leak(Box::new(Assembly{
             buffer_stack, inbound_processor, inbound_send,
-            outbound_processor, outbound_send
+            outbound_processor, outbound_send, counters
         }));
+
+    // TODO signal handler goes here
+
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -130,6 +138,10 @@ fn main() -> ExitCode {
             js.spawn(inbound_recv_worker::launch(
                     &inbound_recv_worker::Config{ batch_size: inbound_recv_batch_size },
                     &*asm, &*socket));
+
+            js.spawn(inbound_processor_worker::launch(
+                    &inbound_processor_worker::Config{ batch_size: inbound_processor_batch_size },
+                    &*asm, ip_outq));
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();
