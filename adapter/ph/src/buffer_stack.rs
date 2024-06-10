@@ -16,6 +16,20 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
         Self{buffers: Mutex::new(bufs.into_iter().collect()), notify: Notify::new()}
     }
 
+    pub async fn get_buffer(&self) -> &'buf mut [u8; BUFSIZ] {
+        loop {
+            {
+                let mut bufs = self.buffers.lock().unwrap();
+                match bufs.pop() {
+                    Some(buf) => return buf,
+                    None => ()
+                }
+            }
+
+            self.notify.notified().await;
+        }
+    }
+
     // Blocks until at least 1 buffer can be returned.
     // Returns up to n buffers.
     // Exception: if n is 0, returns immediately with no buffers.
@@ -41,6 +55,16 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
             }
 
             self.notify.notified().await;
+        }
+    }
+
+    pub fn put_buffer(&self, buf: &'buf mut [u8; BUFSIZ]) {
+        let mut bufs = self.buffers.lock().unwrap();
+        let was_empty = bufs.is_empty();
+        bufs.push(buf);
+        drop(bufs);
+        if was_empty {
+            self.notify.notify_waiters();
         }
     }
 

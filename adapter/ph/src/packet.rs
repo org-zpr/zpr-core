@@ -1,5 +1,5 @@
 use std::mem::size_of;
-use zerocopy::{AsBytes, FromBytes};
+use zerocopy::FromBytes;
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes};
 use crate::config;
 
