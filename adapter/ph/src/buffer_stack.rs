@@ -6,23 +6,29 @@ use tokio::sync::Notify;
 
 pub struct BufferStack<'buf, const BUFSIZ: usize> {
     buffers: Mutex<Vec<&'buf mut [u8; BUFSIZ]>>,
-    notify: Notify
+    notify: Notify,
 }
 
 impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
     pub const BUFFER_SIZE: usize = BUFSIZ;
 
-    pub fn new<I>(bufs: I) -> Self where I: IntoIterator<Item = &'buf mut [u8; BUFSIZ]> {
-        Self{buffers: Mutex::new(bufs.into_iter().collect()), notify: Notify::new()}
+    pub fn new<I>(bufs: I) -> Self
+    where
+        I: IntoIterator<Item = &'buf mut [u8; BUFSIZ]>,
+    {
+        Self {
+            buffers: Mutex::new(bufs.into_iter().collect()),
+            notify: Notify::new(),
+        }
     }
 
     // Blocks until at least 1 buffer can be returned.
     // Returns up to n buffers.
     // Exception: if n is 0, returns immediately with no buffers.
-    pub async fn get_buffers(
-        &self, n: usize, bufs_out: &mut Vec<&'buf mut [u8; BUFSIZ]>
-    ) -> usize {
-        if n == 0 { return 0; }
+    pub async fn get_buffers(&self, n: usize, bufs_out: &mut Vec<&'buf mut [u8; BUFSIZ]>) -> usize {
+        if n == 0 {
+            return 0;
+        }
 
         loop {
             {
@@ -37,16 +43,19 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
                     // note: intentional reversing!  keep bufs on top of stack hot
                     bufs_out.push(bufs.pop().unwrap());
                 }
-                if to_get > 0 { return to_get; }
+                if to_get > 0 {
+                    return to_get;
+                }
             }
 
             self.notify.notified().await;
         }
     }
 
-    pub fn put_buffers<I>(
-        &self, bufs_in: I
-    ) where I: IntoIterator<Item = &'buf mut [u8; BUFSIZ]> {
+    pub fn put_buffers<I>(&self, bufs_in: I)
+    where
+        I: IntoIterator<Item = &'buf mut [u8; BUFSIZ]>,
+    {
         let mut it = bufs_in.into_iter();
         match it.next() {
             Some(first_buf) => {
@@ -58,9 +67,9 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
                 if was_empty {
                     self.notify.notify_waiters();
                 }
-            },
+            }
 
-            None => ()  // avoid taking the lock
+            None => (), // avoid taking the lock
         }
     }
 }

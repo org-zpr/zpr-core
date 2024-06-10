@@ -1,37 +1,36 @@
+use std::io::Error;
 use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
+use std::process;
 use std::process::ExitCode;
 use tokio::io;
 use tokio::io::unix::AsyncFd;
 use tokio::net::UdpSocket;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tokio::signal::unix::{signal, SignalKind};
-use std::io::Error;
-use std::process;
 
 // TODO: make these all non-pub once everything is used
-pub mod ext;
-mod config;
+mod assembly;
 pub mod buffer_stack;
+mod config;
+mod counter;
+pub mod ext;
+mod inbound_processor_worker;
+mod inbound_recv_worker;
+mod inbound_send_worker;
 mod packet;
 mod queues;
-mod assembly;
-mod inbound_recv_worker;
-mod counter;
-mod inbound_processor_worker;
-mod inbound_send_worker;
 
-use buffer_stack::BufferStack;
-use queues::*;
-use counter::*;
 use assembly::Assembly;
-
+use buffer_stack::BufferStack;
+use counter::*;
+use queues::*;
 
 fn is_std_fd(rfd: RawFd) -> bool {
-    rfd == std::io::stdin().as_raw_fd() ||
-    rfd == std::io::stdout().as_raw_fd() ||
-    rfd == std::io::stderr().as_raw_fd()
+    rfd == std::io::stdin().as_raw_fd()
+        || rfd == std::io::stdout().as_raw_fd()
+        || rfd == std::io::stderr().as_raw_fd()
 }
 
 fn is_fd_open<T: AsRawFd>(fd: T) -> bool {
@@ -46,7 +45,7 @@ fn set_fd_nonblocking<T: AsRawFd>(fd: T) -> io::Result<()> {
     Ok(())
 }
 
-fn emit_counts(counts_arr:&[Counter]) {
+fn emit_counts(counts_arr: &[Counter]) {
     let num_packets = counts_arr[0].get_count();
     let num_dropped = counts_arr[1].get_count();
     eprintln!("packets recieved: {num_packets}");
@@ -63,22 +62,19 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    let Ok(self_addr) = args.next().unwrap().parse::<SocketAddr>()
-    else {
+    let Ok(self_addr) = args.next().unwrap().parse::<SocketAddr>() else {
         eprintln!("Address parse failure");
         return ExitCode::FAILURE;
     };
 
-    let Ok(peer_addr) = args.next().unwrap().parse::<SocketAddr>()
-    else {
+    let Ok(peer_addr) = args.next().unwrap().parse::<SocketAddr>() else {
         eprintln!("Address parse failure");
         return ExitCode::FAILURE;
     };
 
     let mut tun_fds = Vec::new();
     for arg in args {
-        let Ok(rfd) = arg.parse::<RawFd>()
-        else {
+        let Ok(rfd) = arg.parse::<RawFd>() else {
             eprintln!("FD parse failure");
             return ExitCode::FAILURE;
         };
@@ -129,11 +125,14 @@ fn main() -> ExitCode {
 
     let counters = [Counter::new(), Counter::new()];
 
-    let asm = Box::leak(Box::new(Assembly{
-            buffer_stack, inbound_processor, inbound_send,
-            outbound_processor, outbound_send, counters
-        }));
-    
+    let asm = Box::leak(Box::new(Assembly {
+        buffer_stack,
+        inbound_processor,
+        inbound_send,
+        outbound_processor,
+        outbound_send,
+        counters,
+    }));
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -141,18 +140,33 @@ fn main() -> ExitCode {
         .unwrap()
         .block_on(async {
             // TODO signal handler goes here
-            
-            let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));
-            socket.connect(peer_addr).await.expect("unable to connect to peer addr");
 
-            let async_tun_fds = tun_fds.into_iter().map(|tun_fd| AsyncFd::new(tun_fd).unwrap()).collect::<Vec<_>>().leak();
+            let socket = Box::leak(Box::new(
+                UdpSocket::bind(self_addr)
+                    .await
+                    .expect("unable to bind to self addr"),
+            ));
+            socket
+                .connect(peer_addr)
+                .await
+                .expect("unable to connect to peer addr");
+
+            let async_tun_fds = tun_fds
+                .into_iter()
+                .map(|tun_fd| AsyncFd::new(tun_fd).unwrap())
+                .collect::<Vec<_>>()
+                .leak();
 
             let mut js = JoinSet::new();
 
             js.spawn(inbound_recv_worker::launch(
-                    &inbound_recv_worker::Config{ batch_size: inbound_recv_batch_size },
-                    &*asm, &*socket));
-            
+                &inbound_recv_worker::Config {
+                    batch_size: inbound_recv_batch_size,
+                },
+                &*asm,
+                &*socket,
+            ));
+
             let mut usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
             let mut term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
 
@@ -161,18 +175,27 @@ fn main() -> ExitCode {
                     tokio::select! {
                         _ = usr1_stream.recv() => (emit_counts(&asm.counters)),
                         _ = term_stream.recv() => (emit_counts(&asm.counters))
-                    }  
+                    }
                 }
             });
 
             js.spawn(inbound_processor_worker::launch(
-                    &inbound_processor_worker::Config{ batch_size: inbound_processor_batch_size },
-                    &*asm, ip_outq));
+                &inbound_processor_worker::Config {
+                    batch_size: inbound_processor_batch_size,
+                },
+                &*asm,
+                ip_outq,
+            ));
 
             for (async_tun_fd, is_outq) in async_tun_fds.iter().zip(is_outqs) {
                 js.spawn(inbound_send_worker::launch(
-                    &inbound_send_worker::Config{ batch_size: inbound_send_batch_size },
-                    &*asm, is_outq, &*async_tun_fd));
+                    &inbound_send_worker::Config {
+                        batch_size: inbound_send_batch_size,
+                    },
+                    &*asm,
+                    is_outq,
+                    &*async_tun_fd,
+                ));
             }
 
             while let Some(res) = js.join_next().await {

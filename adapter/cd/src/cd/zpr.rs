@@ -1,14 +1,12 @@
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufReader, Error, ErrorKind, Read};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use serde::Deserialize;
 use tracing::info;
 
-
 use crate::cd::startmeup::do_start_me_up;
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigState {
@@ -44,7 +42,7 @@ struct Dock {
 #[derive(Debug, Clone, Deserialize)]
 struct Adapter {
     private_key: Option<String>, // base64 noise key
-    public_key: Option<String>,  // base64 noise key (TODO: should be able to derive from private key)
+    public_key: Option<String>, // base64 noise key (TODO: should be able to derive from private key)
 }
 
 pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
@@ -74,10 +72,10 @@ pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
 impl Configuration {
     pub fn get_name(&self) -> &str {
         self.profile.name.as_str()
-    }    
+    }
 
     pub fn get_dock_host(&self) -> &str {
-        self.dock.host_or_ip.as_str()        
+        self.dock.host_or_ip.as_str()
     }
 
     pub fn get_dock_startup_port(&self) -> u16 {
@@ -85,7 +83,7 @@ impl Configuration {
     }
 
     pub fn get_path(&self) -> &str {
-        self.path_name.as_str()                   
+        self.path_name.as_str()
     }
 
     // Returns a filename (possibly relative to the config file path)
@@ -98,13 +96,9 @@ impl Configuration {
     }
 }
 
-
-
-
-
 // Zpr is the "shared state" for the control daemon. Not quite sure yet what will be in
 // here.  For now is holding state information about configurations.
-// 
+//
 // This pattern on an Arc and then a Mutex is copied from the tokio "best practice" as
 // illustrated in the redis example.
 #[derive(Debug, Clone)]
@@ -114,7 +108,7 @@ pub struct Zpr {
 
 #[derive(Debug)]
 struct Shared {
-    state: Mutex<State>,    
+    state: Mutex<State>,
 }
 
 #[derive(Debug)]
@@ -122,20 +116,18 @@ struct State {
     configurations: HashMap<String, (Configuration, ConfigState)>, // indexed by configuration.profile.name.
 }
 
-
 impl Default for Zpr {
     fn default() -> Self {
         Zpr::new()
     }
 }
 
-
 impl Zpr {
     pub fn new() -> Zpr {
         Zpr {
             shared: Arc::new(Shared {
                 state: Mutex::new(State {
-                    configurations: HashMap::new(),                    
+                    configurations: HashMap::new(),
                 }),
             }),
         }
@@ -145,7 +137,7 @@ impl Zpr {
     pub fn add_configuration(&self, c: Configuration) -> Result<(), std::io::Error> {
         let mut found = false;
         let mut found_name: String = String::new();
-        let mut state = self.shared.state.lock().unwrap();            
+        let mut state = self.shared.state.lock().unwrap();
         for (conf, state) in state.configurations.values() {
             if conf.path_name == c.path_name {
                 found = true;
@@ -173,7 +165,9 @@ impl Zpr {
             }
         }
 
-        state.configurations.insert(c.get_name().to_string(), (c, ConfigState::Disconnected));
+        state
+            .configurations
+            .insert(c.get_name().to_string(), (c, ConfigState::Disconnected));
         Ok(())
     }
 
@@ -197,7 +191,6 @@ impl Zpr {
         status
     }
 
-
     pub fn get_configuration_state(&self, name: &str) -> Option<ConfigState> {
         let state = self.shared.state.lock().unwrap();
         let cfg = state.configurations.get(name);
@@ -206,10 +199,9 @@ impl Zpr {
         Some(cs.clone())
     }
 
-
     // This public access to the status property is temporary.  As this is developed the status
     // value will depend on the outcome of operations or reactions to events.
-    // 
+    //
     // For example, when `start_me_up` succeeds, the status moves to "connected".
     pub fn set_status(&self, name: &str, status: ConfigState) -> Result<(), std::io::Error> {
         let mut state = self.shared.state.lock().unwrap();
@@ -243,12 +235,17 @@ impl Zpr {
                 // Set the state back to disconnected.
                 let _ = self.set_status(name, ConfigState::Disconnected);
                 Err(e)
-            },
+            }
             Ok(resp) => {
                 // TODO: Figure out what todo with our new information.
-                info!(config = name, dock_wg_port = resp.wg_port, local_wg_addr = format!("{:?}", resp.local_wg_addr), "start-me-up sucess");
+                info!(
+                    config = name,
+                    dock_wg_port = resp.wg_port,
+                    local_wg_addr = format!("{:?}", resp.local_wg_addr),
+                    "start-me-up sucess"
+                );
                 self.set_status(name, ConfigState::Connected(Instant::now()))
-            },
+            }
         }
     }
 
@@ -284,16 +281,12 @@ impl Zpr {
     }
 }
 
-
-
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::env;    
-    use std::time::{SystemTime, UNIX_EPOCH};
     use rand::Rng;
-
+    use std::env;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempTomlFile {
         path: String,
@@ -308,7 +301,10 @@ mod test {
     impl TempTomlFile {
         fn new(contents: &str) -> TempTomlFile {
             let mut rng = rand::thread_rng();
-            let tstamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+            let tstamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
             let dir = env::temp_dir();
             let num: u32 = rng.gen();
             let path = dir.join(format!("org_zpr_cd_test_{}_{}.toml", num, tstamp));
@@ -323,9 +319,7 @@ mod test {
         }
     }
 
-    
-
-    #[test]    
+    #[test]
     fn test_load_configuration() {
         let toml_txt = r#"
             [profile]
@@ -382,8 +376,8 @@ mod test {
         stats = zpr.get_status();
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].0, "test");
-        assert_eq!(stats[0].1, "localhost");        
-        assert_eq!(stats[0].2, "disconnected");                
+        assert_eq!(stats[0].1, "localhost");
+        assert_eq!(stats[0].2, "disconnected");
     }
 
     #[test]
@@ -411,7 +405,6 @@ mod test {
         }
         assert!(r.is_ok());
 
-
         let toml_txt = r#"
             [profile]
             name = "test"
@@ -429,7 +422,9 @@ mod test {
         let r = zpr.add_configuration(conf2);
         assert!(r.is_err());
         let e = r.unwrap_err();
-        assert!( e.to_string().contains("Configuration with name test already exists"));
+        assert!(e
+            .to_string()
+            .contains("Configuration with name test already exists"));
     }
 
     #[test]
@@ -441,7 +436,9 @@ mod test {
         let r = zpr.set_status("foo", ConfigState::Disconnected);
         assert!(r.is_err());
         let e = r.unwrap_err();
-        assert!( e.to_string().contains("Configuration with name foo not found"));
+        assert!(e
+            .to_string()
+            .contains("Configuration with name foo not found"));
     }
 
     #[test]
@@ -481,4 +478,3 @@ mod test {
         assert!(matches!(state.unwrap(), ConfigState::Connected(_)));
     }
 }
-

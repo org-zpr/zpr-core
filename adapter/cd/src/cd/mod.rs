@@ -9,19 +9,13 @@ pub use crate::cd::zpr::Zpr;
 
 mod startmeup;
 
-
 use std::{fs, io, sync::Arc};
-use tracing::{error, info};
-use tracing_subscriber;
 use tokio::signal;
 use tokio::sync::oneshot;
+use tracing::{error, info};
+use tracing_subscriber;
 
-
-use tokio_util::{
-    sync::CancellationToken,
-    task::TaskTracker,
-};
-
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 #[tokio::main]
 pub async fn tokio_main(config: Arc<Config>) -> io::Result<()> {
@@ -68,7 +62,7 @@ pub async fn tokio_main(config: Arc<Config>) -> io::Result<()> {
 
     // cleanup
     info!("cd preparing for exit");
-    let _ = fs::remove_file(&config.socket_path); // don't care    
+    let _ = fs::remove_file(&config.socket_path); // don't care
     info!("cd shuts down");
     Ok(())
 }

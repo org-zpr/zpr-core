@@ -3,12 +3,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 // Implement counter type used in the Assembly struct
 
 pub struct Counter {
-    number: AtomicU64
+    number: AtomicU64,
 }
 
 impl Counter {
     pub(crate) fn new() -> Self {
-        Self { number: AtomicU64::new(0) }
+        Self {
+            number: AtomicU64::new(0),
+        }
     }
 
     pub(crate) fn reset(&self) {
@@ -37,14 +39,14 @@ impl Counter {
 
     pub(crate) fn get_count(&self) -> u64 {
         self.number.load(Ordering::Relaxed) // TODO look for more elegant way to get value
-                                                    // all the Atomic methods (that I could find) that get type are either
-                                                    // mutable or "consume" the atomic value, which the compiler
-                                                    // gets mad at
+                                            // all the Atomic methods (that I could find) that get type are either
+                                            // mutable or "consume" the atomic value, which the compiler
+                                            // gets mad at
     }
 
     pub(crate) fn print(&self) {
         let count = self.number.load(Ordering::Relaxed);
-        println!("count: {count}") //TODO change message and is println necessary? 
+        println!("count: {count}") //TODO change message and is println necessary?
     }
 }
 
@@ -109,7 +111,5 @@ mod tests {
         assert_eq!(counter.get_count(), 975467);
         counter.decrease_by(4543);
         assert_eq!(counter.get_count(), 970924);
-
     }
-
 }

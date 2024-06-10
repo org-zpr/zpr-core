@@ -47,7 +47,7 @@ fn main() -> io::Result<()> {
 
     let logpath = Path::new(LOG_DIR);
     std::fs::create_dir_all(logpath).expect("failed to create log directory");
-    
+
     let pidpath = Path::new(PID_DIR);
     std::fs::create_dir_all(pidpath).expect("failed to create PID directory");
 
