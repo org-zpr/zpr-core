@@ -21,7 +21,7 @@ async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
 
     while let _count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         for pkt in &pkts {
-            async_fd_write_vectored(tun_fd, &[IoSlice::new(&pkt.buf[..pkt.len])]).await.unwrap();  // TODO: error handling
+            async_fd_write_vectored(tun_fd, &[IoSlice::new(pkt.body())]).await.unwrap();  // TODO: error handling
         }
         asm.buffer_stack.put_buffers(pkts.drain(..).map(|pktbuf| pktbuf.buf));
     }
