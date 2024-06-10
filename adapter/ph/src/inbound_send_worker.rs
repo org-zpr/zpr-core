@@ -3,6 +3,7 @@ use std::io::IoSlice;
 use std::os::fd::{AsFd, AsRawFd};
 use tokio::io::unix::AsyncFd;
 use tokio::sync::mpsc;
+use crate::ext::std::vec::VecExt;
 use crate::ext::tokio::io::unix::*;
 use crate::assembly::Assembly;
 use crate::packet::Packet;
@@ -17,13 +18,19 @@ async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
     queue: &mut mpsc::Receiver<Packet<'pktbuf>>,
     tun_fd: &AsyncFd<Fd>
 ) {
-    let mut pkts = Vec::new();
+    let mut outer_pkts = Vec::new();
 
-    while let _count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
-        for pkt in &pkts {
-            async_fd_write_vectored(tun_fd, &[IoSlice::new(pkt.body())]).await.unwrap();  // TODO: error handling
+    loop {
+        let mut pkts = outer_pkts;
+
+        while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
+            for pkt in &pkts {
+                async_fd_write_vectored(tun_fd, &[IoSlice::new(pkt.body())]).await.unwrap();  // TODO: error handling
+            }
+            asm.buffer_stack.put_buffers(pkts.drain(..).map(|pktbuf| pktbuf.buf));
         }
-        asm.buffer_stack.put_buffers(pkts.drain(..).map(|pktbuf| pktbuf.buf));
+
+        outer_pkts = pkts.recycle();
     }
 }
 
