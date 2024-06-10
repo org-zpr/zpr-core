@@ -1,0 +1,86 @@
+syntax = "proto3";
+package vsio;
+
+option go_package = "zpr.org/vs/pkg/snio/vsio";
+
+
+// The VISA
+//
+// Not only is this passed around in a ZAP herald, but it is also the binary format
+// for visas used by the visa service.
+//
+message Visa {
+    message KeySet {
+        uint32 format     = 1;
+        bytes ingress_key = 2;  // session key encrypted for ingress nodes eyes only
+        bytes egress_key  = 3;   // session key encrypted for egress nodes eyes only
+    }
+
+    message Constraints {
+        bool   bw               = 1;
+        uint64 bw_limit_bps     = 2;
+        string data_cap_id      = 3; // Empty for no data cap
+        uint64 data_cap_bytes   = 4;
+        bytes data_cap_affinity = 5; // tether address of service agent
+    }
+
+    uint32      issuer_id      = 1;
+    uint64      configuration  = 2;
+    int64       expires        = 3; // unix time (milliseconds)
+    bytes       source         = 4; // packet source (tether address)
+    bytes       dest           = 5; // packet sink (tether address)
+    bytes       source_contact = 6; // source contact addr
+    bytes       dest_contact   = 7; // dest contact addr
+    uint32      dock_pep       = 8;
+    uint32      fwd_pep        = 9; // not yet used
+    KeySet      session_key    = 10;
+    bytes       dock_pep_args  = 11; // Marshalled PEPArgsXXX struct
+    Constraints cons           = 12;
+    Signature   sig            = 13;
+}
+
+
+// PEP argument schemas:
+//
+// The PEP args in the visa are just a byte buffer. But really the arg format is an agreement
+// between the visa service and the PEP algorithms baked into the nodes.  Maybe in the future the
+// PEPs themselves will be expressed a code in the visa.  Possibly in a future revision
+// I'll just hard code the PEP arg types into the visa using "oneof".
+
+
+// These are the arguments expected by the UDP dock pep at index 1.
+// These are tightly coupled to the implementation.
+message PEPArgsUDP {
+    bytes source_contact_addr = 1;
+    bytes dest_contact_addr   = 2;
+    uint32 source_port        = 3;
+    uint32 dest_port_mode     = 4; // 0=static, 1=req-port
+    uint32 dest_port          = 5;
+    repeated uint32 icmp_allowed = 6; // list of allowed ICMP types
+}
+
+// Args for basic TCP pep at index 2.
+message PEPArgsTCP {
+    bytes source_contact_addr = 1;
+    bytes dest_contact_addr   = 2;
+    uint32 source_port        = 3; // For server side should be service port, for client side should be zero.
+    uint32 dest_port          = 4; // For server side should be zero, for client side should be service port.
+    bool server               = 5; // If this visa is for dock on server side.
+    repeated uint32 icmp_allowed = 6; // list of allowed ICMP types
+}
+
+message PEPArgsICMP {
+    bytes source_contact_addr = 1;
+    bytes dest_contact_addr   = 2;
+    uint32 icmp_type_code     = 3; // the allowed ICMP type and code (in lower 16 bits)
+    uint32 icmp_antecedent    = 4; // use 0xFF for none
+    uint32 state_timeout_ms   = 5; // timeout for state in milliseconds
+    bool one_shot             = 6; // If we allow only one reply to a request
+}
+
+
+message Signature {
+    uint32 type = 1;
+    bytes signature = 2;
+}
+

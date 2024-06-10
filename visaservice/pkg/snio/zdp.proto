@@ -1,0 +1,25 @@
+syntax="proto3";
+package snio;
+
+option go_package = "zpr.org/vs/pkg/snio";
+
+
+import "zds/zds.proto";
+
+
+message SNState {
+
+  // Authentication challenge from POE to CA.
+  message Challenge {
+    int32         chid = 1;
+    zds.Challenge chal = 2;
+  }
+
+  // Response to a challenge from CA to POE.
+  message ChallengeResp {
+    int32                  chid     = 1;
+    map<string,string>     claims   = 2; // claims (attrs) asserted.
+    repeated zds.ChallengeResponse crb_list = 3;
+  }
+}
+
