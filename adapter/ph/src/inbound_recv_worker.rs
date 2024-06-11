@@ -4,7 +4,7 @@ use tokio::net::UdpSocket;
 use crate::ext::std::vec::VecExt;
 use crate::ext::tokio::net::*;
 use crate::assembly::Assembly;
-use crate::packet::Packet;
+use crate::packet::{packet_body_buffer, Packet};
 
 #[derive(Copy, Clone)]
 pub struct Config {
@@ -26,7 +26,7 @@ async fn worker(
         // construct iovecs
         let mut iovs = iovs_outer;
         for buf in &mut bufs {
-            iovs.push([IoSliceMut::new(*buf)])
+            iovs.push([IoSliceMut::new(packet_body_buffer(buf))])
         }
 
         // TODO: reuse Vec -- why doesn't the recycle trick work here?
@@ -49,8 +49,20 @@ async fn worker(
 
         // enqueue received packets with packet processor
         for (buf, msg) in bufs.drain(..).zip(&msgs) {
-            if msg.1 { asm.buffer_stack.put_buffers([buf]); }  // packet was too large; drop TODO: count somewhere
-            else { asm.inbound_processor.enqueue(Packet{ len: msg.0, buf }).await; }
+            asm.counters[0].increment();
+            println!("packet recieved");
+            asm.counters[0].print();
+            if msg.1 { 
+                asm.buffer_stack.put_buffers([buf]); 
+                asm.counters[1].increment();
+                println!("packet dropped");
+                asm.counters[1].print();
+            }  // packet was too large; drop TODO: count somewhere
+            else {
+                let mut pkt = Packet{ buf };
+                pkt.metadata_mut().len = msg.0;
+                asm.inbound_processor.enqueue(pkt).await;
+            }
         }
 
         msgs_outer = msgs.recycle();

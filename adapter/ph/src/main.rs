@@ -2,11 +2,16 @@ use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::process::ExitCode;
 use tokio::io;
+use tokio::io::unix::AsyncFd;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use std::fs;
+use tokio::signal::unix::{signal, SignalKind};
+use std::io::Error;
+use std::process;
+
 // TODO: make these all non-pub once everything is used
 pub mod ext;
 mod config;
@@ -16,9 +21,13 @@ mod queues;
 mod assembly;
 mod inbound_recv_worker;
 mod rpc_worker;
+mod counter;
+mod inbound_processor_worker;
+mod inbound_send_worker;
 
 use buffer_stack::BufferStack;
 use queues::*;
+use counter::*;
 use assembly::Assembly;
 
 
@@ -38,6 +47,13 @@ fn set_fd_nonblocking<T: AsRawFd>(fd: T) -> io::Result<()> {
     let flags_nb = nix::fcntl::OFlag::from_bits_retain(flags) | nix::fcntl::OFlag::O_NONBLOCK;
     nix::fcntl::fcntl(rfd, nix::fcntl::FcntlArg::F_SETFL(flags_nb))?;
     Ok(())
+}
+
+fn emit_counts(counts_arr:&[Counter]) {
+    let num_packets = counts_arr[0].get_count();
+    let num_dropped = counts_arr[1].get_count();
+    eprintln!("packets recieved: {num_packets}");
+    eprintln!("packets dropped: {num_dropped}");
 }
 
 fn main() -> ExitCode {
@@ -120,21 +136,28 @@ fn main() -> ExitCode {
     let (os_inq, os_outq) = mpsc::channel(outbound_send_batch_size * 2);
     let outbound_send = OutboundSend::new(os_inq);
 
+    let counters = [Counter::new(), Counter::new()];
+
     let asm = Box::leak(Box::new(Assembly{
             buffer_stack, inbound_processor, inbound_send,
-            outbound_processor, outbound_send
+            outbound_processor, outbound_send, counters
         }));
+    
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap()
         .block_on(async {
+            // TODO signal handler goes here
+            
             let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));
             socket.connect(peer_addr).await.expect("unable to connect to peer addr");
             
             fs::remove_file(&sock_path);
             let unix_socket =  Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
+
+            let async_tun_fds = tun_fds.into_iter().map(|tun_fd| AsyncFd::new(tun_fd).unwrap()).collect::<Vec<_>>().leak();
 
             let mut js = JoinSet::new();
 
@@ -145,6 +168,27 @@ fn main() -> ExitCode {
             // Launches RPC worker program
             js.spawn(rpc_worker::launch(
                 &*asm, &*unix_socket));
+            let mut usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
+            let mut term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
+
+            js.spawn(async {
+                loop {
+                    tokio::select! {
+                        _ = usr1_stream.recv() => (emit_counts(&asm.counters)),
+                        _ = term_stream.recv() => (emit_counts(&asm.counters))
+                    }  
+                }
+            });
+
+            js.spawn(inbound_processor_worker::launch(
+                    &inbound_processor_worker::Config{ batch_size: inbound_processor_batch_size },
+                    &*asm, ip_outq));
+
+            for (async_tun_fd, is_outq) in async_tun_fds.iter().zip(is_outqs) {
+                js.spawn(inbound_send_worker::launch(
+                    &inbound_send_worker::Config{ batch_size: inbound_send_batch_size },
+                    &*asm, is_outq, &*async_tun_fd));
+            }
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();
