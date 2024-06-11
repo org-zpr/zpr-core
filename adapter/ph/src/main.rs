@@ -7,6 +7,7 @@ use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
+use std::fs;
 use tokio::signal::unix::{signal, SignalKind};
 use std::io::Error;
 use std::process;
@@ -20,6 +21,7 @@ mod packet;
 mod queues;
 mod assembly;
 mod inbound_recv_worker;
+mod rpc_worker;
 mod counter;
 mod inbound_processor_worker;
 mod inbound_send_worker;
@@ -165,6 +167,10 @@ fn main() -> ExitCode {
                     &inbound_recv_worker::Config{ batch_size: inbound_recv_batch_size },
                     &*asm, &*socket));
             
+            // Launches RPC worker program
+
+            // js.spawn(rpc_worker::launch(&*asm, &*unix_socket)); Now launches on line 196
+          
             let mut usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
             let mut term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
 
@@ -188,6 +194,7 @@ fn main() -> ExitCode {
             }
 
             js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
+
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();

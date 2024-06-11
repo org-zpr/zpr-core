@@ -1,0 +1,26 @@
+
+# transport credentials to use when talking to the visa support service on node 
+# as a client.
+# Must match the credentials that the node is using.
+vss_client_cert: node-cert.pem
+
+# Unless the certificate above has the IP of the node in it, you need a DNS 
+# name here to match a SAN entry in the certificate referenced above.
+vss_san: node.spacelaser.net
+
+# Visa Support Service is at port 8183 (see snet/cfg)
+
+# transport credentials to use for our visa service service.
+# These are the ZPR net key and certificate as set in the node
+# configuration files.
+vs_cert: node-cert.pem
+vs_key: node.key
+
+# This domain must match the SAN domain in the `vs_cert`.
+vs_domain: spacelaser.net
+
+# Visa Service is at port 5002 (see snet/cfg).
+
+# The address of the node to dock to.  Must be set in policy also.
+# (TODO: Since this is set in policy, why not read it from policy?)
+node_addr: "fc00:3001:abd5:d0d:847a:9fd6:586:3836"

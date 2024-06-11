@@ -1,4 +1,4 @@
-name: Rust
+name: Rust-node
 
 on:
   push:
@@ -17,6 +17,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      run: cd adapter/cd && cargo build --verbose
+      run: cd node && cargo build --verbose
     - name: Run tests
-      run: cd adapter/cd && cargo test --verbose
+      run: cd node && cargo test --verbose

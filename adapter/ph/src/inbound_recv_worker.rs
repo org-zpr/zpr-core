@@ -4,7 +4,7 @@ use tokio::net::UdpSocket;
 use crate::ext::std::vec::VecExt;
 use crate::ext::tokio::net::*;
 use crate::assembly::Assembly;
-use crate::packet::Packet;
+use crate::packet::{packet_body_buffer, Packet};
 
 #[derive(Copy, Clone)]
 pub struct Config {
@@ -26,7 +26,7 @@ async fn worker(
         // construct iovecs
         let mut iovs = iovs_outer;
         for buf in &mut bufs {
-            iovs.push([IoSliceMut::new(*buf)])
+            iovs.push([IoSliceMut::new(packet_body_buffer(buf))])
         }
 
         // TODO: reuse Vec -- why doesn't the recycle trick work here?
@@ -58,7 +58,11 @@ async fn worker(
                 println!("packet dropped");
                 asm.counters[1].print();
             }  // packet was too large; drop TODO: count somewhere
-            else { asm.inbound_processor.enqueue(Packet{ len: msg.0, buf }).await; }
+            else {
+                let mut pkt = Packet{ buf };
+                pkt.metadata_mut().len = msg.0;
+                asm.inbound_processor.enqueue(pkt).await;
+            }
         }
 
         msgs_outer = msgs.recycle();
