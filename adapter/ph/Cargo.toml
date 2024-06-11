@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+arrayref = { version = "0.3.7" }
 nix = { version = "0.28.0", features = ["fs", "net", "socket", "uio"] }
 openssl = { version = "0.10.64" }
 tokio = { version = "1.37.0", features = ["full"] }

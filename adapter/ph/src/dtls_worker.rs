@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use tokio_openssl::SslStream;
 use crate::assembly::Assembly;
 use crate::config;
-use crate::packet::{packet_body_buffer, Packet};
+use crate::packet::{self, packet_body_buffer, Packet};
 use crate::udp_stream::UdpStream;
 
 // NOTE: Packet buffers *must* be at least 16384 bytes, to match TLS maximum
@@ -12,7 +12,7 @@ use crate::udp_stream::UdpStream;
 // determine whether the provided read buffer was too small to contain a
 // full record.  So to ensure correct behavior we must be prepared to accept
 // the maximum size record.
-const _: () = assert!(config::PACKET_BUFFER_SIZE >= 16384, "packet buffers too small for OpenSSL DTLS");
+const _: () = assert!(packet::PACKET_BODY_BUFFER_SIZE >= 16384, "packet buffers too small for OpenSSL DTLS");
 
 #[derive(Default)]
 enum InboundRecvState<'pktbuf> {

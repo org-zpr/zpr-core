@@ -12,6 +12,9 @@ use tokio::signal::unix::{signal, SignalKind};
 use std::io::Error;
 use std::process;
 
+#[macro_use]
+extern crate arrayref;
+
 // TODO: make these all non-pub once everything is used
 pub mod ext;
 mod config;
