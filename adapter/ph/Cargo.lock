@@ -286,8 +286,11 @@ name = "ph-test"
 version = "0.1.0"
 dependencies = [
  "arrayref",
+ "foreign-types",
+ "libc",
  "nix",
  "openssl",
+ "openssl-sys",
  "tokio",
  "tokio-openssl",
  "zerocopy",
