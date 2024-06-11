@@ -84,7 +84,7 @@ async fn counters(asm: &Assembly<'_>) -> String {
 }
 
 async fn counters_reset(asm: &Assembly<'_>) -> String {
-    for p in 1..2 {
+    for p in 0..2 {
         asm.counters[p - 1].reset();
     }
     return "counters_reset\n".to_string(); // TODO change the return value of counters reset
