@@ -17,9 +17,8 @@ async fn worker(
 
     loop {
         tokio::select! {
-            _ = set.join_next() => (),
-            accepted = socket.accept() => {
-                println!("accepted");
+            Some(_) = set.join_next() => (),
+            accepted = socket.accept() => 
                 match accepted {
                     Ok((mut stream, _addr)) => {
                         set.spawn(async move {
@@ -27,14 +26,14 @@ async fn worker(
                             eprintln!("Connection recieved");
                             //let local = task::LocalSet::new();
                             let mut str_message = String::new();
-                            let mut split_buf = stream.split(); // split stream into read/write streams
+                            let split_buf = stream.split(); // split stream into read/write streams
                             let mut buf_reader = BufReader::new(split_buf.0);
                             let mut buf_writer = BufWriter::new(split_buf.1);
                             buf_reader.read_line(&mut str_message).await;
                             let last_let = str_message.pop(); // Removes \n from end of string
                             if last_let != Some('\n') {
                                 // close stream then skip the rest of the loop and moves to next iteration
-                                buf_writer.shutdown();
+                                buf_writer.shutdown().await;
                             } else {
                                 // TODO remove \n from end of message?
                                 buf_writer.write("Message Recieved\n".as_bytes()).await;
@@ -58,9 +57,9 @@ async fn worker(
                     Err(_e) => {
                         eprintln!("Connection failed");
                     }
-                }   
+                
             }
-        }TODO
+        }
         
     }
 }
@@ -88,7 +87,7 @@ async fn counters(asm: &Assembly<'_>) -> String {
 
 async fn counters_reset(asm: &Assembly<'_>) -> String {
     for p in 0..2 {
-        asm.counters[p - 1].reset();
+        asm.counters[p].reset();
     }
     return "counters_reset\n".to_string(); // TODO change the return value of counters reset
 }
