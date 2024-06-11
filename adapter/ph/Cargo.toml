@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 nix = { version = "0.28.0", features = ["fs", "net", "socket", "uio"] }
 tokio = { version = "1.37.0", features = ["full"] }
+zerocopy = { version = "0.7.34", features = ["byteorder"] }
+zerocopy-derive = { version = "0.7.34" }

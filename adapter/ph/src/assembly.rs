@@ -1,6 +1,7 @@
 use crate::config;
 use crate::buffer_stack::BufferStack;
 use crate::queues::*;
+use crate::counter::*;
 
 // Interface to full assembly of all stages.
 
@@ -30,5 +31,11 @@ pub struct Assembly<'pktbuf> {
     // Outbound (adapter->dock) agent packet path.  Keep these topologically
     // sorted according to expected packet flow.
     pub outbound_processor: OutboundProcessor<'pktbuf>,
-    pub outbound_send: OutboundSend<'pktbuf>
+    pub outbound_send: OutboundSend<'pktbuf>,
+
+
+    // counters[0] represents the total number of packets recieved
+    // counters[1] represents the number of dropped packets
+    pub counters: [Counter; 2]
+
 }

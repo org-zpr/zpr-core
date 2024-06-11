@@ -36,6 +36,7 @@ async fn worker(
 
                 buf_writer.flush().await;
                 buf_writer.shutdown().await;
+
             }
             Err(e) => {
                 eprintln!("Connection failed");
