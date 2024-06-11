@@ -1,0 +1,1063 @@
+package policy_test
+
+import (
+	"net/netip"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	snip "zpr.org/vs/pkg/ip"
+
+	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/logr"
+	"zpr.org/vs/pkg/policy"
+
+	"zpr.org/vs/pkg/missing/zpl/compiler"
+	"zpr.org/vs/pkg/missing/zpl/fs"
+)
+
+const mtpreamble = `
+zpl_format: 2
+main:
+  policy_version: 1
+  policy_date: "2020-10-22T12:23:00Z"
+
+services:
+  http:
+    tcp: 80
+  ping:
+    icmp:
+      type: request-response
+      type_codes: 128, 129
+`
+
+const network = `
+zpr:
+  globals:
+    max_connections: 100
+    max_connections_per_dock: 10
+    max_connections_per_agent: 3
+  visaservice:
+    provider:
+      - [intern.foo, fox]
+    admin_attrs:
+      - [intern.foo, fee]
+  nodes:
+    n0:
+      key: "cffa793530e6d63e560e8b314b5035db34aaae324f63cb76b204d3e4c00d5a1a"
+      provider:
+        - [intern.cn, eq, nodus]
+      address: "fc00:3001::88"
+      interfaces:
+        i0:
+          netaddr: "n0.spacelaser.net:5000"
+  addresses:
+    node_net: "fc00:3002::0/32"
+    zpr_net: "fc00:3001::0/32"
+  datasources:
+    intern:
+      api: validation/1
+      authority:
+        encoding: pem
+        cert_data: |
+                    -----BEGIN CERTIFICATE-----
+                    MIIDlDCCAnwCCQC8eSseeO7eyzANBgkqhkiG9w0BAQsFADCBizELMAkGA1UEBhMC
+                    VVMxCzAJBgNVBAgMAktZMRMwEQYDVQQHDApMb3Vpc3ZpbGxlMQswCQYDVQQKDAJB
+                    STEQMA4GA1UECwwHc3VyZW5ldDEdMBsGA1UEAwwUYXV0aDAuc3BhY2VsYXNlci5u
+                    ZXQxHDAaBgkqhkiG9w0BCQEWDW1hdGhpYXNAYWkuY28wHhcNMTkwMzE5MTUxNTE3
+                    WhcNMjAwMzE4MTUxNTE3WjCBizELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAktZMRMw
+                    EQYDVQQHDApMb3Vpc3ZpbGxlMQswCQYDVQQKDAJBSTEQMA4GA1UECwwHc3VyZW5l
+                    dDEdMBsGA1UEAwwUYXV0aDAuc3BhY2VsYXNlci5uZXQxHDAaBgkqhkiG9w0BCQEW
+                    DW1hdGhpYXNAYWkuY28wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDh
+                    FIpG5LpTIrhaM2vsccVRJjLbOTZvXf2kBlNDX+HeK59KLUoS/TSV7AR4Yj56uOO6
+                    6iUl17r6ukxlPhqyH0+26DfKCuAsAO72nFSLEAgEqoJBxhuKZB25Qr7ZSnVu6S4J
+                    sOCmW4z87jZmAZ6kSRw+ReVrqzDj67mihHCasOfYsGnZAp+1/5nqBvW+7CQlxJt4
+                    im4IKDb21kIRtn4EjYzf/ecysD3Hqcb8qY6Cq7AWibajhZWmkQVkWfOc0hfixUck
+                    2Szjm+uzZb1ZwCCZFIXEnUvQ5lOiswOkuy2+t/mEiWvhLtRrXms/dhKUtqtyhtGO
+                    dkPuT2zDmOtB92gb2ttxAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAMGvqGBGTVUd
+                    6tpyhcm6J9o1P7pnOjc4HlDpOebqPMnwkuWmOOODshbFD/biDDNtpPt9DikAiSqZ
+                    iVZ/RC6r42dVH0G4tiiQJDPLsLJ0pj/cdJnmmYXwUUqE4IXxsqbKMkhToZlp9Yw1
+                    N+wBxdue8Nix5LhI7YYfut1JlMqtho6hxX712uMlZqUJUFsPUPErxKQIcuwuDJmP
+                    RQiwkwIEZOEvrIQjkFUy+wOxsJI9cqtpVE1hSSc1dwAL0tjLqO5LtQhBMFORXUuK
+                    R+E8nfJH0YhY9AIiRjJM6Gujxa9lMofSlHK0LtS7jaDnbFVsKa4fK8iIAlqGDSnc
+                    roROWU/mSb0=
+                    -----END CERTIFICATE-----
+`
+
+// MatchTrafficAgents helper to call matcher.MatchTraffic
+func MatchTrafficAgents(m *policy.Matcher, td *snip.Traffic, src, dst *agent.Agent) ([]*policy.MatchedPolicy, error) {
+	mtSrc, mtDst := &policy.AgentInfo{src.GetAuthedClaims(), src.GetProvides()}, &policy.AgentInfo{dst.GetAuthedClaims(), dst.GetProvides()}
+	return m.MatchTraffic(td, mtSrc, mtDst)
+}
+
+func mkClaim(val string, ttl time.Duration) *agent.ClaimV {
+	return &agent.ClaimV{
+		V:   val,
+		Exp: time.Now().Add(ttl),
+	}
+}
+
+func mkClaims(key, val string, ttl time.Duration) map[string]*agent.ClaimV {
+	m := make(map[string]*agent.ClaimV)
+	m[key] = mkClaim(val, ttl)
+	return m
+}
+
+func TestSimpleTCPClientToServer(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, fc00:3001::683c:c1ec:6785:af0]  # TODO op=eq assumed for now
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [intern.foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t01",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	{
+		td := &snip.Traffic{
+			Proto:   snip.ProtocolTCP,
+			SrcAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+			SrcPort: 23576,
+			DstAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+			DstPort: 80,
+			Flags:   uint32(0x02), // SYN
+		}
+
+		matches, err := MatchTrafficAgents(m, td, client, server)
+		require.Nil(t, err)
+		require.Len(t, matches, 1)
+		match := matches[0]
+		require.True(t, match.FWD)
+		require.Equal(t, "access", match.CPol.Id)
+		require.Equal(t, "/zpr/testnet/webserver", match.CPol.ServiceId)
+	}
+
+	// Sanity check:
+	{
+		wrongServer := agent.NewAgentFromUnsubstantiatedClaims(nil)
+		wrongServer.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+		wrongServer.SetProvides([]string{"/zpr/testnet/database"})
+
+		td := &snip.Traffic{
+			Proto:   snip.ProtocolTCP,
+			SrcAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+			SrcPort: 23576,
+			DstAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"), // Note we don't care about address
+			DstPort: 80,
+			Flags:   uint32(0x02), // SYN
+		}
+
+		_, err := MatchTrafficAgents(m, td, client, wrongServer)
+		require.NotNil(t, err)
+	}
+}
+
+func TestSimpleTCPServerResponse(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [intern.foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t02",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	{
+		td := &snip.Traffic{
+			Proto:   snip.ProtocolTCP,
+			SrcAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+			SrcPort: 80,
+			DstAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+			DstPort: 23576,
+			Flags:   uint32(0x10), // ACK
+		}
+
+		matches, err := MatchTrafficAgents(m, td, server, client)
+		require.Nil(t, err)
+		require.Len(t, matches, 1)
+		match := matches[0]
+		require.False(t, match.FWD) // a response so should be reverse match
+		require.Equal(t, "access", match.CPol.Id)
+		require.Equal(t, "/zpr/testnet/webserver", match.CPol.ServiceId)
+	}
+	{
+		td := &snip.Traffic{
+			Proto:   snip.ProtocolTCP,
+			SrcAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+			SrcPort: 80,
+			DstAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+			DstPort: 51192,
+			Flags:   uint32(0x10), // ACK
+		}
+
+		matches, err := MatchTrafficAgents(m, td, server, client)
+		require.Nil(t, err)
+		require.Len(t, matches, 1)
+		match := matches[0]
+		require.False(t, match.FWD) // a response so should be reverse match
+		require.Equal(t, "access", match.CPol.Id)
+		require.Equal(t, "/zpr/testnet/webserver", match.CPol.ServiceId)
+	}
+}
+
+func TestSimpleTCPServerCannotSYNClient(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [intern.foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t03",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	td := &snip.Traffic{
+		Proto:   snip.ProtocolTCP,
+		SrcAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+		SrcPort: 80,
+		DstAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+		DstPort: 23576,
+		Flags:   uint32(0x02), // SYN
+	}
+
+	_, err = MatchTrafficAgents(m, td, server, client)
+	require.NotNil(t, err)
+}
+
+func TestICMPEchoRequest(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http, ping]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [intern.foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t04",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	td := &snip.Traffic{
+		Proto:    snip.ProtocolICMP6,
+		SrcAddr:  netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+		DstAddr:  netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+		ICMPType: 0x80,
+		ICMPCode: 0,
+	}
+
+	matches, err := MatchTrafficAgents(m, td, client, server)
+	require.Nil(t, err)
+	require.Len(t, matches, 1)
+	match := matches[0]
+	require.True(t, match.FWD)
+	require.Equal(t, "access", match.CPol.Id)
+	require.Equal(t, "/zpr/testnet/webserver", match.CPol.ServiceId)
+}
+
+func TestICMPEchoResponse(t *testing.T) { // TODO: Waiting to figure out address
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http, ping]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [intern.foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t05",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	td := &snip.Traffic{
+		Proto:    snip.ProtocolICMP6,
+		SrcAddr:  netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+		DstAddr:  netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+		ICMPType: 0x81,
+		ICMPCode: 0,
+	}
+
+	matches, err := MatchTrafficAgents(m, td, server, client)
+	require.Nil(t, err)
+	require.Len(t, matches, 1)
+	match := matches[0]
+	require.False(t, match.FWD)
+	require.Equal(t, "access", match.CPol.Id)
+	require.Equal(t, "/zpr/testnet/webserver", match.CPol.ServiceId)
+}
+
+func TestTCPServerConnect(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [intern.foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t06",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+
+	state, err := policy.NewConnectState(server, nil, netip.Addr{}, logr.NewTestLogger())
+	require.Nil(t, err)
+	matchingAttrs, err := m.MatchConnect(state)
+	require.Nil(t, err)
+	require.Equal(t, []string{"/zpr/testnet/webserver"}, server.GetProvides())
+	require.Equal(t, []string{"zpr.addr"}, matchingAttrs)
+}
+
+func TestTCPServerConnectNotPermitted(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [intern.foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t07",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client.SetAuthenticated(mkClaims("intern.whack", "yes", time.Hour), time.Time{}, nil, nil, 1)
+
+	state, err := policy.NewConnectState(client, nil, netip.Addr{}, logr.NewTestLogger())
+	require.Nil(t, err)
+	_, err = m.MatchConnect(state)
+	require.NotNil(t, err)
+}
+
+func TestTCPClientToServerWithEPIDAttr(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [zpr.addr, eq, fc00:3001::fa57:abcf:9895:6469]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t08",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	{
+		ac := mkClaims("intern.foo", "fee", time.Hour)
+		ac["zpr.addr"] = mkClaim("fc00:3001::fa57:abcf:9895:6469", time.Hour)
+		client.SetAuthenticated(ac, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+	}
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	{
+		td := &snip.Traffic{
+			Proto:   snip.ProtocolTCP,
+			SrcAddr: netip.MustParseAddr("fc00:3001::fa57:abcf:9895:6469"),
+			SrcPort: 23576,
+			DstAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+			DstPort: 80,
+			Flags:   uint32(0x02), // SYN
+		}
+
+		matches, err := MatchTrafficAgents(m, td, client, server)
+		require.Nil(t, err)
+		require.Len(t, matches, 1)
+		match := matches[0]
+		require.True(t, match.FWD)
+		require.Equal(t, "access", match.CPol.Id)
+		require.Equal(t, "/zpr/testnet/webserver", match.CPol.ServiceId)
+	}
+}
+
+func TestConstraintCombine(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access FEE
+              conditions:
+                - desc: fee access
+                  attrs:
+                    - [intern.foo, eq, fee]
+              constraints:
+                bandwidth: 1Mbps
+            - desc: access FOO
+              conditions:
+                - desc: foo access
+                  attrs:
+                    - [intern.fee, eq, foo]
+              constraints:
+                bandwidth: 10Mbps
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t09",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	claims := map[string]*agent.ClaimV{
+		"intern.foo": mkClaim("fee", time.Hour),
+		"intern.fee": mkClaim("foo", time.Hour),
+	}
+	client.SetAuthenticated(claims, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	{
+		td := &snip.Traffic{
+			Proto:   snip.ProtocolTCP,
+			SrcAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+			SrcPort: 23576,
+			DstAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+			DstPort: 80,
+			Flags:   uint32(0x02), // SYN
+		}
+
+		matches, err := MatchTrafficAgents(m, td, client, server)
+		require.Nil(t, err)
+		require.Len(t, matches, 2)
+		require.True(t, matches[0].FWD)
+		require.True(t, matches[1].FWD)
+		require.Contains(t, []string{matches[0].CPol.Id, matches[1].CPol.Id}, "access-FEE")
+		require.Contains(t, []string{matches[0].CPol.Id, matches[1].CPol.Id}, "access-FOO")
+		require.Equal(t, "/zpr/testnet/webserver", matches[0].CPol.ServiceId)
+		require.Equal(t, "/zpr/testnet/webserver", matches[1].CPol.ServiceId)
+	}
+
+}
+
+func TestMixedCaseAttrKey(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access FEE
+              conditions:
+                - desc: fee access
+                  attrs:
+                    - [intern.Foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t10",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	claims := mkClaims("intern.Foo", "fee", time.Hour)
+	client.SetAuthenticated(claims, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	{
+		td := &snip.Traffic{
+			Proto:   snip.ProtocolTCP,
+			SrcAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+			SrcPort: 23576,
+			DstAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+			DstPort: 80,
+			Flags:   uint32(0x02), // SYN
+		}
+
+		matches, err := MatchTrafficAgents(m, td, client, server)
+		require.Nil(t, err)
+		require.Len(t, matches, 1)
+		require.True(t, matches[0].FWD)
+		require.Equal(t, matches[0].CPol.Id, "access-FEE")
+		require.Equal(t, "/zpr/testnet/webserver", matches[0].CPol.ServiceId)
+	}
+}
+
+func TestMixedCaseAttrVal(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: access FEE
+              conditions:
+                - desc: fee access
+                  attrs:
+                    - [intern.foo, eq, fEE]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t11",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	claims := mkClaims("intern.foo", "fEE", time.Hour)
+	client.SetAuthenticated(claims, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	{
+		td := &snip.Traffic{
+			Proto:   snip.ProtocolTCP,
+			SrcAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+			SrcPort: 23576,
+			DstAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+			DstPort: 80,
+			Flags:   uint32(0x02), // SYN
+		}
+
+		matches, err := MatchTrafficAgents(m, td, client, server)
+		require.Nil(t, err)
+		require.Len(t, matches, 1)
+		require.True(t, matches[0].FWD)
+		require.Equal(t, matches[0].CPol.Id, "access-FEE")
+		require.Equal(t, "/zpr/testnet/webserver", matches[0].CPol.ServiceId)
+	}
+}
+
+func TestAttrEq(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: eq test
+              conditions:
+                - desc: foo == fee
+                  attrs:
+                    - [intern.foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t12",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	td := &snip.Traffic{
+		Proto:   snip.ProtocolTCP,
+		SrcAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+		SrcPort: 23576,
+		DstAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+		DstPort: 80,
+		Flags:   uint32(0x02), // SYN
+	}
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+
+	claims0 := mkClaims("intern.foo", "fee", time.Hour)
+	client.SetAuthenticated(claims0, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+	matches, err := MatchTrafficAgents(m, td, client, server)
+	require.Nil(t, err)
+	require.Len(t, matches, 1)
+	require.True(t, matches[0].FWD)
+	require.Equal(t, matches[0].CPol.Id, "eq-test")
+	require.Equal(t, "/zpr/testnet/webserver", matches[0].CPol.ServiceId)
+
+	claims1 := mkClaims("intern.foo", "notfee", time.Hour)
+	client.SetAuthenticated(claims1, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+	_, err = MatchTrafficAgents(m, td, client, server)
+	require.NotNil(t, err)
+}
+
+func TestAttrNe(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: ne test
+              conditions:
+                - desc: foo != fee
+                  attrs:
+                    - [intern.foo, ne, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t13",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	td := &snip.Traffic{
+		Proto:   snip.ProtocolTCP,
+		SrcAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+		SrcPort: 23576,
+		DstAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+		DstPort: 80,
+		Flags:   uint32(0x02), // SYN
+	}
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+
+	claims0 := mkClaims("intern.foo", "notfee", time.Hour)
+	client.SetAuthenticated(claims0, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+	matches, err := MatchTrafficAgents(m, td, client, server)
+	require.Nil(t, err)
+	require.Len(t, matches, 1)
+	require.True(t, matches[0].FWD)
+	require.Equal(t, matches[0].CPol.Id, "ne-test")
+	require.Equal(t, "/zpr/testnet/webserver", matches[0].CPol.ServiceId)
+
+	claims1 := mkClaims("intern.foo", "fee", time.Hour)
+	client.SetAuthenticated(claims1, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+	_, err = MatchTrafficAgents(m, td, client, server)
+	require.NotNil(t, err)
+}
+
+func TestAttrHas(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: has test
+              conditions:
+                - desc: foo has fee
+                  attrs:
+                    - [intern.foo, has, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t14",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	td := &snip.Traffic{
+		Proto:   snip.ProtocolTCP,
+		SrcAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+		SrcPort: 23576,
+		DstAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+		DstPort: 80,
+		Flags:   uint32(0x02), // SYN
+	}
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+
+	claims0 := mkClaims("intern.foo", "there,is,a,fee,here", time.Hour)
+	client.SetAuthenticated(claims0, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+	matches, err := MatchTrafficAgents(m, td, client, server)
+	require.Nil(t, err)
+	require.Len(t, matches, 1)
+	require.True(t, matches[0].FWD)
+	require.Equal(t, matches[0].CPol.Id, "has-test")
+	require.Equal(t, "/zpr/testnet/webserver", matches[0].CPol.ServiceId)
+
+	claims1 := mkClaims("intern.foo", "there,is,a,nonfee,here", time.Hour)
+	client.SetAuthenticated(claims1, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+	_, err = MatchTrafficAgents(m, td, client, server)
+	require.NotNil(t, err)
+}
+
+func TestAttrExcludes(t *testing.T) {
+	t.Skip("waiting on compiler port")
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.addr, eq, fc00:3001::683c:c1ec:6785:af0]
+          address: "fc00:3001::683c:c1ec:6785:af0"
+          policies:
+            - desc: excludes test
+              conditions:
+                - desc: foo excludes fee
+                  attrs:
+                    - [intern.foo, excludes, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t15",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	td := &snip.Traffic{
+		Proto:   snip.ProtocolTCP,
+		SrcAddr: netip.MustParseAddr("fc00:3001::6dcd:97a3:2cbf:1f5a"),
+		SrcPort: 23576,
+		DstAddr: netip.MustParseAddr("fc00:3001::683c:c1ec:6785:af0"),
+		DstPort: 80,
+		Flags:   uint32(0x02), // SYN
+	}
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+
+	claims0 := mkClaims("intern.foo", "there,is,a,nonfee,here", time.Hour)
+	client.SetAuthenticated(claims0, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+	matches, err := MatchTrafficAgents(m, td, client, server)
+	require.Nil(t, err)
+	require.Len(t, matches, 1)
+	require.True(t, matches[0].FWD)
+	require.Equal(t, matches[0].CPol.Id, "excludes-test")
+	require.Equal(t, "/zpr/testnet/webserver", matches[0].CPol.ServiceId)
+
+	claims1 := mkClaims("intern.foo", "there,is,a,fee,here", time.Hour)
+	client.SetAuthenticated(claims1, time.Time{}, []string{"intern"}, []string{"token"}, 1)
+	_, err = MatchTrafficAgents(m, td, client, server)
+	require.NotNil(t, err)
+}
+
+func TestWithNilPolicy(t *testing.T) {
+	m, err := policy.NewMatcher(nil, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+	require.NotNil(t, m)
+}

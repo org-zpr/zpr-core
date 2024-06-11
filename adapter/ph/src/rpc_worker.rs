@@ -1,28 +1,13 @@
 use core::future::Future;
-use std::io::IoSliceMut;
-use tokio::net::UdpSocket;
-use crate::ext::std::vec::VecExt;
-use crate::ext::tokio::net::*;
 use crate::assembly::Assembly;
-use crate::packet::Packet;
 use tokio::net::UnixListener;
-use tokio::net::UnixStream;
 use tokio::io::AsyncWriteExt;
-use std::io::prelude::*;
 use tokio::io::BufReader;
 use tokio::io::BufWriter;
-
-use std::fs::File;
-use std::thread;
 use tokio::io::AsyncBufReadExt;
 
-#[derive(Copy, Clone)]
-pub struct Config {
-    pub batch_size: usize
-}
-
 async fn worker(
-    config: &Config, asm: &Assembly<'_>, socket: &UnixListener
+    asm: &Assembly<'_>, socket: &UnixListener
 ) {
 
     loop {
@@ -48,6 +33,7 @@ async fn worker(
                     "ECHO"           => {buf_writer.write_all(echo(asm).await.as_bytes()).await;
                                          buf_writer.write_all("OK\n".as_bytes()).await},
                     _                => buf_writer.write_all("ERR\n".as_bytes()).await,
+
                 };
 
                 buf_writer.flush().await;
@@ -61,13 +47,12 @@ async fn worker(
 }
 
 pub fn launch<'pktbuf, AsmRef: 'pktbuf, UnixListenerRef: 'pktbuf>(
-    config: &Config, asm: AsmRef, socket: UnixListenerRef)
+    asm: AsmRef, socket: UnixListenerRef)
 -> impl Future<Output = ()> + Send + 'pktbuf
     where AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
         UnixListenerRef: std::ops::Deref<Target = UnixListener> + Send + Sync
 {
-    let cfg = *config;
-    async move { worker(&cfg, &*asm, &*socket).await }
+    async move { worker(&*asm, &*socket).await }
 }
 
 async fn echo(_asm: &Assembly<'_>) -> String {
@@ -88,4 +73,3 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
         asm.counters[p].reset();
     }
     return "counters_reset\n".to_string(); // TODO change the return value of counters reset
-}
