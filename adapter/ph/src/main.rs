@@ -157,6 +157,7 @@ fn main() -> ExitCode {
             fs::remove_file(&sock_path);
             let unix_socket =  Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
 
+            let async_tun_fds = tun_fds.into_iter().map(|tun_fd| AsyncFd::new(tun_fd).unwrap()).collect::<Vec<_>>().leak();
 
             let mut js = JoinSet::new();
 
@@ -186,9 +187,7 @@ fn main() -> ExitCode {
                     &*asm, is_outq, &*async_tun_fd));
             }
 
-            js.spawn(rpc_worker::launch(
-                &rpc_worker::Config{ batch_size: inbound_recv_batch_size },
-                &*asm, &*unix_socket));
+            js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();
