@@ -1,28 +1,13 @@
 use core::future::Future;
-use std::io::IoSliceMut;
-use tokio::net::UdpSocket;
-use crate::ext::std::vec::VecExt;
-use crate::ext::tokio::net::*;
 use crate::assembly::Assembly;
-use crate::packet::Packet;
 use tokio::net::UnixListener;
-use tokio::net::UnixStream;
 use tokio::io::AsyncWriteExt;
-use std::io::prelude::*;
 use tokio::io::BufReader;
 use tokio::io::BufWriter;
-
-use std::fs::File;
-use std::thread;
 use tokio::io::AsyncBufReadExt;
 
-#[derive(Copy, Clone)]
-pub struct Config {
-    pub batch_size: usize
-}
-
 async fn worker(
-    config: &Config, asm: &Assembly<'_>, socket: &UnixListener
+    asm: &Assembly<'_>, socket: &UnixListener
 ) {
 
     loop {
@@ -30,12 +15,16 @@ async fn worker(
             Ok((mut stream, _addr)) => {
                 eprintln!("Connection recieved");
                 let mut str_message = String::new();
-                let mut split_buf = stream.split(); // split stream into read/write streams
+                let split_buf = stream.split(); // split stream into read/write streams
                 let mut buf_reader = BufReader::new(split_buf.0);
                 let mut buf_writer = BufWriter::new(split_buf.1);
                 buf_reader.read_line(&mut str_message).await;
-                str_message.pop(); // Removes \n from end of string
-
+                let last_let = str_message.pop(); // Removes \n from end of string
+                if last_let != Some('\n') {
+                    // close stream then skip the rest of the loop and moves to next iteration
+                    buf_writer.shutdown();
+                    continue; 
+                }
                 // TODO remove \n from end of message?
                 buf_writer.write("Message Recieved\n".as_bytes()).await;
 
@@ -56,13 +45,12 @@ async fn worker(
 }
 
 pub fn launch<'pktbuf, AsmRef: 'pktbuf, UnixListenerRef: 'pktbuf>(
-    config: &Config, asm: AsmRef, socket: UnixListenerRef)
+    asm: AsmRef, socket: UnixListenerRef)
 -> impl Future<Output = ()> + Send + 'pktbuf
     where AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
         UnixListenerRef: std::ops::Deref<Target = UnixListener> + Send + Sync
 {
-    let cfg = *config;
-    async move { worker(&cfg, &*asm, &*socket).await }
+    async move { worker(&*asm, &*socket).await }
 }
 
 async fn echo(_asm: &Assembly<'_>) -> String {
