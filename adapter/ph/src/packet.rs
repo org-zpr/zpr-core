@@ -1,5 +1,5 @@
 use std::mem::size_of;
-use zerocopy::{AsBytes, FromBytes};
+use zerocopy::FromBytes;
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes};
 use crate::config;
 
@@ -10,8 +10,10 @@ pub struct Packet<'buf> {
     pub buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE]
 }
 
-pub fn packet_body_buffer(buf: &mut [u8; config::PACKET_BUFFER_SIZE]) -> &mut [u8] {
-    &mut buf[size_of::<PacketMetadata>()..]
+pub const PACKET_BODY_BUFFER_SIZE: usize = config::PACKET_BUFFER_SIZE - size_of::<PacketMetadata>();
+
+pub fn packet_body_buffer(buf: &mut [u8; config::PACKET_BUFFER_SIZE]) -> &mut [u8; PACKET_BODY_BUFFER_SIZE] {
+    array_mut_ref![buf, size_of::<PacketMetadata>(), PACKET_BODY_BUFFER_SIZE]
 }
 
 #[derive(AsBytes, FromZeroes, FromBytes)]
@@ -21,7 +23,6 @@ pub struct PacketMetadata {
 }
 
 impl<'buf> Packet<'buf> {
-
     // packet metadata
     pub fn metadata(&self) -> &PacketMetadata {
         let opt = PacketMetadata::ref_from(&self.buf[..size_of::<PacketMetadata>()]);
