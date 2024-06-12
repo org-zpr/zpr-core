@@ -11,4 +11,3 @@ go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 ```
 
-Then you can use `make` from the directory containing the `.proto` file.
