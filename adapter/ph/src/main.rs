@@ -28,6 +28,8 @@ mod udp_stream;
 mod dtls_worker;
 mod inbound_processor_worker;
 mod inbound_send_worker;
+mod outbound_recv_worker;
+mod outbound_processor_worker;
 mod rpc_worker;
 
 use buffer_stack::BufferStack;
@@ -196,6 +198,18 @@ fn main() -> ExitCode {
                     &inbound_send_worker::Config{ batch_size: inbound_send_batch_size },
                     &*asm, is_outq, &*async_tun_fd));
             }
+
+            for async_tun_fd in async_tun_fds.iter() {
+                js.spawn(outbound_recv_worker::launch(
+                    &outbound_recv_worker::Config{ batch_size: outbound_recv_batch_size },
+                    &*asm, &*async_tun_fd));
+            }
+
+            js.spawn(outbound_processor_worker::launch(
+                    &outbound_processor_worker::Config{ batch_size: outbound_processor_batch_size },
+                    &*asm, op_outq));
+
+            js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
 
             // TODO: initiate the DTLS connection asynchronously; for now, keep this at the end
             let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));
