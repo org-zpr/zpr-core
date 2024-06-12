@@ -1,17 +1,18 @@
 
 
-.PHONY: all
 all: build
 
+clean: 
+	$(MAKE) -C core $@
 
-
-.PHONY: build
 build:
 	cd mods && $(MAKE)
 	cd core && $(MAKE)
 
 
-.PHONY: test
 test:
-	cd mods && $(MAKE) test
-	cd core && $(MAKE) test
+	$(MAKE) -C mods $@
+	$(MAKE) -C core $@
+
+
+.PHONY: all build test clean
