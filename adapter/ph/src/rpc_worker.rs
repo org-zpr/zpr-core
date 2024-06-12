@@ -15,7 +15,7 @@ async fn worker(
             Ok((mut stream, _addr)) => {
                 eprintln!("Connection recieved");
                 let mut str_message = String::new();
-                let mut split_buf = stream.split(); // split stream into read/write streams
+                let split_buf = stream.split(); // split stream into read/write streams
                 let mut buf_reader = BufReader::new(split_buf.0);
                 let mut buf_writer = BufWriter::new(split_buf.1);
                 buf_reader.read_line(&mut str_message).await;
@@ -39,7 +39,7 @@ async fn worker(
                 buf_writer.flush().await;
                 buf_writer.shutdown().await;
             }
-            Err(e) => {
+            Err(_e) => {
                 eprintln!("Connection failed");
             }
         }   

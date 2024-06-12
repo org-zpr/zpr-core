@@ -6,6 +6,7 @@ pub struct Counter {
     number: AtomicU64
 }
 
+#[allow(dead_code)]
 impl Counter {
     pub(crate) fn new() -> Self {
         Self { number: AtomicU64::new(0) }
