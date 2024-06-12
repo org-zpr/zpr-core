@@ -9,8 +9,8 @@ import (
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 
-	"zpr.org/vs/pkg/missing/zpl/compiler"
-	"zpr.org/vs/pkg/missing/zpl/fs"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
 )
 
 const preamble = `
@@ -282,9 +282,6 @@ func compilePolicy(t *testing.T, pyml string) *policy.Policy {
 }
 
 func TestDSHashWithDiffDS(t *testing.T) {
-
-	t.Skip("waiting on compiler port")
-
 	var dshash1, dshash2 []byte
 
 	{
@@ -303,8 +300,6 @@ func TestDSHashWithDiffDS(t *testing.T) {
 }
 
 func TestDSHashWithDiffDSByQueryApiVersion(t *testing.T) {
-	t.Skip("waiting on compiler port")
-
 	var dshash1, dshash2 []byte
 
 	{
@@ -323,7 +318,6 @@ func TestDSHashWithDiffDSByQueryApiVersion(t *testing.T) {
 }
 
 func TestDSHashWithSameDS(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	var dshash1, dshash2 []byte
 
 	{
@@ -342,7 +336,6 @@ func TestDSHashWithSameDS(t *testing.T) {
 }
 
 func TestDSHashWithSameDSNet2(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	var dshash1, dshash2 []byte
 
 	{
@@ -361,13 +354,11 @@ func TestDSHashWithSameDSNet2(t *testing.T) {
 }
 
 func TestConnectCapatibleNoChange(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pp := compilePolicy(t, preamble+network1+comms)
 	require.True(t, pp.IsConnectCompatibleWith(pp))
 }
 
 func TestConnectCompatibleWithReducedConnects(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pp := compilePolicy(t, preamble+network1+comms)
 
 	comms2 := strings.Replace(comms, "eq, fee", "eq, horse", 1)

@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vs/pkg/missing/zpl/compiler"
-	"zpr.org/vs/pkg/missing/zpl/fs"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice"
 )
@@ -423,7 +423,6 @@ func compilePolicy(t *testing.T, pyaml string) *policy.Policy {
 }
 
 func TestSamePolicySameConfig(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	p1 := compilePolicy(t, policySimple1)
 	p2 := compilePolicy(t, policySimple1)
 	id, err := vservice.ComputeConfiguration(logr.NewTestLogger(), p1, 99, p2)
@@ -432,7 +431,6 @@ func TestSamePolicySameConfig(t *testing.T) {
 }
 
 func TestDifferentDSDifferentConfig(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	p1 := compilePolicy(t, policySimple1)
 	altered := strings.ReplaceAll(
 		strings.ReplaceAll(policySimple1, "ca0.", "ca1."),
@@ -444,7 +442,6 @@ func TestDifferentDSDifferentConfig(t *testing.T) {
 }
 
 func TestUpdatesConfigFromEmptyPolicy(t *testing.T) {
-	t.Skip("wai ting on compiler port")
 	p1 := compilePolicy(t, policySimple1)
 	id, err := vservice.ComputeConfiguration(logr.NewTestLogger(), nil, policy.InitialConfiguration, p1)
 	require.Nil(t, err)
@@ -452,7 +449,6 @@ func TestUpdatesConfigFromEmptyPolicy(t *testing.T) {
 }
 
 func TestConfigIDIncreasing(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	p1 := compilePolicy(t, policySimple1)
 	id, err := vservice.ComputeConfiguration(logr.NewTestLogger(), nil, policy.InitialConfiguration, p1)
 	require.Nil(t, err)
@@ -470,7 +466,6 @@ func TestConfigIDIncreasing(t *testing.T) {
 }
 
 func TestDifferentTopologyDifferentConfig(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	log := logr.NewTestLogger()
 	p1 := compilePolicy(t, policySimple1)
 
@@ -491,7 +486,6 @@ func TestDifferentTopologyDifferentConfig(t *testing.T) {
 }
 
 func TestDifferentServiceRemovedDifferentConfig(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	log := logr.NewTestLogger()
 	p1 := compilePolicy(t, policyHTTPnHTTPS)
 
@@ -505,7 +499,6 @@ func TestDifferentServiceRemovedDifferentConfig(t *testing.T) {
 }
 
 func TestDifferentServiceAddedSameConfig(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	log := logr.NewTestLogger()
 	for i := 0; i < 100; i++ {
 		p1 := compilePolicy(t, policyHTTP)
@@ -521,7 +514,6 @@ func TestDifferentServiceAddedSameConfig(t *testing.T) {
 }
 
 func TestDifferentServiceAddedSameConfigRestrictNodeWeb(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	log := logr.NewTestLogger()
 	for i := 0; i < 100; i++ {
 		p1 := compilePolicy(t, policyHTTPALT)

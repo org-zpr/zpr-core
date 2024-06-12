@@ -14,8 +14,8 @@ import (
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 
-	"zpr.org/vs/pkg/missing/zpl/compiler"
-	"zpr.org/vs/pkg/missing/zpl/fs"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
 )
 
 const mtpreamble = `
@@ -106,7 +106,6 @@ func mkClaims(key, val string, ttl time.Duration) map[string]*agent.ClaimV {
 }
 
 func TestSimpleTCPClientToServer(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -187,7 +186,6 @@ communications:
 }
 
 func TestSimpleTCPServerResponse(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -267,7 +265,6 @@ communications:
 }
 
 func TestSimpleTCPServerCannotSYNClient(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -322,7 +319,6 @@ communications:
 }
 
 func TestICMPEchoRequest(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -381,7 +377,6 @@ communications:
 }
 
 func TestICMPEchoResponse(t *testing.T) { // TODO: Waiting to figure out address
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -440,7 +435,6 @@ communications:
 }
 
 func TestTCPServerConnect(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -486,7 +480,6 @@ communications:
 }
 
 func TestTCPServerConnectNotPermitted(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -530,7 +523,6 @@ communications:
 }
 
 func TestTCPClientToServerWithEPIDAttr(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -596,7 +588,6 @@ communications:
 }
 
 func TestConstraintCombine(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -674,7 +665,6 @@ communications:
 }
 
 func TestMixedCaseAttrKey(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -736,7 +726,6 @@ communications:
 }
 
 func TestMixedCaseAttrVal(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -798,7 +787,6 @@ communications:
 }
 
 func TestAttrEq(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -863,7 +851,6 @@ communications:
 }
 
 func TestAttrNe(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -928,7 +915,6 @@ communications:
 }
 
 func TestAttrHas(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:
@@ -993,7 +979,6 @@ communications:
 }
 
 func TestAttrExcludes(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	pyml := mtpreamble + network + `
 communications:
   systems:

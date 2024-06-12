@@ -14,8 +14,8 @@ import (
 
 	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vs/pkg/missing/zpl/compiler"
-	"zpr.org/vs/pkg/missing/zpl/fs"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"
@@ -152,7 +152,6 @@ func minVSI(t *testing.T, hopcount uint, alog logr.Logger, ds vservice.Directory
 // Test that the a duration constraint set in policy makes it all the way to
 // the visa expiration time.
 func TestRequestVisaWithConstraint(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	alog := logr.NewTestLogger()
 
 	testDS := &TestDS{
@@ -282,7 +281,6 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 }
 
 func TestRequestVisaDupes(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	alog := logr.NewTestLogger()
 
 	testDS := &TestDS{
@@ -415,7 +413,6 @@ func TestRequestVisaDupes(t *testing.T) {
 
 // Ensure that if agent auth has expired, no visa is issued.
 func TestAuthExpireNoVisa(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	alog := logr.NewTestLogger()
 
 	testDS := &TestDS{
@@ -526,7 +523,6 @@ func TestAuthExpireNoVisa(t *testing.T) {
 }
 
 func TestVisaServiceVisasExtended(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	alog := logr.NewTestLogger()
 
 	vsaddr := netip.MustParseAddr(vservice.VisaServiceAddress) // fc00:3003::1

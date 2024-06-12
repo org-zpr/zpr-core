@@ -1,0 +1,14 @@
+TOPTARGETS := all test
+
+MODULES = polio snio zpl
+
+
+$(TOPTARGETS): $(MODULES)
+$(MODULES):
+	$(MAKE) -C $@ $(MAKECMDGOALS)
+
+
+
+
+.PHONY: $(TOPTARGETS) $(MODULES)
+

@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vs/pkg/missing/zpl/compiler"
-	"zpr.org/vs/pkg/missing/zpl/fs"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
 	"zpr.org/vs/pkg/policy"
 
 	"zpr.org/vsx/snio/vsio"
@@ -119,7 +119,6 @@ func makeVSWithPolicy(t *testing.T, pyaml string) (*vservice.VSInst, *policy.Pol
 }
 
 func TestSelectDSPrefixInternal(t *testing.T) {
-	t.Skip("waiting for compiler port")
 	svc, p := makeVSWithPolicy(t, basicPolicyTwoDS)
 	cresp := &zds.ChallengeResponse{
 		ChalSpec: "",
@@ -144,7 +143,6 @@ func TestSelectDSPrefixInternal(t *testing.T) {
 }
 
 func TestSelectDSPrefixExternal(t *testing.T) {
-	t.Skip("waiting for compiler port")
 	svc, p := makeVSWithPolicy(t, basicPolicyTwoDS)
 	cresp := &zds.ChallengeResponse{
 		ChalSpec:    "",
@@ -169,7 +167,6 @@ func TestSelectDSPrefixExternal(t *testing.T) {
 }
 
 func TestSelectDSPrefixInconsistentAuthority(t *testing.T) {
-	t.Skip("waiting for compiler port")
 	svc, p := makeVSWithPolicy(t, basicPolicyTwoDS)
 
 	cresp := &zds.ChallengeResponse{
@@ -199,7 +196,6 @@ func TestSelectDSPrefixInconsistentAuthority(t *testing.T) {
 }
 
 func TestSelectDSPrefixMultipleMixed(t *testing.T) {
-	t.Skip("waiting for compiler port")
 	svc, p := makeVSWithPolicy(t, basicPolicyTwoDS)
 
 	cresp1 := &zds.ChallengeResponse{
@@ -224,7 +220,6 @@ func TestSelectDSPrefixMultipleMixed(t *testing.T) {
 }
 
 func TestSelectDSPrefixMultipleInternal(t *testing.T) {
-	t.Skip("waiting for compiler port")
 	svc, p := makeVSWithPolicy(t, basicPolicyTwoDS)
 
 	cresp1 := &zds.ChallengeResponse{
@@ -249,7 +244,6 @@ func TestSelectDSPrefixMultipleInternal(t *testing.T) {
 }
 
 func TestSelectDSPrefixMultipleInternalWithAuth(t *testing.T) {
-	t.Skip("waiting for compiler port")
 	svc, p := makeVSWithPolicy(t, basicPolicyTwoDS)
 
 	cresp1 := &zds.ChallengeResponse{
@@ -274,7 +268,6 @@ func TestSelectDSPrefixMultipleInternalWithAuth(t *testing.T) {
 }
 
 func TestSelectDSPrefixMultipleExternal(t *testing.T) {
-	t.Skip("waiting for compiler port")
 	svc, p := makeVSWithPolicy(t, basicPolicyTwoDS)
 
 	cresp1 := &zds.ChallengeResponse{

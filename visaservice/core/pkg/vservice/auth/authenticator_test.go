@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vs/pkg/missing/zpl/compiler"
-	"zpr.org/vs/pkg/missing/zpl/fs"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vsx/snio/zds"
@@ -64,7 +64,6 @@ var pyaml = `
 `
 
 func TestAuthenticateHappyPathInternOnly(t *testing.T) {
-	t.Skip("waiting on compiler port")
 	var err error
 
 	addr := netip.MustParseAddr("fc00:3001::1234")

@@ -1,5 +1,17 @@
 # visa service
 
+Started as a copy of the prototype ZPR visa service, but will evolve
+independetly to meet the needs of the reference implementation.
+
+
+## To build
+
+Run `make` to build.  To run the tests do `make test`.
+
+After a successful build the `vservice` binary will be found in
+`core/build`.
+
+
 
 ## Protocol Buffers
 
