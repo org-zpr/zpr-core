@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
 
+#[allow(unused_imports)]
 #[macro_use]
 extern crate arrayref;
 

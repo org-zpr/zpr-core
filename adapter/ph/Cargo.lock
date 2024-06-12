@@ -286,6 +286,7 @@ name = "ph-test"
 version = "0.1.0"
 dependencies = [
  "arrayref",
+ "bytes",
  "nix",
  "openssl",
  "tokio",

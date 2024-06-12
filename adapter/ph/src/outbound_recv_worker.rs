@@ -5,12 +5,15 @@ use tokio::io::unix::AsyncFd;
 use crate::ext::std::vec::VecExt;
 use crate::ext::tokio::io::unix::*;
 use crate::assembly::Assembly;
-use crate::packet::{packet_body_buffer, Packet};
+use crate::packet::{self, Packet};
 
 #[derive(Copy, Clone)]
 pub struct Config {
     pub batch_size: usize
 }
+
+// How much space to leave for the ZDP headers.
+const OUTBOUND_PACKET_HEADROOM: usize = 256;
 
 async fn worker<Fd: AsFd + AsRawFd + Send + Sync>(
     config: &Config, asm: &Assembly<'_>, tun_fd: &AsyncFd<Fd>
@@ -24,11 +27,13 @@ async fn worker<Fd: AsFd + AsRawFd + Send + Sync>(
 
         let mut recvd = recvd_outer;
 
+        let offset = packet::PACKET_BUFFER_MIN_BODY_OFFSET + OUTBOUND_PACKET_HEADROOM;
+
         // FIXME: how to detect truncated packet??
-        recvd.push(async_fd_read(tun_fd, packet_body_buffer(bufs[0])).await.unwrap());
+        recvd.push(async_fd_read(tun_fd, &mut bufs[0][offset..]).await.unwrap());
 
         for buf in &mut bufs[1..] {
-            match tun_fd.try_read(packet_body_buffer(buf)) {
+            match tun_fd.try_read(&mut buf[offset..]) {
                 Err(e) if e.raw_os_error().map(Errno::from_raw) == Some(Errno::EAGAIN) => break,
                 r => recvd.push(r.unwrap())
             }
@@ -38,9 +43,7 @@ async fn worker<Fd: AsFd + AsRawFd + Send + Sync>(
         asm.buffer_stack.put_buffers(bufs.drain(recvd.len()..));
 
         for (buf, &recvd) in bufs.drain(..).zip(&recvd) {
-            let mut pkt = Packet{ buf };
-            pkt.metadata_mut().len = recvd;
-            asm.outbound_processor.enqueue(pkt).await;
+            asm.outbound_processor.enqueue(Packet::new_with_existing_data(buf, offset, recvd)).await;
         }
 
         recvd_outer = recvd.recycle();
