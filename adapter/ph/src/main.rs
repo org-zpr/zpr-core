@@ -13,6 +13,7 @@ use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
 use std::io::Error;
 use std::process;
+use enum_map::{enum_map, EnumMap};
 
 #[macro_use]
 extern crate arrayref;
@@ -30,12 +31,13 @@ mod dtls_worker;
 mod inbound_processor_worker;
 mod inbound_send_worker;
 mod rpc_worker;
+mod counters_enum;
 
 use buffer_stack::BufferStack;
 use queues::*;
 use counter::*;
 use assembly::Assembly;
-
+use counters_enum::*;
 
 fn is_std_fd(rfd: RawFd) -> bool {
     rfd == std::io::stdin().as_raw_fd() ||
@@ -55,11 +57,11 @@ fn set_fd_nonblocking<T: AsRawFd>(fd: T) -> io::Result<()> {
     Ok(())
 }
 
-fn emit_counts(counts_arr:&[Counter]) {
-    let num_packets = counts_arr[0].get_count();
-    let num_dropped = counts_arr[1].get_count();
-    eprintln!("packets recieved: {num_packets}");
-    eprintln!("packets dropped: {num_dropped}");
+fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
+    for value in counts_map.values() {
+        println!("{}", value.get_count());
+    }
+
 }
 
 fn main() -> ExitCode {
@@ -141,7 +143,7 @@ fn main() -> ExitCode {
     let (os_inq, os_outq) = mpsc::channel(outbound_send_queue_size);
     let outbound_send = OutboundSend::new(os_inq);
 
-    let counters = [Counter::new(), Counter::new()];
+    let counters = enum_map! { _ => Counter::new(), };
 
     let asm = Box::leak(Box::new(Assembly{
             buffer_stack, inbound_processor, inbound_send,
@@ -183,8 +185,8 @@ fn main() -> ExitCode {
             js.spawn(async {
                 loop {
                     tokio::select! {
-                        _ = usr1_stream.recv() => (emit_counts(&asm.counters)),
-                        _ = term_stream.recv() => (emit_counts(&asm.counters))
+                        _ = usr1_stream.recv() => emit_counts(&asm.counters),
+                        _ = term_stream.recv() => emit_counts(&asm.counters)
                     }  
                 }
             });

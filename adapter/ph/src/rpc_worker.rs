@@ -5,6 +5,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::io::BufWriter;
 use tokio::io::AsyncBufReadExt;
+use crate::counters_enum::CounterType;
 
 async fn worker(
     asm: &Assembly<'_>, socket: &UnixListener
@@ -15,7 +16,7 @@ async fn worker(
             Ok((mut stream, _addr)) => {
                 eprintln!("Connection recieved");
                 let mut str_message = String::new();
-                let mut split_buf = stream.split(); // split stream into read/write streams
+                let split_buf = stream.split(); // split stream into read/write streams
                 let mut buf_reader = BufReader::new(split_buf.0);
                 let mut buf_writer = BufWriter::new(split_buf.1);
                 buf_reader.read_line(&mut str_message).await;
@@ -25,7 +26,7 @@ async fn worker(
                 buf_writer.write("Message Recieved\n".as_bytes()).await;
                 
                 // TODO there must be a more efficient way to send the OK message, is match statement best suited?
-                match str_message.as_str() {
+                let _ = match str_message.as_str() {
                     "COUNTERS RESET" => {buf_writer.write_all(counters_reset(asm).await.as_bytes()).await;
                                          buf_writer.write_all("OK\n".as_bytes()).await},
                     "COUNTERS"       => {buf_writer.write_all(counters(asm).await.as_bytes()).await;
@@ -36,11 +37,11 @@ async fn worker(
 
                 };
 
-                buf_writer.flush().await;
-                buf_writer.shutdown().await;
+                let _ = buf_writer.flush().await;
+                let _ = buf_writer.shutdown().await;
             }
             Err(e) => {
-                eprintln!("Connection failed");
+                eprintln!("Connection failed: {e}");
             }
         }   
     }
@@ -61,16 +62,16 @@ async fn echo(_asm: &Assembly<'_>) -> String {
 
 // TODO not sure if just printing is what we want this function to do
 async fn counters(asm: &Assembly<'_>) -> String {
-    for p in 0..2 { // TODO replace 2 with some global var that represents # of packets
-        let num = asm.counters[p].get_count();
-        println!("{num}");
+    for value in asm.counters.values() {
+        println!("{}", value.get_count());
     }
     return "counters\n".to_string(); // TODO change the return value of counters
 }
 
 async fn counters_reset(asm: &Assembly<'_>) -> String {
-    for p in 0..2 {
-        asm.counters[p].reset();
+    for value in asm.counters.values() {
+        value.reset();
     }
+
     return "counters_reset\n".to_string(); // TODO change the return value of counters reset
 }
