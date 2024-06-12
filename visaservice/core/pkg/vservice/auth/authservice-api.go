@@ -6,7 +6,7 @@ import (
 
 	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vs/pkg/snio/zds"
+	"zpr.org/vsx/snio/zds"
 )
 
 // TODO: Also in zprn/auth/authenticateok.go

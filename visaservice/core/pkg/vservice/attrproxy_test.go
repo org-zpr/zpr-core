@@ -10,7 +10,7 @@ import (
 
 	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vs/pkg/snio/zds"
+	"zpr.org/vsx/snio/zds"
 	"zpr.org/vs/pkg/vservice"
 	"zpr.org/vs/pkg/vservice/auth"
 )

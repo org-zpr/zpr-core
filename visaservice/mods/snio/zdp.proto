@@ -1,7 +1,7 @@
 syntax="proto3";
 package snio;
 
-option go_package = "zpr.org/vs/pkg/snio";
+option go_package = "zpr.org/vsx/snio";
 
 
 import "zds/zds.proto";

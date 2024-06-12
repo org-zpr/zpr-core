@@ -14,6 +14,7 @@ require (
 	google.golang.org/protobuf v1.34.2
 	gopkg.in/yaml.v2 v2.4.0
 	zpr.org/vsx/polio v0.0.0-00010101000000-000000000000
+	zpr.org/vsx/snio v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -30,3 +31,5 @@ require (
 )
 
 replace zpr.org/vsx/polio => ../mods/polio
+
+replace zpr.org/vsx/snio => ../mods/snio

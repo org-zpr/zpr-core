@@ -1,7 +1,7 @@
 syntax="proto3";
 package zds;
 
-option go_package = "zpr.org/vs/pkg/snio/zds";
+option go_package = "zpr.org/vsx/snio/zds";
 
 // ============================================================================
 // Implementation Notes

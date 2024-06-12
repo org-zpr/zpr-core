@@ -10,7 +10,7 @@ import (
 
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/libvisa"
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 
 	"zpr.org/vsx/polio"
 )

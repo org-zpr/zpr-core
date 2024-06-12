@@ -9,7 +9,7 @@ import (
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vsx/polio"
 
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 )
 
 type SessionKeyEncoding int

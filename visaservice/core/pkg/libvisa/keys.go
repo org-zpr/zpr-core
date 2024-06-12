@@ -6,7 +6,7 @@ import (
 	"crypto/md5"
 	"fmt"
 
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 )
 
 const sessionKeyFormat = 1

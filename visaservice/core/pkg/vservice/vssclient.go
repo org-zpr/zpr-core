@@ -13,8 +13,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vs/pkg/snio/vsio"
-	"zpr.org/vs/pkg/snio/vss"
+	"zpr.org/vsx/snio/vsio"
+	"zpr.org/vsx/snio/vss"
 	"zpr.org/vs/pkg/vservice/auth"
 )
 

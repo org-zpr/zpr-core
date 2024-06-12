@@ -16,8 +16,8 @@ import (
 
 	"zpr.org/vs/pkg/agent"
 	snip "zpr.org/vs/pkg/ip"
-	"zpr.org/vs/pkg/snio/vsio"
 
+	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/polio"
 )
 

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 )
 
 const (

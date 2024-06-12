@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vs/pkg/vservice"
 )
 

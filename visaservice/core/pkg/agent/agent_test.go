@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"zpr.org/vs/pkg/agent"
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 )
 
 func NewAgentFromClaims(c map[string]string, exp time.Time) *agent.Agent {

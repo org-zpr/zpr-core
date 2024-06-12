@@ -1,7 +1,7 @@
 syntax = "proto3";
 package pmctl;
 
-option go_package = "zpr.org/vs/pkg/snio/admin";
+option go_package = "zpr.org/vsx/snio/admin";
 
 // Converted from the pmctl.proto in zpr-prototype.
 service Admin {

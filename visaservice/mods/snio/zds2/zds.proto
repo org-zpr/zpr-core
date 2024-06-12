@@ -1,7 +1,7 @@
 syntax="proto3";
 package zds2;
 
-option go_package = "zpr.org/vs/pkg/snio/zds2";
+option go_package = "zpr.org/vsx/snio/zds2";
 
 
 service ZAuthentication {

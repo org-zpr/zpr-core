@@ -13,7 +13,7 @@ import (
 
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vs/pkg/snio/zds"
+	"zpr.org/vsx/snio/zds"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

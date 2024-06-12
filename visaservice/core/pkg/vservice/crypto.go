@@ -9,7 +9,7 @@ import (
 	"sort"
 
 	"zpr.org/vs/pkg/agent"
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 )
 
 func computeSignatureOverAgent(agnt *agent.Agent, key *rsa.PrivateKey) ([]byte, error) {

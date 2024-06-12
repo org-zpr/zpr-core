@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"zpr.org/vs/pkg/libvisa"
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 )
 
 func TestEncodeDecode(t *testing.T) {

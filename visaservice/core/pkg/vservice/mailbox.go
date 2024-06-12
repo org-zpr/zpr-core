@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 )
 
 // Mailbox is a system designed to support polling of the visa service for

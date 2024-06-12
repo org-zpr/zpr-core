@@ -21,8 +21,8 @@ import (
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vs/pkg/snio/vsio"
-	"zpr.org/vs/pkg/snio/zds"
+	"zpr.org/vsx/snio/vsio"
+	"zpr.org/vsx/snio/zds"
 	"zpr.org/vs/pkg/vservice/auth"
 )
 

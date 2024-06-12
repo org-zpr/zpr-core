@@ -3,7 +3,7 @@ package vservice
 import (
 	"net/netip"
 
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 )
 
 // DirectoryService provides visa service with information about what's docked where.

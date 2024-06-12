@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"zpr.org/vs/pkg/snio/zds"
+	"zpr.org/vsx/snio/zds"
 )
 
 type RSAV2 struct {

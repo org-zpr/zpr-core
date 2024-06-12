@@ -16,7 +16,7 @@ import (
 	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vs/pkg/snio/admin"
+	"zpr.org/vsx/snio/admin"
 
 	"zpr.org/vsx/polio"
 )

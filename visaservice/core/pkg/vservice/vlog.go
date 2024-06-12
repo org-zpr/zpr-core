@@ -10,7 +10,7 @@ import (
 	"time"
 
 	snip "zpr.org/vs/pkg/ip"
-	"zpr.org/vs/pkg/snio/vsio"
+	"zpr.org/vsx/snio/vsio"
 )
 
 type Vlog struct {
