@@ -17,6 +17,7 @@ use std::process;
 #[macro_use]
 extern crate arrayref;
 
+use std::fs;
 // TODO: make these all non-pub once everything is used
 pub mod ext;
 mod config;
@@ -30,6 +31,7 @@ mod udp_stream;
 mod dtls_worker;
 mod inbound_processor_worker;
 mod inbound_send_worker;
+mod rpc_worker;
 
 use buffer_stack::BufferStack;
 use queues::*;
@@ -181,8 +183,9 @@ fn main() -> ExitCode {
             js.spawn(dtls_worker::launch(&*asm, ssl_stream, os_outq));
             
             // Launches RPC worker program
-            js.spawn(rpc_worker::launch(
-                &*asm, &*unix_socket));
+
+            js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
+          
             let mut usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
             let mut term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
 
@@ -204,6 +207,10 @@ fn main() -> ExitCode {
                     &inbound_send_worker::Config{ batch_size: inbound_send_batch_size },
                     &*asm, is_outq, &*async_tun_fd));
             }
+
+            js.spawn(rpc_worker::launch(
+                &rpc_worker::Config{ batch_size: inbound_recv_batch_size },
+                &*asm, &*unix_socket));
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();
