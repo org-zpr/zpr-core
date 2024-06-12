@@ -58,8 +58,9 @@ fn set_fd_nonblocking<T: AsRawFd>(fd: T) -> io::Result<()> {
 }
 
 fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
-    for value in counts_map.values() {
-        println!("{}", value.get_count());
+    for (key, &ref value) in counts_map {
+        let counter_type = name_counters(key);
+        println!("{counter_type}: {}", value.get_count());
     }
 
 }

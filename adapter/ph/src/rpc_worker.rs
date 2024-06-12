@@ -5,7 +5,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
 use tokio::io::BufWriter;
 use tokio::io::AsyncBufReadExt;
-use crate::counters_enum::CounterType;
+use crate::counters_enum::*;
 
 async fn worker(
     asm: &Assembly<'_>, socket: &UnixListener
@@ -62,8 +62,9 @@ async fn echo(_asm: &Assembly<'_>) -> String {
 
 // TODO not sure if just printing is what we want this function to do
 async fn counters(asm: &Assembly<'_>) -> String {
-    for value in asm.counters.values() {
-        println!("{}", value.get_count());
+    for (key, &ref value) in &asm.counters {
+        let counter_type = name_counters(key);
+        println!("{counter_type}: {}", value.get_count());
     }
     return "counters\n".to_string(); // TODO change the return value of counters
 }

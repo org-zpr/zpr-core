@@ -35,5 +35,4 @@ pub struct Assembly<'pktbuf> {
     pub outbound_send: OutboundSend<'pktbuf>,
 
     pub counters: EnumMap<CounterType, Counter>
-
 }
