@@ -10,32 +10,16 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-cd:
+  cd:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Build cd
-      run: cd adapter/cd && make build
+    - name: Build + test cd
+      run: cd adapter/cd && make build && make test
 
-  test-cd:
-    needs: build-cd
+  ph:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Test cd
-      run: cd adapter/cd && make test
-
-  build-ph:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Build ph
-      run: cd adapter/ph && make build
-
-  test-ph:
-    needs: build-ph
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Test ph
-      run: cd adapter/ph && make test
+    - name: Build + test ph
+      run: cd adapter/ph && make build && make test

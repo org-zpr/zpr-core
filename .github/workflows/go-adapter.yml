@@ -10,17 +10,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-cactl:
+  cactl:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Build cactl
-      run: cd adapter/cactl && make build
-
-  test-cactl:
-    needs: build-cactl
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Test cactl
-      run: cd adapter/cactl && make test
+    - name: Build + test cactl
+      run: cd adapter/cactl && make build && make test
