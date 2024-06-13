@@ -1,4 +1,4 @@
-name: Rust-adapter
+name: Go-adapter
 
 on:
   push:
