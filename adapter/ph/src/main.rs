@@ -88,17 +88,17 @@ fn main() -> ExitCode {
     let tun_parse = cmd_line.tun_fd;
 
     let mut tun_fds = Vec::new();
-    for arg in tun_parse {
-        if is_std_fd(arg) {
+    for rfd in tun_parse {
+        if is_std_fd(rfd) {
             eprintln!("refusing to use std FD");
             return ExitCode::FAILURE;
         }
-        if !is_fd_open(arg) {
+        if !is_fd_open(rfd) {
             eprintln!("FD is not open");
             return ExitCode::FAILURE;
         }
         set_fd_nonblocking(arg).expect("unable to set FD nonblocking");
-        tun_fds.push(unsafe { BorrowedFd::borrow_raw(arg) });
+        tun_fds.push(unsafe { BorrowedFd::borrow_raw(rfd) });
     }
 
     // TODO: These batch sizes are placeholders for now.  So are the queue
