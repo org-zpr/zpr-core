@@ -1,0 +1,26 @@
+name: Rust-adapter
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-cactl:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build cactl
+      run: cd adapter/cactl && make build
+
+  test-cactl:
+    needs: build-cactl
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Test cactl
+      run: cd adapter/cactl && make test
