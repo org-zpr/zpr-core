@@ -1,3 +1,4 @@
+#![deny(warnings)]
 use std::fs;
 use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
