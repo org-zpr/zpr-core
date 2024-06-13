@@ -12,6 +12,7 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
+use clap::Parser;
 
 #[macro_use]
 extern crate arrayref;
@@ -37,6 +38,21 @@ use queues::*;
 use counter::*;
 use assembly::Assembly;
 
+#[derive(Parser)]
+#[command(version, about)]
+struct CmdLine {
+    #[arg(short, long)]
+    control_path: String,
+
+    #[arg(short, long)]
+    self_addr: SocketAddr,
+
+    #[arg(short, long)]
+    dock_addr: SocketAddr,
+
+    #[arg(short, long, num_args(1..))]
+    tun_fd: Vec<RawFd>,
+}
 
 fn is_std_fd(rfd: RawFd) -> bool {
     rfd == std::io::stdin().as_raw_fd() ||
@@ -64,50 +80,25 @@ fn emit_counts(counts_arr:&[Counter]) {
 }
 
 fn main() -> ExitCode {
-    let mut args = std::env::args();
+    let cmd_line = CmdLine::parse();
 
-    let execname = args.next().unwrap();
-
-    if args.len() < 4 {
-        eprintln!("Usage: {execname} <socket path> <self addr:port> <peer addr:port> <TUN fd> [<TUN fd>...]");
-        return ExitCode::FAILURE;
-    }
-
-    let Ok(sock_path) = args.next().unwrap().parse::<String>()
-    else {
-        eprintln!("Socket path parse failure");
-        return ExitCode::FAILURE;
-    };
-
-    let Ok(self_addr) = args.next().unwrap().parse::<SocketAddr>()
-    else {
-        eprintln!("Address parse failure");
-        return ExitCode::FAILURE;
-    };
-
-    let Ok(peer_addr) = args.next().unwrap().parse::<SocketAddr>()
-    else {
-        eprintln!("Address parse failure");
-        return ExitCode::FAILURE;
-    };
+    let sock_path = cmd_line.control_path;
+    let peer_addr = cmd_line.dock_addr;
+    let self_addr = cmd_line.self_addr;
+    let tun_parse = cmd_line.tun_fd;
 
     let mut tun_fds = Vec::new();
-    for arg in args {
-        let Ok(rfd) = arg.parse::<RawFd>()
-        else {
-            eprintln!("FD parse failure");
-            return ExitCode::FAILURE;
-        };
-        if is_std_fd(rfd) {
+    for arg in tun_parse {
+        if is_std_fd(arg) {
             eprintln!("refusing to use std FD");
             return ExitCode::FAILURE;
         }
-        if !is_fd_open(rfd) {
+        if !is_fd_open(arg) {
             eprintln!("FD is not open");
             return ExitCode::FAILURE;
         }
-        set_fd_nonblocking(rfd).expect("unable to set FD nonblocking");
-        tun_fds.push(unsafe { BorrowedFd::borrow_raw(rfd) });
+        set_fd_nonblocking(arg).expect("unable to set FD nonblocking");
+        tun_fds.push(unsafe { BorrowedFd::borrow_raw(arg) });
     }
 
     // TODO: These batch sizes are placeholders for now.  So are the queue
