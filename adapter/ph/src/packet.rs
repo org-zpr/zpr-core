@@ -8,7 +8,7 @@ use crate::config;
 // TODO: possible we want to keep this stuff on the heap
 
 pub struct Packet<'buf> {
-    pub buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE]
+    buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE]
 }
 
 #[derive(AsBytes, FromZeroes, FromBytes)]
@@ -30,6 +30,11 @@ impl<'buf> Packet<'buf> {
     // `headroom` indicates room to keep free at packet start for possible extension.
     pub fn new(buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE], headroom: usize) -> Self {
         Self::new_with_existing_data(buf, PACKET_BUFFER_MIN_BODY_OFFSET + headroom, 0)
+    }
+
+    #[must_use]
+    pub fn destroy(self) -> &'buf mut [u8; config::PACKET_BUFFER_SIZE] {
+        self.buf
     }
 
     // Initialize a buffer with existing packet data as a packet buffer.
