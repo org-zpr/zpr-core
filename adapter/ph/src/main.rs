@@ -1,3 +1,4 @@
+#![cfg_attr(feature = "ci", deny(warnings))]
 use std::fs;
 use std::io::ErrorKind;
 use std::net::SocketAddr;

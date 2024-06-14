@@ -16,3 +16,6 @@ tokio-openssl = { version = "0.6.4" }
 zerocopy = { version = "0.7.34", features = ["byteorder"] }
 zerocopy-derive = { version = "0.7.34" }
 enum-map = { version = "2.7.3" }
+
+[features]
+ci = []
