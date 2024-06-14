@@ -199,7 +199,11 @@ func (vs *VSInst) Start(listenAddr netip.Addr, port uint16) error {
 	defer vs.thriftWg.Done()
 	defer close(vs.exitC)
 	thrift.ServerStopTimeout = 5 * time.Second // TODO: Should come from config
+<<<<<<< HEAD
 	if err := vs.startThriftBlocking(listenAddr, port); err != nil {
+=======
+	if err := vs.startThriftBlocking(listenAddr, uint16(port)); err != nil {
+>>>>>>> 9843d7b (started to integrate thrift on visa service go side)
 		vs.log.WithError(err).Error("visa service start failed")
 		return fmt.Errorf("failed to start visa service: %w", err)
 	}
