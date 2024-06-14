@@ -2,7 +2,8 @@ use crate::config;
 use crate::buffer_stack::BufferStack;
 use crate::queues::*;
 use crate::counter::*;
-
+use crate::counters_enum::*;
+use enum_map::EnumMap;
 // Interface to full assembly of all stages.
 
 // This is the "public interface" that all stages of the system use to talk
@@ -33,9 +34,6 @@ pub struct Assembly<'pktbuf> {
     pub outbound_processor: OutboundProcessor<'pktbuf>,
     pub outbound_send: OutboundSend<'pktbuf>,
 
-
-    // counters[0] represents the total number of packets recieved
-    // counters[1] represents the number of dropped packets
-    pub counters: [Counter; 2]
+    pub counters: EnumMap<CounterType, Counter>
 
 }

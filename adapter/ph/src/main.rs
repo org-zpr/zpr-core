@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::pin::Pin;
@@ -13,7 +14,9 @@ use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
 use std::io::Error;
 use std::process;
+use enum_map::{enum_map, EnumMap};
 
+#[allow(unused_imports)]
 #[macro_use]
 extern crate arrayref;
 
@@ -29,13 +32,16 @@ mod udp_stream;
 mod dtls_worker;
 mod inbound_processor_worker;
 mod inbound_send_worker;
+mod outbound_recv_worker;
+mod outbound_processor_worker;
 mod rpc_worker;
+mod counters_enum;
 
 use buffer_stack::BufferStack;
 use queues::*;
 use counter::*;
 use assembly::Assembly;
-
+use counters_enum::*;
 
 fn is_std_fd(rfd: RawFd) -> bool {
     rfd == std::io::stdin().as_raw_fd() ||
@@ -55,11 +61,11 @@ fn set_fd_nonblocking<T: AsRawFd>(fd: T) -> io::Result<()> {
     Ok(())
 }
 
-fn emit_counts(counts_arr:&[Counter]) {
-    let num_packets = counts_arr[0].get_count();
-    let num_dropped = counts_arr[1].get_count();
-    eprintln!("packets recieved: {num_packets}");
-    eprintln!("packets dropped: {num_dropped}");
+fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
+    for value in counts_map.values() {
+        println!("{}", value.get_count());
+    }
+
 }
 
 fn main() -> ExitCode {
@@ -141,7 +147,7 @@ fn main() -> ExitCode {
     let (os_inq, os_outq) = mpsc::channel(outbound_send_queue_size);
     let outbound_send = OutboundSend::new(os_inq);
 
-    let counters = [Counter::new(), Counter::new()];
+    let counters = enum_map! { _ => Counter::new(), };
 
     let asm = Box::leak(Box::new(Assembly{
             buffer_stack, inbound_processor, inbound_send,
@@ -165,8 +171,8 @@ fn main() -> ExitCode {
         .unwrap()
         .block_on(async {
             // TODO signal handler goes here
-
-            fs::remove_file(&sock_path);
+            
+            fs::remove_file(&sock_path).or_else(|e| if e.kind() == ErrorKind::NotFound { Ok(()) } else { Err(e) }).unwrap();
             let unix_socket =  Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
 
             let async_tun_fds = tun_fds.into_iter().map(|tun_fd| AsyncFd::new(tun_fd).unwrap()).collect::<Vec<_>>().leak();
@@ -176,14 +182,14 @@ fn main() -> ExitCode {
             // Launches RPC worker program
             js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
 
-            let mut usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
-            let mut term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
+            let usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
+            let term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
 
             js.spawn(async {
                 loop {
                     tokio::select! {
-                        _ = usr1_stream.recv() => (emit_counts(&asm.counters)),
-                        _ = term_stream.recv() => (emit_counts(&asm.counters))
+                        _ = usr1_stream.recv() => emit_counts(&asm.counters),
+                        _ = term_stream.recv() => emit_counts(&asm.counters)
                     }  
                 }
             });
@@ -198,6 +204,17 @@ fn main() -> ExitCode {
                     &*asm, is_outq, &*async_tun_fd));
             }
 
+            for async_tun_fd in async_tun_fds.iter() {
+                js.spawn(outbound_recv_worker::launch(
+                    &outbound_recv_worker::Config{ batch_size: outbound_recv_batch_size },
+                    &*asm, &*async_tun_fd));
+            }
+
+            js.spawn(outbound_processor_worker::launch(
+                    &outbound_processor_worker::Config{ batch_size: outbound_processor_batch_size },
+                    &*asm, op_outq));
+
+            js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
 
             // TODO: initiate the DTLS connection asynchronously; for now, keep this at the end
             let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));

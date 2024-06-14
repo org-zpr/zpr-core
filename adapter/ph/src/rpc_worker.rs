@@ -1,15 +1,14 @@
 use core::future::Future;
 use crate::assembly::Assembly;
 use tokio::net::UnixListener;
-use tokio::net::UnixStream;
 use tokio::io::AsyncWriteExt;
-use std::io::prelude::*;
 use tokio::io::BufReader;
 use tokio::io::BufWriter;
 use tokio::task::JoinSet;
-use tokio::task::LocalSet;
 use tokio::io::AsyncBufReadExt;
 use std::io::Error;
+use crate::counters_enum::CounterType;
+
 
 async fn worker(
     asm: &'static Assembly<'static>, socket: &UnixListener
@@ -85,16 +84,16 @@ async fn echo(_asm: &Assembly<'_>) -> String {
 
 // TODO not sure if just printing is what we want this function to do
 async fn counters(asm: &Assembly<'_>) -> String {
-    for p in 0..2 { // TODO replace 2 with some global var that represents # of packets
-        let num = asm.counters[p].get_count();
-        println!("{num}");
+    for value in asm.counters.values() {
+        println!("{}", value.get_count());
     }
     return "counters\n".to_string(); // TODO change the return value of counters
 }
 
 async fn counters_reset(asm: &Assembly<'_>) -> String {
-    for p in 0..2 {
-        asm.counters[p].reset();
+    for value in asm.counters.values() {
+        value.reset();
     }
+
     return "counters_reset\n".to_string(); // TODO change the return value of counters reset
 }

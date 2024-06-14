@@ -4,15 +4,16 @@ use tokio::sync::mpsc;
 use tokio_openssl::SslStream;
 use crate::assembly::Assembly;
 use crate::config;
-use crate::packet::{self, packet_body_buffer, Packet};
+use crate::packet::{self, Packet};
 use crate::udp_stream::UdpStream;
+use crate::counters_enum::CounterType;
 
 // NOTE: Packet buffers *must* be at least 16384 bytes, to match TLS maximum
 // record size.  This is because OpenSSL read functions provide no way to
 // determine whether the provided read buffer was too small to contain a
 // full record.  So to ensure correct behavior we must be prepared to accept
 // the maximum size record.
-const _: () = assert!(packet::PACKET_BODY_BUFFER_SIZE >= 16384, "packet buffers too small for OpenSSL DTLS");
+const _: () = assert!(packet::PACKET_BODY_BUFFER_MAX_SIZE >= 16384, "packet buffers too small for OpenSSL DTLS");
 
 #[derive(Default)]
 enum InboundRecvState<'pktbuf> {
@@ -30,19 +31,19 @@ impl<'pktbuf> InboundRecvState<'pktbuf> {
             InboundRecvState::GetBuffer =>
                 *self = InboundRecvState::ReadPacket{ buf: asm.buffer_stack.get_buffer().await },
 
-            InboundRecvState::ReadPacket{ buf } =>
-                match ssl_stream.read(packet_body_buffer(buf)).await {
+            InboundRecvState::ReadPacket{ buf } => {
+                let offset = packet::PACKET_BUFFER_MIN_BODY_OFFSET;
+                match ssl_stream.read(&mut buf[offset..]).await {
                     Ok(size) => {
-                        asm.counters[0].increment();
+                        asm.counters[CounterType::InPacksRec].increment();
                         // NOTE: There is no way to detect a too-large packet.  See above.
-                        let mut pkt = Packet{ buf };
-                        pkt.metadata_mut().len = size;
-                        *self = InboundRecvState::EnqueuePacket{ pkt };
+                        *self = InboundRecvState::EnqueuePacket{ pkt: Packet::new_with_existing_data(buf, offset, size) };
                     },
 
                     Err(_) =>  // TODO: count error
                         *self = InboundRecvState::ReadPacket{ buf }
-                },
+                }
+            },
 
             InboundRecvState::EnqueuePacket{ pkt } => {
                 asm.inbound_processor.enqueue(pkt).await;
