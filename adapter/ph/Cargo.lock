@@ -307,8 +307,12 @@ version = "0.1.0"
 dependencies = [
  "arrayref",
  "enum-map",
+ "bytes",
+ "foreign-types",
+ "libc",
  "nix",
  "openssl",
+ "openssl-sys",
  "tokio",
  "tokio-openssl",
  "zerocopy",
