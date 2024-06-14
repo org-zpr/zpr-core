@@ -41,16 +41,19 @@ use assembly::Assembly;
 #[derive(Parser)]
 #[command(version, about)]
 struct CmdLine {
-    #[arg(short, long)]
+    #[arg(long)]
     control_path: String,
 
-    #[arg(short, long)]
+    #[arg(long)]
     self_addr: SocketAddr,
 
-    #[arg(short, long)]
+    #[arg(long)]
     dock_addr: SocketAddr,
 
-    #[arg(short, long, num_args(1..))]
+    #[arg(long)]
+    ca_file: Option<String>,
+
+    #[arg(long, num_args(1..))]
     tun_fd: Vec<RawFd>,
 }
 
@@ -86,6 +89,7 @@ fn main() -> ExitCode {
     let peer_addr = cmd_line.dock_addr;
     let self_addr = cmd_line.self_addr;
     let tun_parse = cmd_line.tun_fd;
+    let ca_file   = cmd_line.ca_file;
 
     let mut tun_fds = Vec::new();
     for rfd in tun_parse {
@@ -97,7 +101,7 @@ fn main() -> ExitCode {
             eprintln!("FD is not open");
             return ExitCode::FAILURE;
         }
-        set_fd_nonblocking(arg).expect("unable to set FD nonblocking");
+        set_fd_nonblocking(rfd).expect("unable to set FD nonblocking");
         tun_fds.push(unsafe { BorrowedFd::borrow_raw(rfd) });
     }
 
@@ -144,7 +148,12 @@ fn main() -> ExitCode {
     ssl_context_builder.set_options(
         ssl::SslOptions::NO_COMPRESSION |
         (ssl::SslOptions::NO_SSL_MASK & !ssl::SslOptions::NO_DTLSV1_2));
+
+    //eprintln!("{}", ca_file.unwrap());
+    ssl_context_builder.set_ca_file(ca_file.unwrap()).unwrap();
+    ssl_context_builder.set_verify(ssl::SslVerifyMode::PEER);
     // TODO: set CA cert, client key, & enable verification here
+
     let ssl_context = Box::leak(Box::new(ssl_context_builder.build()));
     // FIXME: "OpenSSL’s default configuration is insecure.  It is highly
     // recommended to use SslConnector rather than Ssl directly, as it
