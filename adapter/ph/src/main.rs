@@ -1,4 +1,6 @@
 use std::fs;
+use std::io::Read;
+use std::fs::File;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
@@ -6,6 +8,7 @@ use std::pin::Pin;
 use std::process::ExitCode;
 use openssl::ssl;
 use tokio::io;
+// use tokio::io::prelude::*;
 use tokio::io::unix::AsyncFd;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
@@ -13,7 +16,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
 use clap::Parser;
-
+use openssl::x509::X509;
 #[macro_use]
 extern crate arrayref;
 
@@ -148,11 +151,17 @@ fn main() -> ExitCode {
     ssl_context_builder.set_options(
         ssl::SslOptions::NO_COMPRESSION |
         (ssl::SslOptions::NO_SSL_MASK & !ssl::SslOptions::NO_DTLSV1_2));
+    
+    if ca_file.is_some() {
+        ssl_context_builder.set_ca_file(ca_file.clone().unwrap()).unwrap();
+        ssl_context_builder.set_verify(ssl::SslVerifyMode::PEER);
+        
+        let mut open_ca = File::open(ca_file.unwrap()).unwrap();
+        let mut buffer = Vec::new();
+        open_ca.read_to_end(&mut buffer).unwrap();
+        ssl_context_builder.add_client_ca(&X509::from_pem(&buffer).unwrap());    
+    }
 
-    //eprintln!("{}", ca_file.unwrap());
-    ssl_context_builder.set_ca_file(ca_file.unwrap()).unwrap();
-    ssl_context_builder.set_verify(ssl::SslVerifyMode::PEER);
-    // TODO: set CA cert, client key, & enable verification here
 
     let ssl_context = Box::leak(Box::new(ssl_context_builder.build()));
     // FIXME: "OpenSSL’s default configuration is insecure.  It is highly
