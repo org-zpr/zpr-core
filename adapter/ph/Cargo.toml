@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 arrayref = { version = "0.3.7" }
+bytes = { version = "1.6.0" }
 foreign-types = { version = "0.3.2" }
 libc = { version = "0.2.155" }
 nix = { version = "0.28.0", features = ["fs", "net", "socket", "uio"] }

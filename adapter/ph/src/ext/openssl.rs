@@ -9,6 +9,7 @@ pub mod ssl {
     }
 
     impl SslExt for SslRef {
+        // wrapper for DTLS_get_data_mtu - Get maximum data payload size
         fn get_data_mtu(&self) -> Result<usize, ErrorStack> {
             let ret = unsafe { ffi::DTLS_get_data_mtu(self.as_ptr()) };
             if ret == 0 {

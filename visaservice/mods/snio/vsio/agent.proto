@@ -1,0 +1,27 @@
+syntax = "proto3";
+package vsio;
+
+option go_package = "zpr.org/vsx/snio/vsio";
+
+
+message AClaim {
+    string cval = 1; // claim value
+    int64 exp   = 2; // expiration (unix time seconds)
+}
+
+// TODO: Will replace snet.snauth.agent
+// TODO: Will also be integrated into the zprn.rft messages.
+message Agent {
+    bool                authenticated = 1;
+    map<string,AClaim>  auth_claims   = 2;
+    repeated string     auth_ids      = 3;
+    repeated string     auth_tokens   = 4;
+    string              auth_expires  = 5; // RFC3339
+    bytes               auth_addr     = 6;
+    map<string,string>  unsub_claims  = 7;
+    string              hashval       = 8;
+    string              ident         = 9;
+    repeated string     provides      = 10;
+    uint64              config_id     = 11;
+    bytes               tether_addr   = 12; // added 2/14/24 - so may not be set everywhere (TODO)
+}

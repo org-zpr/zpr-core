@@ -1,0 +1,91 @@
+syntax = "proto3";
+package vss;
+
+option go_package = "zpr.org/vsx/snio/vss";
+
+import "vsio/agent.proto";
+
+service VisaServiceSupport {
+
+    // Bootstrap functions
+    rpc VisaServiceHello(HelloRequest) returns (HelloResponse) {}
+    rpc VisaServiceAuth(AuthRequest) returns (AuthResponse) {}    
+    rpc Install(InstallRequest) returns (InstallResponse) {}
+
+    // Visa Service interface into the RAFT based datastore
+    rpc LookupAgent(LookupAgentRequest) returns (LookupAgentResponse) {}
+
+    // Support for the ZPR administrative commands
+    //   - install a new policy
+    //   - drop by credential or authority (node injects these into raft)
+
+}
+
+
+enum InstallType {
+    VSS_INSTALL_TYPE_POLICY    = 0;
+    VSS_INSTALL_TYPE_BOOTSTRAP = 1;    
+}
+
+// HelloRequest is from visa service to its docking node
+// Left empty for future expansion ;)
+message HelloRequest {} 
+
+// HelloResponse is a reply from node to visa service. Include a challenge for 
+// the visa service to reply to in order to be allowed to proceed.
+message HelloResponse {
+    string challenge_type  = 1;
+    bytes challenge        = 2;
+}
+
+// AuthRquest is from visa service to the node. Includes a reply to the challenge
+// presented in the HelloResponse.  Also includes a `access_token` which the node
+// must furnish when it wants to use privileged functions in the visa service API.
+message AuthRequest {
+    bytes challenge          = 1;
+    bytes challenge_response = 2;
+    bytes access_token       = 3; // TODO: used for access to extra functions in visa service (I think...)
+    string vs_tls_name       = 4; // TLS name to use when grpc'ing to the visa service
+}
+
+// AuthResponse is from the node to the visa service.  This is the final handshake 
+// message and indicates a successful autentication of the visa service to the node.AClaim
+//
+// The node includes the tether address assigned to the visa service so that the 
+// visa service is able to create a valid visa for initial communications with the node.
+message AuthResponse {
+    bytes tether_addr = 1; // The tether address assigned to visa service by dock
+}
+
+
+message VisaBuffer {
+    bytes vs_data = 1; // visa in protocol buffer format
+}
+
+// Installs a policy with optional visas.
+message InstallRequest {    
+    InstallType install_type  = 1;
+    uint32 payload_format     = 2;
+    bytes payload             = 3; // the policy contaner
+    uint64 config_id          = 4; 
+    repeated VisaBuffer visas = 5; // visa-service and visa-support-service  visas for current policy
+}
+
+message InstallResponse {
+    string version    = 1;
+    uint64 config_id  = 2;
+}
+
+enum LookupAgentKey {
+    LOOKUP_KEY_CONTACT_ADDR = 0;
+}
+
+message LookupAgentRequest {
+    LookupAgentKey key = 1;
+    bytes address      = 2;
+}
+
+message LookupAgentResponse {
+    vsio.Agent  agent = 1;  // Will be nil if not found
+}
+

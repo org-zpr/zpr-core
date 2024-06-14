@@ -1,0 +1,170 @@
+syntax = "proto3";
+package vsio;
+
+option go_package = "zpr.org/vsx/snio/vsio";
+
+
+import "zds/zds.proto";
+import "vsio/visa.proto";
+import "vsio/agent.proto";
+
+service VisaService {
+    // A node must register with the visa service before calling any other functions.
+    rpc Register(VSRegisterRequest) returns (VSRegisterResponse) {}
+
+    // A node should de-register before exiting (but this is optional)
+    rpc DeRegister(VSDeRegisterRequest) returns (VSDeRegisterResponse) {} 
+
+    // Authorize a connection to ZPRnet
+    rpc AuthorizeConnect(VSConnectRequest) returns (VSConnectResponse) {}
+
+    // Note that for a given visa service instance, the visa issuer IDs should be increasing.
+    rpc RequestVisa(VSRequest) returns (VSResponse) {}
+
+    // Nodes periodically submit stats on constraint counters.
+    rpc SubmitStats(VSStatsRequest) returns (VSStatsResponse) {}
+
+    // Nodes should poll in case there are messages pushed out by visa service.
+    rpc Poll(VSPollRequest) returns (VSPollResponse) {}
+
+    // Get the network topology relevant to the requestor based on current policy.
+    rpc GetTopology(VSTopoRequest) returns (VSTopoResponse) {}
+
+    // Docking node notify visa service of new "service" host connection.
+    rpc HostAdded(VSHostAddRequest) returns (VSHostAddResponse) {}
+
+    // Docking node notify visa service of removed "service" host connection.
+    rpc HostRemoved(VSHostRemoveRequest) returns (VSHostRemoveResponse) {}
+}
+
+message VSRegisterRequest {
+    bytes node_addr = 1; // ZPR address of the node
+}
+
+message VSRegisterResponse {
+    bool success   = 1;
+    // TODO: could return an access_token here and then use it in all future calls from the node.
+}
+
+
+// VSDeRegisterRequest is a polite "goodbye" message and is optional.
+message VSDeRegisterRequest {
+    bytes node_addr = 1; // ZPR address of the node
+}
+
+message VSDeRegisterResponse {
+    bool success   = 1;
+}
+
+message VSConnectRequest {
+    bytes                  dock_addr  = 1; // dock ZPR address
+    string                 con_id     = 2; // unique (to caller) connection identifier
+    bytes                  req_addr   = 3; // set if connecting entity has requested an address
+    map<string,string>     claims     = 4;
+    zds.Challenge          chal       = 5;
+    repeated zds.ChallengeResponse chal_resp = 6;
+    bytes                  token      = 7; // to use node-agent (originates through visa support)
+    Agent                  node_agent = 8;
+}
+
+message VSConnectResponse {
+    string con_id    = 1; // copied from request
+    bool   success   = 2; // FALSE if connect fails
+    string error_msg = 3; // May be set if success == FALSE
+    Agent  agent     = 4; // nil if connect fails
+    // TODO: We will need things like CIDR and flags, etc that get set on connect.
+}
+
+message VSRequest {
+    bytes      src_tether_addr = 1;
+    PacketDesc traffic         = 2;
+}
+
+message VSResponse {
+    bool      success   = 1; // If TRUE visa will be non-nil
+    string    error_msg = 2; // Optionally set if success == FALSE
+    VSVisaHop visa      = 3; // Set if request has succeeded
+}
+
+
+message VSStatsRequest {
+    uint32 issuer_id   = 1;
+    string cap_key     = 2;
+    uint64 bytes_used  = 3;
+}
+
+message VSStatsResponse {}
+
+
+// Dock polling visa service for any messages.
+message VSPollRequest {
+    bytes dock_addr = 1;
+}
+
+message VSPollResponse {
+    repeated VSVisaHop    visas   = 1;
+    repeated VSRevocation revokes = 2;
+    bool                  more    = 3; // TRUE means there are yet more messages
+}
+
+message VSTopoRequest {
+    bytes  node_addr      = 1;
+    uint64 policy_version = 2;
+}
+
+message VSTopoResponse {
+    message NodeAddr {
+        bytes zpr_id         = 1;
+        string host          = 2; // IP or Hostname
+        uint32 port          = 3; // for node-node IPv4 connection
+        bool ext_auth        = 4; // true if node requires auth service
+        bytes key            = 5; // Noise PK
+    }
+
+    message Link {
+        bytes source_id         = 1; // zpr id value for link originator
+        repeated NodeAddr terms = 2; // link terminators
+    }
+
+    repeated Link links          = 1;
+    uint64        policy_version = 2;
+}
+
+// See snio.Traffic
+message PacketDesc {
+    bytes   source    = 1;
+    bytes   dest      = 2;
+    uint32  protocol  = 3; // is a byte
+    uint32  src_port  = 4; // is a uint16
+    uint32  dst_port  = 5; // is a uint16
+    uint32  flags     = 6; // TCP flags (bottom 9 bits)
+    uint32  icmp_type = 7; // is a byte
+    uint32  icmp_code = 8; // is a byte
+    bytes   icmp_addr = 9; // ICMP target address for ICMP neighbor solicitation only
+    uint32  size      = 10;
+}
+
+message VSVisaHop {
+    Visa   visa      = 1;
+    uint32 hop_count = 2; // for herald (uint8)
+}
+
+message VSRevocation {
+    uint32 issuer_id     = 1;
+    uint64 configuration = 2;
+}
+
+message VSHostAddRequest {
+    uint64 configuration = 1;
+    Agent agent          = 2;
+}
+
+message VSHostAddResponse {}
+
+
+message VSHostRemoveRequest {
+    uint64 configuration = 1;
+    Agent agent          = 2;    
+}
+
+message VSHostRemoveResponse {}
