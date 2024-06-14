@@ -62,3 +62,22 @@ pub mod io {
         }
     }
 }
+
+pub mod net {
+    use std::io;
+    use nix::sys::socket;
+    use tokio::net::UdpSocket;
+
+    pub trait UdpSocketExt {
+        fn mtu(&self) -> io::Result<u32>;
+    }
+
+    impl UdpSocketExt for UdpSocket {
+        fn mtu(&self) -> io::Result<u32> {
+            match socket::getsockopt(self, socket::sockopt::IpMtu) {
+                Ok(mtu) => Ok(mtu as u32),
+                Err(errno) => Err(io::Error::from(errno))
+            }
+        }
+    }
+}

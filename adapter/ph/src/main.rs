@@ -13,7 +13,11 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
 use clap::Parser;
+use std::io::Error;
+use std::process;
+use enum_map::{enum_map, EnumMap};
 
+#[allow(unused_imports)]
 #[macro_use]
 extern crate arrayref;
 
@@ -32,6 +36,7 @@ mod inbound_send_worker;
 mod outbound_recv_worker;
 mod outbound_processor_worker;
 mod rpc_worker;
+mod counters_enum;
 
 use buffer_stack::BufferStack;
 use queues::*;
@@ -54,6 +59,7 @@ struct CmdLine {
     tun_fd: Vec<RawFd>,
 }
 
+
 fn is_std_fd(rfd: RawFd) -> bool {
     rfd == std::io::stdin().as_raw_fd() ||
     rfd == std::io::stdout().as_raw_fd() ||
@@ -72,11 +78,13 @@ fn set_fd_nonblocking<T: AsRawFd>(fd: T) -> io::Result<()> {
     Ok(())
 }
 
-fn emit_counts(counts_arr:&[Counter]) {
-    let num_packets = counts_arr[0].get_count();
-    let num_dropped = counts_arr[1].get_count();
-    eprintln!("packets recieved: {num_packets}");
-    eprintln!("packets dropped: {num_dropped}");
+fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
+    for (key, &ref value) in counts_map {
+        let counter_type = name_counters(key);
+        println!("{counter_type}: {}", value.get_count());
+
+    }
+
 }
 
 fn main() -> ExitCode {
@@ -133,7 +141,7 @@ fn main() -> ExitCode {
     let (os_inq, os_outq) = mpsc::channel(outbound_send_queue_size);
     let outbound_send = OutboundSend::new(os_inq);
 
-    let counters = [Counter::new(), Counter::new()];
+    let counters = enum_map! { _ => Counter::new(), };
 
     let asm = Box::leak(Box::new(Assembly{
             buffer_stack, inbound_processor, inbound_send,
