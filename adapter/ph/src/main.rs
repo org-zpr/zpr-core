@@ -97,7 +97,7 @@ fn main() -> ExitCode {
             eprintln!("FD is not open");
             return ExitCode::FAILURE;
         }
-        set_fd_nonblocking(arg).expect("unable to set FD nonblocking");
+        set_fd_nonblocking(rfd).expect("unable to set FD nonblocking");
         tun_fds.push(unsafe { BorrowedFd::borrow_raw(rfd) });
     }
 
