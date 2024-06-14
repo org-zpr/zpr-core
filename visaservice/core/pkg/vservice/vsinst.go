@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc"
+	"github.com/apache/thrift/lib/go/thrift"
 	"google.golang.org/grpc/credentials"
 
 	"zpr.org/vs/pkg/agent"
@@ -21,9 +21,9 @@ import (
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
+	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"
-	"zpr.org/vs/pkg/vservice/auth"
 )
 
 var (
@@ -45,8 +45,6 @@ type PeerRecord struct {
 // This is a bit of a mess at the moment as we are in progress of porting this from
 // old code in machine.go and network.go.
 type VSInst struct {
-	vsio.UnimplementedVisaServiceServer // For GRPC
-
 	SignalC              chan VSSignal
 	log                  logr.Logger
 	vlog                 *Vlog
@@ -57,7 +55,7 @@ type VSInst struct {
 	visaPushC            chan *vsio.VSPollResponse // For pushing visas without needing a request
 	nodeNumber           uint8
 	nodeState            ConstraintService
-	grpcSvc              *grpc.Server
+	thriftServer         thrift.TServer
 	localAddr            netip.Addr
 	grpcWg               sync.WaitGroup
 	grpcCreds            credentials.TransportCredentials
@@ -190,14 +188,15 @@ func (vs *VSInst) Start(listenAddr netip.Addr, port int) error {
 	vs.grpcWg.Add(1)
 	defer vs.grpcWg.Done()
 	defer close(vs.exitC)
-	if err := vs.startGrpc(listenAddr, port); err != nil {
+	thrift.ServerStopTimeout = 5 * time.Second // TODO: Should come from config
+	if err := vs.startThriftBlocking(listenAddr, uint16(port)); err != nil {
 		vs.log.WithError(err).Error("visa service start failed")
 	}
 	return nil
 }
 
 func (vs *VSInst) Stop() {
-	vs.stopGrpc()
+	vs.thriftServer.Stop()
 }
 
 func (vs *VSInst) HasPollerNode(nodeAddr netip.Addr) bool {

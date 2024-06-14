@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"zpr.org/vs/pkg/libvisa"
@@ -98,6 +99,19 @@ func (svc *AdminService) StopGrpc() {
 		svc.service.gsrvWg.Wait()
 		svc.service.gsrv = nil
 	}
+}
+
+func peerAddrFromCtx(ctx context.Context) netip.Addr {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return netip.Addr{}
+	}
+	// peer.Addr is a net.Addr
+	ap, err := netip.ParseAddrPort(p.Addr.String())
+	if err != nil {
+		return netip.Addr{}
+	}
+	return ap.Addr()
 }
 
 func (svc *AdminService) Fetch(ctx context.Context, fr *admin.FetchRequest) (*admin.FetchResponse, error) {
