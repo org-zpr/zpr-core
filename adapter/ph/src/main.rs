@@ -20,21 +20,22 @@ use enum_map::{enum_map, EnumMap};
 extern crate arrayref;
 
 // TODO: make these all non-pub once everything is used
-pub mod ext;
-mod config;
-pub mod buffer_stack;
-mod packet;
-mod queues;
 mod assembly;
+mod buffer_stack;
+mod config;
 mod counter;
-mod udp_stream;
+mod counters_enum;
 mod dtls_worker;
+mod ext;
 mod inbound_processor_worker;
 mod inbound_send_worker;
-mod outbound_recv_worker;
 mod outbound_processor_worker;
+mod outbound_recv_worker;
+mod packet;
+mod queues;
 mod rpc_worker;
-mod counters_enum;
+mod udp_stream;
+mod zdp;
 
 use buffer_stack::BufferStack;
 use queues::*;

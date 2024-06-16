@@ -241,6 +241,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 
 [[package]]
+name = "open-enum"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0e88e2e4e7b332f23a96ece6261bae7cc7446b8a38439c0bae6fce02168cf16f"
+dependencies = [
+ "open-enum-derive",
+]
+
+[[package]]
+name = "open-enum-derive"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f51a157e01c7343a7c31f540309b3b8b2c9751f3adb6d040373e3139aa2e2e0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "openssl"
 version = "0.10.64"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -311,6 +331,7 @@ dependencies = [
  "foreign-types",
  "libc",
  "nix",
+ "open-enum",
  "openssl",
  "openssl-sys",
  "tokio",
