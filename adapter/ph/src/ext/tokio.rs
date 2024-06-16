@@ -1,4 +1,5 @@
-#[allow(dead_code)]
+#![allow(dead_code)]
+
 pub mod io {
     pub mod unix {
         use std::io::{IoSlice, IoSliceMut};

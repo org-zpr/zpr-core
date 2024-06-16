@@ -1,7 +1,10 @@
-use core::future::Future;
+use std::future::Future;
+use bytes::Buf;
 use tokio::sync::mpsc;
+use zerocopy::FromBytes;
 use crate::assembly::Assembly;
 use crate::packet::Packet;
+use crate::zdp::*;
 
 #[derive(Copy, Clone)]
 pub struct Config {
@@ -14,9 +17,22 @@ async fn worker<'pktbuf>(
     let mut pkts = Vec::new();
 
     while let _count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
-        for pkt in pkts.drain(..) {
-            // TODO: consider enqueueing in parallel to avoid blocking all if one Q is full
-            asm.inbound_send.enqueue(pkt).await;
+        for mut pkt in pkts.drain(..) {
+            let hdr = ZdpHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+
+            match hdr.abbreviated_header.packet_type {
+                ZdpPacketType::UncompressedAgentPacket => {
+                    // copy out relevant header info
+                    pkt.metadata_mut().stream_id = hdr.abbreviated_header.stream_id;
+                    // strip packet header
+                    pkt.advance(std::mem::size_of::<ZdpHeader>());
+                    // send out packet
+                    asm.inbound_send.enqueue(pkt).await;
+                },
+
+                packet_type =>
+                    panic!("unhandled inbound packet type {}", packet_type.0)
+            }
         }
     }
 }
