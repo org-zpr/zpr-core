@@ -7,7 +7,6 @@ use tokio::io::BufWriter;
 use tokio::task::JoinSet;
 use tokio::io::AsyncBufReadExt;
 use tokio::net::UnixStream;
-use crate::counters_enum::*;
 use std::io::Error;
 
 
@@ -86,8 +85,7 @@ async fn echo(_asm: &Assembly<'_>) -> String {
 // TODO not sure if just printing is what we want this function to do
 async fn counters(asm: &Assembly<'_>) -> String {
     for (key, &ref value) in &asm.counters {
-        let counter_type = name_counters(key);
-        println!("{counter_type}: {}", value.get_count());
+        println!("{}: {}", key.to_string(), value.get_count());
     }
     return "counters\n".to_string(); // TODO change the return value of counters
 }
