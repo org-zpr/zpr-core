@@ -14,9 +14,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
 use clap::Parser;
-use std::io::Error;
-use std::process;
-
 use enum_map::{enum_map, EnumMap};
 
 #[allow(unused_imports)]
@@ -46,22 +43,6 @@ use queues::*;
 use counter::*;
 use assembly::Assembly;
 use counters_enum::*;
-
-#[derive(Parser)]
-#[command(version, about)]
-struct CmdLine {
-    #[arg(short, long)]
-    control_path: String,
-
-    #[arg(short, long)]
-    self_addr: SocketAddr,
-
-    #[arg(short, long)]
-    dock_addr: SocketAddr,
-
-    #[arg(short, long, num_args(1..))]
-    tun_fd: Vec<RawFd>,
-}
 
 #[derive(Parser)]
 #[command(version, about)]
