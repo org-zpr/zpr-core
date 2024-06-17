@@ -53,6 +53,12 @@ struct CmdLine {
     #[arg(long)]
     ca_file: String,
 
+    #[arg(long)]
+    certificate_file: String,
+
+    #[arg(long)]
+    private_key_file: String,
+
     #[arg(long, num_args(1..))]
     tun_fd: Vec<RawFd>,
 }
@@ -85,11 +91,13 @@ fn emit_counts(counts_arr:&[Counter]) {
 fn main() -> ExitCode {
     let cmd_line = CmdLine::parse();
 
-    let sock_path = cmd_line.control_path;
-    let peer_addr = cmd_line.dock_addr;
-    let self_addr = cmd_line.self_addr;
-    let tun_parse = cmd_line.tun_fd;
-    let ca_file   = cmd_line.ca_file;
+    let sock_path     = cmd_line.control_path;
+    let peer_addr     = cmd_line.dock_addr;
+    let self_addr     = cmd_line.self_addr;
+    let tun_parse     = cmd_line.tun_fd;
+    let ca_file       = cmd_line.ca_file;
+    let cert_file     = cmd_line.certificate_file;
+    let priv_key_file = cmd_line.private_key_file;
 
     let mut tun_fds = Vec::new();
     for rfd in tun_parse {
@@ -152,6 +160,8 @@ fn main() -> ExitCode {
     //eprintln!("{}", ca_file.unwrap());
     ssl_context_builder.set_ca_file(ca_file).unwrap();
     ssl_context_builder.set_verify(ssl::SslVerifyMode::PEER);
+    ssl_context_builder.set_certificate_file(cert_file, ssl::SslFiletype::PEM).unwrap();
+    ssl_context_builder.set_private_key_file(priv_key_file, ssl::SslFiletype::PEM).unwrap();
     // TODO: set CA cert, client key, & enable verification here
 
     let ssl_context = Box::leak(Box::new(ssl_context_builder.build()));
