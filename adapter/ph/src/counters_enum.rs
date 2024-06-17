@@ -4,7 +4,6 @@ use enum_map::Enum;
 pub enum CounterType {
     InPacksRec,
     InPacksDrop,
-    InPacksErr,
     InPacksSent,
     OutPacksRec,
     OutPacksDrop,
@@ -20,7 +19,6 @@ pub fn name_counters(count_num: CounterType) -> String {
     match count_num {
         CounterType::InPacksRec   => s = "Inbound Packets Recieved",
         CounterType::InPacksDrop  => s = "Inbound Packets Dropped",
-        CounterType::InPacksErr   => s = "Inbound Packet Errors",
         CounterType::InPacksSent  => s = "Inbound Packets Sent",
         CounterType::OutPacksRec  => s = "Outbound Packets Recieved",
         CounterType::OutPacksDrop => s = "Outbound Packets Dropped",
