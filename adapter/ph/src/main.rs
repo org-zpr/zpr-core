@@ -1,3 +1,4 @@
+#![cfg_attr(feature = "ci", deny(warnings))]
 use std::fs;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
@@ -15,6 +16,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use clap::Parser;
 use std::io::Error;
 use std::process;
+
 use enum_map::{enum_map, EnumMap};
 
 #[allow(unused_imports)]

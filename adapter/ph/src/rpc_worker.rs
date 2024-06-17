@@ -6,9 +6,9 @@ use tokio::io::BufReader;
 use tokio::io::BufWriter;
 use tokio::task::JoinSet;
 use tokio::io::AsyncBufReadExt;
+use tokio::net::UnixStream;
 use crate::counters_enum::*;
 use std::io::Error;
-use crate::counters_enum::CounterType;
 
 
 async fn worker(
@@ -26,7 +26,7 @@ async fn worker(
                 },
             accepted = socket.accept() => 
                 match accepted {
-                    Ok((mut stream, _addr)) => {
+                    Ok((stream, _addr)) => {
                         set.spawn(handle_connection(asm, stream));
                     },
                     Err(_e) => {

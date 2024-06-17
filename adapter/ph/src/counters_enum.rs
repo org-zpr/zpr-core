@@ -15,7 +15,7 @@ pub enum CounterType {
 // }
 
 pub fn name_counters(count_num: CounterType) -> String {
-    let mut s = "ERROR1";
+    let s;
     match count_num {
         CounterType::InPacksRec   => s = "Inbound Packets Recieved",
         CounterType::InPacksDrop  => s = "Inbound Packets Dropped",
@@ -23,7 +23,6 @@ pub fn name_counters(count_num: CounterType) -> String {
         CounterType::OutPacksRec  => s = "Outbound Packets Recieved",
         CounterType::OutPacksDrop => s = "Outbound Packets Dropped",
         CounterType::OutPacksSent => s = "Outbound Packets Sent",
-        _                         => s = "ERROR2",
     };
 
     s.to_string()

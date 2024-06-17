@@ -32,16 +32,16 @@ impl<'pktbuf> InboundRecvState<'pktbuf> {
                 *self = InboundRecvState::ReadPacket{ buf: asm.buffer_stack.get_buffer().await },
 
             InboundRecvState::ReadPacket{ buf } => {
-                let offset = packet::PACKET_BUFFER_MIN_BODY_OFFSET;
-                match ssl_stream.read(&mut buf[offset..]).await {
-                    Ok(size) => {
+                let mut pkt = Packet::new(buf, 0);
+                match ssl_stream.read_buf(&mut pkt).await {
+                    Ok(_) => {
                         asm.counters[CounterType::InPacksRec].increment();
                         // NOTE: There is no way to detect a too-large packet.  See above.
-                        *self = InboundRecvState::EnqueuePacket{ pkt: Packet::new_with_existing_data(buf, offset, size) };
+                        *self = InboundRecvState::EnqueuePacket{ pkt };
                     },
 
                     Err(_) =>  // TODO: count error
-                        *self = InboundRecvState::ReadPacket{ buf }
+                        *self = InboundRecvState::ReadPacket{ buf: pkt.buf }
                 }
             },
 

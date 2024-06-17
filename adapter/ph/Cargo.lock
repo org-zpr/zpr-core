@@ -412,6 +412,7 @@ dependencies = [
  "clap",
  "enum-map",
  "bytes",
+ "enum-map",
  "foreign-types",
  "libc",
  "nix",
