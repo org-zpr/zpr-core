@@ -44,6 +44,7 @@ use buffer_stack::BufferStack;
 use queues::*;
 use counter::*;
 use assembly::Assembly;
+use counters_enum::*;
 
 #[derive(Parser)]
 #[command(version, about)]
