@@ -84,10 +84,11 @@ async fn echo(_asm: &Assembly<'_>) -> String {
 
 // TODO not sure if just printing is what we want this function to do
 async fn counters(asm: &Assembly<'_>) -> String {
+    let mut counts: String = "".to_string();
     for (key, &ref value) in &asm.counters {
-        println!("{}: {}", key.to_string(), value.get_count());
+        counts += &(key.to_string() + ": " + &value.get_count().to_string() + "\n");
     }
-    return "counters\n".to_string(); // TODO change the return value of counters
+    return counts; // TODO change the return value of counters
 }
 
 async fn counters_reset(asm: &Assembly<'_>) -> String {
