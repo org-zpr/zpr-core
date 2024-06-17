@@ -23,10 +23,12 @@ async fn worker<'pktbuf>(
             match hdr.abbreviated_header.packet_type {
                 ZdpPacketType::UncompressedAgentPacket => {
                     // copy out relevant header info
-                    pkt.metadata_mut().stream_id = hdr.abbreviated_header.stream_id;
+                    pkt.metadata_mut().flow_id = hdr.abbreviated_header.stream_id;
+
                     // strip packet header
                     pkt.advance(std::mem::size_of::<ZdpHeader>());
-                    // send out packet
+
+                    // send out decapsulated packet
                     asm.inbound_send.enqueue(pkt).await;
                 },
 

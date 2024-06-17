@@ -1,6 +1,6 @@
 use std::mem::{size_of, size_of_val};
 use bytes::buf;
-use zerocopy::FromBytes;
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes};
 use crate::config;
 
@@ -16,7 +16,7 @@ pub struct Packet<'buf> {
 pub struct PacketMetadata {
     offset: usize,  // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
     len: usize,  // packet length
-    pub stream_id: u32  // ZPR stream ID; 0 is unknown
+    pub flow_id: u32  // flow ID for load-balancing purposes; not otherwise meaningful
 }
 
 pub const PACKET_BUFFER_MIN_BODY_OFFSET: usize = size_of::<PacketMetadata>();
@@ -43,7 +43,7 @@ impl<'buf> Packet<'buf> {
         let md = pkt.metadata_mut();
         md.offset = offset;
         md.len = len;
-        md.stream_id = 0;
+        md.flow_id = 0;
         pkt
     }
 
@@ -82,16 +82,24 @@ impl<'buf> Packet<'buf> {
     }
 
     // Extend the start of the packet into available headroom.
-    pub fn alloc_headroom(&mut self, cnt: usize) {
+    pub fn alloc_zeroed_headroom(&mut self, cnt: usize) {
         assert!(cnt <= self.headroom_available());
-        self.metadata_mut().offset -= cnt;
-        self.metadata_mut().len += cnt;
+        let md = self.metadata_mut();
+        md.offset -= cnt;
+        md.len += cnt;
+        let offset = md.offset;
+        self.buf[offset..offset+cnt].fill(0);
+    }
+
+    pub fn alloc_zeroed_header<T: AsBytes + FromBytes + FromZeroes>(&mut self) -> &mut T {
+        self.alloc_zeroed_headroom(size_of::<T>());
+        T::mut_from_prefix(self.body_mut()).unwrap()
     }
 
     // flowhash is different for different flows, but not necessarily vice-versa.
     // Ideally this is a high-entropy value useful for load balancing.
     // Must be cheap to query.
-    pub fn flowhash(&self) -> u32 { self.metadata().stream_id }
+    pub fn flowhash(&self) -> u32 { self.metadata().flow_id }
 }
 
 impl<'buf> buf::Buf for Packet<'buf> {
