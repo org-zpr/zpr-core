@@ -13,6 +13,10 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
+use clap::Parser;
+use std::io::Error;
+use std::process;
+
 use enum_map::{enum_map, EnumMap};
 
 #[allow(unused_imports)]
@@ -20,27 +24,45 @@ use enum_map::{enum_map, EnumMap};
 extern crate arrayref;
 
 // TODO: make these all non-pub once everything is used
-pub mod ext;
-mod config;
-pub mod buffer_stack;
-mod packet;
-mod queues;
 mod assembly;
+mod buffer_stack;
+mod config;
 mod counter;
-mod udp_stream;
+mod counters_enum;
 mod dtls_worker;
+mod ext;
 mod inbound_processor_worker;
 mod inbound_send_worker;
-mod outbound_recv_worker;
 mod outbound_processor_worker;
+mod outbound_recv_worker;
+mod packet;
+mod queues;
 mod rpc_worker;
-mod counters_enum;
+mod udp_stream;
+mod zdp;
 
 use buffer_stack::BufferStack;
 use queues::*;
 use counter::*;
 use assembly::Assembly;
 use counters_enum::*;
+
+#[derive(Parser)]
+#[command(version, about)]
+struct CmdLine {
+    #[arg(short, long)]
+    control_path: String,
+
+    #[arg(short, long)]
+    self_addr: SocketAddr,
+
+    #[arg(short, long)]
+    dock_addr: SocketAddr,
+
+    #[arg(short, long, num_args(1..))]
+    tun_fd: Vec<RawFd>,
+}
+
 
 fn is_std_fd(rfd: RawFd) -> bool {
     rfd == std::io::stdin().as_raw_fd() ||
@@ -70,40 +92,15 @@ fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
 }
 
 fn main() -> ExitCode {
-    let mut args = std::env::args();
+    let cmd_line = CmdLine::parse();
 
-    let execname = args.next().unwrap();
-
-    if args.len() < 4 {
-        eprintln!("Usage: {execname} <socket path> <self addr:port> <peer addr:port> <TUN fd> [<TUN fd>...]");
-        return ExitCode::FAILURE;
-    }
-
-    let Ok(sock_path) = args.next().unwrap().parse::<String>()
-    else {
-        eprintln!("Socket path parse failure");
-        return ExitCode::FAILURE;
-    };
-
-    let Ok(self_addr) = args.next().unwrap().parse::<SocketAddr>()
-    else {
-        eprintln!("Address parse failure");
-        return ExitCode::FAILURE;
-    };
-
-    let Ok(peer_addr) = args.next().unwrap().parse::<SocketAddr>()
-    else {
-        eprintln!("Address parse failure");
-        return ExitCode::FAILURE;
-    };
+    let sock_path = cmd_line.control_path;
+    let peer_addr = cmd_line.dock_addr;
+    let self_addr = cmd_line.self_addr;
+    let tun_parse = cmd_line.tun_fd;
 
     let mut tun_fds = Vec::new();
-    for arg in args {
-        let Ok(rfd) = arg.parse::<RawFd>()
-        else {
-            eprintln!("FD parse failure");
-            return ExitCode::FAILURE;
-        };
+    for rfd in tun_parse {
         if is_std_fd(rfd) {
             eprintln!("refusing to use std FD");
             return ExitCode::FAILURE;

@@ -1,6 +1,6 @@
 use std::mem::{size_of, size_of_val};
 use bytes::buf;
-use zerocopy::FromBytes;
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes};
 use crate::config;
 
@@ -12,10 +12,11 @@ pub struct Packet<'buf> {
 }
 
 #[derive(AsBytes, FromZeroes, FromBytes)]
-#[repr(C)]
+#[repr(packed)]
 pub struct PacketMetadata {
     offset: usize,  // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
-    len: usize  // packet length
+    len: usize,  // packet length
+    pub flow_id: u32  // flow ID for load-balancing purposes; not otherwise meaningful
 }
 
 pub const PACKET_BUFFER_MIN_BODY_OFFSET: usize = size_of::<PacketMetadata>();
@@ -47,6 +48,7 @@ impl<'buf> Packet<'buf> {
         let md = pkt.metadata_mut();
         md.offset = offset;
         md.len = len;
+        md.flow_id = 0;
         pkt
     }
 
@@ -85,16 +87,43 @@ impl<'buf> Packet<'buf> {
     }
 
     // Extend the start of the packet into available headroom.
-    pub fn alloc_headroom(&mut self, cnt: usize) {
+    pub fn alloc_zeroed_headroom(&mut self, cnt: usize) {
         assert!(cnt <= self.headroom_available());
-        self.metadata_mut().offset -= cnt;
-        self.metadata_mut().len += cnt;
+        let md = self.metadata_mut();
+        md.offset -= cnt;
+        md.len += cnt;
+        let offset = md.offset;
+        self.buf[offset..offset+cnt].fill(0);
+    }
+
+    pub fn alloc_zeroed_header<T: AsBytes + FromBytes + FromZeroes>(&mut self) -> &mut T {
+        self.alloc_zeroed_headroom(size_of::<T>());
+        T::mut_from_prefix(self.body_mut()).unwrap()
     }
 
     // flowhash is different for different flows, but not necessarily vice-versa.
     // Ideally this is a high-entropy value useful for load balancing.
     // Must be cheap to query.
-    pub fn flowhash(&self) -> u32 { 0 /* TODO */ }
+    pub fn flowhash(&self) -> u32 { self.metadata().flow_id }
+}
+
+impl<'buf> buf::Buf for Packet<'buf> {
+    fn remaining(&self) -> usize {
+        self.metadata().len
+    }
+
+    // NOTE: This isn't super useful for us, as the contract of `chunk()`
+    // permits returning less than what's available (even though we do not).
+    // Most internal users should use `body()` instead.
+    fn chunk(&self) -> &[u8] {
+        self.body()
+    }
+
+    fn advance(&mut self, cnt: usize) {
+        assert!(cnt <= self.remaining());
+        self.metadata_mut().offset += cnt;
+        self.metadata_mut().len -= cnt;
+    }
 }
 
 unsafe impl<'buf> buf::BufMut for Packet<'buf> {
@@ -103,14 +132,14 @@ unsafe impl<'buf> buf::BufMut for Packet<'buf> {
         size_of_val(self.buf) - (md.offset + md.len)
     }
 
-    unsafe fn advance_mut(&mut self, cnt: usize) {
-        assert!(cnt <= self.remaining_mut());
-        self.metadata_mut().len += cnt;
-    }
-
     fn chunk_mut(&mut self) -> &mut buf::UninitSlice {
         let offset = self.metadata().offset;
         let len = self.metadata().len;
         buf::UninitSlice::new(&mut self.buf[offset+len..])
+    }
+
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        assert!(cnt <= self.remaining_mut());
+        self.metadata_mut().len += cnt;
     }
 }
