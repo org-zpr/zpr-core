@@ -1,49 +1,34 @@
 use core::future::Future;
-use nix::errno::Errno;
 use std::os::fd::{AsFd, AsRawFd};
 use tokio::io::unix::AsyncFd;
-use crate::ext::std::vec::VecExt;
 use crate::ext::tokio::io::unix::*;
 use crate::assembly::Assembly;
-use crate::packet::{packet_body_buffer, Packet};
+use crate::packet::Packet;
 
 #[derive(Copy, Clone)]
 pub struct Config {
     pub batch_size: usize
 }
 
+// How much space to leave for the ZDP headers.
+const OUTBOUND_PACKET_HEADROOM: usize = 256;
+
 async fn worker<Fd: AsFd + AsRawFd + Send + Sync>(
     config: &Config, asm: &Assembly<'_>, tun_fd: &AsyncFd<Fd>
 ) {
     let mut bufs = Vec::new();
-    let mut recvd_outer = Vec::new();
 
     loop {
         // grab some buffers from the pool
         asm.buffer_stack.get_buffers(config.batch_size, &mut bufs).await;
 
-        let mut recvd = recvd_outer;
-
-        // FIXME: how to detect truncated packet??
-        recvd.push(async_fd_read(tun_fd, packet_body_buffer(bufs[0])).await.unwrap());
-
-        for buf in &mut bufs[1..] {
-            match tun_fd.try_read(packet_body_buffer(buf)) {
-                Err(e) if e.raw_os_error().map(Errno::from_raw) == Some(Errno::EAGAIN) => break,
-                r => recvd.push(r.unwrap())
-            }
-        }
-
-        // return unused buffers
-        asm.buffer_stack.put_buffers(bufs.drain(recvd.len()..));
-
-        for (buf, &recvd) in bufs.drain(..).zip(&recvd) {
-            let mut pkt = Packet{ buf };
-            pkt.metadata_mut().len = recvd;
+        // read & forward packets one at a time, no sense to batch really
+        // since neither `read_buf()` nor `enqueue()` support it
+        for buf in bufs.drain(..) {
+            let mut pkt = Packet::new(buf, OUTBOUND_PACKET_HEADROOM);
+            async_fd_read_buf(tun_fd, &mut pkt).await.unwrap();
             asm.outbound_processor.enqueue(pkt).await;
         }
-
-        recvd_outer = recvd.recycle();
     }
 }
 
