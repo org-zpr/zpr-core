@@ -51,7 +51,7 @@ struct CmdLine {
     dock_addr: SocketAddr,
 
     #[arg(long)]
-    ca_file: Option<String>,
+    ca_file: String,
 
     #[arg(long, num_args(1..))]
     tun_fd: Vec<RawFd>,
@@ -150,7 +150,7 @@ fn main() -> ExitCode {
         (ssl::SslOptions::NO_SSL_MASK & !ssl::SslOptions::NO_DTLSV1_2));
 
     //eprintln!("{}", ca_file.unwrap());
-    ssl_context_builder.set_ca_file(ca_file.unwrap()).unwrap();
+    ssl_context_builder.set_ca_file(ca_file).unwrap();
     ssl_context_builder.set_verify(ssl::SslVerifyMode::PEER);
     // TODO: set CA cert, client key, & enable verification here
 
