@@ -3,7 +3,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, mpsc};
 use tokio_openssl::SslStream;
 use crate::assembly::Assembly;
-use crate::config;
 use crate::packet::{self, Packet};
 use crate::udp_stream::UdpStream;
 use crate::counters_enum::CounterType;
@@ -15,57 +14,6 @@ use crate::counters_enum::CounterType;
 // the maximum size record.
 const _: () = assert!(packet::PACKET_BODY_BUFFER_MAX_SIZE >= 16384, "packet buffers too small for OpenSSL DTLS");
 
-#[derive(Default)]
-enum InboundRecvState<'pktbuf> {
-    #[default] GetBuffer,
-    ReadPacket{ buf: &'pktbuf mut [u8; config::PACKET_BUFFER_SIZE] },
-    EnqueuePacket{ pkt: Packet<'pktbuf> }
-}
-
-struct InboundRecvStream<'a, 'b, 'c, 'pktbuf> {
-    asm: &'a Assembly<'pktbuf>,
-    ssl_stream: &'a Mutex<&'b mut SslStream<UdpStream<'c>>>,
-    state: InboundRecvState<'pktbuf>
-}
-
-impl<'a, 'b, 'c, 'pktbuf> InboundRecvStream<'a, 'b, 'c, 'pktbuf> where 'pktbuf: 'a {
-    fn new(asm: &'a Assembly<'pktbuf>, ssl_stream: &'a Mutex<&'b mut SslStream<UdpStream<'c>>>) -> Self {
-        InboundRecvStream { asm, ssl_stream, state: InboundRecvState::default() }
-    }
-
-    async fn step(&mut self) {
-        match std::mem::take(&mut self.state) {
-            InboundRecvState::GetBuffer =>
-                self.state = InboundRecvState::ReadPacket{ buf: self.asm.buffer_stack.get_buffer().await },
-
-            InboundRecvState::ReadPacket{ buf } => {
-                let mut pkt = Packet::new(buf, 0);
-                { self.ssl_stream.blocking_lock().read_buf(&mut pkt) }.await.unwrap();
-                self.asm.counters[CounterType::InPacksRec].increment();
-                // NOTE: There is no way to detect a too-large packet.  See above.
-                self.state = InboundRecvState::EnqueuePacket{ pkt };
-            },
-
-            InboundRecvState::EnqueuePacket{ pkt } => {
-                self.asm.inbound_processor.enqueue(pkt).await;
-                self.state = InboundRecvState::GetBuffer
-            }
-        }
-    }
-
-    fn reset(&mut self) {
-        match std::mem::take(&mut self.state) {
-            InboundRecvState::GetBuffer => (),
-
-            InboundRecvState::ReadPacket{ buf } =>
-                self.asm.buffer_stack.put_buffer(buf),
-
-            InboundRecvState::EnqueuePacket{ pkt } =>
-                self.asm.buffer_stack.put_buffer(pkt.destroy())
-        }
-    }
-}
-
 #[allow(unreachable_code)]
 async fn worker<'pktbuf>(
     asm: &Assembly<'pktbuf>,
@@ -75,27 +23,28 @@ async fn worker<'pktbuf>(
     // FIXME: We want to use a RefCell here, but Rust doesn't
     // realize that our use safely implements Send.
     // See <https://github.com/tokio-rs/tokio/discussions/4702>.
-    let ssl_stream_cell = Mutex::new(ssl_stream);
-
-    let mut inbound_recv_stream = InboundRecvStream::new(asm, &ssl_stream_cell);
+    let ssl_stream = Mutex::new(ssl_stream);
 
     tokio::join! {
         async {
             loop {
-                inbound_recv_stream.step().await;
+                let buf = asm.buffer_stack.get_buffer().await;
+                let mut pkt = Packet::new(buf, 0);
+                { ssl_stream.blocking_lock().read_buf(&mut pkt) }.await.unwrap();
+                asm.counters[CounterType::InPacksRec].increment();
+                // NOTE: There is no way to detect a too-large packet.  See above.
+                asm.inbound_processor.enqueue(pkt).await;
             }
         },
 
         async {
             loop {
                 let out_pkt = outbound_queue.recv().await.unwrap();
-                { ssl_stream_cell.blocking_lock().write(out_pkt.body()) }.await.unwrap();  // TODO: error handling
+                { ssl_stream.blocking_lock().write(out_pkt.body()) }.await.unwrap();  // TODO: error handling
                 asm.buffer_stack.put_buffer(out_pkt.destroy());
             }
         }
     };
-
-    inbound_recv_stream.reset();
 }
 
 pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
