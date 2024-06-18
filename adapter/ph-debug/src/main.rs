@@ -21,7 +21,6 @@ struct Args {
     port: String
 }
 
-
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
@@ -31,7 +30,6 @@ fn main() -> std::io::Result<()> {
     handle_commands(command, port)?;
 
     Ok(())
-   
 }
 
 // Determines which command to execute
