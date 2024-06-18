@@ -441,7 +441,7 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 
 func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byte) error {
 	if !vs.validAPIKey(key) {
-		vs.log.Warn("agent-disconnect called with invalid key", "key", key)
+		vs.log.Debug("agent-disconnect called with invalid key", "key", key)
 		return vsapi.NewUnauthorizedError()
 	}
 	zaddr, addrOk := netip.AddrFromSlice(zprAddr)
