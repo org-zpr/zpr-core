@@ -34,10 +34,16 @@ var (
 )
 
 type PeerRecord struct {
+	Agent                *vsio.Agent
 	RegistrationTime     time.Time
 	LastPollTime         time.Time
 	VisaRequestsCount    uint64
 	ConnectRequestsCount uint64
+}
+
+type HelloRecord struct {
+	CTime  time.Time
+	Chksum uint32
 }
 
 // VSInst is an instance of distributed visa service
@@ -66,11 +72,6 @@ type VSInst struct {
 	agentSigningKey      *rsa.PrivateKey
 	allowInvalidPeerAddr bool // Set to TRUE for testing only.
 
-	registeredNodes struct {
-		sync.RWMutex
-		table map[netip.Addr]*PeerRecord
-	}
-
 	cfgRemoves struct {
 		sync.Mutex
 		removes []*configRemoval // ordered earliest to latest
@@ -87,6 +88,12 @@ type VSInst struct {
 		mtx        sync.RWMutex
 		nextVisaID uint32
 		table      map[uint32]*vtableEnt // Visas created
+	}
+
+	sessions struct {
+		sync.RWMutex
+		hellos  map[int32]*HelloRecord
+		apiKeys map[string]*PeerRecord
 	}
 }
 
@@ -146,7 +153,8 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	}
 	vs.vtable.table = make(map[uint32]*vtableEnt)
 	vs.vtable.nextVisaID = minVisaID
-	vs.registeredNodes.table = make(map[netip.Addr]*PeerRecord)
+	vs.sessions.apiKeys = make(map[string]*PeerRecord)
+	vs.sessions.hellos = make(map[int32]*HelloRecord)
 
 	nopol := policy.NewEmptyPolicy()
 	vs.plcy.p = nopol
@@ -204,10 +212,16 @@ func (vs *VSInst) HasPollerNode(nodeAddr netip.Addr) bool {
 }
 
 func (vs *VSInst) HasRegisteredNode(nodeAddr netip.Addr) bool {
-	vs.registeredNodes.RLock()
-	defer vs.registeredNodes.RUnlock()
-	_, found := vs.registeredNodes.table[nodeAddr]
-	return found
+	vs.sessions.RLock()
+	defer vs.sessions.RUnlock()
+	for _, pr := range vs.sessions.apiKeys {
+		if zaddr, ok := netip.AddrFromSlice(pr.Agent.AuthAddr); ok {
+			if zaddr == nodeAddr {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Implement policy.Configurator interface.

@@ -122,3 +122,33 @@ func LoadRSAPublicKeyFromPKIXPEM(fname string) (*rsa.PublicKey, error) {
 		return nil, ErrUnsupportedPublicKeyType
 	}
 }
+
+func LoadRSAPublicKeyFromPKIXPEMBuffer(pemdata []byte) (*rsa.PublicKey, error) {
+	block, _ := pem.Decode(pemdata)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block found")
+	}
+	pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	switch pub := pub.(type) {
+	case *rsa.PublicKey:
+		return pub, nil
+	default:
+		return nil, ErrUnsupportedPublicKeyType
+	}
+}
+
+func LoadRSAPublicKeyFromPEMBuffer(pemdata []byte) (*rsa.PublicKey, error) {
+	block, _ := pem.Decode(pemdata)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block found")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	rsaPublicKey := cert.PublicKey.(*rsa.PublicKey)
+	return rsaPublicKey, nil
+}

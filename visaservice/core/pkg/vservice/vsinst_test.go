@@ -11,16 +11,18 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vsx/zpl/compiler"
-	"zpr.org/vsx/zpl/fs"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsx/snio/vsio"
-	"zpr.org/vsx/snio/zds"
+	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vs/pkg/vservice"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsx/snio/vsio"
+	"zpr.org/vsx/snio/zds"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
 
 	snip "zpr.org/vs/pkg/ip"
 )
@@ -91,6 +93,39 @@ func ipTrafficToSnioPacketDesc(t *snip.Traffic) *vsio.PacketDesc {
 		IcmpAddr: t.ICMPTargetAddress.AsSlice(),
 		Size:     uint32(t.Size),
 	}
+}
+
+func ipTrafficToVsapiTrafficDesc(t *snip.Traffic) *vsapi.TrafficDesc {
+	return &vsapi.TrafficDesc{
+		Source:     t.SrcAddr.AsSlice(),
+		Dest:       t.DstAddr.AsSlice(),
+		Protocol:   int32(t.Proto.Num()),
+		SourcePort: int32(t.SrcPort),
+		DestPort:   int32(t.DstPort),
+		Flags:      int32(t.Flags),
+		IcmpType:   int16(t.ICMPType),
+		IcmpCode:   int16(t.ICMPCode),
+		IcmpAddr:   t.ICMPTargetAddress.AsSlice(),
+		Size:       int32(t.Size),
+	}
+}
+
+func visaFromVsapiVisaResponse(vr *vsapi.VisaResponse) (*vsio.Visa, error) {
+	var visaObj vsio.Visa
+	err := proto.Unmarshal(vr.GetVisa().VisaPb, &visaObj)
+	if err != nil {
+		return nil, err
+	}
+	return &visaObj, nil
+}
+
+func mustUnmarshalVisa(pb []byte) *vsio.Visa {
+	var visaObj vsio.Visa
+	err := proto.Unmarshal(pb, &visaObj)
+	if err != nil {
+		panic(err)
+	}
+	return &visaObj
 }
 
 // TestDS is a test implementation of DirectoryService used by visaservice.
@@ -179,11 +214,13 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 
 	// Registering is not required under unit testing, but this is here just to catch a
 	// bug in the function.
+	/* XXX disabled for now as we redo VSS/VS.
 	regreq := &vsio.VSRegisterRequest{
 		NodeAddr: netip.MustParseAddr("fc00:3001:1::11").AsSlice(),
 	}
 	_, err = svc.Register(context.Background(), regreq)
 	require.Nil(t, err)
+	*/
 
 	// Just add a web service to the node.
 	// In the future this will need to be re-worked since node config will be separate.
@@ -259,23 +296,22 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 		Syn:     true,
 		Size:    64,
 	}
-	req := &vsio.VSRequest{
-		SrcTetherAddr: taddr,
-		Traffic:       ipTrafficToSnioPacketDesc(td),
-	}
-	res, err := svc.RequestVisa(context.Background(), req)
+
+	apiKey := "apikey"
+
+	res, err := svc.RequestVisa(context.Background(), apiKey, taddr, ipTrafficToVsapiTrafficDesc(td))
 	require.Nil(t, err)
-	require.True(t, res.Success)
+	require.Equal(t, vsapi.StatusCode_SUCCESS, res.Status)
 
-	require.NotNil(t, res.GetVisa().GetVisa())
-	require.Less(t, res.GetVisa().Visa.Expires, time.Now().Add(95*time.Second).Unix()*1000)
+	require.NotNil(t, res.GetVisa().VisaPb)
 
-	// Registering/Deregistering is not required under unit testing, but this is here just to catch a
-	// bug in the function.
-	deregreq := &vsio.VSDeRegisterRequest{
-		NodeAddr: netip.MustParseAddr("fc00:3001:1::11").AsSlice(),
-	}
-	_, err = svc.DeRegister(context.Background(), deregreq)
+	var visaObj vsio.Visa
+	err = proto.Unmarshal(res.GetVisa().VisaPb, &visaObj)
+	require.Nil(t, err)
+
+	require.Less(t, visaObj.Expires, time.Now().Add(95*time.Second).Unix()*1000)
+
+	err = svc.DeRegister(context.Background(), "foo")
 	require.Nil(t, err)
 
 }
@@ -381,34 +417,33 @@ func TestRequestVisaDupes(t *testing.T) {
 		Size:    64,
 	}
 
-	var resp1, resp2 *vsio.VSResponse
+	apiKey := "foo"
+	var resp1, resp2 *vsapi.VisaResponse
 
 	{
-		req := &vsio.VSRequest{
-			SrcTetherAddr: taddr,
-			Traffic:       ipTrafficToSnioPacketDesc(td),
-		}
-		resp1, err = svc.RequestVisa(context.Background(), req)
+		resp1, err = svc.RequestVisa(context.Background(), apiKey, taddr, ipTrafficToVsapiTrafficDesc(td))
 		require.Nil(t, err)
-		require.True(t, resp1.Success)
+		require.Equal(t, vsapi.StatusCode_SUCCESS, resp1.Status)
 	}
-	require.NotNil(t, resp1.GetVisa().GetVisa())
+	require.NotNil(t, resp1.GetVisa().VisaPb)
 
 	// Now request again. For now the visa service will happily create another
 	// visa. Possibly we want to prevent this, but one tricky issue is that the
 	// visa service must allow new visas to be created that extend the lifetime
 	// but are otherwise the same.
 	{
-		req := &vsio.VSRequest{
-			SrcTetherAddr: taddr,
-			Traffic:       ipTrafficToSnioPacketDesc(td),
-		}
-		resp2, err = svc.RequestVisa(context.Background(), req)
+		resp2, err = svc.RequestVisa(context.Background(), apiKey, taddr, ipTrafficToVsapiTrafficDesc(td))
 		require.Nil(t, err)
-		require.True(t, resp2.Success)
+		require.Equal(t, vsapi.StatusCode_SUCCESS, resp2.Status)
 	}
-	require.NotNil(t, resp2.GetVisa().GetVisa())
-	require.NotEqual(t, resp1.GetVisa().Visa.IssuerId, resp2.GetVisa().Visa.IssuerId) // New unique issuer IDs
+	require.NotNil(t, resp2.GetVisa().VisaPb)
+
+	v1, err := visaFromVsapiVisaResponse(resp1)
+	require.Nil(t, err)
+	v2, err := visaFromVsapiVisaResponse(resp2)
+	require.Nil(t, err)
+
+	require.NotEqual(t, v1.IssuerId, v2.IssuerId) // New unique issuer IDs
 }
 
 // Ensure that if agent auth has expired, no visa is issued.
@@ -511,15 +546,11 @@ func TestAuthExpireNoVisa(t *testing.T) {
 		Syn:     true,
 		Size:    64,
 	}
-	req := &vsio.VSRequest{
-		SrcTetherAddr: taddr,
-		Traffic:       ipTrafficToSnioPacketDesc(td),
-	}
-
-	res, err := svc.RequestVisa(context.Background(), req)
+	apiKey := "foo"
+	res, err := svc.RequestVisa(context.Background(), apiKey, taddr, ipTrafficToVsapiTrafficDesc(td))
 	require.Nil(t, err)
-	require.False(t, res.Success)
-	require.Equal(t, "auth expired", res.ErrorMsg)
+	require.Equal(t, vsapi.StatusCode_FAIL, res.Status)
+	require.Equal(t, "auth expired", res.Reason)
 }
 
 func TestVisaServiceVisasExtended(t *testing.T) {
@@ -643,27 +674,25 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	}
 
 	// Request a visa-service visa:
-	td := &vsio.PacketDesc{
-		Source:   n1addr.AsSlice(),
-		Dest:     vsaddr.AsSlice(),
-		Protocol: snip.ProtocolTCP.Num(),
-		SrcPort:  vservice.VisaServicePort,
-		DstPort:  vservice.VisaServicePort,
-		Flags:    0x0002, // SYN
+	td := &vsapi.TrafficDesc{
+		Source:     n1addr.AsSlice(),
+		Dest:       vsaddr.AsSlice(),
+		Protocol:   int32(snip.ProtocolTCP.Num()),
+		SourcePort: vservice.VisaServicePort,
+		DestPort:   vservice.VisaServicePort,
+		Flags:      0x0002, // SYN
 	}
-	req := &vsio.VSRequest{
-		SrcTetherAddr: n1addr.AsSlice(),
-		Traffic:       td,
-	}
-	res, err := svc.RequestVisa(context.Background(), req)
+	apiKey := "foo"
+	res, err := svc.RequestVisa(context.Background(), apiKey, n1addr.AsSlice(), td)
 	require.Nil(t, err)
-	require.Equal(t, "", res.ErrorMsg)
-	require.True(t, res.Success)
+	require.Equal(t, "", res.Reason)
+	require.Equal(t, vsapi.StatusCode_SUCCESS, res.Status)
 
-	require.NotNil(t, res.GetVisa().GetVisa())
-	expt := vsio.VToTime(res.GetVisa().Visa.GetExpires())
+	vsa, err := visaFromVsapiVisaResponse(res)
+	require.Nil(t, err)
+	expt := vsio.VToTime(vsa.GetExpires())
 	require.True(t, time.Until(expt) < time.Minute) // should be very short TTL
-	oldv := res.GetVisa().GetVisa()
+	oldv := vsa
 
 	// So the visa will be expiring very soon, as soon as the visa housekeeping runs it
 	// should try to create a successor visa.
@@ -671,18 +700,18 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	svc.AddNode(n1addr)              // creates a 'mailbox' for the node
 	svc.RunPeriodicHousekeepingNow() // blocking
 
-	preq := vsio.VSPollRequest{DockAddr: n1addr.AsSlice()}
-	presp, err := svc.Poll(context.Background(), &preq)
+	presp, err := svc.Poll(context.Background(), apiKey)
 	require.Nil(t, err)
-	require.False(t, presp.GetMore())
+	require.Equal(t, uint32(0), presp.More)
 	require.NotEmpty(t, presp.GetVisas())
-	require.Empty(t, presp.GetRevokes())
+	require.Empty(t, presp.GetRevocations())
 
 	// Should be a single visa for us:
 	require.Equal(t, 1, len(presp.GetVisas()))
 
-	require.Greater(t, presp.GetVisas()[0].GetHopCount(), uint32(0))
-	newV := presp.GetVisas()[0].GetVisa()
+	require.Greater(t, presp.GetVisas()[0].GetHopCount(), int32(0))
+
+	newV := mustUnmarshalVisa(presp.Visas[0].VisaPb)
 	require.NotNil(t, newV)
 	require.NotNil(t, newV.GetSource())
 	require.NotNil(t, newV.GetDest())
