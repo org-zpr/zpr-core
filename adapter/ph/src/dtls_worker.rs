@@ -32,17 +32,11 @@ impl<'pktbuf> InboundRecvState<'pktbuf> {
                 *self = InboundRecvState::ReadPacket{ buf: asm.buffer_stack.get_buffer().await },
 
             InboundRecvState::ReadPacket{ buf } => {
-                let offset = packet::PACKET_BUFFER_MIN_BODY_OFFSET;
-                match ssl_stream.read(&mut buf[offset..]).await {
-                    Ok(size) => {
-                        asm.counters[CounterType::InPacksRec].increment();
-                        // NOTE: There is no way to detect a too-large packet.  See above.
-                        *self = InboundRecvState::EnqueuePacket{ pkt: Packet::new_with_existing_data(buf, offset, size) };
-                    },
-
-                    Err(_) =>  // TODO: count error
-                        *self = InboundRecvState::ReadPacket{ buf }
-                }
+                let mut pkt = Packet::new(buf, 0);
+                ssl_stream.read_buf(&mut pkt).await.unwrap();
+                asm.counters[CounterType::InPacksRec].increment();
+                // NOTE: There is no way to detect a too-large packet.  See above.
+                *self = InboundRecvState::EnqueuePacket{ pkt };
             },
 
             InboundRecvState::EnqueuePacket{ pkt } => {
@@ -60,7 +54,7 @@ impl<'pktbuf> InboundRecvState<'pktbuf> {
                 asm.buffer_stack.put_buffer(buf),
 
             InboundRecvState::EnqueuePacket{ pkt } =>
-                asm.buffer_stack.put_buffer(pkt.buf)
+                asm.buffer_stack.put_buffer(pkt.destroy())
         }
     }
 }
@@ -90,7 +84,7 @@ async fn worker<'pktbuf>(
                 // writes can only block on the L2 network queue, not the
                 // path through the node.
                 ssl_stream.write(out_pkt.body()).await.unwrap();  // TODO: error handling
-                asm.buffer_stack.put_buffer(out_pkt.buf);
+                asm.buffer_stack.put_buffer(out_pkt.destroy());
             }
         };
     }

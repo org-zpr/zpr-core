@@ -10,13 +10,16 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  cd:
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
-    - name: Build
-      run: cd adapter/cd && cargo build --verbose
-    - name: Run tests
-      run: cd adapter/cd && cargo test --verbose
+    - name: Build + test cd
+      run: cd adapter/cd && make build && make test
+
+  ph:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build + test ph
+      run: cd adapter/ph && make build && make test

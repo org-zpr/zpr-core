@@ -1,3 +1,4 @@
+#![cfg_attr(feature = "ci", deny(warnings))]
 use daemonize::Daemonize;
 use std::env;
 use std::fs::OpenOptions;

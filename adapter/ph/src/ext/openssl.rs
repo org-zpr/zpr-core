@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod ssl {
     use foreign_types::ForeignTypeRef;
     use openssl::error::ErrorStack;
