@@ -1,6 +1,6 @@
 use std::future::Future;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 use tokio_openssl::SslStream;
 use crate::assembly::Assembly;
 use crate::config;
@@ -22,39 +22,46 @@ enum InboundRecvState<'pktbuf> {
     EnqueuePacket{ pkt: Packet<'pktbuf> }
 }
 
-impl<'pktbuf> InboundRecvState<'pktbuf> {
-    async fn step(&mut self,
-        asm: &Assembly<'pktbuf>,
-        ssl_stream: &mut SslStream<UdpStream<'_>>
-    ) {
-        match std::mem::take(self) {
+struct InboundRecvStream<'a, 'b, 'c, 'pktbuf> {
+    asm: &'a Assembly<'pktbuf>,
+    ssl_stream: &'a Mutex<&'b mut SslStream<UdpStream<'c>>>,
+    state: InboundRecvState<'pktbuf>
+}
+
+impl<'a, 'b, 'c, 'pktbuf> InboundRecvStream<'a, 'b, 'c, 'pktbuf> where 'pktbuf: 'a {
+    fn new(asm: &'a Assembly<'pktbuf>, ssl_stream: &'a Mutex<&'b mut SslStream<UdpStream<'c>>>) -> Self {
+        InboundRecvStream { asm, ssl_stream, state: InboundRecvState::default() }
+    }
+
+    async fn step(&mut self) {
+        match std::mem::take(&mut self.state) {
             InboundRecvState::GetBuffer =>
-                *self = InboundRecvState::ReadPacket{ buf: asm.buffer_stack.get_buffer().await },
+                self.state = InboundRecvState::ReadPacket{ buf: self.asm.buffer_stack.get_buffer().await },
 
             InboundRecvState::ReadPacket{ buf } => {
                 let mut pkt = Packet::new(buf, 0);
-                ssl_stream.read_buf(&mut pkt).await.unwrap();
-                asm.counters[CounterType::InPacksRec].increment();
+                { self.ssl_stream.blocking_lock().read_buf(&mut pkt) }.await.unwrap();
+                self.asm.counters[CounterType::InPacksRec].increment();
                 // NOTE: There is no way to detect a too-large packet.  See above.
-                *self = InboundRecvState::EnqueuePacket{ pkt };
+                self.state = InboundRecvState::EnqueuePacket{ pkt };
             },
 
             InboundRecvState::EnqueuePacket{ pkt } => {
-                asm.inbound_processor.enqueue(pkt).await;
-                *self = InboundRecvState::GetBuffer
+                self.asm.inbound_processor.enqueue(pkt).await;
+                self.state = InboundRecvState::GetBuffer
             }
         }
     }
 
-    fn reset(self, asm: &Assembly<'pktbuf>) {
-        match self {
+    fn reset(&mut self) {
+        match std::mem::take(&mut self.state) {
             InboundRecvState::GetBuffer => (),
 
             InboundRecvState::ReadPacket{ buf } =>
-                asm.buffer_stack.put_buffer(buf),
+                self.asm.buffer_stack.put_buffer(buf),
 
             InboundRecvState::EnqueuePacket{ pkt } =>
-                asm.buffer_stack.put_buffer(pkt.destroy())
+                self.asm.buffer_stack.put_buffer(pkt.destroy())
         }
     }
 }
@@ -65,7 +72,12 @@ async fn worker<'pktbuf>(
     ssl_stream: &mut SslStream<UdpStream<'_>>,
     outbound_queue: &mut mpsc::Receiver<Packet<'pktbuf>>
 ) {
-    let mut inbound_recv_state = InboundRecvState::default();
+    // FIXME: We want to use a RefCell here, but Rust doesn't
+    // realize that our use safely implements Send.
+    // See <https://github.com/tokio-rs/tokio/discussions/4702>.
+    let ssl_stream_cell = Mutex::new(ssl_stream);
+
+    let mut inbound_recv_stream = InboundRecvStream::new(asm, &ssl_stream_cell);
 
     loop {
         // SslStream has no notion of "splitting" into a read half & a write
@@ -75,7 +87,7 @@ async fn worker<'pktbuf>(
         // between inbound & outbound paths!)
 
         tokio::select! {
-            () = inbound_recv_state.step(&asm, ssl_stream) => (),
+            () = inbound_recv_stream.step() => (),
 
             out_pkt = outbound_queue.recv() => {
                 let out_pkt = out_pkt.unwrap();
@@ -83,13 +95,13 @@ async fn worker<'pktbuf>(
                 // here, since the DTLS connection uses UDP and therefore
                 // writes can only block on the L2 network queue, not the
                 // path through the node.
-                ssl_stream.write(out_pkt.body()).await.unwrap();  // TODO: error handling
+                { ssl_stream_cell.blocking_lock().write(out_pkt.body()) }.await.unwrap();  // TODO: error handling
                 asm.buffer_stack.put_buffer(out_pkt.destroy());
             }
         };
     }
 
-    inbound_recv_state.reset(asm);
+    inbound_recv_stream.reset();
 }
 
 pub fn launch<'pktbuf, AsmRef: 'pktbuf>(

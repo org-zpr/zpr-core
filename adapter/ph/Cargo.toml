@@ -9,6 +9,7 @@ bytes = { version = "1.6.0" }
 clap = { version = "4.5.7", features = ["derive"] }
 enum-map = { version = "2.7.3" }
 foreign-types = { version = "0.3.2" }
+futures-core = { version = "0.3.30" }
 libc = { version = "0.2.155" }
 nix = { version = "0.28.0", features = ["fs", "net", "socket", "uio"] }
 open-enum = { version = "0.5.1" }

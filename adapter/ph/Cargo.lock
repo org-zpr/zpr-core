@@ -437,6 +437,7 @@ dependencies = [
  "clap",
  "enum-map",
  "foreign-types",
+ "futures-core",
  "libc",
  "nix",
  "open-enum",
