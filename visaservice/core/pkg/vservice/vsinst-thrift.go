@@ -7,13 +7,16 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"math/rand"
 	"net/netip"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"zpr.org/vs/pkg/agent"
+	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vsx/snio/vsio"
@@ -108,6 +111,15 @@ func (vs *VSInst) validAPIKey(key string) bool {
 	return ok
 }
 
+func (vs *VSInst) validAPIKeyAndDeets(key string) (bool, time.Time, netip.Addr) {
+	vs.sessions.RLock()
+	defer vs.sessions.RUnlock()
+	if rec, ok := vs.sessions.apiKeys[key]; ok {
+		return true, rec.LastPollTime, rec.ZPRAddr
+	}
+	return false, time.Time{}, netip.Addr{}
+}
+
 func verifyHMAC(pubKey *rsa.PublicKey, nonce []byte, sid int32, timestamp int64, sig []byte) error {
 	var msg bytes.Buffer
 
@@ -145,7 +157,87 @@ func vsapiAgentToVsioAgent(a *vsapi.Agent) *vsio.Agent {
 	return vsa
 }
 
-// ===================================== THRIFT API ========================= //
+func vsapiTrafficDescToIpTraffic(pd *vsapi.TrafficDesc) *snip.Traffic {
+	tcpflags := uint16(pd.GetFlags())
+	syn := (tcpflags & 0x0002) > 0
+	ack := (tcpflags & 0x0010) > 0
+
+	saddr, _ := netip.AddrFromSlice(pd.GetSource())
+	daddr, _ := netip.AddrFromSlice(pd.GetDest())
+
+	var icmpa netip.Addr
+	if ica := pd.GetIcmpAddr(); ica != nil {
+		icmpa, _ = netip.AddrFromSlice(ica)
+	}
+	return &snip.Traffic{
+		SrcAddr:           saddr,
+		DstAddr:           daddr,
+		Proto:             snip.Protocol(pd.GetProtocol()),
+		SrcPort:           uint16(pd.SourcePort),
+		DstPort:           uint16(pd.DestPort),
+		Connect:           syn && !ack,
+		Syn:               syn,
+		Fin:               (tcpflags & 0x0001) > 0,
+		Rst:               (tcpflags & 0x0004) > 0,
+		Urg:               (tcpflags & 0x0020) > 0,
+		Psh:               (tcpflags & 0x0008) > 0,
+		Ack:               ack,
+		ICMPType:          byte(pd.GetIcmpType()),
+		ICMPCode:          byte(pd.GetIcmpType()),
+		ICMPTargetAddress: icmpa,
+		Size:              int(pd.GetSize()),
+		Flags:             uint32(pd.Flags),
+	}
+}
+
+// --------------------------------- BACKDOOR ------------------------------- //
+//
+// These functions are used by unit tests to get agents into the visa service.
+//
+// TODO: This is placeholder code until I find a cleaner way to do this.
+//
+
+// returns API key
+func (vs *VSInst) BackDoorInstallAPIKeyForUnitTest(node_addr netip.Addr, node_name string) (string, error) {
+	return vs.BackDoorInstallAPIKeyForUnitTestExp(node_addr, node_name, time.Now().Add(5*time.Minute))
+}
+
+// returns API key
+func (vs *VSInst) BackDoorInstallAPIKeyForUnitTestExp(node_addr netip.Addr, node_name string, expiration time.Time) (string, error) {
+	apiKey, err := vs.finishAuthenticate(node_addr, expiration, []string{fmt.Sprintf("/zpr/%s", node_name)})
+	if err != nil {
+		return "", err
+	}
+	return apiKey, nil
+}
+
+func (vs *VSInst) BackDoorConnectAdapter(tether_addr netip.Addr, zpr_addr netip.Addr, dock_addr netip.Addr, extra_claims map[string]*agent.ClaimV, expiration time.Time) error {
+	return vs.BackDoorConnectSvcAdapter(tether_addr, zpr_addr, dock_addr, extra_claims, nil, expiration)
+}
+
+func (vs *VSInst) BackDoorConnectSvcAdapter(tether_addr netip.Addr, zpr_addr netip.Addr, dock_addr netip.Addr, extra_claims map[string]*agent.ClaimV, provides []string, expiration time.Time) error {
+	_, _, cid := vs.getPolicyMatcherConfig()
+
+	claims := make(map[string]*agent.ClaimV)
+	claims[agent.KAttrEPID] = agent.NewClaimV(zpr_addr.String(), expiration)
+	claims[agent.KAttrRole] = agent.NewClaimV("adapter", expiration)
+	claims[agent.KAttrConnectVia] = agent.NewClaimV(dock_addr.String(), expiration)
+
+	for k, v := range extra_claims {
+		claims[k] = v
+	}
+
+	agnt := agent.EmptyAgent()
+	if len(provides) > 0 {
+		agnt.SetProvides(provides)
+	}
+	agnt.SetTetherAddr(tether_addr)
+	agnt.SetAuthenticated(claims, expiration, nil, nil, cid)
+
+	return vs.AddAdapter(zpr_addr, agnt)
+}
+
+// --------------------------------- BEGIN THRIFT ------------------------------- //
 
 func (vs *VSInst) Hello(ctx context.Context) (*vsapi.HelloResponse, error) {
 	chal := new(vsapi.Challenge)
@@ -227,6 +319,17 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		vs.log.Warn("registration: node passes invalid ZPR address", "addr", req.NodeAgent.ZprAddr)
 		return "", fmt.Errorf("invalid agent ZPR address")
 	}
+
+	apiKey, err := vs.finishAuthenticate(naddr, expiration, req.NodeAgent.Provides)
+	if err != nil {
+		vs.log.WithError(err).Warn("registration: failed to write to agent DB")
+		return "", fmt.Errorf("internal error")
+	}
+
+	return apiKey, nil
+}
+
+func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, provides []string) (string, error) {
 	_, _, cid := vs.getPolicyMatcherConfig()
 
 	claims := make(map[string]*agent.ClaimV)
@@ -234,10 +337,13 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 	claims[agent.KAttrRole] = agent.NewClaimV("node", expiration)
 
 	nodeAgent := agent.EmptyAgent()
-	nodeAgent.SetProvides(req.NodeAgent.Provides)
+	nodeAgent.SetProvides(provides)
+	nodeAgent.SetTetherAddr(naddr)
 	nodeAgent.SetAuthenticated(claims, expiration, nil, nil, cid)
 
-	vs.AddNode(naddr, nodeAgent)
+	if err := vs.AddNode(naddr, nodeAgent); err != nil {
+		return "", err
+	}
 
 	apiKey := uuid.New().String()
 
@@ -261,7 +367,7 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
 	rec := vs.takePeerRecord(key)
 	if rec == nil {
-		vs.log.Warn("registration: de-register called with invalid key", "key", key)
+		vs.log.Debug("registration: de-register called with invalid key", "key", key)
 		return vsapi.NewUnauthorizedError()
 	}
 	vs.log.Info("de-register", "node_addr", rec.ZPRAddr, "visa_requests", rec.VisaRequestsCount, "connects", rec.ConnectRequestsCount)
@@ -275,7 +381,7 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 
 func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byte) error {
 	if !vs.validAPIKey(key) {
-		vs.log.Warn("agent-disconnect called with invalid key", "key", key)
+		vs.log.Debug("agent-disconnect called with invalid key", "key", key)
 		return vsapi.NewUnauthorizedError()
 	}
 	zaddr, addrOk := netip.AddrFromSlice(zprAddr)
@@ -311,9 +417,91 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 }
 
 func (vs *VSInst) Poll(ctx context.Context, key string) (*vsapi.PollResponse, error) {
-	return nil, fmt.Errorf("not implemented")
+	valid, lastPoll, zprAddr := vs.validAPIKeyAndDeets(key)
+	if !valid {
+		vs.log.Debug("poll called with invalid key", "key", key)
+		return nil, vsapi.NewUnauthorizedError()
+	}
+	if lastPoll.IsZero() {
+		vs.log.Info("first poll", "peer", zprAddr)
+
+		vs.sessions.Lock()
+		if rec, ok := vs.sessions.apiKeys[key]; ok {
+			rec.LastPollTime = time.Now()
+		}
+		vs.sessions.Unlock()
+	}
+	mbox := zprAddr.String()
+	resp := &vsapi.PollResponse{}
+	const qcount = 100
+	msgs, ok := vs.mb.MessagesFor(mbox, qcount)
+	if !ok {
+		// This is an error - node should inform us of new nodes.
+		vs.log.Info("poll request from unknown node, ignoring", "addr", mbox, "peer", zprAddr)
+		return resp, nil
+	}
+	for _, m := range msgs {
+		if len(m.Revocations) > 0 {
+			resp.Revocations = append(resp.Revocations, m.Revocations...)
+		}
+		if len(m.Visas) > 0 {
+			resp.Visas = append(resp.Visas, m.Visas...)
+		}
+	}
+	if len(msgs) == qcount {
+		// guessing...
+		resp.More = 1
+	}
+	return resp, nil
 }
 
 func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []byte, traffic *vsapi.TrafficDesc) (*vsapi.VisaResponse, error) {
-	return nil, fmt.Errorf("not implemented")
+	valid, _, zprAddr := vs.validAPIKeyAndDeets(key)
+	if !valid {
+		vs.log.Debug("poll called with invalid key", "key", key)
+		return nil, vsapi.NewUnauthorizedError()
+	}
+
+	vs.log.Info("request visa", "peer", zprAddr)
+
+	vs.sessions.Lock()
+	if rr, found := vs.sessions.apiKeys[key]; found {
+		rr.VisaRequestsCount++
+	}
+	vs.sessions.Unlock()
+
+	pp := vs.getPolicy() // take & release lock
+	pver := uint64(0)
+	if pp != nil {
+		pver = pp.VersionNumber()
+	}
+	tetherAddr, ok := netip.AddrFromSlice(srcTetherAddr)
+	if !ok {
+		return nil, errors.New("invalid tether address on visa request")
+	}
+	vsioResp, err := vs.doRequestVisa(ctx, tetherAddr, vsapiTrafficDescToIpTraffic(traffic), 0, pver)
+
+	if err != nil {
+		e := err.Error()
+		return &vsapi.VisaResponse{
+			Status: vsapi.StatusCode_FAIL,
+			Reason: &e,
+		}, nil
+	}
+
+	pbuf, err := proto.Marshal(vsioResp.Visa.Visa)
+	if err != nil {
+		vs.log.WithError(err).Error("failed to marshal visa")
+		return nil, fmt.Errorf("internal error")
+	}
+	vhop := vsapi.VisaHop{
+		VisaPb:   pbuf,
+		HopCount: int32(vsioResp.Visa.HopCount),
+	}
+	resp := &vsapi.VisaResponse{
+		Status: vsapi.StatusCode_SUCCESS,
+		Visa:   &vhop,
+	}
+
+	return resp, nil
 }

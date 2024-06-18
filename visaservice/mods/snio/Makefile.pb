@@ -6,7 +6,6 @@ all: $(PBGENS)
 	cd admin && $(MAKE) all
 	cd zds && $(MAKE) all
 	cd zds2 && $(MAKE) all
-	cd vss && $(MAKE) all
 	cd vsio && $(MAKE) all
 
 clean:
@@ -14,7 +13,6 @@ clean:
 	cd admin && $(MAKE) clean
 	cd zds && $(MAKE) clean
 	cd zds2 && $(MAKE) clean
-	cd vss && $(MAKE) clean
 	cd vsio && $(MAKE) clean
 
 %.pb.go: %.proto

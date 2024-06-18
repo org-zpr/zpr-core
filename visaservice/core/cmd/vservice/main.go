@@ -2,12 +2,9 @@ package main
 
 import (
 	"fmt"
-	"net"
-	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/hashicorp/go-version"
@@ -68,10 +65,6 @@ func main() {
 			Aliases: []string{"c"},
 			Value:   "config.yaml",
 			Usage:   "load configuration from `FILE`",
-		},
-		&cli.StringFlag{
-			Name:  "vssaddr",
-			Usage: "visa support service address in form [DOCK_ZPR_ADDR]:PORT",
 		},
 		&cli.StringFlag{
 			Name:     "policy",
@@ -152,29 +145,6 @@ func main() {
 			}
 		}()
 
-		supportAddr, supportPort, err := func() (netip.Addr, int, error) {
-			if c.String("vssaddr") != "" {
-				host, port, err := net.SplitHostPort(c.String("vssaddr"))
-				if err != nil {
-					return netip.Addr{}, 0, err
-				}
-				pn, err := strconv.Atoi(port)
-				if err != nil {
-					pn = 0
-				}
-				ipa, err := netip.ParseAddr(host)
-				if err != nil {
-					return netip.Addr{}, pn, err
-				}
-				return ipa, pn, nil
-			} else {
-				return config.GetNodeAddr(), vservice.VisaSupportServicePort, nil
-			}
-		}()
-		if err != nil {
-			close(sigExitChan)
-			return fmt.Errorf("failed to parse visa support service address: %w", err)
-		}
 		var vsdnsname string
 		if c.String("tlsname") != "" {
 			vsdnsname = c.String("tlsname")
@@ -187,7 +157,7 @@ func main() {
 				vsdnsname = fmt.Sprintf("vs.%s", config.VSDomain)
 			}
 		}
-		err = service.Start(supportAddr, config.VSSSan, vsdnsname, supportPort, vservice.VisaServicePort) // Blocking!
+		err = service.Start(supportAddr, config.VSSSan, vsdnsname, vservice.VisaServicePort) // Blocking!
 		close(sigExitChan)
 
 		return err

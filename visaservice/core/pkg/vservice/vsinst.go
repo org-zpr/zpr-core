@@ -67,7 +67,6 @@ type VSInst struct {
 	hopCount             uint
 	authr                auth.AuthService
 	attrProx             *AttrProxy
-	ad                   DirectoryService
 	visaPushC            chan *vsapi.PollResponse // For pushing visas without needing a request
 	nodeNumber           uint8
 	nodeState            ConstraintService
@@ -321,7 +320,7 @@ func (vs *VSInst) extendVisaServiceVisas() {
 			remain := time.Until(vsio.VToTime(ve.v.GetExpires()))
 			if remain < VSVisaRenewalTime {
 				sourceAddr, _ := netip.AddrFromSlice(ve.v.Source)
-				agnt, err := vs.ad.AgentAtContactAddr(sourceAddr) // for a node contact_addr is visa "tether" addr.
+				agnt, err := vs.AgentAtContactAddr(sourceAddr) // for a node contact_addr is visa "tether" addr.
 				if err != nil || agnt == nil {
 					continue // agent is gone
 				}
@@ -475,7 +474,7 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 	// actually set an expire time out our internal tunnel.  In any case I could
 	// see wanting to actually re-auth the internal tunnel, in case data source
 	// values have changed, for example.
-	srcAgentExpire, dstAgentExpire := srcAgent.ParseAuthExpiresOr(time.Time{}), dstAgent.ParseAuthExpiresOr(time.Time{})
+	srcAgentExpire, dstAgentExpire := srcAgent.GetAuthExpires(), dstAgent.GetAuthExpires()
 	{
 		now := time.Now()
 		if (!srcAgentExpire.IsZero()) && now.After(srcAgentExpire) {
@@ -488,13 +487,13 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 		}
 	}
 
-	dstTether, ok := netip.AddrFromSlice(dstAgent.TetherAddr) // The source tether address is in passed in.
-	if !ok || !dstTether.IsValid() {
+	dstTether := dstAgent.GetTetherAddr() // The source tether address is in passed in.
+	if !dstTether.IsValid() {
 		vs.log.Info("destination tether is nil, visa request denied")
 		return nil, ErrNoRouteToHost
 	}
 
-	if len(dstAgent.Provides)+len(srcAgent.Provides) == 0 {
+	if len(dstAgent.GetProvides())+len(srcAgent.GetProvides()) == 0 {
 		vs.log.Info("visa denied: no services offered on either endpoint")
 		return nil, ErrDeniedByPolicy
 	}
@@ -515,31 +514,33 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 	{
 		updated, newAttrs, err := vs.checkAndUpdateAttrs(now, srcAgent)
 		if updated {
-			srcAgent.AuthClaims = newAttrs
+			vs.log.Debug("found updates to source authed claims", "agent_addr", srcAgent.GetZPRIDIfSet(), "newAttrs", newAttrs)
+			srcAgent.SetAuthedClaims(newAttrs)
 		}
 		if err != nil {
 			if errors.Is(err, auth.ErrNotSupported) {
-				vs.log.Info("attribute query not supported for source agent", "agent", srcAgent.Ident)
+				vs.log.Info("attribute query not supported for source agent", "agent", srcAgent.GetIdentity())
 			} else {
-				vs.log.WithError(err).Warn("attribute query failed for source agent", "agent", srcAgent.Ident)
+				vs.log.WithError(err).Warn("attribute query failed for source agent", "agent", srcAgent.GetIdentity())
 			}
 		}
 	}
 	{
 		updated, newAttrs, err := vs.checkAndUpdateAttrs(now, dstAgent)
 		if updated {
-			dstAgent.AuthClaims = newAttrs
+			vs.log.Debug("found updates to dest authed claims", "agent_addr", srcAgent.GetZPRIDIfSet(), "newAttrs", newAttrs)
+			dstAgent.SetAuthedClaims(newAttrs)
 		}
 		if err != nil {
 			if errors.Is(err, auth.ErrNotSupported) {
-				vs.log.Info("attribute query not supported for dest agent", "agent", srcAgent.Ident)
+				vs.log.Info("attribute query not supported for dest agent", "agent", srcAgent.GetIdentity())
 			} else {
-				vs.log.WithError(err).Warn("attribute query failed for dest agent", "agent", dstAgent.Ident)
+				vs.log.WithError(err).Warn("attribute query failed for dest agent", "agent", dstAgent.GetIdentity())
 			}
 		}
 	}
 
-	mtSrc, mtDst := policyAgentInfoFromVsioAgent(srcAgent), policyAgentInfoFromVsioAgent(dstAgent)
+	mtSrc, mtDst := policyAgentInfoFromAgent(srcAgent), policyAgentInfoFromAgent(dstAgent)
 	cpols, err := curmatcher.MatchTraffic(pktData, mtSrc, mtDst)
 	if err != nil {
 		vs.visaDenied(curConfigID, "no match", pktData, tetherAddr)
@@ -553,9 +554,9 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 		WithDatacapComputeFunc(vs.dataCapApply)
 
 	if cpols[0].FWD {
-		builder.WithClientAgentIdent(srcAgent.Ident)
+		builder.WithClientAgentIdent(srcAgent.GetIdentity())
 	} else {
-		builder.WithClientAgentIdent(dstAgent.Ident)
+		builder.WithClientAgentIdent(dstAgent.GetIdentity())
 	}
 
 	// In order to compute expiration I need two things from the visaConfig:
@@ -620,17 +621,13 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 }
 
 // Urg, so many types!!
-func policyAgentInfoFromVsioAgent(agnt *vsio.Agent) *policy.AgentInfo {
+func policyAgentInfoFromAgent(agnt *agent.Agent) *policy.AgentInfo {
 	aa := &policy.AgentInfo{
 		AgentAttrs:    make(map[string]*agent.ClaimV),
 		AgentProvides: agnt.GetProvides(),
 	}
-	for key, claim := range agnt.AuthClaims {
-		ac := &agent.ClaimV{
-			V:   claim.Cval,
-			Exp: time.Unix(claim.Exp, 0),
-		}
-		aa.AgentAttrs[key] = ac
+	for key, claim := range agnt.GetAuthedClaims() {
+		aa.AgentAttrs[key] = claim
 	}
 	return aa
 }
@@ -769,14 +766,14 @@ func (vs *VSInst) computeVisaExpiration(maxVisaLifetime time.Duration, durationC
 
 // endpointsForTraffic locate the source and destination agents by using the directory
 // to see what agent is connected at each endpoint.
-func (vs *VSInst) endpointsForTraffic(pktData *snip.Traffic) (srcAgent *vsio.Agent, dstAgent *vsio.Agent, err error) {
+func (vs *VSInst) endpointsForTraffic(pktData *snip.Traffic) (srcAgent *agent.Agent, dstAgent *agent.Agent, err error) {
 	// Note that the visa service does not check for a route. The existence of an entry in the DirectoryService implies a route.
-	srcAgent, err = vs.ad.AgentAtContactAddr(pktData.SrcAddr)
+	srcAgent, err = vs.AgentAtContactAddr(pktData.SrcAddr)
 	if err != nil {
 		vs.log.WithError(err).Info("visa denied: failed to resolve source ZPR address", "source", pktData.SrcAddr)
 		return nil, nil, ErrNoRouteToHost
 	}
-	dstAgent, err = vs.ad.AgentAtContactAddr(pktData.DstAddr)
+	dstAgent, err = vs.AgentAtContactAddr(pktData.DstAddr)
 	if err != nil {
 		vs.log.WithError(err).Info("visa denied: failed to resolve dest ZPR address", "dest", pktData.DstAddr)
 		return nil, nil, ErrNoRouteToHost
@@ -838,34 +835,33 @@ func (vs *VSInst) visaCreated(visa *vsio.Visa, expires time.Time, pktData *snip.
 //
 // ErrNotSupported is returned as error in case where the data source does not support
 // the Query operation.  (PROBLEM: what if there are multiple data sources?)
-func (vs *VSInst) checkAndUpdateAttrs(now time.Time, agnt *vsio.Agent) (bool, map[string]*vsio.AClaim, error) {
+func (vs *VSInst) checkAndUpdateAttrs(now time.Time, agnt *agent.Agent) (bool, map[string]*agent.ClaimV, error) {
 
-	keepAttrs := make(map[string]*vsio.AClaim)
+	keepAttrs := make(map[string]*agent.ClaimV)
 
 	var expired []string // we query for these
 
-	for aKey, aVx := range agnt.AuthClaims {
+	for aKey, aVx := range agnt.GetAuthedClaims() {
 		if strings.HasPrefix(aKey, "zpr.") {
 			keepAttrs[aKey] = aVx
 			continue // For now we don't know how to update zpr keys
 		}
-		if aVx.Exp == 0 {
+		if aVx.Exp.IsZero() {
 			keepAttrs[aKey] = aVx
 			continue // unset? Then it never expires.
 		}
-		expt := time.Unix(aVx.Exp, 0)
-		if now.After(expt) {
+		if now.After(aVx.Exp) {
 			expired = append(expired, aKey)
 		} else {
 			keepAttrs[aKey] = aVx
 		}
 	}
 	if len(expired) == 0 {
-		return false, agnt.AuthClaims, nil // no changes, nothing expired.
+		return false, agnt.GetAuthedClaims(), nil // no changes, nothing expired.
 	}
 
 	var toks [][]byte
-	toks = append(toks, []byte(agnt.Ident)) // TODO: what if there are multiple tokens on an agent?
+	toks = append(toks, []byte(agnt.GetIdentity())) // TODO: what if there are multiple tokens on an agent?
 	qreq := &zds.QueryRequest{
 		TokenList: toks,
 		AttrKeys:  expired,
@@ -888,9 +884,9 @@ func (vs *VSInst) checkAndUpdateAttrs(now time.Time, agnt *vsio.Agent) (bool, ma
 			vs.log.Info("invalid attempt by trusted service to set zpr key", "key", za.Key, "value", za.Val)
 			continue
 		}
-		keepAttrs[za.Key] = &vsio.AClaim{
-			Cval: za.Val,
-			Exp:  za.Exp,
+		keepAttrs[za.Key] = &agent.ClaimV{
+			V:   za.Val,
+			Exp: time.Unix(za.Exp, 0),
 		}
 	}
 	return true, keepAttrs, nil // No error, and attributes have been updated

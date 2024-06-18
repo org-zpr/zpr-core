@@ -49,7 +49,8 @@ type Agent struct {
 	authorityIDs  []string
 	authTokens    []string // JWTs
 	authExpires   time.Time
-	authedEPID    netip.Addr
+	authedEPID    netip.Addr // ZPR contact address
+	tetherAddr    netip.Addr // ZPR tether address
 	unubClaims    map[string]string
 	hashval       string
 	ident         string
@@ -109,6 +110,9 @@ func NewAgentFromSnioAgent(sa *vsio.Agent) *Agent {
 			V:   ac.GetCval(),
 			Exp: time.Unix(ac.GetExp(), 0),
 		}
+	}
+	if ta, ok := netip.AddrFromSlice(sa.GetTetherAddr()); ok {
+		a.tetherAddr = ta
 	}
 	return a
 }
@@ -240,6 +244,15 @@ func (a *Agent) SetAuthedClaimWithExp(k string, v string, x time.Time) {
 	a.updateHash()
 }
 
+// Replaces current authed claims with the ones passed in.
+func (a *Agent) SetAuthedClaims(claims map[string]*ClaimV) {
+	a.authClaims = make(map[string]*ClaimV)
+	for k, v := range claims {
+		a.authClaims[k] = v
+	}
+	a.updateHash()
+}
+
 func (a *Agent) setAuthedClaimIgnoreHash(k string, v *ClaimV) {
 	if a.authClaims == nil {
 		a.authClaims = make(map[string]*ClaimV)
@@ -312,6 +325,22 @@ func (a *Agent) GetZPRID() (netip.Addr, bool) {
 		return netip.Addr{}, false
 	}
 	return a.authedEPID, true
+}
+
+func (a *Agent) GetZPRIDIfSet() netip.Addr {
+	addr, ok := a.GetZPRID()
+	if !ok {
+		return netip.Addr{}
+	}
+	return addr
+}
+
+func (a *Agent) SetTetherAddr(addr netip.Addr) {
+	a.tetherAddr = addr
+}
+
+func (a *Agent) GetTetherAddr() netip.Addr {
+	return a.tetherAddr
 }
 
 func (a *Agent) HasAuthorities() bool {

@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"fmt"
-	"net"
 	"net/netip"
 	"testing"
 	"time"
@@ -196,15 +195,8 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 	require.NotNil(t, svc)
 	svc.SetAuthSvc(&TestAS{})
 
-	// Registering is not required under unit testing, but this is here just to catch a
-	// bug in the function.
-	/* XXX disabled for now as we redo VSS/VS.
-	regreq := &vsio.VSRegisterRequest{
-		NodeAddr: netip.MustParseAddr("fc00:3001:1::11").AsSlice(),
-	}
-	_, err = svc.Register(context.Background(), regreq)
-	require.Nil(t, err)
-	*/
+	naddr := netip.MustParseAddr("fc00:3001:1::11")
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0")
 
 	// Just add a web service to the node.
 	// In the future this will need to be re-worked since node config will be separate.
@@ -269,10 +261,10 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 		svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
 	}
 
-	taddr := net.ParseIP("fc00:3001::9")
+	taddr := netip.MustParseAddr("fc00:3001::9")
 	td := &snip.Traffic{
 		SrcAddr: netip.MustParseAddr("fc00:3001:1::10"),
-		DstAddr: netip.MustParseAddr("fc00:3001:1::11"),
+		DstAddr: naddr,
 		Proto:   snip.ProtocolTCP,
 		SrcPort: 30000,
 		DstPort: 80, // WEB request
@@ -281,10 +273,18 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 		Size:    64,
 	}
 
-	apiKey := "apikey"
+	// Prior to requesting a visa, we need to have told visa service about the
+	// adapter(s).
+	{
+		claims := map[string]*agent.ClaimV{
+			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
+		}
+		svc.BackDoorConnectAdapter(taddr, td.SrcAddr, naddr, claims, time.Now().Add(5*time.Minute))
+	}
 
-	res, err := svc.RequestVisa(context.Background(), apiKey, taddr, ipTrafficToVsapiTrafficDesc(td))
+	res, err := svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), ipTrafficToVsapiTrafficDesc(td))
 	require.Nil(t, err)
+	require.Equal(t, "", res.GetReason())
 	require.Equal(t, vsapi.StatusCode_SUCCESS, res.Status)
 
 	require.NotNil(t, res.GetVisa().VisaPb)
@@ -295,7 +295,7 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 
 	require.Less(t, visaObj.Expires, time.Now().Add(95*time.Second).Unix()*1000)
 
-	err = svc.DeRegister(context.Background(), "foo")
+	err = svc.DeRegister(context.Background(), apiKey)
 	require.Nil(t, err)
 
 }
@@ -311,6 +311,9 @@ func TestRequestVisaDupes(t *testing.T) {
 	require.NotNil(t, svc)
 	svc.SetAuthSvc(&TestAS{})
 
+	naddr := netip.MustParseAddr("fc00:3001:1::11")
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0")
+
 	// Just add a web service to the node.
 	// In the future this will need to be re-worked since node config will be separate.
 	pyaml := `
@@ -374,7 +377,7 @@ func TestRequestVisaDupes(t *testing.T) {
 		svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
 	}
 
-	taddr := net.ParseIP("fc00:3001::9")
+	taddr := netip.MustParseAddr("fc00:3001::9")
 	td := &snip.Traffic{
 		SrcAddr: netip.MustParseAddr("fc00:3001:1::10"),
 		DstAddr: netip.MustParseAddr("fc00:3001:1::11"),
@@ -386,11 +389,17 @@ func TestRequestVisaDupes(t *testing.T) {
 		Size:    64,
 	}
 
-	apiKey := "foo"
+	{
+		claims := map[string]*agent.ClaimV{
+			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
+		}
+		svc.BackDoorConnectAdapter(taddr, td.SrcAddr, naddr, claims, time.Now().Add(5*time.Minute))
+	}
+
 	var resp1, resp2 *vsapi.VisaResponse
 
 	{
-		resp1, err = svc.RequestVisa(context.Background(), apiKey, taddr, ipTrafficToVsapiTrafficDesc(td))
+		resp1, err = svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), ipTrafficToVsapiTrafficDesc(td))
 		require.Nil(t, err)
 		require.Equal(t, vsapi.StatusCode_SUCCESS, resp1.Status)
 	}
@@ -401,7 +410,7 @@ func TestRequestVisaDupes(t *testing.T) {
 	// visa service must allow new visas to be created that extend the lifetime
 	// but are otherwise the same.
 	{
-		resp2, err = svc.RequestVisa(context.Background(), apiKey, taddr, ipTrafficToVsapiTrafficDesc(td))
+		resp2, err = svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), ipTrafficToVsapiTrafficDesc(td))
 		require.Nil(t, err)
 		require.Equal(t, vsapi.StatusCode_SUCCESS, resp2.Status)
 	}
@@ -427,6 +436,9 @@ func TestAuthExpireNoVisa(t *testing.T) {
 	require.Nil(t, err)
 	require.NotNil(t, svc)
 	svc.SetAuthSvc(&TestAS{})
+
+	naddr := netip.MustParseAddr("fc00:3001:1::11")
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0")
 
 	// Just add a web service to the node.
 	// In the future this will need to be re-worked since node config will be separate.
@@ -489,7 +501,7 @@ func TestAuthExpireNoVisa(t *testing.T) {
 		svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
 	}
 
-	taddr := net.ParseIP("fc00:3001::9")
+	taddr := netip.MustParseAddr("fc00:3001::9")
 	td := &snip.Traffic{
 		SrcAddr: netip.MustParseAddr("fc00:3001:1::10"),
 		DstAddr: netip.MustParseAddr("fc00:3001:1::11"),
@@ -500,58 +512,24 @@ func TestAuthExpireNoVisa(t *testing.T) {
 		Syn:     true,
 		Size:    64,
 	}
-	apiKey := "foo"
-	res, err := svc.RequestVisa(context.Background(), apiKey, taddr, ipTrafficToVsapiTrafficDesc(td))
+
+	{
+		claims := map[string]*agent.ClaimV{
+			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
+		}
+		svc.BackDoorConnectAdapter(taddr, td.SrcAddr, naddr, claims, time.Now().Add(-time.Hour)) // <--- note expired
+	}
+
+	res, err := svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), ipTrafficToVsapiTrafficDesc(td))
 	require.Nil(t, err)
 	require.Equal(t, vsapi.StatusCode_FAIL, res.Status)
-	require.Equal(t, "auth expired", res.Reason)
+	require.Equal(t, "auth expired", res.GetReason())
 }
 
 func TestVisaServiceVisasExtended(t *testing.T) {
 	alog := logr.NewTestLogger()
 
 	vsaddr := netip.MustParseAddr(vservice.VisaServiceAddress) // fc00:3003::1
-	//n0addr := netip.MustParseAddr("fc00:3001:1::11")
-	n1addr := netip.MustParseAddr("fc00:3001:1::12")
-
-	/* OFF
-	testDS := &TestDS{
-		recs: map[string]*vsio.Agent{
-			vservice.VisaServiceAddress: {
-				AuthExpires: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
-				Provides: []string{
-					"$$zpr/visaservice",
-					"/zpr/$$zpr/visaservice", // TODO: This needs to be fixed -- the name should be just /zpr/visaservice I think.
-				},
-				AuthClaims: map[string]*vsio.AClaim{
-					agent.KAttrVisaServiceAdapter: {Cval: "true", Exp: time.Now().Add(time.Hour).Unix()},
-				},
-				TetherAddr: vsaddr.AsSlice(), // Note: adapter gets visa service address too!
-			},
-			"fc00:3001:1::10": {
-				AuthExpires: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
-				AuthClaims:  map[string]*vsio.AClaim{"ca0.foo": &vsio.AClaim{Cval: "fee", Exp: time.Now().Add(time.Hour).Unix()}},
-				TetherAddr:  netip.MustParseAddr("fc00:3001:1::10").AsSlice(),
-			},
-			"fc00:3001:1::11": {
-				AuthExpires: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
-				Provides:    []string{"/zpr/n0"},
-				AuthClaims: map[string]*vsio.AClaim{
-					"zpr.role": {Cval: "node", Exp: time.Now().Add(time.Hour).Unix()},
-				},
-				TetherAddr: n0addr.AsSlice(),
-			},
-			"fc00:3001:1::12": {
-				AuthExpires: time.Now().Add(10 * time.Second).Format(time.RFC3339), // <-- note this is about to expire
-				Provides:    []string{"/zpr/n1"},
-				AuthClaims: map[string]*vsio.AClaim{
-					"zpr.role": {Cval: "node", Exp: time.Now().Add(time.Hour).Unix()},
-				},
-				TetherAddr: n1addr.AsSlice(),
-			},
-		},
-	}
-	*/
 
 	// Minimal config:
 	vc := minVSI(t, 99, alog)
@@ -567,6 +545,12 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	// I beleive for time being, the visa service gets static IP _AND_ the adapter for the visa service
 	// takes that address aswell (like a node would).
 	svc.SetLocalAddr(vsaddr)
+
+	n0addr := netip.MustParseAddr("fc00:3001:1::11")
+	n1addr := netip.MustParseAddr("fc00:3001:1::12")
+
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(n0addr, "n0")
+	svc.BackDoorInstallAPIKeyForUnitTestExp(n1addr, "n1", time.Now().Add(10*time.Second)) // <--- note expiry in 10s
 
 	pyaml := `
         zpl_format: 2
@@ -629,6 +613,22 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 		require.Nil(t, err)
 	}
 
+	{
+		claims := map[string]*agent.ClaimV{
+			agent.KAttrVisaServiceAdapter: &agent.ClaimV{V: "true", Exp: time.Now().Add(time.Hour)},
+		}
+		svc.BackDoorConnectSvcAdapter(vsaddr, vsaddr, n1addr, claims, []string{"$$zpr/visaservice", "/zpr/$$zpr/visaservice"}, time.Now().Add(time.Hour))
+	}
+
+	{
+		client110 := netip.MustParseAddr("fc00:3001:1::10")
+		client110ta := netip.MustParseAddr("fc00:3001::10")
+		claims := map[string]*agent.ClaimV{
+			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
+		}
+		svc.BackDoorConnectAdapter(client110ta, client110, n1addr, claims, time.Now().Add(time.Hour))
+	}
+
 	// Request a visa-service visa:
 	td := &vsapi.TrafficDesc{
 		Source:     n1addr.AsSlice(),
@@ -638,10 +638,10 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 		DestPort:   vservice.VisaServicePort,
 		Flags:      0x0002, // SYN
 	}
-	apiKey := "foo"
+
 	res, err := svc.RequestVisa(context.Background(), apiKey, n1addr.AsSlice(), td)
 	require.Nil(t, err)
-	require.Equal(t, "", res.Reason)
+	require.Equal(t, "", res.GetReason())
 	require.Equal(t, vsapi.StatusCode_SUCCESS, res.Status)
 
 	vsa, err := visaFromVsapiVisaResponse(res)
@@ -653,12 +653,11 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	// So the visa will be expiring very soon, as soon as the visa housekeeping runs it
 	// should try to create a successor visa.
 
-	svc.AddNode(n1addr, agent.EmptyAgent()) // creates a 'mailbox' for the node
-	svc.RunPeriodicHousekeepingNow()        // blocking
+	svc.RunPeriodicHousekeepingNow() // blocking
 
 	presp, err := svc.Poll(context.Background(), apiKey)
 	require.Nil(t, err)
-	require.Equal(t, uint32(0), presp.More)
+	require.Equal(t, int32(0), presp.More)
 	require.NotEmpty(t, presp.GetVisas())
 	require.Empty(t, presp.GetRevocations())
 
