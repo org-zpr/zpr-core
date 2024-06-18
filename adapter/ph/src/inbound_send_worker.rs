@@ -23,7 +23,7 @@ async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
         for pkt in &pkts {
             async_fd_write_vectored(tun_fd, &[IoSlice::new(pkt.body())]).await.unwrap();  // TODO: error handling
         }
-        asm.buffer_stack.put_buffers(pkts.drain(..).map(|pktbuf| pktbuf.buf));
+        asm.buffer_stack.put_buffers(pkts.drain(..).map(|pktbuf| pktbuf.destroy()));
     }
 }
 

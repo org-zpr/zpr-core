@@ -1,9 +1,12 @@
+#![cfg_attr(feature = "ci", deny(warnings))]
 use std::fs;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::pin::Pin;
 use std::process::ExitCode;
+use clap::Parser;
+use enum_map::{enum_map, EnumMap};
 use openssl::ssl;
 use tokio::io;
 use tokio::io::unix::AsyncFd;
@@ -12,31 +15,34 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
-use clap::Parser;
 
+#[allow(unused_imports)]
 #[macro_use]
 extern crate arrayref;
 
 // TODO: make these all non-pub once everything is used
-pub mod ext;
-mod config;
-pub mod buffer_stack;
-mod packet;
-mod queues;
 mod assembly;
+mod buffer_stack;
+mod config;
 mod counter;
-mod udp_stream;
+mod counters_enum;
 mod dtls_worker;
+mod ext;
 mod inbound_processor_worker;
 mod inbound_send_worker;
-mod outbound_recv_worker;
 mod outbound_processor_worker;
+mod outbound_recv_worker;
+mod packet;
+mod queues;
 mod rpc_worker;
+mod udp_stream;
+mod zdp;
 
 use buffer_stack::BufferStack;
 use queues::*;
 use counter::*;
 use assembly::Assembly;
+use counters_enum::*;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -81,11 +87,11 @@ fn set_fd_nonblocking<T: AsRawFd>(fd: T) -> io::Result<()> {
     Ok(())
 }
 
-fn emit_counts(counts_arr:&[Counter]) {
-    let num_packets = counts_arr[0].get_count();
-    let num_dropped = counts_arr[1].get_count();
-    eprintln!("packets recieved: {num_packets}");
-    eprintln!("packets dropped: {num_dropped}");
+fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
+    for (key, &ref value) in counts_map {
+        let counter_type = name_counters(key);
+        println!("{counter_type}: {}", value.get_count());
+    }
 }
 
 fn main() -> ExitCode {
@@ -145,7 +151,7 @@ fn main() -> ExitCode {
     let (os_inq, os_outq) = mpsc::channel(outbound_send_queue_size);
     let outbound_send = OutboundSend::new(os_inq);
 
-    let counters = [Counter::new(), Counter::new()];
+    let counters = enum_map! { _ => Counter::new(), };
 
     let asm = Box::leak(Box::new(Assembly{
             buffer_stack, inbound_processor, inbound_send,
