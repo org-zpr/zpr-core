@@ -33,7 +33,7 @@ fn main() -> std::io::Result<()> {
     let command = args.command;
     let port    = args.port;
     let time    = args.time;
-    
+
     handle_commands(command, time, port)?;
 
     Ok(())
@@ -73,6 +73,8 @@ fn basic_call_response(comm: String, port: String) -> std::io::Result<()> {
     Ok(())
 }
 
+// Performs actions associated with watch command, repeatedly opens UnixStream to make
+// connection with PH, requests COUNTERS data, and prints the differences
 fn handle_watch(time: u64, port: String) -> std::io::Result<()> {
     let mut values: [u64; 6] = [0; 6];
     let sleep_time = Duration::new(time, 0);
