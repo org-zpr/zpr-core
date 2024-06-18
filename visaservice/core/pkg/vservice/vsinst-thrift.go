@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"time"
 
+	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vsx/snio/vsio"
@@ -89,6 +90,7 @@ func (vs *VSInst) freeSessionID(sid int32, chksum uint32) bool {
 	return false
 }
 
+// Removes and returns the PeerRecord from the apikeys table.  After this the API key is no longer valid.
 func (vs *VSInst) takePeerRecord(key string) *PeerRecord {
 	vs.sessions.Lock()
 	defer vs.sessions.Unlock()
@@ -97,6 +99,13 @@ func (vs *VSInst) takePeerRecord(key string) *PeerRecord {
 		return pr
 	}
 	return nil
+}
+
+func (vs *VSInst) validAPIKey(key string) bool {
+	vs.sessions.RLock()
+	defer vs.sessions.RUnlock()
+	_, ok := vs.sessions.apiKeys[key]
+	return ok
 }
 
 func verifyHMAC(pubKey *rsa.PublicKey, nonce []byte, sid int32, timestamp int64, sig []byte) error {
@@ -140,7 +149,7 @@ func vsapiAgentToVsioAgent(a *vsapi.Agent) *vsio.Agent {
 
 func (vs *VSInst) Hello(ctx context.Context) (*vsapi.HelloResponse, error) {
 	chal := new(vsapi.Challenge)
-	chal.ChallengeType = 0
+	chal.ChallengeType = vsapi.CHALLENGE_TYPE_HMAC_SHA256
 	chal.ChallengeData = make([]byte, snauth.ChallengeNonceSize)
 	snauth.NewNonce(chal.ChallengeData)
 
@@ -177,6 +186,17 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		return "", fmt.Errorf("agent is required")
 	}
 
+	if req.NodeAgent.AgentType != vsapi.AgentType_NODE {
+		vs.log.Warn("registration: authenticate for node -- invalid agent type", "type", req.NodeAgent.AgentType)
+		return "", fmt.Errorf("invalid agent type")
+	}
+
+	if len(req.NodeAgent.Provides) < 1 {
+		// The node-agent must at least provide /zpr/<node-name>
+		vs.log.Warn("registration: authenticate for node -- missing provides")
+		return "", fmt.Errorf("missing provides")
+	}
+
 	pubKey, err := snauth.LoadRSAPublicKeyFromPEMBuffer(req.NodeCert)
 	if err != nil {
 		vs.log.WithError(err).Warn("registration: failed to read public key from cert")
@@ -197,23 +217,43 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 	//       database of connected entities.  But we are moving that function (probably
 	//       without raft) to the visa service.  So here I need to tell visa serice
 	//       that this node (the passed agent) is now connected.
+	//
+	// For now I am fabricating a node-agent here.  Eventually the node will reun through
+	// the ZDP authentication steps to establish proper credentials.
 
+	expiration := time.Now().Add(1 * time.Hour)
 	naddr, ok := netip.AddrFromSlice(req.NodeAgent.ZprAddr)
 	if !ok {
 		vs.log.Warn("registration: node passes invalid ZPR address", "addr", req.NodeAgent.ZprAddr)
 		return "", fmt.Errorf("invalid agent ZPR address")
 	}
-	vs.AddNode(naddr)
+	_, _, cid := vs.getPolicyMatcherConfig()
+
+	claims := make(map[string]*agent.ClaimV)
+	claims[agent.KAttrEPID] = agent.NewClaimV(naddr.String(), expiration)
+	claims[agent.KAttrRole] = agent.NewClaimV("node", expiration)
+
+	nodeAgent := agent.EmptyAgent()
+	nodeAgent.SetProvides(req.NodeAgent.Provides)
+	nodeAgent.SetAuthenticated(claims, expiration, nil, nil, cid)
+
+	vs.AddNode(naddr, nodeAgent)
 
 	apiKey := uuid.New().String()
 
 	vs.sessions.Lock()
-	defer vs.sessions.Unlock()
-
 	vs.sessions.apiKeys[apiKey] = &PeerRecord{
-		Agent:            vsapiAgentToVsioAgent(req.NodeAgent),
+		ZPRAddr:          naddr,
 		RegistrationTime: time.Now(),
 	}
+	vs.sessions.Unlock()
+
+	// Also stash API key in the agent-db.
+	vs.agentDB.Lock()
+	if rec, ok := vs.agentDB.agents[naddr]; ok {
+		rec.APIKey = apiKey
+	}
+	vs.agentDB.Unlock()
 
 	return apiKey, nil
 }
@@ -222,20 +262,52 @@ func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
 	rec := vs.takePeerRecord(key)
 	if rec == nil {
 		vs.log.Warn("registration: de-register called with invalid key", "key", key)
-		return nil
+		return vsapi.NewUnauthorizedError()
 	}
-	naddr, addrOk := netip.AddrFromSlice(rec.Agent.AuthAddr)
-	if !addrOk {
-		vs.log.Warn("registration: de-register but agent record has invalid address", "addr", rec.Agent.AuthAddr)
-		return nil
-	}
-	vs.log.Info("de-register", "node_addr", naddr, "visa_requests", rec.VisaRequestsCount, "connects", rec.ConnectRequestsCount)
-	vs.RemoveNode(naddr)
+	vs.log.Info("de-register", "node_addr", rec.ZPRAddr, "visa_requests", rec.VisaRequestsCount, "connects", rec.ConnectRequestsCount)
+	vs.RemoveNode(rec.ZPRAddr)
 	return nil
 }
 
 func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsapi.ConnectRequest) (*vsapi.ConnectResponse, error) {
 	return nil, fmt.Errorf("not implemented")
+}
+
+func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byte) error {
+	if !vs.validAPIKey(key) {
+		vs.log.Warn("agent-disconnect called with invalid key", "key", key)
+		return vsapi.NewUnauthorizedError()
+	}
+	zaddr, addrOk := netip.AddrFromSlice(zprAddr)
+	if !addrOk {
+		vs.log.Warn("registration: de-register but agent record has invalid address", "addr", zprAddr)
+		return nil
+	}
+	vs.log.Info("agent disconnect", "zpr_addr", zaddr)
+
+	// Normally this would be an adapter disconnect.
+	isNode := false
+	found := false
+	vs.agentDB.RLock()
+	if rec, ok := vs.agentDB.agents[zaddr]; ok {
+		isNode = rec.Agent.GetRole() == "node"
+		found = true
+	}
+	vs.agentDB.RUnlock()
+
+	if !found {
+		vs.log.Warn("agent-disconnect called but address not found", "addr", zaddr)
+		return nil
+	}
+	if !isNode {
+		vs.RemoveAdapter(zaddr)
+		return nil
+	}
+
+	// Hmm -- is a node.  I would expect a node to call DeRegister instead.  But we will
+	// de-register this node too.
+	vs.log.Info("agent-disconnect: de-registering a node", "addr", zaddr)
+	return vs.DeRegister(ctx, key)
 }
 
 func (vs *VSInst) Poll(ctx context.Context, key string) (*vsapi.PollResponse, error) {

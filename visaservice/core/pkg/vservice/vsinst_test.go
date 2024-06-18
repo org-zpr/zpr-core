@@ -170,7 +170,7 @@ func (ts *TestAS) AddDatasourceProvider(_ string, _ netip.Addr, _ uint64) error 
 	return nil
 }
 
-func minVSI(t *testing.T, hopcount uint, alog logr.Logger, ds vservice.DirectoryService) *vservice.VSIConfig {
+func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 	// Minimal config:
 	pk, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.Nil(t, err)
@@ -180,7 +180,6 @@ func minVSI(t *testing.T, hopcount uint, alog logr.Logger, ds vservice.Directory
 		HopCount:             hopcount,
 		AgentSigningKey:      pk,
 		AllowInvalidPeerAddr: true,
-		Directory:            ds,
 	}
 }
 
@@ -189,22 +188,7 @@ func minVSI(t *testing.T, hopcount uint, alog logr.Logger, ds vservice.Directory
 func TestRequestVisaWithConstraint(t *testing.T) {
 	alog := logr.NewTestLogger()
 
-	testDS := &TestDS{
-		recs: map[string]*vsio.Agent{
-			"fc00:3001:1::10": {
-				AuthExpires: time.Now().Add(1 * time.Hour).Format(time.RFC3339), // These auth expire times are used as part of visa expiration calculation.
-				AuthClaims:  map[string]*vsio.AClaim{"ca0.foo": &vsio.AClaim{Cval: "fee", Exp: time.Now().Add(time.Hour).Unix()}},
-				TetherAddr:  netip.MustParseAddr("fc00:3001:1::10").AsSlice(),
-			},
-			"fc00:3001:1::11": {
-				AuthExpires: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
-				Provides:    []string{"/zpr/n0"},
-				TetherAddr:  netip.MustParseAddr("fc00:3001:1::11").AsSlice(),
-			},
-		},
-	}
-
-	vc := minVSI(t, 99, alog, testDS)
+	vc := minVSI(t, 99, alog)
 
 	// TODO: This initializer is insane. Too hard to test, need to refactor.
 	svc, err := vservice.NewVSInst(vc)
@@ -319,23 +303,8 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 func TestRequestVisaDupes(t *testing.T) {
 	alog := logr.NewTestLogger()
 
-	testDS := &TestDS{
-		recs: map[string]*vsio.Agent{
-			"fc00:3001:1::10": {
-				AuthExpires: time.Now().Add(1 * time.Hour).Format(time.RFC3339), // These auth expire times are used as part of visa expiration calculation.
-				AuthClaims:  map[string]*vsio.AClaim{"ca0.foo": &vsio.AClaim{Cval: "fee", Exp: time.Now().Add(time.Hour).Unix()}},
-				TetherAddr:  netip.MustParseAddr("fc00:3001:1::10").AsSlice(),
-			},
-			"fc00:3001:1::11": {
-				AuthExpires: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
-				Provides:    []string{"/zpr/n0"},
-				TetherAddr:  netip.MustParseAddr("fc00:3001:1::11").AsSlice(),
-			},
-		},
-	}
-
 	// Minimal config:
-	vc := minVSI(t, 99, alog, testDS)
+	vc := minVSI(t, 99, alog)
 
 	svc, err := vservice.NewVSInst(vc)
 	require.Nil(t, err)
@@ -450,23 +419,8 @@ func TestRequestVisaDupes(t *testing.T) {
 func TestAuthExpireNoVisa(t *testing.T) {
 	alog := logr.NewTestLogger()
 
-	testDS := &TestDS{
-		recs: map[string]*vsio.Agent{
-			"fc00:3001:1::10": {
-				AuthExpires: time.Now().Add(-1 * time.Hour).Format(time.RFC3339), // EXPIRED !
-				AuthClaims:  map[string]*vsio.AClaim{"ca0.foo": &vsio.AClaim{Cval: "fee", Exp: time.Now().Add(time.Hour).Unix()}},
-				TetherAddr:  netip.MustParseAddr("fc00:3001:1::10").AsSlice(),
-			},
-			"fc00:3001:1::11": {
-				AuthExpires: time.Now().Add(-1 * time.Hour).Format(time.RFC3339), // EXPIRED !
-				Provides:    []string{"/zpr/n0"},
-				TetherAddr:  netip.MustParseAddr("fc00:3001:1::11").AsSlice(),
-			},
-		},
-	}
-
 	// Minimal config:
-	vc := minVSI(t, 99, alog, testDS)
+	vc := minVSI(t, 99, alog)
 
 	// TODO: This initializer is insane. Too hard to test, need to refactor.
 	svc, err := vservice.NewVSInst(vc)
@@ -557,9 +511,10 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	alog := logr.NewTestLogger()
 
 	vsaddr := netip.MustParseAddr(vservice.VisaServiceAddress) // fc00:3003::1
-	n0addr := netip.MustParseAddr("fc00:3001:1::11")
+	//n0addr := netip.MustParseAddr("fc00:3001:1::11")
 	n1addr := netip.MustParseAddr("fc00:3001:1::12")
 
+	/* OFF
 	testDS := &TestDS{
 		recs: map[string]*vsio.Agent{
 			vservice.VisaServiceAddress: {
@@ -596,9 +551,10 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 			},
 		},
 	}
+	*/
 
 	// Minimal config:
-	vc := minVSI(t, 99, alog, testDS)
+	vc := minVSI(t, 99, alog)
 	vc.NodeName = "n0.spacelaser.net"
 	vc.ReauthBumpTimeOverride = 10 * time.Second // reduce from default of 5 minutes
 
@@ -697,8 +653,8 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	// So the visa will be expiring very soon, as soon as the visa housekeeping runs it
 	// should try to create a successor visa.
 
-	svc.AddNode(n1addr)              // creates a 'mailbox' for the node
-	svc.RunPeriodicHousekeepingNow() // blocking
+	svc.AddNode(n1addr, agent.EmptyAgent()) // creates a 'mailbox' for the node
+	svc.RunPeriodicHousekeepingNow()        // blocking
 
 	presp, err := svc.Poll(context.Background(), apiKey)
 	require.Nil(t, err)

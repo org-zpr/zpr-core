@@ -4,7 +4,9 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"zpr.org/vs/pkg/logr"
+	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vsx/snio/vsio"
 )
 
@@ -20,7 +22,7 @@ type Mailbox struct {
 
 type VisaPushMsg struct {
 	MsgNumber uint64 // always increasing
-	Msg       *vsio.VSPollResponse
+	Msg       *vsapi.PollResponse
 }
 
 type Poller struct {
@@ -61,8 +63,8 @@ func (m *Mailbox) RemovePoller(ID string) {
 }
 
 // MessagesFor will return (nil, false) if the mboxID is unknown.
-func (m *Mailbox) MessagesFor(mboxID string, limit int) ([]*vsio.VSPollResponse, bool) {
-	var results []*vsio.VSPollResponse
+func (m *Mailbox) MessagesFor(mboxID string, limit int) ([]*vsapi.PollResponse, bool) {
+	var results []*vsapi.PollResponse
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 	poller, found := m.pollers[mboxID]
@@ -104,13 +106,25 @@ func (m *Mailbox) AppendVisaResponseMessage(r *vsio.VSResponse) {
 		m.log.Error("attempt to append an error visa-response message to mailbox")
 		return
 	}
-	vpr := &vsio.VSPollResponse{
-		Visas: []*vsio.VSVisaHop{r.GetVisa()},
+
+	pbuf, err := proto.Marshal(r.Visa.Visa)
+	if err != nil {
+		m.log.WithError(err).Error("failed to marshal visa for mailbox")
+		return
+	}
+
+	vh := &vsapi.VisaHop{
+		VisaPb:   pbuf,
+		HopCount: int32(r.Visa.HopCount),
+	}
+
+	vpr := &vsapi.PollResponse{
+		Visas: []*vsapi.VisaHop{vh},
 	}
 	m.AppendMessage(vpr)
 }
 
-func (m *Mailbox) AppendMessage(r *vsio.VSPollResponse) {
+func (m *Mailbox) AppendMessage(r *vsapi.PollResponse) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	if len(m.pollers) == 0 {

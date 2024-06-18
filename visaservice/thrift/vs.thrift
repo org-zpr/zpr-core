@@ -1,5 +1,40 @@
 // vs.thrift - api for the visa service
+
+// This is the new visa-service API for the Reference Implementation. Note that
+// the Visa Support Serice API is not longer needed because we have changed 
+// the way that a visa service and node connect.
+//
+// The new connection protocol is:
+//
+//     1. Start a node. Node is given a visa from the compiler that will allow
+//        it to communicate the the visa service when it comes online.
+//
+//     2. Start the visa service's adatper.  This adapter will present a
+//        certificate to the node that is (a) signed by the ZPR authority and
+//        (b) has a well known CN that tells the node that it is the visa
+//        service's adapter.
+//  
+//     3. The node allows this adapter to connect -- even though the node has
+//        has no policy yet.  The pre-built visa includes the hard-coded visa
+//        service adapter's ZPR address.
+//
+//     ~~ Now this visa sercice API kicks in ~~
+//
+//     4. The node sends a HELLO message to the visa service.
+//
+//     5. The visa sercice sends a HELLO-RESPONSE which includes a challenge.
+//
+//     6. The node performs the crypto operations to satisfy the challenge and
+//        sends back the AUTHENTICATE message.
+//
+//     6. The visa sercice checks the nodes crypto, checks policy, and if all
+//        is well will send back an API Key that the node can use when calling
+//        any of the other functions on this API.
 // 
+//
+// TODO: There is currently no mechanism described for how to expire or 
+//       refresh the API key.
+
 
 
 // The go code slots into core/pkg/vsapi
@@ -8,6 +43,13 @@ namespace go vsapi
 // The rust goes TBD
 namespace rs vsapi
 
+
+exception UnauthorizedError {}
+
+
+// Means visa service sends a nonce buffer, and node is expected to 
+// create a suitable HMAC.
+const i32 CHALLENGE_TYPE_HMAC_SHA256 = 0
 
 
 enum StatusCode {
@@ -21,7 +63,8 @@ enum AgentType {
 }
 
 
-// Basic agent to support early iteration of ZPR.
+// Basic agent to support early iteration of ZPR.  
+// Probably missing things.
 struct Agent {
   1: AgentType agent_type,
   2: map<string, string> attrs,
@@ -54,19 +97,12 @@ struct NodeAuthRequest {
 }
 
 
-struct ChallengeResponse {
-  1: i32 challenge_type,
-  2: i32 response_type,
-  3: binary response_data,
-}
-
-
 struct ConnectRequest {
   1: i32 connection_id,
   2: binary dock_addr, // dock ZPR address
   3: map<string, string> claims,
-  4: binary challenge,
-  5: binary challenge_response,
+  4: binary challenge,  // assume this is old protocol buffer challenge-request
+  5: binary challenge_response,  // assume this is old protocol buffer challenge-response
 }
 
 
@@ -74,7 +110,7 @@ struct ConnectResponse {
   1: i32 connection_id, // copied from request
   2: StatusCode status, // SUCCESS if connect request granted
   3: optional Agent agent,
-  4: optional string reason,     // Optional message in case of non SUCCESS
+  4: optional string reason,  // Optional message in case of non SUCCESS
 }
 
 struct VisaHop {
@@ -90,7 +126,7 @@ struct VisaRevocation {
 struct PollResponse {
   1: list<VisaHop> visas,
   2: list<VisaRevocation> revocations,
-  3: i32 more,
+  3: i32 more, // >0 if there are more visas or revocations available.
 }
 
 struct TrafficDesc {
@@ -122,13 +158,22 @@ service VisaService {
   // The HMAC is a SHA256_HMAC(nonce + big_endian(timestamp) + big_endian(session_id)) using the node's private key.
   string authenticate(1:NodeAuthRequest auth_request)
 
-  // Polite disconnect message.
+  // De-register removes a node from the visa service access list -- AND visa service assumes that
+  // node is disconnecting -- so this also does an agent_disconnect for the node.
   oneway void de_register(1:string key),
 
 
 
   // Node calls this everytime an adapter connects.
+  // Note that the visa service assumes that the connection completes.
+  // If the agent ends up not connecting, or disconnecting the node must
+  // let the visa service know.
   ConnectResponse authorize_connect(1:string key, 2:ConnectRequest request),
+
+
+  // Notify the visa service that an agent has disconnected. Pass in the ZPR address
+  // assigned to the agent via `authorize_connect`.  
+  void agent_disconnect(1:string keym, 2:binary zpr_addr),
 
   PollResponse poll(1:string key),
 

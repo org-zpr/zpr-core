@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"zpr.org/vs/pkg/logr"
+	"zpr.org/vs/pkg/policy"
 	"zpr.org/vsx/zpl/compiler"
 	"zpr.org/vsx/zpl/fs"
-	"zpr.org/vs/pkg/policy"
 
 	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"
@@ -81,9 +81,6 @@ const AuthAttrExtOpenID = "ext:openid"
 func makeVSWithPolicy(t *testing.T, pyaml string) (*vservice.VSInst, *policy.Policy) {
 	llog := logr.NewTestLogger()
 
-	testDS := new(TestDS)
-	testDS.recs = make(map[string]*vsio.Agent)
-
 	// Minimal config:
 	pk, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.Nil(t, err)
@@ -91,7 +88,6 @@ func makeVSWithPolicy(t *testing.T, pyaml string) (*vservice.VSInst, *policy.Pol
 		Log:             llog,
 		HopCount:        uint(99),
 		AgentSigningKey: pk,
-		Directory:       testDS,
 	}
 
 	// TODO: This initializer is insane. Too hard to test, need to refactor.

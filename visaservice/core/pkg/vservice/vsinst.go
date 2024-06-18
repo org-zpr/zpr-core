@@ -21,6 +21,7 @@ import (
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
+	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"
@@ -33,8 +34,9 @@ var (
 	ErrAuthExpired    = errors.New("auth expired")
 )
 
+// The visa-service "peers" are always nodes.
 type PeerRecord struct {
-	Agent                *vsio.Agent
+	ZPRAddr              netip.Addr // can use to lookup in agentDB
 	RegistrationTime     time.Time
 	LastPollTime         time.Time
 	VisaRequestsCount    uint64
@@ -46,19 +48,27 @@ type HelloRecord struct {
 	Chksum uint32
 }
 
+type HostRecord struct {
+	CTime        time.Time // connect/create time
+	LastAuthTime time.Time
+	Agent        *agent.Agent
+	ZPRAddr      netip.Addr
+	TetherAddr   netip.Addr
+	APIKey       string
+}
+
 // VSInst is an instance of distributed visa service
 //
 // This is a bit of a mess at the moment as we are in progress of porting this from
 // old code in machine.go and network.go.
 type VSInst struct {
-	SignalC              chan VSSignal
 	log                  logr.Logger
 	vlog                 *Vlog
 	hopCount             uint
 	authr                auth.AuthService
 	attrProx             *AttrProxy
 	ad                   DirectoryService
-	visaPushC            chan *vsio.VSPollResponse // For pushing visas without needing a request
+	visaPushC            chan *vsapi.PollResponse // For pushing visas without needing a request
 	nodeNumber           uint8
 	nodeState            ConstraintService
 	thriftServer         thrift.TServer
@@ -71,6 +81,11 @@ type VSInst struct {
 	accessToken          []byte // Access token for special node operations
 	agentSigningKey      *rsa.PrivateKey
 	allowInvalidPeerAddr bool // Set to TRUE for testing only.
+
+	agentDB struct {
+		sync.RWMutex
+		agents map[netip.Addr]*HostRecord // ZPR_CONTACT_ADDR -> HostRecord
+	}
 
 	cfgRemoves struct {
 		sync.Mutex
@@ -121,7 +136,6 @@ type VSIConfig struct {
 	AccessToken            []byte                           // Auth token for node to access special VS capabilities
 	AgentSigningKey        *rsa.PrivateKey
 	AllowInvalidPeerAddr   bool // Set to TRUE for testing only.
-	Directory              DirectoryService
 	Constrainer            ConstraintService
 }
 
@@ -130,14 +144,10 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	if vcf.AgentSigningKey == nil {
 		return nil, fmt.Errorf("agent_signing_key is required")
 	}
-	if vcf.Directory == nil {
-		return nil, fmt.Errorf("directory service is required")
-	}
 	vs := &VSInst{
-		SignalC:              make(chan VSSignal, 16),
 		log:                  vcf.Log,
 		hopCount:             vcf.HopCount,
-		visaPushC:            make(chan *vsio.VSPollResponse, 128), // Must be large enough to handle a mass revocation event
+		visaPushC:            make(chan *vsapi.PollResponse, 128), // Must be large enough to handle a mass revocation event
 		grpcCreds:            vcf.Creds,
 		mb:                   NewMailbox(vcf.Log),
 		reauthBumpTime:       DefaultReauthBumpTime,
@@ -145,7 +155,6 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		accessToken:          vcf.AccessToken,
 		agentSigningKey:      vcf.AgentSigningKey,
 		allowInvalidPeerAddr: vcf.AllowInvalidPeerAddr,
-		ad:                   vcf.Directory,
 		nodeState:            vcf.Constrainer,
 	}
 	if vcf.ReauthBumpTimeOverride > 0 {
@@ -155,6 +164,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	vs.vtable.nextVisaID = minVisaID
 	vs.sessions.apiKeys = make(map[string]*PeerRecord)
 	vs.sessions.hellos = make(map[int32]*HelloRecord)
+	vs.agentDB.agents = make(map[netip.Addr]*HostRecord)
 
 	nopol := policy.NewEmptyPolicy()
 	vs.plcy.p = nopol
@@ -215,10 +225,8 @@ func (vs *VSInst) HasRegisteredNode(nodeAddr netip.Addr) bool {
 	vs.sessions.RLock()
 	defer vs.sessions.RUnlock()
 	for _, pr := range vs.sessions.apiKeys {
-		if zaddr, ok := netip.AddrFromSlice(pr.Agent.AuthAddr); ok {
-			if zaddr == nodeAddr {
-				return true
-			}
+		if nodeAddr == pr.ZPRAddr {
+			return true
 		}
 	}
 	return false
@@ -388,12 +396,13 @@ func (vs *VSInst) removeExpiredVisas() {
 	// vs.dumpVisaTableHoldingLock("removeExpired")
 }
 
-func (vs *VSInst) trySignal(s VSSignal) {
-	select {
-	case vs.SignalC <- s: // ok
-	default:
-		vs.log.Warn("signal channel full")
-	}
+// Push the visa for polling nodes.
+//
+// TODO: Presumably the mailbox system makes sure the right visa goes to the right node?
+//
+// Note blocks if our push channel is full.
+func (vs *VSInst) PushVisa(pr *vsapi.PollResponse) {
+	vs.visaPushC <- pr
 }
 
 // expireAllVisas is called when policy is updated.  Revokes and removes all visas under the
@@ -404,12 +413,11 @@ func (vs *VSInst) expireAllVisas(config uint64) {
 	count := 0
 	for vID, ve := range vs.vtable.table {
 		if ve.v.Configuration == config {
-			revoke := &vsio.VSPollResponse{
-				Revokes: []*vsio.VSRevocation{
+			revoke := &vsapi.PollResponse{
+				Revocations: []*vsapi.VisaRevocation{
 					{
-						// TODO: Should this have a hop-count?
-						IssuerId:      vID,
-						Configuration: config,
+						IssuerID:      int32(vID),
+						Configuration: int64(config),
 					},
 				},
 			}

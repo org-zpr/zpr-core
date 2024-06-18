@@ -26,6 +26,7 @@ var _ = thrift.ZERO
 var _ = strings.Contains
 var _ = regexp.MatchString
 
+const CHALLENGE_TYPE_HMAC_SHA256 = 0
 
 func init() {
 }

@@ -23,7 +23,9 @@ func (r *Revoke) GetCredId() string {
 	return r.cid
 }
 
-// Provided by visa support service
+// The prototype used RAFT on the nodes to keep track of the revocations.
+//
+// TODO: This needs to be taken over by visa service directly interacting with its node peers.
 type RevocationService interface {
 	ProposeClearAllRevokes(string)
 	ListRevocationKeysFor(string) []string
@@ -31,6 +33,14 @@ type RevocationService interface {
 	ProposeRevokeCredential(pver, cred string)
 	ProposeRevokeAuthority(pver, credIdent string)
 }
+
+type DummyRecovationService struct{}
+
+func (drs *DummyRecovationService) ProposeClearAllRevokes(string)                 {}
+func (drs *DummyRecovationService) ListRevocationKeysFor(string) []string         { return nil }
+func (drs *DummyRecovationService) GetRevoke(string) *Revoke                      { return nil }
+func (drs *DummyRecovationService) ProposeRevokeCredential(pver, cred string)     {}
+func (drs *DummyRecovationService) ProposeRevokeAuthority(pver, credIdent string) {}
 
 func raftRevokeTypeToSnauthCredIDType(rt RevokeType) snauth.CredIDType {
 	switch rt {

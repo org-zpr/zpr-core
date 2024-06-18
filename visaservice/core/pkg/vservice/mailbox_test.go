@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vsx/snio/vsio"
+	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vs/pkg/vservice"
 )
 
@@ -15,11 +15,11 @@ func TestMailboxEmpty(t *testing.T) {
 	require.False(t, ok)
 }
 
-func newVSPollResponseWithHopCount(hopCount uint32) *vsio.VSPollResponse {
-	return &vsio.VSPollResponse{
-		Visas: []*vsio.VSVisaHop{
+func newPollResponseWithHopCount(hopCount uint32) *vsapi.PollResponse {
+	return &vsapi.PollResponse{
+		Visas: []*vsapi.VisaHop{
 			{
-				HopCount: hopCount,
+				HopCount: int32(hopCount),
 			},
 		},
 	}
@@ -36,7 +36,7 @@ func TestMailboxAdd(t *testing.T) {
 
 	require.Equal(t, 0, mb.Size())
 	for i := 0; i < 200; i++ {
-		mb.AppendMessage(newVSPollResponseWithHopCount(uint32(i + i)))
+		mb.AppendMessage(newPollResponseWithHopCount(uint32(i + i)))
 	}
 	require.Equal(t, 200, mb.Size())
 
@@ -49,7 +49,7 @@ func TestMailboxAddPoll(t *testing.T) {
 
 	require.Equal(t, 0, mb.Size())
 	for i := 0; i < 200; i++ {
-		mb.AppendMessage(newVSPollResponseWithHopCount(uint32(i + 1)))
+		mb.AppendMessage(newPollResponseWithHopCount(uint32(i + 1)))
 	}
 	require.Equal(t, 200, mb.Size()) // added 200 messages, highest num is 200
 
@@ -88,8 +88,8 @@ func TestMailboxAddPoll(t *testing.T) {
 		require.Equal(t, uint32(100), res[99].GetVisas()[0].HopCount)
 	}
 
-	mb.AppendMessage(newVSPollResponseWithHopCount(uint32(1000))) // message 201
-	{                                                             // foo sees new message
+	mb.AppendMessage(newPollResponseWithHopCount(uint32(1000))) // message 201
+	{                                                           // foo sees new message
 		res, ok := mb.MessagesFor("foo", 2000)
 		require.True(t, ok)
 		require.Len(t, res, 1)
@@ -102,7 +102,7 @@ func TestMailboxAddPoll(t *testing.T) {
 		require.EqualValues(t, 1000, res[100].GetVisas()[0].HopCount)
 	}
 
-	mb.AppendMessage(newVSPollResponseWithHopCount(uint32(2000))) // message 202
+	mb.AppendMessage(newPollResponseWithHopCount(uint32(2000))) // message 202
 	{
 		res, ok := mb.MessagesFor("foo", 2000)
 		require.True(t, ok)

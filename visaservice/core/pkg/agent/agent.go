@@ -30,6 +30,13 @@ type ClaimV struct {
 	Exp time.Time // claim valid until time
 }
 
+func NewClaimV(value string, exp time.Time) *ClaimV {
+	return &ClaimV{
+		V:   value,
+		Exp: exp,
+	}
+}
+
 // Agent has attributes (called claims). These are either authenticated or unsubstantiated.
 // The unsubstantiated claims are submitted by the agent at connect time, these are checked
 // by an authentication service which produces the authenticated claims.
@@ -337,6 +344,16 @@ func (a *Agent) SetProvides(p []string) {
 // GetProvides list of services provided by agent. Read only.
 func (a *Agent) GetProvides() []string {
 	return a.provides
+}
+
+func (a *Agent) GetRole() string {
+	if a.authClaims == nil {
+		return ""
+	}
+	if v, ok := a.authClaims[KAttrRole]; ok {
+		return v.V
+	}
+	return ""
 }
 
 func (a *Agent) DoesProvide(serviceID string) bool {

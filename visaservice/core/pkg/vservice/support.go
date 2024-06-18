@@ -46,6 +46,9 @@ type RConstraint struct {
 	Consumed      uint64
 }
 
+// In the prototype we used RAFT on the nodes to keep track of the constraints.
+//
+// TODO: This needs to move to visa service.
 type ConstraintService interface {
 	ProposeConstraint(*RConstraint)
 	ConstraintByKey(string) *RConstraint
