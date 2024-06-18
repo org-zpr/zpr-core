@@ -81,6 +81,28 @@ impl<'buf> Packet<'buf> {
         &mut self.buf[offset..offset+len]
     }
 
+    pub fn metadata_and_body_mut(&mut self) -> (&PacketMetadata, &mut [u8]) {
+        let (md, bd) = self.metadata_mut_and_body_mut();
+        (md as &_, bd)
+    }
+
+    pub fn metadata_mut_and_body(&mut self) -> (&mut PacketMetadata, &[u8]) {
+        let (md, bd) = self.metadata_mut_and_body_mut();
+        (md, bd as &_)
+    }
+
+    pub fn metadata_mut_and_body_mut(&mut self) -> (&mut PacketMetadata, &mut [u8]) {
+        let (md, bd) = self.buf.split_at_mut(size_of::<PacketMetadata>());
+        let opt = PacketMetadata::mut_from(md);
+        let md = unsafe {
+            // SAFETY: we know this fits in PACKET_BUFFER_SIZE
+            opt.unwrap_unchecked()
+        };
+        let offset = md.offset - size_of::<PacketMetadata>();
+        let len = md.len;
+        (md, &mut bd[offset..offset+len])
+    }
+
     // Space available for extension of the start of the packet.
     pub fn headroom_available(&self) -> usize {
         self.metadata().offset - PACKET_BUFFER_MIN_BODY_OFFSET
