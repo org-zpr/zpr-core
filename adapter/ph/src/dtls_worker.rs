@@ -1,6 +1,7 @@
+use std::cell::UnsafeCell;
 use std::future::Future;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::mpsc;
 use tokio_openssl::SslStream;
 use crate::assembly::Assembly;
 use crate::packet::{self, Packet};
@@ -14,6 +15,46 @@ use crate::counters_enum::CounterType;
 // the maximum size record.
 const _: () = assert!(packet::PACKET_BODY_BUFFER_MAX_SIZE >= 16384, "packet buffers too small for OpenSSL DTLS");
 
+
+
+
+
+
+#[repr(transparent)]
+pub struct SyncUnsafeCell<T: ?Sized> {
+    value: UnsafeCell<T>,
+}
+
+unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
+
+impl<T> SyncUnsafeCell<T> {
+    pub fn new(value: T) -> Self {
+        Self { value: UnsafeCell::new(value) }
+    }
+}
+
+#[allow(dead_code)]
+impl<T: ?Sized> SyncUnsafeCell<T> {
+    pub fn get(&self) -> *mut T {
+        self.value.get()
+    }
+
+    pub fn get_mut(&mut self) -> &mut T {
+        self.value.get_mut()
+    }
+
+    pub fn raw_get(this: *const Self) -> *mut T {
+        this as *const T as *mut T
+    }
+}
+
+
+
+
+
+
+
+
 #[allow(unreachable_code)]
 async fn worker<'pktbuf>(
     asm: &Assembly<'pktbuf>,
@@ -23,14 +64,15 @@ async fn worker<'pktbuf>(
     // FIXME: We want to use a RefCell here, but Rust doesn't
     // realize that our use safely implements Send.
     // See <https://github.com/tokio-rs/tokio/discussions/4702>.
-    let ssl_stream = Mutex::new(ssl_stream);
+    let ssl_stream = SyncUnsafeCell::new(ssl_stream);
 
     tokio::join! {
         async {
             loop {
                 let buf = asm.buffer_stack.get_buffer().await;
                 let mut pkt = Packet::new(buf, 0);
-                { ssl_stream.blocking_lock().read_buf(&mut pkt) }.await.unwrap();
+                let str: &mut _ = unsafe { *ssl_stream.get() };
+                str.read_buf(&mut pkt).await.unwrap();
                 asm.counters[CounterType::InPacksRec].increment();
                 // NOTE: There is no way to detect a too-large packet.  See above.
                 asm.inbound_processor.enqueue(pkt).await;
@@ -40,7 +82,8 @@ async fn worker<'pktbuf>(
         async {
             loop {
                 let out_pkt = outbound_queue.recv().await.unwrap();
-                { ssl_stream.blocking_lock().write(out_pkt.body()) }.await.unwrap();  // TODO: error handling
+                let str: &mut _ = unsafe { *ssl_stream.get() };
+                str.write(out_pkt.body()).await.unwrap();  // TODO: error handling
                 asm.buffer_stack.put_buffer(out_pkt.destroy());
             }
         }
