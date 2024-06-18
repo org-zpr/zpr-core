@@ -79,27 +79,21 @@ async fn worker<'pktbuf>(
 
     let mut inbound_recv_stream = InboundRecvStream::new(asm, &ssl_stream_cell);
 
-    loop {
-        // SslStream has no notion of "splitting" into a read half & a write
-        // half, but it requires a mut reference for I/O operations.  So
-        // we're forced to "manually" multiplex here, via
-        // `InboundRecvState`.  (Note this is necessary to avoid deadlock
-        // between inbound & outbound paths!)
+    tokio::join! {
+        async {
+            loop {
+                inbound_recv_stream.step().await;
+            }
+        },
 
-        tokio::select! {
-            () = inbound_recv_stream.step() => (),
-
-            out_pkt = outbound_queue.recv() => {
-                let out_pkt = out_pkt.unwrap();
-                // NOTE: We can safely ignore the possibility to deadlock
-                // here, since the DTLS connection uses UDP and therefore
-                // writes can only block on the L2 network queue, not the
-                // path through the node.
+        async {
+            loop {
+                let out_pkt = outbound_queue.recv().await.unwrap();
                 { ssl_stream_cell.blocking_lock().write(out_pkt.body()) }.await.unwrap();  // TODO: error handling
                 asm.buffer_stack.put_buffer(out_pkt.destroy());
             }
-        };
-    }
+        }
+    };
 
     inbound_recv_stream.reset();
 }
