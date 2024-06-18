@@ -6,59 +6,69 @@ use tokio::io::BufReader;
 use tokio::io::BufWriter;
 use tokio::task::JoinSet;
 use tokio::io::AsyncBufReadExt;
+use tokio::net::UnixStream;
+use crate::counters_enum::*;
+use std::io::Error;
+
 
 async fn worker(
     asm: &'static Assembly<'static>, socket: &UnixListener
 ) {
-    let mut set = JoinSet::new();
+    let mut set = JoinSet::<Result<(), Error>>::new();
 
     loop {
         tokio::select! {
-            Some(_) = set.join_next() => (),
+            Some(ret) = set.join_next() => 
+                match ret {
+                    Ok(Ok(())) => (),
+                    Ok(Err(err)) => eprintln!("Handle Connection Failed: {err}"),
+                    Err(err) => eprintln!("join_next panicked: {err}")
+                },
             accepted = socket.accept() => 
                 match accepted {
-                    Ok((mut stream, _addr)) => {
-                        set.spawn(async move {
-
-                            eprintln!("Connection recieved");
-                            //let local = task::LocalSet::new();
-                            let mut str_message = String::new();
-                            let split_buf = stream.split(); // split stream into read/write streams
-                            let mut buf_reader = BufReader::new(split_buf.0);
-                            let mut buf_writer = BufWriter::new(split_buf.1);
-                            buf_reader.read_line(&mut str_message).await;
-                            let last_let = str_message.pop(); // Removes \n from end of string
-                            if last_let != Some('\n') {
-                                // close stream then skip the rest of the loop and moves to next iteration
-                                buf_writer.shutdown().await;
-                            } else {
-                                // TODO remove \n from end of message?
-                                buf_writer.write("Message Recieved\n".as_bytes()).await;
-                                
-                                // TODO there must be a more efficient way to send the OK message, is match statement best suited?
-                                match str_message.as_str() {
-                                    "COUNTERS RESET" => {buf_writer.write_all(counters_reset(asm).await.as_bytes()).await;
-                                                        buf_writer.write_all("OK\n".as_bytes()).await},
-                                    "COUNTERS"       => {buf_writer.write_all(counters(asm).await.as_bytes()).await;
-                                                        buf_writer.write_all("OK\n".as_bytes()).await},
-                                    "ECHO"           => {buf_writer.write_all(echo(asm).await.as_bytes()).await;
-                                                        buf_writer.write_all("OK\n".as_bytes()).await},
-                                    _                => buf_writer.write_all("ERR\n".as_bytes()).await,
-                                };
-                
-                                buf_writer.flush().await;
-                                buf_writer.shutdown().await;
-                            }
-                        });
-                    }
+                    Ok((stream, _addr)) => {
+                        set.spawn(handle_connection(asm, stream));
+                    },
                     Err(_e) => {
                         eprintln!("Connection failed");
                     }
-
             }
         }
         
     }
+}
+
+async fn handle_connection(asm: &'static Assembly<'static>, mut stream: UnixStream, ) -> std::io::Result<()> {
+    eprintln!("Connection recieved");
+    let mut str_message = String::new();
+    let split_buf = stream.split(); // split stream into read/write streams
+    let mut buf_reader = BufReader::new(split_buf.0);
+    let mut buf_writer = BufWriter::new(split_buf.1);
+    buf_reader.read_line(&mut str_message).await?;
+    let last_let = str_message.pop(); // Removes \n from end of string
+    if last_let != Some('\n') {
+        // close stream then skip the rest of the loop and moves to next iteration
+        buf_writer.shutdown().await?;
+    } else {
+        // TODO remove \n from end of message?
+        buf_writer.write("Message Recieved\n".as_bytes()).await?;
+        
+        // TODO there must be a more efficient way to send the OK message, is match statement best suited?
+        match str_message.as_str() {
+            "COUNTERS RESET" => {buf_writer.write_all(counters_reset(asm).await.as_bytes()).await?;
+                                buf_writer.write_all("OK\n".as_bytes()).await?},
+            "COUNTERS"       => {buf_writer.write_all(counters(asm).await.as_bytes()).await?;
+                                buf_writer.write_all("OK\n".as_bytes()).await?},
+            "ECHO"           => {buf_writer.write_all(echo(asm).await.as_bytes()).await?;
+                                buf_writer.write_all("OK\n".as_bytes()).await?},
+            _                => buf_writer.write_all("ERR\n".as_bytes()).await?,
+        };
+
+        buf_writer.flush().await?;
+        buf_writer.shutdown().await?;
+    }
+
+    Ok(())
 }
 
 pub fn launch<'pktbuf, UnixListenerRef: 'pktbuf>(
@@ -75,16 +85,17 @@ async fn echo(_asm: &Assembly<'_>) -> String {
 
 // TODO not sure if just printing is what we want this function to do
 async fn counters(asm: &Assembly<'_>) -> String {
-    for p in 0..2 { // TODO replace 2 with some global var that represents # of packets
-        let num = asm.counters[p].get_count();
-        println!("{num}");
+    for (key, &ref value) in &asm.counters {
+        let counter_type = name_counters(key);
+        println!("{counter_type}: {}", value.get_count());
     }
     return "counters\n".to_string(); // TODO change the return value of counters
 }
 
 async fn counters_reset(asm: &Assembly<'_>) -> String {
-    for p in 0..2 {
-        asm.counters[p].reset();
+    for value in asm.counters.values() {
+        value.reset();
     }
+
     return "counters_reset\n".to_string(); // TODO change the return value of counters reset
 }

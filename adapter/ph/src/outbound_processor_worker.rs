@@ -2,6 +2,7 @@ use core::future::Future;
 use tokio::sync::mpsc;
 use crate::assembly::Assembly;
 use crate::packet::Packet;
+use crate::zdp::*;
 
 #[derive(Copy, Clone)]
 pub struct Config {
@@ -14,7 +15,15 @@ async fn worker<'pktbuf>(
     let mut pkts = Vec::new();
 
     while let _count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
-        for pkt in pkts.drain(..) {
+        for mut pkt in pkts.drain(..) {
+            // allocate and fill in the header
+            let hdr = pkt.alloc_zeroed_header::<ZdpHeader>();
+            hdr.abbreviated_header.packet_type = ZdpPacketType::UncompressedAgentPacket;
+
+            // fill in metadata
+            pkt.metadata_mut().flow_id = 0;  // TODO: fill from IP header
+
+            // forward encapsulated packet on
             asm.outbound_send.enqueue(pkt).await;
         }
     }
