@@ -60,18 +60,6 @@ struct CmdLine {
     #[arg(long)]
     dock_addr: SocketAddr,
 
-#[derive(Parser)]
-#[command(version, about)]
-struct CmdLine {
-    #[arg(long)]
-    control_path: String,
-
-    #[arg(long)]
-    self_addr: SocketAddr,
-
-    #[arg(long)]
-    dock_addr: SocketAddr,
-
     #[arg(long)]
     ca_file: String,
 
@@ -171,13 +159,13 @@ fn main() -> ExitCode {
         ssl::SslOptions::NO_COMPRESSION |
         (ssl::SslOptions::NO_SSL_MASK & !ssl::SslOptions::NO_DTLSV1_2));
 
-    ssl_context_builder.set_ca_file(ca_file).unwrap();
+    ssl_context_builder.set_ca_file(&ca_file).unwrap();
     ssl_context_builder.set_verify(ssl::SslVerifyMode::PEER);
 
     let mut open_ca = File::open(ca_file).unwrap();
     let mut buffer = Vec::new();
     open_ca.read_to_end(&mut buffer).unwrap();
-    ssl_context_builder.add_client_ca(&X509::from_pem(&buffer).unwrap());    
+    ssl_context_builder.add_client_ca(&X509::from_pem(&buffer).unwrap()).unwrap();
 
     let ssl_context = Box::leak(Box::new(ssl_context_builder.build()));
     // FIXME: "OpenSSL’s default configuration is insecure.  It is highly
