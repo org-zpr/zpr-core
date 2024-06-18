@@ -1,7 +1,7 @@
 use enum_map::Enum;
 use std::fmt;
 
-#[derive(Debug, Enum)]
+#[derive(Debug, Enum, Copy, Clone)]
 pub enum CounterType {
     InPacksRec,
     InPacksDrop,
@@ -15,7 +15,7 @@ pub enum CounterType {
 //     let enum_map: EnumMap<CounterType, Counter> = enum_map! { _ => Counter::new(), };
 // }
 
-pub fn name_counters(count_num: &CounterType) -> String {
+pub fn name_counters(count_num: CounterType) -> String {
     let s;
     match count_num {
         CounterType::InPacksRec   => s = "Inbound Packets Recieved",
@@ -31,6 +31,6 @@ pub fn name_counters(count_num: &CounterType) -> String {
 
 impl fmt::Display for CounterType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", name_counters(self))
+        write!(f, "{}", name_counters(*self))
     }
 }
