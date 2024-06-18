@@ -8,6 +8,7 @@ use tokio::task::JoinSet;
 use tokio::io::AsyncBufReadExt;
 use tokio::net::UnixStream;
 use std::io::Error;
+use std::fmt::Write;
 
 
 async fn worker(
@@ -86,7 +87,7 @@ async fn echo(_asm: &Assembly<'_>) -> String {
 async fn counters(asm: &Assembly<'_>) -> String {
     let mut counts: String = "".to_string();
     for (key, &ref value) in &asm.counters {
-        counts += &(key.to_string() + ": " + &value.get_count().to_string() + "\n");
+        let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
     }
     return counts; // TODO change the return value of counters
 }
