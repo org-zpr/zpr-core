@@ -63,7 +63,8 @@ enum AgentType {
 }
 
 
-// Basic agent to support early iteration of ZPR.
+// Basic agent to support early iteration of ZPR.  
+// Probably missing things.
 struct Agent {
   1: AgentType agent_type,
   2: map<string, string> attrs,

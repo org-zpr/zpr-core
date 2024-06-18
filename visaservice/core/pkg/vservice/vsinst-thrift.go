@@ -308,6 +308,14 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		vs.log.WithError(err).Warn("registration: failed to write to agent DB")
 		return "", fmt.Errorf("internal error")
 	}
+	vs.sessions.Unlock()
+
+	// Also stash API key in the agent-db.
+	vs.agentDB.Lock()
+	if rec, ok := vs.agentDB.agents[naddr]; ok {
+		rec.APIKey = apiKey
+	}
+	vs.agentDB.Unlock()
 
 	return apiKey, nil
 }
@@ -397,6 +405,43 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 	vs.log.Debug("*AGENT_DISCONNECT*")
 	if !vs.validAPIKey(key) {
 		vs.log.Debug("agent-disconnect called with invalid key", "key", key)
+		return vsapi.NewUnauthorizedError()
+	}
+	zaddr, addrOk := netip.AddrFromSlice(zprAddr)
+	if !addrOk {
+		vs.log.Warn("registration: de-register but agent record has invalid address", "addr", zprAddr)
+		return nil
+	}
+	vs.log.Info("agent disconnect", "zpr_addr", zaddr)
+
+	// Normally this would be an adapter disconnect.
+	isNode := false
+	found := false
+	vs.agentDB.RLock()
+	if rec, ok := vs.agentDB.agents[zaddr]; ok {
+		isNode = rec.Agent.GetRole() == "node"
+		found = true
+	}
+	vs.agentDB.RUnlock()
+
+	if !found {
+		vs.log.Warn("agent-disconnect called but address not found", "addr", zaddr)
+		return nil
+	}
+	if !isNode {
+		vs.RemoveAdapter(zaddr)
+		return nil
+	}
+
+	// Hmm -- is a node.  I would expect a node to call DeRegister instead.  But we will
+	// de-register this node too.
+	vs.log.Info("agent-disconnect: de-registering a node", "addr", zaddr)
+	return vs.DeRegister(ctx, key)
+}
+
+func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byte) error {
+	if !vs.validAPIKey(key) {
+		vs.log.Warn("agent-disconnect called with invalid key", "key", key)
 		return vsapi.NewUnauthorizedError()
 	}
 	zaddr, addrOk := netip.AddrFromSlice(zprAddr)

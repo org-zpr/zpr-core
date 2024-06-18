@@ -85,6 +85,11 @@ type VSInst struct {
 		agents map[netip.Addr]*HostRecord // ZPR_CONTACT_ADDR -> HostRecord
 	}
 
+	agentDB struct {
+		sync.RWMutex
+		agents map[netip.Addr]*HostRecord // ZPR_CONTACT_ADDR -> HostRecord
+	}
+
 	cfgRemoves struct {
 		sync.Mutex
 		removes []*configRemoval // ordered earliest to latest
