@@ -37,7 +37,7 @@ fn main() -> std::io::Result<()> {
 fn handle_commands(command: String, port: String) -> std::io::Result<()> {
     println!("{command}, {port}");
     // fs::remove_file(&port).or_else(|e| if e.kind() == ErrorKind::NotFound { Ok(()) } else { Err(e) }).unwrap();
-    let stream =  Box::leak(Box::new(UnixStream::connect(port).unwrap())); //TODO not sure if this needs the Box leak wrapper
+    let stream = &mut UnixStream::connect(port).unwrap(); //TODO not sure if this needs the Box leak wrapper
 
     match command.as_str() {
         "ECHO" => basic_call_response("ECHO\n".to_string(), stream)?,
