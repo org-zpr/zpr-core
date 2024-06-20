@@ -3,6 +3,7 @@ use bytes::Buf;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
 use crate::assembly::Assembly;
+use crate::classifier::classify;
 use crate::packet::Packet;
 use crate::zdp::*;
 
@@ -27,6 +28,8 @@ async fn worker<'pktbuf>(
 
                     // strip packet header
                     pkt.advance(std::mem::size_of::<ZdpHeader>());
+
+                    classify(&mut pkt);
 
                     // send out decapsulated packet
                     asm.inbound_send.enqueue(pkt).await;

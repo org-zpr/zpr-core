@@ -27,6 +27,7 @@ extern crate arrayref;
 // TODO: make these all non-pub once everything is used
 mod assembly;
 mod buffer_stack;
+mod classifier;
 mod config;
 mod counter;
 mod counters_enum;
