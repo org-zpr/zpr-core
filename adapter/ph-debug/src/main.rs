@@ -36,6 +36,7 @@ fn main() -> std::io::Result<()> {
 
     handle_commands(command, time, port)?;
 
+
     Ok(())
 }
 
