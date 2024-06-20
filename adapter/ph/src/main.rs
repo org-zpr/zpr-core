@@ -48,9 +48,19 @@ use counter::*;
 use assembly::Assembly;
 use counters_enum::*;
 
+#[derive(Copy, Clone, Default, clap::ValueEnum)]
+enum PhMode {
+    #[default]
+    Client,
+    Server
+}
+
 #[derive(Parser)]
 #[command(version, about)]
 struct CmdLine {
+    #[arg(long, default_value_t, value_enum)]
+    mode: PhMode,
+
     #[arg(long)]
     control_path: String,
 
@@ -237,7 +247,13 @@ fn main() -> ExitCode {
             let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));
             socket.connect(peer_addr).await.expect("unable to connect to peer addr");
             let mut ssl_stream = tokio_openssl::SslStream::new(ssl, udp_stream::UdpStream::new(socket)).unwrap();
-            Pin::new(&mut ssl_stream).connect().await.expect("unable to establish DTLS connection");
+            match cmd_line.mode {
+                PhMode::Client =>
+                    Pin::new(&mut ssl_stream).connect().await.expect("unable to establish DTLS connection"),
+                PhMode::Server =>
+                    Pin::new(&mut ssl_stream).accept().await.expect("unable to establish DTLS connection")
+            }
+            eprintln!("Connected!");
 
             js.spawn(dtls_worker::launch(&*asm, ssl_stream, os_outq));
 
