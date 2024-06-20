@@ -30,7 +30,7 @@ async fn worker<'pktbuf>(
                 ssl_read.read_buf(&mut pkt).await.unwrap();
                 asm.counters[CounterType::InPacksRec].increment();
                 // NOTE: There is no way to detect a too-large packet.  See above.
-                asm.inbound_processor.enqueue(pkt).await;
+                asm.inbound_processor.enqueue_packet(pkt).await;
             }
         },
 

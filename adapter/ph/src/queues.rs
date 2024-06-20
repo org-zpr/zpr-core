@@ -12,6 +12,9 @@ use crate::packet::Packet;
 // All agent packets from the dock are sent here for decapsulation, and any
 // CPU-intensive postprocessing (e.g. signature verification).
 // This may morph into more or fewer (i.e. zero) stages depending on future requirements.
+pub enum InboundProcessorMessage<'pktbuf> {
+    Packet(Packet<'pktbuf>)
+}
 
 pub struct InboundProcessor<'pktbuf> {
     sender: mpsc::Sender<Packet<'pktbuf>>
@@ -24,7 +27,7 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
         Self{ sender }
     }
 
-    pub async fn enqueue(&self, packet: Packet<'pktbuf>) {
+    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
         self.sender.send(packet).await.unwrap();
     }
 }
@@ -32,20 +35,23 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
 
 // InboundSend is responsible for emitting decapsulated agent packets on the
 // host's TUN interface.
+pub enum InboundSendMessage<'pktbuf> {
+    Packet(Packet<'pktbuf>)
+}
 
 pub struct InboundSend<'pktbuf> {
-    senders: Box<[mpsc::Sender<Packet<'pktbuf>>]>
+    senders: Box<[mpsc::Sender<InboundSendMessage<'pktbuf>>]>
 }
 
 impl<'pktbuf> InboundSend<'pktbuf> {
     // We necessarily have multiple queues, corresponding to the multiple
     // FDs of a multiqueue-enabled TUN interface.
-    pub(crate) fn new(senders: Box<[mpsc::Sender<Packet<'pktbuf>>]>) -> Self {
+    pub(crate) fn new(senders: Box<[mpsc::Sender<InboundSendMessage<'pktbuf>>]>) -> Self {
         Self{ senders }
     }
 
-    pub async fn enqueue(&self, packet: Packet<'pktbuf>) {
-        self.senders[packet.flowhash() as usize % self.senders.len()].send(packet).await.unwrap();
+    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
+        self.senders[packet.flowhash() as usize % self.senders.len()].send(InboundSendMessage::Packet(packet)).await.unwrap();
     }
 }
 
@@ -54,6 +60,9 @@ impl<'pktbuf> InboundSend<'pktbuf> {
 // All packets from the host are sent here for encapsulation, and any
 // CPU-intensive preprocessing (e.g. signature generation).
 // This may morph into more or fewer (i.e. zero) stages depending on future requirements.
+pub enum OutboundProcessorMessage<'pktbuf> {
+    Packet(Packet<'pktbuf>)
+}
 
 pub struct OutboundProcessor<'pktbuf> {
     sender: mpsc::Sender<Packet<'pktbuf>>
@@ -66,13 +75,16 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
         Self{ sender }
     }
 
-    pub async fn enqueue(&self, packet: Packet<'pktbuf>) {
+    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
         self.sender.send(packet).await.unwrap();
     }
 }
 
 
 // OutboundSend is responsible for sending encapsulated agent packets to the dock.
+pub enum OutboundSendMessage<'pktbuf> {
+    Packet(Packet<'pktbuf>)
+}
 
 pub struct OutboundSend<'pktbuf> {
     sender: mpsc::Sender<Packet<'pktbuf>>
@@ -85,7 +97,7 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
         Self{ sender }
     }
 
-    pub async fn enqueue(&self, packet: Packet<'pktbuf>) {
+    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
         self.sender.send(packet).await.unwrap();
     }
 }

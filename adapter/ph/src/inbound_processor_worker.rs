@@ -29,7 +29,7 @@ async fn worker<'pktbuf>(
                     pkt.advance(std::mem::size_of::<ZdpHeader>());
 
                     // send out decapsulated packet
-                    asm.inbound_send.enqueue(pkt).await;
+                    asm.inbound_send.enqueue_packet(pkt).await;
                 },
 
                 packet_type =>

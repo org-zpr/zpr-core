@@ -24,7 +24,7 @@ async fn worker<'pktbuf>(
             pkt.metadata_mut().flow_id = 0;  // TODO: fill from IP header
 
             // forward encapsulated packet on
-            asm.outbound_send.enqueue(pkt).await;
+            asm.outbound_send.enqueue_packet(pkt).await;
         }
     }
 }
