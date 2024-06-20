@@ -1,7 +1,7 @@
 use crate::config;
 use crate::packet;
 use std::mem::size_of;
-use zerocopy::{FromBytes, FromZeroes};
+use zerocopy::{ByteOrder, FromBytes, FromZeroes, NetworkEndian};
 use zerocopy_derive::{FromBytes, FromZeroes, KnownLayout};
 
 #[derive(Debug, PartialEq)]
@@ -20,14 +20,14 @@ const IPV4_HEADER_LENGTH_MASK: u8 = 0x0F;
 struct IPv4Header {
     pub vhl: u8,
     pub dscp: u8,
-    pub total_length: u16,
+    pub total_length: [u8; 2],
     pub frag_id: u16,
     pub frag_offset: u16,
     pub ttl: u8,
     pub proto: u8,
     pub header_checksum: u16,
-    pub source_address: u32,
-    pub destination_address: u32,
+    pub src_address: [u8; 4],
+    pub dst_address: [u8; 4],
 }
 
 #[derive(FromZeroes, FromBytes, KnownLayout)]
@@ -39,15 +39,15 @@ struct IPv6Header {
     pub payload_length: u16,
     pub next_header: u8,
     pub hop_limit: u8,
-    pub source_address: packet::IpAddress,
-    pub destination_address: packet::IpAddress,
+    pub src_address: packet::IpAddress,
+    pub dst_address: packet::IpAddress,
 }
 
 #[derive(FromZeroes, FromBytes, KnownLayout)]
 #[repr(C)]
 struct TCPHeader {
-    pub source_port: u16,
-    pub destination_port: u16,
+    pub src_port: [u8; 2],
+    pub dst_port: [u8; 2],
     pub sequence_number: u32,
     pub acknowledgement_number: u32,
     pub data_offset_and_reserved: u8,
@@ -60,8 +60,8 @@ struct TCPHeader {
 #[derive(FromZeroes, FromBytes, KnownLayout)]
 #[repr(C)]
 struct UDPHeader {
-    pub source_port: u16,
-    pub destination_port: u16,
+    pub src_port: [u8; 2],
+    pub dst_port: [u8; 2],
     pub length: u16,
     pub checksum: u16,
 }
@@ -109,7 +109,7 @@ pub fn classify_ipv4(
     let ipv4_header = IPv4Header::ref_from(header_bytes).unwrap();
 
     let header_length = ipv4_header.vhl & IPV4_HEADER_LENGTH_MASK;
-    let total_length = ipv4_header.total_length.swap_bytes();
+    let total_length = NetworkEndian::read_u16(&ipv4_header.total_length);
     if usize::from(total_length) + offset != metadata.get_length()
         || header_length < 5
         || u16::from(header_length * 4) > total_length
@@ -119,8 +119,8 @@ pub fn classify_ipv4(
 
     let protocol = ipv4_header.proto;
     metadata.set_protocol(protocol);
-    metadata.set_source_address_v4(ipv4_header.source_address);
-    metadata.set_destination_address_v4(ipv4_header.destination_address);
+    metadata.set_src_address_v4(ipv4_header.src_address);
+    metadata.set_dst_address_v4(ipv4_header.dst_address);
 
     offset += usize::from(header_length * 4);
     classify_l4(metadata, body, offset, protocol)
@@ -142,8 +142,8 @@ pub fn classify_ipv6(
 
     let protocol = ipv6_header.next_header;
     metadata.set_protocol(protocol);
-    metadata.set_source_address_v6(ipv6_header.source_address);
-    metadata.set_destination_address_v6(ipv6_header.destination_address);
+    metadata.set_src_address_v6(ipv6_header.src_address);
+    metadata.set_dst_address_v6(ipv6_header.dst_address);
 
     // TODO: IPv6 options parsing
     classify_l4(metadata, body, end_of_header, protocol)
@@ -181,8 +181,8 @@ pub fn classify_tcp(
         return ClassifierResult::LengthError;
     }
 
-    metadata.set_source_port(tcp_header.source_port);
-    metadata.set_destination_port(tcp_header.destination_port);
+    metadata.set_src_port(tcp_header.src_port);
+    metadata.set_dst_port(tcp_header.dst_port);
 
     ClassifierResult::OK
 }
@@ -200,8 +200,8 @@ pub fn classify_udp(
     let header_bytes = &body[offset..end_of_header];
     let udp_header = UDPHeader::ref_from(header_bytes).unwrap();
 
-    metadata.set_source_port(udp_header.source_port);
-    metadata.set_destination_port(udp_header.destination_port);
+    metadata.set_src_port(udp_header.src_port);
+    metadata.set_dst_port(udp_header.dst_port);
 
     ClassifierResult::OK
 }
@@ -221,16 +221,10 @@ mod tests {
         assert_eq!(ClassifierResult::NonIP, classify(&mut packet));
 
         let metadata = packet.metadata();
-        assert_eq!(
-            packet::IpAddress::new_zeroed(),
-            metadata.get_source_address()
-        );
-        assert_eq!(
-            packet::IpAddress::new_zeroed(),
-            metadata.get_destination_address()
-        );
-        assert_eq!(0u16, metadata.get_source_port_hbo());
-        assert_eq!(0u16, metadata.get_destination_port_hbo());
+        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_protocol());
     }
 
@@ -255,15 +249,16 @@ mod tests {
         assert_eq!(ClassifierResult::OK, classify(&mut packet));
 
         let metadata = packet.metadata();
-        assert_eq!(0x04030201u32, metadata.get_source_address().read_as_v4());
         assert_eq!(
-            0x01020304u32,
-            metadata.get_destination_address().read_as_v4()
+            [0x04, 0x03, 0x02, 0x01],
+            metadata.get_dst_address().read_as_v4()
         );
-        assert_eq!(0x14u16, metadata.get_source_port_hbo());
-        assert_eq!(0x1400u16, metadata.get_source_port_nbo());
-        assert_eq!(0x50u16, metadata.get_destination_port_hbo());
-        assert_eq!(0x5000u16, metadata.get_destination_port_nbo());
+        assert_eq!(
+            [0x01, 0x02, 0x03, 0x04],
+            metadata.get_src_address().read_as_v4()
+        );
+        assert_eq!(0x14u16, metadata.get_src_port_hbo());
+        assert_eq!(0x50u16, metadata.get_dst_port_hbo());
         assert_eq!(6u8, metadata.get_protocol());
     }
 
@@ -283,16 +278,10 @@ mod tests {
         assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
 
         let metadata = packet.metadata();
-        assert_eq!(
-            packet::IpAddress::new_zeroed(),
-            metadata.get_source_address()
-        );
-        assert_eq!(
-            packet::IpAddress::new_zeroed(),
-            metadata.get_destination_address()
-        );
-        assert_eq!(0u16, metadata.get_source_port_hbo());
-        assert_eq!(0u16, metadata.get_destination_port_hbo());
+        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_protocol());
     }
 
@@ -307,7 +296,7 @@ mod tests {
                 0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
                 0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x50, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,                        
+                0x50, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
             ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
@@ -315,16 +304,10 @@ mod tests {
         assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
 
         let metadata = packet.metadata();
-        assert_eq!(
-            packet::IpAddress::new_zeroed(),
-            metadata.get_source_address()
-        );
-        assert_eq!(
-            packet::IpAddress::new_zeroed(),
-            metadata.get_destination_address()
-        );
-        assert_eq!(0u16, metadata.get_source_port_hbo());
-        assert_eq!(0u16, metadata.get_destination_port_hbo());
+        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_protocol());
     }
 
@@ -339,7 +322,7 @@ mod tests {
                 0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
                 0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x50, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,                        
+                0x50, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
             ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
@@ -347,16 +330,10 @@ mod tests {
         assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
 
         let metadata = packet.metadata();
-        assert_eq!(
-            packet::IpAddress::new_zeroed(),
-            metadata.get_source_address()
-        );
-        assert_eq!(
-            packet::IpAddress::new_zeroed(),
-            metadata.get_destination_address()
-        );
-        assert_eq!(0u16, metadata.get_source_port_hbo());
-        assert_eq!(0u16, metadata.get_destination_port_hbo());
+        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_protocol());
     }
 
@@ -372,7 +349,7 @@ mod tests {
             0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01,
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
             0xa9, 0xa0, 0x1f, 0x90, 0x02, 0x1b, 0x63, 0x8c,
             0x00, 0x00, 0x00, 0x00, 0xa0, 0x02, 0x67, 0x5c,
             0x8e, 0xb9, 0x00, 0x00, 0x02, 0x04, 0x0b, 0x7c,
@@ -392,7 +369,7 @@ mod tests {
                     0x00, 0x00, 0x01
                 ]
             },
-            metadata.get_source_address()
+            metadata.get_src_address()
         );
         assert_eq!(
             packet::IpAddress {
@@ -401,12 +378,10 @@ mod tests {
                     0x00, 0x00, 0x01
                 ]
             },
-            metadata.get_destination_address()
+            metadata.get_dst_address()
         );
-        assert_eq!(43424u16, metadata.get_source_port_hbo());
-        assert_eq!(0xa0a9u16, metadata.get_source_port_nbo());
-        assert_eq!(8080u16, metadata.get_destination_port_hbo());
-        assert_eq!(0x901fu16, metadata.get_destination_port_nbo());
+        assert_eq!(43424u16, metadata.get_src_port_hbo());
+        assert_eq!(8080u16, metadata.get_dst_port_hbo());
         assert_eq!(6u8, metadata.get_protocol());
     }
 
@@ -421,16 +396,10 @@ mod tests {
         assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
 
         let metadata = packet.metadata();
-        assert_eq!(
-            packet::IpAddress::new_zeroed(),
-            metadata.get_source_address()
-        );
-        assert_eq!(
-            packet::IpAddress::new_zeroed(),
-            metadata.get_destination_address()
-        );
-        assert_eq!(0u16, metadata.get_source_port_hbo());
-        assert_eq!(0u16, metadata.get_destination_port_hbo());
+        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_protocol());
     }
 
@@ -453,13 +422,16 @@ mod tests {
         assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
 
         let metadata = packet.metadata();
-        assert_eq!(0x04030201u32, metadata.get_source_address().read_as_v4());
         assert_eq!(
-            0x01020304u32,
-            metadata.get_destination_address().read_as_v4()
+            [0x04, 0x03, 0x02, 0x01],
+            metadata.get_dst_address().read_as_v4()
         );
-        assert_eq!(0u16, metadata.get_source_port_hbo());
-        assert_eq!(0u16, metadata.get_destination_port_hbo());
+        assert_eq!(
+            [0x01, 0x02, 0x03, 0x04],
+            metadata.get_src_address().read_as_v4()
+        );
+        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(6u8, metadata.get_protocol());
     }
 
@@ -473,7 +445,7 @@ mod tests {
                 0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
                 0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x30, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,                        
+                0x30, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
             ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
@@ -481,13 +453,16 @@ mod tests {
         assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
 
         let metadata = packet.metadata();
-        assert_eq!(0x04030201u32, metadata.get_source_address().read_as_v4());
         assert_eq!(
-            0x01020304u32,
-            metadata.get_destination_address().read_as_v4()
+            [0x04, 0x03, 0x02, 0x01],
+            metadata.get_dst_address().read_as_v4()
         );
-        assert_eq!(0x0u16, metadata.get_source_port_hbo());
-        assert_eq!(0x0u16, metadata.get_destination_port_hbo());
+        assert_eq!(
+            [0x01, 0x02, 0x03, 0x04],
+            metadata.get_src_address().read_as_v4()
+        );
+        assert_eq!(0x0u16, metadata.get_src_port_hbo());
+        assert_eq!(0x0u16, metadata.get_dst_port_hbo());
         assert_eq!(6u8, metadata.get_protocol());
     }
 
@@ -501,7 +476,7 @@ mod tests {
                 0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
                 0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x30, 0x02, 0x30, 0x00, 0x85, 0x75, 0x00, 0x00,                        
+                0x30, 0x02, 0x30, 0x00, 0x85, 0x75, 0x00, 0x00,
             ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
@@ -509,13 +484,16 @@ mod tests {
         assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
 
         let metadata = packet.metadata();
-        assert_eq!(0x04030201u32, metadata.get_source_address().read_as_v4());
         assert_eq!(
-            0x01020304u32,
-            metadata.get_destination_address().read_as_v4()
+            [0x04, 0x03, 0x02, 0x01],
+            metadata.get_dst_address().read_as_v4()
         );
-        assert_eq!(0x0u16, metadata.get_source_port_hbo());
-        assert_eq!(0x0u16, metadata.get_destination_port_hbo());
+        assert_eq!(
+            [0x01, 0x02, 0x03, 0x04],
+            metadata.get_src_address().read_as_v4()
+        );
+        assert_eq!(0x0u16, metadata.get_src_port_hbo());
+        assert_eq!(0x0u16, metadata.get_dst_port_hbo());
         assert_eq!(6u8, metadata.get_protocol());
     }
 
@@ -538,13 +516,16 @@ mod tests {
         assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
 
         let metadata = packet.metadata();
-        assert_eq!(0x04030201u32, metadata.get_source_address().read_as_v4());
         assert_eq!(
-            0x01020304u32,
-            metadata.get_destination_address().read_as_v4()
+            [0x04, 0x03, 0x02, 0x01],
+            metadata.get_dst_address().read_as_v4()
         );
-        assert_eq!(0u16, metadata.get_source_port_hbo());
-        assert_eq!(0u16, metadata.get_destination_port_hbo());
+        assert_eq!(
+            [0x01, 0x02, 0x03, 0x04],
+            metadata.get_src_address().read_as_v4()
+        );
+        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(6u8, metadata.get_protocol());
     }
 }

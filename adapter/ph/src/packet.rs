@@ -19,12 +19,12 @@ pub struct IpAddress {
 }
 
 impl IpAddress {
-    pub fn set_from_v4(&mut self, v4_address: u32) {
-        NetworkEndian::write_u32(&mut self.v6[0..4], v4_address)
+    pub fn set_from_v4(&mut self, v4_address: [u8; 4]) {
+        self.v6[0..4].copy_from_slice(&v4_address)
     }
 
-    pub fn read_as_v4(&self) -> u32 {
-        NetworkEndian::read_u32(&self.v6[0..4])
+    pub fn read_as_v4(&self) -> &[u8] {
+        &self.v6[0..4]
     }
 }
 
@@ -43,49 +43,49 @@ pub struct PacketMetadata {
     offset: usize,    // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
     len: usize,       // packet length
     pub flow_id: u32, // flow ID for load-balancing purposes; not otherwise meaningful
-    source_address: IpAddress,
-    destination_address: IpAddress,
-    source_port: u16,
-    destination_port: u16,
+    src_address: IpAddress,
+    dst_address: IpAddress,
+    src_port: u16,
+    dst_port: u16,
     protocol: u8,
     l3_type: L3Type,
     padding: u16,
 }
 
 impl PacketMetadata {
-    pub fn set_source_port(&mut self, sport: u16) {
-        self.source_port = sport
+    pub fn set_src_port(&mut self, sport: [u8; 2]) {
+        self.src_port = NetworkEndian::read_u16(&sport)
     }
 
-    pub fn set_destination_port(&mut self, dport: u16) {
-        self.destination_port = dport
+    pub fn set_dst_port(&mut self, dport: [u8; 2]) {
+        self.dst_port = NetworkEndian::read_u16(&dport)
     }
 
     pub fn set_protocol(&mut self, proto: u8) {
         self.protocol = proto
     }
 
-    pub fn set_source_address_v4(&mut self, src_addr: u32) {
+    pub fn set_src_address_v4(&mut self, src_addr: [u8; 4]) {
         assert!(self.l3_type != L3Type::Ipv6);
-        self.source_address.set_from_v4(src_addr);
+        self.src_address.set_from_v4(src_addr);
         self.l3_type = L3Type::Ipv4;
     }
 
-    pub fn set_source_address_v6(&mut self, src_addr: IpAddress) {
+    pub fn set_src_address_v6(&mut self, src_addr: IpAddress) {
         assert!(self.l3_type != L3Type::Ipv4);
-        self.source_address = src_addr;
+        self.src_address = src_addr;
         self.l3_type = L3Type::Ipv6;
     }
 
-    pub fn set_destination_address_v4(&mut self, dst_addr: u32) {
+    pub fn set_dst_address_v4(&mut self, dst_addr: [u8; 4]) {
         assert!(self.l3_type != L3Type::Ipv6);
-        self.destination_address.set_from_v4(dst_addr);
+        self.dst_address.set_from_v4(dst_addr);
         self.l3_type = L3Type::Ipv4;
     }
 
-    pub fn set_destination_address_v6(&mut self, dst_addr: IpAddress) {
+    pub fn set_dst_address_v6(&mut self, dst_addr: IpAddress) {
         assert!(self.l3_type != L3Type::Ipv4);
-        self.destination_address = dst_addr;
+        self.dst_address = dst_addr;
         self.l3_type = L3Type::Ipv6;
     }
 
@@ -93,28 +93,20 @@ impl PacketMetadata {
         self.len
     }
 
-    pub fn get_source_address(&self) -> IpAddress {
-        self.source_address
+    pub fn get_src_address(&self) -> IpAddress {
+        self.src_address
     }
 
-    pub fn get_destination_address(&self) -> IpAddress {
-        self.destination_address
+    pub fn get_dst_address(&self) -> IpAddress {
+        self.dst_address
     }
 
-    pub fn get_source_port_nbo(&self) -> u16 {
-        self.source_port
+    pub fn get_src_port_hbo(&self) -> u16 {
+        self.src_port
     }
 
-    pub fn get_source_port_hbo(&self) -> u16 {
-        self.source_port.swap_bytes()
-    }
-
-    pub fn get_destination_port_nbo(&self) -> u16 {
-        self.destination_port
-    }
-
-    pub fn get_destination_port_hbo(&self) -> u16 {
-        self.destination_port.swap_bytes()
+    pub fn get_dst_port_hbo(&self) -> u16 {
+        self.dst_port
     }
 
     pub fn get_protocol(&self) -> u8 {
