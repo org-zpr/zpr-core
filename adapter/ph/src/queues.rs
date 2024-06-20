@@ -65,18 +65,18 @@ pub enum OutboundProcessorMessage<'pktbuf> {
 }
 
 pub struct OutboundProcessor<'pktbuf> {
-    sender: mpsc::Sender<Packet<'pktbuf>>
+    sender: mpsc::Sender<OutboundProcessorMessage<'pktbuf>>
 }
 
 impl<'pktbuf> OutboundProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
-    pub(crate) fn new(sender: mpsc::Sender<Packet<'pktbuf>>) -> Self {
+    pub(crate) fn new(sender: mpsc::Sender<OutboundProcessorMessage<'pktbuf>>) -> Self {
         Self{ sender }
     }
 
     pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
-        self.sender.send(packet).await.unwrap();
+        self.sender.send(OutboundProcessorMessage::Packet(packet)).await.unwrap();
     }
 }
 
