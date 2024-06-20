@@ -10,6 +10,8 @@ pub enum ClassifierResult {
     NonIP,
     UnclassifiedL4,
     LengthError,
+    FirstFragment,
+    SubsequentFragment,
 }
 
 const IP_VERSION_MASK: u8 = 0xF0;
@@ -22,7 +24,7 @@ struct IPv4Header {
     pub dscp: u8,
     pub total_length: [u8; 2],
     pub frag_id: u16,
-    pub frag_offset: u16,
+    pub frag_offset: [u8; 2],
     pub ttl: u8,
     pub proto: u8,
     pub header_checksum: u16,
@@ -42,6 +44,8 @@ struct IPv6Header {
     pub src_address: packet::IpAddress,
     pub dst_address: packet::IpAddress,
 }
+
+const NO_NEXT_HEADER: u8 = 59;
 
 #[derive(FromZeroes, FromBytes, KnownLayout)]
 #[repr(C)]
@@ -72,7 +76,7 @@ pub fn classify(packet: &mut packet::Packet) -> ClassifierResult {
     classify_zdp(metadata, body, offset)
 }
 
-pub fn classify_zdp(
+fn classify_zdp(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
     offset: usize,
@@ -80,7 +84,7 @@ pub fn classify_zdp(
     classify_l3(metadata, body, offset)
 }
 
-pub fn classify_l3(
+fn classify_l3(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
     offset: usize,
@@ -94,7 +98,7 @@ pub fn classify_l3(
     }
 }
 
-pub fn classify_ipv4(
+fn classify_ipv4(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
     mut offset: usize,
@@ -117,16 +121,27 @@ pub fn classify_ipv4(
         return ClassifierResult::LengthError;
     }
 
-    let protocol = ipv4_header.proto;
-    metadata.set_protocol(protocol);
+    const fragment_offset_mask: u16 = 0x1FFF;
+    const more_fragments_mask: u16 = 0x4000;
+    let frag_offset = NetworkEndian::read_u16(&ipv4_header.frag_offset);
+    if frag_offset & fragment_offset_mask != 0 {
+        return ClassifierResult::SubsequentFragment;
+    }
+
     metadata.set_src_address_v4(ipv4_header.src_address);
     metadata.set_dst_address_v4(ipv4_header.dst_address);
 
     offset += usize::from(header_length * 4);
-    classify_l4(metadata, body, offset, protocol)
+    let ret_code = classify_next_header(metadata, body, offset, ipv4_header.proto);
+
+    if frag_offset & more_fragments_mask != 0 {
+        return ClassifierResult::FirstFragment;
+    }
+
+    return ret_code;
 }
 
-pub fn classify_ipv6(
+fn classify_ipv6(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
     offset: usize,
@@ -140,29 +155,105 @@ pub fn classify_ipv6(
     let header_bytes = &body[offset..end_of_header];
     let ipv6_header = IPv6Header::ref_from(header_bytes).unwrap();
 
-    let protocol = ipv6_header.next_header;
-    metadata.set_protocol(protocol);
     metadata.set_src_address_v6(ipv6_header.src_address);
     metadata.set_dst_address_v6(ipv6_header.dst_address);
 
     // TODO: IPv6 options parsing
-    classify_l4(metadata, body, end_of_header, protocol)
+    classify_next_header(metadata, body, end_of_header, ipv6_header.next_header)
 }
 
-pub fn classify_l4(
+fn classify_next_header(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
     offset: usize,
     protocol: u8,
 ) -> ClassifierResult {
+    metadata.set_protocol(protocol);
     match protocol {
+        0 => return skip_non_frag_option(metadata, body, offset), // Hop-by-hop
+        1 => return ClassifierResult::OK,                         // ICMP TODO: check type and code
+        4 => return ClassifierResult::UnclassifiedL4,             // IP in IP
         6 => return classify_tcp(metadata, body, offset),
         17 => return classify_udp(metadata, body, offset),
+        43 => return skip_non_frag_option(metadata, body, offset), // Routing
+        44 => return classify_frag(metadata, body, offset),
+        51 => return skip_auth_header(metadata, body, offset), // AH
+        60 => return skip_non_frag_option(metadata, body, offset), // Dest opts
         _ => return ClassifierResult::UnclassifiedL4,
     }
 }
 
-pub fn classify_tcp(
+fn is_option_length_error(
+    metadata: &packet::PacketMetadata,
+    offset: usize,
+    next_header: u8,
+    option_length: usize,
+) -> bool {
+    return option_length + offset > metadata.get_length()
+        || (next_header != NO_NEXT_HEADER && option_length + offset + 8 > metadata.get_length());
+}
+
+fn skip_non_frag_option(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+    offset: usize,
+) -> ClassifierResult {
+    // Almost all Ipv6 options start with protocol and length
+    let next_header = body[offset];
+    // The length for these options is in muliples of 8, not including the first 8
+    let option_length = (usize::from(body[offset + 1]) + 1) * 8;
+
+    // Validate that there is enough room for this option
+    // and that there is enough room for the next option if
+    // there is one
+    if is_option_length_error(metadata, offset, next_header, option_length) {
+        return ClassifierResult::LengthError;
+    }
+
+    classify_next_header(metadata, body, offset + option_length, next_header)
+}
+
+fn skip_auth_header(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+    offset: usize,
+) -> ClassifierResult {
+    let next_header = body[offset];
+    // AH header is legacy v4 and therefore uses 4 octet multiples instead
+    let option_length = (usize::from(body[offset + 1]) + 2) * 4;
+
+    if is_option_length_error(metadata, offset, next_header, option_length) {
+        return ClassifierResult::LengthError;
+    }
+
+    classify_next_header(metadata, body, offset + option_length, next_header)
+}
+
+fn classify_frag(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+    offset: usize,
+) -> ClassifierResult {
+    // Frag options have no length field and are always 8 bytes
+    let next_header = body[offset];
+    let option_length: usize = 8;
+
+    if is_option_length_error(metadata, offset, next_header, option_length) {
+        return ClassifierResult::LengthError;
+    }
+
+    const frag_offset_mask: u16 = 0xFFF8;
+    let frag_offset = NetworkEndian::read_u16(&body[2..4]);
+    if frag_offset & frag_offset_mask != 0 {
+        // Subsequent fragments can't be parsed further
+        return ClassifierResult::SubsequentFragment;
+    }
+
+    classify_next_header(metadata, body, offset + option_length, next_header);
+    return ClassifierResult::FirstFragment;
+}
+
+fn classify_tcp(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
     offset: usize,
@@ -187,7 +278,7 @@ pub fn classify_tcp(
     ClassifierResult::OK
 }
 
-pub fn classify_udp(
+fn classify_udp(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
     offset: usize,
@@ -383,6 +474,60 @@ mod tests {
         assert_eq!(43424u16, metadata.get_src_port_hbo());
         assert_eq!(8080u16, metadata.get_dst_port_hbo());
         assert_eq!(6u8, metadata.get_protocol());
+    }
+
+    #[test]
+    fn test_v6_with_routing_option() {
+        // This packet presents an interesting problem of the inner IP being the "correct" one
+        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
+        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 128);
+        #[rustfmt::skip]
+        let packet_data = [
+            0x60, 0x0f, 0xbb, 0x74, 0x00, 0x88, 0x2b, 0x3f,
+            0xfc, 0x00, 0x00, 0x42, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02,
+            0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x05,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x29, 0x06, 0x04, 0x02, 0x02, 0x00, 0x00, 0x00,
+            0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x06,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x07,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x05,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x1f, 0x90, 0xa9, 0xa0, 0xba, 0x31, 0x1e, 0x8d,
+            0x02, 0x1b, 0x63, 0x8d, 0xa0, 0x12, 0x70, 0xf8,
+            0x8a, 0xf5, 0x00, 0x00, 0x02, 0x04, 0x07, 0x94,
+            0x04, 0x02, 0x08, 0x0a, 0x80, 0x1d, 0xa5, 0x22,
+            0x80, 0x1d, 0xa5, 0x22, 0x01, 0x03, 0x03, 0x07,
+        ];
+        packet.alloc_zeroed_headroom(packet_data.len());
+        packet.body_mut().copy_from_slice(&packet_data);
+
+        assert_eq!(ClassifierResult::UnclassifiedL4, classify(&mut packet));
+
+        let metadata = packet.metadata();
+        assert_eq!(
+            packet::IpAddress {
+                v6: [
+                    0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x01
+                ]
+            },
+            metadata.get_dst_address()
+        );
+        assert_eq!(
+            packet::IpAddress {
+                v6: [
+                    0xfc, 0x00, 0x00, 0x42, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x02
+                ]
+            },
+            metadata.get_src_address()
+        );
+        assert_eq!(0u16, metadata.get_dst_port_hbo());
+        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(41u8, metadata.get_protocol());
     }
 
     #[test]
