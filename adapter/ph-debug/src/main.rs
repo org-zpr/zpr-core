@@ -81,7 +81,7 @@ fn handle_watch(time: u64, port: String) -> std::io::Result<()> {
     let sleep_time = Duration::new(time, 0);
 
     loop {
-        let stream =  Box::leak(Box::new(UnixStream::connect(port.clone()).unwrap())); //TODO not sure if this needs the Box leak wrapper
+        let stream =  &mut UnixStream::connect(port.clone()).unwrap(); //TODO not sure if this needs the Box leak wrapper
         stream.write_all(b"COUNTERS\n")?;
         stream.flush()?;
         let mut response = String::new();
