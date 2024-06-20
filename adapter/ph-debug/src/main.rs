@@ -63,7 +63,7 @@ fn handle_commands(command: String, time: u64, port: String) -> std::io::Result<
 // TODO could rewrite this to return a string, then print in handle_commands
 // also could use in handle_watch - however would lose error checking capabilities
 fn basic_call_response(comm: String, port: String) -> std::io::Result<()> {
-    let stream =  Box::leak(Box::new(UnixStream::connect(port).unwrap())); //TODO not sure if this needs the Box leak wrapper
+    let stream = &mut UnixStream::connect(port).unwrap(); //TODO not sure if this needs the Box leak wrapper
     stream.write_all(comm.as_bytes())?;
     stream.flush()?;
     let mut response = String::new();
