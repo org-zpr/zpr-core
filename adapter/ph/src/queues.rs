@@ -87,17 +87,17 @@ pub enum OutboundSendMessage<'pktbuf> {
 }
 
 pub struct OutboundSend<'pktbuf> {
-    sender: mpsc::Sender<Packet<'pktbuf>>
+    sender: mpsc::Sender<OutboundSendMessage<'pktbuf>>
 }
 
 impl<'pktbuf> OutboundSend<'pktbuf> {
     // Only one outbound socket, only one queue for now.  (To be determined
     // whether `sendmmsg` via multiple threads provides any needed performance gain.)
-    pub(crate) fn new(sender: mpsc::Sender<Packet<'pktbuf>>) -> Self {
+    pub(crate) fn new(sender: mpsc::Sender<OutboundSendMessage<'pktbuf>>) -> Self {
         Self{ sender }
     }
 
     pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
-        self.sender.send(packet).await.unwrap();
+        self.sender.send(OutboundSendMessage::Packet(packet)).await.unwrap();
     }
 }
