@@ -41,6 +41,7 @@ mod queues;
 mod rpc_worker;
 mod udp_stream;
 mod zdp;
+mod test_packet;
 
 use buffer_stack::BufferStack;
 use queues::*;
