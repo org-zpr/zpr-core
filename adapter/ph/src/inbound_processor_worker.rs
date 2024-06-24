@@ -19,27 +19,8 @@ async fn worker<'pktbuf>(
     while let _count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         for pkt in pkts.drain(..) {
             match pkt {
-                InboundProcessorMessage::Packet(mut pkt) => {
-                    let hdr = ZdpHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
-
-                    match hdr.abbreviated_header.packet_type {
-                        ZdpPacketType::UncompressedAgentPacket => {
-                            // copy out relevant header info
-                            pkt.metadata_mut().flow_id = hdr.abbreviated_header.stream_id;
-        
-                            // strip packet header
-                            pkt.advance(std::mem::size_of::<ZdpHeader>());
-        
-                            // send out decapsulated packet
-                            asm.inbound_send.enqueue_packet(pkt).await;
-                        },
-        
-                        packet_type =>
-                            panic!("unhandled inbound packet type {}", packet_type.0)
-                    }
-                }
-            }
-            
+                InboundProcessorMessage::Packet(pkt) => { handle_packets(pkt, asm).await; }
+            }   
         }
     }
 }
@@ -52,4 +33,24 @@ pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
 {
     let cfg = *config;
     async move { worker(&cfg, &*asm, &mut queue).await }
+}
+
+async fn handle_packets<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf>) {
+    let hdr = ZdpHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+
+    match hdr.abbreviated_header.packet_type {
+        ZdpPacketType::UncompressedAgentPacket => {
+            // copy out relevant header info
+            pkt.metadata_mut().flow_id = hdr.abbreviated_header.stream_id;
+
+            // strip packet header
+            pkt.advance(std::mem::size_of::<ZdpHeader>());
+
+            // send out decapsulated packet
+            asm.inbound_send.enqueue_packet(pkt).await;
+        },
+
+        packet_type =>
+            panic!("unhandled inbound packet type {}", packet_type.0)
+    }
 }
