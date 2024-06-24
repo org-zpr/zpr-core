@@ -5,7 +5,6 @@ use tokio::io::unix::AsyncFd;
 use tokio::sync::mpsc;
 use crate::ext::tokio::io::unix::*;
 use crate::assembly::Assembly;
-// use crate::packet::Packet;
 use crate::InboundSendMessage;
 
 #[derive(Copy, Clone)]
