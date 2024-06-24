@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 use crate::packet::Packet;
 use crate::test_packet::*;
-use std::io::Error;
+use tokio::sync::oneshot::error::RecvError;
 // Queues (i.e., frontend interface) for each stage of the system.
 
 // "Inbound" refers to the dock->adapter direction (i.e., inbound to this host).
@@ -33,11 +33,13 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
         self.sender.send(InboundProcessorMessage::Packet(packet)).await.unwrap();
     }
 
-    // pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, Error> {
-    //     test_packet = 
-    //     self.sender.send(InboundProcessorMessage::TestPacket(test_packet)).await.unwrap();
-    //     test_packet
-    // }
+    pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
+        let test_tuple = TestPacket::create();
+
+        self.sender.send(InboundProcessorMessage::TestPacket(test_tuple.0)).await.unwrap();
+
+        Ok(test_tuple.1.await?)
+    }
 }
 
 
@@ -61,6 +63,20 @@ impl<'pktbuf> InboundSend<'pktbuf> {
 
     pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
         self.senders[packet.flowhash() as usize % self.senders.len()].send(InboundSendMessage::Packet(packet)).await.unwrap();
+    }
+
+    pub async fn enqueue_test_packet(&self, queue: usize) -> Result<TestPacketMetrics, RecvError> {
+        let test_tuple = TestPacket::create();
+
+        self.senders[queue].send(InboundSendMessage::TestPacket(test_tuple.0)).await.unwrap();
+
+        Ok(test_tuple.1.await?)
+    }
+
+    // gets size of the queue array in order for the user to give a reasonable queue value in 
+    // enqueue_test_packet
+    pub fn fanout(&self) -> usize{
+        self.senders.len()
     }
 }
 
@@ -88,6 +104,14 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
     pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
         self.sender.send(OutboundProcessorMessage::Packet(packet)).await.unwrap();
     }
+
+    pub async fn enqueue_test_packet(&self, queue: usize) -> Result<TestPacketMetrics, RecvError> {
+        let test_tuple = TestPacket::create();
+
+        self.sender.send(OutboundProcessorMessage::TestPacket(test_tuple.0)).await.unwrap();
+
+        Ok(test_tuple.1.await?)
+    }
 }
 
 
@@ -110,5 +134,13 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
 
     pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
         self.sender.send(OutboundSendMessage::Packet(packet)).await.unwrap();
+    }
+
+    pub async fn enqueue_test_packet(&self, queue: usize) -> Result<TestPacketMetrics, RecvError> {
+        let test_tuple = TestPacket::create();
+
+        self.sender.send(OutboundSendMessage::TestPacket(test_tuple.0)).await.unwrap();
+
+        Ok(test_tuple.1.await?)
     }
 }
