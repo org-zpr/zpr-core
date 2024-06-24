@@ -4,10 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/proto"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/vsapi"
-	"zpr.org/vsx/snio/vsio"
 )
 
 // Mailbox is a system designed to support polling of the visa service for
@@ -101,25 +99,13 @@ func (m *Mailbox) MessagesFor(mboxID string, limit int) ([]*vsapi.PollResponse, 
 	return results, true
 }
 
-func (m *Mailbox) AppendVisaResponseMessage(r *vsio.VSResponse) {
-	if !r.Success {
+func (m *Mailbox) AppendVisaResponseMessage(r *vsapi.VisaResponse) {
+	if r.Status != vsapi.StatusCode_SUCCESS {
 		m.log.Error("attempt to append an error visa-response message to mailbox")
 		return
 	}
-
-	pbuf, err := proto.Marshal(r.Visa.Visa)
-	if err != nil {
-		m.log.WithError(err).Error("failed to marshal visa for mailbox")
-		return
-	}
-
-	vh := &vsapi.VisaHop{
-		VisaPb:   pbuf,
-		HopCount: int32(r.Visa.HopCount),
-	}
-
 	vpr := &vsapi.PollResponse{
-		Visas: []*vsapi.VisaHop{vh},
+		Visas: []*vsapi.VisaHop{r.Visa},
 	}
 	m.AppendMessage(vpr)
 }

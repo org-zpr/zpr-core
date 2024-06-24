@@ -1,14 +1,12 @@
 package agent_test
 
 import (
-	"net"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"zpr.org/vs/pkg/agent"
-	"zpr.org/vsx/snio/vsio"
 )
 
 func NewAgentFromClaims(c map[string]string, exp time.Time) *agent.Agent {
@@ -93,42 +91,6 @@ func TestEPID(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, clms["zpr.addr"], epid.String())
 	}
-}
-
-func TestAgentFromSnioAgent(t *testing.T) {
-	exp := time.Now().Add(10 * time.Minute)
-	sa := &vsio.Agent{
-		Authenticated: true,
-		AuthClaims: map[string]*vsio.AClaim{
-			"zpr.addr": &vsio.AClaim{Cval: "fc00:2000::1", Exp: exp.Unix()},
-			"foo.foo":  &vsio.AClaim{Cval: "fee", Exp: exp.Unix()},
-		},
-		AuthIds:     []string{"foo", "fie"},
-		AuthTokens:  []string{"token1"},
-		AuthExpires: exp.Format(time.RFC3339),
-		AuthAddr:    net.ParseIP("fc00:2000::1"),
-		UnsubClaims: map[string]string{
-			"heehee": "hoho",
-		},
-		Hashval:  "fakehash",
-		Ident:    "fakeident",
-		Provides: []string{"/foo/service"},
-	}
-	aa := agent.NewAgentFromSnioAgent(sa)
-	require.NotNil(t, aa)
-	require.True(t, aa.IsAuthenticated())
-	require.Contains(t, aa.GetAuthedClaims(), "zpr.addr")
-	require.Contains(t, aa.GetAuthedClaims(), "foo.foo")
-	require.Contains(t, aa.GetAuthIDs(), "foo")
-	require.Contains(t, aa.GetAuthIDs(), "fie")
-	require.Contains(t, aa.GetAuthTokens(), "token1")
-	require.Equal(t, exp.Format(time.RFC3339), aa.GetAuthExpires().Format(time.RFC3339))
-	addr, ok := aa.GetZPRID()
-	require.True(t, ok)
-	require.Equal(t, sa.AuthAddr, addr.AsSlice())
-	require.Equal(t, sa.Hashval, aa.Hash())
-	require.Equal(t, sa.Ident, aa.GetIdentity())
-	require.Contains(t, aa.GetProvides(), "/foo/service")
 }
 
 func TestGetTokenKeys(t *testing.T) {

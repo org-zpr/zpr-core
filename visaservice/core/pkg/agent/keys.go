@@ -8,6 +8,8 @@ const (
 	KAttrRole               = "zpr.role"                 // role, eg "node"
 	KAttrSignaturePfx       = "zpr.signature."           // prefix for an agent signature attribute
 	KAttrVisaServiceAdapter = "zpr.visa_service_adapter" // true or false
+	KAttrHash               = "zpr.hash"
+	KAttrConfigID           = "zpr.config_id"
 )
 
 const (

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
-	"zpr.org/vsx/snio/vsio"
 )
 
 const (
@@ -72,48 +71,6 @@ func NewAgentFromUnsubstantiatedClaims(claims map[string]string) *Agent {
 		unubClaims: uc,
 	}
 	a.updateHash()
-	return a
-}
-
-// NewAgentFromSnioAgent populate this agent directly from the protocol buffer struct. No error checking.
-// TODO: remove panic in here
-func NewAgentFromSnioAgent(sa *vsio.Agent) *Agent {
-	var exp time.Time
-	if sa.GetAuthExpires() != "" {
-		tv, err := time.Parse(time.RFC3339, sa.GetAuthExpires())
-		if err != nil {
-			panic(fmt.Sprintf("time format error: %v", err))
-		}
-		exp = tv
-	}
-
-	authedEPID := netip.Addr{}
-	if aa := sa.GetAuthAddr(); aa != nil {
-		authedEPID, _ = netip.AddrFromSlice(aa)
-	}
-
-	a := &Agent{
-		authenticated: sa.GetAuthenticated(),
-		configID:      sa.GetConfigId(),
-		authClaims:    make(map[string]*ClaimV),
-		authorityIDs:  sa.GetAuthIds(),
-		authTokens:    sa.GetAuthTokens(),
-		authExpires:   exp,
-		authedEPID:    authedEPID,
-		unubClaims:    sa.GetUnsubClaims(),
-		hashval:       sa.GetHashval(),
-		ident:         sa.GetIdent(),
-		provides:      sa.GetProvides(),
-	}
-	for k, ac := range sa.GetAuthClaims() {
-		a.authClaims[k] = &ClaimV{
-			V:   ac.GetCval(),
-			Exp: time.Unix(ac.GetExp(), 0),
-		}
-	}
-	if ta, ok := netip.AddrFromSlice(sa.GetTetherAddr()); ok {
-		a.tetherAddr = ta
-	}
 	return a
 }
 

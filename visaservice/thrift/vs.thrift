@@ -102,7 +102,7 @@ struct ConnectRequest {
   2: binary dock_addr, // dock ZPR address
   3: map<string, string> claims,
   4: binary challenge,  // assume this is old protocol buffer challenge-request
-  5: binary challenge_response,  // assume this is old protocol buffer challenge-response
+  5: list<binary> challenge_responses,  // assume this is old protocol buffer challenge-response
 }
 
 
@@ -114,8 +114,9 @@ struct ConnectResponse {
 }
 
 struct VisaHop {
-  1: binary visa_pb, // visa in protocol buffer form
-  2: i32 hop_count
+  1: binary visa_pb, // visa in "old" protocol buffer form
+  2: i32 hop_count,
+  3: i32 issuer_id,   // copied out of visa
 }
 
 struct VisaRevocation {

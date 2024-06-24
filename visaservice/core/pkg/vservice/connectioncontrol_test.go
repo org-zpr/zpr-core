@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vsx/zpl/compiler"
 	"zpr.org/vsx/zpl/fs"
 
-	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"
 
 	"zpr.org/vs/pkg/vservice"
@@ -114,6 +115,12 @@ func makeVSWithPolicy(t *testing.T, pyaml string) (*vservice.VSInst, *policy.Pol
 	return svc, pp
 }
 
+func appendChallengeResponse(t *testing.T, cr *vsapi.ConnectRequest, chalResp *zds.ChallengeResponse) {
+	pbuf, err := proto.Marshal(chalResp)
+	require.Nil(t, err)
+	cr.ChallengeResponses = append(cr.ChallengeResponses, pbuf)
+}
+
 func TestSelectDSPrefixInternal(t *testing.T) {
 	svc, p := makeVSWithPolicy(t, basicPolicyTwoDS)
 	cresp := &zds.ChallengeResponse{
@@ -124,14 +131,11 @@ func TestSelectDSPrefixInternal(t *testing.T) {
 		NonceLen:    0,
 	}
 
-	cr := &vsio.VSConnectRequest{
-		ConId: "con_key_1",
-		// DockAddr:
-		// ReqAddr:
-		Chal:     nil,
-		ChalResp: []*zds.ChallengeResponse{cresp},
-		Claims:   nil,
+	cr := &vsapi.ConnectRequest{
+		ConnectionID:       1,
+		ChallengeResponses: nil,
 	}
+	appendChallengeResponse(t, cr, cresp)
 
 	adom, err := svc.SelectValidateDSPrefix(p, cr)
 	require.Nil(t, err)
@@ -147,14 +151,11 @@ func TestSelectDSPrefixExternal(t *testing.T) {
 		NonceLen:    0,
 	}
 
-	cr := &vsio.VSConnectRequest{
-		ConId: "con_key_1",
-		//DockAddr: netip.Addr{},
-		//ReqAddr:        snip.ZPRID{},
-		Chal:     nil,
-		ChalResp: []*zds.ChallengeResponse{cresp},
-		Claims:   nil,
+	cr := &vsapi.ConnectRequest{
+		ConnectionID: 1,
+		Claims:       nil,
 	}
+	appendChallengeResponse(t, cr, cresp)
 
 	adom, err := svc.SelectValidateDSPrefix(p, cr)
 	require.Nil(t, err)
@@ -172,16 +173,13 @@ func TestSelectDSPrefixInconsistentAuthority(t *testing.T) {
 		NonceLen:    0,
 	}
 
-	cr := &vsio.VSConnectRequest{
-		ConId: "con_key_1",
-		//DockAddr: netip.Addr{},
-		//ReqAddr:        snip.ZPRID{},
-		Chal:     nil,
-		ChalResp: []*zds.ChallengeResponse{cresp},
+	cr := &vsapi.ConnectRequest{
+		ConnectionID: 1,
 		Claims: map[string]string{
 			"authority": "ca0", // Will accept 'authority' or 'zpr.authority'
 		},
 	}
+	appendChallengeResponse(t, cr, cresp)
 
 	// In this case it will fail because actually the RespSpect determines
 	// if we are to use EXTERNAL type authority. And ca0 is an internal type.
@@ -201,14 +199,12 @@ func TestSelectDSPrefixMultipleMixed(t *testing.T) {
 		RespSpec: "cert:x509:?cn=goo.goo",
 	}
 
-	cr := &vsio.VSConnectRequest{
-		ConId: "con_key_1",
-		// DockAddr: netip.Addr{},
-		// ReqAddr:        snip.ZPRID{},
-		Chal:     nil,
-		ChalResp: []*zds.ChallengeResponse{cresp1, cresp2},
-		Claims:   nil,
+	cr := &vsapi.ConnectRequest{
+		ConnectionID: 1,
+		Claims:       nil,
 	}
+	appendChallengeResponse(t, cr, cresp1)
+	appendChallengeResponse(t, cr, cresp2)
 
 	adom, err := svc.SelectValidateDSPrefix(p, cr)
 	require.Nil(t, err)
@@ -225,14 +221,12 @@ func TestSelectDSPrefixMultipleInternal(t *testing.T) {
 		RespSpec: "cert:x509:?cn=goo.goo",
 	}
 
-	cr := &vsio.VSConnectRequest{
-		ConId: "con_key_1",
-		// DockZPRAddr: netip.Addr{},
-		// EpID:        snip.ZPRID{},
-		Chal:     nil,
-		ChalResp: []*zds.ChallengeResponse{cresp1, cresp2},
-		Claims:   nil,
+	cr := &vsapi.ConnectRequest{
+		ConnectionID: 1,
+		Claims:       nil,
 	}
+	appendChallengeResponse(t, cr, cresp1)
+	appendChallengeResponse(t, cr, cresp2)
 
 	adom, err := svc.SelectValidateDSPrefix(p, cr)
 	require.Nil(t, err)
@@ -249,14 +243,12 @@ func TestSelectDSPrefixMultipleInternalWithAuth(t *testing.T) {
 		RespSpec: "cert:x509:ca99?cn=goo.goo",
 	}
 
-	cr := &vsio.VSConnectRequest{
-		ConId: "con_key_1",
-		//DockZPRAddr: netip.Addr{},
-		//EpID:        snip.ZPRID{},
-		Chal:     nil,
-		ChalResp: []*zds.ChallengeResponse{cresp1, cresp2},
-		Claims:   nil,
+	cr := &vsapi.ConnectRequest{
+		ConnectionID: 1,
+		Claims:       nil,
 	}
+	appendChallengeResponse(t, cr, cresp1)
+	appendChallengeResponse(t, cr, cresp2)
 
 	adom, err := svc.SelectValidateDSPrefix(p, cr)
 	require.Nil(t, err)
@@ -273,14 +265,12 @@ func TestSelectDSPrefixMultipleExternal(t *testing.T) {
 		RespSpec: AuthAttrExtOpenID,
 	}
 
-	cr := &vsio.VSConnectRequest{
-		ConId: "con_key_1",
-		//DockZPRAddr: netip.Addr{},
-		//EpID:        snip.ZPRID{},
-		Chal:     nil,
-		ChalResp: []*zds.ChallengeResponse{cresp1, cresp2},
-		Claims:   nil,
+	cr := &vsapi.ConnectRequest{
+		ConnectionID: 1,
+		Claims:       nil,
 	}
+	appendChallengeResponse(t, cr, cresp1)
+	appendChallengeResponse(t, cr, cresp2)
 
 	adom, err := svc.SelectValidateDSPrefix(p, cr)
 	require.Nil(t, err)

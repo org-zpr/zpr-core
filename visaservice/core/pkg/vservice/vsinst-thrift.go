@@ -14,12 +14,10 @@ import (
 	"net/netip"
 	"time"
 
-	"google.golang.org/protobuf/proto"
 	"zpr.org/vs/pkg/agent"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vsapi"
-	"zpr.org/vsx/snio/vsio"
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/google/uuid"
@@ -136,6 +134,7 @@ func verifyHMAC(pubKey *rsa.PublicKey, nonce []byte, sid int32, timestamp int64,
 	return nil
 }
 
+/* XXX
 func vsapiAgentToVsioAgent(a *vsapi.Agent) *vsio.Agent {
 
 	vsa := new(vsio.Agent)
@@ -157,6 +156,7 @@ func vsapiAgentToVsioAgent(a *vsapi.Agent) *vsio.Agent {
 
 	return vsa
 }
+*/
 
 func vsapiTrafficDescToIpTraffic(pd *vsapi.TrafficDesc) *snip.Traffic {
 	tcpflags := uint16(pd.GetFlags())
@@ -480,7 +480,7 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 	if !ok {
 		return nil, errors.New("invalid tether address on visa request")
 	}
-	vsioResp, err := vs.doRequestVisa(ctx, tetherAddr, vsapiTrafficDescToIpTraffic(traffic), 0, pver)
+	vsResp, err := vs.doRequestVisa(ctx, tetherAddr, vsapiTrafficDescToIpTraffic(traffic), 0, pver)
 
 	if err != nil {
 		e := err.Error()
@@ -490,19 +490,5 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 		}, nil
 	}
 
-	pbuf, err := proto.Marshal(vsioResp.Visa.Visa)
-	if err != nil {
-		vs.log.WithError(err).Error("failed to marshal visa")
-		return nil, fmt.Errorf("internal error")
-	}
-	vhop := vsapi.VisaHop{
-		VisaPb:   pbuf,
-		HopCount: int32(vsioResp.Visa.HopCount),
-	}
-	resp := &vsapi.VisaResponse{
-		Status: vsapi.StatusCode_SUCCESS,
-		Visa:   &vhop,
-	}
-
-	return resp, nil
+	return vsResp, nil
 }

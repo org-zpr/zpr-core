@@ -79,6 +79,7 @@ TmgyWDoy+cjbuozxQCbf3fbrq/zRyC5Y288=
 -----END CERTIFICATE-----
 `
 
+/* XXX
 func ipTrafficToSnioPacketDesc(t *snip.Traffic) *vsio.PacketDesc {
 	return &vsio.PacketDesc{
 		Source:   t.SrcAddr.AsSlice(),
@@ -93,6 +94,7 @@ func ipTrafficToSnioPacketDesc(t *snip.Traffic) *vsio.PacketDesc {
 		Size:     uint32(t.Size),
 	}
 }
+*/
 
 func ipTrafficToVsapiTrafficDesc(t *snip.Traffic) *vsapi.TrafficDesc {
 	return &vsapi.TrafficDesc{
@@ -125,25 +127,6 @@ func mustUnmarshalVisa(pb []byte) *vsio.Visa {
 		panic(err)
 	}
 	return &visaObj
-}
-
-// TestDS is a test implementation of DirectoryService used by visaservice.
-type TestDS struct {
-	recs map[string]*vsio.Agent
-}
-
-// Implements DirectoryService interface
-func (tds *TestDS) AgentAtContactAddr(a netip.Addr) (*vsio.Agent, error) {
-	rec, ok := tds.recs[a.String()]
-	if !ok {
-		return nil, fmt.Errorf("agent record not found: %v", a.String())
-	}
-	return rec, nil
-}
-
-// Implements DirectoryService interface
-func (tds *TestDS) ZPRAddrForService(string) []netip.Addr {
-	panic("TestDS.ZPRAddrForService not implemented")
 }
 
 type TestAS struct{}

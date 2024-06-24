@@ -14,6 +14,7 @@ import (
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/proto"
 
 	"zpr.org/vs/pkg/agent"
 	snip "zpr.org/vs/pkg/ip"
@@ -369,7 +370,7 @@ func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration,
 		} else {
 			vs.vtable.mtx.Lock()
 			if rec, ok := vs.vtable.table[ve.v.GetIssuerId()]; ok {
-				rec.successor = resp.Visa.Visa.GetIssuerId()
+				rec.successor = uint32(resp.Visa.IssuerID)
 			} else {
 				vs.log.Error("failed to locate predecessor visa in table", "issuerID", ve.v.GetIssuerId())
 			}
@@ -441,7 +442,7 @@ func (vs *VSInst) expireAllVisas(config uint64) {
 // TODO: We do not pay attention to the context. If the context expires the
 //
 //	caller (dock, for example) will ignore the response.
-func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktData *snip.Traffic, minDuration time.Duration, expectedPolicyID uint64) (*vsio.VSResponse, error) {
+func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktData *snip.Traffic, minDuration time.Duration, expectedPolicyID uint64) (*vsapi.VisaResponse, error) {
 	// Packet will either be an opening request of a client to a service, or a response
 	// from a service to a client.  The addresses in the packet will be contact addresses.
 	//
@@ -606,13 +607,20 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 
 	// TODO: Sign visa
 
-	resp := &vsio.VSResponse{
-		Success: true,
-		Visa: &vsio.VSVisaHop{
-			Visa:     vent.v,
-			HopCount: uint32(vs.hopCount),
-		},
+	resp := new(vsapi.VisaResponse)
+	resp.Status = vsapi.StatusCode_SUCCESS
+
+	pbuf, err := proto.Marshal(vent.v)
+	if err != nil {
+		vs.log.WithError(err).Error("failed to marshal visa for mailbox")
+		return nil, fmt.Errorf("internal error")
 	}
+	resp.Visa = &vsapi.VisaHop{
+		VisaPb:   pbuf,
+		HopCount: int32(vs.hopCount),
+		IssuerID: int32(vent.v.IssuerId),
+	}
+
 	vs.visaCreated(vent.v, visaExpiration, pktData, expFlags.String(), tetherAddr)
 	if time.Until(visaExpiration) < (30 * time.Second) {
 		vs.log.Warn("visa with very short TTL", "visaID", vent.v.IssuerId, "TTL", time.Until(visaExpiration).String())

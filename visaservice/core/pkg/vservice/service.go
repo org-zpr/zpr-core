@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/protobuf/proto"
 
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
@@ -21,7 +20,6 @@ import (
 
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice/auth"
-	"zpr.org/vsx/snio/vsio"
 
 	"zpr.org/vsx/polio"
 )
@@ -277,7 +275,7 @@ func (s *VisaService) installPolicyWithVisasForNodes(bootstrap bool, cp *polio.C
 	*/
 
 	// Create a visa-service visa so NODE can talk to US.
-	var visas []*vsio.Visa
+	var visas []*vsapi.VisaHop
 
 	for _, nodeAddr := range nodeAddrs {
 		s.log.Info("generating a new visa-service visa for the node->VS", "node_addr_src", nodeAddr, "vs_addr_dest", s.myAddr)
@@ -285,10 +283,10 @@ func (s *VisaService) installPolicyWithVisasForNodes(bootstrap bool, cp *polio.C
 		vsr, err := s.service.inst.doRequestVisa(context.Background(), nodeAddr, pktData, 0, pp.VersionNumber())
 		if err != nil {
 			s.log.WithError(err).Warn("failed to generate a visa-service visa for the node", "node_addr", nodeAddr)
-		} else if !vsr.Success {
-			s.log.Warn("failed to generate a visa-service visa for the node", "node", nodeAddr, "reason", vsr.ErrorMsg)
+		} else if vsr.Status != vsapi.StatusCode_SUCCESS {
+			s.log.Warn("failed to generate a visa-service visa for the node", "node", nodeAddr, "reason", vsr.Reason)
 		} else {
-			visas = append(visas, vsr.Visa.Visa)
+			visas = append(visas, vsr.Visa)
 		}
 	}
 
@@ -300,21 +298,11 @@ func (s *VisaService) installPolicyWithVisasForNodes(bootstrap bool, cp *polio.C
 	//   figure out how the visa-service tells node about it.
 	//
 
-	// For now dumping a visa in the mailbox.
-
-	var vsapiVisas []*vsapi.VisaHop
-	for _, sniov := range visas {
-		pbuf, err := proto.Marshal(sniov)
-		if err != nil {
-			vsapiVisas = append(vsapiVisas, &vsapi.VisaHop{VisaPb: pbuf, HopCount: 1})
-		} else {
-			s.log.WithError(err).Error("failed to marshal a visa -- skipping", "id", sniov.IssuerId)
-		}
-	}
-	if len(vsapiVisas) > 0 {
+	if len(visas) > 0 {
 		pr := vsapi.PollResponse{
-			Visas: vsapiVisas,
+			Visas: visas,
 		}
+		// TODO: Should we set hopcount to 1?
 		s.service.inst.PushVisa(&pr)
 	}
 
