@@ -105,7 +105,7 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
         self.sender.send(OutboundProcessorMessage::Packet(packet)).await.unwrap();
     }
 
-    pub async fn enqueue_test_packet(&self, queue: usize) -> Result<TestPacketMetrics, RecvError> {
+    pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
         let test_tuple = TestPacket::create();
 
         self.sender.send(OutboundProcessorMessage::TestPacket(test_tuple.0)).await.unwrap();
@@ -136,9 +136,11 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
         self.sender.send(OutboundSendMessage::Packet(packet)).await.unwrap();
     }
 
-    pub async fn enqueue_test_packet(&self, queue: usize) -> Result<TestPacketMetrics, RecvError> {
+    pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
         let test_tuple = TestPacket::create();
 
         self.sender.send(OutboundSendMessage::TestPacket(test_tuple.0)).await.unwrap();
+
+        Ok(test_tuple.1.await?)
     }
 }
