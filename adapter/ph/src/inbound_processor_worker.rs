@@ -37,6 +37,9 @@ async fn worker<'pktbuf>(
                         packet_type =>
                             panic!("unhandled inbound packet type {}", packet_type.0)
                     }
+                },
+                InboundProcessorMessage::TestPacket(pkt) => {
+                    pkt.acknowledge(queue.len());
                 }
             }
             

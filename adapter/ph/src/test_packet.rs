@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 use tokio::sync::oneshot::{Sender, Receiver, channel};
 
+// #[derive(Copy)]
 pub struct TestPacket {
     time: Instant,
     sender: Sender<TestPacketMetrics>,
@@ -26,7 +27,6 @@ impl TestPacket {
         let test_metrics = TestPacketMetrics { in_queue, queue_depth };
 
         let _ = self.sender.send(test_metrics);
-
     }
 
 }

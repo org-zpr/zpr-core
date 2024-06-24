@@ -1,6 +1,7 @@
 use tokio::sync::mpsc;
 use crate::packet::Packet;
-
+use crate::test_packet::*;
+// use std::io::Error;
 // Queues (i.e., frontend interface) for each stage of the system.
 
 // "Inbound" refers to the dock->adapter direction (i.e., inbound to this host).
@@ -13,7 +14,8 @@ use crate::packet::Packet;
 // CPU-intensive postprocessing (e.g. signature verification).
 // This may morph into more or fewer (i.e. zero) stages depending on future requirements.
 pub enum InboundProcessorMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>)
+    Packet(Packet<'pktbuf>),
+    TestPacket(TestPacket)
 }
 
 pub struct InboundProcessor<'pktbuf> {
@@ -30,13 +32,19 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
     pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
         self.sender.send(InboundProcessorMessage::Packet(packet)).await.unwrap();
     }
+
+    // pub async fn enqueue_test_packet(&self, test_packet: TestPacket) -> Result<TestPacketMetrics, Error>{
+    //     self.sender.send(InboundProcessorMessage::TestPacket(test_packet)).await.unwrap();
+    //     test_packet
+    // }
 }
 
 
 // InboundSend is responsible for emitting decapsulated agent packets on the
 // host's TUN interface.
 pub enum InboundSendMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>)
+    Packet(Packet<'pktbuf>),
+    TestPacket(TestPacket)
 }
 
 pub struct InboundSend<'pktbuf> {
