@@ -51,7 +51,7 @@ pub struct PacketMetadata {
     dst_port: u16,
     protocol: u8,
     l3_type: L3Type,
-    padding: u16,
+    _padding: u16,
 }
 
 impl PacketMetadata {
@@ -77,10 +77,6 @@ impl PacketMetadata {
         self.src_address = src_addr;
         self.dst_address = dst_addr;
         self.l3_type = L3Type::Ipv6;
-    }
-
-    pub fn get_length(&self) -> usize {
-        self.len
     }
 
     pub fn get_src_address(&self) -> IpAddress {

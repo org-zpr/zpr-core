@@ -107,14 +107,15 @@ fn classify_ipv4(metadata: &mut packet::PacketMetadata, body: &[u8]) -> Classifi
         return ClassifierResult::LengthError;
     }
 
+    metadata.set_addresses_v4(ipv4_header.src_address, ipv4_header.dst_address);
+
     const FRAGMENT_OFFSET_MASK: u16 = 0x1FFF;
-    const MORE_FRAGMENTS_MASK: u16 = 0x4000;
+    const MORE_FRAGMENTS_MASK: u16 = 0x2000;
     let frag_offset = NetworkEndian::read_u16(&ipv4_header.frag_offset);
     if frag_offset & FRAGMENT_OFFSET_MASK != 0 {
+        metadata.set_protocol(ipv4_header.proto);
         return ClassifierResult::SubsequentFragment;
     }
-
-    metadata.set_addresses_v4(ipv4_header.src_address, ipv4_header.dst_address);
 
     let offset = usize::from(header_length * 4);
     let ret_code = classify_next_header(metadata, &body[offset..], ipv4_header.proto);
@@ -308,6 +309,70 @@ mod tests {
     }
 
     #[test]
+    fn test_v4_tcp_first_frag() {
+        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
+        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        #[rustfmt::skip]
+        let packet_data =
+            [
+                0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x20, 0x00,
+                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+                0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x50, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
+            ];
+        packet.alloc_zeroed_headroom(packet_data.len());
+        packet.body_mut().copy_from_slice(&packet_data);
+
+        assert_eq!(ClassifierResult::FirstFragment, classify(&mut packet));
+
+        let metadata = packet.metadata();
+        assert_eq!(
+            [0x04, 0x03, 0x02, 0x01],
+            metadata.get_dst_address().read_as_v4()
+        );
+        assert_eq!(
+            [0x01, 0x02, 0x03, 0x04],
+            metadata.get_src_address().read_as_v4()
+        );
+        assert_eq!(0x14u16, metadata.get_src_port_hbo());
+        assert_eq!(0x50u16, metadata.get_dst_port_hbo());
+        assert_eq!(6u8, metadata.get_protocol());
+    }
+
+    #[test]
+    fn test_v4_tcp_subsequent_frag() {
+        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
+        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        #[rustfmt::skip]
+        let packet_data =
+            [
+                0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0xC0,
+                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+                0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x50, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
+            ];
+        packet.alloc_zeroed_headroom(packet_data.len());
+        packet.body_mut().copy_from_slice(&packet_data);
+
+        assert_eq!(ClassifierResult::SubsequentFragment, classify(&mut packet));
+
+        let metadata = packet.metadata();
+        assert_eq!(
+            [0x04, 0x03, 0x02, 0x01],
+            metadata.get_dst_address().read_as_v4()
+        );
+        assert_eq!(
+            [0x01, 0x02, 0x03, 0x04],
+            metadata.get_src_address().read_as_v4()
+        );
+        assert_eq!(0x0u16, metadata.get_src_port_hbo());
+        assert_eq!(0x0u16, metadata.get_dst_port_hbo());
+        assert_eq!(6u8, metadata.get_protocol());
+    }
+
+    #[test]
     fn test_v4_truncated_l3() {
         let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
         let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
@@ -428,6 +493,101 @@ mod tests {
         assert_eq!(43424u16, metadata.get_src_port_hbo());
         assert_eq!(8080u16, metadata.get_dst_port_hbo());
         assert_eq!(6u8, metadata.get_protocol());
+    }
+
+    #[test]
+    fn test_v6_first_fragment() {
+        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
+        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 128);
+        #[rustfmt::skip]
+        let packet_data = [
+            0x60, 0x02, 0x12, 0x89, 0x05, 0xb0, 0x2c, 0x40,
+            0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x01,
+            0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00,
+            0x11, 0x00, 0x00, 0x01, 0xf8, 0x8e, 0xb4, 0x66, 
+            0x18, 0xdb, 0x18, 0xdb, 0x15, 0x0b, 0x79, 0x16,
+            0x06, 0xfd, 0x14, 0xff, 0x07, 0x29, 0x08, 0x07,
+            0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, 0x08,
+            0x07, 0x74, 0x65, 0x73, 0x74, 0x41, 0x70, 0x70,
+            0x08, 0x01, 0x31, 0x08, 0x07, 0x74, 0x65, 0x73,
+            0x74, 0x41, 0x70, 0x70, 0x08, 0x09, 0xfd, 0x00,
+            0x00, 0x01, 0x4f, 0x23, 0x68, 0xc7, 0x8e, 0x14,
+            0x04, 0x19, 0x02, 0x27, 0x10, 0x15, 0xfd, 0x13,
+            0x88, 0x68, 0x68, 0x68, 0x68, 0x68, 0x68, 0x68,
+        ];
+        packet.alloc_zeroed_headroom(packet_data.len());
+        packet.body_mut().copy_from_slice(&packet_data);
+
+        assert_eq!(ClassifierResult::FirstFragment, classify(&mut packet));
+
+        let metadata = packet.metadata();
+        assert_eq!(
+            packet::IpAddress {
+                v6: [
+                    0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x11, 0x00, 0x00
+                ]
+            },
+            metadata.get_dst_address()
+        );
+        assert_eq!(
+            packet::IpAddress {
+                v6: [
+                    0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x10, 0x01
+                ]
+            },
+            metadata.get_src_address()
+        );
+        assert_eq!(6363u16, metadata.get_dst_port_hbo());
+        assert_eq!(6363u16, metadata.get_src_port_hbo());
+        assert_eq!(17u8, metadata.get_protocol());
+    }
+
+    #[test]
+    fn test_v6_subsequent_fragment() {
+        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
+        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 128);
+        #[rustfmt::skip]
+        let packet_data = [
+            0x60, 0x02, 0x12, 0x89, 0x05, 0xb0, 0x2c, 0x40,
+            0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x01,
+            0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00,
+            0x11, 0x00, 0x05, 0xa9, 0xf8, 0x8e, 0xb4, 0x66, 
+            0x68, 0x68, 0x68, 0x68, 0x68, 0x68, 0x68, 0x68,
+            0x68, 0x68, 0x68, 0x68, 0x68, 0x68, 0x68, 0x68,
+        ];
+        packet.alloc_zeroed_headroom(packet_data.len());
+        packet.body_mut().copy_from_slice(&packet_data);
+
+        assert_eq!(ClassifierResult::SubsequentFragment, classify(&mut packet));
+
+        let metadata = packet.metadata();
+        assert_eq!(
+            packet::IpAddress {
+                v6: [
+                    0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x11, 0x00, 0x00
+                ]
+            },
+            metadata.get_dst_address()
+        );
+        assert_eq!(
+            packet::IpAddress {
+                v6: [
+                    0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x10, 0x01
+                ]
+            },
+            metadata.get_src_address()
+        );
+        assert_eq!(0u16, metadata.get_dst_port_hbo());
+        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(44u8, metadata.get_protocol());
     }
 
     #[test]
