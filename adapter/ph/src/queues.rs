@@ -140,7 +140,5 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
         let test_tuple = TestPacket::create();
 
         self.sender.send(OutboundSendMessage::TestPacket(test_tuple.0)).await.unwrap();
-
-        Ok(test_tuple.1.await?)
     }
 }

@@ -22,7 +22,6 @@ async fn worker<'pktbuf>(
                 InboundProcessorMessage::Packet(pkt) => { handle_packets(pkt, asm).await; },
                 InboundProcessorMessage::TestPacket(pkt) => { pkt.acknowledge(queue.len()); }
             }
-            
         }
     }
 }

@@ -30,6 +30,7 @@ async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
             match msg {
                 InboundSendMessage::Packet(msg) => Some(msg.destroy()),
                 InboundSendMessage::TestPacket(msg) => { msg.acknowledge(queue.len()); None }
+
             }
         ));
     }
