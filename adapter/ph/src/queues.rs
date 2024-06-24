@@ -1,7 +1,7 @@
 use tokio::sync::mpsc;
 use crate::packet::Packet;
 use crate::test_packet::*;
-// use std::io::Error;
+use std::io::Error;
 // Queues (i.e., frontend interface) for each stage of the system.
 
 // "Inbound" refers to the dock->adapter direction (i.e., inbound to this host).
@@ -33,7 +33,8 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
         self.sender.send(InboundProcessorMessage::Packet(packet)).await.unwrap();
     }
 
-    // pub async fn enqueue_test_packet(&self, test_packet: TestPacket) -> Result<TestPacketMetrics, Error>{
+    // pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, Error> {
+    //     test_packet = 
     //     self.sender.send(InboundProcessorMessage::TestPacket(test_packet)).await.unwrap();
     //     test_packet
     // }
@@ -69,7 +70,8 @@ impl<'pktbuf> InboundSend<'pktbuf> {
 // CPU-intensive preprocessing (e.g. signature generation).
 // This may morph into more or fewer (i.e. zero) stages depending on future requirements.
 pub enum OutboundProcessorMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>)
+    Packet(Packet<'pktbuf>),
+    TestPacket(TestPacket)
 }
 
 pub struct OutboundProcessor<'pktbuf> {
@@ -91,7 +93,8 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
 
 // OutboundSend is responsible for sending encapsulated agent packets to the dock.
 pub enum OutboundSendMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>)
+    Packet(Packet<'pktbuf>),
+    TestPacket(TestPacket)
 }
 
 pub struct OutboundSend<'pktbuf> {

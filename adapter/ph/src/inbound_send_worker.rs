@@ -24,13 +24,13 @@ async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
         for msg in &messages {
             match msg {
                 InboundSendMessage::Packet(msg) => { async_fd_write_vectored(tun_fd, &[IoSlice::new(msg.body())]).await.unwrap(); },// TODO: error handling
-                InboundSendMessage::TestPacket(msg) => { &msg.acknowledge(queue.len()); }
+                InboundSendMessage::TestPacket(_msg) => { () }
             };
         }
         asm.buffer_stack.put_buffers(messages.drain(..).filter_map(|msg| 
             match msg {
                 InboundSendMessage::Packet(msg) => Some(msg.destroy()),
-                InboundSendMessage::TestPacket(_msg) => None
+                InboundSendMessage::TestPacket(msg) => { msg.acknowledge(queue.len()); None }
             }
         ));
     }

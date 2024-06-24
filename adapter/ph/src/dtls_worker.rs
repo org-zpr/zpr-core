@@ -42,7 +42,8 @@ async fn worker<'pktbuf>(
                     OutboundSendMessage::Packet(pkt) => {
                         ssl_write.write(pkt.body()).await.unwrap();  // TODO: error handling
                         asm.buffer_stack.put_buffer(pkt.destroy());
-                    }
+                    },
+                    OutboundSendMessage::TestPacket(pkt) => pkt.acknowledge(outbound_queue.len())
                 }
                 
             }

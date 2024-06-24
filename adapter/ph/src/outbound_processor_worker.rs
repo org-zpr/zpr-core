@@ -28,7 +28,8 @@ async fn worker<'pktbuf>(
 
                     // forward encapsulated packet on
                     asm.outbound_send.enqueue_packet(pkt).await;
-                }
+                },
+                OutboundProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len()) 
             }
         }
     }
