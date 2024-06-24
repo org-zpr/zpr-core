@@ -27,7 +27,7 @@ async fn worker<Fd: AsFd + AsRawFd + Send + Sync>(
         for buf in bufs.drain(..) {
             let mut pkt = Packet::new(buf, OUTBOUND_PACKET_HEADROOM);
             async_fd_read_buf(tun_fd, &mut pkt).await.unwrap();
-            asm.outbound_processor.enqueue_packet(pkt).await;
+            asm.outbound_processor.enqueue(pkt).await;
         }
     }
 }

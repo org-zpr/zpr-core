@@ -6,7 +6,6 @@ use crate::assembly::Assembly;
 use crate::packet::{self, Packet};
 use crate::udp_stream::UdpStream;
 use crate::counters_enum::CounterType;
-use crate::OutboundSendMessage;
 
 // NOTE: Packet buffers *must* be at least 16384 bytes, to match TLS maximum
 // record size.  This is because OpenSSL read functions provide no way to
@@ -19,7 +18,7 @@ const _: () = assert!(packet::PACKET_BODY_BUFFER_MAX_SIZE >= 16384, "packet buff
 async fn worker<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ssl_stream: &mut SslStream<UdpStream<'_>>,
-    outbound_queue: &mut mpsc::Receiver<OutboundSendMessage<'pktbuf>>
+    outbound_queue: &mut mpsc::Receiver<Packet<'pktbuf>>
 ) {
     let (mut ssl_read, mut ssl_write) = tokio::io::split(ssl_stream);
 
@@ -31,20 +30,15 @@ async fn worker<'pktbuf>(
                 ssl_read.read_buf(&mut pkt).await.unwrap();
                 asm.counters[CounterType::InPacksRec].increment();
                 // NOTE: There is no way to detect a too-large packet.  See above.
-                asm.inbound_processor.enqueue_packet(pkt).await;
+                asm.inbound_processor.enqueue(pkt).await;
             }
         },
 
         async {
             loop {
                 let out_pkt = outbound_queue.recv().await.unwrap();
-                match out_pkt {
-                    OutboundSendMessage::Packet(pkt) => {
-                        ssl_write.write(pkt.body()).await.unwrap();  // TODO: error handling
-                        asm.buffer_stack.put_buffer(pkt.destroy());
-                    }
-                }
-                
+                ssl_write.write(out_pkt.body()).await.unwrap();  // TODO: error handling
+                asm.buffer_stack.put_buffer(out_pkt.destroy());
             }
         }
     };
@@ -53,7 +47,7 @@ async fn worker<'pktbuf>(
 pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
     asm: AsmRef,
     mut ssl_stream: SslStream<UdpStream<'pktbuf>>,
-    mut outbound_queue: mpsc::Receiver<OutboundSendMessage<'pktbuf>>)
+    mut outbound_queue: mpsc::Receiver<Packet<'pktbuf>>)
 -> impl Future<Output = ()> + Send + 'pktbuf
     where AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync
 {
