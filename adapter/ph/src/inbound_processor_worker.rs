@@ -32,7 +32,8 @@ async fn worker<'pktbuf>(
                     pkt.advance(std::mem::size_of::<ZdpHeader>());
 
                     if config.mode == PhMode::Server {
-                        classify(&mut pkt);
+                        // TODO: drop error packets
+                        let _ = classify(&mut pkt);
                     }
 
                     // send out decapsulated packet

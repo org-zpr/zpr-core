@@ -1,6 +1,5 @@
 use crate::config;
 use bytes::buf;
-use open_enum::open_enum;
 use std::mem::{size_of, size_of_val};
 use zerocopy::{AsBytes, ByteOrder, FromBytes, FromZeroes, NetworkEndian};
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, KnownLayout, Unaligned};
@@ -14,7 +13,9 @@ pub struct Packet<'buf> {
 
 pub const IPV6_ADDRESS_SIZE: usize = 16;
 
-#[derive(AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned, Copy, Clone, Hash, Debug, PartialEq)]
+#[derive(
+    AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned, Copy, Clone, Hash, Debug, PartialEq,
+)]
 #[repr(transparent)]
 pub struct IpAddress {
     pub v6: [u8; IPV6_ADDRESS_SIZE],
@@ -22,21 +23,21 @@ pub struct IpAddress {
 
 impl IpAddress {
     pub fn set_from_v4(&mut self, v4_address: [u8; 4]) {
-        self.v6[0..4].copy_from_slice(&v4_address)
+        self.v6[12..16].copy_from_slice(&v4_address);
+        self.v6[10] = 0xff;
+        self.v6[11] = 0xff
     }
 
     pub fn read_as_v4(&self) -> &[u8] {
-        &self.v6[0..4]
+        &self.v6[12..16]
     }
 }
 
-#[open_enum]
-#[derive(AsBytes, FromZeroes, FromBytes)]
-#[repr(u8)]
-pub enum L3Type {
-    Non_ip,
-    Ipv4,
-    Ipv6,
+pub fn v4_to_v6_address(v4_address: [u8; 4]) -> IpAddress {
+    // Uses standard v4 to v6 conversion
+    let mut v6_address = IpAddress::new_zeroed();
+    v6_address.set_from_v4(v4_address);
+    v6_address
 }
 
 #[derive(AsBytes, FromZeroes, FromBytes)]
@@ -50,8 +51,7 @@ pub struct PacketMetadata {
     src_port: u16,
     dst_port: u16,
     protocol: u8,
-    l3_type: L3Type,
-    _padding: u16,
+    _padding: [u8; 3],
 }
 
 impl PacketMetadata {
@@ -67,16 +67,9 @@ impl PacketMetadata {
         self.protocol = proto
     }
 
-    pub fn set_addresses_v4(&mut self, src_addr: [u8; 4], dst_addr: [u8; 4]) {
-        self.src_address.set_from_v4(src_addr);
-        self.dst_address.set_from_v4(dst_addr);
-        self.l3_type = L3Type::Ipv4;
-    }
-
-    pub fn set_addresses_v6(&mut self, src_addr: IpAddress, dst_addr: IpAddress) {
+    pub fn set_addresses(&mut self, src_addr: IpAddress, dst_addr: IpAddress) {
         self.src_address = src_addr;
         self.dst_address = dst_addr;
-        self.l3_type = L3Type::Ipv6;
     }
 
     pub fn get_src_address(&self) -> IpAddress {

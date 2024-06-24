@@ -9,7 +9,6 @@ pub enum ClassifierResult {
     OK,
     NonIP,
     UnclassifiedL4,
-    LengthError,
     FirstFragment,
     SubsequentFragment,
 }
@@ -70,29 +69,38 @@ struct UDPHeader {
     pub checksum: [u8; 2],
 }
 
-pub fn classify(packet: &mut packet::Packet) -> ClassifierResult {
+pub fn classify(packet: &mut packet::Packet) -> Result<ClassifierResult, &'static str> {
     let (metadata, body) = packet.metadata_mut_and_body();
     classify_zdp(metadata, body)
 }
 
-fn classify_zdp(metadata: &mut packet::PacketMetadata, body: &[u8]) -> ClassifierResult {
+fn classify_zdp(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+) -> Result<ClassifierResult, &'static str> {
     classify_l3(metadata, body)
 }
 
-fn classify_l3(metadata: &mut packet::PacketMetadata, body: &[u8]) -> ClassifierResult {
+fn classify_l3(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+) -> Result<ClassifierResult, &'static str> {
     let ip_version = (body[0] & IP_VERSION_MASK) >> 4;
 
     match ip_version {
         4 => classify_ipv4(metadata, body),
         6 => classify_ipv6(metadata, body),
-        _ => return ClassifierResult::NonIP,
+        _ => return Ok(ClassifierResult::NonIP),
     }
 }
 
-fn classify_ipv4(metadata: &mut packet::PacketMetadata, body: &[u8]) -> ClassifierResult {
+fn classify_ipv4(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+) -> Result<ClassifierResult, &'static str> {
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<IPv4Header>() > body.len() {
-        return ClassifierResult::LengthError;
+        return Err("Packet length error");
     }
 
     let header_bytes = &body[..size_of::<IPv4Header>()];
@@ -104,39 +112,45 @@ fn classify_ipv4(metadata: &mut packet::PacketMetadata, body: &[u8]) -> Classifi
         || header_length < 5
         || u16::from(header_length * 4) > total_length
     {
-        return ClassifierResult::LengthError;
+        return Err("Packet length error");
     }
 
-    metadata.set_addresses_v4(ipv4_header.src_address, ipv4_header.dst_address);
+    metadata.set_addresses(
+        packet::v4_to_v6_address(ipv4_header.src_address),
+        packet::v4_to_v6_address(ipv4_header.dst_address),
+    );
 
     const FRAGMENT_OFFSET_MASK: u16 = 0x1FFF;
     const MORE_FRAGMENTS_MASK: u16 = 0x2000;
     let frag_offset = NetworkEndian::read_u16(&ipv4_header.frag_offset);
     if frag_offset & FRAGMENT_OFFSET_MASK != 0 {
         metadata.set_protocol(ipv4_header.proto);
-        return ClassifierResult::SubsequentFragment;
+        return Ok(ClassifierResult::SubsequentFragment);
     }
 
     let offset = usize::from(header_length * 4);
     let ret_code = classify_next_header(metadata, &body[offset..], ipv4_header.proto);
 
     if frag_offset & MORE_FRAGMENTS_MASK != 0 {
-        return ClassifierResult::FirstFragment;
+        return Ok(ClassifierResult::FirstFragment);
     }
 
     return ret_code;
 }
 
-fn classify_ipv6(metadata: &mut packet::PacketMetadata, body: &[u8]) -> ClassifierResult {
+fn classify_ipv6(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+) -> Result<ClassifierResult, &'static str> {
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<IPv6Header>() > body.len() {
-        return ClassifierResult::LengthError;
+        return Err("Packet length error");
     }
 
     let header_bytes = &body[..size_of::<IPv6Header>()];
     let ipv6_header = IPv6Header::ref_from(header_bytes).unwrap();
 
-    metadata.set_addresses_v6(ipv6_header.src_address, ipv6_header.dst_address);
+    metadata.set_addresses(ipv6_header.src_address, ipv6_header.dst_address);
 
     classify_next_header(
         metadata,
@@ -149,19 +163,19 @@ fn classify_next_header(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
     protocol: u8,
-) -> ClassifierResult {
+) -> Result<ClassifierResult, &'static str> {
     metadata.set_protocol(protocol);
     match protocol {
         0 => return skip_v6_option(metadata, body), // Hop-by-hop
-        1 => return ClassifierResult::OK,           // ICMP TODO: check type and code
-        4 => return ClassifierResult::UnclassifiedL4, // IP in IP
+        1 => return Ok(ClassifierResult::OK),       // ICMP TODO: check type and code
+        4 => return Ok(ClassifierResult::UnclassifiedL4), // IP in IP
         6 => return classify_tcp(metadata, body),   // TCP
         17 => return classify_udp(metadata, body),  // UDP
         43 => return skip_v6_option(metadata, body), // Routing
         44 => return classify_frag(metadata, body), // Fragment
         51 => return skip_auth_header(metadata, body), // AH
         60 => return skip_v6_option(metadata, body), // Dest opts
-        _ => return ClassifierResult::UnclassifiedL4,
+        _ => return Ok(ClassifierResult::UnclassifiedL4),
     }
 }
 
@@ -170,7 +184,10 @@ fn is_option_length_error(remaining_len: usize, next_header: u8, option_length: 
         || (next_header != NO_NEXT_HEADER && option_length + 8 > remaining_len)
 }
 
-fn skip_v6_option(metadata: &mut packet::PacketMetadata, body: &[u8]) -> ClassifierResult {
+fn skip_v6_option(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+) -> Result<ClassifierResult, &'static str> {
     // Almost all Ipv6 options start with protocol and length
     let next_header = body[0];
     // The length for these options is in muliples of 8 bytes, not including the first 8
@@ -180,48 +197,57 @@ fn skip_v6_option(metadata: &mut packet::PacketMetadata, body: &[u8]) -> Classif
     // and that there is enough room for the next option if
     // there is one
     if is_option_length_error(body.len(), next_header, option_length) {
-        return ClassifierResult::LengthError;
+        return Err("Packet length error");
     }
 
     classify_next_header(metadata, &body[option_length..], next_header)
 }
 
-fn skip_auth_header(metadata: &mut packet::PacketMetadata, body: &[u8]) -> ClassifierResult {
+fn skip_auth_header(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+) -> Result<ClassifierResult, &'static str> {
     let next_header = body[0];
     // AH header is legacy v4 and therefore uses 4 octet multiples instead
     let option_length = (usize::from(body[1]) + 2) * 4;
 
     if is_option_length_error(body.len(), next_header, option_length) {
-        return ClassifierResult::LengthError;
+        return Err("Packet length error");
     }
 
     classify_next_header(metadata, &body[option_length..], next_header)
 }
 
-fn classify_frag(metadata: &mut packet::PacketMetadata, body: &[u8]) -> ClassifierResult {
+fn classify_frag(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+) -> Result<ClassifierResult, &'static str> {
     // Frag options have no length field and are always 8 bytes
     let next_header = body[0];
     let option_length: usize = 8;
 
     if is_option_length_error(body.len(), next_header, option_length) {
-        return ClassifierResult::LengthError;
+        return Err("Packet length error");
     }
 
     const FRAG_OFFSET_MASK: u16 = 0xFFF8;
     let frag_offset = NetworkEndian::read_u16(&body[2..4]);
     if frag_offset & FRAG_OFFSET_MASK != 0 {
         // Subsequent fragments can't be parsed further
-        return ClassifierResult::SubsequentFragment;
+        return Ok(ClassifierResult::SubsequentFragment);
     }
 
-    classify_next_header(metadata, &body[option_length..], next_header);
-    return ClassifierResult::FirstFragment;
+    classify_next_header(metadata, &body[option_length..], next_header)?;
+    return Ok(ClassifierResult::FirstFragment);
 }
 
-fn classify_tcp(metadata: &mut packet::PacketMetadata, body: &[u8]) -> ClassifierResult {
+fn classify_tcp(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+) -> Result<ClassifierResult, &'static str> {
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<TCPHeader>() > body.len() {
-        return ClassifierResult::LengthError;
+        return Err("Packet length error");
     }
 
     let header_bytes = &body[..size_of::<TCPHeader>()];
@@ -229,18 +255,21 @@ fn classify_tcp(metadata: &mut packet::PacketMetadata, body: &[u8]) -> Classifie
 
     let data_offset = (tcp_header.data_offset_and_reserved >> 4) * 4;
     if data_offset < 20 || data_offset as usize > body.len() {
-        return ClassifierResult::LengthError;
+        return Err("Packet length error");
     }
 
     metadata.set_src_port(tcp_header.src_port);
     metadata.set_dst_port(tcp_header.dst_port);
 
-    ClassifierResult::OK
+    Ok(ClassifierResult::OK)
 }
 
-fn classify_udp(metadata: &mut packet::PacketMetadata, body: &[u8]) -> ClassifierResult {
+fn classify_udp(
+    metadata: &mut packet::PacketMetadata,
+    body: &[u8],
+) -> Result<ClassifierResult, &'static str> {
     if size_of::<UDPHeader>() > body.len() {
-        return ClassifierResult::LengthError;
+        return Err("Packet length error");
     }
 
     let header_bytes = &body[..size_of::<UDPHeader>()];
@@ -249,7 +278,7 @@ fn classify_udp(metadata: &mut packet::PacketMetadata, body: &[u8]) -> Classifie
     metadata.set_src_port(udp_header.src_port);
     metadata.set_dst_port(udp_header.dst_port);
 
-    ClassifierResult::OK
+    Ok(ClassifierResult::OK)
 }
 
 #[cfg(test)]
@@ -264,7 +293,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::NonIP, classify(&mut packet));
+        assert_eq!(ClassifierResult::NonIP, classify(&mut packet).unwrap());
 
         let metadata = packet.metadata();
         assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
@@ -292,7 +321,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::OK, classify(&mut packet));
+        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -324,7 +353,10 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::FirstFragment, classify(&mut packet));
+        assert_eq!(
+            ClassifierResult::FirstFragment,
+            classify(&mut packet).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -356,7 +388,10 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::SubsequentFragment, classify(&mut packet));
+        assert_eq!(
+            ClassifierResult::SubsequentFragment,
+            classify(&mut packet).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -385,7 +420,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
+        assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
@@ -411,7 +446,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
+        assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
@@ -437,7 +472,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
+        assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
@@ -469,7 +504,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::OK, classify(&mut packet));
+        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -520,7 +555,10 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::FirstFragment, classify(&mut packet));
+        assert_eq!(
+            ClassifierResult::FirstFragment,
+            classify(&mut packet).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -564,7 +602,10 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::SubsequentFragment, classify(&mut packet));
+        assert_eq!(
+            ClassifierResult::SubsequentFragment,
+            classify(&mut packet).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -618,7 +659,10 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::UnclassifiedL4, classify(&mut packet));
+        assert_eq!(
+            ClassifierResult::UnclassifiedL4,
+            classify(&mut packet).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -667,7 +711,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
+        assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -701,7 +745,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
+        assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
@@ -727,7 +771,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
+        assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -758,7 +802,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
+        assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -789,7 +833,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
+        assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -821,7 +865,7 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::LengthError, classify(&mut packet));
+        assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(
