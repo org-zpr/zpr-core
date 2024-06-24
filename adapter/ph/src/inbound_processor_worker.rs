@@ -4,12 +4,14 @@ use tokio::sync::mpsc;
 use zerocopy::FromBytes;
 use crate::assembly::Assembly;
 use crate::classifier::classify;
+use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::zdp::*;
 
 #[derive(Copy, Clone)]
 pub struct Config {
-    pub batch_size: usize
+    pub batch_size: usize,
+    pub mode: PhMode
 }
 
 async fn worker<'pktbuf>(
@@ -29,7 +31,9 @@ async fn worker<'pktbuf>(
                     // strip packet header
                     pkt.advance(std::mem::size_of::<ZdpHeader>());
 
-                    classify(&mut pkt);
+                    if config.mode == PhMode::Server {
+                        classify(&mut pkt);
+                    }
 
                     // send out decapsulated packet
                     asm.inbound_send.enqueue(pkt).await;

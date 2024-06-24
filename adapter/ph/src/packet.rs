@@ -3,7 +3,7 @@ use bytes::buf;
 use open_enum::open_enum;
 use std::mem::{size_of, size_of_val};
 use zerocopy::{AsBytes, ByteOrder, FromBytes, FromZeroes, NetworkEndian};
-use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, KnownLayout};
+use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, KnownLayout, Unaligned};
 
 // This contains all state of a packet which is moving through the system.
 // TODO: possible we want to keep this stuff on the heap
@@ -12,10 +12,12 @@ pub struct Packet<'buf> {
     buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE],
 }
 
-#[derive(AsBytes, FromZeroes, FromBytes, KnownLayout, Copy, Clone, Hash, Debug, PartialEq)]
-#[repr(C)]
+pub const IPV6_ADDRESS_SIZE: usize = 16;
+
+#[derive(AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned, Copy, Clone, Hash, Debug, PartialEq)]
+#[repr(transparent)]
 pub struct IpAddress {
-    pub v6: [u8; config::IPV6_ADDRESS_SIZE],
+    pub v6: [u8; IPV6_ADDRESS_SIZE],
 }
 
 impl IpAddress {
@@ -65,26 +67,14 @@ impl PacketMetadata {
         self.protocol = proto
     }
 
-    pub fn set_src_address_v4(&mut self, src_addr: [u8; 4]) {
-        assert!(self.l3_type != L3Type::Ipv6);
+    pub fn set_addresses_v4(&mut self, src_addr: [u8; 4], dst_addr: [u8; 4]) {
         self.src_address.set_from_v4(src_addr);
-        self.l3_type = L3Type::Ipv4;
-    }
-
-    pub fn set_src_address_v6(&mut self, src_addr: IpAddress) {
-        assert!(self.l3_type != L3Type::Ipv4);
-        self.src_address = src_addr;
-        self.l3_type = L3Type::Ipv6;
-    }
-
-    pub fn set_dst_address_v4(&mut self, dst_addr: [u8; 4]) {
-        assert!(self.l3_type != L3Type::Ipv6);
         self.dst_address.set_from_v4(dst_addr);
         self.l3_type = L3Type::Ipv4;
     }
 
-    pub fn set_dst_address_v6(&mut self, dst_addr: IpAddress) {
-        assert!(self.l3_type != L3Type::Ipv4);
+    pub fn set_addresses_v6(&mut self, src_addr: IpAddress, dst_addr: IpAddress) {
+        self.src_address = src_addr;
         self.dst_address = dst_addr;
         self.l3_type = L3Type::Ipv6;
     }
