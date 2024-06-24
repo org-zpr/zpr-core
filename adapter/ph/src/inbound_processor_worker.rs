@@ -3,7 +3,7 @@ use bytes::Buf;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
 use crate::assembly::Assembly;
-// use crate::packet::Packet;
+use crate::packet::Packet;
 use crate::zdp::*;
 use crate::InboundProcessorMessage;
 #[derive(Copy, Clone)]

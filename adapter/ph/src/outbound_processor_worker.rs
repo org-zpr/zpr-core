@@ -1,7 +1,7 @@
 use core::future::Future;
 use tokio::sync::mpsc;
 use crate::assembly::Assembly;
-// use crate::packet::Packet;
+use crate::packet::Packet;
 use crate::zdp::*;
 use crate::OutboundProcessorMessage;
 
@@ -18,17 +18,7 @@ async fn worker<'pktbuf>(
     while let _count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         for pkt in pkts.drain(..) {
             match pkt {
-                OutboundProcessorMessage::Packet(mut pkt) => {
-                    // allocate and fill in the header
-                    let hdr = pkt.alloc_zeroed_header::<ZdpHeader>();
-                    hdr.abbreviated_header.packet_type = ZdpPacketType::UncompressedAgentPacket;
-
-                    // fill in metadata
-                    pkt.metadata_mut().flow_id = 0;  // TODO: fill from IP header
-
-                    // forward encapsulated packet on
-                    asm.outbound_send.enqueue_packet(pkt).await;
-                }
+                OutboundProcessorMessage::Packet(pkt) => { handle_packets(pkt, asm); }
             }
         }
     }
@@ -42,4 +32,16 @@ pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
 {
     let cfg = *config;
     async move { worker(&cfg, &*asm, &mut queue).await }
+}
+
+async fn handle_packets<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf>) {
+    // allocate and fill in the header
+    let hdr = pkt.alloc_zeroed_header::<ZdpHeader>();
+    hdr.abbreviated_header.packet_type = ZdpPacketType::UncompressedAgentPacket;
+
+    // fill in metadata
+    pkt.metadata_mut().flow_id = 0;  // TODO: fill from IP header
+
+    // forward encapsulated packet on
+    asm.outbound_send.enqueue_packet(pkt).await;
 }
