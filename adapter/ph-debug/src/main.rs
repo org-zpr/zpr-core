@@ -48,7 +48,7 @@ fn handle_commands(command: String, time: u64, port: String) -> std::io::Result<
     match command.as_str() {
         "ECHO" => basic_call_response("ECHO\n".to_string(), port)?,
         "COUNTERS" => basic_call_response("COUNTERS\n".to_string(), port)?,
-        "COUNTERS-RESET" => basic_call_response("COUNTERS RESET\n".to_string(), port)?,
+        "COUNTERS-RESET" => basic_call_response("COUNTERS-RESET\n".to_string(), port)?,
         "WATCH" => handle_watch(time, port)?,
         _ => {eprintln!("Command '{command}' not recognized");},
     };

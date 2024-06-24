@@ -53,13 +53,19 @@ async fn handle_connection(asm: &'static Assembly<'static>, mut stream: UnixStre
         // TODO remove \n from end of message?
         buf_writer.write("Message Recieved\n".as_bytes()).await?;
         
+        let vec_message: Vec<&str> = str_message.split_whitespace().collect();
+
         // TODO there must be a more efficient way to send the OK message, is match statement best suited?
-        match str_message.as_str() {
-            "COUNTERS RESET" => {buf_writer.write_all(counters_reset(asm).await.as_bytes()).await?;
+        match vec_message[0] {
+            // changed to single word to allow for use of split by space, avoids unnecessary 
+            // parsing when command is not PERF-SAMPLE
+            "COUNTERS-RESET" => {buf_writer.write_all(counters_reset(asm).await.as_bytes()).await?;
                                 buf_writer.write_all("OK\n".as_bytes()).await?},
             "COUNTERS"       => {buf_writer.write_all(counters(asm).await.as_bytes()).await?;
                                 buf_writer.write_all("OK\n".as_bytes()).await?},
             "ECHO"           => {buf_writer.write_all(echo(asm).await.as_bytes()).await?;
+                                buf_writer.write_all("OK\n".as_bytes()).await?},
+            "PERF-SAMPLE"    => {buf_writer.write_all(perf_sample(asm, vec_message[1], vec_message[2]).await.as_bytes()).await?;
                                 buf_writer.write_all("OK\n".as_bytes()).await?},
             _                => buf_writer.write_all("ERR\n".as_bytes()).await?,
         };
@@ -98,4 +104,13 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
     }
 
     return "counters_reset\n".to_string(); // TODO change the return value of counters reset
+}
+
+async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
+
+    let mut send = "".to_string();
+
+    let _ = write!(&mut send, "duration: {} and rate: {}\n", duration, rate);
+
+    send 
 }
