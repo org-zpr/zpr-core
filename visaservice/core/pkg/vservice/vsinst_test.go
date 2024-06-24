@@ -79,23 +79,6 @@ TmgyWDoy+cjbuozxQCbf3fbrq/zRyC5Y288=
 -----END CERTIFICATE-----
 `
 
-/* XXX
-func ipTrafficToSnioPacketDesc(t *snip.Traffic) *vsio.PacketDesc {
-	return &vsio.PacketDesc{
-		Source:   t.SrcAddr.AsSlice(),
-		Dest:     t.DstAddr.AsSlice(),
-		Protocol: t.Proto.Num(),
-		SrcPort:  uint32(t.SrcPort),
-		DstPort:  uint32(t.DstPort),
-		Flags:    t.Flags,
-		IcmpType: uint32(t.ICMPType),
-		IcmpCode: uint32(t.ICMPCode),
-		IcmpAddr: t.ICMPTargetAddress.AsSlice(),
-		Size:     uint32(t.Size),
-	}
-}
-*/
-
 func ipTrafficToVsapiTrafficDesc(t *snip.Traffic) *vsapi.TrafficDesc {
 	return &vsapi.TrafficDesc{
 		Source:     t.SrcAddr.AsSlice(),

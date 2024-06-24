@@ -134,30 +134,6 @@ func verifyHMAC(pubKey *rsa.PublicKey, nonce []byte, sid int32, timestamp int64,
 	return nil
 }
 
-/* XXX
-func vsapiAgentToVsioAgent(a *vsapi.Agent) *vsio.Agent {
-
-	vsa := new(vsio.Agent)
-	vsa.Authenticated = false
-	vsa.AuthExpires = time.Unix(a.AuthExpires, 0).Format(time.RFC3339)
-
-	vsa.AuthClaims = make(map[string]*vsio.AClaim)
-	for k, v := range a.Attrs {
-		vsa.AuthClaims[k] = &vsio.AClaim{Cval: v, Exp: a.AuthExpires}
-	}
-
-	if zaddr, ok := netip.AddrFromSlice(a.ZprAddr); ok {
-		vsa.AuthAddr = zaddr.AsSlice()
-		vsa.TetherAddr = zaddr.AsSlice()
-	}
-
-	vsa.Ident = a.Ident
-	vsa.Provides = append(vsa.Provides, a.Provides...)
-
-	return vsa
-}
-*/
-
 func vsapiTrafficDescToIpTraffic(pd *vsapi.TrafficDesc) *snip.Traffic {
 	tcpflags := uint16(pd.GetFlags())
 	syn := (tcpflags & 0x0002) > 0
