@@ -92,18 +92,6 @@ func main() {
 			return fmt.Errorf("failed to initialize logging: %w", err)
 		}
 
-		// These credentials are only used to check the server.
-		// Possibly we can include a client credential too.  See docs for NewClientTLSFromFile.
-		// And not sure what needs to happen on grpc server start side.
-		// ZPR itself should lock down access to the grpc VSS service to this single adapter.
-		// BUT might be nice to have a creds layer on top of that too, but not sure if that is greater
-		// security since presumably whoever is on this host trying to talk to the VSS service also
-		// would have access to whatever creds file we are using here.
-		vssTransportCreds, err := credentials.NewClientTLSFromFile(config.VSSClientCert, "")
-		if err != nil {
-			return fmt.Errorf("failed to initialize visa support service transport credentials from %v: %w", config.VSSClientCert, err)
-		}
-
 		vsTransportCreds, err := credentials.NewServerTLSFromFile(config.VSCert, config.VSKey) // uses sn_certificate & key (like node)
 		if err != nil {
 			return fmt.Errorf("failed to initialize visa service transport credentials from %v: %w", config.VSCert, err)
@@ -127,7 +115,7 @@ func main() {
 		}
 
 		maxAuthDuration := DefaultMaxAuthDuration // TODO: add a command line arg for this
-		service, err := vservice.NewVisaService(c.String("policy"), jwtpk, vssTransportCreds, vsTransportCreds, maxAuthDuration, serviceLog)
+		service, err := vservice.NewVisaService(c.String("policy"), jwtpk, vsTransportCreds, maxAuthDuration, serviceLog)
 		if err != nil {
 			return fmt.Errorf("failed to create visa service: %w", err)
 		}
@@ -157,7 +145,7 @@ func main() {
 				vsdnsname = fmt.Sprintf("vs.%s", config.VSDomain)
 			}
 		}
-		err = service.Start(supportAddr, config.VSSSan, vsdnsname, vservice.VisaServicePort) // Blocking!
+		err = service.Start(vsdnsname, vsdnsname, vservice.VisaServicePort) // Blocking!
 		close(sigExitChan)
 
 		return err

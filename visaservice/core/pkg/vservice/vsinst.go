@@ -128,7 +128,6 @@ type vtableEnt struct {
 // VSIConfig is the rather complex configuration bundle for the visa service.
 type VSIConfig struct {
 	Log                    logr.Logger                      // General logging
-	NodeName               string                           // This nodes name
 	HopCount               uint                             // Is set on every visa we create
 	Creds                  credentials.TransportCredentials // For server side TLS for the PMCTL and the Visa-Service channels
 	ReauthBumpTimeOverride time.Duration                    // For unit testing (see DefaultReauthBumpTime defined above)
@@ -208,6 +207,7 @@ func (vs *VSInst) Start(listenAddr netip.Addr, port int) error {
 	thrift.ServerStopTimeout = 5 * time.Second // TODO: Should come from config
 	if err := vs.startThriftBlocking(listenAddr, uint16(port)); err != nil {
 		vs.log.WithError(err).Error("visa service start failed")
+		return fmt.Errorf("failed to start visa service: %w", err)
 	}
 	return nil
 }

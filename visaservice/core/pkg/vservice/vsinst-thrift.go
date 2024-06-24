@@ -36,9 +36,10 @@ func (vs *VSInst) startThriftBlocking(listenAddr netip.Addr, port uint16) error 
 	var transport thrift.TServerTransport
 	var err error
 
-	transport, err = thrift.NewTServerSocket(fmt.Sprintf("%v:%d", listenAddr, port))
+	ap := netip.AddrPortFrom(listenAddr, port)
+	transport, err = thrift.NewTServerSocket(ap.String())
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create THRIFT socket: %w", err)
 	}
 
 	processor := vsapi.NewVisaServiceProcessor(vs)

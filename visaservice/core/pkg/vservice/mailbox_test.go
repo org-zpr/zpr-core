@@ -57,22 +57,22 @@ func TestMailboxAddPoll(t *testing.T) {
 		res, ok := mb.MessagesFor("foo", 20)
 		require.True(t, ok)
 		require.Len(t, res, 20)
-		require.Equal(t, uint32(1), res[0].GetVisas()[0].HopCount)
-		require.Equal(t, uint32(20), res[19].GetVisas()[0].HopCount)
+		require.Equal(t, int32(1), res[0].GetVisas()[0].HopCount)
+		require.Equal(t, int32(20), res[19].GetVisas()[0].HopCount)
 	}
 	{ // expect 21 ... 40
 		res, ok := mb.MessagesFor("foo", 20)
 		require.True(t, ok)
 		require.Len(t, res, 20)
-		require.Equal(t, uint32(21), res[0].GetVisas()[0].HopCount)
-		require.Equal(t, uint32(40), res[19].GetVisas()[0].HopCount)
+		require.Equal(t, int32(21), res[0].GetVisas()[0].HopCount)
+		require.Equal(t, int32(40), res[19].GetVisas()[0].HopCount)
 	}
 	{ // expect REST
 		res, ok := mb.MessagesFor("foo", 2000)
 		require.True(t, ok)
 		require.Len(t, res, 160)
-		require.Equal(t, uint32(41), res[0].GetVisas()[0].HopCount)
-		require.Equal(t, uint32(200), res[159].GetVisas()[0].HopCount)
+		require.Equal(t, int32(41), res[0].GetVisas()[0].HopCount)
+		require.Equal(t, int32(200), res[159].GetVisas()[0].HopCount)
 	}
 	{ // no more left for foo
 		res, ok := mb.MessagesFor("foo", 2000)
@@ -84,8 +84,8 @@ func TestMailboxAddPoll(t *testing.T) {
 		res, ok := mb.MessagesFor("fee", 100)
 		require.True(t, ok)
 		require.Len(t, res, 100)
-		require.Equal(t, uint32(1), res[0].GetVisas()[0].HopCount)
-		require.Equal(t, uint32(100), res[99].GetVisas()[0].HopCount)
+		require.Equal(t, int32(1), res[0].GetVisas()[0].HopCount)
+		require.Equal(t, int32(100), res[99].GetVisas()[0].HopCount)
 	}
 
 	mb.AppendMessage(newPollResponseWithHopCount(uint32(1000))) // message 201

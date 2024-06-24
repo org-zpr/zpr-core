@@ -533,7 +533,6 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 
 	// Minimal config:
 	vc := minVSI(t, 99, alog)
-	vc.NodeName = "n0.spacelaser.net"
 	vc.ReauthBumpTimeOverride = 10 * time.Second // reduce from default of 5 minutes
 
 	svc, err := vservice.NewVSInst(vc)

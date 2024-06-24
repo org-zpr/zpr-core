@@ -1,2 +1,5 @@
 core/build/
+core/cmd/vservice/vservice
+core/cmd/vservice/visa.log
+
 
