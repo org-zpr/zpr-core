@@ -14,10 +14,6 @@ var (
 	ErrorAgentExists = errors.New("agent already exists at address")
 )
 
-var (
-	ErrorAgentExists = errors.New("agent already exists at address")
-)
-
 // AddNode inform the visa service that a node has joined the ZPR. The node is then added
 // to the list of expected "pollers" for visa service push messages.
 //
