@@ -28,14 +28,16 @@ const (
 	MaxClockSkew = 5 * time.Minute
 )
 
-// And sets vs.thiftServer reference.
+// Start the thrift server (and set the `VSInst.thriftServer` pointer).
+//
+// TODO: This is not using eny encyrption on the thrift connection.
 func (vs *VSInst) startThriftBlocking(listenAddr netip.Addr, port uint16) error {
 
 	var transport thrift.TServerTransport
 	var err error
 
 	ap := netip.AddrPortFrom(listenAddr, port)
-	vs.log.Info("starting THRIFT server", "addr", ap.String())
+	vs.log.Info("starting THRIFT server", "addr", ap.String(), "TLS_enabled?", "no")
 	transport, err = thrift.NewTServerSocket(ap.String())
 	if err != nil {
 		return fmt.Errorf("failed to create THRIFT socket: %w", err)

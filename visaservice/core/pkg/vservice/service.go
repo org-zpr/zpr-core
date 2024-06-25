@@ -29,13 +29,18 @@ type VisaService struct {
 	myAddr            netip.Addr // visa serice ZPR contact address
 	authToken         []byte
 	vsWg              sync.WaitGroup
-	visaServiceCreds  credentials.TransportCredentials
 	shutdownC         chan struct{} // when closed our run() fuction will return
 	initialPolicyFile string
 	authService       auth.AuthService
-	privateKey        *rsa.PrivateKey
 	maxAuthDuration   time.Duration
-	agentSigningKey   *rsa.PrivateKey
+
+	keys struct {
+		agentSigningKey      *rsa.PrivateKey                  // self-generated for signing agent identities (TODO: old -- remove this?)
+		policyCheckingKey    *rsa.PublicKey                   // for checking policy signature
+		adminServiceTLSCreds credentials.TransportCredentials // admins service TLS
+		visaServiceTLSCreds  credentials.TransportCredentials // thrift service TLS
+		tokenSigningKey      *rsa.PrivateKey                  // for signing JWT tokens
+	}
 
 	service struct {
 		inst      *VSInst
@@ -55,10 +60,8 @@ func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vsServ
 	}
 	svc := &VisaService{
 		log:               log,
-		visaServiceCreds:  vsServerCreds,
 		shutdownC:         make(chan struct{}),
 		initialPolicyFile: initialPolicyFile,
-		privateKey:        privateKey,
 		maxAuthDuration:   maxAuthDuration,
 	}
 	svc.policy.config = policy.InitialConfiguration
@@ -68,8 +71,13 @@ func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vsServ
 	if pk, err := rsa.GenerateKey(rand.Reader, 2048); err != nil {
 		return nil, fmt.Errorf("failed to generate rsa key: %w", err)
 	} else {
-		svc.agentSigningKey = pk
+		svc.keys.agentSigningKey = pk
 	}
+
+	svc.keys.adminServiceTLSCreds = vsServerCreds
+	svc.keys.visaServiceTLSCreds = vsServerCreds
+	svc.keys.policyCheckingKey = privateKey.Public().(*rsa.PublicKey)
+	svc.keys.tokenSigningKey = privateKey
 
 	return svc, nil
 }
@@ -105,9 +113,9 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16)
 	icfg := &VSIConfig{
 		Log:             s.log,
 		HopCount:        99, // TODO
-		Creds:           s.visaServiceCreds,
+		Creds:           s.keys.visaServiceTLSCreds,
 		AccessToken:     s.authToken,
-		AgentSigningKey: s.agentSigningKey,
+		AgentSigningKey: s.keys.agentSigningKey,
 		Constrainer:     NewDummyConstraintService(),
 	}
 	vsinst, err := NewVSInst(icfg)
@@ -117,7 +125,7 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16)
 	s.service.shutdownC = make(chan struct{})
 	s.service.inst = vsinst
 
-	authenticator := auth.NewAuthenticator(s.log, s.myAddr, s.maxAuthDuration, issuerName, s.privateKey)
+	authenticator := auth.NewAuthenticator(s.log, s.myAddr, s.maxAuthDuration, issuerName, s.keys.tokenSigningKey)
 	authenticator.SetRevocationService(&auth.DummyRecovationService{})
 	s.authService = authenticator
 	vsinst.SetAuthSvc(authenticator)
@@ -143,7 +151,7 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16)
 	}
 
 	s.log.Infom("bootstrap: visa service THRIFT interface started, now installling policy")
-	if err = s.installPolicyFromFile(s.initialPolicyFile, nil, nil); err != nil {
+	if err = s.installPolicyFromFile(s.initialPolicyFile, s.keys.policyCheckingKey, nil); err != nil {
 		vsinst.Stop()
 		return fmt.Errorf("policy install failed: %w", err)
 	}
@@ -161,7 +169,7 @@ func (s *VisaService) Stop() {
 // This blocks until error or call to Stop().
 func (s *VisaService) run() error {
 
-	adminservice := NewAdminService(s.log, s.visaServiceCreds, s.privateKey.Public().(*rsa.PublicKey), s)
+	adminservice := NewAdminService(s.log, s.keys.adminServiceTLSCreds, s.keys.policyCheckingKey, s)
 
 	go func() {
 		s.log.Info("starting admin service", "port", AdminPort)

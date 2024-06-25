@@ -9,9 +9,20 @@ import (
 )
 
 type VSConfig struct {
-	VSCert  string `yaml:"vs_cert,omitempty"`
-	VSKey   string `yaml:"vs_key,omitempty"`
-	Verbose bool   `yaml:"verbose,omitempty"`
+
+	// The VSCert/VSKey keypair are used for:
+	//   - The admin service gRPC TLS session.
+	//   - Signing all the JWT auth tokens we create.
+	//   - Checking the signature on a policy file
+	//   - Signing the agent records
+	//   - (and not yet for..) the thrift connection
+	//
+	// This key usage nightmare is left over from prototype and needs to be
+	// re-worked.
+	VSCert string `yaml:"vs_cert,omitempty"`
+	VSKey  string `yaml:"vs_key,omitempty"`
+
+	Verbose bool `yaml:"verbose,omitempty"`
 
 	source string
 }

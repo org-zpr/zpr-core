@@ -73,8 +73,8 @@ type VSInst struct {
 	nodeState            ConstraintService
 	thriftServer         thrift.TServer
 	localAddr            netip.Addr
-	grpcWg               sync.WaitGroup
-	grpcCreds            credentials.TransportCredentials
+	thriftWg             sync.WaitGroup
+	thriftCreds          credentials.TransportCredentials
 	exitC                chan struct{}
 	mb                   *Mailbox
 	reauthBumpTime       time.Duration
@@ -130,7 +130,7 @@ type vtableEnt struct {
 type VSIConfig struct {
 	Log                    logr.Logger                      // General logging
 	HopCount               uint                             // Is set on every visa we create
-	Creds                  credentials.TransportCredentials // For server side TLS for the PMCTL and the Visa-Service channels
+	Creds                  credentials.TransportCredentials // TLS for the thrift channel
 	ReauthBumpTimeOverride time.Duration                    // For unit testing (see DefaultReauthBumpTime defined above)
 	AccessToken            []byte                           // Auth token for node to access special VS capabilities
 	AgentSigningKey        *rsa.PrivateKey
@@ -147,7 +147,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		log:                  vcf.Log,
 		hopCount:             vcf.HopCount,
 		visaPushC:            make(chan *vsapi.PollResponse, 128), // Must be large enough to handle a mass revocation event
-		grpcCreds:            vcf.Creds,
+		thriftCreds:          vcf.Creds,
 		mb:                   NewMailbox(vcf.Log),
 		reauthBumpTime:       DefaultReauthBumpTime,
 		exitC:                make(chan struct{}),
@@ -202,8 +202,8 @@ func (vs *VSInst) Start(listenAddr netip.Addr, port uint16) error {
 	vs.vlog = vlog
 	defer vlog.Close()
 
-	vs.grpcWg.Add(1)
-	defer vs.grpcWg.Done()
+	vs.thriftWg.Add(1)
+	defer vs.thriftWg.Done()
 	defer close(vs.exitC)
 	thrift.ServerStopTimeout = 5 * time.Second // TODO: Should come from config
 	if err := vs.startThriftBlocking(listenAddr, port); err != nil {
