@@ -9,10 +9,9 @@ import (
 )
 
 type VSConfig struct {
-	VSCert   string `yaml:"vs_cert,omitempty"`
-	VSKey    string `yaml:"vs_key,omitempty"`
-	VSDomain string `yaml:"vs_domain,omitempty"`
-	Verbose  bool   `yaml:"verbose,omitempty"`
+	VSCert  string `yaml:"vs_cert,omitempty"`
+	VSKey   string `yaml:"vs_key,omitempty"`
+	Verbose bool   `yaml:"verbose,omitempty"`
 
 	source string
 }
@@ -58,9 +57,6 @@ func (c *VSConfig) check() error {
 	c.VSKey, err = c.fixPath(c.VSKey, true)
 	if err != nil {
 		return fmt.Errorf("invalid vs_key: %v", err)
-	}
-	if c.VSDomain == "" {
-		return fmt.Errorf("vs_domain cannot be empty")
 	}
 	return nil
 }

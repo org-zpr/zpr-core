@@ -2,11 +2,13 @@ package main
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hashicorp/go-version"
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
@@ -45,7 +47,10 @@ func main() {
 	app.Usage = "runs a ZPR visa service"
 	app.UsageText = `vservice [global options]
 
-	More details TBD.
+Starts the ZPR visa service and admin service. Before starting this there must
+already be an adapter running and connected to a ZPR node using the visa
+service credentials. Once this starts the node will register with this visa
+service using the visa service API.
 	`
 
 	app.Authors = []*cli.Author{
@@ -73,9 +78,13 @@ func main() {
 			Usage:    "use initial ZPL policy in `FILE`",
 		},
 		&cli.StringFlag{
-			Name:     "tlsname",
-			Required: false,
-			Usage:    "TLS `FQDN` used when talking to the visa service (must match certificate). Also overrides vs_domain in config file.",
+			Name:  "issuer",
+			Usage: "use `NAME` as the issuer on any tokens created by the service",
+		},
+		&cli.StringFlag{
+			Name:    "listen_addr",
+			Aliases: []string{"l"},
+			Usage:   "override the default visa service listen address with `HOST:PORT`",
 		},
 	}
 
@@ -133,19 +142,27 @@ func main() {
 			}
 		}()
 
-		var vsdnsname string
-		if c.String("tlsname") != "" {
-			vsdnsname = c.String("tlsname")
-		} else {
-			// TODO: In the future our name should be determined by our ZPR address.
-			// I think each visa service needs its own name, but am not actually sure.
-			if hostname, err := os.Hostname(); err != nil {
-				vsdnsname = fmt.Sprintf("%s.%s", hostname, config.VSDomain)
-			} else {
-				vsdnsname = fmt.Sprintf("vs.%s", config.VSDomain)
-			}
+		issuerName := c.String("issuer")
+		if issuerName == "" {
+			issuerName = uuid.New().String()
 		}
-		err = service.Start(vsdnsname, vsdnsname, vservice.VisaServicePort) // Blocking!
+
+		var vsAddr netip.Addr
+		var vsPort uint16
+
+		if listenAddr := c.String("listen_addr"); listenAddr != "" {
+			ap, err := netip.ParseAddrPort(listenAddr)
+			if err != nil {
+				return fmt.Errorf("failed to parse listen address: %w", err)
+			}
+			vsAddr = ap.Addr()
+			vsPort = ap.Port()
+		} else {
+			vsAddr = netip.MustParseAddr(vservice.VisaServiceAddress)
+			vsPort = vservice.VisaServicePort
+		}
+
+		err = service.Start(issuerName, vsAddr, vsPort) // Blocking!
 		close(sigExitChan)
 
 		return err

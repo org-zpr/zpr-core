@@ -35,6 +35,7 @@ func (vs *VSInst) startThriftBlocking(listenAddr netip.Addr, port uint16) error 
 	var err error
 
 	ap := netip.AddrPortFrom(listenAddr, port)
+	vs.log.Info("starting THRIFT server", "addr", ap.String())
 	transport, err = thrift.NewTServerSocket(ap.String())
 	if err != nil {
 		return fmt.Errorf("failed to create THRIFT socket: %w", err)

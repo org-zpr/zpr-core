@@ -193,7 +193,7 @@ func (vs *VSInst) SetLocalAddr(a netip.Addr) {
 
 // Start is blocking call to start the visa service GRPC listener.
 // Also sets this visa services local address.
-func (vs *VSInst) Start(listenAddr netip.Addr, port int) error {
+func (vs *VSInst) Start(listenAddr netip.Addr, port uint16) error {
 
 	vlog, err := NewVlogToFile("visa.log")
 	if err != nil {
@@ -206,7 +206,7 @@ func (vs *VSInst) Start(listenAddr netip.Addr, port int) error {
 	defer vs.grpcWg.Done()
 	defer close(vs.exitC)
 	thrift.ServerStopTimeout = 5 * time.Second // TODO: Should come from config
-	if err := vs.startThriftBlocking(listenAddr, uint16(port)); err != nil {
+	if err := vs.startThriftBlocking(listenAddr, port); err != nil {
 		vs.log.WithError(err).Error("visa service start failed")
 		return fmt.Errorf("failed to start visa service: %w", err)
 	}

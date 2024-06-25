@@ -26,7 +26,7 @@ import (
 
 type VisaService struct {
 	log               logr.Logger
-	myAddr            netip.Addr // visa serice contact address
+	myAddr            netip.Addr // visa serice ZPR contact address
 	authToken         []byte
 	vsWg              sync.WaitGroup
 	visaServiceCreds  credentials.TransportCredentials
@@ -55,7 +55,6 @@ func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vsServ
 	}
 	svc := &VisaService{
 		log:               log,
-		myAddr:            netip.MustParseAddr(VisaServiceAddress),
 		visaServiceCreds:  vsServerCreds,
 		shutdownC:         make(chan struct{}),
 		initialPolicyFile: initialPolicyFile,
@@ -92,13 +91,15 @@ func mustNewRandToken() []byte {
 // Once this is started, we expect a node to contact us through the THRIFT api.
 // The node should have side-loaded a visa that will allow it to talk to us over the VS port.
 //
-// `nodeAddr` the address of initial node.
-// `vsPort` local port to listen on (at default visa service address) for node connections to visa service.
-func (s *VisaService) Start(issuerName, vsTlsName string, vsPort int) error {
-	s.log.Info("starting visa service", "tls_name", vsTlsName)
-	vsAddr := netip.MustParseAddr(VisaServiceAddress)
+// `vsAddr` is the ZPR address of the visa service (and admin service).
+// `vsPort` is the port of the visa service.
+// `issuerName` is used on the JWT tokens we issue.
+func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16) error {
+	s.log.Info("starting visa service", "name", issuerName)
 	s.vsWg.Add(1)
 	defer s.vsWg.Done()
+
+	s.myAddr = vsAddr
 
 	s.log.Infom("bootstrap: starting visa service")
 	icfg := &VSIConfig{
