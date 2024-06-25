@@ -27,7 +27,7 @@
 //     6. The node performs the crypto operations to satisfy the challenge and
 //        sends back the AUTHENTICATE message.
 //
-//     6. The visa sercice checks the nodes crypto, checks policy, and if all
+//     6. The visa service checks the nodes crypto, checks policy, and if all
 //        is well will send back an API Key that the node can use when calling
 //        any of the other functions on this API.
 // 
