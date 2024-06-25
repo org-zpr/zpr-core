@@ -14,7 +14,6 @@ type VSConfig struct {
 	//   - The admin service gRPC TLS session.
 	//   - Signing all the JWT auth tokens we create.
 	//   - Checking the signature on a policy file
-	//   - Signing the agent records
 	//   - (and not yet for..) the thrift connection
 	//
 	// This key usage nightmare is left over from prototype and needs to be

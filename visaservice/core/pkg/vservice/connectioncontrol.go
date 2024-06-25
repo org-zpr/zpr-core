@@ -98,12 +98,6 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest, authedAgent *agent
 		vs.log.Error("auth'd agent configID should match current policy configID", "got", validatedAgent.GetConfigID(), "expected", configID)
 	}
 
-	if signature, err := computeSignatureOverAgent(validatedAgent, vs.agentSigningKey); err == nil {
-		validatedAgent.Sign(SigningKeyID, signature)
-	} else {
-		vs.log.WithError(err).Warn("failed to sign agent")
-	}
-
 	// Convert the agent.Agent into an snio.Agent for sending back
 	resp.Agent = agentToVsapiAgent(validatedAgent, nil) // we don't know the tether address.
 	resp.Status = vsapi.StatusCode_SUCCESS

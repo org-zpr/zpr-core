@@ -35,7 +35,6 @@ type VisaService struct {
 	maxAuthDuration   time.Duration
 
 	keys struct {
-		agentSigningKey      *rsa.PrivateKey                  // self-generated for signing agent identities (TODO: old -- remove this?)
 		policyCheckingKey    *rsa.PublicKey                   // for checking policy signature
 		adminServiceTLSCreds credentials.TransportCredentials // admins service TLS
 		visaServiceTLSCreds  credentials.TransportCredentials // thrift service TLS
@@ -66,13 +65,6 @@ func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vsServ
 	}
 	svc.policy.config = policy.InitialConfiguration
 	svc.policy.policy = policy.NewEmptyPolicy()
-
-	// Generate a key that this visa service will use to sign agent identities.
-	if pk, err := rsa.GenerateKey(rand.Reader, 2048); err != nil {
-		return nil, fmt.Errorf("failed to generate rsa key: %w", err)
-	} else {
-		svc.keys.agentSigningKey = pk
-	}
 
 	svc.keys.adminServiceTLSCreds = vsServerCreds
 	svc.keys.visaServiceTLSCreds = vsServerCreds
@@ -111,12 +103,11 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16)
 
 	s.log.Infom("bootstrap: starting visa service")
 	icfg := &VSIConfig{
-		Log:             s.log,
-		HopCount:        99, // TODO
-		Creds:           s.keys.visaServiceTLSCreds,
-		AccessToken:     s.authToken,
-		AgentSigningKey: s.keys.agentSigningKey,
-		Constrainer:     NewDummyConstraintService(),
+		Log:         s.log,
+		HopCount:    99, // TODO
+		Creds:       s.keys.visaServiceTLSCreds,
+		AccessToken: s.authToken,
+		Constrainer: NewDummyConstraintService(),
 	}
 	vsinst, err := NewVSInst(icfg)
 	if err != nil {

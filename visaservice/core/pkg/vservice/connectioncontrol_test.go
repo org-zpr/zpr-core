@@ -1,8 +1,6 @@
 package vservice_test
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -83,12 +81,9 @@ func makeVSWithPolicy(t *testing.T, pyaml string) (*vservice.VSInst, *policy.Pol
 	llog := logr.NewTestLogger()
 
 	// Minimal config:
-	pk, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.Nil(t, err)
 	vc := vservice.VSIConfig{
-		Log:             llog,
-		HopCount:        uint(99),
-		AgentSigningKey: pk,
+		Log:      llog,
+		HopCount: uint(99),
 	}
 
 	// TODO: This initializer is insane. Too hard to test, need to refactor.

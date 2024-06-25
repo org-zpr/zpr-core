@@ -3,7 +3,6 @@ package vservice
 import (
 	"context"
 	"crypto/md5"
-	"crypto/rsa"
 	"errors"
 	"fmt"
 	"math/rand" // not used for crypto
@@ -79,8 +78,7 @@ type VSInst struct {
 	mb                   *Mailbox
 	reauthBumpTime       time.Duration
 	accessToken          []byte // Access token for special node operations
-	agentSigningKey      *rsa.PrivateKey
-	allowInvalidPeerAddr bool // Set to TRUE for testing only.
+	allowInvalidPeerAddr bool   // Set to TRUE for testing only.
 
 	agentDB struct {
 		sync.RWMutex
@@ -133,16 +131,12 @@ type VSIConfig struct {
 	Creds                  credentials.TransportCredentials // TLS for the thrift channel
 	ReauthBumpTimeOverride time.Duration                    // For unit testing (see DefaultReauthBumpTime defined above)
 	AccessToken            []byte                           // Auth token for node to access special VS capabilities
-	AgentSigningKey        *rsa.PrivateKey
-	AllowInvalidPeerAddr   bool // Set to TRUE for testing only.
+	AllowInvalidPeerAddr   bool                             // Set to TRUE for testing only.
 	Constrainer            ConstraintService
 }
 
 // NewVSInst create a new visa service.
 func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
-	if vcf.AgentSigningKey == nil {
-		return nil, fmt.Errorf("agent_signing_key is required")
-	}
 	vs := &VSInst{
 		log:                  vcf.Log,
 		hopCount:             vcf.HopCount,
@@ -152,7 +146,6 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		reauthBumpTime:       DefaultReauthBumpTime,
 		exitC:                make(chan struct{}),
 		accessToken:          vcf.AccessToken,
-		agentSigningKey:      vcf.AgentSigningKey,
 		allowInvalidPeerAddr: vcf.AllowInvalidPeerAddr,
 		nodeState:            vcf.Constrainer,
 	}

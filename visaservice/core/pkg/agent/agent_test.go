@@ -135,23 +135,3 @@ func TestGetTokenIDs(t *testing.T) {
 	require.Len(t, ids, 1)
 	require.Equal(t, "3000", ids[0])
 }
-
-func TestSign(t *testing.T) {
-	sa := agent.EmptyAgent()
-	sa.Sign("foo", []byte("my-rsa-signature-here"))
-	require.Contains(t, sa.GetAuthedClaims(), "zpr.signature.foo")
-	require.Equal(t, ":bXktcnNhLXNpZ25hdHVyZS1oZXJl:", sa.GetAuthedClaims()["zpr.signature.foo"].V)
-	sig, ok := sa.GetSignature("foo")
-	require.True(t, ok)
-	require.Equal(t, []byte("my-rsa-signature-here"), sig)
-}
-
-func TestSignEmpty(t *testing.T) {
-	sa := agent.EmptyAgent()
-	sa.Sign("foo", nil)
-	require.Contains(t, sa.GetAuthedClaims(), "zpr.signature.foo")
-	require.Equal(t, "::", sa.GetAuthedClaims()["zpr.signature.foo"].V)
-	sig, ok := sa.GetSignature("foo")
-	require.True(t, ok)
-	require.Equal(t, []byte([]byte{}), sig)
-}

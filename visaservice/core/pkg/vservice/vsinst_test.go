@@ -2,8 +2,6 @@ package vservice_test
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"fmt"
 	"net/netip"
 	"testing"
@@ -137,13 +135,9 @@ func (ts *TestAS) AddDatasourceProvider(_ string, _ netip.Addr, _ uint64) error 
 
 func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 	// Minimal config:
-	pk, err := rsa.GenerateKey(rand.Reader, 2048)
-	require.Nil(t, err)
-
 	return &vservice.VSIConfig{
 		Log:                  alog,
 		HopCount:             hopcount,
-		AgentSigningKey:      pk,
 		AllowInvalidPeerAddr: true,
 	}
 }
