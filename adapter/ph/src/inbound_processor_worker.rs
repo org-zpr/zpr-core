@@ -6,6 +6,7 @@ use crate::assembly::Assembly;
 use crate::packet::Packet;
 use crate::zdp::*;
 use crate::InboundProcessorMessage;
+
 #[derive(Copy, Clone)]
 pub struct Config {
     pub batch_size: usize

@@ -86,7 +86,7 @@ pub fn launch<'pktbuf, UnixListenerRef: 'pktbuf>(
 }
 
 async fn echo(_asm: &Assembly<'_>) -> String {
-    return "echo\n".to_string(); // TODO change the return value of echo
+    "echo\n".to_string()
 }
 
 // TODO not sure if just printing is what we want this function to do
@@ -95,7 +95,8 @@ async fn counters(asm: &Assembly<'_>) -> String {
     for (key, &ref value) in &asm.counters {
         let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
     }
-    return counts; // TODO change the return value of counters
+    
+    counts
 }
 
 async fn counters_reset(asm: &Assembly<'_>) -> String {
@@ -103,14 +104,20 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
         value.reset();
     }
 
-    return "counters_reset\n".to_string(); // TODO change the return value of counters reset
+    "counters_reset\n".to_string()
 }
 
 async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
 
-    let mut send = "".to_string();
+    let mut ret = "".to_string();
 
-    let _ = write!(&mut send, "duration: {} and rate: {}\n", duration, rate);
 
-    send 
+    let send = asm.inbound_processor.enqueue_test_packet().await;
+    // asm.inbound_send.enqueue_test_packet();
+    // asm.outbound_processor.enqueue_test_packet();
+    // asm.outbound_send.enqueue_test_packet();
+
+    let _ = write!(&mut ret, "duration: {:?}\n", send.unwrap().in_queue);
+
+    ret
 }

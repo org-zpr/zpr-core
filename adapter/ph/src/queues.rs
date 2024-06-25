@@ -107,6 +107,7 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
 
     pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
         let test_tuple = TestPacket::create();
+        println!("tuple {:?}", test_tuple);
 
         self.sender.send(OutboundProcessorMessage::TestPacket(test_tuple.0)).await.unwrap();
 
