@@ -71,6 +71,11 @@ func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vsServ
 	svc.keys.policyCheckingKey = privateKey.Public().(*rsa.PublicKey)
 	svc.keys.tokenSigningKey = privateKey
 
+	svc.keys.adminServiceTLSCreds = vsServerCreds
+	svc.keys.visaServiceTLSCreds = vsServerCreds
+	svc.keys.policyCheckingKey = privateKey.Public().(*rsa.PublicKey)
+	svc.keys.tokenSigningKey = privateKey
+
 	return svc, nil
 }
 
