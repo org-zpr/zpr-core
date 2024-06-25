@@ -9,6 +9,7 @@ pub struct BufferStack<'buf, const BUFSIZ: usize> {
     notify: Notify
 }
 
+#[allow(dead_code)]
 impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
     pub const BUFFER_SIZE: usize = BUFSIZ;
 

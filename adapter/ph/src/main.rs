@@ -1,11 +1,18 @@
+#![cfg_attr(feature = "ci", deny(warnings))]
 use std::fs;
+use std::io::Read;
+use std::fs::File;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::pin::Pin;
 use std::process::ExitCode;
+use clap::Parser;
+use enum_map::{enum_map, EnumMap};
 use openssl::ssl;
+use openssl::x509::X509;
 use tokio::io;
+// use tokio::io::prelude::*;
 use tokio::io::unix::AsyncFd;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
@@ -13,30 +20,69 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::signal::unix::{signal, SignalKind};
 
+#[allow(unused_imports)]
 #[macro_use]
 extern crate arrayref;
 
 // TODO: make these all non-pub once everything is used
-pub mod ext;
-mod config;
-pub mod buffer_stack;
-mod packet;
-mod queues;
 mod assembly;
+mod buffer_stack;
+mod config;
 mod counter;
-mod udp_stream;
+mod counters_enum;
 mod dtls_worker;
+mod ext;
 mod inbound_processor_worker;
 mod inbound_send_worker;
-mod outbound_recv_worker;
 mod outbound_processor_worker;
+mod outbound_recv_worker;
+mod packet;
+mod queues;
 mod rpc_worker;
+mod udp_stream;
+mod zdp;
+mod test_packet;
 
 use buffer_stack::BufferStack;
 use queues::*;
 use counter::*;
 use assembly::Assembly;
+use counters_enum::*;
 
+#[derive(Copy, Clone, Default, clap::ValueEnum)]
+enum PhMode {
+    #[default]
+    Client,
+    Server
+}
+
+#[derive(Parser)]
+#[command(version, about)]
+struct CmdLine {
+    #[arg(long, default_value_t, value_enum)]
+    mode: PhMode,
+
+    #[arg(long)]
+    control_path: String,
+
+    #[arg(long)]
+    self_addr: SocketAddr,
+
+    #[arg(long)]
+    dock_addr: SocketAddr,
+
+    #[arg(long)]
+    ca_file: String,
+
+    #[arg(long)]
+    certificate_file: String,
+
+    #[arg(long)]
+    private_key_file: String,
+
+    #[arg(long, num_args(1..))]
+    tun_fd: Vec<RawFd>,
+}
 
 fn is_std_fd(rfd: RawFd) -> bool {
     rfd == std::io::stdin().as_raw_fd() ||
@@ -56,48 +102,25 @@ fn set_fd_nonblocking<T: AsRawFd>(fd: T) -> io::Result<()> {
     Ok(())
 }
 
-fn emit_counts(counts_arr:&[Counter]) {
-    let num_packets = counts_arr[0].get_count();
-    let num_dropped = counts_arr[1].get_count();
-    eprintln!("packets recieved: {num_packets}");
-    eprintln!("packets dropped: {num_dropped}");
+fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
+    for (key, &ref value) in counts_map {
+        println!("{}: {}", key, value.get_count());
+    }
 }
 
 fn main() -> ExitCode {
-    let mut args = std::env::args();
+    let cmd_line = CmdLine::parse();
 
-    let execname = args.next().unwrap();
-
-    if args.len() < 4 {
-        eprintln!("Usage: {execname} <socket path> <self addr:port> <peer addr:port> <TUN fd> [<TUN fd>...]");
-        return ExitCode::FAILURE;
-    }
-
-    let Ok(sock_path) = args.next().unwrap().parse::<String>()
-    else {
-        eprintln!("Socket path parse failure");
-        return ExitCode::FAILURE;
-    };
-
-    let Ok(self_addr) = args.next().unwrap().parse::<SocketAddr>()
-    else {
-        eprintln!("Address parse failure");
-        return ExitCode::FAILURE;
-    };
-
-    let Ok(peer_addr) = args.next().unwrap().parse::<SocketAddr>()
-    else {
-        eprintln!("Address parse failure");
-        return ExitCode::FAILURE;
-    };
+    let sock_path     = cmd_line.control_path;
+    let peer_addr     = cmd_line.dock_addr;
+    let self_addr     = cmd_line.self_addr;
+    let tun_parse     = cmd_line.tun_fd;
+    let ca_file       = cmd_line.ca_file;
+    let cert_file     = cmd_line.certificate_file;
+    let priv_key_file = cmd_line.private_key_file;
 
     let mut tun_fds = Vec::new();
-    for arg in args {
-        let Ok(rfd) = arg.parse::<RawFd>()
-        else {
-            eprintln!("FD parse failure");
-            return ExitCode::FAILURE;
-        };
+    for rfd in tun_parse {
         if is_std_fd(rfd) {
             eprintln!("refusing to use std FD");
             return ExitCode::FAILURE;
@@ -142,7 +165,7 @@ fn main() -> ExitCode {
     let (os_inq, os_outq) = mpsc::channel(outbound_send_queue_size);
     let outbound_send = OutboundSend::new(os_inq);
 
-    let counters = [Counter::new(), Counter::new()];
+    let counters = enum_map! { _ => Counter::new(), };
 
     let asm = Box::leak(Box::new(Assembly{
             buffer_stack, inbound_processor, inbound_send,
@@ -153,7 +176,17 @@ fn main() -> ExitCode {
     ssl_context_builder.set_options(
         ssl::SslOptions::NO_COMPRESSION |
         (ssl::SslOptions::NO_SSL_MASK & !ssl::SslOptions::NO_DTLSV1_2));
-    // TODO: set CA cert, client key, & enable verification here
+
+    ssl_context_builder.set_ca_file(&ca_file).unwrap();
+    ssl_context_builder.set_verify(ssl::SslVerifyMode::PEER);
+    ssl_context_builder.set_certificate_file(cert_file, ssl::SslFiletype::PEM).unwrap();
+    ssl_context_builder.set_private_key_file(priv_key_file, ssl::SslFiletype::PEM).unwrap();
+
+    let mut open_ca = File::open(ca_file).unwrap();
+    let mut buffer = Vec::new();
+    open_ca.read_to_end(&mut buffer).unwrap();
+    ssl_context_builder.add_client_ca(&X509::from_pem(&buffer).unwrap()).unwrap();
+
     let ssl_context = Box::leak(Box::new(ssl_context_builder.build()));
     // FIXME: "OpenSSL’s default configuration is insecure.  It is highly
     // recommended to use SslConnector rather than Ssl directly, as it
@@ -215,7 +248,13 @@ fn main() -> ExitCode {
             let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));
             socket.connect(peer_addr).await.expect("unable to connect to peer addr");
             let mut ssl_stream = tokio_openssl::SslStream::new(ssl, udp_stream::UdpStream::new(socket)).unwrap();
-            Pin::new(&mut ssl_stream).connect().await.expect("unable to establish DTLS connection");
+            match cmd_line.mode {
+                PhMode::Client =>
+                    Pin::new(&mut ssl_stream).connect().await.expect("unable to establish DTLS connection"),
+                PhMode::Server =>
+                    Pin::new(&mut ssl_stream).accept().await.expect("unable to establish DTLS connection")
+            }
+            eprintln!("Connected!");
 
             js.spawn(dtls_worker::launch(&*asm, ssl_stream, os_outq));
 
