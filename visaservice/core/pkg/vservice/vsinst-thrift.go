@@ -243,7 +243,7 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 	}
 
 	vs.log.Info("registration: authenticate for node -- skipping authority check (TODO)")
-	// TODO ...
+	// TODO: check that the certificate is signed by our authority.
 
 	if time.Since(time.Unix(req.Timestamp, 0)).Abs() > MaxClockSkew {
 		vs.log.Warn("registration: authenticate for node -- timestamp is too old", "timestamp", req.Timestamp,
@@ -278,7 +278,7 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		return "", fmt.Errorf("failed to verify HMAC")
 	}
 
-	// 4. now we can consider the details in the nodeAgnet.
+	//    Now we can consider the details in the nodeAgnet.
 	//    Do we know of this node?  The node must be in our policy, right?
 	//    Need to add a "record" that this node has connected.
 	vs.log.Info("registration: TODO - check that we want this node, etc")
