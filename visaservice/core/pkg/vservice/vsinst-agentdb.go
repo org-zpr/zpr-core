@@ -7,10 +7,8 @@ import (
 	"time"
 
 	"zpr.org/vs/pkg/agent"
+	"zpr.org/vsx/polio"
 )
-
-// TODO: In prototype nodes call this. In new world order, the visa service does not
-//       need any external call to this.  A node is added after a connect authorization.
 
 var (
 	ErrorAgentExists = errors.New("agent already exists at address")
@@ -41,6 +39,7 @@ func (vs *VSInst) AddNode(addr netip.Addr, nodeAgent *agent.Agent) error {
 	if !vs.mb.HasPoller(id) {
 		vs.mb.AddPoller(id)
 	}
+	vs.agentAdded(nodeAgent)
 	return nil
 }
 
@@ -58,6 +57,7 @@ func (vs *VSInst) AddAdapter(addr netip.Addr, agnt *agent.Agent) error {
 		ZPRAddr:    addr,
 		TetherAddr: agnt.GetTetherAddr(),
 	}
+	vs.agentAdded(agnt)
 	return nil
 }
 
@@ -72,10 +72,10 @@ func (vs *VSInst) RemoveNode(addr netip.Addr) {
 			vs.log.Warn("attempt to remove node but record is not a node", "addr", addr, "type", rec.Agent.GetRole())
 		} else {
 			delete(vs.agentDB.agents, addr)
+			vs.agentRemoved(rec.Agent)
 		}
 	}
 	vs.agentDB.Unlock()
-
 	vs.mb.RemovePoller(addr.String())
 }
 
@@ -87,6 +87,7 @@ func (vs *VSInst) RemoveAdapter(addr netip.Addr) {
 		vs.log.Warn("attempt to remove adapter but record is not an adapter", "addr", addr, "type", rec.Agent.GetRole())
 	} else {
 		delete(vs.agentDB.agents, addr)
+		vs.agentRemoved(rec.Agent)
 	}
 	vs.agentDB.Unlock()
 }
@@ -111,4 +112,47 @@ func (vs *VSInst) AgentAtContactAddr(addr netip.Addr) (*agent.Agent, error) {
 		return nil, fmt.Errorf("agent not found")
 	}
 	return rec.Agent, nil
+}
+
+func (vs *VSInst) agentAdded(agnt *agent.Agent) {
+	pp, _, curConfig := vs.getPolicyMatcherConfig()
+
+	if curConfig != agnt.GetConfigID() {
+		// Not sure yet if this is an issue, so will log it.
+		vs.log.Warn("agent added with different config id", "agent_config_id", agnt.GetConfigID(), "current_config", curConfig)
+	}
+
+	svcAddr, hasAddr := agnt.GetZPRID()
+	if !hasAddr {
+		return // no address, no service!
+	}
+
+	for _, serviceName := range agnt.GetProvides() {
+		if psvc := pp.ServiceByName(serviceName); psvc != nil {
+			if psvc.Type == polio.SvcT_SVCT_AUTH {
+				err := vs.authr.AddDatasourceProvider(serviceName, svcAddr, curConfig)
+				if err != nil {
+					vs.log.WithError(err).Error("failed to add auth service", "service_name", serviceName)
+				} else {
+					vs.log.Info("service added", "service", serviceName, "address", svcAddr)
+				}
+			}
+		}
+	}
+}
+
+func (vs *VSInst) agentRemoved(agnt *agent.Agent) {
+	pp, _, curConfig := vs.getPolicyMatcherConfig()
+	if curConfig != agnt.GetConfigID() {
+		vs.log.Warn("host-remove with different configuration", "agent_config_id", agnt.GetConfigID(), "current_config", curConfig)
+	}
+	for _, serviceName := range agnt.GetProvides() {
+		if psvc := pp.ServiceByName(serviceName); psvc != nil {
+			if psvc.Type == polio.SvcT_SVCT_AUTH {
+				if vs.authr.RemoveServiceByPrefix(psvc.GetPrefix()) > 0 {
+					vs.log.Info("host_removed", "lost_service", serviceName)
+				}
+			}
+		}
+	}
 }
