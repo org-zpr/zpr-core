@@ -440,6 +440,7 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 }
 
 func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byte) error {
+	vs.log.Debug("*AGENT_DISCONNECT*")
 	if !vs.validAPIKey(key) {
 		vs.log.Debug("agent-disconnect called with invalid key", "key", key)
 		return vsapi.NewUnauthorizedError()
