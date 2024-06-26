@@ -66,7 +66,7 @@ enum Commands {
     #[command(about = "Call the agent_disconnect function, requires an API key")]
     Disconnect {
         #[arg(short, long, value_name = "HOST:PORT")]
-        service: String, 
+        service: String,
 
         #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
@@ -77,11 +77,11 @@ enum Commands {
     #[command(about = "Call the poll function, requires an API key")]
     Poll {
         #[arg(short, long, value_name = "HOST:PORT")]
-        service: String, 
+        service: String,
 
         #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
-    }
+    },
 }
 
 fn main() {
@@ -134,11 +134,12 @@ fn main() {
             Ok(_) => {
                 println!("Poll command executed successfully");
             }
-            Err(e) => {
-                println!("Error: {:?}", e);
-            }
-        },
-        Some(Commands::Disconnect { service, apikey, addr }) => match disconnect(&service, &apikey, &addr) {
+        }
+        Some(Commands::Disconnect {
+            service,
+            apikey,
+            addr,
+        }) => match vsclient::disconnect(&service, &apikey, &addr) {
             Ok(_) => {
                 println!("Disconnect command executed successfully");
             }
@@ -146,7 +147,7 @@ fn main() {
                 println!("Error: {:?}", e);
             }
         },
-        Some(Commands::Poll { service, apikey }) => match poll(&service, &apikey) {
+        Some(Commands::Poll { service, apikey }) => match vsclient::poll(&service, &apikey) {
             Ok(_) => {
                 println!("Poll command executed successfully");
             }
