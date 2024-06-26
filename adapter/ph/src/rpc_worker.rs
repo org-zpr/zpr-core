@@ -110,7 +110,6 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
 }
 
 async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
-
     let send_duration = Duration::new(duration.parse().unwrap(), 0);
     let begin_time = Instant::now();
     let mut send_interval = interval(Duration::new(0, 1000000000 / rate.parse::<u32>().unwrap()));
