@@ -117,27 +117,51 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
 
     let mut inbound_processor_duration = Histogram::<u64>::new(1).unwrap();
     let mut inbound_processor_depth = Histogram::<u64>::new(1).unwrap();
+    let mut inbound_send_duration = Histogram::<u64>::new(1).unwrap();
+    let mut inbound_send_depth = Histogram::<u64>::new(1).unwrap();
+    let mut outbound_processor_duration = Histogram::<u64>::new(1).unwrap();
+    let mut outbound_processor_depth = Histogram::<u64>::new(1).unwrap();
+    // let mut outbound_send_duration = Histogram::<u64>::new(1).unwrap();
+    // let mut outbound_send_depth = Histogram::<u64>::new(1).unwrap();
 
     send_interval.tick().await;
+    let mut queue_num = 0;
     while begin_time.elapsed().as_secs() < send_duration.as_secs() {
-        let send = asm.inbound_processor.enqueue_test_packet().await;
-        inbound_processor_duration.record(send.as_ref().unwrap().in_queue.as_nanos().try_into().unwrap());
-        inbound_processor_depth.record(send.unwrap().queue_depth.try_into().unwrap());
+        if queue_num == (asm.inbound_send.fanout()) {
+            queue_num = 0;
+        } 
+
+        let in_processor = asm.inbound_processor.enqueue_test_packet().await;
+        let _ = inbound_processor_duration.record(in_processor.as_ref().unwrap().in_queue.as_nanos().try_into().unwrap());
+        let _ = inbound_processor_depth.record(in_processor.as_ref().unwrap().queue_depth.try_into().unwrap());
         
-        
+        let in_send = asm.inbound_send.enqueue_test_packet(queue_num).await;
+        let _ = inbound_send_duration.record(in_send.as_ref().unwrap().in_queue.as_nanos().try_into().unwrap());
+        let _ = inbound_send_depth.record(in_send.as_ref().unwrap().queue_depth.try_into().unwrap());
+
+        let out_processor = asm.outbound_processor.enqueue_test_packet().await;
+        let _ = outbound_processor_duration.record(out_processor.as_ref().unwrap().in_queue.as_nanos().try_into().unwrap());
+        let _ = outbound_processor_depth.record(out_processor.unwrap().queue_depth.try_into().unwrap());
+
+        // let out_send = asm.outbound_send.enqueue_test_packet().await;
+        // outbound_send_duration.record(out_send.as_ref().unwrap().in_queue.as_nanos().try_into().unwrap());
+        // outbound_send_depth.record(out_send.unwrap().queue_depth.try_into().unwrap());
         
         send_interval.tick().await;
+        queue_num += 1;
     }
 
     // get values at 10, 25, 50, 75, 90 quantiles for each hist
     let mut info: String = "All values ".to_string();
-    let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Duration", "ns", inbound_processor_duration.clone()).await.as_str());
-    let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Depth", " packets", inbound_processor_depth.clone()).await.as_str());
-    // asm.inbound_send.enqueue_test_packet();
-    // asm.outbound_processor.enqueue_test_packet();
-    // asm.outbound_send.enqueue_test_packet();
-    // let mut perc = inbound_processor_duration.iter_recorded();
-
+    let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Duration", "ns", inbound_processor_duration).await.as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Depth", " packets", inbound_processor_depth).await.as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Inbound Send Duration", "ns", inbound_send_duration).await.as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Inbound Send Depth", " packets", inbound_send_depth).await.as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Outbound Processor Duration", "ns", outbound_processor_duration).await.as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Outbound Processor Depth", " packets", outbound_processor_depth).await.as_str());
+    // let _ = write!(&mut info, "{}", values_from_hist("Outbound Send Duration", "ns", outbound_send_duration).await.as_str());
+    // let _ = write!(&mut info, "{}", values_from_hist("Outbound Send Depth", " packets", outbound_send_depth).await.as_str());
+    
     info
 }
 
