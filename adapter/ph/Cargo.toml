@@ -18,6 +18,7 @@ tokio-openssl = { version = "0.6.4" }
 tokio = { version = "1.37.0", features = ["full"] }
 zerocopy-derive = { version = "0.7.34" }
 zerocopy = { version = "0.7.34", features = ["byteorder"] }
+hdrhistogram = { version = "7.5.4" }
 
 [features]
 ci = []
