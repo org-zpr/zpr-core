@@ -21,7 +21,7 @@ pub mod vsapi;
 use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
 
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about = "Visa Service THRIFT API Client", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -29,28 +29,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    #[command(about = "Call the hello function")]
     Hello {
-        #[arg(short, long)]
+        #[arg(short, long, value_name = "HOST:PORT")]
         service: String,
     },
+    #[command(about = "Call the authenticate function, returns an API key")]
     Authenticate {
-        #[arg(short, long)]
-        service: String, // format HOST:PORT
+        #[arg(short, long, value_name = "HOST:PORT")]
+        service: String, 
 
-        #[arg(short, long)]
+        #[arg(short, long, value_name = "KEY=VALUE", help = "use multiple times to set multiple claims")]
         claim: Vec<String>,
 
-        #[arg(long)]
+        #[arg(long, value_name = "FILE", help = "path to PEM encoded certificate")]
         cert: String,
 
-        #[arg(long)]
+        #[arg(long, value_name = "FILE", help = "path to PEM encoded private key")]
         key: String, // private key
     },
+    #[command(about = "Call the de_register function, requires an API key")]
     Deregister {
-        #[arg(short, long)]
-        service: String, // format HOST:PORT
+        #[arg(short, long, value_name = "HOST:PORT")]
+        service: String, 
 
-        #[arg(short, long)]
+        #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
     },
 }
