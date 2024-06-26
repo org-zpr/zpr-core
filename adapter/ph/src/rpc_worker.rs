@@ -53,7 +53,7 @@ async fn handle_connection(asm: &'static Assembly<'static>, mut stream: UnixStre
         buf_writer.shutdown().await?;
     } else {
         // TODO remove \n from end of message?
-        buf_writer.write("Message Recieved\n".as_bytes()).await?;
+        buf_writer.write("Message Received\n".as_bytes()).await?;
         
         let vec_message: Vec<&str> = str_message.split_whitespace().collect();
 
@@ -151,7 +151,7 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     }
 
     // get values at 10, 25, 50, 75, 90 quantiles for each hist
-    let mut info: String = "All values ".to_string();
+    let mut info: String = "".to_string();
     let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Duration", "ns", inbound_processor_duration).as_str());
     let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Depth", " packets", inbound_processor_depth).as_str());
     let _ = write!(&mut info, "{}", values_from_hist("Inbound Send Duration", "ns", inbound_send_duration).as_str());

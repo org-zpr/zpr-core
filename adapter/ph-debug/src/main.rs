@@ -37,7 +37,6 @@ fn main() -> std::io::Result<()> {
 
     let command = args.command;
     let port    = args.port;
-    //handle_commands(command, time, port)?;
 
     match command.as_str() {
         "ECHO" => basic_call_response("ECHO\n".to_string(), port)?,
