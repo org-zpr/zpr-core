@@ -143,8 +143,8 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         let _ = outbound_processor_depth.record(out_processor.unwrap().queue_depth.try_into().unwrap());
 
         let out_send = asm.outbound_send.enqueue_test_packet().await;
-        outbound_send_duration.record(out_send.as_ref().unwrap().in_queue.as_nanos().try_into().unwrap());
-        outbound_send_depth.record(out_send.unwrap().queue_depth.try_into().unwrap());
+        let _ = outbound_send_duration.record(out_send.as_ref().unwrap().in_queue.as_nanos().try_into().unwrap());
+        let _ = outbound_send_depth.record(out_send.unwrap().queue_depth.try_into().unwrap());
         
         send_interval.tick().await;
         queue_num += 1;
