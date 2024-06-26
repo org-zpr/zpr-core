@@ -220,6 +220,8 @@ func (vs *VSInst) BackDoorConnectSvcAdapter(tether_addr netip.Addr, zpr_addr net
 // --------------------------------- BEGIN THRIFT ------------------------------- //
 
 func (vs *VSInst) Hello(ctx context.Context) (*vsapi.HelloResponse, error) {
+	// TODO: Would be nice to know address of client...
+	vs.log.Debug("*HELLO*")
 	chal := new(vsapi.Challenge)
 	chal.ChallengeType = vsapi.CHALLENGE_TYPE_HMAC_SHA256
 	chal.ChallengeData = make([]byte, snauth.ChallengeNonceSize)
@@ -235,6 +237,7 @@ func (vs *VSInst) Hello(ctx context.Context) (*vsapi.HelloResponse, error) {
 }
 
 func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) (string, error) {
+	vs.log.Debug("*AUTHENTICATE*")
 	if req.Challenge == nil {
 		vs.log.Warn("registration: missing challenge")
 		return "", fmt.Errorf("challenge required")
@@ -345,6 +348,7 @@ func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, pro
 }
 
 func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
+	vs.log.Debug("*DE_REGISTER*")
 	rec := vs.takePeerRecord(key)
 	if rec == nil {
 		vs.log.Debug("registration: de-register called with invalid key", "key", key)
@@ -356,10 +360,12 @@ func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
 }
 
 func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsapi.ConnectRequest) (*vsapi.ConnectResponse, error) {
+	vs.log.Debug("*AUTHORIZE_CONNECT*")
 	return nil, fmt.Errorf("not implemented")
 }
 
 func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byte) error {
+	vs.log.Debug("*AGENT_DISCONNECT*")
 	if !vs.validAPIKey(key) {
 		vs.log.Debug("agent-disconnect called with invalid key", "key", key)
 		return vsapi.NewUnauthorizedError()
@@ -397,6 +403,7 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 }
 
 func (vs *VSInst) Poll(ctx context.Context, key string) (*vsapi.PollResponse, error) {
+	vs.log.Debug("*POLL*")
 	valid, lastPoll, zprAddr := vs.validAPIKeyAndDeets(key)
 	if !valid {
 		vs.log.Debug("poll called with invalid key", "key", key)
@@ -436,6 +443,7 @@ func (vs *VSInst) Poll(ctx context.Context, key string) (*vsapi.PollResponse, er
 }
 
 func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []byte, traffic *vsapi.TrafficDesc) (*vsapi.VisaResponse, error) {
+	vs.log.Debug("*REQUEST_VISA*")
 	valid, _, zprAddr := vs.validAPIKeyAndDeets(key)
 	if !valid {
 		vs.log.Debug("poll called with invalid key", "key", key)

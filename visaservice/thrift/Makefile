@@ -2,6 +2,7 @@
 
 
 DEST_GO := ../core/pkg/vsapi
+DEST_RS_CLI := ../cli/src/vsapi
 
 GGO := gen-go
 GRS := gen-rs
@@ -20,6 +21,8 @@ install-go: go
 	test -d $(DEST_GO) || mkdir $(DEST_GO)
 	cp $(GGO)/vsapi/*.go $(DEST_GO)
 
+install-rs: rs
+	cp $(GRS)/vs.rs $(DEST_RS_CLI)/mod.rs
 
 $(GGO)/vsapi: vs.thrift
 	$(THRIFTCC) -r --gen go $<
