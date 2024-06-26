@@ -25,8 +25,7 @@ impl TestPacket {
     pub fn acknowledge(self, queue_depth: usize) {
         let curr_time = Instant::now();
         let in_queue = curr_time.duration_since(self.time);// - Instant::now();
-        
-        println!("self.time: {:?}, Instant::now(): {:?}, in_queue: {:?}", self.time, Instant::now(), in_queue);
+
         let test_metrics = TestPacketMetrics { in_queue, queue_depth };
 
         let _ = self.sender.send(test_metrics);

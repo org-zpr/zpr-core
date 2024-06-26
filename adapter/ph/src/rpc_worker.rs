@@ -9,7 +9,9 @@ use tokio::io::AsyncBufReadExt;
 use tokio::net::UnixStream;
 use std::io::Error;
 use std::fmt::Write;
-
+use std::time::{Duration, Instant};
+use tokio::time::interval;
+use hdrhistogram::Histogram;
 
 async fn worker(
     asm: &'static Assembly<'static>, socket: &UnixListener
@@ -95,7 +97,7 @@ async fn counters(asm: &Assembly<'_>) -> String {
     for (key, &ref value) in &asm.counters {
         let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
     }
-    
+
     counts
 }
 
@@ -109,15 +111,48 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
 
 async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
 
-    let mut ret = "".to_string();
+    let send_duration = Duration::new(duration.parse().unwrap(), 0);
+    let begin_time = Instant::now();
+    let mut send_interval = interval(Duration::new(0, 1000000000 / rate.parse::<u32>().unwrap()));
 
+    let mut inbound_processor_duration = Histogram::<u64>::new(1).unwrap();
+    let mut inbound_processor_depth = Histogram::<u64>::new(1).unwrap();
 
-    let send = asm.inbound_processor.enqueue_test_packet().await;
+    send_interval.tick().await;
+    while begin_time.elapsed().as_secs() < send_duration.as_secs() {
+        let send = asm.inbound_processor.enqueue_test_packet().await;
+        inbound_processor_duration.record(send.as_ref().unwrap().in_queue.as_nanos().try_into().unwrap());
+        inbound_processor_depth.record(send.unwrap().queue_depth.try_into().unwrap());
+        
+        
+        
+        send_interval.tick().await;
+    }
+
+    // get values at 10, 25, 50, 75, 90 quantiles for each hist
+    let mut info: String = "All values ".to_string();
+    let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Duration", "ns", inbound_processor_duration.clone()).await.as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Depth", " packets", inbound_processor_depth.clone()).await.as_str());
     // asm.inbound_send.enqueue_test_packet();
     // asm.outbound_processor.enqueue_test_packet();
     // asm.outbound_send.enqueue_test_packet();
+    // let mut perc = inbound_processor_duration.iter_recorded();
 
-    let _ = write!(&mut ret, "duration: {:?}\n", send.unwrap().in_queue);
+    info
+}
 
-    ret
+// TODO not sure if this has to be async
+async fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> String {
+    let ten:u64          = hist.value_at_quantile(0.10);
+    let twenty_five:u64  = hist.value_at_quantile(0.25);
+    let fifty:u64        = hist.value_at_quantile(0.50);
+    let seventy_five:u64 = hist.value_at_quantile(0.75);
+    let ninety:u64       = hist.value_at_quantile(0.90);
+
+    let mut values: String = "".to_string();
+    
+    // Could be easily replaced with other data if need be
+    let _ = write!(&mut values, "{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units);
+
+    values
 }
