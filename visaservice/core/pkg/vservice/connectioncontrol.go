@@ -69,7 +69,6 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest, authedAgent *agent
 		validatedAgent = authedAgent
 		validatedAgent.SetConfigID(configID)
 		// TODO: Update expires?
-
 	}
 	// Set connect-via
 	dockAddr, ok := netip.AddrFromSlice(cr.DockAddr)
@@ -132,6 +131,11 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRe
 
 	// In case sn.authority is not set explicitly, we set it from incomming
 	// auth types.
+
+	// If there are no challenge-responses, we cannot validate anything.
+	if len(cr.ChallengeResponses) == 0 {
+		return nil, fmt.Errorf("no challenge responses")
+	}
 
 	authPrefix, err := vs.SelectValidateDSPrefix(curpol, cr)
 	if err != nil {

@@ -33,11 +33,15 @@ func (a *RSAV2) WorkingDir(d string) {
 // private key can respond to the challenge ... so this is run on a CA or Node.
 // config requires:
 //
-//	key - Path to a private key file (PEM encoded, PKCS1)
+//		key - Path to a private key file (PEM encoded, PKCS1)
+//	    key_data - the PEM file, but encoded as base64
+//	    key_data_pem - the actual textual PEM data (starts with "------ BEGIN PRIVATE KEY -----", etc, etc)
 //
 // optional:
 //
-//	cert - Path to a certificate
+//		cert - Path to a certificate
+//	    cert_data - Base64 encoded PEM data (so take the PEM and base64 encode it --- again?)
+//	    cert_data_pem - Actual PEM text data (starts with "-----BEGIN CERTIFICATE-----", etc, etc)
 func (a *RSAV2) Respond(config map[string]string, chal *zds.Challenge, nonceOffset int) ([]*zds.ChallengeResponse, error) {
 	var err error
 	var rsaCert []byte
@@ -49,13 +53,19 @@ func (a *RSAV2) Respond(config map[string]string, chal *zds.Challenge, nonceOffs
 	} else if certData, ok := config["cert_data"]; ok {
 		buf, err := base64.StdEncoding.DecodeString(certData)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decode base64 cert_data: %w", err)
 		}
 		rsaCert, err = LoadRSACertFromPEM(buf)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to parse cert_data: %w", err)
+		}
+	} else if certData, ok := config["cert_data_pem"]; ok {
+		rsaCert, err = LoadRSACertFromPEM([]byte(certData))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse cert_data_pem: %w", err)
 		}
 	}
+
 	nonce, err := TakeNonce(chal.GetNonce(), nonceOffset)
 	if err != nil {
 		return nil, err
@@ -93,11 +103,16 @@ func (a *RSAV2) RespondWithToken(config map[string]string, nonce []byte) ([]byte
 	} else if kdata, ok := config["key_data"]; ok {
 		buf, err := base64.StdEncoding.DecodeString(kdata)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to decode base64 key_data: %w", err)
 		}
 		rsapk, err = LoadRSAKeyFromPEM(buf)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to parse key_data: %w", err)
+		}
+	} else if kdata, ok := config["key_data_pem"]; ok {
+		rsapk, err = LoadRSAKeyFromPEM([]byte(kdata))
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse key_data_pem: %w", err)
 		}
 	} else {
 		return nil, ErrMissingPrivateKey

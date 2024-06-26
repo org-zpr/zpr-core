@@ -14,10 +14,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
+
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vs/pkg/vservice"
+
+	"zpr.org/vsx/snio/zds"
 )
 
 const testCert = `-----BEGIN CERTIFICATE-----
@@ -339,4 +343,332 @@ func TestThriftDeRegisterNoKeyNoCrash(t *testing.T) {
 	require.ErrorIs(t, err, vsapi.NewUnauthorizedError())
 	err = svc.DeRegister(context.Background(), "")
 	require.ErrorIs(t, err, vsapi.NewUnauthorizedError())
+}
+
+func TestThriftPollRespectKey(t *testing.T) {
+	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
+	require.Nil(t, err)
+	rng := rand.Reader
+
+	svc := initVisaservice(t)
+
+	helloResp, err := svc.Hello(context.Background())
+	if err != nil {
+		t.Fatalf("Hello failed: %v", err)
+	}
+
+	// create HMAC(nonce + timestamp + session_id)
+
+	var buf bytes.Buffer
+
+	timestamp := time.Now().Unix()
+
+	buf.Write(helloResp.Challenge.ChallengeData)
+	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
+	binary.Write(&buf, binary.BigEndian, helloResp.SessionID)
+	hashed := sha256.Sum256(buf.Bytes())
+	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
+	require.Nil(t, err)
+
+	agnt := &vsapi.Agent{
+		AgentType:   vsapi.AgentType_NODE,
+		AuthExpires: time.Now().Unix() + 11400, // +4hrs
+		ZprAddr:     netip.MustParseAddr("fc00:3001::8").AsSlice(),
+		TetherAddr:  netip.MustParseAddr("fc00:3001::8").AsSlice(),
+		Ident:       uuid.New().String(),
+	}
+	agnt.Provides = append(agnt.Provides, "/zpr/n0")
+
+	authReq := &vsapi.NodeAuthRequest{
+		SessionID: helloResp.SessionID,
+		Challenge: helloResp.Challenge,
+		Timestamp: timestamp,
+		NodeCert:  []byte(testCert),
+		Hmac:      sig,
+		NodeAgent: agnt,
+	}
+
+	apiKey, err := svc.Authenticate(context.Background(), authReq)
+	require.Nil(t, err)
+	require.NotEmpty(t, apiKey)
+
+	// Poll should succeed.
+	{
+		pr, err := svc.Poll(context.Background(), apiKey)
+		require.Nil(t, err)
+		require.Empty(t, pr.Visas)
+		require.Empty(t, pr.Revocations)
+		require.Zero(t, pr.More)
+	}
+
+	// Poll should fail with wrong API key.
+	{
+		_, err := svc.Poll(context.Background(), apiKey+"foo")
+		require.NotNil(t, err)
+		require.ErrorContains(t, err, "Unauthorized")
+	}
+
+	// And if we deregister, poll should fail even with right API key.
+	svc.DeRegister(context.Background(), apiKey)
+	{
+		_, err := svc.Poll(context.Background(), apiKey)
+		require.NotNil(t, err)
+		require.ErrorContains(t, err, "Unauthorized")
+	}
+}
+
+func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
+	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
+	require.Nil(t, err)
+	rng := rand.Reader
+
+	svc := initVisaservice(t)
+
+	helloResp, err := svc.Hello(context.Background())
+	if err != nil {
+		t.Fatalf("Hello failed: %v", err)
+	}
+
+	// create HMAC(nonce + timestamp + session_id)
+
+	var buf bytes.Buffer
+
+	timestamp := time.Now().Unix()
+
+	buf.Write(helloResp.Challenge.ChallengeData)
+	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
+	binary.Write(&buf, binary.BigEndian, helloResp.SessionID)
+	hashed := sha256.Sum256(buf.Bytes())
+	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
+	require.Nil(t, err)
+
+	nodeAddr := netip.MustParseAddr("fc00:3001::8")
+	dockAddr := netip.MustParseAddr("fc00:3001::8")
+
+	agnt := &vsapi.Agent{
+		AgentType:   vsapi.AgentType_NODE,
+		AuthExpires: time.Now().Unix() + 11400, // +4hrs
+		ZprAddr:     nodeAddr.AsSlice(),
+		TetherAddr:  dockAddr.AsSlice(),
+		Ident:       uuid.New().String(),
+	}
+	agnt.Provides = append(agnt.Provides, "/zpr/n0")
+
+	authReq := &vsapi.NodeAuthRequest{
+		SessionID: helloResp.SessionID,
+		Challenge: helloResp.Challenge,
+		Timestamp: timestamp,
+		NodeCert:  []byte(testCert),
+		Hmac:      sig,
+		NodeAgent: agnt,
+	}
+
+	apiKey, err := svc.Authenticate(context.Background(), authReq)
+	require.Nil(t, err)
+	require.NotEmpty(t, apiKey)
+
+	agentClaims := map[string]string{
+		"zpr.addr":    "fc00:3003::1",
+		"ca0.x509.cn": "some.agent",
+	}
+
+	req := vsapi.ConnectRequest{
+		ConnectionID:       99,
+		DockAddr:           dockAddr.AsSlice(),
+		Claims:             agentClaims,
+		Challenge:          nil,
+		ChallengeResponses: nil, // will fail anyway because this is empty (and there is no policy loaded)
+	}
+	cr, err := svc.AuthorizeConnect(context.Background(), apiKey, &req)
+	require.Nil(t, err)
+	require.Equal(t, req.ConnectionID, cr.ConnectionID)
+	require.Equal(t, vsapi.StatusCode_FAIL, cr.Status)
+	require.NotNil(t, cr.Reason)
+	require.Contains(t, *cr.Reason, "no challenge responses")
+
+	svc.DeRegister(context.Background(), apiKey)
+	{
+		_, err := svc.Poll(context.Background(), apiKey)
+		require.NotNil(t, err)
+		require.ErrorContains(t, err, "Unauthorized")
+	}
+}
+
+// This time prepare a "real" connection request. Should fail because
+// there is no policy installed so the visa service does not know who
+// to ask.
+func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
+	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
+	require.Nil(t, err)
+	rng := rand.Reader
+
+	svc := initVisaservice(t)
+
+	helloResp, err := svc.Hello(context.Background())
+	if err != nil {
+		t.Fatalf("Hello failed: %v", err)
+	}
+
+	// create HMAC(nonce + timestamp + session_id)
+
+	var buf bytes.Buffer
+
+	timestamp := time.Now().Unix()
+
+	buf.Write(helloResp.Challenge.ChallengeData)
+	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
+	binary.Write(&buf, binary.BigEndian, helloResp.SessionID)
+	hashed := sha256.Sum256(buf.Bytes())
+	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
+	require.Nil(t, err)
+
+	nodeAddr := netip.MustParseAddr("fc00:3001::8")
+	dockAddr := netip.MustParseAddr("fc00:3001::8")
+
+	agnt := &vsapi.Agent{
+		AgentType:   vsapi.AgentType_NODE,
+		AuthExpires: time.Now().Unix() + 11400, // +4hrs
+		ZprAddr:     nodeAddr.AsSlice(),
+		TetherAddr:  dockAddr.AsSlice(),
+		Ident:       uuid.New().String(),
+	}
+	agnt.Provides = append(agnt.Provides, "/zpr/n0")
+
+	authReq := &vsapi.NodeAuthRequest{
+		SessionID: helloResp.SessionID,
+		Challenge: helloResp.Challenge,
+		Timestamp: timestamp,
+		NodeCert:  []byte(testCert),
+		Hmac:      sig,
+		NodeAgent: agnt,
+	}
+
+	apiKey, err := svc.Authenticate(context.Background(), authReq)
+	require.Nil(t, err)
+	require.NotEmpty(t, apiKey)
+
+	agentClaims := map[string]string{
+		"zpr.addr":    "fc00:3003::1",
+		"ca0.x509.cn": "some.agent",
+	}
+
+	nonce := make([]byte, snauth.ChallengeNonceSize)
+	snauth.NewNonce(nonce)
+
+	zchal := &zds.Challenge{
+		Spec:      "chal-node-v1",
+		Timestamp: time.Now().Format(time.RFC3339),
+		Nonce:     nonce,
+	}
+	chalbuf, err := proto.Marshal(zchal)
+	require.Nil(t, err)
+
+	rsac := snauth.NewRSAv2()
+
+	rsaconfig := make(map[string]string)
+	rsaconfig["cert_data_pem"] = testCert
+	rsaconfig["key_data_pem"] = testPrivakeKey
+
+	zchalresps, err := rsac.Respond(rsaconfig, zchal, 0)
+	require.Nil(t, err)
+	require.NotNil(t, zchalresps)
+	require.NotEmpty(t, zchalresps)
+
+	var chalresps [][]byte
+	for _, zchalresp := range zchalresps {
+		pbuf, err := proto.Marshal(zchalresp)
+		require.Nil(t, err)
+		chalresps = append(chalresps, pbuf)
+	}
+
+	req := vsapi.ConnectRequest{
+		ConnectionID:       99,
+		DockAddr:           dockAddr.AsSlice(),
+		Claims:             agentClaims,
+		Challenge:          chalbuf,
+		ChallengeResponses: chalresps,
+	}
+	cr, err := svc.AuthorizeConnect(context.Background(), apiKey, &req)
+	require.Nil(t, err)
+	require.Equal(t, req.ConnectionID, cr.ConnectionID)
+	require.Equal(t, vsapi.StatusCode_FAIL, cr.Status)
+	require.NotNil(t, cr.Reason)
+	require.Contains(t, *cr.Reason, "failed to guess authority")
+}
+
+// Obviously you can't get a visa without a policy.
+func TestThriftRequestVisaNoPolicy(t *testing.T) {
+	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
+	require.Nil(t, err)
+	rng := rand.Reader
+
+	svc := initVisaservice(t)
+
+	helloResp, err := svc.Hello(context.Background())
+	if err != nil {
+		t.Fatalf("Hello failed: %v", err)
+	}
+
+	// create HMAC(nonce + timestamp + session_id)
+
+	var buf bytes.Buffer
+
+	timestamp := time.Now().Unix()
+
+	buf.Write(helloResp.Challenge.ChallengeData)
+	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
+	binary.Write(&buf, binary.BigEndian, helloResp.SessionID)
+	hashed := sha256.Sum256(buf.Bytes())
+	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
+	require.Nil(t, err)
+
+	nodeZprAddr := netip.MustParseAddr("fc00:3001::8")
+	nodeTetherAddr := nodeZprAddr
+
+	agnt := &vsapi.Agent{
+		AgentType:   vsapi.AgentType_NODE,
+		AuthExpires: time.Now().Unix() + 11400, // +4hrs
+		ZprAddr:     nodeZprAddr.AsSlice(),
+		TetherAddr:  nodeTetherAddr.AsSlice(),
+		Ident:       uuid.New().String(),
+	}
+	agnt.Provides = append(agnt.Provides, "/zpr/n0")
+
+	authReq := &vsapi.NodeAuthRequest{
+		SessionID: helloResp.SessionID,
+		Challenge: helloResp.Challenge,
+		Timestamp: timestamp,
+		NodeCert:  []byte(testCert),
+		Hmac:      sig,
+		NodeAgent: agnt,
+	}
+
+	apiKey, err := svc.Authenticate(context.Background(), authReq)
+	require.Nil(t, err)
+	require.NotEmpty(t, apiKey)
+
+	agentTetherAddr := netip.MustParseAddr("fc00:3003::5:10")
+	agentContactAddr := netip.MustParseAddr("fc00:3001::10:20")
+
+	traffic := &vsapi.TrafficDesc{
+		Source:     agentContactAddr.AsSlice(),
+		Dest:       nodeZprAddr.AsSlice(),
+		Protocol:   0x6,
+		SourcePort: 0x31337,
+		DestPort:   22,
+		Flags:      0x2, // SYN
+		Size:       128,
+	}
+	vr, err := svc.RequestVisa(context.Background(), apiKey, agentTetherAddr.AsSlice(), traffic)
+	require.Nil(t, err)
+	require.NotNil(t, vr)
+	require.Equal(t, vsapi.StatusCode_FAIL, vr.Status)
+	require.Contains(t, *vr.Reason, "denied by policy")
+
+	// And as usual, wrong key -- no dice
+	{
+		_, err := svc.RequestVisa(context.Background(), apiKey+"foo", agentTetherAddr.AsSlice(), traffic)
+		require.NotNil(t, err)
+		require.ErrorContains(t, err, "Unauthorized")
+	}
 }

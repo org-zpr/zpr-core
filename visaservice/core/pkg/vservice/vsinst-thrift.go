@@ -361,7 +361,36 @@ func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
 
 func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsapi.ConnectRequest) (*vsapi.ConnectResponse, error) {
 	vs.log.Debug("*AUTHORIZE_CONNECT*")
-	return nil, fmt.Errorf("not implemented")
+	if !vs.validAPIKey(key) {
+		vs.log.Debug("agent-disconnect called with invalid key", "key", key)
+		return nil, vsapi.NewUnauthorizedError()
+	}
+
+	vs.sessions.Lock()
+	if rec, ok := vs.sessions.apiKeys[key]; ok {
+		rec.ConnectRequestsCount++
+	}
+	vs.sessions.Unlock()
+
+	// Note that the prototype visa service allowed a node to pass itself (its own agent) in to this call,
+	// and in that case we pass it in to approve connection which ends up just accepting the nodes
+	// credentials without checking.  I don't think we need or want that for ref-impl, but the arg is still
+	// there on the ApproveConnection function but we set it nil below.
+	resp, err := vs.ApproveConnection(request, nil)
+	if err != nil {
+		strerr := err.Error()
+		resp = &vsapi.ConnectResponse{
+			ConnectionID: request.ConnectionID,
+			Status:       vsapi.StatusCode_FAIL,
+			Reason:       &strerr,
+		}
+		vs.log.WithError(err).Info("authorize connect fails")
+	} else if resp.Status != vsapi.StatusCode_SUCCESS {
+		vs.log.Info("authorize connect fails", "reason", resp.Reason)
+	} else {
+		vs.log.Info("authorize connect succeeds", "agent_ident", resp.Agent.Ident)
+	}
+	return resp, nil
 }
 
 func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byte) error {
