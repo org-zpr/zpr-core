@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::time::SystemTime;
+use std::net::IpAddr;
 
 pub mod vsapi;
 
@@ -56,6 +57,25 @@ enum Commands {
         #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
     },
+    #[command(about = "Call the agent_disconnect function, requires an API key")]
+    Disconnect {
+        #[arg(short, long, value_name = "HOST:PORT")]
+        service: String, 
+
+        #[arg(short, long, value_name = "APIKEY")]
+        apikey: String,
+
+        #[arg(long, value_name = "ADDR", help = "IPv4 or IPv6 address")]
+        addr: String,
+    },
+    #[command(about = "Call the poll function, requires an API key")]
+    Poll {
+        #[arg(short, long, value_name = "HOST:PORT")]
+        service: String, 
+
+        #[arg(short, long, value_name = "APIKEY")]
+        apikey: String,
+    }
 }
 
 fn main() {
@@ -85,6 +105,22 @@ fn main() {
         Some(Commands::Deregister { service, apikey }) => match deregister(&service, &apikey) {
             Ok(_) => {
                 println!("Deregister command executed successfully");
+            }
+            Err(e) => {
+                println!("Error: {:?}", e);
+            }
+        },
+        Some(Commands::Disconnect { service, apikey, addr }) => match disconnect(&service, &apikey, &addr) {
+            Ok(_) => {
+                println!("Disconnect command executed successfully");
+            }
+            Err(e) => {
+                println!("Error: {:?}", e);
+            }
+        },
+        Some(Commands::Poll { service, apikey }) => match poll(&service, &apikey) {
+            Ok(_) => {
+                println!("Poll command executed successfully");
             }
             Err(e) => {
                 println!("Error: {:?}", e);
@@ -236,5 +272,66 @@ fn deregister(service: &str, apikey: &str) -> thrift::Result<()> {
             return Err(e);
         }
     }
+    Ok(())
+}
+
+
+fn disconnect(service: &str, apikey: &str, addrstr: &str) -> thrift::Result<()> {
+    let addr: IpAddr = addrstr.parse().unwrap();
+
+    let octets = match addr {
+        IpAddr::V4(v4) => v4.octets().to_vec(),
+        IpAddr::V6(v6) => v6.octets().to_vec(),
+    };
+
+    let mut client = newclient(service)?;
+    match client.agent_disconnect(apikey.into(), octets) {
+        Ok(result) => {
+            println!("agent_disconnect sent!");
+            println!("result = {:?}", result);
+        }
+        Err(e) => {
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+
+fn poll(service: &str, apikey: &str) -> thrift::Result<()> {
+    let mut client = newclient(service)?;
+
+    match client.poll(apikey.into()) {
+        Ok(result) => {
+            print!("PollResponse:  (more = ");
+            if result.more.unwrap() > 0 {
+                print!("YES");
+            } else {
+                print!("NO");
+            }
+            println!(")");
+            if let Some(visas) = result.visas {
+                println!("  Got {} visas", visas.len());
+                for visa in visas {
+                    println!("    visa {}   hop_count {}    size {} bytes", visa.issuer_id.unwrap(), visa.hop_count.unwrap(), visa.visa_pb.unwrap().len());
+                }
+            } else {
+                println!("  0 visas")
+            }
+            if let Some(revokes) = result.revocations {
+                println!("  Got {} revocations", revokes.len());
+                for revoke in revokes {
+                    println!("    revoke issuer_id {}, config_id {}", revoke.issuer_id.unwrap(), revoke.configuration.unwrap());
+                }
+            } else {
+                println!("  0 revocations")
+            }
+
+        }
+        Err(e) => {
+            return Err(e);
+        }
+    }
+
     Ok(())
 }
