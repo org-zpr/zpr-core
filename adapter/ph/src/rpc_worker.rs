@@ -152,20 +152,19 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
 
     // get values at 10, 25, 50, 75, 90 quantiles for each hist
     let mut info: String = "All values ".to_string();
-    let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Duration", "ns", inbound_processor_duration).await.as_str());
-    let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Depth", " packets", inbound_processor_depth).await.as_str());
-    let _ = write!(&mut info, "{}", values_from_hist("Inbound Send Duration", "ns", inbound_send_duration).await.as_str());
-    let _ = write!(&mut info, "{}", values_from_hist("Inbound Send Depth", " packets", inbound_send_depth).await.as_str());
-    let _ = write!(&mut info, "{}", values_from_hist("Outbound Processor Duration", "ns", outbound_processor_duration).await.as_str());
-    let _ = write!(&mut info, "{}", values_from_hist("Outbound Processor Depth", " packets", outbound_processor_depth).await.as_str());
-    let _ = write!(&mut info, "{}", values_from_hist("Outbound Send Duration", "ns", outbound_send_duration).await.as_str());
-    let _ = write!(&mut info, "{}", values_from_hist("Outbound Send Depth", " packets", outbound_send_depth).await.as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Duration", "ns", inbound_processor_duration).as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Inbound Processor Depth", " packets", inbound_processor_depth).as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Inbound Send Duration", "ns", inbound_send_duration).as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Inbound Send Depth", " packets", inbound_send_depth).as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Outbound Processor Duration", "ns", outbound_processor_duration).as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Outbound Processor Depth", " packets", outbound_processor_depth).as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Outbound Send Duration", "ns", outbound_send_duration).as_str());
+    let _ = write!(&mut info, "{}", values_from_hist("Outbound Send Depth", " packets", outbound_send_depth).as_str());
     
     info
 }
 
-// TODO not sure if this has to be async
-async fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> String {
+fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> String {
     let ten:u64          = hist.value_at_quantile(0.10);
     let twenty_five:u64  = hist.value_at_quantile(0.25);
     let fifty:u64        = hist.value_at_quantile(0.50);
