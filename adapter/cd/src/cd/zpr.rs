@@ -5,10 +5,6 @@ use std::time::Instant;
 
 use crate::cd::config::ConfigRecord;
 
-
-
-
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigState {
     Connecting,
@@ -17,14 +13,9 @@ pub enum ConfigState {
     Disconnected,
 }
 
-
-
-
-
-
 // Zpr is the "shared state" for the control daemon. Not quite sure yet what will be in
 // here.  For now is holding state information about configurations.
-// 
+//
 // This pattern on an Arc and then a Mutex is copied from the tokio "best practice" as
 // illustrated in the redis example.
 #[derive(Debug, Clone)]
@@ -34,7 +25,7 @@ pub struct Zpr {
 
 #[derive(Debug)]
 struct Shared {
-    state: Mutex<State>,    
+    state: Mutex<State>,
 }
 
 #[derive(Debug)]
@@ -42,20 +33,18 @@ struct State {
     configs: HashMap<String, (ConfigRecord, ConfigState)>, // indexed by configuration.profile.name.
 }
 
-
 impl Default for Zpr {
     fn default() -> Self {
         Zpr::new()
     }
 }
 
-
 impl Zpr {
     pub fn new() -> Zpr {
         Zpr {
             shared: Arc::new(Shared {
                 state: Mutex::new(State {
-                    configs: HashMap::new(),                    
+                    configs: HashMap::new(),
                 }),
             }),
         }
@@ -65,7 +54,7 @@ impl Zpr {
     pub fn add_configuration(&self, c: ConfigRecord) -> Result<(), std::io::Error> {
         let mut found = false;
         let mut found_name: String = String::new();
-        let mut state = self.shared.state.lock().unwrap();            
+        let mut state = self.shared.state.lock().unwrap();
         for (conf, state) in state.configs.values() {
             if conf.has_same_source_as(&c) {
                 found = true;
@@ -93,7 +82,9 @@ impl Zpr {
             }
         }
 
-        state.configs.insert(c.get_name().to_string(), (c, ConfigState::Disconnected));
+        state
+            .configs
+            .insert(c.get_name().to_string(), (c, ConfigState::Disconnected));
         Ok(())
     }
 
@@ -112,11 +103,14 @@ impl Zpr {
                 ConfigState::Disconnecting => String::from("disconnecting"),
                 ConfigState::Disconnected => String::from("disconnected"),
             };
-            status.push((format!("{}/{}", cname.clone(), conf.get_cn()), String::from(conf.get_dock_host()), s));
+            status.push((
+                format!("{}/{}", cname.clone(), conf.get_cn()),
+                String::from(conf.get_dock_host()),
+                s,
+            ));
         }
         status
     }
-
 
     pub fn get_configuration_state(&self, name: &str) -> Option<ConfigState> {
         let state = self.shared.state.lock().unwrap();
@@ -126,10 +120,9 @@ impl Zpr {
         Some(cs.clone())
     }
 
-
     // This public access to the status property is temporary.  As this is developed the status
     // value will depend on the outcome of operations or reactions to events.
-    // 
+    //
     // For example, when `start_me_up` succeeds, the status moves to "connected".
     pub fn set_status(&self, name: &str, status: ConfigState) -> Result<(), std::io::Error> {
         let mut state = self.shared.state.lock().unwrap();
@@ -149,20 +142,14 @@ impl Zpr {
     }
 }
 
-
-
-
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::env;    
-    use std::time::{SystemTime, UNIX_EPOCH};
-    use rand::Rng;
     use crate::cd::config::load_configuration;
-    use std::fs;    
-
-
+    use rand::Rng;
+    use std::env;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     const CA_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
 MIIDijCCAnICCQDvR2uxX2eKJTANBgkqhkiG9w0BAQsFADCBhjELMAkGA1UEBhMC
@@ -259,7 +246,10 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
     impl TempFile {
         fn new_toml(contents: &str) -> TempFile {
             let mut rng = rand::thread_rng();
-            let tstamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+            let tstamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
             let dir = env::temp_dir();
             let num: u32 = rng.gen();
             let path = dir.join(format!("org_zpr_cd_test_{}_{}.toml", num, tstamp));
@@ -271,7 +261,10 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
         fn new_pem(contents: &str) -> TempFile {
             let mut rng = rand::thread_rng();
-            let tstamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+            let tstamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
             let dir = env::temp_dir();
             let num: u32 = rng.gen();
             let path = dir.join(format!("org_zpr_cd_test_{}_{}.pem", num, tstamp));
@@ -284,9 +277,9 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         fn get_path(&self) -> &str {
             self.path.as_str()
         }
-    }    
+    }
 
-    #[test]    
+    #[test]
     fn test_load_configuration() {
         let toml_txt = r#"
             [profile]
@@ -308,7 +301,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
         let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
         let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
-
 
         let tmpfile = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile.get_path());
@@ -366,8 +358,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         stats = zpr.get_status();
         assert_eq!(stats.len(), 1);
         assert_eq!(stats[0].0, "test/testnode.zpr");
-        assert_eq!(stats[0].1, "localhost");        
-        assert_eq!(stats[0].2, "disconnected");                
+        assert_eq!(stats[0].1, "localhost");
+        assert_eq!(stats[0].2, "disconnected");
     }
 
     #[test]
@@ -406,7 +398,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         }
         assert!(r.is_ok());
 
-
         let toml_txt = r#"
             [profile]
             name = "test"
@@ -430,7 +421,9 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let r = zpr.add_configuration(conf2);
         assert!(r.is_err());
         let e = r.unwrap_err();
-        assert!( e.to_string().contains("Configuration with name test already exists"));
+        assert!(e
+            .to_string()
+            .contains("Configuration with name test already exists"));
     }
 
     #[test]
@@ -442,7 +435,9 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let r = zpr.set_status("foo", ConfigState::Disconnected);
         assert!(r.is_err());
         let e = r.unwrap_err();
-        assert!( e.to_string().contains("Configuration with name foo not found"));
+        assert!(e
+            .to_string()
+            .contains("Configuration with name foo not found"));
     }
 
     #[test]
@@ -493,4 +488,3 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         assert!(matches!(state.unwrap(), ConfigState::Connected(_)));
     }
 }
-
