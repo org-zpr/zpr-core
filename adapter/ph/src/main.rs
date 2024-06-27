@@ -27,6 +27,7 @@ extern crate arrayref;
 // TODO: make these all non-pub once everything is used
 mod assembly;
 mod buffer_stack;
+mod classifier;
 mod config;
 mod counter;
 mod counters_enum;
@@ -34,6 +35,7 @@ mod dtls_worker;
 mod ext;
 mod inbound_processor_worker;
 mod inbound_send_worker;
+mod options;
 mod outbound_processor_worker;
 mod outbound_recv_worker;
 mod packet;
@@ -48,13 +50,7 @@ use queues::*;
 use counter::*;
 use assembly::Assembly;
 use counters_enum::*;
-
-#[derive(Copy, Clone, Default, clap::ValueEnum)]
-enum PhMode {
-    #[default]
-    Client,
-    Server
-}
+use options::PhMode;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -223,7 +219,7 @@ fn main() -> ExitCode {
             });
 
             js.spawn(inbound_processor_worker::launch(
-                    &inbound_processor_worker::Config{ batch_size: inbound_processor_batch_size },
+                    &inbound_processor_worker::Config{ batch_size: inbound_processor_batch_size, mode: cmd_line.mode },
                     &*asm, ip_outq));
 
             for (async_tun_fd, is_outq) in async_tun_fds.iter().zip(is_outqs) {

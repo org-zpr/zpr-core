@@ -3,12 +3,16 @@ use bytes::Buf;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
 use crate::assembly::Assembly;
+use crate::classifier::classify;
+use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::zdp::*;
 use crate::InboundProcessorMessage;
+
 #[derive(Copy, Clone)]
 pub struct Config {
-    pub batch_size: usize
+    pub batch_size: usize,
+    pub mode: PhMode
 }
 
 async fn worker<'pktbuf>(
@@ -19,7 +23,7 @@ async fn worker<'pktbuf>(
     while let _count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         for pkt in pkts.drain(..) {
             match pkt {
-                InboundProcessorMessage::Packet(pkt) => { handle_packets(pkt, asm).await; },
+                InboundProcessorMessage::Packet(pkt) => { handle_packets(config, pkt, asm).await; },
                 InboundProcessorMessage::TestPacket(pkt) => { pkt.acknowledge(queue.len()); }
             }
         }
@@ -36,7 +40,7 @@ pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
     async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
-async fn handle_packets<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf>) {
+async fn handle_packets<'pktbuf>(config: &Config, mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf>) {
     let hdr = ZdpHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
     match hdr.abbreviated_header.packet_type {
@@ -46,6 +50,11 @@ async fn handle_packets<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbu
 
             // strip packet header
             pkt.advance(std::mem::size_of::<ZdpHeader>());
+
+            if config.mode == PhMode::Server {
+                // TODO: drop error packets
+                let _ = classify(&mut pkt);
+            }
 
             // send out decapsulated packet
             asm.inbound_send.enqueue_packet(pkt).await;

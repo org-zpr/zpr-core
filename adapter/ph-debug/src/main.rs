@@ -24,32 +24,26 @@ struct Args {
 
     #[arg(short, long, default_value_t = 2)]
     time: u64,
-}
 
+    #[arg(short, long, default_value_t = 1)]
+    duration: u64,
+
+    #[arg(short, long, default_value_t = 1)]
+    frequency: u64,
+}
 
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
     let command = args.command;
     let port    = args.port;
-    let time    = args.time;
-
-    handle_commands(command, time, port)?;
-
-
-    Ok(())
-}
-
-// Determines which command to execute
-fn handle_commands(command: String, time: u64, port: String) -> std::io::Result<()> {
-    println!("{command}, {port}");
-    // fs::remove_file(&port).or_else(|e| if e.kind() == ErrorKind::NotFound { Ok(()) } else { Err(e) }).unwrap();
 
     match command.as_str() {
         "ECHO" => basic_call_response("ECHO\n".to_string(), port)?,
         "COUNTERS" => basic_call_response("COUNTERS\n".to_string(), port)?,
-        "COUNTERS-RESET" => basic_call_response("COUNTERS RESET\n".to_string(), port)?,
-        "WATCH" => handle_watch(time, port)?,
+        "COUNTERS-RESET" => basic_call_response("COUNTERS-RESET\n".to_string(), port)?,
+        "WATCH" => handle_watch(args.time, port)?,
+        "PERF-SAMPLE" => handle_perf_sample(args.duration, args.frequency, port)?,
         _ => {eprintln!("Command '{command}' not recognized");},
     };
 
@@ -64,7 +58,7 @@ fn handle_commands(command: String, time: u64, port: String) -> std::io::Result<
 // TODO could rewrite this to return a string, then print in handle_commands
 // also could use in handle_watch - however would lose error checking capabilities
 fn basic_call_response(comm: String, port: String) -> std::io::Result<()> {
-    let stream = &mut UnixStream::connect(port).unwrap(); //TODO not sure if this needs the Box leak wrapper
+    let stream = &mut UnixStream::connect(port).unwrap(); 
     stream.write_all(comm.as_bytes())?;
     stream.flush()?;
     let mut response = String::new();
@@ -77,11 +71,12 @@ fn basic_call_response(comm: String, port: String) -> std::io::Result<()> {
 // Performs actions associated with watch command, repeatedly opens UnixStream to make
 // connection with PH, requests COUNTERS data, and prints the differences
 fn handle_watch(time: u64, port: String) -> std::io::Result<()> {
+    println!("time {}", time);
     let mut values: [u64; 6] = [0; 6];
     let sleep_time = Duration::new(time, 0);
 
     loop {
-        let stream =  &mut UnixStream::connect(port.clone()).unwrap(); //TODO not sure if this needs the Box leak wrapper
+        let stream =  &mut UnixStream::connect(port.clone()).unwrap(); 
         stream.write_all(b"COUNTERS\n")?;
         stream.flush()?;
         let mut response = String::new();
@@ -109,4 +104,11 @@ fn handle_watch(time: u64, port: String) -> std::io::Result<()> {
 
         sleep(sleep_time);
     }
+}
+
+fn handle_perf_sample(duration: u64, frequency: u64, port: String) -> std::io::Result<()> {
+    let command = "PERF-SAMPLE".to_string() + " " + duration.to_string().as_str() + " " + frequency.to_string().as_str() + "\n";
+    basic_call_response(command, port)?;
+
+    Ok(())
 }

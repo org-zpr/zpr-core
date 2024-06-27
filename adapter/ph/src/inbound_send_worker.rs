@@ -29,6 +29,8 @@ async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
         asm.buffer_stack.put_buffers(messages.drain(..).filter_map(|msg| 
             match msg {
                 InboundSendMessage::Packet(msg) => Some(msg.destroy()),
+                // acknowledge had to go here since it consumes the packet, it could not be in 
+                // the previous match because the program still expected the packet to me in messages
                 InboundSendMessage::TestPacket(msg) => { msg.acknowledge(queue.len()); None }
 
             }
