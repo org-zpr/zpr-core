@@ -44,6 +44,7 @@ struct Adapter {
 
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ConfigRecord {
     name: String,
     source: String, // path name of Configuration that loaded this
