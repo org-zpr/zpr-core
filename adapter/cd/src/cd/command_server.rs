@@ -4,19 +4,16 @@ use std::{io, sync::Arc};
 use tracing::{error, info};
 
 use tokio::sync::Mutex;
-use tokio::{
-    io::{
-        //BufReader,
-        AsyncBufReadExt,
-        //AsyncReadExt,
-        AsyncWriteExt,
-    },
-    net::UnixListener,
-};
+use tokio::io::{AsyncBufReadExt,AsyncWriteExt};
+use tokio::net::UnixListener;
 use tokio_util::sync::CancellationToken;
 
-pub use crate::cd::config::Config;
-pub use crate::cd::zpr::{load_configuration, Zpr, ConfigState};
+pub use crate::cd::config::{Config, load_configuration};
+pub use crate::cd::zpr::{Zpr, ConfigState};
+
+
+
+type NetWriterT = Arc<Mutex<tokio::io::BufWriter<tokio::net::unix::OwnedWriteHalf>>>;
 
 pub async fn command_server(config: Arc<Config>, zpr: Zpr, token: CancellationToken) -> io::Result<()> {
     info!("starting command server on {}", config.socket_path);
@@ -91,7 +88,7 @@ async fn handle_command_connection(stream: tokio::net::UnixStream, zpr: Zpr) -> 
 }
 
 async fn handle_status(
-    writer: Arc<Mutex<tokio::io::BufWriter<tokio::net::unix::OwnedWriteHalf>>>,
+    writer: NetWriterT,
     zpr: Zpr,
 ) -> Result<(), io::Error> {
     let stats = zpr.get_status();
@@ -116,7 +113,7 @@ async fn handle_status(
 
 async fn handle_connect(
     parts: &Vec<&str>,
-    writer: Arc<Mutex<tokio::io::BufWriter<tokio::net::unix::OwnedWriteHalf>>>,
+    writer: NetWriterT,
     zpr: Zpr,
 ) -> Result<(), io::Error> {
     let mut writer = writer.lock().await;
@@ -163,24 +160,13 @@ async fn handle_connect(
         cname = parts[1].to_string();
     }
 
-    match zpr.start_me_up(&cname).await {
-        Ok(()) => {
-            writer.write_all(b"2\nOK\nconnect starting\n").await?;            
-        },
-        Err(e) => {
-            error!("Error starting up configuration {}: {}", cname, e);
-            let emsg = e.to_string().replace('\n', " ");
-            writer
-                .write_all(format!("3\nERR\nfailed to start configuration\n{}\n", emsg).as_bytes())
-                .await?;
-        }
-    }
+    writer.write_all(format!("2\nOK\nconnect starting for {} (not really)\n", cname).as_bytes()).await?;            
     Ok(())
 }
 
 async fn handle_disconnect(
     parts: &Vec<&str>,
-    writer: Arc<Mutex<tokio::io::BufWriter<tokio::net::unix::OwnedWriteHalf>>>,
+    writer: NetWriterT,
     zpr: Zpr,
 ) -> Result<(), io::Error> {
     let mut writer = writer.lock().await;

@@ -7,9 +7,6 @@ pub use crate::cd::config::Config;
 mod zpr;
 pub use crate::cd::zpr::Zpr;
 
-mod startmeup;
-
-
 use std::{fs, io, sync::Arc};
 use tracing::{error, info};
 use tracing_subscriber;
