@@ -110,7 +110,7 @@ async fn handle_status(writer: NetWriterT, zpr: Zpr) -> Result<(), io::Error> {
     Ok(())
 }
 
-async fn handle_connect(parts: &Vec<&str>, writer: NetWriterT, zpr: Zpr) -> Result<(), io::Error> {
+async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Result<(), io::Error> {
     let mut writer = writer.lock().await;
     if parts.len() < 2 {
         writer
@@ -165,7 +165,7 @@ async fn handle_connect(parts: &Vec<&str>, writer: NetWriterT, zpr: Zpr) -> Resu
 }
 
 async fn handle_disconnect(
-    parts: &Vec<&str>,
+    parts: &[&str],
     writer: NetWriterT,
     zpr: Zpr,
 ) -> Result<(), io::Error> {

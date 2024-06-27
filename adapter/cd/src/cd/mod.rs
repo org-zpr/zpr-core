@@ -42,6 +42,7 @@ pub async fn tokio_main(config: Arc<Config>) -> io::Result<()> {
 
     // Now just waiting for an exit condition:
     tracker.close();
+
     loop {
         tokio::select! {
             _ = &mut cs_shutdown_rx => {
