@@ -13,7 +13,7 @@ use openssl::sign::Signer;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::prelude::*;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::time::SystemTime;
 
 use crate::vsapi;
@@ -227,5 +227,40 @@ pub fn poll(service: &str, apikey: &str) -> thrift::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+
+
+
+pub fn request_visa(service: &str, apikey: &str, tether_addr: Ipv6Addr, traffic: &vsapi::TrafficDesc) -> thrift::Result<()> {
+    let mut client = newclient(service)?;
+    match client.request_visa(apikey.into(), tether_addr.octets().to_vec(), traffic.clone()) {
+        Ok(result) => {
+            println!("visa request response:");
+            if result.status.unwrap() == vsapi::StatusCode::SUCCESS {
+                println!("  status: SUCCESS");
+            } else {
+                println!("  status: {:?}", result.status);
+                match result.reason {
+                    Some(reason) => {
+                        println!("  reason: {:?}", reason)
+                    }
+                    None => {
+                        println!("  reason: none given")
+                    }                
+                };
+            }
+            if let Some(visa) = result.visa {
+                println!("  visa issuer_id: {}", visa.issuer_id.unwrap());
+                println!("  visa hop_count: {}", visa.hop_count.unwrap());
+                println!("  visa size: {} bytes", visa.visa_pb.unwrap().len());
+            }
+        }
+        Err(e) => {
+            println!("visa request failed");
+            return Err(e);
+        }
+    }
     Ok(())
 }
