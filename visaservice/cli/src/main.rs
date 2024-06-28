@@ -7,6 +7,8 @@ pub mod vsclient;
 
 use crate::traffic_parser::{parse_traffic, Protocol};
 
+
+
 #[derive(Parser)]
 #[command(version, about = "Visa Service THRIFT API Client", long_about = None)]
 struct Cli {
