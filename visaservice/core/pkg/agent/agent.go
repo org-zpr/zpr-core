@@ -2,7 +2,6 @@ package agent
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	fmt "fmt"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
-	"zpr.org/vsx/snio/vsio"
 )
 
 const (
@@ -30,6 +28,13 @@ type ClaimV struct {
 	Exp time.Time // claim valid until time
 }
 
+func NewClaimV(value string, exp time.Time) *ClaimV {
+	return &ClaimV{
+		V:   value,
+		Exp: exp,
+	}
+}
+
 // Agent has attributes (called claims). These are either authenticated or unsubstantiated.
 // The unsubstantiated claims are submitted by the agent at connect time, these are checked
 // by an authentication service which produces the authenticated claims.
@@ -42,7 +47,8 @@ type Agent struct {
 	authorityIDs  []string
 	authTokens    []string // JWTs
 	authExpires   time.Time
-	authedEPID    netip.Addr
+	authedEPID    netip.Addr // ZPR contact address
+	tetherAddr    netip.Addr // ZPR tether address
 	unubClaims    map[string]string
 	hashval       string
 	ident         string
@@ -64,45 +70,6 @@ func NewAgentFromUnsubstantiatedClaims(claims map[string]string) *Agent {
 		unubClaims: uc,
 	}
 	a.updateHash()
-	return a
-}
-
-// NewAgentFromSnioAgent populate this agent directly from the protocol buffer struct. No error checking.
-// TODO: remove panic in here
-func NewAgentFromSnioAgent(sa *vsio.Agent) *Agent {
-	var exp time.Time
-	if sa.GetAuthExpires() != "" {
-		tv, err := time.Parse(time.RFC3339, sa.GetAuthExpires())
-		if err != nil {
-			panic(fmt.Sprintf("time format error: %v", err))
-		}
-		exp = tv
-	}
-
-	authedEPID := netip.Addr{}
-	if aa := sa.GetAuthAddr(); aa != nil {
-		authedEPID, _ = netip.AddrFromSlice(aa)
-	}
-
-	a := &Agent{
-		authenticated: sa.GetAuthenticated(),
-		configID:      sa.GetConfigId(),
-		authClaims:    make(map[string]*ClaimV),
-		authorityIDs:  sa.GetAuthIds(),
-		authTokens:    sa.GetAuthTokens(),
-		authExpires:   exp,
-		authedEPID:    authedEPID,
-		unubClaims:    sa.GetUnsubClaims(),
-		hashval:       sa.GetHashval(),
-		ident:         sa.GetIdent(),
-		provides:      sa.GetProvides(),
-	}
-	for k, ac := range sa.GetAuthClaims() {
-		a.authClaims[k] = &ClaimV{
-			V:   ac.GetCval(),
-			Exp: time.Unix(ac.GetExp(), 0),
-		}
-	}
 	return a
 }
 
@@ -182,42 +149,6 @@ func (a *Agent) GetIdentity() string {
 	return a.ident
 }
 
-func encodeByteFieldSig(signagure []byte) string {
-	return fmt.Sprintf(":%s:", base64.StdEncoding.EncodeToString(signagure))
-}
-
-// DecodeByteFieldSig decodes a signature string value as produced by the Sign() function into a byte buffer.
-func DecodeByteFieldSig(sig string) ([]byte, error) {
-	if len(sig) < 2 {
-		return nil, fmt.Errorf("invalid signature string")
-	}
-	sig = sig[1 : len(sig)-1]
-	return base64.StdEncoding.DecodeString(sig)
-}
-
-// Add a signature attribute to the agents authenticated claims.
-// Signautre key uses a special prefix of "zpr.signature." and the passed signature buffer
-// is written in base64 surrounded by colons, `':'+base64(signature)+':'`.
-func (a *Agent) Sign(keyID string, signature []byte) {
-	skey := fmt.Sprintf("%s%s", KAttrSignaturePfx, keyID)
-	a.setAuthedClaimIgnoreHash(skey, &ClaimV{
-		V:   encodeByteFieldSig(signature),
-		Exp: a.authExpires,
-	})
-}
-
-// Retrieve a signature buffer previously stored on the agent.
-// Ignores expiration.
-func (a *Agent) GetSignature(keyID string) ([]byte, bool) {
-	skey := fmt.Sprintf("%s%s", KAttrSignaturePfx, keyID)
-	if v, ok := a.authClaims[skey]; ok {
-		if sigbuf, err := DecodeByteFieldSig(v.V); err == nil {
-			return sigbuf, true
-		}
-	}
-	return nil, false
-}
-
 // SetAuthedClaim sets an authenticated claim. Alters the agent.Hash.
 func (a *Agent) SetAuthedClaim(k string, v *ClaimV) {
 	a.setAuthedClaimIgnoreHash(k, v)
@@ -230,6 +161,15 @@ func (a *Agent) SetAuthedClaimWithExp(k string, v string, x time.Time) {
 		V:   v,
 		Exp: x,
 	})
+	a.updateHash()
+}
+
+// Replaces current authed claims with the ones passed in.
+func (a *Agent) SetAuthedClaims(claims map[string]*ClaimV) {
+	a.authClaims = make(map[string]*ClaimV)
+	for k, v := range claims {
+		a.authClaims[k] = v
+	}
 	a.updateHash()
 }
 
@@ -256,9 +196,6 @@ func (a *Agent) updateHash() {
 			// Expriment: do not put connect via in hash. This helps in case where a node connects and ends up generating
 			// two connect records (one locally when the remote node connects, and another from the remote node). The only
 			// difference in the records is the connect_via.
-			continue
-		}
-		if strings.HasPrefix(k, KAttrSignaturePfx) {
 			continue
 		}
 		keys = append(keys, k)
@@ -307,6 +244,22 @@ func (a *Agent) GetZPRID() (netip.Addr, bool) {
 	return a.authedEPID, true
 }
 
+func (a *Agent) GetZPRIDIfSet() netip.Addr {
+	addr, ok := a.GetZPRID()
+	if !ok {
+		return netip.Addr{}
+	}
+	return addr
+}
+
+func (a *Agent) SetTetherAddr(addr netip.Addr) {
+	a.tetherAddr = addr
+}
+
+func (a *Agent) GetTetherAddr() netip.Addr {
+	return a.tetherAddr
+}
+
 func (a *Agent) HasAuthorities() bool {
 	return a.authenticated && len(a.authorityIDs) > 0
 }
@@ -337,6 +290,16 @@ func (a *Agent) SetProvides(p []string) {
 // GetProvides list of services provided by agent. Read only.
 func (a *Agent) GetProvides() []string {
 	return a.provides
+}
+
+func (a *Agent) GetRole() string {
+	if a.authClaims == nil {
+		return ""
+	}
+	if v, ok := a.authClaims[KAttrRole]; ok {
+		return v.V
+	}
+	return ""
 }
 
 func (a *Agent) DoesProvide(serviceID string) bool {

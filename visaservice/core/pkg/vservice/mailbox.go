@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vsx/snio/vsio"
+	"zpr.org/vs/pkg/vsapi"
 )
 
 // Mailbox is a system designed to support polling of the visa service for
@@ -20,7 +20,7 @@ type Mailbox struct {
 
 type VisaPushMsg struct {
 	MsgNumber uint64 // always increasing
-	Msg       *vsio.VSPollResponse
+	Msg       *vsapi.PollResponse
 }
 
 type Poller struct {
@@ -61,8 +61,8 @@ func (m *Mailbox) RemovePoller(ID string) {
 }
 
 // MessagesFor will return (nil, false) if the mboxID is unknown.
-func (m *Mailbox) MessagesFor(mboxID string, limit int) ([]*vsio.VSPollResponse, bool) {
-	var results []*vsio.VSPollResponse
+func (m *Mailbox) MessagesFor(mboxID string, limit int) ([]*vsapi.PollResponse, bool) {
+	var results []*vsapi.PollResponse
 	m.mtx.RLock()
 	defer m.mtx.RUnlock()
 	poller, found := m.pollers[mboxID]
@@ -99,18 +99,18 @@ func (m *Mailbox) MessagesFor(mboxID string, limit int) ([]*vsio.VSPollResponse,
 	return results, true
 }
 
-func (m *Mailbox) AppendVisaResponseMessage(r *vsio.VSResponse) {
-	if !r.Success {
+func (m *Mailbox) AppendVisaResponseMessage(r *vsapi.VisaResponse) {
+	if r.Status != vsapi.StatusCode_SUCCESS {
 		m.log.Error("attempt to append an error visa-response message to mailbox")
 		return
 	}
-	vpr := &vsio.VSPollResponse{
-		Visas: []*vsio.VSVisaHop{r.GetVisa()},
+	vpr := &vsapi.PollResponse{
+		Visas: []*vsapi.VisaHop{r.Visa},
 	}
 	m.AppendMessage(vpr)
 }
 
-func (m *Mailbox) AppendMessage(r *vsio.VSPollResponse) {
+func (m *Mailbox) AppendMessage(r *vsapi.PollResponse) {
 	m.mtx.Lock()
 	defer m.mtx.Unlock()
 	if len(m.pollers) == 0 {

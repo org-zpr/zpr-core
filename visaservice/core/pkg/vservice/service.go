@@ -15,11 +15,10 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	snip "zpr.org/vs/pkg/ip"
-	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/logr"
+	"zpr.org/vs/pkg/vsapi"
 
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vs/pkg/vservice/auth"
 
 	"zpr.org/vsx/polio"
@@ -27,19 +26,20 @@ import (
 
 type VisaService struct {
 	log               logr.Logger
-	myAddr            netip.Addr // visa serice contact address
-	myTetherAddr      netip.Addr // tether address assigned to us by dock (for use during bootstrap)
+	myAddr            netip.Addr // visa serice ZPR contact address
 	authToken         []byte
 	vsWg              sync.WaitGroup
-	supportSvc        *VSSClient
-	supportCreds      credentials.TransportCredentials
-	visaServiceCreds  credentials.TransportCredentials
 	shutdownC         chan struct{} // when closed our run() fuction will return
 	initialPolicyFile string
 	authService       auth.AuthService
-	privateKey        *rsa.PrivateKey
 	maxAuthDuration   time.Duration
-	agentSigningKey   *rsa.PrivateKey
+
+	keys struct {
+		policyCheckingKey    *rsa.PublicKey                   // for checking policy signature
+		adminServiceTLSCreds credentials.TransportCredentials // admins service TLS
+		visaServiceTLSCreds  credentials.TransportCredentials // thrift service TLS
+		tokenSigningKey      *rsa.PrivateKey                  // for signing JWT tokens
+	}
 
 	service struct {
 		inst      *VSInst
@@ -53,29 +53,23 @@ type VisaService struct {
 	}
 }
 
-func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vssClientCreds, vsServerCreds credentials.TransportCredentials, maxAuthDuration time.Duration, log logr.Logger) (*VisaService, error) {
+func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vsServerCreds credentials.TransportCredentials, maxAuthDuration time.Duration, log logr.Logger) (*VisaService, error) {
 	if _, err := os.Stat(initialPolicyFile); err != nil {
 		return nil, fmt.Errorf("policy file stat error: %w", err)
 	}
 	svc := &VisaService{
 		log:               log,
-		myAddr:            netip.MustParseAddr(VisaServiceAddress),
-		supportCreds:      vssClientCreds,
-		visaServiceCreds:  vsServerCreds,
 		shutdownC:         make(chan struct{}),
 		initialPolicyFile: initialPolicyFile,
-		privateKey:        privateKey,
 		maxAuthDuration:   maxAuthDuration,
 	}
 	svc.policy.config = policy.InitialConfiguration
 	svc.policy.policy = policy.NewEmptyPolicy()
 
-	// Generate a key that this visa service will use to sign agent identities.
-	if pk, err := rsa.GenerateKey(rand.Reader, 2048); err != nil {
-		return nil, fmt.Errorf("failed to generate rsa key: %w", err)
-	} else {
-		svc.agentSigningKey = pk
-	}
+	svc.keys.adminServiceTLSCreds = vsServerCreds
+	svc.keys.visaServiceTLSCreds = vsServerCreds
+	svc.keys.policyCheckingKey = privateKey.Public().(*rsa.PublicKey)
+	svc.keys.tokenSigningKey = privateKey
 
 	return svc, nil
 }
@@ -92,52 +86,28 @@ func mustNewRandToken() []byte {
 // Blocking call returns when visa service exits (see Stop func).
 //
 // At the time the visa service is started it is expected that the local adapter has
-// already connected to a dock.  The visa service will attempt to connect to the
-// node.
+// already connected to a dock.
 //
-// The adapater has a keypair that is verified by the node.
+// Once this is started, we expect a node to contact us through the THRIFT api.
+// The node should have side-loaded a visa that will allow it to talk to us over the VS port.
 //
-// The visa service also does some sort of authentication with the nodes support service.
-// (which is grpc).
-//
-// `nodeAddr` the node to dock to.
-// `vssPort` port on node running the visa support service.
-// `vsPort` local port to listen on (at default visa service address) for node connections to visa service.
-func (s *VisaService) Start(nodeAddr netip.Addr, nodeName, vsTlsName string, vssPort, vsPort int) error {
-	s.log.Info("starting visa service", "tls_name", vsTlsName)
-	vsAddr := netip.MustParseAddr(VisaServiceAddress)
+// `vsAddr` is the ZPR address of the visa service (and admin service).
+// `vsPort` is the port of the visa service.
+// `issuerName` is used on the JWT tokens we issue.
+func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16) error {
+	s.log.Info("starting visa service", "name", issuerName)
 	s.vsWg.Add(1)
 	defer s.vsWg.Done()
 
-	s.log.Info("connecting to node visa support service", "addr", nodeAddr, "port", vssPort)
-	client, err := NewVSSClient(s.log, nodeAddr, vssPort, nodeName, s.supportCreds, &s.agentSigningKey.PublicKey)
-	if err != nil {
-		return err
-	}
-	s.supportSvc = client
+	s.myAddr = vsAddr
 
-	if err := s.supportSvc.Hello(); err != nil {
-		s.log.WithError(err).Warnm("failed to connect to node")
-		return err
-	}
-	s.authToken = mustNewRandToken()
-	authResp, err := s.supportSvc.AuthRequest(vsTlsName, s.authToken)
-	if err != nil {
-		s.log.WithError(err).Warnm("failed to authenticate with node")
-		return err
-	}
-	s.myTetherAddr, _ = netip.AddrFromSlice(authResp.TetherAddr)
-	s.log.Info("connection to support service successful", "my_tether_addr", s.myTetherAddr)
-	s.log.Infom("bootstrap: starting visa service grpc service")
+	s.log.Infom("bootstrap: starting visa service")
 	icfg := &VSIConfig{
-		Log:             s.log,
-		HopCount:        99,                         // TODO
-		NodeName:        "_VISA_SERVICE_NODE_NAME_", // TODO: What is this for?
-		Creds:           s.visaServiceCreds,
-		AccessToken:     s.authToken,
-		AgentSigningKey: s.agentSigningKey,
-		Directory:       s.supportSvc,
-		Constrainer:     s.supportSvc,
+		Log:         s.log,
+		HopCount:    99, // TODO
+		Creds:       s.keys.visaServiceTLSCreds,
+		AccessToken: s.authToken,
+		Constrainer: NewDummyConstraintService(),
 	}
 	vsinst, err := NewVSInst(icfg)
 	if err != nil {
@@ -146,8 +116,8 @@ func (s *VisaService) Start(nodeAddr netip.Addr, nodeName, vsTlsName string, vss
 	s.service.shutdownC = make(chan struct{})
 	s.service.inst = vsinst
 
-	authenticator := auth.NewAuthenticator(s.log, s.myAddr, s.maxAuthDuration, nodeName, s.privateKey)
-	authenticator.SetRevocationService(s.supportSvc)
+	authenticator := auth.NewAuthenticator(s.log, s.myAddr, s.maxAuthDuration, issuerName, s.keys.tokenSigningKey)
+	authenticator.SetRevocationService(&auth.DummyRecovationService{})
 	s.authService = authenticator
 	vsinst.SetAuthSvc(authenticator)
 
@@ -160,48 +130,23 @@ func (s *VisaService) Start(nodeAddr netip.Addr, nodeName, vsTlsName string, vss
 		s.service.inst = nil
 	}()
 
-	time.Sleep(1 * time.Second) // take a breath
+	// Pause and then check the shutdown channel to catch any configuration errors with the THRIFT setup
+	// that cause immediate failure.
+	time.Sleep(1 * time.Second)
 
-	// TODO: Did I move over the configuration logic (ie, code that decides on a new configuraiton ID)??  Was in zprn/admin_service
+	select {
+	case <-s.service.shutdownC:
+		s.log.Info("visa service THRIFT interface has shutdown")
+		return errors.New("visa service THRIFT interface premature shutdown")
+	default:
+	}
 
-	s.log.Infom("bootstrap: installling policy using support service")
-	if err = s.installPolicyFromFile(s.initialPolicyFile, nil, nodeAddr); err != nil {
+	s.log.Infom("bootstrap: visa service THRIFT interface started, now installling policy")
+	if err = s.installPolicyFromFile(s.initialPolicyFile, s.keys.policyCheckingKey, nil); err != nil {
 		vsinst.Stop()
 		return fmt.Errorf("policy install failed: %w", err)
 	}
-	s.log.Infom("bootstrap: installling policy using support service - DONE")
-
-	// - wait for node registration with visa service...
-	ticker := time.NewTicker(2 * time.Second)
-	for {
-		s.log.Info("bootstrap: waiting for node registration", "from_addr", nodeAddr)
-		if vsinst.HasRegisteredNode(nodeAddr) {
-			break
-		}
-		select {
-		case <-s.shutdownC:
-			ticker.Stop()
-			return fmt.Errorf("no registration from node")
-		case <-s.service.shutdownC:
-			ticker.Stop()
-			return fmt.Errorf("visa service shutdown before node registration")
-		case <-ticker.C:
-			continue
-		}
-	}
-	ticker.Stop()
-	s.log.Info("bootstrap: node registration received")
-	s.log.Info("bootstrap: adding node to our pollers list", "addr", nodeAddr)
-	vsinst.AddNode(nodeAddr)
-
-	// - install vs visas
-	s.log.Infom("bootstrap: **TODO** installing fresh VSS visas using visa service PUSH")
-	s.log.Infom("bootstrap: ...")
-
-	s.log.Infom("bootstrap: NOW NO PUSH POLICY TO OUR NODE .... HOW? (TODO)")
-	s.log.Infom("bootstrap: ...")
-
-	s.log.Infom("bootstrap completed")
+	s.log.Infom("bootstrap: installling policy - DONE")
 	return s.run()
 }
 
@@ -215,7 +160,7 @@ func (s *VisaService) Stop() {
 // This blocks until error or call to Stop().
 func (s *VisaService) run() error {
 
-	adminservice := NewAdminService(s.log, s.visaServiceCreds, s.privateKey.Public().(*rsa.PublicKey), s)
+	adminservice := NewAdminService(s.log, s.keys.adminServiceTLSCreds, s.keys.policyCheckingKey, s)
 
 	go func() {
 		s.log.Info("starting admin service", "port", AdminPort)
@@ -253,19 +198,17 @@ func (s *VisaService) run() error {
 // installPolicyFromFile installs a policy from a file.
 //
 // TODO: The visa service needs to be able to install a new policy form an admin.
+// So there must be an RPC call to visa service that an admin can use to install a policy.
 //
-// New Policy install used to be the job of the admin service. But now really the visa
-// service needs to start the process and it will direct the node through the visa-support
-// interface.
-//
-// So there must be an RPC call to visa service that an admin can use to install a policy. (TODO)
-func (s *VisaService) installPolicyFromFile(fname string, pubkey *rsa.PublicKey, nodeAddr netip.Addr) error {
+// If `nodeAddrs` are given we also create visas for those nodes.  Note this is older code
+// and may not be needed in new ref-impl.  Can leave this empty.
+func (s *VisaService) installPolicyFromFile(fname string, pubkey *rsa.PublicKey, nodeAddrs []netip.Addr) error {
 	s.log.Info("installing policy from file", "file", fname)
 	cp, err := polio.OpenContainedPolicyFile(fname, pubkey)
 	if err != nil {
 		return err
 	}
-	return s.installPolicyWithVisasForNode(true, cp, nodeAddr)
+	return s.installPolicyWithVisasForNodes(true, cp, nodeAddrs)
 }
 
 // Implements an interface needed by the admin service.
@@ -284,10 +227,18 @@ func (s *VisaService) GetPolicyAndConfig() (*policy.Policy, uint64) {
 // Returns (version, config_id, error)
 func (s *VisaService) InstallPolicy(cp *polio.ContainedPolicy) (string, uint64, error) {
 	s.log.Info("installing policy from admin")
-	err := s.installPolicyWithVisasForNode(false, cp, s.supportSvc.NodeAddr)
-	if err != nil {
-		return "", 0, err
+
+	// TODO: Presumably we need to install on all our known nodes.
+	//       What does a node need from the policy anyway?  Just topology I think.
+
+	// There's plenty of room for error here.  We used to use raft to distribute
+	// policy to nodes.  Needs more thought.
+
+	nodes := s.service.inst.GetNodeList()
+	if err := s.installPolicyWithVisasForNodes(false, cp, nodes); err != nil {
+		return "", 0, errors.New("failed to install policy on nodes")
 	}
+
 	installedPolicy, configID := s.GetPolicyAndConfig()
 	pver := "(none)"
 	if installedPolicy != nil {
@@ -296,7 +247,8 @@ func (s *VisaService) InstallPolicy(cp *polio.ContainedPolicy) (string, uint64, 
 	return pver, configID, nil
 }
 
-func (s *VisaService) installPolicyWithVisasForNode(bootstrap bool, cp *polio.ContainedPolicy, nodeAddr netip.Addr) error {
+// `nodeAddrs` are ZPR addresses of nodes.
+func (s *VisaService) installPolicyWithVisasForNodes(bootstrap bool, cp *polio.ContainedPolicy, nodeAddrs []netip.Addr) error {
 	pp := policy.NewPolicyFromContainer(cp, s.log)
 	if pp.Size() == 0 {
 		return errors.New("policy is empty")
@@ -314,46 +266,46 @@ func (s *VisaService) installPolicyWithVisasForNode(bootstrap bool, cp *polio.Co
 	s.service.inst.InstallPolicy(configID, 0, pp)
 
 	// To send this over the wire we want it zipped.
+	/* OFF - we don't yet know how or why to send policy in Ref Impl.
 	format := cp.Policy.SerialVersion
 	gzPolicy, err := libvisa.Compress(cp.Container)
 	if err != nil {
 		return fmt.Errorf("failed to compress policy: %w", err)
 	}
+	*/
 
 	// Create a visa-service visa so NODE can talk to US.
-	// Create a visa-support-service visa so that WE can talk to NODE.
-	var visas []*vsio.Visa
-	{
+	var visas []*vsapi.VisaHop
+
+	for _, nodeAddr := range nodeAddrs {
 		s.log.Info("generating a new visa-service visa for the node->VS", "node_addr_src", nodeAddr, "vs_addr_dest", s.myAddr)
 		pktData := snip.NewTCPConnect(nodeAddr, 0, s.myAddr, VisaServicePort)
 		vsr, err := s.service.inst.doRequestVisa(context.Background(), nodeAddr, pktData, 0, pp.VersionNumber())
 		if err != nil {
-			s.log.WithError(err).Warn("failed to generate a visa-service visa for the node")
-		} else if !vsr.Success {
-			s.log.Warn("failed to generate a visa-service visa for the node", "reason", vsr.ErrorMsg)
+			s.log.WithError(err).Warn("failed to generate a visa-service visa for the node", "node_addr", nodeAddr)
+		} else if vsr.Status != vsapi.StatusCode_SUCCESS {
+			s.log.Warn("failed to generate a visa-service visa for the node", "node", nodeAddr, "reason", vsr.Reason)
 		} else {
-			visas = append(visas, vsr.Visa.Visa)
-		}
-	}
-	{
-		s.log.Info("generating a new visa-support-service visa for the VS->node", "vs_addr_src", s.myAddr, "node_addr_dest", nodeAddr)
-		pktData := snip.NewTCPConnect(s.myAddr, 0, nodeAddr, VisaSupportServicePort)
-		vsr, err := s.service.inst.doRequestVisa(context.Background(), s.myTetherAddr, pktData, 0, pp.VersionNumber())
-		if err != nil {
-			s.log.WithError(err).Warn("failed to generate a visa-service visa for the node")
-		} else if !vsr.Success {
-			s.log.Warn("failed to generate a visa-service visa for the node", "reason", vsr.ErrorMsg)
-		} else {
-			visas = append(visas, vsr.Visa.Visa)
+			visas = append(visas, vsr.Visa)
 		}
 	}
 
-	s.log.Info("sending policy to node support service", "version", pversion, "configID", configID)
-	resp, err := s.supportSvc.InstallPolicy(bootstrap, format, gzPolicy, configID, visas)
-	if err != nil {
-		return err
+	s.log.Info("(TODO) now send policy to node", "version", pversion, "configID", configID)
+	// TODO:
+	//   The prototype used the visa-support-service to send a policy to the node.
+	//   Plus it ised to also send along a visa.  Instead we should use our polling system.
+	//   AND the node doesn't need the whole policy. So we need to figure out what it needs and
+	//   figure out how the visa-service tells node about it.
+	//
+
+	if len(visas) > 0 {
+		pr := vsapi.PollResponse{
+			Visas: visas,
+		}
+		// TODO: Should we set hopcount to 1?
+		s.service.inst.PushVisa(&pr)
 	}
-	s.log.Info("support service returns OK", "version", resp.Version, "config_id", resp.ConfigId)
+
 	return nil
 }
 

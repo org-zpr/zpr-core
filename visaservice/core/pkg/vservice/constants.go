@@ -39,6 +39,7 @@ const (
 	// Visa service signs the agents it authenticates under this key ID.
 	SigningKeyID = "vs"
 
+	// ZPR hard coded visa service address.
 	VisaServiceAddress = "fc00:3003::1"
 
 	// AdminPort is the admin control port for visa service

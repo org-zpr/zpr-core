@@ -5,14 +5,14 @@ import (
 	"net/netip"
 	"sort"
 	"strings"
-	"time"
 
+	"google.golang.org/protobuf/proto"
 	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/vsapi"
 
-	"zpr.org/vsx/snio/vsio"
-	"zpr.org/vsx/snio/zds"
 	"zpr.org/vsx/polio"
+	"zpr.org/vsx/snio/zds"
 )
 
 // TODO: Most of these funcs were using the shim objects (CoonnectionRequest, ConnectionResult)
@@ -45,15 +45,15 @@ import (
 // Passing an `authedAgent` is a hack to deal with implementation decision to have a tunnel address on
 // each node. This tunnel address acts like a connection (with id of -1). So traffic can flow over
 // it. Here we "authenticate" it (in a manner of speaking).
-func (vs *VSInst) ApproveConnection(cr *vsio.VSConnectRequest, authedAgent *agent.Agent) (*vsio.VSConnectResponse, error) {
+func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest, authedAgent *agent.Agent) (*vsapi.ConnectResponse, error) {
 	// The policy in use for this approval. Maybe pass in? But the VS should have it, right?
 	// Note that the auth-service has a policy which is going to be the one used.
 	curpol, curmatcher, configID := vs.getPolicyMatcherConfig()
 
 	var err error
 	var validatedAgent *agent.Agent
-	resp := &vsio.VSConnectResponse{
-		ConId: cr.GetConId(),
+	resp := &vsapi.ConnectResponse{
+		ConnectionID: cr.ConnectionID,
 	}
 
 	if authedAgent == nil {
@@ -69,10 +69,9 @@ func (vs *VSInst) ApproveConnection(cr *vsio.VSConnectRequest, authedAgent *agen
 		validatedAgent = authedAgent
 		validatedAgent.SetConfigID(configID)
 		// TODO: Update expires?
-
 	}
 	// Set connect-via
-	dockAddr, ok := cr.ParseDockAddr()
+	dockAddr, ok := netip.AddrFromSlice(cr.DockAddr)
 	if ok {
 		validatedAgent.SetAuthedClaimWithExp(agent.KAttrConnectVia, dockAddr.String(), validatedAgent.GetAuthExpires())
 	} else {
@@ -85,6 +84,12 @@ func (vs *VSInst) ApproveConnection(cr *vsio.VSConnectRequest, authedAgent *agen
 		return nil, fmt.Errorf("apply policy failed: %w", err)
 	}
 
+	// At this point the agent must have an address.
+	if _, ok := validatedAgent.GetZPRID(); !ok {
+		vs.log.Error("failed to assign an address to the agent, denying connection")
+		return nil, fmt.Errorf("failed to get an address")
+	}
+
 	// Agent has N attributes, some M of those attributes (where M<=N) have been
 	// matched to connect policy.  I'd like a table tracking which attributes are
 	// in use by which agents.
@@ -92,15 +97,9 @@ func (vs *VSInst) ApproveConnection(cr *vsio.VSConnectRequest, authedAgent *agen
 		vs.log.Error("auth'd agent configID should match current policy configID", "got", validatedAgent.GetConfigID(), "expected", configID)
 	}
 
-	if signature, err := computeSignatureOverAgent(validatedAgent, vs.agentSigningKey); err == nil {
-		validatedAgent.Sign(SigningKeyID, signature)
-	} else {
-		vs.log.WithError(err).Warn("failed to sign agent")
-	}
-
 	// Convert the agent.Agent into an snio.Agent for sending back
-	resp.Agent = agentToSnioAgent(validatedAgent, nil) // we don't know the tether address.
-	resp.Success = true
+	resp.Agent = agentToVsapiAgent(validatedAgent, nil) // we don't know the tether address.
+	resp.Status = vsapi.StatusCode_SUCCESS
 	return resp, nil
 }
 
@@ -125,7 +124,7 @@ func (vs *VSInst) applyConnectPolicy(curpol *policy.Policy, matcher *policy.Matc
 
 // validateCredentials uses the data source API to validate the agent credentials.
 // The ConnectionRequest `cr` is possibly modified (claims).
-func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsio.VSConnectRequest) (*agent.Agent, error) {
+func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRequest) (*agent.Agent, error) {
 
 	// externalSvc, externalDomain, externalPrefix := curpol.GetExternalAuthority()
 	// vs.log.Debug("(MakeAuthDec) EXTERNAL authority is set", "prefix", externalPrefix)
@@ -133,19 +132,25 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsio.VSConnectR
 	// In case sn.authority is not set explicitly, we set it from incomming
 	// auth types.
 
+	// If there are no challenge-responses, we cannot validate anything.
+	if len(cr.ChallengeResponses) == 0 {
+		return nil, fmt.Errorf("no challenge responses")
+	}
+
 	authPrefix, err := vs.SelectValidateDSPrefix(curpol, cr)
 	if err != nil {
 		return nil, err
 	}
 
-	// Sanity check: at this point there is no changing EPID, warn if it look suspicious
-	reqAddr, ok := cr.ParseReqAddr()
-	if ok {
-		if epidClaim, found := cr.Claims[agent.KAttrEPID]; found {
-			if reqAddr.String() != epidClaim {
-				vs.log.Warn("EPID assigned does not match claim", "assigned", reqAddr.String(), "claimed", epidClaim)
-			}
+	// The address assigned to the agent is either requested by the agent and propogated by the node
+	// into the agents claims, or it is assigned by the node, or it is not set at all (and must be set by policy).
+	var reqAddr netip.Addr
+	if epidClaim, found := cr.Claims[agent.KAttrEPID]; found {
+		reqAddr, err = netip.ParseAddr(epidClaim)
+		if err != nil {
+			vs.log.WithError(err).Warn("EPID claim is invalid", "claim", epidClaim)
 		}
+		delete(cr.Claims, agent.KAttrEPID)
 	}
 
 	// If there is an "authority" claim, stip it out now.
@@ -154,9 +159,22 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsio.VSConnectR
 	agnt := agent.NewAgentFromUnsubstantiatedClaims(cr.Claims) // TODO: Why bother with the unsubstantiated claims?
 	vs.log.Debug("NEW AGENT", "claims_in", cr.Claims)
 
-	// Finally, perform authentication.
+	var chal zds.Challenge
+	if err := proto.Unmarshal(cr.Challenge, &chal); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal challenge: %w", err)
+	}
+	var chalResps []*zds.ChallengeResponse
+	for i, crb := range cr.ChallengeResponses {
+		var zcr zds.ChallengeResponse
+		if err := proto.Unmarshal(crb, &zcr); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal challenge response %d: %w", i+1, err)
+		}
+		chalResps = append(chalResps, &zcr)
+	}
+
+	// Finally, perform authentication.  Note `reqAddr` may be unset.
 	// Blocking call:
-	aok, err := vs.authr.Authenticate(authPrefix, reqAddr, cr.Chal, cr.ChalResp, cr.Claims) // hmm, no prefix?
+	aok, err := vs.authr.Authenticate(authPrefix, reqAddr, &chal, chalResps, cr.Claims) // hmm, no prefix?
 	if err != nil {
 		return nil, fmt.Errorf("authenticate failed: %w", err)
 	}
@@ -179,19 +197,9 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsio.VSConnectR
 		}
 	}
 
-	// Sanity check: again, at this point there is no changing EPID.
-	reqAddr, ok = cr.ParseReqAddr()
-	if ok {
-		if epidClaim, found := aok.Claims[agent.KAttrEPID]; found {
-			if reqAddr.String() != epidClaim.V {
-				vs.log.Error("EPID assigned does not match epid post auth", "assigned", reqAddr.String(), "post_auth", epidClaim)
-				return nil, fmt.Errorf("auth attempt to re-assign EPID")
-			}
-		}
-	}
-	// Finally, if EPID has not been set by auth claim, make sure the agent has it.
 	if _, ok := agnt.GetZPRID(); !ok {
-		agnt.SetAuthedClaimWithExp(agent.KAttrEPID, reqAddr.String(), aok.Expire)
+		vs.log.Debug("no ZPRID claim found on authenticated agent")
+		// Should be set later then in policy -- or if not it is a connection error.
 	}
 
 	_, _, cid := vs.getPolicyMatcherConfig()
@@ -223,7 +231,7 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsio.VSConnectR
 //
 // Used by validateCredential function. Private function -- capitalized so that I
 // can unit test it.
-func (vs *VSInst) SelectValidateDSPrefix(curpol *policy.Policy, cr *vsio.VSConnectRequest) (string, error) {
+func (vs *VSInst) SelectValidateDSPrefix(curpol *policy.Policy, cr *vsapi.ConnectRequest) (string, error) {
 	var connectAuthority string
 
 	if apfx, found := cr.Claims[agent.KAttrAgentAuthority]; found {
@@ -233,13 +241,22 @@ func (vs *VSInst) SelectValidateDSPrefix(curpol *policy.Policy, cr *vsio.VSConne
 		connectAuthority = apfx
 	}
 
+	var chalResps []*zds.ChallengeResponse
+	for i, crb := range cr.ChallengeResponses {
+		var zcr zds.ChallengeResponse
+		if err := proto.Unmarshal(crb, &zcr); err != nil {
+			return "", fmt.Errorf("failed to unmarshal challenge response %d: %w", i+1, err)
+		}
+		chalResps = append(chalResps, &zcr)
+	}
+
 	// Before calling for authentication check if we know about the domain.
 	// If not, then check to see if it is on a remote node and add it in.
 	// (TODO: Not sure why this wouldn't happen automatically...)
 	usingExternal := false
 	var xAuthSvc *polio.Service
 	var authPrefix string
-	for _, crb := range cr.ChalResp {
+	for _, crb := range chalResps {
 		if aa, err := agent.ParseAuthAttr(crb.GetRespSpec()); err == nil {
 			if aa.IsExternal() {
 				usingExternal = true
@@ -264,7 +281,7 @@ func (vs *VSInst) SelectValidateDSPrefix(curpol *policy.Policy, cr *vsio.VSConne
 	} else {
 		if connectAuthority == "" {
 			vs.log.Debug("(MakeAuthDec) zpr.authority is NOT set, attempting to guess")
-			if apfx, err := vs.guessSnAuthority(curpol, cr.ChalResp); err != nil {
+			if apfx, err := vs.guessSnAuthority(curpol, chalResps); err != nil {
 				return "", fmt.Errorf("failed to guess authority: %w", err)
 			} else {
 				connectAuthority = apfx
@@ -344,29 +361,34 @@ func (vs *VSInst) guessSnAuthority(curpol *policy.Policy, arbs []*zds.ChallengeR
 	return strings.Join(auths, ","), nil
 }
 
-// copied from prototype snet/transcode/agent.go
-func agentToSnioAgent(a *agent.Agent, tetherAddr []byte) *vsio.Agent {
-	aa := &vsio.Agent{
-		Authenticated: a.IsAuthenticated(),
-		AuthClaims:    make(map[string]*vsio.AClaim),
-		AuthIds:       a.GetAuthIDs(),
-		AuthTokens:    a.GetAuthTokens(),
-		AuthExpires:   a.GetAuthExpires().Format(time.RFC3339),
-		UnsubClaims:   a.GetClaims(),
-		Hashval:       a.Hash(),
-		Ident:         a.GetIdentity(),
-		Provides:      a.GetProvides(),
-		ConfigId:      a.GetConfigID(),
-		TetherAddr:    tetherAddr,
+// Note that this is not a reversible operation.  Converting to vsapi.Agent
+// drops a lot of agent info.  The visa service has all the real agent info
+// so can look the details up when it needs them.
+func agentToVsapiAgent(a *agent.Agent, tetherAddr []byte) *vsapi.Agent {
+	aa := &vsapi.Agent{
+		AgentType:   vsapi.AgentType_ADAPTER, // default
+		Attrs:       make(map[string]string),
+		AuthExpires: a.GetAuthExpires().Unix(),
+		TetherAddr:  tetherAddr,
+		Ident:       a.GetIdentity(),
 	}
 	for k, v := range a.GetAuthedClaims() {
-		aa.AuthClaims[k] = &vsio.AClaim{
-			Cval: v.V,
-			Exp:  v.Exp.Unix(),
+		aa.Attrs[k] = v.V // note we drop the claim expiration here. Ok?
+		if k == agent.KAttrRole && v.V == "node" {
+			aa.AgentType = vsapi.AgentType_NODE
 		}
 	}
-	if zid, ok := a.GetZPRID(); ok {
-		aa.AuthAddr = zid.AsSlice()
+	if _, found := aa.Attrs[agent.KAttrHash]; !found {
+		if a.Hash() != "" {
+			aa.Attrs[agent.KAttrHash] = a.Hash()
+		}
 	}
+	if _, found := aa.Attrs[agent.KAttrConfigID]; !found {
+		aa.Attrs[agent.KAttrConfigID] = fmt.Sprintf("%d", a.GetConfigID())
+	}
+	if zid, ok := a.GetZPRID(); ok {
+		aa.ZprAddr = zid.AsSlice()
+	}
+	aa.Provides = append(aa.Provides, a.GetProvides()...)
 	return aa
 }

@@ -66,16 +66,16 @@ type ValidateResult struct {
 // is using the correct revocation details.
 //
 // `ep` is this nodes ZPR address (used as a point-of-entry ID)
-// `nodename` is this nodes name (added as metadata to all JWTs we create)
+// `vsName` is a name for this visa service -- added as metadata to all JWTs we create.
 // `privateKey` is the key used to sign JWTs we create post validation.
 //
 // To make this fully functional you must call `SetRevocationService` at some point.
-func NewAuthenticator(mlog logr.Logger, ep netip.Addr, maxAuthLifetime time.Duration, nodeName string, privateKey *rsa.PrivateKey) *Authenticator {
+func NewAuthenticator(mlog logr.Logger, ep netip.Addr, maxAuthLifetime time.Duration, vsName string, privateKey *rsa.PrivateKey) *Authenticator {
 	ath := &Authenticator{
 		log:             mlog,
 		ep:              ep,
 		MaxAuthDuration: maxAuthLifetime,
-		local:           NewNodeValidator(mlog, maxAuthLifetime, nodeName, privateKey),
+		local:           NewNodeValidator(mlog, maxAuthLifetime, vsName, privateKey),
 	}
 	ath.policy.validators = NewDirectory(snauth.NewCertCollection(), mlog)
 	ath.policy.localPrefixes = make(map[string]bool)

@@ -29,7 +29,7 @@ var (
 // node -- as opposed to using an external validation service.
 type NodeValidator struct {
 	Log             log.Logger
-	nodeName        string
+	name            string
 	privateKey      *rsa.PrivateKey
 	maxAuthDuration time.Duration
 }
@@ -66,11 +66,11 @@ type CertificateDB interface {
 // when auth succeeds. Normally this should be the surenet private key (used by
 // node for the TLS connection).
 //
-// `nodeName` is added as a property to all tokens we create.
-func NewNodeValidator(alog log.Logger, maxAuthDuration time.Duration, nodeName string, privateKey *rsa.PrivateKey) *NodeValidator {
+// `name` is added as the `iss` property to all tokens we create.
+func NewNodeValidator(alog log.Logger, maxAuthDuration time.Duration, name string, privateKey *rsa.PrivateKey) *NodeValidator {
 	return &NodeValidator{
 		Log:             alog,
-		nodeName:        nodeName,
+		name:            name,
 		privateKey:      privateKey,
 		maxAuthDuration: maxAuthDuration,
 	}
@@ -347,7 +347,7 @@ func (v *NodeValidator) makeJWT(subject string, expiration time.Time, issuers, c
 		agent.JWTXAuthCount: len(issuers),
 		"sub":               subject,
 		"aud":               "zpr",
-		"iss":               v.nodeName,
+		"iss":               v.name,
 		"iat":               time.Now().Unix(),
 		"exp":               expiration.Unix(),
 		"nbf":               time.Now().Add(-1 * time.Minute).Unix(),

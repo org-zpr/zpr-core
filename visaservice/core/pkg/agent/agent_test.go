@@ -1,14 +1,12 @@
 package agent_test
 
 import (
-	"net"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"zpr.org/vs/pkg/agent"
-	"zpr.org/vsx/snio/vsio"
 )
 
 func NewAgentFromClaims(c map[string]string, exp time.Time) *agent.Agent {
@@ -95,42 +93,6 @@ func TestEPID(t *testing.T) {
 	}
 }
 
-func TestAgentFromSnioAgent(t *testing.T) {
-	exp := time.Now().Add(10 * time.Minute)
-	sa := &vsio.Agent{
-		Authenticated: true,
-		AuthClaims: map[string]*vsio.AClaim{
-			"zpr.addr": &vsio.AClaim{Cval: "fc00:2000::1", Exp: exp.Unix()},
-			"foo.foo":  &vsio.AClaim{Cval: "fee", Exp: exp.Unix()},
-		},
-		AuthIds:     []string{"foo", "fie"},
-		AuthTokens:  []string{"token1"},
-		AuthExpires: exp.Format(time.RFC3339),
-		AuthAddr:    net.ParseIP("fc00:2000::1"),
-		UnsubClaims: map[string]string{
-			"heehee": "hoho",
-		},
-		Hashval:  "fakehash",
-		Ident:    "fakeident",
-		Provides: []string{"/foo/service"},
-	}
-	aa := agent.NewAgentFromSnioAgent(sa)
-	require.NotNil(t, aa)
-	require.True(t, aa.IsAuthenticated())
-	require.Contains(t, aa.GetAuthedClaims(), "zpr.addr")
-	require.Contains(t, aa.GetAuthedClaims(), "foo.foo")
-	require.Contains(t, aa.GetAuthIDs(), "foo")
-	require.Contains(t, aa.GetAuthIDs(), "fie")
-	require.Contains(t, aa.GetAuthTokens(), "token1")
-	require.Equal(t, exp.Format(time.RFC3339), aa.GetAuthExpires().Format(time.RFC3339))
-	addr, ok := aa.GetZPRID()
-	require.True(t, ok)
-	require.Equal(t, sa.AuthAddr, addr.AsSlice())
-	require.Equal(t, sa.Hashval, aa.Hash())
-	require.Equal(t, sa.Ident, aa.GetIdentity())
-	require.Contains(t, aa.GetProvides(), "/foo/service")
-}
-
 func TestGetTokenKeys(t *testing.T) {
 	exp := time.Now().Add(10 * time.Minute)
 	toks := []string{
@@ -172,24 +134,4 @@ func TestGetTokenIDs(t *testing.T) {
 	ids := sa.TokenIDs()
 	require.Len(t, ids, 1)
 	require.Equal(t, "3000", ids[0])
-}
-
-func TestSign(t *testing.T) {
-	sa := agent.EmptyAgent()
-	sa.Sign("foo", []byte("my-rsa-signature-here"))
-	require.Contains(t, sa.GetAuthedClaims(), "zpr.signature.foo")
-	require.Equal(t, ":bXktcnNhLXNpZ25hdHVyZS1oZXJl:", sa.GetAuthedClaims()["zpr.signature.foo"].V)
-	sig, ok := sa.GetSignature("foo")
-	require.True(t, ok)
-	require.Equal(t, []byte("my-rsa-signature-here"), sig)
-}
-
-func TestSignEmpty(t *testing.T) {
-	sa := agent.EmptyAgent()
-	sa.Sign("foo", nil)
-	require.Contains(t, sa.GetAuthedClaims(), "zpr.signature.foo")
-	require.Equal(t, "::", sa.GetAuthedClaims()["zpr.signature.foo"].V)
-	sig, ok := sa.GetSignature("foo")
-	require.True(t, ok)
-	require.Equal(t, []byte([]byte{}), sig)
 }
