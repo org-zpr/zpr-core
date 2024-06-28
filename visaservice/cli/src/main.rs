@@ -157,20 +157,20 @@ fn main() {
         },
         Some(Commands::Helptraffic {}) => {
             println!("Traffic format syntax:");
-            println!("");
+            println!();
             println!("   SRC_ADDR [ ':' SRC_PORT ] '>' DST_ADDR ':' DST_PORT [ '[' FLAGS ']' ]");
-            println!("");
+            println!();
             println!("   - IPv6 addresses should be enclosed in square brackets.");
             println!("   - Flags are optional, and can be 'S' for SYN, 'A' for ACK, or both.");
             println!("   - Source port is optional, and if omitted a high number port is randomly chosen.");
-            println!("");
+            println!();
             println!("   Note that the protocol is set by using the --tcp or --udp arg in the requestvisa command.");
-            println!("");
+            println!();
             println!("   Examples:");
-            println!("");
+            println!();
             println!("       --tcp 192.168.0.1:42300>192.168.0.99:22[S]");
             println!("       --tcp [fc00:3001::99]>[fc00:3001::1]:443[S]");
-            println!("");
+            println!();
         }
         Some(Commands::Requestvisa {
             service,
