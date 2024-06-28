@@ -230,12 +230,18 @@ pub fn poll(service: &str, apikey: &str) -> thrift::Result<()> {
     Ok(())
 }
 
-
-
-
-pub fn request_visa(service: &str, apikey: &str, tether_addr: Ipv6Addr, traffic: &vsapi::TrafficDesc) -> thrift::Result<()> {
+pub fn request_visa(
+    service: &str,
+    apikey: &str,
+    tether_addr: Ipv6Addr,
+    traffic: &vsapi::TrafficDesc,
+) -> thrift::Result<()> {
     let mut client = newclient(service)?;
-    match client.request_visa(apikey.into(), tether_addr.octets().to_vec(), traffic.clone()) {
+    match client.request_visa(
+        apikey.into(),
+        tether_addr.octets().to_vec(),
+        traffic.clone(),
+    ) {
         Ok(result) => {
             println!("visa request response:");
             if result.status.unwrap() == vsapi::StatusCode::SUCCESS {
@@ -248,7 +254,7 @@ pub fn request_visa(service: &str, apikey: &str, tether_addr: Ipv6Addr, traffic:
                     }
                     None => {
                         println!("  reason: none given")
-                    }                
+                    }
                 };
             }
             if let Some(visa) = result.visa {
