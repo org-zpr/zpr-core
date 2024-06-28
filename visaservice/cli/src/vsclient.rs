@@ -244,10 +244,21 @@ pub fn request_visa(
     ) {
         Ok(result) => {
             println!("visa request response:");
-            if result.status.unwrap() == vsapi::StatusCode::SUCCESS {
-                println!("  status: SUCCESS");
-            } else {
-                println!("  status: {:?}", result.status);
+            match result.status {
+                Some(vsapi::StatusCode::SUCCESS) => {
+                    println!("  status: SUCCESS");
+                }
+                Some(vsapi::StatusCode::FAIL) => {
+                    println!("  status: FAILURE");
+                }
+                None => {
+                    println!("  status: none given / unknown")
+                }
+                _ => {
+                    println!("  status: {:?}", result.status)
+                }
+            }
+            if result.status.unwrap() != vsapi::StatusCode::SUCCESS {
                 match result.reason {
                     Some(reason) => {
                         println!("  reason: {:?}", reason)
@@ -256,11 +267,12 @@ pub fn request_visa(
                         println!("  reason: none given")
                     }
                 };
-            }
-            if let Some(visa) = result.visa {
-                println!("  visa issuer_id: {}", visa.issuer_id.unwrap());
-                println!("  visa hop_count: {}", visa.hop_count.unwrap());
-                println!("  visa size: {} bytes", visa.visa_pb.unwrap().len());
+            } else {
+                if let Some(visa) = result.visa {
+                    println!("  visa issuer_id: {}", visa.issuer_id.unwrap());
+                    println!("  visa hop_count: {}", visa.hop_count.unwrap());
+                    println!("  visa size: {} bytes", visa.visa_pb.unwrap().len());
+                }
             }
         }
         Err(e) => {
