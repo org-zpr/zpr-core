@@ -1,0 +1,31 @@
+#!/bin/sh
+
+# Checks to make sure cargo fmt has been run
+cargo fmt --manifest-path adapter/ph/Cargo.toml --check --quiet
+
+if [ $? -ne 0 ]
+then
+	echo "Please run cargo fmt before committing"
+    	exit 1
+
+fi 
+
+# Checks warnings before committing
+cargo rustc --manifest-path adapter/ph/Cargo.toml -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
+
+if [ $? -ne 0 ]
+then
+	echo "Please clean up warnings before committing"
+	exit 1
+fi 
+
+# Checks warnings with cargo test before committing
+cargo rustc --tests --manifest-path adapter/ph/Cargo.toml -- -D warnings > /dev/null 2>&1
+
+if [ $? -ne 0 ] 
+then 
+	echo "Please clean up warnings with tests before committing"
+	exit 1
+fi 
+
+exit 0
