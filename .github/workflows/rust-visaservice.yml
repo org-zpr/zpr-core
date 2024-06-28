@@ -1,4 +1,4 @@
-name: Rust-adapter
+name: Rust-visaservice
 
 on:
   push:

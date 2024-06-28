@@ -1,14 +1,9 @@
 use std::collections::HashMap;
-use std::fs;
-use std::io::{BufReader, Error, ErrorKind, Read};
+use std::io::{Error, ErrorKind};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use serde::Deserialize;
-use tracing::info;
 
-
-use crate::cd::startmeup::do_start_me_up;
-
+use crate::cd::config::ConfigRecord;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigState {
@@ -18,93 +13,9 @@ pub enum ConfigState {
     Disconnected,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct Configuration {
-    #[serde(skip)]
-    path_name: String,
-
-    profile: Profile,
-    dock: Dock,
-    adapter: Adapter,
-    // TODO: credentials: Credentials,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct Profile {
-    name: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct Dock {
-    host_or_ip: String,
-    startup_port: u16,
-    certificate: String, // path to node key file in DER format (TODO: ability to just use a PEM cert here!!)
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct Adapter {
-    private_key: Option<String>, // base64 noise key
-    public_key: Option<String>,  // base64 noise key (TODO: should be able to derive from private key)
-}
-
-pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
-    let file = fs::File::open(path)?;
-    let mut reader = BufReader::new(file);
-    let mut toml_text = String::new();
-    let len = reader.read_to_string(&mut toml_text)?;
-    if len == 0 {
-        return Err(Error::new(
-            ErrorKind::Other,
-            format!("Empty configuration file: {}", path),
-        ));
-    }
-    let mut c: Configuration = match toml::from_str(&toml_text) {
-        Ok(c) => c,
-        Err(e) => {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("Error parsing configuration file {}: {}", path, e),
-            ))
-        }
-    };
-    c.path_name = path.to_string();
-    Ok(c)
-}
-
-impl Configuration {
-    pub fn get_name(&self) -> &str {
-        self.profile.name.as_str()
-    }    
-
-    pub fn get_dock_host(&self) -> &str {
-        self.dock.host_or_ip.as_str()        
-    }
-
-    pub fn get_dock_startup_port(&self) -> u16 {
-        self.dock.startup_port
-    }
-
-    pub fn get_path(&self) -> &str {
-        self.path_name.as_str()                   
-    }
-
-    // Returns a filename (possibly relative to the config file path)
-    pub fn get_dock_certificate(&self) -> &str {
-        self.dock.certificate.as_str()
-    }
-
-    pub fn get_adapter_public_key(&self) -> Option<&str> {
-        self.adapter.public_key.as_deref()
-    }
-}
-
-
-
-
-
 // Zpr is the "shared state" for the control daemon. Not quite sure yet what will be in
 // here.  For now is holding state information about configurations.
-// 
+//
 // This pattern on an Arc and then a Mutex is copied from the tokio "best practice" as
 // illustrated in the redis example.
 #[derive(Debug, Clone)]
@@ -114,14 +25,13 @@ pub struct Zpr {
 
 #[derive(Debug)]
 struct Shared {
-    state: Mutex<State>,    
+    state: Mutex<State>,
 }
 
 #[derive(Debug)]
 struct State {
-    configurations: HashMap<String, (Configuration, ConfigState)>, // indexed by configuration.profile.name.
+    configs: HashMap<String, (ConfigRecord, ConfigState)>, // indexed by configuration.profile.name.
 }
-
 
 impl Default for Zpr {
     fn default() -> Self {
@@ -129,25 +39,24 @@ impl Default for Zpr {
     }
 }
 
-
 impl Zpr {
     pub fn new() -> Zpr {
         Zpr {
             shared: Arc::new(Shared {
                 state: Mutex::new(State {
-                    configurations: HashMap::new(),                    
+                    configs: HashMap::new(),
                 }),
             }),
         }
     }
 
     // If a configuration exists with the same path, we overrite the existing one but only if it is disconnected.
-    pub fn add_configuration(&self, c: Configuration) -> Result<(), std::io::Error> {
+    pub fn add_configuration(&self, c: ConfigRecord) -> Result<(), std::io::Error> {
         let mut found = false;
         let mut found_name: String = String::new();
-        let mut state = self.shared.state.lock().unwrap();            
-        for (conf, state) in state.configurations.values() {
-            if conf.path_name == c.path_name {
+        let mut state = self.shared.state.lock().unwrap();
+        for (conf, state) in state.configs.values() {
+            if conf.has_same_source_as(&c) {
                 found = true;
                 found_name = conf.get_name().to_string();
                 if !matches!(state, ConfigState::Disconnected) {
@@ -160,28 +69,30 @@ impl Zpr {
         }
         if found {
             // If the names are the same, just writing our new config will overwrite the existing one.
-            if found_name != c.profile.name {
-                state.configurations.remove(&found_name);
+            if found_name != c.get_name() {
+                state.configs.remove(&found_name);
             }
         } else {
             // The new path is not present, but also we require a unique name.
-            if state.configurations.contains_key(c.get_name()) {
+            if state.configs.contains_key(c.get_name()) {
                 return Err(Error::new(
                     ErrorKind::Other,
-                    format!("Configuration with name {} already exists", c.profile.name),
+                    format!("Configuration with name {} already exists", c.get_name()),
                 ));
             }
         }
 
-        state.configurations.insert(c.get_name().to_string(), (c, ConfigState::Disconnected));
+        state
+            .configs
+            .insert(c.get_name().to_string(), (c, ConfigState::Disconnected));
         Ok(())
     }
 
-    // Mock up status function.  This returns a vector of (CONFIG_NAME, ENDPOINT, STATUS)
+    // This returns a vector of (CONFIG_NAME/CN, ENDPOINT, STATUS)
     pub fn get_status(&self) -> Vec<(String, String, String)> {
         let mut status = Vec::new();
         let state = self.shared.state.lock().unwrap();
-        for (cname, (conf, state)) in &state.configurations {
+        for (cname, (conf, state)) in &state.configs {
             let s = match state {
                 ConfigState::Connecting => String::from("connecting"),
                 ConfigState::Connected(ctime) => {
@@ -192,28 +103,30 @@ impl Zpr {
                 ConfigState::Disconnecting => String::from("disconnecting"),
                 ConfigState::Disconnected => String::from("disconnected"),
             };
-            status.push((cname.clone(), conf.dock.host_or_ip.clone(), s));
+            status.push((
+                format!("{}/{}", cname.clone(), conf.get_cn()),
+                String::from(conf.get_dock_host()),
+                s,
+            ));
         }
         status
     }
 
-
     pub fn get_configuration_state(&self, name: &str) -> Option<ConfigState> {
         let state = self.shared.state.lock().unwrap();
-        let cfg = state.configurations.get(name);
+        let cfg = state.configs.get(name);
         cfg?;
         let (_, cs) = cfg.unwrap();
         Some(cs.clone())
     }
 
-
     // This public access to the status property is temporary.  As this is developed the status
     // value will depend on the outcome of operations or reactions to events.
-    // 
+    //
     // For example, when `start_me_up` succeeds, the status moves to "connected".
     pub fn set_status(&self, name: &str, status: ConfigState) -> Result<(), std::io::Error> {
         let mut state = self.shared.state.lock().unwrap();
-        let conf_state_tuple = state.configurations.get_mut(name).ok_or_else(|| {
+        let conf_state_tuple = state.configs.get_mut(name).ok_or_else(|| {
             Error::new(
                 ErrorKind::Other,
                 format!("Configuration with name {} not found", name),
@@ -225,95 +138,138 @@ impl Zpr {
 
     pub fn has_configuration(&self, name: &str) -> bool {
         let state = self.shared.state.lock().unwrap();
-        state.configurations.contains_key(name)
-    }
-
-    // Perform the start-me-up protocol using the named configuration.
-    pub async fn start_me_up(&self, name: &str) -> Result<(), std::io::Error> {
-        let cc = match self.start_me_up_prepare(name) {
-            Ok(c) => c,
-            Err(e) => {
-                return Err(e);
-            }
-        };
-
-        // Do the start-me-up protocol here.
-        match do_start_me_up(&cc).await {
-            Err(e) => {
-                // Set the state back to disconnected.
-                let _ = self.set_status(name, ConfigState::Disconnected);
-                Err(e)
-            },
-            Ok(resp) => {
-                // TODO: Figure out what todo with our new information.
-                info!(config = name, dock_wg_port = resp.wg_port, local_wg_addr = format!("{:?}", resp.local_wg_addr), "start-me-up sucess");
-                self.set_status(name, ConfigState::Connected(Instant::now()))
-            },
-        }
-    }
-
-    // Prepare for start-me-up by setting the state of the config to "connecting".
-    // Returns a clone of the configuration.
-    fn start_me_up_prepare(&self, name: &str) -> Result<Configuration, std::io::Error> {
-        let mut state = self.shared.state.lock().unwrap();
-        let conf_state_tuple = state.configurations.get_mut(name).ok_or_else(|| {
-            Error::new(
-                ErrorKind::Other,
-                format!("Configuration with name {} not found", name),
-            )
-        })?;
-        let (_, conf_state) = conf_state_tuple;
-        // In order to start the state must be in disconnected.
-        if !matches!(conf_state, ConfigState::Disconnected) {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("Configuration {} is not disconnected", name),
-            ));
-        }
-        conf_state_tuple.1 = ConfigState::Connecting;
-
-        // Loose the MUT reference and get a read-only one:
-        let conf_state_tuple = state.configurations.get(name).ok_or_else(|| {
-            Error::new(
-                ErrorKind::Other,
-                format!("Configuration with name {} not found", name),
-            )
-        })?;
-        let (conf, _) = conf_state_tuple;
-        Ok(conf.clone())
+        state.configs.contains_key(name)
     }
 }
-
-
-
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::env;    
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use crate::cd::config::load_configuration;
     use rand::Rng;
+    use std::env;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
+    const CA_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
+MIIDijCCAnICCQDvR2uxX2eKJTANBgkqhkiG9w0BAQsFADCBhjELMAkGA1UEBhMC
+VVMxCzAJBgNVBAgMAktZMQ4wDAYDVQQHDAVWaWxsZTEQMA4GA1UECgwHc3VyZW5l
+dDEWMBQGA1UECwwNYXV0aG9yaXphdGlvbjEXMBUGA1UEAwwOYXV0aDAuaW50ZXJu
+YWwxFzAVBgkqhkiG9w0BCQEWCGF1dGhAZm9vMB4XDTIwMDIyODE5MjMyN1oXDTI1
+MDIyNjE5MjMyN1owgYYxCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJLWTEOMAwGA1UE
+BwwFVmlsbGUxEDAOBgNVBAoMB3N1cmVuZXQxFjAUBgNVBAsMDWF1dGhvcml6YXRp
+b24xFzAVBgNVBAMMDmF1dGgwLmludGVybmFsMRcwFQYJKoZIhvcNAQkBFghhdXRo
+QGZvbzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMCxt6RgI11Q3aZa
+DTUp6Q+5uMB+fqhhuaPoeqEZYujgLbeJrldMQ2aIHlqntC1y4tPSCCYriVRS5j6V
+cqgtu3saFsA/8MwAvaeY5LmD8wE7fl4b/MGst86FVyD3TLlTt5FDIkhJK+jpgKf1
+4NjGDBYSiYVuZ54Kxg8HQXPGXx5txjTxmcBY44b5g5ARxOVu/u/ut0ZeS3z2Uf7K
+q4cZ2/C+xxpYo+NMgg3sfuUDfMDAhLymfmWGa5SEj8XCUoYZv3bJLUDjMLtB06yo
+alxQowZovSpUdJOjb0e+B8FvaziwRVohQ4Y1hEpx9X/idvwgHxzGzR9mSax+iz+p
+OUbw3TMCAwEAATANBgkqhkiG9w0BAQsFAAOCAQEAChfVONalJLlRCgbqC9gxjhYq
+3fA3E4r9yVVlWQmkx8XTK4Z2NWqSdE5PmaYQdvdnzMAsxGHjxgaN/KH/wctEL+qK
+2C7bnaevDBrHTtrVM6UUZfec5eerf7UA1MDKq0BqsaUamhzqxygh9Ei2mrG36+LK
+my2Mk/tFcvSOS8tB8Q+gAGDKX/4DshR3aEkIDzqpdmwK8ffxD9sJp8HewjNtO3Pv
+nsdyXmJ65z95DU5GIsshL7og94933hCN/b86R9Zq6/RAoAM/87TJFnxCywG39Zr5
+GRAzgLWJLdkNEos8XB42MCS7tn/jefKDGquuI625jeARa2eCoJT9yk95pQbuAQ==
+-----END CERTIFICATE-----
+"#;
 
-    struct TempTomlFile {
+    const ADAPTER_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
+MIIEWzCCA0OgAwIBAgIJAMSVUe6Pd/Z7MA0GCSqGSIb3DQEBBQUAMIGGMQswCQYD
+VQQGEwJVUzELMAkGA1UECAwCS1kxDjAMBgNVBAcMBVZpbGxlMRAwDgYDVQQKDAdz
+dXJlbmV0MRYwFAYDVQQLDA1hdXRob3JpemF0aW9uMRcwFQYDVQQDDA5hdXRoMC5p
+bnRlcm5hbDEXMBUGCSqGSIb3DQEJARYIYXV0aEBmb28wHhcNMjQwNjE4MTQzMjI4
+WhcNMjUwNjE4MTQzMjI4WjBLMQswCQYDVQQGEwJVUzELMAkGA1UECAwCS1kxCzAJ
+BgNVBAoMAllZMQswCQYDVQQLDAJaWjEVMBMGA1UEAwwMdGVzdG5vZGUuenByMIIB
+IjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAk0x4ui48znwmmnbeVrRMXeiz
+DdR2EKbZwsoW/sfePCTa50UJHgA3vPPTGhJTTfjJrVyp2nazpaBuy66h85PQWS2x
+FqstxHVTj0+CF4t+YKUyHFZiF2rLWQonO5R43v489NF9JHKH2SgxKMjTsPpJY8sd
+yFgUTbiD6G8T/j/ZIojBIkQG2wWNpdjqUDnzeaU32MGHV8iigUrpc3xDqw+RWhKP
+kPjoyInoA4tNNrfHrddu61w3FPx6KTN1L8UV9K+BlNW/s3buluYMSi2vW24fjdTn
+F3ev2+w+QUcvWP94/pFRiLEDAO+LO3hxFC16qNU33LMvAo8BdJvPG3GbN2+fIwID
+AQABo4IBBDCCAQAwgaUGA1UdIwSBnTCBmqGBjKSBiTCBhjELMAkGA1UEBhMCVVMx
+CzAJBgNVBAgMAktZMQ4wDAYDVQQHDAVWaWxsZTEQMA4GA1UECgwHc3VyZW5ldDEW
+MBQGA1UECwwNYXV0aG9yaXphdGlvbjEXMBUGA1UEAwwOYXV0aDAuaW50ZXJuYWwx
+FzAVBgkqhkiG9w0BCQEWCGF1dGhAZm9vggkA70drsV9niiUwCQYDVR0TBAIwADAL
+BgNVHQ8EBAMCBPAwHwYDVR0RBBgwFoIUYXV0aDAuc3BhY2VsYXNlci5uZXQwHQYD
+VR0OBBYEFFdtDdU6IP12wNv4YUdyZejdx8EaMA0GCSqGSIb3DQEBBQUAA4IBAQBp
+gM2xMYgo6ntaPTV7xhLmAbwlhoKBt3I+i6KQUU9Ec/3AEiiZsyQxcPHAtmeU4han
+5JpOK3hUYVH/SaSj2BHqkXH0yfFyIkAf0V1UsfWwcD8OEZffb5yP02RzIWCqdBN7
+pdx9gtGwy4l779FNvHGQ8AI4y+cpxwiXyBiXdB3Mv1wG5gUNe4pGk7JWA5lb9XQ9
+sOwVMjkwcUsqGr489gqYRWl1mAMz1D2T+U91HavGybvUBlgb/3+dgjksa/ZWTUhD
+2CRFn7sqmwcPHLoGV/+yCjjuheyx+z7LrPqyqPfWwrr68udK4Yqz8iiqwMC1b8m0
+1Hm6nwN1sHYkYgYgk/Ey
+-----END CERTIFICATE-----
+"#;
+
+    const ADAPTER_KEY_DATA: &str = r#"
+-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCTTHi6LjzOfCaa
+dt5WtExd6LMN1HYQptnCyhb+x948JNrnRQkeADe889MaElNN+MmtXKnadrOloG7L
+rqHzk9BZLbEWqy3EdVOPT4IXi35gpTIcVmIXastZCic7lHje/jz00X0kcofZKDEo
+yNOw+kljyx3IWBRNuIPobxP+P9kiiMEiRAbbBY2l2OpQOfN5pTfYwYdXyKKBSulz
+fEOrD5FaEo+Q+OjIiegDi002t8et127rXDcU/HopM3UvxRX0r4GU1b+zdu6W5gxK
+La9bbh+N1OcXd6/b7D5BRy9Y/3j+kVGIsQMA74s7eHEULXqo1Tfcsy8CjwF0m88b
+cZs3b58jAgMBAAECggEAQYQ8FqPGTBmQmhfRIUOkzAhazAX6VcHBDhERVVXVFW9X
+JpLgUUXLhPH2rZwFDaNhIQkcS52MnljTrykHw+21OFVIdUrCWqXM+utkc9CJ77bK
+qSwLCVtpAzuu46NQd+8hcctUHEgNAJwN8ZQSBJ/u0MJhhuEWdtNhaJsvi2Ee1WrN
+ZvUkpn6SpCHVvEtZjJZL0elQrgk7EMzWSWz/1a8ORzbmBDw5X/0dV/VKCfx1kJ+w
+9fmIhfGU3lFT8rOpqcx3MlB+PzRVV4P3hUBirovxBu2TEqp01hvPnb5m6ZGE0U/p
+B4LBke3S23iSkYwPaHwcbLVLhF2pruYmXS1hvCZxEQKBgQC3gBWKZZeV8uT0vKN+
+FScBk5WLYSq63dUSonszWr0AxN03WsoHjkr4AqB+wtMPI2L7Kpy8whwtTXehqNpT
+W+Zz12eVQI2fuGTYZg7zjxN0+H2nRxTOWyVcpW4h1tavzzXAzTDo1jc8DYvMhgXp
+IIOMYDbOCQPCnopdE0Xd2QF7NQKBgQDNftHfeNOINkt3RTTI5NY9pTibl/alzqJf
+aW8BXEsnKM8BB6ux/sTNE4ejaK7a4xvKhgss+Z0FkM11Ycoa2D5/X9CyXT/cOmhF
+E2vt6yyQUSscMQMAaUmma8Gvu5dDF3a7/5liphjafPyFRa275JIxdbDgaCvV62kH
+EjPLMjOj9wKBgQCHhe9iwVlNA5EZN2DAM7sVLPybbe3zCPbexmWbLf683KhMw57G
+Kc8wkDAcrqLWYVovCe+scOgChV4/ZMeqHQt8rq/vyTdPqQ3BzM5qD1ddYlDbBGJX
+bXWQkRVfpJ32RmD6vhDLRbqRfaesK6ed38eIG18emAXQ7Opfh2ZoTGcNqQKBgDKN
+/53lwMyi5t/506mUuqxByHJm6VQTSNkGPDvuc8K3hG2xcGkCz3HQWy81YscQ1lZ1
+sawn4Jxs6k71dt4x0vZNIS+wRzSr3dkYlRXcJIOApIVz/VQNkwPxQJ42HVlxHVHU
+6OxfBoBB/XHgGYS/D8RBOvmKRzaCir0lmj5kJFYzAoGBAKEEaHn0LvmDpHYSUOA4
+FgJnFmtHTHcYFaFus/oqwEtylftAsM5h8o5ww2OCJDa2FSxzaayV1wpm2r1HwvDn
+p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
++VS382WYhn8T/WeSmWHmF69D
+-----END PRIVATE KEY-----
+"#;
+
+    struct TempFile {
         path: String,
     }
 
-    impl Drop for TempTomlFile {
+    impl Drop for TempFile {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.path);
         }
     }
 
-    impl TempTomlFile {
-        fn new(contents: &str) -> TempTomlFile {
+    impl TempFile {
+        fn new_toml(contents: &str) -> TempFile {
             let mut rng = rand::thread_rng();
-            let tstamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+            let tstamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
             let dir = env::temp_dir();
             let num: u32 = rng.gen();
             let path = dir.join(format!("org_zpr_cd_test_{}_{}.toml", num, tstamp));
             fs::write(&path, contents).expect("Unable to write file");
-            TempTomlFile {
+            TempFile {
+                path: path.to_str().unwrap().to_string(),
+            }
+        }
+
+        fn new_pem(contents: &str) -> TempFile {
+            let mut rng = rand::thread_rng();
+            let tstamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            let dir = env::temp_dir();
+            let num: u32 = rng.gen();
+            let path = dir.join(format!("org_zpr_cd_test_{}_{}.pem", num, tstamp));
+            fs::write(&path, contents).expect("Unable to write file");
+            TempFile {
                 path: path.to_str().unwrap().to_string(),
             }
         }
@@ -323,32 +279,41 @@ mod test {
         }
     }
 
-    
-
-    #[test]    
+    #[test]
     fn test_load_configuration() {
         let toml_txt = r#"
             [profile]
             name = "test"
+            root_ca = "@ROOT_CA"
             [dock]
             host_or_ip = "localhost"
-            startup_port = 2242
-            certificate = "missing"
+            port = 2242
             [adapter]
+            certificate = "@CERT"            
+            private_key = "@KEY"                        
             #blank
         "#;
-        let tmpfile = TempTomlFile::new(toml_txt);
+
+        let ca_certf = TempFile::new_pem(CA_CERT_DATA);
+        let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
+        let adapter_keyf = TempFile::new_pem(ADAPTER_KEY_DATA);
+
+        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
+        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
+        let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
+
+        let tmpfile = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile.get_path());
         if let Err(e) = c {
             panic!("Error loading configuration: {}", e);
         }
         assert!(c.is_ok());
         let c = c.unwrap();
-        assert_eq!(c.profile.name, "test");
         assert_eq!(c.get_name(), "test");
-        assert_eq!(c.dock.host_or_ip, "localhost");
-        assert_eq!(c.dock.startup_port, 2242);
-        assert_eq!(c.adapter.private_key, None);
+        assert_eq!(c.get_name(), "test");
+        assert_eq!(c.get_dock_host(), "localhost");
+        assert_eq!(c.get_dock_port(), 2242);
+        assert_eq!(c.get_cn(), "testnode.zpr");
     }
 
     #[test]
@@ -356,14 +321,25 @@ mod test {
         let toml_txt = r#"
             [profile]
             name = "test"
+            root_ca = "@ROOT_CA"
             [dock]
             host_or_ip = "localhost"
-            startup_port = 2242
-            certificate = "missing"
+            port = 2242
             [adapter]
+            certificate = "@CERT"            
+            private_key = "@KEY"                        
             #blank
         "#;
-        let tmpfile = TempTomlFile::new(toml_txt);
+
+        let ca_certf = TempFile::new_pem(CA_CERT_DATA);
+        let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
+        let adapter_keyf = TempFile::new_pem(ADAPTER_KEY_DATA);
+
+        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
+        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
+        let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
+
+        let tmpfile = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile.get_path());
         assert!(c.is_ok());
 
@@ -381,9 +357,9 @@ mod test {
 
         stats = zpr.get_status();
         assert_eq!(stats.len(), 1);
-        assert_eq!(stats[0].0, "test");
-        assert_eq!(stats[0].1, "localhost");        
-        assert_eq!(stats[0].2, "disconnected");                
+        assert_eq!(stats[0].0, "test/testnode.zpr");
+        assert_eq!(stats[0].1, "localhost");
+        assert_eq!(stats[0].2, "disconnected");
     }
 
     #[test]
@@ -391,14 +367,25 @@ mod test {
         let toml_txt = r#"
             [profile]
             name = "test"
+            root_ca = "@ROOT_CA"
             [dock]
             host_or_ip = "localhost"
-            startup_port = 2242
-            certificate = "missing"
+            port = 2242
             [adapter]
+            certificate = "@CERT"            
+            private_key = "@KEY"                        
             #blank
         "#;
-        let tmpfile1 = TempTomlFile::new(toml_txt);
+
+        let ca_certf = TempFile::new_pem(CA_CERT_DATA);
+        let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
+        let adapter_keyf = TempFile::new_pem(ADAPTER_KEY_DATA);
+
+        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
+        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
+        let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
+
+        let tmpfile1 = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile1.get_path());
         assert!(c.is_ok());
         let conf = c.unwrap();
@@ -411,25 +398,32 @@ mod test {
         }
         assert!(r.is_ok());
 
-
         let toml_txt = r#"
             [profile]
             name = "test"
+            root_ca = "@ROOT_CA"
             [dock]
-            host_or_ip = "anotherlocalhost"
-            startup_port = 2243
-            certificate = "missing"
+            host_or_ip = "another.localhost"
+            port = 2243
             [adapter]
+            certificate = "@CERT"            
+            private_key = "@KEY"                        
             #blank
         "#;
-        let tmpfile2 = TempTomlFile::new(toml_txt);
+        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
+        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
+        let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
+
+        let tmpfile2 = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile2.get_path());
         assert!(c.is_ok());
         let conf2 = c.unwrap();
         let r = zpr.add_configuration(conf2);
         assert!(r.is_err());
         let e = r.unwrap_err();
-        assert!( e.to_string().contains("Configuration with name test already exists"));
+        assert!(e
+            .to_string()
+            .contains("Configuration with name test already exists"));
     }
 
     #[test]
@@ -441,7 +435,9 @@ mod test {
         let r = zpr.set_status("foo", ConfigState::Disconnected);
         assert!(r.is_err());
         let e = r.unwrap_err();
-        assert!( e.to_string().contains("Configuration with name foo not found"));
+        assert!(e
+            .to_string()
+            .contains("Configuration with name foo not found"));
     }
 
     #[test]
@@ -449,14 +445,25 @@ mod test {
         let toml_txt = r#"
             [profile]
             name = "test"
+            root_ca = "@ROOT_CA"
             [dock]
             host_or_ip = "localhost"
-            startup_port = 2242
-            certificate = "missing"
+            port = 2242
             [adapter]
+            certificate = "@CERT"            
+            private_key = "@KEY"                        
             #blank
         "#;
-        let tmpfile = TempTomlFile::new(toml_txt);
+
+        let ca_certf = TempFile::new_pem(CA_CERT_DATA);
+        let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
+        let adapter_keyf = TempFile::new_pem(ADAPTER_KEY_DATA);
+
+        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
+        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
+        let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
+
+        let tmpfile = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile.get_path());
         assert!(c.is_ok());
         let conf = c.unwrap();
@@ -481,4 +488,3 @@ mod test {
         assert!(matches!(state.unwrap(), ConfigState::Connected(_)));
     }
 }
-

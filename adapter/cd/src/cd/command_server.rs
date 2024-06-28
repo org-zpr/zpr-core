@@ -3,22 +3,21 @@ use std::{io, sync::Arc};
 
 use tracing::{error, info};
 
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::net::UnixListener;
 use tokio::sync::Mutex;
-use tokio::{
-    io::{
-        //BufReader,
-        AsyncBufReadExt,
-        //AsyncReadExt,
-        AsyncWriteExt,
-    },
-    net::UnixListener,
-};
 use tokio_util::sync::CancellationToken;
 
-pub use crate::cd::config::Config;
-pub use crate::cd::zpr::{load_configuration, Zpr, ConfigState};
+pub use crate::cd::config::{load_configuration, Config};
+pub use crate::cd::zpr::{ConfigState, Zpr};
 
-pub async fn command_server(config: Arc<Config>, zpr: Zpr, token: CancellationToken) -> io::Result<()> {
+type NetWriterT = Arc<Mutex<tokio::io::BufWriter<tokio::net::unix::OwnedWriteHalf>>>;
+
+pub async fn command_server(
+    config: Arc<Config>,
+    zpr: Zpr,
+    token: CancellationToken,
+) -> io::Result<()> {
     info!("starting command server on {}", config.socket_path);
     let listener = UnixListener::bind(config.socket_path.clone())?;
     loop {
@@ -39,8 +38,8 @@ pub async fn command_server(config: Arc<Config>, zpr: Zpr, token: CancellationTo
                         });
                     },
                     Err(e) => {
-                        error!("Error accepting command connection: {}", e);        
-                        return Err(e);                
+                        error!("Error accepting command connection: {}", e);
+                        return Err(e);
                     }
                 }
             }
@@ -83,17 +82,14 @@ async fn handle_command_connection(stream: tokio::net::UnixStream, zpr: Zpr) -> 
                     let mut ww = writer.lock().await;
                     ww.write_all(b"2\nERR\nunknown command\n").await?;
                 }
-            }    
+            }
         }
     }
     writer.lock().await.flush().await?;
     Ok(())
 }
 
-async fn handle_status(
-    writer: Arc<Mutex<tokio::io::BufWriter<tokio::net::unix::OwnedWriteHalf>>>,
-    zpr: Zpr,
-) -> Result<(), io::Error> {
+async fn handle_status(writer: NetWriterT, zpr: Zpr) -> Result<(), io::Error> {
     let stats = zpr.get_status();
 
     let mut writer = writer.lock().await;
@@ -114,11 +110,7 @@ async fn handle_status(
     Ok(())
 }
 
-async fn handle_connect(
-    parts: &Vec<&str>,
-    writer: Arc<Mutex<tokio::io::BufWriter<tokio::net::unix::OwnedWriteHalf>>>,
-    zpr: Zpr,
-) -> Result<(), io::Error> {
+async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Result<(), io::Error> {
     let mut writer = writer.lock().await;
     if parts.len() < 2 {
         writer
@@ -133,7 +125,10 @@ async fn handle_connect(
     let cname: String;
 
     if !zpr.has_configuration(parts[1]) {
-        info!("configuration not found '{}', attempting to load as file", parts[1]);
+        info!(
+            "configuration not found '{}', attempting to load as file",
+            parts[1]
+        );
         let configuration = match load_configuration(parts[1]) {
             Ok(c) => c,
             Err(e) => {
@@ -163,24 +158,15 @@ async fn handle_connect(
         cname = parts[1].to_string();
     }
 
-    match zpr.start_me_up(&cname).await {
-        Ok(()) => {
-            writer.write_all(b"2\nOK\nconnect starting\n").await?;            
-        },
-        Err(e) => {
-            error!("Error starting up configuration {}: {}", cname, e);
-            let emsg = e.to_string().replace('\n', " ");
-            writer
-                .write_all(format!("3\nERR\nfailed to start configuration\n{}\n", emsg).as_bytes())
-                .await?;
-        }
-    }
+    writer
+        .write_all(format!("2\nOK\nconnect starting for {} (not really)\n", cname).as_bytes())
+        .await?;
     Ok(())
 }
 
 async fn handle_disconnect(
-    parts: &Vec<&str>,
-    writer: Arc<Mutex<tokio::io::BufWriter<tokio::net::unix::OwnedWriteHalf>>>,
+    parts: &[&str],
+    writer: NetWriterT,
     zpr: Zpr,
 ) -> Result<(), io::Error> {
     let mut writer = writer.lock().await;
@@ -188,9 +174,9 @@ async fn handle_disconnect(
     let mut all = true;
     let mut cname = "";
 
-    if parts.len() > 1 { 
+    if parts.len() > 1 {
         all = false;
-        cname = parts[1];    
+        cname = parts[1];
     }
 
     let mut fails = vec![];
