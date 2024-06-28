@@ -1,7 +1,15 @@
 use clap::{Parser, Subcommand};
+use std::net::Ipv6Addr;
 
 pub mod vsapi;
 pub mod vsclient;
+pub mod traffic_parser;
+
+
+use crate::traffic_parser::{parse_traffic, Protocol};
+
+
+
 
 #[derive(Parser)]
 #[command(version, about = "Visa Service THRIFT API Client", long_about = None)]
@@ -63,6 +71,26 @@ enum Commands {
         #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
     },
+    #[command(about = "Call the request_visa function, requires an API key")]
+    Requestvisa {
+        #[arg(short, long, value_name = "HOST:PORT")]
+        service: String,
+
+        #[arg(short, long, value_name = "APIKEY")]
+        apikey: String,
+
+        #[arg(long, value_name = "IPv6_ADDR", help = "source tether address")]
+        tether_addr: String,
+
+        #[arg(short, long, value_name = "TRAFFIC", group="protocol", help = "TCP traffic description (see `cli helptraffic`)")]
+        tcp: Option<String>,
+
+        #[arg(short, long, value_name = "TRAFFIC", group="protocol", help = "UDP traffic description (see `cli helptraffic`)")]        
+        udp: Option<String>,
+    },
+
+    #[command(about = "View syntax for traffic format when requesting a visa")]
+    Helptraffic {}
 }
 
 fn main() {
@@ -119,8 +147,83 @@ fn main() {
                 println!("Error: {:?}", e);
             }
         },
+        Some(Commands::Helptraffic {  }) => {
+            println!("Traffic format syntax:");
+            println!("");                        
+            println!("   SRC_ADDR [ ':' SRC_PORT ] '>' DST_ADDR ':' DST_PORT [ '[' FLAGS ']' ]");
+            println!("");
+            println!("   - IPv6 addresses should be enclosed in square brackets.");
+            println!("   - Flags are optional, and can be 'S' for SYN, 'A' for ACK, or both.");
+            println!("   - Source port is optional, and if omitted a high number port is randomly chosen.");
+            println!("");
+            println!("   Note that the protocol is set by using the --tcp or --udp arg in the requestvisa command.");
+            println!("");            
+            println!("   Examples:");
+            println!("");                        
+            println!("       --tcp 192.168.0.1:42300>192.168.0.99:22[S]");
+            println!("       --tcp [fc00:3001::99]>[fc00:3001::1]:443[S]");
+            println!("");                        
+        },
+        Some(Commands::Requestvisa {
+            service,
+            apikey,
+            tether_addr,
+            tcp,
+            udp,
+        }) => {
+            let taddr = match tether_addr.parse::<Ipv6Addr>() {
+                Ok(addr) => addr,
+                Err(_) => {
+                    println!("Invalid tether address");
+                    return;
+                }
+            };
+            match (tcp, udp) {
+                (Some(tcp), None) => {
+                    match parse_traffic(&tcp, Protocol::TCP) {
+                        Ok(traffic) => {
+                            match vsclient::request_visa(&service, &apikey, taddr, &traffic) {
+                                Ok(_) => {
+                                    println!("Requestvisa command executed successfully");
+                                }
+                                Err(e) => {
+                                    println!("Error: {:?}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!("Error: {:?}", e);
+                        }
+                    }
+                }
+                (None, Some(udp)) => {
+                    match parse_traffic(&udp, Protocol::UDP) {
+                        Ok(traffic) => {
+                            match vsclient::request_visa(&service, &apikey, taddr, &traffic) {
+                                Ok(_) => {
+                                    println!("Requestvisa command executed successfully");
+                                }
+                                Err(e) => {
+                                    println!("Error: {:?}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!("Error: {:?}", e);
+                        }
+                    }
+                }
+                _ => {
+                    println!("Either TCP or UDP traffic description must be provided");
+                }
+            }
+        }
         None => {
             println!("No command provided");
         }
     }
 }
+
+
+
+
