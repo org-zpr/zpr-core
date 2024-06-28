@@ -24,14 +24,14 @@ const TCP_FLAGS_ACK: u8 = 0x10;
 //
 pub fn parse_traffic(input: &str, prot: Protocol) -> Result<vsapi::TrafficDesc, std::io::Error> {
     let input = input.trim();
-    let capts: Captures;
+    // let capts: Captures;
 
-    if input.starts_with("[") {
+    let capts: Captures = if input.starts_with('[') {
         // IPv6
         let re =
             Regex::new(r"\[([0-9a-fA-F:]+)\](?::(\d+))?>\[([0-9a-fA-F:]+)\]:(\d+)(?:\[([SA]+)\])?")
                 .unwrap();
-        capts = match re.captures(input) {
+        match re.captures(input) {
             Some(caps) => caps,
             None => {
                 return Err(std::io::Error::new(
@@ -39,11 +39,11 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<vsapi::TrafficDesc, 
                     "Invalid input",
                 ))
             }
-        };
+        }
     } else {
         // IPv4
         let re = Regex::new(r"^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d+))?>(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)(?:\[([SA]+)\])?").unwrap();
-        capts = match re.captures(input) {
+        match re.captures(input) {
             Some(caps) => caps,
             None => {
                 return Err(std::io::Error::new(
@@ -51,8 +51,8 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<vsapi::TrafficDesc, 
                     "Invalid input",
                 ))
             }
-        };
-    }
+        }
+    };
 
     let src_addr = match capts.get(1).unwrap().as_str().parse::<IpAddr>() {
         Ok(addr) => addr,
@@ -107,23 +107,20 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<vsapi::TrafficDesc, 
 
     let mut flags: u32 = 0;
 
-    match capts.get(5) {
-        Some(fstr) => {
-            for c in fstr.as_str().chars() {
-                match c {
-                    'S' => flags |= TCP_FLAGS_SYN as u32,
-                    'A' => flags |= TCP_FLAGS_ACK as u32,
-                    _ => {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::Other,
-                            "Invalid flags",
-                        ))
-                    }
+    if let Some(fstr) = capts.get(5) {
+        for c in fstr.as_str().chars() {
+            match c {
+                'S' => flags |= TCP_FLAGS_SYN as u32,
+                'A' => flags |= TCP_FLAGS_ACK as u32,
+                _ => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Invalid flags",
+                    ))
                 }
             }
         }
-        None => {}
-    }
+    };
 
     if flags > 0 && prot != Protocol::TCP {
         return Err(std::io::Error::new(
