@@ -1,24 +1,24 @@
 #![cfg_attr(feature = "ci", deny(warnings))]
-use std::fs;
-use std::io::Read;
-use std::fs::File;
-use std::io::ErrorKind;
-use std::net::SocketAddr;
-use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
-use std::pin::Pin;
-use std::process::ExitCode;
 use clap::Parser;
 use enum_map::{enum_map, EnumMap};
 use openssl::ssl;
 use openssl::x509::X509;
+use std::fs;
+use std::fs::File;
+use std::io::ErrorKind;
+use std::io::Read;
+use std::net::SocketAddr;
+use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
+use std::pin::Pin;
+use std::process::ExitCode;
 use tokio::io;
 // use tokio::io::prelude::*;
 use tokio::io::unix::AsyncFd;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tokio::signal::unix::{signal, SignalKind};
 
 #[allow(unused_imports)]
 #[macro_use]
@@ -41,16 +41,16 @@ mod outbound_recv_worker;
 mod packet;
 mod queues;
 mod rpc_worker;
+mod test_packet;
 mod udp_stream;
 mod zdp;
-mod test_packet;
 
-use buffer_stack::BufferStack;
-use queues::*;
-use counter::*;
 use assembly::Assembly;
+use buffer_stack::BufferStack;
+use counter::*;
 use counters_enum::*;
 use options::PhMode;
+use queues::*;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -81,9 +81,9 @@ struct CmdLine {
 }
 
 fn is_std_fd(rfd: RawFd) -> bool {
-    rfd == std::io::stdin().as_raw_fd() ||
-    rfd == std::io::stdout().as_raw_fd() ||
-    rfd == std::io::stderr().as_raw_fd()
+    rfd == std::io::stdin().as_raw_fd()
+        || rfd == std::io::stdout().as_raw_fd()
+        || rfd == std::io::stderr().as_raw_fd()
 }
 
 fn is_fd_open<T: AsRawFd>(fd: T) -> bool {
@@ -107,12 +107,12 @@ fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
 fn main() -> ExitCode {
     let cmd_line = CmdLine::parse();
 
-    let sock_path     = cmd_line.control_path;
-    let peer_addr     = cmd_line.dock_addr;
-    let self_addr     = cmd_line.self_addr;
-    let tun_parse     = cmd_line.tun_fd;
-    let ca_file       = cmd_line.ca_file;
-    let cert_file     = cmd_line.certificate_file;
+    let sock_path = cmd_line.control_path;
+    let peer_addr = cmd_line.dock_addr;
+    let self_addr = cmd_line.self_addr;
+    let tun_parse = cmd_line.tun_fd;
+    let ca_file = cmd_line.ca_file;
+    let cert_file = cmd_line.certificate_file;
     let priv_key_file = cmd_line.private_key_file;
 
     let mut tun_fds = Vec::new();
@@ -163,25 +163,36 @@ fn main() -> ExitCode {
 
     let counters = enum_map! { _ => Counter::new(), };
 
-    let asm = Box::leak(Box::new(Assembly{
-            buffer_stack, inbound_processor, inbound_send,
-            outbound_processor, outbound_send, counters
-        }));
+    let asm = Box::leak(Box::new(Assembly {
+        buffer_stack,
+        inbound_processor,
+        inbound_send,
+        outbound_processor,
+        outbound_send,
+        counters,
+    }));
 
     let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
     ssl_context_builder.set_options(
-        ssl::SslOptions::NO_COMPRESSION |
-        (ssl::SslOptions::NO_SSL_MASK & !ssl::SslOptions::NO_DTLSV1_2));
+        ssl::SslOptions::NO_COMPRESSION
+            | (ssl::SslOptions::NO_SSL_MASK & !ssl::SslOptions::NO_DTLSV1_2),
+    );
 
     ssl_context_builder.set_ca_file(&ca_file).unwrap();
     ssl_context_builder.set_verify(ssl::SslVerifyMode::PEER);
-    ssl_context_builder.set_certificate_file(cert_file, ssl::SslFiletype::PEM).unwrap();
-    ssl_context_builder.set_private_key_file(priv_key_file, ssl::SslFiletype::PEM).unwrap();
+    ssl_context_builder
+        .set_certificate_file(cert_file, ssl::SslFiletype::PEM)
+        .unwrap();
+    ssl_context_builder
+        .set_private_key_file(priv_key_file, ssl::SslFiletype::PEM)
+        .unwrap();
 
     let mut open_ca = File::open(ca_file).unwrap();
     let mut buffer = Vec::new();
     open_ca.read_to_end(&mut buffer).unwrap();
-    ssl_context_builder.add_client_ca(&X509::from_pem(&buffer).unwrap()).unwrap();
+    ssl_context_builder
+        .add_client_ca(&X509::from_pem(&buffer).unwrap())
+        .unwrap();
 
     let ssl_context = Box::leak(Box::new(ssl_context_builder.build()));
     // FIXME: "OpenSSL’s default configuration is insecure.  It is highly
@@ -195,11 +206,23 @@ fn main() -> ExitCode {
         .unwrap()
         .block_on(async {
             // TODO signal handler goes here
-            
-            fs::remove_file(&sock_path).or_else(|e| if e.kind() == ErrorKind::NotFound { Ok(()) } else { Err(e) }).unwrap();
-            let unix_socket =  Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
 
-            let async_tun_fds = tun_fds.into_iter().map(|tun_fd| AsyncFd::new(tun_fd).unwrap()).collect::<Vec<_>>().leak();
+            fs::remove_file(&sock_path)
+                .or_else(|e| {
+                    if e.kind() == ErrorKind::NotFound {
+                        Ok(())
+                    } else {
+                        Err(e)
+                    }
+                })
+                .unwrap();
+            let unix_socket = Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
+
+            let async_tun_fds = tun_fds
+                .into_iter()
+                .map(|tun_fd| AsyncFd::new(tun_fd).unwrap())
+                .collect::<Vec<_>>()
+                .leak();
 
             let mut js = JoinSet::new();
 
@@ -214,41 +237,71 @@ fn main() -> ExitCode {
                     tokio::select! {
                         _ = usr1_stream.recv() => emit_counts(&asm.counters),
                         _ = term_stream.recv() => emit_counts(&asm.counters)
-                    }  
+                    }
                 }
             });
 
             js.spawn(inbound_processor_worker::launch(
-                    &inbound_processor_worker::Config{ batch_size: inbound_processor_batch_size, mode: cmd_line.mode },
-                    &*asm, ip_outq));
+                &inbound_processor_worker::Config {
+                    batch_size: inbound_processor_batch_size,
+                    mode: cmd_line.mode,
+                },
+                &*asm,
+                ip_outq,
+            ));
 
             for (async_tun_fd, is_outq) in async_tun_fds.iter().zip(is_outqs) {
                 js.spawn(inbound_send_worker::launch(
-                    &inbound_send_worker::Config{ batch_size: inbound_send_batch_size },
-                    &*asm, is_outq, &*async_tun_fd));
+                    &inbound_send_worker::Config {
+                        batch_size: inbound_send_batch_size,
+                    },
+                    &*asm,
+                    is_outq,
+                    &*async_tun_fd,
+                ));
             }
 
             for async_tun_fd in async_tun_fds.iter() {
                 js.spawn(outbound_recv_worker::launch(
-                    &outbound_recv_worker::Config{ batch_size: outbound_recv_batch_size },
-                    &*asm, &*async_tun_fd));
+                    &outbound_recv_worker::Config {
+                        batch_size: outbound_recv_batch_size,
+                    },
+                    &*asm,
+                    &*async_tun_fd,
+                ));
             }
 
             js.spawn(outbound_processor_worker::launch(
-                    &outbound_processor_worker::Config{ batch_size: outbound_processor_batch_size },
-                    &*asm, op_outq));
+                &outbound_processor_worker::Config {
+                    batch_size: outbound_processor_batch_size,
+                },
+                &*asm,
+                op_outq,
+            ));
 
             js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
 
             // TODO: initiate the DTLS connection asynchronously; for now, keep this at the end
-            let socket = Box::leak(Box::new(UdpSocket::bind(self_addr).await.expect("unable to bind to self addr")));
-            socket.connect(peer_addr).await.expect("unable to connect to peer addr");
-            let mut ssl_stream = tokio_openssl::SslStream::new(ssl, udp_stream::UdpStream::new(socket)).unwrap();
+            let socket = Box::leak(Box::new(
+                UdpSocket::bind(self_addr)
+                    .await
+                    .expect("unable to bind to self addr"),
+            ));
+            socket
+                .connect(peer_addr)
+                .await
+                .expect("unable to connect to peer addr");
+            let mut ssl_stream =
+                tokio_openssl::SslStream::new(ssl, udp_stream::UdpStream::new(socket)).unwrap();
             match cmd_line.mode {
-                PhMode::Client =>
-                    Pin::new(&mut ssl_stream).connect().await.expect("unable to establish DTLS connection"),
-                PhMode::Server =>
-                    Pin::new(&mut ssl_stream).accept().await.expect("unable to establish DTLS connection")
+                PhMode::Client => Pin::new(&mut ssl_stream)
+                    .connect()
+                    .await
+                    .expect("unable to establish DTLS connection"),
+                PhMode::Server => Pin::new(&mut ssl_stream)
+                    .accept()
+                    .await
+                    .expect("unable to establish DTLS connection"),
             }
             eprintln!("Connected!");
 

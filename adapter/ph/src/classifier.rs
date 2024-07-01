@@ -1,7 +1,8 @@
-use crate::config;
+// use crate::config;
 use crate::packet;
 use std::mem::size_of;
-use zerocopy::{ByteOrder, FromBytes, FromZeroes, NetworkEndian};
+// use zerocopy::{ByteOrder, FromBytes, FromZeros, NetworkEndian};
+use zerocopy::{ByteOrder, FromBytes, NetworkEndian};
 use zerocopy_derive::{FromBytes, FromZeroes, KnownLayout, Unaligned};
 
 #[derive(Debug, PartialEq)]

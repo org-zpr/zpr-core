@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
 pub mod ssl {
+    use crate::ext::openssl_sys as ffi;
     use foreign_types::ForeignTypeRef;
     use openssl::error::ErrorStack;
     use openssl::ssl::SslRef;
-    use crate::ext::openssl_sys as ffi;
 
     pub trait SslExt {
         fn get_data_mtu(&self) -> Result<usize, ErrorStack>;

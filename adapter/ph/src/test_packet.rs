@@ -1,5 +1,5 @@
 use std::time::{Duration, Instant};
-use tokio::sync::oneshot::{Sender, Receiver, channel};
+use tokio::sync::oneshot::{channel, Receiver, Sender};
 
 #[derive(Debug)]
 pub struct TestPacket {
@@ -25,10 +25,12 @@ impl TestPacket {
     pub fn acknowledge(self, queue_depth: usize) {
         let curr_time = Instant::now();
         let in_queue = curr_time.duration_since(self.time);
-        
-        let test_metrics = TestPacketMetrics { in_queue, queue_depth };
+
+        let test_metrics = TestPacketMetrics {
+            in_queue,
+            queue_depth,
+        };
 
         let _ = self.sender.send(test_metrics);
     }
-
 }
