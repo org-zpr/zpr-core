@@ -5,14 +5,13 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"net/netip"
 	"os"
 	"sync"
 	"time"
-
-	"google.golang.org/grpc/credentials"
 
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
@@ -35,10 +34,10 @@ type VisaService struct {
 	maxAuthDuration   time.Duration
 
 	keys struct {
-		policyCheckingKey    *rsa.PublicKey                   // for checking policy signature
-		adminServiceTLSCreds credentials.TransportCredentials // admins service TLS
-		visaServiceTLSCreds  credentials.TransportCredentials // thrift service TLS
-		tokenSigningKey      *rsa.PrivateKey                  // for signing JWT tokens
+		policyCheckingKey    *rsa.PublicKey  // for checking policy signature
+		adminServiceTLSCreds *tls.Config     // for admin HTTP service
+		visaServiceTLSCreds  *tls.Config     // thrift service TLS
+		tokenSigningKey      *rsa.PrivateKey // for signing JWT tokens
 	}
 
 	service struct {
@@ -53,7 +52,7 @@ type VisaService struct {
 	}
 }
 
-func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vsServerCreds credentials.TransportCredentials, maxAuthDuration time.Duration, log logr.Logger) (*VisaService, error) {
+func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vsServerCreds *tls.Config, maxAuthDuration time.Duration, log logr.Logger) (*VisaService, error) {
 	if _, err := os.Stat(initialPolicyFile); err != nil {
 		return nil, fmt.Errorf("policy file stat error: %w", err)
 	}
@@ -164,8 +163,9 @@ func (s *VisaService) run() error {
 
 	go func() {
 		s.log.Info("starting admin service", "port", AdminPort)
-		if err := adminservice.StartGrpc(s.myAddr, AdminPort); err != nil {
-			s.log.WithError(err).Warn("admin service exited with error")
+		if err := adminservice.StartAdminService(s.myAddr, AdminPort); err != nil {
+			// The server always exits with an error.
+			s.log.WithError(err).Info("admin service exited")
 		}
 	}()
 
@@ -180,7 +180,7 @@ func (s *VisaService) run() error {
 	}
 
 	s.log.Info("stopping admin service")
-	adminservice.StopGrpc()
+	adminservice.StopAdminService()
 	s.log.Info("admin service stopped")
 
 	if !mainDidShutdown {

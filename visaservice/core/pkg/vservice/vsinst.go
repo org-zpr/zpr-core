@@ -3,6 +3,7 @@ package vservice
 import (
 	"context"
 	"crypto/md5"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"math/rand" // not used for crypto
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/apache/thrift/lib/go/thrift"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/proto"
 
 	"zpr.org/vs/pkg/agent"
@@ -73,7 +73,7 @@ type VSInst struct {
 	thriftServer         thrift.TServer
 	localAddr            netip.Addr
 	thriftWg             sync.WaitGroup
-	thriftCreds          credentials.TransportCredentials
+	thriftCreds          *tls.Config
 	exitC                chan struct{}
 	mb                   *Mailbox
 	reauthBumpTime       time.Duration
@@ -126,12 +126,12 @@ type vtableEnt struct {
 
 // VSIConfig is the rather complex configuration bundle for the visa service.
 type VSIConfig struct {
-	Log                    logr.Logger                      // General logging
-	HopCount               uint                             // Is set on every visa we create
-	Creds                  credentials.TransportCredentials // TLS for the thrift channel
-	ReauthBumpTimeOverride time.Duration                    // For unit testing (see DefaultReauthBumpTime defined above)
-	AccessToken            []byte                           // Auth token for node to access special VS capabilities
-	AllowInvalidPeerAddr   bool                             // Set to TRUE for testing only.
+	Log                    logr.Logger   // General logging
+	HopCount               uint          // Is set on every visa we create
+	Creds                  *tls.Config   // TLS for the thrift channel
+	ReauthBumpTimeOverride time.Duration // For unit testing (see DefaultReauthBumpTime defined above)
+	AccessToken            []byte        // Auth token for node to access special VS capabilities
+	AllowInvalidPeerAddr   bool          // Set to TRUE for testing only.
 	Constrainer            ConstraintService
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/netip"
 	"os"
@@ -13,7 +14,6 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"google.golang.org/grpc/credentials"
 
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
@@ -101,10 +101,11 @@ service using the visa service API.
 			return fmt.Errorf("failed to initialize logging: %w", err)
 		}
 
-		vsTransportCreds, err := credentials.NewServerTLSFromFile(config.VSCert, config.VSKey) // uses sn_certificate & key (like node)
+		cert, err := tls.LoadX509KeyPair(config.VSCert, config.VSKey)
 		if err != nil {
 			return fmt.Errorf("failed to initialize visa service transport credentials from %v: %w", config.VSCert, err)
 		}
+		tconfig := &tls.Config{Certificates: []tls.Certificate{cert}}
 
 		pidf, err := NewPidFile("vservice")
 		if err != nil {
@@ -124,7 +125,7 @@ service using the visa service API.
 		}
 
 		maxAuthDuration := DefaultMaxAuthDuration // TODO: add a command line arg for this
-		service, err := vservice.NewVisaService(c.String("policy"), jwtpk, vsTransportCreds, maxAuthDuration, serviceLog)
+		service, err := vservice.NewVisaService(c.String("policy"), jwtpk, tconfig, maxAuthDuration, serviceLog)
 		if err != nil {
 			return fmt.Errorf("failed to create visa service: %w", err)
 		}
