@@ -43,4 +43,4 @@ jobs:
       steps: 
       - uses: actions/checkout@v4
       - name: Check test warnings
-        run: cd adapter/ph && cargo rustc --tests -- -D warnings > /dev/null 2>&1
+        run: cd adapter/ph && cargo rustc --tests -- -D warnings
