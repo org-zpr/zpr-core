@@ -23,3 +23,24 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build + test ph
       run: cd adapter/ph && make build && make test
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check format
+      run: cd adapter/ph && cargo fmt --check
+
+  warnings:
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check warnings
+      run: cd adapter/ph && cargo rustc -- -D warnings
+
+  test-warnings:
+      runs-on: ubuntu-latest
+      steps:
+      - uses: actions/checkout@v4
+      - name: Check test warnings
+        run: cd adapter/ph && cargo rustc --tests -- -D warnings
