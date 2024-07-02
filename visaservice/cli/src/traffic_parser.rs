@@ -26,11 +26,18 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<vsapi::TrafficDesc, 
     let input = input.trim();
     // let capts: Captures;
 
+    #[rustfmt::skip]
     let capts: Captures = if input.starts_with('[') {
         // IPv6
         let re =
-            Regex::new(r"\[([0-9a-fA-F:]+)\](?::(\d+))?>\[([0-9a-fA-F:]+)\]:(\d+)(?:\[([SA]+)\])?")
-                .unwrap();
+            Regex::new(r"(?x)
+              \[([0-9a-fA-F:]+)\] # something that looks like IPv6 address in square brackets
+              (?::(\d+))?         # optionally followed by a port num
+              >
+              \[([0-9a-fA-F:]+)\] # another IPv6 looking thing
+              :(\d+)              # dest port is required
+              (?:\[([SA]+)\])?    # optional flags
+              ").unwrap();
         match re.captures(input) {
             Some(caps) => caps,
             None => {
@@ -42,7 +49,14 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<vsapi::TrafficDesc, 
         }
     } else {
         // IPv4
-        let re = Regex::new(r"^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?::(\d+))?>(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}):(\d+)(?:\[([SA]+)\])?").unwrap();
+        let re = Regex::new(r"(?x)
+          ^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}) # An IPv4 address, four octets.
+          (?::(\d+))?                           # optionally followed by a port num
+          >
+          (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})  # another IPv4 address
+          :(\d+)                                # dest port number required
+          (?:\[([SA]+)\])?                      # optional flags
+          ").unwrap();
         match re.captures(input) {
             Some(caps) => caps,
             None => {
