@@ -184,7 +184,7 @@ func (vs *VSInst) SetLocalAddr(a netip.Addr) {
 	vs.nodeNumber = a.As16()[15]
 }
 
-// Start is blocking call to start the visa service GRPC listener.
+// Start is blocking call to start the visa service THRIFT listener.
 // Also sets this visa services local address.
 func (vs *VSInst) Start(listenAddr netip.Addr, port uint16) error {
 

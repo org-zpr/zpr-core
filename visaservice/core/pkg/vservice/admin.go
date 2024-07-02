@@ -30,10 +30,10 @@ type PolicyListEntry struct {
 }
 
 type PolicyBundle struct {
-	ConfigID  uint64 `json:"config_id"` // only set when fetching a policy, blank when installing.
+	ConfigID  uint64 `json:"config_id"` // only set when fetching a policy, ignored when installing.
 	Version   string `json:"version"`   // when installing, this is the expected version of the policy we will replace.
-	Format    uint32 `json:"format"`
-	Container string `json:"container"` // base-64 encoded compressed policy
+	Format    string `json:"format"`    // eg, "base64;zip;<SERIAL_VERSION>"
+	Container string `json:"container"` // base-64 encoded, zlib compressed PolicyContainer
 }
 
 // Visa Service API that admin service needs to do its job.
@@ -131,7 +131,7 @@ func (svc *AdminService) handleGetCurrentPolicy(w http.ResponseWriter, r *http.R
 	bundle := &PolicyBundle{
 		ConfigID:  configID,
 		Version:   pcy.Version(),
-		Format:    pcy.GetSerialVersion(),
+		Format:    fmt.Sprintf("base64;zip;%d", pcy.GetSerialVersion()),
 		Container: base64.StdEncoding.EncodeToString(zbuf),
 	}
 	w.Header().Add("Content-Type", "application/json")
@@ -180,7 +180,9 @@ func (svc *AdminService) handleInstallPolicy(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	if bundle.Format != polio.SerialVersion {
+	expectFormat := fmt.Sprintf("base64;zip;%d", polio.SerialVersion)
+
+	if bundle.Format != expectFormat {
 		http.Error(w, "incompatible policy serialization schema", http.StatusBadRequest)
 		return
 	}

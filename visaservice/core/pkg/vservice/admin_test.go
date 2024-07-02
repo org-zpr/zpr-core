@@ -1,19 +1,24 @@
 package vservice_test
 
 import (
+	"bytes"
 	"crypto/rsa"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
 	"testing"
 	"time"
 
+	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vservice"
+
 	"zpr.org/vsx/polio"
 	"zpr.org/vsx/zpl/compiler"
 	"zpr.org/vsx/zpl/fs"
@@ -24,25 +29,43 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const basic_policy_1 = `
+        zpl_format: 2
+        services:
+          http:
+            tcp: 80
+        zpr:
+          visaservice:
+            provider:
+              - [ca0.foo, eq, fox]
+            admin_attrs:
+              - [ca0.foo, eq, fee]
+          nodes:
+            n0:
+              key: "cffa793530e6d63e560e8b314b5035db34aaae324f63cb76b204d3e4c00d5a1a"
+              provider:
+                - [ca0.x509.cn, eq, n0.internal]
+              address: "fc00:3001:1::11"
+              interfaces:
+                i0:
+                  netaddr: "n0.spacelaser.net:5000"
+
+          datasources:
+            ca0:
+              api: validation/1
+              authority:
+                encoding: pem
+                cert_data: $import[ca0-cert.pem]
+
+        communications:
+          systems:
+            mathiasland:
+              desc: mathiasland
+        `
+
 func createPolicyFile(t *testing.T, pyaml string, privateKey *rsa.PrivateKey) (policyFileName string, policyVersion string) {
-	// Compile and install the policy
-	fst, _ := fs.NewMemoryFileStore()
-	fst.AddFile("/pol.yaml", []byte(pyaml))
-	fst.AddFile("/ca0-cert.pem", []byte(ca0cert))
+	pc := compilePolicyToContainer(t, pyaml, privateKey)
 
-	opts := &compiler.CompileOpts{
-		Revision: "foo1",
-		Verbose:  true,
-	}
-	plcy, err := compiler.Compile("/pol.yaml", fst, opts)
-	require.Nil(t, err)
-	require.NotNil(t, plcy)
-
-	//pp := policy.NewPolicyFromPol(plcy, alog)
-	//svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
-
-	pc, err := polio.ContainPolicy(plcy, privateKey)
-	require.Nil(t, err)
 	pcData, err := proto.Marshal(pc)
 	require.Nil(t, err)
 
@@ -59,10 +82,42 @@ func createPolicyFile(t *testing.T, pyaml string, privateKey *rsa.PrivateKey) (p
 	return
 }
 
-// eg, partialURL = "/admin/policies" (must start with slash)
-func doHTTPSGet(t *testing.T, partialURL string, alog *logr.TestLogger) (*http.Response, error) {
+func compilePolicyToContainer(t *testing.T, pyaml string, privateKey *rsa.PrivateKey) *polio.PolicyContainer {
+	// Compile and install the policy
+	fst, _ := fs.NewMemoryFileStore()
+	fst.AddFile("/pol.yaml", []byte(pyaml))
+	fst.AddFile("/ca0-cert.pem", []byte(ca0cert))
 
-	fullURL := fmt.Sprintf("https://127.0.0.1:%d%s", vservice.AdminPort, partialURL)
+	opts := &compiler.CompileOpts{
+		Revision: "foo1",
+		Verbose:  true,
+	}
+	plcy, err := compiler.Compile("/pol.yaml", fst, opts)
+	require.Nil(t, err)
+	require.NotNil(t, plcy)
+
+	pc, err := polio.ContainPolicy(plcy, privateKey)
+	require.Nil(t, err)
+	return pc
+}
+
+// little hack to get a free port number
+func GetFreePort() (port uint16, err error) {
+	var a *net.TCPAddr
+	if a, err = net.ResolveTCPAddr("tcp", "localhost:0"); err == nil {
+		var l *net.TCPListener
+		if l, err = net.ListenTCP("tcp", a); err == nil {
+			defer l.Close()
+			return uint16(l.Addr().(*net.TCPAddr).Port), nil
+		}
+	}
+	return
+}
+
+// eg, partialURL = "/admin/policies" (must start with slash)
+func doHTTPSGet(t *testing.T, port uint16, partialURL string, alog *logr.TestLogger) (*http.Response, error) {
+
+	fullURL := fmt.Sprintf("https://127.0.0.1:%d%s", port, partialURL)
 
 	cliconf := &tls.Config{InsecureSkipVerify: true}
 	cliTransport := &http.Transport{
@@ -83,6 +138,23 @@ func doHTTPSGet(t *testing.T, partialURL string, alog *logr.TestLogger) (*http.R
 		retry++
 		continue
 	}
+	return resp, err
+}
+
+// Does not retry
+func doHTTPSPost(t *testing.T, port uint16, partialURL string, body []byte, alog *logr.TestLogger) (*http.Response, error) {
+
+	fullURL := fmt.Sprintf("https://127.0.0.1:%d%s", port, partialURL)
+
+	cliconf := &tls.Config{InsecureSkipVerify: true}
+	cliTransport := &http.Transport{
+		TLSClientConfig: cliconf,
+	}
+	client := &http.Client{Transport: cliTransport}
+
+	buf := bytes.NewBuffer(body)
+	resp, err := client.Post(fullURL, "application/json", buf)
+
 	return resp, err
 }
 
@@ -110,45 +182,11 @@ func (suite *VSRunnerSuite) TestAdminListPolicy() {
 	t := suite.T()
 	alog := logr.NewTestLogger()
 
-	pyaml := `
-        zpl_format: 2
-        services:
-          http:
-            tcp: 80
-        zpr:
-          visaservice:
-            provider:
-              - [ca0.foo, eq, fox]
-            admin_attrs:
-              - [ca0.foo, eq, fee]
-          nodes:
-            n0:
-              key: "cffa793530e6d63e560e8b314b5035db34aaae324f63cb76b204d3e4c00d5a1a"
-              provider:
-                - [ca0.x509.cn, eq, n0.internal]
-              address: "fc00:3001:1::11"
-              interfaces:
-                i0:
-                  netaddr: "n0.spacelaser.net:5000"
-
-          datasources:
-            ca0:
-              api: validation/1
-              authority:
-                encoding: pem
-                cert_data: $import[ca0-cert.pem]
-
-        communications:
-          systems:
-            mathiasland:
-              desc: mathiasland
-        `
-
 	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
 	require.Nil(t, err)
 
 	// visa service reads a binary "policy container" file
-	policyFileName, policyVersion := createPolicyFile(t, pyaml, privateKey)
+	policyFileName, policyVersion := createPolicyFile(t, basic_policy_1, privateKey)
 	defer os.Remove(policyFileName)
 
 	cer, err := tls.X509KeyPair([]byte(testCert), []byte(testPrivakeKey))
@@ -160,9 +198,14 @@ func (suite *VSRunnerSuite) TestAdminListPolicy() {
 	require.Nil(t, err)
 	suite.svc = svc
 
+	vsPort, err := GetFreePort()
+	require.Nil(t, err)
+	adminPort, err := GetFreePort()
+	require.Nil(t, err)
+
 	go func() {
 		alog.Info("< TEST > starting visa service")
-		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), 0); err != nil {
+		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), vsPort, adminPort); err != nil {
 			alog.WithError(err).Info("< TEST > visa service has stopped")
 		} else {
 			alog.Info("< TEST > visa service has stopped")
@@ -174,7 +217,7 @@ func (suite *VSRunnerSuite) TestAdminListPolicy() {
 	// Wait for visa service to initialize.  We will also retry.
 	time.Sleep(1500 * time.Millisecond)
 
-	resp, err := doHTTPSGet(t, "/admin/policies", alog)
+	resp, err := doHTTPSGet(t, adminPort, "/admin/policies", alog)
 
 	svc.Stop()
 	suite.svc = nil
@@ -195,7 +238,115 @@ func (suite *VSRunnerSuite) TestGetCurrentPolicy() {
 	t := suite.T()
 	alog := logr.NewTestLogger()
 
-	pyaml := `
+	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
+	require.Nil(t, err)
+
+	// visa service reads a binary "policy container" file
+	policyFileName, _ := createPolicyFile(t, basic_policy_1, privateKey)
+	defer os.Remove(policyFileName)
+
+	cer, err := tls.X509KeyPair([]byte(testCert), []byte(testPrivakeKey))
+	require.Nil(t, err)
+
+	serverCreds := &tls.Config{Certificates: []tls.Certificate{cer}}
+
+	svc, err := vservice.NewVisaService(policyFileName, privateKey, serverCreds, 1*time.Hour, alog)
+	require.Nil(t, err)
+	suite.svc = svc
+
+	vsPort, err := GetFreePort()
+	require.Nil(t, err)
+	adminPort, err := GetFreePort()
+	require.Nil(t, err)
+
+	go func() {
+		alog.Info("< TEST > starting visa service")
+		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), vsPort, adminPort); err != nil {
+			alog.WithError(err).Info("< TEST > visa service has stopped")
+		} else {
+			alog.Info("< TEST > visa service has stopped")
+		}
+	}()
+
+	alog.Info("< TEST > allowing visa service time to start up...")
+
+	// Wait for visa service to initialize.  We will also retry.
+	time.Sleep(1500 * time.Millisecond)
+
+	// First we need to get the config ID
+	resp, err := doHTTPSGet(t, adminPort, "/admin/policies", alog)
+	require.Nil(t, err)
+
+	var pols []*vservice.PolicyListEntry
+	err = json.NewDecoder(resp.Body).Decode(&pols)
+	require.Nil(t, err)
+
+	require.Equal(t, 1, len(pols))
+	configID := pols[0].ConfigId
+
+	resp, err = doHTTPSGet(t, adminPort, fmt.Sprintf("/admin/policy/%d/current", configID), alog)
+
+	svc.Stop()
+	suite.svc = nil
+
+	require.Nil(t, err)
+
+	var bundle vservice.PolicyBundle
+	err = json.NewDecoder(resp.Body).Decode(&bundle)
+	require.Nil(t, err)
+
+	require.Equal(t, configID, bundle.ConfigID)
+	require.NotEmpty(t, bundle.Container)
+
+	zdata, err := base64.StdEncoding.DecodeString(bundle.Container)
+	require.Nil(t, err)
+
+	pc, err := libvisa.Decompress(zdata)
+	require.Nil(t, err)
+	require.NotZero(t, pc.GetPolicyVersion())
+}
+
+func (suite *VSRunnerSuite) TestInstallPolicy() {
+	t := suite.T()
+	alog := logr.NewTestLogger()
+
+	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
+	require.Nil(t, err)
+
+	// visa service reads a binary "policy container" file
+	policyFileName, _ := createPolicyFile(t, basic_policy_1, privateKey)
+	defer os.Remove(policyFileName)
+
+	cer, err := tls.X509KeyPair([]byte(testCert), []byte(testPrivakeKey))
+	require.Nil(t, err)
+
+	serverCreds := &tls.Config{Certificates: []tls.Certificate{cer}}
+
+	svc, err := vservice.NewVisaService(policyFileName, privateKey, serverCreds, 1*time.Hour, alog)
+	require.Nil(t, err)
+	suite.svc = svc
+
+	vsPort, err := GetFreePort()
+	require.Nil(t, err)
+	adminPort, err := GetFreePort()
+	require.Nil(t, err)
+
+	go func() {
+		alog.Info("< TEST > starting visa service")
+		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), vsPort, adminPort); err != nil {
+			alog.WithError(err).Info("< TEST > visa service has stopped")
+		} else {
+			alog.Info("< TEST > visa service has stopped")
+		}
+	}()
+
+	alog.Info("< TEST > allowing visa service time to start up...")
+
+	// Wait for visa service to initialize.  We will also retry.
+	time.Sleep(1500 * time.Millisecond)
+
+	// Just changed a couple of attributes
+	newpolicy := `
         zpl_format: 2
         services:
           http:
@@ -203,9 +354,9 @@ func (suite *VSRunnerSuite) TestGetCurrentPolicy() {
         zpr:
           visaservice:
             provider:
-              - [ca0.foo, eq, fox]
+              - [ca0.foo, eq, father]
             admin_attrs:
-              - [ca0.foo, eq, fee]
+              - [ca0.foo, eq, christmas]
           nodes:
             n0:
               key: "cffa793530e6d63e560e8b314b5035db34aaae324f63cb76b204d3e4c00d5a1a"
@@ -229,58 +380,34 @@ func (suite *VSRunnerSuite) TestGetCurrentPolicy() {
               desc: mathiasland
         `
 
-	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
+	bundle := new(vservice.PolicyBundle)
+	bundle.Format = fmt.Sprintf("base64;zip;%d", polio.SerialVersion)
+
+	pc := compilePolicyToContainer(t, newpolicy, privateKey)
+	zdata, err := libvisa.Compress(pc)
 	require.Nil(t, err)
+	bundle.Container = base64.StdEncoding.EncodeToString(zdata)
 
-	// visa service reads a binary "policy container" file
-	policyFileName, _ := createPolicyFile(t, pyaml, privateKey)
-	defer os.Remove(policyFileName)
+	// Before installing lets get the current version so we can see it is different.
+	newVersionExpected := fmt.Sprintf("%d+%v", pc.PolicyVersion, pc.PolicyRevision)
 
-	cer, err := tls.X509KeyPair([]byte(testCert), []byte(testPrivakeKey))
+	resp, err := doHTTPSGet(t, adminPort, "/admin/policies", alog)
 	require.Nil(t, err)
-
-	serverCreds := &tls.Config{Certificates: []tls.Certificate{cer}}
-
-	svc, err := vservice.NewVisaService(policyFileName, privateKey, serverCreds, 1*time.Hour, alog)
-	require.Nil(t, err)
-	suite.svc = svc
-
-	go func() {
-		alog.Info("< TEST > starting visa service")
-		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), 0); err != nil {
-			alog.WithError(err).Info("< TEST > visa service has stopped")
-		} else {
-			alog.Info("< TEST > visa service has stopped")
-		}
-	}()
-
-	alog.Info("< TEST > allowing visa service time to start up...")
-
-	// Wait for visa service to initialize.  We will also retry.
-	time.Sleep(1500 * time.Millisecond)
-
-	// First we need to get the config ID
-	resp, err := doHTTPSGet(t, "/admin/policies", alog)
-	require.Nil(t, err)
-
 	var pols []*vservice.PolicyListEntry
 	err = json.NewDecoder(resp.Body).Decode(&pols)
 	require.Nil(t, err)
-
 	require.Equal(t, 1, len(pols))
-	configID := pols[0].ConfigId
+	require.NotEqual(t, newVersionExpected, pols[0].Version)
 
-	resp, err = doHTTPSGet(t, fmt.Sprintf("/admin/policy/%d/current", configID), alog)
-
-	svc.Stop()
-	suite.svc = nil
-
+	var buf bytes.Buffer
+	err = json.NewEncoder(&buf).Encode(bundle)
 	require.Nil(t, err)
 
-	var bundle vservice.PolicyBundle
-	err = json.NewDecoder(resp.Body).Decode(&bundle)
+	resp, err = doHTTPSPost(t, adminPort, "/admin/policy", buf.Bytes(), alog)
 	require.Nil(t, err)
 
-	require.Equal(t, configID, bundle.ConfigID)
-	require.NotEmpty(t, bundle.Container)
+	var entry vservice.PolicyListEntry
+	err = json.NewDecoder(resp.Body).Decode(&entry)
+	require.Nil(t, err)
+	require.Equal(t, newVersionExpected, entry.Version)
 }

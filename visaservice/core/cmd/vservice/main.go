@@ -86,6 +86,10 @@ service using the visa service API.
 			Aliases: []string{"l"},
 			Usage:   "override the default visa service listen address with `HOST:PORT`",
 		},
+		&cli.IntFlag{
+			Name:  "admin_port",
+			Usage: "override the default admin service port with `PORT`",
+		},
 	}
 
 	app.Action = func(c *cli.Context) error {
@@ -149,7 +153,7 @@ service using the visa service API.
 		}
 
 		var vsAddr netip.Addr
-		var vsPort uint16
+		var vsPort, adminPort uint16
 
 		if listenAddr := c.String("listen_addr"); listenAddr != "" {
 			ap, err := netip.ParseAddrPort(listenAddr)
@@ -163,7 +167,11 @@ service using the visa service API.
 			vsPort = vservice.VisaServicePort
 		}
 
-		err = service.Start(issuerName, vsAddr, vsPort) // Blocking!
+		if adminPort = uint16(c.Int("admin_port")); adminPort == 0 {
+			adminPort = vservice.AdminPort // constant
+		}
+
+		err = service.Start(issuerName, vsAddr, vsPort, adminPort) // Blocking!
 		close(sigExitChan)
 
 		return err

@@ -91,9 +91,10 @@ func mustNewRandToken() []byte {
 // The node should have side-loaded a visa that will allow it to talk to us over the VS port.
 //
 // `vsAddr` is the ZPR address of the visa service (and admin service).
-// `vsPort` is the port of the visa service.
+// `vsPort` is the port of the THRIFT visa service.
+// `adminPort` is port for HTTP admin service
 // `issuerName` is used on the JWT tokens we issue.
-func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16) error {
+func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16, adminPort uint16) error {
 	s.log.Info("starting visa service", "name", issuerName)
 	s.vsWg.Add(1)
 	defer s.vsWg.Done()
@@ -146,7 +147,7 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16)
 		return fmt.Errorf("policy install failed: %w", err)
 	}
 	s.log.Infom("bootstrap: installling policy - DONE")
-	return s.run()
+	return s.run(adminPort)
 }
 
 func (s *VisaService) Stop() {
@@ -157,13 +158,11 @@ func (s *VisaService) Stop() {
 
 // This is the tail end of the Start function.
 // This blocks until error or call to Stop().
-func (s *VisaService) run() error {
-
+func (s *VisaService) run(adminPort uint16) error {
 	adminservice := NewAdminService(s.log, s.keys.adminServiceTLSCreds, s.keys.policyCheckingKey, s)
-
 	go func() {
-		s.log.Info("starting admin service", "port", AdminPort)
-		if err := adminservice.StartAdminService(s.myAddr, AdminPort); err != nil {
+		s.log.Info("starting admin service", "port", adminPort)
+		if err := adminservice.StartAdminService(s.myAddr, int(adminPort)); err != nil {
 			// The server always exits with an error.
 			s.log.WithError(err).Info("admin service exited")
 		}
