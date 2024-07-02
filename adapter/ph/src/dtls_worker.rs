@@ -14,12 +14,6 @@ pub struct Config {
     pub outbound_batch_size: usize,
 }
 
-#[derive(Copy, Clone)]
-pub struct Config {
-    pub inbound_batch_size: usize,
-    pub outbound_batch_size: usize
-}
-
 // NOTE: Packet buffers *must* be at least 16384 bytes, to match TLS maximum
 // record size.  This is because OpenSSL read functions provide no way to
 // determine whether the provided read buffer was too small to contain a
