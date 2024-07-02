@@ -1,0 +1,166 @@
+Testing performance for bottlenecks in system
+
+Devices: Laptop running Ubuntu 22.04 and VM running on laptop running Debian 12
+
+NOTE: For the division for the calculation of the average processing time per packet, 
+      1 was added to each of the mean packet sizes to account for the current packet
+      each time the queue length was calculated (this prevents divide by 0 problems)
+
+Reuslts: the bottleneck almost arises from the outbound send time being slow, causing backups
+         on the outbound processor queue.
+
+
+TEST 1: Server running on laptop, client on VM. PERF-SAMPLE running on server side 
+        for 120 seconds 4 samples/seconds. iperf -s on server side.
+
+    Inbound Processor Duration values at - 10th Quantile: 4351ns, 25th Quantile: 6399ns,
+    50th Quantile: 38911ns, 75th Quantile: 73727ns, 90th Quantile: 147455ns, Mean: 56799.2ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 1 packets, 90th Quantile: 6 packets, Mean: 1.7208333333333334 packets
+
+    Approx inbound processor time per packet: 20,881ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 3199ns, 25th Quantile: 8703ns,
+    50th Quantile: 26623ns, 75th Quantile: 49151ns, 90th Quantile: 81919ns, Mean: 35179.46666666667ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.13958333333333334 packets
+
+    Approx inbound send time per packet: 31,131ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 2815ns, 25th Quantile: 3711ns,
+    50th Quantile: 5375ns, 75th Quantile: 10751ns, 90th Quantile: 17407ns, Mean: 9835.066666666666ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.04375 packets
+
+    Approx outbound processor time per packet: 9,456ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 8191ns, 25th Quantile: 18431ns,
+    50th Quantile: 38911ns, 75th Quantile: 73727ns, 90th Quantile: 110591ns, Mean: 54162.93333333333ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 2 packets, Mean: 0.48750000000000004 packets
+
+    Approx outbound send time per packet: 36,350ns
+
+
+TEST 2: Server running on laptop, client on VM. PERF-SAMPLE running on client side
+        for 120 seconds 4 samples/second. iperf -s on server side 
+
+    Inbound Processor Duration values at - 10th Quantile: 3967ns, 25th Quantile: 4863ns,
+    50th Quantile: 7167ns, 75th Quantile: 27647ns, 90th Quantile: 98303ns, Mean: 31333.466666666667ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.5208333333333334 packets
+
+    Approx inbound processor time per packet: 20,613ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 2815ns, 25th Quantile: 3199ns,
+    50th Quantile: 4351ns, 75th Quantile: 11775ns, 90th Quantile: 57343ns, Mean: 16491.86666666667ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx inbound send time per packet: 16,492ns
+
+    Outbound Processor Duration values at - 10th Quantile: 204799ns, 25th Quantile: 360447ns,
+    50th Quantile: 442367ns, 75th Quantile: 524287ns, 90th Quantile: 622591ns, Mean: 423426.26666666666ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 16 packets,
+    50th Quantile: 16 packets, 75th Quantile: 16 packets, 90th Quantile: 16 packets, Mean: 13.89375 packets
+
+    Approx outbound processor time per packet: 28,437ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 98303ns, 25th Quantile: 188415ns,
+    50th Quantile: 245759ns, 75th Quantile: 294911ns, 90th Quantile: 360447ns, Mean: 237574.93333333332ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.41874999999999996 packets
+
+    Approx outbound send time per packet: 167,306ns
+
+
+TEST 3: Server running on laptop, client on VM. PERF-SAMPLE running on server side 
+        for 120 seconds 4 samples/seconds. iperf -s on client side.
+
+    Inbound Processor Duration values at - 10th Quantile: 4351ns, 25th Quantile: 5375ns,
+    50th Quantile: 7679ns, 75th Quantile: 34815ns, 90th Quantile: 63487ns, Mean: 29413.066666666677ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.2708333333333333 packets
+
+    Approx inbound processor time per packet: 23,160ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 2687ns, 25th Quantile: 3711ns,
+    50th Quantile: 5119ns, 75th Quantile: 25599ns, 90th Quantile: 61439ns, Mean: 21780.733333333337ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.1125 packets
+
+    Approx inbound send time per packet: 19,622ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 3839ns, 25th Quantile: 11263ns,
+    50th Quantile: 77823ns, 75th Quantile: 245759ns, 90th Quantile: 360447ns, Mean: 142525.46666666667ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 7 packets, 90th Quantile: 16 packets, Mean: 4.866666666666666 packets
+
+    Approx outbound processor time per packet: 24,280ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 11775ns, 25th Quantile: 36863ns,
+    50th Quantile: 90111ns, 75th Quantile: 155647ns, 90th Quantile: 212991ns, Mean: 105602.26666666666ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.2375 packets
+
+    Approx outbound send time per packet: 85,163ns
+
+
+TEST 4: Server running on laptop, client on VM. PERF-SAMPLE running on client side
+        for 120 seconds 4 samples/second. iperf -s on client side 
+
+    Inbound Processor Duration values at - 10th Quantile: 7167ns, 25th Quantile: 59391ns,
+    50th Quantile: 245759ns, 75th Quantile: 491519ns, 90th Quantile: 655359ns, Mean: 293933.8666666667ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 5 packets, 75th Quantile: 16 packets, 90th Quantile: 33 packets, Mean: 9.747916666666665 packets
+
+    Approx inbound processor time per packet: 27,470ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 3071ns, 25th Quantile: 12799ns,
+    50th Quantile: 38911ns, 75th Quantile: 102399ns, 90th Quantile: 172031ns, Mean: 69272.06666666665ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.26875 packets
+   
+    Approx inbound send time per packet: 54,978ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 2943ns, 25th Quantile: 3967ns,
+    50th Quantile: 11775ns, 75th Quantile: 61439ns, 90th Quantile: 147455ns, Mean: 46094.733333333344ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.25416666666666665 packets
+
+    Approx outbound processor time per packet: 36,875ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 4351ns, 25th Quantile: 18431ns,
+    50th Quantile: 77823ns, 75th Quantile: 204799ns, 90th Quantile: 360447ns, Mean: 135999.46666666667ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 8 packets, Mean: 1.31875 packets
+
+    Approx outbound send time per packet: 58,620ns
+
