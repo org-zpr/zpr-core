@@ -1,0 +1,52 @@
+t3 
+
+Inbound Processor Duration values at - 10th Quantile: 7679ns, 25th Quantile: 7935ns,
+50th Quantile: 8703ns, 75th Quantile: 11775ns, 90th Quantile: 32767ns, Mean: 14180.266666666668ns
+
+Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+Inbound Send Duration values at - 10th Quantile: 5631ns, 25th Quantile: 5887ns,
+50th Quantile: 6143ns, 75th Quantile: 9215ns, 90th Quantile: 15871ns, Mean: 11075.199999999999ns
+
+Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+Outbound Processor Duration values at - 10th Quantile: 69631ns, 25th Quantile: 245759ns,
+50th Quantile: 360447ns, 75th Quantile: 425983ns, 90th Quantile: 491519ns, Mean: 326335.99999999994ns
+
+Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 11 packets,
+50th Quantile: 16 packets, 75th Quantile: 16 packets, 90th Quantile: 33 packets, Mean: 14.7 packets
+
+Outbound Send Duration values at - 10th Quantile: 17407ns, 25th Quantile: 90111ns,
+50th Quantile: 139263ns, 75th Quantile: 221183ns, 90th Quantile: 311295ns, Mean: 161457.6ns
+
+Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.5166666666666666 packets
+
+t4 
+
+Inbound Processor Duration values at - 10th Quantile: 40959ns, 25th Quantile: 110591ns,
+50th Quantile: 180223ns, 75th Quantile: 245759ns, 90th Quantile: 344063ns, Mean: 184796.80000000002ns
+
+Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 16 packets, 75th Quantile: 17 packets, 90th Quantile: 21 packets, Mean: 11.208333333333334 packets
+
+Inbound Send Duration values at - 10th Quantile: 2559ns, 25th Quantile: 19455ns,
+50th Quantile: 43007ns, 75th Quantile: 65535ns, 90th Quantile: 163839ns, Mean: 57811.46666666667ns
+
+Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.275 packets
+
+Outbound Processor Duration values at - 10th Quantile: 5631ns, 25th Quantile: 6143ns,
+50th Quantile: 7935ns, 75th Quantile: 21503ns, 90th Quantile: 65535ns, Mean: 20547.200000000004ns
+
+Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+Outbound Send Duration values at - 10th Quantile: 4607ns, 25th Quantile: 11263ns,
+50th Quantile: 49151ns, 75th Quantile: 188415ns, 90th Quantile: 294911ns, Mean: 114908.80000000002ns
+
+Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
