@@ -67,25 +67,36 @@ enum Commands {
         #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
     },
-    #[command(about = "Call the agent_disconnect function, requires an API key")]
-    Disconnect {
+    Requestvisa {
         #[arg(short, long, value_name = "HOST:PORT")]
         service: String,
 
         #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
 
-        #[arg(long, value_name = "ADDR", help = "IPv4 or IPv6 address")]
-        addr: String,
-    },
-    #[command(about = "Call the poll function, requires an API key")]
-    Poll {
-        #[arg(short, long, value_name = "HOST:PORT")]
-        service: String,
+        #[arg(long, value_name = "IPv6_ADDR", help = "source tether address")]
+        tether_addr: String,
 
-        #[arg(short, long, value_name = "APIKEY")]
-        apikey: String,
+        #[arg(
+            short,
+            long,
+            value_name = "TRAFFIC",
+            group = "protocol",
+            help = "TCP traffic description (see `cli helptraffic`)"
+        )]
+        tcp: Option<String>,
+
+        #[arg(
+            short,
+            long,
+            value_name = "TRAFFIC",
+            group = "protocol",
+            help = "UDP traffic description (see `cli helptraffic`)"
+        )]
+        udp: Option<String>,
     },
+    #[command(about = "View syntax for traffic format when requesting a visa")]
+    Helptraffic {},
 }
 
 fn main() {
@@ -120,23 +131,6 @@ fn main() {
                 Err(e) => {
                     println!("Error: {:?}", e);
                 }
-            }
-        }
-        Some(Commands::Disconnect {
-            service,
-            apikey,
-            addr,
-        }) => match vsclient::disconnect(&service, &apikey, &addr) {
-            Ok(_) => {
-                println!("Disconnect command executed successfully");
-            }
-            Err(e) => {
-                println!("Error: {:?}", e);
-            }
-        },
-        Some(Commands::Poll { service, apikey }) => match vsclient::poll(&service, &apikey) {
-            Ok(_) => {
-                println!("Poll command executed successfully");
             }
         }
         Some(Commands::Disconnect {
