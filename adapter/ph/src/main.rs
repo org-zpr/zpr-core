@@ -133,11 +133,13 @@ fn main() -> ExitCode {
     // sizes below which are all just double the batch size.  Performance
     // testing will inform us the correct values for these, which balance
     // throughput with service time.
+    let inbound_recv_batch_size = 8;
     let inbound_processor_batch_size = 16;
     let inbound_send_batch_size = 4;
     let outbound_recv_batch_size = 4;
     let outbound_processor_batch_size = 16;
     let outbound_send_queue_size = 16;
+    let outbound_send_batch_size = 8;
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
@@ -305,7 +307,11 @@ fn main() -> ExitCode {
             }
             eprintln!("Connected!");
 
-            js.spawn(dtls_worker::launch(&*asm, ssl_stream, os_outq));
+            js.spawn(dtls_worker::launch(
+                &dtls_worker::Config{
+                    inbound_batch_size: inbound_recv_batch_size,
+                    outbound_batch_size: outbound_send_batch_size
+                }, &*asm, ssl_stream, os_outq));
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();
