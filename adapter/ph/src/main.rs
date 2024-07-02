@@ -308,10 +308,14 @@ fn main() -> ExitCode {
             eprintln!("Connected!");
 
             js.spawn(dtls_worker::launch(
-                &dtls_worker::Config{
+                &dtls_worker::Config {
                     inbound_batch_size: inbound_recv_batch_size,
-                    outbound_batch_size: outbound_send_batch_size
-                }, &*asm, ssl_stream, os_outq));
+                    outbound_batch_size: outbound_send_batch_size,
+                },
+                &*asm,
+                ssl_stream,
+                os_outq,
+            ));
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();

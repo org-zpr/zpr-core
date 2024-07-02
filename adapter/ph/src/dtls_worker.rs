@@ -11,7 +11,7 @@ use tokio_openssl::SslStream;
 #[derive(Copy, Clone)]
 pub struct Config {
     pub inbound_batch_size: usize,
-    pub outbound_batch_size: usize
+    pub outbound_batch_size: usize,
 }
 
 // NOTE: Packet buffers *must* be at least 16384 bytes, to match TLS maximum
@@ -84,7 +84,8 @@ async fn worker<'pktbuf>(
 }
 
 pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
-    config: &Config, asm: AsmRef,
+    config: &Config,
+    asm: AsmRef,
     mut ssl_stream: SslStream<UdpStream<'pktbuf>>,
     mut outbound_queue: mpsc::Receiver<OutboundSendMessage<'pktbuf>>,
 ) -> impl Future<Output = ()> + Send + 'pktbuf
