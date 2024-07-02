@@ -17,6 +17,27 @@ jobs:
     - name: Build + test cd
       run: cd adapter/cd && make build && make test
 
+  cd-format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check format
+      run: cd adapter/cd && cargo fmt --check
+
+  cd-warnings:
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check warnings
+      run: cd adapter/cd && cargo rustc -- -D warnings
+
+  cd-test-warnings:
+      runs-on: ubuntu-latest
+      steps: 
+      - uses: actions/checkout@v4
+      - name: Check test warnings
+        run: cd adapter/cd && cargo rustc --tests -- -D warnings
+
   ph:
     runs-on: ubuntu-latest
     steps:
@@ -24,21 +45,21 @@ jobs:
     - name: Build + test ph
       run: cd adapter/ph && make build && make test
 
-  format:
+  ph-format:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Check format
       run: cd adapter/ph && cargo fmt --check
 
-  warnings:
+  ph-warnings:
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
     - name: Check warnings
       run: cd adapter/ph && cargo rustc -- -D warnings
 
-  test-warnings:
+  ph-test-warnings:
       runs-on: ubuntu-latest
       steps: 
       - uses: actions/checkout@v4

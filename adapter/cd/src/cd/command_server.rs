@@ -164,11 +164,7 @@ async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Result<
     Ok(())
 }
 
-async fn handle_disconnect(
-    parts: &[&str],
-    writer: NetWriterT,
-    zpr: Zpr,
-) -> Result<(), io::Error> {
+async fn handle_disconnect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Result<(), io::Error> {
     let mut writer = writer.lock().await;
 
     let mut all = true;
