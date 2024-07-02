@@ -91,7 +91,6 @@ impl<'a> GatedUdpStream<'a> {
 fn sockaddr_eq_modulo_flowinfo(a: &SocketAddr, b: &SocketAddr) -> bool {
     match (a, b) {
         (SocketAddr::V4(a), SocketAddr::V4(b)) => a == b,
-
         (SocketAddr::V6(a), SocketAddr::V6(b)) => {
             a.ip() == b.ip() && a.port() == b.port() && a.scope_id() == b.scope_id()
         }
