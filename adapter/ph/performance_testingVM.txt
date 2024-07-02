@@ -1,0 +1,54 @@
+Test 2: Server running on laptop, client on VM. PERF-SAMPLE running on client side
+        for 120 seconds 4 samples/second. iperf -s on server side 
+
+Inbound Processor Duration values at - 10th Quantile: 3967ns, 25th Quantile: 4863ns,
+50th Quantile: 7423ns, 75th Quantile: 32767ns, 90th Quantile: 90111ns
+
+Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets
+
+Inbound Send Duration values at - 10th Quantile: 2559ns, 25th Quantile: 3071ns,
+50th Quantile: 4095ns, 75th Quantile: 11263ns, 90th Quantile: 40959ns
+
+Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets
+
+Outbound Processor Duration values at - 10th Quantile: 163839ns, 25th Quantile: 327679ns,
+50th Quantile: 425983ns, 75th Quantile: 524287ns, 90th Quantile: 589823ns
+
+Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 16 packets,
+50th Quantile: 16 packets, 75th Quantile: 16 packets, 90th Quantile: 16 packets
+
+Outbound Send Duration values at - 10th Quantile: 94207ns, 25th Quantile: 180223ns,
+50th Quantile: 245759ns, 75th Quantile: 294911ns, 90th Quantile: 344063ns
+
+Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets
+
+Test 4: Server running on laptop, client on VM. PERF-SAMPLE running on client side
+        for 120 seconds 4 samples/second. iperf -s on client side 
+
+Inbound Processor Duration values at - 10th Quantile: 5887ns, 25th Quantile: 53247ns,
+50th Quantile: 221183ns, 75th Quantile: 442367ns, 90th Quantile: 688127ns
+
+Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 1 packets, 75th Quantile: 16 packets, 90th Quantile: 33 packets
+
+Inbound Send Duration values at - 10th Quantile: 3199ns, 25th Quantile: 10751ns,
+50th Quantile: 34815ns, 75th Quantile: 90111ns, 90th Quantile: 147455ns
+
+Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets
+
+Outbound Processor Duration values at - 10th Quantile: 3071ns, 25th Quantile: 4351ns,
+50th Quantile: 11775ns, 75th Quantile: 73727ns, 90th Quantile: 155647ns
+
+Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets
+
+Outbound Send Duration values at - 10th Quantile: 4863ns, 25th Quantile: 16383ns,
+50th Quantile: 81919ns, 75th Quantile: 172031ns, 90th Quantile: 327679ns
+
+Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 5 packets
+
