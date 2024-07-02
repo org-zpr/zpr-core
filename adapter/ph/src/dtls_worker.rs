@@ -6,6 +6,7 @@ use crate::assembly::Assembly;
 use crate::packet::{self, Packet};
 use crate::udp_stream::UdpStream;
 use crate::counters_enum::CounterType;
+use crate::OutboundSendMessage;
 
 #[derive(Copy, Clone)]
 pub struct Config {
@@ -25,7 +26,7 @@ async fn worker<'pktbuf>(
     config: &Config,
     asm: &Assembly<'pktbuf>,
     ssl_stream: &mut SslStream<UdpStream<'_>>,
-    outbound_queue: &mut mpsc::Receiver<Packet<'pktbuf>>
+    outbound_queue: &mut mpsc::Receiver<OutboundSendMessage<'pktbuf>>
 ) {
     let (mut ssl_read, mut ssl_write) = tokio::io::split(ssl_stream);
 
@@ -44,20 +45,36 @@ async fn worker<'pktbuf>(
                     ssl_read.read_buf(&mut pkt).await.unwrap();
                     asm.counters[CounterType::InPacksRec].increment();
                     // NOTE: There is no way to detect a too-large packet.  See above.
-                    asm.inbound_processor.enqueue(pkt).await;
+                    asm.inbound_processor.enqueue_packet(pkt).await;
                 }
             }
         },
 
         async {
-            let mut pkts = Vec::new();
+            let mut msgs = Vec::new();
 
-            while let _count @ 1.. = outbound_queue.recv_many(&mut pkts, config.outbound_batch_size).await {
-                for pkt in &pkts {
-                    ssl_write.write(pkt.body()).await.unwrap();  // TODO: error handling
+            while let _count @ 1.. = outbound_queue.recv_many(&mut msgs, config.outbound_batch_size).await {
+                for msg in &msgs {
+                    match msg {
+                        OutboundSendMessage::Packet(pkt) => {
+                            ssl_write.write(pkt.body()).await.unwrap();  // TODO: error handling
+                        },
+
+                        OutboundSendMessage::TestPacket(_) => ()  /* handled below */
+                    }
                 }
 
-                asm.buffer_stack.put_buffers(pkts.drain(..).map(|pktbuf| pktbuf.destroy()));
+                asm.buffer_stack.put_buffers(msgs.drain(..).filter_map(
+                        |msg|
+                            match msg {
+                                OutboundSendMessage::Packet(pkt) => Some(pkt.destroy()),
+
+                                OutboundSendMessage::TestPacket(pkt) => {
+                                    pkt.acknowledge(outbound_queue.len());
+                                    None
+                                }
+                            }
+                    ));
             }
         }
     };
@@ -66,7 +83,7 @@ async fn worker<'pktbuf>(
 pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
     config: &Config, asm: AsmRef,
     mut ssl_stream: SslStream<UdpStream<'pktbuf>>,
-    mut outbound_queue: mpsc::Receiver<Packet<'pktbuf>>)
+    mut outbound_queue: mpsc::Receiver<OutboundSendMessage<'pktbuf>>)
 -> impl Future<Output = ()> + Send + 'pktbuf
     where AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync
 {

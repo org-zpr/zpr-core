@@ -1,7 +1,6 @@
 package vsio
 
 import (
-	"fmt"
 	"time"
 )
 
@@ -27,22 +26,3 @@ func VToTime(ts int64) time.Time {
 	return time.Unix(secs, nanos)
 }
 
-func (a *Agent) ParseAuthExpires() (time.Time, error) {
-	return time.Parse(time.RFC3339, a.AuthExpires)
-}
-
-func (a *Agent) MustParseAuthExpires() time.Time {
-	if exp, err := time.Parse(time.RFC3339, a.AuthExpires); err != nil {
-		panic(fmt.Sprintf("failed to parse agent AuthExpires of '%v'", a.AuthExpires))
-	} else {
-		return exp
-	}
-}
-
-func (a *Agent) ParseAuthExpiresOr(t time.Time) time.Time {
-	if exp, err := time.Parse(time.RFC3339, a.AuthExpires); err != nil {
-		return t
-	} else {
-		return exp
-	}
-}

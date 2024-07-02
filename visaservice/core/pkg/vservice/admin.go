@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"zpr.org/vs/pkg/libvisa"
@@ -32,10 +33,10 @@ type VSApi interface {
 type AdminService struct {
 	admin.UnimplementedAdminServer
 
-	log    logr.Logger
-	creds  credentials.TransportCredentials
-	pubkey *rsa.PublicKey // for checking policy signature
-	vsi    VSApi
+	log               logr.Logger
+	creds             credentials.TransportCredentials
+	policyCheckingKey *rsa.PublicKey // for checking policy signature
+	vsi               VSApi
 
 	installMtx sync.Mutex
 
@@ -50,12 +51,12 @@ type AdminService struct {
 //
 // `creds` is the transport credentials for the gRPC server.
 // `pubkey` is the public key used to verify the signature of the policy.
-func NewAdminService(log logr.Logger, creds credentials.TransportCredentials, pubkey *rsa.PublicKey, vsi VSApi) *AdminService {
+func NewAdminService(log logr.Logger, creds credentials.TransportCredentials, policyCheckKey *rsa.PublicKey, vsi VSApi) *AdminService {
 	return &AdminService{
-		log:    log,
-		creds:  creds,
-		pubkey: pubkey,
-		vsi:    vsi,
+		log:               log,
+		creds:             creds,
+		policyCheckingKey: policyCheckKey,
+		vsi:               vsi,
 	}
 }
 
@@ -98,6 +99,19 @@ func (svc *AdminService) StopGrpc() {
 		svc.service.gsrvWg.Wait()
 		svc.service.gsrv = nil
 	}
+}
+
+func peerAddrFromCtx(ctx context.Context) netip.Addr {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return netip.Addr{}
+	}
+	// peer.Addr is a net.Addr
+	ap, err := netip.ParseAddrPort(p.Addr.String())
+	if err != nil {
+		return netip.Addr{}
+	}
+	return ap.Addr()
 }
 
 func (svc *AdminService) Fetch(ctx context.Context, fr *admin.FetchRequest) (*admin.FetchResponse, error) {
@@ -166,7 +180,7 @@ func (svc *AdminService) Install(ctx context.Context, rr *admin.InstallRequest) 
 		svc.log.WithError(err).Error("admin failed to unmarshal policy byndle, policy install aborted")
 		return nil, status.Errorf(codes.InvalidArgument, "error unmarshalling policy")
 	}
-	containedPol, err := polio.OpenContainedPolicy(polcont, svc.pubkey)
+	containedPol, err := polio.OpenContainedPolicy(polcont, svc.policyCheckingKey)
 	if err != nil {
 		svc.log.WithError(err).Error("admin failed to open policy container")
 		return nil, status.Errorf(codes.InvalidArgument, "container error")

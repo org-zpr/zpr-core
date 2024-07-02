@@ -2,7 +2,6 @@ package vservice
 
 import (
 	"fmt"
-	"net/netip"
 	"os"
 	"path/filepath"
 
@@ -10,16 +9,21 @@ import (
 )
 
 type VSConfig struct {
-	VSSClientCert string `yaml:"vss_client_cert,omitempty"`
-	VSSSan        string `yaml:"vss_san,omitempty"`
-	VSCert        string `yaml:"vs_cert,omitempty"`
-	VSKey         string `yaml:"vs_key,omitempty"`
-	VSDomain      string `yaml:"vs_domain,omitempty"`
-	Verbose       bool   `yaml:"verbose,omitempty"`
-	NodeAddr      string `yaml:"node_addr,omitempty"` // use GetNodeAddr() to get netip.Addr
 
-	source   string
-	nodeAddr netip.Addr
+	// The VSCert/VSKey keypair are used for:
+	//   - The admin service gRPC TLS session.
+	//   - Signing all the JWT auth tokens we create.
+	//   - Checking the signature on a policy file
+	//   - (and not yet for..) the thrift connection
+	//
+	// This key usage nightmare is left over from prototype and needs to be
+	// re-worked.
+	VSCert string `yaml:"vs_cert,omitempty"`
+	VSKey  string `yaml:"vs_key,omitempty"`
+
+	Verbose bool `yaml:"verbose,omitempty"`
+
+	source string
 }
 
 func LoadConfig(filename string) (*VSConfig, error) {
@@ -54,15 +58,6 @@ func LoadConfig(filename string) (*VSConfig, error) {
 // Check the configuration values and also set any derived values.
 func (c *VSConfig) check() error {
 	var err error
-	c.nodeAddr, err = netip.ParseAddr(c.NodeAddr)
-	if err != nil {
-		return fmt.Errorf("invalid node_addr: %v", c.NodeAddr)
-	}
-
-	c.VSSClientCert, err = c.fixPath(c.VSSClientCert, true)
-	if err != nil {
-		return fmt.Errorf("invalid vss_client_cert: %v", err)
-	}
 
 	c.VSCert, err = c.fixPath(c.VSCert, true)
 	if err != nil {
@@ -73,18 +68,11 @@ func (c *VSConfig) check() error {
 	if err != nil {
 		return fmt.Errorf("invalid vs_key: %v", err)
 	}
-	if c.VSDomain == "" {
-		return fmt.Errorf("vs_domain cannot be empty")
-	}
 	return nil
 }
 
 func (c *VSConfig) IsVerbose() bool {
 	return c.Verbose
-}
-
-func (c *VSConfig) GetNodeAddr() netip.Addr {
-	return c.nodeAddr
 }
 
 func (c *VSConfig) fixPath(path string, required bool) (string, error) {

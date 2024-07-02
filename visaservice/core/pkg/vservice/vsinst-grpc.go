@@ -1,26 +1,6 @@
 package vservice
 
-import (
-	"bytes"
-	"context"
-	"errors"
-	"fmt"
-	"net"
-	"net/netip"
-	"time"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
-
-	"zpr.org/vs/pkg/agent"
-	snip "zpr.org/vs/pkg/ip"
-
-	"zpr.org/vsx/snio/vsio"
-	"zpr.org/vsx/polio"
-)
-
+/*
 func (vs *VSInst) startGrpc(listenAddr netip.Addr, port int) error {
 	vs.SetLocalAddr(listenAddr)
 	var conStr string
@@ -52,7 +32,9 @@ func (vs *VSInst) startGrpc(listenAddr netip.Addr, port int) error {
 	vs.log.Info("visa service grpc exiting")
 	return nil
 }
+*/
 
+/*
 // StopGrpc stops the server, blocking until complete.
 func (vs *VSInst) stopGrpc() {
 	if vs.grpcSvc != nil {
@@ -60,12 +42,16 @@ func (vs *VSInst) stopGrpc() {
 		vs.grpcWg.Wait()
 	}
 }
+*/
 
+/*
 func (vs *VSInst) checkAccess(addr netip.Addr) bool {
 	// This is called with the peer address. Under unit-testing this will not work correctly since peer address is undefined.
 	return vs.HasRegisteredNode(addr) || vs.allowInvalidPeerAddr
 }
+*/
 
+/*
 func peerAddrFromCtx(ctx context.Context) netip.Addr {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
@@ -78,9 +64,11 @@ func peerAddrFromCtx(ctx context.Context) netip.Addr {
 	}
 	return ap.Addr()
 }
+*/
 
 // --------------------------------- GRPC BEGIN ----------------------------- //
 
+/*
 func (vs *VSInst) Register(ctx context.Context, req *vsio.VSRegisterRequest) (*vsio.VSRegisterResponse, error) {
 	peer := peerAddrFromCtx(ctx)
 	naddr, addrOK := netip.AddrFromSlice(req.GetNodeAddr())
@@ -102,7 +90,9 @@ func (vs *VSInst) Register(ctx context.Context, req *vsio.VSRegisterRequest) (*v
 		Success: true,
 	}, nil
 }
+*/
 
+/*
 func (vs *VSInst) DeRegister(ctx context.Context, req *vsio.VSDeRegisterRequest) (*vsio.VSDeRegisterResponse, error) {
 	peer := peerAddrFromCtx(ctx)
 	naddr, addrOk := netip.AddrFromSlice(req.GetNodeAddr())
@@ -117,7 +107,9 @@ func (vs *VSInst) DeRegister(ctx context.Context, req *vsio.VSDeRegisterRequest)
 		Success: addrOk,
 	}, nil
 }
+*/
 
+/*
 func (vs *VSInst) AuthorizeConnect(ctx context.Context, req *vsio.VSConnectRequest) (*vsio.VSConnectResponse, error) {
 	peer := peerAddrFromCtx(ctx)
 	vs.log.Info("authorize connect", "peer", peer, "at_dock", net.IP(req.DockAddr).String(), "req_addr", net.IP(req.ReqAddr).String())
@@ -148,7 +140,9 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, req *vsio.VSConnectReque
 	}
 	return resp, nil
 }
+*/
 
+/*
 func (vs *VSInst) RequestVisa(ctx context.Context, req *vsio.VSRequest) (*vsio.VSResponse, error) {
 	peer := peerAddrFromCtx(ctx)
 	vs.log.Info("request visa", "peer", peer)
@@ -182,7 +176,9 @@ func (vs *VSInst) RequestVisa(ctx context.Context, req *vsio.VSRequest) (*vsio.V
 	}
 	return resp, nil
 }
+*/
 
+/*
 func (vs *VSInst) SubmitStats(ctx context.Context, req *vsio.VSStatsRequest) (*vsio.VSStatsResponse, error) {
 	peer := peerAddrFromCtx(ctx)
 	vs.log.Info("submit stats", "peer", peer)
@@ -194,7 +190,9 @@ func (vs *VSInst) SubmitStats(ctx context.Context, req *vsio.VSStatsRequest) (*v
 	vs.reportVisaStats(req.GetIssuerId(), req.GetCapKey(), req.GetBytesUsed())
 	return &vsio.VSStatsResponse{}, nil
 }
+*/
 
+/*
 func (vs *VSInst) Poll(ctx context.Context, req *vsio.VSPollRequest) (*vsio.VSPollResponse, error) {
 	peer := peerAddrFromCtx(ctx)
 
@@ -239,7 +237,9 @@ func (vs *VSInst) Poll(ctx context.Context, req *vsio.VSPollRequest) (*vsio.VSPo
 	resp.More = len(msgs) == qcount // guessing...
 	return resp, nil
 }
+*/
 
+/*
 // GetTopology returns any links from policy for which the requestor node address (ZIN) is either a
 // source or destination.
 //
@@ -334,7 +334,9 @@ func (vs *VSInst) GetTopology(ctx context.Context, req *vsio.VSTopoRequest) (*vs
 	}
 	return resp, nil
 }
+*/
 
+/*
 func (vs *VSInst) HostAdded(ctx context.Context, req *vsio.VSHostAddRequest) (*vsio.VSHostAddResponse, error) {
 	peer := peerAddrFromCtx(ctx)
 	vs.log.Info("host_added", "peer", peer)
@@ -373,7 +375,9 @@ func (vs *VSInst) HostAdded(ctx context.Context, req *vsio.VSHostAddRequest) (*v
 	}
 	return &vsio.VSHostAddResponse{}, nil
 }
+*/
 
+/*
 func (vs *VSInst) HostRemoved(ctx context.Context, req *vsio.VSHostRemoveRequest) (*vsio.VSHostRemoveResponse, error) {
 	peer := peerAddrFromCtx(ctx)
 	vs.log.Info("host_removed", "peer", peer)
@@ -401,9 +405,11 @@ func (vs *VSInst) HostRemoved(ctx context.Context, req *vsio.VSHostRemoveRequest
 
 	return &vsio.VSHostRemoveResponse{}, nil
 }
+*/
 
 // --------------------------------- GRPC END ------------------------------- //
 
+/*
 func snioPacketDescToIpTraffic(pd *vsio.PacketDesc) *snip.Traffic {
 	tcpflags := uint16(pd.GetFlags())
 	syn := (tcpflags & 0x0002) > 0
@@ -436,3 +442,4 @@ func snioPacketDescToIpTraffic(pd *vsio.PacketDesc) *snip.Traffic {
 		Flags:             pd.GetFlags(),
 	}
 }
+*/

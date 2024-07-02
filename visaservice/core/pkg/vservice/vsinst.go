@@ -3,7 +3,6 @@ package vservice
 import (
 	"context"
 	"crypto/md5"
-	"crypto/rsa"
 	"errors"
 	"fmt"
 	"math/rand" // not used for crypto
@@ -12,8 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc"
+	"github.com/apache/thrift/lib/go/thrift"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/proto"
 
 	"zpr.org/vs/pkg/agent"
 	snip "zpr.org/vs/pkg/ip"
@@ -21,9 +21,10 @@ import (
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
+	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"
-	"zpr.org/vs/pkg/vservice/auth"
 )
 
 var (
@@ -33,11 +34,27 @@ var (
 	ErrAuthExpired    = errors.New("auth expired")
 )
 
+// The visa-service "peers" are always nodes.
 type PeerRecord struct {
+	ZPRAddr              netip.Addr // can use to lookup in agentDB
 	RegistrationTime     time.Time
 	LastPollTime         time.Time
 	VisaRequestsCount    uint64
 	ConnectRequestsCount uint64
+}
+
+type HelloRecord struct {
+	CTime  time.Time
+	Chksum uint32
+}
+
+type HostRecord struct {
+	CTime        time.Time // connect/create time
+	LastAuthTime time.Time
+	Agent        *agent.Agent
+	ZPRAddr      netip.Addr
+	TetherAddr   netip.Addr
+	APIKey       string
 }
 
 // VSInst is an instance of distributed visa service
@@ -45,32 +62,27 @@ type PeerRecord struct {
 // This is a bit of a mess at the moment as we are in progress of porting this from
 // old code in machine.go and network.go.
 type VSInst struct {
-	vsio.UnimplementedVisaServiceServer // For GRPC
-
-	SignalC              chan VSSignal
 	log                  logr.Logger
 	vlog                 *Vlog
 	hopCount             uint
 	authr                auth.AuthService
 	attrProx             *AttrProxy
-	ad                   DirectoryService
-	visaPushC            chan *vsio.VSPollResponse // For pushing visas without needing a request
+	visaPushC            chan *vsapi.PollResponse // For pushing visas without needing a request
 	nodeNumber           uint8
 	nodeState            ConstraintService
-	grpcSvc              *grpc.Server
+	thriftServer         thrift.TServer
 	localAddr            netip.Addr
-	grpcWg               sync.WaitGroup
-	grpcCreds            credentials.TransportCredentials
+	thriftWg             sync.WaitGroup
+	thriftCreds          credentials.TransportCredentials
 	exitC                chan struct{}
 	mb                   *Mailbox
 	reauthBumpTime       time.Duration
 	accessToken          []byte // Access token for special node operations
-	agentSigningKey      *rsa.PrivateKey
-	allowInvalidPeerAddr bool // Set to TRUE for testing only.
+	allowInvalidPeerAddr bool   // Set to TRUE for testing only.
 
-	registeredNodes struct {
+	agentDB struct {
 		sync.RWMutex
-		table map[netip.Addr]*PeerRecord
+		agents map[netip.Addr]*HostRecord // ZPR_CONTACT_ADDR -> HostRecord
 	}
 
 	cfgRemoves struct {
@@ -89,6 +101,12 @@ type VSInst struct {
 		mtx        sync.RWMutex
 		nextVisaID uint32
 		table      map[uint32]*vtableEnt // Visas created
+	}
+
+	sessions struct {
+		sync.RWMutex
+		hellos  map[int32]*HelloRecord
+		apiKeys map[string]*PeerRecord
 	}
 }
 
@@ -109,38 +127,26 @@ type vtableEnt struct {
 // VSIConfig is the rather complex configuration bundle for the visa service.
 type VSIConfig struct {
 	Log                    logr.Logger                      // General logging
-	NodeName               string                           // This nodes name
 	HopCount               uint                             // Is set on every visa we create
-	Creds                  credentials.TransportCredentials // For server side TLS for the PMCTL and the Visa-Service channels
+	Creds                  credentials.TransportCredentials // TLS for the thrift channel
 	ReauthBumpTimeOverride time.Duration                    // For unit testing (see DefaultReauthBumpTime defined above)
 	AccessToken            []byte                           // Auth token for node to access special VS capabilities
-	AgentSigningKey        *rsa.PrivateKey
-	AllowInvalidPeerAddr   bool // Set to TRUE for testing only.
-	Directory              DirectoryService
+	AllowInvalidPeerAddr   bool                             // Set to TRUE for testing only.
 	Constrainer            ConstraintService
 }
 
 // NewVSInst create a new visa service.
 func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
-	if vcf.AgentSigningKey == nil {
-		return nil, fmt.Errorf("agent_signing_key is required")
-	}
-	if vcf.Directory == nil {
-		return nil, fmt.Errorf("directory service is required")
-	}
 	vs := &VSInst{
-		SignalC:              make(chan VSSignal, 16),
 		log:                  vcf.Log,
 		hopCount:             vcf.HopCount,
-		visaPushC:            make(chan *vsio.VSPollResponse, 128), // Must be large enough to handle a mass revocation event
-		grpcCreds:            vcf.Creds,
+		visaPushC:            make(chan *vsapi.PollResponse, 128), // Must be large enough to handle a mass revocation event
+		thriftCreds:          vcf.Creds,
 		mb:                   NewMailbox(vcf.Log),
 		reauthBumpTime:       DefaultReauthBumpTime,
 		exitC:                make(chan struct{}),
 		accessToken:          vcf.AccessToken,
-		agentSigningKey:      vcf.AgentSigningKey,
 		allowInvalidPeerAddr: vcf.AllowInvalidPeerAddr,
-		ad:                   vcf.Directory,
 		nodeState:            vcf.Constrainer,
 	}
 	if vcf.ReauthBumpTimeOverride > 0 {
@@ -148,7 +154,9 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	}
 	vs.vtable.table = make(map[uint32]*vtableEnt)
 	vs.vtable.nextVisaID = minVisaID
-	vs.registeredNodes.table = make(map[netip.Addr]*PeerRecord)
+	vs.sessions.apiKeys = make(map[string]*PeerRecord)
+	vs.sessions.hellos = make(map[int32]*HelloRecord)
+	vs.agentDB.agents = make(map[netip.Addr]*HostRecord)
 
 	nopol := policy.NewEmptyPolicy()
 	vs.plcy.p = nopol
@@ -178,7 +186,7 @@ func (vs *VSInst) SetLocalAddr(a netip.Addr) {
 
 // Start is blocking call to start the visa service GRPC listener.
 // Also sets this visa services local address.
-func (vs *VSInst) Start(listenAddr netip.Addr, port int) error {
+func (vs *VSInst) Start(listenAddr netip.Addr, port uint16) error {
 
 	vlog, err := NewVlogToFile("visa.log")
 	if err != nil {
@@ -187,17 +195,19 @@ func (vs *VSInst) Start(listenAddr netip.Addr, port int) error {
 	vs.vlog = vlog
 	defer vlog.Close()
 
-	vs.grpcWg.Add(1)
-	defer vs.grpcWg.Done()
+	vs.thriftWg.Add(1)
+	defer vs.thriftWg.Done()
 	defer close(vs.exitC)
-	if err := vs.startGrpc(listenAddr, port); err != nil {
+	thrift.ServerStopTimeout = 5 * time.Second // TODO: Should come from config
+	if err := vs.startThriftBlocking(listenAddr, port); err != nil {
 		vs.log.WithError(err).Error("visa service start failed")
+		return fmt.Errorf("failed to start visa service: %w", err)
 	}
 	return nil
 }
 
 func (vs *VSInst) Stop() {
-	vs.stopGrpc()
+	vs.thriftServer.Stop()
 }
 
 func (vs *VSInst) HasPollerNode(nodeAddr netip.Addr) bool {
@@ -205,10 +215,14 @@ func (vs *VSInst) HasPollerNode(nodeAddr netip.Addr) bool {
 }
 
 func (vs *VSInst) HasRegisteredNode(nodeAddr netip.Addr) bool {
-	vs.registeredNodes.RLock()
-	defer vs.registeredNodes.RUnlock()
-	_, found := vs.registeredNodes.table[nodeAddr]
-	return found
+	vs.sessions.RLock()
+	defer vs.sessions.RUnlock()
+	for _, pr := range vs.sessions.apiKeys {
+		if nodeAddr == pr.ZPRAddr {
+			return true
+		}
+	}
+	return false
 }
 
 // Implement policy.Configurator interface.
@@ -300,7 +314,7 @@ func (vs *VSInst) extendVisaServiceVisas() {
 			remain := time.Until(vsio.VToTime(ve.v.GetExpires()))
 			if remain < VSVisaRenewalTime {
 				sourceAddr, _ := netip.AddrFromSlice(ve.v.Source)
-				agnt, err := vs.ad.AgentAtContactAddr(sourceAddr) // for a node contact_addr is visa "tether" addr.
+				agnt, err := vs.AgentAtContactAddr(sourceAddr) // for a node contact_addr is visa "tether" addr.
 				if err != nil || agnt == nil {
 					continue // agent is gone
 				}
@@ -349,7 +363,7 @@ func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration,
 		} else {
 			vs.vtable.mtx.Lock()
 			if rec, ok := vs.vtable.table[ve.v.GetIssuerId()]; ok {
-				rec.successor = resp.Visa.Visa.GetIssuerId()
+				rec.successor = uint32(resp.Visa.IssuerID)
 			} else {
 				vs.log.Error("failed to locate predecessor visa in table", "issuerID", ve.v.GetIssuerId())
 			}
@@ -375,12 +389,13 @@ func (vs *VSInst) removeExpiredVisas() {
 	// vs.dumpVisaTableHoldingLock("removeExpired")
 }
 
-func (vs *VSInst) trySignal(s VSSignal) {
-	select {
-	case vs.SignalC <- s: // ok
-	default:
-		vs.log.Warn("signal channel full")
-	}
+// Push the visa for polling nodes.
+//
+// TODO: Presumably the mailbox system makes sure the right visa goes to the right node?
+//
+// Note blocks if our push channel is full.
+func (vs *VSInst) PushVisa(pr *vsapi.PollResponse) {
+	vs.visaPushC <- pr
 }
 
 // expireAllVisas is called when policy is updated.  Revokes and removes all visas under the
@@ -391,12 +406,11 @@ func (vs *VSInst) expireAllVisas(config uint64) {
 	count := 0
 	for vID, ve := range vs.vtable.table {
 		if ve.v.Configuration == config {
-			revoke := &vsio.VSPollResponse{
-				Revokes: []*vsio.VSRevocation{
+			revoke := &vsapi.PollResponse{
+				Revocations: []*vsapi.VisaRevocation{
 					{
-						// TODO: Should this have a hop-count?
-						IssuerId:      vID,
-						Configuration: config,
+						IssuerID:      int32(vID),
+						Configuration: int64(config),
 					},
 				},
 			}
@@ -421,7 +435,7 @@ func (vs *VSInst) expireAllVisas(config uint64) {
 // TODO: We do not pay attention to the context. If the context expires the
 //
 //	caller (dock, for example) will ignore the response.
-func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktData *snip.Traffic, minDuration time.Duration, expectedPolicyID uint64) (*vsio.VSResponse, error) {
+func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktData *snip.Traffic, minDuration time.Duration, expectedPolicyID uint64) (*vsapi.VisaResponse, error) {
 	// Packet will either be an opening request of a client to a service, or a response
 	// from a service to a client.  The addresses in the packet will be contact addresses.
 	//
@@ -454,7 +468,7 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 	// actually set an expire time out our internal tunnel.  In any case I could
 	// see wanting to actually re-auth the internal tunnel, in case data source
 	// values have changed, for example.
-	srcAgentExpire, dstAgentExpire := srcAgent.ParseAuthExpiresOr(time.Time{}), dstAgent.ParseAuthExpiresOr(time.Time{})
+	srcAgentExpire, dstAgentExpire := srcAgent.GetAuthExpires(), dstAgent.GetAuthExpires()
 	{
 		now := time.Now()
 		if (!srcAgentExpire.IsZero()) && now.After(srcAgentExpire) {
@@ -467,13 +481,13 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 		}
 	}
 
-	dstTether, ok := netip.AddrFromSlice(dstAgent.TetherAddr) // The source tether address is in passed in.
-	if !ok || !dstTether.IsValid() {
+	dstTether := dstAgent.GetTetherAddr() // The source tether address is in passed in.
+	if !dstTether.IsValid() {
 		vs.log.Info("destination tether is nil, visa request denied")
 		return nil, ErrNoRouteToHost
 	}
 
-	if len(dstAgent.Provides)+len(srcAgent.Provides) == 0 {
+	if len(dstAgent.GetProvides())+len(srcAgent.GetProvides()) == 0 {
 		vs.log.Info("visa denied: no services offered on either endpoint")
 		return nil, ErrDeniedByPolicy
 	}
@@ -494,31 +508,33 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 	{
 		updated, newAttrs, err := vs.checkAndUpdateAttrs(now, srcAgent)
 		if updated {
-			srcAgent.AuthClaims = newAttrs
+			vs.log.Debug("found updates to source authed claims", "agent_addr", srcAgent.GetZPRIDIfSet(), "newAttrs", newAttrs)
+			srcAgent.SetAuthedClaims(newAttrs)
 		}
 		if err != nil {
 			if errors.Is(err, auth.ErrNotSupported) {
-				vs.log.Info("attribute query not supported for source agent", "agent", srcAgent.Ident)
+				vs.log.Info("attribute query not supported for source agent", "agent", srcAgent.GetIdentity())
 			} else {
-				vs.log.WithError(err).Warn("attribute query failed for source agent", "agent", srcAgent.Ident)
+				vs.log.WithError(err).Warn("attribute query failed for source agent", "agent", srcAgent.GetIdentity())
 			}
 		}
 	}
 	{
 		updated, newAttrs, err := vs.checkAndUpdateAttrs(now, dstAgent)
 		if updated {
-			dstAgent.AuthClaims = newAttrs
+			vs.log.Debug("found updates to dest authed claims", "agent_addr", srcAgent.GetZPRIDIfSet(), "newAttrs", newAttrs)
+			dstAgent.SetAuthedClaims(newAttrs)
 		}
 		if err != nil {
 			if errors.Is(err, auth.ErrNotSupported) {
-				vs.log.Info("attribute query not supported for dest agent", "agent", srcAgent.Ident)
+				vs.log.Info("attribute query not supported for dest agent", "agent", srcAgent.GetIdentity())
 			} else {
-				vs.log.WithError(err).Warn("attribute query failed for dest agent", "agent", dstAgent.Ident)
+				vs.log.WithError(err).Warn("attribute query failed for dest agent", "agent", dstAgent.GetIdentity())
 			}
 		}
 	}
 
-	mtSrc, mtDst := policyAgentInfoFromVsioAgent(srcAgent), policyAgentInfoFromVsioAgent(dstAgent)
+	mtSrc, mtDst := policyAgentInfoFromAgent(srcAgent), policyAgentInfoFromAgent(dstAgent)
 	cpols, err := curmatcher.MatchTraffic(pktData, mtSrc, mtDst)
 	if err != nil {
 		vs.visaDenied(curConfigID, "no match", pktData, tetherAddr)
@@ -532,9 +548,9 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 		WithDatacapComputeFunc(vs.dataCapApply)
 
 	if cpols[0].FWD {
-		builder.WithClientAgentIdent(srcAgent.Ident)
+		builder.WithClientAgentIdent(srcAgent.GetIdentity())
 	} else {
-		builder.WithClientAgentIdent(dstAgent.Ident)
+		builder.WithClientAgentIdent(dstAgent.GetIdentity())
 	}
 
 	// In order to compute expiration I need two things from the visaConfig:
@@ -584,13 +600,20 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 
 	// TODO: Sign visa
 
-	resp := &vsio.VSResponse{
-		Success: true,
-		Visa: &vsio.VSVisaHop{
-			Visa:     vent.v,
-			HopCount: uint32(vs.hopCount),
-		},
+	resp := new(vsapi.VisaResponse)
+	resp.Status = vsapi.StatusCode_SUCCESS
+
+	pbuf, err := proto.Marshal(vent.v)
+	if err != nil {
+		vs.log.WithError(err).Error("failed to marshal visa for mailbox")
+		return nil, fmt.Errorf("internal error")
 	}
+	resp.Visa = &vsapi.VisaHop{
+		VisaPb:   pbuf,
+		HopCount: int32(vs.hopCount),
+		IssuerID: int32(vent.v.IssuerId),
+	}
+
 	vs.visaCreated(vent.v, visaExpiration, pktData, expFlags.String(), tetherAddr)
 	if time.Until(visaExpiration) < (30 * time.Second) {
 		vs.log.Warn("visa with very short TTL", "visaID", vent.v.IssuerId, "TTL", time.Until(visaExpiration).String())
@@ -599,17 +622,13 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 }
 
 // Urg, so many types!!
-func policyAgentInfoFromVsioAgent(agnt *vsio.Agent) *policy.AgentInfo {
+func policyAgentInfoFromAgent(agnt *agent.Agent) *policy.AgentInfo {
 	aa := &policy.AgentInfo{
 		AgentAttrs:    make(map[string]*agent.ClaimV),
 		AgentProvides: agnt.GetProvides(),
 	}
-	for key, claim := range agnt.AuthClaims {
-		ac := &agent.ClaimV{
-			V:   claim.Cval,
-			Exp: time.Unix(claim.Exp, 0),
-		}
-		aa.AgentAttrs[key] = ac
+	for key, claim := range agnt.GetAuthedClaims() {
+		aa.AgentAttrs[key] = claim
 	}
 	return aa
 }
@@ -748,14 +767,14 @@ func (vs *VSInst) computeVisaExpiration(maxVisaLifetime time.Duration, durationC
 
 // endpointsForTraffic locate the source and destination agents by using the directory
 // to see what agent is connected at each endpoint.
-func (vs *VSInst) endpointsForTraffic(pktData *snip.Traffic) (srcAgent *vsio.Agent, dstAgent *vsio.Agent, err error) {
+func (vs *VSInst) endpointsForTraffic(pktData *snip.Traffic) (srcAgent *agent.Agent, dstAgent *agent.Agent, err error) {
 	// Note that the visa service does not check for a route. The existence of an entry in the DirectoryService implies a route.
-	srcAgent, err = vs.ad.AgentAtContactAddr(pktData.SrcAddr)
+	srcAgent, err = vs.AgentAtContactAddr(pktData.SrcAddr)
 	if err != nil {
 		vs.log.WithError(err).Info("visa denied: failed to resolve source ZPR address", "source", pktData.SrcAddr)
 		return nil, nil, ErrNoRouteToHost
 	}
-	dstAgent, err = vs.ad.AgentAtContactAddr(pktData.DstAddr)
+	dstAgent, err = vs.AgentAtContactAddr(pktData.DstAddr)
 	if err != nil {
 		vs.log.WithError(err).Info("visa denied: failed to resolve dest ZPR address", "dest", pktData.DstAddr)
 		return nil, nil, ErrNoRouteToHost
@@ -817,34 +836,33 @@ func (vs *VSInst) visaCreated(visa *vsio.Visa, expires time.Time, pktData *snip.
 //
 // ErrNotSupported is returned as error in case where the data source does not support
 // the Query operation.  (PROBLEM: what if there are multiple data sources?)
-func (vs *VSInst) checkAndUpdateAttrs(now time.Time, agnt *vsio.Agent) (bool, map[string]*vsio.AClaim, error) {
+func (vs *VSInst) checkAndUpdateAttrs(now time.Time, agnt *agent.Agent) (bool, map[string]*agent.ClaimV, error) {
 
-	keepAttrs := make(map[string]*vsio.AClaim)
+	keepAttrs := make(map[string]*agent.ClaimV)
 
 	var expired []string // we query for these
 
-	for aKey, aVx := range agnt.AuthClaims {
+	for aKey, aVx := range agnt.GetAuthedClaims() {
 		if strings.HasPrefix(aKey, "zpr.") {
 			keepAttrs[aKey] = aVx
 			continue // For now we don't know how to update zpr keys
 		}
-		if aVx.Exp == 0 {
+		if aVx.Exp.IsZero() {
 			keepAttrs[aKey] = aVx
 			continue // unset? Then it never expires.
 		}
-		expt := time.Unix(aVx.Exp, 0)
-		if now.After(expt) {
+		if now.After(aVx.Exp) {
 			expired = append(expired, aKey)
 		} else {
 			keepAttrs[aKey] = aVx
 		}
 	}
 	if len(expired) == 0 {
-		return false, agnt.AuthClaims, nil // no changes, nothing expired.
+		return false, agnt.GetAuthedClaims(), nil // no changes, nothing expired.
 	}
 
 	var toks [][]byte
-	toks = append(toks, []byte(agnt.Ident)) // TODO: what if there are multiple tokens on an agent?
+	toks = append(toks, []byte(agnt.GetIdentity())) // TODO: what if there are multiple tokens on an agent?
 	qreq := &zds.QueryRequest{
 		TokenList: toks,
 		AttrKeys:  expired,
@@ -867,9 +885,9 @@ func (vs *VSInst) checkAndUpdateAttrs(now time.Time, agnt *vsio.Agent) (bool, ma
 			vs.log.Info("invalid attempt by trusted service to set zpr key", "key", za.Key, "value", za.Val)
 			continue
 		}
-		keepAttrs[za.Key] = &vsio.AClaim{
-			Cval: za.Val,
-			Exp:  za.Exp,
+		keepAttrs[za.Key] = &agent.ClaimV{
+			V:   za.Val,
+			Exp: time.Unix(za.Exp, 0),
 		}
 	}
 	return true, keepAttrs, nil // No error, and attributes have been updated
