@@ -303,6 +303,7 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     let _ = write!(
         &mut info,
         "Approx packet time: {outbound_send_mean}ns\n\n\n"
+
     );
 
     info
@@ -315,6 +316,7 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
     let seventy_five: u64 = hist.value_at_quantile(0.75);
     let ninety: u64 = hist.value_at_quantile(0.90);
     let mean: f64 = hist.mean();
+
 
     let mut values: String = "".to_string();
 
