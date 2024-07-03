@@ -219,6 +219,7 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         values_from_hist(
             "Inbound Processor Duration",
             "ns",
+            inbound_processor_duration.clone()
         )
         .as_str()
     );
@@ -314,7 +315,6 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
     let seventy_five: u64 = hist.value_at_quantile(0.75);
     let ninety: u64 = hist.value_at_quantile(0.90);
     let mean: f64 = hist.mean();
-
 
     let mut values: String = "".to_string();
 
