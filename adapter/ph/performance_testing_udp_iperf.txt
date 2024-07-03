@@ -1,0 +1,246 @@
+TEST 1: Server running on laptop, client on VM. PERF-SAMPLE running on server side 
+        for 120 seconds 4 samples/seconds. iperf -s on server side. Using -t 
+        flag on the client side to send traffic for 120 seconds
+
+    Inbound Processor Duration values at - 10th Quantile: 8191ns, 25th Quantile: 17407ns,
+    50th Quantile: 38911ns, 75th Quantile: 47103ns, 90th Quantile: 51199ns, Mean: 33362.399999999994ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 33362ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 4863ns, 25th Quantile: 10239ns,
+    50th Quantile: 16383ns, 75th Quantile: 21503ns, 90th Quantile: 23551ns, Mean: 15988.8ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 15988ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 4863ns, 25th Quantile: 10239ns,
+    50th Quantile: 13311ns, 75th Quantile: 17407ns, 90th Quantile: 19455ns, Mean: 13379.333333333334ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 13379ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 10239ns, 25th Quantile: 12799ns,
+    50th Quantile: 18431ns, 75th Quantile: 57343ns, 90th Quantile: 73727ns, Mean: 34068.666666666664ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 34068ns
+
+
+    ------------------------------------------------------------
+    Server listening on UDP port 5001
+    UDP buffer size:  208 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 46999
+    [ ID] Interval       Transfer     Bandwidth        Jitter   Lost/Total Datagrams
+    [  1] 0.0000-120.0149 sec  15.0 MBytes  1.05 Mbits/sec   0.151 ms 0/10703 (0%)
+
+    ------------------------------------------------------------
+    Client connecting to 192.168.99.1, UDP port 5001
+    Sending 1470 byte datagrams, IPG target: 11215.21 us (kalman adjust)
+    UDP buffer size:  208 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.2 port 46999 connected with 192.168.99.1 port 5001
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0143 sec  15.0 MBytes  1.05 Mbits/sec
+    [  1] Sent 10704 datagrams
+    [  1] Server Report:
+    [ ID] Interval       Transfer     Bandwidth        Jitter   Lost/Total Datagrams
+    [  1] 0.0000-120.0149 sec  15.0 MBytes  1.05 Mbits/sec   0.150 ms 0/10703 (0%)
+
+
+TEST 2: Server running on laptop, client on VM. PERF-SAMPLE running on server side 
+        for 120 seconds 4 samples/seconds. iperf -s on client side. Using -t 
+        flag on the server side to send traffic for 120 seconds
+
+    Inbound Processor Duration values at - 10th Quantile: 20479ns, 25th Quantile: 36863ns,
+    50th Quantile: 38911ns, 75th Quantile: 47103ns, 90th Quantile: 51199ns, Mean: 39309.333333333336ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 39309ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 13311ns, 25th Quantile: 15871ns,
+    50th Quantile: 17407ns, 75th Quantile: 22527ns, 90th Quantile: 23551ns, Mean: 18396.8ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 18396ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 5631ns, 25th Quantile: 11775ns,
+    50th Quantile: 13311ns, 75th Quantile: 17407ns, 90th Quantile: 18431ns, Mean: 13995.333333333332ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.010416666666666666 packets
+
+    Approx packet time: 13851ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 10751ns, 25th Quantile: 12799ns,
+    50th Quantile: 21503ns, 75th Quantile: 63487ns, 90th Quantile: 77823ns, Mean: 41509.73333333334ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.0020833333333333333 packets
+
+    Approx packet time: 41423ns
+
+
+    ------------------------------------------------------------
+    Server listening on UDP port 5001
+    UDP buffer size:  208 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.2 port 5001 connected with 192.168.99.1 port 35752
+    [ ID] Interval       Transfer     Bandwidth        Jitter   Lost/Total Datagrams
+    [  1] 0.0000-120.0134 sec  15.0 MBytes  1.05 Mbits/sec   0.216 ms 0/10703 (0%) 
+
+    ------------------------------------------------------------
+    Client connecting to 192.168.99.2, UDP port 5001
+    Sending 1470 byte datagrams, IPG target: 11215.21 us (kalman adjust)
+    UDP buffer size:  208 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.1 port 35752 connected with 192.168.99.2 port 5001
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0141 sec  15.0 MBytes  1.05 Mbits/sec
+    [  1] Sent 10704 datagrams
+    [  1] Server Report:
+    [ ID] Interval       Transfer     Bandwidth        Jitter   Lost/Total Datagrams
+    [  1] 0.0000-120.0134 sec  15.0 MBytes  1.05 Mbits/sec   0.216 ms 0/10703 (0%)
+
+
+TEST 3: Server running on laptop, client on VM. PERF-SAMPLE running on client side 
+        for 120 seconds 4 samples/seconds. iperf -s on server side. Using -t 
+        flag on the client side to send traffic for 120 seconds
+
+    Inbound Processor Duration values at - 10th Quantile: 20479ns, 25th Quantile: 45055ns,
+    50th Quantile: 45055ns, 75th Quantile: 53247ns, 90th Quantile: 59391ns, Mean: 47532.26666666667ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 47532ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 15871ns, 25th Quantile: 17407ns,
+    50th Quantile: 17407ns, 75th Quantile: 22527ns, 90th Quantile: 24575ns, Mean: 19379.199999999993ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 19379ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 7423ns, 25th Quantile: 12287ns,
+    50th Quantile: 12799ns, 75th Quantile: 17407ns, 90th Quantile: 19455ns, Mean: 14129.333333333332ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.0020833333333333333 packets
+
+    Approx packet time: 14099ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 8703ns, 25th Quantile: 14335ns,
+    50th Quantile: 20479ns, 75th Quantile: 81919ns, 90th Quantile: 98303ns, Mean: 47686.93333333333ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.0020833333333333333 packets
+
+    Approx packet time: 47587ns
+
+
+    ------------------------------------------------------------
+    Server listening on UDP port 5001
+    UDP buffer size:  208 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 49386
+    [ ID] Interval       Transfer     Bandwidth        Jitter   Lost/Total Datagrams
+    [  1] 0.0000-120.0160 sec  15.0 MBytes  1.05 Mbits/sec   0.078 ms 0/10703 (0%)
+
+    ------------------------------------------------------------
+    Client connecting to 192.168.99.1, UDP port 5001
+    Sending 1470 byte datagrams, IPG target: 11215.21 us (kalman adjust)
+    UDP buffer size:  208 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.2 port 49386 connected with 192.168.99.1 port 5001
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0148 sec  15.0 MBytes  1.05 Mbits/sec
+    [  1] Sent 10704 datagrams
+    [  1] Server Report:
+    [ ID] Interval       Transfer     Bandwidth        Jitter   Lost/Total Datagrams
+    [  1] 0.0000-120.0160 sec  15.0 MBytes  1.05 Mbits/sec   0.078 ms 0/10703 (0%)
+
+
+TEST 4: Server running on laptop, client on VM. PERF-SAMPLE running on client side 
+        for 120 seconds 4 samples/seconds. iperf -s on client side. Using -t 
+        flag on the server side to send traffic for 120 seconds
+
+    Inbound Processor Duration values at - 10th Quantile: 20479ns, 25th Quantile: 45055ns,
+    50th Quantile: 47103ns, 75th Quantile: 55295ns, 90th Quantile: 59391ns, Mean: 46238.399999999994ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 46238ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 11263ns, 25th Quantile: 17407ns,
+    50th Quantile: 17407ns, 75th Quantile: 22527ns, 90th Quantile: 24575ns, Mean: 18395.199999999993ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 18395ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 11775ns, 25th Quantile: 12799ns,
+    50th Quantile: 13311ns, 75th Quantile: 17407ns, 90th Quantile: 19455ns, Mean: 15295.999999999998ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 15295ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 13311ns, 25th Quantile: 14847ns,
+    50th Quantile: 22527ns, 75th Quantile: 81919ns, 90th Quantile: 102399ns, Mean: 54492.26666666667ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0 packets
+
+    Approx packet time: 54492ns
+
+
+    ------------------------------------------------------------
+    Server listening on UDP port 5001
+    UDP buffer size:  208 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.2 port 5001 connected with 192.168.99.1 port 48297
+    [ ID] Interval       Transfer     Bandwidth        Jitter   Lost/Total Datagrams
+    [  1] 0.0000-120.0132 sec  15.0 MBytes  1.05 Mbits/sec   0.173 ms 0/10703 (0%)
+
+    ------------------------------------------------------------
+    Client connecting to 192.168.99.2, UDP port 5001
+    Sending 1470 byte datagrams, IPG target: 11215.21 us (kalman adjust)
+    UDP buffer size:  208 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.1 port 48297 connected with 192.168.99.2 port 5001
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0147 sec  15.0 MBytes  1.05 Mbits/sec
+    [  1] Sent 10704 datagrams
+    [  1] Server Report:
+    [ ID] Interval       Transfer     Bandwidth        Jitter   Lost/Total Datagrams
+    [  1] 0.0000-120.0132 sec  15.0 MBytes  1.05 Mbits/sec   0.172 ms 0/10703 (0%)
