@@ -211,13 +211,14 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
 
     // get values at 10, 25, 50, 75, 90 quantiles for each hist
     let mut info: String = "".to_string();
+
     let _ = write!(
         &mut info,
         "{}",
         values_from_hist(
             "Inbound Processor Duration",
             "ns",
-            inbound_processor_duration
+            inbound_processor_duration.clone()
         )
         .as_str()
     );
@@ -227,27 +228,33 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         values_from_hist(
             "Inbound Processor Depth",
             " packets",
-            inbound_processor_depth
+            inbound_processor_depth.clone()
         )
         .as_str()
     );
+    let inbound_pro_mean = inbound_processor_duration.mean() / inbound_processor_depth.mean();
+    let _ = write!(&mut info, "Approx packet time: {inbound_pro_mean}");
+
     let _ = write!(
         &mut info,
         "{}",
-        values_from_hist("Inbound Send Duration", "ns", inbound_send_duration).as_str()
+        values_from_hist("Inbound Send Duration", "ns", inbound_send_duration.clone()).as_str()
     );
     let _ = write!(
         &mut info,
         "{}",
-        values_from_hist("Inbound Send Depth", " packets", inbound_send_depth).as_str()
+        values_from_hist("Inbound Send Depth", " packets", inbound_send_depth.clone()).as_str()
     );
+    let inbound_send_mean = inbound_send_duration.mean() / inbound_send_depth.mean();
+    let _ = write!(&mut info, "Approx packet time: {inbound_send_mean}");
+
     let _ = write!(
         &mut info,
         "{}",
         values_from_hist(
             "Outbound Processor Duration",
             "ns",
-            outbound_processor_duration
+            outbound_processor_duration.clone()
         )
         .as_str()
     );
@@ -257,31 +264,46 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         values_from_hist(
             "Outbound Processor Depth",
             " packets",
-            outbound_processor_depth
+            outbound_processor_depth.clone()
+        )
+        .as_str()
+    );
+    let outbound_pro_mean = outbound_processor_duration.mean() / outbound_processor_depth.mean();
+    let _ = write!(&mut info, "Approx packet time: {outbound_pro_mean}");
+
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist(
+            "Outbound Send Duration",
+            "ns",
+            outbound_send_duration.clone()
         )
         .as_str()
     );
     let _ = write!(
         &mut info,
         "{}",
-        values_from_hist("Outbound Send Duration", "ns", outbound_send_duration).as_str()
+        values_from_hist(
+            "Outbound Send Depth",
+            " packets",
+            outbound_send_depth.clone()
+        )
+        .as_str()
     );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist("Outbound Send Depth", " packets", outbound_send_depth).as_str()
-    );
+    let outbound_send_mean = outbound_send_duration.mean() / outbound_send_depth.mean();
+    let _ = write!(&mut info, "Approx packet time: {outbound_send_mean}");
 
     info
 }
 
 fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> String {
-    let ten:u64          = hist.value_at_quantile(0.10);
-    let twenty_five:u64  = hist.value_at_quantile(0.25);
-    let fifty:u64        = hist.value_at_quantile(0.50);
-    let seventy_five:u64 = hist.value_at_quantile(0.75);
-    let ninety:u64       = hist.value_at_quantile(0.90);
-    let mean:f64         = hist.mean();
+    let ten: u64 = hist.value_at_quantile(0.10);
+    let twenty_five: u64 = hist.value_at_quantile(0.25);
+    let fifty: u64 = hist.value_at_quantile(0.50);
+    let seventy_five: u64 = hist.value_at_quantile(0.75);
+    let ninety: u64 = hist.value_at_quantile(0.90);
+    let mean: f64 = hist.mean();
 
     let mut values: String = "".to_string();
 
