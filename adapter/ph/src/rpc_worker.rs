@@ -212,6 +212,7 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     // get values at 10, 25, 50, 75, 90 quantiles for each hist
     let mut info: String = "".to_string();
 
+    // Get info for inbound processor
     let _ = write!(
         &mut info,
         "{}",
@@ -232,9 +233,11 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         )
         .as_str()
     );
-    let inbound_pro_mean = inbound_processor_duration.mean() / inbound_processor_depth.mean();
-    let _ = write!(&mut info, "Approx packet time: {inbound_pro_mean}");
+    let inbound_pro_mean: u64 =
+        (inbound_processor_duration.mean() / (1.0 + inbound_processor_depth.mean())) as u64;
+    let _ = write!(&mut info, "Approx packet time: {inbound_pro_mean}ns\n\n\n");
 
+    // Get info for inbound send
     let _ = write!(
         &mut info,
         "{}",
@@ -245,9 +248,11 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         "{}",
         values_from_hist("Inbound Send Depth", " packets", inbound_send_depth.clone()).as_str()
     );
-    let inbound_send_mean = inbound_send_duration.mean() / inbound_send_depth.mean();
-    let _ = write!(&mut info, "Approx packet time: {inbound_send_mean}");
+    let inbound_send_mean: u64 =
+        (inbound_send_duration.mean() / (1.0 + inbound_send_depth.mean())) as u64;
+    let _ = write!(&mut info, "Approx packet time: {inbound_send_mean}ns\n\n\n");
 
+    // Get info for outbound processor
     let _ = write!(
         &mut info,
         "{}",
@@ -268,9 +273,11 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         )
         .as_str()
     );
-    let outbound_pro_mean = outbound_processor_duration.mean() / outbound_processor_depth.mean();
-    let _ = write!(&mut info, "Approx packet time: {outbound_pro_mean}");
+    let outbound_pro_mean: u64 =
+        (outbound_processor_duration.mean() / (1.0 + outbound_processor_depth.mean())) as u64;
+    let _ = write!(&mut info, "Approx packet time: {outbound_pro_mean}ns\n\n\n");
 
+    // Get info for outbound send
     let _ = write!(
         &mut info,
         "{}",
@@ -291,8 +298,12 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         )
         .as_str()
     );
-    let outbound_send_mean = outbound_send_duration.mean() / outbound_send_depth.mean();
-    let _ = write!(&mut info, "Approx packet time: {outbound_send_mean}");
+    let outbound_send_mean: u64 =
+        (outbound_send_duration.mean() / (1.0 + outbound_send_depth.mean())) as u64;
+    let _ = write!(
+        &mut info,
+        "Approx packet time: {outbound_send_mean}ns\n\n\n"
+    );
 
     info
 }
