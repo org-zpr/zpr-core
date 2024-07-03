@@ -340,6 +340,7 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
         prev_bucket = curr_bucket;
         iter_value = iter.next();
     }
+
     let _ = write!(&mut values, "\n");
 
     values
