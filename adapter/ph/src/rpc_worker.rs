@@ -12,6 +12,7 @@ use tokio::net::UnixListener;
 use tokio::net::UnixStream;
 use tokio::task::JoinSet;
 use tokio::time::interval;
+use std::f64::consts::SQRT_2;
 
 async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
     let mut set = JoinSet::<Result<(), Error>>::new();
@@ -303,7 +304,6 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     let _ = write!(
         &mut info,
         "Approx packet time: {outbound_send_mean}ns\n\n\n"
-
     );
 
     info
@@ -317,11 +317,25 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
     let ninety: u64 = hist.value_at_quantile(0.90);
     let mean: f64 = hist.mean();
 
-
     let mut values: String = "".to_string();
 
     // Could be easily replaced with other data if need be
     let _ = write!(&mut values, "{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}, Mean: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units, mean, units);
+
+    let mut iter = hist.iter_log(1, SQRT_2);
+
+    let mut iter_value = iter.next();
+    let mut prev_bucket = 0;
+
+    while iter_value != None {
+        let curr_bucket = iter_value.as_ref().unwrap().value_iterated_to();
+        let _ = write!(&mut values, "Bucket: {}-{} | {}\n", prev_bucket, curr_bucket, iter_value.unwrap().count_since_last_iteration());
+        
+        prev_bucket = curr_bucket;
+        iter_value = iter.next();
+    }
+
+    let _ = write!(&mut values, "\n");
 
     values
 }
