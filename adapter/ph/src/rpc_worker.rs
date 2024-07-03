@@ -1,6 +1,7 @@
 use crate::assembly::Assembly;
 use core::future::Future;
 use hdrhistogram::Histogram;
+use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
 use std::time::{Duration, Instant};
@@ -12,7 +13,6 @@ use tokio::net::UnixListener;
 use tokio::net::UnixStream;
 use tokio::task::JoinSet;
 use tokio::time::interval;
-use std::f64::consts::SQRT_2;
 
 async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
     let mut set = JoinSet::<Result<(), Error>>::new();
@@ -329,8 +329,14 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
 
     while iter_value != None {
         let curr_bucket = iter_value.as_ref().unwrap().value_iterated_to();
-        let _ = write!(&mut values, "Bucket: {}-{} | {}\n", prev_bucket, curr_bucket, iter_value.unwrap().count_since_last_iteration());
-        
+        let _ = write!(
+            &mut values,
+            "Bucket: {}-{} | {}\n",
+            prev_bucket,
+            curr_bucket,
+            iter_value.unwrap().count_since_last_iteration()
+        );
+
         prev_bucket = curr_bucket;
         iter_value = iter.next();
     }
