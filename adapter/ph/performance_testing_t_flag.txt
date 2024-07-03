@@ -1,0 +1,105 @@
+TEST 1: Server running on laptop, client on VM. PERF-SAMPLE running on server side 
+        for 120 seconds 4 samples/seconds. iperf -s on server side. Not using -t 
+        flag on the client side, repeatedly send 10sec of traffic
+
+    Inbound Processor Duration values at - 10th Quantile: 4351ns, 25th Quantile: 6143ns,
+    50th Quantile: 38911ns, 75th Quantile: 77823ns, 90th Quantile: 155647ns, Mean: 60425.73333333334ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 1 packets, 90th Quantile: 9 packets, Mean: 2.2458333333333336 packets
+
+    Inbound Send Duration values at - 10th Quantile: 3071ns, 25th Quantile: 7167ns,
+    50th Quantile: 26623ns, 75th Quantile: 47103ns, 90th Quantile: 69631ns, Mean: 32201.26666666666ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.1875 packets
+
+    Outbound Processor Duration values at - 10th Quantile: 3071ns, 25th Quantile: 3839ns,
+    50th Quantile: 5631ns, 75th Quantile: 11263ns, 90th Quantile: 16383ns, Mean: 9128ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.058333333333333334 packets
+
+    Outbound Send Duration values at - 10th Quantile: 9215ns, 25th Quantile: 19455ns,
+    50th Quantile: 40959ns, 75th Quantile: 77823ns, 90th Quantile: 118783ns, Mean: 56461.53333333333ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 2 packets, Mean: 0.4437499999999999 packets
+
+    ------------------------------------------------------------
+    Server listening on TCP port 5001
+    TCP window size:  128 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 48490
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-10.0252 sec  1021 MBytes   854 Mbits/sec
+    [  2] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 42568
+    [ ID] Interval       Transfer     Bandwidth
+    [  2] 0.0000-10.0239 sec  1.03 GBytes   880 Mbits/sec
+    [  3] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 59740
+    [ ID] Interval       Transfer     Bandwidth
+    [  3] 0.0000-10.0194 sec  1.02 GBytes   878 Mbits/sec
+    [  4] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 39346
+    [ ID] Interval       Transfer     Bandwidth
+    [  4] 0.0000-10.0175 sec  1.02 GBytes   873 Mbits/sec
+    [  5] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 45430
+    [ ID] Interval       Transfer     Bandwidth
+    [  5] 0.0000-10.0206 sec  1006 MBytes   842 Mbits/sec
+    [  6] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 39440
+    [ ID] Interval       Transfer     Bandwidth
+    [  6] 0.0000-10.0219 sec  1020 MBytes   854 Mbits/sec
+    [  7] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 51226
+    [ ID] Interval       Transfer     Bandwidth
+    [  7] 0.0000-10.0178 sec  1.02 GBytes   871 Mbits/sec
+    [  8] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 42910
+    [ ID] Interval       Transfer     Bandwidth
+    [  8] 0.0000-10.0181 sec  1017 MBytes   852 Mbits/sec
+    [  9] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 60930
+    [ ID] Interval       Transfer     Bandwidth
+    [  9] 0.0000-10.0192 sec  1.02 GBytes   876 Mbits/sec
+    [ 10] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 53520
+    [ ID] Interval       Transfer     Bandwidth
+    [ 10] 0.0000-10.0191 sec  1.01 GBytes   869 Mbits/sec
+    [ 11] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 52672
+    [ ID] Interval       Transfer     Bandwidth
+    [ 11] 0.0000-10.0202 sec  1.02 GBytes   872 Mbits/sec
+    [ 12] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 60180
+    [ ID] Interval       Transfer     Bandwidth
+    [ 12] 0.0000-10.0309 sec   970 MBytes   811 Mbits/sec
+
+
+TEST 2: Server running on laptop, client on VM. PERF-SAMPLE running on server side 
+        for 120 seconds 4 samples/seconds. iperf -s on server side. Using -t 
+        flag on the client side to send traffic for 120 seconds
+
+    Inbound Processor Duration values at - 10th Quantile: 4095ns, 25th Quantile: 5375ns,
+    50th Quantile: 26623ns, 75th Quantile: 77823ns, 90th Quantile: 139263ns, Mean: 52938.33333333332ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 1 packets, 90th Quantile: 7 packets, Mean: 1.6708333333333334 packets
+
+    Inbound Send Duration values at - 10th Quantile: 2943ns, 25th Quantile: 4863ns,
+    50th Quantile: 25599ns, 75th Quantile: 40959ns, 90th Quantile: 57343ns, Mean: 27572.800000000003ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.2 packets
+
+    Outbound Processor Duration values at - 10th Quantile: 2943ns, 25th Quantile: 3583ns,
+    50th Quantile: 4863ns, 75th Quantile: 9215ns, 90th Quantile: 15871ns, Mean: 12352.333333333336ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.10416666666666666 packets
+
+    Outbound Send Duration values at - 10th Quantile: 9215ns, 25th Quantile: 20479ns,
+    50th Quantile: 43007ns, 75th Quantile: 77823ns, 90th Quantile: 114687ns, Mean: 60334.333333333336ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 2 packets, Mean: 0.5166666666666666 packets
+      
+    ------------------------------------------------------------
+    Server listening on TCP port 5001
+    TCP window size:  128 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 47846
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0173 sec  12.1 GBytes   867 Mbits/sec
