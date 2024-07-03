@@ -1,8 +1,8 @@
-use crate::config;
 use crate::buffer_stack::BufferStack;
-use crate::queues::*;
+use crate::config;
 use crate::counter::*;
 use crate::counters_enum::*;
+use crate::queues::*;
 use enum_map::EnumMap;
 // Interface to full assembly of all stages.
 
@@ -34,5 +34,5 @@ pub struct Assembly<'pktbuf> {
     pub outbound_processor: OutboundProcessor<'pktbuf>,
     pub outbound_send: OutboundSend<'pktbuf>,
 
-    pub counters: EnumMap<CounterType, Counter>
+    pub counters: EnumMap<CounterType, Counter>,
 }

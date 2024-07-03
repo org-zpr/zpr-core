@@ -21,6 +21,7 @@ pub struct IpAddress {
     pub v6: [u8; IPV6_ADDRESS_SIZE],
 }
 
+#[allow(dead_code)]
 impl IpAddress {
     pub fn set_from_v4(&mut self, v4_address: [u8; 4]) {
         self.v6[12..16].copy_from_slice(&v4_address);
@@ -54,6 +55,7 @@ pub struct PacketMetadata {
     _padding: [u8; 3],
 }
 
+#[allow(dead_code)]
 impl PacketMetadata {
     pub fn set_src_port(&mut self, sport: [u8; 2]) {
         self.src_port = NetworkEndian::read_u16(&sport)
