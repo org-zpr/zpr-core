@@ -14,10 +14,15 @@ use crate::vs::VSConn;
 pub const VERSION: &str = "0.1.0";
 
 
+
+/// CoreOpts is for debug options we want to pass to the node.
 #[derive(Debug, Clone)]
 pub struct CoreOpts {
+
+    /// Force the node to immediately open a connection to the visa service at the provided HOST:PORT.
     vsforceconnect: Option<String>,
 }
+
 
 impl CoreOpts {
     pub fn new() -> CoreOpts {
@@ -43,30 +48,17 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     let mut tasks = JoinSet::new();
     let (cs_shutdown_tx, mut cs_shutdown_rx) = oneshot::channel();
 
-    // The node address is one of the required claims.
-    let node_addr: IpAddr = match nconfig.get_claim("zpr.addr") {
-        Some(s) => {
-            match s.parse() {
-                Ok(a) => a,
-                Err(e) => {
-                    error!("failed to parse zpr.addr claim: {}: {}", s, e);
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "failed to parse zpr.addr claim"));
-                }
-            }
-        }
-        None => {
-            error!("zpr.addr claim not found in config");
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "zpr.addr claim not found in config"));
-        }
-    };
 
-    if opts.vsforceconnect.is_some() {
+    let o_vsforceconnect = opts.vsforceconnect.is_some();
+
+    if o_vsforceconnect {
         info!("DEBUG: force connect to visa service");
         
-        let vs_conn = VSConn::new(&opts.vsforceconnect.unwrap(), &nconfig.get_cert_path(), &nconfig.get_key_path(), node_addr)?;
+        let vs_conn = VSConn::new(&opts.vsforceconnect.unwrap(), &nconfig.get_cert_path(), &nconfig.get_key_path(), nconfig.get_node_addr())?;
         for (k, v) in nconfig.get_claims() {
             vs_conn.add_claim(&k, &v);
         }
+        let another_vs_conn = vs_conn.clone();        
 
         let vs_ctoken = ctoken.clone();
         tasks.spawn(async move { 
@@ -92,11 +84,61 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
             }
             let _ = cs_shutdown_tx.send(()); // visa service exits.
         });
+
+        // XXXX ---------------------- DEBUG
+        use tokio::time::{self, Duration};        
+        let dbg_ctoken = ctoken.clone();
+
+        tasks.spawn(async move {
+            let mut interval = time::interval(Duration::from_millis(3000)); 
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let n: f64 = rand::random();  // <--- TODO: remove RAND crate when done testing
+                        if n < 0.33 {
+                            match another_vs_conn.request_visa().await {
+                                Ok(_) => {
+                                    info!("DEBUG: visa request sent");
+                                }
+                                Err(e) => {
+                                    error!("DEBUG: failed to get visa: {}", e);
+                                }
+                            }
+                        } else if n < 0.66 {
+                            match another_vs_conn.authorize_connect().await {
+                                Ok(_) => {
+                                    info!("DEBUG: authorized connect");
+                                }
+                                Err(e) => {
+                                    error!("DEBUG: failed to authorize connect: {}", e);
+                                }
+                            }
+                        } else {                            
+                            match another_vs_conn.agent_disconnect().await {
+                                Ok(_) => {
+                                    info!("DEBUG: agent disconnect");
+                                }
+                                Err(e) => {
+                                    error!("DEBUG: failed to agent disconnect: {}", e);
+                                }
+                            }
+                        }
+                    }                    
+                    _ = dbg_ctoken.cancelled() => {
+                        break;
+                    }
+                }
+            }
+        });
+        // XXXX ---------------------- DEBUG ^^^^^
+
         
 
     } else {
         info!("nothing to do...  ^C to exit");
     }
+
+
 
 
     tokio::select! {

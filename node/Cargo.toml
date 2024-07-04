@@ -10,6 +10,7 @@ chrono = "0.4.38"
 clap = { version = "4.5.8", features = ["derive"] }
 daemonize = "0.5.0"
 openssl = "0.10.64"
+rand = "0.8.5"
 serde = { version = "1.0.203", features = ["derive"] }
 thrift = "0.17.0"
 tokio = { version = "1.38.0", features = ["full"] }

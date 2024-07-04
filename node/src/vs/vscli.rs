@@ -103,4 +103,18 @@ impl VSClient {
 
         Ok(apikey)
     }
+
+
+    pub fn de_register(&self, apikey: &str) -> Result<(), thrift::Error> {
+        let mut client = self.newclient()?;
+        match client.de_register(apikey.into()) {
+            Ok(_) => {
+                Ok(())
+            }
+            Err(e) => {
+                Err(e)
+            }
+        }
+    }
+
 }

@@ -13,12 +13,13 @@ use std::net::IpAddr;
 
 use tokio::time::{self, Duration};
 use tokio_util::sync::CancellationToken;
+use tokio::sync::mpsc::{self, Sender};
 
 
 use crate::vs::vscli;
 use crate::vsapi;
 
-use tracing::info;
+use tracing::{info, error};
 
 
 
@@ -64,16 +65,28 @@ struct State {
     node_cert_pem_data: String,
     api_key: Option<String>,
     node_addr: IpAddr,
+    cmd_tx: Option<mpsc::Sender<VSCommand>>,
+}
+
+
+// This is a place holder for the async "commands" that can be sent into the running visa service client.
+// Clearly there will be arguments attached to these in the future.
+// Also need to figure out how the responses are routed back out.
+#[derive(Debug)]
+enum VSCommand {
+    RequestVisa,
+    AuthorizeConnect,
+    AgentDisconnect
 }
 
 
 
-
+/// The VSConn will manage all communication with the visa service on behalf of the node.
 impl VSConn {
-    // `service_addr` is ADDR:PORT of the visa service (ADDR should be a ZPR address)
-    // `node_cert_file` is the path to the node's signed certificate file
-    // `node_key_file` is the path to the node's private key file
-    // `node_addr` is the ZPR address of the node (from node config file).
+    /// - `service_addr` is ADDR:PORT of the visa service (ADDR should be a ZPR address)
+    /// - `node_cert_file` is the path to the node's signed certificate file
+    /// - `node_key_file` is the path to the node's private key file
+    /// - `node_addr` is the ZPR address of the node (from node config file).
     pub fn new(service_addr: &str, node_cert_file: &str, node_key_file: &str, node_addr: IpAddr) -> Result<VSConn, Error> {
 
         let mut certfile = match File::open(node_cert_file) {
@@ -109,6 +122,7 @@ impl VSConn {
                 node_cert_pem_data: cert_pem_data,
                 api_key: None,
                 node_addr,
+                cmd_tx: None,
             }),
         });
 
@@ -122,8 +136,8 @@ impl VSConn {
 
 
 
-    // Must be callled before run.  This registers with visa service and obtains an API key.
-    // Blocking network call.
+    /// Must be callled before run.  This registers with visa service and obtains an API key.
+    /// Blocking network call.
     pub fn initialize(&self) -> Result<(), Error> {
         info!("VSConn::initialize starts");
 
@@ -168,35 +182,87 @@ impl VSConn {
         Ok(())
     }
 
-    // Blocking call. Does not return until we are disconnected from the visa service.
+    /// Blocking async-friendly call.  Sets ip a polling loop. Eventually will handle all other visa service duties.
+    /// Does not return until we are disconnected from the visa service or the passed token is cancelled.
     pub async fn run(&self, ctok: CancellationToken) -> Result<(), Error> {
         info!("VSConn::run starts");
 
-        let mut apikey: Option<String> = None;
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut maybe_apikey: Option<String> = None;        
+        let svc_addr: String;
         {
-            let state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)            
-            apikey = state.api_key.clone();        
+            let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)            
+            state.cmd_tx = Some(tx.clone());
+            maybe_apikey = state.api_key.clone();        
+            svc_addr = state.service_addr.clone();
         }
 
-        if apikey.is_none() {
-            return Err(Error::new(ErrorKind::Other, "VSConn::run called but not initialized"));
-        }
+        let apikey = match maybe_apikey {
+            Some(k) => k,
+            None => {
+                return Err(Error::new(ErrorKind::Other, "VSConn::run called but not initialized"));
+            }
+        };
+
 
         let mut interval = time::interval(Duration::from_millis(1000)); // TODO: not hardcode
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    info!("VSConn::run tick!!");
+                    info!("VSConn::run tick!!"); // TODO: polling 
                 }
                 _ = ctok.cancelled() => {
                     info!("VSConn::run cancelled");
-                    return Ok(());
+                    let vsc = vscli::VSClient::new(&svc_addr);                    
+                    if let Err(e) = vsc.de_register(&apikey) {
+                        error!("VSConn::run failed to de-register: {}", e);
+                    }
+                    break;
+                }
+                Some(cmd) = rx.recv() => {
+                    info!("VSConn::run received command: {:?}", cmd);
                 }
             }
         }
-        // Ok(())
+        Ok(())
     }
 
+    async fn send_command(&self, cmd: VSCommand) -> Result<(), Error> {
+
+        // Extract the tx channel from the state, but must do so without keeping lock across the await later.    
+        let tx_chan: Sender<VSCommand>;
+        {
+            let state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
+            if let Some(tx) = &state.cmd_tx {
+                tx_chan = tx.clone();
+            } else {
+                error!("VSConn::send_command called but no command channel available");
+                return Err(Error::new(ErrorKind::Other, "VSConn::send_command called but no command channel available"));
+            }
+        }
+
+        if let Err(e) = tx_chan.send(cmd).await {
+            error!("VSConn::send_command failed: {}", e);
+            return Err(Error::new(ErrorKind::Other, "VSConn::send_command failed"));
+        }
+        Ok(())
+    }
+
+
+    /// PLACEHOLDER for request-visa operation
+    pub async fn request_visa(&self) -> Result<(), Error> {
+        self.send_command(VSCommand::RequestVisa).await
+    }
+
+    /// PLACEHOLDER for authorize-connect operation
+    pub async fn authorize_connect(&self) -> Result<(), Error> {
+        self.send_command(VSCommand::AuthorizeConnect).await
+    }
+
+    /// PLACEHOLDER for agent-disconnect operation
+    pub async fn agent_disconnect(&self) -> Result<(), Error>{
+        self.send_command(VSCommand::AgentDisconnect).await
+    }
 
 }
 

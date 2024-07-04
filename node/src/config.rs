@@ -4,6 +4,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 
 
@@ -11,6 +12,9 @@ use std::path::Path;
 pub struct Configuration {
     #[serde(skip)]
     base_path: String,    
+
+    #[serde(skip)]
+    node_addr: Option<IpAddr>,
 
     creds: Creds,    
 
@@ -54,6 +58,14 @@ impl Configuration {
             None => None,
         }
     }
+
+    pub fn get_node_addr(&self) -> IpAddr {
+        if let Some(a) = &self.node_addr {
+            return a.clone();
+        } else {
+            panic!("node address not set in Configuration"); // This fair since the address is required in load_configuration
+        }
+    }
 }
 
 
@@ -74,5 +86,23 @@ pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
         Some(p) => p.to_string(),
         None => return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("failed to get parent path of config file: {}", path))),
     };
+
+    // The node address is one of the required claims.  
+    let node_addr: IpAddr = match c.get_claim("zpr.addr") {
+        Some(s) => {
+            match s.parse() {
+                Ok(a) => a,
+                Err(e) => {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "failed to parse zpr.addr claim"));
+                }
+            }
+        }
+        None => {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "zpr.addr claim not found in config"));
+        }
+    };
+
+    c.node_addr = Some(node_addr);
+
     Ok(c)
 }
