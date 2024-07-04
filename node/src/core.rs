@@ -1,20 +1,25 @@
 use std::io;
-use tokio::signal;
+
 use tracing::{info, error};
 
-
+use tokio::signal;
 use tokio::task::JoinSet;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::vs::VSConn;
+use crate::vs::VSOutput::{PushedVisa, PushedRevocation};
 
 pub const VERSION: &str = "0.1.0";
 
 
+const VS_OUTPUT_CHANNEL_SIZE: usize = 32;
 
-/// CoreOpts is for debug options we want to pass to the node.
+
+
+/// CoreOpts is for debug options we want to pass to the node, but not include in
+/// the config file.
 #[derive(Debug, Clone)]
 pub struct CoreOpts {
 
@@ -52,8 +57,11 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
 
     if o_vsforceconnect {
         info!("DEBUG: force connect to visa service");
+
+
+        let (tx, mut rx) = mpsc::channel(VS_OUTPUT_CHANNEL_SIZE);
         
-        let vs_conn = VSConn::new(&opts.vsforceconnect.unwrap(), &nconfig.get_cert_path(), &nconfig.get_key_path(), nconfig.get_node_addr())?;
+        let vs_conn = VSConn::new(tx.clone(), &opts.vsforceconnect.unwrap(), &nconfig.get_cert_path(), &nconfig.get_key_path(), nconfig.get_node_addr())?;
         for (k, v) in nconfig.get_claims() {
             vs_conn.add_claim(&k, &v);
         }
@@ -120,6 +128,16 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                                 Err(e) => {
                                     error!("DEBUG: failed to agent disconnect: {}", e);
                                 }
+                            }
+                        }
+                    }
+                    Some(vs_output) = rx.recv() => {
+                        match vs_output {
+                            PushedVisa ( visa ) => {
+                                info!("DEBUG: visa received, issuer_id: {}", visa.issuer_id);
+                            }
+                            PushedRevocation ( revocation ) => {
+                                info!("DEBUG: revocation received, issuer_id: {}", revocation.issuer_id);
                             }
                         }
                     }                    

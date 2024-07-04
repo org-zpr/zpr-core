@@ -45,11 +45,13 @@ use tracing::{info, error};
 //  
 
 
+const POLL_INTERVAL_MS: u64 = 5000;
+const MAX_POLL_ERRORS: u32 = 5;
 
 
 #[derive(Debug, Clone)]
 pub struct VSConn {
-    shared: Arc<Shared>,  // TODO: Do I really need this VSConn to be shared?
+    shared: Arc<Shared>,  
 }
 
 #[derive(Debug)]
@@ -66,6 +68,7 @@ struct State {
     api_key: Option<String>,
     node_addr: IpAddr,
     cmd_tx: Option<mpsc::Sender<VSCommand>>,
+    output_tx: Option<mpsc::Sender<VSOutput>>,
 }
 
 
@@ -80,14 +83,53 @@ enum VSCommand {
 }
 
 
+// This will change a bit too. This is for output messages from the visa service. These are asynchronous
+// messages so the request/response pairs will need to include an operation ID or some such so that the 
+// node can match responses to requests.
+#[derive(Debug)]
+pub enum VSOutput {
+    // Eventually this will include visa-accepts/denies, connect-accepts/denies, etc.
+    PushedVisa(Visa),
+    PushedRevocation(Revocation)    
+}
+
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct Visa {
+    pub hop_count: u32,
+    pub issuer_id: u32,
+    pub visa_pb: Vec<u8> // TODO: Visas are still in serialized protocol buffer format
+}
+
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct Revocation {
+    pub issuer_id: u32,
+    pub configuration_id: u64
+}
+
 
 /// The VSConn will manage all communication with the visa service on behalf of the node.
+/// 
+/// To use:
+/// - Create a new one with `new(...)``
+/// - Add any claims from node configuration with `add_claim(...)`
+/// - Initialize with `initialize()`
+/// - Finally call `run()`
+/// 
+/// To clealy shutdown the visa service, cancel the token passed to `run' function.
+//
 impl VSConn {
+
+    /// - `output_tx` is the channel to send output messages to the node.  
     /// - `service_addr` is ADDR:PORT of the visa service (ADDR should be a ZPR address)
     /// - `node_cert_file` is the path to the node's signed certificate file
     /// - `node_key_file` is the path to the node's private key file
     /// - `node_addr` is the ZPR address of the node (from node config file).
-    pub fn new(service_addr: &str, node_cert_file: &str, node_key_file: &str, node_addr: IpAddr) -> Result<VSConn, Error> {
+    //
+    pub fn new(output_tx: Sender<VSOutput>, service_addr: &str, node_cert_file: &str, node_key_file: &str, node_addr: IpAddr) -> Result<VSConn, Error> {
 
         let mut certfile = match File::open(node_cert_file) {
             Ok(f) => f,
@@ -123,6 +165,7 @@ impl VSConn {
                 api_key: None,
                 node_addr,
                 cmd_tx: None,
+                output_tx: Some(output_tx),
             }),
         });
 
@@ -190,11 +233,13 @@ impl VSConn {
         let (tx, mut rx) = mpsc::channel(16);
         let maybe_apikey: Option<String>;        
         let svc_addr: String;
+        let output_tx: Sender<VSOutput>;
         {
             let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)            
             state.cmd_tx = Some(tx.clone());
             maybe_apikey = state.api_key.clone();        
             svc_addr = state.service_addr.clone();
+            output_tx = state.output_tx.clone().unwrap();
         }
 
         let apikey = match maybe_apikey {
@@ -205,11 +250,33 @@ impl VSConn {
         };
 
 
-        let mut interval = time::interval(Duration::from_millis(1000)); // TODO: not hardcode
+        let mut interval = time::interval(Duration::from_millis(POLL_INTERVAL_MS)); 
+        let mut poll_errors = 0;
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    info!("VSConn::run tick!!"); // TODO: polling 
+                    match self.do_poll() {
+                        Ok((visas, revokes, more)) => {
+                            poll_errors = 0;
+                            if more {
+                                info!("VSConn::run poll signals there is more data ... ignoring for now");                            
+                            }
+                            for v in visas {
+                                let _ = output_tx.send(VSOutput::PushedVisa(v)).await;
+                            }
+                            for r in revokes {
+                                let _ = output_tx.send(VSOutput::PushedRevocation(r)).await;
+                            }
+                        }
+                        Err(e) => {
+                            error!("VSConn::run poll failed: {}", e);
+                            poll_errors += 1;
+                            if poll_errors > MAX_POLL_ERRORS {
+                                error!("VSConn::run too many poll errors, assuming we are disconnected");
+                                break;
+                            }
+                        }
+                    }                    
                 }
                 _ = ctok.cancelled() => {
                     info!("VSConn::run cancelled");
@@ -246,6 +313,48 @@ impl VSConn {
             return Err(Error::new(ErrorKind::Other, "VSConn::send_command failed"));
         }
         Ok(())
+    }
+
+
+    // Blocking network call -- holds the state lock too.
+    fn do_poll(&self) -> Result<(Vec::<Visa>, Vec::<Revocation>, bool), Error> {
+        let state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)                    
+        let apikey = match &state.api_key {
+            Some(k) => k,
+            None => {
+                return Err(Error::new(ErrorKind::Other, "VSConn::do_poll called but not initialized"));
+            }
+        };
+
+        let vsc = vscli::VSClient::new(&state.service_addr);
+        match vsc.poll_vs(apikey) {
+            Ok(poll_resp) => {
+                let mut visas = Vec::<Visa>::new();
+                let mut revocations = Vec::<Revocation>::new();
+                let more = poll_resp.more.unwrap() > 0;
+                if let Some(pr_visas) = poll_resp.visas {
+                    for v in pr_visas {
+                        visas.push(Visa {
+                            hop_count: v.hop_count.unwrap() as u32,
+                            issuer_id: v.issuer_id.unwrap() as u32,
+                            visa_pb: v.visa_pb.unwrap(),
+                        }); 
+                    }
+                }
+                if let Some(pr_revokes) = poll_resp.revocations {
+                    for r in pr_revokes {
+                        revocations.push(Revocation {
+                            issuer_id: r.issuer_id.unwrap() as u32,
+                            configuration_id: r.configuration.unwrap() as u64,
+                        }); 
+                    }
+                }
+                return Ok((visas, revocations, more));
+            }
+            Err(e) => {
+                return Err(Error::new(ErrorKind::Other, format!("VSConn::do_poll failed: {}", e)));
+            }
+        }
     }
 
 

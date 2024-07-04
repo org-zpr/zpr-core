@@ -1,7 +1,8 @@
 
 
 mod vsconn;
-pub use vsconn::VSConn; // TODO: do i need this use statement?
+pub use vsconn::VSConn; 
+pub use vsconn::VSOutput;
 
 mod vscli;
 

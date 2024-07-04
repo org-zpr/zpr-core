@@ -31,6 +31,7 @@ pub struct VSClient {
     service: String
 }
 
+// Wrapper on top of the the THRIFT generated code.
 impl VSClient {
     pub fn new(service: &str) -> VSClient {
         VSClient {
@@ -107,6 +108,7 @@ impl VSClient {
 
     pub fn de_register(&self, apikey: &str) -> Result<(), thrift::Error> {
         let mut client = self.newclient()?;
+        debug!("sending DE-REGISTER to {}", self.service);        
         match client.de_register(apikey.into()) {
             Ok(_) => {
                 Ok(())
@@ -115,6 +117,12 @@ impl VSClient {
                 Err(e)
             }
         }
+    }
+
+    pub fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error> {
+        let mut client = self.newclient()?;
+        debug!("sending POLL to {}", self.service);                
+        client.poll(apikey.into())
     }
 
 }
