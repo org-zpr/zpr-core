@@ -188,7 +188,7 @@ impl VSConn {
         info!("VSConn::run starts");
 
         let (tx, mut rx) = mpsc::channel(16);
-        let mut maybe_apikey: Option<String> = None;        
+        let maybe_apikey: Option<String>;        
         let svc_addr: String;
         {
             let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)            

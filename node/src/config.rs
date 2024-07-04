@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 
 
 
@@ -46,22 +46,19 @@ impl Configuration {
         for (k, v) in self.claims.iter() {
             hmap.insert(k.to_string(), v.to_string());
         }
-        return hmap;
+        hmap
     }
 
     pub fn get_claim(&self, key: &str) -> Option<String> {
         match self.claims.get(key) {
-            Some(v) => match v.as_str() {
-                Some(s) => Some(s.to_string()), // Double decode since v.as_str() includes quotes.
-                None => None,
-            },
+            Some(v) => v.as_str().map(|s| s.to_string()),  // Double decode since v.as_str() from Table includes quotes.
             None => None,
         }
     }
 
     pub fn get_node_addr(&self) -> IpAddr {
         if let Some(a) = &self.node_addr {
-            return a.clone();
+            *a // somehow this de-ref returns a copy of the addr ???? XXX
         } else {
             panic!("node address not set in Configuration"); // This fair since the address is required in load_configuration
         }
@@ -93,7 +90,7 @@ pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
             match s.parse() {
                 Ok(a) => a,
                 Err(e) => {
-                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "failed to parse zpr.addr claim"));
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to parse zpr.addr claim: {}", e)));
                 }
             }
         }

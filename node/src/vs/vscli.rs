@@ -17,7 +17,7 @@ use crate::vsapi;
 use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
 
 
-use tracing::{debug, info};
+use tracing::debug;
 
 
 // ugh!!
