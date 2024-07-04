@@ -11,14 +11,10 @@ use openssl::sign::Signer;
 use std::io::prelude::*;
 use std::time::SystemTime;
 
-
-
 use crate::vsapi;
 use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
 
-
 use tracing::debug;
-
 
 // ugh!!
 type VSClientT = VisaServiceSyncClient<
@@ -26,9 +22,8 @@ type VSClientT = VisaServiceSyncClient<
     TBinaryOutputProtocol<TFramedWriteTransport<WriteHalf<TTcpChannel>>>,
 >;
 
-
 pub struct VSClient {
-    service: String
+    service: String,
 }
 
 // Wrapper on top of the the THRIFT generated code.
@@ -51,8 +46,8 @@ impl VSClient {
         Ok(vsapi::VisaServiceSyncClient::new(i_prot, o_prot))
     }
 
-
-    pub fn authenticate(&self,
+    pub fn authenticate(
+        &self,
         agent: vsapi::Agent,
         cert_pem_data: &str,
         private_key: Rsa<Private>,
@@ -96,7 +91,7 @@ impl VSClient {
 
         debug!("sending AUTHENTICATE to {}", self.service);
         let apikey = match client.authenticate(authreq) {
-            Ok(result) => { result }
+            Ok(result) => result,
             Err(e) => {
                 return Err(e);
             }
@@ -105,24 +100,18 @@ impl VSClient {
         Ok(apikey)
     }
 
-
     pub fn de_register(&self, apikey: &str) -> Result<(), thrift::Error> {
         let mut client = self.newclient()?;
-        debug!("sending DE-REGISTER to {}", self.service);        
+        debug!("sending DE-REGISTER to {}", self.service);
         match client.de_register(apikey.into()) {
-            Ok(_) => {
-                Ok(())
-            }
-            Err(e) => {
-                Err(e)
-            }
+            Ok(_) => Ok(()),
+            Err(e) => Err(e),
         }
     }
 
     pub fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error> {
         let mut client = self.newclient()?;
-        debug!("sending POLL to {}", self.service);                
+        debug!("sending POLL to {}", self.service);
         client.poll(apikey.into())
     }
-
 }

@@ -1,4 +1,4 @@
-use clap::{Parser};
+use clap::Parser;
 
 use std::fs::OpenOptions;
 use std::io;
@@ -13,29 +13,30 @@ mod core;
 mod vs;
 pub mod vsapi;
 
-
-
-
 const LOG_DIR: &str = "/var/run/zpr";
 const PID_DIR: &str = "/var/run/zpr";
-
 
 #[derive(Parser)]
 #[command(version, about = "ZPR node")]
 struct Cli {
-    #[arg(short, long, value_name = "FILE", help = "path to the configuration file")]
+    #[arg(
+        short,
+        long,
+        value_name = "FILE",
+        help = "path to the configuration file"
+    )]
     config: String,
 
     #[arg(short, long, help = "run in foreground")]
     foreground: bool,
 
-    #[arg(long, value_name = "HOST:PORT", help = "DEBUG - force immediate visa service connect")]
+    #[arg(
+        long,
+        value_name = "HOST:PORT",
+        help = "DEBUG - force immediate visa service connect"
+    )]
     vsforceconnect: Option<String>,
 }
-
-
-
-
 
 fn main() -> io::Result<()> {
     let cli = Cli::parse();

@@ -1,36 +1,31 @@
 use std::io;
 
-use tracing::{info, error};
+use tracing::{error, info};
 
 use tokio::signal;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
-use tokio::sync::{oneshot, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::vs::VSConn;
-use crate::vs::VSOutput::{PushedVisa, PushedRevocation};
+use crate::vs::VSOutput::{PushedRevocation, PushedVisa};
 
 pub const VERSION: &str = "0.1.0";
 
-
 const VS_OUTPUT_CHANNEL_SIZE: usize = 32;
-
-
 
 /// CoreOpts is for debug options we want to pass to the node, but not include in
 /// the config file.
 #[derive(Debug, Clone)]
 pub struct CoreOpts {
-
     /// Force the node to immediately open a connection to the visa service at the provided HOST:PORT.
     vsforceconnect: Option<String>,
 }
 
-
 impl CoreOpts {
     pub fn new() -> CoreOpts {
-        CoreOpts { 
+        CoreOpts {
             vsforceconnect: None,
         }
     }
@@ -40,35 +35,36 @@ impl CoreOpts {
     }
 }
 
-
-
 #[tokio::main]
 pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::Result<()> {
     tracing_subscriber::fmt::init();
     info!("Starting ZPR node v{}", VERSION);
 
-
     let ctoken = CancellationToken::new();
     let mut tasks = JoinSet::new();
     let (cs_shutdown_tx, mut cs_shutdown_rx) = oneshot::channel();
-
 
     let o_vsforceconnect = opts.vsforceconnect.is_some();
 
     if o_vsforceconnect {
         info!("DEBUG: force connect to visa service");
 
-
         let (tx, mut rx) = mpsc::channel(VS_OUTPUT_CHANNEL_SIZE);
-        
-        let vs_conn = VSConn::new(tx.clone(), &opts.vsforceconnect.unwrap(), &nconfig.get_cert_path(), &nconfig.get_key_path(), nconfig.get_node_addr())?;
+
+        let vs_conn = VSConn::new(
+            tx.clone(),
+            &opts.vsforceconnect.unwrap(),
+            &nconfig.get_cert_path(),
+            &nconfig.get_key_path(),
+            nconfig.get_node_addr(),
+        )?;
         for (k, v) in nconfig.get_claims() {
             vs_conn.add_claim(&k, &v);
         }
-        let another_vs_conn = vs_conn.clone();        
+        let another_vs_conn = vs_conn.clone();
 
         let vs_ctoken = ctoken.clone();
-        tasks.spawn(async move { 
+        tasks.spawn(async move {
             let init_ok = match vs_conn.initialize() {
                 Ok(_) => {
                     info!("visa service initialized OK");
@@ -78,7 +74,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                     error!("failed to connect to visa service: {}", e);
                     false
                 }
-            };     
+            };
             if init_ok {
                 match vs_conn.run(vs_ctoken).await {
                     Ok(_) => {
@@ -93,11 +89,11 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
         });
 
         // XXXX ---------------------- DEBUG
-        use tokio::time::{self, Duration};        
+        use tokio::time::{self, Duration};
         let dbg_ctoken = ctoken.clone();
 
         tasks.spawn(async move {
-            let mut interval = time::interval(Duration::from_millis(3000)); 
+            let mut interval = time::interval(Duration::from_millis(3000));
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
@@ -120,7 +116,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                                     error!("DEBUG: failed to authorize connect: {}", e);
                                 }
                             }
-                        } else {                            
+                        } else {
                             match another_vs_conn.agent_disconnect().await {
                                 Ok(_) => {
                                     info!("DEBUG: agent disconnect");
@@ -140,7 +136,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                                 info!("DEBUG: revocation received, issuer_id: {}", revocation.issuer_id);
                             }
                         }
-                    }                    
+                    }
                     _ = dbg_ctoken.cancelled() => {
                         break;
                     }
@@ -148,15 +144,9 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
             }
         });
         // XXXX ---------------------- DEBUG ^^^^^
-
-        
-
     } else {
         info!("nothing to do...  ^C to exit");
     }
-
-
-
 
     tokio::select! {
         _ = signal::ctrl_c() => {
@@ -168,9 +158,9 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
         }
     }
 
-    info!("node preparing for exit");    
-    
-    // and wait for all tasks to die    
+    info!("node preparing for exit");
+
+    // and wait for all tasks to die
     while let Some(_) = tasks.join_next().await {}
 
     // cleanup

@@ -3,28 +3,26 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Read;
-use std::path::Path;
 use std::net::IpAddr;
-
-
+use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Configuration {
     #[serde(skip)]
-    base_path: String,    
+    base_path: String,
 
     #[serde(skip)]
     node_addr: Option<IpAddr>,
 
-    creds: Creds,    
+    creds: Creds,
 
     claims: toml::Table,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct Creds {
-    certificate: String,  // this nodes signed certificate file
-    private_key: String,  // this nodes private key file
+    certificate: String, // this nodes signed certificate file
+    private_key: String, // this nodes private key file
 }
 
 impl Configuration {
@@ -51,7 +49,7 @@ impl Configuration {
 
     pub fn get_claim(&self, key: &str) -> Option<String> {
         match self.claims.get(key) {
-            Some(v) => v.as_str().map(|s| s.to_string()),  // Double decode since v.as_str() from Table includes quotes.
+            Some(v) => v.as_str().map(|s| s.to_string()), // Double decode since v.as_str() from Table includes quotes.
             None => None,
         }
     }
@@ -65,37 +63,53 @@ impl Configuration {
     }
 }
 
-
 pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
     let file = std::fs::File::open(path)?;
     let mut reader = std::io::BufReader::new(file);
     let mut toml_text = String::new();
     let len = reader.read_to_string(&mut toml_text)?;
     if len == 0 {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("empty config file: {}", path)));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("empty config file: {}", path),
+        ));
     }
     let mut c: Configuration = match toml::from_str(&toml_text) {
         Ok(c) => c,
-        Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("failed to parse config file: {}: {}", path, e))),
+        Err(e) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed to parse config file: {}: {}", path, e),
+            ))
+        }
     };
 
     c.base_path = match std::path::Path::new(path).parent().unwrap().to_str() {
         Some(p) => p.to_string(),
-        None => return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("failed to get parent path of config file: {}", path))),
+        None => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("failed to get parent path of config file: {}", path),
+            ))
+        }
     };
 
-    // The node address is one of the required claims.  
+    // The node address is one of the required claims.
     let node_addr: IpAddr = match c.get_claim("zpr.addr") {
-        Some(s) => {
-            match s.parse() {
-                Ok(a) => a,
-                Err(e) => {
-                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("failed to parse zpr.addr claim: {}", e)));
-                }
+        Some(s) => match s.parse() {
+            Ok(a) => a,
+            Err(e) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("failed to parse zpr.addr claim: {}", e),
+                ));
             }
-        }
+        },
         None => {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "zpr.addr claim not found in config"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "zpr.addr claim not found in config",
+            ));
         }
     };
 
