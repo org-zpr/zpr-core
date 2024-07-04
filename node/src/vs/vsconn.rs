@@ -68,6 +68,7 @@ struct State {
 // Clearly there will be arguments attached to these in the future.
 // Also need to figure out how the responses are routed back out.
 #[derive(Debug)]
+#[allow(dead_code)]
 enum VSCommand {
     RequestVisa,
     AuthorizeConnect,
@@ -110,7 +111,7 @@ pub struct Revocation {
 /// To clealy shutdown the visa service, cancel the token passed to `run' function.
 //
 impl VSConn {
-    /// - `output_tx` is the channel to send output messages to the node.  
+    /// - `output_tx` is the channel to send output messages to the node.
     /// - `service_addr` is ADDR:PORT of the visa service (ADDR should be a ZPR address)
     /// - `node_cert_file` is the path to the node's signed certificate file
     /// - `node_key_file` is the path to the node's private key file

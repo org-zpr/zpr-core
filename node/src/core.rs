@@ -46,6 +46,16 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
 
     let o_vsforceconnect = opts.vsforceconnect.is_some();
 
+    // This force-connect thing makes it possible to have this connect to the visa service
+    // during development.  I think this will go away or be refactored before final commit.
+    // But to test this out, do something like:
+    //
+    //    start visa service:
+    //    ./build/visaservice -c /path/to/config.yaml -p /path/to/a/policy.bin --issuer vs1 -l 127.0.0.1:31337 --verbose
+    //
+    //    then start the node:
+    //    ./target/debug/node -f -c /path/to/config.toml --vsforceconnect 127.0.0.1:31337
+    //
     if o_vsforceconnect {
         info!("DEBUG: force connect to visa service");
 
@@ -61,7 +71,6 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
         for (k, v) in nconfig.get_claims() {
             vs_conn.add_claim(&k, &v);
         }
-        let another_vs_conn = vs_conn.clone();
 
         let vs_ctoken = ctoken.clone();
         tasks.spawn(async move {
@@ -75,6 +84,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                     false
                 }
             };
+
             if init_ok {
                 match vs_conn.run(vs_ctoken).await {
                     Ok(_) => {
@@ -84,49 +94,17 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                         error!("visa service exits with error: {}", e);
                     }
                 }
+            } else {
+                vs_ctoken.cancel(); // kills the thread below that reads from the output channel
             }
             let _ = cs_shutdown_tx.send(()); // visa service exits.
         });
 
-        // XXXX ---------------------- DEBUG
-        use tokio::time::{self, Duration};
+        // Fire up another task to watch the output channel...
         let dbg_ctoken = ctoken.clone();
-
         tasks.spawn(async move {
-            let mut interval = time::interval(Duration::from_millis(3000));
             loop {
                 tokio::select! {
-                    _ = interval.tick() => {
-                        let n: f64 = rand::random();  // <--- TODO: remove RAND crate when done testing
-                        if n < 0.33 {
-                            match another_vs_conn.request_visa().await {
-                                Ok(_) => {
-                                    info!("DEBUG: visa request sent");
-                                }
-                                Err(e) => {
-                                    error!("DEBUG: failed to get visa: {}", e);
-                                }
-                            }
-                        } else if n < 0.66 {
-                            match another_vs_conn.authorize_connect().await {
-                                Ok(_) => {
-                                    info!("DEBUG: authorized connect");
-                                }
-                                Err(e) => {
-                                    error!("DEBUG: failed to authorize connect: {}", e);
-                                }
-                            }
-                        } else {
-                            match another_vs_conn.agent_disconnect().await {
-                                Ok(_) => {
-                                    info!("DEBUG: agent disconnect");
-                                }
-                                Err(e) => {
-                                    error!("DEBUG: failed to agent disconnect: {}", e);
-                                }
-                            }
-                        }
-                    }
                     Some(vs_output) = rx.recv() => {
                         match vs_output {
                             PushedVisa ( visa ) => {
@@ -143,7 +121,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                 }
             }
         });
-        // XXXX ---------------------- DEBUG ^^^^^
+
     } else {
         info!("nothing to do...  ^C to exit");
     }
