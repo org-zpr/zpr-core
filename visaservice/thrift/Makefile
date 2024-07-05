@@ -47,4 +47,4 @@ clean:
 	rm -rf $(GGO) && rm -rf $(GRS)
 
 
-.PHONY: all go rs install-go clean
+.PHONY: all go rs install-go install-rs clean
