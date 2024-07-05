@@ -39,7 +39,8 @@ use tracing::{error, info};
 //   from the visa service.
 //
 
-const POLL_INTERVAL_MS: u64 = 5000;
+
+const POLL_INTERVAL: Duration = Duration::from_millis(5000);
 const MAX_POLL_ERRORS: u32 = 5;
 
 #[derive(Debug, Clone)]
@@ -269,7 +270,7 @@ impl VSConn {
             }
         };
 
-        let mut interval = time::interval(Duration::from_millis(POLL_INTERVAL_MS));
+        let mut interval = time::interval(POLL_INTERVAL);
         let mut poll_errors = 0;
         loop {
             tokio::select! {
