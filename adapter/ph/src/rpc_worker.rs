@@ -319,7 +319,6 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
 
     let mut values: String = "".to_string();
 
-    // Could be easily replaced with other data if need be
     let _ = write!(&mut values, "{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}, Mean: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units, mean, units);
 
     let mut iter = hist.iter_log(1, SQRT_2);
