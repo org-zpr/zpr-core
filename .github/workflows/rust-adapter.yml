@@ -2,7 +2,7 @@ name: Rust-adapter
 
 on:
   push:
-    branches: [ "main" ] # want to see if double execution returns when based off main
+    branches: [ "main" ]
   pull_request:
 
 env:
