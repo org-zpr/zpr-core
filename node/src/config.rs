@@ -55,8 +55,8 @@ impl Configuration {
     }
 
     pub fn get_node_addr(&self) -> IpAddr {
-        if let Some(a) = &self.node_addr {
-            *a // somehow this de-ref returns a copy of the addr ???? XXX
+        if let Some(a) = self.node_addr {
+            a
         } else {
             panic!("node address not set in Configuration"); // This fair since the address is required in load_configuration
         }
