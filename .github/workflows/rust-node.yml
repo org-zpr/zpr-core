@@ -2,7 +2,7 @@ name: Rust-node
 
 on:
   push:
-    branches: [ "main" ] # need change for test
+    branches: [ "main" ] # need change for test and again
   pull_request:
     branches: [ "main" ]
 
