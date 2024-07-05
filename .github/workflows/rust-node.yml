@@ -1,10 +1,8 @@
 name: Rust-node
 
 on:
-  push:
-    branches: [ "main" ] # need change for test and again
-  pull_request:
-    branches: [ "main" ]
+  push
+  pull_request
 
 env:
   CARGO_TERM_COLOR: always
