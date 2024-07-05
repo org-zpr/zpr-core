@@ -13,7 +13,7 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio::time::{self, Duration};
 use tokio_util::sync::CancellationToken;
 
-use crate::vs::vscli;
+use crate::vs::vscli::{self, VSClientI};
 use crate::vsapi;
 
 use tracing::{error, info};
@@ -62,6 +62,7 @@ struct State {
     node_addr: IpAddr,
     cmd_tx: Option<mpsc::Sender<VSCommand>>,
     output_tx: Option<mpsc::Sender<VSOutput>>,
+    client_fac: vscli::VSClientFactory,
 }
 
 // This is a place holder for the async "commands" that can be sent into the running visa service client.
@@ -85,7 +86,7 @@ pub enum VSOutput {
     PushedRevocation(Revocation),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub struct Visa {
     pub hop_count: u32,
@@ -93,12 +94,17 @@ pub struct Visa {
     pub visa_pb: Vec<u8>, // TODO: Visas are still in serialized protocol buffer format
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct Revocation {
     pub issuer_id: u32,
     pub configuration_id: u64,
 }
+
+
+
+
+
 
 /// The VSConn will manage all communication with the visa service on behalf of the node.
 ///
@@ -168,6 +174,7 @@ impl VSConn {
                 node_addr,
                 cmd_tx: None,
                 output_tx: Some(output_tx),
+                client_fac: vscli::default_vsclient_factory,
             }),
         });
 
@@ -179,14 +186,19 @@ impl VSConn {
         state.claims.insert(key.to_string(), value.to_string());
     }
 
+
     /// Must be callled before run.  This registers with visa service and obtains an API key.
     /// Blocking network call.
-    pub fn initialize(&self) -> Result<(), Error> {
+    pub fn initialize(&self, fac_override: Option<vscli::VSClientFactory>) -> Result<(), Error> {
         info!("VSConn::initialize starts");
 
         let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
 
-        let vsc = vscli::VSClient::new(&state.service_addr);
+        if let Some(f) = fac_override {
+            state.client_fac = f;
+        }
+
+        let vsc = (state.client_fac)(&state.service_addr);
 
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -237,14 +249,14 @@ impl VSConn {
 
         let (tx, mut rx) = mpsc::channel(16);
         let maybe_apikey: Option<String>;
-        let svc_addr: String;
         let output_tx: Sender<VSOutput>;
+        let vsc: Box<dyn VSClientI>;
         {
             let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
             state.cmd_tx = Some(tx.clone());
             maybe_apikey = state.api_key.clone();
-            svc_addr = state.service_addr.clone();
             output_tx = state.output_tx.clone().unwrap();
+            vsc = (state.client_fac)(&state.service_addr);
         }
 
         let apikey = match maybe_apikey {
@@ -262,7 +274,7 @@ impl VSConn {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    match self.do_poll() {
+                    match self.do_poll(&vsc) {
                         Ok((visas, revokes, more)) => {
                             poll_errors = 0;
                             if more {
@@ -287,7 +299,6 @@ impl VSConn {
                 }
                 _ = ctok.cancelled() => {
                     info!("VSConn::run cancelled");
-                    let vsc = vscli::VSClient::new(&svc_addr);
                     if let Err(e) = vsc.de_register(&apikey) {
                         error!("VSConn::run failed to de-register: {}", e);
                     }
@@ -325,7 +336,7 @@ impl VSConn {
     }
 
     // Blocking network call -- holds the state lock too.
-    fn do_poll(&self) -> Result<(Vec<Visa>, Vec<Revocation>, bool), Error> {
+    fn do_poll(&self, vsc: &Box<dyn VSClientI>) -> Result<(Vec<Visa>, Vec<Revocation>, bool), Error> {
         let state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
         let apikey = match &state.api_key {
             Some(k) => k,
@@ -337,7 +348,7 @@ impl VSConn {
             }
         };
 
-        let vsc = vscli::VSClient::new(&state.service_addr);
+        // let vsc = (state.client_fac)(&state.service_addr);
         match vsc.poll_vs(apikey) {
             Ok(poll_resp) => {
                 let mut visas = Vec::<Visa>::new();
@@ -372,17 +383,337 @@ impl VSConn {
     }
 
     /// PLACEHOLDER for request-visa operation
+    #[allow(dead_code)]
     pub async fn request_visa(&self) -> Result<(), Error> {
         self.send_command(VSCommand::RequestVisa).await
     }
 
     /// PLACEHOLDER for authorize-connect operation
+    #[allow(dead_code)]
     pub async fn authorize_connect(&self) -> Result<(), Error> {
         self.send_command(VSCommand::AuthorizeConnect).await
     }
 
     /// PLACEHOLDER for agent-disconnect operation
+    #[allow(dead_code)]
     pub async fn agent_disconnect(&self) -> Result<(), Error> {
         self.send_command(VSCommand::AgentDisconnect).await
     }
 }
+
+
+
+
+#[cfg(test)]
+mod test {
+    use std::net::Ipv4Addr;
+
+    use super::*;
+
+    use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
+
+    use rand::Rng;
+    use std::env;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+
+
+
+
+
+
+    const CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
+MIIEWzCCA0OgAwIBAgIJAMSVUe6Pd/Z7MA0GCSqGSIb3DQEBBQUAMIGGMQswCQYD
+VQQGEwJVUzELMAkGA1UECAwCS1kxDjAMBgNVBAcMBVZpbGxlMRAwDgYDVQQKDAdz
+dXJlbmV0MRYwFAYDVQQLDA1hdXRob3JpemF0aW9uMRcwFQYDVQQDDA5hdXRoMC5p
+bnRlcm5hbDEXMBUGCSqGSIb3DQEJARYIYXV0aEBmb28wHhcNMjQwNjE4MTQzMjI4
+WhcNMjUwNjE4MTQzMjI4WjBLMQswCQYDVQQGEwJVUzELMAkGA1UECAwCS1kxCzAJ
+BgNVBAoMAllZMQswCQYDVQQLDAJaWjEVMBMGA1UEAwwMdGVzdG5vZGUuenByMIIB
+IjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAk0x4ui48znwmmnbeVrRMXeiz
+DdR2EKbZwsoW/sfePCTa50UJHgA3vPPTGhJTTfjJrVyp2nazpaBuy66h85PQWS2x
+FqstxHVTj0+CF4t+YKUyHFZiF2rLWQonO5R43v489NF9JHKH2SgxKMjTsPpJY8sd
+yFgUTbiD6G8T/j/ZIojBIkQG2wWNpdjqUDnzeaU32MGHV8iigUrpc3xDqw+RWhKP
+kPjoyInoA4tNNrfHrddu61w3FPx6KTN1L8UV9K+BlNW/s3buluYMSi2vW24fjdTn
+F3ev2+w+QUcvWP94/pFRiLEDAO+LO3hxFC16qNU33LMvAo8BdJvPG3GbN2+fIwID
+AQABo4IBBDCCAQAwgaUGA1UdIwSBnTCBmqGBjKSBiTCBhjELMAkGA1UEBhMCVVMx
+CzAJBgNVBAgMAktZMQ4wDAYDVQQHDAVWaWxsZTEQMA4GA1UECgwHc3VyZW5ldDEW
+MBQGA1UECwwNYXV0aG9yaXphdGlvbjEXMBUGA1UEAwwOYXV0aDAuaW50ZXJuYWwx
+FzAVBgkqhkiG9w0BCQEWCGF1dGhAZm9vggkA70drsV9niiUwCQYDVR0TBAIwADAL
+BgNVHQ8EBAMCBPAwHwYDVR0RBBgwFoIUYXV0aDAuc3BhY2VsYXNlci5uZXQwHQYD
+VR0OBBYEFFdtDdU6IP12wNv4YUdyZejdx8EaMA0GCSqGSIb3DQEBBQUAA4IBAQBp
+gM2xMYgo6ntaPTV7xhLmAbwlhoKBt3I+i6KQUU9Ec/3AEiiZsyQxcPHAtmeU4han
+5JpOK3hUYVH/SaSj2BHqkXH0yfFyIkAf0V1UsfWwcD8OEZffb5yP02RzIWCqdBN7
+pdx9gtGwy4l779FNvHGQ8AI4y+cpxwiXyBiXdB3Mv1wG5gUNe4pGk7JWA5lb9XQ9
+sOwVMjkwcUsqGr489gqYRWl1mAMz1D2T+U91HavGybvUBlgb/3+dgjksa/ZWTUhD
+2CRFn7sqmwcPHLoGV/+yCjjuheyx+z7LrPqyqPfWwrr68udK4Yqz8iiqwMC1b8m0
+1Hm6nwN1sHYkYgYgk/Ey
+-----END CERTIFICATE-----
+"#;
+
+    const KEY_DATA: &str = r#"
+-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCTTHi6LjzOfCaa
+dt5WtExd6LMN1HYQptnCyhb+x948JNrnRQkeADe889MaElNN+MmtXKnadrOloG7L
+rqHzk9BZLbEWqy3EdVOPT4IXi35gpTIcVmIXastZCic7lHje/jz00X0kcofZKDEo
+yNOw+kljyx3IWBRNuIPobxP+P9kiiMEiRAbbBY2l2OpQOfN5pTfYwYdXyKKBSulz
+fEOrD5FaEo+Q+OjIiegDi002t8et127rXDcU/HopM3UvxRX0r4GU1b+zdu6W5gxK
+La9bbh+N1OcXd6/b7D5BRy9Y/3j+kVGIsQMA74s7eHEULXqo1Tfcsy8CjwF0m88b
+cZs3b58jAgMBAAECggEAQYQ8FqPGTBmQmhfRIUOkzAhazAX6VcHBDhERVVXVFW9X
+JpLgUUXLhPH2rZwFDaNhIQkcS52MnljTrykHw+21OFVIdUrCWqXM+utkc9CJ77bK
+qSwLCVtpAzuu46NQd+8hcctUHEgNAJwN8ZQSBJ/u0MJhhuEWdtNhaJsvi2Ee1WrN
+ZvUkpn6SpCHVvEtZjJZL0elQrgk7EMzWSWz/1a8ORzbmBDw5X/0dV/VKCfx1kJ+w
+9fmIhfGU3lFT8rOpqcx3MlB+PzRVV4P3hUBirovxBu2TEqp01hvPnb5m6ZGE0U/p
+B4LBke3S23iSkYwPaHwcbLVLhF2pruYmXS1hvCZxEQKBgQC3gBWKZZeV8uT0vKN+
+FScBk5WLYSq63dUSonszWr0AxN03WsoHjkr4AqB+wtMPI2L7Kpy8whwtTXehqNpT
+W+Zz12eVQI2fuGTYZg7zjxN0+H2nRxTOWyVcpW4h1tavzzXAzTDo1jc8DYvMhgXp
+IIOMYDbOCQPCnopdE0Xd2QF7NQKBgQDNftHfeNOINkt3RTTI5NY9pTibl/alzqJf
+aW8BXEsnKM8BB6ux/sTNE4ejaK7a4xvKhgss+Z0FkM11Ycoa2D5/X9CyXT/cOmhF
+E2vt6yyQUSscMQMAaUmma8Gvu5dDF3a7/5liphjafPyFRa275JIxdbDgaCvV62kH
+EjPLMjOj9wKBgQCHhe9iwVlNA5EZN2DAM7sVLPybbe3zCPbexmWbLf683KhMw57G
+Kc8wkDAcrqLWYVovCe+scOgChV4/ZMeqHQt8rq/vyTdPqQ3BzM5qD1ddYlDbBGJX
+bXWQkRVfpJ32RmD6vhDLRbqRfaesK6ed38eIG18emAXQ7Opfh2ZoTGcNqQKBgDKN
+/53lwMyi5t/506mUuqxByHJm6VQTSNkGPDvuc8K3hG2xcGkCz3HQWy81YscQ1lZ1
+sawn4Jxs6k71dt4x0vZNIS+wRzSr3dkYlRXcJIOApIVz/VQNkwPxQJ42HVlxHVHU
+6OxfBoBB/XHgGYS/D8RBOvmKRzaCir0lmj5kJFYzAoGBAKEEaHn0LvmDpHYSUOA4
+FgJnFmtHTHcYFaFus/oqwEtylftAsM5h8o5ww2OCJDa2FSxzaayV1wpm2r1HwvDn
+p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
++VS382WYhn8T/WeSmWHmF69D
+-----END PRIVATE KEY-----
+"#;
+
+    struct TempFile {
+        path: String,
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+
+    impl TempFile {
+        fn new_pem(contents: &str) -> TempFile {
+            let mut rng = rand::thread_rng();
+            let tstamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            let dir = env::temp_dir();
+            let num: u32 = rng.gen();
+            let path = dir.join(format!("org_zpr_node_vs_test_{}_{}.pem", num, tstamp));
+            fs::write(&path, contents).expect("Unable to write file");
+            TempFile {
+                path: path.to_str().unwrap().to_string(),
+            }
+        }
+
+        fn get_path(&self) -> &str {
+            self.path.as_str()
+        }
+    }
+
+
+
+    // In an effort to leave the client trait implementation as simple as possible
+    // it does not allow for modification of `self`... so we can't have any mutable
+    // state in there.  For these tests, we track state in a static variable.
+    //
+    // Also turns out that `cargo test` likes to run tests in parallel which is not
+    // good for our static state which is shared with all these tests. So there is a
+    // MUTEX to protect it which the test acquires for the duration of its run.
+    //
+    // Its a fair amount of hackery for a couple of tests that don't actually test much!
+    //
+    struct TestState {
+        auth_count: u32,
+        poll_count: u32,
+        de_register_count: u32,
+        push_v: Option<Visa>,
+    }
+
+    enum CounterT {
+        Auth,
+        Poll,
+        DeRegister,
+    }
+
+    static mut RUN_LOCK:Mutex<u32> = Mutex::new(0); // Each test holds this while running.
+
+    static mut TEST_STATE: TestState = TestState {
+        auth_count: 0,
+        poll_count: 0,
+        de_register_count: 0,
+        push_v: None
+    };
+
+    fn reset_state() {
+        unsafe {
+            TEST_STATE.auth_count = 0;
+            TEST_STATE.poll_count = 0;
+            TEST_STATE.de_register_count = 0;
+            TEST_STATE.push_v = None;
+        }
+    }
+
+    fn get_counter(c: CounterT) -> u32 {
+        unsafe {
+            match c {
+                CounterT::Auth => TEST_STATE.auth_count,
+                CounterT::Poll => TEST_STATE.poll_count,
+                CounterT::DeRegister => TEST_STATE.de_register_count,
+            }
+        }
+    }
+
+    fn incr(c: CounterT) {
+        unsafe {
+            match c {
+                CounterT::Auth => TEST_STATE.auth_count += 1,
+                CounterT::Poll => TEST_STATE.poll_count += 1,
+                CounterT::DeRegister => TEST_STATE.de_register_count += 1,
+            }
+        }
+    }
+
+    fn get_pushed_visa() -> Option<Visa> {
+        unsafe {
+            TEST_STATE.push_v.clone()
+        }
+    }
+
+
+    #[derive(Debug)]
+    struct TestVSCli {}
+
+
+    impl VSClientI for TestVSCli {
+        fn authenticate(
+            &self,
+            _agent: vsapi::Agent,
+            _cert_pem_data: &str,
+            _private_key: Rsa<Private>,
+        ) -> Result<String, thrift::Error>
+        {
+            incr(CounterT::Auth);
+            Ok(String::from("le_key"))
+        }
+
+        fn poll_vs(&self, _apikey: &str) -> Result<vsapi::PollResponse, thrift::Error> {
+            incr(CounterT::Poll);
+            if let Some(v) = get_pushed_visa() {
+                return Ok(vsapi::PollResponse {
+                    visas: Some(vec![vsapi::VisaHop {
+                        hop_count: Some(v.hop_count as i32),
+                        issuer_id: Some(v.issuer_id as i32),
+                        visa_pb: Some(v.visa_pb),
+                    }]),
+                    revocations: None,
+                    more: Some(0),
+                });
+            }
+
+            Ok(vsapi::PollResponse {
+                visas: None,
+                revocations: None,
+                more: Some(0),
+            })
+        }
+
+        fn de_register(&self, _apikey: &str) -> Result<(), thrift::Error> {
+            incr(CounterT::DeRegister);
+            Ok(())
+        }
+    }
+
+    fn testvscli_factory(_service_addr: &str) -> Box<dyn VSClientI> {
+        Box::new(TestVSCli{})
+    }
+
+
+    #[tokio::test]
+    async fn test_start_and_stop_and_poll() {
+        let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
+        reset_state();
+        let certfile = TempFile::new_pem(CERT_DATA);
+        let keyfile = TempFile::new_pem(KEY_DATA);
+
+        let (tx, mut _rx) = mpsc::channel(8);
+        let conn = VSConn::new(tx, "127.0.0.1:0", certfile.get_path(), keyfile.get_path(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))).unwrap();
+        conn.add_claim("foo", "fee");
+        conn.initialize(Some(testvscli_factory)).unwrap();
+        assert_eq!(get_counter(CounterT::Auth), 1);
+        assert_eq!(get_counter(CounterT::DeRegister), 0);
+        assert_eq!(get_counter(CounterT::Poll), 0);
+
+        let ctoken = CancellationToken::new();
+        let vs_tok = ctoken.clone();
+        tokio::spawn(async move {
+            let _ = conn.run(vs_tok).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        ctoken.cancel(); // stop the vs
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Does de-register
+        assert_eq!(get_counter(CounterT::DeRegister), 1);
+
+        // Does call poll
+        assert_eq!(get_counter(CounterT::Poll), 1);
+    }
+
+    #[tokio::test]
+    async fn test_returns_pushed_visa() {
+        let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
+
+        reset_state();
+        let certfile = TempFile::new_pem(CERT_DATA);
+        let keyfile = TempFile::new_pem(KEY_DATA);
+
+        let (tx, mut rx) = mpsc::channel(8);
+        let conn = VSConn::new(tx, "127.0.0.1:0", certfile.get_path(), keyfile.get_path(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))).unwrap();
+        conn.add_claim("foo", "fee");
+        conn.initialize(Some(testvscli_factory)).unwrap();
+
+        let a_visa = Visa {
+            hop_count: 1,
+            issuer_id: 2,
+            visa_pb: Vec::new(),
+        };
+        unsafe {
+            TEST_STATE.push_v = Some(a_visa.clone());
+        }
+
+        let ctoken = CancellationToken::new();
+        let vs_tok = ctoken.clone();
+        tokio::spawn(async move {
+            let _ = conn.run(vs_tok).await;
+        });
+
+        // Allow it to poll...
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_millis(1000)) => {
+                assert!(false); // timed out
+            }
+            Some(output) = rx.recv() =>  match output {
+                VSOutput::PushedVisa(visa) => {
+                    assert_eq!(visa, a_visa);
+                }
+                _ => {
+                    assert!(false); // Did not get a visa
+                }
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        ctoken.cancel(); // stop the vs
+    }
+}
+
+

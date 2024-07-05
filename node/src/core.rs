@@ -74,7 +74,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
 
         let vs_ctoken = ctoken.clone();
         tasks.spawn(async move {
-            let init_ok = match vs_conn.initialize() {
+            let init_ok = match vs_conn.initialize(None) {
                 Ok(_) => {
                     info!("visa service initialized OK");
                     true

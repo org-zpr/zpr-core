@@ -26,9 +26,30 @@ pub struct VSClient {
     service: String,
 }
 
+
+// This is an interface that covers the VSClient wrapper designed to facilitate
+// unit testing.  The running node code should use the `default_vsclient_factory`
+// function.
+pub trait VSClientI: Send {
+    fn authenticate(
+        &self,
+        agent: vsapi::Agent,
+        cert_pem_data: &str,
+        private_key: Rsa<Private>,
+    ) -> Result<String, thrift::Error>;
+    fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error>;
+    fn de_register(&self, apikey: &str) -> Result<(), thrift::Error>;
+}
+
+
+pub type VSClientFactory = fn(service_addr: &str) -> Box<dyn VSClientI>;
+
+
+
 // Wrapper on top of the the THRIFT generated code.
 impl VSClient {
-    pub fn new(service: &str) -> VSClient {
+    // Not public; use the factory.
+    fn new(service: &str) -> VSClient {
         VSClient {
             service: service.to_string(),
         }
@@ -45,8 +66,16 @@ impl VSClient {
 
         Ok(vsapi::VisaServiceSyncClient::new(i_prot, o_prot))
     }
+}
 
-    pub fn authenticate(
+pub fn default_vsclient_factory(service_addr: &str) -> Box<dyn VSClientI> {
+    Box::new(VSClient::new(service_addr))
+}
+
+
+impl VSClientI for VSClient {
+
+    fn authenticate(
         &self,
         agent: vsapi::Agent,
         cert_pem_data: &str,
@@ -100,7 +129,7 @@ impl VSClient {
         Ok(apikey)
     }
 
-    pub fn de_register(&self, apikey: &str) -> Result<(), thrift::Error> {
+    fn de_register(&self, apikey: &str) -> Result<(), thrift::Error> {
         let mut client = self.newclient()?;
         debug!("sending DE-REGISTER to {}", self.service);
         match client.de_register(apikey.into()) {
@@ -109,7 +138,7 @@ impl VSClient {
         }
     }
 
-    pub fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error> {
+    fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error> {
         let mut client = self.newclient()?;
         debug!("sending POLL to {}", self.service);
         client.poll(apikey.into())
