@@ -56,7 +56,7 @@ async fn worker<'pktbuf>(
         async {
             let mut msgs = Vec::new();
 
-            while let _count @ 1.. = outbound_queue.recv_many(&mut msgs, config.outbound_batch_size).await {
+            while let count @ 1.. = outbound_queue.recv_many(&mut msgs, config.outbound_batch_size).await {
                 for msg in &msgs {
                     match msg {
                         OutboundSendMessage::Packet(pkt) => {
@@ -73,7 +73,7 @@ async fn worker<'pktbuf>(
                                 OutboundSendMessage::Packet(pkt) => Some(pkt.destroy()),
 
                                 OutboundSendMessage::TestPacket(pkt) => {
-                                    pkt.acknowledge(outbound_queue.len());
+                                    pkt.acknowledge(outbound_queue.len(), count);
                                     None
                                 }
                             }

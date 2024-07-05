@@ -20,7 +20,7 @@ async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
 ) {
     let mut messages = Vec::new();
 
-    while let _count @ 1.. = queue.recv_many(&mut messages, config.batch_size).await {
+    while let count @ 1.. = queue.recv_many(&mut messages, config.batch_size).await {
         for msg in &messages {
             match msg {
                 InboundSendMessage::Packet(msg) => {
@@ -37,7 +37,7 @@ async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
                 // acknowledge had to go here since it consumes the packet, it could not be in
                 // the previous match because the program still expected the packet to me in messages
                 InboundSendMessage::TestPacket(msg) => {
-                    msg.acknowledge(queue.len());
+                    msg.acknowledge(queue.len(), count);
                     None
                 }
             }));

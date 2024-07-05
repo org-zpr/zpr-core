@@ -135,12 +135,16 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
 
     let mut inbound_processor_duration = Histogram::<u64>::new(1).unwrap();
     let mut inbound_processor_depth = Histogram::<u64>::new(1).unwrap();
+    let mut inbound_processor_batch = Histogram::<u64>::new(1).unwrap();
     let mut inbound_send_duration = Histogram::<u64>::new(1).unwrap();
     let mut inbound_send_depth = Histogram::<u64>::new(1).unwrap();
+    let mut inbound_send_batch = Histogram::<u64>::new(1).unwrap();
     let mut outbound_processor_duration = Histogram::<u64>::new(1).unwrap();
     let mut outbound_processor_depth = Histogram::<u64>::new(1).unwrap();
+    let mut outbound_processor_batch = Histogram::<u64>::new(1).unwrap();
     let mut outbound_send_duration = Histogram::<u64>::new(1).unwrap();
     let mut outbound_send_depth = Histogram::<u64>::new(1).unwrap();
+    let mut outbound_send_batch = Histogram::<u64>::new(1).unwrap();
 
     send_interval.tick().await;
     let mut queue_num = 0;
@@ -167,6 +171,14 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
                 .try_into()
                 .unwrap(),
         );
+        let _ = inbound_processor_batch.record(
+            in_processor
+                .as_ref()
+                .unwrap()
+                .batch_size
+                .try_into()
+                .unwrap(),
+        );
 
         let in_send = asm.inbound_send.enqueue_test_packet(queue_num).await;
         let _ = inbound_send_duration.record(
@@ -181,6 +193,8 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         let _ =
             inbound_send_depth.record(in_send.as_ref().unwrap().queue_depth.try_into().unwrap());
 
+        let _ = inbound_send_batch.record(in_send.as_ref().unwrap().batch_size.try_into().unwrap());
+
         let out_processor = asm.outbound_processor.enqueue_test_packet().await;
         let _ = outbound_processor_duration.record(
             out_processor
@@ -191,8 +205,16 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
                 .try_into()
                 .unwrap(),
         );
+        let _ = outbound_processor_depth.record(
+            out_processor
+                .as_ref()
+                .unwrap()
+                .queue_depth
+                .try_into()
+                .unwrap(),
+        );
         let _ =
-            outbound_processor_depth.record(out_processor.unwrap().queue_depth.try_into().unwrap());
+            outbound_processor_batch.record(out_processor.unwrap().queue_depth.try_into().unwrap());
 
         let out_send = asm.outbound_send.enqueue_test_packet().await;
         let _ = outbound_send_duration.record(
@@ -204,7 +226,9 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
                 .try_into()
                 .unwrap(),
         );
-        let _ = outbound_send_depth.record(out_send.unwrap().queue_depth.try_into().unwrap());
+        let _ =
+            outbound_send_depth.record(out_send.as_ref().unwrap().queue_depth.try_into().unwrap());
+        let _ = outbound_send_batch.record(out_send.unwrap().batch_size.try_into().unwrap());
 
         send_interval.tick().await;
         queue_num += 1;
@@ -234,6 +258,16 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         )
         .as_str()
     );
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist(
+            "Inbound Processor Batch",
+            " packets",
+            inbound_processor_batch.clone()
+        )
+        .as_str()
+    );
     let inbound_pro_mean: u64 =
         (inbound_processor_duration.mean() / (1.0 + inbound_processor_depth.mean())) as u64;
     let _ = write!(&mut info, "Approx packet time: {inbound_pro_mean}ns\n\n\n");
@@ -248,6 +282,11 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         &mut info,
         "{}",
         values_from_hist("Inbound Send Depth", " packets", inbound_send_depth.clone()).as_str()
+    );
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist("Inbound Send Batch", " packets", inbound_send_batch.clone()).as_str()
     );
     let inbound_send_mean: u64 =
         (inbound_send_duration.mean() / (1.0 + inbound_send_depth.mean())) as u64;
@@ -274,6 +313,16 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         )
         .as_str()
     );
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist(
+            "Outbound Processor Batch",
+            " packets",
+            outbound_processor_batch.clone()
+        )
+        .as_str()
+    );
     let outbound_pro_mean: u64 =
         (outbound_processor_duration.mean() / (1.0 + outbound_processor_depth.mean())) as u64;
     let _ = write!(&mut info, "Approx packet time: {outbound_pro_mean}ns\n\n\n");
@@ -296,6 +345,16 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
             "Outbound Send Depth",
             " packets",
             outbound_send_depth.clone()
+        )
+        .as_str()
+    );
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist(
+            "Outbound Send Batch",
+            " packets",
+            outbound_send_batch.clone()
         )
         .as_str()
     );
