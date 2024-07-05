@@ -64,10 +64,9 @@ impl Configuration {
 }
 
 pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
-    let file = std::fs::File::open(path)?;
-    let mut reader = std::io::BufReader::new(file);
+    let mut file = std::fs::File::open(path)?;
     let mut toml_text = String::new();
-    let len = reader.read_to_string(&mut toml_text)?;
+    let len = file.read_to_string(&mut toml_text)?;
     if len == 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Other,
