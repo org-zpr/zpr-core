@@ -34,5 +34,7 @@ pub struct Assembly<'pktbuf> {
     pub outbound_processor: OutboundProcessor<'pktbuf>,
     pub outbound_send: OutboundSend<'pktbuf>,
 
+    pub capture: Capture<'pktbuf>,
+
     pub counters: EnumMap<CounterType, Counter>,
 }

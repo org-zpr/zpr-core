@@ -140,6 +140,7 @@ fn main() -> ExitCode {
     let outbound_processor_batch_size = 16;
     let outbound_send_queue_size = 16;
     let outbound_send_batch_size = 8;
+    let capture_size = 8;
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
@@ -163,6 +164,9 @@ fn main() -> ExitCode {
     let (os_inq, os_outq) = mpsc::channel(outbound_send_queue_size);
     let outbound_send = OutboundSend::new(os_inq);
 
+    let (cap_inq, _cap_outq) = mpsc::channel(capture_size);
+    let capture = Capture::new(cap_inq);
+
     let counters = enum_map! { _ => Counter::new(), };
 
     let asm = Box::leak(Box::new(Assembly {
@@ -171,6 +175,7 @@ fn main() -> ExitCode {
         inbound_send,
         outbound_processor,
         outbound_send,
+        capture,
         counters,
     }));
 

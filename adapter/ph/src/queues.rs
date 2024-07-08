@@ -1,6 +1,7 @@
 use crate::packet::Packet;
 use crate::test_packet::*;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
 // Queues (i.e., frontend interface) for each stage of the system.
 
@@ -161,5 +162,47 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
             .unwrap();
 
         Ok(test_tuple.1.await?)
+    }
+}
+
+#[allow(dead_code)]
+pub enum TryEnqueueError<T> {
+    Full(T),
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct CapPacket<'pktbuf> {
+    packet: Packet<'pktbuf>,
+    timestamp: std::time::Instant,
+}
+
+#[allow(dead_code)]
+pub struct Capture<'pktbuf> {
+    sender: mpsc::Sender<CapPacket<'pktbuf>>,
+}
+
+#[allow(dead_code)]
+impl<'pktbuf> Capture<'pktbuf> {
+    pub(crate) fn new(sender: mpsc::Sender<CapPacket<'pktbuf>>) -> Self {
+        Self { sender }
+    }
+
+    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>, timestamp: std::time::Instant) {
+        let cap_pack: CapPacket = CapPacket { packet, timestamp };
+        self.sender.send(cap_pack).await.unwrap();
+    }
+
+    pub fn try_enqueue_packet<T>(
+        &self,
+        packet: Packet<'pktbuf>,
+        timestamp: std::time::Instant,
+    ) -> Result<(), TryEnqueueError<CapPacket<'pktbuf>>> {
+        let cap_pack: CapPacket = CapPacket { packet, timestamp };
+        let _result = match self.sender.try_send(cap_pack) {
+            Ok(()) => return Ok(()),
+            Err(TrySendError::Full(x)) => return Err(TryEnqueueError::Full(x)),
+            Err(TrySendError::Closed(x)) => panic!("panicking! {:?}", x),
+        };
     }
 }
