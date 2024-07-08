@@ -182,11 +182,6 @@ pub struct Capture<'pktbuf> {
 }
 
 #[allow(dead_code)]
-pub enum TryEnqueueError<T> {
-    Full(T),
-}
-
-#[allow(dead_code)]
 impl<'pktbuf> Capture<'pktbuf> {
     pub(crate) fn new(sender: mpsc::Sender<CapPacket<'pktbuf>>) -> Self {
         Self { sender }
