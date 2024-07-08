@@ -7,6 +7,7 @@ use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, KnownLayout, Unaligned};
 // This contains all state of a packet which is moving through the system.
 // TODO: possible we want to keep this stuff on the heap
 
+#[derive(Debug)]
 pub struct Packet<'buf> {
     buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE],
 }
