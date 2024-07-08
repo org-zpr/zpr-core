@@ -167,9 +167,12 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
     }
 }
 
-// Capture will intercept packets in the PH and dump them into a file for debugging purposes
-// Could make elements of struct not public and instead make methods once clone method for Packet
-// is merged
+#[allow(dead_code)]
+pub enum TryEnqueueError<T> {
+    Full(T),
+}
+
+#[derive(Debug)]
 #[allow(dead_code)]
 pub struct CapPacket<'pktbuf> {
     pub packet: Packet<'pktbuf>,
@@ -179,11 +182,6 @@ pub struct CapPacket<'pktbuf> {
 #[allow(dead_code)]
 pub struct Capture<'pktbuf> {
     sender: mpsc::Sender<CapPacket<'pktbuf>>,
-}
-
-#[allow(dead_code)]
-pub enum TryEnqueueError<T> {
-    Full(T),
 }
 
 #[allow(dead_code)]
