@@ -137,6 +137,14 @@ impl<'buf> Packet<'buf> {
         pkt
     }
 
+    pub fn clone_into<'other>(
+        &self,
+        buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
+    ) -> Packet<'other> {
+        buf.copy_from_slice(self.buf);
+        Packet { buf }
+    }
+
     // packet metadata
     pub fn metadata(&self) -> &PacketMetadata {
         let opt = PacketMetadata::ref_from(&self.buf[..size_of::<PacketMetadata>()]);
