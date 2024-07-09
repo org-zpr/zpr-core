@@ -27,6 +27,7 @@ extern crate arrayref;
 // TODO: make these all non-pub once everything is used
 mod assembly;
 mod buffer_stack;
+mod capture_worker;
 mod classifier;
 mod config;
 mod counter;
@@ -44,9 +45,9 @@ mod rpc_worker;
 mod test_packet;
 mod udp_stream;
 mod zdp;
-
 use assembly::Assembly;
 use buffer_stack::BufferStack;
+use capture_worker::CaptureWorker;
 use counter::*;
 use counters_enum::*;
 use options::PhMode;
@@ -144,7 +145,7 @@ fn main() -> ExitCode {
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
-
+    let capture_worker: CaptureWorker;
     let (ip_inq, ip_outq) = mpsc::channel(inbound_processor_batch_size * 2);
     let inbound_processor = InboundProcessor::new(ip_inq);
 
@@ -165,7 +166,7 @@ fn main() -> ExitCode {
     let outbound_send = OutboundSend::new(os_inq);
 
     let (cap_inq, _cap_outq) = mpsc::channel(capture_queue_size);
-    let capture = Capture::new(cap_inq);
+    let capture_queue = Capture::new(cap_inq);
 
     let counters = enum_map! { _ => Counter::new(), };
 
@@ -175,7 +176,8 @@ fn main() -> ExitCode {
         inbound_send,
         outbound_processor,
         outbound_send,
-        capture,
+        capture_queue,
+        capture_worker,
         counters,
     }));
 

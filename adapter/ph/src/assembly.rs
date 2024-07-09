@@ -4,6 +4,7 @@ use crate::counter::*;
 use crate::counters_enum::*;
 use crate::queues::*;
 use enum_map::EnumMap;
+use crate::capture_worker::CaptureWorker;
 // Interface to full assembly of all stages.
 
 // This is the "public interface" that all stages of the system use to talk
@@ -35,7 +36,8 @@ pub struct Assembly<'pktbuf> {
     pub outbound_send: OutboundSend<'pktbuf>,
 
     #[allow(dead_code)]
-    pub capture: Capture<'pktbuf>,
+    pub capture_queue: Capture<'pktbuf>,
+    pub capture_worker: CaptureWorker,
 
     pub counters: EnumMap<CounterType, Counter>,
 }
