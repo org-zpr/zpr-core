@@ -38,6 +38,16 @@ jobs:
       - name: Check test warnings
         run: cd adapter/cd && cargo rustc --tests -- -D warnings
 
+  install-libpcap-dev:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install libpcap-dev
+      run: | 
+        sudo apt update
+        sudo apt install libpcap-dev
+        
+
   ph:
     runs-on: ubuntu-latest
     steps:
