@@ -166,7 +166,6 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
 }
 
 // Capture will intercept packets in the PH and dump them into a file for debugging purposes
-#[derive(Debug)]
 #[allow(dead_code)]
 pub struct CapPacket<'pktbuf> {
     packet: Packet<'pktbuf>,
@@ -202,8 +201,9 @@ impl<'pktbuf> Capture<'pktbuf> {
         let cap_pack: CapPacket = CapPacket { packet, timestamp };
         let _result = match self.sender.try_send(cap_pack) {
             Ok(()) => return Ok(()),
-            Err(TrySendError::Full(x)) => return Err(TryEnqueueError::Full(x)),
-            Err(TrySendError::Closed(x)) => panic!("panicking! {:?}", x),
+            Err(TrySendError::Full(x)) | Err(TrySendError::Closed(x)) => {
+                return Err(TryEnqueueError::Full(x))
+            }
         };
     }
 }
