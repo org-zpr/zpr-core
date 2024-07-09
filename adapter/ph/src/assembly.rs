@@ -6,7 +6,6 @@ use crate::counters_enum::*;
 use crate::flow_control::FlowControl;
 use crate::queues::*;
 use enum_map::EnumMap;
-use crate::capture_worker::CaptureWorker;
 // Interface to full assembly of all stages.
 
 // This is the "public interface" that all stages of the system use to talk

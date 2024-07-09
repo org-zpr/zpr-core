@@ -169,7 +169,6 @@ fn main() -> ExitCode {
     let (cap_inq, _cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
     let capture_worker = CaptureWorker::new();
-
     let counters = enum_map! { _ => Counter::new(), };
 <<<<<<< HEAD
     let flow_control = FlowControl::new(true, false);
