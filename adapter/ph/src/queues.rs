@@ -166,7 +166,6 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
 }
 
 // Capture will intercept packets in the PH and dump them into a file for debugging purposes
-#[derive(Debug)]
 #[allow(dead_code)]
 pub struct CapPacket<'pktbuf> {
     packet: Packet<'pktbuf>,
