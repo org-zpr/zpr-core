@@ -165,11 +165,7 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
     }
 }
 
-#[allow(dead_code)]
-pub enum TryEnqueueError<T> {
-    Full(T),
-}
-
+// Capture will intercept packets in the PH and dump them into a file for debugging purposes
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct CapPacket<'pktbuf> {
@@ -183,6 +179,11 @@ pub struct Capture<'pktbuf> {
 }
 
 #[allow(dead_code)]
+pub enum TryEnqueueError<T> {
+    Full(T),
+}
+
+#[allow(dead_code)]
 impl<'pktbuf> Capture<'pktbuf> {
     pub(crate) fn new(sender: mpsc::Sender<CapPacket<'pktbuf>>) -> Self {
         Self { sender }
@@ -193,7 +194,7 @@ impl<'pktbuf> Capture<'pktbuf> {
         self.sender.send(cap_pack).await.unwrap();
     }
 
-    pub fn try_enqueue_packet<T>(
+    pub fn try_enqueue_packet(
         &self,
         packet: Packet<'pktbuf>,
         timestamp: std::time::Instant,
