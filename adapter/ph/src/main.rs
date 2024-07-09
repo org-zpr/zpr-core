@@ -137,7 +137,6 @@ fn main() -> ExitCode {
     let capture_queue = Capture::new(cap_inq);
 
     let capture_worker = CaptureWorker::new();
-
     let flow_control = FlowControl::new();
 
     let counters = enum_map! { _ => Counter::new(), };
