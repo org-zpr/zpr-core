@@ -137,6 +137,28 @@ impl<'buf> Packet<'buf> {
         pkt
     }
 
+    pub fn clone_into<'other>(
+        &self,
+        buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
+    ) -> Packet<'other> {
+        self.clone_into_with_headroom(buf, self.headroom_available())
+    }
+
+    pub fn clone_into_with_headroom<'other>(
+        &self,
+        buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
+        headroom: usize,
+    ) -> Packet<'other> {
+        let body = self.body();
+        assert!(headroom <= size_of_val(buf) - body.len() - PACKET_BUFFER_MIN_BODY_OFFSET);
+        buf[..size_of::<PacketMetadata>()]
+            .copy_from_slice(&self.buf[..size_of::<PacketMetadata>()]);
+        buf[PACKET_BUFFER_MIN_BODY_OFFSET + headroom
+            ..PACKET_BUFFER_MIN_BODY_OFFSET + headroom + body.len()]
+            .copy_from_slice(body);
+        Packet { buf }
+    }
+
     // packet metadata
     pub fn metadata(&self) -> &PacketMetadata {
         let opt = PacketMetadata::ref_from(&self.buf[..size_of::<PacketMetadata>()]);
