@@ -211,13 +211,3 @@ impl<'pktbuf> Capture<'pktbuf> {
         };
     }
 }
-
-impl<'pktbuf> CapPacket<'pktbuf> {
-    // pub (crate) fn new(packet: Packet<'pktbuf>, timestamp: Instant) -> Self{
-    //     Self { packet, timestamp }
-    // }
-
-    // pub fn get_packet(&self) -> Packet {
-    //     self.packet
-    // }
-}
