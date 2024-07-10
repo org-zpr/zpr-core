@@ -168,6 +168,8 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
 }
 
 // Capture will intercept packets in the PH and dump them into a file for debugging purposes
+// Could make elements of struct not public and instead make methods once clone method for Packet
+// is merged
 #[allow(dead_code)]
 pub struct CapPacket<'pktbuf> {
     pub packet: Packet<'pktbuf>,
@@ -208,4 +210,14 @@ impl<'pktbuf> Capture<'pktbuf> {
             }
         };
     }
+}
+
+impl<'pktbuf> CapPacket<'pktbuf> {
+    // pub (crate) fn new(packet: Packet<'pktbuf>, timestamp: Instant) -> Self{
+    //     Self { packet, timestamp }
+    // }
+
+    // pub fn get_packet(&self) -> Packet {
+    //     self.packet
+    // }
 }

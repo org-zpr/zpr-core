@@ -35,7 +35,7 @@ impl CaptureWorker {
             Some(self.inner_cap.lock().await.capture.savefile(path).unwrap())
     }
 
-    pub async fn flush_capture_file(&self) -> Result<(), pcap::Error> {
+    pub async fn flush_capture_file(&self) -> Result<(), Error> {
         self.inner_cap
             .lock()
             .await
