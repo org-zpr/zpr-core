@@ -40,6 +40,7 @@ pub struct Assembly<'pktbuf> {
     pub capture_queue: Capture<'pktbuf>,
     #[allow(dead_code)]
     pub capture_worker: CaptureWorker,
+
     #[allow(dead_code)]
     pub flow_control: FlowControl,
 
