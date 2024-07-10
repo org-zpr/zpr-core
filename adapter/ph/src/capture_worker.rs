@@ -7,13 +7,13 @@ use std::mem::drop;
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
+pub const USER0: i32 = 147;
+use std::path::Path;
 
-#[allow(dead_code)]
 pub struct CaptureWorker {
     inner_cap: Mutex<InnerCap>,
 }
 
-#[allow(dead_code)]
 struct InnerCap {
     capture: Capture<Dead>,
     savefile: Option<Savefile>,
@@ -24,18 +24,18 @@ impl CaptureWorker {
     pub fn new() -> Self {
         Self {
             inner_cap: InnerCap {
-                capture: Capture::dead(Linktype(0)).unwrap(), // not sure what Linktype this should be
+                capture: pcap::Capture::dead(pcap::Linktype(USER0)).unwrap(), // not sure what Linktype this should be
                 savefile: None,
             }
             .into(),
         }
     }
-    pub async fn open_capture_file(&self, path: String) {
+    pub async fn open_capture_file(&self, path: &Path) {
         self.inner_cap.lock().await.savefile =
             Some(self.inner_cap.lock().await.capture.savefile(path).unwrap())
     }
 
-    pub async fn flush_savefile(&self) -> Result<(), Error> {
+    pub async fn flush_capture_file(&self) -> Result<(), pcap::Error> {
         self.inner_cap
             .lock()
             .await
@@ -45,11 +45,8 @@ impl CaptureWorker {
             .flush()
     }
 
-    // Have to use .into_inner() here to get ownership of the savefile in order to drop it,
-    // can't use get_mut() because calling drop() on a non-owned value does nothing.
-    // Means can't use entire CaptureWorker struct after calling this function.
-    pub async fn destroy_savefile(self) {
-        drop(self.inner_cap.into_inner().savefile)
+    pub async fn destroy_capture_file(&self) {
+        self.inner_cap.lock().await.savefile = None;
     }
 }
 #[derive(Copy, Clone)]
