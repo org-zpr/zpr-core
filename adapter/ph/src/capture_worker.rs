@@ -3,7 +3,6 @@ use crate::CapPacket;
 use core::future::Future;
 use libc::timeval;
 use pcap::{Capture, Dead, Error, Linktype, Packet, PacketHeader, Savefile};
-use std::mem::drop;
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -24,7 +23,7 @@ impl CaptureWorker {
     pub fn new() -> Self {
         Self {
             inner_cap: InnerCap {
-                capture: pcap::Capture::dead(pcap::Linktype(USER0)).unwrap(), // not sure what Linktype this should be
+                capture: Capture::dead(Linktype(USER0)).unwrap(), // not sure what Linktype this should be
                 savefile: None,
             }
             .into(),
@@ -45,10 +44,11 @@ impl CaptureWorker {
             .flush()
     }
 
-    pub async fn destroy_capture_file(&self) {
+    pub async fn close_capture_file(&self) {
         self.inner_cap.lock().await.savefile = None;
     }
 }
+
 #[derive(Copy, Clone)]
 pub struct Config {
     pub batch_size: usize,
@@ -59,29 +59,20 @@ async fn worker<'pktbuf>(
     config: &Config,
     asm: &Assembly<'pktbuf>,
     queue: &mut mpsc::Receiver<CapPacket<'pktbuf>>,
-    path: String,
 ) {
     let mut messages = Vec::new();
-    let mut savefile_exists = false;
-
-    if asm.capture_worker.inner_cap.lock().await.savefile.is_some() {
-        asm.capture_worker.open_capture_file(path).await;
-        savefile_exists = true;
-    }
+    let path = Path::new("temp"); // temporary until RPC is implemented
 
     while let _count @ 1.. = queue.recv_many(&mut messages, config.batch_size).await {
+        let mut locked_mutex = asm.capture_worker.inner_cap.lock().await;
         for cap_pack in &messages {
-            if savefile_exists {
-                savefile_write(
-                    cap_pack,
-                    asm.capture_worker
-                        .inner_cap
-                        .lock()
-                        .await
-                        .savefile
-                        .as_mut()
-                        .unwrap(),
-                )
+            match &mut locked_mutex.savefile {
+                Some(s_file) => {
+                    asm.capture_worker.open_capture_file(&path).await;
+                    savefile_write(cap_pack, s_file);
+                    asm.capture_worker.close_capture_file().await; //Not sure if this needs to be here
+                }
+                None => (),
             }
         }
         asm.buffer_stack
@@ -94,13 +85,12 @@ pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
     config: &Config,
     asm: AsmRef,
     mut queue: mpsc::Receiver<CapPacket<'pktbuf>>,
-    path: String,
 ) -> impl Future<Output = ()> + Send + 'pktbuf
 where
     AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
 {
     let cfg = *config;
-    async move { worker(&cfg, &*asm, &mut queue, path).await }
+    async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
 #[allow(dead_code)]
