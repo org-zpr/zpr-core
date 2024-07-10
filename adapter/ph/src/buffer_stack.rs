@@ -46,25 +46,32 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
         }
 
         loop {
-            {
-                // `bufs` this needs to be lexically scoped as
-                // Rust's non-lexical scope logic isn't smart enough yet
-                // to figure out we don't need to hold the mutex over
-                // the `await`, even with `drop(bufs)`!
-                // hence the contorted logic here
-                let mut bufs = self.buffers.lock().unwrap();
-                let to_get = std::cmp::min(n, bufs.len());
-                for _ in 0..to_get {
-                    // note: intentional reversing!  keep bufs on top of stack hot
-                    bufs_out.push(bufs.pop().unwrap());
-                }
-                if to_get > 0 {
-                    return to_get;
-                }
+            let got = self.try_get_buffers(n, bufs_out);
+            if got > 0 {
+                break got;
             }
 
             self.notify.notified().await;
         }
+    }
+
+    // Does not block.  May return 0 if no buffers could be returned.
+    // Returns up to n buffers.
+    pub fn try_get_buffers(&self, n: usize, bufs_out: &mut Vec<&'buf mut [u8; BUFSIZ]>) -> usize {
+        if n == 0 {
+            return 0;
+        }
+
+        let mut bufs = self.buffers.lock().unwrap();
+
+        let to_get = std::cmp::min(n, bufs.len());
+
+        for _ in 0..to_get {
+            // note: intentional reversing!  keep bufs on top of stack hot
+            bufs_out.push(bufs.pop().unwrap());
+        }
+
+        to_get
     }
 
     pub fn put_buffer(&self, buf: &'buf mut [u8; BUFSIZ]) {
