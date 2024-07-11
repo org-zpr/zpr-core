@@ -37,11 +37,7 @@ pub struct Assembly<'pktbuf> {
     pub outbound_send: OutboundSend<'pktbuf>,
 
     pub capture_queue: Capture<'pktbuf>,
-    #[allow(dead_code)]
     pub capture_worker: CaptureWorker,
-    pub flow_control: FlowControl,
-
-    #[allow(dead_code)]
     pub flow_control: FlowControl,
 
     pub counters: EnumMap<CounterType, Counter>,
