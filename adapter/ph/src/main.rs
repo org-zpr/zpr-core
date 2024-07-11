@@ -171,7 +171,7 @@ fn main() -> ExitCode {
     let capture_worker = CaptureWorker::new();
 
     let counters = enum_map! { _ => Counter::new(), };
-    let flow_control = FlowControl::new(true, false);
+    let flow_control = FlowControl::new();
 
     let asm = Box::leak(Box::new(Assembly {
         buffer_stack,
