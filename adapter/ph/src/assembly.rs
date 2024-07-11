@@ -41,5 +41,8 @@ pub struct Assembly<'pktbuf> {
     pub capture_worker: CaptureWorker,
     pub flow_control: FlowControl,
 
+    #[allow(dead_code)]
+    pub flow_control: FlowControl,
+
     pub counters: EnumMap<CounterType, Counter>,
 }
