@@ -10,7 +10,6 @@ use tokio::sync::Mutex;
 
 pub const USER0: i32 = 147;
 
-
 pub struct CaptureWorker {
     inner_cap: Mutex<InnerCap>,
 }

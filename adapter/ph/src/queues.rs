@@ -218,4 +218,3 @@ impl<'pktbuf> Capture<'pktbuf> {
 //         let _ = self.packet.destroy();
 //     }
 // }
-

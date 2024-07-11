@@ -31,15 +31,14 @@ async fn worker<'pktbuf>(
                             .try_enqueue_packet(pkt_clone, SystemTime::now())
                         {
                             Ok(()) => (),
-                            Err(TryEnqueueError::Full(_)) => {
-                                // pkt_clone.destroy();
-                                // asm.buffer_stack.put_buffer(buf);
-                                // TODO destroy, ownership of pkt_clone and buf no longer here, pkt clone
-                                // ownership transferred by try_enqueue_packet, buf transferred by clone_into
+                            Err(TryEnqueueError::Full(ret_capture_packet)) => {
+                                let ret_buf = ret_capture_packet.packet.destroy();
+                                asm.buffer_stack.put_buffer(ret_buf);
                             }
                         }
                     }
                     OutboundProcessorMessage::TestPacket(_pkt) => asm.buffer_stack.put_buffer(buf),
+                    // TODO potentially restrustructure, this wastes a buffer if there are lots of test packets
                 }
             }
         }
