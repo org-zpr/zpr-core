@@ -36,12 +36,8 @@ pub struct Assembly<'pktbuf> {
     pub outbound_processor: OutboundProcessor<'pktbuf>,
     pub outbound_send: OutboundSend<'pktbuf>,
 
-    #[allow(dead_code)]
     pub capture_queue: Capture<'pktbuf>,
-    #[allow(dead_code)]
     pub capture_worker: CaptureWorker,
-
-    #[allow(dead_code)]
     pub flow_control: FlowControl,
 
     pub counters: EnumMap<CounterType, Counter>,
