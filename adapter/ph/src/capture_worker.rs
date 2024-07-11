@@ -31,18 +31,16 @@ impl CaptureWorker {
         }
     }
     pub async fn open_capture_file(&self, path: &Path) {
-        self.inner_cap.lock().await.savefile =
-            Some(self.inner_cap.lock().await.capture.savefile(path).unwrap())
+        let mut inner_cap = self.inner_cap.lock().await;
+        inner_cap.savefile = Some(inner_cap.capture.savefile(path).unwrap());
     }
-
-    pub async fn flush_capture_file(&self) -> Result<(), Error> {
-        self.inner_cap
-            .lock()
-            .await
-            .savefile
-            .as_mut()
-            .unwrap()
-            .flush()
+  
+    pub async fn flush_capture_file(&self) -> Result<(), pcap::Error> {
+        let sf = &mut self.inner_cap.lock().await.savefile;
+        match sf {
+            Some(ref mut sf) => sf.flush(),
+            None => Ok(()),
+        }
     }
 
     pub async fn close_capture_file(&self) {
