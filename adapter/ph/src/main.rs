@@ -34,6 +34,7 @@ mod counter;
 mod counters_enum;
 mod dtls_worker;
 mod ext;
+mod flow_control;
 mod inbound_processor_worker;
 mod inbound_send_worker;
 mod options;
@@ -50,6 +51,7 @@ use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
 use counter::*;
 use counters_enum::*;
+use flow_control::FlowControl;
 use options::PhMode;
 use queues::*;
 
@@ -169,6 +171,7 @@ fn main() -> ExitCode {
     let capture_worker = CaptureWorker::new();
 
     let counters = enum_map! { _ => Counter::new(), };
+    let flow_control = FlowControl::new(true, false);
 
     let asm = Box::leak(Box::new(Assembly {
         buffer_stack,
@@ -178,6 +181,7 @@ fn main() -> ExitCode {
         outbound_send,
         capture_queue,
         capture_worker,
+        flow_control,
         counters,
     }));
 
