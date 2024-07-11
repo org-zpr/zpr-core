@@ -7,10 +7,10 @@ pub struct FlowControl {
 
 #[allow(dead_code)]
 impl FlowControl {
-    pub(crate) fn new(inbound: bool, outbound: bool) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            copy_inbound_to_capture: AtomicBool::new(inbound),
-            copy_outbound_to_capture: AtomicBool::new(outbound),
+            copy_inbound_to_capture: AtomicBool::new(false),
+            copy_outbound_to_capture: AtomicBool::new(false),
         }
     }
 
@@ -37,38 +37,39 @@ mod tests {
 
     #[test]
     fn test_new_fc() {
-        let fc = FlowControl::new(true, false);
-        assert_eq!(fc.get_inbound(), true);
+        let fc = FlowControl::new();
+        assert_eq!(fc.get_inbound(), false);
         assert_eq!(fc.get_outbound(), false);
     }
 
     #[test]
     fn test_new_fc_reverse() {
-        let fc = FlowControl::new(false, true);
+        let fc = FlowControl::new();
         assert_eq!(fc.get_inbound(), false);
+        fc.set_outbound(true);
         assert_eq!(fc.get_outbound(), true);
     }
 
     #[test]
     fn test_store_fc() {
-        let fc = FlowControl::new(true, false);
-        assert_eq!(fc.get_inbound(), true);
+        let fc = FlowControl::new();
+        assert_eq!(fc.get_inbound(), false);
         assert_eq!(fc.get_outbound(), false);
 
         fc.set_inbound(false);
         assert_eq!(fc.get_inbound(), false);
         assert_eq!(fc.get_outbound(), false);
 
-        fc.set_outbound(true);
-        assert_eq!(fc.get_inbound(), false);
-        assert_eq!(fc.get_outbound(), true);
+        fc.set_inbound(true);
+        assert_eq!(fc.get_inbound(), true);
+        assert_eq!(fc.get_outbound(), false);
     }
 
     #[test]
     fn test_same_fc() {
-        let fc = FlowControl::new(true, true);
-        assert_eq!(fc.get_inbound(), true);
-        assert_eq!(fc.get_outbound(), true);
+        let fc = FlowControl::new();
+        assert_eq!(fc.get_inbound(), false);
+        assert_eq!(fc.get_outbound(), false);
 
         fc.set_inbound(true);
         fc.set_outbound(false);

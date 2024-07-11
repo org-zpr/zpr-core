@@ -31,18 +31,16 @@ impl CaptureWorker {
         }
     }
     pub async fn open_capture_file(&self, path: &Path) {
-        self.inner_cap.lock().await.savefile =
-            Some(self.inner_cap.lock().await.capture.savefile(path).unwrap())
+        let mut inner_cap = self.inner_cap.lock().await;
+        inner_cap.savefile = Some(inner_cap.capture.savefile(path).unwrap());
     }
 
     pub async fn flush_capture_file(&self) -> Result<(), Error> {
-        self.inner_cap
-            .lock()
-            .await
-            .savefile
-            .as_mut()
-            .unwrap()
-            .flush()
+        let sf = &mut self.inner_cap.lock().await.savefile;
+        match sf {
+            Some(ref mut sf) => sf.flush(),
+            None => Ok(()),
+        }
     }
 
     pub async fn close_capture_file(&self) {
@@ -62,19 +60,16 @@ async fn worker<'pktbuf>(
     queue: &mut mpsc::Receiver<CapPacket<'pktbuf>>,
 ) {
     let mut messages = Vec::new();
-    let path = Path::new("temp"); // temporary until RPC is implemented
 
     while let _count @ 1.. = queue.recv_many(&mut messages, config.batch_size).await {
         let mut locked_mutex = asm.capture_worker.inner_cap.lock().await;
-        for cap_pack in &messages {
-            match &mut locked_mutex.savefile {
-                Some(s_file) => {
-                    asm.capture_worker.open_capture_file(&path).await;
+        match &mut locked_mutex.savefile {
+            Some(s_file) => {
+                for cap_pack in &messages {
                     savefile_write(cap_pack, s_file);
-                    asm.capture_worker.close_capture_file().await; //Not sure if this needs to be here
                 }
-                None => (),
             }
+            None => (),
         }
         asm.buffer_stack
             .put_buffers(messages.drain(..).map(|cap_pack| cap_pack.packet.destroy()));
