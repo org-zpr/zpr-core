@@ -34,7 +34,7 @@ impl CaptureWorker {
         let mut inner_cap = self.inner_cap.lock().await;
         inner_cap.savefile = Some(inner_cap.capture.savefile(path).unwrap());
     }
-  
+
     pub async fn flush_capture_file(&self) -> Result<(), Error> {
         let sf = &mut self.inner_cap.lock().await.savefile;
         match sf {
@@ -63,14 +63,14 @@ async fn worker<'pktbuf>(
 
     while let _count @ 1.. = queue.recv_many(&mut messages, config.batch_size).await {
         let mut locked_mutex = asm.capture_worker.inner_cap.lock().await;
-            match &mut locked_mutex.savefile {
-                Some(s_file) => {
-                    for cap_pack in &messages {
-                        savefile_write(cap_pack, s_file);
-                    }
+        match &mut locked_mutex.savefile {
+            Some(s_file) => {
+                for cap_pack in &messages {
+                    savefile_write(cap_pack, s_file);
                 }
-                None => (),
             }
+            None => (),
+        }
         asm.buffer_stack
             .put_buffers(messages.drain(..).map(|cap_pack| cap_pack.packet.destroy()));
     }
