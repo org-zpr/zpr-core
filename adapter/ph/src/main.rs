@@ -134,9 +134,9 @@ fn main() -> ExitCode {
 
     let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
-    
+
     let capture_worker = CaptureWorker::new();
-    
+
     let flow_control = FlowControl::new();
 
     let counters = enum_map! { _ => Counter::new(), };
@@ -270,7 +270,7 @@ fn main() -> ExitCode {
                 &*asm,
                 cap_outq,
             ));
-            
+
             // TODO: initiate the DTLS connection asynchronously; for now, keep this at the end
             eprintln!("Connecting...");
             let socket = Box::leak(Box::new(
