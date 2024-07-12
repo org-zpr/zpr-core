@@ -166,7 +166,7 @@ fn main() -> ExitCode {
     let (os_inq, os_outq) = mpsc::channel(outbound_send_queue_size);
     let outbound_send = OutboundSend::new(os_inq);
 
-    let (cap_inq, _cap_outq) = mpsc::channel(capture_queue_size);
+    let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
     let capture_worker = CaptureWorker::new();
 
@@ -293,7 +293,7 @@ fn main() -> ExitCode {
             ));
 
             js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
-            
+
             js.spawn(capture_worker::launch(
                 &capture_worker::Config {
                     batch_size: capture_queue_size,
@@ -301,7 +301,7 @@ fn main() -> ExitCode {
                 &*asm,
                 cap_outq,
             ));
-            
+
             // TODO: initiate the DTLS connection asynchronously; for now, keep this at the end
             let socket = Box::leak(Box::new(
                 UdpSocket::bind(self_addr)
