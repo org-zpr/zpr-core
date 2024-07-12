@@ -22,6 +22,7 @@ async fn worker<'pktbuf>(
     while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         if asm.flow_control.get_outbound() {
             let mut bufs = Vec::new();
+            let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
             for (i, buf) in bufs.drain(..).enumerate() {
                 match &pkts[i] {
                     OutboundProcessorMessage::Packet(pkt) => {

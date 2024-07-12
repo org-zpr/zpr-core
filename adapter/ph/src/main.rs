@@ -293,7 +293,15 @@ fn main() -> ExitCode {
             ));
 
             js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
-
+            
+            js.spawn(capture_worker::launch(
+                &capture_worker::Config {
+                    batch_size: capture_queue_size,
+                },
+                &*asm,
+                cap_outq,
+            ));
+            
             // TODO: initiate the DTLS connection asynchronously; for now, keep this at the end
             let socket = Box::leak(Box::new(
                 UdpSocket::bind(self_addr)
