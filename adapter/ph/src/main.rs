@@ -143,7 +143,8 @@ fn main() -> ExitCode {
     let outbound_processor_batch_size = 16;
     let outbound_send_queue_size = 16;
     let outbound_send_batch_size = 8;
-    let capture_queue_size = 8;
+    let capture_queue_size = 16;
+    let capture_batch_size = 8;
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
@@ -296,7 +297,7 @@ fn main() -> ExitCode {
 
             js.spawn(capture_worker::launch(
                 &capture_worker::Config {
-                    batch_size: capture_queue_size,
+                    batch_size: capture_batch_size,
                 },
                 &*asm,
                 cap_outq,
