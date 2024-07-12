@@ -1,5 +1,7 @@
 use crate::assembly::Assembly;
-use crate::InboundSendMessage;
+use crate::ext::tokio_tun::*;
+use crate::net_defs;
+use crate::queues::InboundSendMessage;
 use std::future::Future;
 use std::io::IoSlice;
 use tokio::sync::mpsc;
@@ -8,6 +10,14 @@ use tokio_tun::Tun;
 #[derive(Copy, Clone)]
 pub struct Config {
     pub batch_size: usize,
+}
+
+fn ip_ethertype(ip_version: u8) -> u16 {
+    match ip_version {
+        4 => net_defs::ETHERTYPE_IP,
+        6 => net_defs::ETHERTYPE_IPV6,
+        _ => 0,
+    }
 }
 
 async fn worker<'pktbuf>(
@@ -19,23 +29,30 @@ async fn worker<'pktbuf>(
     let mut messages = Vec::new();
 
     while let count @ 1.. = queue.recv_many(&mut messages, config.batch_size).await {
-        for msg in &messages {
+        for msg in &mut messages {
             match msg {
-                InboundSendMessage::Packet(msg) => {
-                    tun.send_vectored(&[IoSlice::new(msg.body())])
+                InboundSendMessage::Packet(pkt) => {
+                    tun_pi::write_pi(
+                        pkt,
+                        tun_pi::TunPi {
+                            strip: false,
+                            proto: ip_ethertype(pkt.metadata().get_ip_version()),
+                        },
+                    );
+                    tun.send_vectored(&[IoSlice::new(pkt.body())])
                         .await
                         .unwrap();
                 } // TODO: error handling
-                InboundSendMessage::TestPacket(_msg) => (),
+                InboundSendMessage::TestPacket(_pkt) => (),
             };
         }
         asm.buffer_stack
             .put_buffers(messages.drain(..).filter_map(|msg| match msg {
-                InboundSendMessage::Packet(msg) => Some(msg.destroy()),
+                InboundSendMessage::Packet(pkt) => Some(pkt.destroy()),
                 // acknowledge had to go here since it consumes the packet, it could not be in
                 // the previous match because the program still expected the packet to me in messages
-                InboundSendMessage::TestPacket(msg) => {
-                    msg.acknowledge(queue.len(), count);
+                InboundSendMessage::TestPacket(pkt) => {
+                    pkt.acknowledge(queue.len(), count);
                     None
                 }
             }));

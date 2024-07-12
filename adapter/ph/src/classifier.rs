@@ -117,9 +117,10 @@ fn classify_ipv4(
         return Err("Packet length error");
     }
 
+    metadata.set_ip_version(4);
     metadata.set_addresses(
-        packet::v4_to_v6_address(ipv4_header.src_address),
-        packet::v4_to_v6_address(ipv4_header.dst_address),
+        packet::IpAddress::new_from_v4(ipv4_header.src_address),
+        packet::IpAddress::new_from_v4(ipv4_header.dst_address),
     );
 
     const FRAGMENT_OFFSET_MASK: u16 = 0x1FFF;
@@ -152,6 +153,7 @@ fn classify_ipv6(
     let header_bytes = &body[..size_of::<IPv6Header>()];
     let ipv6_header = IPv6Header::ref_from(header_bytes).unwrap();
 
+    metadata.set_ip_version(6);
     metadata.set_addresses(ipv6_header.src_address, ipv6_header.dst_address);
 
     classify_next_header(

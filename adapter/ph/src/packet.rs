@@ -23,22 +23,18 @@ pub struct IpAddress {
 
 #[allow(dead_code)]
 impl IpAddress {
-    pub fn set_from_v4(&mut self, v4_address: [u8; 4]) {
-        self.v6[12..16].copy_from_slice(&v4_address);
-        self.v6[10] = 0xff;
-        self.v6[11] = 0xff
+    pub fn new_from_v4(v4_address: [u8; 4]) -> Self {
+        // Uses standard v4 to v6 conversion
+        let mut addr = Self::new_zeroed();
+        addr.v6[12..16].copy_from_slice(&v4_address);
+        addr.v6[10] = 0xff;
+        addr.v6[11] = 0xff;
+        addr
     }
 
-    pub fn read_as_v4(&self) -> &[u8] {
-        &self.v6[12..16]
+    pub fn read_as_v4(&self) -> [u8; 4] {
+        *array_ref!(self.v6, 12, 4)
     }
-}
-
-pub fn v4_to_v6_address(v4_address: [u8; 4]) -> IpAddress {
-    // Uses standard v4 to v6 conversion
-    let mut v6_address = IpAddress::new_zeroed();
-    v6_address.set_from_v4(v4_address);
-    v6_address
 }
 
 #[derive(AsBytes, FromZeroes, FromBytes)]
@@ -52,11 +48,17 @@ pub struct PacketMetadata {
     src_port: u16,
     dst_port: u16,
     protocol: u8,
-    _padding: [u8; 3],
+    ip_version: u8,
+    _padding: [u8; 2],
 }
 
 #[allow(dead_code)]
 impl PacketMetadata {
+    pub fn set_addresses(&mut self, src_addr: IpAddress, dst_addr: IpAddress) {
+        self.src_address = src_addr;
+        self.dst_address = dst_addr;
+    }
+
     pub fn set_src_port(&mut self, sport: [u8; 2]) {
         self.src_port = NetworkEndian::read_u16(&sport)
     }
@@ -69,9 +71,8 @@ impl PacketMetadata {
         self.protocol = proto
     }
 
-    pub fn set_addresses(&mut self, src_addr: IpAddress, dst_addr: IpAddress) {
-        self.src_address = src_addr;
-        self.dst_address = dst_addr;
+    pub fn set_ip_version(&mut self, ip_version: u8) {
+        self.ip_version = ip_version
     }
 
     pub fn get_src_address(&self) -> IpAddress {
@@ -92,6 +93,10 @@ impl PacketMetadata {
 
     pub fn get_protocol(&self) -> u8 {
         self.protocol
+    }
+
+    pub fn get_ip_version(&self) -> u8 {
+        self.ip_version
     }
 }
 
