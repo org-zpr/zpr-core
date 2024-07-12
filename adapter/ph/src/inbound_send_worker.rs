@@ -1,22 +1,20 @@
 use crate::assembly::Assembly;
-use crate::ext::tokio::io::unix::*;
 use crate::InboundSendMessage;
-use core::future::Future;
+use std::future::Future;
 use std::io::IoSlice;
-use std::os::fd::{AsFd, AsRawFd};
-use tokio::io::unix::AsyncFd;
 use tokio::sync::mpsc;
+use tokio_tun::Tun;
 
 #[derive(Copy, Clone)]
 pub struct Config {
     pub batch_size: usize,
 }
 
-async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
+async fn worker<'pktbuf>(
     config: &Config,
     asm: &Assembly<'pktbuf>,
     queue: &mut mpsc::Receiver<InboundSendMessage<'pktbuf>>,
-    tun_fd: &AsyncFd<Fd>,
+    tun: &Tun,
 ) {
     let mut messages = Vec::new();
 
@@ -24,7 +22,7 @@ async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
         for msg in &messages {
             match msg {
                 InboundSendMessage::Packet(msg) => {
-                    async_fd_write_vectored(tun_fd, &[IoSlice::new(msg.body())])
+                    tun.send_vectored(&[IoSlice::new(msg.body())])
                         .await
                         .unwrap();
                 } // TODO: error handling
@@ -44,16 +42,16 @@ async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
     }
 }
 
-pub fn launch<'pktbuf, AsmRef: 'pktbuf, AfdRef: 'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
+pub fn launch<'pktbuf, AsmRef: 'pktbuf, TunRef: 'pktbuf>(
     config: &Config,
     asm: AsmRef,
     mut queue: mpsc::Receiver<InboundSendMessage<'pktbuf>>,
-    tun_fd: AfdRef,
+    tun: TunRef,
 ) -> impl Future<Output = ()> + Send + 'pktbuf
 where
     AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
-    AfdRef: std::ops::Deref<Target = AsyncFd<Fd>> + Send + Sync,
+    TunRef: std::ops::Deref<Target = Tun> + Send + Sync,
 {
     let cfg = *config;
-    async move { worker(&cfg, &*asm, &mut queue, &*tun_fd).await }
+    async move { worker(&cfg, &*asm, &mut queue, &*tun).await }
 }

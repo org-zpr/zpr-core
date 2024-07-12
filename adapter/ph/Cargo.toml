@@ -9,17 +9,18 @@ bytes = { version = "1.6.0" }
 clap = { version = "4.5.7", features = ["derive"] }
 enum-map = { version = "2.7.3" }
 foreign-types = { version = "0.3.2" }
+hdrhistogram = { version = "7.5.4" }
 libc = { version = "0.2.155" }
 nix = { version = "0.28.0", features = ["fs", "net", "socket", "uio"] }
 open-enum = { version = "0.5.1" }
 openssl-sys = { version = "0.9.102" }
 openssl = { version = "0.10.64" }
+pcap = { version = "2.0.0" }
 tokio-openssl = { version = "0.6.4" }
+tokio-tun = { version = "0.11.5" }
 tokio = { version = "1.37.0", features = ["full"] }
 zerocopy-derive = { version = "0.7.34" }
 zerocopy = { version = "0.7.34", features = ["byteorder"] }
-hdrhistogram = { version = "7.5.4" }
-pcap = { version = "2.0.0" }
 
 [features]
 ci = []
