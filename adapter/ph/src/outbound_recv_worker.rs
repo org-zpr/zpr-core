@@ -1,6 +1,6 @@
 use crate::assembly::Assembly;
-use crate::packet::Packet;
 use crate::ext::tokio_tun::*;
+use crate::packet::Packet;
 use std::future::Future;
 use tokio_tun::Tun;
 
@@ -12,11 +12,7 @@ pub struct Config {
 // How much space to leave for the ZDP headers.
 const OUTBOUND_PACKET_HEADROOM: usize = 256;
 
-async fn worker(
-    config: &Config,
-    asm: &Assembly<'_>,
-    tun: &Tun,
-) {
+async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
     let mut bufs = Vec::new();
 
     loop {

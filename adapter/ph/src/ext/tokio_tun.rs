@@ -17,7 +17,9 @@ pub async fn tun_recv_buf<B: buf::BufMut>(self_: &Tun, buf: &mut B) -> io::Resul
     let slice = unsafe { slice_assume_init_mut(uninit_slice.as_uninit_slice_mut()) };
     let size = self_.recv(slice).await?;
     // SAFETY: we've now initialized this much of the slize
-    unsafe { buf.advance_mut(size); }
+    unsafe {
+        buf.advance_mut(size);
+    }
     Ok(size)
 }
 
@@ -28,7 +30,9 @@ impl TunExt for Tun {
         let slice = unsafe { slice_assume_init_mut(uninit_slice.as_uninit_slice_mut()) };
         let size = self.try_recv(slice)?;
         // SAFETY: we've now initialized this much of the slize
-        unsafe { buf.advance_mut(size); }
+        unsafe {
+            buf.advance_mut(size);
+        }
         Ok(size)
     }
 }
