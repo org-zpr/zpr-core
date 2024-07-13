@@ -5,6 +5,7 @@ use crate::counter::*;
 use crate::counters_enum::*;
 use crate::flow_control::FlowControl;
 use crate::queues::*;
+use crate::tun_ctl::TunCtl;
 use enum_map::EnumMap;
 // Interface to full assembly of all stages.
 
@@ -45,4 +46,6 @@ pub struct Assembly<'pktbuf> {
     pub flow_control: FlowControl,
 
     pub counters: EnumMap<CounterType, Counter>,
+
+    pub tun_ctl: TunCtl<'pktbuf>,
 }

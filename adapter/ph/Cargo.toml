@@ -11,7 +11,7 @@ enum-map = { version = "2.7.3" }
 foreign-types = { version = "0.3.2" }
 hdrhistogram = { version = "7.5.4" }
 libc = { version = "0.2.155" }
-nix = { version = "0.28.0", features = ["fs", "net", "socket", "uio"] }
+nix = { version = "0.29.0", features = ["fs", "ioctl", "net", "socket", "uio"] }
 open-enum = { version = "0.5.1" }
 openssl-sys = { version = "0.9.102" }
 openssl = { version = "0.10.64" }
