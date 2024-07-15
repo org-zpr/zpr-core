@@ -4,12 +4,12 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Read;
 use std::net::IpAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Configuration {
     #[serde(skip)]
-    base_path: String,
+    base_path: PathBuf,
 
     #[serde(skip)]
     node_addr: Option<IpAddr>,
@@ -67,14 +67,14 @@ impl Configuration {
     }
 }
 
-pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
+pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> {
     let mut file = std::fs::File::open(path)?;
     let mut toml_text = String::new();
     let len = file.read_to_string(&mut toml_text)?;
     if len == 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Other,
-            format!("empty config file: {}", path),
+            format!("empty config file: {}", path.to_string_lossy()),
         ));
     }
     let mut c: Configuration = match toml::from_str(&toml_text) {
@@ -82,17 +82,17 @@ pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
         Err(e) => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("failed to parse config file: {}: {}", path, e),
+                format!("failed to parse config file: {}: {}", path.to_string_lossy(), e),
             ))
         }
     };
 
-    c.base_path = match std::path::Path::new(path).parent().unwrap().to_str() {
-        Some(p) => String::from(p),
+    c.base_path = match std::path::Path::new(path).parent() {
+        Some(p) => PathBuf::from(p),
         None => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("failed to get parent path of config file: {}", path),
+                format!("failed to get parent path of config file: {}", path.to_string_lossy()),
             ))
         }
     };
@@ -156,8 +156,8 @@ mod test {
             }
         }
 
-        fn get_path(&self) -> &str {
-            self.path.as_str()
+        fn get_path(&self) -> &Path {
+            return Path::new(&self.path);
         }
     }
 
