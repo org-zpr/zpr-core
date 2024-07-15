@@ -1,28 +1,40 @@
 package vservice
 
 import (
-	"context"
 	"crypto/rsa"
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
-	"net"
+	"net/http"
 	"net/netip"
 	"sync"
+	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/peer"
-	"google.golang.org/grpc/status"
+	"github.com/gorilla/mux"
+	"golang.org/x/net/context"
 
 	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsx/snio/admin"
 
 	"zpr.org/vsx/polio"
 )
 
 // 'admin.go' implements the parts of the admin service applicable to the visa service.
+// Converted to HTTPS from original gRPC in prototype.
+
+type PolicyListEntry struct {
+	ConfigId uint64 `json:"config_id"`
+	Version  string `json:"version"`
+}
+
+type PolicyBundle struct {
+	ConfigID  uint64 `json:"config_id"` // only set when fetching a policy, ignored when installing.
+	Version   string `json:"version"`   // when installing, this is the expected version of the policy we will replace.
+	Format    string `json:"format"`    // eg, "base64;zip;<SERIAL_VERSION>"
+	Container string `json:"container"` // base-64 encoded, zlib compressed PolicyContainer
+}
 
 // Visa Service API that admin service needs to do its job.
 type VSApi interface {
@@ -31,10 +43,8 @@ type VSApi interface {
 }
 
 type AdminService struct {
-	admin.UnimplementedAdminServer
-
 	log               logr.Logger
-	creds             credentials.TransportCredentials
+	creds             *tls.Config
 	policyCheckingKey *rsa.PublicKey // for checking policy signature
 	vsi               VSApi
 
@@ -42,155 +52,169 @@ type AdminService struct {
 
 	service struct {
 		localAddr netip.Addr // local service address
-		gsrvWg    sync.WaitGroup
-		gsrv      *grpc.Server
+		srvWg     sync.WaitGroup
+		srv       *http.Server
 	}
 }
 
-// NewAdminService creates the gRPC admin service -- you must call blocking function StartGrpc to start the service.
-//
-// `creds` is the transport credentials for the gRPC server.
-// `pubkey` is the public key used to verify the signature of the policy.
-func NewAdminService(log logr.Logger, creds credentials.TransportCredentials, policyCheckKey *rsa.PublicKey, vsi VSApi) *AdminService {
+// NewAdminService creates the service. Call `StartAdminService` to start it.
+func NewAdminService(log logr.Logger, tlsConfig *tls.Config, policyCheckKey *rsa.PublicKey, vsi VSApi) *AdminService {
 	return &AdminService{
 		log:               log,
-		creds:             creds,
+		creds:             tlsConfig,
 		policyCheckingKey: policyCheckKey,
 		vsi:               vsi,
 	}
 }
 
 // Blocking function
-func (svc *AdminService) StartGrpc(listenAddr netip.Addr, port int) error {
-	svc.service.localAddr = listenAddr
-	svc.service.gsrvWg.Add(1)
-	defer svc.service.gsrvWg.Done()
-	var conStr string
-	if listenAddr.Is6() {
-		conStr = fmt.Sprintf("[%v]:%d", listenAddr.String(), port)
-	} else {
-		if listenAddr.IsUnspecified() {
-			svc.log.Warn("admin service interface is unwisely configured to use IPv4 localhost")
-		}
-		conStr = fmt.Sprintf("%v:%d", listenAddr.String(), port)
+func (svc *AdminService) StartAdminService(listenAddr netip.Addr, port int) error {
+
+	router := mux.NewRouter()
+	router.HandleFunc("/admin/policies", svc.handleListPolicies).Methods("GET")
+	router.HandleFunc("/admin/policy/{config_id}/current", svc.handleGetCurrentPolicy).Methods("GET")
+	router.HandleFunc("/admin/policy", svc.handleInstallPolicy).Methods("POST")
+
+	server := http.Server{
+		Addr:         fmt.Sprintf("%v:%d", listenAddr.String(), port),
+		Handler:      router,
+		TLSConfig:    svc.creds,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		// ErrorLog:     TODO: wrap the log.Logger to we capture logging to our own logger.
 	}
-	lis, err := net.Listen("tcp", conStr)
-	if err != nil {
-		return fmt.Errorf("failed to listen: %v", err)
-	}
-	opts := []grpc.ServerOption{
-		grpc.Creds(svc.creds),
-	}
-	svc.service.gsrv = grpc.NewServer(opts...)
-	admin.RegisterAdminServer(svc.service.gsrv, svc)
-	svc.log.Infof("admin service starts on %v", conStr)
-	if err = svc.service.gsrv.Serve(lis); err != nil {
-		svc.log.Errorf("admin service exited with error: %v", err)
-		return err
-	}
-	svc.log.Info("admin service exiting")
-	return nil
+
+	svc.service.srvWg.Add(1)
+	defer svc.service.srvWg.Done()
+	svc.log.Infof("admin service starts on %v", server.Addr)
+	svc.service.srv = &server
+	err := server.ListenAndServeTLS("", "")
+	svc.log.Errorf("admin service exited with error: %v", err)
+	return err
 }
 
 // Stop server, blocking until complete.
-func (svc *AdminService) StopGrpc() {
-	if svc.service.gsrv != nil {
-		svc.service.gsrv.Stop()
-		svc.service.gsrvWg.Wait()
-		svc.service.gsrv = nil
+func (svc *AdminService) StopAdminService() {
+	if svc.service.srv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		svc.service.srv.Shutdown(ctx)
+		svc.service.srvWg.Wait()
+		svc.service.srv = nil
 	}
 }
 
-func peerAddrFromCtx(ctx context.Context) netip.Addr {
-	p, ok := peer.FromContext(ctx)
-	if !ok {
-		return netip.Addr{}
-	}
-	// peer.Addr is a net.Addr
-	ap, err := netip.ParseAddrPort(p.Addr.String())
-	if err != nil {
-		return netip.Addr{}
-	}
-	return ap.Addr()
-}
-
-func (svc *AdminService) Fetch(ctx context.Context, fr *admin.FetchRequest) (*admin.FetchResponse, error) {
-	reqIP := peerAddrFromCtx(ctx)
-	svc.log.Info("admin: fetch request", "peer", reqIP)
+// Returns a PolicyBundle json object
+func (svc *AdminService) handleGetCurrentPolicy(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
 
 	pcy, configID := svc.vsi.GetPolicyAndConfig()
 	if pcy == nil {
-		return nil, status.Errorf(codes.InvalidArgument, "policy not found at %d", fr.GetConfigId())
+		http.Error(w, "policy not found", http.StatusNotFound)
+		return
+	}
+
+	configIDStr := params["config_id"]
+	if fmt.Sprintf("%d", configID) != configIDStr {
+		http.Error(w, "config_id unknown", http.StatusBadRequest)
+		return
 	}
 
 	zbuf, err := libvisa.Compress(pcy.Export())
 	if err != nil {
-		svc.log.WithError(err).Error("admin failed to serialized policy, aborting fetch request")
-		return nil, status.Error(codes.Internal, "serialization failed")
+		svc.log.WithError(err).Error("admin service: failed to serialized policy, aborting fetch request")
+		http.Error(w, "policy serialization failed", http.StatusInternalServerError)
+		return
 	}
 
-	svc.log.Debug("admin fetch request processed successfully", "config", configID, "version", pcy.Version())
-	resp := &admin.FetchResponse{
-		Version:         pcy.Version(),
-		Format:          pcy.GetSerialVersion(),
-		PolicyContainer: zbuf, // TODO: Perhaps version and format could be attributes of PolicyContainer?
-		ConfigId:        configID,
+	svc.log.Debug("admin server: fetch request processed successfully", "config", configID, "version", pcy.Version())
+	bundle := &PolicyBundle{
+		ConfigID:  configID,
+		Version:   pcy.Version(),
+		Format:    fmt.Sprintf("base64;zip;%d", pcy.GetSerialVersion()),
+		Container: base64.StdEncoding.EncodeToString(zbuf),
 	}
-	return resp, nil
+	w.Header().Add("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(bundle)
 }
 
-func (svc *AdminService) List(ctx context.Context, lr *admin.ListRequest) (*admin.ListResponse, error) {
-	reqIP := peerAddrFromCtx(ctx)
-	svc.log.Info("admin: list request", "peer", reqIP)
+func (svc *AdminService) handleListPolicies(w http.ResponseWriter, r *http.Request) {
 	pcy, configID := svc.vsi.GetPolicyAndConfig()
 	pver := "(none)"
 	if pcy != nil {
 		pver = pcy.VersionAndRevision()
 	}
-	resp := admin.ListResponse{}
-	resp.List = append(resp.List, &admin.ListResponseEl{
-		ConfigId: configID,
-		Version:  pver,
-	})
-	return &resp, nil
+	resp := []*PolicyListEntry{
+		{
+			ConfigId: configID,
+			Version:  pver,
+		},
+	}
+	w.Header().Add("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
-func (svc *AdminService) Install(ctx context.Context, rr *admin.InstallRequest) (*admin.InstallResponse, error) {
-	reqIP := peerAddrFromCtx(ctx)
-	svc.log.Info("admin: install request", "peer", reqIP)
+// Pass a PolicyBundle json object, returns a PolicyListEntry.
+// ConfigID should be left blank.
+// If version is set, then it is interpreted as the expected version of the existing policy.
+func (svc *AdminService) handleInstallPolicy(w http.ResponseWriter, r *http.Request) {
+	var bundle PolicyBundle
 
-	// TODO: Is our grpc server multi-threaded?  Not sure so we are locking here
-	//       to allow only one install to run at a time.
+	err := json.NewDecoder(r.Body).Decode(&bundle)
+	if err != nil {
+		svc.log.WithError(err).Error("admin service: failed to unmarshal policy bundle, policy install aborted")
+		http.Error(w, "policy unmarshal failed", http.StatusBadRequest)
+		return
+	}
+
 	svc.installMtx.Lock()
 	defer svc.installMtx.Unlock()
 
 	currentP, _ := svc.vsi.GetPolicyAndConfig()
-	if rr.GetVersion() != "" {
-		if currentP != nil && currentP.Version() != rr.GetVersion() {
-			return nil, status.Errorf(codes.FailedPrecondition, "expected version mismatch")
+	if bundle.Version != "" {
+		if currentP != nil && currentP.Version() != bundle.Version {
+			http.Error(w, "expected version mismatch", http.StatusPreconditionFailed)
+			return
 		}
 	}
-	if rr.GetFormat() != polio.SerialVersion {
-		return nil, status.Errorf(codes.FailedPrecondition,
-			fmt.Sprintf("incompatible policy serialization schema: expected %d, got %d", polio.SerialVersion, rr.GetFormat()))
+
+	expectFormat := fmt.Sprintf("base64;zip;%d", polio.SerialVersion)
+
+	if bundle.Format != expectFormat {
+		http.Error(w, "incompatible policy serialization schema", http.StatusBadRequest)
+		return
 	}
 
-	polcont, err := libvisa.Decompress(rr.GetPolicyContainer())
+	zbuf, err := base64.StdEncoding.DecodeString(bundle.Container)
 	if err != nil {
-		svc.log.WithError(err).Error("admin failed to unmarshal policy byndle, policy install aborted")
-		return nil, status.Errorf(codes.InvalidArgument, "error unmarshalling policy")
+		svc.log.WithError(err).Error("admin service: failed to decode base64 policy container")
+		http.Error(w, "base64 decode failed", http.StatusBadRequest)
+		return
+	}
+
+	polcont, err := libvisa.Decompress(zbuf)
+	if err != nil {
+		svc.log.WithError(err).Error("admin service: failed to unmarshal policy byndle, policy install aborted")
+		http.Error(w, "policy unmarshal failed", http.StatusBadRequest)
+		return
 	}
 	containedPol, err := polio.OpenContainedPolicy(polcont, svc.policyCheckingKey)
 	if err != nil {
-		svc.log.WithError(err).Error("admin failed to open policy container")
-		return nil, status.Errorf(codes.InvalidArgument, "container error")
+		svc.log.WithError(err).Error("admin service: failed to open policy container")
+		http.Error(w, "policy open failed", http.StatusBadRequest)
+		return
 	}
 	pversion, configID, err := svc.vsi.InstallPolicy(containedPol)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "policy install failed: %v", err)
+		svc.log.WithError(err).Error("admin service: failed to install policy")
+		http.Error(w, "policy install failed", http.StatusInternalServerError)
+		return
 	}
-	return &admin.InstallResponse{
-		Version:  pversion,
+
+	entry := &PolicyListEntry{
 		ConfigId: configID,
-	}, nil
+		Version:  pversion,
+	}
+	w.Header().Add("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(entry)
 }

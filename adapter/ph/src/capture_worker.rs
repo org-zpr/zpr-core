@@ -8,8 +8,6 @@ use std::time::{Duration, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
-pub const USER0: i32 = 147;
-
 pub struct CaptureWorker {
     inner_cap: Mutex<InnerCap>,
 }
@@ -24,7 +22,7 @@ impl CaptureWorker {
     pub fn new() -> Self {
         Self {
             inner_cap: InnerCap {
-                capture: Capture::dead(Linktype(USER0)).unwrap(), // not sure what Linktype this should be
+                capture: Capture::dead(Linktype::USER0).unwrap(), // not sure what Linktype this should be
                 savefile: None,
             }
             .into(),
