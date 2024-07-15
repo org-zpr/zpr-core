@@ -57,7 +57,7 @@ type AdminService struct {
 	}
 }
 
-// NewAdminService creates the gRPC admin service -- you must call blocking function StartGrpc to start the service.
+// NewAdminService creates the service. Call `StartAdminService` to start it.
 func NewAdminService(log logr.Logger, tlsConfig *tls.Config, policyCheckKey *rsa.PublicKey, vsi VSApi) *AdminService {
 	return &AdminService{
 		log:               log,
@@ -167,8 +167,6 @@ func (svc *AdminService) handleInstallPolicy(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// TODO: Is our grpc server multi-threaded?  Not sure so we are locking here
-	//       to allow only one install to run at a time.
 	svc.installMtx.Lock()
 	defer svc.installMtx.Unlock()
 

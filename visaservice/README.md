@@ -15,7 +15,7 @@ After a successful build the `vservice` binary will be found in
 
 ## Visa Service Admin API
 
-This is an HTTPS API for controlling the visa service designed for network administratorsq. Access is protected by policy.
+This is an HTTPS API for controlling the visa service designed for network administratora. Access is protected by policy.
 The default port is TCP/8182 (see `core/pkg/vservice/constants.go`), and this uses the ZPR
 contact address of the adapter in front of the visa service.
 
@@ -71,7 +71,7 @@ Takes a JSON encoded `PolicyBundle` struct (see `core/pkg/vservice/admin.go`) fi
 ```
 
 Note that the `41` in the `format` field should be the current serialization ID for the policy schema.  
-In th code this is `SerialVersion` which can be found in `mods/polio/const.go`.
+In the code this is `SerialVersion` which can be found in `mods/polio/const.go`.
 
 If you do set `version` then the admin service will ensure that the current (running) policy matches the value
 before attempting to install the new policy.
@@ -109,7 +109,7 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 ## Thrift
 
-The compiled thrift files are included int he source, but if you need to
+The compiled thrift files are included in the source, but if you need to
 rebuild them then you will need the thrift compiler.
 
 ```
