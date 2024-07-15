@@ -26,26 +26,7 @@ async fn worker<'pktbuf>(
 
     while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         if asm.flow_control.get_inbound() {
-            let mut bufs = Vec::new();
-            for (i, buf) in bufs.drain(..).enumerate() {
-                match &pkts[i] {
-                    InboundProcessorMessage::Packet(pkt) => {
-                        let pkt_clone: Packet = pkt.clone_into(buf);
-                        match asm
-                            .capture_queue
-                            .try_enqueue_packet(pkt_clone, SystemTime::now())
-                        {
-                            Ok(()) => (),
-                            Err(TryEnqueueError::Full(ret_capture_packet)) => {
-                                let ret_buf = ret_capture_packet.packet.destroy();
-                                asm.buffer_stack.put_buffer(ret_buf);
-                            }
-                        }
-                    }
-                    InboundProcessorMessage::TestPacket(_pkt) => asm.buffer_stack.put_buffer(buf),
-                    // TODO potentially restrustructure, this wastes a buffer if there are lots of test packets
-                }
-            }
+            clone_cap_packs(asm, &pkts, count);
         }
         for pkt in pkts.drain(..) {
             match pkt {
@@ -98,4 +79,39 @@ async fn handle_packets<'pktbuf>(
 
         packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
     }
+}
+
+fn clone_cap_packs<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    pkts: &Vec<InboundProcessorMessage<'pktbuf>>,
+    count: usize,
+) {
+    let mut bufs = Vec::new();
+    let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
+    for pkt in pkts {
+        match pkt {
+            // Splits between Packets and TestPackets
+            InboundProcessorMessage::Packet(pkt) => match bufs.pop() {
+                // Ensures there's at least one buffer
+                Some(buf) => {
+                    let pkt_clone: Packet = pkt.clone_into(buf);
+                    match asm
+                        .capture_queue
+                        .try_enqueue_packet(pkt_clone, SystemTime::now())
+                    {
+                        // Checks to see if the packet enqueue was successful
+                        Ok(()) => (),
+                        Err(TryEnqueueError::Full(ret_packet)) => {
+                            let ret_buf = ret_packet.destroy();
+                            asm.buffer_stack.put_buffer(ret_buf);
+                            break;
+                        }
+                    };
+                }
+                None => break,
+            },
+            InboundProcessorMessage::TestPacket(_) => (),
+        }
+    }
+    asm.buffer_stack.put_buffers(bufs.into_iter());
 }

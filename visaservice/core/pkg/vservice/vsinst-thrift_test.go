@@ -84,23 +84,11 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
 func initVisaservice(t *testing.T) *vservice.VSInst {
 	alog := logr.NewTestLogger()
-	/*
-		testDS := &TestDS{
-			recs: map[string]*vsio.Agent{
-				"fc00:3001:1::10": {
-					AuthExpires: time.Now().Add(1 * time.Hour).Format(time.RFC3339), // These auth expire times are used as part of visa expiration calculation.
-					AuthClaims:  map[string]*vsio.AClaim{"ca0.foo": &vsio.AClaim{Cval: "fee", Exp: time.Now().Add(time.Hour).Unix()}},
-					TetherAddr:  netip.MustParseAddr("fc00:3001:1::10").AsSlice(),
-				},
-				"fc00:3001:1::11": {
-					AuthExpires: time.Now().Add(1 * time.Hour).Format(time.RFC3339),
-					Provides:    []string{"/zpr/n0"},
-					TetherAddr:  netip.MustParseAddr("fc00:3001:1::11").AsSlice(),
-				},
-			},
-		}
-	*/
-	vc := minVSI(t, 99, alog)
+	vc := &vservice.VSIConfig{
+		Log:                  alog,
+		HopCount:             99,
+		AllowInvalidPeerAddr: true,
+	}
 	svc, err := vservice.NewVSInst(vc)
 	require.Nil(t, err)
 	require.NotNil(t, svc)
