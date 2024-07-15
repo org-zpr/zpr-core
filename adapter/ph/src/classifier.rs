@@ -118,8 +118,8 @@ fn classify_ipv4(
     }
 
     metadata.set_addresses(
-        packet::v4_to_v6_address(ipv4_header.src_address),
-        packet::v4_to_v6_address(ipv4_header.dst_address),
+        packet::IpAddress::new_from_v4(ipv4_header.src_address),
+        packet::IpAddress::new_from_v4(ipv4_header.dst_address),
     );
 
     const FRAGMENT_OFFSET_MASK: u16 = 0x1FFF;

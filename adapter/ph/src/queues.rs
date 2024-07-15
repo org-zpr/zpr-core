@@ -201,23 +201,13 @@ impl<'pktbuf> Capture<'pktbuf> {
         &self,
         packet: Packet<'pktbuf>,
         timestamp: SystemTime,
-    ) -> Result<(), TryEnqueueError<CapPacket<'pktbuf>>> {
+    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
         let cap_pack: CapPacket = CapPacket { packet, timestamp };
-        let _result = match self.sender.try_send(cap_pack) {
+        match self.sender.try_send(cap_pack) {
             Ok(()) => return Ok(()),
-            Err(TrySendError::Full(x)) | Err(TrySendError::Closed(x)) => {
-                return Err(TryEnqueueError::Full(x))
+            Err(TrySendError::Full(cap_pack)) | Err(TrySendError::Closed(cap_pack)) => {
+                return Err(TryEnqueueError::Full(cap_pack.packet));
             }
         };
     }
-}
-
-impl<'pktbuf> CapPacket<'pktbuf> {
-    // pub (crate) fn new(packet: Packet<'pktbuf>, timestamp: Instant) -> Self{
-    //     Self { packet, timestamp }
-    // }
-
-    // pub fn get_packet(&self) -> Packet {
-    //     self.packet
-    // }
 }

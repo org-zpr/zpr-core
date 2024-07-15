@@ -1,8 +1,10 @@
 use crate::assembly::Assembly;
 use crate::packet::Packet;
+use crate::queues::TryEnqueueError;
 use crate::zdp::*;
 use crate::OutboundProcessorMessage;
 use core::future::Future;
+use std::time::SystemTime;
 use tokio::sync::mpsc;
 
 #[derive(Copy, Clone)]
@@ -18,6 +20,9 @@ async fn worker<'pktbuf>(
     let mut pkts = Vec::new();
 
     while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
+        if asm.flow_control.get_outbound() {
+            clone_cap_packs(asm, &pkts, count);
+        }
         for pkt in pkts.drain(..) {
             match pkt {
                 OutboundProcessorMessage::Packet(pkt) => {
@@ -51,4 +56,39 @@ async fn handle_packets<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbu
 
     // forward encapsulated packet on
     asm.outbound_send.enqueue_packet(pkt).await;
+}
+
+fn clone_cap_packs<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    pkts: &Vec<OutboundProcessorMessage<'pktbuf>>,
+    count: usize,
+) {
+    let mut bufs = Vec::new();
+    let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
+    for pkt in pkts {
+        match pkt {
+            // Splits between Packets and TestPackets
+            OutboundProcessorMessage::Packet(pkt) => match bufs.pop() {
+                // Ensures there's at least one buffer
+                Some(buf) => {
+                    let pkt_clone: Packet = pkt.clone_into(buf);
+                    match asm
+                        .capture_queue
+                        .try_enqueue_packet(pkt_clone, SystemTime::now())
+                    {
+                        // Checks to see if the packet enqueue was successful
+                        Ok(()) => (),
+                        Err(TryEnqueueError::Full(ret_packet)) => {
+                            let ret_buf = ret_packet.destroy();
+                            asm.buffer_stack.put_buffer(ret_buf);
+                            break;
+                        }
+                    };
+                }
+                None => break,
+            },
+            OutboundProcessorMessage::TestPacket(_) => (),
+        }
+    }
+    asm.buffer_stack.put_buffers(bufs.into_iter());
 }
