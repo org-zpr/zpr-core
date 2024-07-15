@@ -8,6 +8,7 @@ use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
+use std::path::Path;
 
 use tokio::sync::mpsc::{self, Sender};
 use tokio::time::{self, Duration};
@@ -127,8 +128,8 @@ impl VSConn {
     pub fn new(
         output_tx: Sender<VSOutput>,
         service_addr: &str,
-        node_cert_file: &str,
-        node_key_file: &str,
+        node_cert_file: &Path,
+        node_key_file: &Path,
         node_addr: IpAddr,
     ) -> Result<VSConn, Error> {
         let mut certfile = match File::open(node_cert_file) {
@@ -160,7 +161,7 @@ impl VSConn {
             Err(e) => {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
-                    format!("failed to parse private RSA key: {}: {}", node_key_file, e),
+                    format!("failed to parse private RSA key: {}: {}", node_key_file.to_string_lossy(), e),
                 ));
             }
         };
@@ -510,8 +511,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             }
         }
 
-        fn get_path(&self) -> &str {
-            self.path.as_str()
+        fn get_path(&self) -> &Path {
+            Path::new(self.path.as_str())
         }
     }
 

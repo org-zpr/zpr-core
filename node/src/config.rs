@@ -26,16 +26,14 @@ struct Creds {
 }
 
 impl Configuration {
-    pub fn get_cert_path(&self) -> String {
+    pub fn get_cert_path(&self) -> PathBuf {
         let base = Path::new(&self.base_path);
-        let cert_pb = base.join(&self.creds.certificate);
-        return cert_pb.to_str().unwrap().to_string();
+        return base.join(&self.creds.certificate);        
     }
 
-    pub fn get_key_path(&self) -> String {
+    pub fn get_key_path(&self) -> PathBuf {
         let base = Path::new(&self.base_path);
-        let cert_pb = base.join(&self.creds.private_key);
-        return cert_pb.to_str().unwrap().to_string();
+        return base.join(&self.creds.private_key);
     }
 
     // Gets a copy of the claims
