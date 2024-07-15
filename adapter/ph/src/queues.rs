@@ -206,7 +206,6 @@ impl<'pktbuf> Capture<'pktbuf> {
         match self.sender.try_send(cap_pack) {
             Ok(()) => return Ok(()),
             Err(TrySendError::Full(cap_pack)) | Err(TrySendError::Closed(cap_pack)) => {
-                // cap_pack.destroy();
                 return Err(TryEnqueueError::Full(cap_pack.packet));
             }
         };

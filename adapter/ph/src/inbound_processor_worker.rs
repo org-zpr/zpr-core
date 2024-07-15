@@ -87,28 +87,30 @@ fn clone_cap_packs<'pktbuf>(
     count: usize,
 ) {
     let mut bufs = Vec::new();
-    let mut num_bufs = asm.buffer_stack.try_get_buffers(count, &mut bufs);
-    // now that this loop is based on packets, it could be moved into the loop
-    // below for performance
+    let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
     for pkt in pkts {
-        if num_bufs > 0 {
-            match pkt {
-                InboundProcessorMessage::Packet(pkt) => {
-                    let pkt_clone: Packet = pkt.clone_into(bufs.pop().unwrap());
+        match pkt {
+            // Splits between Packets and TestPackets
+            InboundProcessorMessage::Packet(pkt) => match bufs.pop() {
+                // Ensures there's at least one buffer
+                Some(buf) => {
+                    let pkt_clone: Packet = pkt.clone_into(buf);
                     match asm
                         .capture_queue
                         .try_enqueue_packet(pkt_clone, SystemTime::now())
                     {
-                        Ok(()) => num_bufs -= 1,
+                        // Checks to see if the packet enqueue was successful
+                        Ok(()) => (),
                         Err(TryEnqueueError::Full(ret_packet)) => {
                             let ret_buf = ret_packet.destroy();
                             asm.buffer_stack.put_buffer(ret_buf);
                             break;
                         }
-                    }
+                    };
                 }
-                InboundProcessorMessage::TestPacket(_pkt) => (),
-            }
+                None => break,
+            },
+            InboundProcessorMessage::TestPacket(_) => (),
         }
     }
     asm.buffer_stack.put_buffers(bufs.into_iter());
