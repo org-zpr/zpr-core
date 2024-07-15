@@ -8,9 +8,6 @@ use std::time::{Duration, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
-pub const USER0: i32 = 147;
-
-#[allow(dead_code)]
 pub struct CaptureWorker {
     inner_cap: Mutex<InnerCap>,
 }

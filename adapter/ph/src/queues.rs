@@ -231,9 +231,3 @@ impl<'pktbuf> Capture<'pktbuf> {
         };
     }
 }
-
-// impl<'pktbuf> CapPacket<'pktbuf> {
-//     pub(crate) fn destroy(self) {
-//         let _ = self.packet.destroy();
-//     }
-// }
