@@ -174,6 +174,12 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
 pub struct CapPacket<'pktbuf> {
     pub packet: Packet<'pktbuf>,
     pub timestamp: SystemTime,
+    pub direction: Direction,
+}
+
+pub enum Direction {
+    Inbound,
+    Outbound,
 }
 
 #[allow(dead_code)]
@@ -192,8 +198,17 @@ impl<'pktbuf> Capture<'pktbuf> {
         Self { sender }
     }
 
-    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>, timestamp: SystemTime) {
-        let cap_pack: CapPacket = CapPacket { packet, timestamp };
+    pub async fn enqueue_packet(
+        &self,
+        packet: Packet<'pktbuf>,
+        timestamp: SystemTime,
+        direction: Direction,
+    ) {
+        let cap_pack: CapPacket = CapPacket {
+            packet,
+            timestamp,
+            direction,
+        };
         self.sender.send(cap_pack).await.unwrap();
     }
 
@@ -201,8 +216,13 @@ impl<'pktbuf> Capture<'pktbuf> {
         &self,
         packet: Packet<'pktbuf>,
         timestamp: SystemTime,
+        direction: Direction,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
-        let cap_pack: CapPacket = CapPacket { packet, timestamp };
+        let cap_pack: CapPacket = CapPacket {
+            packet,
+            timestamp,
+            direction,
+        };
         match self.sender.try_send(cap_pack) {
             Ok(()) => return Ok(()),
             Err(TrySendError::Full(cap_pack)) | Err(TrySendError::Closed(cap_pack)) => {
