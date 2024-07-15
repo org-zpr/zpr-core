@@ -43,7 +43,7 @@ pub mod tun_pi {
     // per-packet packet info
     #[derive(Clone, Copy)]
     pub struct TunPi {
-        pub strip: bool,  // the inbound packet was truncated (ignored outbound)
+        pub strip: bool, // the inbound packet was truncated (ignored outbound)
         pub proto: u16,  // Ethertype of packet
     }
 
