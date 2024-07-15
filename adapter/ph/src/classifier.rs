@@ -117,7 +117,6 @@ fn classify_ipv4(
         return Err("Packet length error");
     }
 
-    metadata.set_ip_version(4);
     metadata.set_addresses(
         packet::IpAddress::new_from_v4(ipv4_header.src_address),
         packet::IpAddress::new_from_v4(ipv4_header.dst_address),
@@ -153,7 +152,6 @@ fn classify_ipv6(
     let header_bytes = &body[..size_of::<IPv6Header>()];
     let ipv6_header = IPv6Header::ref_from(header_bytes).unwrap();
 
-    metadata.set_ip_version(6);
     metadata.set_addresses(ipv6_header.src_address, ipv6_header.dst_address);
 
     classify_next_header(

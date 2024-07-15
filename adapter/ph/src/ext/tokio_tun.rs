@@ -40,10 +40,11 @@ impl TunExt for Tun {
 pub mod tun_pi {
     use bytes::buf;
 
+    // per-packet packet info
     #[derive(Clone, Copy)]
     pub struct TunPi {
-        pub strip: bool,
-        pub proto: u16,
+        pub strip: bool,  // the inbound packet was truncated (ignored outbound)
+        pub proto: u16,  // Ethertype of packet
     }
 
     #[cfg(target_os = "linux")]
@@ -89,6 +90,8 @@ pub mod tun_pi {
         }
         .into()
     }
+
+    pub const PI_SIZE: usize = std::mem::size_of::<os::TunPi>();
 
     pub fn write_pi<B: buf::BufMut>(buf: &mut B, pi: TunPi) {
         let os_pi: os::TunPi = pi.into();

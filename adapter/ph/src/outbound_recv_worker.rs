@@ -35,7 +35,7 @@ async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
             tun_recv_buf(tun, &mut pkt).await.unwrap();
 
             let pi = tun_pi::read_pi(&mut pkt);
-            if pi.strip || is_ip(pi) {
+            if pi.strip || !is_ip(pi) {
                 // packet was too large or non-IP; drop
                 asm.counters[CounterType::OutPacksDrop].increment();
                 asm.buffer_stack.put_buffer(pkt.destroy());

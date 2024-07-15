@@ -1,4 +1,5 @@
 use crate::assembly::Assembly;
+use crate::counters_enum::*;
 use crate::ext::tokio_tun::*;
 use crate::net_defs;
 use crate::queues::InboundSendMessage;
@@ -10,6 +11,10 @@ use tokio_tun::Tun;
 #[derive(Copy, Clone)]
 pub struct Config {
     pub batch_size: usize,
+}
+
+fn ip_version(pkt: &[u8]) -> u8 {
+    pkt[0] >> 4
 }
 
 fn ip_ethertype(ip_version: u8) -> u16 {
@@ -32,20 +37,27 @@ async fn worker<'pktbuf>(
         for msg in &mut messages {
             match msg {
                 InboundSendMessage::Packet(pkt) => {
+                    let proto = ip_ethertype(ip_version(pkt.body()));
+                    let mut hdr = pkt.alloc_zeroed_header::<[u8; tun_pi::PI_SIZE]>() as &mut [u8];
                     tun_pi::write_pi(
-                        pkt,
+                        &mut hdr,
                         tun_pi::TunPi {
                             strip: false,
-                            proto: ip_ethertype(pkt.metadata().get_ip_version()),
+                            proto,
                         },
                     );
+
                     tun.send_vectored(&[IoSlice::new(pkt.body())])
                         .await
                         .unwrap();
+
+                    asm.counters[CounterType::InPacksSent].increment();
                 } // TODO: error handling
+
                 InboundSendMessage::TestPacket(_pkt) => (),
             };
         }
+
         asm.buffer_stack
             .put_buffers(messages.drain(..).filter_map(|msg| match msg {
                 InboundSendMessage::Packet(pkt) => Some(pkt.destroy()),

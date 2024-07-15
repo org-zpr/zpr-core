@@ -61,6 +61,7 @@ async fn worker<'pktbuf>(
                     match msg {
                         OutboundSendMessage::Packet(pkt) => {
                             ssl_write.write(pkt.body()).await.unwrap();  // TODO: error handling
+                            asm.counters[CounterType::OutPacksSent].increment();
                         },
 
                         OutboundSendMessage::TestPacket(_) => ()  /* handled below */

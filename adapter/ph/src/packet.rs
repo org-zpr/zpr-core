@@ -48,8 +48,7 @@ pub struct PacketMetadata {
     src_port: u16,
     dst_port: u16,
     protocol: u8,
-    ip_version: u8,
-    _padding: [u8; 2],
+    _padding: [u8; 3],
 }
 
 #[allow(dead_code)]
@@ -71,10 +70,6 @@ impl PacketMetadata {
         self.protocol = proto
     }
 
-    pub fn set_ip_version(&mut self, ip_version: u8) {
-        self.ip_version = ip_version
-    }
-
     pub fn get_src_address(&self) -> IpAddress {
         self.src_address
     }
@@ -93,10 +88,6 @@ impl PacketMetadata {
 
     pub fn get_protocol(&self) -> u8 {
         self.protocol
-    }
-
-    pub fn get_ip_version(&self) -> u8 {
-        self.ip_version
     }
 }
 
