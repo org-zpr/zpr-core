@@ -47,7 +47,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     let o_vsforceconnect = opts.vsforceconnect.is_some();
 
     // This force-connect thing makes it possible to have this connect to the visa service
-    // during development.  I think this will go away or be refactored before final commit.
+    // during development.  I think this will go away or be refactored before version 1.0.
     // But to test this out, do something like:
     //
     //    start visa service:
@@ -94,9 +94,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                         error!("visa service exits with error: {}", e);
                     }
                 }
-            } else {
-                vs_ctoken.cancel(); // kills the thread below that reads from the output channel
-            }
+            } 
             let _ = cs_shutdown_tx.send(()); // visa service exits.
         });
 
@@ -133,6 +131,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
         }
         _ = &mut cs_shutdown_rx => {
             info!("visa service exited");
+            ctoken.cancel(); 
         }
     }
 
