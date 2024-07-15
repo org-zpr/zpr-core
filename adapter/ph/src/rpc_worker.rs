@@ -1,6 +1,7 @@
 use crate::assembly::Assembly;
 use core::future::Future;
 use hdrhistogram::Histogram;
+use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
 use std::time::{Duration, Instant};
@@ -134,12 +135,16 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
 
     let mut inbound_processor_duration = Histogram::<u64>::new(1).unwrap();
     let mut inbound_processor_depth = Histogram::<u64>::new(1).unwrap();
+    let mut inbound_processor_batch = Histogram::<u64>::new(1).unwrap();
     let mut inbound_send_duration = Histogram::<u64>::new(1).unwrap();
     let mut inbound_send_depth = Histogram::<u64>::new(1).unwrap();
+    let mut inbound_send_batch = Histogram::<u64>::new(1).unwrap();
     let mut outbound_processor_duration = Histogram::<u64>::new(1).unwrap();
     let mut outbound_processor_depth = Histogram::<u64>::new(1).unwrap();
+    let mut outbound_processor_batch = Histogram::<u64>::new(1).unwrap();
     let mut outbound_send_duration = Histogram::<u64>::new(1).unwrap();
     let mut outbound_send_depth = Histogram::<u64>::new(1).unwrap();
+    let mut outbound_send_batch = Histogram::<u64>::new(1).unwrap();
 
     send_interval.tick().await;
     let mut queue_num = 0;
@@ -166,6 +171,14 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
                 .try_into()
                 .unwrap(),
         );
+        let _ = inbound_processor_batch.record(
+            in_processor
+                .as_ref()
+                .unwrap()
+                .batch_size
+                .try_into()
+                .unwrap(),
+        );
 
         let in_send = asm.inbound_send.enqueue_test_packet(queue_num).await;
         let _ = inbound_send_duration.record(
@@ -180,6 +193,8 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         let _ =
             inbound_send_depth.record(in_send.as_ref().unwrap().queue_depth.try_into().unwrap());
 
+        let _ = inbound_send_batch.record(in_send.as_ref().unwrap().batch_size.try_into().unwrap());
+
         let out_processor = asm.outbound_processor.enqueue_test_packet().await;
         let _ = outbound_processor_duration.record(
             out_processor
@@ -190,8 +205,16 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
                 .try_into()
                 .unwrap(),
         );
+        let _ = outbound_processor_depth.record(
+            out_processor
+                .as_ref()
+                .unwrap()
+                .queue_depth
+                .try_into()
+                .unwrap(),
+        );
         let _ =
-            outbound_processor_depth.record(out_processor.unwrap().queue_depth.try_into().unwrap());
+            outbound_processor_batch.record(out_processor.unwrap().queue_depth.try_into().unwrap());
 
         let out_send = asm.outbound_send.enqueue_test_packet().await;
         let _ = outbound_send_duration.record(
@@ -203,7 +226,9 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
                 .try_into()
                 .unwrap(),
         );
-        let _ = outbound_send_depth.record(out_send.unwrap().queue_depth.try_into().unwrap());
+        let _ =
+            outbound_send_depth.record(out_send.as_ref().unwrap().queue_depth.try_into().unwrap());
+        let _ = outbound_send_batch.record(out_send.unwrap().batch_size.try_into().unwrap());
 
         send_interval.tick().await;
         queue_num += 1;
@@ -211,13 +236,15 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
 
     // get values at 10, 25, 50, 75, 90 quantiles for each hist
     let mut info: String = "".to_string();
+
+    // Get info for inbound processor
     let _ = write!(
         &mut info,
         "{}",
         values_from_hist(
             "Inbound Processor Duration",
             "ns",
-            inbound_processor_duration
+            inbound_processor_duration.clone()
         )
         .as_str()
     );
@@ -227,27 +254,52 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         values_from_hist(
             "Inbound Processor Depth",
             " packets",
-            inbound_processor_depth
+            inbound_processor_depth.clone()
         )
         .as_str()
     );
     let _ = write!(
         &mut info,
         "{}",
-        values_from_hist("Inbound Send Duration", "ns", inbound_send_duration).as_str()
+        values_from_hist(
+            "Inbound Processor Batch",
+            " packets",
+            inbound_processor_batch.clone()
+        )
+        .as_str()
+    );
+    let inbound_pro_mean: u64 =
+        (inbound_processor_duration.mean() / (1.0 + inbound_processor_depth.mean())) as u64;
+    let _ = write!(&mut info, "Approx packet time: {inbound_pro_mean}ns\n\n\n");
+
+    // Get info for inbound send
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist("Inbound Send Duration", "ns", inbound_send_duration.clone()).as_str()
     );
     let _ = write!(
         &mut info,
         "{}",
-        values_from_hist("Inbound Send Depth", " packets", inbound_send_depth).as_str()
+        values_from_hist("Inbound Send Depth", " packets", inbound_send_depth.clone()).as_str()
     );
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist("Inbound Send Batch", " packets", inbound_send_batch.clone()).as_str()
+    );
+    let inbound_send_mean: u64 =
+        (inbound_send_duration.mean() / (1.0 + inbound_send_depth.mean())) as u64;
+    let _ = write!(&mut info, "Approx packet time: {inbound_send_mean}ns\n\n\n");
+
+    // Get info for outbound processor
     let _ = write!(
         &mut info,
         "{}",
         values_from_hist(
             "Outbound Processor Duration",
             "ns",
-            outbound_processor_duration
+            outbound_processor_duration.clone()
         )
         .as_str()
     );
@@ -257,19 +309,60 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         values_from_hist(
             "Outbound Processor Depth",
             " packets",
-            outbound_processor_depth
+            outbound_processor_depth.clone()
         )
         .as_str()
     );
     let _ = write!(
         &mut info,
         "{}",
-        values_from_hist("Outbound Send Duration", "ns", outbound_send_duration).as_str()
+        values_from_hist(
+            "Outbound Processor Batch",
+            " packets",
+            outbound_processor_batch.clone()
+        )
+        .as_str()
+    );
+    let outbound_pro_mean: u64 =
+        (outbound_processor_duration.mean() / (1.0 + outbound_processor_depth.mean())) as u64;
+    let _ = write!(&mut info, "Approx packet time: {outbound_pro_mean}ns\n\n\n");
+
+    // Get info for outbound send
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist(
+            "Outbound Send Duration",
+            "ns",
+            outbound_send_duration.clone()
+        )
+        .as_str()
     );
     let _ = write!(
         &mut info,
         "{}",
-        values_from_hist("Outbound Send Depth", " packets", outbound_send_depth).as_str()
+        values_from_hist(
+            "Outbound Send Depth",
+            " packets",
+            outbound_send_depth.clone()
+        )
+        .as_str()
+    );
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist(
+            "Outbound Send Batch",
+            " packets",
+            outbound_send_batch.clone()
+        )
+        .as_str()
+    );
+    let outbound_send_mean: u64 =
+        (outbound_send_duration.mean() / (1.0 + outbound_send_depth.mean())) as u64;
+    let _ = write!(
+        &mut info,
+        "Approx packet time: {outbound_send_mean}ns\n\n\n"
     );
 
     info
@@ -281,11 +374,32 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
     let fifty: u64 = hist.value_at_quantile(0.50);
     let seventy_five: u64 = hist.value_at_quantile(0.75);
     let ninety: u64 = hist.value_at_quantile(0.90);
+    let mean: f64 = hist.mean();
 
     let mut values: String = "".to_string();
 
-    // Could be easily replaced with other data if need be
-    let _ = write!(&mut values, "{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units);
+    let _ = write!(&mut values, "{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}, Mean: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units, mean, units);
+
+    let mut iter = hist.iter_log(1, SQRT_2);
+
+    let mut iter_value = iter.next();
+    let mut prev_bucket = 0;
+
+    while iter_value != None {
+        let curr_bucket = iter_value.as_ref().unwrap().value_iterated_to();
+        let _ = write!(
+            &mut values,
+            "Bucket: {}-{} | {}\n",
+            prev_bucket,
+            curr_bucket,
+            iter_value.unwrap().count_since_last_iteration()
+        );
+
+        prev_bucket = curr_bucket;
+        iter_value = iter.next();
+    }
+
+    let _ = write!(&mut values, "\n");
 
     values
 }

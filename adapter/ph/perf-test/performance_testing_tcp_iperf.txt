@@ -1,0 +1,226 @@
+TEST 1: Server running on laptop, client on VM. PERF-SAMPLE running on server side 
+        for 120 seconds 4 samples/seconds. iperf -s on server side. Using -t 
+        flag on the client side to send traffic for 120 seconds
+
+    Inbound Processor Duration values at - 10th Quantile: 4095ns, 25th Quantile: 5375ns,
+    50th Quantile: 26623ns, 75th Quantile: 77823ns, 90th Quantile: 139263ns, Mean: 52938.33333333332ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 1 packets, 90th Quantile: 7 packets, Mean: 1.6708333333333334 packets
+
+    Time per packet: 19,827ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 2943ns, 25th Quantile: 4863ns,
+    50th Quantile: 25599ns, 75th Quantile: 40959ns, 90th Quantile: 57343ns, Mean: 27572.800000000003ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.2 packets
+
+    Time per packet: 22,966ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 2943ns, 25th Quantile: 3583ns,
+    50th Quantile: 4863ns, 75th Quantile: 9215ns, 90th Quantile: 15871ns, Mean: 12352.333333333336ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.10416666666666666 packets
+
+    Time per packet: 11,229ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 9215ns, 25th Quantile: 20479ns,
+    50th Quantile: 43007ns, 75th Quantile: 77823ns, 90th Quantile: 114687ns, Mean: 60334.333333333336ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 2 packets, Mean: 0.5166666666666666 packets
+      
+    Time per packet: 39,693ns
+
+
+    ------------------------------------------------------------
+    Server listening on TCP port 5001
+    TCP window size:  128 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 47846
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0173 sec  12.1 GBytes   867 Mbits/sec
+
+    ------------------------------------------------------------
+    Client connecting to 192.168.99.1, TCP port 5001
+    TCP window size: 16.0 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.2 port 47846 connected with 192.168.99.1 port 5001 (icwnd/mss/irtt=13/1348/1687)
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0291 sec  12.1 GBytes   867 Mbits/sec
+
+
+TEST 2: Server running on laptop, client on VM. PERF-SAMPLE running on server side 
+        for 120 seconds 4 samples/seconds. iperf -s on client side. Using -t 
+        flag on the server side to send traffic for 120 seconds
+
+    Inbound Processor Duration values at - 10th Quantile: 4863ns, 25th Quantile: 6143ns,
+    50th Quantile: 7935ns, 75th Quantile: 18431ns, 90th Quantile: 65535ns, Mean: 26253.6ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.38125 packets
+
+    Time per packet: 19,023ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 2943ns, 25th Quantile: 4095ns,
+    50th Quantile: 5119ns, 75th Quantile: 27647ns, 90th Quantile: 69631ns, Mean: 21794.933333333334ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.09791666666666667 packets
+
+    Time per packet: 19,813ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 4351ns, 25th Quantile: 10239ns,
+    50th Quantile: 118783ns, 75th Quantile: 278527ns, 90th Quantile: 442367ns, Mean: 169793.46666666667ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 12 packets, 90th Quantile: 17 packets, Mean: 5.5125 packets
+
+    Time per packet: 26,082ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 10751ns, 25th Quantile: 47103ns,
+    50th Quantile: 98303ns, 75th Quantile: 163839ns, 90th Quantile: 221183ns, Mean: 110855.26666666668ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.14375 packets
+
+    Time per packet: 97,241ns
+
+
+    ------------------------------------------------------------
+    Server listening on TCP port 5001
+    TCP window size:  128 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.2 port 5001 connected with 192.168.99.1 port 48432 (icwnd/mss/irtt=13/1348/775)
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0032 sec  9.47 GBytes   678 Mbits/sec
+
+    ------------------------------------------------------------
+    Client connecting to 192.168.99.2, TCP port 5001
+    TCP window size: 45.0 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.1 port 48432 connected with 192.168.99.2 port 5001
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0201 sec  9.47 GBytes   678 Mbits/sec
+
+
+TEST 3: Server running on laptop, client on VM. PERF-SAMPLE running on client side 
+        for 120 seconds 4 samples/seconds. iperf -s on server side. Using -t 
+        flag on the client side to send traffic for 120 seconds
+
+    Inbound Processor Duration values at - 10th Quantile: 4095ns, 25th Quantile: 4863ns,
+    50th Quantile: 6399ns, 75th Quantile: 12799ns, 90th Quantile: 90111ns, Mean: 27231.600000000002ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.51875 packets
+
+    Time per packet: 17,915ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 2687ns, 25th Quantile: 3199ns,
+    50th Quantile: 4095ns, 75th Quantile: 7679ns, 90th Quantile: 51199ns, Mean: 14842.93333333333ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.00625 packets
+
+    Time per packet: 14,695ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 278527ns, 25th Quantile: 393215ns,
+    50th Quantile: 458751ns, 75th Quantile: 557055ns, 90th Quantile: 655359ns, Mean: 490933.4666666666ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 16 packets,
+    50th Quantile: 16 packets, 75th Quantile: 16 packets, 90th Quantile: 16 packets, Mean: 14.995833333333334 packets
+
+    Time per packet: 30,683ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 126975ns, 25th Quantile: 204799ns,
+    50th Quantile: 253951ns, 75th Quantile: 311295ns, 90th Quantile: 360447ns, Mean: 251492.53333333333ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.3729166666666667 packets
+
+    Time per packet: 185,571ns
+
+
+    ------------------------------------------------------------
+    Server listening on TCP port 5001
+    TCP window size:  128 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.1 port 5001 connected with 192.168.99.2 port 39450
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0270 sec  11.9 GBytes   849 Mbits/sec
+
+    ------------------------------------------------------------
+    Client connecting to 192.168.99.1, TCP port 5001
+    TCP window size: 16.0 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.2 port 39450 connected with 192.168.99.1 port 5001 (icwnd/mss/irtt=13/1348/1861)
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0300 sec  11.9 GBytes   849 Mbits/sec
+    
+
+TEST 4: Server running on laptop, client on VM. PERF-SAMPLE running on client side 
+        for 120 seconds 4 samples/seconds. iperf -s on client side. Using -t 
+        flag on the server side to send traffic for 120 seconds
+
+    Inbound Processor Duration values at - 10th Quantile: 5119ns, 25th Quantile: 61439ns,
+    50th Quantile: 278527ns, 75th Quantile: 491519ns, 90th Quantile: 688127ns, Mean: 312107.99999999994ns
+
+    Inbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 6 packets, 75th Quantile: 16 packets, 90th Quantile: 33 packets, Mean: 10.977083333333333 packets
+
+    Time per packet: 26,052ns
+
+
+    Inbound Send Duration values at - 10th Quantile: 2815ns, 25th Quantile: 7935ns,
+    50th Quantile: 40959ns, 75th Quantile: 98303ns, 90th Quantile: 172031ns, Mean: 66690.66666666667ns
+
+    Inbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.16666666666666666 packets
+
+    Time per packet: 57,001ns
+
+
+    Outbound Processor Duration values at - 10th Quantile: 2943ns, 25th Quantile: 3839ns,
+    50th Quantile: 9727ns, 75th Quantile: 77823ns, 90th Quantile: 147455ns, Mean: 47020.26666666667ns
+
+    Outbound Processor Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 0 packets, Mean: 0.3729166666666666 packets
+
+    Time per packet: 34,321ns
+
+
+    Outbound Send Duration values at - 10th Quantile: 4095ns, 25th Quantile: 16383ns,
+    50th Quantile: 90111ns, 75th Quantile: 237567ns, 90th Quantile: 393215ns, Mean: 153132.4666666667ns
+
+    Outbound Send Depth values at - 10th Quantile: 0 packets, 25th Quantile: 0 packets,
+    50th Quantile: 0 packets, 75th Quantile: 0 packets, 90th Quantile: 8 packets, Mean: 1.3375000000000001 packets
+
+    Time per packet: 114,278ns
+
+
+    ------------------------------------------------------------
+    Server listening on TCP port 5001
+    TCP window size:  128 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.2 port 5001 connected with 192.168.99.1 port 41178 (icwnd/mss/irtt=13/1348/846)
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0175 sec  10.1 GBytes   724 Mbits/sec
+
+    ------------------------------------------------------------
+    Client connecting to 192.168.99.2, TCP port 5001
+    TCP window size: 45.0 KByte (default)
+    ------------------------------------------------------------
+    [  1] local 192.168.99.1 port 41178 connected with 192.168.99.2 port 5001
+    [ ID] Interval       Transfer     Bandwidth
+    [  1] 0.0000-120.0182 sec  10.1 GBytes   724 Mbits/sec

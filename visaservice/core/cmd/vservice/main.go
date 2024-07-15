@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/netip"
 	"os"
@@ -13,7 +14,6 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"google.golang.org/grpc/credentials"
 
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
@@ -86,6 +86,10 @@ service using the visa service API.
 			Aliases: []string{"l"},
 			Usage:   "override the default visa service listen address with `HOST:PORT`",
 		},
+		&cli.IntFlag{
+			Name:  "admin_port",
+			Usage: "override the default admin service port with `PORT`",
+		},
 	}
 
 	app.Action = func(c *cli.Context) error {
@@ -101,10 +105,11 @@ service using the visa service API.
 			return fmt.Errorf("failed to initialize logging: %w", err)
 		}
 
-		vsTransportCreds, err := credentials.NewServerTLSFromFile(config.VSCert, config.VSKey) // uses sn_certificate & key (like node)
+		cert, err := tls.LoadX509KeyPair(config.VSCert, config.VSKey)
 		if err != nil {
 			return fmt.Errorf("failed to initialize visa service transport credentials from %v: %w", config.VSCert, err)
 		}
+		tconfig := &tls.Config{Certificates: []tls.Certificate{cert}}
 
 		pidf, err := NewPidFile("vservice")
 		if err != nil {
@@ -124,7 +129,7 @@ service using the visa service API.
 		}
 
 		maxAuthDuration := DefaultMaxAuthDuration // TODO: add a command line arg for this
-		service, err := vservice.NewVisaService(c.String("policy"), jwtpk, vsTransportCreds, maxAuthDuration, serviceLog)
+		service, err := vservice.NewVisaService(c.String("policy"), jwtpk, tconfig, maxAuthDuration, serviceLog)
 		if err != nil {
 			return fmt.Errorf("failed to create visa service: %w", err)
 		}
@@ -148,7 +153,7 @@ service using the visa service API.
 		}
 
 		var vsAddr netip.Addr
-		var vsPort uint16
+		var vsPort, adminPort uint16
 
 		if listenAddr := c.String("listen_addr"); listenAddr != "" {
 			ap, err := netip.ParseAddrPort(listenAddr)
@@ -162,7 +167,11 @@ service using the visa service API.
 			vsPort = vservice.VisaServicePort
 		}
 
-		err = service.Start(issuerName, vsAddr, vsPort) // Blocking!
+		if adminPort = uint16(c.Int("admin_port")); adminPort == 0 {
+			adminPort = vservice.AdminPort // constant
+		}
+
+		err = service.Start(issuerName, vsAddr, vsPort, adminPort) // Blocking!
 		close(sigExitChan)
 
 		return err

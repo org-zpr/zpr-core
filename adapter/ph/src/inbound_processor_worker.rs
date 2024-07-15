@@ -22,14 +22,14 @@ async fn worker<'pktbuf>(
 ) {
     let mut pkts = Vec::new();
 
-    while let _count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
+    while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         for pkt in pkts.drain(..) {
             match pkt {
                 InboundProcessorMessage::Packet(pkt) => {
                     handle_packets(config, pkt, asm).await;
                 }
                 InboundProcessorMessage::TestPacket(pkt) => {
-                    pkt.acknowledge(queue.len());
+                    pkt.acknowledge(queue.len(), count);
                 }
             }
         }

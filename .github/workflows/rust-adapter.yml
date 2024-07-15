@@ -4,7 +4,6 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -43,7 +42,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build + test ph
-      run: cd adapter/ph && make build && make test
+      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && make build && make test
 
   ph-format:
     runs-on: ubuntu-latest
@@ -57,11 +56,11 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check warnings
-      run: cd adapter/ph && cargo rustc -- -D warnings
+      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc -- -D warnings
 
   ph-test-warnings:
       runs-on: ubuntu-latest
       steps: 
       - uses: actions/checkout@v4
       - name: Check test warnings
-        run: cd adapter/ph && cargo rustc --tests -- -D warnings
+        run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc --tests -- -D warnings

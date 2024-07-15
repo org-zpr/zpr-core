@@ -1,7 +1,10 @@
 use crate::packet::Packet;
 use crate::test_packet::*;
+use std::time::SystemTime;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
+
 // Queues (i.e., frontend interface) for each stage of the system.
 
 // "Inbound" refers to the dock->adapter direction (i.e., inbound to this host).
@@ -162,4 +165,59 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
 
         Ok(test_tuple.1.await?)
     }
+}
+
+// Capture will intercept packets in the PH and dump them into a file for debugging purposes
+// Could make elements of struct not public and instead make methods once clone method for Packet
+// is merged
+#[allow(dead_code)]
+pub struct CapPacket<'pktbuf> {
+    pub packet: Packet<'pktbuf>,
+    pub timestamp: SystemTime,
+}
+
+#[allow(dead_code)]
+pub struct Capture<'pktbuf> {
+    sender: mpsc::Sender<CapPacket<'pktbuf>>,
+}
+
+#[allow(dead_code)]
+pub enum TryEnqueueError<T> {
+    Full(T),
+}
+
+#[allow(dead_code)]
+impl<'pktbuf> Capture<'pktbuf> {
+    pub(crate) fn new(sender: mpsc::Sender<CapPacket<'pktbuf>>) -> Self {
+        Self { sender }
+    }
+
+    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>, timestamp: SystemTime) {
+        let cap_pack: CapPacket = CapPacket { packet, timestamp };
+        self.sender.send(cap_pack).await.unwrap();
+    }
+
+    pub fn try_enqueue_packet(
+        &self,
+        packet: Packet<'pktbuf>,
+        timestamp: SystemTime,
+    ) -> Result<(), TryEnqueueError<CapPacket<'pktbuf>>> {
+        let cap_pack: CapPacket = CapPacket { packet, timestamp };
+        let _result = match self.sender.try_send(cap_pack) {
+            Ok(()) => return Ok(()),
+            Err(TrySendError::Full(x)) | Err(TrySendError::Closed(x)) => {
+                return Err(TryEnqueueError::Full(x))
+            }
+        };
+    }
+}
+
+impl<'pktbuf> CapPacket<'pktbuf> {
+    // pub (crate) fn new(packet: Packet<'pktbuf>, timestamp: Instant) -> Self{
+    //     Self { packet, timestamp }
+    // }
+
+    // pub fn get_packet(&self) -> Packet {
+    //     self.packet
+    // }
 }
