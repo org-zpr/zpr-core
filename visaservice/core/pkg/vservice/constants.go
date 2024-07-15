@@ -5,9 +5,6 @@ import (
 )
 
 const (
-	// VisaSupporotServicePort is port where grpc support service listens on.
-	VisaSupportServicePort = 8183 // TCP
-
 	// VisaServicePort is the ZPR visa service port
 	VisaServicePort = 5002 // TCP
 
@@ -35,9 +32,6 @@ const (
 	// client nodes are able to get updated critical visas for the next configuration
 	// before the old configuration expires.
 	NetConfigSettleTime = 10 * time.Second
-
-	// Visa service signs the agents it authenticates under this key ID.
-	SigningKeyID = "vs"
 
 	// ZPR hard coded visa service address.
 	VisaServiceAddress = "fc00:3003::1"

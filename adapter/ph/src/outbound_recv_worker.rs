@@ -1,9 +1,8 @@
 use crate::assembly::Assembly;
-use crate::ext::tokio::io::unix::*;
+use crate::ext::tokio_tun::*;
 use crate::packet::Packet;
-use core::future::Future;
-use std::os::fd::{AsFd, AsRawFd};
-use tokio::io::unix::AsyncFd;
+use std::future::Future;
+use tokio_tun::Tun;
 
 #[derive(Copy, Clone)]
 pub struct Config {
@@ -13,11 +12,7 @@ pub struct Config {
 // How much space to leave for the ZDP headers.
 const OUTBOUND_PACKET_HEADROOM: usize = 256;
 
-async fn worker<Fd: AsFd + AsRawFd + Send + Sync>(
-    config: &Config,
-    asm: &Assembly<'_>,
-    tun_fd: &AsyncFd<Fd>,
-) {
+async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
     let mut bufs = Vec::new();
 
     loop {
@@ -30,21 +25,21 @@ async fn worker<Fd: AsFd + AsRawFd + Send + Sync>(
         // since neither `read_buf()` nor `enqueue()` support it
         for buf in bufs.drain(..) {
             let mut pkt = Packet::new(buf, OUTBOUND_PACKET_HEADROOM);
-            async_fd_read_buf(tun_fd, &mut pkt).await.unwrap();
+            tun_recv_buf(tun, &mut pkt).await.unwrap();
             asm.outbound_processor.enqueue_packet(pkt).await;
         }
     }
 }
 
-pub fn launch<'pktbuf, AsmRef: 'pktbuf, AfdRef: 'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
+pub fn launch<'pktbuf, AsmRef: 'pktbuf, TunRef: 'pktbuf>(
     config: &Config,
     asm: AsmRef,
-    tun_fd: AfdRef,
+    tun: TunRef,
 ) -> impl Future<Output = ()> + Send + 'pktbuf
 where
     AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
-    AfdRef: std::ops::Deref<Target = AsyncFd<Fd>> + Send + Sync,
+    TunRef: std::ops::Deref<Target = Tun> + Send + Sync,
 {
     let cfg = *config;
-    async move { worker(&cfg, &*asm, &*tun_fd).await }
+    async move { worker(&cfg, &*asm, &*tun).await }
 }
