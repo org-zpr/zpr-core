@@ -184,7 +184,7 @@ impl VSConn {
 
     pub fn add_claim(&self, key: &str, value: &str) {
         let mut state = self.shared.state.lock().unwrap();
-        state.claims.insert(key.to_string(), value.to_string());
+        state.claims.insert(String::from(key), String::from(value));
     }
 
 

@@ -42,18 +42,18 @@ impl Configuration {
     pub fn get_claims(&self) -> HashMap<String, String> {
         let mut hmap: HashMap<String, String> = HashMap::new();
         for (k, v) in self.claims.iter() {
-            let vstr = match v.as_str().map(|s| s.to_string()) {
+            let vstr = match v.as_str().map(|s| String::from(s)) {
                 Some(s) => s,
                 None => String::from("")
             };
-            hmap.insert(k.to_string(), vstr);
+            hmap.insert(k.clone(), vstr);
         }
         hmap
     }
 
     pub fn get_claim(&self, key: &str) -> Option<String> {
         match self.claims.get(key) {
-            Some(v) => v.as_str().map(|s| s.to_string()), // Double decode since v.as_str() from Table includes quotes.
+            Some(v) => v.as_str().map(|s| String::from(s)), // Double decode since v.as_str() from Table includes quotes.
             None => None,
         }
     }
@@ -88,7 +88,7 @@ pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
     };
 
     c.base_path = match std::path::Path::new(path).parent().unwrap().to_str() {
-        Some(p) => p.to_string(),
+        Some(p) => String::from(p),
         None => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
