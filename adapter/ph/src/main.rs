@@ -34,6 +34,7 @@ mod ext;
 mod flow_control;
 mod inbound_processor_worker;
 mod inbound_send_worker;
+mod net_defs;
 mod options;
 mod outbound_processor_worker;
 mod outbound_recv_worker;
@@ -218,7 +219,6 @@ fn main() -> ExitCode {
 
             let tun_devs = TunBuilder::new()
                 .name(cmd_line.tun_if.unwrap_or(String::new()).as_str())
-                .packet_info(false)
                 .try_build_mq(tun_queue_count)
                 .expect("unable to open TUN device")
                 .leak();
