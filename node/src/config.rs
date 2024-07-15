@@ -42,7 +42,11 @@ impl Configuration {
     pub fn get_claims(&self) -> HashMap<String, String> {
         let mut hmap: HashMap<String, String> = HashMap::new();
         for (k, v) in self.claims.iter() {
-            hmap.insert(k.to_string(), v.to_string());
+            let vstr = match v.as_str().map(|s| s.to_string()) {
+                Some(s) => s,
+                None => String::from("")
+            };
+            hmap.insert(k.to_string(), vstr);
         }
         hmap
     }
@@ -115,4 +119,78 @@ pub fn load_configuration(path: &str) -> Result<Configuration, std::io::Error> {
     c.node_addr = Some(node_addr);
 
     Ok(c)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::env;
+    use std::fs;
+    use rand::Rng;
+
+
+    struct TempFile {
+        path: String,
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+
+    impl TempFile {
+        fn new_toml(contents: &str) -> TempFile {
+            let mut rng = rand::thread_rng();
+            let tstamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            let dir = env::temp_dir();
+            let num: u32 = rng.gen();
+            let path = dir.join(format!("org_zpr_cd_test_{}_{}.toml", num, tstamp));
+            fs::write(&path, contents).expect("Unable to write file");
+            TempFile {
+                path: path.to_str().unwrap().to_string(),
+            }
+        }
+
+        fn get_path(&self) -> &str {
+            self.path.as_str()
+        }
+    }
+
+
+
+    #[test]
+    fn test_get_claims() {
+
+        let toml_txt = r#"
+            [creds]
+            certificate = "foo-cert.pem"
+            private_key = "foo-key.pem"
+            
+            [claims]
+            "zpr.addr" = "fc00:3001::1"
+            "x509.cn" = "node.zpr"
+        "#;
+
+        let tmpfile = TempFile::new_toml(&toml_txt);
+        let c = load_configuration(tmpfile.get_path());
+        if let Err(e) = c {
+            panic!("failed to load configuration: {}", e);        
+        }
+        let c = c.unwrap();
+        let claims = c.get_claims();
+        assert_eq!(claims.len(), 2);
+
+        assert_eq!(c.get_claim("zpr.addr").unwrap(), "fc00:3001::1");
+        assert_eq!(c.get_claim("x509.cn").unwrap(), "node.zpr");
+
+        assert_eq!(c.get_claim("not_there"), None);
+
+        assert_eq!(claims.get("zpr.addr").unwrap(), "fc00:3001::1");
+        assert_eq!(claims.get("x509.cn").unwrap(), "node.zpr");
+    }
 }
