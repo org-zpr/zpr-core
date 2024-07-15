@@ -4,6 +4,7 @@ use hdrhistogram::Histogram;
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
+use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
@@ -76,6 +77,7 @@ async fn handle_connection(
                 buf_writer.write_all(echo(asm).await.as_bytes()).await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
+            // PERF SAMPLE <DURATION> <FREQUENCY>
             "PERF-SAMPLE" => {
                 buf_writer
                     .write_all(
@@ -83,6 +85,48 @@ async fn handle_connection(
                             .await
                             .as_bytes(),
                     )
+                    .await?;
+                buf_writer.write_all("OK\n".as_bytes()).await?
+            }
+            "SET-CAPTURE" => {
+                buf_writer
+                    .write_all(set_capture(asm, vec_message[1]).await.as_bytes())
+                    .await?;
+                buf_writer.write_all("OK\n".as_bytes()).await?
+            }
+            "FLUSH-CAPTURE" => {
+                buf_writer
+                    .write_all(flush_capture(asm).await.as_bytes())
+                    .await?;
+                buf_writer.write_all("OK\n".as_bytes()).await?
+            }
+            "CLOSE-CAPTURE" => {
+                buf_writer
+                    .write_all(close_capture(asm).await.as_bytes())
+                    .await?;
+                buf_writer.write_all("OK\n".as_bytes()).await?
+            }
+            "ENABLE-IN-CAPTURE" => {
+                buf_writer
+                    .write_all(enable_in_capture(asm).await.as_bytes())
+                    .await?;
+                buf_writer.write_all("OK\n".as_bytes()).await?
+            }
+            "DISABLE-IN-CAPTURE" => {
+                buf_writer
+                    .write_all(disable_in_capture(asm).await.as_bytes())
+                    .await?;
+                buf_writer.write_all("OK\n".as_bytes()).await?
+            }
+            "ENABLE-OUT-CAPTURE" => {
+                buf_writer
+                    .write_all(enable_out_capture(asm).await.as_bytes())
+                    .await?;
+                buf_writer.write_all("OK\n".as_bytes()).await?
+            }
+            "DISABLE-OUT-CAPTURE" => {
+                buf_writer
+                    .write_all(disable_out_capture(asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
@@ -112,7 +156,7 @@ async fn echo(_asm: &Assembly<'_>) -> String {
 
 // TODO not sure if just printing is what we want this function to do
 async fn counters(asm: &Assembly<'_>) -> String {
-    let mut counts: String = "".to_string();
+    let mut counts: String = String::new();
     for (key, &ref value) in &asm.counters {
         let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
     }
@@ -235,7 +279,7 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     }
 
     // get values at 10, 25, 50, 75, 90 quantiles for each hist
-    let mut info: String = "".to_string();
+    let mut info: String = String::new();
 
     // Get info for inbound processor
     let _ = write!(
@@ -376,7 +420,7 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
     let ninety: u64 = hist.value_at_quantile(0.90);
     let mean: f64 = hist.mean();
 
-    let mut values: String = "".to_string();
+    let mut values: String = String::new();
 
     // Could be easily replaced with other data if need be
     let _ = write!(&mut values, "{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}, Mean: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units, mean, units);
@@ -403,4 +447,80 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
     let _ = write!(&mut values, "\n");
 
     values
+}
+
+async fn set_capture(asm: &Assembly<'_>, path_str: &str) -> String {
+    let path = Path::new(path_str);
+    asm.capture_worker.open_capture_file(path).await;
+    let mut message: String = String::new();
+    let _ = write!(&mut message, "Capture file opened at {}\n", path_str);
+
+    message
+}
+
+async fn flush_capture(asm: &Assembly<'_>) -> String {
+    let _ = asm.capture_worker.flush_capture_file().await;
+    let mut message: String = String::new();
+    let _ = write!(&mut message, "Capture file flushed\n");
+
+    message
+}
+
+async fn close_capture(asm: &Assembly<'_>) -> String {
+    asm.capture_worker.close_capture_file().await;
+    asm.flow_control.set_inbound(false);
+    asm.flow_control.set_outbound(false);
+
+    let mut message: String = String::new();
+    let _ = write!(&mut message, "Capture file closed\n");
+
+    message
+}
+
+// Could change this structure frmo enable/disable to toggle and/or
+// have the user provide truth value
+async fn enable_in_capture(asm: &Assembly<'_>) -> String {
+    let mut message: String = String::new();
+    if asm.capture_worker.query_savefile().await {
+        asm.flow_control.set_inbound(true);
+        let _ = write!(&mut message, "Inbound capture enabled\n");
+    } else {
+        let _ = write!(
+            &mut message,
+            "Inbound capture not enabled, no capture file\n"
+        );
+    }
+
+    message
+}
+
+async fn disable_in_capture(asm: &Assembly<'_>) -> String {
+    asm.flow_control.set_inbound(false);
+    let mut message: String = String::new();
+    let _ = write!(&mut message, "Inbound capture disabled\n");
+
+    message
+}
+
+async fn enable_out_capture(asm: &Assembly<'_>) -> String {
+    let mut message: String = String::new();
+    if asm.capture_worker.query_savefile().await {
+        asm.flow_control.set_outbound(true);
+        let _ = write!(&mut message, "Outbound capture enabled\n");
+    } else {
+        let _ = write!(
+            &mut message,
+            "Outbound capture not enabled, no capture file\n"
+        );
+    }
+
+    message
+}
+
+async fn disable_out_capture(asm: &Assembly<'_>) -> String {
+    asm.flow_control.set_inbound(false);
+    let mut message: String = String::new();
+    let _ = write!(&mut message, "Outbound capture disabled\n");
+
+    message
 }

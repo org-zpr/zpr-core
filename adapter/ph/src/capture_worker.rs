@@ -44,6 +44,10 @@ impl CaptureWorker {
     pub async fn close_capture_file(&self) {
         self.inner_cap.lock().await.savefile = None;
     }
+
+    pub async fn query_savefile(&self) -> bool {
+        self.inner_cap.lock().await.savefile.is_some()
+    }
 }
 
 #[derive(Copy, Clone)]
