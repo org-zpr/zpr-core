@@ -211,4 +211,3 @@ impl<'pktbuf> Capture<'pktbuf> {
         };
     }
 }
-
