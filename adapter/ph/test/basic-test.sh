@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 set -euo pipefail
 
-PH_BIN=$(realpath ../target/debug/ph-test)
+PH_BIN=$(realpath "$(dirname $0)/../target/debug/ph-test")
 
 ZPR_USER=$USER
 
@@ -101,11 +101,11 @@ function create_agent_key_and_cert() {
 }
 
 function ping_test() {
-  sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR"
-  sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR"
+  sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!
+  sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!
 
-  sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR6"
-  sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR6"
+  sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR6" & wait -f $!
+  sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR6" & wait -f $!
 }
 
 function check_carrier() {
