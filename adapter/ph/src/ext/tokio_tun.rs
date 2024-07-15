@@ -8,6 +8,7 @@ use std::io::Result;
 use std::os::fd::AsRawFd;
 use tokio_tun::*;
 
+// from /usr/include/linux/if_tun.h
 ioctl_write_ptr!(tun_set_carrier, b'T', 226, libc::c_int);
 
 pub trait TunExt {
@@ -22,7 +23,7 @@ pub async fn tun_recv_buf<B: buf::BufMut>(self_: &Tun, buf: &mut B) -> Result<us
     // SAFETY: we are only writing to this uninitialized slice
     let slice = unsafe { slice_assume_init_mut(uninit_slice.as_uninit_slice_mut()) };
     let size = self_.recv(slice).await?;
-    // SAFETY: we've now initialized this much of the slize
+    // SAFETY: we've now initialized this much of the slice
     unsafe {
         buf.advance_mut(size);
     }
@@ -35,7 +36,7 @@ impl TunExt for Tun {
         // SAFETY: we are only writing to this uninitialized slice
         let slice = unsafe { slice_assume_init_mut(uninit_slice.as_uninit_slice_mut()) };
         let size = self.try_recv(slice)?;
-        // SAFETY: we've now initialized this much of the slize
+        // SAFETY: we've now initialized this much of the slice
         unsafe {
             buf.advance_mut(size);
         }
