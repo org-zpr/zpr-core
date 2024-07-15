@@ -2,5 +2,5 @@
 pub enum PhMode {
     #[default]
     Client,
-    Server
+    Server,
 }

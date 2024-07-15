@@ -4,7 +4,6 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,9 +16,51 @@ jobs:
     - name: Build + test cd
       run: cd adapter/cd && make build && make test
 
+  cd-format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check format
+      run: cd adapter/cd && cargo fmt --check
+
+  cd-warnings:
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check warnings
+      run: cd adapter/cd && cargo rustc -- -D warnings
+
+  cd-test-warnings:
+      runs-on: ubuntu-latest
+      steps: 
+      - uses: actions/checkout@v4
+      - name: Check test warnings
+        run: cd adapter/cd && cargo rustc --tests -- -D warnings
+
   ph:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Build + test ph
-      run: cd adapter/ph && make build && make test
+      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && make build && make test
+
+  ph-format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check format
+      run: cd adapter/ph && cargo fmt --check
+
+  ph-warnings:
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check warnings
+      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc -- -D warnings
+
+  ph-test-warnings:
+      runs-on: ubuntu-latest
+      steps: 
+      - uses: actions/checkout@v4
+      - name: Check test warnings
+        run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc --tests -- -D warnings

@@ -1,6 +1,8 @@
+#[allow(unused_imports)]
 use crate::config;
 use crate::packet;
 use std::mem::size_of;
+#[allow(unused_imports)]
 use zerocopy::{ByteOrder, FromBytes, FromZeroes, NetworkEndian};
 use zerocopy_derive::{FromBytes, FromZeroes, KnownLayout, Unaligned};
 

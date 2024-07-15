@@ -1,51 +1,57 @@
-use core::future::Future;
-use std::io::IoSlice;
-use std::os::fd::{AsFd, AsRawFd};
-use tokio::io::unix::AsyncFd;
-use tokio::sync::mpsc;
-use crate::ext::tokio::io::unix::*;
 use crate::assembly::Assembly;
 use crate::InboundSendMessage;
+use std::future::Future;
+use std::io::IoSlice;
+use tokio::sync::mpsc;
+use tokio_tun::Tun;
 
 #[derive(Copy, Clone)]
 pub struct Config {
-    pub batch_size: usize
+    pub batch_size: usize,
 }
 
-async fn worker<'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
-    config: &Config, asm: &Assembly<'pktbuf>,
+async fn worker<'pktbuf>(
+    config: &Config,
+    asm: &Assembly<'pktbuf>,
     queue: &mut mpsc::Receiver<InboundSendMessage<'pktbuf>>,
-    tun_fd: &AsyncFd<Fd>
+    tun: &Tun,
 ) {
     let mut messages = Vec::new();
 
-    while let _count @ 1.. = queue.recv_many(&mut messages, config.batch_size).await {
+    while let count @ 1.. = queue.recv_many(&mut messages, config.batch_size).await {
         for msg in &messages {
             match msg {
-                InboundSendMessage::Packet(msg) => { async_fd_write_vectored(tun_fd, &[IoSlice::new(msg.body())]).await.unwrap(); },// TODO: error handling
-                InboundSendMessage::TestPacket(_msg) => { () }
+                InboundSendMessage::Packet(msg) => {
+                    tun.send_vectored(&[IoSlice::new(msg.body())])
+                        .await
+                        .unwrap();
+                } // TODO: error handling
+                InboundSendMessage::TestPacket(_msg) => (),
             };
         }
-        asm.buffer_stack.put_buffers(messages.drain(..).filter_map(|msg| 
-            match msg {
+        asm.buffer_stack
+            .put_buffers(messages.drain(..).filter_map(|msg| match msg {
                 InboundSendMessage::Packet(msg) => Some(msg.destroy()),
-                // acknowledge had to go here since it consumes the packet, it could not be in 
+                // acknowledge had to go here since it consumes the packet, it could not be in
                 // the previous match because the program still expected the packet to me in messages
-                InboundSendMessage::TestPacket(msg) => { msg.acknowledge(queue.len()); None }
-
-            }
-        ));
+                InboundSendMessage::TestPacket(msg) => {
+                    msg.acknowledge(queue.len(), count);
+                    None
+                }
+            }));
     }
 }
 
-pub fn launch<'pktbuf, AsmRef: 'pktbuf, AfdRef: 'pktbuf, Fd: AsFd + AsRawFd + Send + Sync>(
-    config: &Config, asm: AsmRef,
+pub fn launch<'pktbuf, AsmRef: 'pktbuf, TunRef: 'pktbuf>(
+    config: &Config,
+    asm: AsmRef,
     mut queue: mpsc::Receiver<InboundSendMessage<'pktbuf>>,
-    tun_fd: AfdRef
+    tun: TunRef,
 ) -> impl Future<Output = ()> + Send + 'pktbuf
-    where AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
-        AfdRef: std::ops::Deref<Target = AsyncFd<Fd>> + Send + Sync
+where
+    AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
+    TunRef: std::ops::Deref<Target = Tun> + Send + Sync,
 {
     let cfg = *config;
-    async move { worker(&cfg, &*asm, &mut queue, &*tun_fd).await }
+    async move { worker(&cfg, &*asm, &mut queue, &*tun).await }
 }
