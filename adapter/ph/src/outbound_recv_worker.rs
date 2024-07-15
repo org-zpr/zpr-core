@@ -1,4 +1,5 @@
 use crate::assembly::Assembly;
+use crate::counters_enum::CounterType;
 use crate::ext::tokio_tun::*;
 use crate::packet::Packet;
 use std::future::Future;
@@ -26,6 +27,7 @@ async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
         for buf in bufs.drain(..) {
             let mut pkt = Packet::new(buf, OUTBOUND_PACKET_HEADROOM);
             tun_recv_buf(tun, &mut pkt).await.unwrap();
+            asm.counters[CounterType::OutPacksRec].increment();
             asm.outbound_processor.enqueue_packet(pkt).await;
         }
     }

@@ -1,5 +1,6 @@
 use crate::assembly::Assembly;
 use crate::classifier::classify;
+use crate::counters_enum::CounterType;
 use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::queues::TryEnqueueError;
@@ -100,7 +101,7 @@ fn clone_cap_packs<'pktbuf>(
                         .try_enqueue_packet(pkt_clone, SystemTime::now())
                     {
                         // Checks to see if the packet enqueue was successful
-                        Ok(()) => (),
+                        Ok(()) => asm.counters[CounterType::InCapPacksWrite].increment(),
                         Err(TryEnqueueError::Full(ret_packet)) => {
                             let ret_buf = ret_packet.destroy();
                             asm.buffer_stack.put_buffer(ret_buf);
@@ -114,4 +115,8 @@ fn clone_cap_packs<'pktbuf>(
         }
     }
     asm.buffer_stack.put_buffers(bufs.into_iter());
+    asm.counters[CounterType::InCapPacksDrop].set(
+        asm.counters[CounterType::InPacksRec].get_count()
+            - asm.counters[CounterType::InCapPacksWrite].get_count(),
+    );
 }
