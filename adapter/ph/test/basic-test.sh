@@ -179,10 +179,10 @@ CHILDREN=(${CHILDREN[@]} "$!")
 # Wait for connectivity
 #
 
-echo -n "Wait for TUN carriers... "
-wait_for 5 check_carrier zpr-a tun0
-wait_for 5 check_carrier zpr-b tun0
-echo "done."
+echo "Wait for TUN carrier..."
+wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
+wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
+echo "Carrier has arrived."
 
 
 #
