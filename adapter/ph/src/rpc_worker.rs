@@ -56,13 +56,12 @@ async fn handle_connection(
     } else {
         // TODO remove \n from end of message?
         buf_writer.write("Message Received\n".as_bytes()).await?;
-
+        println!("str_message: {}", str_message);
         let vec_message: Vec<&str> = str_message.split_whitespace().collect();
 
         // TODO there must be a more efficient way to send the OK message, is match statement best suited?
         match vec_message[0] {
-            // changed to single word to allow for use of split by space, avoids unnecessary
-            // parsing when command is not PERF-SAMPLE
+            // To avoid excess parsing, the command must not have spaces
             "COUNTERS-RESET" => {
                 buf_writer
                     .write_all(counters_reset(asm).await.as_bytes())
@@ -88,6 +87,7 @@ async fn handle_connection(
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
+            // SET-CAPTURE <file_path>
             "SET-CAPTURE" => {
                 buf_writer
                     .write_all(set_capture(asm, vec_message[1]).await.as_bytes())
