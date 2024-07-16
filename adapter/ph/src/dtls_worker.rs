@@ -1,5 +1,6 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
+use crate::flow_control;
 use crate::packet::{self, Packet};
 use crate::udp_stream::UdpStream;
 use crate::OutboundSendMessage;
@@ -7,7 +8,6 @@ use std::future::Future;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio_openssl::SslStream;
-
 #[derive(Copy, Clone)]
 pub struct Config {
     pub inbound_batch_size: usize,
@@ -44,7 +44,7 @@ async fn worker<'pktbuf>(
                 // read & forward packets one at a time, no sense to batch really
                 // since neither `read_buf()` nor `enqueue()` support it
                 for buf in bufs.drain(..) {
-                    let mut pkt = Packet::new(buf, 0);
+                    let mut pkt = Packet::new(buf, flow_control::DIRECTION_HEADER_SIZE);
                     ssl_read.read_buf(&mut pkt).await.unwrap();
                     asm.counters[CounterType::InPacksRec].increment();
                     // NOTE: There is no way to detect a too-large packet.  See above.
