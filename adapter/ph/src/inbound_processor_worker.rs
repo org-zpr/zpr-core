@@ -89,7 +89,7 @@ fn clone_cap_packs<'pktbuf>(
 ) {
     let mut bufs = Vec::new();
     let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
-    let mut num_enqueued: usize = 0;
+    let mut num_enqueued: u64 = 0;
     for pkt in pkts {
         match pkt {
             // Splits between Packets and TestPackets
@@ -109,17 +109,15 @@ fn clone_cap_packs<'pktbuf>(
                         Err(TryEnqueueError::Full(ret_packet)) => {
                             let ret_buf = ret_packet.destroy();
                             asm.buffer_stack.put_buffer(ret_buf);
-                            break; //asm.counters[CounterType::InCapPacksDrop].increment();
+                            break;
                         }
                     };
                 }
-                None => break, //asm.counters[CounterType::InCapPacksDrop].increment(),
+                None => break,
             },
             InboundProcessorMessage::TestPacket(_) => (),
         }
     }
     asm.buffer_stack.put_buffers(bufs.into_iter());
-    for _ in 0..(pkts.len() - num_enqueued) {
-        asm.counters[CounterType::InCapPacksDrop].increment()
-    }
+    asm.counters[CounterType::InCapPacksDrop].increase_by(pkts.len() as u64 - num_enqueued)
 }
