@@ -149,10 +149,11 @@ impl<'buf> Packet<'buf> {
         assert!(headroom <= size_of_val(buf) - body.len() - PACKET_BUFFER_MIN_BODY_OFFSET);
         buf[..size_of::<PacketMetadata>()]
             .copy_from_slice(&self.buf[..size_of::<PacketMetadata>()]);
-        buf[PACKET_BUFFER_MIN_BODY_OFFSET + headroom
-            ..PACKET_BUFFER_MIN_BODY_OFFSET + headroom + body.len()]
-            .copy_from_slice(body);
-        Packet { buf }
+        let offset = PACKET_BUFFER_MIN_BODY_OFFSET + headroom;
+        buf[offset..offset + body.len()].copy_from_slice(body);
+        let mut pkt = Packet { buf };
+        pkt.metadata_mut().offset = offset;
+        pkt
     }
 
     // packet metadata

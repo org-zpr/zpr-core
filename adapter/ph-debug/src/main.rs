@@ -7,7 +7,6 @@ use clap::Parser;
 use std::io::prelude::*;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
-use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -131,7 +130,6 @@ fn handle_perf_sample(duration: u64, frequency: u64, port: String) -> std::io::R
 
 fn handle_set_capture(file_path: String, port: String) -> std::io::Result<()> {
     let command = "SET-CAPTURE".to_string() + " " + file_path.as_str() + "\n";
-    println!("{}", command);
     basic_call_response(command, port)?;
 
     Ok(())
@@ -144,7 +142,7 @@ fn capture_sequence(file_path: String, time: u64, port: String) -> std::io::Resu
     basic_call_response("ENABLE-OUT-CAPTURE\n".to_string(), port.clone())?;
     sleep(sleep_time); // TODO implement handling for Ctrl+C
                        // See 'signal handling' in the rust book, crate::ctrlc, crate::nix
-    basic_call_response("CLOSE-CAPTURE\n".to_string(), port.clone())?;
+    basic_call_response("CLOSE-CAPTURE\n".to_string(), port)?;
 
     Ok(())
 }

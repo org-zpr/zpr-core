@@ -71,7 +71,7 @@ fn clone_cap_packs<'pktbuf>(
             OutboundProcessorMessage::Packet(pkt) => match bufs.pop() {
                 // Ensures there's at least one buffer
                 Some(buf) => {
-                    let mut pkt_clone: Packet = pkt.clone_into_with_headroom(buf, 1);
+                    let mut pkt_clone: Packet = pkt.clone_into_with_headroom(buf, 8);
                     let dir: &mut u8 = pkt_clone.alloc_zeroed_header();
                     *dir = 1;
                     match asm.capture_queue.try_enqueue_packet(

@@ -56,7 +56,6 @@ async fn handle_connection(
     } else {
         // TODO remove \n from end of message?
         buf_writer.write("Message Received\n".as_bytes()).await?;
-        println!("str_message: {}", str_message);
         let vec_message: Vec<&str> = str_message.split_whitespace().collect();
 
         // TODO there must be a more efficient way to send the OK message, is match statement best suited?
