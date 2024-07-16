@@ -44,6 +44,7 @@ impl TunExt for Tun {
     }
 
     fn set_carrier(&self, carrier: bool) -> Result<()> {
+        // SAFETY: the temporary pointer is valid for the lifetime of the ioctl, which is sufficient
         unsafe { tun_set_carrier(self.as_raw_fd(), &carrier.into()) }?;
         Ok(())
     }
