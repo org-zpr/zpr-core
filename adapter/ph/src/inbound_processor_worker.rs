@@ -3,9 +3,10 @@ use crate::classifier::classify;
 use crate::counters_enum::CounterType;
 use crate::options::PhMode;
 use crate::packet::Packet;
-use crate::queues::TryEnqueueError;
+use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
 use crate::InboundProcessorMessage;
+// use crate::buffer_stack::BufferStack;
 use bytes::Buf;
 use std::future::Future;
 use std::time::SystemTime;
@@ -96,11 +97,14 @@ fn clone_cap_packs<'pktbuf>(
             InboundProcessorMessage::Packet(pkt) => match bufs.pop() {
                 // Ensures there's at least one buffer
                 Some(buf) => {
-                    let pkt_clone: Packet = pkt.clone_into(buf);
-                    match asm
-                        .capture_queue
-                        .try_enqueue_packet(pkt_clone, SystemTime::now())
-                    {
+                    let mut pkt_clone: Packet = pkt.clone_into_with_headroom(buf, 1);
+                    let dir: &mut u8 = pkt_clone.alloc_zeroed_header();
+                    *dir = 0;
+                    match asm.capture_queue.try_enqueue_packet(
+                        pkt_clone,
+                        SystemTime::now(),
+                        Direction::Inbound,
+                    ) {
                         // Checks to see if the packet enqueue was successful
                         Ok(()) => {
                             asm.counters[CounterType::InCapPacksWrite].increment();

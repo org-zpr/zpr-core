@@ -34,6 +34,7 @@ mod ext;
 mod flow_control;
 mod inbound_processor_worker;
 mod inbound_send_worker;
+mod net_defs;
 mod options;
 mod outbound_processor_worker;
 mod outbound_recv_worker;
@@ -41,6 +42,7 @@ mod packet;
 mod queues;
 mod rpc_worker;
 mod test_packet;
+mod tun_ctl;
 mod udp_stream;
 mod zdp;
 use assembly::Assembly;
@@ -134,22 +136,11 @@ fn main() -> ExitCode {
 
     let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
-    let capture_worker = CaptureWorker::new();
 
-    let counters = enum_map! { _ => Counter::new(), };
+    let capture_worker = CaptureWorker::new();
     let flow_control = FlowControl::new();
 
-    let asm = Box::leak(Box::new(Assembly {
-        buffer_stack,
-        inbound_processor,
-        inbound_send,
-        outbound_processor,
-        outbound_send,
-        capture_queue,
-        capture_worker,
-        flow_control,
-        counters,
-    }));
+    let counters = enum_map! { _ => Counter::new(), };
 
     let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
     ssl_context_builder.set_options(
@@ -184,6 +175,25 @@ fn main() -> ExitCode {
         .build()
         .unwrap()
         .block_on(async {
+            let tun_devs = TunBuilder::new()
+                .name(cmd_line.tun_if.unwrap_or(String::new()).as_str())
+                .try_build_mq(tun_queue_count)
+                .expect("unable to open TUN device")
+                .leak();
+
+            let asm = Box::leak(Box::new(Assembly {
+                buffer_stack,
+                inbound_processor,
+                inbound_send,
+                outbound_processor,
+                outbound_send,
+                capture_queue,
+                capture_worker,
+                flow_control,
+                counters,
+                tun_ctl: tun_ctl::TunCtl::new(&tun_devs[0]),
+            }));
+
             // TODO signal handler goes here
 
             fs::remove_file(&sock_path)
@@ -209,17 +219,13 @@ fn main() -> ExitCode {
                 loop {
                     tokio::select! {
                         _ = usr1_stream.recv() => emit_counts(&asm.counters),
-                        _ = term_stream.recv() => emit_counts(&asm.counters)
+                        _ = term_stream.recv() => {
+                            emit_counts(&asm.counters);
+                            std::process::exit(128 + SignalKind::terminate().as_raw_value())
+                        }
                     }
                 }
             });
-
-            let tun_devs = TunBuilder::new()
-                .name(cmd_line.tun_if.unwrap_or(String::new()).as_str())
-                .packet_info(false)
-                .try_build_mq(tun_queue_count)
-                .expect("unable to open TUN device")
-                .leak();
 
             js.spawn(inbound_processor_worker::launch(
                 &inbound_processor_worker::Config {
@@ -271,6 +277,7 @@ fn main() -> ExitCode {
 
             // TODO: initiate the DTLS connection asynchronously; for now, keep this at the end
             eprintln!("Connecting...");
+            asm.tun_ctl.set_carrier(false).unwrap();
             let socket = Box::leak(Box::new(
                 UdpSocket::bind(self_addr)
                     .await
@@ -293,6 +300,7 @@ fn main() -> ExitCode {
                     .expect("unable to establish DTLS connection"),
             }
             eprintln!("Connected!");
+            asm.tun_ctl.set_carrier(true).unwrap();
 
             js.spawn(dtls_worker::launch(
                 &dtls_worker::Config {

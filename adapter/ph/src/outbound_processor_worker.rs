@@ -1,7 +1,7 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
 use crate::packet::Packet;
-use crate::queues::TryEnqueueError;
+use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
 use crate::OutboundProcessorMessage;
 use core::future::Future;
@@ -73,11 +73,14 @@ fn clone_cap_packs<'pktbuf>(
             OutboundProcessorMessage::Packet(pkt) => match bufs.pop() {
                 // Ensures there's at least one buffer
                 Some(buf) => {
-                    let pkt_clone: Packet = pkt.clone_into(buf);
-                    match asm
-                        .capture_queue
-                        .try_enqueue_packet(pkt_clone, SystemTime::now())
-                    {
+                    let mut pkt_clone: Packet = pkt.clone_into_with_headroom(buf, 1);
+                    let dir: &mut u8 = pkt_clone.alloc_zeroed_header();
+                    *dir = 1;
+                    match asm.capture_queue.try_enqueue_packet(
+                        pkt_clone,
+                        SystemTime::now(),
+                        Direction::Outbound,
+                    ) {
                         // Checks to see if the packet enqueue was successful
                         Ok(()) => {
                             asm.counters[CounterType::OutCapPacksWrite].increment();

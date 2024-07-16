@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 use crate::config;
+use crate::net_defs::*;
 use crate::packet;
 use std::mem::size_of;
 #[allow(unused_imports)]
@@ -42,8 +43,8 @@ struct IPv6Header {
     pub payload_length: [u8; 2],
     pub next_header: u8,
     pub hop_limit: u8,
-    pub src_address: packet::IpAddress,
-    pub dst_address: packet::IpAddress,
+    pub src_address: IpAddress,
+    pub dst_address: IpAddress,
 }
 
 const NO_NEXT_HEADER: u8 = 59;
@@ -72,7 +73,7 @@ struct UDPHeader {
 }
 
 pub fn classify(packet: &mut packet::Packet) -> Result<ClassifierResult, &'static str> {
-    let (metadata, body) = packet.metadata_mut_and_body();
+    let (metadata, body) = packet.metadata_mut_and_body_mut();
     classify_zdp(metadata, body)
 }
 
@@ -118,8 +119,8 @@ fn classify_ipv4(
     }
 
     metadata.set_addresses(
-        packet::v4_to_v6_address(ipv4_header.src_address),
-        packet::v4_to_v6_address(ipv4_header.dst_address),
+        IpAddress::new_from_v4(ipv4_header.src_address),
+        IpAddress::new_from_v4(ipv4_header.dst_address),
     );
 
     const FRAGMENT_OFFSET_MASK: u16 = 0x1FFF;
@@ -298,8 +299,8 @@ mod tests {
         assert_eq!(ClassifierResult::NonIP, classify(&mut packet).unwrap());
 
         let metadata = packet.metadata();
-        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
-        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_protocol());
@@ -425,8 +426,8 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
-        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
-        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_protocol());
@@ -451,8 +452,8 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
-        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
-        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_protocol());
@@ -477,8 +478,8 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
-        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
-        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_protocol());
@@ -510,7 +511,7 @@ mod tests {
 
         let metadata = packet.metadata();
         assert_eq!(
-            packet::IpAddress {
+            IpAddress {
                 v6: [
                     0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x01
@@ -519,7 +520,7 @@ mod tests {
             metadata.get_src_address()
         );
         assert_eq!(
-            packet::IpAddress {
+            IpAddress {
                 v6: [
                     0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x01
@@ -564,7 +565,7 @@ mod tests {
 
         let metadata = packet.metadata();
         assert_eq!(
-            packet::IpAddress {
+            IpAddress {
                 v6: [
                     0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x11, 0x00, 0x00
@@ -573,7 +574,7 @@ mod tests {
             metadata.get_dst_address()
         );
         assert_eq!(
-            packet::IpAddress {
+            IpAddress {
                 v6: [
                     0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x10, 0x01
@@ -611,7 +612,7 @@ mod tests {
 
         let metadata = packet.metadata();
         assert_eq!(
-            packet::IpAddress {
+            IpAddress {
                 v6: [
                     0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x11, 0x00, 0x00
@@ -620,7 +621,7 @@ mod tests {
             metadata.get_dst_address()
         );
         assert_eq!(
-            packet::IpAddress {
+            IpAddress {
                 v6: [
                     0x26, 0x07, 0xf0, 0x10, 0x03, 0xf9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x10, 0x01
@@ -668,7 +669,7 @@ mod tests {
 
         let metadata = packet.metadata();
         assert_eq!(
-            packet::IpAddress {
+            IpAddress {
                 v6: [
                     0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x01
@@ -677,7 +678,7 @@ mod tests {
             metadata.get_dst_address()
         );
         assert_eq!(
-            packet::IpAddress {
+            IpAddress {
                 v6: [
                     0xfc, 0x00, 0x00, 0x42, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x02
@@ -717,7 +718,7 @@ mod tests {
 
         let metadata = packet.metadata();
         assert_eq!(
-            packet::IpAddress {
+            IpAddress {
                 v6: [
                     0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x01
@@ -726,7 +727,7 @@ mod tests {
             metadata.get_dst_address()
         );
         assert_eq!(
-            packet::IpAddress {
+            IpAddress {
                 v6: [
                     0xfc, 0x00, 0x00, 0x42, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x02
@@ -750,8 +751,8 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
-        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_src_address());
-        assert_eq!(packet::IpAddress::new_zeroed(), metadata.get_dst_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
+        assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u8, metadata.get_protocol());

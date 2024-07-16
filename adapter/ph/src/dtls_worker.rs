@@ -20,7 +20,7 @@ pub struct Config {
 // full record.  So to ensure correct behavior we must be prepared to accept
 // the maximum size record.
 const _: () = assert!(
-    packet::PACKET_BODY_BUFFER_MAX_SIZE >= 16384,
+    packet::PACKET_BUFFER_MAX_BODY_SIZE >= 16384,
     "packet buffers too small for OpenSSL DTLS"
 );
 
@@ -61,6 +61,7 @@ async fn worker<'pktbuf>(
                     match msg {
                         OutboundSendMessage::Packet(pkt) => {
                             ssl_write.write(pkt.body()).await.unwrap();  // TODO: error handling
+                            asm.counters[CounterType::OutPacksSent].increment();
                         },
 
                         OutboundSendMessage::TestPacket(_) => ()  /* handled below */
