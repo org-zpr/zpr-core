@@ -15,7 +15,7 @@ pub struct Config {
 const OUTBOUND_PACKET_HEADROOM: usize = 256;
 
 fn is_ip(pi: tun_pi::TunPi) -> bool {
-    pi.proto == net_defs::ETHERTYPE_IP || pi.proto == net_defs::ETHERTYPE_IPV6
+    pi.proto == net_defs::ethertype::IP || pi.proto == net_defs::ethertype::IPV6
 }
 
 async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
