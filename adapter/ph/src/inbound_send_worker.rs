@@ -1,12 +1,8 @@
 use crate::assembly::Assembly;
-<<<<<<< HEAD
 use crate::counters_enum::*;
 use crate::ext::tokio_tun::*;
 use crate::net_defs;
 use crate::queues::InboundSendMessage;
-=======
-use crate::InboundSendMessage;
->>>>>>> 54f0b6f (merge main into link layer branch (#205))
 use std::future::Future;
 use std::io::IoSlice;
 use tokio::sync::mpsc;

@@ -1,11 +1,7 @@
 use crate::assembly::Assembly;
-<<<<<<< HEAD
 use crate::counters_enum::*;
 use crate::ext::tokio_tun::*;
 use crate::net_defs;
-=======
-use crate::ext::tokio_tun::*;
->>>>>>> 54f0b6f (merge main into link layer branch (#205))
 use crate::packet::Packet;
 use std::future::Future;
 use tokio_tun::Tun;
@@ -18,13 +14,10 @@ pub struct Config {
 // How much space to leave for the ZDP headers.
 const OUTBOUND_PACKET_HEADROOM: usize = 256;
 
-<<<<<<< HEAD
 fn is_ip(pi: tun_pi::TunPi) -> bool {
     pi.proto == net_defs::ETHERTYPE_IP || pi.proto == net_defs::ETHERTYPE_IPV6
 }
 
-=======
->>>>>>> 54f0b6f (merge main into link layer branch (#205))
 async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
     let mut bufs = Vec::new();
 
