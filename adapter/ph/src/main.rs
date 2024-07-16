@@ -269,7 +269,7 @@ fn main() -> ExitCode {
                 &*asm,
                 cap_outq,
             ));
-            
+
             // TODO: initiate the DTLS connection asynchronously; for now, keep this at the end
             eprintln!("Connecting...");
             let socket = Box::leak(Box::new(
