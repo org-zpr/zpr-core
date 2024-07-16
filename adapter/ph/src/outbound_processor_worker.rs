@@ -66,6 +66,7 @@ fn clone_cap_packs<'pktbuf>(
 ) {
     let mut bufs = Vec::new();
     let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
+    let mut num_enqueued: usize = 0;
     for pkt in pkts {
         match pkt {
             // Splits between Packets and TestPackets
@@ -78,22 +79,24 @@ fn clone_cap_packs<'pktbuf>(
                         .try_enqueue_packet(pkt_clone, SystemTime::now())
                     {
                         // Checks to see if the packet enqueue was successful
-                        Ok(()) => asm.counters[CounterType::OutCapPacksWrite].increment(),
+                        Ok(()) => {
+                            asm.counters[CounterType::OutCapPacksWrite].increment();
+                            num_enqueued += 1;
+                        }
                         Err(TryEnqueueError::Full(ret_packet)) => {
                             let ret_buf = ret_packet.destroy();
                             asm.buffer_stack.put_buffer(ret_buf);
-                            break;
+                            break; //asm.counters[CounterType::OutCapPacksDrop].increment();
                         }
                     };
                 }
-                None => break,
+                None => break, //asm.counters[CounterType::OutCapPacksDrop].increment(),
             },
             OutboundProcessorMessage::TestPacket(_) => (),
         }
     }
     asm.buffer_stack.put_buffers(bufs.into_iter());
-    asm.counters[CounterType::OutCapPacksDrop].set(
-        asm.counters[CounterType::OutPacksRec].get_count()
-            - asm.counters[CounterType::OutCapPacksWrite].get_count(),
-    );
+    for _ in 0..(pkts.len() - num_enqueued) {
+        asm.counters[CounterType::OutCapPacksDrop].increment()
+    }
 }
