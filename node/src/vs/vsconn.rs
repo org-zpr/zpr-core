@@ -276,7 +276,7 @@ impl VSConn {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    match self.do_poll(&vsc) {
+                    match self.do_poll().await {
                         Ok((visas, revokes, more)) => {
                             poll_errors = 0;
                             if more {
@@ -349,21 +349,24 @@ impl VSConn {
         Ok(())
     }
 
-    // Blocking network call -- holds the state lock too.
-    fn do_poll(&self, vsc: &Box<dyn VSClientI>) -> Result<(Vec<Visa>, Vec<Revocation>, bool), Error> {
-        let state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
-        let apikey = match &state.api_key {
-            Some(k) => k,
-            None => {
-                return Err(Error::new(
-                    ErrorKind::Other,
-                    "VSConn::do_poll called but not initialized",
-                ));
-            }
-        };
 
-        // let vsc = (state.client_fac)(&state.service_addr);
-        match vsc.poll_vs(apikey) {
+    async fn do_poll(&self) -> Result<(Vec<Visa>, Vec<Revocation>, bool), Error> {
+        let vsc: Box<dyn VSClientI>;
+        let apikey: String;
+        {
+            let state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
+            vsc = (state.client_fac)(&state.service_addr);
+            apikey = match &state.api_key {
+                Some(k) => String::from(k),
+                None => {
+                    return Err(Error::new(
+                        ErrorKind::Other,
+                        "VSConn::do_poll called but not initialized",
+                    ));
+                }
+            };
+        }
+        match vsc.poll_vs(&apikey) {
             Ok(poll_resp) => {
                 let mut visas = Vec::<Visa>::new();
                 let mut revocations = Vec::<Revocation>::new();
