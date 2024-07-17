@@ -1,11 +1,15 @@
 use crate::assembly::Assembly;
 use crate::classifier::classify;
+use crate::counters_enum::CounterType;
 use crate::options::PhMode;
 use crate::packet::Packet;
+use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
 use crate::InboundProcessorMessage;
+// use crate::buffer_stack::BufferStack;
 use bytes::Buf;
 use std::future::Future;
+use std::time::SystemTime;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
 
@@ -23,6 +27,9 @@ async fn worker<'pktbuf>(
     let mut pkts = Vec::new();
 
     while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
+        if asm.flow_control.get_inbound() {
+            clone_cap_packs(asm, &pkts, count);
+        }
         for pkt in pkts.drain(..) {
             match pkt {
                 InboundProcessorMessage::Packet(pkt) => {
@@ -74,4 +81,47 @@ async fn handle_packets<'pktbuf>(
 
         packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
     }
+}
+
+fn clone_cap_packs<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    pkts: &Vec<InboundProcessorMessage<'pktbuf>>,
+    count: usize,
+) {
+    let mut bufs = Vec::new();
+    let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
+    let mut num_enqueued: u64 = 0;
+    for pkt in pkts {
+        match pkt {
+            // Splits between Packets and TestPackets
+            InboundProcessorMessage::Packet(pkt) => match bufs.pop() {
+                // Ensures there's at least one buffer
+                Some(buf) => {
+                    let mut pkt_clone: Packet = pkt.clone_into_with_headroom(buf, 1);
+                    let dir: &mut u8 = pkt_clone.alloc_zeroed_header();
+                    *dir = 0;
+                    match asm.capture_queue.try_enqueue_packet(
+                        pkt_clone,
+                        SystemTime::now(),
+                        Direction::Inbound,
+                    ) {
+                        // Checks to see if the packet enqueue was successful
+                        Ok(()) => {
+                            asm.counters[CounterType::InCapPacksWrite].increment();
+                            num_enqueued += 1;
+                        }
+                        Err(TryEnqueueError::Full(ret_packet)) => {
+                            let ret_buf = ret_packet.destroy();
+                            asm.buffer_stack.put_buffer(ret_buf);
+                            break;
+                        }
+                    };
+                }
+                None => break,
+            },
+            InboundProcessorMessage::TestPacket(_) => (),
+        }
+    }
+    asm.buffer_stack.put_buffers(bufs.into_iter());
+    asm.counters[CounterType::InCapPacksDrop].increase_by(pkts.len() as u64 - num_enqueued)
 }

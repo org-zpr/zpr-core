@@ -4,11 +4,9 @@
 // with a '-' on the command line
 
 use clap::Parser;
-use std::os::unix::net::UnixStream;
-// use std::fs;
-// use std::io::ErrorKind;
 use std::io::prelude::*;
 use std::net::Shutdown;
+use std::os::unix::net::UnixStream;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -22,14 +20,17 @@ struct Args {
     #[arg(short, long)]
     port: String,
 
-    #[arg(short, long, default_value_t = 2)]
+    #[arg(long, default_value_t = 2)]
     time: u64,
 
-    #[arg(short, long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1)]
     duration: u64,
 
-    #[arg(short, long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1)]
     frequency: u64,
+
+    #[arg(long, default_value = "cap_file.txt")]
+    file_path: String,
 }
 
 fn main() -> std::io::Result<()> {
@@ -44,6 +45,14 @@ fn main() -> std::io::Result<()> {
         "COUNTERS-RESET" => basic_call_response("COUNTERS-RESET\n".to_string(), port)?,
         "WATCH" => handle_watch(args.time, port)?,
         "PERF-SAMPLE" => handle_perf_sample(args.duration, args.frequency, port)?,
+        "SET-CAPTURE" => handle_set_capture(args.file_path, port)?,
+        "FLUSH-CAPTURE" => basic_call_response("FLUSH-CAPTURE\n".to_string(), port)?,
+        "CLOSE-CAPTURE" => basic_call_response("CLOSE-CAPTURE\n".to_string(), port)?,
+        "ENABLE-IN-CAPTURE" => basic_call_response("ENABLE-IN-CAPTURE\n".to_string(), port)?,
+        "DISABLE-IN-CAPTURE" => basic_call_response("DISABLE-IN-CAPTURE\n".to_string(), port)?,
+        "ENABLE-OUT-CAPTURE" => basic_call_response("ENABLE-OUT-CAPTURE\n".to_string(), port)?,
+        "DISABLE-OUT-CAPTURE" => basic_call_response("DISABLE-OUT-CAPTURE\n".to_string(), port)?,
+        "CAPTURE-SEQUENCE" => capture_sequence(args.file_path, args.time, port)?,
         _ => {
             eprintln!("Command '{command}' not recognized");
         }
@@ -115,6 +124,25 @@ fn handle_perf_sample(duration: u64, frequency: u64, port: String) -> std::io::R
         + frequency.to_string().as_str()
         + "\n";
     basic_call_response(command, port)?;
+
+    Ok(())
+}
+
+fn handle_set_capture(file_path: String, port: String) -> std::io::Result<()> {
+    let command = "SET-CAPTURE".to_string() + " " + file_path.as_str() + "\n";
+    basic_call_response(command, port)?;
+
+    Ok(())
+}
+
+fn capture_sequence(file_path: String, time: u64, port: String) -> std::io::Result<()> {
+    let sleep_time = Duration::new(time, 0);
+    handle_set_capture(file_path, port.clone())?;
+    basic_call_response("ENABLE-IN-CAPTURE\n".to_string(), port.clone())?;
+    basic_call_response("ENABLE-OUT-CAPTURE\n".to_string(), port.clone())?;
+    sleep(sleep_time); // TODO implement handling for Ctrl+C
+                       // See 'signal handling' in the rust book, crate::ctrlc, crate::nix
+    basic_call_response("CLOSE-CAPTURE\n".to_string(), port)?;
 
     Ok(())
 }

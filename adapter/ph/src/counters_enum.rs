@@ -9,6 +9,10 @@ pub enum CounterType {
     OutPacksRec,
     OutPacksDrop,
     OutPacksSent,
+    InCapPacksWrite,
+    OutCapPacksWrite,
+    InCapPacksDrop,
+    OutCapPacksDrop,
 }
 
 // pub fn new_counters_array() {
@@ -24,6 +28,10 @@ pub fn name_counters(count_num: CounterType) -> String {
         CounterType::OutPacksRec => s = "Outbound Packets Recieved",
         CounterType::OutPacksDrop => s = "Outbound Packets Dropped",
         CounterType::OutPacksSent => s = "Outbound Packets Sent",
+        CounterType::InCapPacksWrite => s = "Inbound Capture Packets Written",
+        CounterType::OutCapPacksWrite => s = "Outbound Capture Packets Written",
+        CounterType::InCapPacksDrop => s = "Inbound Capture Packets Dropped",
+        CounterType::OutCapPacksDrop => s = "Outbound Capture Packets Dropped",
     };
 
     s.to_string()

@@ -3,12 +3,10 @@ use crate::CapPacket;
 use core::future::Future;
 use libc::timeval;
 use pcap::{Capture, Dead, Error, Linktype, Packet, PacketHeader, Savefile};
+use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::sync::mpsc;
-
 use tokio::sync::Mutex;
-pub const USER0: i32 = 147;
-use std::path::Path;
 
 pub struct CaptureWorker {
     inner_cap: Mutex<InnerCap>,
@@ -24,7 +22,7 @@ impl CaptureWorker {
     pub fn new() -> Self {
         Self {
             inner_cap: InnerCap {
-                capture: Capture::dead(Linktype(USER0)).unwrap(), // not sure what Linktype this should be
+                capture: Capture::dead(Linktype::USER0).unwrap(), // not sure what Linktype this should be
                 savefile: None,
             }
             .into(),
@@ -45,6 +43,10 @@ impl CaptureWorker {
 
     pub async fn close_capture_file(&self) {
         self.inner_cap.lock().await.savefile = None;
+    }
+
+    pub async fn query_savefile(&self) -> bool {
+        self.inner_cap.lock().await.savefile.is_some()
     }
 }
 
@@ -89,7 +91,6 @@ where
     async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
-#[allow(dead_code)]
 fn savefile_write(cap_pack: &CapPacket, savefile: &mut Savefile) {
     let creation_time: Duration = cap_pack.timestamp.duration_since(UNIX_EPOCH).unwrap();
     let ts: timeval = timeval {
