@@ -28,22 +28,19 @@ struct Creds {
 impl Configuration {
     pub fn get_cert_path(&self) -> PathBuf {
         let base = Path::new(&self.base_path);
-        return base.join(&self.creds.certificate);        
+        base.join(&self.creds.certificate)
     }
 
     pub fn get_key_path(&self) -> PathBuf {
         let base = Path::new(&self.base_path);
-        return base.join(&self.creds.private_key);
+        base.join(&self.creds.private_key)
     }
 
     // Gets a copy of the claims
     pub fn get_claims(&self) -> HashMap<String, String> {
         let mut hmap: HashMap<String, String> = HashMap::new();
         for (k, v) in self.claims.iter() {
-            let vstr = match v.as_str().map(|s| String::from(s)) {
-                Some(s) => s,
-                None => String::from("")
-            };
+            let vstr = v.as_str().map(String::from).unwrap_or_default();
             hmap.insert(k.clone(), vstr);
         }
         hmap
@@ -51,7 +48,7 @@ impl Configuration {
 
     pub fn get_claim(&self, key: &str) -> Option<String> {
         match self.claims.get(key) {
-            Some(v) => v.as_str().map(|s| String::from(s)), // Double decode since v.as_str() from Table includes quotes.
+            Some(v) => v.as_str().map(String::from), // Double decode since v.as_str() from Table includes quotes.
             None => None,
         }
     }
@@ -168,7 +165,7 @@ mod test {
             [creds]
             certificate = "foo-cert.pem"
             private_key = "foo-key.pem"
-            
+
             [claims]
             "zpr.addr" = "fc00:3001::1"
             "x509.cn" = "node.zpr"
@@ -177,7 +174,7 @@ mod test {
         let tmpfile = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile.get_path());
         if let Err(e) = c {
-            panic!("failed to load configuration: {}", e);        
+            panic!("failed to load configuration: {}", e);
         }
         let c = c.unwrap();
         let claims = c.get_claims();

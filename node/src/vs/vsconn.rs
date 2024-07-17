@@ -283,10 +283,22 @@ impl VSConn {
                                 info!("VSConn::run poll signals there is more data ... ignoring for now");
                             }
                             for v in visas {
-                                let _ = output_tx.send(VSOutput::PushedVisa(v)).await;
+                                match output_tx.send(VSOutput::PushedVisa(v)).await {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        error!("VSConn::run failed to send pushed visa: {}, exiting poll loop", e);
+                                        return Err(Error::new(ErrorKind::Other, "VSConn::run failed to send pushed visa"));
+                                    }
+                                }
                             }
                             for r in revokes {
-                                let _ = output_tx.send(VSOutput::PushedRevocation(r)).await;
+                                match output_tx.send(VSOutput::PushedRevocation(r)).await {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        error!("VSConn::run failed to send pushed revocation: {}, exiting poll loop", e);
+                                        return Err(Error::new(ErrorKind::Other, "VSConn::run failed to send pushed revocation"));
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
@@ -373,13 +385,13 @@ impl VSConn {
                         });
                     }
                 }
-                return Ok((visas, revocations, more));
+                Ok((visas, revocations, more))
             }
             Err(e) => {
-                return Err(Error::new(
+                Err(Error::new(
                     ErrorKind::Other,
                     format!("VSConn::do_poll failed: {}", e),
-                ));
+                ))
             }
         }
     }
