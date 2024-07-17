@@ -1,7 +1,7 @@
 // config.rs - Config file format for the node
 
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -37,8 +37,8 @@ impl Configuration {
     }
 
     // Gets a copy of the claims
-    pub fn get_claims(&self) -> HashMap<String, String> {
-        let mut hmap: HashMap<String, String> = HashMap::new();
+    pub fn get_claims(&self) -> BTreeMap<String, String> {
+        let mut hmap: BTreeMap<String, String> = BTreeMap::new();
         for (k, v) in self.claims.iter() {
             let vstr = v.as_str().map(String::from).unwrap_or_default();
             hmap.insert(k.clone(), vstr);
@@ -47,18 +47,11 @@ impl Configuration {
     }
 
     pub fn get_claim(&self, key: &str) -> Option<String> {
-        match self.claims.get(key) {
-            Some(v) => v.as_str().map(String::from), // Double decode since v.as_str() from Table includes quotes.
-            None => None,
-        }
+        self.claims.get(key)?.as_str().map(String::from) // Double decode since v.as_str() from Table includes quotes.
     }
 
     pub fn get_node_addr(&self) -> IpAddr {
-        if let Some(a) = self.node_addr {
-            a
-        } else {
-            panic!("node address not set in Configuration"); // This fair since the address is required in load_configuration
-        }
+        self.node_addr.expect("node address not set in Configuration") // This fair panic since the address is required in load_configuration
     }
 }
 
