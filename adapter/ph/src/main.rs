@@ -16,7 +16,6 @@ use tokio_tun::TunBuilder;
 #[macro_use]
 extern crate arrayref;
 
-// TODO: make these all non-pub once everything is used
 mod assembly;
 mod buffer_stack;
 mod capture_worker;
@@ -24,21 +23,23 @@ mod classifier;
 mod config;
 mod counter;
 mod counters_enum;
-mod dtls_worker;
 mod ext;
 mod flow_control;
 mod inbound_processor_worker;
+mod inbound_recv_worker;
 mod inbound_send_worker;
 mod net_defs;
 mod options;
 mod outbound_processor_worker;
 mod outbound_recv_worker;
+mod outbound_send_worker;
 mod packet;
 mod queues;
 mod rpc_worker;
 mod test_packet;
 mod tun_ctl;
 mod zdp;
+
 use assembly::Assembly;
 use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
@@ -277,10 +278,17 @@ fn main() -> ExitCode {
             eprintln!("Connected!");  // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
 
-            js.spawn(dtls_worker::launch(
-                &dtls_worker::Config {
-                    inbound_batch_size: inbound_recv_batch_size,
-                    outbound_batch_size: outbound_send_batch_size,
+            js.spawn(inbound_recv_worker::launch(
+                &inbound_recv_worker::Config {
+                    batch_size: inbound_recv_batch_size,
+                },
+                &*asm,
+                &*socket,
+            ));
+
+            js.spawn(outbound_send_worker::launch(
+                &outbound_send_worker::Config {
+                    batch_size: outbound_send_batch_size,
                 },
                 &*asm,
                 &*socket,
