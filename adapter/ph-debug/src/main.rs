@@ -7,7 +7,6 @@ use clap::Parser;
 use std::io::prelude::*;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
-use std::path::Path;
 use std::thread::sleep;
 use std::time::Duration;
 
