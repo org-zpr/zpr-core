@@ -22,25 +22,23 @@ async fn worker<'a>(
         for msg in &msgs {
             match msg {
                 OutboundSendMessage::Packet(pkt) => {
-                    socket.send(pkt.body()).await.unwrap();  // TODO: error handling
+                    socket.send(pkt.body()).await.unwrap(); // TODO: error handling
                     asm.counters[CounterType::OutPacksSent].increment();
-                },
+                }
 
-                OutboundSendMessage::TestPacket(_) => ()  /* handled below */
+                OutboundSendMessage::TestPacket(_) => (), /* handled below */
             }
         }
 
-        asm.buffer_stack.put_buffers(msgs.drain(..).filter_map(
-                |msg|
-                    match msg {
-                        OutboundSendMessage::Packet(pkt) => Some(pkt.destroy()),
+        asm.buffer_stack
+            .put_buffers(msgs.drain(..).filter_map(|msg| match msg {
+                OutboundSendMessage::Packet(pkt) => Some(pkt.destroy()),
 
-                        OutboundSendMessage::TestPacket(pkt) => {
-                            pkt.acknowledge(outbound_queue.len(), count);
-                            None
-                        }
-                    }
-            ));
+                OutboundSendMessage::TestPacket(pkt) => {
+                    pkt.acknowledge(outbound_queue.len(), count);
+                    None
+                }
+            }));
     }
 }
 

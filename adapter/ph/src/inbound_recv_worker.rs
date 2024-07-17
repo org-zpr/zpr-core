@@ -10,16 +10,14 @@ pub struct Config {
     pub batch_size: usize,
 }
 
-async fn worker<'a>(
-    config: &Config,
-    asm: &Assembly<'a>,
-    socket: &UdpSocket,
-) {
+async fn worker<'a>(config: &Config, asm: &Assembly<'a>, socket: &UdpSocket) {
     let mut bufs = Vec::new();
 
     loop {
         // grab some buffers from the pool
-        asm.buffer_stack.get_buffers(config.batch_size, &mut bufs).await;
+        asm.buffer_stack
+            .get_buffers(config.batch_size, &mut bufs)
+            .await;
 
         // TODO: batch receive
         for buf in bufs.drain(..) {
@@ -30,7 +28,7 @@ async fn worker<'a>(
 
                     Err(err) => {
                         match err.kind() {
-                            ErrorKind::ConnectionRefused => (),  // FIXME: do something with this later...
+                            ErrorKind::ConnectionRefused => (), // FIXME: do something with this later...
                             _ => panic!("got socket error {}", err),
                         }
                         continue;

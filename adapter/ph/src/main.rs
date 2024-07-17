@@ -275,7 +275,7 @@ fn main() -> ExitCode {
                 .connect(peer_addr)
                 .await
                 .expect("unable to connect to peer addr");
-            eprintln!("Connected!");  // FIXME: it's a lie
+            eprintln!("Connected!"); // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
 
             js.spawn(inbound_recv_worker::launch(
