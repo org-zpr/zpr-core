@@ -1,4 +1,5 @@
 use crate::assembly::Assembly;
+use crate::test_packet::TestPacketMetrics;
 use core::future::Future;
 use hdrhistogram::Histogram;
 use std::f64::consts::SQRT_2;
@@ -12,6 +13,7 @@ use tokio::io::BufReader;
 use tokio::io::BufWriter;
 use tokio::net::UnixListener;
 use tokio::net::UnixStream;
+use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
 
@@ -191,227 +193,143 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
 
     send_interval.tick().await;
     let mut queue_num = 0;
+
+    // Enqueue test packets at the frequency desired by the user for the
+    // desired amount of time
     while begin_time.elapsed().as_secs() < send_duration.as_secs() {
         if queue_num == (asm.inbound_send.fanout()) {
             queue_num = 0;
         }
 
         let in_processor = asm.inbound_processor.enqueue_test_packet().await;
-        let _ = inbound_processor_duration.record(
-            in_processor
-                .as_ref()
-                .unwrap()
-                .in_queue
-                .as_nanos()
-                .try_into()
-                .unwrap(),
-        );
-        let _ = inbound_processor_depth.record(
-            in_processor
-                .as_ref()
-                .unwrap()
-                .queue_depth
-                .try_into()
-                .unwrap(),
-        );
-        let _ = inbound_processor_batch.record(
-            in_processor
-                .as_ref()
-                .unwrap()
-                .batch_size
-                .try_into()
-                .unwrap(),
+        record_metrics(
+            in_processor,
+            &mut inbound_processor_duration,
+            &mut inbound_processor_depth,
+            &mut inbound_processor_batch,
         );
 
         let in_send = asm.inbound_send.enqueue_test_packet(queue_num).await;
-        let _ = inbound_send_duration.record(
-            in_send
-                .as_ref()
-                .unwrap()
-                .in_queue
-                .as_nanos()
-                .try_into()
-                .unwrap(),
+        record_metrics(
+            in_send,
+            &mut inbound_send_duration,
+            &mut inbound_send_depth,
+            &mut inbound_send_batch,
         );
-        let _ =
-            inbound_send_depth.record(in_send.as_ref().unwrap().queue_depth.try_into().unwrap());
-
-        let _ = inbound_send_batch.record(in_send.as_ref().unwrap().batch_size.try_into().unwrap());
 
         let out_processor = asm.outbound_processor.enqueue_test_packet().await;
-        let _ = outbound_processor_duration.record(
-            out_processor
-                .as_ref()
-                .unwrap()
-                .in_queue
-                .as_nanos()
-                .try_into()
-                .unwrap(),
+        record_metrics(
+            out_processor,
+            &mut outbound_processor_duration,
+            &mut outbound_processor_depth,
+            &mut outbound_processor_batch,
         );
-        let _ = outbound_processor_depth.record(
-            out_processor
-                .as_ref()
-                .unwrap()
-                .queue_depth
-                .try_into()
-                .unwrap(),
-        );
-        let _ =
-            outbound_processor_batch.record(out_processor.unwrap().queue_depth.try_into().unwrap());
 
         let out_send = asm.outbound_send.enqueue_test_packet().await;
-        let _ = outbound_send_duration.record(
-            out_send
-                .as_ref()
-                .unwrap()
-                .in_queue
-                .as_nanos()
-                .try_into()
-                .unwrap(),
+        record_metrics(
+            out_send,
+            &mut outbound_send_duration,
+            &mut outbound_send_depth,
+            &mut outbound_send_batch,
         );
-        let _ =
-            outbound_send_depth.record(out_send.as_ref().unwrap().queue_depth.try_into().unwrap());
-        let _ = outbound_send_batch.record(out_send.unwrap().batch_size.try_into().unwrap());
 
         send_interval.tick().await;
         queue_num += 1;
     }
 
-    // get values at 10, 25, 50, 75, 90 quantiles for each hist
+    // Get values at 10, 25, 50, 75, 90 quantiles for each hist as well as the mean
+    let in_processor = three_hists_values(
+        "Inbound Processor",
+        &inbound_processor_duration,
+        &inbound_processor_depth,
+        &inbound_processor_batch,
+    );
+    let in_send = three_hists_values(
+        "Inbound Send",
+        &inbound_send_duration,
+        &inbound_send_depth,
+        &inbound_send_batch,
+    );
+    let out_processor = three_hists_values(
+        "Outbound Processor",
+        &outbound_processor_duration,
+        &outbound_processor_depth,
+        &outbound_processor_batch,
+    );
+    let out_send = three_hists_values(
+        "Outbound Send",
+        &outbound_send_duration,
+        &outbound_send_depth,
+        &outbound_send_batch,
+    );
+
     let mut info: String = String::new();
-
-    // Get info for inbound processor
     let _ = write!(
         &mut info,
-        "{}",
-        values_from_hist(
-            "Inbound Processor Duration",
-            "ns",
-            inbound_processor_duration.clone()
-        )
-        .as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Inbound Processor Depth",
-            " packets",
-            inbound_processor_depth.clone()
-        )
-        .as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Inbound Processor Batch",
-            " packets",
-            inbound_processor_batch.clone()
-        )
-        .as_str()
-    );
-    let inbound_pro_mean: u64 =
-        (inbound_processor_duration.mean() / (1.0 + inbound_processor_depth.mean())) as u64;
-    let _ = write!(&mut info, "Approx packet time: {inbound_pro_mean}ns\n\n\n");
-
-    // Get info for inbound send
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist("Inbound Send Duration", "ns", inbound_send_duration.clone()).as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist("Inbound Send Depth", " packets", inbound_send_depth.clone()).as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist("Inbound Send Batch", " packets", inbound_send_batch.clone()).as_str()
-    );
-    let inbound_send_mean: u64 =
-        (inbound_send_duration.mean() / (1.0 + inbound_send_depth.mean())) as u64;
-    let _ = write!(&mut info, "Approx packet time: {inbound_send_mean}ns\n\n\n");
-
-    // Get info for outbound processor
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Processor Duration",
-            "ns",
-            outbound_processor_duration.clone()
-        )
-        .as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Processor Depth",
-            " packets",
-            outbound_processor_depth.clone()
-        )
-        .as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Processor Batch",
-            " packets",
-            outbound_processor_batch.clone()
-        )
-        .as_str()
-    );
-    let outbound_pro_mean: u64 =
-        (outbound_processor_duration.mean() / (1.0 + outbound_processor_depth.mean())) as u64;
-    let _ = write!(&mut info, "Approx packet time: {outbound_pro_mean}ns\n\n\n");
-
-    // Get info for outbound send
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Send Duration",
-            "ns",
-            outbound_send_duration.clone()
-        )
-        .as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Send Depth",
-            " packets",
-            outbound_send_depth.clone()
-        )
-        .as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Send Batch",
-            " packets",
-            outbound_send_batch.clone()
-        )
-        .as_str()
-    );
-    let outbound_send_mean: u64 =
-        (outbound_send_duration.mean() / (1.0 + outbound_send_depth.mean())) as u64;
-    let _ = write!(
-        &mut info,
-        "Approx packet time: {outbound_send_mean}ns\n\n\n"
+        "{in_processor}{in_send}{out_processor}{out_send}"
     );
 
     info
 }
 
-fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> String {
+// Records the metrics from a single test packet to the trio of histograms
+// tracking the data from the queue that particular test packet was enqueued on
+fn record_metrics(
+    metrics: Result<TestPacketMetrics, RecvError>,
+    hist_dur: &mut Histogram<u64>,
+    hist_dep: &mut Histogram<u64>,
+    hist_batch: &mut Histogram<u64>,
+) {
+    let _ = hist_dur.record(
+        metrics
+            .as_ref()
+            .unwrap()
+            .in_queue
+            .as_nanos()
+            .try_into()
+            .unwrap(),
+    );
+    let _ = hist_dep.record(metrics.as_ref().unwrap().queue_depth.try_into().unwrap());
+    let _ = hist_batch.record(metrics.as_ref().unwrap().batch_size.try_into().unwrap());
+}
+
+// Gets the values from the trio of histograms for each queue
+fn three_hists_values(
+    hist_name: &str,
+    hist_dur: &Histogram<u64>,
+    hist_dep: &Histogram<u64>,
+    hist_batch: &Histogram<u64>,
+) -> String {
+    let mut info = String::new();
+
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist(
+            &format!("{hist_name} Duration"), // TODO could use en enum and a display to do this
+            "ns",
+            hist_dur
+        )
+        .as_str()
+    );
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist(&format!("{hist_name} Depth"), " packets", hist_dep).as_str()
+    );
+    let _ = write!(
+        &mut info,
+        "{}",
+        values_from_hist(&format!("{hist_name} Batch"), " packets", hist_batch).as_str()
+    );
+    let mean: u64 = (hist_dur.mean() / (1.0 + hist_dep.mean())) as u64;
+    let _ = write!(&mut info, "{hist_name} approx packet time: {mean}ns\n\n\n");
+
+    info
+}
+
+// Gets the data from a single histogram
+fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> String {
     let ten: u64 = hist.value_at_quantile(0.10);
     let twenty_five: u64 = hist.value_at_quantile(0.25);
     let fifty: u64 = hist.value_at_quantile(0.50);
