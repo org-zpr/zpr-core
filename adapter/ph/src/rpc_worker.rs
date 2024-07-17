@@ -272,6 +272,7 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     info
 }
 
+// Helper for perf_sample
 // Records the metrics from a single test packet to the trio of histograms
 // tracking the data from the queue that particular test packet was enqueued on
 fn record_metrics(
@@ -293,6 +294,7 @@ fn record_metrics(
     let _ = hist_batch.record(metrics.as_ref().unwrap().batch_size.try_into().unwrap());
 }
 
+// Helper for perf_sample
 // Gets the values from the trio of histograms for each queue
 fn three_hists_values(
     hist_name: &str,
@@ -306,7 +308,7 @@ fn three_hists_values(
         &mut info,
         "{}",
         values_from_hist(
-            &format!("{hist_name} Duration"), // TODO could use en enum and a display to do this
+            &format!("{hist_name} Duration"), // TODO could use en enum and a display to get the name
             "ns",
             hist_dur
         )
@@ -328,6 +330,7 @@ fn three_hists_values(
     info
 }
 
+// Helper for perf_sample
 // Gets the data from a single histogram
 fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> String {
     let ten: u64 = hist.value_at_quantile(0.10);
