@@ -1,12 +1,11 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
 use crate::packet::{self, Packet};
-use crate::udp_stream::UdpStream;
 use crate::OutboundSendMessage;
 use std::future::Future;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::io::ErrorKind;
+use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
-use tokio_openssl::SslStream;
 
 #[derive(Copy, Clone)]
 pub struct Config {
@@ -25,14 +24,12 @@ const _: () = assert!(
 );
 
 #[allow(unreachable_code)]
-async fn worker<'pktbuf>(
+async fn worker<'a>(
     config: &Config,
-    asm: &Assembly<'pktbuf>,
-    ssl_stream: &mut SslStream<UdpStream<'_>>,
-    outbound_queue: &mut mpsc::Receiver<OutboundSendMessage<'pktbuf>>,
+    asm: &Assembly<'a>,
+    socket: &UdpSocket,
+    outbound_queue: &mut mpsc::Receiver<OutboundSendMessage<'a>>,
 ) {
-    let (mut ssl_read, mut ssl_write) = tokio::io::split(ssl_stream);
-
     tokio::join! {
         async {
             let mut bufs = Vec::new();
@@ -41,14 +38,27 @@ async fn worker<'pktbuf>(
                 // grab some buffers from the pool
                 asm.buffer_stack.get_buffers(config.inbound_batch_size, &mut bufs).await;
 
-                // read & forward packets one at a time, no sense to batch really
-                // since neither `read_buf()` nor `enqueue()` support it
+                // TODO: batch receive
                 for buf in bufs.drain(..) {
                     let mut pkt = Packet::new(buf, 0);
-                    ssl_read.read_buf(&mut pkt).await.unwrap();
-                    asm.counters[CounterType::InPacksRec].increment();
-                    // NOTE: There is no way to detect a too-large packet.  See above.
-                    asm.inbound_processor.enqueue_packet(pkt).await;
+                    loop {
+                        match socket.recv_buf(&mut pkt).await {
+                            Ok(_) => (),
+
+                            Err(err) => {
+                                match err.kind() {
+                                    ErrorKind::ConnectionRefused => (),  // FIXME: do something with this later...
+                                    _ => panic!("got socket error {}", err),
+                                }
+                                continue;
+                            }
+                        }
+
+                        asm.counters[CounterType::InPacksRec].increment();
+                        // FIXME: Detect a too-large packet.
+                        asm.inbound_processor.enqueue_packet(pkt).await;
+                        break;
+                    }
                 }
             }
         },
@@ -60,7 +70,7 @@ async fn worker<'pktbuf>(
                 for msg in &msgs {
                     match msg {
                         OutboundSendMessage::Packet(pkt) => {
-                            ssl_write.write(pkt.body()).await.unwrap();  // TODO: error handling
+                            socket.send(pkt.body()).await.unwrap();  // TODO: error handling
                             asm.counters[CounterType::OutPacksSent].increment();
                         },
 
@@ -84,15 +94,16 @@ async fn worker<'pktbuf>(
     };
 }
 
-pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
+pub fn launch<'a, AsmRef: 'a, SocketRef: 'a>(
     config: &Config,
     asm: AsmRef,
-    mut ssl_stream: SslStream<UdpStream<'pktbuf>>,
-    mut outbound_queue: mpsc::Receiver<OutboundSendMessage<'pktbuf>>,
-) -> impl Future<Output = ()> + Send + 'pktbuf
+    socket: SocketRef,
+    mut outbound_queue: mpsc::Receiver<OutboundSendMessage<'a>>,
+) -> impl Future<Output = ()> + Send + 'a
 where
-    AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
+    AsmRef: std::ops::Deref<Target = Assembly<'a>> + Send + Sync,
+    SocketRef: std::ops::Deref<Target = UdpSocket> + Send + Sync,
 {
     let cfg = *config;
-    async move { worker(&cfg, &*asm, &mut ssl_stream, &mut outbound_queue).await }
+    async move { worker(&cfg, &*asm, &*socket, &mut outbound_queue).await }
 }

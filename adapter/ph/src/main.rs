@@ -1,14 +1,9 @@
 #![cfg_attr(feature = "ci", deny(warnings))]
 use clap::Parser;
 use enum_map::{enum_map, EnumMap};
-use openssl::ssl;
-use openssl::x509::X509;
 use std::fs;
-use std::fs::File;
 use std::io::ErrorKind;
-use std::io::Read;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::process::ExitCode;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
@@ -43,7 +38,6 @@ mod queues;
 mod rpc_worker;
 mod test_packet;
 mod tun_ctl;
-mod udp_stream;
 mod zdp;
 use assembly::Assembly;
 use buffer_stack::BufferStack;
@@ -94,9 +88,9 @@ fn main() -> ExitCode {
     let sock_path = cmd_line.control_path;
     let peer_addr = cmd_line.dock_addr;
     let self_addr = cmd_line.self_addr;
-    let ca_file = cmd_line.ca_file;
-    let cert_file = cmd_line.certificate_file;
-    let priv_key_file = cmd_line.private_key_file;
+    let _ca_file = cmd_line.ca_file;
+    let _cert_file = cmd_line.certificate_file;
+    let _priv_key_file = cmd_line.private_key_file;
 
     // TODO: These batch sizes are placeholders for now.  So are the queue
     // sizes below which are all just double the batch size.  Performance
@@ -142,7 +136,7 @@ fn main() -> ExitCode {
 
     let counters = enum_map! { _ => Counter::new(), };
 
-    let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
+    /*let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
     ssl_context_builder.set_options(
         ssl::SslOptions::NO_COMPRESSION
             | (ssl::SslOptions::NO_SSL_MASK & !ssl::SslOptions::NO_DTLSV1_2),
@@ -162,13 +156,7 @@ fn main() -> ExitCode {
     open_ca.read_to_end(&mut buffer).unwrap();
     ssl_context_builder
         .add_client_ca(&X509::from_pem(&buffer).unwrap())
-        .unwrap();
-
-    let ssl_context = Box::leak(Box::new(ssl_context_builder.build()));
-    // FIXME: "OpenSSL’s default configuration is insecure.  It is highly
-    // recommended to use SslConnector rather than Ssl directly, as it
-    // manages that configuration."
-    let ssl = ssl::Ssl::new(&ssl_context).unwrap();
+        .unwrap();*/
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -275,7 +263,6 @@ fn main() -> ExitCode {
                 cap_outq,
             ));
 
-            // TODO: initiate the DTLS connection asynchronously; for now, keep this at the end
             eprintln!("Connecting...");
             asm.tun_ctl.set_carrier(false).unwrap();
             let socket = Box::leak(Box::new(
@@ -287,19 +274,7 @@ fn main() -> ExitCode {
                 .connect(peer_addr)
                 .await
                 .expect("unable to connect to peer addr");
-            let mut ssl_stream =
-                tokio_openssl::SslStream::new(ssl, udp_stream::UdpStream::new(socket)).unwrap();
-            match cmd_line.mode {
-                PhMode::Client => Pin::new(&mut ssl_stream)
-                    .connect()
-                    .await
-                    .expect("unable to establish DTLS connection"),
-                PhMode::Server => Pin::new(&mut ssl_stream)
-                    .accept()
-                    .await
-                    .expect("unable to establish DTLS connection"),
-            }
-            eprintln!("Connected!");
+            eprintln!("Connected!");  // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
 
             js.spawn(dtls_worker::launch(
@@ -308,7 +283,7 @@ fn main() -> ExitCode {
                     outbound_batch_size: outbound_send_batch_size,
                 },
                 &*asm,
-                ssl_stream,
+                &*socket,
                 os_outq,
             ));
 
