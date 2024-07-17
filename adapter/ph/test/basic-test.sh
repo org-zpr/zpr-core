@@ -158,7 +158,7 @@ create_agent_key_and_cert ca client
 # Launch PHs
 #
 
-sudo ip netns exec zpr-a sudo -u "$ZPR_USER" "$PH_BIN" \
+sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --mode=server --control-path server.sock \
   --self-addr "$A_HOST_ADDR":12345 --dock-addr "$B_HOST_ADDR":12345 \
   --ca-file ca.crt --certificate-file server.crt --private-key-file server.key \
@@ -167,7 +167,7 @@ CHILDREN=(${CHILDREN[@]} "$!")
 
 sleep 1  # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well
 
-sudo ip netns exec zpr-b sudo -u "$ZPR_USER" "$PH_BIN" \
+sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --mode=client --control-path client.sock \
   --self-addr "$B_HOST_ADDR":12345 --dock-addr "$A_HOST_ADDR":12345 \
   --ca-file ca.crt --certificate-file client.crt --private-key-file client.key \
