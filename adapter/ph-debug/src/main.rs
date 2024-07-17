@@ -4,7 +4,6 @@
 // with a '-' on the command line
 
 use clap::Parser;
-use std::fmt::Write as _;
 use std::io::prelude::*;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
@@ -115,8 +114,7 @@ fn handle_watch(time: u64, port: &str) -> std::io::Result<()> {
 }
 
 fn handle_perf_sample(duration: u64, frequency: u64, port: &str) -> std::io::Result<()> {
-    let mut command: String = String::new();
-    let _ = write!(&mut command, "PERF-SAMPLE {} {}\n", duration, frequency);
+    let command = format!("PERF-SAMPLE {} {}\n", duration, frequency);
 
     basic_call_response(&command, port)?;
 
@@ -124,8 +122,7 @@ fn handle_perf_sample(duration: u64, frequency: u64, port: &str) -> std::io::Res
 }
 
 fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
-    let mut command: String = String::new();
-    let _ = write!(&mut command, "SET-CAPTURE {}\n", file_path);
+    let command = format!("SET-CAPTURE {}\n", file_path);
 
     basic_call_response(&command, port)?;
 
