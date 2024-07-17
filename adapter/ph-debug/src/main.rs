@@ -31,6 +31,9 @@ struct Args {
 
     #[arg(long, default_value = "cap_file.txt")]
     file_path: String,
+
+    #[arg(long)]
+    program: Option<String>,
 }
 
 fn main() -> std::io::Result<()> {
@@ -48,11 +51,11 @@ fn main() -> std::io::Result<()> {
         "SET-CAPTURE" => handle_set_capture(args.file_path, port)?,
         "FLUSH-CAPTURE" => basic_call_response("FLUSH-CAPTURE\n".to_string(), port)?,
         "CLOSE-CAPTURE" => basic_call_response("CLOSE-CAPTURE\n".to_string(), port)?,
-        "ENABLE-IN-CAPTURE" => basic_call_response("ENABLE-IN-CAPTURE\n".to_string(), port)?,
-        "DISABLE-IN-CAPTURE" => basic_call_response("DISABLE-IN-CAPTURE\n".to_string(), port)?,
-        "ENABLE-OUT-CAPTURE" => basic_call_response("ENABLE-OUT-CAPTURE\n".to_string(), port)?,
-        "DISABLE-OUT-CAPTURE" => basic_call_response("DISABLE-OUT-CAPTURE\n".to_string(), port)?,
-        "CAPTURE-SEQUENCE" => capture_sequence(args.file_path, args.time, port)?,
+        "SET-PROGRAM" => handle_set_program(args.program, port)?,
+        "DELETE-PROGRAM" => basic_call_response("DELETE-PROGRAM\n".to_string(), port)?,
+        "CAPTURE-SEQUENCE" => {
+            handle_capture_sequence(args.file_path, args.time, args.program, port)?
+        }
         _ => {
             eprintln!("Command '{command}' not recognized");
         }
@@ -136,14 +139,30 @@ fn handle_set_capture(file_path: String, port: String) -> std::io::Result<()> {
     Ok(())
 }
 
-fn capture_sequence(file_path: String, time: u64, port: String) -> std::io::Result<()> {
+fn handle_capture_sequence(
+    file_path: String,
+    time: u64,
+    program: Option<String>,
+    port: String,
+) -> std::io::Result<()> {
     let sleep_time = Duration::new(time, 0);
     handle_set_capture(file_path, port.clone())?;
-    basic_call_response("ENABLE-IN-CAPTURE\n".to_string(), port.clone())?;
-    basic_call_response("ENABLE-OUT-CAPTURE\n".to_string(), port.clone())?;
+    handle_set_program(program, port.clone())?;
     sleep(sleep_time); // TODO implement handling for Ctrl+C
                        // See 'signal handling' in the rust book, crate::ctrlc, crate::nix
     basic_call_response("CLOSE-CAPTURE\n".to_string(), port.clone())?;
+
+    Ok(())
+}
+
+fn handle_set_program(program: Option<String>, port: String) -> std::io::Result<()> {
+    match program {
+        Some(program) => {
+            let command = "SET-PROGRAM".to_string() + " " + program.as_str() + "\n";
+            basic_call_response(command, port)?;
+        }
+        None => (),
+    };
 
     Ok(())
 }
