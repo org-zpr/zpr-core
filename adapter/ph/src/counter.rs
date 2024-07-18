@@ -15,13 +15,13 @@ impl Counter {
     }
 
     pub(crate) fn reset(&self) {
-        self.number.store(0, Ordering::Relaxed); // TODO ordering type
+        self.number.store(0, Ordering::Relaxed);
     }
 
     pub(crate) fn set(&self, value: u64) {
-        self.number.store(value, Ordering::Relaxed); // TODO ordering type
+        self.number.store(value, Ordering::Relaxed);
     }
-
+    
     pub(crate) fn increment(&self) {
         self.number.fetch_add(1, Ordering::Relaxed);
     }
@@ -39,15 +39,12 @@ impl Counter {
     }
 
     pub(crate) fn get_count(&self) -> u64 {
-        self.number.load(Ordering::Relaxed) // TODO look for more elegant way to get value
-                                            // all the Atomic methods (that I could find) that get type are either
-                                            // mutable or "consume" the atomic value, which the compiler
-                                            // gets mad at
+        self.number.load(Ordering::Relaxed) 
     }
 
     pub(crate) fn print(&self) {
         let count = self.number.load(Ordering::Relaxed);
-        println!("count: {count}") //TODO change message and is println necessary?
+        println!("count: {count}")
     }
 }
 

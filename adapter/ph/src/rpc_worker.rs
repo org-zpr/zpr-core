@@ -57,11 +57,9 @@ async fn handle_connection(
         // close stream then skip the rest of the loop and moves to next iteration
         buf_writer.shutdown().await?;
     } else {
-        // TODO remove \n from end of message?
         buf_writer.write("Message Received\n".as_bytes()).await?;
         let vec_message: Vec<&str> = str_message.split_whitespace().collect();
 
-        // TODO there must be a more efficient way to send the OK message, is match statement best suited?
         match vec_message[0] {
             // To avoid excess parsing, the command must not have spaces
             "COUNTERS-RESET" => {
@@ -108,6 +106,7 @@ async fn handle_connection(
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
+            // SET-CAPTURE-PROGRAM <program>
             "SET-CAPTURE-PROGRAM" => {
                 buf_writer
                     .write_all(set_capture_program(asm, str_message).await.as_bytes())
@@ -144,7 +143,6 @@ async fn echo(_asm: &Assembly<'_>) -> String {
     String::from("echo\n")
 }
 
-// TODO not sure if just printing is what we want this function to do
 async fn counters(asm: &Assembly<'_>) -> String {
     let mut counts: String = String::new();
     for (key, &ref value) in &asm.counters {
@@ -364,8 +362,7 @@ async fn flush_capture(asm: &Assembly<'_>) -> String {
 
 async fn close_capture(asm: &Assembly<'_>) -> String {
     asm.capture_worker.close_capture_file().await;
-    asm.flow_control.set_inbound(false);
-    asm.flow_control.set_outbound(false);
+    asm.flow_control.delete_program().await;
 
     String::from("Capture file closed\n")
 }

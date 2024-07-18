@@ -23,6 +23,7 @@ impl TestPacket {
         (t_pkt, receiver)
     }
 
+    // Sends metrics of the TestPacket to the associated reciever
     pub fn acknowledge(self, queue_depth: usize, batch_size: usize) {
         let curr_time = Instant::now();
         let in_queue = curr_time.duration_since(self.time);
