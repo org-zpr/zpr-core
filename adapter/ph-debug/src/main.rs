@@ -20,9 +20,6 @@ struct Args {
     #[arg(short, long)]
     port: String,
 
-    #[arg(long, default_value_t = 2)]
-    time: u64,
-
     #[arg(long, default_value_t = 1)]
     duration: u64,
 
@@ -39,23 +36,21 @@ struct Args {
 fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
-    let command = args.command;
+    let command = args.command + "\n";
     let port = args.port;
 
     match command.as_str() {
-        "ECHO" => basic_call_response("ECHO\n".to_string(), port)?,
-        "COUNTERS" => basic_call_response("COUNTERS\n".to_string(), port)?,
-        "COUNTERS-RESET" => basic_call_response("COUNTERS-RESET\n".to_string(), port)?,
-        "WATCH" => handle_watch(args.time, port)?,
-        "PERF-SAMPLE" => handle_perf_sample(args.duration, args.frequency, port)?,
-        "SET-CAPTURE" => handle_set_capture(args.file_path, port)?,
-        "FLUSH-CAPTURE" => basic_call_response("FLUSH-CAPTURE\n".to_string(), port)?,
-        "CLOSE-CAPTURE" => basic_call_response("CLOSE-CAPTURE\n".to_string(), port)?,
-        "SET-CAPTURE-PROGRAM" => handle_set_program(args.program, port)?,
-        "DELETE-CAPTURE-PROGRAM" => basic_call_response("DELETE-CAPTURE-PROGRAM\n".to_string(), port)?,
-        "CAPTURE-SEQUENCE" => {
-            handle_capture_sequence(args.file_path, args.time, args.program, port)?
-        }
+        "ECHO\n"
+        | "COUNTERS\n"
+        | "COUNTERS-RESET\n"
+        | "FLUSH-CAPTURE\n"
+        | "CLOSE-CAPTURE\n"
+        | "DELETE-CAPTURE-PROGRAM\n" => basic_call_response(&command, &port)?,
+        "WATCH\n" => handle_watch(args.frequency, &port)?,
+        "PERF-SAMPLE\n" => handle_perf_sample(args.duration, args.frequency, &port)?,
+        "SET-CAPTURE\n" => handle_set_capture(args.file_path, &port)?,
+        "CAPTURE-SEQUENCE\n" => capture_sequence(args.file_path, args.duration, &port)?,
+        "SET-CAPTURE-PROGRAM\n" => handle_set_capture_program(args.program, &port)?,
         _ => {
             eprintln!("Command '{command}' not recognized");
         }
@@ -70,7 +65,7 @@ fn main() -> std::io::Result<()> {
 //
 // TODO could rewrite this to return a string, then print in handle_commands
 // also could use in handle_watch - however would lose error checking capabilities
-fn basic_call_response(comm: String, port: String) -> std::io::Result<()> {
+fn basic_call_response(comm: &str, port: &str) -> std::io::Result<()> {
     let stream = &mut UnixStream::connect(port).unwrap();
     stream.write_all(comm.as_bytes())?;
     stream.flush()?;
@@ -83,13 +78,13 @@ fn basic_call_response(comm: String, port: String) -> std::io::Result<()> {
 
 // Performs actions associated with watch command, repeatedly opens UnixStream to make
 // connection with PH, requests COUNTERS data, and prints the differences
-fn handle_watch(time: u64, port: String) -> std::io::Result<()> {
+fn handle_watch(time: u64, port: &str) -> std::io::Result<()> {
     println!("time {}", time);
     let mut values: [u64; 6] = [0; 6];
     let sleep_time = Duration::new(time, 0);
 
     loop {
-        let stream = &mut UnixStream::connect(port.clone()).unwrap();
+        let stream = &mut UnixStream::connect(port).unwrap();
         stream.write_all(b"COUNTERS\n")?;
         stream.flush()?;
         let mut response = String::new();
@@ -119,47 +114,39 @@ fn handle_watch(time: u64, port: String) -> std::io::Result<()> {
     }
 }
 
-fn handle_perf_sample(duration: u64, frequency: u64, port: String) -> std::io::Result<()> {
-    let command = "PERF-SAMPLE".to_string()
-        + " "
-        + duration.to_string().as_str()
-        + " "
-        + frequency.to_string().as_str()
-        + "\n";
-    basic_call_response(command, port)?;
+fn handle_perf_sample(duration: u64, frequency: u64, port: &str) -> std::io::Result<()> {
+    let command = format!("PERF-SAMPLE {} {}\n", duration, frequency);
+
+    basic_call_response(&command, port)?;
 
     Ok(())
 }
 
-fn handle_set_capture(file_path: String, port: String) -> std::io::Result<()> {
-    let command = "SET-CAPTURE".to_string() + " " + file_path.as_str() + "\n";
-    println!("{}", command);
-    basic_call_response(command, port)?;
+fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
+    let command = format!("SET-CAPTURE {}\n", file_path);
+
+    basic_call_response(&command, port)?;
 
     Ok(())
 }
 
-fn handle_capture_sequence(
-    file_path: String,
-    time: u64,
-    program: Option<String>,
-    port: String,
-) -> std::io::Result<()> {
+fn capture_sequence(file_path: String, time: u64, port: &str) -> std::io::Result<()> {
     let sleep_time = Duration::new(time, 0);
-    handle_set_capture(file_path, port.clone())?;
-    handle_set_program(program, port.clone())?;
+    handle_set_capture(file_path, port)?;
+    basic_call_response("ENABLE-IN-CAPTURE\n", port)?;
+    basic_call_response("ENABLE-OUT-CAPTURE\n", port)?;
     sleep(sleep_time); // TODO implement handling for Ctrl+C
                        // See 'signal handling' in the rust book, crate::ctrlc, crate::nix
-    basic_call_response("CLOSE-CAPTURE\n".to_string(), port.clone())?;
+    basic_call_response("CLOSE-CAPTURE\n", port)?;
 
     Ok(())
 }
 
-fn handle_set_program(program: Option<String>, port: String) -> std::io::Result<()> {
+fn handle_set_capture_program(program: Option<String>, port: &str) -> std::io::Result<()> {
     match program {
         Some(program) => {
             let command = "SET-CAPTURE-PROGRAM".to_string() + " " + program.as_str() + "\n";
-            basic_call_response(command, port)?;
+            basic_call_response(&command, &port)?;
         }
         None => (),
     };

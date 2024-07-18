@@ -19,8 +19,8 @@ fn ip_version(pkt: &[u8]) -> u8 {
 
 fn ip_ethertype(ip_version: u8) -> u16 {
     match ip_version {
-        4 => net_defs::ETHERTYPE_IP,
-        6 => net_defs::ETHERTYPE_IPV6,
+        4 => net_defs::ethertype::IP,
+        6 => net_defs::ethertype::IPV6,
         _ => 0,
     }
 }
@@ -38,7 +38,7 @@ async fn worker<'pktbuf>(
             match msg {
                 InboundSendMessage::Packet(pkt) => {
                     let proto = ip_ethertype(ip_version(pkt.body()));
-                    let mut hdr = pkt.alloc_zeroed_header::<[u8; tun_pi::PI_SIZE]>() as &mut [u8];
+                    let mut hdr = pkt.alloc_zeroed_headroom(tun_pi::PI_SIZE);
                     tun_pi::write_pi(
                         &mut hdr,
                         tun_pi::TunPi {

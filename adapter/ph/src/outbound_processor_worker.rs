@@ -1,7 +1,8 @@
 use crate::assembly::Assembly;
+use crate::counters_enum::CounterType;
 use crate::flow_control;
 use crate::packet::Packet;
-use crate::queues::TryEnqueueError;
+use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
 use crate::OutboundProcessorMessage;
 use bytes::Buf;
@@ -67,6 +68,7 @@ async fn clone_cap_packs<'pktbuf>(
 ) {
     let mut bufs = Vec::new();
     let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
+    let mut num_enqueued: u64 = 0;
     for pkt in pkts {
         // Splits between Packets and TestPackets
         match pkt {
@@ -80,11 +82,15 @@ async fn clone_cap_packs<'pktbuf>(
                             let pkt_clone: Packet = pkt.clone_into(buf);
                             pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
                             // Checks to see if the packet enqueue was successful
-                            match asm
-                                .capture_queue
-                                .try_enqueue_packet(pkt_clone, SystemTime::now())
-                            {
-                                Ok(()) => (),
+                            match asm.capture_queue.try_enqueue_packet(
+                                pkt_clone,
+                                SystemTime::now(),
+                                Direction::Outbound,
+                            ) {
+                                Ok(()) => {
+                                    asm.counters[CounterType::OutCapPacksWrite].increment();
+                                    num_enqueued += 1;
+                                }
                                 Err(TryEnqueueError::Full(ret_packet)) => {
                                     let ret_buf = ret_packet.destroy();
                                     asm.buffer_stack.put_buffer(ret_buf);
@@ -103,4 +109,5 @@ async fn clone_cap_packs<'pktbuf>(
         }
     }
     asm.buffer_stack.put_buffers(bufs.into_iter());
+    asm.counters[CounterType::OutCapPacksDrop].increase_by(count as u64 - num_enqueued)
 }

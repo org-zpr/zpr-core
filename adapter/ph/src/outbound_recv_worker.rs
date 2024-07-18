@@ -15,7 +15,7 @@ pub struct Config {
 const OUTBOUND_PACKET_HEADROOM: usize = 256;
 
 fn is_ip(pi: tun_pi::TunPi) -> bool {
-    pi.proto == net_defs::ETHERTYPE_IP || pi.proto == net_defs::ETHERTYPE_IPV6
+    pi.proto == net_defs::ethertype::IP || pi.proto == net_defs::ethertype::IPV6
 }
 
 async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
@@ -33,7 +33,6 @@ async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
             let mut pkt = Packet::new(buf, OUTBOUND_PACKET_HEADROOM);
 
             tun_recv_buf(tun, &mut pkt).await.unwrap();
-
             let pi = tun_pi::read_pi(&mut pkt);
             if pi.strip || !is_ip(pi) {
                 // packet was too large or non-IP; drop
@@ -41,7 +40,6 @@ async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
                 asm.buffer_stack.put_buffer(pkt.destroy());
                 continue;
             }
-
             asm.counters[CounterType::OutPacksRec].increment();
             asm.outbound_processor.enqueue_packet(pkt).await;
         }
