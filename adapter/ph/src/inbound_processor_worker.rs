@@ -34,7 +34,7 @@ async fn worker<'pktbuf>(
         for pkt in pkts.drain(..) {
             match pkt {
                 InboundProcessorMessage::Packet(pkt) => {
-                    handle_packets(config, pkt, asm).await;
+                    handle_packet(config, pkt, asm).await;
                 }
                 InboundProcessorMessage::TestPacket(pkt) => {
                     pkt.acknowledge(queue.len(), count);
@@ -56,7 +56,7 @@ where
     async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
-async fn handle_packets<'pktbuf>(
+async fn handle_packet<'pktbuf>(
     config: &Config,
     mut pkt: Packet<'pktbuf>,
     asm: &Assembly<'pktbuf>,
@@ -96,15 +96,14 @@ async fn clone_cap_packs<'pktbuf>(
         // Splits between Packets and TestPackets
         match pkt {
             InboundProcessorMessage::Packet(pkt) => {
+                let dir: &mut u8 = pkt.alloc_zeroed_header();
+                *dir = 0;
                 if asm.flow_control.check_packet(pkt.body()).await {
-                    let dir: &mut u8 = pkt.alloc_zeroed_header();
-                    *dir = 0;
+                    println!("packets match inbound");
                     // Ensures there's at least one buffer
                     match bufs.pop() {
                         Some(buf) => {
                             let pkt_clone: Packet = pkt.clone_into(buf);
-                            pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
-
                             // Checks to see if the packet enqueue was successful
                             match asm.capture_queue.try_enqueue_packet(
                                 pkt_clone,
@@ -118,6 +117,7 @@ async fn clone_cap_packs<'pktbuf>(
                                 Err(TryEnqueueError::Full(ret_packet)) => {
                                     let ret_buf = ret_packet.destroy();
                                     asm.buffer_stack.put_buffer(ret_buf);
+                                    pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
                                     break;
                                 }
                             };
@@ -128,6 +128,7 @@ async fn clone_cap_packs<'pktbuf>(
                         }
                     }
                 }
+                pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
             }
             InboundProcessorMessage::TestPacket(_) => (),
         }

@@ -49,7 +49,7 @@ fn main() -> std::io::Result<()> {
         "WATCH\n" => handle_watch(args.frequency, &port)?,
         "PERF-SAMPLE\n" => handle_perf_sample(args.duration, args.frequency, &port)?,
         "SET-CAPTURE\n" => handle_set_capture(args.file_path, &port)?,
-        "CAPTURE-SEQUENCE\n" => capture_sequence(args.file_path, args.duration, &port)?,
+        "CAPTURE-SEQUENCE\n" => capture_sequence(args.file_path, args.duration, args.program, &port)?,
         "SET-CAPTURE-PROGRAM\n" => handle_set_capture_program(args.program, &port)?,
         _ => {
             eprintln!("Command '{command}' not recognized");
@@ -130,13 +130,13 @@ fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn capture_sequence(file_path: String, time: u64, port: &str) -> std::io::Result<()> {
+fn capture_sequence(file_path: String, time: u64, program: Option<String>, port: &str) -> std::io::Result<()> {
     let sleep_time = Duration::new(time, 0);
     handle_set_capture(file_path, port)?;
-    basic_call_response("ENABLE-IN-CAPTURE\n", port)?;
-    basic_call_response("ENABLE-OUT-CAPTURE\n", port)?;
+    handle_set_capture_program(program, port)?;
     sleep(sleep_time); // TODO implement handling for Ctrl+C
                        // See 'signal handling' in the rust book, crate::ctrlc, crate::nix
+    basic_call_response("DELETE-CAPTURE-PROGRAM\n", port)?;
     basic_call_response("CLOSE-CAPTURE\n", port)?;
 
     Ok(())
@@ -145,7 +145,7 @@ fn capture_sequence(file_path: String, time: u64, port: &str) -> std::io::Result
 fn handle_set_capture_program(program: Option<String>, port: &str) -> std::io::Result<()> {
     match program {
         Some(program) => {
-            let command = "SET-CAPTURE-PROGRAM".to_string() + " " + program.as_str() + "\n";
+            let command = format!("SET-CAPTURE-PROGRAM {}\n", program);
             basic_call_response(&command, &port)?;
         }
         None => (),
