@@ -152,7 +152,7 @@ where
 }
 
 async fn echo(_asm: &Assembly<'_>) -> String {
-    "echo\n".to_string()
+    String::from("echo\n")
 }
 
 // TODO not sure if just printing is what we want this function to do
@@ -170,7 +170,7 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
         value.reset();
     }
 
-    "counters_reset\n".to_string()
+    String::from("counters_reset\n")
 }
 
 async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
@@ -263,13 +263,7 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         &outbound_send_batch,
     );
 
-    let mut info: String = String::new();
-    let _ = write!(
-        &mut info,
-        "{in_processor}{in_send}{out_processor}{out_send}"
-    );
-
-    info
+    format!("{in_processor}{in_send}{out_processor}{out_send}")
 }
 
 // Helper for perf_sample
@@ -340,9 +334,7 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
     let ninety: u64 = hist.value_at_quantile(0.90);
     let mean: f64 = hist.mean();
 
-    let mut values: String = String::new();
-
-    let _ = write!(&mut values, "{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}, Mean: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units, mean, units);
+    let mut values = format!("{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}, Mean: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units, mean, units);
 
     let mut iter = hist.iter_log(1, SQRT_2);
 
@@ -371,18 +363,14 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
 async fn set_capture(asm: &Assembly<'_>, path_str: &str) -> String {
     let path = Path::new(path_str);
     asm.capture_worker.open_capture_file(path).await;
-    let mut message: String = String::new();
-    let _ = write!(&mut message, "Capture file opened at {}\n", path_str);
 
-    message
+    format!("Capture file opened at {}\n", path_str)
 }
 
 async fn flush_capture(asm: &Assembly<'_>) -> String {
     let _ = asm.capture_worker.flush_capture_file().await;
-    let mut message: String = String::new();
-    let _ = write!(&mut message, "Capture file flushed\n");
 
-    message
+    String::from("Capture file flushed\n")
 }
 
 async fn close_capture(asm: &Assembly<'_>) -> String {
@@ -390,56 +378,36 @@ async fn close_capture(asm: &Assembly<'_>) -> String {
     asm.flow_control.set_inbound(false);
     asm.flow_control.set_outbound(false);
 
-    let mut message: String = String::new();
-    let _ = write!(&mut message, "Capture file closed\n");
-
-    message
+    String::from("Capture file closed\n")
 }
 
 // Could change this structure frmo enable/disable to toggle and/or
 // have the user provide truth value
 async fn enable_in_capture(asm: &Assembly<'_>) -> String {
-    let mut message: String = String::new();
     if asm.capture_worker.query_savefile().await {
         asm.flow_control.set_inbound(true);
-        let _ = write!(&mut message, "Inbound capture enabled\n");
+        String::from("Inbound capture enabled\n")
     } else {
-        let _ = write!(
-            &mut message,
-            "Inbound capture not enabled, no capture file\n"
-        );
+        String::from("Inbound capture not enabled, no capture file\n")
     }
-
-    message
 }
 
 async fn disable_in_capture(asm: &Assembly<'_>) -> String {
     asm.flow_control.set_inbound(false);
-    let mut message: String = String::new();
-    let _ = write!(&mut message, "Inbound capture disabled\n");
 
-    message
+    String::from("Inbound capture disabled\n")
 }
 
 async fn enable_out_capture(asm: &Assembly<'_>) -> String {
-    let mut message: String = String::new();
     if asm.capture_worker.query_savefile().await {
         asm.flow_control.set_outbound(true);
-        let _ = write!(&mut message, "Outbound capture enabled\n");
+        String::from("Outbound capture enabled\n")
     } else {
-        let _ = write!(
-            &mut message,
-            "Outbound capture not enabled, no capture file\n"
-        );
+        String::from("Outbound capture not enabled, no capture file\n")
     }
-
-    message
 }
 
 async fn disable_out_capture(asm: &Assembly<'_>) -> String {
     asm.flow_control.set_inbound(false);
-    let mut message: String = String::new();
-    let _ = write!(&mut message, "Outbound capture disabled\n");
-
-    message
+    String::from("Outbound capture disabled\n")
 }
