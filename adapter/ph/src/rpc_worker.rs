@@ -375,7 +375,7 @@ async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String 
     let capture = Capture::dead(Linktype::USER0).unwrap();
     let bpfprogram = capture.compile(program, true).unwrap();
     asm.flow_control.set_program(bpfprogram).await;
-  
+
     format!("Program: {program} set\n")
 }
 
