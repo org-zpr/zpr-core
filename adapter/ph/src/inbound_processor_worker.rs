@@ -1,6 +1,7 @@
 use crate::assembly::Assembly;
 use crate::classifier::classify;
 use crate::counters_enum::CounterType;
+use crate::flow_control;
 use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::queues::{Direction, TryEnqueueError};
@@ -27,13 +28,13 @@ async fn worker<'pktbuf>(
     let mut pkts = Vec::new();
 
     while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
-        if asm.flow_control.get_inbound() {
-            clone_cap_packs(asm, &pkts, count);
+        if asm.flow_control.program_exists().await {
+            clone_cap_packs(asm, &mut pkts, count).await;
         }
         for pkt in pkts.drain(..) {
             match pkt {
                 InboundProcessorMessage::Packet(pkt) => {
-                    handle_packets(config, pkt, asm).await;
+                    handle_packet(config, pkt, asm).await;
                 }
                 InboundProcessorMessage::TestPacket(pkt) => {
                     pkt.acknowledge(queue.len(), count);
@@ -55,7 +56,7 @@ where
     async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
-async fn handle_packets<'pktbuf>(
+async fn handle_packet<'pktbuf>(
     config: &Config,
     mut pkt: Packet<'pktbuf>,
     asm: &Assembly<'pktbuf>,
@@ -83,45 +84,55 @@ async fn handle_packets<'pktbuf>(
     }
 }
 
-fn clone_cap_packs<'pktbuf>(
+async fn clone_cap_packs<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    pkts: &Vec<InboundProcessorMessage<'pktbuf>>,
+    pkts: &mut Vec<InboundProcessorMessage<'pktbuf>>,
     count: usize,
 ) {
     let mut bufs = Vec::new();
     let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
     let mut num_enqueued: u64 = 0;
     for pkt in pkts {
+        // Splits between Packets and TestPackets
         match pkt {
-            // Splits between Packets and TestPackets
-            InboundProcessorMessage::Packet(pkt) => match bufs.pop() {
-                // Ensures there's at least one buffer
-                Some(buf) => {
-                    let mut pkt_clone: Packet = pkt.clone_into_with_headroom(buf, 1);
-                    let dir: &mut u8 = pkt_clone.alloc_zeroed_header();
-                    *dir = 0;
-                    match asm.capture_queue.try_enqueue_packet(
-                        pkt_clone,
-                        SystemTime::now(),
-                        Direction::Inbound,
-                    ) {
-                        // Checks to see if the packet enqueue was successful
-                        Ok(()) => {
-                            asm.counters[CounterType::InCapPacksWrite].increment();
-                            num_enqueued += 1;
+            InboundProcessorMessage::Packet(pkt) => {
+                let dir: &mut u8 = pkt.alloc_zeroed_header();
+                *dir = 0;
+                if asm.flow_control.check_packet(pkt.body()).await {
+                    println!("packets match inbound");
+                    // Ensures there's at least one buffer
+                    match bufs.pop() {
+                        Some(buf) => {
+                            let pkt_clone: Packet = pkt.clone_into(buf);
+                            // Checks to see if the packet enqueue was successful
+                            match asm.capture_queue.try_enqueue_packet(
+                                pkt_clone,
+                                SystemTime::now(),
+                                Direction::Inbound,
+                            ) {
+                                Ok(()) => {
+                                    asm.counters[CounterType::InCapPacksWrite].increment();
+                                    num_enqueued += 1;
+                                }
+                                Err(TryEnqueueError::Full(ret_packet)) => {
+                                    let ret_buf = ret_packet.destroy();
+                                    asm.buffer_stack.put_buffer(ret_buf);
+                                    pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
+                                    break;
+                                }
+                            };
                         }
-                        Err(TryEnqueueError::Full(ret_packet)) => {
-                            let ret_buf = ret_packet.destroy();
-                            asm.buffer_stack.put_buffer(ret_buf);
+                        None => {
+                            pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
                             break;
                         }
-                    };
+                    }
                 }
-                None => break,
-            },
+                pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
+            }
             InboundProcessorMessage::TestPacket(_) => (),
         }
     }
     asm.buffer_stack.put_buffers(bufs.into_iter());
-    asm.counters[CounterType::InCapPacksDrop].increase_by(pkts.len() as u64 - num_enqueued)
+    asm.counters[CounterType::InCapPacksDrop].increase_by(count as u64 - num_enqueued)
 }

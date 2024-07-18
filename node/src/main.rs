@@ -1,43 +1,62 @@
+use clap::Parser;
+
 use std::fs::OpenOptions;
 use std::io;
 use std::io::Write;
 use std::path::Path;
-use std::{env, process};
+use std::process;
 
 use daemonize::Daemonize;
+
+mod config;
+mod core;
+mod vs;
+pub mod vsapi;
 
 const LOG_DIR: &str = "/var/run/zpr";
 const PID_DIR: &str = "/var/run/zpr";
 
-#[rustfmt::skip]
-fn usage() {
-    println!("Usage: node [OPTIONS]");
-    println!("Start a ZPR node\n");
-    println!("Options:");
-    println!("  -f | --foreground Run in the foreground.");
-    println!("                    Will run in the background by default logging to {}.", LOG_DIR);
-    println!("  -h | --help       Print this help message.");
-    println!("  -v | --version    Print the version.");
+#[derive(Parser)]
+#[command(version, about = "ZPR node")]
+struct Cli {
+    #[arg(
+        short,
+        long,
+        value_name = "FILE",
+        help = "path to the configuration file"
+    )]
+    config: String,
+
+    #[arg(short, long, help = "run in foreground")]
+    foreground: bool,
+
+    #[arg(
+        long,
+        value_name = "HOST:PORT",
+        help = "DEBUG - force immediate visa service connect"
+    )]
+    vsforceconnect: Option<String>,
 }
 
 fn main() -> io::Result<()> {
-    let args: Vec<String> = env::args().collect();
-    let config = Config::build(&args).unwrap_or_else(|err| {
-        eprintln!("argument error: {}", err);
-        process::exit(1);
-    });
-    if config.help {
-        usage();
-        return Ok(());
+    let cli = Cli::parse();
+
+    let config = match config::load_configuration(Path::new(&cli.config)) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("failed to load configuration: {}", e);
+            process::exit(1);
+        }
+    };
+
+    let mut opts = core::CoreOpts::new();
+
+    if let Some(hostport) = cli.vsforceconnect.as_deref() {
+        opts.set_vsforceconnect(hostport)
     }
 
-    if config.version {
-        println!("ZPR node v{}", node::VERSION);
-        return Ok(());
-    }
-
-    if config.foreground {
-        return node::tokio_main();
+    if cli.foreground {
+        return core::tokio_main(config, opts);
     }
 
     // Else we go into background.
@@ -78,30 +97,5 @@ fn main() -> io::Result<()> {
         Ok(_) => println!("node launching in background..."),
         Err(e) => eprintln!("failed to launch: {}", e),
     }
-    node::tokio_main()
-}
-
-struct Config {
-    help: bool,
-    version: bool,
-    foreground: bool,
-}
-
-impl Config {
-    fn build(args: &[String]) -> Result<Config, &'static str> {
-        let mut config = Config {
-            help: false,
-            version: false,
-            foreground: false,
-        };
-        for arg in args.iter() {
-            match arg.as_str() {
-                "-h" | "--help" => config.help = true,
-                "-v" | "--version" => config.version = true,
-                "-f" | "--foreground" => config.foreground = true,
-                _ => (),
-            }
-        }
-        Ok(config)
-    }
+    core::tokio_main(config, opts)
 }

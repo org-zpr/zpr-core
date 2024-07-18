@@ -2,6 +2,7 @@ use crate::assembly::Assembly;
 use crate::test_packet::TestPacketMetrics;
 use core::future::Future;
 use hdrhistogram::Histogram;
+use pcap::{Capture, Linktype};
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
@@ -107,27 +108,15 @@ async fn handle_connection(
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "ENABLE-IN-CAPTURE" => {
+            "SET-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(enable_in_capture(asm).await.as_bytes())
+                    .write_all(set_capture_program(asm, str_message).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "DISABLE-IN-CAPTURE" => {
+            "DELETE-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(disable_in_capture(asm).await.as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            "ENABLE-OUT-CAPTURE" => {
-                buf_writer
-                    .write_all(enable_out_capture(asm).await.as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            "DISABLE-OUT-CAPTURE" => {
-                buf_writer
-                    .write_all(disable_out_capture(asm).await.as_bytes())
+                    .write_all(delete_capture_program(asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
@@ -381,33 +370,17 @@ async fn close_capture(asm: &Assembly<'_>) -> String {
     String::from("Capture file closed\n")
 }
 
-// Could change this structure frmo enable/disable to toggle and/or
-// have the user provide truth value
-async fn enable_in_capture(asm: &Assembly<'_>) -> String {
-    if asm.capture_worker.query_savefile().await {
-        asm.flow_control.set_inbound(true);
-        String::from("Inbound capture enabled\n")
-    } else {
-        String::from("Inbound capture not enabled, no capture file\n")
-    }
+async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
+    let (_command, program) = str_message.split_once(' ').unwrap();
+    let capture = Capture::dead(Linktype::USER0).unwrap();
+    let bpfprogram = capture.compile(program, true).unwrap();
+    asm.flow_control.set_program(bpfprogram).await;
+  
+    format!("Program: {program} set\n")
 }
 
-async fn disable_in_capture(asm: &Assembly<'_>) -> String {
-    asm.flow_control.set_inbound(false);
+async fn delete_capture_program(asm: &Assembly<'_>) -> String {
+    asm.flow_control.delete_program().await;
 
-    String::from("Inbound capture disabled\n")
-}
-
-async fn enable_out_capture(asm: &Assembly<'_>) -> String {
-    if asm.capture_worker.query_savefile().await {
-        asm.flow_control.set_outbound(true);
-        String::from("Outbound capture enabled\n")
-    } else {
-        String::from("Outbound capture not enabled, no capture file\n")
-    }
-}
-
-async fn disable_out_capture(asm: &Assembly<'_>) -> String {
-    asm.flow_control.set_inbound(false);
-    String::from("Outbound capture disabled\n")
+    String::from("Program deleted\n")
 }
