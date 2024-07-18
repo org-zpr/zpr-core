@@ -38,10 +38,7 @@ impl FlowControl {
 
     pub async fn program_exists(&self) -> bool {
         let inner_flow = &mut self.inner_control.lock().await.flow;
-        match inner_flow {
-            Some(_) => true,
-            None => false,
-        }
+        inner_flow.is_some()
     }
 
     // Stubs for now, allow code to compile as I change things incrementally

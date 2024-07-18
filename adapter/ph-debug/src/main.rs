@@ -51,8 +51,8 @@ fn main() -> std::io::Result<()> {
         "SET-CAPTURE" => handle_set_capture(args.file_path, port)?,
         "FLUSH-CAPTURE" => basic_call_response("FLUSH-CAPTURE\n".to_string(), port)?,
         "CLOSE-CAPTURE" => basic_call_response("CLOSE-CAPTURE\n".to_string(), port)?,
-        "SET-PROGRAM" => handle_set_program(args.program, port)?,
-        "DELETE-PROGRAM" => basic_call_response("DELETE-PROGRAM\n".to_string(), port)?,
+        "SET-CAPTURE-PROGRAM" => handle_set_program(args.program, port)?,
+        "DELETE-CAPTURE-PROGRAM" => basic_call_response("DELETE-CAPTURE-PROGRAM\n".to_string(), port)?,
         "CAPTURE-SEQUENCE" => {
             handle_capture_sequence(args.file_path, args.time, args.program, port)?
         }
@@ -158,7 +158,7 @@ fn handle_capture_sequence(
 fn handle_set_program(program: Option<String>, port: String) -> std::io::Result<()> {
     match program {
         Some(program) => {
-            let command = "SET-PROGRAM".to_string() + " " + program.as_str() + "\n";
+            let command = "SET-CAPTURE-PROGRAM".to_string() + " " + program.as_str() + "\n";
             basic_call_response(command, port)?;
         }
         None => (),

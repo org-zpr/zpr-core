@@ -107,15 +107,15 @@ async fn handle_connection(
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "SET-PROGRAM" => {
+            "SET-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(set_program(asm, str_message).await.as_bytes())
+                    .write_all(set_capture_program(asm, str_message).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "DELETE-PROGRAM" => {
+            "DELETE-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(delete_program(asm).await.as_bytes())
+                    .write_all(delete_capture_program(asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
@@ -465,7 +465,7 @@ async fn close_capture(asm: &Assembly<'_>) -> String {
     message
 }
 
-async fn set_program(asm: &Assembly<'_>, str_message: String) -> String {
+async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
     let (_command, program) = str_message.split_once(' ').unwrap();
     let capture = Capture::dead(Linktype::USER0).unwrap();
     let bpfprogram = capture.compile(program, true).unwrap();
@@ -477,7 +477,7 @@ async fn set_program(asm: &Assembly<'_>, str_message: String) -> String {
     message
 }
 
-async fn delete_program(asm: &Assembly<'_>) -> String {
+async fn delete_capture_program(asm: &Assembly<'_>) -> String {
     asm.flow_control.delete_program().await;
 
     let mut message: String = String::new();
