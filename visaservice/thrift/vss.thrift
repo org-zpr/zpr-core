@@ -28,7 +28,9 @@ struct VisaRevocation {
 
 struct PolicyInfo {
   1: i64 policy_id,
-  4: i64 config_id,
+  2: i64 config_id,
+  3: map<string, string> node_config,
+  // TODO: links
 }
 
 
@@ -47,14 +49,18 @@ struct PolicyInfo {
 //
 service VisaSupport {
 
-  // Visa service tells node when policy and config IDs change.
-  NetworkPolicy(1:PolicyInfo pi)
+  // Visa service tells node when policy and config IDs change. In the future
+  // there may be links that need to be brought up or turn down.  There may
+  // also be updated configuration details for the node.
+  NetworkPolicyInstalled(1:PolicyInfo pi)
 
-  // Visa service pushes visas to the node.
-  PushVisas(1:list<VisaHop> vh)
+  // Visa service pushes visas to the node.  Node need not tell other nodes
+  // about these since the visa service is in contact with all nodes.
+  InstallVisas(1:list<VisaHop> vh)
 
-  // Visa service revokes visas.
-  RevokeVisa(1:list<VisaRevocation> vr)
+  // Visa service revokes visas.  Node need not tell other nodes about these as 
+  // the visa service is in contact with all nodes.
+  RevokeVisas(1:list<VisaRevocation> vr)
 
   // TODO: Revocation of credentials/agents.  Could be implemented at the
   //       visa service and just end up being a series of visa revocations.
