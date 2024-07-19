@@ -98,7 +98,7 @@ fn savefile_write(cap_pack: &CapPacket, savefile: &mut Savefile) {
 
     let header: PacketHeader = PacketHeader {
         ts,
-        caplen: cap_pack.packet.body().len() as u32, 
+        caplen: cap_pack.packet.body().len() as u32,
         len: cap_pack.packet.body().len() as u32,
     };
 

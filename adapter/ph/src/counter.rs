@@ -21,7 +21,7 @@ impl Counter {
     pub(crate) fn set(&self, value: u64) {
         self.number.store(value, Ordering::Relaxed);
     }
-    
+
     pub(crate) fn increment(&self) {
         self.number.fetch_add(1, Ordering::Relaxed);
     }
@@ -39,7 +39,7 @@ impl Counter {
     }
 
     pub(crate) fn get_count(&self) -> u64 {
-        self.number.load(Ordering::Relaxed) 
+        self.number.load(Ordering::Relaxed)
     }
 
     pub(crate) fn print(&self) {
