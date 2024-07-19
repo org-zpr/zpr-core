@@ -169,8 +169,6 @@ impl<'pktbuf> OutboundSend<'pktbuf> {
 }
 
 // Capture will intercept packets in the PH and dump them into a file for debugging purposes
-// Could make elements of struct not public and instead make methods once clone method for Packet
-// is merged
 #[allow(dead_code)]
 pub struct CapPacket<'pktbuf> {
     pub packet: Packet<'pktbuf>,
@@ -185,12 +183,10 @@ pub enum Direction {
     Outbound,
 }
 
-#[allow(dead_code)]
 pub struct Capture<'pktbuf> {
     sender: mpsc::Sender<CapPacket<'pktbuf>>,
 }
 
-#[allow(dead_code)]
 pub enum TryEnqueueError<T> {
     Full(T),
 }
@@ -201,6 +197,7 @@ impl<'pktbuf> Capture<'pktbuf> {
         Self { sender }
     }
 
+    // Blocks until packet is enqueued
     pub async fn enqueue_packet(
         &self,
         packet: Packet<'pktbuf>,
@@ -217,6 +214,7 @@ impl<'pktbuf> Capture<'pktbuf> {
         self.sender.send(cap_pack).await.unwrap();
     }
 
+    // Does not block
     pub fn try_enqueue_packet(
         &self,
         packet: Packet<'pktbuf>,
