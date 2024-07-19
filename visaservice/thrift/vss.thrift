@@ -16,20 +16,20 @@ namespace rs vssapi
 
 
 struct VisaHop {
-  1: binary visa_pb, // visa in "old" protocol buffer form
-  2: i32 hop_count,
-  3: i32 issuer_id,   // copied out of visa
+  1: required binary visa_pb, // visa in "old" protocol buffer form
+  2: required i32 hop_count,
+  3: required i32 issuer_id   // copied out of visa
 }
 
 struct VisaRevocation {
-  1: i32 issuer_id,
-  2: i64 configuration,
+  1: required i32 issuer_id,
+  2: required i64 configuration
 }
 
 struct PolicyInfo {
-  1: i64 policy_id,
-  2: i64 config_id,
-  3: map<string, string> node_config,
+  1: required i64 policy_id,
+  2: required i64 config_id,
+  3: map<string, string> node_config
   // TODO: links
 }
 
@@ -52,19 +52,20 @@ service VisaSupport {
   // Visa service tells node when policy and config IDs change. In the future
   // there may be links that need to be brought up or turn down.  There may
   // also be updated configuration details for the node.
-  NetworkPolicyInstalled(1:PolicyInfo pi)
+  void NetworkPolicyInstalled(1:PolicyInfo pi)
 
   // Visa service pushes visas to the node.  Node need not tell other nodes
   // about these since the visa service is in contact with all nodes.
-  InstallVisas(1:list<VisaHop> vh)
+  void InstallVisas(1:list<VisaHop> vh)
 
   // Visa service revokes visas.  Node need not tell other nodes about these as 
   // the visa service is in contact with all nodes.
-  RevokeVisas(1:list<VisaRevocation> vr)
+  void RevokeVisas(1:list<VisaRevocation> vr)
 
   // TODO: Revocation of credentials/agents.  Could be implemented at the
   //       visa service and just end up being a series of visa revocations.
   //       Though how do we tell a node to disconnect an adapter?
+
 }
 
 

@@ -11,7 +11,9 @@ use daemonize::Daemonize;
 mod config;
 mod core;
 mod vs;
+
 pub mod vsapi;
+pub mod vssapi;
 
 const LOG_DIR: &str = "/var/run/zpr";
 const PID_DIR: &str = "/var/run/zpr";
