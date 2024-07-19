@@ -1,0 +1,12 @@
+# Example node configuration file.
+
+
+[creds]
+certificate = "node-cert.pem"
+private_key = "node-key.pem"
+
+[claims]
+"zpr.addr" = "fc00:3001:abd5::3836"
+"x509.cn" = "n0.zpr"
+
+

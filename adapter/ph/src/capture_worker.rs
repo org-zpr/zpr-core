@@ -22,7 +22,7 @@ impl CaptureWorker {
     pub fn new() -> Self {
         Self {
             inner_cap: InnerCap {
-                capture: Capture::dead(Linktype::USER0).unwrap(), // not sure what Linktype this should be
+                capture: Capture::dead(Linktype::USER0).unwrap(),
                 savefile: None,
             }
             .into(),
