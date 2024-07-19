@@ -1,6 +1,8 @@
 use std::borrow::Borrow;
 use std::hint::unreachable_unchecked;
 
+pub const VERSION: i32 = 199606;
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct BpfInsn {
@@ -8,6 +10,21 @@ pub struct BpfInsn {
     pub jt: u8,
     pub jf: u8,
     pub k: u32,
+}
+
+impl BpfInsn {
+    pub fn stmt(code: u16, k: u32) -> Self {
+        Self {
+            code,
+            jt: 0,
+            jf: 0,
+            k,
+        }
+    }
+
+    pub fn jump(code: u16, k: u32, jt: u8, jf: u8) -> Self {
+        Self { code, jt, jf, k }
+    }
 }
 
 #[allow(dead_code)]
@@ -84,12 +101,7 @@ fn code_miscop(code: u16) -> u16 {
 const TAX: u16 = 0x00;
 const TXA: u16 = 0x80;
 
-pub enum BpfError {
-    DecodeError,
-    JumpTargetError,
-    MemRangeError,
-    PacketRangeError,
-}
+const MEMWORDS: usize = 16;
 
 struct CodeHelper<const A: u16, const B: u16, const C: u16> {}
 
@@ -125,26 +137,47 @@ unsafe fn load_word(packet: &[u8], addr: usize) -> u32 {
         | (*unsafe { packet.get_unchecked((addr) + 3) } as u32)
 }
 
+#[derive(Debug, PartialEq)]
+pub enum BpfError {
+    ProgramTooLarge,
+    MissingReturn,
+    InvalidInstruction,
+    BadJumpTarget,
+    BadMemoryAccess,
+    DivideByZero,
+}
 pub struct BpfProgram {
-    program: Box<[BpfInsn]>,
+    insns: Box<[BpfInsn]>,
 }
 
 impl BpfProgram {
+    pub const VALIDATE_ALLOW_BACKWARD_JUMPS: usize = 1;
+
+    // SAFETY: all unsafe blocks in these methods assume the program has been validated.
+
     pub fn validate<I: IntoIterator<Item = impl Borrow<BpfInsn>>>(
         insns: I,
     ) -> Result<Self, BpfError> {
-        // TODO FIXME: check program! incl. switch to check backwards jumps or not
-        Ok(unsafe { Self::new_unvalidated(insns) })
+        Self::validate_with_flags(insns, 0)
+    }
+
+    pub fn validate_with_flags<I: IntoIterator<Item = impl Borrow<BpfInsn>>>(
+        insns: I,
+        flags: usize,
+    ) -> Result<Self, BpfError> {
+        let insns: Box<_> = insns.into_iter().map(|x| *x.borrow()).collect();
+        Self::do_validate(insns.as_ref(), flags)?;
+        Ok(Self { insns })
     }
 
     pub unsafe fn new_unvalidated<I: IntoIterator<Item = impl Borrow<BpfInsn>>>(insns: I) -> Self {
         Self {
-            program: insns.into_iter().map(|x| *x.borrow()).collect(),
+            insns: insns.into_iter().map(|x| *x.borrow()).collect(),
         }
     }
 
-    fn do_jmp(pc: usize, taken: bool, insn: &BpfInsn) -> usize {
-        unsafe { pc.unchecked_add(if taken { insn.jt } else { insn.jf } as usize) }
+    fn do_jmp(pc: u32, taken: bool, insn: &BpfInsn) -> u32 {
+        unsafe { pc.unchecked_add(if taken { insn.jt } else { insn.jf } as u32) }
     }
 
     pub fn filter<P: AsRef<[u8]>>(&self, packet: P) -> u32 {
@@ -154,11 +187,11 @@ impl BpfProgram {
     fn filter_slice(&self, packet: &[u8]) -> u32 {
         let mut a = 0u32;
         let mut x = 0u32;
-        let mut pc = 0;
-        let mut mem = [0u32; 16];
+        let mut pc = 0u32;
+        let mut mem = [0u32; MEMWORDS];
 
         loop {
-            let insn = unsafe { self.program.get_unchecked(pc) };
+            let insn = unsafe { self.insns.get_unchecked(pc as usize) };
             pc = unsafe { pc.unchecked_add(1) };
 
             match insn.code {
@@ -240,10 +273,9 @@ impl BpfProgram {
                 code!(ST) => *unsafe { mem.get_unchecked_mut(insn.k as usize) } = a,
                 code!(STX) => *unsafe { mem.get_unchecked_mut(insn.k as usize) } = x,
 
-                code!(JMP, JA) =>
-                /* deliberate wrapping for backwards jumps */
-                {
-                    pc = pc.wrapping_add(insn.k as usize)
+                code!(JMP, JA) => {
+                    /* deliberate wrapping for backwards jumps */
+                    pc = pc.wrapping_add(insn.k)
                 }
 
                 code!(JMP, JGT, K) => pc = Self::do_jmp(pc, a > insn.k, insn),
@@ -335,21 +367,140 @@ impl BpfProgram {
             }
         }
     }
-}
 
-#[cfg(any(feature = "pcap", test))]
-impl From<pcap::BpfInstruction> for BpfInsn {
-    fn from(insn: pcap::BpfInstruction) -> Self {
-        // SAFETY: these have the same C layout
-        unsafe { std::mem::transmute(insn) }
+    fn do_validate(insns: &[BpfInsn], flags: usize) -> Result<(), BpfError> {
+        if insns.len() > u32::MAX as usize {
+            return Err(BpfError::ProgramTooLarge);
+        }
+
+        for i in 0..(insns.len() as u32) {
+            let insn = &insns[i as usize];
+
+            if insn.code & 0xff00 != 0 {
+                return Err(BpfError::InvalidInstruction);
+            }
+
+            match code_class(insn.code) {
+                LD | LDX => match code_mode(insn.code) {
+                    IMM | LEN => {
+                        if code_size(insn.code) != W {
+                            return Err(BpfError::InvalidInstruction);
+                        }
+                    }
+
+                    ABS | IND => (),
+
+                    MSH => {
+                        if code_size(insn.code) != B {
+                            return Err(BpfError::InvalidInstruction);
+                        }
+                    }
+
+                    MEM => {
+                        if code_size(insn.code) != W {
+                            return Err(BpfError::InvalidInstruction);
+                        }
+
+                        if insn.k as usize >= MEMWORDS {
+                            return Err(BpfError::BadMemoryAccess);
+                        }
+                    }
+
+                    _ => return Err(BpfError::InvalidInstruction),
+                },
+
+                ST | STX => {
+                    if code_mode(insn.code) != MEM || code_size(insn.code) != W {
+                        return Err(BpfError::InvalidInstruction);
+                    }
+
+                    if insn.k as usize >= MEMWORDS {
+                        return Err(BpfError::BadMemoryAccess);
+                    }
+                }
+
+                ALU => match code_op(insn.code) {
+                    ADD | SUB | MUL | OR | AND | XOR | LSH | RSH => (),
+
+                    NEG => {
+                        if code_src(insn.code) != 0 {
+                            return Err(BpfError::InvalidInstruction);
+                        }
+                    }
+
+                    DIV | MOD => {
+                        if code_src(insn.code) == K && insn.k == 0 {
+                            return Err(BpfError::DivideByZero);
+                        }
+                    }
+
+                    _ => return Err(BpfError::InvalidInstruction),
+                },
+
+                JMP => {
+                    let from = i + 1;
+                    match code_op(insn.code) {
+                        JA => {
+                            if code_src(insn.code) != 0 {
+                                return Err(BpfError::InvalidInstruction);
+                            }
+
+                            if flags & Self::VALIDATE_ALLOW_BACKWARD_JUMPS != 0 {
+                                if from.wrapping_add(insn.k) >= insns.len() as u32 {
+                                    return Err(BpfError::BadJumpTarget);
+                                }
+                            } else {
+                                if insn.k >= (insns.len() as u32) - from {
+                                    return Err(BpfError::BadJumpTarget);
+                                }
+                            }
+                        }
+
+                        JEQ | JGT | JGE | JSET => {
+                            if insn.jt as u32 >= (insns.len() as u32) - from
+                                || insn.jf as u32 >= (insns.len() as u32) - from
+                            {
+                                return Err(BpfError::BadJumpTarget);
+                            }
+                        }
+
+                        _ => return Err(BpfError::InvalidInstruction),
+                    }
+                }
+
+                RET => {
+                    match code_rval(insn.code) {
+                        A | K => (),
+                        _ => return Err(BpfError::InvalidInstruction),
+                    }
+
+                    if insn.code & 0xe0 != 0 {
+                        return Err(BpfError::InvalidInstruction);
+                    }
+                }
+
+                MISC => match code_miscop(insn.code) {
+                    TAX | TXA => (),
+                    _ => return Err(BpfError::InvalidInstruction),
+                },
+
+                _ => return Err(BpfError::InvalidInstruction),
+            }
+        }
+
+        if !insns.last().is_some_and(|insn| insn.code == RET) {
+            return Err(BpfError::MissingReturn);
+        }
+
+        Ok(())
     }
 }
 
 #[cfg(any(feature = "pcap", test))]
-impl AsRef<BpfInsn> for pcap::BpfInstruction {
-    fn as_ref(&self) -> &BpfInsn {
+impl Borrow<BpfInsn> for &pcap::BpfInstruction {
+    fn borrow(&self) -> &BpfInsn {
         // SAFETY: these have the same C layout
-        unsafe { std::mem::transmute(self) }
+        unsafe { std::mem::transmute(*self) }
     }
 }
 
@@ -386,5 +537,21 @@ mod tests {
 
         packet[26..30].copy_from_slice(&[5, 6, 7, 8]);
         assert_eq!(prog.filter(packet), 0);
+    }
+
+    #[test]
+    fn validate_test() -> Result<(), BpfError> {
+        let capture = Capture::dead(Linktype::ETHERNET).unwrap();
+        let prog = capture.compile("ip src 1.2.3.4", true).unwrap();
+        let _ = BpfProgram::validate(prog.get_instructions())?;
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_test() {
+        match BpfProgram::validate([BpfInsn::stmt(RET | LEN, 0)]) {
+            Ok(_) => panic!("program should not compile"),
+            Err(err) => assert_eq!(err, BpfError::InvalidInstruction),
+        }
     }
 }
