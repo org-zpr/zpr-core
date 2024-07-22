@@ -1,10 +1,10 @@
 use crate::packet::Packet;
 use crate::test_packet::*;
+use enum_map::Enum;
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
-use enum_map::Enum;
 
 // Queues (i.e., frontend interface) for each stage of the system.
 
@@ -206,7 +206,7 @@ impl<'pktbuf> Capture<'pktbuf> {
         packet: Packet<'pktbuf>,
         timestamp: SystemTime,
         direction: Direction,
-        caplen: u32
+        caplen: u32,
     ) {
         let cap_pack: CapPacket = CapPacket {
             packet,
@@ -222,7 +222,7 @@ impl<'pktbuf> Capture<'pktbuf> {
         packet: Packet<'pktbuf>,
         timestamp: SystemTime,
         direction: Direction,
-        caplen: u32
+        caplen: u32,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
         let cap_pack: CapPacket = CapPacket {
             packet,

@@ -70,7 +70,7 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
                     pkt_clone,
                     SystemTime::now(),
                     Direction::Outbound,
-                    caplen // Not currently used
+                    caplen, // Not currently used
                 ) {
                     Ok(()) => {
                         asm.counters[CounterType::OutCapPacksWrite].increment();

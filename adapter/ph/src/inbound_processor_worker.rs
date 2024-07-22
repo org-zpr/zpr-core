@@ -110,7 +110,7 @@ async fn clone_cap_packs<'pktbuf>(
                                 pkt_clone,
                                 SystemTime::now(),
                                 Direction::Inbound,
-                                caplen // Not currently used
+                                caplen, // Not currently used
                             ) {
                                 Ok(()) => {
                                     asm.counters[CounterType::InCapPacksWrite].increment();

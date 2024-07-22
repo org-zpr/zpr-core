@@ -100,11 +100,11 @@ fn savefile_write(cap_pack: &CapPacket, savefile: &mut Savefile) {
 
     let header: PacketHeader = PacketHeader {
         ts,
-        caplen: cap_pack.packet.body().len() as u32, //cap_pack.caplen, 
+        caplen: cap_pack.packet.body().len() as u32, //cap_pack.caplen,
         len: cap_pack.packet.body().len() as u32,
     };
     //println!("packet.body.len: {}, caplen: {}", cap_pack.packet.body().len() as u32, cap_pack.caplen);
-    
+
     let packet: Packet = Packet {
         header: &header,
         data: cap_pack.packet.body(),

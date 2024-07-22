@@ -1,5 +1,6 @@
 use crate::assembly::Assembly;
 use crate::test_packet::TestPacketMetrics;
+use cbpf_rs;
 use core::future::Future;
 use hdrhistogram::Histogram;
 use pcap::{Capture, Linktype};
@@ -17,7 +18,6 @@ use tokio::net::UnixStream;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
-use cbpf_rs;
 
 async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
     let mut set = JoinSet::<Result<(), Error>>::new();
@@ -375,7 +375,11 @@ async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String 
     let (_command, program) = str_message.split_once(' ').unwrap();
     let capture = Capture::dead(Linktype::USER0).unwrap();
     // let bpfprogram: cbpf_rs::BpfProgram = cbpf_rs::BpfProgram::from(capture.compile(program, true).unwrap());
-    asm.flow_control.set_program(cbpf_rs::BpfProgram::from(capture.compile(program, true).unwrap())).await;
+    asm.flow_control
+        .set_program(cbpf_rs::BpfProgram::from(
+            capture.compile(program, true).unwrap(),
+        ))
+        .await;
 
     format!("Program: {program} set\n")
 }
