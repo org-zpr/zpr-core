@@ -5,6 +5,7 @@ use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
+use enum_map::Enum;
 
 // Queues (i.e., frontend interface) for each stage of the system.
 
