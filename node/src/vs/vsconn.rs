@@ -14,23 +14,10 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio::time::{self, Duration};
 use tokio_util::sync::CancellationToken;
 
-
-// TODO: I'd like to keep all the thrift stuff in vss.
-use thrift::transport::{TReadTransportFactory, TFramedReadTransportFactory};
-use thrift::transport::{TWriteTransportFactory, TFramedWriteTransportFactory};
-use thrift::protocol::{TInputProtocolFactory, TOutputProtocolFactory};
-use thrift::protocol::{TBinaryInputProtocolFactory, TBinaryOutputProtocolFactory};
-use thrift::server::TServer;
-
-
 use crate::vsapi;
 
 use crate::vs::vscli::{self, VSClientI};
-
-use crate::vssapi::VisaSupportSyncProcessor;
-
-use crate::vs::vss::VisaSupportHandlerImpl;
-
+use crate::vs::vss;
 use crate::vs::vstypes::{Visa, Revocation};
 
 use tracing::{error, info};
@@ -271,36 +258,11 @@ impl VSConn {
 
         let (vss_tx, mut vss_rx) = mpsc::channel(16);
 
-        // Thread is detached when handle drops out of scope which is always during a node shutdown.
+        // Thread is detached when handle drops out of scope which is during a node shutdown.
         // In the future that may not always be the case so we will need a better way to deal with
-        // this annoying thrift server.
+        // this thrift server.
         let _vss_handle = std::thread::spawn(move ||{
-            // Create the thrift server and run it.
-            let handler = VisaSupportHandlerImpl::new(vss_tx);
-            let processor = VisaSupportSyncProcessor::new(handler);
-
-            let i_tr_fact: Box<dyn TReadTransportFactory> = Box::new(TFramedReadTransportFactory::new());
-            let i_pr_fact: Box<dyn TInputProtocolFactory> = Box::new(TBinaryInputProtocolFactory::new());
-            let o_tr_fact: Box<dyn TWriteTransportFactory> = Box::new(TFramedWriteTransportFactory::new());
-            let o_pr_fact: Box<dyn TOutputProtocolFactory> = Box::new(TBinaryOutputProtocolFactory::new());
-
-            let mut vss_server = TServer::new(
-                i_tr_fact,
-                i_pr_fact,
-                o_tr_fact,
-                o_pr_fact,
-                processor,
-                10
-            );
-
-            // TODO: super annoying that thrift gives us no way to run non-blocking or
-            //       even a way to stop the server.
-            info!("starting visa support service on port 31338"); // XXX addr and port come from config
-            match vss_server.listen("127.0.0.1:31338") {
-                Ok(_) => info!("VSS server completed OK"),
-                Err(e) => error!("VSS server failed with error: {}", e),
-            };
-
+            vss::start_vss_server(vss_tx, "127.0.0.1:31338");
         });
 
 
