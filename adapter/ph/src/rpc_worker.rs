@@ -17,6 +17,7 @@ use tokio::net::UnixStream;
 use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
+use cbpf_rs;
 
 async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
     let mut set = JoinSet::<Result<(), Error>>::new();
@@ -373,8 +374,8 @@ async fn close_capture(asm: &Assembly<'_>) -> String {
 async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
     let (_command, program) = str_message.split_once(' ').unwrap();
     let capture = Capture::dead(Linktype::USER0).unwrap();
-    let bpfprogram = capture.compile(program, true).unwrap();
-    asm.flow_control.set_program(bpfprogram).await;
+    // let bpfprogram: cbpf_rs::BpfProgram = cbpf_rs::BpfProgram::from(capture.compile(program, true).unwrap());
+    asm.flow_control.set_program(cbpf_rs::BpfProgram::from(capture.compile(program, true).unwrap())).await;
 
     format!("Program: {program} set\n")
 }

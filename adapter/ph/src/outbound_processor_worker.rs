@@ -56,8 +56,9 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
 
     let dir: &mut u8 = pkt.alloc_zeroed_header();
     *dir = 1;
-    if asm.flow_control.check_packet(pkt.body()).await {
-        println!("packets match outbound");
+    let caplen = asm.flow_control.check_packet(pkt.body()).await;
+    //println!("caplen outbound {}", caplen);
+    if caplen > 0 {
         let mut bufs = Vec::new();
         let _ = asm.buffer_stack.try_get_buffers(1, &mut bufs);
         // Ensures there's at least one buffer
@@ -69,6 +70,7 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
                     pkt_clone,
                     SystemTime::now(),
                     Direction::Outbound,
+                    caplen // Not currently used
                 ) {
                     Ok(()) => {
                         asm.counters[CounterType::OutCapPacksWrite].increment();

@@ -98,8 +98,9 @@ async fn clone_cap_packs<'pktbuf>(
             InboundProcessorMessage::Packet(pkt) => {
                 let dir: &mut u8 = pkt.alloc_zeroed_header();
                 *dir = 0;
-                if asm.flow_control.check_packet(pkt.body()).await {
-                    println!("packets match inbound");
+                let caplen = asm.flow_control.check_packet(pkt.body()).await;
+                //println!("caplen inbound {}", caplen);
+                if caplen > 0 {
                     // Ensures there's at least one buffer
                     match bufs.pop() {
                         Some(buf) => {
@@ -109,6 +110,7 @@ async fn clone_cap_packs<'pktbuf>(
                                 pkt_clone,
                                 SystemTime::now(),
                                 Direction::Inbound,
+                                caplen // Not currently used
                             ) {
                                 Ok(()) => {
                                     asm.counters[CounterType::InCapPacksWrite].increment();
