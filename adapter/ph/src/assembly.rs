@@ -37,6 +37,7 @@ pub struct Assembly<'pktbuf> {
     pub outbound_processor: OutboundProcessor<'pktbuf>,
     pub outbound_send: OutboundSend<'pktbuf>,
 
+    // Used to intercept packets that are unencrypted but still have ZDP headers
     pub capture_queue: Capture<'pktbuf>,
     pub capture_worker: CaptureWorker,
     pub flow_control: FlowControl,
