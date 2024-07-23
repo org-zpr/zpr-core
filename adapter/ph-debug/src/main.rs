@@ -193,7 +193,7 @@ fn serialize(program: &str) -> String {
     let mut serialized_program = format!("{},", instructions.len());
 
     for instruction in instructions {
-        let insn: &cbpf_rs::BpfInsn = (&instruction).borrow();
+        let insn: &cbpf_rs::BpfInsn = instruction.borrow();
         let _ = write!(
             &mut serialized_program,
             "{} {} {} {},",
