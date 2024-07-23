@@ -22,24 +22,27 @@ else
 endif
 
 
-.PHONY: all
-all: build
+all: check build
 
 
-.PHONY: build
 build: vservice
 
 
-.PHONY: vservice
 vservice:
 	go build $(GFLAGS) -o $(OUT_DIR)/vservice -v $(PKG_VSERVICE)
 
 
-.PHONY: test
 test:
 	go test -short ${PKG_LIST}
 
 
-.PHONY: clean
 clean:
 	rm -rf $(OUT_DIR)
+
+
+# If check fails, the thrift files need to be rebuilt
+check:
+	cd ../thrift && md5sum -c ../core/pkg/vsapi/md5sums.txt
+
+
+.PHONY: all build vservice test clean check

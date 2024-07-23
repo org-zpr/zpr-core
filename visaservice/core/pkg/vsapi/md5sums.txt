@@ -1,0 +1,1 @@
+baed52c0b401d2f1bd8d0d664b9c001f  vs.thrift

@@ -1,12 +1,12 @@
 
 
-all: build
+all: check build
 
 
-all-go: build-go
+all-go: check-go build-go
 
 
-all-rs: build-rs
+all-rs: check-rs build-rs
 
 
 clean:
@@ -43,5 +43,20 @@ test-rs:
 	cd cli && cargo test
 
 
+# If check fails, the thrift files need to be rebuilt
+check: check-go check-rs
 
-.PHONY: all build test clean all-go build-go build-rs test-rs test-go
+
+check-go:
+	$(MAKE) -C core check
+
+
+# In the node project we have a cargo build script to check the MD5s.
+# Since there is a makefile for the whole visa service it is much 
+# simpler to do this here instead of in our `cli` subproject.
+check-rs:
+	cd thrift && md5sum -c ../cli/src/vsapi/md5sums.txt
+
+
+
+.PHONY: all build test clean all-go build-go build-rs test-rs test-go check check-go check-rs

@@ -1,6 +1,5 @@
 # Requires that env var $THRIFTCC is set to location of thrift compiler.
 
-
 # VSAPI is the visa service API.
 # Used by:
 #   - visa service go code (server)
@@ -20,15 +19,23 @@ VSS_DEST_RS_NODE := ../../node/src/vssapi
 
 
 
-# Build output directories for the go and rust 
+# Build output directories for the go and rust
 GGO := gen-go
 GRS := gen-rs
 
+
+VS_SUM := vs.thrift.sum
+VSS_SUM := vss.thrift.sum
+
+
+SUMS := $(patsubst %.thrift,%.thrift.sum,$(wildcard *.thrift))
 
 
 ifndef THRIFTCC
   $(error must set THRIFTCC to location of thrift compiler)
 endif
+
+
 
 
 all: go rs
@@ -42,18 +49,24 @@ rs: $(GRS)/vs.rs $(GRS)/vss.rs
 
 install: install-go install-rs
 
+sums: $(SUMS)
 
-install-go: go
-	test -d $(VS_DEST_GO) || mkdir $(VS_DEST_GO)
-	cp $(GGO)/vsapi/*.go $(VS_DEST_GO)
+install-go: sums go
+	test -d $(VS_DEST_GO)  || mkdir $(VS_DEST_GO)
 	test -d $(VSS_DEST_GO) || mkdir $(VSS_DEST_GO)
+	cp $(GGO)/vsapi/*.go  $(VS_DEST_GO)
+	cp $(VS_SUM)          $(VS_DEST_GO)
 	cp $(GGO)/vssapi/*.go $(VSS_DEST_GO)
+	cp $(VSS_SUM)         $(VSS_DEST_GO)
 
 
-install-rs: rs
-	cp $(GRS)/vs.rs $(VS_DEST_RS_CLI)/mod.rs
-	cp $(GRS)/vs.rs $(VS_DEST_RS_NODE)/mod.rs
+install-rs: sums rs
+	cp $(GRS)/vs.rs  $(VS_DEST_RS_CLI)/mod.rs
+	cp $(VS_SUM)     $(VS_DEST_RS_CLI)
+	cp $(GRS)/vs.rs  $(VS_DEST_RS_NODE)/mod.rs
+	cp $(VS_SUM)     $(VS_DEST_RS_NODE)
 	cp $(GRS)/vss.rs $(VSS_DEST_RS_NODE)/mod.rs
+	cp $(VSS_SUM)    $(VSS_DEST_RS_NODE)
 
 
 $(GGO)/vsapi: vs.thrift
@@ -76,8 +89,12 @@ $(GRS)/vss.rs: vss.thrift
 	$(THRIFTCC) -r -out $(GRS) --gen rs $<
 
 
+$(SUMS): %.thrift.sum: %.thrift
+	md5sum $< >$@
+
+
 clean:
-	rm -rf $(GGO) && rm -rf $(GRS)
+	rm -rf $(GGO) && rm -rf $(GRS) && rm -f $(SUMSFILE)
 
 
-.PHONY: all go rs install-go install-rs clean
+.PHONY: all go rs install-go install-rs clean sums

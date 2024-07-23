@@ -54,6 +54,7 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
     // fill in metadata
     pkt.metadata_mut().flow_id = 0; // TODO: fill from IP header
 
+    // Clones packet into capture queue after adding direction to beginning of packet
     let dir: &mut u8 = pkt.alloc_zeroed_header();
     *dir = 1;
     if asm.flow_control.check_packet(pkt.body()).await {
@@ -85,6 +86,7 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
             }
         }
     }
+    // remove direction indicator from beginning of packet
     pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
     // forward encapsulated packet on
     asm.outbound_send.enqueue_packet(pkt).await;
