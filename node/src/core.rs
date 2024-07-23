@@ -57,7 +57,6 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     let mut tasks = JoinSet::new();
     let (cs_shutdown_tx, mut cs_shutdown_rx) = oneshot::channel();
 
-
     // This channel is for messages from the visa-support-service.
     let (vss_tx, mut vss_rx) = mpsc::channel(VSS_OUTPUT_CHANNEL_SIZE);
 
@@ -72,12 +71,9 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     // In the future that may not always be the case so we will need a better way to deal with
     // this thrift server.
     let vss_addr_for_vss = vss_addr.clone();
-    let _vss_handle = std::thread::spawn(move ||{
+    let _vss_handle = std::thread::spawn(move || {
         vss::start_vss_server(vss_tx, &vss_addr_for_vss);
     });
-
-
-
 
     let o_vsforceconnect = opts.vsforceconnect.is_some();
 
@@ -155,12 +151,12 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                 }
             }
         });
-
     } else {
         info!("nothing to do...  ^C to exit");
     }
 
-    loop { //  main node runloop
+    loop {
+        //  main node runloop
         tokio::select! {
             _ = signal::ctrl_c() => {
                 info!("exiting due to signal");

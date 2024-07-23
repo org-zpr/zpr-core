@@ -22,11 +22,9 @@ type VSClientT = VisaServiceSyncClient<
     TBinaryOutputProtocol<TFramedWriteTransport<WriteHalf<TTcpChannel>>>,
 >;
 
-
 pub struct VSClient {
     service: String,
 }
-
 
 // This is an interface that covers the VSClient wrapper designed to facilitate
 // unit testing.  The running node code should use the `default_vsclient_factory`
@@ -37,16 +35,13 @@ pub trait VSClientI: Send {
         agent: vsapi::Agent,
         cert_pem_data: &str,
         private_key: Rsa<Private>,
-        vss_service_addr: &str
+        vss_service_addr: &str,
     ) -> Result<String, thrift::Error>;
     fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error>;
     fn de_register(&self, apikey: &str) -> Result<(), thrift::Error>;
 }
 
-
 pub type VSClientFactory = fn(service_addr: &str) -> Box<dyn VSClientI>;
-
-
 
 // Wrapper on top of the the THRIFT generated code.
 impl VSClient {
@@ -74,15 +69,13 @@ pub fn default_vsclient_factory(service_addr: &str) -> Box<dyn VSClientI> {
     Box::new(VSClient::new(service_addr))
 }
 
-
 impl VSClientI for VSClient {
-
     fn authenticate(
         &self,
         agent: vsapi::Agent,
         cert_pem_data: &str,
         private_key: Rsa<Private>,
-        vss_service_addr: &str
+        vss_service_addr: &str,
     ) -> Result<String, thrift::Error> {
         let mut client = self.newclient()?;
 

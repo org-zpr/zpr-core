@@ -1,11 +1,10 @@
-
 use tokio::sync::mpsc::Sender;
 
-use thrift::transport::{TReadTransportFactory, TFramedReadTransportFactory};
-use thrift::transport::{TWriteTransportFactory, TFramedWriteTransportFactory};
-use thrift::protocol::{TInputProtocolFactory, TOutputProtocolFactory};
 use thrift::protocol::{TBinaryInputProtocolFactory, TBinaryOutputProtocolFactory};
+use thrift::protocol::{TInputProtocolFactory, TOutputProtocolFactory};
 use thrift::server::TServer;
+use thrift::transport::{TFramedReadTransportFactory, TReadTransportFactory};
+use thrift::transport::{TFramedWriteTransportFactory, TWriteTransportFactory};
 
 use tracing::{error, info};
 
@@ -14,8 +13,7 @@ use std::collections::BTreeMap;
 use crate::vssapi;
 use vssapi::{VisaSupportSyncHandler, VisaSupportSyncProcessor};
 
-use crate::vs::vstypes::{PolicyInfo, Visa, Revocation};
-
+use crate::vs::vstypes::{PolicyInfo, Revocation, Visa};
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -25,18 +23,13 @@ pub enum VSSMsg {
     PushedRevocation(Revocation),
 }
 
-
-
-
 pub struct VisaSupportHandlerImpl {
     msg_chan_out: Sender<VSSMsg>,
 }
 
 impl VisaSupportHandlerImpl {
     pub fn new(msg_chan_out: Sender<VSSMsg>) -> Self {
-        VisaSupportHandlerImpl {
-            msg_chan_out,
-        }
+        VisaSupportHandlerImpl { msg_chan_out }
     }
 }
 
@@ -52,14 +45,7 @@ pub fn start_vss_server(tx_chan: Sender<VSSMsg>, listen_addr: &str) {
     let o_tr_fact: Box<dyn TWriteTransportFactory> = Box::new(TFramedWriteTransportFactory::new());
     let o_pr_fact: Box<dyn TOutputProtocolFactory> = Box::new(TBinaryOutputProtocolFactory::new());
 
-    let mut vss_server = TServer::new(
-        i_tr_fact,
-        i_pr_fact,
-        o_tr_fact,
-        o_pr_fact,
-        processor,
-        10
-    );
+    let mut vss_server = TServer::new(i_tr_fact, i_pr_fact, o_tr_fact, o_pr_fact, processor, 10);
 
     // TODO: super annoying that thrift gives us no way to run non-blocking or
     //       even a way to stop the server.
@@ -70,10 +56,7 @@ pub fn start_vss_server(tx_chan: Sender<VSSMsg>, listen_addr: &str) {
     };
 }
 
-
-
 impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
-
     fn handle_network_policy_installed(&self, pi: vssapi::PolicyInfo) -> thrift::Result<()> {
         info!("handle_network_policy_installed: {:?}", pi);
 
@@ -110,7 +93,3 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
         Ok(())
     }
 }
-
-
-
-

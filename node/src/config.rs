@@ -51,7 +51,8 @@ impl Configuration {
     }
 
     pub fn get_node_addr(&self) -> IpAddr {
-        self.node_addr.expect("node address not set in Configuration") // This fair panic since the address is required in load_configuration
+        self.node_addr
+            .expect("node address not set in Configuration") // This fair panic since the address is required in load_configuration
     }
 }
 
@@ -70,7 +71,11 @@ pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> 
         Err(e) => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("failed to parse config file: {}: {}", path.to_string_lossy(), e),
+                format!(
+                    "failed to parse config file: {}: {}",
+                    path.to_string_lossy(),
+                    e
+                ),
             ))
         }
     };
@@ -80,7 +85,10 @@ pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> 
         None => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("failed to get parent path of config file: {}", path.to_string_lossy()),
+                format!(
+                    "failed to get parent path of config file: {}",
+                    path.to_string_lossy()
+                ),
             ))
         }
     };
@@ -112,11 +120,10 @@ pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> 
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use rand::Rng;
     use std::env;
     use std::fs;
-    use rand::Rng;
-
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempFile {
         path: String,
@@ -149,11 +156,8 @@ mod test {
         }
     }
 
-
-
     #[test]
     fn test_get_claims() {
-
         let toml_txt = r#"
             [creds]
             certificate = "foo-cert.pem"

@@ -6,9 +6,9 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::{Error, ErrorKind};
 use std::net::IpAddr;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
-use std::path::Path;
 
 use tokio::sync::mpsc::{self, Sender};
 use tokio::time::{self, Duration};
@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 use crate::vsapi;
 
 use crate::vs::vscli::{self, VSClientI};
-use crate::vs::vstypes::{Visa, Revocation};
+use crate::vs::vstypes::{Revocation, Visa};
 
 use tracing::{error, info};
 
@@ -38,8 +38,6 @@ use tracing::{error, info};
 //
 //   Now the node can request visas or call for connect authorizations.
 //
-
-
 
 const POLL_INTERVAL: Duration = Duration::from_millis(5000);
 const MAX_POLL_ERRORS: u32 = 5;
@@ -88,8 +86,6 @@ pub enum VSOutput {
     PushedVisa(Visa),
     PushedRevocation(Revocation),
 }
-
-
 
 /// The VSConn will manage all communication with the visa service on behalf of the node.
 ///
@@ -147,7 +143,11 @@ impl VSConn {
             Err(e) => {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
-                    format!("failed to parse private RSA key: {}: {}", node_key_file.to_string_lossy(), e),
+                    format!(
+                        "failed to parse private RSA key: {}: {}",
+                        node_key_file.to_string_lossy(),
+                        e
+                    ),
                 ));
             }
         };
@@ -163,7 +163,7 @@ impl VSConn {
                 cmd_tx: None,
                 output_tx: Some(output_tx),
                 client_fac: vscli::default_vsclient_factory,
-                vss_service_addr: vss_service_addr.to_string()
+                vss_service_addr: vss_service_addr.to_string(),
             }),
         });
 
@@ -174,7 +174,6 @@ impl VSConn {
         let mut state = self.shared.state.lock().unwrap();
         state.claims.insert(String::from(key), String::from(value));
     }
-
 
     /// Must be callled before run.  This registers with visa service and obtains an API key.
     /// Blocking network call.
@@ -315,7 +314,6 @@ impl VSConn {
         Ok(())
     }
 
-
     async fn send_command(&self, cmd: VSCommand) -> Result<(), Error> {
         // Extract the tx channel from the state, but must do so without keeping lock across the await later.
         let tx_chan: Sender<VSCommand>;
@@ -338,7 +336,6 @@ impl VSConn {
         }
         Ok(())
     }
-
 
     async fn do_poll(&self) -> Result<(Vec<Visa>, Vec<Revocation>, bool), Error> {
         let vsc: Box<dyn VSClientI>;
@@ -380,12 +377,10 @@ impl VSConn {
                 }
                 Ok((visas, revocations, more))
             }
-            Err(e) => {
-                Err(Error::new(
-                    ErrorKind::Other,
-                    format!("VSConn::do_poll failed: {}", e),
-                ))
-            }
+            Err(e) => Err(Error::new(
+                ErrorKind::Other,
+                format!("VSConn::do_poll failed: {}", e),
+            )),
         }
     }
 
@@ -408,9 +403,6 @@ impl VSConn {
     }
 }
 
-
-
-
 #[cfg(test)]
 mod test {
     use std::net::Ipv4Addr;
@@ -424,12 +416,6 @@ mod test {
     use std::env;
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
-
-
-
-
-
-
 
     const CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
 MIIEWzCCA0OgAwIBAgIJAMSVUe6Pd/Z7MA0GCSqGSIb3DQEBBQUAMIGGMQswCQYD
@@ -521,8 +507,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         }
     }
 
-
-
     // In an effort to leave the client trait implementation as simple as possible
     // it does not allow for modification of `self`... so we can't have any mutable
     // state in there.  For these tests, we track state in a static variable.
@@ -546,13 +530,13 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         DeRegister,
     }
 
-    static mut RUN_LOCK:Mutex<u32> = Mutex::new(0); // Each test holds this while running.
+    static mut RUN_LOCK: Mutex<u32> = Mutex::new(0); // Each test holds this while running.
 
     static mut TEST_STATE: TestState = TestState {
         auth_count: 0,
         poll_count: 0,
         de_register_count: 0,
-        push_v: None
+        push_v: None,
     };
 
     fn reset_state() {
@@ -585,15 +569,11 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
     }
 
     fn get_pushed_visa() -> Option<Visa> {
-        unsafe {
-            TEST_STATE.push_v.clone()
-        }
+        unsafe { TEST_STATE.push_v.clone() }
     }
-
 
     #[derive(Debug)]
     struct TestVSCli {}
-
 
     impl VSClientI for TestVSCli {
         fn authenticate(
@@ -602,8 +582,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             _cert_pem_data: &str,
             _private_key: Rsa<Private>,
             _vss_service_addr: &str,
-        ) -> Result<String, thrift::Error>
-        {
+        ) -> Result<String, thrift::Error> {
             incr(CounterT::Auth);
             Ok(String::from("le_key"))
         }
@@ -636,9 +615,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
     }
 
     fn testvscli_factory(_service_addr: &str) -> Box<dyn VSClientI> {
-        Box::new(TestVSCli{})
+        Box::new(TestVSCli {})
     }
-
 
     #[tokio::test]
     async fn test_start_and_stop_and_poll() {
@@ -648,7 +626,15 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let keyfile = TempFile::new_pem(KEY_DATA);
 
         let (tx, mut _rx) = mpsc::channel(8);
-        let conn = VSConn::new(tx, "127.0.0.1:0", certfile.get_path(), keyfile.get_path(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), "127.0.0.1:0").unwrap();
+        let conn = VSConn::new(
+            tx,
+            "127.0.0.1:0",
+            certfile.get_path(),
+            keyfile.get_path(),
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            "127.0.0.1:0",
+        )
+        .unwrap();
         conn.add_claim("foo", "fee");
         conn.initialize(Some(testvscli_factory)).unwrap();
         assert_eq!(get_counter(CounterT::Auth), 1);
@@ -683,7 +669,15 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let keyfile = TempFile::new_pem(KEY_DATA);
 
         let (tx, mut rx) = mpsc::channel(8);
-        let conn = VSConn::new(tx, "127.0.0.1:0", certfile.get_path(), keyfile.get_path(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), "127.0.0.1:0").unwrap();
+        let conn = VSConn::new(
+            tx,
+            "127.0.0.1:0",
+            certfile.get_path(),
+            keyfile.get_path(),
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            "127.0.0.1:0",
+        )
+        .unwrap();
         conn.add_claim("foo", "fee");
         conn.initialize(Some(testvscli_factory)).unwrap();
 
@@ -723,5 +717,3 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         ctoken.cancel(); // stop the vs
     }
 }
-
-

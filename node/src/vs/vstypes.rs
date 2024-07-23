@@ -1,7 +1,4 @@
-
 use std::collections::BTreeMap;
-
-
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -10,7 +7,6 @@ pub struct PolicyInfo {
     pub configuration_id: u64,
     pub node_config: BTreeMap<String, String>,
 }
-
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
