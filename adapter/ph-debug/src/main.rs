@@ -3,7 +3,10 @@
 // when a command is multiple words, this program assumes the spaces are replaced
 // with a '-' on the command line
 
+use cbpf_rs;
 use clap::Parser;
+use pcap::{Capture, Linktype};
+use std::borrow::Borrow;
 use std::io::prelude::*;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
@@ -49,7 +52,9 @@ fn main() -> std::io::Result<()> {
         "WATCH\n" => handle_watch(args.frequency, &port)?,
         "PERF-SAMPLE\n" => handle_perf_sample(args.duration, args.frequency, &port)?,
         "SET-CAPTURE\n" => handle_set_capture(args.file_path, &port)?,
-        "CAPTURE-SEQUENCE\n" => capture_sequence(args.file_path, args.duration, args.program, &port)?,
+        "CAPTURE-SEQUENCE\n" => {
+            capture_sequence(args.file_path, args.duration, args.program, &port)?
+        }
         "SET-CAPTURE-PROGRAM\n" => handle_set_capture_program(args.program, &port)?,
         _ => {
             eprintln!("Command '{command}' not recognized");
@@ -130,7 +135,12 @@ fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn capture_sequence(file_path: String, time: u64, program: Option<String>, port: &str) -> std::io::Result<()> {
+fn capture_sequence(
+    file_path: String,
+    time: u64,
+    program: Option<String>,
+    port: &str,
+) -> std::io::Result<()> {
     let sleep_time = Duration::new(time, 0);
     handle_set_capture(file_path, port)?;
     handle_set_capture_program(program, port)?;
@@ -145,11 +155,32 @@ fn capture_sequence(file_path: String, time: u64, program: Option<String>, port:
 fn handle_set_capture_program(program: Option<String>, port: &str) -> std::io::Result<()> {
     match program {
         Some(program) => {
-            let command = format!("SET-CAPTURE-PROGRAM {}\n", program);
+            let serialized_program = serialize(&program);
+            let command = format!("SET-CAPTURE-PROGRAM {}\n", serialized_program);
             basic_call_response(&command, &port)?;
         }
         None => (),
     };
 
     Ok(())
+}
+
+fn serialize(program: &str) -> String {
+    use std::fmt::Write;
+
+    let capture = Capture::dead(Linktype::USER0).unwrap();
+    let program = capture.compile(program, true).unwrap();
+    let instructions: &[pcap::BpfInstruction] = program.get_instructions();
+    let mut serialized_program = format!("{},", instructions.len());
+
+    for instruction in instructions {
+        let insn: &cbpf_rs::BpfInsn = (&instruction).borrow();
+        let _ = write!(
+            &mut serialized_program,
+            "{} {} {} {},",
+            insn.code, insn.jt, insn.jf, insn.k
+        );
+    }
+    let _ = serialized_program.pop();
+    serialized_program
 }

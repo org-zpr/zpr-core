@@ -3,7 +3,6 @@ use crate::test_packet::TestPacketMetrics;
 use cbpf_rs;
 use core::future::Future;
 use hdrhistogram::Histogram;
-use pcap::{Capture, Linktype};
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
@@ -371,12 +370,22 @@ async fn close_capture(asm: &Assembly<'_>) -> String {
 
 async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
     let (_command, program) = str_message.split_once(' ').unwrap();
-    let capture = Capture::dead(Linktype::USER0).unwrap();
-    // let bpfprogram: cbpf_rs::BpfProgram = cbpf_rs::BpfProgram::from(capture.compile(program, true).unwrap());
+    let mut serialized_program: Vec<&str> = program.split(',').collect();
+    let mut insn_vec = Vec::new();
+    serialized_program.remove(0);
+
+    for insn in serialized_program {
+        let split_insn: Vec<&str> = insn.split_whitespace().collect();
+        let bpf_insn = cbpf_rs::BpfInsn {
+            code: split_insn[0].parse().unwrap(),
+            jt: split_insn[1].parse().unwrap(),
+            jf: split_insn[2].parse().unwrap(),
+            k: split_insn[3].parse().unwrap(),
+        };
+        insn_vec.push(bpf_insn);
+    }
     asm.flow_control
-        .set_program(cbpf_rs::BpfProgram::from(
-            capture.compile(program, true).unwrap(),
-        ))
+        .set_program(cbpf_rs::BpfProgram::validate(insn_vec).unwrap()) // TODO use match to catch the error
         .await;
 
     format!("Program: {program} set\n")
