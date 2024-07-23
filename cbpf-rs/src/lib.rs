@@ -1,8 +1,10 @@
 use std::borrow::Borrow;
 use std::hint::unreachable_unchecked;
 
+/// BPF compatibility version
 pub const VERSION: i32 = 199606;
 
+/// a single BPF instruction
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct BpfInsn {
@@ -101,23 +103,21 @@ fn code_miscop(code: u16) -> u16 {
 const TAX: u16 = 0x00;
 const TXA: u16 = 0x80;
 
+/// number of words addressable via MEM addressing mode
 const MEMWORDS: usize = 16;
 
-struct CodeHelper<const A: u16, const B: u16, const C: u16> {}
+/// Launder a compile-time u16 value as a const symbol
+/// which can be used for pattern matching.
+struct U16Value<const A: u16> {}
 
-impl<const A: u16, const B: u16, const C: u16> CodeHelper<A, B, C> {
-    const X: u16 = A | B | C;
+impl<const A: u16> U16Value<A> {
+    const VALUE: u16 = A;
 }
 
-macro_rules! code {
-    ($i:path) => {
-        CodeHelper::<$i, 0, 0>::X
-    };
-    ($i:path, $j:path) => {
-        CodeHelper::<$i, $j, 0>::X
-    };
-    ($i:path, $j:path, $k:path) => {
-        CodeHelper::<$i, $j, $k>::X
+/// macro helper for arithmetic expression patterns
+macro_rules! u16pat {
+    ($i:expr) => {
+        $crate::U16Value::<{ $i }>::VALUE
     };
 }
 
@@ -137,6 +137,7 @@ unsafe fn load_word(packet: &[u8], addr: usize) -> u32 {
         | (*unsafe { packet.get_unchecked((addr) + 3) } as u32)
 }
 
+/// error indicating why a BPF program did not validate
 #[derive(Debug, PartialEq)]
 pub enum BpfError {
     ProgramTooLarge,
@@ -146,21 +147,27 @@ pub enum BpfError {
     BadMemoryAccess,
     DivideByZero,
 }
+
+/// a validated BPF program
 pub struct BpfProgram {
     insns: Box<[BpfInsn]>,
 }
 
 impl BpfProgram {
+    /// Allow backward jumps while validating. This means a BPF program
+    /// is not guaranteed to terminate.
     pub const VALIDATE_ALLOW_BACKWARD_JUMPS: usize = 1;
 
     // SAFETY: all unsafe blocks in these methods assume the program has been validated.
 
+    /// Validate the stream of BPF instructions and construct a program as proof.
     pub fn validate<I: IntoIterator<Item = impl Borrow<BpfInsn>>>(
         insns: I,
     ) -> Result<Self, BpfError> {
         Self::validate_with_flags(insns, 0)
     }
 
+    /// Validate, with options.
     pub fn validate_with_flags<I: IntoIterator<Item = impl Borrow<BpfInsn>>>(
         insns: I,
         flags: usize,
@@ -170,6 +177,7 @@ impl BpfProgram {
         Ok(Self { insns })
     }
 
+    /// Create a BPF program from a series of instructions without validating.
     pub unsafe fn new_unvalidated<I: IntoIterator<Item = impl Borrow<BpfInsn>>>(insns: I) -> Self {
         Self {
             insns: insns.into_iter().map(|x| *x.borrow()).collect(),
@@ -180,6 +188,7 @@ impl BpfProgram {
         unsafe { pc.unchecked_add(if taken { insn.jt } else { insn.jf } as u32) }
     }
 
+    /// Execute the BPF program on the given packet data.
     pub fn filter<P: AsRef<[u8]>>(&self, packet: P) -> u32 {
         self.filter_slice(packet.as_ref())
     }
@@ -195,10 +204,10 @@ impl BpfProgram {
             pc = unsafe { pc.unchecked_add(1) };
 
             match insn.code {
-                code!(RET, K) => break insn.k,
-                code!(RET, A) => break a,
+                u16pat!(RET | K) => break insn.k,
+                u16pat!(RET | A) => break a,
 
-                code!(LD, W, ABS) => {
+                u16pat!(LD | W | ABS) => {
                     let k = insn.k as usize;
                     if k > packet.len() || packet.len() - k < 4 {
                         break 0;
@@ -207,7 +216,7 @@ impl BpfProgram {
                     }
                 }
 
-                code!(LD, H, ABS) => {
+                u16pat!(LD | H | ABS) => {
                     let k = insn.k as usize;
                     if k > packet.len() || packet.len() - k < 2 {
                         break 0;
@@ -216,7 +225,7 @@ impl BpfProgram {
                     }
                 }
 
-                code!(LD, B, ABS) => {
+                u16pat!(LD | B | ABS) => {
                     let k = insn.k as usize;
                     if k >= packet.len() {
                         break 0;
@@ -225,10 +234,10 @@ impl BpfProgram {
                     }
                 }
 
-                code!(LD, W, LEN) => a = packet.len() as u32,
-                code!(LDX, W, LEN) => x = packet.len() as u32,
+                u16pat!(LD | W | LEN) => a = packet.len() as u32,
+                u16pat!(LDX | W | LEN) => x = packet.len() as u32,
 
-                code!(LD, W, IND) => {
+                u16pat!(LD | W | IND) => {
                     let k = x.wrapping_add(insn.k) as usize;
                     if k > packet.len() || packet.len() - k < 4 {
                         break 0;
@@ -237,7 +246,7 @@ impl BpfProgram {
                     }
                 }
 
-                code!(LD, H, IND) => {
+                u16pat!(LD | H | IND) => {
                     let k = x.wrapping_add(insn.k) as usize;
                     if k > packet.len() || packet.len() - k < 2 {
                         break 0;
@@ -246,7 +255,7 @@ impl BpfProgram {
                     }
                 }
 
-                code!(LD, B, IND) => {
+                u16pat!(LD | B | IND) => {
                     let k = x.wrapping_add(insn.k) as usize;
                     if k >= packet.len() {
                         break 0;
@@ -255,7 +264,7 @@ impl BpfProgram {
                     }
                 }
 
-                code!(LDX, B, MSH) => {
+                u16pat!(LDX | B | MSH) => {
                     let k = insn.k as usize;
                     if k >= packet.len() {
                         break 0;
@@ -264,58 +273,58 @@ impl BpfProgram {
                     }
                 }
 
-                code!(LD, IMM) => a = insn.k,
-                code!(LDX, IMM) => x = insn.k,
+                u16pat!(LD | IMM) => a = insn.k,
+                u16pat!(LDX | IMM) => x = insn.k,
 
-                code!(LD, MEM) => a = *unsafe { mem.get_unchecked(insn.k as usize) },
-                code!(LDX, MEM) => x = *unsafe { mem.get_unchecked(insn.k as usize) },
+                u16pat!(LD | MEM) => a = *unsafe { mem.get_unchecked(insn.k as usize) },
+                u16pat!(LDX | MEM) => x = *unsafe { mem.get_unchecked(insn.k as usize) },
 
-                code!(ST) => *unsafe { mem.get_unchecked_mut(insn.k as usize) } = a,
-                code!(STX) => *unsafe { mem.get_unchecked_mut(insn.k as usize) } = x,
+                u16pat!(ST) => *unsafe { mem.get_unchecked_mut(insn.k as usize) } = a,
+                u16pat!(STX) => *unsafe { mem.get_unchecked_mut(insn.k as usize) } = x,
 
-                code!(JMP, JA) => {
+                u16pat!(JMP | JA) => {
                     /* deliberate wrapping for backwards jumps */
                     pc = pc.wrapping_add(insn.k)
                 }
 
-                code!(JMP, JGT, K) => pc = Self::do_jmp(pc, a > insn.k, insn),
-                code!(JMP, JGE, K) => pc = Self::do_jmp(pc, a >= insn.k, insn),
-                code!(JMP, JEQ, K) => pc = Self::do_jmp(pc, a == insn.k, insn),
-                code!(JMP, JSET, K) => pc = Self::do_jmp(pc, a & insn.k != 0, insn),
+                u16pat!(JMP | JGT | K) => pc = Self::do_jmp(pc, a > insn.k, insn),
+                u16pat!(JMP | JGE | K) => pc = Self::do_jmp(pc, a >= insn.k, insn),
+                u16pat!(JMP | JEQ | K) => pc = Self::do_jmp(pc, a == insn.k, insn),
+                u16pat!(JMP | JSET | K) => pc = Self::do_jmp(pc, a & insn.k != 0, insn),
 
-                code!(JMP, JGT, X) => pc = Self::do_jmp(pc, a > x, insn),
-                code!(JMP, JGE, X) => pc = Self::do_jmp(pc, a >= x, insn),
-                code!(JMP, JEQ, X) => pc = Self::do_jmp(pc, a == x, insn),
-                code!(JMP, JSET, X) => pc = Self::do_jmp(pc, a & x != 0, insn),
+                u16pat!(JMP | JGT | X) => pc = Self::do_jmp(pc, a > x, insn),
+                u16pat!(JMP | JGE | X) => pc = Self::do_jmp(pc, a >= x, insn),
+                u16pat!(JMP | JEQ | X) => pc = Self::do_jmp(pc, a == x, insn),
+                u16pat!(JMP | JSET | X) => pc = Self::do_jmp(pc, a & x != 0, insn),
 
-                code!(ALU, ADD, X) => a = a.wrapping_add(x),
-                code!(ALU, SUB, X) => a = a.wrapping_sub(x),
-                code!(ALU, MUL, X) => a = a.wrapping_mul(x),
-                code!(ALU, DIV, X) => {
+                u16pat!(ALU | ADD | X) => a = a.wrapping_add(x),
+                u16pat!(ALU | SUB | X) => a = a.wrapping_sub(x),
+                u16pat!(ALU | MUL | X) => a = a.wrapping_mul(x),
+                u16pat!(ALU | DIV | X) => {
                     if x == 0 {
                         break 0;
                     } else {
                         a /= x
                     }
                 }
-                code!(ALU, MOD, X) => {
+                u16pat!(ALU | MOD | X) => {
                     if x == 0 {
                         break 0;
                     } else {
                         a %= x
                     }
                 }
-                code!(ALU, AND, X) => a &= x,
-                code!(ALU, OR, X) => a |= x,
-                code!(ALU, XOR, X) => a ^= x,
-                code!(ALU, LSH, X) => {
+                u16pat!(ALU | AND | X) => a &= x,
+                u16pat!(ALU | OR | X) => a |= x,
+                u16pat!(ALU | XOR | X) => a ^= x,
+                u16pat!(ALU | LSH | X) => {
                     if x < 32 {
                         a <<= x
                     } else {
                         a = 0
                     }
                 }
-                code!(ALU, RSH, X) => {
+                u16pat!(ALU | RSH | X) => {
                     if x < 32 {
                         a >>= x
                     } else {
@@ -323,34 +332,34 @@ impl BpfProgram {
                     }
                 }
 
-                code!(ALU, ADD, K) => a = a.wrapping_add(insn.k),
-                code!(ALU, SUB, K) => a = a.wrapping_sub(insn.k),
-                code!(ALU, MUL, K) => a = a.wrapping_mul(insn.k),
-                code!(ALU, DIV, K) => {
+                u16pat!(ALU | ADD | K) => a = a.wrapping_add(insn.k),
+                u16pat!(ALU | SUB | K) => a = a.wrapping_sub(insn.k),
+                u16pat!(ALU | MUL | K) => a = a.wrapping_mul(insn.k),
+                u16pat!(ALU | DIV | K) => {
                     if insn.k == 0 {
                         break 0;
                     } else {
                         a /= insn.k
                     }
                 }
-                code!(ALU, MOD, K) => {
+                u16pat!(ALU | MOD | K) => {
                     if insn.k == 0 {
                         break 0;
                     } else {
                         a %= insn.k
                     }
                 }
-                code!(ALU, AND, K) => a &= insn.k,
-                code!(ALU, OR, K) => a |= insn.k,
-                code!(ALU, XOR, K) => a ^= insn.k,
-                code!(ALU, LSH, K) => {
+                u16pat!(ALU | AND | K) => a &= insn.k,
+                u16pat!(ALU | OR | K) => a |= insn.k,
+                u16pat!(ALU | XOR | K) => a ^= insn.k,
+                u16pat!(ALU | LSH | K) => {
                     if insn.k < 32 {
                         a <<= insn.k
                     } else {
                         a = 0
                     }
                 }
-                code!(ALU, RSH, K) => {
+                u16pat!(ALU | RSH | K) => {
                     if insn.k < 32 {
                         a >>= insn.k
                     } else {
@@ -358,10 +367,10 @@ impl BpfProgram {
                     }
                 }
 
-                code!(ALU, NEG) => a = a.wrapping_neg(),
+                u16pat!(ALU | NEG) => a = a.wrapping_neg(),
 
-                code!(MISC, TAX) => x = a,
-                code!(MISC, TXA) => a = x,
+                u16pat!(MISC | TAX) => x = a,
+                u16pat!(MISC | TXA) => a = x,
 
                 _ => unsafe { unreachable_unchecked() },
             }
