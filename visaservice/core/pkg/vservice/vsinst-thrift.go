@@ -96,14 +96,26 @@ func (vs *VSInst) freeSessionID(sid int32, chksum uint32) bool {
 }
 
 // Removes and returns the PeerRecord from the apikeys table.  After this the API key is no longer valid.
-func (vs *VSInst) takePeerRecord(key string) *PeerRecord {
+func (vs *VSInst) takePeerRecord(key string) (netip.Addr, *PeerRecord) {
+	var naddr netip.Addr
 	vs.sessions.Lock()
-	defer vs.sessions.Unlock()
-	if pr, ok := vs.sessions.apiKeys[key]; ok {
+	if addr, ok := vs.sessions.apiKeys[key]; ok {
 		delete(vs.sessions.apiKeys, key)
-		return pr
+		naddr = addr
 	}
-	return nil
+	vs.sessions.Unlock()
+
+	var peer *PeerRecord
+	vs.agentDB.Lock()
+	defer vs.agentDB.Unlock()
+	if rec, ok := vs.agentDB.agents[naddr]; ok {
+		if rec.Peer != nil {
+			peer = rec.Peer
+			rec.Peer.APIKey = ""
+		}
+	}
+
+	return naddr, peer
 }
 
 func (vs *VSInst) validAPIKey(key string) bool {
@@ -113,12 +125,33 @@ func (vs *VSInst) validAPIKey(key string) bool {
 	return ok
 }
 
-func (vs *VSInst) validAPIKeyAndDeets(key string) (bool, time.Time, netip.Addr) {
+func (vs *VSInst) nodeAddrForKey(key string) (netip.Addr, bool) {
 	vs.sessions.RLock()
 	defer vs.sessions.RUnlock()
+	addr, ok := vs.sessions.apiKeys[key]
+	return addr, ok
+}
+
+func (vs *VSInst) validAPIKeyAndDeets(key string) (bool, time.Time, netip.Addr) {
+	var nodeAddr netip.Addr
+	found := false
+	vs.sessions.RLock()
 	if rec, ok := vs.sessions.apiKeys[key]; ok {
-		return true, rec.LastPollTime, rec.ZPRAddr
+		nodeAddr = rec
+		found = true
 	}
+	vs.sessions.RUnlock()
+
+	if found {
+		vs.agentDB.RLock()
+		defer vs.agentDB.RUnlock()
+		if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
+			if rec.Peer != nil {
+				return true, rec.Peer.LastPollTime, nodeAddr
+			}
+		}
+	}
+
 	return false, time.Time{}, netip.Addr{}
 }
 
@@ -347,17 +380,19 @@ func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, pro
 	apiKey := uuid.New().String()
 
 	vs.sessions.Lock()
-	vs.sessions.apiKeys[apiKey] = &PeerRecord{
-		ZPRAddr:          naddr,
-		RegistrationTime: time.Now(),
-	}
+	vs.sessions.apiKeys[apiKey] = naddr
 	vs.sessions.Unlock()
 
-	// Also stash API key in the agent-db.
+	peer := &PeerRecord{
+		APIKey:           apiKey,
+		RegistrationTime: time.Now(),
+		VSSAddr:          vssServiceAddr,
+	}
 	vs.agentDB.Lock()
 	if rec, ok := vs.agentDB.agents[naddr]; ok {
-		rec.APIKey = apiKey
-		rec.VSSAddr = vssServiceAddr
+		rec.Peer = peer
+	} else {
+		vs.log.Warn("registration: node not found in agent DB", "addr", naddr)
 	}
 	vs.agentDB.Unlock()
 
@@ -366,13 +401,13 @@ func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, pro
 
 func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
 	vs.log.Debug("*DE_REGISTER*")
-	rec := vs.takePeerRecord(key)
+	naddr, rec := vs.takePeerRecord(key)
 	if rec == nil {
 		vs.log.Debug("registration: de-register called with invalid key", "key", key)
 		return vsapi.NewUnauthorizedError()
 	}
-	vs.log.Info("de-register", "node_addr", rec.ZPRAddr, "visa_requests", rec.VisaRequestsCount, "connects", rec.ConnectRequestsCount)
-	vs.RemoveNode(rec.ZPRAddr)
+	vs.log.Info("de-register", "node_addr", naddr, "visa_requests", rec.VisaRequestsCount, "connects", rec.ConnectRequestsCount)
+	vs.RemoveNode(naddr)
 	return nil
 }
 
@@ -383,11 +418,15 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 		return nil, vsapi.NewUnauthorizedError()
 	}
 
-	vs.sessions.Lock()
-	if rec, ok := vs.sessions.apiKeys[key]; ok {
-		rec.ConnectRequestsCount++
+	if naddr, ok := vs.nodeAddrForKey(key); ok {
+		vs.agentDB.Lock()
+		if rec, ok := vs.agentDB.agents[naddr]; ok {
+			if rec.Peer != nil {
+				rec.Peer.ConnectRequestsCount++
+			}
+		}
+		vs.agentDB.Unlock()
 	}
-	vs.sessions.Unlock()
 
 	// Note that the prototype visa service allowed a node to pass itself (its own agent) in to this call,
 	// and in that case we pass it in to approve connection which ends up just accepting the nodes
@@ -448,6 +487,7 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 	return vs.DeRegister(ctx, key)
 }
 
+// Poll is not really necessary anymore since we can just use the visa-support-service.
 func (vs *VSInst) Poll(ctx context.Context, key string) (*vsapi.PollResponse, error) {
 	vs.log.Debug("*POLL*")
 	valid, lastPoll, zprAddr := vs.validAPIKeyAndDeets(key)
@@ -458,34 +498,33 @@ func (vs *VSInst) Poll(ctx context.Context, key string) (*vsapi.PollResponse, er
 	if lastPoll.IsZero() {
 		vs.log.Info("first poll", "peer", zprAddr)
 
-		vs.sessions.Lock()
-		if rec, ok := vs.sessions.apiKeys[key]; ok {
-			rec.LastPollTime = time.Now()
+		vs.agentDB.Lock()
+		if rec, ok := vs.agentDB.agents[zprAddr]; ok {
+			if rec.Peer != nil {
+				rec.Peer.LastPollTime = time.Now()
+			}
 		}
-		vs.sessions.Unlock()
+		vs.agentDB.Unlock()
 	}
-	mbox := zprAddr.String()
-	resp := &vsapi.PollResponse{}
-	const qcount = 100
-	msgs, ok := vs.mb.MessagesFor(mbox, qcount)
-	if !ok {
-		// This is an error - node should inform us of new nodes.
-		vs.log.Info("poll request from unknown node, ignoring", "addr", mbox, "peer", zprAddr)
-		return resp, nil
-	}
-	for _, m := range msgs {
-		if len(m.Revocations) > 0 {
-			resp.Revocations = append(resp.Revocations, m.Revocations...)
-		}
-		if len(m.Visas) > 0 {
-			resp.Visas = append(resp.Visas, m.Visas...)
+
+	var messages []*vsapi.PollResponse
+	vs.agentDB.Lock()
+	if rec, ok := vs.agentDB.agents[zprAddr]; ok {
+		if rec.Peer != nil {
+			messages = rec.Peer.PushBuffer
+			rec.Peer.PushBuffer = nil
 		}
 	}
-	if len(msgs) == qcount {
-		// guessing...
-		resp.More = 1
+	vs.agentDB.Unlock()
+
+	resp := vsapi.PollResponse{}
+
+	for _, msg := range messages {
+		resp.Visas = append(resp.Visas, msg.Visas...)
+		resp.Revocations = append(resp.Revocations, msg.Revocations...)
 	}
-	return resp, nil
+
+	return &resp, nil
 }
 
 func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []byte, traffic *vsapi.TrafficDesc) (*vsapi.VisaResponse, error) {
@@ -498,11 +537,13 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 
 	vs.log.Info("request visa", "peer", zprAddr)
 
-	vs.sessions.Lock()
-	if rr, found := vs.sessions.apiKeys[key]; found {
-		rr.VisaRequestsCount++
+	vs.agentDB.Lock()
+	if rec, ok := vs.agentDB.agents[zprAddr]; ok {
+		if rec.Peer != nil {
+			rec.Peer.VisaRequestsCount++
+		}
 	}
-	vs.sessions.Unlock()
+	vs.agentDB.Unlock()
 
 	pp := vs.getPolicy() // take & release lock
 	pver := uint64(0)

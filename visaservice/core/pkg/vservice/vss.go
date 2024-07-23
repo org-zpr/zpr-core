@@ -8,19 +8,29 @@ import (
 	"zpr.org/vs/pkg/vssapi"
 )
 
-type VSSCli struct{}
+type VSSCli struct {
+	serviceAddr string
+}
 
-// `serviceAddr` is nodes vss service address in 'ADDR:PORT' form.
-func (vc *VSSCli) SendNetworkPolicy(serviceAddr string, policyID uint64, configID uint64) error {
+func NewVSSCli(serviceAddr string) *VSSCli {
+	return &VSSCli{
+		serviceAddr: serviceAddr,
+	}
+}
 
+type ThriftCallF func(*vssapi.VisaSupportClient) error
+
+func (vc *VSSCli) withClient(f ThriftCallF) error {
 	protoFac := thrift.NewTBinaryProtocolFactoryConf(nil)
 	transFac := thrift.NewTFramedTransportFactoryConf(thrift.NewTTransportFactory(), nil)
 
-	transport, err := transFac.GetTransport(thrift.NewTSocketConf(serviceAddr, nil))
+	transport, err := transFac.GetTransport(thrift.NewTSocketConf(vc.serviceAddr, nil))
 	if err != nil {
 		return fmt.Errorf("failed to get thrift transport: %v", err)
 	}
+
 	defer transport.Close()
+
 	if err := transport.Open(); err != nil {
 		return fmt.Errorf("failed to open transport: %v", err)
 	}
@@ -28,11 +38,38 @@ func (vc *VSSCli) SendNetworkPolicy(serviceAddr string, policyID uint64, configI
 	oprot := protoFac.GetProtocol(transport)
 
 	client := vssapi.NewVisaSupportClient(thrift.NewTStandardClient(iprot, oprot))
+	return f(client) // ensures transport is closed
+}
 
+// `serviceAddr` is nodes vss service address in 'ADDR:PORT' form.
+func (vc *VSSCli) SendNetworkPolicy(policyID uint64, configID uint64) error {
 	pi := vssapi.PolicyInfo{
 		PolicyID: int64(policyID),
 		ConfigID: int64(configID),
 	}
+	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
+		return client.NetworkPolicyInstalled(context.Background(), &pi)
+	})
+}
 
-	return client.NetworkPolicyInstalled(context.Background(), &pi)
+func (vc *VSSCli) SendRevocation(config_id uint64, issuer_id uint32) error {
+
+	rev := vssapi.VisaRevocation{
+		IssuerID:      int32(issuer_id),
+		Configuration: int64(config_id),
+	}
+	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
+		return client.RevokeVisas(context.Background(), []*vssapi.VisaRevocation{&rev})
+	})
+}
+
+func (vc *VSSCli) SendVisa(issuerID uint32, visaBuffer []byte, hopCount uint32) error {
+	hoppity := vssapi.VisaHop{
+		VisaPb:   visaBuffer,
+		HopCount: int32(hopCount),
+		IssuerID: int32(issuerID),
+	}
+	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
+		return client.InstallVisas(context.Background(), []*vssapi.VisaHop{&hoppity})
+	})
 }

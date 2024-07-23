@@ -17,7 +17,6 @@ use tokio_util::sync::CancellationToken;
 use crate::vsapi;
 
 use crate::vs::vscli::{self, VSClientI};
-use crate::vs::vss;
 use crate::vs::vstypes::{Visa, Revocation};
 
 use tracing::{error, info};
@@ -39,9 +38,7 @@ use tracing::{error, info};
 //
 //   Now the node can request visas or call for connect authorizations.
 //
-//   Also the node should set up a polling loop to respond to pushed visas and revocations
-//   from the visa service.
-//
+
 
 
 const POLL_INTERVAL: Duration = Duration::from_millis(5000);
@@ -244,14 +241,12 @@ impl VSConn {
         let maybe_apikey: Option<String>;
         let output_tx: Sender<VSOutput>;
         let vsc: Box<dyn VSClientI>;
-        let vss_addr: String;
         {
             let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
             state.cmd_tx = Some(tx.clone());
             maybe_apikey = state.api_key.clone();
             output_tx = state.output_tx.clone().unwrap();
             vsc = (state.client_fac)(&state.service_addr);
-            vss_addr = state.vss_service_addr.clone();
         }
 
         let apikey = match maybe_apikey {
@@ -263,17 +258,6 @@ impl VSConn {
                 ));
             }
         };
-
-        let (vss_tx, mut vss_rx) = mpsc::channel(16);
-
-        // Thread is detached when handle drops out of scope which is during a node shutdown.
-        // In the future that may not always be the case so we will need a better way to deal with
-        // this thrift server.
-        let _vss_handle = std::thread::spawn(move ||{
-            vss::start_vss_server(vss_tx, &vss_addr);
-        });
-
-
 
         // TODO: Polling to go away
         let mut interval = time::interval(POLL_INTERVAL);
@@ -325,9 +309,6 @@ impl VSConn {
                 }
                 Some(cmd) = rx.recv() => {
                     info!("VSConn::run received command: {:?}", cmd);
-                }
-                Some(vss_msg) = vss_rx.recv() => {
-                    info!("VSConn::run received VSS message: {:?}", vss_msg);
                 }
             }
         }

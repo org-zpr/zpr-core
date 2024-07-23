@@ -4,4 +4,4 @@ pub use vsconn::VSOutput;
 
 mod vstypes;
 mod vscli;
-mod vss;
+pub mod vss;

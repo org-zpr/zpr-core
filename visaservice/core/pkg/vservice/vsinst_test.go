@@ -511,6 +511,9 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(n0addr, "n0")
 	svc.BackDoorInstallAPIKeyForUnitTestExp(n1addr, "n1", time.Now().Add(10*time.Second)) // <--- note expiry in 10s
 
+	go svc.Start(netip.MustParseAddr("127.0.0.1"), 0)
+	defer svc.Stop()
+
 	pyaml := `
         zpl_format: 2
         services:

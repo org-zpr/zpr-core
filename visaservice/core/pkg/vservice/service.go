@@ -219,10 +219,6 @@ func (s *VisaService) GetPolicyAndConfig() (*policy.Policy, uint64) {
 
 // InstallPolicy is for installing a policy supplied by an admin through our admin-service.
 //
-//	 TODO: This is also sending visas over to the node, not sure if we need to our not.
-//		Feels like we should use our existing push system to renew all the important visas
-//		before sending.  Surely we did something like that in the past.
-//
 // Returns (version, config_id, error)
 func (s *VisaService) InstallPolicy(cp *polio.ContainedPolicy) (string, uint64, error) {
 	s.log.Info("installing policy from admin")
@@ -253,7 +249,7 @@ func (s *VisaService) installPolicyWithVisasForNodes(bootstrap bool, cp *polio.C
 		return errors.New("policy is empty")
 	}
 
-	pversion, configID, err := s.computeVersionConfigID(pp) // this updates our local policy value
+	_, configID, err := s.computeVersionConfigID(pp) // this updates our local policy value
 	if err != nil {
 		return fmt.Errorf("policy install failed: %w", err)
 	}
@@ -264,19 +260,9 @@ func (s *VisaService) installPolicyWithVisasForNodes(bootstrap bool, cp *polio.C
 	s.log.Info("installing policy to visa service")
 	s.service.inst.InstallPolicy(configID, 0, pp)
 
-	// To send this over the wire we want it zipped.
-	/* OFF - we don't yet know how or why to send policy in Ref Impl.
-	format := cp.Policy.SerialVersion
-	gzPolicy, err := libvisa.Compress(cp.Container)
-	if err != nil {
-		return fmt.Errorf("failed to compress policy: %w", err)
-	}
-	*/
-
-	// Create a visa-service visa so NODE can talk to US.
-	var visas []*vsapi.VisaHop
-
 	for _, nodeAddr := range nodeAddrs {
+		var visas []*vsapi.VisaHop
+
 		s.log.Info("generating a new visa-service visa for the node->VS", "node_addr_src", nodeAddr, "vs_addr_dest", s.myAddr)
 		pktData := snip.NewTCPConnect(nodeAddr, 0, s.myAddr, VisaServicePort)
 		vsr, err := s.service.inst.doRequestVisa(context.Background(), nodeAddr, pktData, 0, pp.VersionNumber())
@@ -287,24 +273,12 @@ func (s *VisaService) installPolicyWithVisasForNodes(bootstrap bool, cp *polio.C
 		} else {
 			visas = append(visas, vsr.Visa)
 		}
-	}
 
-	s.log.Info("(TODO) now send policy to node", "version", pversion, "configID", configID)
-	// TODO:
-	//   The prototype used the visa-support-service to send a policy to the node.
-	//   Plus it ised to also send along a visa.  Instead we should use our polling system.
-	//   AND the node doesn't need the whole policy. So we need to figure out what it needs and
-	//   figure out how the visa-service tells node about it.
-	//
-
-	if len(visas) > 0 {
-		pr := vsapi.PollResponse{
-			Visas: visas,
+		s.service.inst.SendConfigAndPolicyToNode(nodeAddr)
+		if len(visas) > 0 {
+			s.service.inst.PushVisa(nodeAddr, visas)
 		}
-		// TODO: Should we set hopcount to 1?
-		s.service.inst.PushVisa(&pr)
 	}
-
 	return nil
 }
 

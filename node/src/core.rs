@@ -11,9 +11,12 @@ use crate::config;
 use crate::vs::VSConn;
 use crate::vs::VSOutput::{PushedRevocation, PushedVisa};
 
+use crate::vs::vss;
+
 pub const VERSION: &str = "0.1.0";
 
 const VS_OUTPUT_CHANNEL_SIZE: usize = 32;
+const VSS_OUTPUT_CHANNEL_SIZE: usize = 32;
 
 const DEFAULT_VSS_PORT: u16 = 8183;
 
@@ -54,6 +57,28 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     let mut tasks = JoinSet::new();
     let (cs_shutdown_tx, mut cs_shutdown_rx) = oneshot::channel();
 
+
+    // This channel is for messages from the visa-support-service.
+    let (vss_tx, mut vss_rx) = mpsc::channel(VSS_OUTPUT_CHANNEL_SIZE);
+
+    // The visa support service normally is started up on the ZPR public address of the node.
+    // But for debug, you can override that.
+    let vss_addr = match opts.vssforcelisten {
+        Some(addr) => addr,
+        None => format!("[{}]:{}", nconfig.get_node_addr(), DEFAULT_VSS_PORT),
+    };
+
+    // Thread is detached when handle drops out of scope which is during a node shutdown.
+    // In the future that may not always be the case so we will need a better way to deal with
+    // this thrift server.
+    let vss_addr_for_vss = vss_addr.clone();
+    let _vss_handle = std::thread::spawn(move ||{
+        vss::start_vss_server(vss_tx, &vss_addr_for_vss);
+    });
+
+
+
+
     let o_vsforceconnect = opts.vsforceconnect.is_some();
 
     // This force-connect thing makes it possible to have this connect to the visa service
@@ -70,11 +95,6 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
         info!("DEBUG: force connect to visa service");
 
         let (tx, mut rx) = mpsc::channel(VS_OUTPUT_CHANNEL_SIZE);
-
-        let vss_addr = match opts.vssforcelisten {
-            Some(addr) => addr,
-            None => format!("[{}]:{}", nconfig.get_node_addr(), DEFAULT_VSS_PORT),
-        };
 
         let vs_conn = VSConn::new(
             tx.clone(),
@@ -140,14 +160,21 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
         info!("nothing to do...  ^C to exit");
     }
 
-    tokio::select! {
-        _ = signal::ctrl_c() => {
-            info!("exiting due to signal");
-            ctoken.cancel();
-        }
-        _ = &mut cs_shutdown_rx => {
-            info!("visa service exited");
-            ctoken.cancel();
+    loop { //  main node runloop
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                info!("exiting due to signal");
+                ctoken.cancel();
+                break;
+            }
+            _ = &mut cs_shutdown_rx => {
+                info!("visa service exited");
+                ctoken.cancel();
+                break;
+            }
+            Some(vss_msg) = vss_rx.recv() => {
+                info!("VSConn::run received VSS message: {:?}", vss_msg);
+            }
         }
     }
 
