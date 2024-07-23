@@ -1,7 +1,7 @@
 // vs.thrift - api for the visa service
 
 // This is the new visa-service API for the Reference Implementation. Note that
-// the Visa Support Serice API is not longer needed because we have changed 
+// the Visa Support Serice API is not longer needed because we have changed
 // the way that a visa service and node connect.
 //
 // The new connection protocol is:
@@ -13,7 +13,7 @@
 //        certificate to the node that is (a) signed by the ZPR authority and
 //        (b) has a well known CN that tells the node that it is the visa
 //        service's adapter.
-//  
+//
 //     3. The node allows this adapter to connect -- even though the node has
 //        has no policy yet.  The pre-built visa includes the hard-coded visa
 //        service adapter's ZPR address.
@@ -30,9 +30,9 @@
 //     6. The visa service checks the nodes crypto, checks policy, and if all
 //        is well will send back an API Key that the node can use when calling
 //        any of the other functions on this API.
-// 
 //
-// TODO: There is currently no mechanism described for how to expire or 
+//
+// TODO: There is currently no mechanism described for how to expire or
 //       refresh the API key.
 
 
@@ -47,7 +47,7 @@ namespace rs vsapi
 exception UnauthorizedError {}
 
 
-// Means visa service sends a nonce buffer, and node is expected to 
+// Means visa service sends a nonce buffer, and node is expected to
 // create a suitable HMAC.
 const i32 CHALLENGE_TYPE_HMAC_SHA256 = 0
 
@@ -63,7 +63,7 @@ enum AgentType {
 }
 
 
-// Basic agent to support early iteration of ZPR.  
+// Basic agent to support early iteration of ZPR.
 // Probably missing things.
 struct Agent {
   1: AgentType agent_type,
@@ -71,7 +71,7 @@ struct Agent {
   3: i64 auth_expires, // unix time stamp
   4: binary zpr_addr,  // assigned ZPR address
   5: binary tether_addr,
-  6: string ident,     // unique in this ZPRnet 
+  6: string ident,     // unique in this ZPRnet
   7: list<string> provides,
 }
 
@@ -93,7 +93,8 @@ struct NodeAuthRequest {
   3: i64 timestamp,
   4: binary node_cert,
   5: binary hmac,
-  6: Agent node_agent,
+  6: string vss_service, // 'ADDR:PORT'
+  7: Agent node_agent,
 }
 
 
@@ -173,7 +174,7 @@ service VisaService {
 
 
   // Notify the visa service that an agent has disconnected. Pass in the ZPR address
-  // assigned to the agent via `authorize_connect`.  
+  // assigned to the agent via `authorize_connect`.
   void agent_disconnect(1:string keym, 2:binary zpr_addr),
 
   PollResponse poll(1:string key),

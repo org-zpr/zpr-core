@@ -184,7 +184,7 @@ func (vs *VSInst) BackDoorInstallAPIKeyForUnitTest(node_addr netip.Addr, node_na
 
 // returns API key
 func (vs *VSInst) BackDoorInstallAPIKeyForUnitTestExp(node_addr netip.Addr, node_name string, expiration time.Time) (string, error) {
-	apiKey, err := vs.finishAuthenticate(node_addr, expiration, []string{fmt.Sprintf("/zpr/%s", node_name)})
+	apiKey, err := vs.finishAuthenticate(node_addr, expiration, []string{fmt.Sprintf("/zpr/%s", node_name)}, "127.0.0.1:0")
 	if err != nil {
 		return "", err
 	}
@@ -303,16 +303,32 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		return "", fmt.Errorf("invalid agent ZPR address")
 	}
 
-	apiKey, err := vs.finishAuthenticate(naddr, expiration, req.NodeAgent.Provides)
+	var vssServiceAddr string
+
+	if req.VssService == "" {
+		ap := netip.AddrPortFrom(naddr, VSSDefaultPort)
+		vssServiceAddr = ap.String()
+		vs.log.Info("registration: missing VSS service address - using default", "vss_addr", vssServiceAddr)
+	} else {
+		vssServiceAddr = req.VssService
+		vs.log.Info("registration: got VSS service address", "vss_addr", vssServiceAddr)
+	}
+
+	apiKey, err := vs.finishAuthenticate(naddr, expiration, req.NodeAgent.Provides, vssServiceAddr)
 	if err != nil {
 		vs.log.WithError(err).Warn("registration: failed to write to agent DB")
 		return "", fmt.Errorf("internal error")
 	}
 
+	vs.vsMsgC <- &VSMsg{
+		MsgType:  MTNodeRegister,
+		NodeAddr: naddr,
+	}
+
 	return apiKey, nil
 }
 
-func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, provides []string) (string, error) {
+func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, provides []string, vssServiceAddr string) (string, error) {
 	_, _, cid := vs.getPolicyMatcherConfig()
 
 	claims := make(map[string]*agent.ClaimV)
@@ -341,6 +357,7 @@ func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, pro
 	vs.agentDB.Lock()
 	if rec, ok := vs.agentDB.agents[naddr]; ok {
 		rec.APIKey = apiKey
+		rec.VSSAddr = vssServiceAddr
 	}
 	vs.agentDB.Unlock()
 

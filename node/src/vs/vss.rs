@@ -92,12 +92,12 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
 
         let msg = VSSMsg::PolicyInstall(pi);
         match self.msg_chan_out.blocking_send(msg) {
-            Ok(_) => return Ok(()),
+            Ok(_) => Ok(()),
             Err(e) => {
                 error!("failed to enque policy message to node: {}", e);
-                return Err(thrift::Error::from("enque failed"))
+                Err(thrift::Error::from("enque failed"))
             }
-        };
+        }
     }
 
     fn handle_install_visas(&self, vh: Vec<vssapi::VisaHop>) -> thrift::Result<()> {

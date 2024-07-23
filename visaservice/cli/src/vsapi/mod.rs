@@ -487,17 +487,19 @@ pub struct NodeAuthRequest {
   pub timestamp: Option<i64>,
   pub node_cert: Option<Vec<u8>>,
   pub hmac: Option<Vec<u8>>,
+  pub vss_service: Option<String>,
   pub node_agent: Option<Agent>,
 }
 
 impl NodeAuthRequest {
-  pub fn new<F1, F2, F3, F4, F5, F6>(session_id: F1, challenge: F2, timestamp: F3, node_cert: F4, hmac: F5, node_agent: F6) -> NodeAuthRequest where F1: Into<Option<i32>>, F2: Into<Option<Challenge>>, F3: Into<Option<i64>>, F4: Into<Option<Vec<u8>>>, F5: Into<Option<Vec<u8>>>, F6: Into<Option<Agent>> {
+  pub fn new<F1, F2, F3, F4, F5, F6, F7>(session_id: F1, challenge: F2, timestamp: F3, node_cert: F4, hmac: F5, vss_service: F6, node_agent: F7) -> NodeAuthRequest where F1: Into<Option<i32>>, F2: Into<Option<Challenge>>, F3: Into<Option<i64>>, F4: Into<Option<Vec<u8>>>, F5: Into<Option<Vec<u8>>>, F6: Into<Option<String>>, F7: Into<Option<Agent>> {
     NodeAuthRequest {
       session_id: session_id.into(),
       challenge: challenge.into(),
       timestamp: timestamp.into(),
       node_cert: node_cert.into(),
       hmac: hmac.into(),
+      vss_service: vss_service.into(),
       node_agent: node_agent.into(),
     }
   }
@@ -511,7 +513,8 @@ impl TSerializable for NodeAuthRequest {
     let mut f_3: Option<i64> = Some(0);
     let mut f_4: Option<Vec<u8>> = Some(Vec::new());
     let mut f_5: Option<Vec<u8>> = Some(Vec::new());
-    let mut f_6: Option<Agent> = None;
+    let mut f_6: Option<String> = Some("".to_owned());
+    let mut f_7: Option<Agent> = None;
     loop {
       let field_ident = i_prot.read_field_begin()?;
       if field_ident.field_type == TType::Stop {
@@ -540,8 +543,12 @@ impl TSerializable for NodeAuthRequest {
           f_5 = Some(val);
         },
         6 => {
-          let val = Agent::read_from_in_protocol(i_prot)?;
+          let val = i_prot.read_string()?;
           f_6 = Some(val);
+        },
+        7 => {
+          let val = Agent::read_from_in_protocol(i_prot)?;
+          f_7 = Some(val);
         },
         _ => {
           i_prot.skip(field_ident.field_type)?;
@@ -556,7 +563,8 @@ impl TSerializable for NodeAuthRequest {
       timestamp: f_3,
       node_cert: f_4,
       hmac: f_5,
-      node_agent: f_6,
+      vss_service: f_6,
+      node_agent: f_7,
     };
     Ok(ret)
   }
@@ -588,8 +596,13 @@ impl TSerializable for NodeAuthRequest {
       o_prot.write_bytes(fld_var)?;
       o_prot.write_field_end()?
     }
+    if let Some(ref fld_var) = self.vss_service {
+      o_prot.write_field_begin(&TFieldIdentifier::new("vss_service", TType::String, 6))?;
+      o_prot.write_string(fld_var)?;
+      o_prot.write_field_end()?
+    }
     if let Some(ref fld_var) = self.node_agent {
-      o_prot.write_field_begin(&TFieldIdentifier::new("node_agent", TType::Struct, 6))?;
+      o_prot.write_field_begin(&TFieldIdentifier::new("node_agent", TType::Struct, 7))?;
       fld_var.write_to_out_protocol(o_prot)?;
       o_prot.write_field_end()?
     }

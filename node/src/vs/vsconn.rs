@@ -59,7 +59,7 @@ struct Shared {
 
 #[derive(Debug)]
 struct State {
-    service_addr: String, // visa service listen address, format "HOST:PORT"
+    service_addr: String, // visa service address, format "HOST:PORT"
     claims: BTreeMap<String, String>,
     node_private_key: Rsa<Private>,
     node_cert_pem_data: String,
@@ -68,6 +68,7 @@ struct State {
     cmd_tx: Option<mpsc::Sender<VSCommand>>,
     output_tx: Option<mpsc::Sender<VSOutput>>,
     client_fac: vscli::VSClientFactory,
+    vss_service_addr: String, // visa support service listen address, format "HOST:PORT"
 }
 
 // This is a place holder for the async "commands" that can be sent into the running visa service client.
@@ -109,6 +110,8 @@ impl VSConn {
     /// - `node_cert_file` is the path to the node's signed certificate file
     /// - `node_key_file` is the path to the node's private key file
     /// - `node_addr` is the ZPR address of the node (from node config file).
+    /// - `vss_service_addr` is 'ADDR:PORT' for the visa support service running on this node.
+    ///   Normally this would be '<NODE_ADDR>:<VSS_PORT>'.
     //
     pub fn new(
         output_tx: Sender<VSOutput>,
@@ -116,6 +119,7 @@ impl VSConn {
         node_cert_file: &Path,
         node_key_file: &Path,
         node_addr: IpAddr,
+        vss_service_addr: &str,
     ) -> Result<VSConn, Error> {
         let mut certfile = match File::open(node_cert_file) {
             Ok(f) => f,
@@ -162,6 +166,7 @@ impl VSConn {
                 cmd_tx: None,
                 output_tx: Some(output_tx),
                 client_fac: vscli::default_vsclient_factory,
+                vss_service_addr: vss_service_addr.to_string()
             }),
         });
 
@@ -215,6 +220,7 @@ impl VSConn {
             agent,
             &state.node_cert_pem_data,
             state.node_private_key.clone(),
+            &state.vss_service_addr,
         ) {
             Ok(k) => k,
             Err(e) => {
@@ -238,12 +244,14 @@ impl VSConn {
         let maybe_apikey: Option<String>;
         let output_tx: Sender<VSOutput>;
         let vsc: Box<dyn VSClientI>;
+        let vss_addr: String;
         {
             let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
             state.cmd_tx = Some(tx.clone());
             maybe_apikey = state.api_key.clone();
             output_tx = state.output_tx.clone().unwrap();
             vsc = (state.client_fac)(&state.service_addr);
+            vss_addr = state.vss_service_addr.clone();
         }
 
         let apikey = match maybe_apikey {
@@ -262,7 +270,7 @@ impl VSConn {
         // In the future that may not always be the case so we will need a better way to deal with
         // this thrift server.
         let _vss_handle = std::thread::spawn(move ||{
-            vss::start_vss_server(vss_tx, "127.0.0.1:31338");
+            vss::start_vss_server(vss_tx, &vss_addr);
         });
 
 
@@ -612,6 +620,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             _agent: vsapi::Agent,
             _cert_pem_data: &str,
             _private_key: Rsa<Private>,
+            _vss_service_addr: &str,
         ) -> Result<String, thrift::Error>
         {
             incr(CounterT::Auth);
@@ -658,7 +667,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let keyfile = TempFile::new_pem(KEY_DATA);
 
         let (tx, mut _rx) = mpsc::channel(8);
-        let conn = VSConn::new(tx, "127.0.0.1:0", certfile.get_path(), keyfile.get_path(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))).unwrap();
+        let conn = VSConn::new(tx, "127.0.0.1:0", certfile.get_path(), keyfile.get_path(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), "127.0.0.1:0").unwrap();
         conn.add_claim("foo", "fee");
         conn.initialize(Some(testvscli_factory)).unwrap();
         assert_eq!(get_counter(CounterT::Auth), 1);
@@ -693,7 +702,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let keyfile = TempFile::new_pem(KEY_DATA);
 
         let (tx, mut rx) = mpsc::channel(8);
-        let conn = VSConn::new(tx, "127.0.0.1:0", certfile.get_path(), keyfile.get_path(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))).unwrap();
+        let conn = VSConn::new(tx, "127.0.0.1:0", certfile.get_path(), keyfile.get_path(), IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), "127.0.0.1:0").unwrap();
         conn.add_claim("foo", "fee");
         conn.initialize(Some(testvscli_factory)).unwrap();
 

@@ -55,6 +55,27 @@ type HostRecord struct {
 	ZPRAddr      netip.Addr
 	TetherAddr   netip.Addr
 	APIKey       string
+	VSSAddr      string
+	VSSState     VSSStateT
+}
+
+type VSSStateT int
+
+const (
+	VSSStateUninitialized VSSStateT = iota
+	VSSStateInitializing
+	VSSStateInitialized
+)
+
+type VSMsgType int
+
+const (
+	MTNodeRegister VSMsgType = iota + 1
+)
+
+type VSMsg struct {
+	MsgType  VSMsgType
+	NodeAddr netip.Addr
 }
 
 // VSInst is an instance of distributed visa service
@@ -71,6 +92,8 @@ type VSInst struct {
 	nodeNumber           uint8
 	nodeState            ConstraintService
 	thriftServer         thrift.TServer
+	vsMsgC               chan *VSMsg
+	vssCli               *VSSCli
 	localAddr            netip.Addr
 	thriftWg             sync.WaitGroup
 	thriftCreds          *tls.Config
@@ -148,6 +171,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		accessToken:          vcf.AccessToken,
 		allowInvalidPeerAddr: vcf.AllowInvalidPeerAddr,
 		nodeState:            vcf.Constrainer,
+		vsMsgC:               make(chan *VSMsg, 16),
 	}
 	if vcf.ReauthBumpTimeOverride > 0 {
 		vs.reauthBumpTime = vcf.ReauthBumpTimeOverride
@@ -196,18 +220,51 @@ func (vs *VSInst) Start(listenAddr netip.Addr, port uint16) error {
 	defer vlog.Close()
 
 	vs.thriftWg.Add(1)
-	defer vs.thriftWg.Done()
-	defer close(vs.exitC)
-	thrift.ServerStopTimeout = 5 * time.Second // TODO: Should come from config
-	if err := vs.startThriftBlocking(listenAddr, port); err != nil {
-		vs.log.WithError(err).Error("visa service start failed")
-		return fmt.Errorf("failed to start visa service: %w", err)
+	go func() {
+		defer vs.thriftWg.Done()
+		thrift.ServerStopTimeout = 5 * time.Second // TODO: Should come from config
+		if err := vs.startThriftBlocking(listenAddr, port); err != nil {
+			vs.log.WithError(err).Error("visa service start failed")
+		}
+	}()
+
+	tkr := time.NewTicker(15 * time.Second)
+	defer tkr.Stop()
+VS_RUNLOOP:
+	for {
+		select {
+		case m, ok := <-vs.vsMsgC:
+			if ok {
+				switch m.MsgType {
+				case MTNodeRegister:
+					vs.handleNodeRegister(m.NodeAddr)
+				}
+			}
+
+		case now := <-tkr.C:
+			vs.periodicHousekeeping(now)
+
+		case req, ok := <-vs.visaPushC: // Drain this push channel
+			// TODO: This is not a great plan. These boxes for the docks and forwarders could get large.
+			//       Also, polling is not a good fit for the revoke use-case. In that case we want to
+			//       kill the visa/credential immediately.
+			if ok {
+				vs.mb.AppendMessage(req)
+			}
+
+		case <-vs.exitC:
+			break VS_RUNLOOP
+		}
 	}
+
+	vs.log.Info("visa service runloop exiting")
 	return nil
 }
 
 func (vs *VSInst) Stop() {
 	vs.thriftServer.Stop()
+	vs.thriftWg.Wait()
+	close(vs.exitC) // stop runloop
 }
 
 func (vs *VSInst) HasPollerNode(nodeAddr netip.Addr) bool {
@@ -233,48 +290,84 @@ func (vs *VSInst) SetConfig(key, value string) error {
 	return nil
 }
 
-// runloop is normally started as side-effect of starting the grpc server, via the Start
-// function.
-func (vs *VSInst) runloop(exitC chan struct{}) error {
-	tkr := time.NewTicker(15 * time.Second)
-	defer tkr.Stop()
-
-VS_RUNLOOP:
-	for {
-		select {
-
-		case <-exitC:
-			break VS_RUNLOOP
-
-		case now := <-tkr.C:
-			vs.periodicHousekeeping(now)
-
-		case req, ok := <-vs.visaPushC: // Drain this push channel
-			// TODO: This is not a great plan. These boxes for the docks and forwarders could get large.
-			//       Also, polling is not a good fit for the revoke use-case. In that case we want to
-			//       kill the visa/credential immediately.
-			if ok {
-				vs.mb.AppendMessage(req)
-			}
-
-		case <-vs.exitC:
-			break VS_RUNLOOP
-		}
-	}
-	vs.log.Info("runloop exits")
-	return nil
-}
-
 // periodicHousekeeping is called from runloop (and so blocks runloop).
 func (vs *VSInst) periodicHousekeeping(now time.Time) {
 	vs.extendVisaServiceVisas()
 	vs.removeExpiredVisas()
 	vs.expireOldConfiguration()
+	vs.checkNodesVSSState()
 }
 
 // RunPeriodicHousekeepingNow is here for unit tests only. Do not call outside of unit tests.
 func (vs *VSInst) RunPeriodicHousekeepingNow() {
 	vs.periodicHousekeeping(time.Now())
+}
+
+func (vs *VSInst) handleNodeRegister(nodeAddr netip.Addr) {
+	vs.log.Info("node registered", "nodeAddr", nodeAddr)
+	// TODO: More here in the future.
+	//
+	// Initially we were calling into the VSS here, but the node has not started the VSS
+	// at registration time -- it starts it after successful registration.
+}
+
+// checkNodeVSSState checks the VSS state of all nodes and sends config and policy to nodes
+// which indicate they are uninitialized.
+func (vs *VSInst) checkNodesVSSState() {
+	var nodes []netip.Addr
+	vs.agentDB.Lock()
+	for nodeAddr, rec := range vs.agentDB.agents {
+		if rec.VSSState == VSSStateUninitialized {
+			nodes = append(nodes, nodeAddr)
+		}
+	}
+	vs.agentDB.Unlock()
+
+	for _, nodeAddr := range nodes {
+		vs.sendConfigAndPolicyToNode(nodeAddr)
+	}
+}
+
+func (vs *VSInst) sendConfigAndPolicyToNode(nodeAddr netip.Addr) {
+	var serviceAddr string
+	var vssPrevState VSSStateT
+
+	vs.agentDB.Lock()
+	if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
+		serviceAddr = rec.VSSAddr
+		vssPrevState = rec.VSSState
+		if serviceAddr != "" {
+			if vssPrevState == VSSStateUninitialized {
+				rec.VSSState = VSSStateInitializing
+			}
+		}
+	}
+	vs.agentDB.Unlock()
+
+	if serviceAddr == "" {
+		vs.log.Warn("node registered but VSS service address not in agentDB", "nodeAddr", nodeAddr)
+		return
+	}
+
+	if vssPrevState != VSSStateUninitialized {
+		// nothing to do
+		return
+	}
+
+	var vssNextState VSSStateT
+	plcy, _, cid := vs.getPolicyMatcherConfig()
+	if err := vs.vssCli.SendNetworkPolicy(serviceAddr, plcy.VersionNumber(), cid); err != nil {
+		vs.log.WithError(err).Error("failed to send network policy message to node", "service_addr", serviceAddr)
+		vssNextState = VSSStateUninitialized
+	} else {
+		vssNextState = VSSStateInitialized
+	}
+
+	vs.agentDB.Lock()
+	if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
+		rec.VSSState = vssNextState
+	}
+	vs.agentDB.Unlock()
 }
 
 // expireOldConfiguration expires the oldest configuration change which has exceeded

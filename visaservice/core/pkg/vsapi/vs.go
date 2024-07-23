@@ -938,6 +938,7 @@ func (p *HelloResponse) Validate() error {
 //  - Timestamp
 //  - NodeCert
 //  - Hmac
+//  - VssService
 //  - NodeAgent
 type NodeAuthRequest struct {
   SessionID int32 `thrift:"session_id,1" db:"session_id" json:"session_id"`
@@ -945,7 +946,8 @@ type NodeAuthRequest struct {
   Timestamp int64 `thrift:"timestamp,3" db:"timestamp" json:"timestamp"`
   NodeCert []byte `thrift:"node_cert,4" db:"node_cert" json:"node_cert"`
   Hmac []byte `thrift:"hmac,5" db:"hmac" json:"hmac"`
-  NodeAgent *Agent `thrift:"node_agent,6" db:"node_agent" json:"node_agent"`
+  VssService string `thrift:"vss_service,6" db:"vss_service" json:"vss_service"`
+  NodeAgent *Agent `thrift:"node_agent,7" db:"node_agent" json:"node_agent"`
 }
 
 func NewNodeAuthRequest() *NodeAuthRequest {
@@ -974,6 +976,10 @@ func (p *NodeAuthRequest) GetNodeCert() []byte {
 
 func (p *NodeAuthRequest) GetHmac() []byte {
   return p.Hmac
+}
+
+func (p *NodeAuthRequest) GetVssService() string {
+  return p.VssService
 }
 var NodeAuthRequest_NodeAgent_DEFAULT *Agent
 func (p *NodeAuthRequest) GetNodeAgent() *Agent {
@@ -1054,8 +1060,18 @@ func (p *NodeAuthRequest) Read(ctx context.Context, iprot thrift.TProtocol) erro
         }
       }
     case 6:
-      if fieldTypeId == thrift.STRUCT {
+      if fieldTypeId == thrift.STRING {
         if err := p.ReadField6(ctx, iprot); err != nil {
+          return err
+        }
+      } else {
+        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+          return err
+        }
+      }
+    case 7:
+      if fieldTypeId == thrift.STRUCT {
+        if err := p.ReadField7(ctx, iprot); err != nil {
           return err
         }
       } else {
@@ -1123,6 +1139,15 @@ func (p *NodeAuthRequest)  ReadField5(ctx context.Context, iprot thrift.TProtoco
 }
 
 func (p *NodeAuthRequest)  ReadField6(ctx context.Context, iprot thrift.TProtocol) error {
+  if v, err := iprot.ReadString(ctx); err != nil {
+  return thrift.PrependError("error reading field 6: ", err)
+} else {
+  p.VssService = v
+}
+  return nil
+}
+
+func (p *NodeAuthRequest)  ReadField7(ctx context.Context, iprot thrift.TProtocol) error {
   p.NodeAgent = &Agent{}
   if err := p.NodeAgent.Read(ctx, iprot); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.NodeAgent), err)
@@ -1140,6 +1165,7 @@ func (p *NodeAuthRequest) Write(ctx context.Context, oprot thrift.TProtocol) err
     if err := p.writeField4(ctx, oprot); err != nil { return err }
     if err := p.writeField5(ctx, oprot); err != nil { return err }
     if err := p.writeField6(ctx, oprot); err != nil { return err }
+    if err := p.writeField7(ctx, oprot); err != nil { return err }
   }
   if err := oprot.WriteFieldStop(ctx); err != nil {
     return thrift.PrependError("write field stop error: ", err) }
@@ -1200,13 +1226,23 @@ func (p *NodeAuthRequest) writeField5(ctx context.Context, oprot thrift.TProtoco
 }
 
 func (p *NodeAuthRequest) writeField6(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "node_agent", thrift.STRUCT, 6); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 6:node_agent: ", p), err) }
+  if err := oprot.WriteFieldBegin(ctx, "vss_service", thrift.STRING, 6); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field begin error 6:vss_service: ", p), err) }
+  if err := oprot.WriteString(ctx, string(p.VssService)); err != nil {
+  return thrift.PrependError(fmt.Sprintf("%T.vss_service (6) field write error: ", p), err) }
+  if err := oprot.WriteFieldEnd(ctx); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field end error 6:vss_service: ", p), err) }
+  return err
+}
+
+func (p *NodeAuthRequest) writeField7(ctx context.Context, oprot thrift.TProtocol) (err error) {
+  if err := oprot.WriteFieldBegin(ctx, "node_agent", thrift.STRUCT, 7); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field begin error 7:node_agent: ", p), err) }
   if err := p.NodeAgent.Write(ctx, oprot); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", p.NodeAgent), err)
   }
   if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 6:node_agent: ", p), err) }
+    return thrift.PrependError(fmt.Sprintf("%T write field end error 7:node_agent: ", p), err) }
   return err
 }
 
@@ -1221,6 +1257,7 @@ func (p *NodeAuthRequest) Equals(other *NodeAuthRequest) bool {
   if p.Timestamp != other.Timestamp { return false }
   if bytes.Compare(p.NodeCert, other.NodeCert) != 0 { return false }
   if bytes.Compare(p.Hmac, other.Hmac) != 0 { return false }
+  if p.VssService != other.VssService { return false }
   if !p.NodeAgent.Equals(other.NodeAgent) { return false }
   return true
 }

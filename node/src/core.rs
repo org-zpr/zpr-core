@@ -15,23 +15,33 @@ pub const VERSION: &str = "0.1.0";
 
 const VS_OUTPUT_CHANNEL_SIZE: usize = 32;
 
+const DEFAULT_VSS_PORT: u16 = 8183;
+
 /// CoreOpts is for debug options we want to pass to the node, but not include in
 /// the config file.
 #[derive(Debug, Clone)]
 pub struct CoreOpts {
     /// Force the node to immediately open a connection to the visa service at the provided HOST:PORT.
     vsforceconnect: Option<String>,
+
+    // Ovverride the default VSS listen address. Format 'ADDR:PORT'.
+    vssforcelisten: Option<String>,
 }
 
 impl CoreOpts {
     pub fn new() -> CoreOpts {
         CoreOpts {
             vsforceconnect: None,
+            vssforcelisten: None,
         }
     }
 
     pub fn set_vsforceconnect(&mut self, hostport: &str) {
         self.vsforceconnect = Some(hostport.to_string());
+    }
+
+    pub fn set_vssforcelisten(&mut self, hostport: &str) {
+        self.vssforcelisten = Some(hostport.to_string());
     }
 }
 
@@ -61,12 +71,18 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
 
         let (tx, mut rx) = mpsc::channel(VS_OUTPUT_CHANNEL_SIZE);
 
+        let vss_addr = match opts.vssforcelisten {
+            Some(addr) => addr,
+            None => format!("[{}]:{}", nconfig.get_node_addr(), DEFAULT_VSS_PORT),
+        };
+
         let vs_conn = VSConn::new(
             tx.clone(),
             &opts.vsforceconnect.unwrap(),
             &nconfig.get_cert_path(),
             &nconfig.get_key_path(),
             nconfig.get_node_addr(),
+            &vss_addr,
         )?;
         for (k, v) in nconfig.get_claims() {
             vs_conn.add_claim(&k, &v);
@@ -94,7 +110,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                         error!("visa service exits with error: {}", e);
                     }
                 }
-            } 
+            }
             let _ = cs_shutdown_tx.send(()); // visa service exits.
         });
 
@@ -131,7 +147,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
         }
         _ = &mut cs_shutdown_rx => {
             info!("visa service exited");
-            ctoken.cancel(); 
+            ctoken.cancel();
         }
     }
 

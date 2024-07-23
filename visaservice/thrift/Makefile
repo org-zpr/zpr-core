@@ -40,9 +40,14 @@ go: $(GGO)/vsapi $(GGO)/vssapi
 rs: $(GRS)/vs.rs $(GRS)/vss.rs
 
 
+install: install-go install-rs
+
+
 install-go: go
 	test -d $(VS_DEST_GO) || mkdir $(VS_DEST_GO)
 	cp $(GGO)/vsapi/*.go $(VS_DEST_GO)
+	test -d $(VSS_DEST_GO) || mkdir $(VSS_DEST_GO)
+	cp $(GGO)/vssapi/*.go $(VSS_DEST_GO)
 
 
 install-rs: rs

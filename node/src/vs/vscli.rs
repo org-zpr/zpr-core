@@ -22,6 +22,7 @@ type VSClientT = VisaServiceSyncClient<
     TBinaryOutputProtocol<TFramedWriteTransport<WriteHalf<TTcpChannel>>>,
 >;
 
+
 pub struct VSClient {
     service: String,
 }
@@ -36,6 +37,7 @@ pub trait VSClientI: Send {
         agent: vsapi::Agent,
         cert_pem_data: &str,
         private_key: Rsa<Private>,
+        vss_service_addr: &str
     ) -> Result<String, thrift::Error>;
     fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error>;
     fn de_register(&self, apikey: &str) -> Result<(), thrift::Error>;
@@ -80,6 +82,7 @@ impl VSClientI for VSClient {
         agent: vsapi::Agent,
         cert_pem_data: &str,
         private_key: Rsa<Private>,
+        vss_service_addr: &str
     ) -> Result<String, thrift::Error> {
         let mut client = self.newclient()?;
 
@@ -115,6 +118,7 @@ impl VSClientI for VSClient {
             timestamp: Some(timestamp as i64),
             node_cert: Some(cert_pem_data.into()),
             hmac: Some(hmac),
+            vss_service: Some(vss_service_addr.into()),
             node_agent: Some(agent),
         };
 

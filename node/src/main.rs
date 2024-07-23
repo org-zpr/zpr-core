@@ -34,10 +34,17 @@ struct Cli {
 
     #[arg(
         long,
-        value_name = "HOST:PORT",
+        value_name = "ADDR:PORT",
         help = "DEBUG - force immediate visa service connect"
     )]
     vsforceconnect: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "ADDR:PORT",
+        help = "DEBUG - override default visa-support-service listening address"
+    )]
+    vssforcelisten: Option<String>,
 }
 
 fn main() -> io::Result<()> {
@@ -55,6 +62,9 @@ fn main() -> io::Result<()> {
 
     if let Some(hostport) = cli.vsforceconnect.as_deref() {
         opts.set_vsforceconnect(hostport)
+    }
+    if let Some(hostport) = cli.vssforcelisten.as_deref() {
+        opts.set_vssforcelisten(hostport)
     }
 
     if cli.foreground {
