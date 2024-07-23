@@ -18,18 +18,15 @@ VSS_DEST_GO := ../core/pkg/vssapi
 VSS_DEST_RS_NODE := ../../node/src/vssapi
 
 
-
 # Build output directories for the go and rust
-GGO := gen-go
-GRS := gen-rs
+BUILD_GO := gen-go
+BUILD_RS := gen-rs
 
 
 VS_SUM := vs.thrift.sum
 VSS_SUM := vss.thrift.sum
 
-
 SUMS := $(patsubst %.thrift,%.thrift.sum,$(wildcard *.thrift))
-
 
 ifndef THRIFTCC
   $(error must set THRIFTCC to location of thrift compiler)
@@ -41,52 +38,54 @@ endif
 all: go rs
 
 
-go: $(GGO)/vsapi $(GGO)/vssapi
-
-
-rs: $(GRS)/vs.rs $(GRS)/vss.rs
-
-
 install: install-go install-rs
 
+
+go: $(BUILD_GO)/vsapi $(BUILD_GO)/vssapi
+
+
+rs: $(BUILD_RS)/vs.rs $(BUILD_RS)/vss.rs
+
+
 sums: $(SUMS)
+
 
 install-go: sums go
 	test -d $(VS_DEST_GO)  || mkdir $(VS_DEST_GO)
 	test -d $(VSS_DEST_GO) || mkdir $(VSS_DEST_GO)
-	cp $(GGO)/vsapi/*.go  $(VS_DEST_GO)
+	cp $(BUILD_GO)/vsapi/*.go  $(VS_DEST_GO)
 	cp $(VS_SUM)          $(VS_DEST_GO)
-	cp $(GGO)/vssapi/*.go $(VSS_DEST_GO)
+	cp $(BUILD_GO)/vssapi/*.go $(VSS_DEST_GO)
 	cp $(VSS_SUM)         $(VSS_DEST_GO)
 
 
 install-rs: sums rs
-	cp $(GRS)/vs.rs  $(VS_DEST_RS_CLI)/mod.rs
+	cp $(BUILD_RS)/vs.rs  $(VS_DEST_RS_CLI)/mod.rs
 	cp $(VS_SUM)     $(VS_DEST_RS_CLI)
-	cp $(GRS)/vs.rs  $(VS_DEST_RS_NODE)/mod.rs
+	cp $(BUILD_RS)/vs.rs  $(VS_DEST_RS_NODE)/mod.rs
 	cp $(VS_SUM)     $(VS_DEST_RS_NODE)
-	cp $(GRS)/vss.rs $(VSS_DEST_RS_NODE)/mod.rs
+	cp $(BUILD_RS)/vss.rs $(VSS_DEST_RS_NODE)/mod.rs
 	cp $(VSS_SUM)    $(VSS_DEST_RS_NODE)
 
 
-$(GGO)/vsapi: vs.thrift
-	mkdir -p $(GGO)
-	$(THRIFTCC) -r -out $(GGO) --gen go $<
+$(BUILD_GO)/vsapi: vs.thrift
+	mkdir -p $(BUILD_GO)
+	$(THRIFTCC) -r -out $(BUILD_GO) --gen go $<
 
 
-$(GGO)/vssapi: vss.thrift
-	mkdir -p $(GGO)
-	$(THRIFTCC) -r -out $(GGO) --gen go $<
+$(BUILD_GO)/vssapi: vss.thrift
+	mkdir -p $(BUILD_GO)
+	$(THRIFTCC) -r -out $(BUILD_GO) --gen go $<
 
 
-$(GRS)/vs.rs: vs.thrift
-	mkdir -p $(GRS)
-	$(THRIFTCC) -r -out $(GRS) --gen rs $<
+$(BUILD_RS)/vs.rs: vs.thrift
+	mkdir -p $(BUILD_RS)
+	$(THRIFTCC) -r -out $(BUILD_RS) --gen rs $<
 
 
-$(GRS)/vss.rs: vss.thrift
-	mkdir -p $(GRS)
-	$(THRIFTCC) -r -out $(GRS) --gen rs $<
+$(BUILD_RS)/vss.rs: vss.thrift
+	mkdir -p $(BUILD_RS)
+	$(THRIFTCC) -r -out $(BUILD_RS) --gen rs $<
 
 
 $(SUMS): %.thrift.sum: %.thrift
@@ -94,7 +93,7 @@ $(SUMS): %.thrift.sum: %.thrift
 
 
 clean:
-	rm -rf $(GGO) && rm -rf $(GRS) && rm -f $(SUMSFILE)
+	rm -rf $(BUILD_GO) && rm -rf $(BUILD_RS) && rm -f $(SUMSFILE)
 
 
-.PHONY: all go rs install-go install-rs clean sums
+.PHONY: all go rs install install-go install-rs clean sums
