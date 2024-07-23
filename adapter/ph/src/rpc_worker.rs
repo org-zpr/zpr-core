@@ -1,6 +1,8 @@
 use crate::assembly::Assembly;
+use crate::test_packet::TestPacketMetrics;
 use core::future::Future;
 use hdrhistogram::Histogram;
+use pcap::{Capture, Linktype};
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
@@ -12,6 +14,7 @@ use tokio::io::BufReader;
 use tokio::io::BufWriter;
 use tokio::net::UnixListener;
 use tokio::net::UnixStream;
+use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
 
@@ -54,11 +57,9 @@ async fn handle_connection(
         // close stream then skip the rest of the loop and moves to next iteration
         buf_writer.shutdown().await?;
     } else {
-        // TODO remove \n from end of message?
         buf_writer.write("Message Received\n".as_bytes()).await?;
         let vec_message: Vec<&str> = str_message.split_whitespace().collect();
 
-        // TODO there must be a more efficient way to send the OK message, is match statement best suited?
         match vec_message[0] {
             // To avoid excess parsing, the command must not have spaces
             "COUNTERS-RESET" => {
@@ -105,27 +106,16 @@ async fn handle_connection(
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "ENABLE-IN-CAPTURE" => {
+            // SET-CAPTURE-PROGRAM <program>
+            "SET-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(enable_in_capture(asm).await.as_bytes())
+                    .write_all(set_capture_program(asm, str_message).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "DISABLE-IN-CAPTURE" => {
+            "DELETE-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(disable_in_capture(asm).await.as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            "ENABLE-OUT-CAPTURE" => {
-                buf_writer
-                    .write_all(enable_out_capture(asm).await.as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            "DISABLE-OUT-CAPTURE" => {
-                buf_writer
-                    .write_all(disable_out_capture(asm).await.as_bytes())
+                    .write_all(delete_capture_program(asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
@@ -150,10 +140,9 @@ where
 }
 
 async fn echo(_asm: &Assembly<'_>) -> String {
-    "echo\n".to_string()
+    String::from("echo\n")
 }
 
-// TODO not sure if just printing is what we want this function to do
 async fn counters(asm: &Assembly<'_>) -> String {
     let mut counts: String = String::new();
     for (key, &ref value) in &asm.counters {
@@ -168,7 +157,7 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
         value.reset();
     }
 
-    "counters_reset\n".to_string()
+    String::from("counters_reset\n")
 }
 
 async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
@@ -191,227 +180,140 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
 
     send_interval.tick().await;
     let mut queue_num = 0;
+
+    // Enqueue test packets at the frequency desired by the user for the
+    // desired amount of time
     while begin_time.elapsed().as_secs() < send_duration.as_secs() {
         if queue_num == (asm.inbound_send.fanout()) {
             queue_num = 0;
         }
 
         let in_processor = asm.inbound_processor.enqueue_test_packet().await;
-        let _ = inbound_processor_duration.record(
-            in_processor
-                .as_ref()
-                .unwrap()
-                .in_queue
-                .as_nanos()
-                .try_into()
-                .unwrap(),
-        );
-        let _ = inbound_processor_depth.record(
-            in_processor
-                .as_ref()
-                .unwrap()
-                .queue_depth
-                .try_into()
-                .unwrap(),
-        );
-        let _ = inbound_processor_batch.record(
-            in_processor
-                .as_ref()
-                .unwrap()
-                .batch_size
-                .try_into()
-                .unwrap(),
+        record_metrics(
+            in_processor,
+            &mut inbound_processor_duration,
+            &mut inbound_processor_depth,
+            &mut inbound_processor_batch,
         );
 
         let in_send = asm.inbound_send.enqueue_test_packet(queue_num).await;
-        let _ = inbound_send_duration.record(
-            in_send
-                .as_ref()
-                .unwrap()
-                .in_queue
-                .as_nanos()
-                .try_into()
-                .unwrap(),
+        record_metrics(
+            in_send,
+            &mut inbound_send_duration,
+            &mut inbound_send_depth,
+            &mut inbound_send_batch,
         );
-        let _ =
-            inbound_send_depth.record(in_send.as_ref().unwrap().queue_depth.try_into().unwrap());
-
-        let _ = inbound_send_batch.record(in_send.as_ref().unwrap().batch_size.try_into().unwrap());
 
         let out_processor = asm.outbound_processor.enqueue_test_packet().await;
-        let _ = outbound_processor_duration.record(
-            out_processor
-                .as_ref()
-                .unwrap()
-                .in_queue
-                .as_nanos()
-                .try_into()
-                .unwrap(),
+        record_metrics(
+            out_processor,
+            &mut outbound_processor_duration,
+            &mut outbound_processor_depth,
+            &mut outbound_processor_batch,
         );
-        let _ = outbound_processor_depth.record(
-            out_processor
-                .as_ref()
-                .unwrap()
-                .queue_depth
-                .try_into()
-                .unwrap(),
-        );
-        let _ =
-            outbound_processor_batch.record(out_processor.unwrap().queue_depth.try_into().unwrap());
 
         let out_send = asm.outbound_send.enqueue_test_packet().await;
-        let _ = outbound_send_duration.record(
-            out_send
-                .as_ref()
-                .unwrap()
-                .in_queue
-                .as_nanos()
-                .try_into()
-                .unwrap(),
+        record_metrics(
+            out_send,
+            &mut outbound_send_duration,
+            &mut outbound_send_depth,
+            &mut outbound_send_batch,
         );
-        let _ =
-            outbound_send_depth.record(out_send.as_ref().unwrap().queue_depth.try_into().unwrap());
-        let _ = outbound_send_batch.record(out_send.unwrap().batch_size.try_into().unwrap());
 
         send_interval.tick().await;
         queue_num += 1;
     }
 
-    // get values at 10, 25, 50, 75, 90 quantiles for each hist
-    let mut info: String = String::new();
+    // Get values at 10, 25, 50, 75, 90 quantiles for each hist as well as the mean
+    let in_processor = three_hists_values(
+        "Inbound Processor",
+        &inbound_processor_duration,
+        &inbound_processor_depth,
+        &inbound_processor_batch,
+    );
+    let in_send = three_hists_values(
+        "Inbound Send",
+        &inbound_send_duration,
+        &inbound_send_depth,
+        &inbound_send_batch,
+    );
+    let out_processor = three_hists_values(
+        "Outbound Processor",
+        &outbound_processor_duration,
+        &outbound_processor_depth,
+        &outbound_processor_batch,
+    );
+    let out_send = three_hists_values(
+        "Outbound Send",
+        &outbound_send_duration,
+        &outbound_send_depth,
+        &outbound_send_batch,
+    );
 
-    // Get info for inbound processor
+    format!("{in_processor}{in_send}{out_processor}{out_send}")
+}
+
+// Helper for perf_sample
+// Records the metrics from a single test packet to the trio of histograms
+// tracking the data from the queue that particular test packet was enqueued on
+fn record_metrics(
+    metrics: Result<TestPacketMetrics, RecvError>,
+    hist_dur: &mut Histogram<u64>,
+    hist_dep: &mut Histogram<u64>,
+    hist_batch: &mut Histogram<u64>,
+) {
+    let _ = hist_dur.record(
+        metrics
+            .as_ref()
+            .unwrap()
+            .in_queue
+            .as_nanos()
+            .try_into()
+            .unwrap(),
+    );
+    let _ = hist_dep.record(metrics.as_ref().unwrap().queue_depth.try_into().unwrap());
+    let _ = hist_batch.record(metrics.as_ref().unwrap().batch_size.try_into().unwrap());
+}
+
+// Helper for perf_sample
+// Gets the values from the trio of histograms for each queue
+fn three_hists_values(
+    hist_name: &str,
+    hist_dur: &Histogram<u64>,
+    hist_dep: &Histogram<u64>,
+    hist_batch: &Histogram<u64>,
+) -> String {
+    let mut info = String::new();
+
     let _ = write!(
         &mut info,
         "{}",
         values_from_hist(
-            "Inbound Processor Duration",
+            &format!("{hist_name} Duration"), // TODO could use en enum and a display to get the name
             "ns",
-            inbound_processor_duration.clone()
+            hist_dur
         )
         .as_str()
     );
     let _ = write!(
         &mut info,
         "{}",
-        values_from_hist(
-            "Inbound Processor Depth",
-            " packets",
-            inbound_processor_depth.clone()
-        )
-        .as_str()
+        values_from_hist(&format!("{hist_name} Depth"), " packets", hist_dep).as_str()
     );
     let _ = write!(
         &mut info,
         "{}",
-        values_from_hist(
-            "Inbound Processor Batch",
-            " packets",
-            inbound_processor_batch.clone()
-        )
-        .as_str()
+        values_from_hist(&format!("{hist_name} Batch"), " packets", hist_batch).as_str()
     );
-    let inbound_pro_mean: u64 =
-        (inbound_processor_duration.mean() / (1.0 + inbound_processor_depth.mean())) as u64;
-    let _ = write!(&mut info, "Approx packet time: {inbound_pro_mean}ns\n\n\n");
-
-    // Get info for inbound send
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist("Inbound Send Duration", "ns", inbound_send_duration.clone()).as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist("Inbound Send Depth", " packets", inbound_send_depth.clone()).as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist("Inbound Send Batch", " packets", inbound_send_batch.clone()).as_str()
-    );
-    let inbound_send_mean: u64 =
-        (inbound_send_duration.mean() / (1.0 + inbound_send_depth.mean())) as u64;
-    let _ = write!(&mut info, "Approx packet time: {inbound_send_mean}ns\n\n\n");
-
-    // Get info for outbound processor
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Processor Duration",
-            "ns",
-            outbound_processor_duration.clone()
-        )
-        .as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Processor Depth",
-            " packets",
-            outbound_processor_depth.clone()
-        )
-        .as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Processor Batch",
-            " packets",
-            outbound_processor_batch.clone()
-        )
-        .as_str()
-    );
-    let outbound_pro_mean: u64 =
-        (outbound_processor_duration.mean() / (1.0 + outbound_processor_depth.mean())) as u64;
-    let _ = write!(&mut info, "Approx packet time: {outbound_pro_mean}ns\n\n\n");
-
-    // Get info for outbound send
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Send Duration",
-            "ns",
-            outbound_send_duration.clone()
-        )
-        .as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Send Depth",
-            " packets",
-            outbound_send_depth.clone()
-        )
-        .as_str()
-    );
-    let _ = write!(
-        &mut info,
-        "{}",
-        values_from_hist(
-            "Outbound Send Batch",
-            " packets",
-            outbound_send_batch.clone()
-        )
-        .as_str()
-    );
-    let outbound_send_mean: u64 =
-        (outbound_send_duration.mean() / (1.0 + outbound_send_depth.mean())) as u64;
-    let _ = write!(
-        &mut info,
-        "Approx packet time: {outbound_send_mean}ns\n\n\n"
-    );
+    let mean: u64 = (hist_dur.mean() / (1.0 + hist_dep.mean())) as u64;
+    let _ = write!(&mut info, "{hist_name} approx packet time: {mean}ns\n\n\n");
 
     info
 }
 
-fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> String {
+// Helper for perf_sample
+// Gets the data from a single histogram
+fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> String {
     let ten: u64 = hist.value_at_quantile(0.10);
     let twenty_five: u64 = hist.value_at_quantile(0.25);
     let fifty: u64 = hist.value_at_quantile(0.50);
@@ -419,9 +321,7 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
     let ninety: u64 = hist.value_at_quantile(0.90);
     let mean: f64 = hist.mean();
 
-    let mut values: String = String::new();
-
-    let _ = write!(&mut values, "{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}, Mean: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units, mean, units);
+    let mut values = format!("{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}, Mean: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units, mean, units);
 
     let mut iter = hist.iter_log(1, SQRT_2);
 
@@ -450,75 +350,34 @@ fn values_from_hist(hist_name: &str, units: &str, hist: Histogram<u64>) -> Strin
 async fn set_capture(asm: &Assembly<'_>, path_str: &str) -> String {
     let path = Path::new(path_str);
     asm.capture_worker.open_capture_file(path).await;
-    let mut message: String = String::new();
-    let _ = write!(&mut message, "Capture file opened at {}\n", path_str);
 
-    message
+    format!("Capture file opened at {}\n", path_str)
 }
 
 async fn flush_capture(asm: &Assembly<'_>) -> String {
     let _ = asm.capture_worker.flush_capture_file().await;
-    let mut message: String = String::new();
-    let _ = write!(&mut message, "Capture file flushed\n");
 
-    message
+    String::from("Capture file flushed\n")
 }
 
 async fn close_capture(asm: &Assembly<'_>) -> String {
     asm.capture_worker.close_capture_file().await;
-    asm.flow_control.set_inbound(false);
-    asm.flow_control.set_outbound(false);
+    asm.flow_control.delete_program().await;
 
-    let mut message: String = String::new();
-    let _ = write!(&mut message, "Capture file closed\n");
-
-    message
+    String::from("Capture file closed\n")
 }
 
-// Could change this structure frmo enable/disable to toggle and/or
-// have the user provide truth value
-async fn enable_in_capture(asm: &Assembly<'_>) -> String {
-    let mut message: String = String::new();
-    if asm.capture_worker.query_savefile().await {
-        asm.flow_control.set_inbound(true);
-        let _ = write!(&mut message, "Inbound capture enabled\n");
-    } else {
-        let _ = write!(
-            &mut message,
-            "Inbound capture not enabled, no capture file\n"
-        );
-    }
+async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
+    let (_command, program) = str_message.split_once(' ').unwrap();
+    let capture = Capture::dead(Linktype::USER0).unwrap();
+    let bpfprogram = capture.compile(program, true).unwrap();
+    asm.flow_control.set_program(bpfprogram).await;
 
-    message
+    format!("Program: {program} set\n")
 }
 
-async fn disable_in_capture(asm: &Assembly<'_>) -> String {
-    asm.flow_control.set_inbound(false);
-    let mut message: String = String::new();
-    let _ = write!(&mut message, "Inbound capture disabled\n");
+async fn delete_capture_program(asm: &Assembly<'_>) -> String {
+    asm.flow_control.delete_program().await;
 
-    message
-}
-
-async fn enable_out_capture(asm: &Assembly<'_>) -> String {
-    let mut message: String = String::new();
-    if asm.capture_worker.query_savefile().await {
-        asm.flow_control.set_outbound(true);
-        let _ = write!(&mut message, "Outbound capture enabled\n");
-    } else {
-        let _ = write!(
-            &mut message,
-            "Outbound capture not enabled, no capture file\n"
-        );
-    }
-
-    message
-}
-
-async fn disable_out_capture(asm: &Assembly<'_>) -> String {
-    asm.flow_control.set_inbound(false);
-    let mut message: String = String::new();
-    let _ = write!(&mut message, "Outbound capture disabled\n");
-
-    message
+    String::from("Program deleted\n")
 }

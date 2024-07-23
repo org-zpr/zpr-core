@@ -1,5 +1,6 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
+use crate::flow_control;
 use crate::packet::Packet;
 use std::future::Future;
 use std::io::ErrorKind;
@@ -21,7 +22,7 @@ async fn worker<'a>(config: &Config, asm: &Assembly<'a>, socket: &UdpSocket) {
 
         // TODO: batch receive
         for buf in bufs.drain(..) {
-            let mut pkt = Packet::new(buf, 0);
+            let mut pkt = Packet::new(buf, flow_control::DIRECTION_HEADER_SIZE);
             loop {
                 match socket.recv_buf(&mut pkt).await {
                     Ok(_) => (),
