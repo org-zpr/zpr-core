@@ -383,11 +383,14 @@ async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String 
         };
         insn_vec.push(bpf_insn);
     }
-    asm.flow_control
-        .set_program(cbpf_rs::BpfProgram::validate(insn_vec).unwrap()) // TODO use match to catch the error
-        .await;
 
-    format!("Program: {program} set\n")
+    let mut return_message = format!("Program: {program} set\n");
+    match cbpf_rs::BpfProgram::validate(insn_vec) {
+        Ok(final_program) => asm.flow_control.set_program(final_program).await,
+        _ => return_message = format!("Invalid program recieved, program not set\n"),
+    }
+
+    return_message
 }
 
 async fn delete_capture_program(asm: &Assembly<'_>) -> String {
