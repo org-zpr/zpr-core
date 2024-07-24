@@ -20,9 +20,17 @@ struct Args {
         short,
         long,
         help = "Re-run with '--help' for list of commands",
-        long_help = "ECHO\nCOUNTERS\nCOUNTERS-RESET\nFLUSH-CAPTURE\nCLOSE-CAPTURE\nDELETE-CAPTURE-PROGRAM\n\
-                    WATCH <frequency>\nPERF-SAMPLE <duration> <frequency>\nSET-CAPTURE <file-path>\n\
-                    CAPTURE-SEQUENCE <file-path> <duration> <program>\nSET-CAPTURE-PROGRAM <program>"
+        long_help = "ECHO\n\
+                     COUNTERS\n\
+                     COUNTERS-RESET\n\
+                     FLUSH-CAPTURE\n\
+                     CLOSE-CAPTURE\n\
+                     DELETE-CAPTURE-PROGRAM\n\
+                     WATCH <frequency>\n\
+                     PERF-SAMPLE <duration> <frequency>\n\
+                     SET-CAPTURE <file-path>\n\
+                     CAPTURE-SEQUENCE <file-path> <duration> <program>\n\
+                     SET-CAPTURE-PROGRAM <program>"
     )]
     command: String,
 
