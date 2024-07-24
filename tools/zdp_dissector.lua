@@ -39,18 +39,18 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         subtree:add(mac_addr, buffer(17, 4))
         subtree:add(d2d_said, buffer(21, 1))
         subtree:add(agent_packet, buffer(22, real_len - 26))
-        subtree:add(d2d_mac, buffer(real_len - 5, 4))
+        subtree:add(d2d_mac, buffer(real_len - 4, 4))
     -- Stream-oriented Management Message
     elseif type <= 127 then 
         subtree:add(stream_id, buffer(5, 4))
         subtree:add(management_packet, buffer(9, real_len - 21))
-        subtree:add(pad, buffer(real_len - 13, 8))
-        subtree:add(mac, buffer(real_len - 5, 4))
+        subtree:add(pad, buffer(real_len - 12, 8))
+        subtree:add(mac, buffer(real_len - 4, 4))
     -- Other Management Message
     else 
         subtree:add(management_packet, buffer(5, real_len - 17))
-        subtree:add(pad, buffer(real_len - 13, 8))
-        subtree:add(mac, buffer(real_len - 5, 4))
+        subtree:add(pad, buffer(real_len - 12, 8))
+        subtree:add(mac, buffer(real_len - 4, 4))
     end
 
 end
