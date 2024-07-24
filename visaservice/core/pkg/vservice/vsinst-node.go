@@ -1,61 +1,173 @@
 package vservice
 
 import (
+	"fmt"
 	"net/netip"
 
+	"golang.org/x/net/context"
+	snip "zpr.org/vs/pkg/ip"
+	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vs/pkg/vssapi"
 )
 
-// Send the config-and-policy message over the VSS to the indicated node.
-// Updates state in the agentDB.
-func (vs *VSInst) SendConfigAndPolicyToNode(nodeAddr netip.Addr) {
+// Called by InstallPolicy
+func (vs *VSInst) installPolicyWithVisasForNodes(pp *policy.Policy, configID uint64) error {
+	errCount := 0
+	for _, nodeAddr := range vs.GetNodeList() {
+		if err := vs.installPolicyWithVisasForNode(nodeAddr, pp, configID); err != nil {
+			vs.log.WithError(err).Warn("failed to install policy on node", "node", nodeAddr)
+			errCount++
+		}
+	}
+	if errCount > 0 {
+		return fmt.Errorf("failed to install policy on %d nodes", errCount)
+	}
+	return nil
+}
+
+func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.Policy, configID uint64) error {
+	var visas []*vssapi.VisaHop
+	var vssPort uint16
+
+	serviceAddr := vs.GetVSSAddrForNode(nodeAddr)
+	if serviceAddr == "" {
+		return fmt.Errorf("no support service addr for node")
+	}
+	if ap, err := netip.ParseAddrPort(serviceAddr); err == nil {
+		vssPort = ap.Port()
+		// The node tells the visa service its service address for the VSS. We assume that
+		// the address part matches the node address. That may not always be true but we
+		// confirm that here with an error message.
+		if ap.Addr() != nodeAddr {
+			vs.log.Error("node address does not match VSS address: VS->VSS visa will fail", "node", nodeAddr, "service_addr", serviceAddr)
+		}
+	} else {
+		return fmt.Errorf("invalid serice address for VSS: %v", serviceAddr)
+	}
+
+	{
+		vs.log.Info("generating a new visa-service visa for the node->VS", "node_addr_src", nodeAddr, "vs_addr_dest", vs.localAddr)
+		pktData := snip.NewTCPConnect(nodeAddr, 0, vs.localAddr, VisaServicePort)
+		vsr, err := vs.doRequestVisa(context.Background(), nodeAddr, pktData, 0, pp.VersionNumber())
+		if err != nil {
+			vs.log.WithError(err).Warn("failed to generate a visa-service visa for the node", "node_addr", nodeAddr)
+		} else if vsr.Status != vsapi.StatusCode_SUCCESS {
+			vs.log.Warn("failed to generate a visa-service visa for the node", "node", nodeAddr, "reason", vsr.Reason)
+		} else {
+			visas = append(visas, &vssapi.VisaHop{
+				VisaPb:   vsr.Visa.VisaPb,
+				HopCount: vsr.Visa.HopCount,
+				IssuerID: vsr.Visa.IssuerID,
+			})
+		}
+	}
+	{
+		vs.log.Info("generating a new visa-support-service visa for the VS->node", "vs_addr_src", vs.localAddr, "node_addr_dest", nodeAddr)
+		pktData := snip.NewTCPConnect(vs.localAddr, 1025, nodeAddr, vssPort)
+		vsr, err := vs.doRequestVisa(context.Background(), vs.localAddr, pktData, 0, pp.VersionNumber())
+		if err != nil {
+			vs.log.WithError(err).Warn("failed to generate a visa-service visa for the node")
+		} else if vsr.Status != vsapi.StatusCode_SUCCESS {
+			vs.log.Warn("failed to generate a visa-service visa for the node", "reason", vsr.Reason)
+		} else {
+			visas = append(visas, &vssapi.VisaHop{
+				VisaPb:   vsr.Visa.VisaPb,
+				HopCount: vsr.Visa.HopCount,
+				IssuerID: vsr.Visa.IssuerID,
+			})
+		}
+	}
+
+	return vs.updateNode(nodeAddr, pp.VersionNumber(), configID, visas)
+}
+
+// For update node to work, we need to push the policy and version, plus all the visas.
+// This updates the WantXXX values in the peer record state.
+// If it completes, we update the LastXXX values in the peer record too.
+//
+// This does not use the push-buffer.
+func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uint64, visas []*vssapi.VisaHop) error {
+
+	found := false
+	updating := false
 	var serviceAddr string
-	var vssPrevState VSSStateT
+	var opErr error
 
 	vs.agentDB.Lock()
 	if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
 		if rec.Peer != nil {
-			serviceAddr = rec.Peer.VSSAddr
-			vssPrevState = rec.Peer.VSSState
-			if serviceAddr != "" {
-				if vssPrevState == VSSStateUninitialized {
-					rec.Peer.VSSState = VSSStateInitializing
+			found = true
+			if rec.Peer.State.Updating {
+				updating = true
+			} else {
+				rec.Peer.State.WantPolicyVer = policyVer
+				rec.Peer.State.WantConfigID = configID
+				serviceAddr = rec.Peer.VSSAddr
+				if serviceAddr != "" {
+					rec.Peer.State.Updating = true // essentially takes a lock here
 				}
 			}
 		}
 	}
 	vs.agentDB.Unlock()
-
+	if updating {
+		return nil
+	}
+	if !found {
+		return fmt.Errorf("node not found")
+	}
 	if serviceAddr == "" {
-		vs.log.Warn("node registered but VSS service address not in agentDB", "nodeAddr", nodeAddr)
-		return
+		return fmt.Errorf("no VSS address for node")
 	}
 
-	if vssPrevState != VSSStateUninitialized {
-		// nothing to do
-		return
-	}
-
-	var vssNextState VSSStateT
-	plcy, _, cid := vs.getPolicyMatcherConfig()
 	client := NewVSSCli(serviceAddr)
-	if err := client.SendNetworkPolicy(plcy.VersionNumber(), cid); err != nil {
-		vs.log.WithError(err).Error("failed to send network policy message to node", "service_addr", serviceAddr)
-		vssNextState = VSSStateUninitialized
-	} else {
-		vssNextState = VSSStateInitialized
+
+	if err := client.SendNetworkPolicy(policyVer, configID); err != nil {
+		opErr = fmt.Errorf("failed to send network policy message to node: %w", err)
+		goto RELEASE_UPDATE
 	}
 
+	if len(visas) > 0 {
+		if err := client.SendVisas(visas); err != nil {
+			opErr = fmt.Errorf("failed to send visas to node: %w", err)
+			goto RELEASE_UPDATE
+		}
+	}
+
+	// Success!
 	vs.agentDB.Lock()
 	if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
 		if rec.Peer != nil {
-			rec.Peer.VSSState = vssNextState
+			rec.Peer.State.LastPushConfigID = configID
+			rec.Peer.State.LastPushPolicyVer = policyVer
 		}
 	}
 	vs.agentDB.Unlock()
+
+RELEASE_UPDATE:
+	vs.agentDB.Lock()
+	if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
+		if rec.Peer != nil {
+			rec.Peer.State.Updating = false
+		}
+	}
+	vs.agentDB.Unlock()
+	return opErr
 }
 
-func (vs *VSInst) PushVisa(forNode netip.Addr, visas []*vsapi.VisaHop) {
+func (vs *VSInst) GetVSSAddrForNode(naddr netip.Addr) string {
+	vs.agentDB.RLock()
+	defer vs.agentDB.RUnlock()
+	if rec, ok := vs.agentDB.agents[naddr]; ok {
+		if rec.Peer != nil {
+			return rec.Peer.VSSAddr
+		}
+	}
+	return ""
+}
+
+func (vs *VSInst) EnqueuePushVisa(forNode netip.Addr, visas []*vsapi.VisaHop) {
 	item := &PushItem{
 		NodeAddr: forNode,
 		Item: &vsapi.PollResponse{
@@ -65,7 +177,17 @@ func (vs *VSInst) PushVisa(forNode netip.Addr, visas []*vsapi.VisaHop) {
 	vs.visaPushC <- item
 }
 
-func (vs *VSInst) PushVisaToAllNodes(visas []*vsapi.VisaHop) {
+func (vs *VSInst) EnqueuePushVsapiVisas(visas []*vsapi.VisaHop) {
+	item := &PushItem{
+		Broadcast: true,
+		Item: &vsapi.PollResponse{
+			Visas: visas,
+		},
+	}
+	vs.visaPushC <- item
+}
+
+func (vs *VSInst) EnqueuePushVisaToAllNodes(visas []*vsapi.VisaHop) {
 	item := &PushItem{
 		Broadcast: true,
 		Item: &vsapi.PollResponse{
@@ -119,17 +241,34 @@ func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, item *vsapi.PollRespon
 	client := NewVSSCli(serviceAddr)
 	failing := vsapi.PollResponse{}
 
-	for _, rev := range item.Revocations {
-		if err := client.SendRevocation(uint64(rev.Configuration), uint32(rev.IssuerID)); err != nil {
-			failing.Revocations = append(failing.Revocations, rev)
-			vs.log.WithError(err).Warn("failed to send revocation to node", "node", nodeAddr, "issuerID", rev.IssuerID)
+	// Minor impedence mismatch here. We need to convert vsapi types to vssapi types.
+
+	if len(item.Revocations) > 0 {
+		var vssRevs []*vssapi.VisaRevocation
+		for _, rev := range item.Revocations {
+			vssRevs = append(vssRevs, &vssapi.VisaRevocation{
+				IssuerID:      rev.IssuerID,
+				Configuration: rev.Configuration,
+			})
+		}
+		if err := client.SendRevocations(vssRevs); err != nil {
+			failing.Revocations = append(failing.Revocations, item.Revocations...)
+			vs.log.WithError(err).Warn("failed to send revocations to node", "node", nodeAddr)
 		}
 	}
 
-	for _, visa := range item.Visas {
-		if err := client.SendVisa(uint32(visa.IssuerID), visa.VisaPb, uint32(visa.HopCount)); err != nil {
-			failing.Visas = append(failing.Visas, visa)
-			vs.log.WithError(err).Warn("failed to send visa to node", "node", nodeAddr, "issuerID", visa.IssuerID)
+	if len(item.Visas) > 0 {
+		var vssVisas []*vssapi.VisaHop
+		for _, v := range item.Visas {
+			vssVisas = append(vssVisas, &vssapi.VisaHop{
+				VisaPb:   v.VisaPb,
+				HopCount: v.HopCount,
+				IssuerID: v.IssuerID,
+			})
+		}
+		if err := client.SendVisas(vssVisas); err != nil {
+			failing.Visas = append(failing.Visas, item.Visas...)
+			vs.log.WithError(err).Warn("failed to send visas to node", "node", nodeAddr)
 		}
 	}
 
@@ -144,26 +283,35 @@ func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, item *vsapi.PollRespon
 
 func (vs *VSInst) handleNodeRegister(nodeAddr netip.Addr) {
 	vs.log.Info("node registered", "nodeAddr", nodeAddr)
-	vs.SendConfigAndPolicyToNode(nodeAddr)
+	// Now try to bring node into sycn-
+	pp, _, configID := vs.getPolicyMatcherConfig()
+	if err := vs.installPolicyWithVisasForNode(nodeAddr, pp, configID); err != nil {
+		vs.log.WithError(err).Warn("failed to install initial policy on node", "node", nodeAddr)
+	}
 }
 
 // checkNodeVSSState checks the VSS state of all nodes and sends config and policy to nodes
-// which indicate they are uninitialized.
+// which indicate they are out of sync.
 func (vs *VSInst) checkNodesVSSState() {
+	pp, _, configID := vs.getPolicyMatcherConfig()
+
 	var nodes []netip.Addr
 	vs.agentDB.RLock()
 	for nodeAddr, rec := range vs.agentDB.agents {
 		if rec.Peer == nil {
 			continue
 		}
-		if rec.Peer.VSSState == VSSStateUninitialized {
+		if rec.Peer.State.Updating {
+			continue
+		}
+		if !rec.Peer.IsInSync() {
 			nodes = append(nodes, nodeAddr)
 		}
 	}
 	vs.agentDB.RUnlock()
 
 	for _, nodeAddr := range nodes {
-		vs.SendConfigAndPolicyToNode(nodeAddr)
+		vs.installPolicyWithVisasForNode(nodeAddr, pp, configID)
 	}
 }
 

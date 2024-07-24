@@ -17,6 +17,7 @@ import (
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsx/polio"
 	"zpr.org/vsx/snio/vsio"
 )
 
@@ -51,17 +52,21 @@ type PeerRecord struct {
 	VisaRequestsCount    uint64
 	ConnectRequestsCount uint64
 	VSSAddr              string
-	VSSState             VSSStateT
 	PushBuffer           []*vsapi.PollResponse
+	State                struct {
+		Updating          bool
+		WantPolicyVer     uint64
+		WantConfigID      uint64
+		LastPushConfigID  uint64
+		LastPushPolicyVer uint64
+	}
 }
 
-type VSSStateT int
-
-const (
-	VSSStateUninitialized VSSStateT = iota
-	VSSStateInitializing
-	VSSStateInitialized
-)
+func (pr *PeerRecord) IsInSync() bool {
+	return (pr.State.WantPolicyVer > 0 || pr.State.WantConfigID > 0) &&
+		pr.State.WantPolicyVer == pr.State.LastPushPolicyVer &&
+		pr.State.WantConfigID == pr.State.LastPushConfigID
+}
 
 type VSMsgType int
 
@@ -150,6 +155,7 @@ type vtableEnt struct {
 // VSIConfig is the rather complex configuration bundle for the visa service.
 type VSIConfig struct {
 	Log                    logr.Logger   // General logging
+	VSAddr                 netip.Addr    // Visa service ZPR public address
 	HopCount               uint          // Is set on every visa we create
 	Creds                  *tls.Config   // TLS for the thrift channel
 	ReauthBumpTimeOverride time.Duration // For unit testing (see DefaultReauthBumpTime defined above)
@@ -158,10 +164,17 @@ type VSIConfig struct {
 	Constrainer            ConstraintService
 }
 
+var EMPTY_ADDR = netip.Addr{}
+
 // NewVSInst create a new visa service.
 func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
+	if vcf.VSAddr == EMPTY_ADDR || vcf.VSAddr.IsUnspecified() {
+		return nil, fmt.Errorf("visa service address 'VSAddr' must be set")
+	}
+
 	vs := &VSInst{
 		log:                  vcf.Log,
+		localAddr:            vcf.VSAddr,
 		hopCount:             vcf.HopCount,
 		visaPushC:            make(chan *PushItem, 128), // Must be large enough to handle a mass revocation event
 		thriftCreds:          vcf.Creds,
@@ -189,6 +202,33 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	} else {
 		vs.plcy.matcher = m
 	}
+
+	// We need a visa service agent to exist.
+	// TODO: These claims need to come from configuration. Note that the adapter holds the claims
+	//       for the visa service agent.
+	visaServiceAgent := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	{
+		visaServiceAgent.SetProvides([]string{
+			polio.VisaServiceName,
+			fmt.Sprintf("/zpr/%s", polio.VisaServiceName),
+		})
+		authedClaims := make(map[string]*agent.ClaimV)
+		authedClaims[agent.KAttrVisaServiceAdapter] = &agent.ClaimV{
+			V:   "true",
+			Exp: time.Now().Add(BootstrapAuthLifetime),
+		}
+		authedClaims[agent.KAttrEPID] = &agent.ClaimV{
+			V:   vcf.VSAddr.String(),
+			Exp: time.Now().Add(BootstrapAuthLifetime),
+		}
+		visaServiceAgent.SetTetherAddr(vcf.VSAddr)
+		visaServiceAgent.SetAuthenticated(authedClaims, time.Now().Add(BootstrapAuthLifetime), nil, nil, 0)
+	}
+
+	if err := vs.AddAdapter(vcf.VSAddr, visaServiceAgent); err != nil {
+		return nil, fmt.Errorf("failed to add visa service agent")
+	}
+
 	vs.log.Info("visa service instance configured", "reauthBumpTime", vs.reauthBumpTime.String())
 	return vs, nil
 }
@@ -196,15 +236,6 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 func (vs *VSInst) SetAuthSvc(a auth.AuthService) {
 	vs.authr = a
 	vs.attrProx = NewAttrProxy(a)
-}
-
-// SetLocalAddr sets this visa services local address. Called automatically when Start is called.
-// Exposed here for unit tests.
-//
-// For now this better be the hard coded, static visa service address.
-func (vs *VSInst) SetLocalAddr(a netip.Addr) {
-	vs.localAddr = a
-	vs.nodeNumber = a.As16()[15]
 }
 
 // Start is blocking call to start the visa service THRIFT listener.
@@ -360,7 +391,7 @@ func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration,
 				// TODO: To push the visa we need to know which nodes need this.
 				//       I think we used to put this in the mailbox for all nodes,
 				//       for now I am broadcasting.
-				vs.PushVisaToAllNodes([]*vsapi.VisaHop{resp.Visa})
+				vs.EnqueuePushVisaToAllNodes([]*vsapi.VisaHop{resp.Visa})
 			}
 		}
 	}

@@ -53,13 +53,18 @@ func (vc *VSSCli) SendNetworkPolicy(policyID uint64, configID uint64) error {
 }
 
 func (vc *VSSCli) SendRevocation(config_id uint64, issuer_id uint32) error {
-
 	rev := vssapi.VisaRevocation{
 		IssuerID:      int32(issuer_id),
 		Configuration: int64(config_id),
 	}
 	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
 		return client.RevokeVisas(context.Background(), []*vssapi.VisaRevocation{&rev})
+	})
+}
+
+func (vc *VSSCli) SendRevocations(revocations []*vssapi.VisaRevocation) error {
+	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
+		return client.RevokeVisas(context.Background(), revocations)
 	})
 }
 
@@ -71,5 +76,11 @@ func (vc *VSSCli) SendVisa(issuerID uint32, visaBuffer []byte, hopCount uint32) 
 	}
 	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
 		return client.InstallVisas(context.Background(), []*vssapi.VisaHop{&hoppity})
+	})
+}
+
+func (vc *VSSCli) SendVisas(visas []*vssapi.VisaHop) error {
+	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
+		return client.InstallVisas(context.Background(), visas)
 	})
 }

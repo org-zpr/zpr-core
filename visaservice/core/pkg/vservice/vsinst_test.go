@@ -137,6 +137,7 @@ func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 	// Minimal config:
 	return &vservice.VSIConfig{
 		Log:                  alog,
+		VSAddr:               netip.MustParseAddr(vservice.VisaServiceAddress),
 		HopCount:             hopcount,
 		AllowInvalidPeerAddr: true,
 	}
@@ -499,11 +500,6 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	require.Nil(t, err)
 	require.NotNil(t, svc)
 	svc.SetAuthSvc(&TestAS{})
-
-	// TODO: What is this for? The visa service has well known address (or is from a range of them).
-	// I beleive for time being, the visa service gets static IP _AND_ the adapter for the visa service
-	// takes that address aswell (like a node would).
-	svc.SetLocalAddr(vsaddr)
 
 	n0addr := netip.MustParseAddr("fc00:3001:1::11")
 	n1addr := netip.MustParseAddr("fc00:3001:1::12")
