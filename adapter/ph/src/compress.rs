@@ -10,14 +10,13 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use zerocopy::FromBytes;
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
-const COMPRESSED_IPV4_FLAG_HAS_FRAG_OFFSET: u8 = 1; // IPv4 "evil bit"
-
 #[derive(AsBytes, FromZeroes, FromBytes, Unaligned)]
 #[repr(packed)]
 pub struct CompressedIPv4Header {
-    pub hl_flags: u8,
+    pub vhl: u8,
     pub dscp: u8,
     pub frag_id: [u8; 2],
+    pub frag_offset: [u8; 2],
     pub ttl: u8,
 }
 
@@ -40,62 +39,51 @@ pub fn compress_addrs(pkt: &mut Packet) {
 
 pub fn compress_addrs_v4(pkt: &mut Packet) {
     let hdr = classifier::IPv4Header::ref_from_prefix(pkt.body()).unwrap();
-    let hl = hdr.vhl & 0x0f;
-    let mut flags = hdr.frag_offset[0] >> 5;
+    let vhl = hdr.vhl;
     let dscp = hdr.dscp;
     let frag_id = hdr.frag_id;
+    let frag_offset = hdr.frag_offset;
     let ttl = hdr.ttl;
-    let frag_offset = [hdr.frag_offset[0] & 0x1f, hdr.frag_offset[1]];
 
     pkt.advance(std::mem::size_of::<classifier::IPv4Header>());
 
-    // clear "evil bit" if set, as we're going to use it
-    flags &= !COMPRESSED_IPV4_FLAG_HAS_FRAG_OFFSET;
-
-    if frag_offset != [0u8, 0u8] {
-        flags |= COMPRESSED_IPV4_FLAG_HAS_FRAG_OFFSET;
-        *pkt.alloc_zeroed_header::<[u8; 2]>() = frag_offset;
-    }
-
     let chdr = pkt.alloc_zeroed_header::<CompressedIPv4Header>();
-    chdr.hl_flags = (hl << 4) | (flags << 1);
+    chdr.vhl = vhl;
     chdr.dscp = dscp;
     chdr.frag_id = frag_id;
+    chdr.frag_offset = frag_offset;
     chdr.ttl = ttl;
 }
 
 pub fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_address: Ipv4Addr) {
     let chdr = CompressedIPv4Header::ref_from_prefix(pkt.body()).unwrap();
-    let hl = chdr.hl_flags >> 4;
-    let mut flags = (chdr.hl_flags & 0x0f) >> 1;
+    let vhl = chdr.vhl;
     let dscp = chdr.dscp;
     let frag_id = chdr.frag_id;
+    let frag_offset = chdr.frag_offset;
     let ttl = chdr.ttl;
-    let mut frag_offset = [0u8; 2];
 
     pkt.advance(std::mem::size_of::<CompressedIPv4Header>());
-
-    if flags & COMPRESSED_IPV4_FLAG_HAS_FRAG_OFFSET != 0 {
-        pkt.copy_to_slice(&mut frag_offset);
-    }
-
-    flags &= !COMPRESSED_IPV4_FLAG_HAS_FRAG_OFFSET;
 
     let body_len = pkt.body().len();
 
     let hdr = pkt.alloc_zeroed_header::<classifier::IPv4Header>();
-    hdr.vhl = (4u8 << 4) | hl;
+    hdr.vhl = vhl;
     hdr.dscp = dscp;
     hdr.total_length =
         ((body_len + std::mem::size_of::<classifier::IPv4Header>()) as u16).to_be_bytes();
     hdr.frag_id = frag_id;
-    hdr.frag_offset = [(flags << 5) | frag_offset[0], frag_offset[1]];
+    hdr.frag_offset = frag_offset;
     hdr.ttl = ttl;
     hdr.proto = proto;
     hdr.src_address = src_address.octets();
     hdr.dst_address = dst_address.octets();
 
-    // TODO FIXME: header checksum
+    let header_len = ((vhl & 0x0f) as usize) << 2;
+    let csum = net_defs::inet_checksum(&pkt.body()[..header_len]);
+    classifier::IPv4Header::mut_from_prefix(pkt.body_mut())
+        .unwrap()
+        .header_checksum = csum;
 }
 
 pub fn compress_addrs_v6(pkt: &mut Packet) {
@@ -134,7 +122,7 @@ pub fn expand_addrs_v6(
     hdr.version_and_tc_upper = version_and_tc_upper;
     hdr.tc_lower_and_fl_upper = tc_lower_and_fl_upper;
     hdr.fl_lower = fl_lower;
-    hdr.payload_length = (body_len as u16).to_be_bytes(); // TODO FIXME: set to zero for Jumbo Payload
+    hdr.payload_length = (body_len as u16).to_be_bytes(); // NOTE: we do not allow jumbo payloads
     hdr.next_header = next_header;
     hdr.hop_limit = hop_limit;
     hdr.src_address = net_defs::IpAddress {
