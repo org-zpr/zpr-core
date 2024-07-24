@@ -6,7 +6,7 @@ use thrift::server::TServer;
 use thrift::transport::{TFramedReadTransportFactory, TReadTransportFactory};
 use thrift::transport::{TFramedWriteTransportFactory, TWriteTransportFactory};
 
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
 
 use std::collections::BTreeMap;
 

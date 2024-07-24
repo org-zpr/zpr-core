@@ -133,23 +133,23 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
         // Now we fire up another task to watch for output messages from
         // the visa service.  In the future this will include visa-request
         // responses and authentication responses.
-         let dbg_ctoken = ctoken.clone();
-         tasks.spawn(async move {
-           loop {
-              tokio::select! {
-                  Some(vs_output) = rx.recv() => {
-                      match vs_output {
-                        PingSuccess(config_id, policy_version) => {
-                            info!("PingSuccess: config={} policy={}", config_id, policy_version);
+        let dbg_ctoken = ctoken.clone();
+        tasks.spawn(async move {
+            loop {
+                tokio::select! {
+                    Some(vs_output) = rx.recv() => {
+                        match vs_output {
+                          PingSuccess(config_id, policy_version) => {
+                              info!("PingSuccess: config={} policy={}", config_id, policy_version);
+                          }
                         }
-                      }
-                  }
-                  _ = dbg_ctoken.cancelled() => {
-                      break;
-                  }
-              }
+                    }
+                    _ = dbg_ctoken.cancelled() => {
+                        break;
+                    }
+                }
             }
-          });
+        });
     } else {
         info!("nothing to do...  ^C to exit");
     }

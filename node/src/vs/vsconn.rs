@@ -339,9 +339,10 @@ impl VSConn {
             };
         }
         match vsc.ping_vs(&apikey) {
-            Ok(ping_resp) => {
-                Ok((ping_resp.configuration.unwrap() as u64, ping_resp.policy_version.unwrap() as u64))
-            }
+            Ok(ping_resp) => Ok((
+                ping_resp.configuration.unwrap() as u64,
+                ping_resp.policy_version.unwrap() as u64,
+            )),
             Err(e) => Err(Error::new(
                 ErrorKind::Other,
                 format!("VSConn::do_ping failed: {}", e),
@@ -529,7 +530,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             }
         }
     }
-
 
     #[derive(Debug)]
     struct TestVSCli {}
