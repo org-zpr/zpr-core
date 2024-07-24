@@ -6,7 +6,7 @@ use thrift::server::TServer;
 use thrift::transport::{TFramedReadTransportFactory, TReadTransportFactory};
 use thrift::transport::{TFramedWriteTransportFactory, TWriteTransportFactory};
 
-use tracing::{error, info};
+use tracing::{error, info, debug};
 
 use std::collections::BTreeMap;
 
@@ -58,7 +58,7 @@ pub fn start_vss_server(tx_chan: Sender<VSSMsg>, listen_addr: &str) {
 
 impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
     fn handle_network_policy_installed(&self, pi: vssapi::PolicyInfo) -> thrift::Result<()> {
-        info!("handle_network_policy_installed: {:?}", pi);
+        debug!("handle_network_policy_installed: {:?}", pi);
 
         let mut config = BTreeMap::new();
         if let Some(nc) = pi.node_config {
@@ -84,12 +84,27 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
     }
 
     fn handle_install_visas(&self, vh: Vec<vssapi::VisaHop>) -> thrift::Result<()> {
-        println!("handle_install_visas: {:?}", vh);
+        debug!("handle_install_visas");
+        for v in vh {
+            let visa = Visa {
+                hop_count: v.hop_count as u32,
+                issuer_id: v.issuer_id as u32,
+                visa_pb: v.visa_pb,
+            };
+            let msg = VSSMsg::PushedVisa(visa);
+            match self.msg_chan_out.blocking_send(msg) {
+                Ok(_) => (),
+                Err(e) => {
+                    error!("failed to enqueue visa message to node: {}", e);
+                    return Err(thrift::Error::from("enqueue failed"));
+                }
+            }
+        }
         Ok(())
     }
 
     fn handle_revoke_visas(&self, vr: Vec<vssapi::VisaRevocation>) -> thrift::Result<()> {
-        println!("handle_revoke_visas: {:?}", vr);
+        info!("handle_revoke_visas not implemented: {:?}", vr);
         Ok(())
     }
 }

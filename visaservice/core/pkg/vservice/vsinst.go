@@ -15,8 +15,8 @@ import (
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vs/pkg/vssapi"
 	"zpr.org/vsx/polio"
 	"zpr.org/vsx/snio/vsio"
 )
@@ -48,11 +48,11 @@ type HostRecord struct {
 type PeerRecord struct {
 	APIKey               string
 	RegistrationTime     time.Time
-	LastPollTime         time.Time
+	LastContactTime      time.Time
 	VisaRequestsCount    uint64
 	ConnectRequestsCount uint64
 	VSSAddr              string
-	PushBuffer           []*vsapi.PollResponse
+	PushBuffer           []*PushItem
 	State                struct {
 		Updating          bool
 		WantPolicyVer     uint64
@@ -80,9 +80,10 @@ type VSMsg struct {
 }
 
 type PushItem struct {
-	Broadcast bool
-	NodeAddr  netip.Addr
-	Item      *vsapi.PollResponse
+	Broadcast   bool
+	NodeAddr    netip.Addr
+	Visas       []*vssapi.VisaHop
+	Revocations []*vssapi.VisaRevocation
 }
 
 // VSInst is an instance of distributed visa service
@@ -394,7 +395,12 @@ func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration,
 				// TODO: To push the visa we need to know which nodes need this.
 				//       I think we used to put this in the mailbox for all nodes,
 				//       for now I am broadcasting.
-				vs.EnqueuePushVisaToAllNodes([]*vsapi.VisaHop{resp.Visa})
+				vssV := &vssapi.VisaHop{
+					VisaPb:   resp.Visa.VisaPb,
+					HopCount: resp.Visa.HopCount,
+					IssuerID: resp.Visa.IssuerID,
+				}
+				vs.EnqueuePushVisaToAllNodes([]*vssapi.VisaHop{vssV})
 			}
 		}
 	}
@@ -419,28 +425,27 @@ func (vs *VSInst) expireAllVisas(config uint64) {
 	vs.vtable.mtx.Lock()
 	defer vs.vtable.mtx.Unlock()
 	count := 0
+	var revokes []*vssapi.VisaRevocation
 	for vID, ve := range vs.vtable.table {
 		if ve.v.Configuration == config {
-			item := &PushItem{
-				Broadcast: true,
-				Item: &vsapi.PollResponse{
-					Revocations: []*vsapi.VisaRevocation{
-						{
-							IssuerID:      int32(vID),
-							Configuration: int64(config),
-						},
-					},
-				},
-			}
-			// We are often called from runloop so blocking here would be bad.
-			select {
-			case vs.visaPushC <- item: // ok
-			default:
-				vs.log.Warn("push channel full, failed to issue revoke, continuing")
-			}
+			revokes = append(revokes, &vssapi.VisaRevocation{
+				IssuerID:      int32(vID),
+				Configuration: int64(config),
+			})
 			delete(vs.vtable.table, vID)
 			count++
 		}
 	}
 	vs.log.Infof("%d visas revoked due to configuration change", count)
+	push := PushItem{
+		Broadcast:   true,
+		Revocations: revokes,
+	}
+	// We are often called from runloop so blocking here would be bad.
+	select {
+	case vs.visaPushC <- &push: // ok
+	default:
+		vs.log.Warn("push channel full, failed to issue revoke, continuing")
+	}
+
 }

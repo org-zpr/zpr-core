@@ -383,16 +383,15 @@ func TestThriftPollRespectKey(t *testing.T) {
 
 	// Poll should succeed.
 	{
-		pr, err := svc.Poll(context.Background(), apiKey)
+		pr, err := svc.Poll(apiKey)
 		require.Nil(t, err)
 		require.Empty(t, pr.Visas)
 		require.Empty(t, pr.Revocations)
-		require.Zero(t, pr.More)
 	}
 
 	// Poll should fail with wrong API key.
 	{
-		_, err := svc.Poll(context.Background(), apiKey+"foo")
+		_, err := svc.Poll(apiKey + "foo")
 		require.NotNil(t, err)
 		require.ErrorContains(t, err, "Unauthorized")
 	}
@@ -400,7 +399,7 @@ func TestThriftPollRespectKey(t *testing.T) {
 	// And if we deregister, poll should fail even with right API key.
 	svc.DeRegister(context.Background(), apiKey)
 	{
-		_, err := svc.Poll(context.Background(), apiKey)
+		_, err := svc.Poll(apiKey)
 		require.NotNil(t, err)
 		require.ErrorContains(t, err, "Unauthorized")
 	}
@@ -477,7 +476,7 @@ func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 
 	svc.DeRegister(context.Background(), apiKey)
 	{
-		_, err := svc.Poll(context.Background(), apiKey)
+		_, err := svc.Poll(apiKey)
 		require.NotNil(t, err)
 		require.ErrorContains(t, err, "Unauthorized")
 	}

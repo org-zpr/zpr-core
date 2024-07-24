@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::vs::VSConn;
-use crate::vs::VSOutput::{PushedRevocation, PushedVisa};
+use crate::vs::VSOutput::PingSuccess;
 
 use crate::vs::vss;
 
@@ -130,27 +130,26 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
             let _ = cs_shutdown_tx.send(()); // visa service exits.
         });
 
-        // Fire up another task to watch the output channel...
-        let dbg_ctoken = ctoken.clone();
-        tasks.spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(vs_output) = rx.recv() => {
-                        match vs_output {
-                            PushedVisa ( visa ) => {
-                                info!("DEBUG: visa received, issuer_id: {}", visa.issuer_id);
-                            }
-                            PushedRevocation ( revocation ) => {
-                                info!("DEBUG: revocation received, issuer_id: {}", revocation.issuer_id);
-                            }
+        // Now we fire up another task to watch for output messages from
+        // the visa service.  In the future this will include visa-request
+        // responses and authentication responses.
+         let dbg_ctoken = ctoken.clone();
+         tasks.spawn(async move {
+           loop {
+              tokio::select! {
+                  Some(vs_output) = rx.recv() => {
+                      match vs_output {
+                        PingSuccess(config_id, policy_version) => {
+                            info!("PingSuccess: config={} policy={}", config_id, policy_version);
                         }
-                    }
-                    _ = dbg_ctoken.cancelled() => {
-                        break;
-                    }
-                }
+                      }
+                  }
+                  _ = dbg_ctoken.cancelled() => {
+                      break;
+                  }
+              }
             }
-        });
+          });
     } else {
         info!("nothing to do...  ^C to exit");
     }
@@ -169,7 +168,17 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                 break;
             }
             Some(vss_msg) = vss_rx.recv() => {
-                info!("VSConn::run received VSS message: {:?}", vss_msg);
+                match vss_msg {
+                    vss::VSSMsg::PolicyInstall(pi) => {
+                        info!("VSS policy install: {:?}", pi);
+                    }
+                    vss::VSSMsg::PushedVisa(v) => {
+                        info!("VSS pushed visa: issuer_id={} size={}bytes", v.issuer_id, v.visa_pb.len());
+                    }
+                    _ => {
+                        info!("VSConn::run received VSS message: {:?}", vss_msg);
+                    }
+                }
             }
         }
     }

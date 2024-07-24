@@ -120,15 +120,9 @@ struct VisaHop {
   3: i32 issuer_id,   // copied out of visa
 }
 
-struct VisaRevocation {
-  1: i32 issuer_id,
-  2: i64 configuration,
-}
-
-struct PollResponse {
-  1: list<VisaHop> visas,
-  2: list<VisaRevocation> revocations,
-  3: i32 more, // >0 if there are more visas or revocations available.
+struct Pong {
+  1: i64 configuration,
+  2: i64 policy_version,
 }
 
 struct TrafficDesc {
@@ -162,7 +156,7 @@ service VisaService {
 
   // De-register removes a node from the visa service access list -- AND visa service assumes that
   // node is disconnecting -- so this also does an agent_disconnect for the node.
-  oneway void de_register(1:string key),
+  oneway void de_register(1:string key)
 
 
 
@@ -170,15 +164,16 @@ service VisaService {
   // Note that the visa service assumes that the connection completes.
   // If the agent ends up not connecting, or disconnecting the node must
   // let the visa service know.
-  ConnectResponse authorize_connect(1:string key, 2:ConnectRequest request),
+  ConnectResponse authorize_connect(1:string key, 2:ConnectRequest request)
 
 
   // Notify the visa service that an agent has disconnected. Pass in the ZPR address
   // assigned to the agent via `authorize_connect`.
-  void agent_disconnect(1:string keym, 2:binary zpr_addr),
+  void agent_disconnect(1:string keym, 2:binary zpr_addr)
 
-  PollResponse poll(1:string key),
+  // For now, fully optional. Use to test connectivity or key or just to check on 
+  // current policy version and config.
+  Pong ping(1:string key)
 
-  VisaResponse request_visa(1:string key, 2:binary src_tether_addr, 3:TrafficDesc traffic),
-
+  VisaResponse request_visa(1:string key, 2:binary src_tether_addr, 3:TrafficDesc traffic)
 }

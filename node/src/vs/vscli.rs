@@ -37,7 +37,7 @@ pub trait VSClientI: Send {
         private_key: Rsa<Private>,
         vss_service_addr: &str,
     ) -> Result<String, thrift::Error>;
-    fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error>;
+    fn ping_vs(&self, apikey: &str) -> Result<vsapi::Pong, thrift::Error>;
     fn de_register(&self, apikey: &str) -> Result<(), thrift::Error>;
 }
 
@@ -135,9 +135,9 @@ impl VSClientI for VSClient {
         }
     }
 
-    fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error> {
+    fn ping_vs(&self, apikey: &str) -> Result<vsapi::Pong, thrift::Error> {
         let mut client = self.newclient()?;
-        debug!("sending POLL to {}", self.service);
-        client.poll(apikey.into())
+        debug!("sending PING to {}", self.service);
+        client.ping(apikey.into())
     }
 }

@@ -17,7 +17,6 @@ use tokio_util::sync::CancellationToken;
 use crate::vsapi;
 
 use crate::vs::vscli::{self, VSClientI};
-use crate::vs::vstypes::{Revocation, Visa};
 
 use tracing::{error, info};
 
@@ -39,8 +38,8 @@ use tracing::{error, info};
 //   Now the node can request visas or call for connect authorizations.
 //
 
-const POLL_INTERVAL: Duration = Duration::from_millis(5000);
-const MAX_POLL_ERRORS: u32 = 5;
+const PING_INTERVAL: Duration = Duration::from_millis(10000);
+const MAX_PING_ERRORS: u32 = 5;
 
 #[derive(Debug, Clone)]
 pub struct VSConn {
@@ -83,8 +82,7 @@ enum VSCommand {
 #[derive(Debug)]
 pub enum VSOutput {
     // Eventually this will include visa-accepts/denies, connect-accepts/denies, etc.
-    PushedVisa(Visa),
-    PushedRevocation(Revocation),
+    PingSuccess(u64, u64), // (CONFIG_ID, POLICY_VERSION)
 }
 
 /// The VSConn will manage all communication with the visa service on behalf of the node.
@@ -231,21 +229,21 @@ impl VSConn {
         Ok(())
     }
 
-    /// Blocking async-friendly call.  Sets ip a polling loop. Eventually will handle all other visa service duties.
+    /// Blocking async-friendly call.  Eventually will handle all other visa service duties.
     /// Does not return until we are disconnected from the visa service or the passed token is cancelled.
     pub async fn run(&self, ctok: CancellationToken) -> Result<(), Error> {
         info!("VSConn::run starts");
 
         let (tx, mut rx) = mpsc::channel(16);
         let maybe_apikey: Option<String>;
-        let output_tx: Sender<VSOutput>;
         let vsc: Box<dyn VSClientI>;
+        let output_tx: Sender<VSOutput>;
         {
             let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
             state.cmd_tx = Some(tx.clone());
             maybe_apikey = state.api_key.clone();
-            output_tx = state.output_tx.clone().unwrap();
             vsc = (state.client_fac)(&state.service_addr);
+            output_tx = state.output_tx.clone().unwrap();
         }
 
         let apikey = match maybe_apikey {
@@ -258,42 +256,28 @@ impl VSConn {
             }
         };
 
-        // TODO: Polling to go away
-        let mut interval = time::interval(POLL_INTERVAL);
-        let mut poll_errors = 0;
+        let mut interval = time::interval(PING_INTERVAL);
+        let mut ping_errors = 0;
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    match self.do_poll().await {
-                        Ok((visas, revokes, more)) => {
-                            poll_errors = 0;
-                            if more {
-                                info!("VSConn::run poll signals there is more data ... ignoring for now");
-                            }
-                            for v in visas {
-                                match output_tx.send(VSOutput::PushedVisa(v)).await {
-                                    Ok(_) => {}
-                                    Err(e) => {
-                                        error!("VSConn::run failed to send pushed visa: {}, exiting poll loop", e);
-                                        return Err(Error::new(ErrorKind::Other, "VSConn::run failed to send pushed visa"));
-                                    }
-                                }
-                            }
-                            for r in revokes {
-                                match output_tx.send(VSOutput::PushedRevocation(r)).await {
-                                    Ok(_) => {}
-                                    Err(e) => {
-                                        error!("VSConn::run failed to send pushed revocation: {}, exiting poll loop", e);
-                                        return Err(Error::new(ErrorKind::Other, "VSConn::run failed to send pushed revocation"));
-                                    }
+                    match self.do_ping().await {
+                        Ok((config_id, policy_version)) => {
+                            ping_errors = 0;
+                            // This is just a demo of using output_tx to send messages back to parent proc.
+                            match output_tx.send(VSOutput::PingSuccess(config_id, policy_version)).await {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    error!("VSConn::run failed to send ping success message: {}, exiting ping loop", e);
+                                    return Err(Error::new(ErrorKind::Other, "VSConn::run failed to send ping success message"));
                                 }
                             }
                         }
                         Err(e) => {
-                            error!("VSConn::run poll failed: {}", e);
-                            poll_errors += 1;
-                            if poll_errors > MAX_POLL_ERRORS {
-                                error!("VSConn::run too many poll errors, assuming we are disconnected");
+                            error!("VSConn::run ping failed: {}", e);
+                            ping_errors += 1;
+                            if ping_errors > MAX_PING_ERRORS {
+                                error!("VSConn::run too many ping errors, assuming we are disconnected");
                                 break;
                             }
                         }
@@ -337,7 +321,8 @@ impl VSConn {
         Ok(())
     }
 
-    async fn do_poll(&self) -> Result<(Vec<Visa>, Vec<Revocation>, bool), Error> {
+    /// Returns tuple of (CONFIG_ID, POLICY_VERSION)
+    async fn do_ping(&self) -> Result<(u64, u64), Error> {
         let vsc: Box<dyn VSClientI>;
         let apikey: String;
         {
@@ -348,38 +333,18 @@ impl VSConn {
                 None => {
                     return Err(Error::new(
                         ErrorKind::Other,
-                        "VSConn::do_poll called but not initialized",
+                        "VSConn::do_ping called but not initialized",
                     ));
                 }
             };
         }
-        match vsc.poll_vs(&apikey) {
-            Ok(poll_resp) => {
-                let mut visas = Vec::<Visa>::new();
-                let mut revocations = Vec::<Revocation>::new();
-                let more = poll_resp.more.unwrap() > 0;
-                if let Some(pr_visas) = poll_resp.visas {
-                    for v in pr_visas {
-                        visas.push(Visa {
-                            hop_count: v.hop_count.unwrap() as u32,
-                            issuer_id: v.issuer_id.unwrap() as u32,
-                            visa_pb: v.visa_pb.unwrap(),
-                        });
-                    }
-                }
-                if let Some(pr_revokes) = poll_resp.revocations {
-                    for r in pr_revokes {
-                        revocations.push(Revocation {
-                            issuer_id: r.issuer_id.unwrap() as u32,
-                            configuration_id: r.configuration.unwrap() as u64,
-                        });
-                    }
-                }
-                Ok((visas, revocations, more))
+        match vsc.ping_vs(&apikey) {
+            Ok(ping_resp) => {
+                Ok((ping_resp.configuration.unwrap() as u64, ping_resp.policy_version.unwrap() as u64))
             }
             Err(e) => Err(Error::new(
                 ErrorKind::Other,
-                format!("VSConn::do_poll failed: {}", e),
+                format!("VSConn::do_ping failed: {}", e),
             )),
         }
     }
@@ -519,14 +484,13 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
     //
     struct TestState {
         auth_count: u32,
-        poll_count: u32,
+        ping_count: u32,
         de_register_count: u32,
-        push_v: Option<Visa>,
     }
 
     enum CounterT {
         Auth,
-        Poll,
+        Ping,
         DeRegister,
     }
 
@@ -534,17 +498,15 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
     static mut TEST_STATE: TestState = TestState {
         auth_count: 0,
-        poll_count: 0,
+        ping_count: 0,
         de_register_count: 0,
-        push_v: None,
     };
 
     fn reset_state() {
         unsafe {
             TEST_STATE.auth_count = 0;
-            TEST_STATE.poll_count = 0;
+            TEST_STATE.ping_count = 0;
             TEST_STATE.de_register_count = 0;
-            TEST_STATE.push_v = None;
         }
     }
 
@@ -552,7 +514,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         unsafe {
             match c {
                 CounterT::Auth => TEST_STATE.auth_count,
-                CounterT::Poll => TEST_STATE.poll_count,
+                CounterT::Ping => TEST_STATE.ping_count,
                 CounterT::DeRegister => TEST_STATE.de_register_count,
             }
         }
@@ -562,15 +524,12 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         unsafe {
             match c {
                 CounterT::Auth => TEST_STATE.auth_count += 1,
-                CounterT::Poll => TEST_STATE.poll_count += 1,
+                CounterT::Ping => TEST_STATE.ping_count += 1,
                 CounterT::DeRegister => TEST_STATE.de_register_count += 1,
             }
         }
     }
 
-    fn get_pushed_visa() -> Option<Visa> {
-        unsafe { TEST_STATE.push_v.clone() }
-    }
 
     #[derive(Debug)]
     struct TestVSCli {}
@@ -587,24 +546,11 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             Ok(String::from("le_key"))
         }
 
-        fn poll_vs(&self, _apikey: &str) -> Result<vsapi::PollResponse, thrift::Error> {
-            incr(CounterT::Poll);
-            if let Some(v) = get_pushed_visa() {
-                return Ok(vsapi::PollResponse {
-                    visas: Some(vec![vsapi::VisaHop {
-                        hop_count: Some(v.hop_count as i32),
-                        issuer_id: Some(v.issuer_id as i32),
-                        visa_pb: Some(v.visa_pb),
-                    }]),
-                    revocations: None,
-                    more: Some(0),
-                });
-            }
-
-            Ok(vsapi::PollResponse {
-                visas: None,
-                revocations: None,
-                more: Some(0),
+        fn ping_vs(&self, _apikey: &str) -> Result<vsapi::Pong, thrift::Error> {
+            incr(CounterT::Ping);
+            Ok(vsapi::Pong {
+                configuration: Some(1),
+                policy_version: Some(2),
             })
         }
 
@@ -619,7 +565,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
     }
 
     #[tokio::test]
-    async fn test_start_and_stop_and_poll() {
+    async fn test_start_and_stop_and_ping() {
         let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
         reset_state();
         let certfile = TempFile::new_pem(CERT_DATA);
@@ -639,7 +585,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         conn.initialize(Some(testvscli_factory)).unwrap();
         assert_eq!(get_counter(CounterT::Auth), 1);
         assert_eq!(get_counter(CounterT::DeRegister), 0);
-        assert_eq!(get_counter(CounterT::Poll), 0);
+        assert_eq!(get_counter(CounterT::Ping), 0);
 
         let ctoken = CancellationToken::new();
         let vs_tok = ctoken.clone();
@@ -656,64 +602,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         // Does de-register
         assert_eq!(get_counter(CounterT::DeRegister), 1);
 
-        // Does call poll
-        assert_eq!(get_counter(CounterT::Poll), 1);
-    }
-
-    #[tokio::test]
-    async fn test_returns_pushed_visa() {
-        let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
-
-        reset_state();
-        let certfile = TempFile::new_pem(CERT_DATA);
-        let keyfile = TempFile::new_pem(KEY_DATA);
-
-        let (tx, mut rx) = mpsc::channel(8);
-        let conn = VSConn::new(
-            tx,
-            "127.0.0.1:0",
-            certfile.get_path(),
-            keyfile.get_path(),
-            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            "127.0.0.1:0",
-        )
-        .unwrap();
-        conn.add_claim("foo", "fee");
-        conn.initialize(Some(testvscli_factory)).unwrap();
-
-        let a_visa = Visa {
-            hop_count: 1,
-            issuer_id: 2,
-            visa_pb: Vec::new(),
-        };
-        unsafe {
-            TEST_STATE.push_v = Some(a_visa.clone());
-        }
-
-        let ctoken = CancellationToken::new();
-        let vs_tok = ctoken.clone();
-        tokio::spawn(async move {
-            let _ = conn.run(vs_tok).await;
-        });
-
-        // Allow it to poll...
-        tokio::time::sleep(Duration::from_millis(500)).await;
-
-        tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(1000)) => {
-                assert!(false); // timed out
-            }
-            Some(output) = rx.recv() =>  match output {
-                VSOutput::PushedVisa(visa) => {
-                    assert_eq!(visa, a_visa);
-                }
-                _ => {
-                    assert!(false); // Did not get a visa
-                }
-            }
-        }
-
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        ctoken.cancel(); // stop the vs
+        // Does call ping
+        assert_eq!(get_counter(CounterT::Ping), 1);
     }
 }

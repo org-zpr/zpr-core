@@ -169,32 +169,26 @@ func (vs *VSInst) GetVSSAddrForNode(naddr netip.Addr) string {
 	return ""
 }
 
-func (vs *VSInst) EnqueuePushVisa(forNode netip.Addr, visas []*vsapi.VisaHop) {
+func (vs *VSInst) EnqueuePushVisa(forNode netip.Addr, visas []*vssapi.VisaHop) {
 	item := &PushItem{
 		NodeAddr: forNode,
-		Item: &vsapi.PollResponse{
-			Visas: visas,
-		},
+		Visas:    visas,
 	}
 	vs.visaPushC <- item
 }
 
-func (vs *VSInst) EnqueuePushVsapiVisas(visas []*vsapi.VisaHop) {
+func (vs *VSInst) EnqueuePushVsapiVisas(visas []*vssapi.VisaHop) {
 	item := &PushItem{
 		Broadcast: true,
-		Item: &vsapi.PollResponse{
-			Visas: visas,
-		},
+		Visas:     visas,
 	}
 	vs.visaPushC <- item
 }
 
-func (vs *VSInst) EnqueuePushVisaToAllNodes(visas []*vsapi.VisaHop) {
+func (vs *VSInst) EnqueuePushVisaToAllNodes(visas []*vssapi.VisaHop) {
 	item := &PushItem{
 		Broadcast: true,
-		Item: &vsapi.PollResponse{
-			Visas: visas,
-		},
+		Visas:     visas,
 	}
 	vs.visaPushC <- item
 }
@@ -216,14 +210,14 @@ func (vs *VSInst) pushToNode(item *PushItem) {
 		}
 		vs.agentDB.RUnlock()
 		for _, node := range nodes {
-			vs.pushToNodeOrBuffer(node, item.Item)
+			vs.pushToNodeOrBuffer(node, item)
 		}
 	} else {
-		vs.pushToNodeOrBuffer(item.NodeAddr, item.Item)
+		vs.pushToNodeOrBuffer(item.NodeAddr, item)
 	}
 }
 
-func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, item *vsapi.PollResponse) {
+func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, item *PushItem) {
 	// We used to use a polling interface. Now we can use the VSS to send
 	// directly to the node.
 
@@ -243,34 +237,17 @@ func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, item *vsapi.PollRespon
 	}
 
 	client := NewVSSCli(serviceAddr)
-	failing := vsapi.PollResponse{}
-
-	// Minor impedence mismatch here. We need to convert vsapi types to vssapi types.
+	failing := PushItem{}
 
 	if len(item.Revocations) > 0 {
-		var vssRevs []*vssapi.VisaRevocation
-		for _, rev := range item.Revocations {
-			vssRevs = append(vssRevs, &vssapi.VisaRevocation{
-				IssuerID:      rev.IssuerID,
-				Configuration: rev.Configuration,
-			})
-		}
-		if err := client.SendRevocations(vssRevs); err != nil {
+		if err := client.SendRevocations(item.Revocations); err != nil {
 			failing.Revocations = append(failing.Revocations, item.Revocations...)
 			vs.log.WithError(err).Warn("failed to send revocations to node", "node", nodeAddr)
 		}
 	}
 
 	if len(item.Visas) > 0 {
-		var vssVisas []*vssapi.VisaHop
-		for _, v := range item.Visas {
-			vssVisas = append(vssVisas, &vssapi.VisaHop{
-				VisaPb:   v.VisaPb,
-				HopCount: v.HopCount,
-				IssuerID: v.IssuerID,
-			})
-		}
-		if err := client.SendVisas(vssVisas); err != nil {
+		if err := client.SendVisas(item.Visas); err != nil {
 			failing.Visas = append(failing.Visas, item.Visas...)
 			vs.log.WithError(err).Warn("failed to send visas to node", "node", nodeAddr)
 		}
@@ -331,7 +308,7 @@ func (vs *VSInst) checkPushBuffers() {
 
 	for _, nodeAddr := range nodes {
 		// take the push buffer.
-		var pushBuffer []*vsapi.PollResponse
+		var pushBuffer []*PushItem
 		vs.agentDB.Lock()
 		if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
 			if rec.Peer != nil {
@@ -341,7 +318,7 @@ func (vs *VSInst) checkPushBuffers() {
 		}
 		vs.agentDB.Unlock()
 		if len(pushBuffer) > 0 {
-			var consolidated vsapi.PollResponse
+			var consolidated PushItem
 			for _, item := range pushBuffer {
 				consolidated.Visas = append(consolidated.Visas, item.Visas...)
 				consolidated.Revocations = append(consolidated.Revocations, item.Revocations...)

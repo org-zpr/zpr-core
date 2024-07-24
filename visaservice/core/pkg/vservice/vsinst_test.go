@@ -606,19 +606,16 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 
 	svc.RunPeriodicHousekeepingNow() // blocking
 
-	presp, err := svc.Poll(context.Background(), apiKey)
+	presp, err := svc.Poll(apiKey)
 	require.Nil(t, err)
-	require.Equal(t, int32(0), presp.More)
-	require.NotEmpty(t, presp.GetVisas())
-	require.Empty(t, presp.GetRevocations())
+	require.NotEmpty(t, presp.Visas)
+	require.Empty(t, presp.Revocations)
 
 	// Three visas-
 	//   1. node to visaservice
 	//   2. visaservice to node-vss
 	//   3. that visa we requested
-	require.Equal(t, 3, len(presp.GetVisas()))
-
-	visas := presp.GetVisas()
+	require.Equal(t, 3, len(presp.Visas))
 
 	expectSources := []string{
 		n0addr.String(),
@@ -626,7 +623,7 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 		vsaddr.String(),
 	}
 
-	for _, v := range visas {
+	for _, v := range presp.Visas {
 		require.Greater(t, v.GetHopCount(), int32(0))
 
 		newV := mustUnmarshalVisa(v.VisaPb)

@@ -922,28 +922,28 @@ impl TSerializable for VisaHop {
 }
 
 //
-// VisaRevocation
+// Pong
 //
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct VisaRevocation {
-  pub issuer_id: Option<i32>,
+pub struct Pong {
   pub configuration: Option<i64>,
+  pub policy_version: Option<i64>,
 }
 
-impl VisaRevocation {
-  pub fn new<F1, F2>(issuer_id: F1, configuration: F2) -> VisaRevocation where F1: Into<Option<i32>>, F2: Into<Option<i64>> {
-    VisaRevocation {
-      issuer_id: issuer_id.into(),
+impl Pong {
+  pub fn new<F1, F2>(configuration: F1, policy_version: F2) -> Pong where F1: Into<Option<i64>>, F2: Into<Option<i64>> {
+    Pong {
       configuration: configuration.into(),
+      policy_version: policy_version.into(),
     }
   }
 }
 
-impl TSerializable for VisaRevocation {
-  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaRevocation> {
+impl TSerializable for Pong {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<Pong> {
     i_prot.read_struct_begin()?;
-    let mut f_1: Option<i32> = Some(0);
+    let mut f_1: Option<i64> = Some(0);
     let mut f_2: Option<i64> = Some(0);
     loop {
       let field_ident = i_prot.read_field_begin()?;
@@ -953,7 +953,7 @@ impl TSerializable for VisaRevocation {
       let field_id = field_id(&field_ident)?;
       match field_id {
         1 => {
-          let val = i_prot.read_i32()?;
+          let val = i_prot.read_i64()?;
           f_1 = Some(val);
         },
         2 => {
@@ -967,126 +967,23 @@ impl TSerializable for VisaRevocation {
       i_prot.read_field_end()?;
     }
     i_prot.read_struct_end()?;
-    let ret = VisaRevocation {
-      issuer_id: f_1,
-      configuration: f_2,
+    let ret = Pong {
+      configuration: f_1,
+      policy_version: f_2,
     };
     Ok(ret)
   }
   fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
-    let struct_ident = TStructIdentifier::new("VisaRevocation");
+    let struct_ident = TStructIdentifier::new("Pong");
     o_prot.write_struct_begin(&struct_ident)?;
-    if let Some(fld_var) = self.issuer_id {
-      o_prot.write_field_begin(&TFieldIdentifier::new("issuer_id", TType::I32, 1))?;
-      o_prot.write_i32(fld_var)?;
-      o_prot.write_field_end()?
-    }
     if let Some(fld_var) = self.configuration {
-      o_prot.write_field_begin(&TFieldIdentifier::new("configuration", TType::I64, 2))?;
+      o_prot.write_field_begin(&TFieldIdentifier::new("configuration", TType::I64, 1))?;
       o_prot.write_i64(fld_var)?;
       o_prot.write_field_end()?
     }
-    o_prot.write_field_stop()?;
-    o_prot.write_struct_end()
-  }
-}
-
-//
-// PollResponse
-//
-
-#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct PollResponse {
-  pub visas: Option<Vec<VisaHop>>,
-  pub revocations: Option<Vec<VisaRevocation>>,
-  pub more: Option<i32>,
-}
-
-impl PollResponse {
-  pub fn new<F1, F2, F3>(visas: F1, revocations: F2, more: F3) -> PollResponse where F1: Into<Option<Vec<VisaHop>>>, F2: Into<Option<Vec<VisaRevocation>>>, F3: Into<Option<i32>> {
-    PollResponse {
-      visas: visas.into(),
-      revocations: revocations.into(),
-      more: more.into(),
-    }
-  }
-}
-
-impl TSerializable for PollResponse {
-  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<PollResponse> {
-    i_prot.read_struct_begin()?;
-    let mut f_1: Option<Vec<VisaHop>> = Some(Vec::new());
-    let mut f_2: Option<Vec<VisaRevocation>> = Some(Vec::new());
-    let mut f_3: Option<i32> = Some(0);
-    loop {
-      let field_ident = i_prot.read_field_begin()?;
-      if field_ident.field_type == TType::Stop {
-        break;
-      }
-      let field_id = field_id(&field_ident)?;
-      match field_id {
-        1 => {
-          let list_ident = i_prot.read_list_begin()?;
-          let mut val: Vec<VisaHop> = Vec::with_capacity(list_ident.size as usize);
-          for _ in 0..list_ident.size {
-            let list_elem_6 = VisaHop::read_from_in_protocol(i_prot)?;
-            val.push(list_elem_6);
-          }
-          i_prot.read_list_end()?;
-          f_1 = Some(val);
-        },
-        2 => {
-          let list_ident = i_prot.read_list_begin()?;
-          let mut val: Vec<VisaRevocation> = Vec::with_capacity(list_ident.size as usize);
-          for _ in 0..list_ident.size {
-            let list_elem_7 = VisaRevocation::read_from_in_protocol(i_prot)?;
-            val.push(list_elem_7);
-          }
-          i_prot.read_list_end()?;
-          f_2 = Some(val);
-        },
-        3 => {
-          let val = i_prot.read_i32()?;
-          f_3 = Some(val);
-        },
-        _ => {
-          i_prot.skip(field_ident.field_type)?;
-        },
-      };
-      i_prot.read_field_end()?;
-    }
-    i_prot.read_struct_end()?;
-    let ret = PollResponse {
-      visas: f_1,
-      revocations: f_2,
-      more: f_3,
-    };
-    Ok(ret)
-  }
-  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
-    let struct_ident = TStructIdentifier::new("PollResponse");
-    o_prot.write_struct_begin(&struct_ident)?;
-    if let Some(ref fld_var) = self.visas {
-      o_prot.write_field_begin(&TFieldIdentifier::new("visas", TType::List, 1))?;
-      o_prot.write_list_begin(&TListIdentifier::new(TType::Struct, fld_var.len() as i32))?;
-      for e in fld_var {
-        e.write_to_out_protocol(o_prot)?;
-      }
-      o_prot.write_list_end()?;
-      o_prot.write_field_end()?
-    }
-    if let Some(ref fld_var) = self.revocations {
-      o_prot.write_field_begin(&TFieldIdentifier::new("revocations", TType::List, 2))?;
-      o_prot.write_list_begin(&TListIdentifier::new(TType::Struct, fld_var.len() as i32))?;
-      for e in fld_var {
-        e.write_to_out_protocol(o_prot)?;
-      }
-      o_prot.write_list_end()?;
-      o_prot.write_field_end()?
-    }
-    if let Some(fld_var) = self.more {
-      o_prot.write_field_begin(&TFieldIdentifier::new("more", TType::I32, 3))?;
-      o_prot.write_i32(fld_var)?;
+    if let Some(fld_var) = self.policy_version {
+      o_prot.write_field_begin(&TFieldIdentifier::new("policy_version", TType::I64, 2))?;
+      o_prot.write_i64(fld_var)?;
       o_prot.write_field_end()?
     }
     o_prot.write_field_stop()?;
@@ -1363,7 +1260,7 @@ pub trait TVisaServiceSyncClient {
   fn de_register(&mut self, key: String) -> thrift::Result<()>;
   fn authorize_connect(&mut self, key: String, request: ConnectRequest) -> thrift::Result<ConnectResponse>;
   fn agent_disconnect(&mut self, keym: String, zpr_addr: Vec<u8>) -> thrift::Result<()>;
-  fn poll(&mut self, key: String) -> thrift::Result<PollResponse>;
+  fn ping(&mut self, key: String) -> thrift::Result<Pong>;
   fn request_visa(&mut self, key: String, src_tether_addr: Vec<u8>, traffic: TrafficDesc) -> thrift::Result<VisaResponse>;
 }
 
@@ -1513,12 +1410,12 @@ impl <C: TThriftClient + TVisaServiceSyncClientMarker> TVisaServiceSyncClient fo
       result.ok_or()
     }
   }
-  fn poll(&mut self, key: String) -> thrift::Result<PollResponse> {
+  fn ping(&mut self, key: String) -> thrift::Result<Pong> {
     (
       {
         self.increment_sequence_number();
-        let message_ident = TMessageIdentifier::new("poll", TMessageType::Call, self.sequence_number());
-        let call_args = VisaServicePollArgs { key };
+        let message_ident = TMessageIdentifier::new("ping", TMessageType::Call, self.sequence_number());
+        let call_args = VisaServicePingArgs { key };
         self.o_prot_mut().write_message_begin(&message_ident)?;
         call_args.write_to_out_protocol(self.o_prot_mut())?;
         self.o_prot_mut().write_message_end()?;
@@ -1528,14 +1425,14 @@ impl <C: TThriftClient + TVisaServiceSyncClientMarker> TVisaServiceSyncClient fo
     {
       let message_ident = self.i_prot_mut().read_message_begin()?;
       verify_expected_sequence_number(self.sequence_number(), message_ident.sequence_number)?;
-      verify_expected_service_call("poll", &message_ident.name)?;
+      verify_expected_service_call("ping", &message_ident.name)?;
       if message_ident.message_type == TMessageType::Exception {
         let remote_error = thrift::Error::read_application_error_from_in_protocol(self.i_prot_mut())?;
         self.i_prot_mut().read_message_end()?;
         return Err(thrift::Error::Application(remote_error))
       }
       verify_expected_message_type(TMessageType::Reply, message_ident.message_type)?;
-      let result = VisaServicePollResult::read_from_in_protocol(self.i_prot_mut())?;
+      let result = VisaServicePingResult::read_from_in_protocol(self.i_prot_mut())?;
       self.i_prot_mut().read_message_end()?;
       result.ok_or()
     }
@@ -1579,7 +1476,7 @@ pub trait VisaServiceSyncHandler {
   fn handle_de_register(&self, key: String) -> thrift::Result<()>;
   fn handle_authorize_connect(&self, key: String, request: ConnectRequest) -> thrift::Result<ConnectResponse>;
   fn handle_agent_disconnect(&self, keym: String, zpr_addr: Vec<u8>) -> thrift::Result<()>;
-  fn handle_poll(&self, key: String) -> thrift::Result<PollResponse>;
+  fn handle_ping(&self, key: String) -> thrift::Result<Pong>;
   fn handle_request_visa(&self, key: String, src_tether_addr: Vec<u8>, traffic: TrafficDesc) -> thrift::Result<VisaResponse>;
 }
 
@@ -1608,8 +1505,8 @@ impl <H: VisaServiceSyncHandler> VisaServiceSyncProcessor<H> {
   fn process_agent_disconnect(&self, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
     TVisaServiceProcessFunctions::process_agent_disconnect(&self.handler, incoming_sequence_number, i_prot, o_prot)
   }
-  fn process_poll(&self, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
-    TVisaServiceProcessFunctions::process_poll(&self.handler, incoming_sequence_number, i_prot, o_prot)
+  fn process_ping(&self, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    TVisaServiceProcessFunctions::process_ping(&self.handler, incoming_sequence_number, i_prot, o_prot)
   }
   fn process_request_visa(&self, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
     TVisaServiceProcessFunctions::process_request_visa(&self.handler, incoming_sequence_number, i_prot, o_prot)
@@ -1791,13 +1688,13 @@ impl TVisaServiceProcessFunctions {
       },
     }
   }
-  pub fn process_poll<H: VisaServiceSyncHandler>(handler: &H, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
-    let args = VisaServicePollArgs::read_from_in_protocol(i_prot)?;
-    match handler.handle_poll(args.key) {
+  pub fn process_ping<H: VisaServiceSyncHandler>(handler: &H, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let args = VisaServicePingArgs::read_from_in_protocol(i_prot)?;
+    match handler.handle_ping(args.key) {
       Ok(handler_return) => {
-        let message_ident = TMessageIdentifier::new("poll", TMessageType::Reply, incoming_sequence_number);
+        let message_ident = TMessageIdentifier::new("ping", TMessageType::Reply, incoming_sequence_number);
         o_prot.write_message_begin(&message_ident)?;
-        let ret = VisaServicePollResult { result_value: Some(handler_return) };
+        let ret = VisaServicePingResult { result_value: Some(handler_return) };
         ret.write_to_out_protocol(o_prot)?;
         o_prot.write_message_end()?;
         o_prot.flush()
@@ -1805,7 +1702,7 @@ impl TVisaServiceProcessFunctions {
       Err(e) => {
         match e {
           thrift::Error::Application(app_err) => {
-            let message_ident = TMessageIdentifier::new("poll", TMessageType::Exception, incoming_sequence_number);
+            let message_ident = TMessageIdentifier::new("ping", TMessageType::Exception, incoming_sequence_number);
             o_prot.write_message_begin(&message_ident)?;
             thrift::Error::write_application_error_to_out_protocol(&app_err, o_prot)?;
             o_prot.write_message_end()?;
@@ -1818,7 +1715,7 @@ impl TVisaServiceProcessFunctions {
                 e.to_string()
               )
             };
-            let message_ident = TMessageIdentifier::new("poll", TMessageType::Exception, incoming_sequence_number);
+            let message_ident = TMessageIdentifier::new("ping", TMessageType::Exception, incoming_sequence_number);
             o_prot.write_message_begin(&message_ident)?;
             thrift::Error::write_application_error_to_out_protocol(&ret_err, o_prot)?;
             o_prot.write_message_end()?;
@@ -1886,8 +1783,8 @@ impl <H: VisaServiceSyncHandler> TProcessor for VisaServiceSyncProcessor<H> {
       "agent_disconnect" => {
         self.process_agent_disconnect(message_ident.sequence_number, i_prot, o_prot)
       },
-      "poll" => {
-        self.process_poll(message_ident.sequence_number, i_prot, o_prot)
+      "ping" => {
+        self.process_ping(message_ident.sequence_number, i_prot, o_prot)
       },
       "request_visa" => {
         self.process_request_visa(message_ident.sequence_number, i_prot, o_prot)
@@ -2376,16 +2273,16 @@ impl VisaServiceAgentDisconnectResult {
 }
 
 //
-// VisaServicePollArgs
+// VisaServicePingArgs
 //
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct VisaServicePollArgs {
+struct VisaServicePingArgs {
   key: String,
 }
 
-impl VisaServicePollArgs {
-  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaServicePollArgs> {
+impl VisaServicePingArgs {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaServicePingArgs> {
     i_prot.read_struct_begin()?;
     let mut f_1: Option<String> = None;
     loop {
@@ -2406,14 +2303,14 @@ impl VisaServicePollArgs {
       i_prot.read_field_end()?;
     }
     i_prot.read_struct_end()?;
-    verify_required_field_exists("VisaServicePollArgs.key", &f_1)?;
-    let ret = VisaServicePollArgs {
+    verify_required_field_exists("VisaServicePingArgs.key", &f_1)?;
+    let ret = VisaServicePingArgs {
       key: f_1.expect("auto-generated code should have checked for presence of required fields"),
     };
     Ok(ret)
   }
   fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
-    let struct_ident = TStructIdentifier::new("poll_args");
+    let struct_ident = TStructIdentifier::new("ping_args");
     o_prot.write_struct_begin(&struct_ident)?;
     o_prot.write_field_begin(&TFieldIdentifier::new("key", TType::String, 1))?;
     o_prot.write_string(&self.key)?;
@@ -2424,16 +2321,16 @@ impl VisaServicePollArgs {
 }
 
 //
-// VisaServicePollResult
+// VisaServicePingResult
 //
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-struct VisaServicePollResult {
-  result_value: Option<PollResponse>,
+struct VisaServicePingResult {
+  result_value: Option<Pong>,
 }
 
-impl VisaServicePollResult {
-  fn ok_or(self) -> thrift::Result<PollResponse> {
+impl VisaServicePingResult {
+  fn ok_or(self) -> thrift::Result<Pong> {
     if self.result_value.is_some() {
       Ok(self.result_value.unwrap())
     } else {
@@ -2441,15 +2338,15 @@ impl VisaServicePollResult {
         thrift::Error::Application(
           ApplicationError::new(
             ApplicationErrorKind::MissingResult,
-            "no result received for VisaServicePoll"
+            "no result received for VisaServicePing"
           )
         )
       )
     }
   }
-  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaServicePollResult> {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaServicePingResult> {
     i_prot.read_struct_begin()?;
-    let mut f_0: Option<PollResponse> = None;
+    let mut f_0: Option<Pong> = None;
     loop {
       let field_ident = i_prot.read_field_begin()?;
       if field_ident.field_type == TType::Stop {
@@ -2458,7 +2355,7 @@ impl VisaServicePollResult {
       let field_id = field_id(&field_ident)?;
       match field_id {
         0 => {
-          let val = PollResponse::read_from_in_protocol(i_prot)?;
+          let val = Pong::read_from_in_protocol(i_prot)?;
           f_0 = Some(val);
         },
         _ => {
@@ -2468,13 +2365,13 @@ impl VisaServicePollResult {
       i_prot.read_field_end()?;
     }
     i_prot.read_struct_end()?;
-    let ret = VisaServicePollResult {
+    let ret = VisaServicePingResult {
       result_value: f_0,
     };
     Ok(ret)
   }
   fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
-    let struct_ident = TStructIdentifier::new("VisaServicePollResult");
+    let struct_ident = TStructIdentifier::new("VisaServicePingResult");
     o_prot.write_struct_begin(&struct_ident)?;
     if let Some(ref fld_var) = self.result_value {
       o_prot.write_field_begin(&TFieldIdentifier::new("result_value", TType::Struct, 0))?;
