@@ -2,7 +2,9 @@
 
 zdp_link_p2p_proto = Proto("Direction", "Inbound/Outbound Dissector")
 
--- direction = ProtoField.u8()
+in_out = ProtoField.uint8("direction.direction", "Direction", base.DEC)
+
+zdp_link_p2p_proto.fields = { in_out }
 
 function zdp_link_p2p_proto.dissector(buffer, pinfo, tree)
     length = buffer:len()
@@ -11,7 +13,7 @@ function zdp_link_p2p_proto.dissector(buffer, pinfo, tree)
     pinfo.cols.protocol = zdp_link_p2p_proto.name
 
     local subtree = tree:add(zdp_link_p2p_proto, buffer(), "Direction Data")
-    subtree:add(buffer(0,1), "Direction: " .. buffer(0,1):uint())
+    subtree:add(in_out, buffer(0,1))
 
 end
 
