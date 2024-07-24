@@ -19,9 +19,6 @@ function zdp_link_p2p_proto.dissector(buffer, pinfo, tree)
 
 end
 
-local tcp_port = DissectorTable.get("tcp.port")
-tcp_port:add(59274, zdp_link_p2p_proto)
-
 function get_direction_name(direction)
     local direction_name = "Unknown"
 
@@ -30,3 +27,6 @@ function get_direction_name(direction)
 
     return direction_name
 end
+
+local tcp_port = DissectorTable.get("tcp.port")
+tcp_port:add(59274, zdp_link_p2p_proto)
