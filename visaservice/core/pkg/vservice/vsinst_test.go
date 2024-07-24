@@ -572,13 +572,6 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	}
 
 	{
-		claims := map[string]*agent.ClaimV{
-			agent.KAttrVisaServiceAdapter: &agent.ClaimV{V: "true", Exp: time.Now().Add(time.Hour)},
-		}
-		svc.BackDoorConnectSvcAdapter(vsaddr, vsaddr, n1addr, claims, []string{"$$zpr/visaservice", "/zpr/$$zpr/visaservice"}, time.Now().Add(time.Hour))
-	}
-
-	{
 		client110 := netip.MustParseAddr("fc00:3001:1::10")
 		client110ta := netip.MustParseAddr("fc00:3001::10")
 		claims := map[string]*agent.ClaimV{
@@ -619,19 +612,34 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	require.NotEmpty(t, presp.GetVisas())
 	require.Empty(t, presp.GetRevocations())
 
-	// Should be a single visa for us:
-	require.Equal(t, 1, len(presp.GetVisas()))
+	// Three visas-
+	//   1. node to visaservice
+	//   2. visaservice to node-vss
+	//   3. that visa we requested
+	require.Equal(t, 3, len(presp.GetVisas()))
 
-	require.Greater(t, presp.GetVisas()[0].GetHopCount(), int32(0))
+	visas := presp.GetVisas()
 
-	newV := mustUnmarshalVisa(presp.Visas[0].VisaPb)
-	require.NotNil(t, newV)
-	require.NotNil(t, newV.GetSource())
-	require.NotNil(t, newV.GetDest())
+	expectSources := []string{
+		n0addr.String(),
+		n1addr.String(),
+		vsaddr.String(),
+	}
 
-	require.Equal(t, vsaddr, mustAddrFromSlice(newV.GetDest()))
-	require.Equal(t, n1addr, mustAddrFromSlice(newV.GetSource()))
-	require.Greater(t, newV.IssuerId, oldv.IssuerId)
+	for _, v := range visas {
+		require.Greater(t, v.GetHopCount(), int32(0))
+
+		newV := mustUnmarshalVisa(v.VisaPb)
+		require.NotNil(t, newV)
+		require.NotNil(t, newV.GetSource())
+		require.NotNil(t, newV.GetDest())
+
+		require.Equal(t, vsaddr.String(), mustAddrFromSlice(newV.GetDest()).String())
+		require.Contains(t, expectSources, mustAddrFromSlice(newV.GetSource()).String())
+
+		require.Greater(t, newV.IssuerId, oldv.IssuerId)
+	}
+
 }
 
 func mustAddrFromSlice(s []byte) netip.Addr {

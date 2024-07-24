@@ -49,6 +49,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	{
 		vs.log.Info("generating a new visa-service visa for the node->VS", "node_addr_src", nodeAddr, "vs_addr_dest", vs.localAddr)
 		pktData := snip.NewTCPConnect(nodeAddr, 0, vs.localAddr, VisaServicePort)
+		vs.log.Debug("invoking request-visa for part of policy install (1/2)", "for_node", nodeAddr)
 		vsr, err := vs.doRequestVisa(context.Background(), nodeAddr, pktData, 0, pp.VersionNumber())
 		if err != nil {
 			vs.log.WithError(err).Warn("failed to generate a visa-service visa for the node", "node_addr", nodeAddr)
@@ -65,6 +66,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	{
 		vs.log.Info("generating a new visa-support-service visa for the VS->node", "vs_addr_src", vs.localAddr, "node_addr_dest", nodeAddr)
 		pktData := snip.NewTCPConnect(vs.localAddr, 1025, nodeAddr, vssPort)
+		vs.log.Debug("invoking request-visa for part of policy install (2/2)", "for_node", nodeAddr)
 		vsr, err := vs.doRequestVisa(context.Background(), vs.localAddr, pktData, 0, pp.VersionNumber())
 		if err != nil {
 			vs.log.WithError(err).Warn("failed to generate a visa-service visa for the node")
@@ -225,6 +227,8 @@ func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, item *vsapi.PollRespon
 	// We used to use a polling interface. Now we can use the VSS to send
 	// directly to the node.
 
+	vs.log.Debug("begin push items to node", "node", nodeAddr, "visa_count", len(item.Visas), "revocation_count", len(item.Revocations))
+
 	var serviceAddr string
 	vs.agentDB.RLock()
 	if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
@@ -337,9 +341,12 @@ func (vs *VSInst) checkPushBuffers() {
 		}
 		vs.agentDB.Unlock()
 		if len(pushBuffer) > 0 {
+			var consolidated vsapi.PollResponse
 			for _, item := range pushBuffer {
-				vs.pushToNodeOrBuffer(nodeAddr, item)
+				consolidated.Visas = append(consolidated.Visas, item.Visas...)
+				consolidated.Revocations = append(consolidated.Revocations, item.Revocations...)
 			}
+			vs.pushToNodeOrBuffer(nodeAddr, &consolidated)
 		}
 	}
 }

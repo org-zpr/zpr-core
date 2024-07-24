@@ -554,6 +554,7 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 	if !ok {
 		return nil, errors.New("invalid tether address on visa request")
 	}
+	vs.log.Debug("invoking request-visa for visa service API", "requesting_node", zprAddr)
 	vsResp, err := vs.doRequestVisa(ctx, tetherAddr, vsapiTrafficDescToIpTraffic(traffic), 0, pver)
 
 	if err != nil {

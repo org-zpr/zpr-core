@@ -304,11 +304,13 @@ func (vs *VSInst) SetConfig(key, value string) error {
 
 // periodicHousekeeping is called from runloop (and so blocks runloop).
 func (vs *VSInst) periodicHousekeeping(now time.Time) {
+	vs.log.Debug("periodic housekeeping starts")
 	vs.extendVisaServiceVisas()
 	vs.removeExpiredVisas()
 	vs.expireOldConfiguration()
 	vs.checkNodesVSSState()
 	vs.checkPushBuffers()
+	vs.log.Debug("periodic housekeeping ends", "elapsed", time.Since(now).String())
 }
 
 // RunPeriodicHousekeepingNow is here for unit tests only. Do not call outside of unit tests.
@@ -375,6 +377,7 @@ func (vs *VSInst) extendVisaServiceVisas() {
 func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration, push bool, expectedPolicyID uint64) {
 	for _, ve := range xvisas {
 		sourceTetherAddr, _ := netip.AddrFromSlice(ve.v.Source)
+		vs.log.Debug("invoking request-visa for re-request visa processing")
 		resp, err := vs.doRequestVisa(context.Background(), sourceTetherAddr, ve.pktData, minDuration, expectedPolicyID)
 		if err != nil {
 			vs.log.WithError(err).Error("failed to re-request visa")
