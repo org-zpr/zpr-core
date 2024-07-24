@@ -133,6 +133,7 @@ pub fn authenticate(
         timestamp: Some(timestamp as i64),
         node_cert: Some(cert_pem_data.into()),
         hmac: Some(hmac),
+        vss_service: Some(String::from("127.0.0.1:0")),
         node_agent: Some(agent),
     };
 
@@ -184,43 +185,14 @@ pub fn disconnect(service: &str, apikey: &str, addrstr: &str) -> thrift::Result<
     Ok(())
 }
 
-pub fn poll(service: &str, apikey: &str) -> thrift::Result<()> {
+pub fn ping(service: &str, apikey: &str) -> thrift::Result<()> {
     let mut client = newclient(service)?;
 
-    match client.poll(apikey.into()) {
+    match client.ping(apikey.into()) {
         Ok(result) => {
-            print!("PollResponse:  (more = ");
-            if result.more.unwrap() > 0 {
-                print!("YES");
-            } else {
-                print!("NO");
-            }
-            println!(")");
-            if let Some(visas) = result.visas {
-                println!("  Got {} visas", visas.len());
-                for visa in visas {
-                    println!(
-                        "    visa {}   hop_count {}    size {} bytes",
-                        visa.issuer_id.unwrap(),
-                        visa.hop_count.unwrap(),
-                        visa.visa_pb.unwrap().len()
-                    );
-                }
-            } else {
-                println!("  0 visas")
-            }
-            if let Some(revokes) = result.revocations {
-                println!("  Got {} revocations", revokes.len());
-                for revoke in revokes {
-                    println!(
-                        "    revoke issuer_id {}, config_id {}",
-                        revoke.issuer_id.unwrap(),
-                        revoke.configuration.unwrap()
-                    );
-                }
-            } else {
-                println!("  0 revocations")
-            }
+            println!("PingResponse:");
+            println!("    configuration: {}", result.configuration.unwrap());
+            println!("   policy version: {}", result.policy_version.unwrap());
         }
         Err(e) => {
             return Err(e);

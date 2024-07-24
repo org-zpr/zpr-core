@@ -59,8 +59,8 @@ enum Commands {
         #[arg(long, value_name = "ADDR", help = "IPv4 or IPv6 address")]
         addr: String,
     },
-    #[command(about = "Call the poll function, requires an API key")]
-    Poll {
+    #[command(about = "Call the ping function, requires an API key")]
+    Ping {
         #[arg(short, long, value_name = "HOST:PORT")]
         service: String,
 
@@ -145,7 +145,7 @@ fn main() {
                 println!("Error: {:?}", e);
             }
         },
-        Some(Commands::Poll { service, apikey }) => match vsclient::poll(&service, &apikey) {
+        Some(Commands::Ping { service, apikey }) => match vsclient::ping(&service, &apikey) {
             Ok(_) => {
                 println!("Poll command executed successfully");
             }
