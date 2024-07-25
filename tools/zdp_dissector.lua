@@ -55,5 +55,11 @@ function zdp_proto.dissector(buffer, pinfo, tree)
 
 end
 
-local tcp_port = DissectorTable.get("tcp.port")
-tcp_port:add(59274, zdp_proto)
+local udp_port = DissectorTable.get("udp.port")
+udp_port:add(1201, zdp_proto)
+
+local ip_proto = DissectorTable.get("ip.proto")
+ip_proto:add(253, zdp_proto)
+
+local eth_type = DissectorTable.get("ethertype")
+eth_type:add(0x88B5, zdp_proto)
