@@ -25,7 +25,11 @@ function zdp_proto.dissector(buffer, pinfo, tree)
 
     local subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
     subtree:add(zpi_val, buffer(0, 1))
-    subtree:add(zdp_type, buffer(1, 1))
+
+    local type = buffer(2,1):uint()
+    local type_name = get_type_name(type)
+    subtree:add(zdp_type, buffer(1, 1)):append_text(" (" .. type_name .. ")")
+
     subtree:add(excess_len, buffer(2, 1))
     subtree:add(seq_num, buffer(3, 2))
 
@@ -55,5 +59,54 @@ function zdp_proto.dissector(buffer, pinfo, tree)
 
 end
 
+function get_type_name(type)
+    local type_name = "Unknown"
+
+    if type == 0 then type_name = "Transit Packet"
+    elseif type == 1 then type_name = "Unused" -- not sure if we need to write this here, or if it should remain "Unknown" or something else
+    elseif type == 2 then type_name = "Destination Unreachable"
+    elseif type == 3 then type_name = "Visa Herald Request"
+    elseif type == 4 then type_name = "Visa Herald Response"
+    elseif type == 5 then type_name = "Visa Update Request"
+    elseif type == 6 then type_name = "Visa Update Response"
+    elseif type == 7 then type_name = "Visa Retract Request"
+    elseif type == 8 then type_name = "Visa Retract Response"
+    elseif type == 9 then type_name = "Visa Deaccept Indication"
+    elseif type == 10 then type_name = "Visa Deaccept ACK"
+    elseif type == 11 then type_name = "Bind Agent Address Request"
+    elseif type == 12 then type_name = "Bind Agent Address Response"
+    elseif type == 13 then type_name = "Unbind Agent Address Request"
+    elseif type == 14 then type_name = "Unbind Agent Address Response"
+    elseif type == 15 then type_name = "Authentication Request"
+    elseif type == 16 then type_name = "Set Path MTU"
+    elseif type == 17 then type_name = "Authentication Response"
+    elseif type >= 18 and type <= 95 then type_name = "Reserved/Unknown" -- This range is not specified in the RFC
+    elseif type >= 95 and type <= 126 then type_name = "Reserved for private use and experimentation"
+    elseif type == 127 then type_name = "Reserved, Discard"
+    elseif type == 128 then type_name = "ZPR ARP"
+    elseif type == 129 then type_name = "Key Management"
+    elseif type == 130 then type_name = "Discard"
+    elseif type == 131 then type_name = "Echo Request"
+    elseif type == 132 then type_name = "Echo Response"
+    elseif type == 133 then type_name = "Terminate Link or Docking Session Request"
+    elseif type == 134 then type_name = "Terminate Link or Docking Session Response"
+    elseif type == 135 then type_name = "Terminate Link or Docking Session Indication"
+    elseif type == 136 then type_name = "Hello Request"
+    elseif type == 137 then type_name = "Hello Response"
+    elseif type == 138 then type_name = "Configuration Request"
+    elseif type == 139 then type_name = "Configuration Response"
+    elseif type == 140 then type_name = "Register Agent Address Request"
+    elseif type == 141 then type_name = "Unknown" -- Not specified in RFC
+    elseif type == 142 then type_name = "Register Agent Address Response"
+    elseif type == 143 then type_name = "Unregister Agent Address Request"
+    elseif type == 144 then type_name = "Unregister Agent Address Response"
+    elseif type == 145 then type_name = "Report"
+    elseif type >= 146 and type <= 223 then type_name = "Reserved/Unknown" -- Not specified in RFC
+    elseif type >= 224 and type <= 254 then type_name = "Experimental and Private Use"
+    elseif type == 255 then type_name = "Reserved, must not be used" end
+
+    return type_name
+
+end 
 local tcp_port = DissectorTable.get("tcp.port")
 tcp_port:add(59274, zdp_proto)
