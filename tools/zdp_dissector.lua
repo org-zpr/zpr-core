@@ -6,12 +6,12 @@ zpi_val = ProtoField.uint8("zdp.zpi", "ZPI", base.DEC)
 zdp_type = ProtoField.uint8("zdp.type", "Type", base.DEC)
 excess_len = ProtoField.uint8("zdp.excess_len", "Excess Length", base.DEC)
 seq_num = ProtoField.uint16("zdp.seq_num", "Sequence Number", base.DEC)
-stream_id = ProtoField.uint64("zdp.streamid", "Stream ID", base.DEC)
+stream_id = ProtoField.uint32("zdp.streamid", "Stream ID", base.DEC)
 pad = ProtoField.bytes("zdp.pad", "Pad")
-mac_addr = ProtoField.uint64("zdp.mac", "MAC", base.DEC)
+mac_addr = ProtoField.uint32("zdp.mac", "MAC", base.DEC)
 d2d_said = ProtoField.uint8("zdp.d2d_said", "D2D SAID", base.DEC)
 agent_packet = ProtoField.bytes("zdp.agent_packet", "Agent Packet")
-d2d_mac = ProtoField.uint64("zdp.d2d_mac", "D2D MAC", base.DEC)
+d2d_mac = ProtoField.uint32("zdp.d2d_mac", "D2D MAC", base.DEC)
 management_packet = ProtoField.bytes("zdp.management", "Management Packet")
 
 zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
@@ -108,5 +108,12 @@ function get_type_name(type)
     return type_name
 
 end 
-local tcp_port = DissectorTable.get("tcp.port")
-tcp_port:add(59274, zdp_proto)
+
+local udp_port = DissectorTable.get("udp.port")
+udp_port:add(1201, zdp_proto)
+
+local ip_proto = DissectorTable.get("ip.proto")
+ip_proto:add(253, zdp_proto)
+
+local eth_type = DissectorTable.get("ethertype")
+eth_type:add(0x88B5, zdp_proto)
