@@ -11,7 +11,7 @@ pad = ProtoField.bytes("zdp.pad", "Pad")
 mac_addr = ProtoField.uint64("zdp.mac", "MAC", base.DEC)
 d2d_said = ProtoField.uint8("zdp.d2d_said", "D2D SAID", base.DEC)
 agent_packet = ProtoField.bytes("zdp.agent_packet", "Agent Packet")
-d2d_mac = ProtoField.uint64("zdp.d2d_mac", "D2D MAC", base.DEC)
+d2d_mac = ProtoField.uint32("zdp.d2d_mac", "D2D MAC", base.DEC)
 management_packet = ProtoField.bytes("zdp.management", "Management Packet")
 
 zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
