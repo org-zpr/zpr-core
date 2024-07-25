@@ -111,6 +111,10 @@ mod tests {
         }
     }
 
+    // NOTE: because of how these sequences are stored in the object file,
+    // they are arbitrarily aligned.  In order to ensure a specific
+    // alignment, copy them into a Vec before using.  Memory allocated to a
+    // Vec is all-but-guaranteed to be aligned at least to the system word size.
     const TEST_DATA: &[&[u8]] = &[
         &[
             0x45, 0x00, 0x00, 0x5b, 0xd7, 0xbe, 0x40, 0x00, 0x40, 0x06, 0x6a, 0x45, 0xc0, 0xa8,
