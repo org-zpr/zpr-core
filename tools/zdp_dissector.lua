@@ -58,8 +58,6 @@ function zdp_proto.dissector(buffer, pinfo, tree)
 end
 
 function get_type_name(type)
-    
-
     local type_name = type_name_table[type]
 
     if type_name ~= nil then return type_name
@@ -69,7 +67,6 @@ function get_type_name(type)
     elseif type >= 224 and type <= 254 then type_name = "Experimental and Private Use" end
 
     return type_name
-
 end 
 
 type_name_table =
@@ -115,7 +112,7 @@ type_name_table =
 }
 
 local udp_port = DissectorTable.get("udp.port")
-udp_port:add(1201, zdp_proto)
+udp_port:add(1021, zdp_proto)
 
 local ip_proto = DissectorTable.get("ip.proto")
 ip_proto:add(253, zdp_proto)

@@ -5,7 +5,7 @@ use crate::packet;
 use std::mem::size_of;
 #[allow(unused_imports)]
 use zerocopy::{ByteOrder, FromBytes, FromZeroes, NetworkEndian};
-use zerocopy_derive::{FromBytes, FromZeroes, KnownLayout, Unaligned};
+use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, KnownLayout, Unaligned};
 
 #[derive(Debug, PartialEq)]
 pub enum ClassifierResult {
@@ -19,9 +19,9 @@ pub enum ClassifierResult {
 const IP_VERSION_MASK: u8 = 0xF0;
 const IPV4_HEADER_LENGTH_MASK: u8 = 0x0F;
 
-#[derive(FromZeroes, FromBytes, KnownLayout, Unaligned)]
+#[derive(AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned)]
 #[repr(C)]
-struct IPv4Header {
+pub struct IPv4Header {
     pub vhl: u8,
     pub dscp: u8,
     pub total_length: [u8; 2],
@@ -34,12 +34,12 @@ struct IPv4Header {
     pub dst_address: [u8; 4],
 }
 
-#[derive(FromZeroes, FromBytes, KnownLayout, Unaligned)]
+#[derive(AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned)]
 #[repr(C)]
-struct IPv6Header {
-    pub version_and_tc_lower: u8,
-    pub tc_upper_and_fl_lower: u8,
-    pub fl_upper: [u8; 2],
+pub struct IPv6Header {
+    pub version_and_tc_upper: u8,
+    pub tc_lower_and_fl_upper: u8,
+    pub fl_lower: [u8; 2],
     pub payload_length: [u8; 2],
     pub next_header: u8,
     pub hop_limit: u8,
@@ -72,6 +72,10 @@ struct UDPHeader {
     pub checksum: [u8; 2],
 }
 
+pub fn get_ip_version(body: &[u8]) -> u8 {
+    (body[0] & IP_VERSION_MASK) >> 4
+}
+
 pub fn classify(packet: &mut packet::Packet) -> Result<ClassifierResult, &'static str> {
     let (metadata, body) = packet.metadata_mut_and_body_mut();
     classify_zdp(metadata, body)
@@ -88,7 +92,7 @@ fn classify_l3(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
 ) -> Result<ClassifierResult, &'static str> {
-    let ip_version = (body[0] & IP_VERSION_MASK) >> 4;
+    let ip_version = get_ip_version(body);
 
     match ip_version {
         4 => classify_ipv4(metadata, body),

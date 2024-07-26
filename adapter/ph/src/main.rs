@@ -20,6 +20,7 @@ mod assembly;
 mod buffer_stack;
 mod capture_worker;
 mod classifier;
+mod compress;
 mod config;
 mod counter;
 mod counters_enum;
