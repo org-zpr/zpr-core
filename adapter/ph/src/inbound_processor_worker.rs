@@ -61,15 +61,15 @@ async fn handle_packet<'pktbuf>(
     mut pkt: Packet<'pktbuf>,
     asm: &Assembly<'pktbuf>,
 ) {
-    let hdr = ZdpHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
     match hdr.abbreviated_header.packet_type {
-        ZdpPacketType::UncompressedAgentPacket => {
+        ZdpPacketType::TransitPacket => {
             // copy out relevant header info
-            pkt.metadata_mut().flow_id = hdr.abbreviated_header.stream_id;
+            pkt.metadata_mut().flow_id = hdr.stream_id;
 
             // strip packet header
-            pkt.advance(std::mem::size_of::<ZdpHeader>());
+            pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
 
             if config.mode == PhMode::Server {
                 // TODO: drop error packets
