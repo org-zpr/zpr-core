@@ -34,8 +34,6 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     subtree:add(seq_num, buffer(3, 2))
 
     local real_len = length - buffer(2,1):uint() 
-    local type = 125
-
     -- Transit Packet
     if type == 0 then
         subtree:add(stream_id, buffer(5, 4))
