@@ -13,11 +13,25 @@ use std::os::unix::net::UnixStream;
 use std::thread::sleep;
 use std::time::Duration;
 
-// Struct made for use with clap parsing
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(version, about = "This program controls the RPC calls to the ZPR Packet Handler", long_about = None)]
 struct Args {
-    #[arg(short, long)]
+    #[arg(
+        short,
+        long,
+        help = "Re-run with '--help' for list of commands",
+        long_help = "ECHO\n\
+                     COUNTERS\n\
+                     COUNTERS-RESET\n\
+                     FLUSH-CAPTURE\n\
+                     CLOSE-CAPTURE\n\
+                     DELETE-CAPTURE-PROGRAM\n\
+                     WATCH <frequency>\n\
+                     PERF-SAMPLE <duration> <frequency>\n\
+                     SET-CAPTURE <file-path>\n\
+                     CAPTURE-SEQUENCE <file-path> <duration> <program>\n\
+                     SET-CAPTURE-PROGRAM <program>"
+    )]
     command: String,
 
     #[arg(short, long)]
@@ -32,7 +46,12 @@ struct Args {
     #[arg(long, default_value = "cap_file.txt")]
     file_path: String,
 
-    #[arg(long)]
+    #[arg(
+        long,
+        help = "",
+        long_help = "This option has no default, if no program is provided for a command that \
+                            needs a program, no program will be set"
+    )]
     program: Option<String>,
 }
 
@@ -174,7 +193,7 @@ fn serialize(program: &str) -> String {
     let mut serialized_program = format!("{},", instructions.len());
 
     for instruction in instructions {
-        let insn: &cbpf_rs::BpfInsn = (&instruction).borrow();
+        let insn: &cbpf_rs::BpfInsn = instruction.borrow();
         let _ = write!(
             &mut serialized_program,
             "{} {} {} {},",

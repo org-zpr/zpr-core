@@ -32,18 +32,19 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     if length == 0 then return end
 
     pinfo.cols.protocol = zdp_proto.name
-
     -- TODO look into adding to a subtree from a funciton, this "main" function 
-    -- is rather long, and is doing many things
-    local zdp_header_subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data") -- It's really dissecting all fields of the ZDP packet, not just the header, right?
-    zdp_header_subtree:add(zpi_val, buffer(0, 1))
-    zdp_header_subtree:add(zdp_type, buffer(1, 1))
-    zdp_header_subtree:add(excess_len, buffer(2, 1))
-    zdp_header_subtree:add(seq_num, buffer(3, 2))
+    -- is rather long, and is doing many things    
+    local subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
+    subtree:add(zpi_val, buffer(0, 1))
 
     local type = buffer(1,1):uint()
-    local real_len = length - buffer(2,1):uint() 
+    local type_name = get_type_name(type)
+    subtree:add(zdp_type, buffer(1, 1)):append_text(" (" .. type_name .. ")")
 
+    subtree:add(excess_len, buffer(2, 1))
+    subtree:add(seq_num, buffer(3, 2))
+
+    local real_len = length - buffer(2,1):uint() 
     -- Perform different dissections depending on type of packet
     if type == 0 then 
         -- Transit Packet
@@ -83,10 +84,61 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
         zdp_header_subtree:add(mac, buffer(real_len - 4, 4))
     end
-
-
-    
 end
+
+function get_type_name(type)
+    local type_name = type_name_table[type]
+
+    if type_name ~= nil then return type_name
+    elseif type >= 18 and type <= 95 then type_name = "Reserved/Unknown" -- This range is not specified in the RFC
+    elseif type >= 95 and type <= 126 then type_name = "Reserved for private use and experimentation"
+    elseif type >= 146 and type <= 223 then type_name = "Reserved/Unknown" -- Not specified in RFC
+    elseif type >= 224 and type <= 254 then type_name = "Experimental and Private Use" end
+
+    return type_name
+end 
+
+type_name_table =
+{
+    [0] = "Transit Packet",
+    [1] = "Unused",
+    [2] = "Destination Unreachable",
+    [3] = "Visa Herald Request",
+    [4] = "Visa Herald Response",
+    [5] = "Visa Update Request",
+    [6] = "Visa Update Response",
+    [7] = "Visa Retract Request",
+    [8] = "Visa Retract Response",
+    [9] = "Visa Deaccept Indication",
+    [10] = "Visa Deaccept ACK",
+    [11] = "Bind Agent Address Request",
+    [12] = "Bind Agent Address Response",
+    [13] = "Unbind Agent Address Request",
+    [14] = "Unbind Agent Address Response",
+    [15] = "Authentication Request",
+    [16] = "Set Path MTU",
+    [17] = "Authentication Response",
+    [127] = "Reserved, Discard",
+    [128] = "ZPR ARP",
+    [129] = "Key Management",
+    [130] = "Discard",
+    [131] = "Echo Request",
+    [132] = "Echo Response",
+    [133] = "Terminate Link or Docking Session Request",
+    [134] = "Terminate Link or Docking Session Response",
+    [135] = "Terminate Link or Docking Session Indication",
+    [136] = "Hello Request",
+    [137] = "Hello Response",
+    [138] = "Configuration Request",
+    [139] = "Configuration Response",
+    [140] = "Register Agent Address Request",
+    [141] = "Not Specified", -- Not specified in RFC
+    [142] = "Register Agent Address Response",
+    [143] = "Unregister Agent Address Request",
+    [144] = "Unregister Agent Address Response",
+    [145] = "Report",
+    [255] = "Reserved, must not be used",
+}
 
 function get_first_four(one_byte) 
     return bit.rshift(one_byte, 4)
