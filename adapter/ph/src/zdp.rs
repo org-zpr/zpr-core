@@ -48,7 +48,7 @@ pub enum ZdpPacketType {
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
-pub struct ZdpAbbreviatedHeader {
+pub struct ZdpBaseHeader {
     pub packet_type: ZdpPacketType,
     pub excess_length: u8,
     pub sequence_number: u16,
@@ -57,12 +57,14 @@ pub struct ZdpAbbreviatedHeader {
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpPerFlowHeader {
-    pub abbreviated_header: ZdpAbbreviatedHeader,
+    pub abbreviated_header: ZdpBaseHeader,
     pub stream_id: u32,
 }
 
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
 pub struct ZdpEchoHeader {
-    pub abbreviated_header: ZdpAbbreviatedHeader,
+    pub abbreviated_header: ZdpBaseHeader,
     pub sequence_number: u16, // Only used for the response
     pub additional_length: u16,
 }
