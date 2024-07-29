@@ -18,7 +18,7 @@ pub async fn command_server(
     zpr: Zpr,
     token: CancellationToken,
 ) -> io::Result<()> {
-    info!("starting command server on {}", config.socket_path);
+    info!("starting command server on {}", config.socket_path.display());
     let listener = UnixListener::bind(config.socket_path.clone())?;
     loop {
         tokio::select! {

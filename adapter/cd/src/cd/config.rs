@@ -5,12 +5,13 @@ use openssl::rsa::Rsa;
 use openssl::x509::X509;
 
 use std::fs;
+use std::path::PathBuf;
 use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read};
 
 // "Config" is configuration details for the CD binary.
 pub struct Config {
-    pub socket_path: String,
+    pub socket_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Deserialize)]
