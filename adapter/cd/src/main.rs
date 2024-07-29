@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 pub mod cd;
+pub mod zdp;
 
 
 fn usage() -> io::Result<()> {

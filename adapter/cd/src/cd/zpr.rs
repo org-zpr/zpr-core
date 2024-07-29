@@ -112,6 +112,21 @@ impl Zpr {
         status
     }
 
+    pub fn get_configuration_names(&self) -> Vec<String> {
+        let state = self.shared.state.lock().unwrap();
+        state.configs.keys().cloned().collect()
+    }
+
+
+    /// Returns "ADDR:PORT"
+    pub fn get_connect_string(&self, name: &str) -> Option<String> {
+        let state = self.shared.state.lock().unwrap();
+        let cfg = state.configs.get(name);
+        cfg?;
+        let (conf, _) = cfg.unwrap();
+        Some(format!("{}:{}", conf.get_dock_host(), conf.get_dock_port()))
+    }
+
     pub fn get_configuration_state(&self, name: &str) -> Option<ConfigState> {
         let state = self.shared.state.lock().unwrap();
         let cfg = state.configs.get(name);
@@ -289,8 +304,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             host_or_ip = "localhost"
             port = 2242
             [adapter]
-            certificate = "@CERT"            
-            private_key = "@KEY"                        
+            certificate = "@CERT"
+            private_key = "@KEY"
             #blank
         "#;
 
@@ -326,8 +341,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             host_or_ip = "localhost"
             port = 2242
             [adapter]
-            certificate = "@CERT"            
-            private_key = "@KEY"                        
+            certificate = "@CERT"
+            private_key = "@KEY"
             #blank
         "#;
 
@@ -372,8 +387,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             host_or_ip = "localhost"
             port = 2242
             [adapter]
-            certificate = "@CERT"            
-            private_key = "@KEY"                        
+            certificate = "@CERT"
+            private_key = "@KEY"
             #blank
         "#;
 
@@ -406,8 +421,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             host_or_ip = "another.localhost"
             port = 2243
             [adapter]
-            certificate = "@CERT"            
-            private_key = "@KEY"                        
+            certificate = "@CERT"
+            private_key = "@KEY"
             #blank
         "#;
         let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
@@ -450,8 +465,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             host_or_ip = "localhost"
             port = 2242
             [adapter]
-            certificate = "@CERT"            
-            private_key = "@KEY"                        
+            certificate = "@CERT"
+            private_key = "@KEY"
             #blank
         "#;
 

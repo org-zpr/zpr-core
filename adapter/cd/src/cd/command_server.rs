@@ -7,9 +7,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
+use tokio::sync::mpsc::Sender;
 
 pub use crate::cd::config::{load_configuration, Config};
 pub use crate::cd::zpr::{ConfigState, Zpr};
+
+use super::cmonitor;
 
 type NetWriterT = Arc<Mutex<tokio::io::BufWriter<tokio::net::unix::OwnedWriteHalf>>>;
 
@@ -17,6 +20,7 @@ pub async fn command_server(
     config: Arc<Config>,
     zpr: Zpr,
     token: CancellationToken,
+    monitor_ctrl: Sender<cmonitor::Command>,
 ) -> io::Result<()> {
     info!("starting command server on {}", config.socket_path.display());
     let listener = UnixListener::bind(config.socket_path.clone())?;
@@ -31,8 +35,9 @@ pub async fn command_server(
                     Ok((stream, _)) => {
                         info!("accepted command connection");
                         let zpr = zpr.clone();
+                        let mctrl = monitor_ctrl.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = handle_command_connection(stream, zpr).await {
+                            if let Err(e) = handle_command_connection(stream, zpr, mctrl).await {
                                 error!("Error handling command connection: {}", e);
                             }
                         });
@@ -57,7 +62,7 @@ pub async fn command_server(
 //      OK
 //      explanatory message here
 //
-async fn handle_command_connection(stream: tokio::net::UnixStream, zpr: Zpr) -> io::Result<()> {
+async fn handle_command_connection(stream: tokio::net::UnixStream, zpr: Zpr, monitor_ctrl: Sender<cmonitor::Command>) -> io::Result<()> {
     let (reader, send) = stream.into_split();
     let mut reader = tokio::io::BufReader::new(reader);
 
@@ -76,8 +81,8 @@ async fn handle_command_connection(stream: tokio::net::UnixStream, zpr: Zpr) -> 
             let parts: Vec<&str> = line.split_whitespace().collect();
             match parts[0] {
                 "status" => handle_status(Arc::clone(&writer), zpr).await?,
-                "connect" => handle_connect(&parts, Arc::clone(&writer), zpr).await?,
-                "disconnect" => handle_disconnect(&parts, Arc::clone(&writer), zpr).await?,
+                "connect" => handle_connect(&parts, Arc::clone(&writer), zpr, monitor_ctrl).await?,
+                "disconnect" => handle_disconnect(&parts, Arc::clone(&writer), zpr, monitor_ctrl).await?,
                 _ => {
                     let mut ww = writer.lock().await;
                     ww.write_all(b"2\nERR\nunknown command\n").await?;
@@ -110,13 +115,13 @@ async fn handle_status(writer: NetWriterT, zpr: Zpr) -> Result<(), io::Error> {
     Ok(())
 }
 
-async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Result<(), io::Error> {
+async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr, monitor_ctrl: Sender<cmonitor::Command>) -> Result<(), io::Error> {
     let mut writer = writer.lock().await;
     if parts.len() < 2 {
         writer
             .write_all(b"2\nERR\nconnect requires a configuration path or name\n")
             .await?;
-        return Ok(());
+        return Err(io::Error::new(io::ErrorKind::Other, "argument error"));
     }
 
     // Determine if it is a name of existing or a path to a new one.
@@ -137,7 +142,7 @@ async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Result<
                 writer
                     .write_all(format!("2\nERR\n{}\n", emsg).as_bytes())
                     .await?;
-                return Ok(());
+                return Err(io::Error::new(io::ErrorKind::Other, e));
             }
         };
 
@@ -151,11 +156,22 @@ async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Result<
                 writer
                     .write_all(format!("2\nERR\n{}\n", emsg).as_bytes())
                     .await?;
-                return Ok(());
+                return Err(io::Error::new(io::ErrorKind::Other, e));
             }
         }
     } else {
         cname = parts[1].to_string();
+    }
+
+    match monitor_ctrl.send(cmonitor::Command::Connect(cname.clone())).await {
+        Ok(()) => (),
+        Err(e) => {
+            error!("Error sending connect command to monitor: {}", e);
+            writer
+                .write_all(b"2\nERR\nerror sending connect command\n")
+                .await?;
+            return Err(io::Error::new(io::ErrorKind::Other, e));
+        }
     }
 
     writer
@@ -164,7 +180,7 @@ async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Result<
     Ok(())
 }
 
-async fn handle_disconnect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Result<(), io::Error> {
+async fn handle_disconnect(parts: &[&str], writer: NetWriterT, zpr: Zpr, monitor_control: Sender<cmonitor::Command>) -> Result<(), io::Error> {
     let mut writer = writer.lock().await;
 
     let mut all = true;
@@ -178,14 +194,25 @@ async fn handle_disconnect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Resu
     let mut fails = vec![];
     let mut successes = vec![];
 
-    let statuses = zpr.get_status();
-    for (name, _, state_str) in statuses {
-        if (all || name == cname) && (state_str != "disconnected") {
-            if let Err(e) = zpr.set_status(&name, ConfigState::Disconnected) {
-                error!("Error setting status to disconnected for {}: {}", name, e);
-                fails.push(name);
-            } else {
-                successes.push(name);
+    for name in zpr.get_configuration_names() {
+        if let Some(cs) = zpr.get_configuration_state(&name) {
+            let is_connected = match cs {
+                ConfigState::Connected{..} | ConfigState::Connecting => true,
+                _ => false,
+            };
+            if is_connected {
+                match monitor_control.send(cmonitor::Command::Disconnect(name.clone())).await {
+                    Ok(()) => {
+                        successes.push(name);
+                    }
+                    Err(e) => {
+                        error!("Error sending disconnect command to monitor: {}", e);
+                        writer
+                            .write_all(b"2\nERR\nerror sending disconnect command\n")
+                            .await?;
+                        fails.push(name);
+                    }
+                }
             }
         }
     }
@@ -207,7 +234,7 @@ async fn handle_disconnect(parts: &[&str], writer: NetWriterT, zpr: Zpr) -> Resu
             .await?;
         for name in &successes {
             writer
-                .write_all(format!("{}: disconnect OK\n", name).as_bytes())
+                .write_all(format!("{}: disconnect requested\n", name).as_bytes())
                 .await?;
         }
         for name in &fails {
