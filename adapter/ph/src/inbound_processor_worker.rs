@@ -63,7 +63,7 @@ async fn handle_packet<'pktbuf>(
 ) {
     let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
-    match hdr.abbreviated_header.packet_type {
+    match hdr.base_header.packet_type {
         ZdpPacketType::TransitPacket => {
             // copy out relevant header info
             pkt.metadata_mut().flow_id = hdr.stream_id;

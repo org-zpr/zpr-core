@@ -57,14 +57,14 @@ pub struct ZdpBaseHeader {
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpPerFlowHeader {
-    pub abbreviated_header: ZdpBaseHeader,
+    pub base_header: ZdpBaseHeader,
     pub stream_id: u32,
 }
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpEchoHeader {
-    pub abbreviated_header: ZdpBaseHeader,
+    pub base_header: ZdpBaseHeader,
     pub sequence_number: u16, // Only used for the response
     pub additional_length: u16,
 }

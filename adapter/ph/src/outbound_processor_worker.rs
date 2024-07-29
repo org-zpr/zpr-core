@@ -49,7 +49,7 @@ where
 async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf>) {
     // allocate and fill in the header
     let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
-    hdr.abbreviated_header.packet_type = ZdpPacketType::TransitPacket;
+    hdr.base_header.packet_type = ZdpPacketType::TransitPacket;
 
     // fill in metadata
     pkt.metadata_mut().flow_id = 0; // TODO: fill from IP header
