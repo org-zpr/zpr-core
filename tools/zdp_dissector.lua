@@ -22,10 +22,11 @@ ttl = ProtoField.uint8("zdp.ttl", "Time to Live", base.DEC)
 tc = ProtoField.uint8("zdp.tc", "Traffic Class", base.DEC)
 fl = ProtoField.uint32("zdp.fl", "Flow Label", base.DEC)
 hop_limit = ProtoField.uint8("zdp.hop_limit", "Hop Limit", base.DEC)
+ip_options = ProtoField.bytes("zdp.ip_options", "IP Options")
 
 zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
                      mac_addr, d2d_said, agent_packet, d2d_mac, management_packet, ip_version,
-                     ihl, dscp, frag_id, frag_offset, ttl, tc, fl, hop_limit }
+                     ihl, dscp, frag_id, frag_offset, ttl, tc, fl, hop_limit, ip_options }
 
 function zdp_proto.dissector(buffer, pinfo, tree)
     length = buffer:len()
@@ -34,15 +35,15 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     pinfo.cols.protocol = zdp_proto.name
     -- TODO look into adding to a subtree from a funciton, this "main" function 
     -- is rather long, and is doing many things    
-    local subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
-    subtree:add(zpi_val, buffer(0, 1))
+    local zdp_header_subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
+    zdp_header_subtree:add(zpi_val, buffer(0, 1))
 
     local type = buffer(1,1):uint()
     local type_name = get_type_name(type)
-    subtree:add(zdp_type, buffer(1, 1)):append_text(" (" .. type_name .. ")")
+    zdp_header_subtree:add(zdp_type, buffer(1, 1)):append_text(" (" .. type_name .. ")")
 
-    subtree:add(excess_len, buffer(2, 1))
-    subtree:add(seq_num, buffer(3, 2))
+    zdp_header_subtree:add(excess_len, buffer(2, 1))
+    zdp_header_subtree:add(seq_num, buffer(3, 2))
 
     local real_len = length - buffer(2,1):uint() 
     -- Perform different dissections depending on type of packet
@@ -65,6 +66,9 @@ function zdp_proto.dissector(buffer, pinfo, tree)
             agent_header_subtree:add(frag_id, buffer(24, 2))
             agent_header_subtree:add(frag_offset, buffer(26, 2))
             agent_header_subtree:add(ttl, buffer(27, 1))
+            if ihl_val > 5 then
+                agent_header_subtree:add(ip_options, buffer(28, ihl_val - ((ihl_val - 5) * 4)))
+            end
         elseif v4_v6 == 6 then
             local tc_value = get_middle_eight(buffer(22, 2):uint())
             agent_header_subtree:add(tc, tc_value)
