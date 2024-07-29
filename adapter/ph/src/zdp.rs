@@ -46,6 +46,12 @@ pub enum ZdpPacketType {
     Report = 145,
 }
 
+impl ZdpPacketType {
+    pub fn is_per_flow(self) -> bool {
+        self.0 < 128
+    }
+}
+
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBaseHeader {
