@@ -21,6 +21,13 @@ impl ZDPClient {
 }
 
 
+/// Creates a new ZDPClient.
+//
+// One day this may do more stuff, like kick off a state machine or
+// something.  For now, after you call this you can call primitive
+// methods on the client.
+//
+// Call disconnect when you are done.
 pub async fn connect(addr: &str) -> io::Result<ZDPClient> {
     info!("zdp/client faking connect ....");
     Ok(ZDPClient::new(addr))
