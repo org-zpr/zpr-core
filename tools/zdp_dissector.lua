@@ -34,15 +34,15 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     pinfo.cols.protocol = zdp_proto.name
     -- TODO look into adding to a subtree from a funciton, this "main" function 
     -- is rather long, and is doing many things    
-    local subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
-    subtree:add(zpi_val, buffer(0, 1))
+    local zdp_header_subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
+    zdp_header_subtree:add(zpi_val, buffer(0, 1))
 
     local type = buffer(1,1):uint()
     local type_name = get_type_name(type)
-    subtree:add(zdp_type, buffer(1, 1)):append_text(" (" .. type_name .. ")")
+    zdp_header_subtree:add(zdp_type, buffer(1, 1)):append_text(" (" .. type_name .. ")")
 
-    subtree:add(excess_len, buffer(2, 1))
-    subtree:add(seq_num, buffer(3, 2))
+    zdp_header_subtree:add(excess_len, buffer(2, 1))
+    zdp_header_subtree:add(seq_num, buffer(3, 2))
 
     local real_len = length - buffer(2,1):uint() 
     -- Perform different dissections depending on type of packet
