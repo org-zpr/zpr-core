@@ -34,12 +34,8 @@ async fn worker<'pktbuf>(
                 }
                 OutboundProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), count),
                 OutboundProcessorMessage::NonFlowMgmt(pack_type, mut pkt) => {
-                    println!("in non-flow management section");
                     let hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     hdr.packet_type = pack_type;
-                    if pack_type == ZdpPacketType::Report {
-                        println!("yes defo");
-                    }
                     handle_packet(pkt, asm).await;
                 }
                 OutboundProcessorMessage::PerFlowMgmt(pack_type, mut pkt, stream_id) => {

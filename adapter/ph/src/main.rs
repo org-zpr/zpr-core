@@ -197,6 +197,8 @@ fn main() -> ExitCode {
                 .unwrap();
             let unix_socket = Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
 
+            asm.send_report("Reporting for Duty!").await;
+
             let mut js = JoinSet::new();
 
             // Launches RPC worker program
@@ -278,8 +280,6 @@ fn main() -> ExitCode {
                 .expect("unable to connect to peer addr");
             eprintln!("Connected!"); // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
-            
-            asm.send_report("Reporting for Duty!\n").await;
 
             js.spawn(inbound_recv_worker::launch(
                 &inbound_recv_worker::Config {
@@ -301,7 +301,6 @@ fn main() -> ExitCode {
             while let Some(res) = js.join_next().await {
                 res.unwrap();
             }
-
         });
 
     ExitCode::SUCCESS

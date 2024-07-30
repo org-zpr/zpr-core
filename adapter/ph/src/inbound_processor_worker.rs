@@ -61,10 +61,11 @@ async fn handle_packet<'pktbuf>(
     mut pkt: Packet<'pktbuf>,
     asm: &Assembly<'pktbuf>,
 ) {
+    pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
+
     let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
     if base_hdr.packet_type.is_per_flow() {
-        pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
         let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
         // copy out relevant header info
@@ -100,7 +101,6 @@ async fn handle_packet<'pktbuf>(
 
         match packet_type {
             ZdpPacketType::Report => {
-                println!("its a report");
                 let hdr =
                     ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
                 // Not sure if this if statement is what you mean by "validate", or do you want an assert or panic
