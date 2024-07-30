@@ -110,8 +110,6 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         zdp_header_subtree:add(mac, buffer(real_len - 4, 4))
         decode_management(type, buffer(5, real_len - 17), tree)
     end
-    decode_management(11, buffer(5, real_len - 17), tree)
-
 end
 -- Idiomatic way of doing this may be to actually create a whole new dissector, although that might be challenging
 -- becuase we couldn't just forward the managament packet, the type would also have to be forwarded, meaning we would either
