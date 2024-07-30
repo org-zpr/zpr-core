@@ -88,13 +88,22 @@ function zdp_proto.dissector(buffer, pinfo, tree)
             agent_header_subtree:add(dscp, buffer(23, 1))
             agent_header_subtree:add(frag_id, buffer(24, 2))
             agent_header_subtree:add(frag_offset, buffer(26, 2))
-            agent_header_subtree:add(ttl, buffer(27, 1))
+            agent_header_subtree:add(ttl, buffer(28, 1))
+            if ihl_val > 5 then
+                local options_len = ihl_val - ((ihl_val - 5) * 4)
+                agent_header_subtree:add(ip_options, buffer(29, options_len))
+                -- pass ip options to an options dissector here (I could not find an existing IP options dissector)
+            else
+                Dissector.get("tcp"):call(buffer(29, real_len - 33):tvb(), pinfo, tree)
+            end
+
         elseif v4_v6 == 6 then
             local tc_value = get_middle_eight(buffer(22, 2):uint())
             agent_header_subtree:add(tc, tc_value)
             local fl_value = get_back_twelve(buffer(23, 3):uint())
             agent_header_subtree:add(fl, fl_value)
             agent_header_subtree:add(hop_limit, buffer(26, 1))
+            Dissector.get("tcp"):call(buffer(27, real_len - 33):tvb(), pinfo, tree)
         end
     elseif type <= 127 then 
         -- Stream-oriented Management Message
