@@ -61,26 +61,45 @@ async fn handle_packet<'pktbuf>(
     mut pkt: Packet<'pktbuf>,
     asm: &Assembly<'pktbuf>,
 ) {
-    let hdr = ZdpHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
-    match hdr.abbreviated_header.packet_type {
-        ZdpPacketType::UncompressedAgentPacket => {
-            // copy out relevant header info
-            pkt.metadata_mut().flow_id = hdr.abbreviated_header.stream_id;
+    if base_hdr.packet_type.is_per_flow() {
+        let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
-            // strip packet header
-            pkt.advance(std::mem::size_of::<ZdpHeader>());
+        // copy out relevant header info
+        let packet_type = hdr.base_header.packet_type;
+        let _sequence_number = hdr.base_header.sequence_number;
+        let stream_id = hdr.stream_id;
 
-            if config.mode == PhMode::Server {
-                // TODO: drop error packets
-                let _ = classify(&mut pkt);
+        // strip packet header
+        pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
+
+        match packet_type {
+            ZdpPacketType::TransitPacket => {
+                pkt.metadata_mut().flow_id = stream_id;
+
+                if config.mode == PhMode::Server {
+                    // TODO: drop error packets
+                    let _ = classify(&mut pkt);
+                }
+
+                // send out decapsulated packet
+                asm.inbound_send.enqueue_packet(pkt).await;
             }
 
-            // send out decapsulated packet
-            asm.inbound_send.enqueue_packet(pkt).await;
+            packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
+    } else {
+        // copy out relevant header info
+        let packet_type = base_hdr.packet_type;
+        let _sequence_number = base_hdr.sequence_number;
 
-        packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
+        // strip packet header
+        pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
+
+        match packet_type {
+            packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
+        }
     }
 }
 
