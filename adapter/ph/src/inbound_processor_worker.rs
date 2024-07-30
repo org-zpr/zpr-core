@@ -66,7 +66,6 @@ async fn handle_packet<'pktbuf>(
     let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
     if base_hdr.packet_type.is_per_flow() {
-        pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
         let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
         // copy out relevant header info
@@ -102,7 +101,6 @@ async fn handle_packet<'pktbuf>(
 
         match packet_type {
             ZdpPacketType::Report => {
-                println!("its a report");
                 let hdr =
                     ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
                 // TODO handle protocol errors i.e. if the body is shorter
