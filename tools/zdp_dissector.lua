@@ -70,7 +70,6 @@ function zdp_proto.dissector(buffer, pinfo, tree)
                 local options_len = ihl_val - ((ihl_val - 5) * 4)
                 agent_header_subtree:add(ip_options, buffer(29, options_len))
                 -- pass ip options to an options dissector here (I could not find an existing IP options dissector)
-                Dissector.get("tcp"):call(buffer(29 + options_len, real_len - (options_len + 33)):tvb(), pinfo, tree)
             else
                 Dissector.get("tcp"):call(buffer(29, real_len - 33):tvb(), pinfo, tree)
             end
