@@ -105,4 +105,3 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
     // forward encapsulated packet on
     asm.outbound_send.enqueue_packet(pkt).await;
 }
-
