@@ -2,6 +2,7 @@
 
 zdp_proto = Proto("zdp", "ZDP Header Dissector")
 
+-- ZDP Headers 
 zpi_val = ProtoField.uint8("zdp.zpi", "ZPI", base.DEC)
 zdp_type = ProtoField.uint8("zdp.type", "Type", base.DEC)
 excess_len = ProtoField.uint8("zdp.excess_len", "Excess Length", base.DEC)
@@ -13,6 +14,8 @@ d2d_said = ProtoField.uint8("zdp.d2d_said", "D2D SAID", base.DEC)
 agent_packet = ProtoField.bytes("zdp.agent_packet", "Agent Packet")
 d2d_mac = ProtoField.uint32("zdp.d2d_mac", "D2D MAC", base.DEC)
 management_packet = ProtoField.bytes("zdp.management", "Management Packet")
+
+-- Agent Packet Headers
 ip_version = ProtoField.uint8("zdp.ip_version", "IP Version", base.DEC)
 ihl = ProtoField.uint8("zdp.ihl", "Internet Header Length", base.DEC)
 dscp = ProtoField.uint8("zdp.dscp", "Differentiated Services Code Point", base.DEC)
@@ -24,9 +27,29 @@ fl = ProtoField.uint32("zdp.fl", "Flow Label", base.DEC)
 hop_limit = ProtoField.uint8("zdp.hop_limit", "Hop Limit", base.DEC)
 ip_options = ProtoField.bytes("zdp.ip_options", "IP Options")
 
+-- Management Data
+mbz = ProtoField.bytes("zdp.mbz", "Must Be Zero")
+adl = ProtoField.uint16("zdp.adl", "Additional Data Length", base.DEC)
+aditional_data = ProtoField.bytes("zdp.additional", "Optional Additional Data")
+req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
+ip_protocol_present = ProtoField.uint8("zdp.protocol_present", "IP Protocol Present", base.DEC)
+source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
+destination_port_present = ProtoField.uint8("zdp.destination_port_present", "Destination Port Information Present", base.DEC)
+source_addr = ProtoField.bytes("zdp.source_addr", "Source IP Address") -- TODO change from bytes to two functions one with type ProtoField.ipv4 and one with ipv6
+dest_addr = ProtoField.bytes("zdp.dest_addr", "Destination IP Address")
+ip_protocol = ProtoField.uint8("zdp.ip_protocol", "IP Protocol", base.DEC)
+source_info = ProtoField.uint16("zdp.source_info", "Source Port Information", base.DEC)
+dest_info = ProtoField.uint16("zdp.dest_info", "Destination Port Information", base.DEC)
+status_code = ProtoField.uint8("zdp.status_code", "Status Code", base.DEC)
+info_len = ProtoField.uint8("zdp.info_len", "Information Length", base.DEC)
+status_info = ProtoField.bytes("zdp.status_info", "Optional Additional Status Information")
+
 zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
                      mac_addr, d2d_said, agent_packet, d2d_mac, management_packet, ip_version,
-                     ihl, dscp, frag_id, frag_offset, ttl, tc, fl, hop_limit, ip_options }
+                     ihl, dscp, frag_id, frag_offset, ttl, tc, fl, hop_limit, ip_options, mbz,
+                     adl, aditional_data, req_seq_num, ip_protocol_present, source_port_present, 
+                     destination_port_present, source_addr, dest_addr, ip_protocol, source_info, 
+                     dest_info, status_code, info_len, status_info }
 
 function zdp_proto.dissector(buffer, pinfo, tree)
     length = buffer:len()
@@ -38,7 +61,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     local zdp_header_subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
     zdp_header_subtree:add(zpi_val, buffer(0, 1))
 
-    local type = buffer(1,1):uint()
+    local type = buffer(1, 1):uint()
     local type_name = get_type_name(type)
     zdp_header_subtree:add(zdp_type, buffer(1, 1)):append_text(" (" .. type_name .. ")")
 
@@ -87,14 +110,100 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         zdp_header_subtree:add(stream_id, buffer(5, 4))
         zdp_header_subtree:add(management_packet, buffer(9, real_len - 21))
         zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
-        zdp_header_subtree:add(mac, buffer(real_len - 4, 4))
+        zdp_header_subtree:add(mac_addr, buffer(real_len - 4, 4))
+        decode_management(type, buffer(9, real_len - 21), tree)
     else 
         -- Other Management Message
         zdp_header_subtree:add(management_packet, buffer(5, real_len - 17))
         zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
-        zdp_header_subtree:add(mac, buffer(real_len - 4, 4))
+        zdp_header_subtree:add(mac_addr, buffer(real_len - 4, 4))
+        decode_management(type, buffer(5, real_len - 17), tree)
     end
 end
+-- Idiomatic way of doing this may be to actually create a whole new dissector, although that might be challenging
+-- becuase we couldn't just forward the managament packet, the type would also have to be forwarded, meaning we would either
+-- have to forward basically the whole packet, or create a new tvb with the type and the management packet and forward that
+function decode_management(type, buffer, tree)
+    local management_subtree = tree:add(zdp_proto, buffer(), "Management Packet Data")
+    local func = management_table[type]
+    if(func) then
+        func(buffer, management_subtree)
+    else
+        management_subtree:add(management_packet, buffer(0))
+    end
+end
+
+-- Function definitions must come before table
+function handle_echo_request(buffer, management_subtree)
+    management_subtree:add(mbz, buffer(0, 2))
+    management_subtree:add(adl, buffer(2, 2))
+    local add_data_len = buffer(2, 2):uint()
+    management_subtree:add(aditional_data, buffer(4, add_data_len))
+end
+
+function handle_echo_response(buffer, management_subtree)
+    management_subtree:add(req_seq_num, buffer(0, 2))
+    management_subtree:add(adl, buffer(2, 2))
+    local add_data_len = buffer(2, 2):uint()
+    if add_data_len > 0 then
+        management_subtree:add(aditional_data, buffer(4, add_data_len))
+    end                                                           
+end
+
+function handle_bind_agent_addr_request(buffer, management_subtree)
+    local version = buffer(0, 1):uint()
+    management_subtree:add(ip_version, buffer(0, 1))
+    local ip_proto_present = get_first_bit(buffer(1, 1):uint())
+    management_subtree:add(ip_protocol_present, ip_proto_present):append_text(" (" .. presence_value[ip_proto_present] .. ")")
+    local source_present = get_second_bit(buffer(1, 1):uint())
+    management_subtree:add(source_port_present, source_present):append_text(" (" .. presence_value[source_present] .. ")")
+    local dest_present = get_third_bit(buffer(1, 1):uint())
+    management_subtree:add(destination_port_present, dest_present):append_text(" (" .. presence_value[dest_present] .. ")")
+    
+    local addr_len = 4
+    if version == 6 then addr_len = 16 end
+
+    management_subtree:add(source_addr, buffer(2, addr_len))
+    management_subtree:add(dest_addr, buffer(2 + addr_len, addr_len))
+
+    local bytes_used = 2 + (2 * addr_len)
+    if ip_proto_present == 1 then 
+        management_subtree:add(ip_protocol, buffer(bytes_used, 1))
+        bytes_used = bytes_used + 1
+    end
+     
+    if source_present == 1 then 
+        management_subtree:add(source_info, buffer(bytes_used, 2))
+        bytes_used = bytes_used + 2
+    end
+
+    if dest_present == 1 then 
+        management_subtree:add(dest_info, buffer(bytes_used, 2))
+    end
+end
+
+function handle_bind_agent_addr_response(buffer, management_subtree)
+    management_subtree:add(req_seq_num, buffer(0, 2))
+    management_subtree:add(status_code, buffer(2, 1))
+    management_subtree:add(info_len, buffer(3, 1))
+    local add_info_len = buffer(3, 1):uint()
+    if add_info_len > 1 then
+        management_subtree:add(status_info, buffer(4, add_info_len)) 
+    end                                                          
+end
+management_table = 
+{
+    [11] = handle_bind_agent_addr_request,
+    [12] = handle_bind_agent_addr_response,
+    [131] = handle_echo_request,
+    [132] = handle_echo_response,
+}
+
+presence_value = 
+{
+    [0] = "Not Present",
+    [1] = "Present",
+}
 
 function get_type_name(type)
     local type_name = type_name_table[type]
@@ -165,6 +274,20 @@ end
 
 function get_back_twelve(three_bytes) 
     return bit.band(three_bytes, 0x0FFFFF)
+end
+
+function get_first_bit(one_byte)
+    return bit.rshift(one_byte, 7)
+end
+
+function get_second_bit(one_byte)
+    local masked = bit.band(one_byte, 0x40)
+    return bit.rshift(masked, 6)
+end
+
+function get_third_bit(one_byte)
+    local masked = bit.band(one_byte, 0x20)
+    return bit.rshift(masked, 5)
 end
 
 local udp_port = DissectorTable.get("udp.port")

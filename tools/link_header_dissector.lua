@@ -14,16 +14,12 @@ function zdp_link_p2p_proto.dissector(buffer, pinfo, tree)
 
     local subtree = tree:add(zdp_link_p2p_proto, buffer(), "ZDP Link Layer Data")
     local direction = buffer(0,1):uint()
-    local direction_name = get_direction_name(direction)
-    subtree:add(in_out, buffer(0,1)):append_text(" (" .. direction_name .. ")")
+    subtree:add(in_out, buffer(0,1)):append_text(" (" .. direction_name[direction] .. ")")
 
 end
 
-function get_direction_name(direction)
-    local direction_name = "Unknown"
-
-    if direction == 0 then direction_name = "Inbound"
-    elseif direction == 1 then direction_name = "Outbound" end
-
-    return direction_name
-end
+direction_name = 
+{
+    [0] = "Inbound",
+    [1] = "Outbound",
+}
