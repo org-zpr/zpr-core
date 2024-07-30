@@ -102,7 +102,7 @@ pub enum OutboundProcessorMessage<'pktbuf> {
     Packet(Packet<'pktbuf>),
     TestPacket(TestPacket),
     NonFlowMgmt(zdp::ZdpPacketType, Packet<'pktbuf>),
-    PerFlowMgmt(zdp::ZdpPacketType, Packet<'pktbuf>, u32),
+    PerFlowMgmt(zdp::ZdpPacketType, u32, Packet<'pktbuf>),
 }
 
 pub struct OutboundProcessor<'pktbuf> {
@@ -153,14 +153,14 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
     pub async fn enqueue_per_flow_mgmt(
         &self,
         zdp_packet_type: zdp::ZdpPacketType,
-        packet: Packet<'pktbuf>,
         stream_id: u32,
+        packet: Packet<'pktbuf>,
     ) {
         self.sender
             .send(OutboundProcessorMessage::PerFlowMgmt(
                 zdp_packet_type,
-                packet,
                 stream_id,
+                packet,
             ))
             .await
             .unwrap();

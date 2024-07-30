@@ -25,7 +25,6 @@ async fn worker<'pktbuf>(
     while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         for pkt in pkts.drain(..) {
             match pkt {
-                // TOOD not a very elegant solution, consider restructuring
                 OutboundProcessorMessage::Packet(mut pkt) => {
                     // allocate and fill in the header
                     let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
@@ -38,7 +37,7 @@ async fn worker<'pktbuf>(
                     hdr.packet_type = pack_type;
                     handle_packet(pkt, asm).await;
                 }
-                OutboundProcessorMessage::PerFlowMgmt(pack_type, mut pkt, stream_id) => {
+                OutboundProcessorMessage::PerFlowMgmt(pack_type, stream_id, mut pkt) => {
                     let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
                     hdr.base_header.packet_type = pack_type;
                     hdr.stream_id = stream_id;
