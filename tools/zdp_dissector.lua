@@ -136,8 +136,9 @@ function handle_echo_response(buffer, management_subtree)
     management_subtree:add(req_seq_num, buffer(0, 2))
     management_subtree:add(adl, buffer(2, 2))
     local add_data_len = buffer(2, 2):uint()
-    management_subtree:add(aditional_data, buffer(4, add_data_len)) -- do we want if statement here, or just let it show up
-                                                                    -- as <MISSING> on wireshark?
+    if add_data_len > 0 then
+        management_subtree:add(aditional_data, buffer(4, add_data_len))
+    end                                                           
 end
 
 function handle_bind_agent_addr_request(buffer, management_subtree)
@@ -177,8 +178,9 @@ function handle_bind_agent_addr_response(buffer, management_subtree)
     management_subtree:add(status_code, buffer(2, 1))
     management_subtree:add(info_len, buffer(3, 1))
     local add_info_len = buffer(3, 1):uint()
-    management_subtree:add(status_info, buffer(4, add_info_len)) -- do we want if statement here, or just let it show up
-                                                              -- as <MISSING> on wireshark?
+    if add_info_len > 1 then
+        management_subtree:add(status_info, buffer(4, add_info_len)) 
+    end                                                          
 end
 management_table = 
 {
