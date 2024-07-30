@@ -7,6 +7,9 @@ use crate::flow_control::FlowControl;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use enum_map::EnumMap;
+use crate::zdp::*;
+use crate::packet::*;
+use bytes::{BufMut, Buf};
 // Interface to full assembly of all stages.
 
 // This is the "public interface" that all stages of the system use to talk
@@ -45,4 +48,21 @@ pub struct Assembly<'pktbuf> {
     pub counters: EnumMap<CounterType, Counter>,
 
     pub tun_ctl: TunCtl<'pktbuf>,
+}
+
+impl<'pktbuf> Assembly<'pktbuf> {
+    pub async fn send_report(&self, to_send: &str) {
+        let buf = self.buffer_stack.get_buffer().await;
+        let mut pkt = Packet::new(buf, config::REPORT_HEADROOM);
+        let hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
+        hdr.report_data_length = to_send.len() as u16;
+        println!("length: {}", pkt.remaining_mut());
+        if pkt.remaining_mut() >= to_send.len() {
+            println!("in here");
+            pkt.put(to_send.as_bytes())
+        }
+        println!("enqueuing packet\n");
+        self.outbound_processor.enqueue_non_flow_mgmt(ZdpPacketType::Report, pkt).await;
+        //println!("{}", pkt.body().len());
+    }
 }

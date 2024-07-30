@@ -22,8 +22,10 @@ async fn worker<'a>(
         for msg in &msgs {
             match msg {
                 OutboundSendMessage::Packet(pkt) => {
+                    println!("in sending packet section");
                     socket.send(pkt.body()).await.unwrap(); // TODO: error handling
                     asm.counters[CounterType::OutPacksSent].increment();
+                    println!("sent packet");
                 }
 
                 OutboundSendMessage::TestPacket(_) => (), /* handled below */
