@@ -37,13 +37,13 @@ async fn worker<'pktbuf>(
                     let hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     hdr.packet_type = pack_type;
                     handle_packet(pkt, asm).await;
-                },
+                }
                 OutboundProcessorMessage::PerFlowMgmt(pack_type, mut pkt, stream_id) => {
                     let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
                     hdr.base_header.packet_type = pack_type;
                     hdr.stream_id = stream_id;
                     handle_packet(pkt, asm).await;
-                },
+                }
             }
         }
     }
@@ -104,4 +104,3 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
     // forward encapsulated packet on
     asm.outbound_send.enqueue_packet(pkt).await;
 }
-
