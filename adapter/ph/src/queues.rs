@@ -1,11 +1,11 @@
 use crate::packet::Packet;
 use crate::test_packet::*;
+use crate::zdp;
 use enum_map::Enum;
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
-
 // Queues (i.e., frontend interface) for each stage of the system.
 
 // "Inbound" refers to the dock->adapter direction (i.e., inbound to this host).
@@ -97,9 +97,12 @@ impl<'pktbuf> InboundSend<'pktbuf> {
 // All packets from the host are sent here for encapsulation, and any
 // CPU-intensive preprocessing (e.g. signature generation).
 // This may morph into more or fewer (i.e. zero) stages depending on future requirements.
+#[allow(dead_code)]
 pub enum OutboundProcessorMessage<'pktbuf> {
     Packet(Packet<'pktbuf>),
     TestPacket(TestPacket),
+    NonFlowMgmt(zdp::ZdpPacketType, Packet<'pktbuf>),
+    PerFlowMgmt(zdp::ZdpPacketType, Packet<'pktbuf>, u32),
 }
 
 pub struct OutboundProcessor<'pktbuf> {
@@ -129,6 +132,38 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
             .unwrap();
 
         Ok(test_tuple.1.await?)
+    }
+
+    #[allow(dead_code)]
+    pub async fn enqueue_non_flow_mgmt(
+        &self,
+        zdp_packet_type: zdp::ZdpPacketType,
+        packet: Packet<'pktbuf>,
+    ) {
+        self.sender
+            .send(OutboundProcessorMessage::NonFlowMgmt(
+                zdp_packet_type,
+                packet,
+            ))
+            .await
+            .unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn enqueue_per_flow_mgmt(
+        &self,
+        zdp_packet_type: zdp::ZdpPacketType,
+        packet: Packet<'pktbuf>,
+        stream_id: u32,
+    ) {
+        self.sender
+            .send(OutboundProcessorMessage::PerFlowMgmt(
+                zdp_packet_type,
+                packet,
+                stream_id,
+            ))
+            .await
+            .unwrap();
     }
 }
 
