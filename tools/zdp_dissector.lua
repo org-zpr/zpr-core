@@ -101,13 +101,13 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         zdp_header_subtree:add(stream_id, buffer(5, 4))
         zdp_header_subtree:add(management_packet, buffer(9, real_len - 21))
         zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
-        zdp_header_subtree:add(mac, buffer(real_len - 4, 4))
+        zdp_header_subtree:add(mac_addr, buffer(real_len - 4, 4))
         decode_management(type, buffer(9, real_len - 21), tree)
     else 
         -- Other Management Message
         zdp_header_subtree:add(management_packet, buffer(5, real_len - 17))
         zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
-        zdp_header_subtree:add(mac, buffer(real_len - 4, 4))
+        zdp_header_subtree:add(mac_addr, buffer(real_len - 4, 4))
         decode_management(type, buffer(5, real_len - 17), tree)
     end
 end
@@ -120,7 +120,7 @@ function decode_management(type, buffer, tree)
     if(func) then
         func(buffer, management_subtree)
     else
-        management_subtree:add(zpi_val, buffer(0,1))
+        management_subtree:add(management_packet, buffer(0))
     end
 end
 
