@@ -98,6 +98,19 @@ async fn handle_packet<'pktbuf>(
         pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
 
         match packet_type {
+            ZdpPacketType::Report => {
+                let hdr =
+                    ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+                // Not sure if this if statement is what you mean by "validate", or do you want an assert or panic
+                // or something similar?
+                if pkt.body().len() as u16 - 2 == hdr.report_data_length {
+                    pkt.advance(2);
+                    // TODO printing to stderr blocks indefinitely, this is just temporary
+                    eprintln!("{}", std::str::from_utf8(pkt.body()).unwrap());
+                }
+                let ret_buf = pkt.destroy();
+                asm.buffer_stack.put_buffer(ret_buf);
+            }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     }

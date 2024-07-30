@@ -75,4 +75,10 @@ pub struct ZdpEchoHeader {
     pub additional_length: u16,
 }
 
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpReportHeader {
+    pub report_data_length: u16,
+}
+
 const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 8);
