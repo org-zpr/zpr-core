@@ -35,9 +35,6 @@ async fn worker<'pktbuf>(
                 OutboundProcessorMessage::NonFlowMgmt(pack_type, mut pkt) => {
                     let hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     hdr.packet_type = pack_type;
-                    if pack_type == ZdpPacketType::Report {
-                        println!("yes defo");
-                    }
                     handle_packet(pkt, asm).await;
                 }
                 OutboundProcessorMessage::PerFlowMgmt(pack_type, stream_id, mut pkt) => {
