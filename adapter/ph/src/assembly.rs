@@ -63,4 +63,15 @@ impl<'pktbuf> Assembly<'pktbuf> {
             .enqueue_non_flow_mgmt(ZdpPacketType::Report, pkt)
             .await;
     }
+
+    #[allow(dead_code)]
+    pub async fn send_discard(&self) {
+        let buf = self.buffer_stack.get_buffer().await;
+        // I know this likely doesn't need as much headroom as report becuase it doesn't have a unique header,
+        // but I wanted to make sure I left enough room for the ZDP header
+        let pkt = Packet::new(buf, config::REPORT_HEADROOM);
+        self.outbound_processor
+            .enqueue_non_flow_mgmt(ZdpPacketType::Discard, pkt)
+            .await;
+    }
 }

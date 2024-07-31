@@ -117,6 +117,9 @@ async fn handle_packet<'pktbuf>(
                 let ret_buf = pkt.destroy();
                 asm.buffer_stack.put_buffer(ret_buf);
             }
+            ZdpPacketType::Discard => {
+                eprintln!("Discard message recieved");
+            }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     }

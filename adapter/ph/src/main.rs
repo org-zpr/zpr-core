@@ -198,6 +198,7 @@ fn main() -> ExitCode {
             let unix_socket = Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
 
             asm.send_report("Reporting for Duty!").await;
+            asm.send_discard().await;
 
             let mut js = JoinSet::new();
 
