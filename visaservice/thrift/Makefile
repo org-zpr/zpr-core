@@ -93,7 +93,7 @@ $(SUMS): %.thrift.sum: %.thrift
 
 
 clean:
-	rm -rf $(BUILD_GO) && rm -rf $(BUILD_RS) && rm -f $(SUMSFILE)
+	rm -rf $(BUILD_GO) && rm -rf $(BUILD_RS) && rm -f *.thrift.sum
 
 
 .PHONY: all go rs install install-go install-rs clean sums
