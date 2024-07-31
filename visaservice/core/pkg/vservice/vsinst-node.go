@@ -36,6 +36,10 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	}
 	if ap, err := netip.ParseAddrPort(serviceAddr); err == nil {
 		vssPort = ap.Port()
+		if vssPort == 0 {
+			// Problem!
+			return fmt.Errorf("misconfiguration - VSS reported port is zero (service_address = %v)", serviceAddr)
+		}
 		// The node tells the visa service its service address for the VSS. We assume that
 		// the address part matches the node address. That may not always be true but we
 		// confirm that here with an error message.
@@ -47,6 +51,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	}
 
 	{
+
 		vs.log.Info("generating a new visa-service visa for the node->VS", "node_addr_src", nodeAddr, "vs_addr_dest", vs.localAddr)
 		pktData := snip.NewTCPConnect(nodeAddr, 0, vs.localAddr, VisaServicePort)
 		vs.log.Debug("invoking request-visa for part of policy install (1/2)", "for_node", nodeAddr)
@@ -65,7 +70,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	}
 	{
 		vs.log.Info("generating a new visa-support-service visa for the VS->node", "vs_addr_src", vs.localAddr, "node_addr_dest", nodeAddr)
-		pktData := snip.NewTCPConnect(vs.localAddr, 1025, nodeAddr, vssPort)
+		pktData := snip.NewTCPConnect(vs.localAddr, 0, nodeAddr, vssPort)
 		vs.log.Debug("invoking request-visa for part of policy install (2/2)", "for_node", nodeAddr)
 		vsr, err := vs.doRequestVisa(context.Background(), vs.localAddr, pktData, 0, pp.VersionNumber())
 		if err != nil {

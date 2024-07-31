@@ -157,7 +157,7 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 	svc.SetAuthSvc(&TestAS{})
 
 	naddr := netip.MustParseAddr("fc00:3001:1::11")
-	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0")
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0", fmt.Sprintf("127.0.0.1:%d", vservice.VSSDefaultPort))
 
 	// Just add a web service to the node.
 	// In the future this will need to be re-worked since node config will be separate.
@@ -273,7 +273,7 @@ func TestRequestVisaDupes(t *testing.T) {
 	svc.SetAuthSvc(&TestAS{})
 
 	naddr := netip.MustParseAddr("fc00:3001:1::11")
-	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0")
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0", fmt.Sprintf("127.0.0.1:%d", vservice.VSSDefaultPort))
 
 	// Just add a web service to the node.
 	// In the future this will need to be re-worked since node config will be separate.
@@ -399,7 +399,7 @@ func TestAuthExpireNoVisa(t *testing.T) {
 	svc.SetAuthSvc(&TestAS{})
 
 	naddr := netip.MustParseAddr("fc00:3001:1::11")
-	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0")
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0", fmt.Sprintf("127.0.0.1:%d", vservice.VSSDefaultPort))
 
 	// Just add a web service to the node.
 	// In the future this will need to be re-worked since node config will be separate.
@@ -491,6 +491,7 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	alog := logr.NewTestLogger()
 
 	vsaddr := netip.MustParseAddr(vservice.VisaServiceAddress) // fc00:3003::1
+	vssListenAddr := fmt.Sprintf("127.0.0.1:%d", vservice.VSSDefaultPort)
 
 	// Minimal config:
 	vc := minVSI(t, 99, alog)
@@ -504,10 +505,10 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	n0addr := netip.MustParseAddr("fc00:3001:1::11")
 	n1addr := netip.MustParseAddr("fc00:3001:1::12")
 
-	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(n0addr, "n0")
-	svc.BackDoorInstallAPIKeyForUnitTestExp(n1addr, "n1", time.Now().Add(10*time.Second)) // <--- note expiry in 10s
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(n0addr, "n0", vssListenAddr)
+	svc.BackDoorInstallAPIKeyForUnitTestExp(n1addr, "n1", time.Now().Add(10*time.Second), vssListenAddr) // <--- note expiry in 10s
 
-	go svc.Start(netip.MustParseAddr("127.0.0.1"), 0)
+	go svc.Start(netip.MustParseAddr("127.0.0.1"), vservice.VisaServicePort)
 	defer svc.Stop()
 
 	pyaml := `
@@ -607,7 +608,7 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	svc.RunPeriodicHousekeepingNow() // blocking
 
 	var presp *vservice.PollResponse
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 3; i++ {
 		presp, err = svc.Poll(apiKey)
 		require.Nil(t, err)
 		if len(presp.Visas) > 0 {
@@ -644,7 +645,6 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 
 		require.Greater(t, newV.IssuerId, oldv.IssuerId)
 	}
-
 }
 
 func mustAddrFromSlice(s []byte) netip.Addr {

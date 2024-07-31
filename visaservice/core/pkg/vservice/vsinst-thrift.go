@@ -244,13 +244,13 @@ func vsapiTrafficDescToIpTraffic(pd *vsapi.TrafficDesc) *snip.Traffic {
 //
 
 // returns API key
-func (vs *VSInst) BackDoorInstallAPIKeyForUnitTest(node_addr netip.Addr, node_name string) (string, error) {
-	return vs.BackDoorInstallAPIKeyForUnitTestExp(node_addr, node_name, time.Now().Add(5*time.Minute))
+func (vs *VSInst) BackDoorInstallAPIKeyForUnitTest(node_addr netip.Addr, node_name, vssAddr string) (string, error) {
+	return vs.BackDoorInstallAPIKeyForUnitTestExp(node_addr, node_name, time.Now().Add(5*time.Minute), vssAddr)
 }
 
 // returns API key
-func (vs *VSInst) BackDoorInstallAPIKeyForUnitTestExp(node_addr netip.Addr, node_name string, expiration time.Time) (string, error) {
-	apiKey, err := vs.finishAuthenticate(node_addr, expiration, []string{fmt.Sprintf("/zpr/%s", node_name)}, "127.0.0.1:0")
+func (vs *VSInst) BackDoorInstallAPIKeyForUnitTestExp(node_addr netip.Addr, node_name string, expiration time.Time, vssAddr string) (string, error) {
+	apiKey, err := vs.finishAuthenticate(node_addr, expiration, []string{fmt.Sprintf("/zpr/%s", node_name)}, vssAddr)
 	if err != nil {
 		return "", err
 	}
@@ -403,6 +403,10 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		vs.log.Info("registration: missing VSS service address - using default", "vss_addr", vssServiceAddr)
 	} else {
 		vssServiceAddr = req.VssService
+		if _, err := netip.ParseAddrPort(vssServiceAddr); err != nil {
+			vs.log.Warn("registration: invalid VSS service address", "vss_addr", vssServiceAddr)
+			return "", fmt.Errorf("invalid VSS service address")
+		}
 		vs.log.Info("registration: got VSS service address", "vss_addr", vssServiceAddr)
 	}
 
