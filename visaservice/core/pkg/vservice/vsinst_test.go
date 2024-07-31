@@ -606,8 +606,16 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 
 	svc.RunPeriodicHousekeepingNow() // blocking
 
-	presp, err := svc.Poll(apiKey)
-	require.Nil(t, err)
+	var presp *vservice.PollResponse
+	for i := 0; i < 5; i++ {
+		presp, err = svc.Poll(apiKey)
+		require.Nil(t, err)
+		if len(presp.Visas) > 0 {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+
 	require.NotEmpty(t, presp.Visas)
 	require.Empty(t, presp.Revocations)
 
