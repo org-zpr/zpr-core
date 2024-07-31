@@ -1,3 +1,4 @@
 gen-go/
 gen-rs/
-md5sums.txt
+vs.thrift.sum
+vss.thrift.sum
