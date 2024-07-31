@@ -2,7 +2,6 @@ package vservice
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
@@ -13,9 +12,7 @@ import (
 	"sync"
 	"time"
 
-	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vs/pkg/vsapi"
 
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice/auth"
@@ -51,6 +48,8 @@ type VisaService struct {
 		policy *policy.Policy
 	}
 }
+
+const BootstrapAuthLifetime = 1 * time.Hour
 
 func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vsServerCreds *tls.Config, maxAuthDuration time.Duration, log logr.Logger) (*VisaService, error) {
 	if _, err := os.Stat(initialPolicyFile); err != nil {
@@ -104,6 +103,7 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16,
 	s.log.Infom("bootstrap: starting visa service")
 	icfg := &VSIConfig{
 		Log:         s.log,
+		VSAddr:      vsAddr,
 		HopCount:    99, // TODO
 		Creds:       s.keys.visaServiceTLSCreds,
 		AccessToken: s.authToken,
@@ -142,7 +142,7 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16,
 	}
 
 	s.log.Infom("bootstrap: visa service THRIFT interface started, now installling policy")
-	if err = s.installPolicyFromFile(s.initialPolicyFile, s.keys.policyCheckingKey, nil); err != nil {
+	if err = s.installPolicyFromFile(s.initialPolicyFile, s.keys.policyCheckingKey); err != nil {
 		vsinst.Stop()
 		return fmt.Errorf("policy install failed: %w", err)
 	}
@@ -194,22 +194,6 @@ func (s *VisaService) run(adminPort uint16) error {
 	return nil
 }
 
-// installPolicyFromFile installs a policy from a file.
-//
-// TODO: The visa service needs to be able to install a new policy form an admin.
-// So there must be an RPC call to visa service that an admin can use to install a policy.
-//
-// If `nodeAddrs` are given we also create visas for those nodes.  Note this is older code
-// and may not be needed in new ref-impl.  Can leave this empty.
-func (s *VisaService) installPolicyFromFile(fname string, pubkey *rsa.PublicKey, nodeAddrs []netip.Addr) error {
-	s.log.Info("installing policy from file", "file", fname)
-	cp, err := polio.OpenContainedPolicyFile(fname, pubkey)
-	if err != nil {
-		return err
-	}
-	return s.installPolicyWithVisasForNodes(true, cp, nodeAddrs)
-}
-
 // Implements an interface needed by the admin service.
 func (s *VisaService) GetPolicyAndConfig() (*policy.Policy, uint64) {
 	s.policy.RLock()
@@ -217,24 +201,23 @@ func (s *VisaService) GetPolicyAndConfig() (*policy.Policy, uint64) {
 	return s.policy.policy, s.policy.config
 }
 
+// installPolicyFromFile installs a policy from a file.
+func (s *VisaService) installPolicyFromFile(fname string, pubkey *rsa.PublicKey) error {
+	s.log.Info("installing policy from file", "file", fname)
+	cp, err := polio.OpenContainedPolicyFile(fname, pubkey)
+	if err != nil {
+		return err
+	}
+	return s.doInstallPolicy(cp)
+}
+
 // InstallPolicy is for installing a policy supplied by an admin through our admin-service.
-//
-//	 TODO: This is also sending visas over to the node, not sure if we need to our not.
-//		Feels like we should use our existing push system to renew all the important visas
-//		before sending.  Surely we did something like that in the past.
 //
 // Returns (version, config_id, error)
 func (s *VisaService) InstallPolicy(cp *polio.ContainedPolicy) (string, uint64, error) {
 	s.log.Info("installing policy from admin")
 
-	// TODO: Presumably we need to install on all our known nodes.
-	//       What does a node need from the policy anyway?  Just topology I think.
-
-	// There's plenty of room for error here.  We used to use raft to distribute
-	// policy to nodes.  Needs more thought.
-
-	nodes := s.service.inst.GetNodeList()
-	if err := s.installPolicyWithVisasForNodes(false, cp, nodes); err != nil {
+	if err := s.doInstallPolicy(cp); err != nil {
 		return "", 0, errors.New("failed to install policy on nodes")
 	}
 
@@ -246,14 +229,15 @@ func (s *VisaService) InstallPolicy(cp *polio.ContainedPolicy) (string, uint64, 
 	return pver, configID, nil
 }
 
-// `nodeAddrs` are ZPR addresses of nodes.
-func (s *VisaService) installPolicyWithVisasForNodes(bootstrap bool, cp *polio.ContainedPolicy, nodeAddrs []netip.Addr) error {
+// doInstallPolicy actually install policy into all the visa service components, including
+// communicating with any nodes.
+func (s *VisaService) doInstallPolicy(cp *polio.ContainedPolicy) error {
 	pp := policy.NewPolicyFromContainer(cp, s.log)
 	if pp.Size() == 0 {
 		return errors.New("policy is empty")
 	}
 
-	pversion, configID, err := s.computeVersionConfigID(pp) // this updates our local policy value
+	_, configID, err := s.computeVersionConfigID(pp) // this updates our local policy value
 	if err != nil {
 		return fmt.Errorf("policy install failed: %w", err)
 	}
@@ -262,50 +246,7 @@ func (s *VisaService) installPolicyWithVisasForNodes(bootstrap bool, cp *polio.C
 	s.authService.InstallPolicy(configID, 0, pp)
 
 	s.log.Info("installing policy to visa service")
-	s.service.inst.InstallPolicy(configID, 0, pp)
-
-	// To send this over the wire we want it zipped.
-	/* OFF - we don't yet know how or why to send policy in Ref Impl.
-	format := cp.Policy.SerialVersion
-	gzPolicy, err := libvisa.Compress(cp.Container)
-	if err != nil {
-		return fmt.Errorf("failed to compress policy: %w", err)
-	}
-	*/
-
-	// Create a visa-service visa so NODE can talk to US.
-	var visas []*vsapi.VisaHop
-
-	for _, nodeAddr := range nodeAddrs {
-		s.log.Info("generating a new visa-service visa for the node->VS", "node_addr_src", nodeAddr, "vs_addr_dest", s.myAddr)
-		pktData := snip.NewTCPConnect(nodeAddr, 0, s.myAddr, VisaServicePort)
-		vsr, err := s.service.inst.doRequestVisa(context.Background(), nodeAddr, pktData, 0, pp.VersionNumber())
-		if err != nil {
-			s.log.WithError(err).Warn("failed to generate a visa-service visa for the node", "node_addr", nodeAddr)
-		} else if vsr.Status != vsapi.StatusCode_SUCCESS {
-			s.log.Warn("failed to generate a visa-service visa for the node", "node", nodeAddr, "reason", vsr.Reason)
-		} else {
-			visas = append(visas, vsr.Visa)
-		}
-	}
-
-	s.log.Info("(TODO) now send policy to node", "version", pversion, "configID", configID)
-	// TODO:
-	//   The prototype used the visa-support-service to send a policy to the node.
-	//   Plus it ised to also send along a visa.  Instead we should use our polling system.
-	//   AND the node doesn't need the whole policy. So we need to figure out what it needs and
-	//   figure out how the visa-service tells node about it.
-	//
-
-	if len(visas) > 0 {
-		pr := vsapi.PollResponse{
-			Visas: visas,
-		}
-		// TODO: Should we set hopcount to 1?
-		s.service.inst.PushVisa(&pr)
-	}
-
-	return nil
+	return s.service.inst.InstallPolicy(configID, 0, pp)
 }
 
 // computeVersionAndConfigID updates our policy state variables.

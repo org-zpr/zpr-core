@@ -137,6 +137,7 @@ func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 	// Minimal config:
 	return &vservice.VSIConfig{
 		Log:                  alog,
+		VSAddr:               netip.MustParseAddr(vservice.VisaServiceAddress),
 		HopCount:             hopcount,
 		AllowInvalidPeerAddr: true,
 	}
@@ -500,16 +501,14 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	require.NotNil(t, svc)
 	svc.SetAuthSvc(&TestAS{})
 
-	// TODO: What is this for? The visa service has well known address (or is from a range of them).
-	// I beleive for time being, the visa service gets static IP _AND_ the adapter for the visa service
-	// takes that address aswell (like a node would).
-	svc.SetLocalAddr(vsaddr)
-
 	n0addr := netip.MustParseAddr("fc00:3001:1::11")
 	n1addr := netip.MustParseAddr("fc00:3001:1::12")
 
 	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(n0addr, "n0")
 	svc.BackDoorInstallAPIKeyForUnitTestExp(n1addr, "n1", time.Now().Add(10*time.Second)) // <--- note expiry in 10s
+
+	go svc.Start(netip.MustParseAddr("127.0.0.1"), 0)
+	defer svc.Stop()
 
 	pyaml := `
         zpl_format: 2
@@ -573,13 +572,6 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	}
 
 	{
-		claims := map[string]*agent.ClaimV{
-			agent.KAttrVisaServiceAdapter: &agent.ClaimV{V: "true", Exp: time.Now().Add(time.Hour)},
-		}
-		svc.BackDoorConnectSvcAdapter(vsaddr, vsaddr, n1addr, claims, []string{"$$zpr/visaservice", "/zpr/$$zpr/visaservice"}, time.Now().Add(time.Hour))
-	}
-
-	{
 		client110 := netip.MustParseAddr("fc00:3001:1::10")
 		client110ta := netip.MustParseAddr("fc00:3001::10")
 		claims := map[string]*agent.ClaimV{
@@ -614,25 +606,37 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 
 	svc.RunPeriodicHousekeepingNow() // blocking
 
-	presp, err := svc.Poll(context.Background(), apiKey)
+	presp, err := svc.Poll(apiKey)
 	require.Nil(t, err)
-	require.Equal(t, int32(0), presp.More)
-	require.NotEmpty(t, presp.GetVisas())
-	require.Empty(t, presp.GetRevocations())
+	require.NotEmpty(t, presp.Visas)
+	require.Empty(t, presp.Revocations)
 
-	// Should be a single visa for us:
-	require.Equal(t, 1, len(presp.GetVisas()))
+	// Three visas-
+	//   1. node to visaservice
+	//   2. visaservice to node-vss
+	//   3. that visa we requested
+	require.Equal(t, 3, len(presp.Visas))
 
-	require.Greater(t, presp.GetVisas()[0].GetHopCount(), int32(0))
+	expectSources := []string{
+		n0addr.String(),
+		n1addr.String(),
+		vsaddr.String(),
+	}
 
-	newV := mustUnmarshalVisa(presp.Visas[0].VisaPb)
-	require.NotNil(t, newV)
-	require.NotNil(t, newV.GetSource())
-	require.NotNil(t, newV.GetDest())
+	for _, v := range presp.Visas {
+		require.Greater(t, v.GetHopCount(), int32(0))
 
-	require.Equal(t, vsaddr, mustAddrFromSlice(newV.GetDest()))
-	require.Equal(t, n1addr, mustAddrFromSlice(newV.GetSource()))
-	require.Greater(t, newV.IssuerId, oldv.IssuerId)
+		newV := mustUnmarshalVisa(v.VisaPb)
+		require.NotNil(t, newV)
+		require.NotNil(t, newV.GetSource())
+		require.NotNil(t, newV.GetDest())
+
+		require.Equal(t, vsaddr.String(), mustAddrFromSlice(newV.GetDest()).String())
+		require.Contains(t, expectSources, mustAddrFromSlice(newV.GetSource()).String())
+
+		require.Greater(t, newV.IssuerId, oldv.IssuerId)
+	}
+
 }
 
 func mustAddrFromSlice(s []byte) netip.Addr {

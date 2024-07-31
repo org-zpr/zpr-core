@@ -14,19 +14,17 @@ pub enum Protocol {
 const TCP_FLAGS_SYN: u8 = 0x02;
 const TCP_FLAGS_ACK: u8 = 0x10;
 
-
-
 // This function parses a string from the user that describes traffic in a succinct way
 // so that we can pass a visa-request to the visa service.
-// 
+//
 // This is a part of the visaservice/cli tool which is a DEVELOPMENT DEBUGGING TOOL.
 // This parser and this format has nothing to do with production visa requesting.
 // In production, a visa is requested based on a packet header.  The packet header is
 // parsed into a description structure directly.
-// 
-// Note that since this is development tool, not a lot of time has been spent on 
+//
+// Note that since this is development tool, not a lot of time has been spent on
 // hardening the parser against spurious inputs.
-// 
+//
 // DO NOT COUNT ON THE PARSER TO BARF IF YOU GIVE IT BAD INPUT.
 //
 //
@@ -227,9 +225,9 @@ mod test {
 
     // These are cases that I have observed that the parser does allow.
     // These don't cause a crash, but they also don't raise any errors.
-    // 
+    //
     // NOT PART OF ANY PRODUCTION VISA REQUEST PATH!
-    // 
+    //
     #[test]
     fn test_parse_questionable() {
         let questionable_input = vec![

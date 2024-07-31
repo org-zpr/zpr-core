@@ -26,7 +26,6 @@ pub struct VSClient {
     service: String,
 }
 
-
 // This is an interface that covers the VSClient wrapper designed to facilitate
 // unit testing.  The running node code should use the `default_vsclient_factory`
 // function.
@@ -36,15 +35,13 @@ pub trait VSClientI: Send {
         agent: vsapi::Agent,
         cert_pem_data: &str,
         private_key: Rsa<Private>,
+        vss_service_addr: &str,
     ) -> Result<String, thrift::Error>;
-    fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error>;
+    fn ping_vs(&self, apikey: &str) -> Result<vsapi::Pong, thrift::Error>;
     fn de_register(&self, apikey: &str) -> Result<(), thrift::Error>;
 }
 
-
 pub type VSClientFactory = fn(service_addr: &str) -> Box<dyn VSClientI>;
-
-
 
 // Wrapper on top of the the THRIFT generated code.
 impl VSClient {
@@ -72,14 +69,13 @@ pub fn default_vsclient_factory(service_addr: &str) -> Box<dyn VSClientI> {
     Box::new(VSClient::new(service_addr))
 }
 
-
 impl VSClientI for VSClient {
-
     fn authenticate(
         &self,
         agent: vsapi::Agent,
         cert_pem_data: &str,
         private_key: Rsa<Private>,
+        vss_service_addr: &str,
     ) -> Result<String, thrift::Error> {
         let mut client = self.newclient()?;
 
@@ -115,6 +111,7 @@ impl VSClientI for VSClient {
             timestamp: Some(timestamp as i64),
             node_cert: Some(cert_pem_data.into()),
             hmac: Some(hmac),
+            vss_service: Some(vss_service_addr.into()),
             node_agent: Some(agent),
         };
 
@@ -138,9 +135,9 @@ impl VSClientI for VSClient {
         }
     }
 
-    fn poll_vs(&self, apikey: &str) -> Result<vsapi::PollResponse, thrift::Error> {
+    fn ping_vs(&self, apikey: &str) -> Result<vsapi::Pong, thrift::Error> {
         let mut client = self.newclient()?;
-        debug!("sending POLL to {}", self.service);
-        client.poll(apikey.into())
+        debug!("sending PING to {}", self.service);
+        client.ping(apikey.into())
     }
 }

@@ -14,9 +14,7 @@ var (
 	ErrorAgentExists = errors.New("agent already exists at address")
 )
 
-// AddNode inform the visa service that a node has joined the ZPR. The node is then added
-// to the list of expected "pollers" for visa service push messages.
-//
+// AddNode inform the visa service that a node has joined the ZPR.
 // For now using the "register" call for this.
 func (vs *VSInst) AddNode(addr netip.Addr, nodeAgent *agent.Agent) error {
 	vs.agentDB.Lock()
@@ -31,14 +29,9 @@ func (vs *VSInst) AddNode(addr netip.Addr, nodeAgent *agent.Agent) error {
 		Agent:      nodeAgent,
 		ZPRAddr:    addr,
 		TetherAddr: addr, // ok?
+		Peer:       &PeerRecord{},
 	}
 	vs.agentDB.Unlock()
-
-	// minor race condition here:
-	id := addr.String()
-	if !vs.mb.HasPoller(id) {
-		vs.mb.AddPoller(id)
-	}
 	vs.agentAdded(nodeAgent)
 	return nil
 }
@@ -76,7 +69,6 @@ func (vs *VSInst) RemoveNode(addr netip.Addr) {
 		}
 	}
 	vs.agentDB.Unlock()
-	vs.mb.RemovePoller(addr.String())
 }
 
 func (vs *VSInst) RemoveAdapter(addr netip.Addr) {
@@ -97,8 +89,10 @@ func (vs *VSInst) GetNodeList() []netip.Addr {
 	defer vs.agentDB.RUnlock()
 
 	var list []netip.Addr
-	for addr := range vs.agentDB.agents {
-		list = append(list, addr)
+	for addr, rec := range vs.agentDB.agents {
+		if rec.Agent.GetRole() == "node" {
+			list = append(list, addr)
+		}
 	}
 	return list
 }
