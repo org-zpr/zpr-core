@@ -120,6 +120,7 @@ struct VisaHop {
   3: i32 issuer_id,   // copied out of visa
 }
 
+// Response to the Ping call.
 struct Pong {
   1: i64 configuration,
   2: i64 policy_version,
@@ -171,8 +172,8 @@ service VisaService {
   // assigned to the agent via `authorize_connect`.
   void agent_disconnect(1:string keym, 2:binary zpr_addr)
 
-  // For now, fully optional. Use to test connectivity or key or just to check on 
-  // current policy version and config.
+  // For now, fully optional. Use to test connectivity or key or just to check on
+  // current policy version and config.  "Pong" message is returned.
   Pong ping(1:string key)
 
   VisaResponse request_visa(1:string key, 2:binary src_tether_addr, 3:TrafficDesc traffic)
