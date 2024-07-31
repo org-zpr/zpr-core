@@ -1,10 +1,11 @@
 use crate::packet::Packet;
 use crate::test_packet::*;
+use crate::zdp;
+use enum_map::Enum;
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
-
 // Queues (i.e., frontend interface) for each stage of the system.
 
 // "Inbound" refers to the dock->adapter direction (i.e., inbound to this host).
@@ -96,9 +97,12 @@ impl<'pktbuf> InboundSend<'pktbuf> {
 // All packets from the host are sent here for encapsulation, and any
 // CPU-intensive preprocessing (e.g. signature generation).
 // This may morph into more or fewer (i.e. zero) stages depending on future requirements.
+#[allow(dead_code)]
 pub enum OutboundProcessorMessage<'pktbuf> {
     Packet(Packet<'pktbuf>),
     TestPacket(TestPacket),
+    NonFlowMgmt(zdp::ZdpPacketType, Packet<'pktbuf>),
+    PerFlowMgmt(zdp::ZdpPacketType, u32, Packet<'pktbuf>),
 }
 
 pub struct OutboundProcessor<'pktbuf> {
@@ -128,6 +132,38 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
             .unwrap();
 
         Ok(test_tuple.1.await?)
+    }
+
+    #[allow(dead_code)]
+    pub async fn enqueue_non_flow_mgmt(
+        &self,
+        zdp_packet_type: zdp::ZdpPacketType,
+        packet: Packet<'pktbuf>,
+    ) {
+        self.sender
+            .send(OutboundProcessorMessage::NonFlowMgmt(
+                zdp_packet_type,
+                packet,
+            ))
+            .await
+            .unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn enqueue_per_flow_mgmt(
+        &self,
+        zdp_packet_type: zdp::ZdpPacketType,
+        stream_id: u32,
+        packet: Packet<'pktbuf>,
+    ) {
+        self.sender
+            .send(OutboundProcessorMessage::PerFlowMgmt(
+                zdp_packet_type,
+                stream_id,
+                packet,
+            ))
+            .await
+            .unwrap();
     }
 }
 
@@ -173,8 +209,10 @@ pub struct CapPacket<'pktbuf> {
     pub packet: Packet<'pktbuf>,
     pub timestamp: SystemTime,
     pub direction: Direction,
+    pub caplen: u32,
 }
 
+#[derive(Enum)]
 pub enum Direction {
     Inbound,
     Outbound,
@@ -200,11 +238,13 @@ impl<'pktbuf> Capture<'pktbuf> {
         packet: Packet<'pktbuf>,
         timestamp: SystemTime,
         direction: Direction,
+        caplen: u32,
     ) {
         let cap_pack: CapPacket = CapPacket {
             packet,
             timestamp,
             direction,
+            caplen,
         };
         self.sender.send(cap_pack).await.unwrap();
     }
@@ -215,11 +255,13 @@ impl<'pktbuf> Capture<'pktbuf> {
         packet: Packet<'pktbuf>,
         timestamp: SystemTime,
         direction: Direction,
+        caplen: u32,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
         let cap_pack: CapPacket = CapPacket {
             packet,
             timestamp,
             direction,
+            caplen,
         };
         match self.sender.try_send(cap_pack) {
             Ok(()) => return Ok(()),

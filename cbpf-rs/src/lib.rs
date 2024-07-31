@@ -6,7 +6,7 @@ pub const VERSION: i32 = 199606;
 
 /// a single BPF instruction
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct BpfInsn {
     pub code: u16,
     pub jt: u8,
@@ -15,6 +15,7 @@ pub struct BpfInsn {
 }
 
 impl BpfInsn {
+    /// construct a simple BPF statement
     pub fn stmt(code: u16, k: u32) -> Self {
         Self {
             code,
@@ -24,6 +25,7 @@ impl BpfInsn {
         }
     }
 
+    /// construct a BPF jump statement
     pub fn jump(code: u16, k: u32, jt: u8, jf: u8) -> Self {
         Self { code, jt, jf, k }
     }
@@ -161,14 +163,14 @@ impl BpfProgram {
     // SAFETY: all unsafe blocks in these methods assume the program has been validated.
 
     /// Validate the stream of BPF instructions and construct a program as proof.
-    pub fn validate<I: IntoIterator<Item = impl Borrow<BpfInsn>>>(
+    pub fn validate<'a, I: IntoIterator<Item = &'a (impl Borrow<BpfInsn> + 'a)>>(
         insns: I,
     ) -> Result<Self, BpfError> {
         Self::validate_with_flags(insns, 0)
     }
 
     /// Validate, with options.
-    pub fn validate_with_flags<I: IntoIterator<Item = impl Borrow<BpfInsn>>>(
+    pub fn validate_with_flags<'a, I: IntoIterator<Item = &'a (impl Borrow<BpfInsn> + 'a)>>(
         insns: I,
         flags: usize,
     ) -> Result<Self, BpfError> {
@@ -178,7 +180,9 @@ impl BpfProgram {
     }
 
     /// Create a BPF program from a series of instructions without validating.
-    pub unsafe fn new_unvalidated<I: IntoIterator<Item = impl Borrow<BpfInsn>>>(insns: I) -> Self {
+    pub unsafe fn new_unvalidated<'a, I: IntoIterator<Item = &'a (impl Borrow<BpfInsn> + 'a)>>(
+        insns: I,
+    ) -> Self {
         Self {
             insns: insns.into_iter().map(|x| *x.borrow()).collect(),
         }
@@ -506,10 +510,10 @@ impl BpfProgram {
 }
 
 #[cfg(any(feature = "pcap", test))]
-impl Borrow<BpfInsn> for &pcap::BpfInstruction {
+impl Borrow<BpfInsn> for pcap::BpfInstruction {
     fn borrow(&self) -> &BpfInsn {
         // SAFETY: these have the same C layout
-        unsafe { std::mem::transmute(*self) }
+        unsafe { std::mem::transmute(self) }
     }
 }
 
@@ -549,6 +553,14 @@ mod tests {
     }
 
     #[test]
+    fn borrow_test() {
+        let capture = Capture::dead(Linktype::ETHERNET).unwrap();
+        let prog = capture.compile("ip src 1.2.3.4", true).unwrap();
+        let my_insn: &BpfInsn = prog.get_instructions()[0].borrow();
+        assert_eq!(*my_insn, BpfInsn::stmt(LD | H | ABS, 12));
+    }
+
+    #[test]
     fn validate_test() -> Result<(), BpfError> {
         let capture = Capture::dead(Linktype::ETHERNET).unwrap();
         let prog = capture.compile("ip src 1.2.3.4", true).unwrap();
@@ -558,7 +570,7 @@ mod tests {
 
     #[test]
     fn invalid_test() {
-        match BpfProgram::validate([BpfInsn::stmt(RET | LEN, 0)]) {
+        match BpfProgram::validate(&[BpfInsn::stmt(RET | LEN, 0)]) {
             Ok(_) => panic!("program should not compile"),
             Err(err) => assert_eq!(err, BpfError::InvalidInstruction),
         }

@@ -1,4 +1,5 @@
-use pcap::BpfProgram;
+use cbpf_rs::BpfProgram;
+// use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 
 pub const DIRECTION_HEADER_SIZE: usize = 1;
@@ -26,11 +27,11 @@ impl FlowControl {
         self.inner_control.lock().await.flow = None;
     }
 
-    pub async fn check_packet(&self, packet: &[u8]) -> bool {
+    pub async fn check_packet(&self, packet: &[u8]) -> u32 {
         let inner_flow = &mut self.inner_control.lock().await.flow;
         match inner_flow {
             Some(program) => program.filter(packet),
-            None => false,
+            None => 0,
         }
     }
 

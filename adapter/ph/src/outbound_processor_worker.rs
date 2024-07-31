@@ -25,10 +25,24 @@ async fn worker<'pktbuf>(
     while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         for pkt in pkts.drain(..) {
             match pkt {
-                OutboundProcessorMessage::Packet(pkt) => {
+                OutboundProcessorMessage::Packet(mut pkt) => {
+                    // allocate and fill in the header
+                    let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
+                    hdr.base_header.packet_type = ZdpPacketType::TransitPacket;
                     handle_packet(pkt, asm).await;
                 }
                 OutboundProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), count),
+                OutboundProcessorMessage::NonFlowMgmt(pack_type, mut pkt) => {
+                    let hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
+                    hdr.packet_type = pack_type;
+                    handle_packet(pkt, asm).await;
+                }
+                OutboundProcessorMessage::PerFlowMgmt(pack_type, stream_id, mut pkt) => {
+                    let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
+                    hdr.base_header.packet_type = pack_type;
+                    hdr.stream_id = stream_id;
+                    handle_packet(pkt, asm).await;
+                }
             }
         }
     }
@@ -47,18 +61,15 @@ where
 }
 
 async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf>) {
-    // allocate and fill in the header
-    let hdr = pkt.alloc_zeroed_header::<ZdpHeader>();
-    hdr.abbreviated_header.packet_type = ZdpPacketType::UncompressedAgentPacket;
-
     // fill in metadata
     pkt.metadata_mut().flow_id = 0; // TODO: fill from IP header
 
     // Clones packet into capture queue after adding direction to beginning of packet
     let dir: &mut u8 = pkt.alloc_zeroed_header();
     *dir = 1;
-    if asm.flow_control.check_packet(pkt.body()).await {
-        println!("packets match outbound");
+    let caplen = asm.flow_control.check_packet(pkt.body()).await;
+    //println!("caplen outbound {}", caplen);
+    if caplen > 0 {
         let mut bufs = Vec::new();
         let _ = asm.buffer_stack.try_get_buffers(1, &mut bufs);
         // Ensures there's at least one buffer
@@ -70,6 +81,7 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
                     pkt_clone,
                     SystemTime::now(),
                     Direction::Outbound,
+                    caplen, // Not currently used
                 ) {
                     Ok(()) => {
                         asm.counters[CounterType::OutCapPacksWrite].increment();

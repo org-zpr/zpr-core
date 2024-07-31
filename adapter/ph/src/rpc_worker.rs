@@ -1,8 +1,8 @@
 use crate::assembly::Assembly;
 use crate::test_packet::TestPacketMetrics;
+use cbpf_rs;
 use core::future::Future;
 use hdrhistogram::Histogram;
-use pcap::{Capture, Linktype};
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
@@ -369,11 +369,28 @@ async fn close_capture(asm: &Assembly<'_>) -> String {
 
 async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
     let (_command, program) = str_message.split_once(' ').unwrap();
-    let capture = Capture::dead(Linktype::USER0).unwrap();
-    let bpfprogram = capture.compile(program, true).unwrap();
-    asm.flow_control.set_program(bpfprogram).await;
+    let mut serialized_program: Vec<&str> = program.split(',').collect();
+    let mut insn_vec = Vec::new();
+    serialized_program.remove(0);
 
-    format!("Program: {program} set\n")
+    for insn in serialized_program {
+        let split_insn: Vec<&str> = insn.split_whitespace().collect();
+        let bpf_insn = cbpf_rs::BpfInsn {
+            code: split_insn[0].parse().unwrap(),
+            jt: split_insn[1].parse().unwrap(),
+            jf: split_insn[2].parse().unwrap(),
+            k: split_insn[3].parse().unwrap(),
+        };
+        insn_vec.push(bpf_insn);
+    }
+
+    let mut return_message = format!("Program: {program} set\n");
+    match cbpf_rs::BpfProgram::validate(&insn_vec) {
+        Ok(final_program) => asm.flow_control.set_program(final_program).await,
+        _ => return_message = format!("Invalid program recieved, program not set\n"),
+    }
+
+    return_message
 }
 
 async fn delete_capture_program(asm: &Assembly<'_>) -> String {
