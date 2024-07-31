@@ -32,7 +32,6 @@ async fn worker<'pktbuf>(
             clone_cap_packs(asm, &mut pkts, count).await;
         }
         for pkt in pkts.drain(..) {
-            println!("pkt recieved");
             match pkt {
                 InboundProcessorMessage::Packet(pkt) => {
                     handle_packet(config, pkt, asm).await;
@@ -67,7 +66,6 @@ async fn handle_packet<'pktbuf>(
     let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
     if base_hdr.packet_type.is_per_flow() {
-        println!("per flow");
         let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
         // copy out relevant header info
@@ -94,7 +92,6 @@ async fn handle_packet<'pktbuf>(
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     } else {
-        println!("not per flow");
         // copy out relevant header info
         let packet_type = base_hdr.packet_type;
         let _sequence_number = base_hdr.sequence_number;
@@ -121,6 +118,7 @@ async fn handle_packet<'pktbuf>(
                 asm.buffer_stack.put_buffer(ret_buf);
             }
             ZdpPacketType::Discard => {
+                // TODO print to debug log, when implemented
                 eprintln!("Discard message recieved");
             }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),

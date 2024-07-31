@@ -26,7 +26,6 @@ async fn worker<'pktbuf>(
         for pkt in pkts.drain(..) {
             match pkt {
                 OutboundProcessorMessage::Packet(mut pkt) => {
-                    println!("process pkt");
                     // allocate and fill in the header
                     let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
                     hdr.base_header.packet_type = ZdpPacketType::TransitPacket;
@@ -34,7 +33,6 @@ async fn worker<'pktbuf>(
                 }
                 OutboundProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), count),
                 OutboundProcessorMessage::NonFlowMgmt(pack_type, mut pkt) => {
-                    println!("processor nfm");
                     let hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     hdr.packet_type = pack_type;
                     handle_packet(pkt, asm).await;
