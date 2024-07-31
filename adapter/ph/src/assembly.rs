@@ -52,13 +52,16 @@ pub struct Assembly<'pktbuf> {
 
 impl<'pktbuf> Assembly<'pktbuf> {
     pub async fn send_report(&self, to_send: &str) {
+        // this condition will need to be adjusted when we have complete ZPR packets
+        // with the information at the end of the packet at well
+        if PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < to_send.len() {
+            return;
+        }
         let buf = self.buffer_stack.get_buffer().await;
-        let mut pkt = Packet::new(buf, config::REPORT_HEADROOM);
+        let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
         let hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
         hdr.report_data_length = to_send.len() as u16;
-        if pkt.remaining_mut() >= to_send.len() {
-            pkt.put(to_send.as_bytes())
-        }
+        pkt.put(to_send.as_bytes());
         self.outbound_processor
             .enqueue_non_flow_mgmt(ZdpPacketType::Report, pkt)
             .await;
@@ -67,9 +70,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
     #[allow(dead_code)]
     pub async fn send_discard(&self) {
         let buf = self.buffer_stack.get_buffer().await;
-        // I know this likely doesn't need as much headroom as report becuase it doesn't have a unique header,
-        // but I wanted to make sure I left enough room for the ZDP header
-        let pkt = Packet::new(buf, config::REPORT_HEADROOM);
+        let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
         self.outbound_processor
             .enqueue_non_flow_mgmt(ZdpPacketType::Discard, pkt)
             .await;
