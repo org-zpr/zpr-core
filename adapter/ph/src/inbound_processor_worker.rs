@@ -98,6 +98,23 @@ async fn handle_packet<'pktbuf>(
         pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
 
         match packet_type {
+            ZdpPacketType::Report => {
+                let hdr =
+                    ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+                // TODO handle protocol errors i.e. if the body is shorter
+                let report_data_length: usize = hdr.report_data_length.into();
+                pkt.advance(std::mem::size_of::<ZdpReportHeader>());
+                if pkt.body().len() >= report_data_length {
+                    // TODO printing to stderr blocks indefinitely, this is just temporary
+                    eprintln!(
+                        "{}",
+                        std::str::from_utf8(&pkt.body()[..report_data_length]).unwrap()
+                    );
+                }
+                let ret_buf = pkt.destroy();
+                asm.buffer_stack.put_buffer(ret_buf);
+            }
+
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     }
