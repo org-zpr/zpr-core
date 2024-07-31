@@ -105,9 +105,8 @@ async fn handle_packet<'pktbuf>(
                     ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
                 // TODO handle protocol errors i.e. if the body is shorter
                 let report_data_length: usize = hdr.report_data_length.into();
-                if pkt.body().len() - std::mem::size_of::<ZdpReportHeader>() >= report_data_length {
-                    let report_data_length: usize = hdr.report_data_length.into();
-                    pkt.advance(2);
+                pkt.advance(std::mem::size_of::<ZdpReportHeader>());
+                if pkt.body().len() >= report_data_length {
                     // TODO printing to stderr blocks indefinitely, this is just temporary
                     eprintln!(
                         "{}",
