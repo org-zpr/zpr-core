@@ -23,9 +23,8 @@ impl ZDPClient {
 
 /// Creates a new ZDPClient.
 //
-// One day this may do more stuff, like kick off a state machine or
-// something.  For now, after you call this you can call primitive
-// methods on the client.
+// Not clear yet what a "connect" means, for now this kicks off the
+// key management process.
 //
 // Call disconnect when you are done.
 pub async fn connect(addr: &str) -> io::Result<ZDPClient> {
