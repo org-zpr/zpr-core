@@ -134,7 +134,6 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
         Ok(test_tuple.1.await?)
     }
 
-    #[allow(dead_code)]
     pub async fn enqueue_non_flow_mgmt(
         &self,
         zdp_packet_type: zdp::ZdpPacketType,

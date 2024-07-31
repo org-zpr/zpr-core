@@ -67,7 +67,6 @@ impl<'pktbuf> Assembly<'pktbuf> {
             .await;
     }
 
-    #[allow(dead_code)]
     pub async fn send_discard(&self) {
         let buf = self.buffer_stack.get_buffer().await;
         let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
