@@ -15,6 +15,7 @@ import (
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vs/pkg/vssapi"
 	"zpr.org/vsx/polio"
@@ -33,41 +34,6 @@ type HelloRecord struct {
 	Chksum uint32
 }
 
-// All agents in the system have a HostRecord.
-// Nodes will have the Peer struct set.
-type HostRecord struct {
-	CTime        time.Time // connect/create time
-	LastAuthTime time.Time
-	Agent        *agent.Agent
-	ZPRAddr      netip.Addr
-	TetherAddr   netip.Addr
-	Peer         *PeerRecord
-}
-
-// The visa-service "peers" are always nodes.
-type PeerRecord struct {
-	APIKey               string
-	RegistrationTime     time.Time
-	LastContactTime      time.Time
-	VisaRequestsCount    uint64
-	ConnectRequestsCount uint64
-	VSSAddr              string
-	PushBuffer           []*PushItem
-	State                struct {
-		Updating          bool
-		WantPolicyVer     uint64
-		WantConfigID      uint64
-		LastPushConfigID  uint64
-		LastPushPolicyVer uint64
-	}
-}
-
-func (pr *PeerRecord) IsInSync() bool {
-	return (pr.State.WantPolicyVer > 0 || pr.State.WantConfigID > 0) &&
-		pr.State.WantPolicyVer == pr.State.LastPushPolicyVer &&
-		pr.State.WantConfigID == pr.State.LastPushConfigID
-}
-
 type VSMsgType int
 
 const (
@@ -77,13 +43,6 @@ const (
 type VSMsg struct {
 	MsgType  VSMsgType
 	NodeAddr netip.Addr
-}
-
-type PushItem struct {
-	Broadcast   bool
-	NodeAddr    netip.Addr
-	Visas       []*vssapi.VisaHop
-	Revocations []*vssapi.VisaRevocation
 }
 
 // VSInst is an instance of distributed visa service
@@ -96,7 +55,7 @@ type VSInst struct {
 	hopCount             uint
 	authr                auth.AuthService
 	attrProx             *AttrProxy
-	visaPushC            chan *PushItem // For pushing visas without needing a request
+	visaPushC            chan *adb.PushItem // For pushing visas without needing a request
 	nodeNumber           uint8
 	nodeState            ConstraintService
 	thriftServer         thrift.TServer
@@ -108,11 +67,7 @@ type VSInst struct {
 	reauthBumpTime       time.Duration
 	accessToken          []byte // Access token for special node operations
 	allowInvalidPeerAddr bool   // Set to TRUE for testing only.
-
-	agentDB struct {
-		sync.RWMutex
-		agents map[netip.Addr]*HostRecord // ZPR_CONTACT_ADDR -> HostRecord
-	}
+	agentDB              *adb.AgentDB
 
 	cfgRemoves struct {
 		sync.Mutex
@@ -177,7 +132,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		log:                  vcf.Log,
 		localAddr:            vcf.VSAddr,
 		hopCount:             vcf.HopCount,
-		visaPushC:            make(chan *PushItem, 128), // Must be large enough to handle a mass revocation event
+		visaPushC:            make(chan *adb.PushItem, 128), // Must be large enough to handle a mass revocation event
 		thriftCreds:          vcf.Creds,
 		reauthBumpTime:       DefaultReauthBumpTime,
 		exitC:                make(chan struct{}),
@@ -193,7 +148,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	vs.vtable.nextVisaID = minVisaID
 	vs.sessions.apiKeys = make(map[string]netip.Addr)
 	vs.sessions.hellos = make(map[int32]*HelloRecord)
-	vs.agentDB.agents = make(map[netip.Addr]*HostRecord)
+	vs.agentDB = adb.NewAgentDB(vs)
 
 	nopol := policy.NewEmptyPolicy()
 	vs.plcy.p = nopol
@@ -226,7 +181,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		visaServiceAgent.SetAuthenticated(authedClaims, time.Now().Add(BootstrapAuthLifetime), nil, nil, 0)
 	}
 
-	if err := vs.AddAdapter(vcf.VSAddr, visaServiceAgent); err != nil {
+	if err := vs.agentDB.AddAdapter(vcf.VSAddr, visaServiceAgent.GetTetherAddr(), visaServiceAgent); err != nil {
 		return nil, fmt.Errorf("failed to add visa service agent")
 	}
 
@@ -356,7 +311,7 @@ func (vs *VSInst) extendVisaServiceVisas() {
 			remain := time.Until(vsio.VToTime(ve.v.GetExpires()))
 			if remain < VSVisaRenewalTime {
 				sourceAddr, _ := netip.AddrFromSlice(ve.v.Source)
-				agnt, err := vs.AgentAtContactAddr(sourceAddr) // for a node contact_addr is visa "tether" addr.
+				agnt, err := vs.agentDB.AgentAtContactAddr(sourceAddr) // for a node contact_addr is visa "tether" addr.
 				if err != nil || agnt == nil {
 					continue // agent is gone
 				}
@@ -394,13 +349,24 @@ func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration,
 			if push {
 				// TODO: To push the visa we need to know which nodes need this.
 				//       I think we used to put this in the mailbox for all nodes,
-				//       for now I am broadcasting.
+				//       for now I am doing a search here to find the correct node(s)
+				//       to push to.
 				vssV := &vssapi.VisaHop{
 					VisaPb:   resp.Visa.VisaPb,
 					HopCount: resp.Visa.HopCount,
 					IssuerID: resp.Visa.IssuerID,
 				}
-				vs.EnqueuePushVisaToAllNodes([]*vssapi.VisaHop{vssV})
+				targetNodes := make(map[netip.Addr]bool)
+				for _, addr := range [][]byte{ve.v.Source, ve.v.Dest, ve.v.SourceContact, ve.v.DestContact} {
+					if a, ok := netip.AddrFromSlice(addr); ok {
+						if vs.agentDB.IsNode(a) {
+							targetNodes[a] = true
+						}
+					}
+				}
+				for a := range targetNodes {
+					vs.EnqueuePushVisasToNode(a, []*vssapi.VisaHop{vssV})
+				}
 			}
 		}
 	}
@@ -437,7 +403,7 @@ func (vs *VSInst) expireAllVisas(config uint64) {
 		}
 	}
 	vs.log.Infof("%d visas revoked due to configuration change", count)
-	push := PushItem{
+	push := adb.PushItem{
 		Broadcast:   true,
 		Revocations: revokes,
 	}

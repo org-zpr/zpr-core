@@ -64,6 +64,8 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
     // fill in metadata
     pkt.metadata_mut().flow_id = 0; // TODO: fill from IP header
 
+    let _: &u8 = pkt.alloc_zeroed_header(); // account for fact we don't yet have ZPI
+
     // Clones packet into capture queue after adding direction to beginning of packet
     let dir: &mut u8 = pkt.alloc_zeroed_header();
     *dir = 1;

@@ -469,42 +469,26 @@ func (pps *PPState) parseZPR(networkPath []yt.Node) error {
 		return err
 	}
 
-	// All nodes allow admin PMCTL requests
+	// All nodes allow admin PMCTL requests and visa-service-support connects from visa service.
 	for _, vsnode := range zpr.Nodes {
 		if err := pps.addUniqueService(vsnode, AdminServiceServiceName); err != nil {
 			return err
 		}
 		vsnode.Policies = append(vsnode.Policies, newAdminServicePolicy(pps.doc.Zpr.Visaservice.Attrs, "node"))
-	}
-
-	// The node to which the visa service can dock must allow the visa-support-service.
-	{
-		matched := false
-		vsDockNode := zpr.Visaservice.Dock
-		var attrs []*doc.AttrExpr
 
 		// Take the attributes specified in the policy
-		attrs = append(attrs, zpr.Visaservice.Provider...)
-
 		// And add on that the adapter must also have the visa service address
+		var attrs []*doc.AttrExpr
+		attrs = append(attrs, zpr.Visaservice.Provider...)
 		attrs = append(attrs, &doc.AttrExpr{
 			Key:   doc.MustNewZplString(defs.KAttrEPID),
 			Op:    doc.MustNewZplString("eq"),
 			Value: doc.MustNewZplString(pps.visaServiceAddress),
 		})
-
-		for _, vsnode := range zpr.Nodes {
-			if vsnode.ID.String() == vsDockNode.String() {
-				matched = true
-				if err := pps.addUniqueService(vsnode, VisaSupportServiceName); err != nil {
-					return err
-				}
-				vsnode.Policies = append(vsnode.Policies, newVisaSupportServicePolicy(attrs))
-			}
+		if err := pps.addUniqueService(vsnode, VisaSupportServiceName); err != nil {
+			return err
 		}
-		if !matched {
-			return fmt.Errorf("failed to match visa service docking node (%s) to an existing node", vsDockNode.String())
-		}
+		vsnode.Policies = append(vsnode.Policies, newVisaSupportServicePolicy(attrs))
 	}
 
 	// If topology is unspecified, set up a default topology with zero bridges and

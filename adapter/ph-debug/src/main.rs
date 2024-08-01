@@ -5,11 +5,13 @@
 
 use cbpf_rs;
 use clap::Parser;
+use ctrlc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
 use std::io::prelude::*;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -163,8 +165,12 @@ fn capture_sequence(
     let sleep_time = Duration::new(time, 0);
     handle_set_capture(file_path, port)?;
     handle_set_capture_program(program, port)?;
-    sleep(sleep_time); // TODO implement handling for Ctrl+C
-                       // See 'signal handling' in the rust book, crate::ctrlc, crate::nix
+
+    let handler = Arc::new(CtrlcHandle::new());
+    let ctrlc_handler = handler.clone();
+    ctrlc::set_handler(move || ctrlc_handler.set_false()).unwrap();
+    handler.timed_wait(sleep_time);
+
     basic_call_response("DELETE-CAPTURE-PROGRAM\n", port)?;
     basic_call_response("CLOSE-CAPTURE\n", port)?;
 
@@ -202,4 +208,33 @@ fn serialize(program: &str) -> String {
     }
     let _ = serialized_program.pop();
     serialized_program
+}
+
+struct CtrlcHandle {
+    wait: Mutex<bool>,
+    cv: Condvar,
+}
+
+impl CtrlcHandle {
+    pub fn new() -> Self {
+        Self {
+            wait: Mutex::new(true),
+            cv: Condvar::new(),
+        }
+    }
+
+    pub fn set_false(&self) {
+        *self.wait.lock().unwrap() = false;
+        self.cv.notify_one();
+    }
+
+    pub fn timed_wait(&self, dur: Duration) -> bool {
+        let (mut guard, _) = self
+            .cv
+            .wait_timeout_while(self.wait.lock().unwrap(), dur, |&mut wait| wait)
+            .unwrap();
+        let wait = *guard;
+        *guard = true;
+        wait
+    }
 }
