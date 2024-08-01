@@ -9,13 +9,15 @@ use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use crate::zdp;
 use crate::zdp::*;
-use bytes::{Buf, BufMut};
+use bytes::BufMut;
+use crate::zdp;
+use crate::zdp::*;
+use bytes::Buf;
 use enum_map::EnumMap;
 use std::result::Result;
-use std::sync::Mutex;
 use tokio::sync::{
     oneshot::{channel, Sender},
-    Semaphore, SemaphorePermit,
+    Mutex, Semaphore, SemaphorePermit,
 };
 use zerocopy::FromBytes;
 
