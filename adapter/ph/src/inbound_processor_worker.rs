@@ -65,7 +65,23 @@ async fn handle_packet<'pktbuf>(
 
     let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
-    if base_hdr.packet_type.is_per_flow() {
+    if base_hdr.packet_type.is_response() {
+        let channel;
+        {
+            let mut inner_req = asm.sync_req_state.inner_req.lock().await;
+            channel = inner_req.reply_channel.take();
+        }
+        match channel {
+            Some(channel) => {
+                let _ = channel.send(pkt); // TODO error handling
+            }
+            None => {
+                let ret_buf = pkt.destroy();
+                asm.buffer_stack.put_buffer(ret_buf);
+                asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+            }
+        }
+    } else if base_hdr.packet_type.is_per_flow() {
         let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
         // copy out relevant header info

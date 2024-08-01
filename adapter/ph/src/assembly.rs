@@ -9,7 +9,7 @@ use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use crate::zdp;
 use crate::zdp::*;
-use bytes::Buf;
+use bytes::{Buf, BufMut};
 use enum_map::EnumMap;
 use std::result::Result;
 use tokio::sync::{
@@ -60,13 +60,14 @@ pub struct Assembly<'pktbuf> {
     pub sync_req_state: SyncReqState<'pktbuf>,
 }
 
+#[allow(dead_code)]
 pub struct SyncReqState<'pktbuf> {
-    inner_req: Mutex<SyncReqInnerState<'pktbuf>>, // don't need to be pub now, may change in future
-    semaphore: Semaphore,
+    pub inner_req: Mutex<SyncReqInnerState<'pktbuf>>,
+    pub semaphore: Semaphore,
 }
 
 pub struct SyncReqInnerState<'pktbuf> {
-    reply_channel: Option<Sender<Packet<'pktbuf>>>,
+    pub reply_channel: Option<Sender<Packet<'pktbuf>>>,
 }
 
 impl<'pktbuf> SyncReqState<'pktbuf> {
@@ -81,15 +82,18 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
     }
 }
 
+#[allow(dead_code)]
 pub enum SyncReqError {
     LinkClosed,
     ProtocolError,
 }
 
 impl<'pktbuf> Assembly<'pktbuf> {
+    #[allow(dead_code)]
     pub async fn send_sync_non_flow_req(
         &self,
-        zdp_packet_type: zdp::ZdpPacketType,
+        zdp_request_type: zdp::ZdpPacketType,
+        zdp_response_type: zdp::ZdpPacketType,
         packet: Packet<'pktbuf>,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
         let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit
@@ -98,19 +102,17 @@ impl<'pktbuf> Assembly<'pktbuf> {
             let mut inner_req = self.sync_req_state.inner_req.lock().await;
             inner_req.reply_channel = Some(sender);
         }
-        let sent_hdr =
-            ZdpBaseHeader::ref_from_prefix(packet.body()).expect("too-short inbound packet");
-        let sent_pkt_type = sent_hdr.packet_type;
 
         self.outbound_processor
-            .enqueue_non_flow_mgmt(zdp_packet_type, packet)
+            .enqueue_non_flow_mgmt(zdp_request_type, packet)
             .await;
+
         match receiver.await {
             Ok(mut rec_pkt) => {
                 drop(permit);
                 let rec_hdr = ZdpBaseHeader::ref_from_prefix(rec_pkt.body())
                     .expect("too-short inbound packet");
-                if sent_pkt_type != rec_hdr.packet_type {
+                if zdp_response_type != rec_hdr.packet_type {
                     let ret_buf = rec_pkt.destroy();
                     self.buffer_stack.put_buffer(ret_buf);
                     self.counters[CounterType::BadMgmtResponse].increment();
@@ -123,9 +125,11 @@ impl<'pktbuf> Assembly<'pktbuf> {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn send_sync_per_flow_req(
         &self,
-        zdp_packet_type: zdp::ZdpPacketType,
+        zdp_request_type: zdp::ZdpPacketType,
+        zdp_response_type: zdp::ZdpPacketType,
         stream_id: u32,
         packet: Packet<'pktbuf>,
     ) -> Result<(u32, Packet<'pktbuf>), SyncReqError> {
@@ -135,19 +139,16 @@ impl<'pktbuf> Assembly<'pktbuf> {
             let mut inner_req = self.sync_req_state.inner_req.lock().await;
             inner_req.reply_channel = Some(sender);
         }
-        let sent_hdr =
-            ZdpPerFlowHeader::ref_from_prefix(packet.body()).expect("too-short inbound packet"); // could also use ZdpBaseHeader here b/c the beginning of both headers are the same
-        let sent_pkt_type = sent_hdr.base_header.packet_type;
-
         self.outbound_processor
-            .enqueue_per_flow_mgmt(zdp_packet_type, stream_id, packet)
+            .enqueue_per_flow_mgmt(zdp_request_type, stream_id, packet)
             .await;
+
         match receiver.await {
             Ok(mut rec_pkt) => {
                 drop(permit);
                 let rec_hdr = ZdpPerFlowHeader::ref_from_prefix(rec_pkt.body())
                     .expect("too-short inbound packet");
-                if sent_pkt_type != rec_hdr.base_header.packet_type {
+                if zdp_response_type != rec_hdr.base_header.packet_type {
                     let ret_buf = rec_pkt.destroy();
                     self.buffer_stack.put_buffer(ret_buf);
                     self.counters[CounterType::BadMgmtResponse].increment();
@@ -160,9 +161,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
             Err(_) => return Err(SyncReqError::LinkClosed),
         }
     }
-}
 
-impl<'pktbuf> Assembly<'pktbuf> {
     pub async fn send_report(&self, to_send: &str) {
         // this condition will need to be adjusted when we have complete ZPR packets
         // with the information at the end of the packet at well

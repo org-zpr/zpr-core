@@ -17,6 +17,7 @@ pub enum CounterType {
     InCapPacksDrop,
     OutCapPacksDrop,
     BadMgmtResponse,
+    UnexpectedMgmtResponse,
 }
 
 pub fn name_counters(count_num: CounterType) -> String {
@@ -33,6 +34,7 @@ pub fn name_counters(count_num: CounterType) -> String {
         CounterType::InCapPacksDrop => s = "Inbound Capture Packets Dropped",
         CounterType::OutCapPacksDrop => s = "Outbound Capture Packets Dropped",
         CounterType::BadMgmtResponse => s = "Bad Management Response",
+        CounterType::UnexpectedMgmtResponse => s = "Unexpected Management Response",
     };
 
     s.to_string()
