@@ -12,7 +12,7 @@ use crate::zdp::*;
 use bytes::BufMut;
 use crate::zdp;
 use crate::zdp::*;
-use bytes::Buf;
+use bytes::{Buf, BufMut};
 use enum_map::EnumMap;
 use std::result::Result;
 use tokio::sync::{
