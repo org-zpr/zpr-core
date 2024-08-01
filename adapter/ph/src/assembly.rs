@@ -4,8 +4,11 @@ use crate::config;
 use crate::counter::*;
 use crate::counters_enum::*;
 use crate::flow_control::FlowControl;
+use crate::packet::*;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
+use crate::zdp::*;
+use bytes::BufMut;
 use enum_map::EnumMap;
 // Interface to full assembly of all stages.
 
@@ -45,4 +48,30 @@ pub struct Assembly<'pktbuf> {
     pub counters: EnumMap<CounterType, Counter>,
 
     pub tun_ctl: TunCtl<'pktbuf>,
+}
+
+impl<'pktbuf> Assembly<'pktbuf> {
+    pub async fn send_report(&self, to_send: &str) {
+        // this condition will need to be adjusted when we have complete ZPR packets
+        // with the information at the end of the packet at well
+        if PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < to_send.len() {
+            return;
+        }
+        let buf = self.buffer_stack.get_buffer().await;
+        let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+        let hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
+        hdr.report_data_length = to_send.len() as u16;
+        pkt.put(to_send.as_bytes());
+        self.outbound_processor
+            .enqueue_non_flow_mgmt(ZdpPacketType::Report, pkt)
+            .await;
+    }
+
+    pub async fn send_discard(&self) {
+        let buf = self.buffer_stack.get_buffer().await;
+        let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+        self.outbound_processor
+            .enqueue_non_flow_mgmt(ZdpPacketType::Discard, pkt)
+            .await;
+    }
 }

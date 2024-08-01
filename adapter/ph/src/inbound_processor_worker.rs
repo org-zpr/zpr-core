@@ -61,6 +61,8 @@ async fn handle_packet<'pktbuf>(
     mut pkt: Packet<'pktbuf>,
     asm: &Assembly<'pktbuf>,
 ) {
+    pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
+
     let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
     if base_hdr.packet_type.is_per_flow() {
@@ -114,7 +116,10 @@ async fn handle_packet<'pktbuf>(
                 let ret_buf = pkt.destroy();
                 asm.buffer_stack.put_buffer(ret_buf);
             }
-
+            ZdpPacketType::Discard => {
+                // TODO print to debug log, when implemented
+                eprintln!("Discard message recieved");
+            }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     }
