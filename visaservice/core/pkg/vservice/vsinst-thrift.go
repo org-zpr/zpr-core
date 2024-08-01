@@ -18,6 +18,7 @@ import (
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vssapi"
 
 	"github.com/apache/thrift/lib/go/thrift"
@@ -106,7 +107,7 @@ func (vs *VSInst) freeSessionID(sid int32, chksum uint32) bool {
 }
 
 // Removes and returns the PeerRecord from the apikeys table.  After this the API key is no longer valid.
-func (vs *VSInst) takePeerRecord(key string) (netip.Addr, *PeerRecord) {
+func (vs *VSInst) takePeerRecord(key string) (netip.Addr, *adb.PeerRecord) {
 	var naddr netip.Addr
 	vs.sessions.Lock()
 	if addr, ok := vs.sessions.apiKeys[key]; ok {
@@ -115,17 +116,8 @@ func (vs *VSInst) takePeerRecord(key string) (netip.Addr, *PeerRecord) {
 	}
 	vs.sessions.Unlock()
 
-	var peer *PeerRecord
-	vs.agentDB.Lock()
-	defer vs.agentDB.Unlock()
-	if rec, ok := vs.agentDB.agents[naddr]; ok {
-		if rec.Peer != nil {
-			peer = rec.Peer
-			rec.Peer.APIKey = ""
-		}
-	}
-
-	return naddr, peer
+	vs.agentDB.DisableAPIKey(naddr)
+	return naddr, vs.agentDB.GetPeerRecord(naddr)
 }
 
 func (vs *VSInst) validAPIKey(key string) bool {
@@ -155,13 +147,7 @@ func (vs *VSInst) updateContactTime(key string) {
 		return
 	}
 
-	vs.agentDB.Lock()
-	defer vs.agentDB.Unlock()
-	if rec, ok := vs.agentDB.agents[naddr]; ok {
-		if rec.Peer != nil {
-			rec.Peer.LastContactTime = time.Now()
-		}
-	}
+	vs.agentDB.SetNodeContactTime(naddr, time.Now())
 }
 
 // Returns (key_is_valid, last_heard_from_time, node_address)
@@ -176,12 +162,9 @@ func (vs *VSInst) validAPIKeyAndDeets(key string) (bool, time.Time, netip.Addr) 
 	vs.sessions.RUnlock()
 
 	if found {
-		vs.agentDB.RLock()
-		defer vs.agentDB.RUnlock()
-		if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
-			if rec.Peer != nil {
-				return true, rec.Peer.LastContactTime, nodeAddr
-			}
+		lastContact, ok := vs.agentDB.GetNodeLastContact(nodeAddr)
+		if ok {
+			return true, lastContact, nodeAddr
 		}
 	}
 
@@ -280,7 +263,7 @@ func (vs *VSInst) BackDoorConnectSvcAdapter(tether_addr netip.Addr, zpr_addr net
 	agnt.SetTetherAddr(tether_addr)
 	agnt.SetAuthenticated(claims, expiration, nil, nil, cid)
 
-	return vs.AddAdapter(zpr_addr, agnt)
+	return vs.agentDB.AddOrUpdateAdapter(zpr_addr, agnt.GetTetherAddr(), agnt)
 }
 
 // Poll used to be a VS API function, but is superceded by the VSS push functions.
@@ -292,15 +275,13 @@ func (vs *VSInst) Poll(key string) (*PollResponse, error) {
 		vs.log.Debug("poll called with invalid key", "key", key)
 		return nil, vsapi.NewUnauthorizedError()
 	}
-	var messages []*PushItem
-	vs.agentDB.Lock()
-	if rec, ok := vs.agentDB.agents[zprAddr]; ok {
-		if rec.Peer != nil {
-			messages = rec.Peer.PushBuffer
-			rec.Peer.PushBuffer = nil
-		}
+	messages := vs.agentDB.DrainPending(zprAddr)
+	vcount, rcount := 0, 0
+	for _, msg := range messages {
+		vcount += len(msg.Visas)
+		rcount += len(msg.Revocations)
 	}
-	vs.agentDB.Unlock()
+	vs.log.Debugf("found %d messages (%d visas, %d revocations) in mbox for node %s", len(messages), vcount, rcount, zprAddr)
 	resp := PollResponse{}
 	for _, msg := range messages {
 		resp.Visas = append(resp.Visas, msg.Visas...)
@@ -436,29 +417,15 @@ func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, pro
 	nodeAgent.SetTetherAddr(naddr)
 	nodeAgent.SetAuthenticated(claims, expiration, nil, nil, cid)
 
-	if err := vs.AddNode(naddr, nodeAgent); err != nil {
+	apiKey := uuid.New().String()
+
+	if err := vs.agentDB.AddNode(naddr, naddr, nodeAgent, apiKey, vssServiceAddr); err != nil {
 		return "", err
 	}
-
-	apiKey := uuid.New().String()
 
 	vs.sessions.Lock()
 	vs.sessions.apiKeys[apiKey] = naddr
 	vs.sessions.Unlock()
-
-	peer := &PeerRecord{
-		APIKey:           apiKey,
-		RegistrationTime: time.Now(),
-		VSSAddr:          vssServiceAddr,
-		LastContactTime:  time.Now(),
-	}
-	vs.agentDB.Lock()
-	if rec, ok := vs.agentDB.agents[naddr]; ok {
-		rec.Peer = peer
-	} else {
-		vs.log.Warn("registration: node not found in agent DB", "addr", naddr)
-	}
-	vs.agentDB.Unlock()
 
 	return apiKey, nil
 }
@@ -471,7 +438,7 @@ func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
 		return vsapi.NewUnauthorizedError()
 	}
 	vs.log.Info("de-register", "node_addr", naddr, "visa_requests", rec.VisaRequestsCount, "connects", rec.ConnectRequestsCount)
-	vs.RemoveNode(naddr)
+	vs.agentDB.RemoveNode(naddr)
 	return nil
 }
 
@@ -483,14 +450,7 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 	}
 
 	if naddr, ok := vs.nodeAddrForKey(key); ok {
-		vs.agentDB.Lock()
-		if rec, ok := vs.agentDB.agents[naddr]; ok {
-			if rec.Peer != nil {
-				rec.Peer.ConnectRequestsCount++
-				rec.Peer.LastContactTime = time.Now()
-			}
-		}
-		vs.agentDB.Unlock()
+		vs.agentDB.IncrNodeConnectReq(naddr)
 	}
 
 	// Note that the prototype visa service allowed a node to pass itself (its own agent) in to this call,
@@ -529,21 +489,16 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 	vs.log.Info("agent disconnect", "zpr_addr", zaddr)
 
 	// Normally this would be an adapter disconnect.
-	isNode := false
-	found := false
-	vs.agentDB.RLock()
-	if rec, ok := vs.agentDB.agents[zaddr]; ok {
-		isNode = rec.Agent.GetRole() == "node"
-		found = true
-	}
-	vs.agentDB.RUnlock()
+
+	found := vs.agentDB.Contains(zaddr)
+	isNode := vs.agentDB.IsNode(zaddr)
 
 	if !found {
 		vs.log.Warn("agent-disconnect called but address not found", "addr", zaddr)
 		return nil
 	}
 	if !isNode {
-		vs.RemoveAdapter(zaddr)
+		vs.agentDB.RemoveAdapter(zaddr)
 		return nil
 	}
 
@@ -577,15 +532,7 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 	}
 
 	vs.log.Info("request visa", "peer", zprAddr)
-
-	vs.agentDB.Lock()
-	if rec, ok := vs.agentDB.agents[zprAddr]; ok {
-		if rec.Peer != nil {
-			rec.Peer.VisaRequestsCount++
-			rec.Peer.LastContactTime = time.Now()
-		}
-	}
-	vs.agentDB.Unlock()
+	vs.agentDB.IncrNodeVisaReq(zprAddr)
 
 	pp := vs.getPolicy() // take & release lock
 	pver := uint64(0)

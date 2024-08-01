@@ -8,13 +8,14 @@ import (
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vssapi"
 )
 
 // Called by InstallPolicy
 func (vs *VSInst) installPolicyWithVisasForNodes(pp *policy.Policy, configID uint64) error {
 	errCount := 0
-	for _, nodeAddr := range vs.GetNodeList() {
+	for _, nodeAddr := range vs.agentDB.GetNodeList() {
 		if err := vs.installPolicyWithVisasForNode(nodeAddr, pp, configID); err != nil {
 			vs.log.WithError(err).Warn("failed to install policy on node", "node", nodeAddr)
 			errCount++
@@ -30,7 +31,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	var visas []*vssapi.VisaHop
 	var vssPort uint16
 
-	serviceAddr := vs.GetVSSAddrForNode(nodeAddr)
+	serviceAddr := vs.agentDB.GetNodeVSSAddr(nodeAddr)
 	if serviceAddr == "" {
 		return fmt.Errorf("no support service addr for node")
 	}
@@ -76,7 +77,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 		if err != nil {
 			vs.log.WithError(err).Warn("failed to generate a visa-service visa for the node")
 		} else if vsr.Status != vsapi.StatusCode_SUCCESS {
-			vs.log.Warn("failed to generate a visa-service visa for the node", "reason", vsr.Reason)
+			vs.log.Warn("failed to generate a visa-support-service visa for the node", "reason", vsr.Reason)
 		} else {
 			visas = append(visas, &vssapi.VisaHop{
 				VisaPb:   vsr.Visa.VisaPb,
@@ -86,7 +87,17 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 		}
 	}
 
-	return vs.updateNode(nodeAddr, pp.VersionNumber(), configID, visas)
+	if err := vs.updateNode(nodeAddr, pp.VersionNumber(), configID, visas); err != nil {
+		// Failed to update, stuff them in the push buffer.
+		vs.log.WithError(err).Warn("failed to update node during a policy install -- buffering", "node", nodeAddr)
+		item := adb.PushItem{
+			NodeAddr: nodeAddr,
+			Visas:    visas,
+		}
+		vs.agentDB.BufferItemsForNode(nodeAddr, []*adb.PushItem{&item})
+		return err
+	}
+	return nil
 }
 
 // For update node to work, we need to push the policy and version, plus all the visas.
@@ -95,37 +106,25 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 //
 // This does not use the push-buffer.
 func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uint64, visas []*vssapi.VisaHop) error {
-
-	found := false
-	updating := false
 	var serviceAddr string
 	var opErr error
 
-	vs.agentDB.Lock()
-	if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
-		if rec.Peer != nil {
-			found = true
-			if rec.Peer.State.Updating {
-				updating = true
-			} else {
-				rec.Peer.State.WantPolicyVer = policyVer
-				rec.Peer.State.WantConfigID = configID
-				serviceAddr = rec.Peer.VSSAddr
-				if serviceAddr != "" {
-					rec.Peer.State.Updating = true // essentially takes a lock here
-				}
-			}
-		}
-	}
-	vs.agentDB.Unlock()
-	if updating {
-		return nil
-	}
-	if !found {
+	// if updating false, set true.
+
+	oldValue, ok := vs.agentDB.TestAndSetUpdating(nodeAddr, false, true)
+	if !ok {
 		return fmt.Errorf("node not found")
 	}
+	if oldValue {
+		// already updating
+		return nil
+	}
+	serviceAddr = vs.agentDB.GetNodeVSSAddr(nodeAddr)
 	if serviceAddr == "" {
 		return fmt.Errorf("no VSS address for node")
+	}
+	if ok := vs.agentDB.SetPeerDesiredPolicyState(nodeAddr, policyVer, configID); !ok {
+		return fmt.Errorf("node not found")
 	}
 
 	client := NewVSSCli(serviceAddr)
@@ -143,57 +142,17 @@ func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uin
 	}
 
 	// Success!
-	vs.agentDB.Lock()
-	if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
-		if rec.Peer != nil {
-			rec.Peer.State.LastPushConfigID = configID
-			rec.Peer.State.LastPushPolicyVer = policyVer
-		}
-	}
-	vs.agentDB.Unlock()
+	_ = vs.agentDB.SetPeerLastPolicyState(nodeAddr, policyVer, configID)
 
 RELEASE_UPDATE:
-	vs.agentDB.Lock()
-	if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
-		if rec.Peer != nil {
-			rec.Peer.State.Updating = false
-		}
-	}
-	vs.agentDB.Unlock()
+	_, _ = vs.agentDB.TestAndSetUpdating(nodeAddr, true, false)
 	return opErr
 }
 
-func (vs *VSInst) GetVSSAddrForNode(naddr netip.Addr) string {
-	vs.agentDB.RLock()
-	defer vs.agentDB.RUnlock()
-	if rec, ok := vs.agentDB.agents[naddr]; ok {
-		if rec.Peer != nil {
-			return rec.Peer.VSSAddr
-		}
-	}
-	return ""
-}
-
-func (vs *VSInst) EnqueuePushVisa(forNode netip.Addr, visas []*vssapi.VisaHop) {
-	item := &PushItem{
-		NodeAddr: forNode,
+func (vs *VSInst) EnqueuePushVisasToNode(addr netip.Addr, visas []*vssapi.VisaHop) {
+	item := &adb.PushItem{
+		NodeAddr: addr,
 		Visas:    visas,
-	}
-	vs.visaPushC <- item
-}
-
-func (vs *VSInst) EnqueuePushVsapiVisas(visas []*vssapi.VisaHop) {
-	item := &PushItem{
-		Broadcast: true,
-		Visas:     visas,
-	}
-	vs.visaPushC <- item
-}
-
-func (vs *VSInst) EnqueuePushVisaToAllNodes(visas []*vssapi.VisaHop) {
-	item := &PushItem{
-		Broadcast: true,
-		Visas:     visas,
 	}
 	vs.visaPushC <- item
 }
@@ -203,67 +162,56 @@ func (vs *VSInst) EnqueuePushVisaToAllNodes(visas []*vssapi.VisaHop) {
 //
 // We use the VSS to send the item and if send fails we put the item on the
 // node buffer (in agentDB) for retry.
-func (vs *VSInst) pushToNode(item *PushItem) {
+func (vs *VSInst) pushToNode(item *adb.PushItem) {
 	if item.Broadcast {
 		// Push to all nodes!
-		var nodes []netip.Addr
-		vs.agentDB.RLock()
-		for _, rec := range vs.agentDB.agents {
-			if rec.Peer != nil {
-				nodes = append(nodes, rec.ZPRAddr)
-			}
-		}
-		vs.agentDB.RUnlock()
-		for _, node := range nodes {
-			vs.pushToNodeOrBuffer(node, item)
+		for _, node := range vs.agentDB.GetNodeList() {
+			vs.pushToNodeOrBuffer(node, []*adb.PushItem{item})
 		}
 	} else {
-		vs.pushToNodeOrBuffer(item.NodeAddr, item)
+		vs.pushToNodeOrBuffer(item.NodeAddr, []*adb.PushItem{item})
 	}
 }
 
-func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, item *PushItem) {
+func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, items []*adb.PushItem) {
 	// We used to use a polling interface. Now we can use the VSS to send
 	// directly to the node.
 
-	vs.log.Debug("begin push items to node", "node", nodeAddr, "visa_count", len(item.Visas), "revocation_count", len(item.Revocations))
+	vs.log.Debug("begin push items to node", "node", nodeAddr, "count", len(items))
 
-	var serviceAddr string
-	vs.agentDB.RLock()
-	if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
-		if rec.Peer != nil {
-			serviceAddr = rec.Peer.VSSAddr
-		}
-	}
-	vs.agentDB.RUnlock()
+	serviceAddr := vs.agentDB.GetNodeVSSAddr(nodeAddr)
 	if serviceAddr == "" {
 		vs.log.Warn("attempt to push to node but node not found", "addr", nodeAddr)
 		return
 	}
 
 	client := NewVSSCli(serviceAddr)
-	failing := PushItem{}
+	failing := adb.PushItem{}
 
-	if len(item.Revocations) > 0 {
-		if err := client.SendRevocations(item.Revocations); err != nil {
-			failing.Revocations = append(failing.Revocations, item.Revocations...)
+	var revocations []*vssapi.VisaRevocation
+	var visas []*vssapi.VisaHop
+	for _, itm := range items {
+		revocations = append(revocations, itm.Revocations...)
+		visas = append(visas, itm.Visas...)
+	}
+
+	if len(revocations) > 0 {
+		if err := client.SendRevocations(revocations); err != nil {
+			failing.Revocations = append(failing.Revocations, revocations...)
 			vs.log.WithError(err).Warn("failed to send revocations to node", "node", nodeAddr)
 		}
 	}
 
-	if len(item.Visas) > 0 {
-		if err := client.SendVisas(item.Visas); err != nil {
-			failing.Visas = append(failing.Visas, item.Visas...)
+	if len(visas) > 0 {
+		if err := client.SendVisas(visas); err != nil {
+			failing.Visas = append(failing.Visas, visas...)
 			vs.log.WithError(err).Warn("failed to send visas to node", "node", nodeAddr)
 		}
 	}
 
 	if len(failing.Revocations) > 0 || len(failing.Visas) > 0 {
-		vs.agentDB.Lock()
-		if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
-			rec.Peer.PushBuffer = append(rec.Peer.PushBuffer, &failing)
-		}
-		vs.agentDB.Unlock()
+		vs.log.Debug("adding visas/revocations to pushbuffer for node", "node", nodeAddr, "visas", len(failing.Visas), "revocations", len(failing.Revocations))
+		vs.agentDB.BufferItemsForNode(nodeAddr, []*adb.PushItem{&failing})
 	}
 }
 
@@ -278,57 +226,24 @@ func (vs *VSInst) handleNodeRegister(nodeAddr netip.Addr) {
 
 // checkNodeVSSState checks the VSS state of all nodes and sends config and policy to nodes
 // which indicate they are out of sync.
+//
+// This should not be called by multiple routines at once.
 func (vs *VSInst) checkNodesVSSState() {
 	pp, _, configID := vs.getPolicyMatcherConfig()
-
-	var nodes []netip.Addr
-	vs.agentDB.RLock()
-	for nodeAddr, rec := range vs.agentDB.agents {
-		if rec.Peer == nil {
-			continue
+	for _, nodeAddr := range vs.agentDB.GetOutOfSyncNonUpdatingNodes() {
+		vs.log.Debug("checkNodesVSSState - node out of sync", "node", nodeAddr)
+		if err := vs.installPolicyWithVisasForNode(nodeAddr, pp, configID); err != nil {
+			vs.log.WithError(err).Warn("failed to install policy on node", "node", nodeAddr)
 		}
-		if rec.Peer.State.Updating {
-			continue
-		}
-		if !rec.Peer.IsInSync() {
-			nodes = append(nodes, nodeAddr)
-		}
-	}
-	vs.agentDB.RUnlock()
-
-	for _, nodeAddr := range nodes {
-		vs.installPolicyWithVisasForNode(nodeAddr, pp, configID)
 	}
 }
 
 func (vs *VSInst) checkPushBuffers() {
-	var nodes []netip.Addr
-	vs.agentDB.RLock()
-	for nodeAddr, rec := range vs.agentDB.agents {
-		if rec.Peer != nil && len(rec.Peer.PushBuffer) > 0 {
-			nodes = append(nodes, nodeAddr)
-		}
-	}
-	vs.agentDB.RUnlock()
-
-	for _, nodeAddr := range nodes {
-		// take the push buffer.
-		var pushBuffer []*PushItem
-		vs.agentDB.Lock()
-		if rec, ok := vs.agentDB.agents[nodeAddr]; ok {
-			if rec.Peer != nil {
-				pushBuffer = rec.Peer.PushBuffer
-				rec.Peer.PushBuffer = nil
-			}
-		}
-		vs.agentDB.Unlock()
+	for _, nodeAddr := range vs.agentDB.GetNodesWithPending() {
+		pushBuffer := vs.agentDB.DrainPending(nodeAddr)
 		if len(pushBuffer) > 0 {
-			var consolidated PushItem
-			for _, item := range pushBuffer {
-				consolidated.Visas = append(consolidated.Visas, item.Visas...)
-				consolidated.Revocations = append(consolidated.Revocations, item.Revocations...)
-			}
-			vs.pushToNodeOrBuffer(nodeAddr, &consolidated)
+			vs.log.Debug("checkPushBuffers - found pending items for node", "node", nodeAddr, "count", len(pushBuffer))
+			vs.pushToNodeOrBuffer(nodeAddr, pushBuffer)
 		}
 	}
 }

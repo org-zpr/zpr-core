@@ -502,9 +502,10 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 			if portIdx, match := protIdx[td.Proto.Num()]; match {
 				m.log.Debug("[MX]  -- found protocol in match table", "portCount", len(portIdx))
 				if set, merr := m.matchy(td, true, portIdx, dstAgent); len(set) > 0 { // FORWARD !
+					m.log.Debugf("[MX]  -- -- matched %d policies on FWD", len(set))
 					pset = append(pset, set...)
 				} else if merr != nil {
-					m.log.Debug("[MX] scope match failed", "reason", merr.Error(), "dir", "FWD")
+					m.log.Debug("[MX] -- -- scope match failed", "reason", merr.Error(), "dir", "FWD")
 				}
 			}
 		} else { // XXX DEBUG
@@ -520,9 +521,10 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 		if protIdx, match := m.trafficIdx[svcID]; match {
 			if portIdx, match := protIdx[td.Proto.Num()]; match {
 				if set, merr := m.matchy(td, false, portIdx, dstAgent); len(set) > 0 { // REVERSE !
+					m.log.Debugf("[MX]  -- -- matched %d policies on REV", len(set))
 					pset = append(pset, set...)
 				} else if merr != nil {
-					m.log.Debug("[MX] scope match failed", "reason", merr.Error(), "dir", "REV")
+					m.log.Debug("[MX] -- -- scope match failed", "reason", merr.Error(), "dir", "REV")
 				}
 			}
 		}

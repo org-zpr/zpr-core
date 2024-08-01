@@ -361,12 +361,12 @@ func (vs *VSInst) computeVisaExpiration(maxVisaLifetime time.Duration, durationC
 // to see what agent is connected at each endpoint.
 func (vs *VSInst) endpointsForTraffic(pktData *snip.Traffic) (srcAgent *agent.Agent, dstAgent *agent.Agent, err error) {
 	// Note that the visa service does not check for a route. The existence of an entry in the DirectoryService implies a route.
-	srcAgent, err = vs.AgentAtContactAddr(pktData.SrcAddr)
+	srcAgent, err = vs.agentDB.AgentAtContactAddr(pktData.SrcAddr)
 	if err != nil {
 		vs.log.WithError(err).Info("visa denied: failed to resolve source ZPR address", "source", pktData.SrcAddr)
 		return nil, nil, ErrNoRouteToHost
 	}
-	dstAgent, err = vs.AgentAtContactAddr(pktData.DstAddr)
+	dstAgent, err = vs.agentDB.AgentAtContactAddr(pktData.DstAddr)
 	if err != nil {
 		vs.log.WithError(err).Info("visa denied: failed to resolve dest ZPR address", "dest", pktData.DstAddr)
 		return nil, nil, ErrNoRouteToHost
