@@ -5,6 +5,7 @@ import (
 	"zpr.org/vsx/polio"
 )
 
+// Callback function for adb/agentdb
 func (vs *VSInst) HandleDBAgentAdded(agnt *agent.Agent) {
 	pp, _, curConfig := vs.getPolicyMatcherConfig()
 
@@ -32,6 +33,7 @@ func (vs *VSInst) HandleDBAgentAdded(agnt *agent.Agent) {
 	}
 }
 
+// Callback function for adb/agentdb
 func (vs *VSInst) HandleDBAgentRemoved(agnt *agent.Agent) {
 	pp, _, curConfig := vs.getPolicyMatcherConfig()
 	if curConfig != agnt.GetConfigID() {
