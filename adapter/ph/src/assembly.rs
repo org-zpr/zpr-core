@@ -80,6 +80,10 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
             semaphore: Semaphore::new(1),
         }
     }
+
+    pub fn get_sender(&self) -> Option<Sender<Packet<'pktbuf>>> {
+        self.inner_req.lock().unwrap().reply_channel.take()
+    }
 }
 
 #[allow(dead_code)]
@@ -89,27 +93,13 @@ pub enum SyncReqError {
 }
 
 impl<'pktbuf> Assembly<'pktbuf> {
-    pub fn get_sender(&self) -> Option<Sender<Packet<'pktbuf>>> {
-        match self
-            .sync_req_state
-            .inner_req
-            .lock()
-            .unwrap()
-            .reply_channel
-            .take()
-        {
-            Some(channel) => Some(channel),
-            None => None,
-        }
-    }
-
     async fn send_sync_req_helper(
         &self,
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
         stream_id: Option<u32>,
         packet: Packet<'pktbuf>,
-    ) -> Result<(Option<u32>, Packet<'pktbuf>), SyncReqError> {
+    ) -> Result<Packet<'pktbuf>, SyncReqError> {
         let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit
         let (sender, receiver) = channel::<Packet<'pktbuf>>();
         {
@@ -131,6 +121,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
             }
         }
 
+        // Check received packet type, remove base header
         match receiver.await {
             Ok(mut rec_pkt) => {
                 drop(permit);
@@ -142,20 +133,8 @@ impl<'pktbuf> Assembly<'pktbuf> {
                     self.counters[CounterType::BadMgmtResponse].increment();
                     return Err(SyncReqError::ProtocolError);
                 }
-                let rec_stream_id: Option<u32>;
-                match stream_id {
-                    Some(_) => {
-                        let per_flow_hdr = ZdpPerFlowHeader::ref_from_prefix(rec_pkt.body())
-                            .expect("too-short inbound packet");
-                        rec_stream_id = Some(per_flow_hdr.stream_id);
-                        rec_pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
-                    }
-                    None => {
-                        rec_pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
-                        rec_stream_id = None;
-                    }
-                }
-                return Ok((rec_stream_id, rec_pkt));
+                rec_pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
+                Ok(rec_pkt)
             }
             Err(_) => return Err(SyncReqError::LinkClosed),
         }
@@ -168,16 +147,8 @@ impl<'pktbuf> Assembly<'pktbuf> {
         zdp_response_type: ZdpPacketType,
         packet: Packet<'pktbuf>,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
-        match self
-            .send_sync_req_helper(zdp_request_type, zdp_response_type, None, packet)
+        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, packet)
             .await
-        {
-            Err(err) => match err {
-                SyncReqError::LinkClosed => Err(SyncReqError::LinkClosed),
-                SyncReqError::ProtocolError => Err(SyncReqError::ProtocolError),
-            },
-            Ok(tuple) => Ok(tuple.1),
-        }
     }
 
     #[allow(dead_code)]
@@ -192,11 +163,14 @@ impl<'pktbuf> Assembly<'pktbuf> {
             .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), packet)
             .await
         {
-            Err(err) => match err {
-                SyncReqError::LinkClosed => Err(SyncReqError::LinkClosed),
-                SyncReqError::ProtocolError => Err(SyncReqError::ProtocolError),
-            },
-            Ok(tuple) => Ok((tuple.0.unwrap(), tuple.1)),
+            Ok(mut pkt) => {
+                let per_flow_hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body())
+                    .expect("too-short inbound packet");
+                let stream_id = per_flow_hdr.stream_id;
+                pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
+                Ok((stream_id, pkt))
+            }
+            Err(err) => Err(err),
         }
     }
 

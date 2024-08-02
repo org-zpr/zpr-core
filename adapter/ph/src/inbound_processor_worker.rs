@@ -73,7 +73,7 @@ async fn handle_packet<'pktbuf>(
     pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
 
     if packet_type.is_response() {
-        let channel = asm.get_sender();
+        let channel = asm.sync_req_state.get_sender();
         match channel {
             Some(channel) => match channel.send(pkt) {
                 Ok(()) => (),
