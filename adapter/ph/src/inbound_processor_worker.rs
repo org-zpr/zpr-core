@@ -63,7 +63,7 @@ async fn handle_packet<'pktbuf>(
 ) {
     pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
 
-    let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short ZDP message");
 
     if base_hdr.packet_type.is_response() {
         let channel = asm.get_sender();
@@ -86,11 +86,9 @@ async fn handle_packet<'pktbuf>(
         let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
         // copy out relevant header info
-        let packet_type = hdr.base_header.packet_type;
-        let _sequence_number = hdr.base_header.sequence_number;
-        let stream_id = hdr.stream_id;
+        let stream_id = per_flow_hdr.stream_id;
 
-        // strip packet header
+        // strip per-flow header
         pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
 
         match packet_type {
@@ -109,13 +107,6 @@ async fn handle_packet<'pktbuf>(
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     } else {
-        // copy out relevant header info
-        let packet_type = base_hdr.packet_type;
-        let _sequence_number = base_hdr.sequence_number;
-
-        // strip packet header
-        pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
-
         match packet_type {
             ZdpPacketType::Report => {
                 let hdr =
