@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use std::fmt;
 use std::io;
 
-use bytes::Bytes;
+use bytes::{BufMut, BytesMut, Bytes};
 
 use tracing::{info, error};
 
@@ -143,7 +143,7 @@ impl KeyManager<'_> {
         }
 
         // TODO: will I always need to crate a buffer here or can I write to input packet in place?
-        let mut outbuf = vec![0_u8; 1 + message.len + padlen];
+        let mut outbuf = vec![0_u8; 1 + message.body().len() + padlen];
 
         match encr.encrypt_transport(message.body(), &mut outbuf) {
             Ok(len) => {
@@ -192,12 +192,13 @@ impl KeyManager<'_> {
     // Pass in a full Key Management payload here.
     //
     // We copy the payload into our own buffer for processing. Caller should free buffer.
-    pub async fn handle_km_message(&self, message: &Packet) -> io::Result<()> {
+    pub async fn handle_km_message(&self, message: &[u8]) -> io::Result<()> {
         let state = self.shared.state.lock().unwrap();
         match state.mgmt_tx {
             Some(ref tx) => {
-                let km_buf = Bytes::from(message.body());
-                match tx.send(km_buf).await {
+                let mut km_buf = BytesMut::with_capacity(message.len());
+                km_buf.put(message);
+                match tx.send(km_buf.into()).await {
                     Ok(_) => Ok(()),
                     Err(_) => Err(io::Error::new(io::ErrorKind::Other, "failed to enqueue inbound KM message")),
                 }
