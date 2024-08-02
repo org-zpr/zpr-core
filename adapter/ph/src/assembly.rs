@@ -12,9 +12,10 @@ use crate::zdp::*;
 use bytes::{Buf, BufMut};
 use enum_map::EnumMap;
 use std::result::Result;
+use std::sync::Mutex;
 use tokio::sync::{
     oneshot::{channel, Sender},
-    Mutex, Semaphore, SemaphorePermit,
+    Semaphore, SemaphorePermit,
 };
 use zerocopy::FromBytes;
 
@@ -62,12 +63,12 @@ pub struct Assembly<'pktbuf> {
 
 #[allow(dead_code)]
 pub struct SyncReqState<'pktbuf> {
-    pub inner_req: Mutex<SyncReqInnerState<'pktbuf>>,
-    pub semaphore: Semaphore,
+    inner_req: Mutex<SyncReqInnerState<'pktbuf>>,
+    semaphore: Semaphore,
 }
 
-pub struct SyncReqInnerState<'pktbuf> {
-    pub reply_channel: Option<Sender<Packet<'pktbuf>>>,
+struct SyncReqInnerState<'pktbuf> {
+    reply_channel: Option<Sender<Packet<'pktbuf>>>,
 }
 
 impl<'pktbuf> SyncReqState<'pktbuf> {
@@ -89,23 +90,47 @@ pub enum SyncReqError {
 }
 
 impl<'pktbuf> Assembly<'pktbuf> {
-    #[allow(dead_code)]
-    pub async fn send_sync_non_flow_req(
+    pub fn get_sender(&self) -> Option<Sender<Packet<'pktbuf>>> {
+        match self
+            .sync_req_state
+            .inner_req
+            .lock()
+            .unwrap()
+            .reply_channel
+            .take()
+        {
+            Some(channel) => Some(channel),
+            None => None,
+        }
+    }
+
+    async fn send_sync_req_helper(
         &self,
         zdp_request_type: zdp::ZdpPacketType,
         zdp_response_type: zdp::ZdpPacketType,
+        stream_id: Option<u32>,
         packet: Packet<'pktbuf>,
-    ) -> Result<Packet<'pktbuf>, SyncReqError> {
+    ) -> Result<(Option<u32>, Packet<'pktbuf>), SyncReqError> {
         let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit
         let (sender, receiver) = channel::<Packet<'pktbuf>>();
         {
-            let mut inner_req = self.sync_req_state.inner_req.lock().await;
+            let mut inner_req = self.sync_req_state.inner_req.lock().unwrap();
             inner_req.reply_channel = Some(sender);
         }
 
-        self.outbound_processor
-            .enqueue_non_flow_mgmt(zdp_request_type, packet)
-            .await;
+        // Determine if sending a non-flow or per-flow message
+        match stream_id {
+            Some(stream_id) => {
+                self.outbound_processor
+                    .enqueue_per_flow_mgmt(zdp_request_type, stream_id, packet)
+                    .await
+            }
+            None => {
+                self.outbound_processor
+                    .enqueue_non_flow_mgmt(zdp_request_type, packet)
+                    .await
+            }
+        }
 
         match receiver.await {
             Ok(mut rec_pkt) => {
@@ -118,10 +143,41 @@ impl<'pktbuf> Assembly<'pktbuf> {
                     self.counters[CounterType::BadMgmtResponse].increment();
                     return Err(SyncReqError::ProtocolError);
                 }
-                rec_pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
-                return Ok(rec_pkt);
+                let rec_stream_id: Option<u32>;
+                match stream_id {
+                    Some(_) => {
+                        let per_flow_hdr = ZdpPerFlowHeader::ref_from_prefix(rec_pkt.body())
+                            .expect("too-short inbound packet");
+                        rec_stream_id = Some(per_flow_hdr.stream_id);
+                        rec_pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
+                    }
+                    None => {
+                        rec_pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
+                        rec_stream_id = None;
+                    }
+                }
+                return Ok((rec_stream_id, rec_pkt));
             }
-            Err(_) => return Err(SyncReqError::LinkClosed), // drop permit here as well? or will it automatically happen when the function gets popped off the call stack?
+            Err(_) => return Err(SyncReqError::LinkClosed),
+        }
+    }
+
+    #[allow(dead_code)]
+    pub async fn send_sync_non_flow_req(
+        &self,
+        zdp_request_type: zdp::ZdpPacketType,
+        zdp_response_type: zdp::ZdpPacketType,
+        packet: Packet<'pktbuf>,
+    ) -> Result<Packet<'pktbuf>, SyncReqError> {
+        match self
+            .send_sync_req_helper(zdp_request_type, zdp_response_type, None, packet)
+            .await
+        {
+            Err(err) => match err {
+                SyncReqError::LinkClosed => Err(SyncReqError::LinkClosed),
+                SyncReqError::ProtocolError => Err(SyncReqError::ProtocolError),
+            },
+            Ok(tuple) => Ok(tuple.1),
         }
     }
 
@@ -133,32 +189,15 @@ impl<'pktbuf> Assembly<'pktbuf> {
         stream_id: u32,
         packet: Packet<'pktbuf>,
     ) -> Result<(u32, Packet<'pktbuf>), SyncReqError> {
-        let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit
-        let (sender, receiver) = channel::<Packet<'pktbuf>>();
+        match self
+            .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), packet)
+            .await
         {
-            let mut inner_req = self.sync_req_state.inner_req.lock().await;
-            inner_req.reply_channel = Some(sender);
-        }
-        self.outbound_processor
-            .enqueue_per_flow_mgmt(zdp_request_type, stream_id, packet)
-            .await;
-
-        match receiver.await {
-            Ok(mut rec_pkt) => {
-                drop(permit);
-                let rec_hdr = ZdpPerFlowHeader::ref_from_prefix(rec_pkt.body())
-                    .expect("too-short inbound packet");
-                if zdp_response_type != rec_hdr.base_header.packet_type {
-                    let ret_buf = rec_pkt.destroy();
-                    self.buffer_stack.put_buffer(ret_buf);
-                    self.counters[CounterType::BadMgmtResponse].increment();
-                    return Err(SyncReqError::ProtocolError);
-                }
-                let rec_stream_id = rec_hdr.stream_id;
-                rec_pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
-                return Ok((rec_stream_id, rec_pkt));
-            }
-            Err(_) => return Err(SyncReqError::LinkClosed),
+            Err(err) => match err {
+                SyncReqError::LinkClosed => Err(SyncReqError::LinkClosed),
+                SyncReqError::ProtocolError => Err(SyncReqError::ProtocolError),
+            },
+            Ok(tuple) => Ok((tuple.0.unwrap(), tuple.1)),
         }
     }
 
