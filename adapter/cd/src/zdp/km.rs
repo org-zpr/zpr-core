@@ -76,7 +76,6 @@ impl fmt::Debug for KMState<'_> {
 // KeyManager maintains an SA with its peer.
 impl KeyManager<'_> {
     /// `statemachine` is the key management algorithm.
-    /// `km_buffers_out` is the output channel for key management packets.  These are the payloads only (no ZDP header).
     pub fn new<'a>(statemachine: Box<dyn KeyManagerStateMachine>) -> KeyManager<'a> {
 
         let settings = statemachine.get_settings();
@@ -144,7 +143,7 @@ impl KeyManager<'_> {
         }
 
         // TODO: will I always need to crate a buffer here or can I write to input packet in place?
-        let mut outbuf = vec![0_u8; 1 + message.metadata().len + padlen];
+        let mut outbuf = vec![0_u8; 1 + message.len + padlen];
 
         match encr.encrypt_transport(message.body(), &mut outbuf) {
             Ok(len) => {
@@ -200,7 +199,7 @@ impl KeyManager<'_> {
                 let km_buf = Bytes::from(message.body());
                 match tx.send(km_buf).await {
                     Ok(_) => Ok(()),
-                    Err(_) => Err(io::Error::new(io::ErrorKind::Other, "KeyManager not running")),
+                    Err(_) => Err(io::Error::new(io::ErrorKind::Other, "failed to enqueue inbound KM message")),
                 }
             }
             None => {
@@ -233,7 +232,7 @@ impl KeyManager<'_> {
             match km_buffers_out.send(handshake).await {
                 Ok(_) => {},
                 Err(_) => {
-                    return Err(io::Error::new(io::ErrorKind::Other, "failed to enqueue KM message"))
+                    return Err(io::Error::new(io::ErrorKind::Other, "failed to enqueue outbound KM message"))
                 }
             }
         };
@@ -258,7 +257,7 @@ impl KeyManager<'_> {
                         match km_buffers_out.send(resp).await {
                             Ok(_) => {},
                             Err(_) => {
-                                error!("failed to enqueue KM message")
+                                error!("failed to enqueue outbound KM message")
                             }
                         }
                     }
@@ -280,7 +279,7 @@ impl KeyManager<'_> {
                                 match km_buffers_out.send(resp).await {
                                     Ok(_) => {},
                                     Err(_) => {
-                                        error!("failed to enqueue KM message")
+                                        error!("failed to enqueue outbound KM message")
                                     }
                                 }
                             }
@@ -296,7 +295,7 @@ impl KeyManager<'_> {
                                 match km_buffers_out.send(resp).await {
                                     Ok(_) => {},
                                     Err(_) => {
-                                        error!("failed to enqueue KM message")
+                                        error!("failed to enqueue oubound KM message")
                                     }
                                 }
                             }
