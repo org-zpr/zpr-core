@@ -64,7 +64,8 @@ async fn handle_packet<'pktbuf>(
 ) {
     pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
 
-    let base_hdr_ref = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    let base_hdr_ref =
+        ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
     if base_hdr_ref.packet_type.is_per_flow() {
         let per_flow_hdr =
