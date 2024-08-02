@@ -65,7 +65,14 @@ async fn handle_packet<'pktbuf>(
 
     let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short ZDP message");
 
-    if base_hdr.packet_type.is_response() {
+    // copy out relevant header info
+    let packet_type = base_hdr.packet_type;
+    let _sequence_number = base_hdr.sequence_number;
+
+    // strip base header
+    pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
+
+    if packet_type.is_response() {
         let channel = asm.get_sender();
         match channel {
             Some(channel) => match channel.send(pkt) {
@@ -82,8 +89,9 @@ async fn handle_packet<'pktbuf>(
                 asm.counters[CounterType::UnexpectedMgmtResponse].increment();
             }
         }
-    } else if base_hdr.packet_type.is_per_flow() {
-        let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    } else if packet_type.is_per_flow() {
+        let per_flow_hdr =
+            ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
         // copy out relevant header info
         let stream_id = per_flow_hdr.stream_id;
