@@ -40,7 +40,7 @@ async fn worker<'pktbuf>(
                 OutboundProcessorMessage::PerFlowMgmt(pack_type, stream_id, mut pkt) => {
                     let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
                     hdr.base_header.packet_type = pack_type;
-                    hdr.stream_id = stream_id;
+                    hdr.stream_id = stream_id.into();
                     handle_packet(pkt, asm).await;
                 }
             }
