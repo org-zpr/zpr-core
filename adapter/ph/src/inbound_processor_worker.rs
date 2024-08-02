@@ -72,9 +72,26 @@ async fn handle_packet<'pktbuf>(
     // strip base header
     pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
 
-    if packet_type.is_per_flow() {
+    if packet_type.is_response() {
+        let channel = asm.get_sender();
+        match channel {
+            Some(channel) => match channel.send(pkt) {
+                Ok(()) => (),
+                Err(pkt) => {
+                    let ret_buf = pkt.destroy();
+                    asm.buffer_stack.put_buffer(ret_buf);
+                    asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+                }
+            },
+            None => {
+                let ret_buf = pkt.destroy();
+                asm.buffer_stack.put_buffer(ret_buf);
+                asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+            }
+        }
+    } else if packet_type.is_per_flow() {
         let per_flow_hdr =
-            ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short per-flow message");
+            ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
         // copy out relevant header info
         let stream_id = per_flow_hdr.stream_id;
