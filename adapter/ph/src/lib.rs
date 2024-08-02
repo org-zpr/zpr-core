@@ -1,4 +1,3 @@
-
 #[allow(unused_imports)]
 #[macro_use]
 extern crate arrayref;
@@ -27,4 +26,3 @@ pub mod rpc_worker;
 pub mod test_packet;
 pub mod tun_ctl;
 pub mod zdp;
-
