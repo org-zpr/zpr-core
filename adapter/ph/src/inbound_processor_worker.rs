@@ -6,7 +6,7 @@ use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
-use crate::InboundProcessorMessage;
+use crate::queues::InboundProcessorMessage;
 // use crate::buffer_stack::BufferStack;
 use bytes::Buf;
 use std::future::Future;

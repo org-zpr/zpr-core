@@ -1,5 +1,5 @@
 use crate::assembly::Assembly;
-use crate::CapPacket;
+use crate::queues::CapPacket;
 use core::future::Future;
 use libc::timeval;
 use pcap::{Capture, Dead, Error, Linktype, Packet, PacketHeader, Savefile};

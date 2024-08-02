@@ -4,7 +4,7 @@ use crate::flow_control;
 use crate::packet::Packet;
 use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
-use crate::OutboundProcessorMessage;
+use crate::queues::OutboundProcessorMessage;
 use bytes::Buf;
 use core::future::Future;
 use std::time::SystemTime;

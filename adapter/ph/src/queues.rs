@@ -27,6 +27,7 @@ pub struct InboundProcessor<'pktbuf> {
 impl<'pktbuf> InboundProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
+    #[allow(dead_code)]
     pub(crate) fn new(sender: mpsc::Sender<InboundProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
     }
@@ -64,6 +65,7 @@ pub struct InboundSend<'pktbuf> {
 impl<'pktbuf> InboundSend<'pktbuf> {
     // We necessarily have multiple queues, corresponding to the multiple
     // FDs of a multiqueue-enabled TUN interface.
+    #[allow(dead_code)]
     pub(crate) fn new(senders: Box<[mpsc::Sender<InboundSendMessage<'pktbuf>>]>) -> Self {
         Self { senders }
     }
@@ -112,6 +114,7 @@ pub struct OutboundProcessor<'pktbuf> {
 impl<'pktbuf> OutboundProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
+    #[allow(dead_code)]
     pub(crate) fn new(sender: mpsc::Sender<OutboundProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
     }
@@ -179,6 +182,7 @@ pub struct OutboundSend<'pktbuf> {
 impl<'pktbuf> OutboundSend<'pktbuf> {
     // Only one outbound socket, only one queue for now.  (To be determined
     // whether `sendmmsg` via multiple threads provides any needed performance gain.)
+    #[allow(dead_code)]
     pub(crate) fn new(sender: mpsc::Sender<OutboundSendMessage<'pktbuf>>) -> Self {
         Self { sender }
     }
