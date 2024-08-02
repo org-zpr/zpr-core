@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod mem {
+    use std::mem::ManuallyDrop;
     use std::ops::{Deref, DerefMut, Drop};
 
     pub unsafe fn slice_assume_init_mut<T>(slice: &mut [std::mem::MaybeUninit<T>]) -> &mut [T] {
@@ -12,26 +13,27 @@ pub mod mem {
         destructor: F,
     }
 
-    // TODO: switch to ManuallyDrop
-    struct DropGuardImpl<T, F: FnOnce(T)>(Option<DropGuardImplInner<T, F>>);
+    struct DropGuardImpl<T, F: FnOnce(T)>(ManuallyDrop<DropGuardImplInner<T, F>>);
 
     impl<T, F: FnOnce(T)> Deref for DropGuardImpl<T, F> {
         type Target = T;
 
         fn deref(&self) -> &T {
-            &self.0.as_ref().unwrap().item
+            &self.0.deref().item
         }
     }
 
     impl<T, F: FnOnce(T)> DerefMut for DropGuardImpl<T, F> {
         fn deref_mut(&mut self) -> &mut T {
-            &mut self.0.as_mut().unwrap().item
+            &mut self.0.deref_mut().item
         }
     }
 
     impl<T, F: FnOnce(T)> Drop for DropGuardImpl<T, F> {
         fn drop(&mut self) {
-            let inner = self.0.take().unwrap();
+            // SAFETY: we are calling this in the drop handler, and
+            // do not ourselves reuse `inner`
+            let inner = unsafe { ManuallyDrop::take(&mut self.0) };
             (inner.destructor)(inner.item);
         }
     }
@@ -59,9 +61,10 @@ pub mod mem {
 
     impl<T, F: FnOnce(T)> DropGuard<T> for DropGuardImpl<T, F> {
         fn into_inner(mut self) -> T {
-            let item = self.0.take().unwrap().item;
+            // SAFETY: we are consuming `self`, and forget it immediately after
+            let inner = unsafe { ManuallyDrop::take(&mut self.0) };
             std::mem::forget(self);
-            item
+            inner.item
         }
 
         fn map<U, IntoFn: FnOnce(T) -> U, FromFn: FnOnce(U) -> T>(
@@ -69,10 +72,11 @@ pub mod mem {
             into_fn: IntoFn,
             from_fn: FromFn,
         ) -> impl DropGuard<U> {
-            let inner = self.0.take().unwrap();
+            // SAFETY: we are consuming `self`, and forget it immediately after
+            let inner = unsafe { ManuallyDrop::take(&mut self.0) };
+            std::mem::forget(self);
             let inner_item = inner.item;
             let inner_destructor = inner.destructor;
-            std::mem::forget(self);
             drop_guard(into_fn(inner_item), |outer| {
                 inner_destructor(from_fn(outer))
             })
@@ -81,7 +85,7 @@ pub mod mem {
 
     /// Construct a `DropGuard`, wrapping the specified item, with the specified destructor.
     pub fn drop_guard<T, F: FnOnce(T)>(item: T, destructor: F) -> impl DropGuard<T> {
-        DropGuardImpl(Some(DropGuardImplInner { item, destructor }))
+        DropGuardImpl(ManuallyDrop::new(DropGuardImplInner { item, destructor }))
     }
 }
 
