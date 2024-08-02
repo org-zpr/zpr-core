@@ -199,10 +199,6 @@ fn main() -> ExitCode {
                 .unwrap();
             let unix_socket = Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
 
-            asm.send_report("Reporting for Duty!").await;
-            asm.send_discard().await;
-            asm.send_hello_req().await;
-
             let mut js = JoinSet::new();
 
             // Launches RPC worker program
@@ -301,6 +297,10 @@ fn main() -> ExitCode {
                 &*socket,
                 os_outq,
             ));
+
+            asm.send_report("Reporting for Duty!").await;
+            asm.send_discard().await;
+            asm.send_hello_req().await;
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();

@@ -240,7 +240,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                 let hdr = ZdpHelloResponseHeader::ref_from_prefix(hello_res.body())
                     .expect("too-short inbound packet");
                 let status = hdr.status;
-                println!("HelloResponse received, status: {}", status);
+                println!("Received HelloResponse, status: {}", status);
             }
             Err(err) => match err {
                 SyncReqError::LinkClosed => eprintln!("LinkClosed error with HelloRequest"),
