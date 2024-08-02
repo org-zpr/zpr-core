@@ -50,12 +50,6 @@ pub struct KeyManager<'mgr> {
 
 #[derive(Debug)]
 pub struct KMShared<'mgr> {
-
-    // TODO: Can I use a RwLock ??
-    // Bummer with this lock is that encrypt and decrypt functions will not be able to run in parallel.
-    // Also -- are there actually two SA's on the connection?  One for each direction?
-    //         If so, then we can run a manager for each direction and there will be encrypt/decrypt contention.
-    //         But what if we want to encrypt or decrypt in parallel?
     state: Mutex<KMState<'mgr>>,
 }
 
