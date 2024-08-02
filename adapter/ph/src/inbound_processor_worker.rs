@@ -5,9 +5,9 @@ use crate::ext::zerocopy::*;
 use crate::flow_control;
 use crate::options::PhMode;
 use crate::packet::Packet;
+use crate::queues::InboundProcessorMessage;
 use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
-use crate::InboundProcessorMessage;
 // use crate::buffer_stack::BufferStack;
 use bytes::Buf;
 use std::future::Future;
@@ -66,7 +66,24 @@ async fn handle_packet<'pktbuf>(
 
     let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
 
-    if base_hdr.packet_type.is_per_flow() {
+    if base_hdr.packet_type.is_response() {
+        let channel = asm.get_sender();
+        match channel {
+            Some(channel) => match channel.send(pkt) {
+                Ok(()) => (),
+                Err(pkt) => {
+                    let ret_buf = pkt.destroy();
+                    asm.buffer_stack.put_buffer(ret_buf);
+                    asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+                }
+            },
+            None => {
+                let ret_buf = pkt.destroy();
+                asm.buffer_stack.put_buffer(ret_buf);
+                asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+            }
+        }
+    } else if base_hdr.packet_type.is_per_flow() {
         let per_flow_hdr =
             ZdpPerFlowHeader::read_from_buf(&mut pkt).expect("too-short per-flow message");
 

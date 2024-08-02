@@ -1,6 +1,7 @@
 //! This module contains all state of a packet which is moving through the system.
 
 use crate::config;
+use crate::ext::std::mem::DropGuard;
 use crate::net_defs::*;
 use bytes::buf;
 use std::mem::{size_of, size_of_val};
@@ -100,6 +101,16 @@ impl<'buf> Packet<'buf> {
     /// `headroom` indicates room to keep free at packet start for possible extension.
     pub fn new(buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE], headroom: usize) -> Self {
         Self::new_with_existing_data(buf, PACKET_BUFFER_MIN_BODY_OFFSET + headroom, 0)
+    }
+
+    /// Same as `new()`, but accepts a `DropGuard`-protected buffer, and produces
+    /// a `DropGuard`-protected packet buffer, so manually calling `destroy()`
+    /// is unnecessary.
+    pub fn new_guarded<B: DropGuard<&'buf mut [u8; config::PACKET_BUFFER_SIZE]>>(
+        buf: B,
+        headroom: usize,
+    ) -> impl DropGuard<Self> {
+        buf.map(move |b| Self::new(b, headroom), |p| p.destroy())
     }
 
     /// Consumes a packet handle, returning the underlying buffer.

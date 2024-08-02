@@ -576,7 +576,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ph-test"
+name = "ph"
 version = "0.1.0"
 dependencies = [
  "arrayref",
