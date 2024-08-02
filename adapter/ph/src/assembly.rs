@@ -7,10 +7,6 @@ use crate::flow_control::FlowControl;
 use crate::packet::*;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
-use crate::zdp;
-use crate::zdp::*;
-use bytes::BufMut;
-use crate::zdp;
 use crate::zdp::*;
 use bytes::{Buf, BufMut};
 use enum_map::EnumMap;
@@ -109,8 +105,8 @@ impl<'pktbuf> Assembly<'pktbuf> {
 
     async fn send_sync_req_helper(
         &self,
-        zdp_request_type: zdp::ZdpPacketType,
-        zdp_response_type: zdp::ZdpPacketType,
+        zdp_request_type: ZdpPacketType,
+        zdp_response_type: ZdpPacketType,
         stream_id: Option<u32>,
         packet: Packet<'pktbuf>,
     ) -> Result<(Option<u32>, Packet<'pktbuf>), SyncReqError> {
@@ -168,8 +164,8 @@ impl<'pktbuf> Assembly<'pktbuf> {
     #[allow(dead_code)]
     pub async fn send_sync_non_flow_req(
         &self,
-        zdp_request_type: zdp::ZdpPacketType,
-        zdp_response_type: zdp::ZdpPacketType,
+        zdp_request_type: ZdpPacketType,
+        zdp_response_type: ZdpPacketType,
         packet: Packet<'pktbuf>,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
         match self
@@ -187,8 +183,8 @@ impl<'pktbuf> Assembly<'pktbuf> {
     #[allow(dead_code)]
     pub async fn send_sync_per_flow_req(
         &self,
-        zdp_request_type: zdp::ZdpPacketType,
-        zdp_response_type: zdp::ZdpPacketType,
+        zdp_request_type: ZdpPacketType,
+        zdp_response_type: ZdpPacketType,
         stream_id: u32,
         packet: Packet<'pktbuf>,
     ) -> Result<(u32, Packet<'pktbuf>), SyncReqError> {
