@@ -80,7 +80,6 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
             semaphore: Semaphore::new(1),
         }
     }
-
     pub fn get_sender(&self) -> Option<Sender<Packet<'pktbuf>>> {
         self.inner_req.lock().unwrap().reply_channel.take()
     }
