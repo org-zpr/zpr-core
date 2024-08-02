@@ -1,8 +1,9 @@
 use std::io;
 use std::time::Instant;
 
-use tokio::sync::mpsc::{self, Sender, Receiver};
+use tokio::sync::mpsc::{self, Sender};
 use tokio_util::sync::CancellationToken;
+use tokio::task::JoinHandle;
 
 use std::sync::{Arc, Mutex};
 
@@ -45,7 +46,8 @@ struct ClientState {
 struct ClientRec {
     addr: String, // form of 'host:port'
     config_name: String,
-    client: client::ZDPClient,
+    ctok: CancellationToken,
+    client_handle: Arc::<JoinHandle<io::Result<()>>>,
 }
 
 impl CMonitor {
@@ -143,9 +145,11 @@ impl CMonitor {
 
                 // TODO: Possibly this state value should live here in cmonitor?
                 let _ = zpr.set_status(&crec.config_name, ConfigState::Disconnecting);
-                crec.client.disconnect().await?;
-                let _ = zpr.set_status(&crec.config_name, ConfigState::Disconnected);
+                crec.ctok.cancel();
+                // TODO: Hmm, I can't seem to join() the handle
+                drop(crec.client_handle);
 
+                let _ = zpr.set_status(&crec.config_name, ConfigState::Disconnected);
                 // get the lock again and update state
                 let mut state = self.shared.state.lock().unwrap();
                 state.cli.client = None;
@@ -154,20 +158,24 @@ impl CMonitor {
         }
 
         let _ = zpr.set_status(&configuration, ConfigState::Connecting);
-        let cli = match client::connect(&addr_port).await {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = zpr.set_status(&configuration, ConfigState::Disconnected);
-                return Err(e);
-            }
-        };
+
+        // placholder code
+        let cli = client::ZDPClient::new(&addr_port);
+        let ctok = CancellationToken::new();
+        let passed_ctok = ctok.clone();
+        let handle: JoinHandle<io::Result<()>> = tokio::spawn(async move {
+            cli.run(passed_ctok).await // blocking, long running
+        });
+        // well hopefully that launched!
+
         let _ = zpr.set_status(&configuration, ConfigState::Connected(Instant::now()));
 
         let mut state = self.shared.state.lock().unwrap();
         state.cli.client = Some(ClientRec {
             addr: addr_port.clone(),
             config_name: configuration.clone(),
-            client: cli,
+            ctok: ctok.clone(),
+            client_handle: Arc::new(handle),
         });
 
         Ok(())
@@ -193,9 +201,9 @@ impl CMonitor {
                 }
                 info!("disconnecting from {}", crec.addr);
                 let _ = zpr.set_status(&crec.config_name, ConfigState::Disconnecting);
-                crec.client.disconnect().await?;
+                crec.ctok.cancel();
+                drop(crec.client_handle);
                 let _ = zpr.set_status(&crec.config_name, ConfigState::Disconnected);
-
                 let mut state = self.shared.state.lock().unwrap();
                 state.cli.client = None;
             }
