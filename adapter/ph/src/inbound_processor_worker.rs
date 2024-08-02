@@ -64,10 +64,17 @@ async fn handle_packet<'pktbuf>(
 ) {
     pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
 
-    let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short ZDP message");
 
-    if base_hdr.packet_type.is_response() {
-        let channel = asm.get_sender();
+    // copy out relevant header info
+    let packet_type = base_hdr.packet_type;
+    let _sequence_number = base_hdr.sequence_number;
+
+    // strip base header
+    pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
+
+    if packet_type.is_response() {
+        let channel = asm.sync_req_state.get_sender();
         match channel {
             Some(channel) => match channel.send(pkt) {
                 Ok(()) => (),
@@ -83,15 +90,14 @@ async fn handle_packet<'pktbuf>(
                 asm.counters[CounterType::UnexpectedMgmtResponse].increment();
             }
         }
-    } else if base_hdr.packet_type.is_per_flow() {
-        let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    } else if packet_type.is_per_flow() {
+        let per_flow_hdr =
+            ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
         // copy out relevant header info
-        let packet_type = hdr.base_header.packet_type;
-        let _sequence_number = hdr.base_header.sequence_number;
-        let stream_id = hdr.stream_id;
+        let stream_id = per_flow_hdr.stream_id;
 
-        // strip packet header
+        // strip per-flow header
         pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
 
         match packet_type {
@@ -110,13 +116,6 @@ async fn handle_packet<'pktbuf>(
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     } else {
-        // copy out relevant header info
-        let packet_type = base_hdr.packet_type;
-        let _sequence_number = base_hdr.sequence_number;
-
-        // strip packet header
-        pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
-
         match packet_type {
             ZdpPacketType::Report => {
                 let hdr =

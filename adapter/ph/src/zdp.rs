@@ -85,7 +85,6 @@ pub struct ZdpBaseHeader {
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpPerFlowHeader {
-    pub base_header: ZdpBaseHeader,
     pub stream_id: u32,
 }
 
@@ -109,4 +108,5 @@ pub struct ZdpHelloResponseHeader {
     pub status: u16,
 }
 
-const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 8);
+const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
+const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);

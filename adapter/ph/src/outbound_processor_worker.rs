@@ -26,9 +26,14 @@ async fn worker<'pktbuf>(
         for pkt in pkts.drain(..) {
             match pkt {
                 OutboundProcessorMessage::Packet(mut pkt) => {
-                    // allocate and fill in the header
-                    let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
-                    hdr.base_header.packet_type = ZdpPacketType::TransitPacket;
+                    // allocate and fill in the headers
+                    let stream_id = pkt.metadata().flow_id;
+                    let per_flow_hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
+                    per_flow_hdr.stream_id = stream_id;
+
+                    let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
+                    base_hdr.packet_type = ZdpPacketType::TransitPacket;
+
                     handle_packet(pkt, asm).await;
                 }
                 OutboundProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), count),
@@ -38,9 +43,12 @@ async fn worker<'pktbuf>(
                     handle_packet(pkt, asm).await;
                 }
                 OutboundProcessorMessage::PerFlowMgmt(pack_type, stream_id, mut pkt) => {
-                    let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
-                    hdr.base_header.packet_type = pack_type;
-                    hdr.stream_id = stream_id;
+                    let per_flow_hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
+                    per_flow_hdr.stream_id = stream_id;
+
+                    let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
+                    base_hdr.packet_type = pack_type;
+
                     handle_packet(pkt, asm).await;
                 }
             }
