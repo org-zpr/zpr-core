@@ -1,6 +1,7 @@
 use crate::assembly::Assembly;
 use crate::classifier::classify;
 use crate::counters_enum::CounterType;
+use crate::ext::zerocopy::*;
 use crate::flow_control;
 use crate::options::PhMode;
 use crate::packet::Packet;
@@ -63,22 +64,15 @@ async fn handle_packet<'pktbuf>(
 ) {
     pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
 
-    let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    let base_hdr_ref = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
 
-    if base_hdr.packet_type.is_per_flow() {
-        let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    if base_hdr_ref.packet_type.is_per_flow() {
+        let per_flow_hdr =
+            ZdpPerFlowHeader::read_from_buf(&mut pkt).expect("too-short per-flow message");
 
-        // copy out relevant header info
-        let packet_type = hdr.base_header.packet_type;
-        let _sequence_number = hdr.base_header.sequence_number;
-        let stream_id = hdr.stream_id;
-
-        // strip packet header
-        pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
-
-        match packet_type {
+        match per_flow_hdr.base_header.packet_type {
             ZdpPacketType::TransitPacket => {
-                pkt.metadata_mut().flow_id = stream_id;
+                pkt.metadata_mut().flow_id = per_flow_hdr.stream_id;
 
                 if config.mode == PhMode::Server {
                     // TODO: drop error packets
@@ -92,14 +86,9 @@ async fn handle_packet<'pktbuf>(
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     } else {
-        // copy out relevant header info
-        let packet_type = base_hdr.packet_type;
-        let _sequence_number = base_hdr.sequence_number;
+        let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).unwrap();
 
-        // strip packet header
-        pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
-
-        match packet_type {
+        match base_hdr.packet_type {
             ZdpPacketType::Report => {
                 let hdr =
                     ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
