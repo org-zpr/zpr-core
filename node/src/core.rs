@@ -9,11 +9,16 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config;
 use crate::vs::VSConn;
-use crate::vs::VSOutput::{PushedRevocation, PushedVisa};
+use crate::vs::VSOutput::PingSuccess;
+
+use crate::vs::vss;
 
 pub const VERSION: &str = "0.1.0";
 
 const VS_OUTPUT_CHANNEL_SIZE: usize = 32;
+const VSS_OUTPUT_CHANNEL_SIZE: usize = 32;
+
+const DEFAULT_VSS_PORT: u16 = 8183;
 
 /// CoreOpts is for debug options we want to pass to the node, but not include in
 /// the config file.
@@ -21,17 +26,25 @@ const VS_OUTPUT_CHANNEL_SIZE: usize = 32;
 pub struct CoreOpts {
     /// Force the node to immediately open a connection to the visa service at the provided HOST:PORT.
     vsforceconnect: Option<String>,
+
+    // Ovverride the default VSS listen address. Format 'ADDR:PORT'.
+    vssforcelisten: Option<String>,
 }
 
 impl CoreOpts {
     pub fn new() -> CoreOpts {
         CoreOpts {
             vsforceconnect: None,
+            vssforcelisten: None,
         }
     }
 
     pub fn set_vsforceconnect(&mut self, hostport: &str) {
         self.vsforceconnect = Some(hostport.to_string());
+    }
+
+    pub fn set_vssforcelisten(&mut self, hostport: &str) {
+        self.vssforcelisten = Some(hostport.to_string());
     }
 }
 
@@ -43,6 +56,24 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     let ctoken = CancellationToken::new();
     let mut tasks = JoinSet::new();
     let (cs_shutdown_tx, mut cs_shutdown_rx) = oneshot::channel();
+
+    // This channel is for messages from the visa-support-service.
+    let (vss_tx, mut vss_rx) = mpsc::channel(VSS_OUTPUT_CHANNEL_SIZE);
+
+    // The visa support service normally is started up on the ZPR public address of the node.
+    // But for debug, you can override that.
+    let vss_addr = match opts.vssforcelisten {
+        Some(addr) => addr,
+        None => format!("[{}]:{}", nconfig.get_node_addr(), DEFAULT_VSS_PORT),
+    };
+
+    // Thread is detached when handle drops out of scope which is during a node shutdown.
+    // In the future that may not always be the case so we will need a better way to deal with
+    // this thrift server.
+    let vss_addr_for_vss = vss_addr.clone();
+    let _vss_handle = std::thread::spawn(move || {
+        vss::start_vss_server(vss_tx, &vss_addr_for_vss);
+    });
 
     let o_vsforceconnect = opts.vsforceconnect.is_some();
 
@@ -67,6 +98,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
             &nconfig.get_cert_path(),
             &nconfig.get_key_path(),
             nconfig.get_node_addr(),
+            &vss_addr,
         )?;
         for (k, v) in nconfig.get_claims() {
             vs_conn.add_claim(&k, &v);
@@ -94,23 +126,22 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                         error!("visa service exits with error: {}", e);
                     }
                 }
-            } 
+            }
             let _ = cs_shutdown_tx.send(()); // visa service exits.
         });
 
-        // Fire up another task to watch the output channel...
+        // Now we fire up another task to watch for output messages from
+        // the visa service.  In the future this will include visa-request
+        // responses and authentication responses.
         let dbg_ctoken = ctoken.clone();
         tasks.spawn(async move {
             loop {
                 tokio::select! {
                     Some(vs_output) = rx.recv() => {
                         match vs_output {
-                            PushedVisa ( visa ) => {
-                                info!("DEBUG: visa received, issuer_id: {}", visa.issuer_id);
-                            }
-                            PushedRevocation ( revocation ) => {
-                                info!("DEBUG: revocation received, issuer_id: {}", revocation.issuer_id);
-                            }
+                          PingSuccess(config_id, policy_version) => {
+                              info!("PingSuccess: config={} policy={}", config_id, policy_version);
+                          }
                         }
                     }
                     _ = dbg_ctoken.cancelled() => {
@@ -119,19 +150,36 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                 }
             }
         });
-
     } else {
         info!("nothing to do...  ^C to exit");
     }
 
-    tokio::select! {
-        _ = signal::ctrl_c() => {
-            info!("exiting due to signal");
-            ctoken.cancel();
-        }
-        _ = &mut cs_shutdown_rx => {
-            info!("visa service exited");
-            ctoken.cancel(); 
+    loop {
+        //  main node runloop
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                info!("exiting due to signal");
+                ctoken.cancel();
+                break;
+            }
+            _ = &mut cs_shutdown_rx => {
+                info!("visa service exited");
+                ctoken.cancel();
+                break;
+            }
+            Some(vss_msg) = vss_rx.recv() => {
+                match vss_msg {
+                    vss::VSSMsg::PolicyInstall(pi) => {
+                        info!("VSS policy install: {:?}", pi);
+                    }
+                    vss::VSSMsg::PushedVisa(v) => {
+                        info!("VSS pushed visa: issuer_id={} size={}bytes", v.issuer_id, v.visa_pb.len());
+                    }
+                    _ => {
+                        info!("VSConn::run received VSS message: {:?}", vss_msg);
+                    }
+                }
+            }
         }
     }
 

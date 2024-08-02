@@ -2,9 +2,9 @@ use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
 use crate::flow_control;
 use crate::packet::Packet;
+use crate::queues::OutboundProcessorMessage;
 use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
-use crate::OutboundProcessorMessage;
 use bytes::Buf;
 use core::future::Future;
 use std::time::SystemTime;
@@ -25,10 +25,32 @@ async fn worker<'pktbuf>(
     while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         for pkt in pkts.drain(..) {
             match pkt {
-                OutboundProcessorMessage::Packet(pkt) => {
+                OutboundProcessorMessage::Packet(mut pkt) => {
+                    // allocate and fill in the headers
+                    let stream_id = pkt.metadata().flow_id;
+                    let per_flow_hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
+                    per_flow_hdr.stream_id = stream_id;
+
+                    let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
+                    base_hdr.packet_type = ZdpPacketType::TransitPacket;
+
                     handle_packet(pkt, asm).await;
                 }
                 OutboundProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), count),
+                OutboundProcessorMessage::NonFlowMgmt(pack_type, mut pkt) => {
+                    let hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
+                    hdr.packet_type = pack_type;
+                    handle_packet(pkt, asm).await;
+                }
+                OutboundProcessorMessage::PerFlowMgmt(pack_type, stream_id, mut pkt) => {
+                    let per_flow_hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
+                    per_flow_hdr.stream_id = stream_id;
+
+                    let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
+                    base_hdr.packet_type = pack_type;
+
+                    handle_packet(pkt, asm).await;
+                }
             }
         }
     }
@@ -47,12 +69,10 @@ where
 }
 
 async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf>) {
-    // allocate and fill in the header
-    let hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
-    hdr.abbreviated_header.packet_type = ZdpPacketType::TransitPacket;
-
     // fill in metadata
     pkt.metadata_mut().flow_id = 0; // TODO: fill from IP header
+
+    let _: &u8 = pkt.alloc_zeroed_header(); // account for fact we don't yet have ZPI
 
     // Clones packet into capture queue after adding direction to beginning of packet
     let dir: &mut u8 = pkt.alloc_zeroed_header();

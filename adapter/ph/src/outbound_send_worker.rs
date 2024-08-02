@@ -1,7 +1,8 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
-use crate::OutboundSendMessage;
+use crate::queues::OutboundSendMessage;
 use std::future::Future;
+use std::io::ErrorKind;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
@@ -22,8 +23,24 @@ async fn worker<'a>(
         for msg in &msgs {
             match msg {
                 OutboundSendMessage::Packet(pkt) => {
-                    socket.send(pkt.body()).await.unwrap(); // TODO: error handling
-                    asm.counters[CounterType::OutPacksSent].increment();
+                    match socket.send(pkt.body()).await {
+                        Ok(_) => {
+                            asm.counters[CounterType::OutPacksSent].increment();
+                        }
+
+                        Err(err) => {
+                            match err.kind() {
+                                ErrorKind::InvalidInput | ErrorKind::Unsupported => {
+                                    panic!("Unrecoverable I/O error {}", err)
+                                }
+
+                                // most other network errors are temporary, just count
+                                // TODO: it would be nice to report to the user _why_ packets aren't moving;
+                                // this depends on <https://github.com/rust-lang/rust/issues/86442> though
+                                _ => asm.counters[CounterType::OutPacksErr].increment(),
+                            }
+                        }
+                    }
                 }
 
                 OutboundSendMessage::TestPacket(_) => (), /* handled below */

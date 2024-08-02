@@ -46,6 +46,34 @@ pub enum ZdpPacketType {
     Report = 145,
 }
 
+impl ZdpPacketType {
+    pub fn is_per_flow(self) -> bool {
+        self.0 < 128
+    }
+
+    pub fn is_response(self) -> bool {
+        // CTP: I have a pending ask to Frank to group together responses
+        // so this logic becomes a simple range check
+
+        match self {
+            Self::VisaHeraldResponse
+            | Self::VisaUpdateResponse
+            | Self::VisaRetractResponse
+            | Self::VisaDeacceptAcknowledgement
+            | Self::BindAgentAddressResponse
+            | Self::UnbindAgentAddressResponse
+            | Self::AuthenticationResponse
+            | Self::EchoResponse
+            | Self::TerminateLinkResponse
+            | Self::HelloResponse
+            | Self::ConfigurationResponse
+            | Self::RegisterAgentAddressResponse
+            | Self::UnregisterAgentAddressResponse => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBaseHeader {
@@ -57,16 +85,22 @@ pub struct ZdpBaseHeader {
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpPerFlowHeader {
-    pub abbreviated_header: ZdpBaseHeader,
     pub stream_id: u32,
 }
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpEchoHeader {
-    pub abbreviated_header: ZdpBaseHeader,
+    pub base_header: ZdpBaseHeader,
     pub sequence_number: u16, // Only used for the response
     pub additional_length: u16,
 }
 
-const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 8);
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpReportHeader {
+    pub report_data_length: u16,
+}
+
+const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
+const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);

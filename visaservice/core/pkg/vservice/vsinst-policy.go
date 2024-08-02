@@ -52,7 +52,7 @@ func (vs *VSInst) ActivateConfiguration(configID uint64, _ byte) {
 //
 // must install the policy under the given configuration.
 // implementation of policy.PolicyListener
-func (vs *VSInst) InstallPolicy(configID uint64, _ byte, pol *policy.Policy) {
+func (vs *VSInst) InstallPolicy(configID uint64, _ byte, pol *policy.Policy) error {
 	vs.plcy.Lock()
 
 	vs.log.Debug("new policy arrives for install")
@@ -66,7 +66,7 @@ func (vs *VSInst) InstallPolicy(configID uint64, _ byte, pol *policy.Policy) {
 		vs.log.WithError(err).Error("failed to create matcher")
 		vs.log.Error("policy install failed")
 		vs.plcy.Unlock()
-		return
+		return err
 	}
 
 	vs.plcy.p = pol
@@ -87,4 +87,6 @@ func (vs *VSInst) InstallPolicy(configID uint64, _ byte, pol *policy.Policy) {
 		})
 		vs.cfgRemoves.Unlock()
 	}
+
+	return vs.installPolicyWithVisasForNodes(pol, configID)
 }

@@ -1,12 +1,11 @@
 use crate::assembly::Assembly;
-use crate::CapPacket;
+use crate::queues::CapPacket;
 use core::future::Future;
 use libc::timeval;
 use pcap::{Capture, Dead, Error, Linktype, Packet, PacketHeader, Savefile};
 use std::path::Path;
 use std::time::{Duration, UNIX_EPOCH};
-use tokio::sync::mpsc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
 
 pub struct CaptureWorker {
     inner_cap: Mutex<InnerCap>,

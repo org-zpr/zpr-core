@@ -41,7 +41,7 @@ mod test_packet;
 mod tun_ctl;
 mod zdp;
 
-use assembly::Assembly;
+use assembly::{Assembly, SyncReqState};
 use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
 use counter::*;
@@ -138,6 +138,7 @@ fn main() -> ExitCode {
 
     let counters = enum_map! { _ => Counter::new(), };
 
+    let sync_req_state = SyncReqState::new();
     /*let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
     ssl_context_builder.set_options(
         ssl::SslOptions::NO_COMPRESSION
@@ -182,6 +183,7 @@ fn main() -> ExitCode {
                 flow_control,
                 counters,
                 tun_ctl: tun_ctl::TunCtl::new(&tun_devs[0]),
+                sync_req_state,
             }));
 
             // TODO signal handler goes here
@@ -196,6 +198,9 @@ fn main() -> ExitCode {
                 })
                 .unwrap();
             let unix_socket = Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
+
+            asm.send_report("Reporting for Duty!").await;
+            asm.send_discard().await;
 
             let mut js = JoinSet::new();
 

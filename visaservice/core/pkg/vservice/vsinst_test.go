@@ -3,6 +3,7 @@ package vservice_test
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 	"testing"
 	"time"
@@ -137,6 +138,7 @@ func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 	// Minimal config:
 	return &vservice.VSIConfig{
 		Log:                  alog,
+		VSAddr:               netip.MustParseAddr(vservice.VisaServiceAddress),
 		HopCount:             hopcount,
 		AllowInvalidPeerAddr: true,
 	}
@@ -156,7 +158,7 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 	svc.SetAuthSvc(&TestAS{})
 
 	naddr := netip.MustParseAddr("fc00:3001:1::11")
-	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0")
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0", fmt.Sprintf("127.0.0.1:%d", vservice.VSSDefaultPort))
 
 	// Just add a web service to the node.
 	// In the future this will need to be re-worked since node config will be separate.
@@ -272,7 +274,7 @@ func TestRequestVisaDupes(t *testing.T) {
 	svc.SetAuthSvc(&TestAS{})
 
 	naddr := netip.MustParseAddr("fc00:3001:1::11")
-	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0")
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0", fmt.Sprintf("127.0.0.1:%d", vservice.VSSDefaultPort))
 
 	// Just add a web service to the node.
 	// In the future this will need to be re-worked since node config will be separate.
@@ -398,7 +400,7 @@ func TestAuthExpireNoVisa(t *testing.T) {
 	svc.SetAuthSvc(&TestAS{})
 
 	naddr := netip.MustParseAddr("fc00:3001:1::11")
-	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0")
+	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(naddr, "n0", fmt.Sprintf("127.0.0.1:%d", vservice.VSSDefaultPort))
 
 	// Just add a web service to the node.
 	// In the future this will need to be re-worked since node config will be separate.
@@ -487,30 +489,6 @@ func TestAuthExpireNoVisa(t *testing.T) {
 }
 
 func TestVisaServiceVisasExtended(t *testing.T) {
-	alog := logr.NewTestLogger()
-
-	vsaddr := netip.MustParseAddr(vservice.VisaServiceAddress) // fc00:3003::1
-
-	// Minimal config:
-	vc := minVSI(t, 99, alog)
-	vc.ReauthBumpTimeOverride = 10 * time.Second // reduce from default of 5 minutes
-
-	svc, err := vservice.NewVSInst(vc)
-	require.Nil(t, err)
-	require.NotNil(t, svc)
-	svc.SetAuthSvc(&TestAS{})
-
-	// TODO: What is this for? The visa service has well known address (or is from a range of them).
-	// I beleive for time being, the visa service gets static IP _AND_ the adapter for the visa service
-	// takes that address aswell (like a node would).
-	svc.SetLocalAddr(vsaddr)
-
-	n0addr := netip.MustParseAddr("fc00:3001:1::11")
-	n1addr := netip.MustParseAddr("fc00:3001:1::12")
-
-	apiKey, _ := svc.BackDoorInstallAPIKeyForUnitTest(n0addr, "n0")
-	svc.BackDoorInstallAPIKeyForUnitTestExp(n1addr, "n1", time.Now().Add(10*time.Second)) // <--- note expiry in 10s
-
 	pyaml := `
         zpl_format: 2
         services:
@@ -522,7 +500,7 @@ func TestVisaServiceVisasExtended(t *testing.T) {
             provider:
               - [ca0.foo, eq, fox]
             admin_attrs:
-              - [ca0.foo, fee]
+              - [ca0.foo, eq, fee]
           nodes:
             n0:
               key: "cffa793530e6d63e560e8b314b5035db34aaae324f63cb76b204d3e4c00d5a1a"
@@ -553,6 +531,38 @@ func TestVisaServiceVisasExtended(t *testing.T) {
               desc: mathiasland
         `
 
+	alog := logr.NewTestLogger()
+
+	vsaddr := netip.MustParseAddr(vservice.VisaServiceAddress) // fc00:3003::1
+	vssListenAddr := fmt.Sprintf("127.0.0.1:%d", vservice.VSSDefaultPort)
+
+	// Minimal config:
+	vc := minVSI(t, 99, alog)
+	vc.ReauthBumpTimeOverride = 10 * time.Second // reduce from default of 5 minutes
+
+	svc, err := vservice.NewVSInst(vc)
+	require.Nil(t, err)
+	require.NotNil(t, svc)
+	svc.SetAuthSvc(&TestAS{})
+
+	n0addr := netip.MustParseAddr("fc00:3001:1::11")
+	n1addr := netip.MustParseAddr("fc00:3001:1::12")
+
+	apiKey, err := svc.BackDoorInstallAPIKeyForUnitTest(n0addr, "n0", vssListenAddr)
+	require.Nil(t, err)
+
+	// Node n1 has very short auth lifetime. So any visas created for it will be short too.
+	_, err = svc.BackDoorInstallAPIKeyForUnitTestExp(n1addr, "n1", time.Now().Add(10*time.Second), vssListenAddr) // <--- note expiry in 10s
+	require.Nil(t, err)
+
+	vs_claims := make(map[string]*agent.ClaimV)
+	vs_claims["ca0.foo"] = &agent.ClaimV{V: "fox", Exp: time.Now().Add(time.Hour)}
+	err = svc.BackDoorConnectSvcAdapter(vsaddr, vsaddr, n0addr, vs_claims, []string{"$$zpr/visaservice", "/zpr/$$zpr/visaservice"}, time.Now().Add(time.Hour))
+	require.Nil(t, err)
+
+	go svc.Start(netip.MustParseAddr("127.0.0.1"), vservice.VisaServicePort)
+	defer svc.Stop()
+
 	{
 		// Compile and install the policy
 		fst, _ := fs.NewMemoryFileStore()
@@ -573,13 +583,6 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	}
 
 	{
-		claims := map[string]*agent.ClaimV{
-			agent.KAttrVisaServiceAdapter: &agent.ClaimV{V: "true", Exp: time.Now().Add(time.Hour)},
-		}
-		svc.BackDoorConnectSvcAdapter(vsaddr, vsaddr, n1addr, claims, []string{"$$zpr/visaservice", "/zpr/$$zpr/visaservice"}, time.Now().Add(time.Hour))
-	}
-
-	{
 		client110 := netip.MustParseAddr("fc00:3001:1::10")
 		client110ta := netip.MustParseAddr("fc00:3001::10")
 		claims := map[string]*agent.ClaimV{
@@ -588,51 +591,41 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 		svc.BackDoorConnectAdapter(client110ta, client110, n1addr, claims, time.Now().Add(time.Hour))
 	}
 
-	// Request a visa-service visa:
-	td := &vsapi.TrafficDesc{
-		Source:     n1addr.AsSlice(),
-		Dest:       vsaddr.AsSlice(),
-		Protocol:   int32(snip.ProtocolTCP.Num()),
-		SourcePort: vservice.VisaServicePort,
-		DestPort:   vservice.VisaServicePort,
-		Flags:      0x0002, // SYN
-	}
-
-	res, err := svc.RequestVisa(context.Background(), apiKey, n1addr.AsSlice(), td)
-	require.Nil(t, err)
-	require.Equal(t, "", res.GetReason())
-	require.Equal(t, vsapi.StatusCode_SUCCESS, res.Status)
-
-	vsa, err := visaFromVsapiVisaResponse(res)
-	require.Nil(t, err)
-	expt := vsio.VToTime(vsa.GetExpires())
-	require.True(t, time.Until(expt) < time.Minute) // should be very short TTL
-	oldv := vsa
-
-	// So the visa will be expiring very soon, as soon as the visa housekeeping runs it
+	// So the visas for node n1 will be expiring very soon, as soon as the visa housekeeping runs it
 	// should try to create a successor visa.
 
 	svc.RunPeriodicHousekeepingNow() // blocking
+	time.Sleep(200 * time.Millisecond)
 
-	presp, err := svc.Poll(context.Background(), apiKey)
+	presp, err := svc.Poll(apiKey) // polling for n0
 	require.Nil(t, err)
-	require.Equal(t, int32(0), presp.More)
-	require.NotEmpty(t, presp.GetVisas())
-	require.Empty(t, presp.GetRevocations())
+	require.NotEmpty(t, presp.Visas)
+	require.Empty(t, presp.Revocations)
 
-	// Should be a single visa for us:
-	require.Equal(t, 1, len(presp.GetVisas()))
+	// All the visas that the system has tried to send directly have failed,
+	// so they are all sitting in the buffer.
+	require.Equal(t, 5, len(presp.Visas))
 
-	require.Greater(t, presp.GetVisas()[0].GetHopCount(), int32(0))
+	// Really, node n0 should only get visas related to it.
+	expectSources := []string{
+		n0addr.String(), // :11
+		vsaddr.String(), // 3003::1
+	}
 
-	newV := mustUnmarshalVisa(presp.Visas[0].VisaPb)
-	require.NotNil(t, newV)
-	require.NotNil(t, newV.GetSource())
-	require.NotNil(t, newV.GetDest())
+	for _, v := range presp.Visas {
+		require.Greater(t, v.GetHopCount(), int32(0))
 
-	require.Equal(t, vsaddr, mustAddrFromSlice(newV.GetDest()))
-	require.Equal(t, n1addr, mustAddrFromSlice(newV.GetSource()))
-	require.Greater(t, newV.IssuerId, oldv.IssuerId)
+		newV := mustUnmarshalVisa(v.VisaPb)
+
+		require.NotNil(t, newV)
+		require.NotNil(t, newV.GetSource())
+		require.NotNil(t, newV.GetDest())
+
+		// Either source or dest must be our polling node (n0)
+		require.Contains(t, []string{net.IP(newV.GetSource()).String(), net.IP(newV.GetDest()).String()}, n0addr.String())
+
+		require.Contains(t, expectSources, mustAddrFromSlice(newV.GetSource()).String())
+	}
 }
 
 func mustAddrFromSlice(s []byte) netip.Addr {

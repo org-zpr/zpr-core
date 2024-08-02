@@ -38,4 +38,7 @@ const (
 
 	// AdminPort is the admin control port for visa service
 	AdminPort = 8182 // TCP
+
+	// Visa Support Service runs on each node
+	VSSDefaultPort = 8183
 )

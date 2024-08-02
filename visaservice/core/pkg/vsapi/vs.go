@@ -938,6 +938,7 @@ func (p *HelloResponse) Validate() error {
 //  - Timestamp
 //  - NodeCert
 //  - Hmac
+//  - VssService
 //  - NodeAgent
 type NodeAuthRequest struct {
   SessionID int32 `thrift:"session_id,1" db:"session_id" json:"session_id"`
@@ -945,7 +946,8 @@ type NodeAuthRequest struct {
   Timestamp int64 `thrift:"timestamp,3" db:"timestamp" json:"timestamp"`
   NodeCert []byte `thrift:"node_cert,4" db:"node_cert" json:"node_cert"`
   Hmac []byte `thrift:"hmac,5" db:"hmac" json:"hmac"`
-  NodeAgent *Agent `thrift:"node_agent,6" db:"node_agent" json:"node_agent"`
+  VssService string `thrift:"vss_service,6" db:"vss_service" json:"vss_service"`
+  NodeAgent *Agent `thrift:"node_agent,7" db:"node_agent" json:"node_agent"`
 }
 
 func NewNodeAuthRequest() *NodeAuthRequest {
@@ -974,6 +976,10 @@ func (p *NodeAuthRequest) GetNodeCert() []byte {
 
 func (p *NodeAuthRequest) GetHmac() []byte {
   return p.Hmac
+}
+
+func (p *NodeAuthRequest) GetVssService() string {
+  return p.VssService
 }
 var NodeAuthRequest_NodeAgent_DEFAULT *Agent
 func (p *NodeAuthRequest) GetNodeAgent() *Agent {
@@ -1054,8 +1060,18 @@ func (p *NodeAuthRequest) Read(ctx context.Context, iprot thrift.TProtocol) erro
         }
       }
     case 6:
-      if fieldTypeId == thrift.STRUCT {
+      if fieldTypeId == thrift.STRING {
         if err := p.ReadField6(ctx, iprot); err != nil {
+          return err
+        }
+      } else {
+        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+          return err
+        }
+      }
+    case 7:
+      if fieldTypeId == thrift.STRUCT {
+        if err := p.ReadField7(ctx, iprot); err != nil {
           return err
         }
       } else {
@@ -1123,6 +1139,15 @@ func (p *NodeAuthRequest)  ReadField5(ctx context.Context, iprot thrift.TProtoco
 }
 
 func (p *NodeAuthRequest)  ReadField6(ctx context.Context, iprot thrift.TProtocol) error {
+  if v, err := iprot.ReadString(ctx); err != nil {
+  return thrift.PrependError("error reading field 6: ", err)
+} else {
+  p.VssService = v
+}
+  return nil
+}
+
+func (p *NodeAuthRequest)  ReadField7(ctx context.Context, iprot thrift.TProtocol) error {
   p.NodeAgent = &Agent{}
   if err := p.NodeAgent.Read(ctx, iprot); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.NodeAgent), err)
@@ -1140,6 +1165,7 @@ func (p *NodeAuthRequest) Write(ctx context.Context, oprot thrift.TProtocol) err
     if err := p.writeField4(ctx, oprot); err != nil { return err }
     if err := p.writeField5(ctx, oprot); err != nil { return err }
     if err := p.writeField6(ctx, oprot); err != nil { return err }
+    if err := p.writeField7(ctx, oprot); err != nil { return err }
   }
   if err := oprot.WriteFieldStop(ctx); err != nil {
     return thrift.PrependError("write field stop error: ", err) }
@@ -1200,13 +1226,23 @@ func (p *NodeAuthRequest) writeField5(ctx context.Context, oprot thrift.TProtoco
 }
 
 func (p *NodeAuthRequest) writeField6(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "node_agent", thrift.STRUCT, 6); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 6:node_agent: ", p), err) }
+  if err := oprot.WriteFieldBegin(ctx, "vss_service", thrift.STRING, 6); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field begin error 6:vss_service: ", p), err) }
+  if err := oprot.WriteString(ctx, string(p.VssService)); err != nil {
+  return thrift.PrependError(fmt.Sprintf("%T.vss_service (6) field write error: ", p), err) }
+  if err := oprot.WriteFieldEnd(ctx); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field end error 6:vss_service: ", p), err) }
+  return err
+}
+
+func (p *NodeAuthRequest) writeField7(ctx context.Context, oprot thrift.TProtocol) (err error) {
+  if err := oprot.WriteFieldBegin(ctx, "node_agent", thrift.STRUCT, 7); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field begin error 7:node_agent: ", p), err) }
   if err := p.NodeAgent.Write(ctx, oprot); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", p.NodeAgent), err)
   }
   if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 6:node_agent: ", p), err) }
+    return thrift.PrependError(fmt.Sprintf("%T write field end error 7:node_agent: ", p), err) }
   return err
 }
 
@@ -1221,6 +1257,7 @@ func (p *NodeAuthRequest) Equals(other *NodeAuthRequest) bool {
   if p.Timestamp != other.Timestamp { return false }
   if bytes.Compare(p.NodeCert, other.NodeCert) != 0 { return false }
   if bytes.Compare(p.Hmac, other.Hmac) != 0 { return false }
+  if p.VssService != other.VssService { return false }
   if !p.NodeAgent.Equals(other.NodeAgent) { return false }
   return true
 }
@@ -2015,26 +2052,26 @@ func (p *VisaHop) Validate() error {
   return nil
 }
 // Attributes:
-//  - IssuerID
 //  - Configuration
-type VisaRevocation struct {
-  IssuerID int32 `thrift:"issuer_id,1" db:"issuer_id" json:"issuer_id"`
-  Configuration int64 `thrift:"configuration,2" db:"configuration" json:"configuration"`
+//  - PolicyVersion
+type Pong struct {
+  Configuration int64 `thrift:"configuration,1" db:"configuration" json:"configuration"`
+  PolicyVersion int64 `thrift:"policy_version,2" db:"policy_version" json:"policy_version"`
 }
 
-func NewVisaRevocation() *VisaRevocation {
-  return &VisaRevocation{}
+func NewPong() *Pong {
+  return &Pong{}
 }
 
 
-func (p *VisaRevocation) GetIssuerID() int32 {
-  return p.IssuerID
-}
-
-func (p *VisaRevocation) GetConfiguration() int64 {
+func (p *Pong) GetConfiguration() int64 {
   return p.Configuration
 }
-func (p *VisaRevocation) Read(ctx context.Context, iprot thrift.TProtocol) error {
+
+func (p *Pong) GetPolicyVersion() int64 {
+  return p.PolicyVersion
+}
+func (p *Pong) Read(ctx context.Context, iprot thrift.TProtocol) error {
   if _, err := iprot.ReadStructBegin(ctx); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
   }
@@ -2048,7 +2085,7 @@ func (p *VisaRevocation) Read(ctx context.Context, iprot thrift.TProtocol) error
     if fieldTypeId == thrift.STOP { break; }
     switch fieldId {
     case 1:
-      if fieldTypeId == thrift.I32 {
+      if fieldTypeId == thrift.I64 {
         if err := p.ReadField1(ctx, iprot); err != nil {
           return err
         }
@@ -2082,232 +2119,30 @@ func (p *VisaRevocation) Read(ctx context.Context, iprot thrift.TProtocol) error
   return nil
 }
 
-func (p *VisaRevocation)  ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadI32(ctx); err != nil {
-  return thrift.PrependError("error reading field 1: ", err)
-} else {
-  p.IssuerID = v
-}
-  return nil
-}
-
-func (p *VisaRevocation)  ReadField2(ctx context.Context, iprot thrift.TProtocol) error {
+func (p *Pong)  ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
   if v, err := iprot.ReadI64(ctx); err != nil {
-  return thrift.PrependError("error reading field 2: ", err)
+  return thrift.PrependError("error reading field 1: ", err)
 } else {
   p.Configuration = v
 }
   return nil
 }
 
-func (p *VisaRevocation) Write(ctx context.Context, oprot thrift.TProtocol) error {
-  if err := oprot.WriteStructBegin(ctx, "VisaRevocation"); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err) }
-  if p != nil {
-    if err := p.writeField1(ctx, oprot); err != nil { return err }
-    if err := p.writeField2(ctx, oprot); err != nil { return err }
-  }
-  if err := oprot.WriteFieldStop(ctx); err != nil {
-    return thrift.PrependError("write field stop error: ", err) }
-  if err := oprot.WriteStructEnd(ctx); err != nil {
-    return thrift.PrependError("write struct stop error: ", err) }
-  return nil
-}
-
-func (p *VisaRevocation) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "issuer_id", thrift.I32, 1); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:issuer_id: ", p), err) }
-  if err := oprot.WriteI32(ctx, int32(p.IssuerID)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.issuer_id (1) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 1:issuer_id: ", p), err) }
-  return err
-}
-
-func (p *VisaRevocation) writeField2(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "configuration", thrift.I64, 2); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 2:configuration: ", p), err) }
-  if err := oprot.WriteI64(ctx, int64(p.Configuration)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.configuration (2) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 2:configuration: ", p), err) }
-  return err
-}
-
-func (p *VisaRevocation) Equals(other *VisaRevocation) bool {
-  if p == other {
-    return true
-  } else if p == nil || other == nil {
-    return false
-  }
-  if p.IssuerID != other.IssuerID { return false }
-  if p.Configuration != other.Configuration { return false }
-  return true
-}
-
-func (p *VisaRevocation) String() string {
-  if p == nil {
-    return "<nil>"
-  }
-  return fmt.Sprintf("VisaRevocation(%+v)", *p)
-}
-
-func (p *VisaRevocation) LogValue() slog.Value {
-  if p == nil {
-    return slog.AnyValue(nil)
-  }
-  v := thrift.SlogTStructWrapper{
-    Type: "*vsapi.VisaRevocation",
-    Value: p,
-  }
-  return slog.AnyValue(v)
-}
-
-var _ slog.LogValuer = (*VisaRevocation)(nil)
-
-func (p *VisaRevocation) Validate() error {
-  return nil
-}
-// Attributes:
-//  - Visas
-//  - Revocations
-//  - More
-type PollResponse struct {
-  Visas []*VisaHop `thrift:"visas,1" db:"visas" json:"visas"`
-  Revocations []*VisaRevocation `thrift:"revocations,2" db:"revocations" json:"revocations"`
-  More int32 `thrift:"more,3" db:"more" json:"more"`
-}
-
-func NewPollResponse() *PollResponse {
-  return &PollResponse{}
-}
-
-
-func (p *PollResponse) GetVisas() []*VisaHop {
-  return p.Visas
-}
-
-func (p *PollResponse) GetRevocations() []*VisaRevocation {
-  return p.Revocations
-}
-
-func (p *PollResponse) GetMore() int32 {
-  return p.More
-}
-func (p *PollResponse) Read(ctx context.Context, iprot thrift.TProtocol) error {
-  if _, err := iprot.ReadStructBegin(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
-  }
-
-
-  for {
-    _, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
-    if err != nil {
-      return thrift.PrependError(fmt.Sprintf("%T field %d read error: ", p, fieldId), err)
-    }
-    if fieldTypeId == thrift.STOP { break; }
-    switch fieldId {
-    case 1:
-      if fieldTypeId == thrift.LIST {
-        if err := p.ReadField1(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 2:
-      if fieldTypeId == thrift.LIST {
-        if err := p.ReadField2(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 3:
-      if fieldTypeId == thrift.I32 {
-        if err := p.ReadField3(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    default:
-      if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-        return err
-      }
-    }
-    if err := iprot.ReadFieldEnd(ctx); err != nil {
-      return err
-    }
-  }
-  if err := iprot.ReadStructEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
-  }
-  return nil
-}
-
-func (p *PollResponse)  ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
-  _, size, err := iprot.ReadListBegin(ctx)
-  if err != nil {
-    return thrift.PrependError("error reading list begin: ", err)
-  }
-  tSlice := make([]*VisaHop, 0, size)
-  p.Visas =  tSlice
-  for i := 0; i < size; i ++ {
-    _elem10 := &VisaHop{}
-    if err := _elem10.Read(ctx, iprot); err != nil {
-      return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem10), err)
-    }
-    p.Visas = append(p.Visas, _elem10)
-  }
-  if err := iprot.ReadListEnd(ctx); err != nil {
-    return thrift.PrependError("error reading list end: ", err)
-  }
-  return nil
-}
-
-func (p *PollResponse)  ReadField2(ctx context.Context, iprot thrift.TProtocol) error {
-  _, size, err := iprot.ReadListBegin(ctx)
-  if err != nil {
-    return thrift.PrependError("error reading list begin: ", err)
-  }
-  tSlice := make([]*VisaRevocation, 0, size)
-  p.Revocations =  tSlice
-  for i := 0; i < size; i ++ {
-    _elem11 := &VisaRevocation{}
-    if err := _elem11.Read(ctx, iprot); err != nil {
-      return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", _elem11), err)
-    }
-    p.Revocations = append(p.Revocations, _elem11)
-  }
-  if err := iprot.ReadListEnd(ctx); err != nil {
-    return thrift.PrependError("error reading list end: ", err)
-  }
-  return nil
-}
-
-func (p *PollResponse)  ReadField3(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadI32(ctx); err != nil {
-  return thrift.PrependError("error reading field 3: ", err)
+func (p *Pong)  ReadField2(ctx context.Context, iprot thrift.TProtocol) error {
+  if v, err := iprot.ReadI64(ctx); err != nil {
+  return thrift.PrependError("error reading field 2: ", err)
 } else {
-  p.More = v
+  p.PolicyVersion = v
 }
   return nil
 }
 
-func (p *PollResponse) Write(ctx context.Context, oprot thrift.TProtocol) error {
-  if err := oprot.WriteStructBegin(ctx, "PollResponse"); err != nil {
+func (p *Pong) Write(ctx context.Context, oprot thrift.TProtocol) error {
+  if err := oprot.WriteStructBegin(ctx, "Pong"); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err) }
   if p != nil {
     if err := p.writeField1(ctx, oprot); err != nil { return err }
     if err := p.writeField2(ctx, oprot); err != nil { return err }
-    if err := p.writeField3(ctx, oprot); err != nil { return err }
   }
   if err := oprot.WriteFieldStop(ctx); err != nil {
     return thrift.PrependError("write field stop error: ", err) }
@@ -2316,95 +2151,58 @@ func (p *PollResponse) Write(ctx context.Context, oprot thrift.TProtocol) error 
   return nil
 }
 
-func (p *PollResponse) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "visas", thrift.LIST, 1); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:visas: ", p), err) }
-  if err := oprot.WriteListBegin(ctx, thrift.STRUCT, len(p.Visas)); err != nil {
-    return thrift.PrependError("error writing list begin: ", err)
-  }
-  for _, v := range p.Visas {
-    if err := v.Write(ctx, oprot); err != nil {
-      return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", v), err)
-    }
-  }
-  if err := oprot.WriteListEnd(ctx); err != nil {
-    return thrift.PrependError("error writing list end: ", err)
-  }
+func (p *Pong) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
+  if err := oprot.WriteFieldBegin(ctx, "configuration", thrift.I64, 1); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:configuration: ", p), err) }
+  if err := oprot.WriteI64(ctx, int64(p.Configuration)); err != nil {
+  return thrift.PrependError(fmt.Sprintf("%T.configuration (1) field write error: ", p), err) }
   if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 1:visas: ", p), err) }
+    return thrift.PrependError(fmt.Sprintf("%T write field end error 1:configuration: ", p), err) }
   return err
 }
 
-func (p *PollResponse) writeField2(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "revocations", thrift.LIST, 2); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 2:revocations: ", p), err) }
-  if err := oprot.WriteListBegin(ctx, thrift.STRUCT, len(p.Revocations)); err != nil {
-    return thrift.PrependError("error writing list begin: ", err)
-  }
-  for _, v := range p.Revocations {
-    if err := v.Write(ctx, oprot); err != nil {
-      return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", v), err)
-    }
-  }
-  if err := oprot.WriteListEnd(ctx); err != nil {
-    return thrift.PrependError("error writing list end: ", err)
-  }
+func (p *Pong) writeField2(ctx context.Context, oprot thrift.TProtocol) (err error) {
+  if err := oprot.WriteFieldBegin(ctx, "policy_version", thrift.I64, 2); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field begin error 2:policy_version: ", p), err) }
+  if err := oprot.WriteI64(ctx, int64(p.PolicyVersion)); err != nil {
+  return thrift.PrependError(fmt.Sprintf("%T.policy_version (2) field write error: ", p), err) }
   if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 2:revocations: ", p), err) }
+    return thrift.PrependError(fmt.Sprintf("%T write field end error 2:policy_version: ", p), err) }
   return err
 }
 
-func (p *PollResponse) writeField3(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "more", thrift.I32, 3); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 3:more: ", p), err) }
-  if err := oprot.WriteI32(ctx, int32(p.More)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.more (3) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 3:more: ", p), err) }
-  return err
-}
-
-func (p *PollResponse) Equals(other *PollResponse) bool {
+func (p *Pong) Equals(other *Pong) bool {
   if p == other {
     return true
   } else if p == nil || other == nil {
     return false
   }
-  if len(p.Visas) != len(other.Visas) { return false }
-  for i, _tgt := range p.Visas {
-    _src12 := other.Visas[i]
-    if !_tgt.Equals(_src12) { return false }
-  }
-  if len(p.Revocations) != len(other.Revocations) { return false }
-  for i, _tgt := range p.Revocations {
-    _src13 := other.Revocations[i]
-    if !_tgt.Equals(_src13) { return false }
-  }
-  if p.More != other.More { return false }
+  if p.Configuration != other.Configuration { return false }
+  if p.PolicyVersion != other.PolicyVersion { return false }
   return true
 }
 
-func (p *PollResponse) String() string {
+func (p *Pong) String() string {
   if p == nil {
     return "<nil>"
   }
-  return fmt.Sprintf("PollResponse(%+v)", *p)
+  return fmt.Sprintf("Pong(%+v)", *p)
 }
 
-func (p *PollResponse) LogValue() slog.Value {
+func (p *Pong) LogValue() slog.Value {
   if p == nil {
     return slog.AnyValue(nil)
   }
   v := thrift.SlogTStructWrapper{
-    Type: "*vsapi.PollResponse",
+    Type: "*vsapi.Pong",
     Value: p,
   }
   return slog.AnyValue(v)
 }
 
-var _ slog.LogValuer = (*PollResponse)(nil)
+var _ slog.LogValuer = (*Pong)(nil)
 
-func (p *PollResponse) Validate() error {
+func (p *Pong) Validate() error {
   return nil
 }
 // Attributes:
@@ -3095,7 +2893,7 @@ type VisaService interface {
   AgentDisconnect(ctx context.Context, keym string, zpr_addr []byte) (_err error)
   // Parameters:
   //  - Key
-  Poll(ctx context.Context, key string) (_r *PollResponse, _err error)
+  Ping(ctx context.Context, key string) (_r *Pong, _err error)
   // Parameters:
   //  - Key
   //  - SrcTetherAddr
@@ -3139,16 +2937,16 @@ func (p *VisaServiceClient) SetLastResponseMeta_(meta thrift.ResponseMeta) {
 }
 
 func (p *VisaServiceClient) Hello(ctx context.Context) (_r *HelloResponse, _err error) {
-  var _args14 VisaServiceHelloArgs
-  var _result16 VisaServiceHelloResult
-  var _meta15 thrift.ResponseMeta
-  _meta15, _err = p.Client_().Call(ctx, "hello", &_args14, &_result16)
-  p.SetLastResponseMeta_(_meta15)
+  var _args10 VisaServiceHelloArgs
+  var _result12 VisaServiceHelloResult
+  var _meta11 thrift.ResponseMeta
+  _meta11, _err = p.Client_().Call(ctx, "hello", &_args10, &_result12)
+  p.SetLastResponseMeta_(_meta11)
   if _err != nil {
     return
   }
-  if _ret17 := _result16.GetSuccess(); _ret17 != nil {
-    return _ret17, nil
+  if _ret13 := _result12.GetSuccess(); _ret13 != nil {
+    return _ret13, nil
   }
   return nil, thrift.NewTApplicationException(thrift.MISSING_RESULT, "hello failed: unknown result")
 }
@@ -3156,25 +2954,25 @@ func (p *VisaServiceClient) Hello(ctx context.Context) (_r *HelloResponse, _err 
 // Parameters:
 //  - AuthRequest
 func (p *VisaServiceClient) Authenticate(ctx context.Context, auth_request *NodeAuthRequest) (_r string, _err error) {
-  var _args18 VisaServiceAuthenticateArgs
-  _args18.AuthRequest = auth_request
-  var _result20 VisaServiceAuthenticateResult
-  var _meta19 thrift.ResponseMeta
-  _meta19, _err = p.Client_().Call(ctx, "authenticate", &_args18, &_result20)
-  p.SetLastResponseMeta_(_meta19)
+  var _args14 VisaServiceAuthenticateArgs
+  _args14.AuthRequest = auth_request
+  var _result16 VisaServiceAuthenticateResult
+  var _meta15 thrift.ResponseMeta
+  _meta15, _err = p.Client_().Call(ctx, "authenticate", &_args14, &_result16)
+  p.SetLastResponseMeta_(_meta15)
   if _err != nil {
     return
   }
-  return _result20.GetSuccess(), nil
+  return _result16.GetSuccess(), nil
 }
 
 // Parameters:
 //  - Key
 func (p *VisaServiceClient) DeRegister(ctx context.Context, key string) (_err error) {
-  var _args21 VisaServiceDeRegisterArgs
-  _args21.Key = key
+  var _args17 VisaServiceDeRegisterArgs
+  _args17.Key = key
   p.SetLastResponseMeta_(thrift.ResponseMeta{})
-  if _, err := p.Client_().Call(ctx, "de_register", &_args21, nil); err != nil {
+  if _, err := p.Client_().Call(ctx, "de_register", &_args17, nil); err != nil {
     return err
   }
   return nil
@@ -3184,18 +2982,18 @@ func (p *VisaServiceClient) DeRegister(ctx context.Context, key string) (_err er
 //  - Key
 //  - Request
 func (p *VisaServiceClient) AuthorizeConnect(ctx context.Context, key string, request *ConnectRequest) (_r *ConnectResponse, _err error) {
-  var _args22 VisaServiceAuthorizeConnectArgs
-  _args22.Key = key
-  _args22.Request = request
-  var _result24 VisaServiceAuthorizeConnectResult
-  var _meta23 thrift.ResponseMeta
-  _meta23, _err = p.Client_().Call(ctx, "authorize_connect", &_args22, &_result24)
-  p.SetLastResponseMeta_(_meta23)
+  var _args18 VisaServiceAuthorizeConnectArgs
+  _args18.Key = key
+  _args18.Request = request
+  var _result20 VisaServiceAuthorizeConnectResult
+  var _meta19 thrift.ResponseMeta
+  _meta19, _err = p.Client_().Call(ctx, "authorize_connect", &_args18, &_result20)
+  p.SetLastResponseMeta_(_meta19)
   if _err != nil {
     return
   }
-  if _ret25 := _result24.GetSuccess(); _ret25 != nil {
-    return _ret25, nil
+  if _ret21 := _result20.GetSuccess(); _ret21 != nil {
+    return _ret21, nil
   }
   return nil, thrift.NewTApplicationException(thrift.MISSING_RESULT, "authorize_connect failed: unknown result")
 }
@@ -3204,13 +3002,13 @@ func (p *VisaServiceClient) AuthorizeConnect(ctx context.Context, key string, re
 //  - Keym
 //  - ZprAddr
 func (p *VisaServiceClient) AgentDisconnect(ctx context.Context, keym string, zpr_addr []byte) (_err error) {
-  var _args26 VisaServiceAgentDisconnectArgs
-  _args26.Keym = keym
-  _args26.ZprAddr = zpr_addr
-  var _result28 VisaServiceAgentDisconnectResult
-  var _meta27 thrift.ResponseMeta
-  _meta27, _err = p.Client_().Call(ctx, "agent_disconnect", &_args26, &_result28)
-  p.SetLastResponseMeta_(_meta27)
+  var _args22 VisaServiceAgentDisconnectArgs
+  _args22.Keym = keym
+  _args22.ZprAddr = zpr_addr
+  var _result24 VisaServiceAgentDisconnectResult
+  var _meta23 thrift.ResponseMeta
+  _meta23, _err = p.Client_().Call(ctx, "agent_disconnect", &_args22, &_result24)
+  p.SetLastResponseMeta_(_meta23)
   if _err != nil {
     return
   }
@@ -3219,20 +3017,20 @@ func (p *VisaServiceClient) AgentDisconnect(ctx context.Context, keym string, zp
 
 // Parameters:
 //  - Key
-func (p *VisaServiceClient) Poll(ctx context.Context, key string) (_r *PollResponse, _err error) {
-  var _args29 VisaServicePollArgs
-  _args29.Key = key
-  var _result31 VisaServicePollResult
-  var _meta30 thrift.ResponseMeta
-  _meta30, _err = p.Client_().Call(ctx, "poll", &_args29, &_result31)
-  p.SetLastResponseMeta_(_meta30)
+func (p *VisaServiceClient) Ping(ctx context.Context, key string) (_r *Pong, _err error) {
+  var _args25 VisaServicePingArgs
+  _args25.Key = key
+  var _result27 VisaServicePingResult
+  var _meta26 thrift.ResponseMeta
+  _meta26, _err = p.Client_().Call(ctx, "ping", &_args25, &_result27)
+  p.SetLastResponseMeta_(_meta26)
   if _err != nil {
     return
   }
-  if _ret32 := _result31.GetSuccess(); _ret32 != nil {
-    return _ret32, nil
+  if _ret28 := _result27.GetSuccess(); _ret28 != nil {
+    return _ret28, nil
   }
-  return nil, thrift.NewTApplicationException(thrift.MISSING_RESULT, "poll failed: unknown result")
+  return nil, thrift.NewTApplicationException(thrift.MISSING_RESULT, "ping failed: unknown result")
 }
 
 // Parameters:
@@ -3240,19 +3038,19 @@ func (p *VisaServiceClient) Poll(ctx context.Context, key string) (_r *PollRespo
 //  - SrcTetherAddr
 //  - Traffic
 func (p *VisaServiceClient) RequestVisa(ctx context.Context, key string, src_tether_addr []byte, traffic *TrafficDesc) (_r *VisaResponse, _err error) {
-  var _args33 VisaServiceRequestVisaArgs
-  _args33.Key = key
-  _args33.SrcTetherAddr = src_tether_addr
-  _args33.Traffic = traffic
-  var _result35 VisaServiceRequestVisaResult
-  var _meta34 thrift.ResponseMeta
-  _meta34, _err = p.Client_().Call(ctx, "request_visa", &_args33, &_result35)
-  p.SetLastResponseMeta_(_meta34)
+  var _args29 VisaServiceRequestVisaArgs
+  _args29.Key = key
+  _args29.SrcTetherAddr = src_tether_addr
+  _args29.Traffic = traffic
+  var _result31 VisaServiceRequestVisaResult
+  var _meta30 thrift.ResponseMeta
+  _meta30, _err = p.Client_().Call(ctx, "request_visa", &_args29, &_result31)
+  p.SetLastResponseMeta_(_meta30)
   if _err != nil {
     return
   }
-  if _ret36 := _result35.GetSuccess(); _ret36 != nil {
-    return _ret36, nil
+  if _ret32 := _result31.GetSuccess(); _ret32 != nil {
+    return _ret32, nil
   }
   return nil, thrift.NewTApplicationException(thrift.MISSING_RESULT, "request_visa failed: unknown result")
 }
@@ -3277,15 +3075,15 @@ func (p *VisaServiceProcessor) ProcessorMap() map[string]thrift.TProcessorFuncti
 
 func NewVisaServiceProcessor(handler VisaService) *VisaServiceProcessor {
 
-  self37 := &VisaServiceProcessor{handler:handler, processorMap:make(map[string]thrift.TProcessorFunction)}
-  self37.processorMap["hello"] = &visaServiceProcessorHello{handler:handler}
-  self37.processorMap["authenticate"] = &visaServiceProcessorAuthenticate{handler:handler}
-  self37.processorMap["de_register"] = &visaServiceProcessorDeRegister{handler:handler}
-  self37.processorMap["authorize_connect"] = &visaServiceProcessorAuthorizeConnect{handler:handler}
-  self37.processorMap["agent_disconnect"] = &visaServiceProcessorAgentDisconnect{handler:handler}
-  self37.processorMap["poll"] = &visaServiceProcessorPoll{handler:handler}
-  self37.processorMap["request_visa"] = &visaServiceProcessorRequestVisa{handler:handler}
-return self37
+  self33 := &VisaServiceProcessor{handler:handler, processorMap:make(map[string]thrift.TProcessorFunction)}
+  self33.processorMap["hello"] = &visaServiceProcessorHello{handler:handler}
+  self33.processorMap["authenticate"] = &visaServiceProcessorAuthenticate{handler:handler}
+  self33.processorMap["de_register"] = &visaServiceProcessorDeRegister{handler:handler}
+  self33.processorMap["authorize_connect"] = &visaServiceProcessorAuthorizeConnect{handler:handler}
+  self33.processorMap["agent_disconnect"] = &visaServiceProcessorAgentDisconnect{handler:handler}
+  self33.processorMap["ping"] = &visaServiceProcessorPing{handler:handler}
+  self33.processorMap["request_visa"] = &visaServiceProcessorRequestVisa{handler:handler}
+return self33
 }
 
 func (p *VisaServiceProcessor) Process(ctx context.Context, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
@@ -3296,12 +3094,12 @@ func (p *VisaServiceProcessor) Process(ctx context.Context, iprot, oprot thrift.
   }
   iprot.Skip(ctx, thrift.STRUCT)
   iprot.ReadMessageEnd(ctx)
-  x38 := thrift.NewTApplicationException(thrift.UNKNOWN_METHOD, "Unknown function " + name)
+  x34 := thrift.NewTApplicationException(thrift.UNKNOWN_METHOD, "Unknown function " + name)
   oprot.WriteMessageBegin(ctx, name, thrift.EXCEPTION, seqId)
-  x38.Write(ctx, oprot)
+  x34.Write(ctx, oprot)
   oprot.WriteMessageEnd(ctx)
   oprot.Flush(ctx)
-  return false, x38
+  return false, x34
 
 }
 
@@ -3310,7 +3108,7 @@ type visaServiceProcessorHello struct {
 }
 
 func (p *visaServiceProcessorHello) Process(ctx context.Context, seqId int32, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
-  var _write_err39 error
+  var _write_err35 error
   args := VisaServiceHelloArgs{}
   if err2 := args.Read(ctx, iprot); err2 != nil {
     iprot.ReadMessageEnd(ctx)
@@ -3361,21 +3159,21 @@ func (p *visaServiceProcessorHello) Process(ctx context.Context, seqId int32, ip
         return false, thrift.WrapTException(err)
       }
     }
-    _exc40 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing hello: " + err2.Error())
+    _exc36 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing hello: " + err2.Error())
     if err2 := oprot.WriteMessageBegin(ctx, "hello", thrift.EXCEPTION, seqId); err2 != nil {
-      _write_err39 = thrift.WrapTException(err2)
+      _write_err35 = thrift.WrapTException(err2)
     }
-    if err2 := _exc40.Write(ctx, oprot); _write_err39 == nil && err2 != nil {
-      _write_err39 = thrift.WrapTException(err2)
+    if err2 := _exc36.Write(ctx, oprot); _write_err35 == nil && err2 != nil {
+      _write_err35 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.WriteMessageEnd(ctx); _write_err39 == nil && err2 != nil {
-      _write_err39 = thrift.WrapTException(err2)
+    if err2 := oprot.WriteMessageEnd(ctx); _write_err35 == nil && err2 != nil {
+      _write_err35 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.Flush(ctx); _write_err39 == nil && err2 != nil {
-      _write_err39 = thrift.WrapTException(err2)
+    if err2 := oprot.Flush(ctx); _write_err35 == nil && err2 != nil {
+      _write_err35 = thrift.WrapTException(err2)
     }
-    if _write_err39 != nil {
-      return false, thrift.WrapTException(_write_err39)
+    if _write_err35 != nil {
+      return false, thrift.WrapTException(_write_err35)
     }
     return true, err
   } else {
@@ -3383,19 +3181,19 @@ func (p *visaServiceProcessorHello) Process(ctx context.Context, seqId int32, ip
   }
   tickerCancel()
   if err2 := oprot.WriteMessageBegin(ctx, "hello", thrift.REPLY, seqId); err2 != nil {
-    _write_err39 = thrift.WrapTException(err2)
+    _write_err35 = thrift.WrapTException(err2)
   }
-  if err2 := result.Write(ctx, oprot); _write_err39 == nil && err2 != nil {
-    _write_err39 = thrift.WrapTException(err2)
+  if err2 := result.Write(ctx, oprot); _write_err35 == nil && err2 != nil {
+    _write_err35 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.WriteMessageEnd(ctx); _write_err39 == nil && err2 != nil {
-    _write_err39 = thrift.WrapTException(err2)
+  if err2 := oprot.WriteMessageEnd(ctx); _write_err35 == nil && err2 != nil {
+    _write_err35 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.Flush(ctx); _write_err39 == nil && err2 != nil {
-    _write_err39 = thrift.WrapTException(err2)
+  if err2 := oprot.Flush(ctx); _write_err35 == nil && err2 != nil {
+    _write_err35 = thrift.WrapTException(err2)
   }
-  if _write_err39 != nil {
-    return false, thrift.WrapTException(_write_err39)
+  if _write_err35 != nil {
+    return false, thrift.WrapTException(_write_err35)
   }
   return true, err
 }
@@ -3405,7 +3203,7 @@ type visaServiceProcessorAuthenticate struct {
 }
 
 func (p *visaServiceProcessorAuthenticate) Process(ctx context.Context, seqId int32, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
-  var _write_err41 error
+  var _write_err37 error
   args := VisaServiceAuthenticateArgs{}
   if err2 := args.Read(ctx, iprot); err2 != nil {
     iprot.ReadMessageEnd(ctx)
@@ -3456,21 +3254,21 @@ func (p *visaServiceProcessorAuthenticate) Process(ctx context.Context, seqId in
         return false, thrift.WrapTException(err)
       }
     }
-    _exc42 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing authenticate: " + err2.Error())
+    _exc38 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing authenticate: " + err2.Error())
     if err2 := oprot.WriteMessageBegin(ctx, "authenticate", thrift.EXCEPTION, seqId); err2 != nil {
-      _write_err41 = thrift.WrapTException(err2)
+      _write_err37 = thrift.WrapTException(err2)
     }
-    if err2 := _exc42.Write(ctx, oprot); _write_err41 == nil && err2 != nil {
-      _write_err41 = thrift.WrapTException(err2)
+    if err2 := _exc38.Write(ctx, oprot); _write_err37 == nil && err2 != nil {
+      _write_err37 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.WriteMessageEnd(ctx); _write_err41 == nil && err2 != nil {
-      _write_err41 = thrift.WrapTException(err2)
+    if err2 := oprot.WriteMessageEnd(ctx); _write_err37 == nil && err2 != nil {
+      _write_err37 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.Flush(ctx); _write_err41 == nil && err2 != nil {
-      _write_err41 = thrift.WrapTException(err2)
+    if err2 := oprot.Flush(ctx); _write_err37 == nil && err2 != nil {
+      _write_err37 = thrift.WrapTException(err2)
     }
-    if _write_err41 != nil {
-      return false, thrift.WrapTException(_write_err41)
+    if _write_err37 != nil {
+      return false, thrift.WrapTException(_write_err37)
     }
     return true, err
   } else {
@@ -3478,19 +3276,19 @@ func (p *visaServiceProcessorAuthenticate) Process(ctx context.Context, seqId in
   }
   tickerCancel()
   if err2 := oprot.WriteMessageBegin(ctx, "authenticate", thrift.REPLY, seqId); err2 != nil {
-    _write_err41 = thrift.WrapTException(err2)
+    _write_err37 = thrift.WrapTException(err2)
   }
-  if err2 := result.Write(ctx, oprot); _write_err41 == nil && err2 != nil {
-    _write_err41 = thrift.WrapTException(err2)
+  if err2 := result.Write(ctx, oprot); _write_err37 == nil && err2 != nil {
+    _write_err37 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.WriteMessageEnd(ctx); _write_err41 == nil && err2 != nil {
-    _write_err41 = thrift.WrapTException(err2)
+  if err2 := oprot.WriteMessageEnd(ctx); _write_err37 == nil && err2 != nil {
+    _write_err37 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.Flush(ctx); _write_err41 == nil && err2 != nil {
-    _write_err41 = thrift.WrapTException(err2)
+  if err2 := oprot.Flush(ctx); _write_err37 == nil && err2 != nil {
+    _write_err37 = thrift.WrapTException(err2)
   }
-  if _write_err41 != nil {
-    return false, thrift.WrapTException(_write_err41)
+  if _write_err37 != nil {
+    return false, thrift.WrapTException(_write_err37)
   }
   return true, err
 }
@@ -3523,7 +3321,7 @@ type visaServiceProcessorAuthorizeConnect struct {
 }
 
 func (p *visaServiceProcessorAuthorizeConnect) Process(ctx context.Context, seqId int32, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
-  var _write_err43 error
+  var _write_err39 error
   args := VisaServiceAuthorizeConnectArgs{}
   if err2 := args.Read(ctx, iprot); err2 != nil {
     iprot.ReadMessageEnd(ctx)
@@ -3574,21 +3372,21 @@ func (p *visaServiceProcessorAuthorizeConnect) Process(ctx context.Context, seqI
         return false, thrift.WrapTException(err)
       }
     }
-    _exc44 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing authorize_connect: " + err2.Error())
+    _exc40 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing authorize_connect: " + err2.Error())
     if err2 := oprot.WriteMessageBegin(ctx, "authorize_connect", thrift.EXCEPTION, seqId); err2 != nil {
-      _write_err43 = thrift.WrapTException(err2)
+      _write_err39 = thrift.WrapTException(err2)
     }
-    if err2 := _exc44.Write(ctx, oprot); _write_err43 == nil && err2 != nil {
-      _write_err43 = thrift.WrapTException(err2)
+    if err2 := _exc40.Write(ctx, oprot); _write_err39 == nil && err2 != nil {
+      _write_err39 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.WriteMessageEnd(ctx); _write_err43 == nil && err2 != nil {
-      _write_err43 = thrift.WrapTException(err2)
+    if err2 := oprot.WriteMessageEnd(ctx); _write_err39 == nil && err2 != nil {
+      _write_err39 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.Flush(ctx); _write_err43 == nil && err2 != nil {
-      _write_err43 = thrift.WrapTException(err2)
+    if err2 := oprot.Flush(ctx); _write_err39 == nil && err2 != nil {
+      _write_err39 = thrift.WrapTException(err2)
     }
-    if _write_err43 != nil {
-      return false, thrift.WrapTException(_write_err43)
+    if _write_err39 != nil {
+      return false, thrift.WrapTException(_write_err39)
     }
     return true, err
   } else {
@@ -3596,19 +3394,19 @@ func (p *visaServiceProcessorAuthorizeConnect) Process(ctx context.Context, seqI
   }
   tickerCancel()
   if err2 := oprot.WriteMessageBegin(ctx, "authorize_connect", thrift.REPLY, seqId); err2 != nil {
-    _write_err43 = thrift.WrapTException(err2)
+    _write_err39 = thrift.WrapTException(err2)
   }
-  if err2 := result.Write(ctx, oprot); _write_err43 == nil && err2 != nil {
-    _write_err43 = thrift.WrapTException(err2)
+  if err2 := result.Write(ctx, oprot); _write_err39 == nil && err2 != nil {
+    _write_err39 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.WriteMessageEnd(ctx); _write_err43 == nil && err2 != nil {
-    _write_err43 = thrift.WrapTException(err2)
+  if err2 := oprot.WriteMessageEnd(ctx); _write_err39 == nil && err2 != nil {
+    _write_err39 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.Flush(ctx); _write_err43 == nil && err2 != nil {
-    _write_err43 = thrift.WrapTException(err2)
+  if err2 := oprot.Flush(ctx); _write_err39 == nil && err2 != nil {
+    _write_err39 = thrift.WrapTException(err2)
   }
-  if _write_err43 != nil {
-    return false, thrift.WrapTException(_write_err43)
+  if _write_err39 != nil {
+    return false, thrift.WrapTException(_write_err39)
   }
   return true, err
 }
@@ -3618,7 +3416,7 @@ type visaServiceProcessorAgentDisconnect struct {
 }
 
 func (p *visaServiceProcessorAgentDisconnect) Process(ctx context.Context, seqId int32, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
-  var _write_err45 error
+  var _write_err41 error
   args := VisaServiceAgentDisconnectArgs{}
   if err2 := args.Read(ctx, iprot); err2 != nil {
     iprot.ReadMessageEnd(ctx)
@@ -3669,54 +3467,54 @@ func (p *visaServiceProcessorAgentDisconnect) Process(ctx context.Context, seqId
         return false, thrift.WrapTException(err)
       }
     }
-    _exc46 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing agent_disconnect: " + err2.Error())
+    _exc42 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing agent_disconnect: " + err2.Error())
     if err2 := oprot.WriteMessageBegin(ctx, "agent_disconnect", thrift.EXCEPTION, seqId); err2 != nil {
-      _write_err45 = thrift.WrapTException(err2)
+      _write_err41 = thrift.WrapTException(err2)
     }
-    if err2 := _exc46.Write(ctx, oprot); _write_err45 == nil && err2 != nil {
-      _write_err45 = thrift.WrapTException(err2)
+    if err2 := _exc42.Write(ctx, oprot); _write_err41 == nil && err2 != nil {
+      _write_err41 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.WriteMessageEnd(ctx); _write_err45 == nil && err2 != nil {
-      _write_err45 = thrift.WrapTException(err2)
+    if err2 := oprot.WriteMessageEnd(ctx); _write_err41 == nil && err2 != nil {
+      _write_err41 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.Flush(ctx); _write_err45 == nil && err2 != nil {
-      _write_err45 = thrift.WrapTException(err2)
+    if err2 := oprot.Flush(ctx); _write_err41 == nil && err2 != nil {
+      _write_err41 = thrift.WrapTException(err2)
     }
-    if _write_err45 != nil {
-      return false, thrift.WrapTException(_write_err45)
+    if _write_err41 != nil {
+      return false, thrift.WrapTException(_write_err41)
     }
     return true, err
   }
   tickerCancel()
   if err2 := oprot.WriteMessageBegin(ctx, "agent_disconnect", thrift.REPLY, seqId); err2 != nil {
-    _write_err45 = thrift.WrapTException(err2)
+    _write_err41 = thrift.WrapTException(err2)
   }
-  if err2 := result.Write(ctx, oprot); _write_err45 == nil && err2 != nil {
-    _write_err45 = thrift.WrapTException(err2)
+  if err2 := result.Write(ctx, oprot); _write_err41 == nil && err2 != nil {
+    _write_err41 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.WriteMessageEnd(ctx); _write_err45 == nil && err2 != nil {
-    _write_err45 = thrift.WrapTException(err2)
+  if err2 := oprot.WriteMessageEnd(ctx); _write_err41 == nil && err2 != nil {
+    _write_err41 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.Flush(ctx); _write_err45 == nil && err2 != nil {
-    _write_err45 = thrift.WrapTException(err2)
+  if err2 := oprot.Flush(ctx); _write_err41 == nil && err2 != nil {
+    _write_err41 = thrift.WrapTException(err2)
   }
-  if _write_err45 != nil {
-    return false, thrift.WrapTException(_write_err45)
+  if _write_err41 != nil {
+    return false, thrift.WrapTException(_write_err41)
   }
   return true, err
 }
 
-type visaServiceProcessorPoll struct {
+type visaServiceProcessorPing struct {
   handler VisaService
 }
 
-func (p *visaServiceProcessorPoll) Process(ctx context.Context, seqId int32, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
-  var _write_err47 error
-  args := VisaServicePollArgs{}
+func (p *visaServiceProcessorPing) Process(ctx context.Context, seqId int32, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
+  var _write_err43 error
+  args := VisaServicePingArgs{}
   if err2 := args.Read(ctx, iprot); err2 != nil {
     iprot.ReadMessageEnd(ctx)
     x := thrift.NewTApplicationException(thrift.PROTOCOL_ERROR, err2.Error())
-    oprot.WriteMessageBegin(ctx, "poll", thrift.EXCEPTION, seqId)
+    oprot.WriteMessageBegin(ctx, "ping", thrift.EXCEPTION, seqId)
     x.Write(ctx, oprot)
     oprot.WriteMessageEnd(ctx)
     oprot.Flush(ctx)
@@ -3750,8 +3548,8 @@ func (p *visaServiceProcessorPoll) Process(ctx context.Context, seqId int32, ipr
     }(tickerCtx, cancel)
   }
 
-  result := VisaServicePollResult{}
-  if retval, err2 := p.handler.Poll(ctx, args.Key); err2 != nil {
+  result := VisaServicePingResult{}
+  if retval, err2 := p.handler.Ping(ctx, args.Key); err2 != nil {
     tickerCancel()
     err = thrift.WrapTException(err2)
     if errors.Is(err2, thrift.ErrAbandonRequest) {
@@ -3762,41 +3560,41 @@ func (p *visaServiceProcessorPoll) Process(ctx context.Context, seqId int32, ipr
         return false, thrift.WrapTException(err)
       }
     }
-    _exc48 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing poll: " + err2.Error())
-    if err2 := oprot.WriteMessageBegin(ctx, "poll", thrift.EXCEPTION, seqId); err2 != nil {
-      _write_err47 = thrift.WrapTException(err2)
+    _exc44 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing ping: " + err2.Error())
+    if err2 := oprot.WriteMessageBegin(ctx, "ping", thrift.EXCEPTION, seqId); err2 != nil {
+      _write_err43 = thrift.WrapTException(err2)
     }
-    if err2 := _exc48.Write(ctx, oprot); _write_err47 == nil && err2 != nil {
-      _write_err47 = thrift.WrapTException(err2)
+    if err2 := _exc44.Write(ctx, oprot); _write_err43 == nil && err2 != nil {
+      _write_err43 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.WriteMessageEnd(ctx); _write_err47 == nil && err2 != nil {
-      _write_err47 = thrift.WrapTException(err2)
+    if err2 := oprot.WriteMessageEnd(ctx); _write_err43 == nil && err2 != nil {
+      _write_err43 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.Flush(ctx); _write_err47 == nil && err2 != nil {
-      _write_err47 = thrift.WrapTException(err2)
+    if err2 := oprot.Flush(ctx); _write_err43 == nil && err2 != nil {
+      _write_err43 = thrift.WrapTException(err2)
     }
-    if _write_err47 != nil {
-      return false, thrift.WrapTException(_write_err47)
+    if _write_err43 != nil {
+      return false, thrift.WrapTException(_write_err43)
     }
     return true, err
   } else {
     result.Success = retval
   }
   tickerCancel()
-  if err2 := oprot.WriteMessageBegin(ctx, "poll", thrift.REPLY, seqId); err2 != nil {
-    _write_err47 = thrift.WrapTException(err2)
+  if err2 := oprot.WriteMessageBegin(ctx, "ping", thrift.REPLY, seqId); err2 != nil {
+    _write_err43 = thrift.WrapTException(err2)
   }
-  if err2 := result.Write(ctx, oprot); _write_err47 == nil && err2 != nil {
-    _write_err47 = thrift.WrapTException(err2)
+  if err2 := result.Write(ctx, oprot); _write_err43 == nil && err2 != nil {
+    _write_err43 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.WriteMessageEnd(ctx); _write_err47 == nil && err2 != nil {
-    _write_err47 = thrift.WrapTException(err2)
+  if err2 := oprot.WriteMessageEnd(ctx); _write_err43 == nil && err2 != nil {
+    _write_err43 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.Flush(ctx); _write_err47 == nil && err2 != nil {
-    _write_err47 = thrift.WrapTException(err2)
+  if err2 := oprot.Flush(ctx); _write_err43 == nil && err2 != nil {
+    _write_err43 = thrift.WrapTException(err2)
   }
-  if _write_err47 != nil {
-    return false, thrift.WrapTException(_write_err47)
+  if _write_err43 != nil {
+    return false, thrift.WrapTException(_write_err43)
   }
   return true, err
 }
@@ -3806,7 +3604,7 @@ type visaServiceProcessorRequestVisa struct {
 }
 
 func (p *visaServiceProcessorRequestVisa) Process(ctx context.Context, seqId int32, iprot, oprot thrift.TProtocol) (success bool, err thrift.TException) {
-  var _write_err49 error
+  var _write_err45 error
   args := VisaServiceRequestVisaArgs{}
   if err2 := args.Read(ctx, iprot); err2 != nil {
     iprot.ReadMessageEnd(ctx)
@@ -3857,21 +3655,21 @@ func (p *visaServiceProcessorRequestVisa) Process(ctx context.Context, seqId int
         return false, thrift.WrapTException(err)
       }
     }
-    _exc50 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing request_visa: " + err2.Error())
+    _exc46 := thrift.NewTApplicationException(thrift.INTERNAL_ERROR, "Internal error processing request_visa: " + err2.Error())
     if err2 := oprot.WriteMessageBegin(ctx, "request_visa", thrift.EXCEPTION, seqId); err2 != nil {
-      _write_err49 = thrift.WrapTException(err2)
+      _write_err45 = thrift.WrapTException(err2)
     }
-    if err2 := _exc50.Write(ctx, oprot); _write_err49 == nil && err2 != nil {
-      _write_err49 = thrift.WrapTException(err2)
+    if err2 := _exc46.Write(ctx, oprot); _write_err45 == nil && err2 != nil {
+      _write_err45 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.WriteMessageEnd(ctx); _write_err49 == nil && err2 != nil {
-      _write_err49 = thrift.WrapTException(err2)
+    if err2 := oprot.WriteMessageEnd(ctx); _write_err45 == nil && err2 != nil {
+      _write_err45 = thrift.WrapTException(err2)
     }
-    if err2 := oprot.Flush(ctx); _write_err49 == nil && err2 != nil {
-      _write_err49 = thrift.WrapTException(err2)
+    if err2 := oprot.Flush(ctx); _write_err45 == nil && err2 != nil {
+      _write_err45 = thrift.WrapTException(err2)
     }
-    if _write_err49 != nil {
-      return false, thrift.WrapTException(_write_err49)
+    if _write_err45 != nil {
+      return false, thrift.WrapTException(_write_err45)
     }
     return true, err
   } else {
@@ -3879,19 +3677,19 @@ func (p *visaServiceProcessorRequestVisa) Process(ctx context.Context, seqId int
   }
   tickerCancel()
   if err2 := oprot.WriteMessageBegin(ctx, "request_visa", thrift.REPLY, seqId); err2 != nil {
-    _write_err49 = thrift.WrapTException(err2)
+    _write_err45 = thrift.WrapTException(err2)
   }
-  if err2 := result.Write(ctx, oprot); _write_err49 == nil && err2 != nil {
-    _write_err49 = thrift.WrapTException(err2)
+  if err2 := result.Write(ctx, oprot); _write_err45 == nil && err2 != nil {
+    _write_err45 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.WriteMessageEnd(ctx); _write_err49 == nil && err2 != nil {
-    _write_err49 = thrift.WrapTException(err2)
+  if err2 := oprot.WriteMessageEnd(ctx); _write_err45 == nil && err2 != nil {
+    _write_err45 = thrift.WrapTException(err2)
   }
-  if err2 := oprot.Flush(ctx); _write_err49 == nil && err2 != nil {
-    _write_err49 = thrift.WrapTException(err2)
+  if err2 := oprot.Flush(ctx); _write_err45 == nil && err2 != nil {
+    _write_err45 = thrift.WrapTException(err2)
   }
-  if _write_err49 != nil {
-    return false, thrift.WrapTException(_write_err49)
+  if _write_err45 != nil {
+    return false, thrift.WrapTException(_write_err45)
   }
   return true, err
 }
@@ -4870,19 +4668,19 @@ var _ slog.LogValuer = (*VisaServiceAgentDisconnectResult)(nil)
 
 // Attributes:
 //  - Key
-type VisaServicePollArgs struct {
+type VisaServicePingArgs struct {
   Key string `thrift:"key,1" db:"key" json:"key"`
 }
 
-func NewVisaServicePollArgs() *VisaServicePollArgs {
-  return &VisaServicePollArgs{}
+func NewVisaServicePingArgs() *VisaServicePingArgs {
+  return &VisaServicePingArgs{}
 }
 
 
-func (p *VisaServicePollArgs) GetKey() string {
+func (p *VisaServicePingArgs) GetKey() string {
   return p.Key
 }
-func (p *VisaServicePollArgs) Read(ctx context.Context, iprot thrift.TProtocol) error {
+func (p *VisaServicePingArgs) Read(ctx context.Context, iprot thrift.TProtocol) error {
   if _, err := iprot.ReadStructBegin(ctx); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
   }
@@ -4920,7 +4718,7 @@ func (p *VisaServicePollArgs) Read(ctx context.Context, iprot thrift.TProtocol) 
   return nil
 }
 
-func (p *VisaServicePollArgs)  ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
+func (p *VisaServicePingArgs)  ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
   if v, err := iprot.ReadString(ctx); err != nil {
   return thrift.PrependError("error reading field 1: ", err)
 } else {
@@ -4929,8 +4727,8 @@ func (p *VisaServicePollArgs)  ReadField1(ctx context.Context, iprot thrift.TPro
   return nil
 }
 
-func (p *VisaServicePollArgs) Write(ctx context.Context, oprot thrift.TProtocol) error {
-  if err := oprot.WriteStructBegin(ctx, "poll_args"); err != nil {
+func (p *VisaServicePingArgs) Write(ctx context.Context, oprot thrift.TProtocol) error {
+  if err := oprot.WriteStructBegin(ctx, "ping_args"); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err) }
   if p != nil {
     if err := p.writeField1(ctx, oprot); err != nil { return err }
@@ -4942,7 +4740,7 @@ func (p *VisaServicePollArgs) Write(ctx context.Context, oprot thrift.TProtocol)
   return nil
 }
 
-func (p *VisaServicePollArgs) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
+func (p *VisaServicePingArgs) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
   if err := oprot.WriteFieldBegin(ctx, "key", thrift.STRING, 1); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:key: ", p), err) }
   if err := oprot.WriteString(ctx, string(p.Key)); err != nil {
@@ -4952,48 +4750,48 @@ func (p *VisaServicePollArgs) writeField1(ctx context.Context, oprot thrift.TPro
   return err
 }
 
-func (p *VisaServicePollArgs) String() string {
+func (p *VisaServicePingArgs) String() string {
   if p == nil {
     return "<nil>"
   }
-  return fmt.Sprintf("VisaServicePollArgs(%+v)", *p)
+  return fmt.Sprintf("VisaServicePingArgs(%+v)", *p)
 }
 
-func (p *VisaServicePollArgs) LogValue() slog.Value {
+func (p *VisaServicePingArgs) LogValue() slog.Value {
   if p == nil {
     return slog.AnyValue(nil)
   }
   v := thrift.SlogTStructWrapper{
-    Type: "*vsapi.VisaServicePollArgs",
+    Type: "*vsapi.VisaServicePingArgs",
     Value: p,
   }
   return slog.AnyValue(v)
 }
 
-var _ slog.LogValuer = (*VisaServicePollArgs)(nil)
+var _ slog.LogValuer = (*VisaServicePingArgs)(nil)
 
 // Attributes:
 //  - Success
-type VisaServicePollResult struct {
-  Success *PollResponse `thrift:"success,0" db:"success" json:"success,omitempty"`
+type VisaServicePingResult struct {
+  Success *Pong `thrift:"success,0" db:"success" json:"success,omitempty"`
 }
 
-func NewVisaServicePollResult() *VisaServicePollResult {
-  return &VisaServicePollResult{}
+func NewVisaServicePingResult() *VisaServicePingResult {
+  return &VisaServicePingResult{}
 }
 
-var VisaServicePollResult_Success_DEFAULT *PollResponse
-func (p *VisaServicePollResult) GetSuccess() *PollResponse {
+var VisaServicePingResult_Success_DEFAULT *Pong
+func (p *VisaServicePingResult) GetSuccess() *Pong {
   if !p.IsSetSuccess() {
-    return VisaServicePollResult_Success_DEFAULT
+    return VisaServicePingResult_Success_DEFAULT
   }
   return p.Success
 }
-func (p *VisaServicePollResult) IsSetSuccess() bool {
+func (p *VisaServicePingResult) IsSetSuccess() bool {
   return p.Success != nil
 }
 
-func (p *VisaServicePollResult) Read(ctx context.Context, iprot thrift.TProtocol) error {
+func (p *VisaServicePingResult) Read(ctx context.Context, iprot thrift.TProtocol) error {
   if _, err := iprot.ReadStructBegin(ctx); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
   }
@@ -5031,16 +4829,16 @@ func (p *VisaServicePollResult) Read(ctx context.Context, iprot thrift.TProtocol
   return nil
 }
 
-func (p *VisaServicePollResult)  ReadField0(ctx context.Context, iprot thrift.TProtocol) error {
-  p.Success = &PollResponse{}
+func (p *VisaServicePingResult)  ReadField0(ctx context.Context, iprot thrift.TProtocol) error {
+  p.Success = &Pong{}
   if err := p.Success.Read(ctx, iprot); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.Success), err)
   }
   return nil
 }
 
-func (p *VisaServicePollResult) Write(ctx context.Context, oprot thrift.TProtocol) error {
-  if err := oprot.WriteStructBegin(ctx, "poll_result"); err != nil {
+func (p *VisaServicePingResult) Write(ctx context.Context, oprot thrift.TProtocol) error {
+  if err := oprot.WriteStructBegin(ctx, "ping_result"); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err) }
   if p != nil {
     if err := p.writeField0(ctx, oprot); err != nil { return err }
@@ -5052,7 +4850,7 @@ func (p *VisaServicePollResult) Write(ctx context.Context, oprot thrift.TProtoco
   return nil
 }
 
-func (p *VisaServicePollResult) writeField0(ctx context.Context, oprot thrift.TProtocol) (err error) {
+func (p *VisaServicePingResult) writeField0(ctx context.Context, oprot thrift.TProtocol) (err error) {
   if p.IsSetSuccess() {
     if err := oprot.WriteFieldBegin(ctx, "success", thrift.STRUCT, 0); err != nil {
       return thrift.PrependError(fmt.Sprintf("%T write field begin error 0:success: ", p), err) }
@@ -5065,25 +4863,25 @@ func (p *VisaServicePollResult) writeField0(ctx context.Context, oprot thrift.TP
   return err
 }
 
-func (p *VisaServicePollResult) String() string {
+func (p *VisaServicePingResult) String() string {
   if p == nil {
     return "<nil>"
   }
-  return fmt.Sprintf("VisaServicePollResult(%+v)", *p)
+  return fmt.Sprintf("VisaServicePingResult(%+v)", *p)
 }
 
-func (p *VisaServicePollResult) LogValue() slog.Value {
+func (p *VisaServicePingResult) LogValue() slog.Value {
   if p == nil {
     return slog.AnyValue(nil)
   }
   v := thrift.SlogTStructWrapper{
-    Type: "*vsapi.VisaServicePollResult",
+    Type: "*vsapi.VisaServicePingResult",
     Value: p,
   }
   return slog.AnyValue(v)
 }
 
-var _ slog.LogValuer = (*VisaServicePollResult)(nil)
+var _ slog.LogValuer = (*VisaServicePingResult)(nil)
 
 // Attributes:
 //  - Key

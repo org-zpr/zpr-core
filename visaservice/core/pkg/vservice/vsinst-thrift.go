@@ -18,6 +18,8 @@ import (
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vs/pkg/vservice/adb"
+	"zpr.org/vs/pkg/vssapi"
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/google/uuid"
@@ -27,6 +29,15 @@ const (
 	HelloTimeout = 2 * time.Minute
 	MaxClockSkew = 5 * time.Minute
 )
+
+type PollResponse struct {
+	Visas       []*vssapi.VisaHop
+	Revocations []*vssapi.VisaRevocation
+}
+type Revocation struct {
+	IssuerID uint32
+	ConfigID uint64
+}
 
 // Start the thrift server (and set the `VSInst.thriftServer` pointer).
 //
@@ -96,14 +107,17 @@ func (vs *VSInst) freeSessionID(sid int32, chksum uint32) bool {
 }
 
 // Removes and returns the PeerRecord from the apikeys table.  After this the API key is no longer valid.
-func (vs *VSInst) takePeerRecord(key string) *PeerRecord {
+func (vs *VSInst) takePeerRecord(key string) (netip.Addr, *adb.PeerRecord) {
+	var naddr netip.Addr
 	vs.sessions.Lock()
-	defer vs.sessions.Unlock()
-	if pr, ok := vs.sessions.apiKeys[key]; ok {
+	if addr, ok := vs.sessions.apiKeys[key]; ok {
 		delete(vs.sessions.apiKeys, key)
-		return pr
+		naddr = addr
 	}
-	return nil
+	vs.sessions.Unlock()
+
+	vs.agentDB.DisableAPIKey(naddr)
+	return naddr, vs.agentDB.GetPeerRecord(naddr)
 }
 
 func (vs *VSInst) validAPIKey(key string) bool {
@@ -113,12 +127,47 @@ func (vs *VSInst) validAPIKey(key string) bool {
 	return ok
 }
 
-func (vs *VSInst) validAPIKeyAndDeets(key string) (bool, time.Time, netip.Addr) {
+func (vs *VSInst) nodeAddrForKey(key string) (netip.Addr, bool) {
 	vs.sessions.RLock()
 	defer vs.sessions.RUnlock()
-	if rec, ok := vs.sessions.apiKeys[key]; ok {
-		return true, rec.LastPollTime, rec.ZPRAddr
+	addr, ok := vs.sessions.apiKeys[key]
+	return addr, ok
+}
+
+func (vs *VSInst) updateContactTime(key string) {
+	var naddr netip.Addr
+	found := false
+	vs.sessions.RLock()
+	if addr, ok := vs.sessions.apiKeys[key]; ok {
+		found = true
+		naddr = addr
 	}
+	vs.sessions.RUnlock()
+	if !found {
+		return
+	}
+
+	vs.agentDB.SetNodeContactTime(naddr, time.Now())
+}
+
+// Returns (key_is_valid, last_heard_from_time, node_address)
+func (vs *VSInst) validAPIKeyAndDeets(key string) (bool, time.Time, netip.Addr) {
+	var nodeAddr netip.Addr
+	found := false
+	vs.sessions.RLock()
+	if rec, ok := vs.sessions.apiKeys[key]; ok {
+		nodeAddr = rec
+		found = true
+	}
+	vs.sessions.RUnlock()
+
+	if found {
+		lastContact, ok := vs.agentDB.GetNodeLastContact(nodeAddr)
+		if ok {
+			return true, lastContact, nodeAddr
+		}
+	}
+
 	return false, time.Time{}, netip.Addr{}
 }
 
@@ -178,13 +227,13 @@ func vsapiTrafficDescToIpTraffic(pd *vsapi.TrafficDesc) *snip.Traffic {
 //
 
 // returns API key
-func (vs *VSInst) BackDoorInstallAPIKeyForUnitTest(node_addr netip.Addr, node_name string) (string, error) {
-	return vs.BackDoorInstallAPIKeyForUnitTestExp(node_addr, node_name, time.Now().Add(5*time.Minute))
+func (vs *VSInst) BackDoorInstallAPIKeyForUnitTest(node_addr netip.Addr, node_name, vssAddr string) (string, error) {
+	return vs.BackDoorInstallAPIKeyForUnitTestExp(node_addr, node_name, time.Now().Add(5*time.Minute), vssAddr)
 }
 
 // returns API key
-func (vs *VSInst) BackDoorInstallAPIKeyForUnitTestExp(node_addr netip.Addr, node_name string, expiration time.Time) (string, error) {
-	apiKey, err := vs.finishAuthenticate(node_addr, expiration, []string{fmt.Sprintf("/zpr/%s", node_name)})
+func (vs *VSInst) BackDoorInstallAPIKeyForUnitTestExp(node_addr netip.Addr, node_name string, expiration time.Time, vssAddr string) (string, error) {
+	apiKey, err := vs.finishAuthenticate(node_addr, expiration, []string{fmt.Sprintf("/zpr/%s", node_name)}, vssAddr)
 	if err != nil {
 		return "", err
 	}
@@ -214,7 +263,31 @@ func (vs *VSInst) BackDoorConnectSvcAdapter(tether_addr netip.Addr, zpr_addr net
 	agnt.SetTetherAddr(tether_addr)
 	agnt.SetAuthenticated(claims, expiration, nil, nil, cid)
 
-	return vs.AddAdapter(zpr_addr, agnt)
+	return vs.agentDB.AddOrUpdateAdapter(zpr_addr, agnt.GetTetherAddr(), agnt)
+}
+
+// Poll used to be a VS API function, but is superceded by the VSS push functions.
+// Left her for unit testing ease.
+func (vs *VSInst) Poll(key string) (*PollResponse, error) {
+	vs.log.Debug("*POLL*")
+	valid, _, zprAddr := vs.validAPIKeyAndDeets(key)
+	if !valid {
+		vs.log.Debug("poll called with invalid key", "key", key)
+		return nil, vsapi.NewUnauthorizedError()
+	}
+	messages := vs.agentDB.DrainPending(zprAddr)
+	vcount, rcount := 0, 0
+	for _, msg := range messages {
+		vcount += len(msg.Visas)
+		rcount += len(msg.Revocations)
+	}
+	vs.log.Debugf("found %d messages (%d visas, %d revocations) in mbox for node %s", len(messages), vcount, rcount, zprAddr)
+	resp := PollResponse{}
+	for _, msg := range messages {
+		resp.Visas = append(resp.Visas, msg.Visas...)
+		resp.Revocations = append(resp.Revocations, msg.Revocations...)
+	}
+	return &resp, nil
 }
 
 // --------------------------------- BEGIN THRIFT ------------------------------- //
@@ -303,16 +376,36 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		return "", fmt.Errorf("invalid agent ZPR address")
 	}
 
-	apiKey, err := vs.finishAuthenticate(naddr, expiration, req.NodeAgent.Provides)
+	var vssServiceAddr string
+
+	if req.VssService == "" {
+		ap := netip.AddrPortFrom(naddr, VSSDefaultPort)
+		vssServiceAddr = ap.String()
+		vs.log.Info("registration: missing VSS service address - using default", "vss_addr", vssServiceAddr)
+	} else {
+		vssServiceAddr = req.VssService
+		if _, err := netip.ParseAddrPort(vssServiceAddr); err != nil {
+			vs.log.Warn("registration: invalid VSS service address", "vss_addr", vssServiceAddr)
+			return "", fmt.Errorf("invalid VSS service address")
+		}
+		vs.log.Info("registration: got VSS service address", "vss_addr", vssServiceAddr)
+	}
+
+	apiKey, err := vs.finishAuthenticate(naddr, expiration, req.NodeAgent.Provides, vssServiceAddr)
 	if err != nil {
 		vs.log.WithError(err).Warn("registration: failed to write to agent DB")
 		return "", fmt.Errorf("internal error")
 	}
 
+	vs.vsMsgC <- &VSMsg{
+		MsgType:  MTNodeRegister,
+		NodeAddr: naddr,
+	}
+
 	return apiKey, nil
 }
 
-func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, provides []string) (string, error) {
+func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, provides []string, vssServiceAddr string) (string, error) {
 	_, _, cid := vs.getPolicyMatcherConfig()
 
 	claims := make(map[string]*agent.ClaimV)
@@ -324,38 +417,28 @@ func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, pro
 	nodeAgent.SetTetherAddr(naddr)
 	nodeAgent.SetAuthenticated(claims, expiration, nil, nil, cid)
 
-	if err := vs.AddNode(naddr, nodeAgent); err != nil {
+	apiKey := uuid.New().String()
+
+	if err := vs.agentDB.AddNode(naddr, naddr, nodeAgent, apiKey, vssServiceAddr); err != nil {
 		return "", err
 	}
 
-	apiKey := uuid.New().String()
-
 	vs.sessions.Lock()
-	vs.sessions.apiKeys[apiKey] = &PeerRecord{
-		ZPRAddr:          naddr,
-		RegistrationTime: time.Now(),
-	}
+	vs.sessions.apiKeys[apiKey] = naddr
 	vs.sessions.Unlock()
-
-	// Also stash API key in the agent-db.
-	vs.agentDB.Lock()
-	if rec, ok := vs.agentDB.agents[naddr]; ok {
-		rec.APIKey = apiKey
-	}
-	vs.agentDB.Unlock()
 
 	return apiKey, nil
 }
 
 func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
 	vs.log.Debug("*DE_REGISTER*")
-	rec := vs.takePeerRecord(key)
+	naddr, rec := vs.takePeerRecord(key)
 	if rec == nil {
 		vs.log.Debug("registration: de-register called with invalid key", "key", key)
 		return vsapi.NewUnauthorizedError()
 	}
-	vs.log.Info("de-register", "node_addr", rec.ZPRAddr, "visa_requests", rec.VisaRequestsCount, "connects", rec.ConnectRequestsCount)
-	vs.RemoveNode(rec.ZPRAddr)
+	vs.log.Info("de-register", "node_addr", naddr, "visa_requests", rec.VisaRequestsCount, "connects", rec.ConnectRequestsCount)
+	vs.agentDB.RemoveNode(naddr)
 	return nil
 }
 
@@ -366,11 +449,9 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 		return nil, vsapi.NewUnauthorizedError()
 	}
 
-	vs.sessions.Lock()
-	if rec, ok := vs.sessions.apiKeys[key]; ok {
-		rec.ConnectRequestsCount++
+	if naddr, ok := vs.nodeAddrForKey(key); ok {
+		vs.agentDB.IncrNodeConnectReq(naddr)
 	}
-	vs.sessions.Unlock()
 
 	// Note that the prototype visa service allowed a node to pass itself (its own agent) in to this call,
 	// and in that case we pass it in to approve connection which ends up just accepting the nodes
@@ -399,6 +480,7 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 		vs.log.Debug("agent-disconnect called with invalid key", "key", key)
 		return vsapi.NewUnauthorizedError()
 	}
+	vs.updateContactTime(key)
 	zaddr, addrOk := netip.AddrFromSlice(zprAddr)
 	if !addrOk {
 		vs.log.Warn("registration: de-register but agent record has invalid address", "addr", zprAddr)
@@ -407,21 +489,16 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 	vs.log.Info("agent disconnect", "zpr_addr", zaddr)
 
 	// Normally this would be an adapter disconnect.
-	isNode := false
-	found := false
-	vs.agentDB.RLock()
-	if rec, ok := vs.agentDB.agents[zaddr]; ok {
-		isNode = rec.Agent.GetRole() == "node"
-		found = true
-	}
-	vs.agentDB.RUnlock()
+
+	found := vs.agentDB.Contains(zaddr)
+	isNode := vs.agentDB.IsNode(zaddr)
 
 	if !found {
 		vs.log.Warn("agent-disconnect called but address not found", "addr", zaddr)
 		return nil
 	}
 	if !isNode {
-		vs.RemoveAdapter(zaddr)
+		vs.agentDB.RemoveAdapter(zaddr)
 		return nil
 	}
 
@@ -431,44 +508,19 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 	return vs.DeRegister(ctx, key)
 }
 
-func (vs *VSInst) Poll(ctx context.Context, key string) (*vsapi.PollResponse, error) {
-	vs.log.Debug("*POLL*")
-	valid, lastPoll, zprAddr := vs.validAPIKeyAndDeets(key)
+func (vs *VSInst) Ping(ctx context.Context, key string) (*vsapi.Pong, error) {
+	vs.log.Debug("*PING*")
+	valid, _, _ := vs.validAPIKeyAndDeets(key)
 	if !valid {
-		vs.log.Debug("poll called with invalid key", "key", key)
+		vs.log.Debug("ping called with invalid key", "key", key)
 		return nil, vsapi.NewUnauthorizedError()
 	}
-	if lastPoll.IsZero() {
-		vs.log.Info("first poll", "peer", zprAddr)
-
-		vs.sessions.Lock()
-		if rec, ok := vs.sessions.apiKeys[key]; ok {
-			rec.LastPollTime = time.Now()
-		}
-		vs.sessions.Unlock()
-	}
-	mbox := zprAddr.String()
-	resp := &vsapi.PollResponse{}
-	const qcount = 100
-	msgs, ok := vs.mb.MessagesFor(mbox, qcount)
-	if !ok {
-		// This is an error - node should inform us of new nodes.
-		vs.log.Info("poll request from unknown node, ignoring", "addr", mbox, "peer", zprAddr)
-		return resp, nil
-	}
-	for _, m := range msgs {
-		if len(m.Revocations) > 0 {
-			resp.Revocations = append(resp.Revocations, m.Revocations...)
-		}
-		if len(m.Visas) > 0 {
-			resp.Visas = append(resp.Visas, m.Visas...)
-		}
-	}
-	if len(msgs) == qcount {
-		// guessing...
-		resp.More = 1
-	}
-	return resp, nil
+	vs.updateContactTime(key)
+	pp, _, configID := vs.getPolicyMatcherConfig()
+	return &vsapi.Pong{
+		Configuration: int64(configID),
+		PolicyVersion: int64(pp.VersionNumber()),
+	}, nil
 }
 
 func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []byte, traffic *vsapi.TrafficDesc) (*vsapi.VisaResponse, error) {
@@ -480,12 +532,7 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 	}
 
 	vs.log.Info("request visa", "peer", zprAddr)
-
-	vs.sessions.Lock()
-	if rr, found := vs.sessions.apiKeys[key]; found {
-		rr.VisaRequestsCount++
-	}
-	vs.sessions.Unlock()
+	vs.agentDB.IncrNodeVisaReq(zprAddr)
 
 	pp := vs.getPolicy() // take & release lock
 	pver := uint64(0)
@@ -496,6 +543,7 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 	if !ok {
 		return nil, errors.New("invalid tether address on visa request")
 	}
+	vs.log.Debug("invoking request-visa for visa service API", "requesting_node", zprAddr)
 	vsResp, err := vs.doRequestVisa(ctx, tetherAddr, vsapiTrafficDescToIpTraffic(traffic), 0, pver)
 
 	if err != nil {

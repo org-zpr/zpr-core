@@ -4,9 +4,9 @@ use crate::counters_enum::CounterType;
 use crate::flow_control;
 use crate::options::PhMode;
 use crate::packet::Packet;
+use crate::queues::InboundProcessorMessage;
 use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
-use crate::InboundProcessorMessage;
 // use crate::buffer_stack::BufferStack;
 use bytes::Buf;
 use std::future::Future;
@@ -61,26 +61,83 @@ async fn handle_packet<'pktbuf>(
     mut pkt: Packet<'pktbuf>,
     asm: &Assembly<'pktbuf>,
 ) {
-    let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
 
-    match hdr.abbreviated_header.packet_type {
-        ZdpPacketType::TransitPacket => {
-            // copy out relevant header info
-            pkt.metadata_mut().flow_id = hdr.stream_id;
+    let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short ZDP message");
 
-            // strip packet header
-            pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
+    // copy out relevant header info
+    let packet_type = base_hdr.packet_type;
+    let _sequence_number = base_hdr.sequence_number;
 
-            if config.mode == PhMode::Server {
-                // TODO: drop error packets
-                let _ = classify(&mut pkt);
+    // strip base header
+    pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
+
+    if packet_type.is_response() {
+        let channel = asm.get_sender();
+        match channel {
+            Some(channel) => match channel.send(pkt) {
+                Ok(()) => (),
+                Err(pkt) => {
+                    let ret_buf = pkt.destroy();
+                    asm.buffer_stack.put_buffer(ret_buf);
+                    asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+                }
+            },
+            None => {
+                let ret_buf = pkt.destroy();
+                asm.buffer_stack.put_buffer(ret_buf);
+                asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+            }
+        }
+    } else if packet_type.is_per_flow() {
+        let per_flow_hdr =
+            ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+
+        // copy out relevant header info
+        let stream_id = per_flow_hdr.stream_id;
+
+        // strip per-flow header
+        pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
+
+        match packet_type {
+            ZdpPacketType::TransitPacket => {
+                pkt.metadata_mut().flow_id = stream_id;
+
+                if config.mode == PhMode::Server {
+                    // TODO: drop error packets
+                    let _ = classify(&mut pkt);
+                }
+
+                // send out decapsulated packet
+                asm.inbound_send.enqueue_packet(pkt).await;
             }
 
-            // send out decapsulated packet
-            asm.inbound_send.enqueue_packet(pkt).await;
+            packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
-
-        packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
+    } else {
+        match packet_type {
+            ZdpPacketType::Report => {
+                let hdr =
+                    ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+                // TODO handle protocol errors i.e. if the body is shorter
+                let report_data_length: usize = hdr.report_data_length.into();
+                pkt.advance(std::mem::size_of::<ZdpReportHeader>());
+                if pkt.body().len() >= report_data_length {
+                    // TODO printing to stderr blocks indefinitely, this is just temporary
+                    eprintln!(
+                        "{}",
+                        std::str::from_utf8(&pkt.body()[..report_data_length]).unwrap()
+                    );
+                }
+                let ret_buf = pkt.destroy();
+                asm.buffer_stack.put_buffer(ret_buf);
+            }
+            ZdpPacketType::Discard => {
+                // TODO print to debug log, when implemented
+                eprintln!("Discard message recieved");
+            }
+            packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
+        }
     }
 }
 

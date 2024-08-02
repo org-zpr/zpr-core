@@ -1,11 +1,11 @@
 use crate::packet::Packet;
 use crate::test_packet::*;
+use crate::zdp;
 use enum_map::Enum;
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
-
 // Queues (i.e., frontend interface) for each stage of the system.
 
 // "Inbound" refers to the dock->adapter direction (i.e., inbound to this host).
@@ -27,6 +27,7 @@ pub struct InboundProcessor<'pktbuf> {
 impl<'pktbuf> InboundProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
+    #[allow(dead_code)]
     pub(crate) fn new(sender: mpsc::Sender<InboundProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
     }
@@ -64,6 +65,7 @@ pub struct InboundSend<'pktbuf> {
 impl<'pktbuf> InboundSend<'pktbuf> {
     // We necessarily have multiple queues, corresponding to the multiple
     // FDs of a multiqueue-enabled TUN interface.
+    #[allow(dead_code)]
     pub(crate) fn new(senders: Box<[mpsc::Sender<InboundSendMessage<'pktbuf>>]>) -> Self {
         Self { senders }
     }
@@ -97,9 +99,12 @@ impl<'pktbuf> InboundSend<'pktbuf> {
 // All packets from the host are sent here for encapsulation, and any
 // CPU-intensive preprocessing (e.g. signature generation).
 // This may morph into more or fewer (i.e. zero) stages depending on future requirements.
+#[allow(dead_code)]
 pub enum OutboundProcessorMessage<'pktbuf> {
     Packet(Packet<'pktbuf>),
     TestPacket(TestPacket),
+    NonFlowMgmt(zdp::ZdpPacketType, Packet<'pktbuf>),
+    PerFlowMgmt(zdp::ZdpPacketType, u32, Packet<'pktbuf>),
 }
 
 pub struct OutboundProcessor<'pktbuf> {
@@ -109,6 +114,7 @@ pub struct OutboundProcessor<'pktbuf> {
 impl<'pktbuf> OutboundProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
+    #[allow(dead_code)]
     pub(crate) fn new(sender: mpsc::Sender<OutboundProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
     }
@@ -130,6 +136,37 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
 
         Ok(test_tuple.1.await?)
     }
+
+    pub async fn enqueue_non_flow_mgmt(
+        &self,
+        zdp_packet_type: zdp::ZdpPacketType,
+        packet: Packet<'pktbuf>,
+    ) {
+        self.sender
+            .send(OutboundProcessorMessage::NonFlowMgmt(
+                zdp_packet_type,
+                packet,
+            ))
+            .await
+            .unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn enqueue_per_flow_mgmt(
+        &self,
+        zdp_packet_type: zdp::ZdpPacketType,
+        stream_id: u32,
+        packet: Packet<'pktbuf>,
+    ) {
+        self.sender
+            .send(OutboundProcessorMessage::PerFlowMgmt(
+                zdp_packet_type,
+                stream_id,
+                packet,
+            ))
+            .await
+            .unwrap();
+    }
 }
 
 // OutboundSend is responsible for sending encapsulated agent packets to the dock.
@@ -145,6 +182,7 @@ pub struct OutboundSend<'pktbuf> {
 impl<'pktbuf> OutboundSend<'pktbuf> {
     // Only one outbound socket, only one queue for now.  (To be determined
     // whether `sendmmsg` via multiple threads provides any needed performance gain.)
+    #[allow(dead_code)]
     pub(crate) fn new(sender: mpsc::Sender<OutboundSendMessage<'pktbuf>>) -> Self {
         Self { sender }
     }

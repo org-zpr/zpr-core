@@ -1,3 +1,4 @@
+use crate::ext::std::mem::{drop_guard, DropGuard};
 use std::sync::Mutex;
 use tokio::sync::Notify;
 
@@ -23,23 +24,30 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
         }
     }
 
+    /// Blocks until a single buffer can be returned.
     pub async fn get_buffer(&self) -> &'buf mut [u8; BUFSIZ] {
         loop {
-            {
-                let mut bufs = self.buffers.lock().unwrap();
-                match bufs.pop() {
-                    Some(buf) => return buf,
-                    None => (),
-                }
+            let mut bufs = self.buffers.lock().unwrap();
+            match bufs.pop() {
+                Some(buf) => break buf,
+                None => (),
             }
+            std::mem::drop(bufs);
 
             self.notify.notified().await;
         }
     }
 
-    // Blocks until at least 1 buffer can be returned.
-    // Returns up to n buffers.
-    // Exception: if n is 0, returns immediately with no buffers.
+    /// Same as `get_buffer()`, but returns the buffer in a `DropGuard`
+    /// which will automatically return the buffer to the pool if it goes
+    /// out of scope.
+    pub async fn get_buffer_guarded(&'buf self) -> impl DropGuard<&'buf mut [u8; BUFSIZ]> {
+        drop_guard(self.get_buffer().await, |buf| self.put_buffer(buf))
+    }
+
+    /// Blocks until at least 1 buffer can be returned.
+    /// Returns up to n buffers.
+    /// Exception: if n is 0, returns immediately with no buffers.
     pub async fn get_buffers(&self, n: usize, bufs_out: &mut Vec<&'buf mut [u8; BUFSIZ]>) -> usize {
         if n == 0 {
             return 0;
@@ -55,8 +63,8 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
         }
     }
 
-    // Does not block.  May return 0 if no buffers could be returned.
-    // Returns up to n buffers.
+    /// Does not block.  May return 0 if no buffers could be returned.
+    /// Returns up to n buffers.
     pub fn try_get_buffers(&self, n: usize, bufs_out: &mut Vec<&'buf mut [u8; BUFSIZ]>) -> usize {
         if n == 0 {
             return 0;
@@ -74,6 +82,7 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
         to_get
     }
 
+    /// Returns a single buffer.  Does not block.
     pub fn put_buffer(&self, buf: &'buf mut [u8; BUFSIZ]) {
         let mut bufs = self.buffers.lock().unwrap();
         let was_empty = bufs.is_empty();
@@ -84,6 +93,7 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
         }
     }
 
+    /// Returns all buffers in the given collection.  Does not block.
     pub fn put_buffers<I>(&self, bufs_in: I)
     where
         I: IntoIterator<Item = &'buf mut [u8; BUFSIZ]>,

@@ -55,7 +55,7 @@ check-go:
 # Since there is a makefile for the whole visa service it is much 
 # simpler to do this here instead of in our `cli` subproject.
 check-rs:
-	cd thrift && md5sum -c ../cli/src/vsapi/md5sums.txt
+	cd thrift && md5sum -c ../cli/src/vsapi/vs.thrift.sum
 
 
 
