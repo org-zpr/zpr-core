@@ -97,7 +97,10 @@ pub mod mem {
         fn drop_guard_drop_test() {
             let dropped = RefCell::new(false);
             {
-                let _guard = drop_guard(123, |x| { assert_eq!(x, 123); *dropped.borrow_mut() = true });
+                let _guard = drop_guard(123, |x| {
+                    assert_eq!(x, 123);
+                    *dropped.borrow_mut() = true
+                });
                 assert!(!*dropped.borrow());
             }
             assert!(dropped.take());
@@ -125,7 +128,10 @@ pub mod mem {
         fn drop_guard_map_test() {
             let dropped = RefCell::new(false);
             {
-                let guard_outer = drop_guard(123, |x| { assert_eq!(x, 123); *dropped.borrow_mut() = true });
+                let guard_outer = drop_guard(123, |x| {
+                    assert_eq!(x, 123);
+                    *dropped.borrow_mut() = true
+                });
                 let guard_inner = guard_outer.map(|x| x + 333, |x| x - 333);
                 assert!(!*dropped.borrow());
                 assert_eq!(*guard_inner, 456);
