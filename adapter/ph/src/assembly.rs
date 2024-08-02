@@ -15,9 +15,10 @@ use crate::zdp::*;
 use bytes::{Buf, BufMut};
 use enum_map::EnumMap;
 use std::result::Result;
+use std::sync::Mutex;
 use tokio::sync::{
     oneshot::{channel, Sender},
-    Mutex, Semaphore, SemaphorePermit,
+    Semaphore, SemaphorePermit,
 };
 use zerocopy::FromBytes;
 
