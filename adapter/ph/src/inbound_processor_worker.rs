@@ -2,6 +2,7 @@ use crate::assembly::Assembly;
 use crate::classifier::classify;
 use crate::counters_enum::CounterType;
 use crate::ext::zerocopy::*;
+use crate::ext::std::mem::drop_guard;
 use crate::flow_control;
 use crate::options::PhMode;
 use crate::packet::Packet;
@@ -97,7 +98,7 @@ async fn handle_packet<'pktbuf>(
                 }
 
                 // send out decapsulated packet
-                asm.inbound_send.enqueue_packet(pkt).await;
+                asm.inbound_send.enqueue_packet(drop_guard(pkt, |p| asm.buffer_stack.put_buffer(p.destroy()))).await;
             }
 
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),

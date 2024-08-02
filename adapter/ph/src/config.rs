@@ -1,7 +1,7 @@
-// Static system configuration.
+//! Static system configuration.
 
-// Size of a packet buffer.
+/// Size of a packet buffer.
 pub const PACKET_BUFFER_SIZE: usize = 4096 * 3;
 
-// Size of headroom necessary for Report messages
+/// Size of headroom necessary for most messages.
 pub const DEFAULT_MESSAGE_HEADROOM: usize = 256;

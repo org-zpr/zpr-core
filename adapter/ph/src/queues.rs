@@ -1,7 +1,11 @@
+use crate::ext::std::mem::DropGuard;
+use crate::ext::tokio_tun::tun_pi;
+use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
 use crate::zdp;
 use enum_map::Enum;
+use std::io::IoSlice;
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
@@ -53,45 +57,40 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
 
 // InboundSend is responsible for emitting decapsulated agent packets on the
 // host's TUN interface.
-pub enum InboundSendMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>),
-    TestPacket(TestPacket),
+pub struct InboundSend<'a> {
+    tuns: Box<[&'a tokio_tun::Tun]>,
 }
 
-pub struct InboundSend<'pktbuf> {
-    senders: Box<[mpsc::Sender<InboundSendMessage<'pktbuf>>]>,
-}
-
-impl<'pktbuf> InboundSend<'pktbuf> {
+impl<'a> InboundSend<'a> {
     // We necessarily have multiple queues, corresponding to the multiple
     // FDs of a multiqueue-enabled TUN interface.
-    #[allow(dead_code)]
-    pub(crate) fn new(senders: Box<[mpsc::Sender<InboundSendMessage<'pktbuf>>]>) -> Self {
-        Self { senders }
+    pub fn new(tuns: impl IntoIterator<Item = &'a tokio_tun::Tun>) -> Self {
+        Self { tuns: tuns.into_iter().collect() }
     }
 
-    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
-        self.senders[packet.flowhash() as usize % self.senders.len()]
-            .send(InboundSendMessage::Packet(packet))
+    // TODO: batch enqueue
+    pub async fn enqueue_packet(&self, mut packet: impl DropGuard<Packet<'_>>) {
+        let tun = self.tuns[packet.flowhash() as usize % self.tuns.len()];
+
+        let proto = net_defs::ip_ethertype(net_defs::ip_version(packet.body()));
+        let mut hdr = packet.alloc_zeroed_headroom(tun_pi::PI_SIZE);
+        tun_pi::write_pi(
+            &mut hdr,
+            tun_pi::TunPi {
+                strip: false,
+                proto,
+            },
+        );
+
+        tun.send_vectored(&[IoSlice::new(packet.body())])
             .await
-            .unwrap();
-    }
-
-    pub async fn enqueue_test_packet(&self, queue: usize) -> Result<TestPacketMetrics, RecvError> {
-        let test_tuple = TestPacket::create();
-
-        self.senders[queue]
-            .send(InboundSendMessage::TestPacket(test_tuple.0))
-            .await
-            .unwrap();
-
-        Ok(test_tuple.1.await?)
+            .unwrap();  // TODO: error handling
     }
 
     // gets size of the queue array in order for the user to give a reasonable queue value in
     // enqueue_test_packet
     pub fn fanout(&self) -> usize {
-        self.senders.len()
+        self.tuns.len()
     }
 }
 

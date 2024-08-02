@@ -28,7 +28,6 @@ mod ext;
 mod flow_control;
 mod inbound_processor_worker;
 mod inbound_recv_worker;
-mod inbound_send_worker;
 mod net_defs;
 mod options;
 mod outbound_processor_worker;
@@ -100,7 +99,6 @@ fn main() -> ExitCode {
     // throughput with service time.
     let inbound_recv_batch_size = 8;
     let inbound_processor_batch_size = 16;
-    let inbound_send_batch_size = 4;
     let outbound_recv_batch_size = 4;
     let outbound_processor_batch_size = 16;
     let outbound_send_queue_size = 16;
@@ -113,16 +111,6 @@ fn main() -> ExitCode {
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
     let (ip_inq, ip_outq) = mpsc::channel(inbound_processor_batch_size * 2);
     let inbound_processor = InboundProcessor::new(ip_inq);
-
-    let mut is_inqs = Vec::new();
-    let mut is_outqs = Vec::new();
-    for _ in 0..tun_queue_count {
-        let (is_inq, is_outq) = mpsc::channel(inbound_send_batch_size * 2);
-        // FIXME: maybe a way to do this with unzip but Rust couldn't infer types
-        is_inqs.push(is_inq);
-        is_outqs.push(is_outq);
-    }
-    let inbound_send = InboundSend::new(is_inqs.into_boxed_slice());
 
     let (op_inq, op_outq) = mpsc::channel(outbound_processor_batch_size * 2);
     let outbound_processor = OutboundProcessor::new(op_inq);
@@ -171,6 +159,8 @@ fn main() -> ExitCode {
                 .try_build_mq(tun_queue_count)
                 .expect("unable to open TUN device")
                 .leak();
+
+            let inbound_send = InboundSend::new(tun_devs.iter());
 
             let asm = Box::leak(Box::new(Assembly {
                 buffer_stack,
@@ -230,17 +220,6 @@ fn main() -> ExitCode {
                 &*asm,
                 ip_outq,
             ));
-
-            for (tun_dev, is_outq) in tun_devs.iter().zip(is_outqs) {
-                js.spawn(inbound_send_worker::launch(
-                    &inbound_send_worker::Config {
-                        batch_size: inbound_send_batch_size,
-                    },
-                    &*asm,
-                    is_outq,
-                    tun_dev,
-                ));
-            }
 
             for tun_dev in tun_devs.iter() {
                 js.spawn(outbound_recv_worker::launch(
