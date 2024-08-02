@@ -87,6 +87,52 @@ pub mod mem {
     pub fn drop_guard<T, F: FnOnce(T)>(item: T, destructor: F) -> impl DropGuard<T> {
         DropGuardImpl(ManuallyDrop::new(DropGuardImplInner { item, destructor }))
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::cell::RefCell;
+
+        #[test]
+        fn drop_guard_drop_test() {
+            let dropped = RefCell::new(false);
+            {
+                let _guard = drop_guard(123, |x| { assert_eq!(x, 123); *dropped.borrow_mut() = true });
+                assert!(!*dropped.borrow());
+            }
+            assert!(dropped.take());
+        }
+
+        #[test]
+        fn drop_guard_into_inner_test() {
+            let mut dropped = false;
+            {
+                let guard = drop_guard(123, |_| dropped = true);
+                assert_eq!(guard.into_inner(), 123);
+            }
+            assert!(!dropped);
+        }
+
+        #[test]
+        fn drop_guard_deref_test() {
+            let mut guard = drop_guard(123, |_| ());
+            assert_eq!(*guard, 123);
+            *guard = 456;
+            assert_eq!(*guard, 456);
+        }
+
+        #[test]
+        fn drop_guard_map_test() {
+            let dropped = RefCell::new(false);
+            {
+                let guard_outer = drop_guard(123, |x| { assert_eq!(x, 123); *dropped.borrow_mut() = true });
+                let guard_inner = guard_outer.map(|x| x + 333, |x| x - 333);
+                assert!(!*dropped.borrow());
+                assert_eq!(*guard_inner, 456);
+            }
+            assert!(dropped.take());
+        }
+    }
 }
 
 pub mod vec {
