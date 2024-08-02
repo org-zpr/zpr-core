@@ -8,6 +8,7 @@ use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
 use crate::InboundProcessorMessage;
 // use crate::buffer_stack::BufferStack;
+use crate::config;
 use bytes::Buf;
 use std::future::Future;
 use std::time::SystemTime;
@@ -136,6 +137,15 @@ async fn handle_packet<'pktbuf>(
             ZdpPacketType::Discard => {
                 // TODO print to debug log, when implemented
                 eprintln!("Discard message recieved");
+            }
+            ZdpPacketType::HelloRequest => {
+                let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+                let hdr = send_pkt.alloc_zeroed_header::<ZdpHelloResponseHeader>();
+                hdr.status = 0;
+                asm.outbound_processor
+                    .enqueue_non_flow_mgmt(ZdpPacketType::HelloResponse, send_pkt)
+                    .await;
+                eprintln!("Recieved HelloRequest");
             }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }

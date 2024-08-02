@@ -224,4 +224,28 @@ impl<'pktbuf> Assembly<'pktbuf> {
             .enqueue_non_flow_mgmt(ZdpPacketType::Discard, pkt)
             .await;
     }
+
+    pub async fn send_hello_req(&self) {
+        let buf = self.buffer_stack.get_buffer().await;
+        let hello_req = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+        let response = self
+            .send_sync_non_flow_req(
+                ZdpPacketType::HelloRequest,
+                ZdpPacketType::HelloResponse,
+                hello_req,
+            )
+            .await;
+        match response {
+            Ok(hello_res) => {
+                let hdr = ZdpHelloResponseHeader::ref_from_prefix(hello_res.body())
+                    .expect("too-short inbound packet");
+                let status = hdr.status;
+                println!("HelloResponse received, status: {}", status);
+            }
+            Err(err) => match err {
+                SyncReqError::LinkClosed => eprintln!("LinkClosed error with HelloRequest"),
+                SyncReqError::ProtocolError => eprintln!("ProtocolError error with HelloRequest"),
+            },
+        }
+    }
 }

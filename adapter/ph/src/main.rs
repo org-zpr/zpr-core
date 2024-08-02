@@ -201,6 +201,7 @@ fn main() -> ExitCode {
 
             asm.send_report("Reporting for Duty!").await;
             asm.send_discard().await;
+            asm.send_hello_req().await;
 
             let mut js = JoinSet::new();
 
