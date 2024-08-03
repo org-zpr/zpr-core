@@ -8,6 +8,7 @@ use std::fmt;
 pub enum CounterType {
     InPacksRec,
     InPacksDrop,
+    InPacksSent,
     OutPacksRec,
     OutPacksDrop,
     OutPacksSent,
@@ -25,6 +26,7 @@ pub fn name_counters(count_num: CounterType) -> String {
     match count_num {
         CounterType::InPacksRec => s = "Inbound Packets Recieved",
         CounterType::InPacksDrop => s = "Inbound Packets Dropped",
+        CounterType::InPacksSent => s = "Inbound Packets Sent",
         CounterType::OutPacksRec => s = "Outbound Packets Recieved",
         CounterType::OutPacksDrop => s = "Outbound Packets Dropped",
         CounterType::OutPacksSent => s = "Outbound Packets Sent",

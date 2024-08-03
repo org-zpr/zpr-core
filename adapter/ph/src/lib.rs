@@ -18,7 +18,6 @@ pub mod net_defs;
 pub mod options;
 pub mod outbound_processor_worker;
 pub mod outbound_recv_worker;
-pub mod outbound_send_worker;
 pub mod packet;
 pub mod queues;
 pub mod rpc_worker;
