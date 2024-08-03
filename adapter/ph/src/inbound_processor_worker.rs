@@ -1,8 +1,8 @@
 use crate::assembly::Assembly;
 use crate::classifier::classify;
 use crate::counters_enum::CounterType;
-use crate::ext::zerocopy::*;
 use crate::ext::std::mem::drop_guard;
+use crate::ext::zerocopy::*;
 use crate::flow_control;
 use crate::options::PhMode;
 use crate::packet::Packet;
@@ -98,7 +98,11 @@ async fn handle_packet<'pktbuf>(
                 }
 
                 // send out decapsulated packet
-                asm.inbound_send.enqueue_packet(drop_guard(pkt, |p| asm.buffer_stack.put_buffer(p.destroy()))).await;
+                asm.inbound_send
+                    .enqueue_packet(drop_guard(pkt, |p| {
+                        asm.buffer_stack.put_buffer(p.destroy())
+                    }))
+                    .await;
                 asm.counters[CounterType::InPacksSent].increment();
             }
 

@@ -69,7 +69,9 @@ impl<'a> InboundSend<'a> {
     // We necessarily have multiple queues, corresponding to the multiple
     // FDs of a multiqueue-enabled TUN interface.
     pub fn new(tuns: impl IntoIterator<Item = &'a tokio_tun::Tun>) -> Self {
-        Self { tuns: tuns.into_iter().collect() }
+        Self {
+            tuns: tuns.into_iter().collect(),
+        }
     }
 
     // TODO: batch enqueue
@@ -88,7 +90,7 @@ impl<'a> InboundSend<'a> {
 
         tun.send_vectored(&[IoSlice::new(packet.body())])
             .await
-            .unwrap();  // any error here is unrecoverable (TUN device is broken)
+            .unwrap(); // any error here is unrecoverable (TUN device is broken)
     }
 
     pub fn fanout(&self) -> usize {
@@ -172,16 +174,21 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
 
 /// OutboundSend is responsible for sending encapsulated agent packets to the dock.
 pub struct OutboundSend<'a> {
-    sockets: Box<[&'a UdpSocket]>
+    sockets: Box<[&'a UdpSocket]>,
 }
 
 impl<'a> OutboundSend<'a> {
     pub fn new(sockets: impl IntoIterator<Item = &'a UdpSocket>) -> Self {
-        Self { sockets: sockets.into_iter().collect() }
+        Self {
+            sockets: sockets.into_iter().collect(),
+        }
     }
 
     // TODO: batch enqueue
-    pub async fn enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(&self, packet: P) -> Result<(), P> {
+    pub async fn enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
+        &self,
+        packet: P,
+    ) -> Result<(), P> {
         let socket = self.sockets[packet.flowhash() as usize % self.sockets.len()];
 
         match socket.send(packet.body()).await {
@@ -196,7 +203,7 @@ impl<'a> OutboundSend<'a> {
                     // most other network errors are temporary; return packet to caller
                     // TODO: it would be nice to report to the user _why_ packets aren't moving;
                     // this depends on <https://github.com/rust-lang/rust/issues/86442> though
-                    _ => Err(packet)
+                    _ => Err(packet),
                 }
             }
         }

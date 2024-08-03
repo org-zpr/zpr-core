@@ -114,7 +114,13 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
     pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
 
     // forward encapsulated packet on
-    match asm.outbound_send.enqueue_packet(drop_guard(pkt, |p| asm.buffer_stack.put_buffer(p.destroy()))).await {
+    match asm
+        .outbound_send
+        .enqueue_packet(drop_guard(pkt, |p| {
+            asm.buffer_stack.put_buffer(p.destroy())
+        }))
+        .await
+    {
         Ok(()) => asm.counters[CounterType::OutPacksSent].increment(),
         Err(_) => asm.counters[CounterType::OutPacksErr].increment(),
     }
