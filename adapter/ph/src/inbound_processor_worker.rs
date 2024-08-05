@@ -76,10 +76,10 @@ async fn handle_packet<'pktbuf>(
     if packet_type.is_response() {
         let channel = asm.sync_req_state.get_sender();
         match channel {
-            Some(channel) => match channel.send(pkt) {
+            Some(channel) => match channel.send((pkt, packet_type)) {
                 Ok(()) => (),
-                Err(pkt) => {
-                    let ret_buf = pkt.destroy();
+                Err(ret_sender) => {
+                    let ret_buf = ret_sender.0.destroy();
                     asm.buffer_stack.put_buffer(ret_buf);
                     asm.counters[CounterType::UnexpectedMgmtResponse].increment();
                 }
