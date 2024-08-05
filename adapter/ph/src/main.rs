@@ -24,7 +24,9 @@ mod compress;
 mod config;
 mod counter;
 mod counters_enum;
+mod defs;
 mod ext;
+mod fastpath;
 mod flow_control;
 mod inbound_processor_worker;
 mod inbound_recv_worker;
@@ -38,6 +40,7 @@ mod rpc_worker;
 mod test_packet;
 mod tun_ctl;
 mod zdp;
+mod zdp_ll;
 
 use assembly::{Assembly, SyncReqState};
 use buffer_stack::BufferStack;
@@ -197,9 +200,6 @@ fn main() -> ExitCode {
                 .unwrap();
             let unix_socket = Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
 
-            asm.send_report("Reporting for Duty!").await;
-            asm.send_discard().await;
-
             let mut js = JoinSet::new();
 
             // Launches RPC worker program
@@ -268,6 +268,10 @@ fn main() -> ExitCode {
                 &*asm,
                 &*socket,
             ));
+
+            asm.send_report("Reporting for Duty!").await;
+            asm.send_discard().await;
+            asm.send_hello_req().await;
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();

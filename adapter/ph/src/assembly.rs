@@ -67,7 +67,7 @@ pub struct SyncReqState<'pktbuf> {
 }
 
 struct SyncReqInnerState<'pktbuf> {
-    reply_channel: Option<Sender<Packet<'pktbuf>>>,
+    reply_channel: Option<Sender<(Packet<'pktbuf>, ZdpPacketType)>>,
 }
 
 impl<'pktbuf> SyncReqState<'pktbuf> {
@@ -80,6 +80,9 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
             semaphore: Semaphore::new(1),
         }
     }
+    pub fn get_sender(&self) -> Option<Sender<(Packet<'pktbuf>, ZdpPacketType)>> {
+        self.inner_req.lock().unwrap().reply_channel.take()
+    }
 }
 
 #[allow(dead_code)]
@@ -89,29 +92,15 @@ pub enum SyncReqError {
 }
 
 impl<'pktbuf> Assembly<'pktbuf> {
-    pub fn get_sender(&self) -> Option<Sender<Packet<'pktbuf>>> {
-        match self
-            .sync_req_state
-            .inner_req
-            .lock()
-            .unwrap()
-            .reply_channel
-            .take()
-        {
-            Some(channel) => Some(channel),
-            None => None,
-        }
-    }
-
     async fn send_sync_req_helper(
         &self,
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
         stream_id: Option<u32>,
         packet: Packet<'pktbuf>,
-    ) -> Result<(Option<u32>, Packet<'pktbuf>), SyncReqError> {
+    ) -> Result<Packet<'pktbuf>, SyncReqError> {
         let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit
-        let (sender, receiver) = channel::<Packet<'pktbuf>>();
+        let (sender, receiver) = channel::<(Packet<'pktbuf>, ZdpPacketType)>();
         {
             let mut inner_req = self.sync_req_state.inner_req.lock().unwrap();
             inner_req.reply_channel = Some(sender);
@@ -131,31 +120,17 @@ impl<'pktbuf> Assembly<'pktbuf> {
             }
         }
 
+        // Check received packet type, remove base header
         match receiver.await {
-            Ok(mut rec_pkt) => {
+            Ok(rec_tuple) => {
                 drop(permit);
-                let rec_hdr = ZdpBaseHeader::ref_from_prefix(rec_pkt.body())
-                    .expect("too-short inbound packet");
-                if zdp_response_type != rec_hdr.packet_type {
-                    let ret_buf = rec_pkt.destroy();
+                if zdp_response_type != rec_tuple.1 {
+                    let ret_buf = rec_tuple.0.destroy();
                     self.buffer_stack.put_buffer(ret_buf);
                     self.counters[CounterType::BadMgmtResponse].increment();
                     return Err(SyncReqError::ProtocolError);
                 }
-                let rec_stream_id: Option<u32>;
-                match stream_id {
-                    Some(_) => {
-                        let per_flow_hdr = ZdpPerFlowHeader::ref_from_prefix(rec_pkt.body())
-                            .expect("too-short inbound packet");
-                        rec_stream_id = Some(per_flow_hdr.stream_id);
-                        rec_pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
-                    }
-                    None => {
-                        rec_pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
-                        rec_stream_id = None;
-                    }
-                }
-                return Ok((rec_stream_id, rec_pkt));
+                Ok(rec_tuple.0)
             }
             Err(_) => return Err(SyncReqError::LinkClosed),
         }
@@ -168,16 +143,8 @@ impl<'pktbuf> Assembly<'pktbuf> {
         zdp_response_type: ZdpPacketType,
         packet: Packet<'pktbuf>,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
-        match self
-            .send_sync_req_helper(zdp_request_type, zdp_response_type, None, packet)
+        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, packet)
             .await
-        {
-            Err(err) => match err {
-                SyncReqError::LinkClosed => Err(SyncReqError::LinkClosed),
-                SyncReqError::ProtocolError => Err(SyncReqError::ProtocolError),
-            },
-            Ok(tuple) => Ok(tuple.1),
-        }
     }
 
     #[allow(dead_code)]
@@ -192,11 +159,14 @@ impl<'pktbuf> Assembly<'pktbuf> {
             .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), packet)
             .await
         {
-            Err(err) => match err {
-                SyncReqError::LinkClosed => Err(SyncReqError::LinkClosed),
-                SyncReqError::ProtocolError => Err(SyncReqError::ProtocolError),
-            },
-            Ok(tuple) => Ok((tuple.0.unwrap(), tuple.1)),
+            Ok(mut pkt) => {
+                let per_flow_hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body())
+                    .expect("too-short inbound packet");
+                let stream_id = per_flow_hdr.stream_id;
+                pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
+                Ok((stream_id.into(), pkt))
+            }
+            Err(err) => Err(err),
         }
     }
 
@@ -209,7 +179,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
         let buf = self.buffer_stack.get_buffer().await;
         let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
         let hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
-        hdr.report_data_length = to_send.len() as u16;
+        hdr.report_data_length = (to_send.len() as u16).into();
         pkt.put(to_send.as_bytes());
         self.outbound_processor
             .enqueue_non_flow_mgmt(ZdpPacketType::Report, pkt)
@@ -222,5 +192,29 @@ impl<'pktbuf> Assembly<'pktbuf> {
         self.outbound_processor
             .enqueue_non_flow_mgmt(ZdpPacketType::Discard, pkt)
             .await;
+    }
+
+    pub async fn send_hello_req(&self) {
+        let buf = self.buffer_stack.get_buffer().await;
+        let hello_req = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+        let response = self
+            .send_sync_non_flow_req(
+                ZdpPacketType::HelloRequest,
+                ZdpPacketType::HelloResponse,
+                hello_req,
+            )
+            .await;
+        match response {
+            Ok(hello_res) => {
+                let hdr = ZdpHelloResponseHeader::ref_from_prefix(hello_res.body())
+                    .expect("too-short inbound packet");
+                let status = hdr.status;
+                println!("Received HelloResponse, status: {}", status);
+            }
+            Err(err) => match err {
+                SyncReqError::LinkClosed => eprintln!("LinkClosed error with HelloRequest"),
+                SyncReqError::ProtocolError => eprintln!("ProtocolError error with HelloRequest"),
+            },
+        }
     }
 }

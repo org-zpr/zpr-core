@@ -1,14 +1,12 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
+use crate::defs::Direction;
 use crate::ext::std::mem::drop_guard;
-use crate::flow_control;
+use crate::fastpath::*;
 use crate::packet::Packet;
 use crate::queues::OutboundProcessorMessage;
-use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
-use bytes::Buf;
 use core::future::Future;
-use std::time::SystemTime;
 use tokio::sync::mpsc;
 
 #[derive(Copy, Clone)]
@@ -30,7 +28,7 @@ async fn worker<'pktbuf>(
                     // allocate and fill in the headers
                     let stream_id = pkt.metadata().flow_id;
                     let per_flow_hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
-                    per_flow_hdr.stream_id = stream_id;
+                    per_flow_hdr.stream_id = stream_id.into();
 
                     let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     base_hdr.packet_type = ZdpPacketType::TransitPacket;
@@ -45,7 +43,7 @@ async fn worker<'pktbuf>(
                 }
                 OutboundProcessorMessage::PerFlowMgmt(pack_type, stream_id, mut pkt) => {
                     let per_flow_hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
-                    per_flow_hdr.stream_id = stream_id;
+                    per_flow_hdr.stream_id = stream_id.into();
 
                     let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     base_hdr.packet_type = pack_type;
@@ -75,43 +73,7 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
 
     let _: &u8 = pkt.alloc_zeroed_header(); // account for fact we don't yet have ZPI
 
-    // Clones packet into capture queue after adding direction to beginning of packet
-    let dir: &mut u8 = pkt.alloc_zeroed_header();
-    *dir = 1;
-    let caplen = asm.flow_control.check_packet(pkt.body()).await;
-    //println!("caplen outbound {}", caplen);
-    if caplen > 0 {
-        let mut bufs = Vec::new();
-        let _ = asm.buffer_stack.try_get_buffers(1, &mut bufs);
-        // Ensures there's at least one buffer
-        match bufs.pop() {
-            Some(buf) => {
-                let pkt_clone: Packet = pkt.clone_into(buf);
-                // Checks to see if the packet enqueue was successful
-                match asm.capture_queue.try_enqueue_packet(
-                    pkt_clone,
-                    SystemTime::now(),
-                    Direction::Outbound,
-                    caplen, // Not currently used
-                ) {
-                    Ok(()) => {
-                        asm.counters[CounterType::OutCapPacksWrite].increment();
-                    }
-                    Err(TryEnqueueError::Full(ret_packet)) => {
-                        let ret_buf = ret_packet.destroy();
-                        asm.buffer_stack.put_buffer(ret_buf);
-                        asm.counters[CounterType::OutCapPacksDrop].increment();
-                    }
-                };
-            }
-            None => {
-                asm.counters[CounterType::OutCapPacksDrop].increment();
-            }
-        }
-    }
-
-    // remove direction indicator from beginning of packet
-    pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
+    maybe_capture(asm, Direction::Outbound, [&mut pkt]); // FIXME: batch
 
     // forward encapsulated packet on
     match asm

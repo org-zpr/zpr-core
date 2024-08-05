@@ -14,7 +14,6 @@ use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
 use crate::zdp;
-use enum_map::Enum;
 use std::io::{ErrorKind, IoSlice};
 use std::result::Result;
 use std::time::SystemTime;
@@ -219,14 +218,7 @@ impl<'a> OutboundSend<'a> {
 pub struct CapPacket<'pktbuf> {
     pub packet: Packet<'pktbuf>,
     pub timestamp: SystemTime,
-    pub direction: Direction,
     pub caplen: u32,
-}
-
-#[derive(Enum)]
-pub enum Direction {
-    Inbound,
-    Outbound,
 }
 
 pub struct Capture<'pktbuf> {
@@ -248,13 +240,11 @@ impl<'pktbuf> Capture<'pktbuf> {
         &self,
         packet: Packet<'pktbuf>,
         timestamp: SystemTime,
-        direction: Direction,
         caplen: u32,
     ) {
         let cap_pack: CapPacket = CapPacket {
             packet,
             timestamp,
-            direction,
             caplen,
         };
         self.sender.send(cap_pack).await.unwrap();
@@ -265,13 +255,11 @@ impl<'pktbuf> Capture<'pktbuf> {
         &self,
         packet: Packet<'pktbuf>,
         timestamp: SystemTime,
-        direction: Direction,
         caplen: u32,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
         let cap_pack: CapPacket = CapPacket {
             packet,
             timestamp,
-            direction,
             caplen,
         };
         match self.sender.try_send(cap_pack) {
