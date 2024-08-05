@@ -1,6 +1,6 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
-use crate::OutboundSendMessage;
+use crate::queues::OutboundSendMessage;
 use std::future::Future;
 use std::io::ErrorKind;
 use tokio::net::UdpSocket;

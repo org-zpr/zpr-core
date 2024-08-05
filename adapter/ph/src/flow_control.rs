@@ -13,6 +13,7 @@ struct InnerFlow {
 }
 
 impl FlowControl {
+    #[allow(dead_code)]
     pub(crate) fn new() -> Self {
         Self {
             inner_control: InnerFlow { flow: None }.into(),

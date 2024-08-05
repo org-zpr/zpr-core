@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 set -euo pipefail
 
-PH_BIN=$(realpath "$(dirname $0)/../target/debug/ph-test")
+PH_BIN=$(realpath "$(dirname $0)/../target/debug/ph")
 
 ZPR_USER=$USER
 
