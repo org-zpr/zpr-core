@@ -29,7 +29,7 @@ async fn worker<'pktbuf>(
                     // allocate and fill in the headers
                     let stream_id = pkt.metadata().flow_id;
                     let per_flow_hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
-                    per_flow_hdr.stream_id = stream_id;
+                    per_flow_hdr.stream_id = stream_id.into();
 
                     let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     base_hdr.packet_type = ZdpPacketType::TransitPacket;
