@@ -193,19 +193,23 @@ impl KeyManager<'_> {
     //
     // We copy the payload into our own buffer for processing. Caller should free buffer.
     pub async fn handle_km_message(&self, message: &[u8]) -> io::Result<()> {
-        let state = self.shared.state.lock().unwrap();
-        match state.mgmt_tx {
-            Some(ref tx) => {
-                let mut km_buf = BytesMut::with_capacity(message.len());
-                km_buf.put(message);
-                match tx.send(km_buf.into()).await {
-                    Ok(_) => Ok(()),
-                    Err(_) => Err(io::Error::new(io::ErrorKind::Other, "failed to enqueue inbound KM message")),
+        let tx: mpsc::Sender<Bytes>;
+        {
+            let state = self.shared.state.lock().unwrap();
+            match state.mgmt_tx {
+                Some(ref t) => {
+                    tx = t.clone();
+                }
+                None => {
+                    return Err(io::Error::new(io::ErrorKind::Other, "KeyManager not running"));
                 }
             }
-            None => {
-                return Err(io::Error::new(io::ErrorKind::Other, "KeyManager not running"));
-            }
+        }
+        let mut km_buf = BytesMut::with_capacity(message.len());
+        km_buf.put(message);
+        match tx.send(km_buf.into()).await {
+            Ok(_) => Ok(()),
+            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "failed to enqueue inbound KM message")),
         }
     }
 
@@ -415,6 +419,7 @@ pub trait KeyManagerStateMachine : Send + Sync {
 pub struct SillyKeyManager {
     state: KMSMState,
     settings: KMSettings,
+    hello_t: time::Instant,
 }
 
 impl SillyKeyManager {
@@ -426,7 +431,8 @@ impl SillyKeyManager {
                 padlen: 2, // we need 2 extra bytes
                 alignment: 0,
                 tick_interval: Duration::from_millis(1000),
-            }
+            },
+            hello_t: time::Instant::now(),
         }
     }
 }
@@ -484,6 +490,7 @@ impl KeyManagerStateMachine for SillyKeyManager {
     fn reset(&mut self, _initiate: bool) -> Option<Bytes> {
         let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
         self.state = KMSMState::Configuring;
+        self.hello_t = time::Instant::now();
         Some(handshake)
     }
 
@@ -495,6 +502,14 @@ impl KeyManagerStateMachine for SillyKeyManager {
     }
 
     fn tick(&mut self) -> Option<Bytes> {
+        if self.state == KMSMState::Configuring {
+            if self.hello_t.elapsed() > Duration::from_secs(5) {
+                // too long, send another hello.
+                let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
+                self.hello_t = time::Instant::now();
+                return Some(handshake);
+            }
+        }
         None
     }
 

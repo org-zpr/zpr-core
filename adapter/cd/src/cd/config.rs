@@ -14,6 +14,7 @@ pub struct Config {
     pub socket_path: PathBuf,
 }
 
+// "Configuration" is the CD configuration file.
 #[derive(Debug, Clone, Deserialize)]
 struct Configuration {
     profile: Profile,

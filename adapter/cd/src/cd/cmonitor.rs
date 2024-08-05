@@ -160,10 +160,12 @@ impl CMonitor {
         let _ = zpr.set_status(&configuration, ConfigState::Connecting);
 
         // placholder code
-        let cli = client::ZDPClient::new(&addr_port);
+
         let ctok = CancellationToken::new();
         let passed_ctok = ctok.clone();
+        let passed_addr_port = addr_port.clone();
         let handle: JoinHandle<io::Result<()>> = tokio::spawn(async move {
+            let cli = client::ZDPClient::new(&passed_addr_port);            
             cli.run(passed_ctok).await // blocking, long running
         });
         // well hopefully that launched!
