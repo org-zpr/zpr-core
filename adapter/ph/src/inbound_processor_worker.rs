@@ -30,7 +30,7 @@ async fn worker<'pktbuf>(
         for msg in msgs.drain(..) {
             match msg {
                 InboundProcessorMessage::Packet(mut pkt) => {
-                    maybe_capture(asm, Direction::Inbound, [&mut pkt]);  // FIXME: batch
+                    maybe_capture(asm, Direction::Inbound, [&mut pkt]); // FIXME: batch
                     handle_packet(config, pkt, asm).await;
                 }
                 InboundProcessorMessage::TestPacket(pkt) => {

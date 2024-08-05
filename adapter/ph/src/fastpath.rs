@@ -16,7 +16,11 @@ use std::time::SystemTime;
 /// The packet must be a complete ZDP message.
 /// Despite the &mut borrow, the packet will return materially unchanged.
 /// (It will have a link-layer header temporarily added to it.)
-pub fn maybe_capture<'a, 'pktbuf: 'a>(asm: &Assembly<'pktbuf>, dir: Direction, pkts: impl IntoIterator<Item = &'a mut Packet<'pktbuf>>) {
+pub fn maybe_capture<'a, 'pktbuf: 'a>(
+    asm: &Assembly<'pktbuf>,
+    dir: Direction,
+    pkts: impl IntoIterator<Item = &'a mut Packet<'pktbuf>>,
+) {
     if !asm.flow_control.program_exists() {
         return;
     }
@@ -43,7 +47,13 @@ pub fn maybe_capture<'a, 'pktbuf: 'a>(asm: &Assembly<'pktbuf>, dir: Direction, p
         // FIXME: ideally, take an RCU reference to the program once on function entry
         let caplen = asm.flow_control.check_packet(pkt.body());
         if caplen > 0 {
-            match bufs.pop().or_else(|| if out_of_bufs { None } else { asm.buffer_stack.try_get_buffer() }) {
+            match bufs.pop().or_else(|| {
+                if out_of_bufs {
+                    None
+                } else {
+                    asm.buffer_stack.try_get_buffer()
+                }
+            }) {
                 Some(buf) => {
                     let pkt_clone: Packet = pkt.clone_into(buf);
                     // remove direction indicator from beginning of packet
@@ -53,7 +63,7 @@ pub fn maybe_capture<'a, 'pktbuf: 'a>(asm: &Assembly<'pktbuf>, dir: Direction, p
                     match asm.capture_queue.try_enqueue_packet(
                         pkt_clone,
                         capture_time,
-                        caplen,  // TODO: pass full packet length instead, and only copy caplen bytes
+                        caplen, // TODO: pass full packet length instead, and only copy caplen bytes
                     ) {
                         Ok(()) => num_captured += 1,
 

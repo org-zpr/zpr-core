@@ -71,7 +71,7 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
 
     let _: &u8 = pkt.alloc_zeroed_header(); // account for fact we don't yet have ZPI
 
-    maybe_capture(asm, Direction::Outbound, [&mut pkt]);  // FIXME: batch
+    maybe_capture(asm, Direction::Outbound, [&mut pkt]); // FIXME: batch
 
     // forward encapsulated packet on
     asm.outbound_send.enqueue_packet(pkt).await;
