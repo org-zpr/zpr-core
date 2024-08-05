@@ -11,11 +11,20 @@ then
 fi 
 
 # Checks warnings in ph before committing
-cargo rustc --manifest-path adapter/ph/Cargo.toml -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
+cargo rustc --manifest-path adapter/ph/Cargo.toml --bin ph -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
 
 if [ $? -ne 0 ]
 then
-	echo "Please clean up warnings in ph before committing"
+	echo "Please clean up warnings in ph binary before committing"
+	exit 1
+fi 
+
+# Checks warnings in ph before committing
+cargo rustc --manifest-path adapter/ph/Cargo.toml --lib -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
+
+if [ $? -ne 0 ]
+then
+	echo "Please clean up warnings in ph lib before committing"
 	exit 1
 fi 
 

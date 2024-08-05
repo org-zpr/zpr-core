@@ -26,3 +26,6 @@ zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "
 
 [features]
 ci = []
+
+[lib] 
+test = false
