@@ -1,17 +1,15 @@
 use crate::assembly::Assembly;
 use crate::classifier::classify;
 use crate::counters_enum::CounterType;
+use crate::defs::Direction;
 use crate::ext::zerocopy::*;
-use crate::flow_control;
+use crate::fastpath::*;
 use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::queues::InboundProcessorMessage;
-use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
-// use crate::buffer_stack::BufferStack;
 use bytes::Buf;
 use std::future::Future;
-use std::time::SystemTime;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
 
@@ -26,15 +24,13 @@ async fn worker<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     queue: &mut mpsc::Receiver<InboundProcessorMessage<'pktbuf>>,
 ) {
-    let mut pkts = Vec::new();
+    let mut msgs = Vec::new();
 
-    while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
-        if asm.flow_control.program_exists().await {
-            clone_cap_packs(asm, &mut pkts, count).await;
-        }
-        for pkt in pkts.drain(..) {
-            match pkt {
-                InboundProcessorMessage::Packet(pkt) => {
+    while let count @ 1.. = queue.recv_many(&mut msgs, config.batch_size).await {
+        for msg in msgs.drain(..) {
+            match msg {
+                InboundProcessorMessage::Packet(mut pkt) => {
+                    maybe_capture(asm, Direction::Inbound, [&mut pkt]);  // FIXME: batch
                     handle_packet(config, pkt, asm).await;
                 }
                 InboundProcessorMessage::TestPacket(pkt) => {
@@ -127,59 +123,4 @@ async fn handle_packet<'pktbuf>(
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     }
-}
-
-async fn clone_cap_packs<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    pkts: &mut Vec<InboundProcessorMessage<'pktbuf>>,
-    count: usize,
-) {
-    let mut bufs = Vec::new();
-    let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
-    let mut num_enqueued: u64 = 0;
-    for pkt in pkts {
-        // Splits between Packets and TestPackets
-        match pkt {
-            InboundProcessorMessage::Packet(pkt) => {
-                let dir: &mut u8 = pkt.alloc_zeroed_header();
-                *dir = 0;
-                let caplen = asm.flow_control.check_packet(pkt.body()).await;
-                //println!("caplen inbound {}", caplen);
-                if caplen > 0 {
-                    // Ensures there's at least one buffer
-                    match bufs.pop() {
-                        Some(buf) => {
-                            let pkt_clone: Packet = pkt.clone_into(buf);
-                            // Checks to see if the packet enqueue was successful
-                            match asm.capture_queue.try_enqueue_packet(
-                                pkt_clone,
-                                SystemTime::now(),
-                                Direction::Inbound,
-                                caplen, // Not currently used
-                            ) {
-                                Ok(()) => {
-                                    asm.counters[CounterType::InCapPacksWrite].increment();
-                                    num_enqueued += 1;
-                                }
-                                Err(TryEnqueueError::Full(ret_packet)) => {
-                                    let ret_buf = ret_packet.destroy();
-                                    asm.buffer_stack.put_buffer(ret_buf);
-                                    pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
-                                    break;
-                                }
-                            };
-                        }
-                        None => {
-                            pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
-                            break;
-                        }
-                    }
-                }
-                pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
-            }
-            InboundProcessorMessage::TestPacket(_) => (),
-        }
-    }
-    asm.buffer_stack.put_buffers(bufs.into_iter());
-    asm.counters[CounterType::InCapPacksDrop].increase_by(count as u64 - num_enqueued)
 }

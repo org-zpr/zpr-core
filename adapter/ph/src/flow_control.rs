@@ -1,11 +1,9 @@
 use cbpf_rs::BpfProgram;
-// use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex;
-
-pub const DIRECTION_HEADER_SIZE: usize = 1;
+use std::sync::RwLock;
 
 pub struct FlowControl {
-    inner_control: Mutex<InnerFlow>,
+    // TODO: replace this with RCU
+    inner_control: RwLock<InnerFlow>,
 }
 
 struct InnerFlow {
@@ -13,31 +11,30 @@ struct InnerFlow {
 }
 
 impl FlowControl {
-    #[allow(dead_code)]
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             inner_control: InnerFlow { flow: None }.into(),
         }
     }
 
-    pub async fn set_program(&self, program: BpfProgram) {
-        self.inner_control.lock().await.flow = Some(program);
+    pub fn set_program(&self, program: BpfProgram) {
+        self.inner_control.write().unwrap().flow = Some(program);
     }
 
-    pub async fn delete_program(&self) {
-        self.inner_control.lock().await.flow = None;
+    pub fn delete_program(&self) {
+        self.inner_control.write().unwrap().flow = None;
     }
 
-    pub async fn check_packet(&self, packet: &[u8]) -> u32 {
-        let inner_flow = &mut self.inner_control.lock().await.flow;
+    pub fn check_packet(&self, packet: &[u8]) -> u32 {
+        let inner_flow = &self.inner_control.read().unwrap().flow;
         match inner_flow {
             Some(program) => program.filter(packet),
             None => 0,
         }
     }
 
-    pub async fn program_exists(&self) -> bool {
-        let inner_flow = &mut self.inner_control.lock().await.flow;
+    pub fn program_exists(&self) -> bool {
+        let inner_flow = &self.inner_control.read().unwrap().flow;
         inner_flow.is_some()
     }
 }

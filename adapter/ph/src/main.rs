@@ -24,7 +24,9 @@ mod compress;
 mod config;
 mod counter;
 mod counters_enum;
+mod defs;
 mod ext;
+mod fastpath;
 mod flow_control;
 mod inbound_processor_worker;
 mod inbound_recv_worker;
@@ -40,6 +42,7 @@ mod rpc_worker;
 mod test_packet;
 mod tun_ctl;
 mod zdp;
+mod zdp_ll;
 
 use assembly::{Assembly, SyncReqState};
 use buffer_stack::BufferStack;

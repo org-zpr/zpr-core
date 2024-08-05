@@ -358,7 +358,7 @@ async fn flush_capture(asm: &Assembly<'_>) -> String {
 
 async fn close_capture(asm: &Assembly<'_>) -> String {
     asm.capture_worker.close_capture_file().await;
-    asm.flow_control.delete_program().await;
+    asm.flow_control.delete_program();
 
     String::from("Capture file closed\n")
 }
@@ -382,7 +382,7 @@ async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String 
 
     let mut return_message = format!("Program: {program} set\n");
     match cbpf_rs::BpfProgram::validate(&insn_vec) {
-        Ok(final_program) => asm.flow_control.set_program(final_program).await,
+        Ok(final_program) => asm.flow_control.set_program(final_program),
         _ => return_message = format!("Invalid program recieved, program not set\n"),
     }
 
@@ -390,7 +390,7 @@ async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String 
 }
 
 async fn delete_capture_program(asm: &Assembly<'_>) -> String {
-    asm.flow_control.delete_program().await;
+    asm.flow_control.delete_program();
 
     String::from("Program deleted\n")
 }
