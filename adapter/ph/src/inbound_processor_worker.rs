@@ -1,5 +1,6 @@
 use crate::assembly::Assembly;
 use crate::classifier::classify;
+use crate::config;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::ext::zerocopy::*;
@@ -8,7 +9,6 @@ use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::queues::InboundProcessorMessage;
 use crate::zdp::*;
-use crate::config;
 use bytes::Buf;
 use std::future::Future;
 use tokio::sync::mpsc;
