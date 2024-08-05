@@ -167,7 +167,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                     .expect("too-short inbound packet");
                 let stream_id = per_flow_hdr.stream_id;
                 pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
-                Ok((stream_id, pkt))
+                Ok((stream_id.into(), pkt))
             }
             Err(err) => Err(err),
         }
