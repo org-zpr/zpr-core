@@ -10,23 +10,32 @@ then
 
 fi 
 
-# # Checks warnings in ph before committing
-# cargo rustc --manifest-path adapter/ph/Cargo.toml -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
+# Checks warnings in ph before committing
+cargo rustc --manifest-path adapter/ph/Cargo.toml --bin ph -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
 
-# if [ $? -ne 0 ]
-# then
-# 	echo "Please clean up warnings in ph before committing"
-# 	exit 1
-# fi 
+if [ $? -ne 0 ]
+then
+	echo "Please clean up warnings in ph binary before committing"
+	exit 1
+fi 
 
-# # Checks warnings with cargo test in ph before committing
-# cargo rustc --tests --manifest-path adapter/ph/Cargo.toml -- -D warnings > /dev/null 2>&1
+# Checks warnings in ph before committing
+cargo rustc --manifest-path adapter/ph/Cargo.toml --lib -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
 
-# if [ $? -ne 0 ] 
-# then 
-# 	echo "Please clean up warnings with tests in ph before committing"
-# 	exit 1
-# fi 
+if [ $? -ne 0 ]
+then
+	echo "Please clean up warnings in ph lib before committing"
+	exit 1
+fi 
+
+# Checks warnings with cargo test in ph before committing
+cargo rustc --tests --manifest-path adapter/ph/Cargo.toml -- -D warnings #> /dev/null 2>&1
+
+if [ $? -ne 0 ] 
+then 
+	echo "Please clean up warnings with tests in ph before committing"
+	exit 1
+fi 
 
 # Checks to make sure cargo fmt has been run on cd
 cargo fmt --manifest-path adapter/cd/Cargo.toml --check --quiet
