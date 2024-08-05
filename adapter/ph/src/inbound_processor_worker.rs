@@ -8,6 +8,7 @@ use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::queues::InboundProcessorMessage;
 use crate::zdp::*;
+use crate::config;
 use bytes::Buf;
 use std::future::Future;
 use tokio::sync::mpsc;
@@ -62,13 +63,17 @@ async fn handle_packet<'pktbuf>(
 
     let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
 
-    if base_hdr.packet_type.is_response() {
-        let channel = asm.get_sender();
+    // copy out relevant header info
+    let packet_type = base_hdr.packet_type;
+    let _sequence_number = base_hdr.sequence_number;
+
+    if packet_type.is_response() {
+        let channel = asm.sync_req_state.get_sender();
         match channel {
-            Some(channel) => match channel.send(pkt) {
+            Some(channel) => match channel.send((pkt, packet_type)) {
                 Ok(()) => (),
-                Err(pkt) => {
-                    let ret_buf = pkt.destroy();
+                Err(ret_sender) => {
+                    let ret_buf = ret_sender.0.destroy();
                     asm.buffer_stack.put_buffer(ret_buf);
                     asm.counters[CounterType::UnexpectedMgmtResponse].increment();
                 }
@@ -86,7 +91,6 @@ async fn handle_packet<'pktbuf>(
         match base_hdr.packet_type {
             ZdpPacketType::TransitPacket => {
                 pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into();
-
                 if config.mode == PhMode::Server {
                     // TODO: drop error packets
                     let _ = classify(&mut pkt);
@@ -119,6 +123,15 @@ async fn handle_packet<'pktbuf>(
             ZdpPacketType::Discard => {
                 // TODO print to debug log, when implemented
                 eprintln!("Discard message recieved");
+            }
+            ZdpPacketType::HelloRequest => {
+                let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+                let hdr = send_pkt.alloc_zeroed_header::<ZdpHelloResponseHeader>();
+                hdr.status = 0;
+                asm.outbound_processor
+                    .enqueue_non_flow_mgmt(ZdpPacketType::HelloResponse, send_pkt)
+                    .await;
+                eprintln!("Recieved HelloRequest");
             }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }

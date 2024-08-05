@@ -58,12 +58,9 @@ jobs:
     - name: Check warnings 
       run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc --lib -- -D warnings && cargo rustc --bin ph -- -D warnings
 
-# *OFF* becase ph has multiple targets (lib & binary) the --tests function is ubable to pass
-#       args to rustc.
-#
-#  ph-test-warnings:
-#    runs-on: ubuntu-latest
-#      steps: 
-#      - uses: actions/checkout@v4
-#     - name: Check test warnings
-#        run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc --tests -- -D warnings
+  ph-test-warnings:
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check test warnings
+      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc --tests -- -D warnings

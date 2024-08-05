@@ -103,5 +103,11 @@ pub struct ZdpReportHeader {
     pub report_data_length: U16,
 }
 
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpHelloResponseHeader {
+    pub status: u16,
+}
+
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
 const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);

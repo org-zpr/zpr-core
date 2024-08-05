@@ -25,3 +25,6 @@ cbpf-rs = { path = "../../cbpf-rs", features = ['pcap'] }
 
 [features]
 ci = []
+
+[lib] 
+test = false
