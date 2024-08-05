@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use open_enum::open_enum;
+use zerocopy::byteorder::network_endian::*;
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
 #[open_enum]
@@ -79,27 +80,27 @@ impl ZdpPacketType {
 pub struct ZdpBaseHeader {
     pub packet_type: ZdpPacketType,
     pub excess_length: u8,
-    pub sequence_number: u16,
+    pub sequence_number: U16,
 }
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpPerFlowHeader {
-    pub stream_id: u32,
+    pub stream_id: U32,
 }
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpEchoHeader {
     pub base_header: ZdpBaseHeader,
-    pub sequence_number: u16, // Only used for the response
-    pub additional_length: u16,
+    pub sequence_number: U16, // Only used for the response
+    pub additional_length: U16,
 }
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpReportHeader {
-    pub report_data_length: u16,
+    pub report_data_length: U16,
 }
 
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);

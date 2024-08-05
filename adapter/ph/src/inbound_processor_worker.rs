@@ -96,7 +96,7 @@ async fn handle_packet<'pktbuf>(
 
         match base_hdr.packet_type {
             ZdpPacketType::TransitPacket => {
-                pkt.metadata_mut().flow_id = per_flow_hdr.stream_id;
+                pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into();
 
                 if config.mode == PhMode::Server {
                     // TODO: drop error packets
