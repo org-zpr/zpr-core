@@ -1,10 +1,10 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::*;
-use crate::ext::tokio_tun::*;
 use crate::net_defs;
 use crate::packet::Packet;
 use std::future::Future;
 use tokio_tun::Tun;
+use zpr_ext::tokio_tun::*;
 
 #[derive(Copy, Clone)]
 pub struct Config {

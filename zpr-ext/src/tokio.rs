@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod net {
     use nix::sys::socket;
     use std::io;

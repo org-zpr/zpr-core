@@ -10,7 +10,6 @@ pub mod compress;
 pub mod config;
 pub mod counter;
 pub mod counters_enum;
-pub mod ext;
 pub mod flow_control;
 pub mod inbound_processor_worker;
 pub mod inbound_recv_worker;

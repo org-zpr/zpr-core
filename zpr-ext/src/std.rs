@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub mod mem {
     use std::mem::ManuallyDrop;
     use std::ops::{Deref, DerefMut, Drop};

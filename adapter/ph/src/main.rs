@@ -24,7 +24,6 @@ mod compress;
 mod config;
 mod counter;
 mod counters_enum;
-mod ext;
 mod flow_control;
 mod inbound_processor_worker;
 mod inbound_recv_worker;

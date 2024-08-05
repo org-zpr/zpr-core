@@ -1,6 +1,4 @@
-#![allow(dead_code)]
-
-use crate::ext::std::mem::slice_assume_init_mut;
+use crate::std::mem::slice_assume_init_mut;
 use bytes::buf;
 use libc;
 use nix::ioctl_write_ptr;

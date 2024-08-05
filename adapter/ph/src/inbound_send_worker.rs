@@ -1,12 +1,12 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::*;
-use crate::ext::tokio_tun::*;
 use crate::net_defs;
 use crate::queues::InboundSendMessage;
 use std::future::Future;
 use std::io::IoSlice;
 use tokio::sync::mpsc;
 use tokio_tun::Tun;
+use zpr_ext::tokio_tun::*;
 
 #[derive(Copy, Clone)]
 pub struct Config {

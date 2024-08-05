@@ -1,7 +1,6 @@
 use crate::assembly::Assembly;
 use crate::classifier::classify;
 use crate::counters_enum::CounterType;
-use crate::ext::zerocopy::*;
 use crate::flow_control;
 use crate::options::PhMode;
 use crate::packet::Packet;
@@ -14,6 +13,7 @@ use std::future::Future;
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
+use zpr_ext::zerocopy::*;
 
 #[derive(Copy, Clone)]
 pub struct Config {
