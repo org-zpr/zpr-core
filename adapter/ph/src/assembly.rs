@@ -164,7 +164,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                     .expect("too-short inbound packet");
                 let stream_id = per_flow_hdr.stream_id;
                 pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
-                Ok((stream_id, pkt))
+                Ok((stream_id.into(), pkt))
             }
             Err(err) => Err(err),
         }
@@ -179,7 +179,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
         let buf = self.buffer_stack.get_buffer().await;
         let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
         let hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
-        hdr.report_data_length = to_send.len() as u16;
+        hdr.report_data_length = (to_send.len() as u16).into();
         pkt.put(to_send.as_bytes());
         self.outbound_processor
             .enqueue_non_flow_mgmt(ZdpPacketType::Report, pkt)
