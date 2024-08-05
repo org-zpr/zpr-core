@@ -29,7 +29,7 @@ then
 fi 
 
 # Checks warnings with cargo test in ph before committing
-cargo rustc --tests --manifest-path adapter/ph/Cargo.toml -- -D warnings #> /dev/null 2>&1
+cargo rustc --tests --manifest-path adapter/ph/Cargo.toml -- -D warnings > /dev/null 2>&1
 
 if [ $? -ne 0 ] 
 then 
