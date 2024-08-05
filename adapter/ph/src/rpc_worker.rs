@@ -105,13 +105,13 @@ async fn handle_connection(
             // SET-CAPTURE-PROGRAM <program>
             "SET-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(set_capture_program(asm, str_message).await.as_bytes())
+                    .write_all(set_capture_program(asm, str_message).as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             "DELETE-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(delete_capture_program(asm).await.as_bytes())
+                    .write_all(delete_capture_program(asm).as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
@@ -363,7 +363,7 @@ async fn close_capture(asm: &Assembly<'_>) -> String {
     String::from("Capture file closed\n")
 }
 
-async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
+fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
     let (_command, program) = str_message.split_once(' ').unwrap();
     let mut serialized_program: Vec<&str> = program.split(',').collect();
     let mut insn_vec = Vec::new();
@@ -389,7 +389,7 @@ async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String 
     return_message
 }
 
-async fn delete_capture_program(asm: &Assembly<'_>) -> String {
+fn delete_capture_program(asm: &Assembly<'_>) -> String {
     asm.flow_control.delete_program();
 
     String::from("Program deleted\n")
