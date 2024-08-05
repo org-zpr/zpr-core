@@ -1,12 +1,13 @@
 use crate::assembly::Assembly;
 use crate::classifier::classify;
 use crate::counters_enum::CounterType;
+use crate::ext::zerocopy::*;
 use crate::flow_control;
 use crate::options::PhMode;
 use crate::packet::Packet;
+use crate::queues::InboundProcessorMessage;
 use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
-use crate::InboundProcessorMessage;
 // use crate::buffer_stack::BufferStack;
 use bytes::Buf;
 use std::future::Future;
@@ -63,22 +64,32 @@ async fn handle_packet<'pktbuf>(
 ) {
     pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
 
-    let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
 
-    if base_hdr.packet_type.is_per_flow() {
-        let hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    if base_hdr.packet_type.is_response() {
+        let channel = asm.get_sender();
+        match channel {
+            Some(channel) => match channel.send(pkt) {
+                Ok(()) => (),
+                Err(pkt) => {
+                    let ret_buf = pkt.destroy();
+                    asm.buffer_stack.put_buffer(ret_buf);
+                    asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+                }
+            },
+            None => {
+                let ret_buf = pkt.destroy();
+                asm.buffer_stack.put_buffer(ret_buf);
+                asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+            }
+        }
+    } else if base_hdr.packet_type.is_per_flow() {
+        let per_flow_hdr =
+            ZdpPerFlowHeader::read_from_buf(&mut pkt).expect("too-short per-flow message");
 
-        // copy out relevant header info
-        let packet_type = hdr.base_header.packet_type;
-        let _sequence_number = hdr.base_header.sequence_number;
-        let stream_id = hdr.stream_id;
-
-        // strip packet header
-        pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
-
-        match packet_type {
+        match base_hdr.packet_type {
             ZdpPacketType::TransitPacket => {
-                pkt.metadata_mut().flow_id = stream_id.into();
+                pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into();
 
                 if config.mode == PhMode::Server {
                     // TODO: drop error packets
@@ -92,14 +103,7 @@ async fn handle_packet<'pktbuf>(
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     } else {
-        // copy out relevant header info
-        let packet_type = base_hdr.packet_type;
-        let _sequence_number = base_hdr.sequence_number;
-
-        // strip packet header
-        pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
-
-        match packet_type {
+        match base_hdr.packet_type {
             ZdpPacketType::Report => {
                 let hdr =
                     ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
