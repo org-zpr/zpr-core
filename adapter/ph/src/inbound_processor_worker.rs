@@ -71,9 +71,6 @@ async fn handle_packet<'pktbuf>(
     let packet_type = base_hdr.packet_type;
     let _sequence_number = base_hdr.sequence_number;
 
-    // strip base header
-    pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
-
     if packet_type.is_response() {
         let channel = asm.sync_req_state.get_sender();
         match channel {

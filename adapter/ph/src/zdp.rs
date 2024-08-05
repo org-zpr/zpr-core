@@ -110,9 +110,3 @@ pub struct ZdpHelloResponseHeader {
 
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
 const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);
-
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
-#[repr(packed)]
-pub struct ZdpHelloResponseHeader {
-    pub status: u16,
-}
