@@ -173,7 +173,8 @@ pub fn encrypt<'pktbuf>(
     _link_id: zpr::LinkId,
     pkt: &mut Packet<'pktbuf>,
 ) {
-    let zpi_hdr = zdp::ZdpZpiHeader::ref_from_prefix(pkt.body()).expect("ZPI header must be present");
+    let zpi_hdr =
+        zdp::ZdpZpiHeader::ref_from_prefix(pkt.body()).expect("ZPI header must be present");
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == 0 {
@@ -208,7 +209,8 @@ pub fn decrypt<'pktbuf>(
     _link_id: zpr::LinkId,
     pkt: &mut Packet<'pktbuf>,
 ) -> Result<(), DecryptError> {
-    let zpi_hdr = zdp::ZdpZpiHeader::ref_from_prefix(pkt.body()).ok_or(DecryptError::BadStructure)?;
+    let zpi_hdr =
+        zdp::ZdpZpiHeader::ref_from_prefix(pkt.body()).ok_or(DecryptError::BadStructure)?;
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == 0 {
