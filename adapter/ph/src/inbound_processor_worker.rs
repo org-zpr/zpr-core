@@ -6,13 +6,13 @@ use crate::defs::Direction;
 use crate::fastpath;
 use crate::options::PhMode;
 use crate::packet::Packet;
-use crate::queues::InboundProcessorMessage;
+use crate::queues::{InboundProcessorMessage, TryEnqueueError};
 use crate::zdp::*;
 use bytes::Buf;
 use std::future::Future;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
-use zpr_ext::std::mem::drop_guard;
+use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
 
 #[derive(Copy, Clone)]
@@ -113,12 +113,15 @@ async fn handle_packet<'pktbuf>(
                 }
 
                 // send out decapsulated packet
-                asm.inbound_send
-                    .enqueue_packet(drop_guard(pkt, |p| {
-                        asm.buffer_stack.put_buffer(p.destroy())
-                    }))
-                    .await;
-                asm.counters[CounterType::InPacksSent].increment();
+                match asm.inbound_send
+                    .try_enqueue_packet(drop_guard(pkt, |p|
+                        fastpath::drop_and_count(asm, p, CounterType::InPacksSent)
+                    ))
+                {
+                    Ok(()) => (),
+                    Err(TryEnqueueError::Full(pkt)) =>
+                        fastpath::drop_and_count(asm, pkt.into_inner(), CounterType::InPacksDrop),
+                }
             }
 
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
