@@ -129,20 +129,8 @@ impl<'pktbuf> Assembly<'pktbuf> {
             }
             tokio::select! {
                 received_val = &mut receiver => {
-                    // TODO add drop_and_count function when merged with that code
-                    match received_val {
-                        Ok(rec_tuple) => {
-                            drop(permit);
-                            if zdp_response_type != rec_tuple.1 {
-                                let ret_buf = rec_tuple.0.destroy();
-                                self.buffer_stack.put_buffer(ret_buf);
-                                self.counters[CounterType::BadMgmtResponse].increment();
-                                return Err(SyncReqError::ProtocolError);
-                            }
-                            return Ok(rec_tuple.0)
-                        }
-                        Err(_) => return Err(SyncReqError::LinkClosed),
-                    }
+                    drop(permit);
+                    return self.match_received(received_val, SyncReqError::ProtocolError, zdp_response_type);
                 }
                 _ = sleep(Duration::from_secs(1)) => ()
             }
@@ -150,24 +138,34 @@ impl<'pktbuf> Assembly<'pktbuf> {
         match self.sync_req_state.get_sender() {
             None => {
                 receiver.close();
-                match receiver.try_recv() {
-                    Ok(rec_tuple) => {
-                        drop(permit);
-                        if zdp_response_type != rec_tuple.1 {
-                            let ret_buf = rec_tuple.0.destroy();
-                            self.buffer_stack.put_buffer(ret_buf);
-                            self.counters[CounterType::BadMgmtResponse].increment();
-                            return Err(SyncReqError::ProtocolError);
-                        }
-                        return Ok(rec_tuple.0);
-                    }
-                    Err(_) => return Err(SyncReqError::Timeout),
-                }
+                drop(permit);
+                return self.match_received(
+                    receiver.try_recv(),
+                    SyncReqError::Timeout,
+                    zdp_response_type,
+                );
             }
             Some(_) => return Err(SyncReqError::Timeout),
         }
     }
 
+    fn match_received<T>(
+        &self,
+        result: Result<(Packet<'pktbuf>, ZdpPacketType), T>,
+        err_type: SyncReqError,
+        zdp_response_type: ZdpPacketType,
+    ) -> Result<Packet<'pktbuf>, SyncReqError> {
+        match result {
+            Ok(rec_tuple) => {
+                if zdp_response_type != rec_tuple.1 {
+                    fastpath::drop_and_count(self, rec_tuple.0, CounterType::BadMgmtResponse);
+                    return Err(SyncReqError::ProtocolError);
+                }
+                return Ok(rec_tuple.0);
+            }
+            Err(_) => return Err(err_type),
+        }
+    }
     #[allow(dead_code)]
     pub async fn send_sync_non_flow_req(
         &self,
