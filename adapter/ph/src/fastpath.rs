@@ -6,18 +6,35 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
+use crate::ext::zerocopy::*;
 use crate::packet::Packet;
 use crate::queues::TryEnqueueError;
+use crate::zdp;
 use crate::zdp_ll;
+use crate::zpr;
 use bytes::Buf;
 use std::time::SystemTime;
+
+pub fn drop_and_count<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pktbuf>, reason: impl Into<CounterType>) {
+    asm.buffer_stack.put_buffer(pkt.destroy());
+    asm.counters[reason.into()].increment();
+}
 
 /// Offer a packet to be captured by the packet capture facility.
 /// The packet must be a complete ZDP message.
 /// Despite the &mut borrow, the packet will return materially unchanged.
 /// (It will have a link-layer header temporarily added to it.)
-pub fn maybe_capture<'a, 'pktbuf: 'a>(
+pub fn maybe_capture<'pktbuf>(
     asm: &Assembly<'pktbuf>,
+    dir: Direction,
+    pkt: &mut Packet<'pktbuf>,
+) {
+    maybe_capture_batch(asm, dir, [pkt])
+}
+
+/// Batch packet capture.
+pub fn maybe_capture_batch<'a, 'pktbuf: 'a>(
+    asm: &'a Assembly<'pktbuf>,
     dir: Direction,
     pkts: impl IntoIterator<Item = &'a mut Packet<'pktbuf>>,
 ) {
@@ -103,5 +120,52 @@ pub fn maybe_capture<'a, 'pktbuf: 'a>(
             asm.counters[CounterType::OutCapPacksDrop].increase_by(num_dropped as u64);
             asm.counters[CounterType::OutCapPacksFilt].increase_by(num_filtered as u64);
         }
+    }
+}
+
+#[allow(dead_code)]
+pub enum DecryptError {
+    BadStructure,
+    UnknownZpi,
+    DecryptionFailure,
+    MicvFailure,
+}
+
+impl From<DecryptError> for CounterType {
+    fn from(value: DecryptError) -> Self {
+        match value {
+            DecryptError::BadStructure => Self::BadStructure,
+            DecryptError::UnknownZpi => Self::UnknownZpi,
+            DecryptError::DecryptionFailure => Self::DecryptionFailure,
+            DecryptError::MicvFailure => Self::MicvFailure,
+        }
+    }
+}
+
+/// Decrypt a ZDP packet according to its ZPI header, which is removed.
+/// Returns the ZPI.
+pub fn decrypt<'pktbuf>(_asm: &Assembly<'pktbuf>, _link_id: zpr::LinkId, pkt: &mut Packet<'pktbuf>) ->
+    Result<zpr::Zpi, DecryptError>
+{
+    let zpi_hdr = zdp::ZdpZpiHeader::read_from_buf(pkt).ok_or(DecryptError::BadStructure)?;
+    let zpi = zpi_hdr.zpi as zpr::Zpi;
+
+    if zpi == 0 {
+        // TODO: MAC
+    } else {
+        todo!("decryption");
+    }
+
+    Ok(zpi)
+}
+
+/// Encrypt a ZDP packet according to the specified ZPI, and add a ZPI header.
+pub fn encrypt<'pktbuf>(_asm: &Assembly<'pktbuf>, _link_id: zpr::LinkId, zpi: zpr::Zpi, pkt: &mut Packet<'pktbuf>) {
+    pkt.alloc_zeroed_header::<zdp::ZdpZpiHeader>().zpi = zpi;
+
+    if zpi == 0 {
+        // TODO: MAC
+    } else {
+        todo!("encryption");
     }
 }

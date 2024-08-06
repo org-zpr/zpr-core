@@ -21,29 +21,46 @@ pub enum CounterType {
     OutCapPacksFilt,
     BadMgmtResponse,
     UnexpectedMgmtResponse,
+
+    // § 8.2.1
+    UnknownZpi,
+    SequenceError,
+    MicvFailure,
+    DecryptionFailure,
+    UnknownType,
+    UnknownStreamId,
+    BadStructure,
+    OtherError,
 }
 
-pub fn name_counters(count_num: CounterType) -> String {
-    let s;
+pub fn name_counters(count_num: CounterType) -> &'static str {
     match count_num {
-        CounterType::InPacksRec => s = "Inbound Packets Recieved",
-        CounterType::InPacksDrop => s = "Inbound Packets Dropped",
-        CounterType::InPacksSent => s = "Inbound Packets Sent",
-        CounterType::OutPacksRec => s = "Outbound Packets Recieved",
-        CounterType::OutPacksDrop => s = "Outbound Packets Dropped",
-        CounterType::OutPacksSent => s = "Outbound Packets Sent",
-        CounterType::OutPacksErr => s = "Outbound Packet Send Errors",
-        CounterType::InCapPacksWrite => s = "Inbound Capture Packets Written",
-        CounterType::OutCapPacksWrite => s = "Outbound Capture Packets Written",
-        CounterType::InCapPacksDrop => s = "Inbound Capture Packets Dropped",
-        CounterType::OutCapPacksDrop => s = "Outbound Capture Packets Dropped",
-        CounterType::InCapPacksFilt => s = "Inbound Capture Packets Filtered",
-        CounterType::OutCapPacksFilt => s = "Outbound Capture Packets Filtered",
-        CounterType::BadMgmtResponse => s = "Bad Management Response",
-        CounterType::UnexpectedMgmtResponse => s = "Unexpected Management Response",
-    };
+        CounterType::InPacksRec => "Inbound Packets Recieved",
+        CounterType::InPacksDrop => "Inbound Packets Dropped",
+        CounterType::InPacksSent => "Inbound Packets Sent",
+        CounterType::OutPacksRec => "Outbound Packets Recieved",
+        CounterType::OutPacksDrop => "Outbound Packets Dropped",
+        CounterType::OutPacksSent => "Outbound Packets Sent",
+        CounterType::OutPacksErr => "Outbound Packet Send Errors",
+        CounterType::InCapPacksWrite => "Inbound Capture Packets Written",
+        CounterType::OutCapPacksWrite => "Outbound Capture Packets Written",
+        CounterType::InCapPacksDrop => "Inbound Capture Packets Dropped",
+        CounterType::OutCapPacksDrop => "Outbound Capture Packets Dropped",
+        CounterType::InCapPacksFilt => "Inbound Capture Packets Filtered",
+        CounterType::OutCapPacksFilt => "Outbound Capture Packets Filtered",
+        CounterType::BadMgmtResponse => "Bad Management Response",
+        CounterType::UnexpectedMgmtResponse => "Unexpected Management Response",
 
-    s.to_string()
+        // § 8.2.1
+        CounterType::UnknownZpi => "Unknown ZPI",
+        CounterType::SequenceError => "Sequence Error",
+        CounterType::MicvFailure => "MICV Failure",
+        CounterType::DecryptionFailure => "Decryption Failure",
+        CounterType::UnknownType => "Unknown Type",
+        CounterType::UnknownStreamId => "Unknown Stream ID",
+        CounterType::BadStructure => "Bad Structure",
+        CounterType::OtherError => "Other Error",
+    }
 }
 
 impl fmt::Display for CounterType {

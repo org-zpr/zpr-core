@@ -5,7 +5,7 @@ use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::ext::std::mem::drop_guard;
 use crate::ext::zerocopy::*;
-use crate::fastpath::*;
+use crate::fastpath;
 use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::queues::InboundProcessorMessage;
@@ -32,7 +32,7 @@ async fn worker<'pktbuf>(
         for msg in msgs.drain(..) {
             match msg {
                 InboundProcessorMessage::Packet(mut pkt) => {
-                    maybe_capture(asm, Direction::Inbound, [&mut pkt]); // FIXME: batch
+                    fastpath::maybe_capture(asm, Direction::Inbound, &mut pkt); // TODO: batch
                     handle_packet(config, pkt, asm).await;
                 }
                 InboundProcessorMessage::TestPacket(pkt) => {
@@ -60,7 +60,10 @@ async fn handle_packet<'pktbuf>(
     mut pkt: Packet<'pktbuf>,
     asm: &Assembly<'pktbuf>,
 ) {
-    pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
+    match fastpath::decrypt(asm, 0, &mut pkt) {
+        Ok(_zpi) => (),
+        Err(err) => { fastpath::drop_and_count(asm, pkt, err); return; }
+    }
 
     let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
 
