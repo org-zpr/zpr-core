@@ -34,6 +34,7 @@ mod options;
 mod outbound_processor_worker;
 mod outbound_recv_worker;
 mod packet;
+mod pcap_writer;
 mod queues;
 mod rpc_worker;
 mod test_packet;

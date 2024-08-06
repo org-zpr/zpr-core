@@ -313,9 +313,10 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
 
 async fn set_capture(asm: &Assembly<'_>, path_str: &str) -> String {
     let path = Path::new(path_str);
-    asm.capture_worker.open_capture_file(path).await;
-
-    format!("Capture file opened at {}\n", path_str)
+    match asm.capture_worker.open_capture_file(path).await {
+        Ok(()) => format!("Capture file opened at {}\n", path_str),
+        Err(err) => format!("Error opening Capture file {}: {}\n", path_str, err),
+    }
 }
 
 async fn flush_capture(asm: &Assembly<'_>) -> String {
@@ -325,7 +326,7 @@ async fn flush_capture(asm: &Assembly<'_>) -> String {
 }
 
 async fn close_capture(asm: &Assembly<'_>) -> String {
-    asm.capture_worker.close_capture_file().await;
+    let _ = asm.capture_worker.close_capture_file().await;
     asm.flow_control.delete_program();
 
     String::from("Capture file closed\n")

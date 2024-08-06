@@ -591,7 +591,6 @@ dependencies = [
  "open-enum",
  "openssl",
  "openssl-sys",
- "pcap",
  "tokio",
  "tokio-openssl",
  "tokio-tun",

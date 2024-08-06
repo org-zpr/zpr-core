@@ -1,10 +1,10 @@
 use crate::assembly::Assembly;
+use crate::pcap_writer::*;
 use crate::queues::CapPacket;
 use core::future::Future;
-use libc::timeval;
-use pcap::{Capture, Dead, Error, Linktype, Packet, PacketHeader, Savefile};
+use std::io;
 use std::path::Path;
-use std::time::{Duration, UNIX_EPOCH};
+use tokio::fs::File;
 use tokio::sync::{mpsc, Mutex};
 
 pub struct CaptureWorker {
@@ -12,35 +12,39 @@ pub struct CaptureWorker {
 }
 
 struct InnerCap {
-    capture: Capture<Dead>,
-    savefile: Option<Savefile>,
+    savefile: Option<PcapWriter<File>>,
 }
 
 impl CaptureWorker {
     pub fn new() -> Self {
         Self {
-            inner_cap: InnerCap {
-                capture: Capture::dead(Linktype::USER0).unwrap(),
-                savefile: None,
-            }
-            .into(),
+            inner_cap: InnerCap { savefile: None }.into(),
         }
     }
-    pub async fn open_capture_file(&self, path: &Path) {
+
+    pub async fn open_capture_file(&self, path: &Path) -> Result<(), io::Error> {
         let mut inner_cap = self.inner_cap.lock().await;
-        inner_cap.savefile = Some(inner_cap.capture.savefile(path).unwrap());
+        inner_cap.savefile =
+            Some(PcapWriter::open(File::open(path).await?, linktype::USER0).await?);
+        Ok(())
     }
 
-    pub async fn flush_capture_file(&self) -> Result<(), Error> {
+    pub async fn flush_capture_file(&self) -> Result<(), io::Error> {
         let sf = &mut self.inner_cap.lock().await.savefile;
         match sf {
-            Some(ref mut sf) => sf.flush(),
+            Some(ref mut sf) => sf.flush().await,
             None => Ok(()),
         }
     }
 
-    pub async fn close_capture_file(&self) {
-        self.inner_cap.lock().await.savefile = None;
+    pub async fn close_capture_file(&self) -> Result<(), io::Error> {
+        match self.inner_cap.lock().await.savefile.take() {
+            Some(writer) => {
+                writer.close().await?;
+            }
+            None => (),
+        }
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -66,7 +70,7 @@ async fn worker<'pktbuf>(
         match &mut locked_mutex.savefile {
             Some(s_file) => {
                 for cap_pack in &messages {
-                    savefile_write(cap_pack, s_file);
+                    savefile_write(cap_pack, s_file).await;
                 }
             }
             None => (),
@@ -88,23 +92,13 @@ where
     async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
-fn savefile_write(cap_pack: &CapPacket, savefile: &mut Savefile) {
-    let creation_time: Duration = cap_pack.timestamp.duration_since(UNIX_EPOCH).unwrap();
-    let ts: timeval = timeval {
-        tv_sec: creation_time.as_secs() as i64,
-        tv_usec: creation_time.subsec_micros() as i64,
-    };
-
-    let header: PacketHeader = PacketHeader {
-        ts,
-        caplen: cap_pack.packet.body().len() as u32,
-        len: cap_pack.orig_len as u32,
-    };
-
-    let packet: Packet = Packet {
-        header: &header,
+async fn savefile_write(cap_pack: &CapPacket<'_>, savefile: &mut PcapWriter<File>) {
+    let packet = PcapPacket {
+        timestamp: cap_pack.timestamp,
+        orig_len: cap_pack.orig_len,
         data: cap_pack.packet.body(),
     };
 
-    savefile.write(&packet);
+    // FIXME: handle write errors (maybe close the capture file?)
+    savefile.write(&packet).await.unwrap();
 }
