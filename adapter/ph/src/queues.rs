@@ -77,10 +77,10 @@ impl<'a> InboundSend<'a> {
         }
     }
 
-    pub fn try_enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>
-        (&self, mut packet: P) ->
-        Result<(), TryEnqueueError<P>>
-    {
+    pub fn try_enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
+        &self,
+        mut packet: P,
+    ) -> Result<(), TryEnqueueError<P>> {
         let tun = self.tuns[packet.flowhash() as usize % self.tuns.len()];
 
         let proto = net_defs::ip_ethertype(net_defs::ip_version(packet.body()));

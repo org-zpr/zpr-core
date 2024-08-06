@@ -224,7 +224,12 @@ pub fn decrypt<'pktbuf>(
 
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
 /// The ZPI header will be added to the packet.
-pub fn substrate_egress<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId, zpi: zpr::Zpi, mut pkt: Packet<'pktbuf>) {
+pub fn substrate_egress<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+    zpi: zpr::Zpi,
+    mut pkt: Packet<'pktbuf>,
+) {
     encap_zpi(asm, link_id, zpi, &mut pkt);
 
     maybe_capture(asm, Direction::Outbound, &mut pkt);
@@ -235,31 +240,32 @@ pub fn substrate_egress<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId, 
         todo!("link routing");
     }
 
-    match asm
-        .outbound_send
-        .try_enqueue_packet(drop_guard(pkt, |p|
-            drop_and_count(asm, p, CounterType::OutPacksSent)
-        ))
-    {
+    match asm.outbound_send.try_enqueue_packet(drop_guard(pkt, |p| {
+        drop_and_count(asm, p, CounterType::OutPacksSent)
+    })) {
         Ok(()) => (),
-        Err(TryEnqueueError::Full(pkt)) =>
-            drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr),
+        Err(TryEnqueueError::Full(pkt)) => {
+            drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr)
+        }
     }
 }
 
 /// Send a compressed agent packet to the agent.
 /// The packet will be decompressed according to the given stream ID.
-pub fn agent_input<'pktbuf>(asm: &Assembly<'pktbuf>, _stream_id: zpr::StreamId, pkt: Packet<'pktbuf>) {
+pub fn agent_input<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    _stream_id: zpr::StreamId,
+    pkt: Packet<'pktbuf>,
+) {
     // TODO: decompress
 
     // send out decapsulated packet
-    match asm.inbound_send
-        .try_enqueue_packet(drop_guard(pkt, |p|
-            drop_and_count(asm, p, CounterType::InPacksSent)
-        ))
-    {
+    match asm.inbound_send.try_enqueue_packet(drop_guard(pkt, |p| {
+        drop_and_count(asm, p, CounterType::InPacksSent)
+    })) {
         Ok(()) => (),
-        Err(TryEnqueueError::Full(pkt)) =>
-            drop_and_count(asm, pkt.into_inner(), CounterType::InPacksDrop),
+        Err(TryEnqueueError::Full(pkt)) => {
+            drop_and_count(asm, pkt.into_inner(), CounterType::InPacksDrop)
+        }
     }
 }

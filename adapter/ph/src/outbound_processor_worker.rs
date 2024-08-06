@@ -30,14 +30,24 @@ async fn worker<'pktbuf>(
                     let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     base_hdr.packet_type = ZdpPacketType::TransitPacket;
 
-                    fastpath::substrate_egress(asm, zpr::ADAPTER_DOCKING_SESSION_ID, zpr::ZPI_0, pkt);
+                    fastpath::substrate_egress(
+                        asm,
+                        zpr::ADAPTER_DOCKING_SESSION_ID,
+                        zpr::ZPI_0,
+                        pkt,
+                    );
                 }
                 OutboundProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), count),
                 OutboundProcessorMessage::NonFlowMgmt(pack_type, mut pkt) => {
                     let hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     hdr.packet_type = pack_type;
 
-                    fastpath::substrate_egress(asm, zpr::ADAPTER_DOCKING_SESSION_ID, zpr::ZPI_0, pkt);
+                    fastpath::substrate_egress(
+                        asm,
+                        zpr::ADAPTER_DOCKING_SESSION_ID,
+                        zpr::ZPI_0,
+                        pkt,
+                    );
                 }
                 OutboundProcessorMessage::PerFlowMgmt(pack_type, stream_id, mut pkt) => {
                     let per_flow_hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
@@ -46,7 +56,12 @@ async fn worker<'pktbuf>(
                     let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     base_hdr.packet_type = pack_type;
 
-                    fastpath::substrate_egress(asm, zpr::ADAPTER_DOCKING_SESSION_ID, zpr::ZPI_0, pkt);
+                    fastpath::substrate_egress(
+                        asm,
+                        zpr::ADAPTER_DOCKING_SESSION_ID,
+                        zpr::ZPI_0,
+                        pkt,
+                    );
                 }
             }
         }
