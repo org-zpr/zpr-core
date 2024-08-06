@@ -143,7 +143,16 @@ impl<'buf> Packet<'buf> {
         &self,
         buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
     ) -> Packet<'other> {
-        self.clone_into_with_headroom(buf, self.headroom_available())
+        self.clone_prefix_into_with_headroom(buf, self.headroom_available(), self.body().len())
+    }
+
+    /// Like `clone_into()`, but only copy a prefix of the packet's data.
+    pub fn clone_prefix_into<'other>(
+        &self,
+        buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
+        len: usize,
+    ) -> Packet<'other> {
+        self.clone_prefix_into_with_headroom(buf, self.headroom_available(), len)
     }
 
     /// Copy this packet's metadata and data into a new buffer, returning a handle for it.
@@ -151,16 +160,27 @@ impl<'buf> Packet<'buf> {
     pub fn clone_into_with_headroom<'other>(
         &self,
         buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
+        headroom: usize
+    ) -> Packet<'other> {
+        self.clone_prefix_into_with_headroom(buf, headroom, self.body().len())
+    }
+
+    fn clone_prefix_into_with_headroom<'other>(
+        &self,
+        buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
         headroom: usize,
+        len: usize,
     ) -> Packet<'other> {
         let body = self.body();
-        assert!(headroom <= size_of_val(buf) - body.len() - PACKET_BUFFER_MIN_BODY_OFFSET);
+        assert!(len <= body.len());
+        assert!(headroom <= size_of_val(buf) - len - PACKET_BUFFER_MIN_BODY_OFFSET);
         buf[..size_of::<PacketMetadata>()]
             .copy_from_slice(&self.buf[..size_of::<PacketMetadata>()]);
         let offset = PACKET_BUFFER_MIN_BODY_OFFSET + headroom;
-        buf[offset..offset + body.len()].copy_from_slice(body);
+        buf[offset..offset + len].copy_from_slice(body);
         let mut pkt = Packet { buf };
         pkt.metadata_mut().offset = offset;
+        pkt.metadata_mut().len = len;
         pkt
     }
 

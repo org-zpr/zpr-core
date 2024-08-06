@@ -219,7 +219,7 @@ impl<'a> OutboundSend<'a> {
 pub struct CapPacket<'pktbuf> {
     pub packet: Packet<'pktbuf>,
     pub timestamp: SystemTime,
-    pub caplen: u32,
+    pub orig_len: usize,
 }
 
 pub struct Capture<'pktbuf> {
@@ -241,12 +241,12 @@ impl<'pktbuf> Capture<'pktbuf> {
         &self,
         packet: Packet<'pktbuf>,
         timestamp: SystemTime,
-        caplen: u32,
+        orig_len: usize,
     ) {
         let cap_pack: CapPacket = CapPacket {
             packet,
             timestamp,
-            caplen,
+            orig_len,
         };
         self.sender.send(cap_pack).await.unwrap();
     }
@@ -256,12 +256,12 @@ impl<'pktbuf> Capture<'pktbuf> {
         &self,
         packet: Packet<'pktbuf>,
         timestamp: SystemTime,
-        caplen: u32,
+        orig_len: usize,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
         let cap_pack: CapPacket = CapPacket {
             packet,
             timestamp,
-            caplen,
+            orig_len,
         };
         match self.sender.try_send(cap_pack) {
             Ok(()) => return Ok(()),
