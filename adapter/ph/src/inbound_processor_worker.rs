@@ -89,15 +89,15 @@ async fn handle_packet<'pktbuf>(
             Some(channel) => match channel.send((pkt, packet_type)) {
                 Ok(()) => (),
                 Err(ret_sender) => {
-                    let ret_buf = ret_sender.0.destroy();
-                    asm.buffer_stack.put_buffer(ret_buf);
-                    asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+                    fastpath::drop_and_count(
+                        asm,
+                        ret_sender.0,
+                        CounterType::UnexpectedMgmtResponse,
+                    );
                 }
             },
             None => {
-                let ret_buf = pkt.destroy();
-                asm.buffer_stack.put_buffer(ret_buf);
-                asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+                fastpath::drop_and_count(asm, pkt, CounterType::UnexpectedMgmtResponse);
             }
         }
     } else if base_hdr.packet_type.is_per_flow() {
@@ -138,8 +138,7 @@ async fn handle_packet<'pktbuf>(
                         std::str::from_utf8(&pkt.body()[..report_data_length]).unwrap()
                     );
                 }
-                let ret_buf = pkt.destroy();
-                asm.buffer_stack.put_buffer(ret_buf);
+                asm.buffer_stack.put_buffer(pkt.destroy());
             }
             ZdpPacketType::Discard => {
                 // TODO print to debug log, when implemented

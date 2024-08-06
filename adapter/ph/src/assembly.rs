@@ -3,6 +3,7 @@ use crate::capture_worker::CaptureWorker;
 use crate::config;
 use crate::counter::*;
 use crate::counters_enum::*;
+use crate::fastpath;
 use crate::flow_control::FlowControl;
 use crate::packet::*;
 use crate::queues::*;
@@ -125,9 +126,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
             Ok(rec_tuple) => {
                 drop(permit);
                 if zdp_response_type != rec_tuple.1 {
-                    let ret_buf = rec_tuple.0.destroy();
-                    self.buffer_stack.put_buffer(ret_buf);
-                    self.counters[CounterType::BadMgmtResponse].increment();
+                    fastpath::drop_and_count(self, rec_tuple.0, CounterType::BadMgmtResponse);
                     return Err(SyncReqError::ProtocolError);
                 }
                 Ok(rec_tuple.0)

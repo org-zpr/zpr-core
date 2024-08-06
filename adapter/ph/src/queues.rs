@@ -208,6 +208,7 @@ impl<'a> OutboundSend<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn fanout(&self) -> usize {
         self.sockets.len()
     }
