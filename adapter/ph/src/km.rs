@@ -3,7 +3,9 @@
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tokio::time;
+
 use std::time::Duration;
+use std::mem;
 
 use std::sync::{Arc, Mutex};
 use std::fmt;
@@ -11,9 +13,13 @@ use std::io;
 
 use bytes::{BufMut, BytesMut, Bytes};
 
+use zerocopy::FromBytes;
+
 use tracing::{info, error};
 
 use crate::packet::Packet;
+use crate::zdp::{ZdpPacketType, ZdpBaseHeader, ZdpPerFlowHeader};
+
 
 
 /*
@@ -39,6 +45,27 @@ use crate::packet::Packet;
          4    x    KM_PACKET
 
 
+         ZDP management packets (non-km) are fully encrypted, so we
+         can pass full buffer to the transport encrypt/decrypt.
+
+         0    1    ZPI
+         1    n    payload (encrypted by KM transport routine)  
+
+
+         ZDP transit packets are more complicated.
+
+         0    1    ZPI         
+         1    n    ZPR header (encrypted by KM transport routine)
+         n+1  m    agent data (d2d-sa + data + micv) -- not encrypted by KM transport
+
+         In order to properly decrypt a transit packet, the KM routine should
+         put the encrypted length on the front of the buffer AND protect that with AEAD.
+         So something like:
+
+         encr_len = u16::from_be_bytes(payload[0], payload[1]);
+         plaintext = decrypt_aead(payload[2..encr_len+2], [ZPI, payload[0], payload[1]]);
+
+         Those two bytes need to be taken into consideration when computing padding.
 */
 
 
@@ -73,6 +100,9 @@ impl fmt::Debug for KMState<'_> {
 
 
 // KeyManager maintains an SA with its peer.
+//
+// Note that this is written prior to implementing the actual key management algorithm. So 
+// some of the abstractions here may not be quite right -- yet.
 impl KeyManager<'_> {
     /// `statemachine` is the key management algorithm.
     pub fn new<'a>(statemachine: Box<dyn KeyManagerStateMachine>) -> KeyManager<'a> {
@@ -98,19 +128,27 @@ impl KeyManager<'_> {
 
 
     // Encrypt a ZDP message for transport.  Key Management messages should not be sent here.
-    // This overwrites the plaintext ZDP header.
-    // For ZDP management messages, also overwrites the payload.
+    // This overwrites the plaintext ZDP header at least.
+    // For everything except transit packets, this also overwrites the payload.
     //
-    // For transit packets, there must be enough padding between the header and
-    // the agent-data to hold the output ciphertext.
+    // For all packets, there must be enough padding included in the body length to 
+    // accomodate any expansion caused by encryption.
+    //
+    // For transit packets the padding space must be between the ZDP header and the
+    // agent data bits.
     //
     // `message` is expected to be a ZDP message wihout a ZPI value.  We add a ZPI
     // value to the front of the message -- note that the value we add is just the
     // SA_ID.  It's up to caller to mix in the configuration ID value.
     pub fn encrypt_transport(&self, message: &mut Packet) -> io::Result<()> {
+        let base_hdr = ZdpBaseHeader::ref_from_prefix(message.body()).expect("too-short ZDP message");
+        if message.headroom_available() < 1 {
+            return Err(io::Error::new(io::ErrorKind::Other, "insufficient headroom"));
+        }
+
         let encr: Box<dyn TransportEncr>;
         let padlen: usize;
-        let align: u8;
+        let sa_id: u8;
         {
             let state = self.shared.state.lock().unwrap();
             if state.statemachine.get_state() != KMSMState::Transport {
@@ -121,32 +159,43 @@ impl KeyManager<'_> {
                 panic!("SA_ID is zero");
             }
             encr = state.statemachine.get_transport_encryptor();
+            sa_id = state.sa_id;
             padlen = state.kmsettings.padlen;
-            align = state.kmsettings.alignment;
         }
 
-
-
-        // if this is transit packet
-        //   encrypt just the ZDP header.
-        // else
-        //   encrypt the entire message.
-        //
-        // push a ZPI onto the front.
-        // ...
-
-        if align > 0 {
-            panic!("aligment not implemented") // TODO
+        // The assumption here is that caller has already built in space of any padding required by key manager protocol.
+        let encr_len: usize;
+        let encr_buf_len: usize;
+        match base_hdr.packet_type {
+            ZdpPacketType::KeyManagement => {
+                // Programmer error
+                return Err(io::Error::new(io::ErrorKind::Other, "Key Management packets should not be sent here"));
+            }
+            ZdpPacketType::TransitPacket => {
+                // So the data to be encrypted is ZDP header plus stream ID.  Padding is still assumed to after that.
+                encr_len = mem::size_of::<ZdpBaseHeader>() + mem::size_of::<ZdpPerFlowHeader>();
+                encr_buf_len = encr_len + padlen;
+            }
+            _ => {
+                encr_len = message.body().len();
+                encr_buf_len = encr_len;
+            }
         }
 
-        // TODO: will I always need to crate a buffer here or can I write to input packet in place?
-        let mut outbuf = vec![0_u8; 1 + message.body().len() + padlen];
+        // TODO: Ability to encrypt in place. Not sure how to accomplish. At very least we could use our own buffer pool.        
+        let mut encr_buf = BytesMut::with_capacity(encr_buf_len);
 
-        match encr.encrypt_transport(message.body(), &mut outbuf) {
-            Ok(len) => {
-                // TODO: Write ZPI + contents of outbuf into passed packet.
-                // ...
-                info!("TODO: ready to write {}byte encrypted message back into packet - not implemented", len);
+        // TODO: Pass sa_id into encrypt/decrypt 
+        match encr.encrypt_transport(sa_id, &message.body()[0..encr_len], &mut encr_buf) {
+            Ok(len) => {                
+                // Copy the encrypted data back into the message -- there should be sufficient room for it since
+                // caller should know our required padding space and alignment.
+                message.body_mut()[0..len].copy_from_slice(&encr_buf[0..len]);
+
+                // Now we need to push a our SA id onto the front.
+                // (Note ZPI should be part of integrity protected data)                
+                let zpi_buf = message.alloc_zeroed_headroom(1);
+                zpi_buf[0] = sa_id;
             }
             Err(e) => {
                 return Err(io::Error::new(io::ErrorKind::Other, format!("encrypt failed: {}", e)));
@@ -156,10 +205,16 @@ impl KeyManager<'_> {
     }
 
 
+    // The message here must start with the ZPI value.
     // We assume that packet ZPI value has been clensed of the config ID and is only the SA_ID.
     // Key Management packets should not be sent here.
+    // Does not remove the ZPI/SA_ID value.
     pub fn decrypt_transport(&self, message: &mut Packet) -> io::Result<()> {
-        let _encr: Box<dyn TransportEncr>;
+        if message.body().len() < 1 {
+            return Err(io::Error::new(io::ErrorKind::Other, "message too short"));
+        }
+        let encr: Box<dyn TransportEncr>;
+        let sa_id: u8;
         {
             let state = self.shared.state.lock().unwrap();
             if message.body()[0]  == 0 {
@@ -171,25 +226,31 @@ impl KeyManager<'_> {
             if state.statemachine.get_state() != KMSMState::Transport {
                 return Err(io::Error::new(io::ErrorKind::Other, "SA not in transport state"));
             }
-            _encr = state.statemachine.get_transport_encryptor();
+            encr = state.statemachine.get_transport_encryptor();
+            sa_id = state.sa_id;
         }
 
-        // TODO... actually use encr...
+        // TODO: Ability to decrypt in place. Not sure how to accomplish.  At very least we could use our own buffer pool.
+        let mut decr_buf = BytesMut::with_capacity(message.body().len());
 
-        // check ZPI...
-        // if this is a transit packet
-        //   decrypt just the ZDP header, zero out padding.
-        // else
-        //   decrypt the entire message.
-        //
-
+        // TODO: pass sa_id into decrypt
+        match encr.decrypt_transport(sa_id, &message.body()[1..], &mut decr_buf) {
+            Ok(len) => {
+                // Copy the decrypted data back into the message.
+                // Note at this point the "padding" space on the message is probably filled with leftover ciphertext.
+                message.body_mut()[0..len].copy_from_slice(&decr_buf[0..len]);
+            }
+            Err(e) => {
+                return Err(io::Error::new(io::ErrorKind::Other, format!("decrypt failed: {}", e)));
+            }
+        }
         Ok(())
     }
 
 
-    // Pass in a full Key Management payload here.
+    // Pass in a full Key Management payload here (does not include ZDP header).
     //
-    // We copy the payload into our own buffer for processing. Caller should free buffer.
+    // We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
     pub async fn handle_km_message(&self, message: &[u8]) -> io::Result<()> {
         let tx: mpsc::Sender<Bytes>;
         {
@@ -214,7 +275,9 @@ impl KeyManager<'_> {
 
     // Blocking run loop for the key manager.  This runs the key management algorithm
     // state machine handing KM messages in and out.
-    // If `initiate` is true, the key manager will initiate a new handshake.
+    //
+    // If `initiate` is true, the key manager will initiate a new handshake.  In the adapter-dock
+    // scenario, the adapter should be the initiator and the node should not.
     pub async fn start(&mut self, initiate: bool, ctok: CancellationToken, km_buffers_out: mpsc::Sender<Bytes>) -> io::Result<()> {
         let (km_tx, mut km_rx) = mpsc::channel(16);
         let tick_interval: Duration;
@@ -223,7 +286,6 @@ impl KeyManager<'_> {
             state.mgmt_tx = Some(km_tx);
             tick_interval = state.kmsettings.tick_interval;
         }
-
 
         let mut interval = time::interval(tick_interval);
 
@@ -338,6 +400,7 @@ impl KeyManager<'_> {
 
 
 
+// Generic encryption error (to be fleshed out later).
 pub struct EncryptionError;
 
 impl fmt::Display for EncryptionError {
@@ -376,13 +439,13 @@ pub struct KMSettings {
 }
 
 pub trait TransportEncr : Send + Sync {
-    fn encrypt_transport(self: &Self, payload: &[u8], message: &mut[u8]) -> Result<usize, EncryptionError>;
-    fn decrypt_transport(self: &Self, payload: &[u8], message: &mut[u8]) -> Result<usize, EncryptionError>;
+    fn encrypt_transport(self: &Self, sa_id: u8, payload: &[u8], message: &mut[u8]) -> Result<usize, EncryptionError>;
+    fn decrypt_transport(self: &Self, sa_id: u8, payload: &[u8], message: &mut[u8]) -> Result<usize, EncryptionError>;
 }
 
 pub trait KeyManagerStateMachine : Send + Sync {
 
-    // These do not change
+    // These do not change (TODO: is there a way to state that in rust?)
     fn get_settings(self: &Self) -> KMSettings;
 
     // State can only change through handle_message, tick, or reset.
@@ -442,36 +505,28 @@ struct SillyEncr;
 
 impl TransportEncr for SillyEncr {
     // Copy payload into message with a SIZE preamble.
-    fn encrypt_transport(self: &Self, payload: &[u8], message: &mut [u8]) -> Result<usize, EncryptionError> {
+    fn encrypt_transport(self: &Self, _sa_id: u8, payload: &[u8], message: &mut [u8]) -> Result<usize, EncryptionError> {
         let sz = payload.len() + 2; // SIZE includes the 2 byte size field.
         if sz > std::u16::MAX as usize {
             return Err(EncryptionError);
         }
-
         let szbytes = (sz as u16).to_be_bytes();
         message[0..3].copy_from_slice(&szbytes); // write SIZE as u16 to front of buffer
-
-
         message[2..sz].copy_from_slice(payload); // then copy rest of payload
         Ok(sz)
     }
 
     // Check and remove the SIZE preamble, return the payload
-    fn decrypt_transport(self: &Self, payload: &[u8], message: &mut [u8]) -> Result<usize, EncryptionError> {
-
+    fn decrypt_transport(self: &Self, _sa_id: u8, payload: &[u8], message: &mut [u8]) -> Result<usize, EncryptionError> {
         let buf_sz = payload.len();
-
         if buf_sz < 2 {
             return Err(EncryptionError);
         }
-
         let msg_sz: u16 = u16::from_be_bytes([payload[0], payload[1]]);
         if buf_sz < msg_sz as usize {
             return Err(EncryptionError);
         }
-
         let msg_len: usize = (msg_sz - 2) as usize;
-
         message[..msg_len].copy_from_slice(&payload[2..]);
         Ok(msg_len)
     }
