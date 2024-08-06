@@ -97,9 +97,14 @@ impl<'pktbuf> Assembly<'pktbuf> {
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
         stream_id: Option<u32>,
-        packet: Packet<'pktbuf>,
+        pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
         let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit
+
+        let buf = self.buffer_stack.get_buffer().await;
+        let mut packet = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+        pkt_fn(&mut packet);
+
         let (sender, receiver) = channel::<(Packet<'pktbuf>, ZdpPacketType)>();
         {
             let mut inner_req = self.sync_req_state.inner_req.lock().unwrap();
@@ -141,9 +146,9 @@ impl<'pktbuf> Assembly<'pktbuf> {
         &self,
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
-        packet: Packet<'pktbuf>,
+        pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
-        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, packet)
+        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, pkt_fn)
             .await
     }
 
@@ -153,10 +158,10 @@ impl<'pktbuf> Assembly<'pktbuf> {
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
         stream_id: u32,
-        packet: Packet<'pktbuf>,
+        pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<(u32, Packet<'pktbuf>), SyncReqError> {
         match self
-            .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), packet)
+            .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), pkt_fn)
             .await
         {
             Ok(mut pkt) => {
@@ -195,13 +200,11 @@ impl<'pktbuf> Assembly<'pktbuf> {
     }
 
     pub async fn send_hello_req(&self) {
-        let buf = self.buffer_stack.get_buffer().await;
-        let hello_req = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
         let response = self
             .send_sync_non_flow_req(
                 ZdpPacketType::HelloRequest,
                 ZdpPacketType::HelloResponse,
-                hello_req,
+                move |_packet| {},
             )
             .await;
         match response {
