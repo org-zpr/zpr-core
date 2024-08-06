@@ -4,10 +4,12 @@ mod zerocopy_bytes {
     use zerocopy::*;
 
     pub trait AsBytesExt {
+        /// Like `write_to()`, but writes to a `BufMut`.
         fn write_to_buf(&self, buf: &mut impl BufMut) -> Option<()>;
     }
 
     pub trait FromBytesExt {
+        /// Like `read_from_prefix()`, but reads from a `Buf`.
         fn read_from_buf(buf: &mut impl Buf) -> Option<Self>
         where
             Self: Sized;

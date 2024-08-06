@@ -8,6 +8,7 @@ pub mod net {
     }
 
     impl UdpSocketExt for UdpSocket {
+        /// Retrieve the socket's current known path MTU.
         fn mtu(&self) -> io::Result<u32> {
             match socket::getsockopt(self, socket::sockopt::IpMtu) {
                 Ok(mtu) => Ok(mtu as u32),
