@@ -71,9 +71,11 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
     // fill in metadata
     pkt.metadata_mut().flow_id = 0; // TODO: fill from IP header
 
-    fastpath::encrypt(asm, 0, 0, &mut pkt);
+    fastpath::encap_zpi(asm, 0, 0, &mut pkt);
 
-    fastpath::maybe_capture(asm, Direction::Outbound, &mut pkt); // TODO: batch
+    fastpath::maybe_capture(asm, Direction::Outbound, &mut pkt);
+
+    fastpath::encrypt(asm, 0, &mut pkt);
 
     // forward encapsulated packet on
     match asm

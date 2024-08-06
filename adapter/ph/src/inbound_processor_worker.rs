@@ -31,9 +31,8 @@ async fn worker<'pktbuf>(
     while let count @ 1.. = queue.recv_many(&mut msgs, config.batch_size).await {
         for msg in msgs.drain(..) {
             match msg {
-                InboundProcessorMessage::Packet(mut pkt) => {
-                    fastpath::maybe_capture(asm, Direction::Inbound, &mut pkt); // TODO: batch
-                    handle_packet(config, pkt, asm).await;
+                InboundProcessorMessage::Packet(pkt) => {
+                    handle_packet(config, asm, pkt).await;
                 }
                 InboundProcessorMessage::TestPacket(pkt) => {
                     pkt.acknowledge(queue.len(), count);
@@ -57,13 +56,26 @@ where
 
 async fn handle_packet<'pktbuf>(
     config: &Config,
-    mut pkt: Packet<'pktbuf>,
     asm: &Assembly<'pktbuf>,
+    mut pkt: Packet<'pktbuf>,
 ) {
     match fastpath::decrypt(asm, 0, &mut pkt) {
-        Ok(_zpi) => (),
-        Err(err) => { fastpath::drop_and_count(asm, pkt, err); return; }
+        Ok(()) => (),
+        Err(err) => {
+            fastpath::drop_and_count(asm, pkt, err);
+            return;
+        }
     }
+
+    fastpath::maybe_capture(asm, Direction::Inbound, &mut pkt);
+
+    let _zpi = match fastpath::decap_zpi(asm, 0, &mut pkt) {
+        Ok(zpi) => zpi,
+        Err(err) => {
+            fastpath::drop_and_count(asm, pkt, err);
+            return;
+        }
+    };
 
     let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
 
