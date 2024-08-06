@@ -8,16 +8,77 @@ use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::packet::Packet;
 use crate::queues::TryEnqueueError;
+use crate::zdp;
 use crate::zdp_ll;
+use crate::zpr;
 use bytes::Buf;
 use std::time::SystemTime;
+use zerocopy::FromBytes;
+use zpr_ext::zerocopy::*;
+
+/// Drop a packet and count the drop with the given reason.
+pub fn drop_and_count<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    pkt: Packet<'pktbuf>,
+    reason: impl Into<CounterType>,
+) {
+    asm.buffer_stack.put_buffer(pkt.destroy());
+    asm.counters[reason.into()].increment();
+}
+
+/// Add the ZPI header to a packet.
+pub fn encap_zpi<'pktbuf>(
+    _asm: &Assembly<'pktbuf>,
+    _link_id: zpr::LinkId,
+    zpi: zpr::Zpi,
+    pkt: &mut Packet<'pktbuf>,
+) {
+    pkt.alloc_zeroed_header::<zdp::ZdpZpiHeader>().zpi = zpi;
+}
+
+pub enum DecapZpiError {
+    BadStructure,
+    UnknownZpi,
+}
+
+impl From<DecapZpiError> for CounterType {
+    fn from(value: DecapZpiError) -> Self {
+        match value {
+            DecapZpiError::BadStructure => Self::BadStructure,
+            DecapZpiError::UnknownZpi => Self::UnknownZpi,
+        }
+    }
+}
+
+/// Remove the ZPI header from a packet.
+/// Returns the ZPI value, or an error if it's invalid for the given link.
+pub fn decap_zpi<'pktbuf>(
+    _asm: &Assembly<'pktbuf>,
+    _link_id: zpr::LinkId,
+    pkt: &mut Packet<'pktbuf>,
+) -> Result<zpr::Zpi, DecapZpiError> {
+    let zpi_hdr = zdp::ZdpZpiHeader::read_from_buf(pkt).ok_or(DecapZpiError::BadStructure)?;
+    let zpi = zpi_hdr.zpi as zpr::Zpi;
+
+    if zpi == 0 {
+        Ok(zpi)
+    } else {
+        // TODO: lookup in table
+        Err(DecapZpiError::UnknownZpi)
+    }
+}
 
 /// Offer a packet to be captured by the packet capture facility.
 /// The packet must be a complete ZDP message.
 /// Despite the &mut borrow, the packet will return materially unchanged.
 /// (It will have a link-layer header temporarily added to it.)
-pub fn maybe_capture<'a, 'pktbuf: 'a>(
-    asm: &Assembly<'pktbuf>,
+pub fn maybe_capture<'pktbuf>(asm: &Assembly<'pktbuf>, dir: Direction, pkt: &mut Packet<'pktbuf>) {
+    maybe_capture_batch(asm, dir, [pkt])
+}
+
+/// Batch packet capture.
+pub fn maybe_capture_batch<'a, 'pktbuf: 'a>(
+    asm: &'a Assembly<'pktbuf>,
     dir: Direction,
     pkts: impl IntoIterator<Item = &'a mut Packet<'pktbuf>>,
 ) {
@@ -103,5 +164,59 @@ pub fn maybe_capture<'a, 'pktbuf: 'a>(
             asm.counters[CounterType::OutCapPacksDrop].increase_by(num_dropped as u64);
             asm.counters[CounterType::OutCapPacksFilt].increase_by(num_filtered as u64);
         }
+    }
+}
+
+/// Encrypt a ZDP packet according to its ZPI header (which is not encrypted).
+pub fn encrypt<'pktbuf>(
+    _asm: &Assembly<'pktbuf>,
+    _link_id: zpr::LinkId,
+    pkt: &mut Packet<'pktbuf>,
+) {
+    let zpi_hdr =
+        zdp::ZdpZpiHeader::ref_from_prefix(pkt.body()).expect("ZPI header must be present");
+    let zpi = zpi_hdr.zpi as zpr::Zpi;
+
+    if zpi == 0 {
+        // TODO: MAC
+    } else {
+        todo!("encryption");
+    }
+}
+
+#[allow(dead_code)]
+pub enum DecryptError {
+    BadStructure,
+    UnknownZpi,
+    DecryptionFailure,
+    MicvFailure,
+}
+
+impl From<DecryptError> for CounterType {
+    fn from(value: DecryptError) -> Self {
+        match value {
+            DecryptError::BadStructure => Self::BadStructure,
+            DecryptError::UnknownZpi => Self::UnknownZpi,
+            DecryptError::DecryptionFailure => Self::DecryptionFailure,
+            DecryptError::MicvFailure => Self::MicvFailure,
+        }
+    }
+}
+
+/// Decrypt a ZDP packet according to its ZPI header (which is not removed).
+pub fn decrypt<'pktbuf>(
+    _asm: &Assembly<'pktbuf>,
+    _link_id: zpr::LinkId,
+    pkt: &mut Packet<'pktbuf>,
+) -> Result<(), DecryptError> {
+    let zpi_hdr =
+        zdp::ZdpZpiHeader::ref_from_prefix(pkt.body()).ok_or(DecryptError::BadStructure)?;
+    let zpi = zpi_hdr.zpi as zpr::Zpi;
+
+    if zpi == 0 {
+        // TODO: MAC
+        Ok(())
+    } else {
+        todo!("decryption");
     }
 }

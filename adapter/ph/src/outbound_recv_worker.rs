@@ -1,10 +1,11 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::*;
-use crate::ext::tokio_tun::*;
+use crate::fastpath;
 use crate::net_defs;
 use crate::packet::Packet;
 use std::future::Future;
 use tokio_tun::Tun;
+use zpr_ext::tokio_tun::*;
 
 #[derive(Copy, Clone)]
 pub struct Config {
@@ -36,8 +37,7 @@ async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
             let pi = tun_pi::read_pi(&mut pkt);
             if pi.strip || !is_ip(pi) {
                 // packet was too large or non-IP; drop
-                asm.counters[CounterType::OutPacksDrop].increment();
-                asm.buffer_stack.put_buffer(pkt.destroy());
+                fastpath::drop_and_count(asm, pkt, CounterType::OutPacksDrop);
                 continue;
             }
             asm.counters[CounterType::OutPacksRec].increment();

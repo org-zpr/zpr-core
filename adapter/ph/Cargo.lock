@@ -597,6 +597,7 @@ dependencies = [
  "tokio-tun",
  "zerocopy",
  "zerocopy-derive",
+ "zpr-ext",
 ]
 
 [[package]]
@@ -1048,4 +1049,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "zpr-ext"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "libc",
+ "nix",
+ "tokio",
+ "tokio-tun",
+ "zerocopy",
 ]

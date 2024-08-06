@@ -36,6 +36,18 @@ impl IpAddress {
     }
 }
 
+pub fn ip_version(pkt: &[u8]) -> u8 {
+    pkt[0] >> 4
+}
+
+pub fn ip_ethertype(ip_version: u8) -> u16 {
+    match ip_version {
+        4 => ethertype::IP,
+        6 => ethertype::IPV6,
+        _ => 0,
+    }
+}
+
 /// RFC 1071 Internet Checksum.  The input data must be non-empty, length at
 /// most 64 KiB, and length a multiple of 4.
 pub fn inet_checksum(data: &[u8]) -> [u8; 2] {

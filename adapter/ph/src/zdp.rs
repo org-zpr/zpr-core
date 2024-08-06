@@ -77,6 +77,12 @@ impl ZdpPacketType {
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
+pub struct ZdpZpiHeader {
+    pub zpi: u8,
+}
+
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
 pub struct ZdpBaseHeader {
     pub packet_type: ZdpPacketType,
     pub excess_length: u8,

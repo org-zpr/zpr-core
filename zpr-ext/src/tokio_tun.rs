@@ -1,6 +1,4 @@
-#![allow(dead_code)]
-
-use crate::ext::std::mem::slice_assume_init_mut;
+use crate::std::mem::slice_assume_init_mut;
 use bytes::buf;
 use libc;
 use nix::ioctl_write_ptr;
@@ -14,10 +12,15 @@ ioctl_write_ptr!(tun_set_carrier, b'T', 226, libc::c_int);
 pub trait TunExt {
     // no support yet in Rust for async trait fns
     //async fn recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> Result<usize>;
+
+    /// Like `try_recv()`, but reads into a `BufMut`.
     fn try_recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> Result<usize>;
+
+    /// Set the carrier status of the TUN link.
     fn set_carrier(&self, carrier: bool) -> Result<()>;
 }
 
+/// Like `Tun::recv()`, but reads into a `BufMut`.
 pub async fn tun_recv_buf<B: buf::BufMut>(self_: &Tun, buf: &mut B) -> Result<usize> {
     let uninit_slice = buf.chunk_mut();
     // SAFETY: we are only writing to this uninitialized slice
@@ -50,14 +53,19 @@ impl TunExt for Tun {
     }
 }
 
+#[cfg(target_os = "linux")]
 pub mod tun_pi {
+    //! Structures and functions for working with per-packet packet info.
+
     use bytes::buf;
 
-    // per-packet packet info
+    /// per-packet packet info
     #[derive(Clone, Copy)]
     pub struct TunPi {
-        pub strip: bool, // the inbound packet was truncated (ignored outbound)
-        pub proto: u16,  // Ethertype of packet
+        // the inbound packet was truncated (ignored outbound)
+        pub strip: bool,
+        /// Ethertype of packet
+        pub proto: u16,
     }
 
     #[cfg(target_os = "linux")]
@@ -90,6 +98,7 @@ pub mod tun_pi {
         }
     }
 
+    /// Read per-packet packet info from a `Buf`.
     pub fn read_pi<B: buf::Buf>(buf: &mut B) -> TunPi {
         let mut os_pi = std::mem::MaybeUninit::<os::TunPi>::uninit();
         let slice = os_pi.as_mut_ptr();
@@ -104,8 +113,10 @@ pub mod tun_pi {
         .into()
     }
 
+    /// The size of a per-packet packet info structure.
     pub const PI_SIZE: usize = std::mem::size_of::<os::TunPi>();
 
+    /// Write per-packet packet info into a `BufMut`.
     pub fn write_pi<B: buf::BufMut>(buf: &mut B, pi: TunPi) {
         let os_pi: os::TunPi = pi.into();
         buf.put(unsafe {

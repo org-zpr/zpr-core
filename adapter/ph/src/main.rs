@@ -25,17 +25,14 @@ mod config;
 mod counter;
 mod counters_enum;
 mod defs;
-mod ext;
 mod fastpath;
 mod flow_control;
 mod inbound_processor_worker;
 mod inbound_recv_worker;
-mod inbound_send_worker;
 mod net_defs;
 mod options;
 mod outbound_processor_worker;
 mod outbound_recv_worker;
-mod outbound_send_worker;
 mod packet;
 mod queues;
 mod rpc_worker;
@@ -43,6 +40,7 @@ mod test_packet;
 mod tun_ctl;
 mod zdp;
 mod zdp_ll;
+mod zpr;
 
 use assembly::{Assembly, SyncReqState};
 use buffer_stack::BufferStack;
@@ -103,11 +101,8 @@ fn main() -> ExitCode {
     // throughput with service time.
     let inbound_recv_batch_size = 8;
     let inbound_processor_batch_size = 16;
-    let inbound_send_batch_size = 4;
     let outbound_recv_batch_size = 4;
     let outbound_processor_batch_size = 16;
-    let outbound_send_queue_size = 16;
-    let outbound_send_batch_size = 8;
     let capture_queue_size = 16;
     let capture_batch_size = 8;
     let tun_queue_count = 1;
@@ -117,21 +112,8 @@ fn main() -> ExitCode {
     let (ip_inq, ip_outq) = mpsc::channel(inbound_processor_batch_size * 2);
     let inbound_processor = InboundProcessor::new(ip_inq);
 
-    let mut is_inqs = Vec::new();
-    let mut is_outqs = Vec::new();
-    for _ in 0..tun_queue_count {
-        let (is_inq, is_outq) = mpsc::channel(inbound_send_batch_size * 2);
-        // FIXME: maybe a way to do this with unzip but Rust couldn't infer types
-        is_inqs.push(is_inq);
-        is_outqs.push(is_outq);
-    }
-    let inbound_send = InboundSend::new(is_inqs.into_boxed_slice());
-
     let (op_inq, op_outq) = mpsc::channel(outbound_processor_batch_size * 2);
     let outbound_processor = OutboundProcessor::new(op_inq);
-
-    let (os_inq, os_outq) = mpsc::channel(outbound_send_queue_size);
-    let outbound_send = OutboundSend::new(os_inq);
 
     let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
@@ -175,6 +157,22 @@ fn main() -> ExitCode {
                 .expect("unable to open TUN device")
                 .leak();
 
+            let tun_ctl = tun_ctl::TunCtl::new(&tun_devs[0]);
+
+            tun_ctl.set_carrier(false).unwrap();
+            let socket = Box::leak(Box::new(
+                UdpSocket::bind(self_addr)
+                    .await
+                    .expect("unable to bind to self addr"),
+            ));
+            socket
+                .connect(peer_addr)
+                .await
+                .expect("unable to connect to peer addr");
+
+            let inbound_send = InboundSend::new(tun_devs.iter());
+            let outbound_send = OutboundSend::new([&*socket]);
+
             let asm = Box::leak(Box::new(Assembly {
                 buffer_stack,
                 inbound_processor,
@@ -185,7 +183,7 @@ fn main() -> ExitCode {
                 capture_worker,
                 flow_control,
                 counters,
-                tun_ctl: tun_ctl::TunCtl::new(&tun_devs[0]),
+                tun_ctl,
                 sync_req_state,
             }));
 
@@ -231,17 +229,6 @@ fn main() -> ExitCode {
                 ip_outq,
             ));
 
-            for (tun_dev, is_outq) in tun_devs.iter().zip(is_outqs) {
-                js.spawn(inbound_send_worker::launch(
-                    &inbound_send_worker::Config {
-                        batch_size: inbound_send_batch_size,
-                    },
-                    &*asm,
-                    is_outq,
-                    tun_dev,
-                ));
-            }
-
             for tun_dev in tun_devs.iter() {
                 js.spawn(outbound_recv_worker::launch(
                     &outbound_recv_worker::Config {
@@ -271,16 +258,6 @@ fn main() -> ExitCode {
             ));
 
             eprintln!("Connecting...");
-            asm.tun_ctl.set_carrier(false).unwrap();
-            let socket = Box::leak(Box::new(
-                UdpSocket::bind(self_addr)
-                    .await
-                    .expect("unable to bind to self addr"),
-            ));
-            socket
-                .connect(peer_addr)
-                .await
-                .expect("unable to connect to peer addr");
             eprintln!("Connected!"); // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
 
@@ -290,15 +267,6 @@ fn main() -> ExitCode {
                 },
                 &*asm,
                 &*socket,
-            ));
-
-            js.spawn(outbound_send_worker::launch(
-                &outbound_send_worker::Config {
-                    batch_size: outbound_send_batch_size,
-                },
-                &*asm,
-                &*socket,
-                os_outq,
             ));
 
             asm.send_report("Reporting for Duty!").await;

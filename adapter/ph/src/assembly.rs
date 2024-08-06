@@ -3,6 +3,7 @@ use crate::capture_worker::CaptureWorker;
 use crate::config;
 use crate::counter::*;
 use crate::counters_enum::*;
+use crate::fastpath;
 use crate::flow_control::FlowControl;
 use crate::packet::*;
 use crate::queues::*;

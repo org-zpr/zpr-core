@@ -1,6 +1,6 @@
-use crate::ext::std::mem::{drop_guard, DropGuard};
 use std::sync::Mutex;
 use tokio::sync::Notify;
+use zpr_ext::std::mem::{drop_guard, DropGuard};
 
 // This is used by the ingress stage to allocate buffers for incoming
 // packets.  Buffers are reused in a LIFO manner to promote cache reuse.
