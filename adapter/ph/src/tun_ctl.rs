@@ -1,6 +1,6 @@
-use crate::ext::tokio_tun::TunExt;
 use std::io::Result;
 use tokio_tun::Tun;
+use zpr_ext::tokio_tun::TunExt;
 
 // This structure provides shared access to the TUN device
 // for controlling its state.  Though it is just a thin wrapper

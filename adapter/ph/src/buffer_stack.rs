@@ -1,6 +1,6 @@
-use crate::ext::std::mem::{drop_guard, DropGuard};
 use std::sync::Mutex;
 use tokio::sync::Notify;
+use zpr_ext::std::mem::{drop_guard, DropGuard};
 
 // This is used by the ingress stage to allocate buffers for incoming
 // packets.  Buffers are reused in a LIFO manner to promote cache reuse.
@@ -27,12 +27,10 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
     /// Blocks until a single buffer can be returned.
     pub async fn get_buffer(&self) -> &'buf mut [u8; BUFSIZ] {
         loop {
-            let mut bufs = self.buffers.lock().unwrap();
-            match bufs.pop() {
+            match self.try_get_buffer() {
                 Some(buf) => break buf,
                 None => (),
             }
-            std::mem::drop(bufs);
 
             self.notify.notified().await;
         }
@@ -43,6 +41,11 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
     /// out of scope.
     pub async fn get_buffer_guarded(&'buf self) -> impl DropGuard<&'buf mut [u8; BUFSIZ]> {
         drop_guard(self.get_buffer().await, |buf| self.put_buffer(buf))
+    }
+
+    /// Attempts to acquire a single buffer.  Does not block.
+    pub fn try_get_buffer(&self) -> Option<&'buf mut [u8; BUFSIZ]> {
+        self.buffers.lock().unwrap().pop()
     }
 
     /// Blocks until at least 1 buffer can be returned.

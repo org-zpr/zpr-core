@@ -97,10 +97,9 @@ fn savefile_write(cap_pack: &CapPacket, savefile: &mut Savefile) {
 
     let header: PacketHeader = PacketHeader {
         ts,
-        caplen: std::cmp::min(cap_pack.packet.body().len() as u32, cap_pack.caplen),
-        len: cap_pack.packet.body().len() as u32,
+        caplen: cap_pack.packet.body().len() as u32,
+        len: cap_pack.orig_len as u32,
     };
-    //println!("packet.body.len: {}, caplen: {}", cap_pack.packet.body().len() as u32, cap_pack.caplen);
 
     let packet: Packet = Packet {
         header: &header,

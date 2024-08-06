@@ -1,18 +1,19 @@
 use crate::assembly::Assembly;
 use crate::classifier::classify;
+use crate::config;
 use crate::counters_enum::CounterType;
-use crate::flow_control;
+use crate::defs::Direction;
+use crate::fastpath;
 use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::queues::InboundProcessorMessage;
-use crate::queues::{Direction, TryEnqueueError};
 use crate::zdp::*;
-// use crate::buffer_stack::BufferStack;
 use bytes::Buf;
 use std::future::Future;
-use std::time::SystemTime;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
+use zpr_ext::std::mem::drop_guard;
+use zpr_ext::zerocopy::*;
 
 #[derive(Copy, Clone)]
 pub struct Config {
@@ -25,16 +26,13 @@ async fn worker<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     queue: &mut mpsc::Receiver<InboundProcessorMessage<'pktbuf>>,
 ) {
-    let mut pkts = Vec::new();
+    let mut msgs = Vec::new();
 
-    while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
-        if asm.flow_control.program_exists().await {
-            clone_cap_packs(asm, &mut pkts, count).await;
-        }
-        for pkt in pkts.drain(..) {
-            match pkt {
+    while let count @ 1.. = queue.recv_many(&mut msgs, config.batch_size).await {
+        for msg in msgs.drain(..) {
+            match msg {
                 InboundProcessorMessage::Packet(pkt) => {
-                    handle_packet(config, pkt, asm).await;
+                    handle_packet(config, asm, pkt).await;
                 }
                 InboundProcessorMessage::TestPacket(pkt) => {
                     pkt.acknowledge(queue.len(), count);
@@ -58,64 +56,75 @@ where
 
 async fn handle_packet<'pktbuf>(
     config: &Config,
-    mut pkt: Packet<'pktbuf>,
     asm: &Assembly<'pktbuf>,
+    mut pkt: Packet<'pktbuf>,
 ) {
-    pkt.advance(std::mem::size_of::<u8>()); // Account for extra byte at beginning because of ZPI
+    match fastpath::decrypt(asm, 0, &mut pkt) {
+        Ok(()) => (),
+        Err(err) => {
+            fastpath::drop_and_count(asm, pkt, err);
+            return;
+        }
+    }
 
-    let base_hdr = ZdpBaseHeader::ref_from_prefix(pkt.body()).expect("too-short ZDP message");
+    fastpath::maybe_capture(asm, Direction::Inbound, &mut pkt);
+
+    let _zpi = match fastpath::decap_zpi(asm, 0, &mut pkt) {
+        Ok(zpi) => zpi,
+        Err(err) => {
+            fastpath::drop_and_count(asm, pkt, err);
+            return;
+        }
+    };
+
+    let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
 
     // copy out relevant header info
     let packet_type = base_hdr.packet_type;
     let _sequence_number = base_hdr.sequence_number;
 
-    // strip base header
-    pkt.advance(std::mem::size_of::<ZdpBaseHeader>());
-
     if packet_type.is_response() {
-        let channel = asm.get_sender();
+        let channel = asm.sync_req_state.get_sender();
         match channel {
-            Some(channel) => match channel.send(pkt) {
+            Some(channel) => match channel.send((pkt, packet_type)) {
                 Ok(()) => (),
-                Err(pkt) => {
-                    let ret_buf = pkt.destroy();
-                    asm.buffer_stack.put_buffer(ret_buf);
-                    asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+                Err(ret_sender) => {
+                    fastpath::drop_and_count(
+                        asm,
+                        ret_sender.0,
+                        CounterType::UnexpectedMgmtResponse,
+                    );
                 }
             },
             None => {
-                let ret_buf = pkt.destroy();
-                asm.buffer_stack.put_buffer(ret_buf);
-                asm.counters[CounterType::UnexpectedMgmtResponse].increment();
+                fastpath::drop_and_count(asm, pkt, CounterType::UnexpectedMgmtResponse);
             }
         }
-    } else if packet_type.is_per_flow() {
+    } else if base_hdr.packet_type.is_per_flow() {
         let per_flow_hdr =
-            ZdpPerFlowHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+            ZdpPerFlowHeader::read_from_buf(&mut pkt).expect("too-short per-flow message");
 
-        // copy out relevant header info
-        let stream_id = per_flow_hdr.stream_id;
-
-        // strip per-flow header
-        pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
-
-        match packet_type {
+        match base_hdr.packet_type {
             ZdpPacketType::TransitPacket => {
-                pkt.metadata_mut().flow_id = stream_id;
-
+                pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into();
                 if config.mode == PhMode::Server {
                     // TODO: drop error packets
                     let _ = classify(&mut pkt);
                 }
 
                 // send out decapsulated packet
-                asm.inbound_send.enqueue_packet(pkt).await;
+                asm.inbound_send
+                    .enqueue_packet(drop_guard(pkt, |p| {
+                        asm.buffer_stack.put_buffer(p.destroy())
+                    }))
+                    .await;
+                asm.counters[CounterType::InPacksSent].increment();
             }
 
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     } else {
-        match packet_type {
+        match base_hdr.packet_type {
             ZdpPacketType::Report => {
                 let hdr =
                     ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
@@ -129,69 +138,22 @@ async fn handle_packet<'pktbuf>(
                         std::str::from_utf8(&pkt.body()[..report_data_length]).unwrap()
                     );
                 }
-                let ret_buf = pkt.destroy();
-                asm.buffer_stack.put_buffer(ret_buf);
+                asm.buffer_stack.put_buffer(pkt.destroy());
             }
             ZdpPacketType::Discard => {
                 // TODO print to debug log, when implemented
                 eprintln!("Discard message recieved");
             }
+            ZdpPacketType::HelloRequest => {
+                let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+                let hdr = send_pkt.alloc_zeroed_header::<ZdpHelloResponseHeader>();
+                hdr.status = 0;
+                asm.outbound_processor
+                    .enqueue_non_flow_mgmt(ZdpPacketType::HelloResponse, send_pkt)
+                    .await;
+                eprintln!("Recieved HelloRequest");
+            }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     }
-}
-
-async fn clone_cap_packs<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    pkts: &mut Vec<InboundProcessorMessage<'pktbuf>>,
-    count: usize,
-) {
-    let mut bufs = Vec::new();
-    let _ = asm.buffer_stack.try_get_buffers(count, &mut bufs);
-    let mut num_enqueued: u64 = 0;
-    for pkt in pkts {
-        // Splits between Packets and TestPackets
-        match pkt {
-            InboundProcessorMessage::Packet(pkt) => {
-                let dir: &mut u8 = pkt.alloc_zeroed_header();
-                *dir = 0;
-                let caplen = asm.flow_control.check_packet(pkt.body()).await;
-                //println!("caplen inbound {}", caplen);
-                if caplen > 0 {
-                    // Ensures there's at least one buffer
-                    match bufs.pop() {
-                        Some(buf) => {
-                            let pkt_clone: Packet = pkt.clone_into(buf);
-                            // Checks to see if the packet enqueue was successful
-                            match asm.capture_queue.try_enqueue_packet(
-                                pkt_clone,
-                                SystemTime::now(),
-                                Direction::Inbound,
-                                caplen, // Not currently used
-                            ) {
-                                Ok(()) => {
-                                    asm.counters[CounterType::InCapPacksWrite].increment();
-                                    num_enqueued += 1;
-                                }
-                                Err(TryEnqueueError::Full(ret_packet)) => {
-                                    let ret_buf = ret_packet.destroy();
-                                    asm.buffer_stack.put_buffer(ret_buf);
-                                    pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
-                                    break;
-                                }
-                            };
-                        }
-                        None => {
-                            pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
-                            break;
-                        }
-                    }
-                }
-                pkt.advance(flow_control::DIRECTION_HEADER_SIZE);
-            }
-            InboundProcessorMessage::TestPacket(_) => (),
-        }
-    }
-    asm.buffer_stack.put_buffers(bufs.into_iter());
-    asm.counters[CounterType::InCapPacksDrop].increase_by(count as u64 - num_enqueued)
 }

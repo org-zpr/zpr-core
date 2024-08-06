@@ -105,13 +105,13 @@ async fn handle_connection(
             // SET-CAPTURE-PROGRAM <program>
             "SET-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(set_capture_program(asm, str_message).await.as_bytes())
+                    .write_all(set_capture_program(asm, str_message).as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             "DELETE-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(delete_capture_program(asm).await.as_bytes())
+                    .write_all(delete_capture_program(asm).as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
@@ -164,15 +164,9 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     let mut inbound_processor_duration = Histogram::<u64>::new(1).unwrap();
     let mut inbound_processor_depth = Histogram::<u64>::new(1).unwrap();
     let mut inbound_processor_batch = Histogram::<u64>::new(1).unwrap();
-    let mut inbound_send_duration = Histogram::<u64>::new(1).unwrap();
-    let mut inbound_send_depth = Histogram::<u64>::new(1).unwrap();
-    let mut inbound_send_batch = Histogram::<u64>::new(1).unwrap();
     let mut outbound_processor_duration = Histogram::<u64>::new(1).unwrap();
     let mut outbound_processor_depth = Histogram::<u64>::new(1).unwrap();
     let mut outbound_processor_batch = Histogram::<u64>::new(1).unwrap();
-    let mut outbound_send_duration = Histogram::<u64>::new(1).unwrap();
-    let mut outbound_send_depth = Histogram::<u64>::new(1).unwrap();
-    let mut outbound_send_batch = Histogram::<u64>::new(1).unwrap();
 
     send_interval.tick().await;
     let mut queue_num = 0;
@@ -192,14 +186,6 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
             &mut inbound_processor_batch,
         );
 
-        let in_send = asm.inbound_send.enqueue_test_packet(queue_num).await;
-        record_metrics(
-            in_send,
-            &mut inbound_send_duration,
-            &mut inbound_send_depth,
-            &mut inbound_send_batch,
-        );
-
         let out_processor = asm.outbound_processor.enqueue_test_packet().await;
         record_metrics(
             out_processor,
@@ -208,13 +194,7 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
             &mut outbound_processor_batch,
         );
 
-        let out_send = asm.outbound_send.enqueue_test_packet().await;
-        record_metrics(
-            out_send,
-            &mut outbound_send_duration,
-            &mut outbound_send_depth,
-            &mut outbound_send_batch,
-        );
+        // TODO: record metrics from TUN interface and UDP socket
 
         send_interval.tick().await;
         queue_num += 1;
@@ -227,26 +207,14 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         &inbound_processor_depth,
         &inbound_processor_batch,
     );
-    let in_send = three_hists_values(
-        "Inbound Send",
-        &inbound_send_duration,
-        &inbound_send_depth,
-        &inbound_send_batch,
-    );
     let out_processor = three_hists_values(
         "Outbound Processor",
         &outbound_processor_duration,
         &outbound_processor_depth,
         &outbound_processor_batch,
     );
-    let out_send = three_hists_values(
-        "Outbound Send",
-        &outbound_send_duration,
-        &outbound_send_depth,
-        &outbound_send_batch,
-    );
 
-    format!("{in_processor}{in_send}{out_processor}{out_send}")
+    format!("{in_processor}{out_processor}")
 }
 
 // Helper for perf_sample
@@ -358,12 +326,12 @@ async fn flush_capture(asm: &Assembly<'_>) -> String {
 
 async fn close_capture(asm: &Assembly<'_>) -> String {
     asm.capture_worker.close_capture_file().await;
-    asm.flow_control.delete_program().await;
+    asm.flow_control.delete_program();
 
     String::from("Capture file closed\n")
 }
 
-async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
+fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
     let (_command, program) = str_message.split_once(' ').unwrap();
     let mut serialized_program: Vec<&str> = program.split(',').collect();
     let mut insn_vec = Vec::new();
@@ -382,15 +350,15 @@ async fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String 
 
     let mut return_message = format!("Program: {program} set\n");
     match cbpf_rs::BpfProgram::validate(&insn_vec) {
-        Ok(final_program) => asm.flow_control.set_program(final_program).await,
+        Ok(final_program) => asm.flow_control.set_program(final_program),
         _ => return_message = format!("Invalid program recieved, program not set\n"),
     }
 
     return_message
 }
 
-async fn delete_capture_program(asm: &Assembly<'_>) -> String {
-    asm.flow_control.delete_program().await;
+fn delete_capture_program(asm: &Assembly<'_>) -> String {
+    asm.flow_control.delete_program();
 
     String::from("Program deleted\n")
 }
