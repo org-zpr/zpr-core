@@ -1,4 +1,5 @@
 use crate::assembly::Assembly;
+use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::fastpath::*;
 use crate::packet::Packet;
@@ -6,6 +7,7 @@ use crate::queues::OutboundProcessorMessage;
 use crate::zdp::*;
 use core::future::Future;
 use tokio::sync::mpsc;
+use zpr_ext::std::mem::drop_guard;
 
 #[derive(Copy, Clone)]
 pub struct Config {
@@ -31,13 +33,13 @@ async fn worker<'pktbuf>(
                     let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     base_hdr.packet_type = ZdpPacketType::TransitPacket;
 
-                    handle_packet(pkt, asm).await;
+                    handle_packet(asm, pkt).await;
                 }
                 OutboundProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), count),
                 OutboundProcessorMessage::NonFlowMgmt(pack_type, mut pkt) => {
                     let hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     hdr.packet_type = pack_type;
-                    handle_packet(pkt, asm).await;
+                    handle_packet(asm, pkt).await;
                 }
                 OutboundProcessorMessage::PerFlowMgmt(pack_type, stream_id, mut pkt) => {
                     let per_flow_hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
@@ -46,7 +48,7 @@ async fn worker<'pktbuf>(
                     let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
                     base_hdr.packet_type = pack_type;
 
-                    handle_packet(pkt, asm).await;
+                    handle_packet(asm, pkt).await;
                 }
             }
         }
@@ -65,7 +67,7 @@ where
     async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
-async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf>) {
+async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
     // fill in metadata
     pkt.metadata_mut().flow_id = 0; // TODO: fill from IP header
 
@@ -74,5 +76,14 @@ async fn handle_packet<'pktbuf>(mut pkt: Packet<'pktbuf>, asm: &Assembly<'pktbuf
     maybe_capture(asm, Direction::Outbound, [&mut pkt]); // FIXME: batch
 
     // forward encapsulated packet on
-    asm.outbound_send.enqueue_packet(pkt).await;
+    match asm
+        .outbound_send
+        .enqueue_packet(drop_guard(pkt, |p| {
+            asm.buffer_stack.put_buffer(p.destroy())
+        }))
+        .await
+    {
+        Ok(()) => asm.counters[CounterType::OutPacksSent].increment(),
+        Err(_) => asm.counters[CounterType::OutPacksErr].increment(),
+    }
 }
