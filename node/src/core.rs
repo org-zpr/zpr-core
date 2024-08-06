@@ -60,6 +60,8 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     // This channel is for messages from the visa-support-service.
     let (vss_tx, mut vss_rx) = mpsc::channel(VSS_OUTPUT_CHANNEL_SIZE);
 
+    let another_opts = opts.clone(); 
+
     // The visa support service normally is started up on the ZPR public address of the node.
     // But for debug, you can override that.
     let vss_addr = match opts.vssforcelisten {
@@ -88,68 +90,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     //    ./target/debug/node -f -c /path/to/config.toml --vsforceconnect 127.0.0.1:31337
     //
     if o_vsforceconnect {
-        info!("DEBUG: force connect to visa service");
-
-        let (tx, mut rx) = mpsc::channel(VS_OUTPUT_CHANNEL_SIZE);
-
-        let vs_conn = VSConn::new(
-            tx.clone(),
-            &opts.vsforceconnect.unwrap(),
-            &nconfig.get_cert_path(),
-            &nconfig.get_key_path(),
-            nconfig.get_node_addr(),
-            &vss_addr,
-        )?;
-        for (k, v) in nconfig.get_claims() {
-            vs_conn.add_claim(&k, &v);
-        }
-
-        let vs_ctoken = ctoken.clone();
-        tasks.spawn(async move {
-            let init_ok = match vs_conn.initialize(None) {
-                Ok(_) => {
-                    info!("visa service initialized OK");
-                    true
-                }
-                Err(e) => {
-                    error!("failed to connect to visa service: {}", e);
-                    false
-                }
-            };
-
-            if init_ok {
-                match vs_conn.run(vs_ctoken).await {
-                    Ok(_) => {
-                        info!("visa service exits without error");
-                    }
-                    Err(e) => {
-                        error!("visa service exits with error: {}", e);
-                    }
-                }
-            }
-            let _ = cs_shutdown_tx.send(()); // visa service exits.
-        });
-
-        // Now we fire up another task to watch for output messages from
-        // the visa service.  In the future this will include visa-request
-        // responses and authentication responses.
-        let dbg_ctoken = ctoken.clone();
-        tasks.spawn(async move {
-            loop {
-                tokio::select! {
-                    Some(vs_output) = rx.recv() => {
-                        match vs_output {
-                          PingSuccess(config_id, policy_version) => {
-                              info!("PingSuccess: config={} policy={}", config_id, policy_version);
-                          }
-                        }
-                    }
-                    _ = dbg_ctoken.cancelled() => {
-                        break;
-                    }
-                }
-            }
-        });
+        vs_force_connect(&vss_addr, &mut tasks, &nconfig, another_opts, ctoken.clone(), cs_shutdown_tx).await?;
     } else {
         info!("nothing to do...  ^C to exit");
     }
@@ -192,5 +133,74 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     // ...
 
     info!("node shuts down");
+    Ok(())
+}
+
+
+async fn vs_force_connect(vss_addr: &str, tasks: &mut JoinSet<()>, nconfig: &config::Configuration, opts: CoreOpts, ctoken: CancellationToken, cs_shutdown_tx: oneshot::Sender<()>) -> io::Result<()> {
+    info!("DEBUG: force connect to visa service");
+
+
+    let (tx, mut rx) = mpsc::channel(VS_OUTPUT_CHANNEL_SIZE);
+
+    let vs_conn = VSConn::new(
+        tx.clone(),
+        &opts.vsforceconnect.unwrap(),
+        &nconfig.get_cert_path(),
+        &nconfig.get_key_path(),
+        nconfig.get_node_addr(),
+        &vss_addr,
+    )?;
+    for (k, v) in nconfig.get_claims() {
+        vs_conn.add_claim(&k, &v);
+    }
+
+    let vs_ctoken = ctoken.clone();
+    tasks.spawn(async move {
+        let init_ok = match vs_conn.initialize(None) {
+            Ok(_) => {
+                info!("visa service initialized OK");
+                true
+            }
+            Err(e) => {
+                error!("failed to connect to visa service: {}", e);
+                false
+            }
+        };
+
+        if init_ok {
+            match vs_conn.run(vs_ctoken).await {
+                Ok(_) => {
+                    info!("visa service exits without error");
+                }
+                Err(e) => {
+                    error!("visa service exits with error: {}", e);
+                }
+            }
+        }
+        let _ = cs_shutdown_tx.send(()); // visa service exits.
+    });
+
+    // Now we fire up another task to watch for output messages from
+    // the visa service.  In the future this will include visa-request
+    // responses and authentication responses.
+    let dbg_ctoken = ctoken.clone();
+    tasks.spawn(async move {
+        loop {
+            tokio::select! {
+                Some(vs_output) = rx.recv() => {
+                    match vs_output {
+                      PingSuccess(config_id, policy_version) => {
+                          info!("PingSuccess: config={} policy={}", config_id, policy_version);
+                      }
+                    }
+                }
+                _ = dbg_ctoken.cancelled() => {
+                    break;
+                }
+            }
+        }
+    });
+
     Ok(())
 }
