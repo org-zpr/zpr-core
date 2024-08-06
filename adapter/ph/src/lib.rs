@@ -15,6 +15,7 @@ pub mod flow_control;
 pub mod inbound_processor_worker;
 pub mod inbound_recv_worker;
 pub mod inbound_send_worker;
+pub mod km;
 pub mod net_defs;
 pub mod options;
 pub mod outbound_processor_worker;

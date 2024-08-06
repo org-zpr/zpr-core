@@ -22,6 +22,8 @@ tokio = { version = "1.37.0", features = ["full"] }
 zerocopy-derive = { version = "0.7.34" }
 zerocopy = { version = "0.7.34", features = ["byteorder"] }
 cbpf-rs = { path = "../../cbpf-rs", features = ['pcap'] }
+tokio-util = { version = "0.7.11", features = ["rt"] }
+tracing = "0.1.40"
 
 [features]
 ci = []

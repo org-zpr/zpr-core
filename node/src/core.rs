@@ -12,6 +12,8 @@ use crate::vs::VSConn;
 use crate::vs::VSOutput::PingSuccess;
 
 use crate::vs::vss;
+use crate::zdp::server::ZDPServer;
+
 
 pub const VERSION: &str = "0.1.0";
 
@@ -95,6 +97,24 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
         info!("nothing to do...  ^C to exit");
     }
 
+    if nconfig.is_dock_enabled() {
+        info!("setting up dock at {}", nconfig.get_dock_listen_addr());
+        let zctok = ctoken.clone();
+        let zserver = ZDPServer::new(nconfig.get_dock_listen_addr());
+        tasks.spawn(async move {
+            match zserver.run(zctok).await {
+                Ok(_) => {
+                    info!("dock server exits without error");
+                }
+                Err(e) => {
+                    error!("dock server exits with error: {}", e);
+                }
+            }
+        });
+    } else {
+        info!("dock is not enabled");
+    }
+    
     loop {
         //  main node runloop
         tokio::select! {

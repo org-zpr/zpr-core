@@ -1,5 +1,4 @@
 // km.rs - Key Management for ZDP
-// TODO: Probably need this in node too.
 
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -14,7 +13,7 @@ use bytes::{BufMut, BytesMut, Bytes};
 
 use tracing::{info, error};
 
-use ph::packet::Packet;
+use crate::packet::Packet;
 
 
 /*
@@ -110,7 +109,6 @@ impl KeyManager<'_> {
     // SA_ID.  It's up to caller to mix in the configuration ID value.
     pub fn encrypt_transport(&self, message: &mut Packet) -> io::Result<()> {
         let encr: Box<dyn TransportEncr>;
-        let sa_id: u8;
         let padlen: usize;
         let align: u8;
         {
@@ -122,7 +120,6 @@ impl KeyManager<'_> {
                 // programming error
                 panic!("SA_ID is zero");
             }
-            sa_id = state.sa_id;
             encr = state.statemachine.get_transport_encryptor();
             padlen = state.kmsettings.padlen;
             align = state.kmsettings.alignment;
@@ -149,6 +146,7 @@ impl KeyManager<'_> {
             Ok(len) => {
                 // TODO: Write ZPI + contents of outbuf into passed packet.
                 // ...
+                info!("TODO: ready to write {}byte encrypted message back into packet - not implemented", len);
             }
             Err(e) => {
                 return Err(io::Error::new(io::ErrorKind::Other, format!("encrypt failed: {}", e)));
@@ -161,7 +159,7 @@ impl KeyManager<'_> {
     // We assume that packet ZPI value has been clensed of the config ID and is only the SA_ID.
     // Key Management packets should not be sent here.
     pub fn decrypt_transport(&self, message: &mut Packet) -> io::Result<()> {
-        let encr: Box<dyn TransportEncr>;
+        let _encr: Box<dyn TransportEncr>;
         {
             let state = self.shared.state.lock().unwrap();
             if message.body()[0]  == 0 {
@@ -173,10 +171,10 @@ impl KeyManager<'_> {
             if state.statemachine.get_state() != KMSMState::Transport {
                 return Err(io::Error::new(io::ErrorKind::Other, "SA not in transport state"));
             }
-            encr = state.statemachine.get_transport_encryptor();
+            _encr = state.statemachine.get_transport_encryptor();
         }
 
-        // TODO...
+        // TODO... actually use encr...
 
         // check ZPI...
         // if this is a transit packet
@@ -216,7 +214,8 @@ impl KeyManager<'_> {
 
     // Blocking run loop for the key manager.  This runs the key management algorithm
     // state machine handing KM messages in and out.
-    pub async fn start(&mut self, ctok: CancellationToken, km_buffers_out: mpsc::Sender<Bytes>) -> io::Result<()> {
+    // If `initiate` is true, the key manager will initiate a new handshake.
+    pub async fn start(&mut self, initiate: bool, ctok: CancellationToken, km_buffers_out: mpsc::Sender<Bytes>) -> io::Result<()> {
         let (km_tx, mut km_rx) = mpsc::channel(16);
         let tick_interval: Duration;
         {
@@ -231,7 +230,7 @@ impl KeyManager<'_> {
         let handshake: Option<Bytes>;
         {
             let mut state = self.shared.state.lock().unwrap();
-            handshake = state.statemachine.reset(true);
+            handshake = state.statemachine.reset(initiate);
         }
         if let Some(handshake) = handshake {
             match km_buffers_out.send(handshake).await {
@@ -256,7 +255,7 @@ impl KeyManager<'_> {
                     let resp: Option<Bytes>;
                     {
                         let mut state = self.shared.state.lock().unwrap();
-                        resp = state.statemachine.reset(true);
+                        resp = state.statemachine.reset(initiate);
                     }
                     if let Some(resp) = resp {
                         match km_buffers_out.send(resp).await {
@@ -339,7 +338,7 @@ impl KeyManager<'_> {
 
 
 
-struct EncryptionError;
+pub struct EncryptionError;
 
 impl fmt::Display for EncryptionError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -420,6 +419,7 @@ pub struct SillyKeyManager {
     state: KMSMState,
     settings: KMSettings,
     hello_t: time::Instant,
+    initiate: bool,
 }
 
 impl SillyKeyManager {
@@ -433,6 +433,7 @@ impl SillyKeyManager {
                 tick_interval: Duration::from_millis(1000),
             },
             hello_t: time::Instant::now(),
+            initiate: false,
         }
     }
 }
@@ -487,23 +488,33 @@ impl KeyManagerStateMachine for SillyKeyManager {
         self.state.clone()
     }
 
-    fn reset(&mut self, _initiate: bool) -> Option<Bytes> {
-        let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
-        self.state = KMSMState::Configuring;
-        self.hello_t = time::Instant::now();
-        Some(handshake)
+    fn reset(&mut self, initiate: bool) -> Option<Bytes> {
+        self.initiate = initiate;        
+        self.state = KMSMState::Configuring;        
+        if initiate {
+            let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD        
+            self.hello_t = time::Instant::now();
+            Some(handshake)            
+        } else {
+            None
+        }
     }
 
     fn handle_message(&mut self, _message: &[u8]) -> Option<Bytes> {
-       if self.state == KMSMState::Configuring {
-        self.state = KMSMState::Transport;
-       }
-       None
+        if self.state == KMSMState::Configuring {
+            self.state = KMSMState::Transport;
+            if !self.initiate {
+                // Did not initiate, so send a reply back.
+                let handshake_reply = Bytes::from_static(&[0, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD        
+                return Some(handshake_reply);
+            }
+        }
+        None
     }
 
     fn tick(&mut self) -> Option<Bytes> {
         if self.state == KMSMState::Configuring {
-            if self.hello_t.elapsed() > Duration::from_secs(5) {
+            if self.initiate && self.hello_t.elapsed() > Duration::from_secs(5) {
                 // too long, send another hello.
                 let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
                 self.hello_t = time::Instant::now();
