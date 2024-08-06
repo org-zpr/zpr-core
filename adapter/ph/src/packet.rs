@@ -160,7 +160,7 @@ impl<'buf> Packet<'buf> {
     pub fn clone_into_with_headroom<'other>(
         &self,
         buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
-        headroom: usize
+        headroom: usize,
     ) -> Packet<'other> {
         self.clone_prefix_into_with_headroom(buf, headroom, self.body().len())
     }

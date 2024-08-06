@@ -117,16 +117,16 @@ pub fn maybe_capture_batch<'a, 'pktbuf: 'a>(
             }) {
                 Some(buf) => {
                     let orig_len = pkt.body().len();
-                    let pkt_clone: Packet = pkt.clone_prefix_into(buf, std::cmp::min(caplen, orig_len));
+                    let pkt_clone: Packet =
+                        pkt.clone_prefix_into(buf, std::cmp::min(caplen, orig_len));
                     // remove direction indicator from beginning of packet
                     pkt.advance(std::mem::size_of::<zdp_ll::ZdpLinkP2P>());
 
                     // Checks to see if the packet enqueue was successful
-                    match asm.capture_queue.try_enqueue_packet(
-                        pkt_clone,
-                        capture_time,
-                        orig_len,
-                    ) {
+                    match asm
+                        .capture_queue
+                        .try_enqueue_packet(pkt_clone, capture_time, orig_len)
+                    {
                         Ok(()) => num_captured += 1,
 
                         Err(TryEnqueueError::Full(ret_packet)) => {
