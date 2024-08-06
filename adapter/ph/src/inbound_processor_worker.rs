@@ -3,8 +3,6 @@ use crate::classifier::classify;
 use crate::config;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
-use crate::ext::std::mem::drop_guard;
-use crate::ext::zerocopy::*;
 use crate::fastpath;
 use crate::options::PhMode;
 use crate::packet::Packet;
@@ -14,6 +12,8 @@ use bytes::Buf;
 use std::future::Future;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
+use zpr_ext::std::mem::drop_guard;
+use zpr_ext::zerocopy::*;
 
 #[derive(Copy, Clone)]
 pub struct Config {

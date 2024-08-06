@@ -6,7 +6,6 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
-use crate::ext::zerocopy::*;
 use crate::packet::Packet;
 use crate::queues::TryEnqueueError;
 use crate::zdp;
@@ -15,6 +14,7 @@ use crate::zpr;
 use bytes::Buf;
 use std::time::SystemTime;
 use zerocopy::FromBytes;
+use zpr_ext::zerocopy::*;
 
 /// Drop a packet and count the drop with the given reason.
 pub fn drop_and_count<'pktbuf>(

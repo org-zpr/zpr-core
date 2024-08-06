@@ -11,7 +11,6 @@ pub mod config;
 pub mod counter;
 pub mod counters_enum;
 pub mod defs;
-pub mod ext;
 pub mod fastpath;
 pub mod flow_control;
 pub mod inbound_processor_worker;

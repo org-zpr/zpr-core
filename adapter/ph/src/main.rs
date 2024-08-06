@@ -25,7 +25,6 @@ mod config;
 mod counter;
 mod counters_enum;
 mod defs;
-mod ext;
 mod fastpath;
 mod flow_control;
 mod inbound_processor_worker;

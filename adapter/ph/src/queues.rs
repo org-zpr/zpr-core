@@ -8,8 +8,6 @@
 //! CPU-intensive postprocessing (e.g. signature verification).
 //! This may morph into more or fewer (i.e. zero) stages depending on future requirements.
 
-use crate::ext::std::mem::DropGuard;
-use crate::ext::tokio_tun::tun_pi;
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
@@ -21,6 +19,8 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
+use zpr_ext::std::mem::DropGuard;
+use zpr_ext::tokio_tun::tun_pi;
 
 pub enum InboundProcessorMessage<'pktbuf> {
     Packet(Packet<'pktbuf>),
