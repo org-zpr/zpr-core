@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 arrayref = { version = "0.3.7" }
 bytes = { version = "1.7.1" }
-cbpf-rs = { path = "../../cbpf-rs", features = ["pcap"] }
+cbpf-rs = { path = "../../cbpf-rs" }
 clap = { version = "4.5.7", features = ["derive"] }
 enum-map = { version = "2.7.3" }
 foreign-types = { version = "0.3.2" }
