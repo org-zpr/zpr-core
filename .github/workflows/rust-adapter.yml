@@ -9,7 +9,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  cd:
+  cd-build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -37,7 +37,7 @@ jobs:
       - name: Check test warnings
         run: cd adapter/cd && cargo rustc --tests -- -D warnings
 
-  ph:
+  ph-build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
