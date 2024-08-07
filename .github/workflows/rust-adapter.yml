@@ -28,6 +28,8 @@ jobs:
   cd-warnings:
     runs-on: ubuntu-latest
     steps: 
+    - name: setup
+      run: sudo apt update -y && sudo apt install -y libpcap-dev
     - uses: actions/checkout@v4
     - name: Check warnings
       run: cd adapter/cd && cargo rustc -- -D warnings
@@ -35,6 +37,8 @@ jobs:
   cd-test-warnings:
       runs-on: ubuntu-latest
       steps: 
+      - name: setup
+        run: sudo apt update -y && sudo apt install -y libpcap-dev
       - uses: actions/checkout@v4
       - name: Check test warnings
         run: cd adapter/cd && cargo rustc --tests -- -D warnings
