@@ -5,9 +5,9 @@ use openssl::rsa::Rsa;
 use openssl::x509::X509;
 
 use std::fs;
-use std::path::PathBuf;
 use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read};
+use std::path::PathBuf;
 
 // "Config" is configuration details for the CD binary.
 pub struct Config {

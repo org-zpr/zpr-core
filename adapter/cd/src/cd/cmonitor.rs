@@ -2,22 +2,21 @@ use std::io;
 use std::time::Instant;
 
 use tokio::sync::mpsc::{self, Sender};
-use tokio_util::sync::CancellationToken;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use std::sync::{Arc, Mutex};
 
 use tracing::info;
 
-pub use crate::cd::zpr::{Zpr, ConfigState};
+pub use crate::cd::zpr::{ConfigState, Zpr};
 
 pub use crate::zdp::client;
 
 pub enum Command {
-    Connect(String), // takes configuration name
+    Connect(String),    // takes configuration name
     Disconnect(String), // takes configuration name
 }
-
 
 #[derive(Debug, Clone)]
 pub struct CMonitor {
@@ -36,7 +35,6 @@ pub struct CMState {
     cli: ClientState,
 }
 
-
 #[derive(Debug, Clone)]
 struct ClientState {
     client: Option<ClientRec>,
@@ -47,7 +45,7 @@ struct ClientRec {
     addr: String, // form of 'host:port'
     config_name: String,
     ctok: CancellationToken,
-    client_handle: Arc::<JoinHandle<io::Result<()>>>,
+    client_handle: Arc<JoinHandle<io::Result<()>>>,
 }
 
 impl CMonitor {
@@ -57,11 +55,9 @@ impl CMonitor {
                 state: Mutex::new(CMState {
                     cmd_tx: None,
                     zpr,
-                    cli: ClientState {
-                        client: None,
-                    },
-                })
-            })
+                    cli: ClientState { client: None },
+                }),
+            }),
         }
     }
 
@@ -113,12 +109,10 @@ impl CMonitor {
         Ok(())
     }
 
-
     // In the future a single adapter could have multiple active client
     // connections (to different ZPR nets).  For now we support just one.
     async fn do_connect(&mut self, configuration: String) -> io::Result<()> {
         info!("CMonitor - do_connect - config = {}", configuration);
-
 
         let zpr: Zpr;
         let addr_port: String;
@@ -128,8 +122,11 @@ impl CMonitor {
             zpr = state.zpr.clone();
             addr_port = match zpr.get_connect_string(&configuration) {
                 None => {
-                    return Err(io::Error::new(io::ErrorKind::Other, "No connection string found"));
-                },
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "No connection string found",
+                    ));
+                }
                 Some(ap) => ap,
             };
             old_cli = state.cli.client.clone();
@@ -165,7 +162,7 @@ impl CMonitor {
         let passed_ctok = ctok.clone();
         let passed_addr_port = addr_port.clone();
         let handle: JoinHandle<io::Result<()>> = tokio::spawn(async move {
-            let cli = client::ZDPClient::new(&passed_addr_port);            
+            let cli = client::ZDPClient::new(&passed_addr_port);
             cli.run(passed_ctok).await // blocking, long running
         });
         // well hopefully that launched!
@@ -183,7 +180,6 @@ impl CMonitor {
         Ok(())
     }
 
-
     async fn do_disconnect(&mut self, configuration: String) -> io::Result<()> {
         info!("CMonitor - do_disconnect - config = {}", configuration);
 
@@ -195,11 +191,13 @@ impl CMonitor {
             old_cli = state.cli.client.clone();
         }
 
-
         match old_cli {
             Some(crec) => {
                 if crec.config_name != configuration {
-                    return Err(io::Error::new(io::ErrorKind::Other, format!("Not connected to {}", configuration)));
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("Not connected to {}", configuration),
+                    ));
                 }
                 info!("disconnecting from {}", crec.addr);
                 let _ = zpr.set_status(&crec.config_name, ConfigState::Disconnecting);
@@ -210,11 +208,12 @@ impl CMonitor {
                 state.cli.client = None;
             }
             None => {
-                return Err(io::Error::new(io::ErrorKind::Other, format!("Not connected to {}", configuration)));
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Not connected to {}", configuration),
+                ));
             }
         }
         Ok(())
     }
-
 }
-

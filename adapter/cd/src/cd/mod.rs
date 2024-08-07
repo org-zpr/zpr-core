@@ -10,15 +10,14 @@ pub use crate::cd::zpr::Zpr;
 mod cmonitor;
 pub use crate::cd::cmonitor::CMonitor;
 
-
 use std::{fs, io, sync::Arc};
 use tokio::signal;
 use tokio::sync::oneshot;
 use tracing::{error, info};
 use tracing_subscriber;
 
-use tokio_util::sync::CancellationToken;
 use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
 
 #[tokio::main]
 pub async fn tokio_main(config: Arc<Config>) -> io::Result<()> {
@@ -29,7 +28,6 @@ pub async fn tokio_main(config: Arc<Config>) -> io::Result<()> {
     let mut tracker = JoinSet::new();
     let token = CancellationToken::new();
     let zpr = Zpr::new();
-
 
     let monitor = CMonitor::new(zpr.clone());
 
@@ -61,7 +59,10 @@ pub async fn tokio_main(config: Arc<Config>) -> io::Result<()> {
         None => {
             error!("cmonitor failed to start");
             token.cancel();
-            return Err(io::Error::new(io::ErrorKind::Other, "cmonitor failed to start"));
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "cmonitor failed to start",
+            ));
         }
     };
     info!("cmonitor running");
@@ -81,7 +82,6 @@ pub async fn tokio_main(config: Arc<Config>) -> io::Result<()> {
         let _ = cs_shutdown_tx.send(());
     });
 
-
     loop {
         tokio::select! {
             _ = &mut cs_shutdown_rx => {
@@ -95,7 +95,6 @@ pub async fn tokio_main(config: Arc<Config>) -> io::Result<()> {
             }
         }
     }
-
 
     // wait for all subtasks to stop
     while let Some(_) = tracker.join_next().await {}

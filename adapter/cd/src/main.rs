@@ -10,10 +10,6 @@ use std::sync::Arc;
 pub mod cd;
 pub mod zdp;
 
-
-
-
-
 fn usage() -> io::Result<()> {
     println!("Usage: cd [-f|--foreground]");
     println!("ZPR Connection Daemon\n");
@@ -21,7 +17,8 @@ fn usage() -> io::Result<()> {
     let data_home = get_data_home();
     println!(
         "background, logging to {}/cd.out and {}/cd.err.",
-        data_home.to_str().unwrap(), data_home.to_str().unwrap()
+        data_home.to_str().unwrap(),
+        data_home.to_str().unwrap()
     );
     println!();
 
@@ -31,16 +28,14 @@ fn usage() -> io::Result<()> {
 fn get_data_home() -> PathBuf {
     let mut dh = match env::var("XDG_DATA_HOME") {
         Ok(val) => PathBuf::from(val),
-        Err(_) => {
-            match env::var("HOME") {
-                Ok(val) => {
-                    let mut pb = PathBuf::from(val);
-                    pb.push(".local/share");
-                    pb
-                },
-                Err(_) => PathBuf::from("/var/run"),
+        Err(_) => match env::var("HOME") {
+            Ok(val) => {
+                let mut pb = PathBuf::from(val);
+                pb.push(".local/share");
+                pb
             }
-        }
+            Err(_) => PathBuf::from("/var/run"),
+        },
     };
     dh.push("zpr");
     dh

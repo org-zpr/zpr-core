@@ -14,7 +14,6 @@ use crate::vs::VSOutput::PingSuccess;
 use crate::vs::vss;
 use crate::zdp::server::ZDPServer;
 
-
 pub const VERSION: &str = "0.1.0";
 
 const VS_OUTPUT_CHANNEL_SIZE: usize = 32;
@@ -62,7 +61,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     // This channel is for messages from the visa-support-service.
     let (vss_tx, mut vss_rx) = mpsc::channel(VSS_OUTPUT_CHANNEL_SIZE);
 
-    let another_opts = opts.clone(); 
+    let another_opts = opts.clone();
 
     // The visa support service normally is started up on the ZPR public address of the node.
     // But for debug, you can override that.
@@ -92,7 +91,15 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     //    ./target/debug/node -f -c /path/to/config.toml --vsforceconnect 127.0.0.1:31337
     //
     if o_vsforceconnect {
-        vs_force_connect(&vss_addr, &mut tasks, &nconfig, another_opts, ctoken.clone(), cs_shutdown_tx).await?;
+        vs_force_connect(
+            &vss_addr,
+            &mut tasks,
+            &nconfig,
+            another_opts,
+            ctoken.clone(),
+            cs_shutdown_tx,
+        )
+        .await?;
     } else {
         info!("nothing to do...  ^C to exit");
     }
@@ -114,7 +121,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     } else {
         info!("dock is not enabled");
     }
-    
+
     loop {
         //  main node runloop
         tokio::select! {
@@ -156,10 +163,15 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     Ok(())
 }
 
-
-async fn vs_force_connect(vss_addr: &str, tasks: &mut JoinSet<()>, nconfig: &config::Configuration, opts: CoreOpts, ctoken: CancellationToken, cs_shutdown_tx: oneshot::Sender<()>) -> io::Result<()> {
+async fn vs_force_connect(
+    vss_addr: &str,
+    tasks: &mut JoinSet<()>,
+    nconfig: &config::Configuration,
+    opts: CoreOpts,
+    ctoken: CancellationToken,
+    cs_shutdown_tx: oneshot::Sender<()>,
+) -> io::Result<()> {
     info!("DEBUG: force connect to visa service");
-
 
     let (tx, mut rx) = mpsc::channel(VS_OUTPUT_CHANNEL_SIZE);
 

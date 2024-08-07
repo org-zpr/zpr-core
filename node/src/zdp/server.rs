@@ -3,19 +3,17 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use tokio::net::UdpSocket;
-use tokio_util::sync::CancellationToken;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 use tracing::info;
 
 use ph::km::{KeyManager, SillyKeyManager};
 
-
 #[derive(Debug, Clone)]
 pub struct ZDPServer {
     addr: String, // listen address, "host:port"
 }
-
 
 // Placeholder or demonstration code for a dock server component on a node.
 // Here to help with testing the KM code.
@@ -38,7 +36,7 @@ impl ZDPServer {
         };
 
         let socket = UdpSocket::bind(local_addr).await?;
-        info!("ZDP server listening on {}", self.addr);        
+        info!("ZDP server listening on {}", self.addr);
         let s_recv = Arc::new(socket);
         let s_send = s_recv.clone();
 
@@ -46,7 +44,7 @@ impl ZDPServer {
         let km_ctok = ctok.clone();
 
         // In real implemntation each client gets a KM instance.
-        let mgr = KeyManager::new(Box::new(SillyKeyManager::new()));        
+        let mgr = KeyManager::new(Box::new(SillyKeyManager::new()));
         let mut mgr_cc = mgr.clone();
         tokio::spawn(async move {
             mgr_cc.start(false, km_ctok, km_tx).await.unwrap();
@@ -71,7 +69,7 @@ impl ZDPServer {
                     if cur_client.is_none() {
                         info!("error: KM generated a message but we have no client to send to");
                         continue;
-                    }   
+                    }
                     match s_send.send_to(&km_buf, cur_client.unwrap()).await {
                         Ok(sz) => {
                             info!("zdp/client - sent {} byte KM message", sz);
@@ -90,15 +88,15 @@ impl ZDPServer {
                         info!("Ignoring message from unknown source");
                         continue;
                     }
-                    // Normally we would look at the SPI/ZPI or other header information to determine 
+                    // Normally we would look at the SPI/ZPI or other header information to determine
                     // what to do with the message.  For now we assume this is a key management message.
-                    // If this is a transport message we would also use KM, but would use the decrypt fn instead of 
+                    // If this is a transport message we would also use KM, but would use the decrypt fn instead of
                     // this channel.
                     match mgr.handle_km_message(&buf[..n]).await {
                         Ok(_) => {},
                         Err(e) => {
                             info!("zdp/server - error handling KM message: {:?}", e);
-                            // TODO: Drop client? Reset KM?                            
+                            // TODO: Drop client? Reset KM?
                         }
                     }
                 }
@@ -107,5 +105,4 @@ impl ZDPServer {
 
         Ok(())
     }
-
 }

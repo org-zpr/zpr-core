@@ -16,7 +16,6 @@ pub struct ZDPClient {
     addr: String,
 }
 
-
 impl ZDPClient {
     pub fn new(addr_port: &str) -> ZDPClient {
         ZDPClient {
@@ -24,16 +23,17 @@ impl ZDPClient {
         }
     }
 
-
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-
         let mgr = KeyManager::new(Box::new(SillyKeyManager::new()));
 
         let remote_addr: SocketAddr = match self.addr.parse() {
             Ok(addr) => addr,
             Err(e) => {
-                return Err(io::Error::new(io::ErrorKind::Other, format!("failed to parse address: {}", e)));
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to parse address: {}", e),
+                ));
             }
         };
 
@@ -52,7 +52,6 @@ impl ZDPClient {
         tokio::spawn(async move {
             mgr_cc.start(true, km_ctok, km_tx).await.unwrap();
         });
-
 
         // Now loop -
         //   read from UDP, pass to KM
@@ -101,7 +100,4 @@ impl ZDPClient {
 
         Ok(())
     }
-
-
 }
-

@@ -29,7 +29,7 @@ struct Creds {
 
 #[derive(Debug, Clone, Deserialize)]
 struct Dock {
-    enabled: bool, 
+    enabled: bool,
     listen_address: String, // dock listen address, "host:port"
 }
 

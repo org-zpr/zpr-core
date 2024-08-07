@@ -117,7 +117,6 @@ impl Zpr {
         state.configs.keys().cloned().collect()
     }
 
-
     /// Returns "ADDR:PORT"
     pub fn get_connect_string(&self, name: &str) -> Option<String> {
         let state = self.shared.state.lock().unwrap();

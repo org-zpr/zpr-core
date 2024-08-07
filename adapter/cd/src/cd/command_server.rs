@@ -5,9 +5,9 @@ use tracing::{error, info};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use tokio::sync::mpsc::Sender;
 
 pub use crate::cd::config::{load_configuration, Config};
 pub use crate::cd::zpr::{ConfigState, Zpr};
@@ -22,7 +22,10 @@ pub async fn command_server(
     token: CancellationToken,
     monitor_ctrl: Sender<cmonitor::Command>,
 ) -> io::Result<()> {
-    info!("starting command server on {}", config.socket_path.display());
+    info!(
+        "starting command server on {}",
+        config.socket_path.display()
+    );
     let listener = UnixListener::bind(config.socket_path.clone())?;
     loop {
         tokio::select! {
@@ -62,7 +65,11 @@ pub async fn command_server(
 //      OK
 //      explanatory message here
 //
-async fn handle_command_connection(stream: tokio::net::UnixStream, zpr: Zpr, monitor_ctrl: Sender<cmonitor::Command>) -> io::Result<()> {
+async fn handle_command_connection(
+    stream: tokio::net::UnixStream,
+    zpr: Zpr,
+    monitor_ctrl: Sender<cmonitor::Command>,
+) -> io::Result<()> {
     let (reader, send) = stream.into_split();
     let mut reader = tokio::io::BufReader::new(reader);
 
@@ -82,7 +89,9 @@ async fn handle_command_connection(stream: tokio::net::UnixStream, zpr: Zpr, mon
             match parts[0] {
                 "status" => handle_status(Arc::clone(&writer), zpr).await?,
                 "connect" => handle_connect(&parts, Arc::clone(&writer), zpr, monitor_ctrl).await?,
-                "disconnect" => handle_disconnect(&parts, Arc::clone(&writer), zpr, monitor_ctrl).await?,
+                "disconnect" => {
+                    handle_disconnect(&parts, Arc::clone(&writer), zpr, monitor_ctrl).await?
+                }
                 _ => {
                     let mut ww = writer.lock().await;
                     ww.write_all(b"2\nERR\nunknown command\n").await?;
@@ -115,7 +124,12 @@ async fn handle_status(writer: NetWriterT, zpr: Zpr) -> Result<(), io::Error> {
     Ok(())
 }
 
-async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr, monitor_ctrl: Sender<cmonitor::Command>) -> Result<(), io::Error> {
+async fn handle_connect(
+    parts: &[&str],
+    writer: NetWriterT,
+    zpr: Zpr,
+    monitor_ctrl: Sender<cmonitor::Command>,
+) -> Result<(), io::Error> {
     let mut writer = writer.lock().await;
     if parts.len() < 2 {
         writer
@@ -163,7 +177,10 @@ async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr, monitor_ct
         cname = parts[1].to_string();
     }
 
-    match monitor_ctrl.send(cmonitor::Command::Connect(cname.clone())).await {
+    match monitor_ctrl
+        .send(cmonitor::Command::Connect(cname.clone()))
+        .await
+    {
         Ok(()) => (),
         Err(e) => {
             error!("Error sending connect command to monitor: {}", e);
@@ -180,7 +197,12 @@ async fn handle_connect(parts: &[&str], writer: NetWriterT, zpr: Zpr, monitor_ct
     Ok(())
 }
 
-async fn handle_disconnect(parts: &[&str], writer: NetWriterT, zpr: Zpr, monitor_control: Sender<cmonitor::Command>) -> Result<(), io::Error> {
+async fn handle_disconnect(
+    parts: &[&str],
+    writer: NetWriterT,
+    zpr: Zpr,
+    monitor_control: Sender<cmonitor::Command>,
+) -> Result<(), io::Error> {
     let mut writer = writer.lock().await;
 
     let mut all = true;
@@ -197,11 +219,14 @@ async fn handle_disconnect(parts: &[&str], writer: NetWriterT, zpr: Zpr, monitor
     for name in zpr.get_configuration_names() {
         if let Some(cs) = zpr.get_configuration_state(&name) {
             let is_connected = match cs {
-                ConfigState::Connected{..} | ConfigState::Connecting => true,
+                ConfigState::Connected { .. } | ConfigState::Connecting => true,
                 _ => false,
             };
             if is_connected {
-                match monitor_control.send(cmonitor::Command::Disconnect(name.clone())).await {
+                match monitor_control
+                    .send(cmonitor::Command::Disconnect(name.clone()))
+                    .await
+                {
                     Ok(()) => {
                         successes.push(name);
                     }
