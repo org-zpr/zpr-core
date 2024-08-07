@@ -2,7 +2,7 @@
 
 HOOKS="pre-commit"
 PATH_TO_HOOKS=../.git/hooks
-PATH_TO_SCRIPT=$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)
+PATH_TO_SCRIPT=$(cd "$(dirname "$0")"; pwd -P)
 
 cd "$PATH_TO_SCRIPT"
 
