@@ -12,6 +12,8 @@ jobs:
   cd:
     runs-on: ubuntu-latest
     steps:
+    - name: setup
+      run: sudo apt update -y && sudo apt install -y libpcap-dev
     - uses: actions/checkout@v4
     - name: Build + test cd
       run: cd adapter/cd && make build && make test
