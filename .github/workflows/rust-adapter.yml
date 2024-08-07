@@ -65,6 +65,13 @@ jobs:
     - name: Check test warnings
       run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc --tests -- -D warnings
 
+  ph-basic-test:
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check test warnings
+      run: cd adapter/ph && test/basic-test.sh
+      
   ph-debug-build:
     runs-on: ubuntu-latest
     steps:
