@@ -85,6 +85,11 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
     pub fn get_sender(&self) -> Option<Sender<(Packet<'pktbuf>, ZdpPacketType)>> {
         self.inner_req.lock().unwrap().reply_channel.take()
     }
+
+    fn set_sender(&self, sender: Option<Sender<(Packet<'pktbuf>, ZdpPacketType)>>) {
+        let mut inner_req = self.inner_req.lock().unwrap();
+        inner_req.reply_channel = sender;
+    }
 }
 
 #[allow(dead_code)]
@@ -104,12 +109,10 @@ impl<'pktbuf> Assembly<'pktbuf> {
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
         let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit
         let (sender, mut receiver) = channel::<(Packet<'pktbuf>, ZdpPacketType)>();
-        {
-            let mut inner_req = self.sync_req_state.inner_req.lock().unwrap();
-            inner_req.reply_channel = Some(sender);
-        }
 
-        for _i in 0..3 {
+        self.sync_req_state.set_sender(Some(sender));
+
+        for _i in 0..=config::DEFAULT_REQUEST_RETRY_COUNT {
             let buf = self.buffer_stack.get_buffer().await;
             let mut packet = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
             pkt_fn(&mut packet);
@@ -130,23 +133,19 @@ impl<'pktbuf> Assembly<'pktbuf> {
             tokio::select! {
                 received_val = &mut receiver => {
                     drop(permit);
-                    return self.match_received(received_val, SyncReqError::ProtocolError, zdp_response_type);
+                    return self.match_received(received_val, SyncReqError::LinkClosed, zdp_response_type);
                 }
-                _ = sleep(Duration::from_secs(1)) => ()
+                _ = sleep(Duration::from_secs(config::DEFAULT_REQUEST_RETRY_TIMER as u64)) => ()
             }
         }
-        match self.sync_req_state.get_sender() {
-            None => {
-                receiver.close();
-                drop(permit);
-                return self.match_received(
-                    receiver.try_recv(),
-                    SyncReqError::Timeout,
-                    zdp_response_type,
-                );
-            }
-            Some(_) => return Err(SyncReqError::Timeout),
-        }
+        self.sync_req_state.set_sender(None);
+        receiver.close();
+        drop(permit);
+        return self.match_received(
+            receiver.try_recv(),
+            SyncReqError::Timeout,
+            zdp_response_type,
+        );
     }
 
     fn match_received<T>(
