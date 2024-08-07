@@ -181,7 +181,7 @@ async fn vs_force_connect(
         &nconfig.get_cert_path(),
         &nconfig.get_key_path(),
         nconfig.get_node_addr(),
-        &vss_addr,
+        vss_addr,
     )?;
     for (k, v) in nconfig.get_claims() {
         vs_conn.add_claim(&k, &v);
