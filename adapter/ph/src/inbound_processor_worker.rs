@@ -142,7 +142,7 @@ async fn handle_packet<'pktbuf>(
             }
             ZdpPacketType::Discard => {
                 // TODO print to debug log, when implemented
-                eprintln!("Discard message recieved");
+                eprintln!("Discard message received");
             }
             ZdpPacketType::HelloRequest => {
                 let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
@@ -151,7 +151,7 @@ async fn handle_packet<'pktbuf>(
                 asm.outbound_processor
                     .enqueue_non_flow_mgmt(ZdpPacketType::HelloResponse, send_pkt)
                     .await;
-                eprintln!("Recieved HelloRequest");
+                eprintln!("Received HelloRequest");
             }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }

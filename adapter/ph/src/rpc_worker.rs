@@ -42,7 +42,8 @@ async fn handle_connection(
     asm: &'static Assembly<'static>,
     mut stream: UnixStream,
 ) -> std::io::Result<()> {
-    eprintln!("Connection recieved");
+    eprintln!("Connection received");
+
     let mut str_message = String::new();
     let split_buf = stream.split(); // split stream into read/write streams
     let mut buf_reader = BufReader::new(split_buf.0);
@@ -55,7 +56,6 @@ async fn handle_connection(
     } else {
         buf_writer.write("Message Received\n".as_bytes()).await?;
         let vec_message: Vec<&str> = str_message.split_whitespace().collect();
-
         match vec_message[0] {
             // To avoid excess parsing, the command must not have spaces
             "COUNTERS-RESET" => {
@@ -73,23 +73,29 @@ async fn handle_connection(
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             // PERF SAMPLE <DURATION> <FREQUENCY>
-            "PERF-SAMPLE" => {
-                buf_writer
-                    .write_all(
-                        perf_sample(asm, vec_message[1], vec_message[2])
-                            .await
-                            .as_bytes(),
-                    )
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
+            "PERF-SAMPLE" => match vec_message.len() {
+                3 => {
+                    buf_writer
+                        .write_all(
+                            perf_sample(asm, vec_message[1], vec_message[2])
+                                .await
+                                .as_bytes(),
+                        )
+                        .await?;
+                    buf_writer.write_all("OK\n".as_bytes()).await?
+                }
+                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
+            },
             // SET-CAPTURE <file_path>
-            "SET-CAPTURE" => {
-                buf_writer
-                    .write_all(set_capture(asm, vec_message[1]).await.as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
+            "SET-CAPTURE" => match vec_message.len() {
+                2 => {
+                    buf_writer
+                        .write_all(set_capture(asm, vec_message[1]).await.as_bytes())
+                        .await?;
+                    buf_writer.write_all("OK\n".as_bytes()).await?
+                }
+                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
+            },
             "FLUSH-CAPTURE" => {
                 buf_writer
                     .write_all(flush_capture(asm).await.as_bytes())
@@ -351,7 +357,7 @@ fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
     let mut return_message = format!("Program: {program} set\n");
     match cbpf_rs::BpfProgram::validate(&insn_vec) {
         Ok(final_program) => asm.flow_control.set_program(final_program),
-        _ => return_message = format!("Invalid program recieved, program not set\n"),
+        _ => return_message = format!("Invalid program received, program not set\n"),
     }
 
     return_message
