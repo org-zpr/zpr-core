@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Git pre-commit hooks. Checks to ensure code is formatted and compiles without warnings
+# when a user tries to commit. Can be over-ruled by running git commit with --no-verify
+
 # Checks to make sure cargo fmt has been run on ph
 cargo fmt --manifest-path adapter/ph/Cargo.toml --check --quiet
 
