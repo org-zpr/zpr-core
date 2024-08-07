@@ -77,7 +77,7 @@ async fn handle_packet<'pktbuf>(
     };
 
     let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
-
+    pkt.advance(1);
     // copy out relevant header info
     let packet_type = base_hdr.packet_type;
     let _sequence_number = base_hdr.sequence_number;
