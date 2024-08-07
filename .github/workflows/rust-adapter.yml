@@ -84,7 +84,7 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check warnings 
-      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph-debug && cargo rustc --lib -- -D warnings && cargo rustc --bin ph -- -D warnings
+      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph-debug && cargo rustc -- -D warnings
 
   ph-debug-test-warnings:
     runs-on: ubuntu-latest
