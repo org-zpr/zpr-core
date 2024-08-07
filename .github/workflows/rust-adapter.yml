@@ -64,3 +64,31 @@ jobs:
     - uses: actions/checkout@v4
     - name: Check test warnings
       run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc --tests -- -D warnings
+
+  ph-debug-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build + test ph
+      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph-debug && cargo build --verbose && cargo test --verbose
+
+  ph-debug-format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check format
+      run: cd adapter/ph-debug && cargo fmt --check
+
+  ph-debug-warnings:
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check warnings 
+      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph-debug && cargo rustc --lib -- -D warnings && cargo rustc --bin ph -- -D warnings
+
+  ph-debug-test-warnings:
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check test warnings
+      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph-debug && cargo rustc --tests -- -D warnings
