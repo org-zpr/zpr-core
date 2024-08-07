@@ -70,7 +70,7 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
-      run: cd adapter/ph && cargo build && test/basic-test.sh
+      run: cd adapter/ph && sudo apt install libpcap-dev && cd adapter/ph && cargo build && test/basic-test.sh
 
   ph-debug-build:
     runs-on: ubuntu-latest
