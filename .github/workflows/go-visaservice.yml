@@ -21,7 +21,11 @@ jobs:
         go-version: '1.22'
 
     - name: Build
-      run: cd visaservice && make all-go
+      run: |
+        cd visaservice
+        make all-go
 
     - name: Test
-      run: cd visaservice && make test-go
+      run: |
+        visaservice
+        make test-go
