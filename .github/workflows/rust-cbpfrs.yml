@@ -17,6 +17,7 @@ jobs:
       run: sudo apt update && sudo apt install libpcap-dev && cd cbpf-rs && cargo build --verbose && cargo test --verbose
 
   cbpf-format:
+    needs: [cbpf-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -24,6 +25,7 @@ jobs:
       run: cd cbpf-rs && cargo fmt --check
 
   cbpf-warnings:
+    needs: [cbpf-build]
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
@@ -31,6 +33,7 @@ jobs:
       run: cd cbpf-rs && cargo rustc -- -D warnings
 
   cbpf-test-warnings:
+    needs: [cbpf-build]
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4

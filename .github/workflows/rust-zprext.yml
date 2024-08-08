@@ -17,6 +17,7 @@ jobs:
       run: cd zpr-ext && cargo build --verbose && cargo test --verbose
 
   zpr-ext-format:
+    needs: [zpr-ext-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -24,6 +25,7 @@ jobs:
       run: cd zpr-ext && cargo fmt --check
 
   zpr-ext-warnings:
+    needs: [zpr-ext-build]
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
@@ -31,6 +33,7 @@ jobs:
       run: cd zpr-ext && cargo rustc -- -D warnings
 
   zpr-ext-test-warnings:
+    needs: [zpr-ext-build]
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
