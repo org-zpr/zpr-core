@@ -34,6 +34,7 @@ mod options;
 mod outbound_processor_worker;
 mod outbound_recv_worker;
 mod packet;
+mod pcap_writer;
 mod queues;
 mod rpc_worker;
 mod test_packet;
@@ -201,9 +202,6 @@ fn main() -> ExitCode {
             let unix_socket = Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
 
             let mut js = JoinSet::new();
-
-            // Launches RPC worker program
-            js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
 
             let usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
             let term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));

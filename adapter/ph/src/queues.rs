@@ -12,7 +12,7 @@ use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
 use crate::zdp;
-use std::io::{ErrorKind, IoSlice};
+use std::io::ErrorKind;
 use std::result::Result;
 use std::time::SystemTime;
 use tokio::net::UdpSocket;
@@ -21,6 +21,10 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
 use zpr_ext::std::mem::DropGuard;
 use zpr_ext::tokio_tun::tun_pi;
+
+pub enum TryEnqueueError<T> {
+    Full(T),
+}
 
 pub enum InboundProcessorMessage<'pktbuf> {
     Packet(Packet<'pktbuf>),
@@ -73,8 +77,10 @@ impl<'a> InboundSend<'a> {
         }
     }
 
-    // TODO: batch enqueue
-    pub async fn enqueue_packet(&self, mut packet: impl DropGuard<Packet<'_>>) {
+    pub fn try_enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
+        &self,
+        mut packet: P,
+    ) -> Result<(), TryEnqueueError<P>> {
         let tun = self.tuns[packet.flowhash() as usize % self.tuns.len()];
 
         let proto = net_defs::ip_ethertype(net_defs::ip_version(packet.body()));
@@ -87,9 +93,11 @@ impl<'a> InboundSend<'a> {
             },
         );
 
-        tun.send_vectored(&[IoSlice::new(packet.body())])
-            .await
-            .unwrap(); // any error here is unrecoverable (TUN device is broken)
+        match tun.try_send(packet.body()) {
+            Ok(_) => Ok(()),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => Err(TryEnqueueError::Full(packet)),
+            Err(err) => panic!("unrecoverable TUN error: {}", err),
+        }
     }
 
     pub fn fanout(&self) -> usize {
@@ -184,13 +192,13 @@ impl<'a> OutboundSend<'a> {
     }
 
     // TODO: batch enqueue
-    pub async fn enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
+    pub fn try_enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
         &self,
         packet: P,
-    ) -> Result<(), P> {
+    ) -> Result<(), TryEnqueueError<P>> {
         let socket = self.sockets[packet.flowhash() as usize % self.sockets.len()];
 
-        match socket.send(packet.body()).await {
+        match socket.try_send(packet.body()) {
             Ok(_) => Ok(()),
 
             Err(err) => {
@@ -199,10 +207,12 @@ impl<'a> OutboundSend<'a> {
                         panic!("Unrecoverable I/O error: {}", err)
                     }
 
+                    ErrorKind::WouldBlock => Err(TryEnqueueError::Full(packet)),
+
                     // most other network errors are temporary; return packet to caller
                     // TODO: it would be nice to report to the user _why_ packets aren't moving;
                     // this depends on <https://github.com/rust-lang/rust/issues/86442> though
-                    _ => Err(packet),
+                    _ => Err(TryEnqueueError::Full(packet)),
                 }
             }
         }
@@ -224,10 +234,6 @@ pub struct CapPacket<'pktbuf> {
 
 pub struct Capture<'pktbuf> {
     sender: mpsc::Sender<CapPacket<'pktbuf>>,
-}
-
-pub enum TryEnqueueError<T> {
-    Full(T),
 }
 
 #[allow(dead_code)]

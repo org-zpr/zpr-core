@@ -9,7 +9,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  cd:
+  cd-build:
     runs-on: ubuntu-latest
     steps:
     - name: setup
@@ -43,12 +43,12 @@ jobs:
       - name: Check test warnings
         run: cd adapter/cd && cargo rustc --tests -- -D warnings
 
-  ph:
+  ph-build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Build + test ph
-      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && make build && make test
+      run: cd adapter/ph && make build && make test
 
   ph-format:
     runs-on: ubuntu-latest
@@ -62,11 +62,11 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check warnings 
-      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc --lib -- -D warnings && cargo rustc --bin ph -- -D warnings
+      run: cd adapter/ph && cargo rustc --lib -- -D warnings && cargo rustc --bin ph -- -D warnings
 
   ph-test-warnings:
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
-      run: sudo apt update && sudo apt install libpcap-dev && cd adapter/ph && cargo rustc --tests -- -D warnings
+      run: cd adapter/ph && cargo rustc --tests -- -D warnings

@@ -21,6 +21,7 @@ pub mod options;
 pub mod outbound_processor_worker;
 pub mod outbound_recv_worker;
 pub mod packet;
+pub mod pcap_writer;
 pub mod queues;
 pub mod rpc_worker;
 pub mod test_packet;

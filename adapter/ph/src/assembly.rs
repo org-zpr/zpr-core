@@ -10,6 +10,7 @@ use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use crate::zdp::*;
 use bytes::{Buf, BufMut};
+use core::time::Duration;
 use enum_map::EnumMap;
 use std::result::Result;
 use std::sync::Mutex;
@@ -17,8 +18,8 @@ use tokio::sync::{
     oneshot::{channel, Sender},
     Semaphore, SemaphorePermit,
 };
+use tokio::time::sleep;
 use zerocopy::FromBytes;
-
 // Interface to full assembly of all stages.
 
 // This is the "public interface" that all stages of the system use to talk
@@ -84,12 +85,18 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
     pub fn get_sender(&self) -> Option<Sender<(Packet<'pktbuf>, ZdpPacketType)>> {
         self.inner_req.lock().unwrap().reply_channel.take()
     }
+
+    fn set_sender(&self, sender: Option<Sender<(Packet<'pktbuf>, ZdpPacketType)>>) {
+        let mut inner_req = self.inner_req.lock().unwrap();
+        inner_req.reply_channel = sender;
+    }
 }
 
 #[allow(dead_code)]
 pub enum SyncReqError {
     LinkClosed,
     ProtocolError,
+    Timeout,
 }
 
 impl<'pktbuf> Assembly<'pktbuf> {
@@ -98,51 +105,74 @@ impl<'pktbuf> Assembly<'pktbuf> {
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
         stream_id: Option<u32>,
-        packet: Packet<'pktbuf>,
+        pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
         let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit
-        let (sender, receiver) = channel::<(Packet<'pktbuf>, ZdpPacketType)>();
-        {
-            let mut inner_req = self.sync_req_state.inner_req.lock().unwrap();
-            inner_req.reply_channel = Some(sender);
-        }
+        let (sender, mut receiver) = channel::<(Packet<'pktbuf>, ZdpPacketType)>();
 
-        // Determine if sending a non-flow or per-flow message
-        match stream_id {
-            Some(stream_id) => {
-                self.outbound_processor
-                    .enqueue_per_flow_mgmt(zdp_request_type, stream_id, packet)
-                    .await
+        self.sync_req_state.set_sender(Some(sender));
+
+        for _i in 0..=config::DEFAULT_REQUEST_RETRY_COUNT {
+            let buf = self.buffer_stack.get_buffer().await;
+            let mut packet = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+            pkt_fn(&mut packet);
+
+            // Determine if sending a non-flow or per-flow message
+            match stream_id {
+                Some(stream_id) => {
+                    self.outbound_processor
+                        .enqueue_per_flow_mgmt(zdp_request_type, stream_id, packet)
+                        .await
+                }
+                None => {
+                    self.outbound_processor
+                        .enqueue_non_flow_mgmt(zdp_request_type, packet)
+                        .await
+                }
             }
-            None => {
-                self.outbound_processor
-                    .enqueue_non_flow_mgmt(zdp_request_type, packet)
-                    .await
+            tokio::select! {
+                received_val = &mut receiver => {
+                    drop(permit);
+                    return self.match_received(received_val, SyncReqError::LinkClosed, zdp_response_type);
+                }
+                _ = sleep(Duration::from_secs(config::DEFAULT_REQUEST_RETRY_TIMER as u64)) => ()
             }
         }
+        self.sync_req_state.set_sender(None);
+        receiver.close();
+        drop(permit);
+        return self.match_received(
+            receiver.try_recv(),
+            SyncReqError::Timeout,
+            zdp_response_type,
+        );
+    }
 
-        // Check received packet type, remove base header
-        match receiver.await {
+    fn match_received<T>(
+        &self,
+        result: Result<(Packet<'pktbuf>, ZdpPacketType), T>,
+        err_type: SyncReqError,
+        zdp_response_type: ZdpPacketType,
+    ) -> Result<Packet<'pktbuf>, SyncReqError> {
+        match result {
             Ok(rec_tuple) => {
-                drop(permit);
                 if zdp_response_type != rec_tuple.1 {
                     fastpath::drop_and_count(self, rec_tuple.0, CounterType::BadMgmtResponse);
                     return Err(SyncReqError::ProtocolError);
                 }
-                Ok(rec_tuple.0)
+                return Ok(rec_tuple.0);
             }
-            Err(_) => return Err(SyncReqError::LinkClosed),
+            Err(_) => return Err(err_type),
         }
     }
-
     #[allow(dead_code)]
     pub async fn send_sync_non_flow_req(
         &self,
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
-        packet: Packet<'pktbuf>,
+        pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
-        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, packet)
+        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, pkt_fn)
             .await
     }
 
@@ -152,10 +182,10 @@ impl<'pktbuf> Assembly<'pktbuf> {
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
         stream_id: u32,
-        packet: Packet<'pktbuf>,
+        pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<(u32, Packet<'pktbuf>), SyncReqError> {
         match self
-            .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), packet)
+            .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), pkt_fn)
             .await
         {
             Ok(mut pkt) => {
@@ -194,13 +224,11 @@ impl<'pktbuf> Assembly<'pktbuf> {
     }
 
     pub async fn send_hello_req(&self) {
-        let buf = self.buffer_stack.get_buffer().await;
-        let hello_req = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
         let response = self
             .send_sync_non_flow_req(
                 ZdpPacketType::HelloRequest,
                 ZdpPacketType::HelloResponse,
-                hello_req,
+                move |_packet| {},
             )
             .await;
         match response {
@@ -213,6 +241,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
             Err(err) => match err {
                 SyncReqError::LinkClosed => eprintln!("LinkClosed error with HelloRequest"),
                 SyncReqError::ProtocolError => eprintln!("ProtocolError error with HelloRequest"),
+                SyncReqError::Timeout => eprintln!("Timeout error with HelloRequest"),
             },
         }
     }

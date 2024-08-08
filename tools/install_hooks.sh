@@ -2,6 +2,9 @@
 
 HOOKS="pre-commit"
 PATH_TO_HOOKS=../.git/hooks
+PATH_TO_SCRIPT=$(cd "$(dirname "$0")"; pwd -P)
+
+cd "$PATH_TO_SCRIPT"
 
 for hook in $HOOKS; do
     # Checks if there is an existing hook with the same name, archives it

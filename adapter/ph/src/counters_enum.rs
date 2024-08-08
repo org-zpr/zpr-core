@@ -35,10 +35,10 @@ pub enum CounterType {
 
 pub fn name_counters(count_num: CounterType) -> &'static str {
     match count_num {
-        CounterType::InPacksRec => "Inbound Packets Recieved",
+        CounterType::InPacksRec => "Inbound Packets Received",
         CounterType::InPacksDrop => "Inbound Packets Dropped",
         CounterType::InPacksSent => "Inbound Packets Sent",
-        CounterType::OutPacksRec => "Outbound Packets Recieved",
+        CounterType::OutPacksRec => "Outbound Packets Received",
         CounterType::OutPacksDrop => "Outbound Packets Dropped",
         CounterType::OutPacksSent => "Outbound Packets Sent",
         CounterType::OutPacksErr => "Outbound Packet Send Errors",

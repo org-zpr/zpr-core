@@ -69,31 +69,41 @@ pub fn inet_checksum(data: &[u8]) -> [u8; 2] {
         !sum as u16
     }
 
-    // We can easily make this strong assumption, as this
-    // checksum is only used over IP headers, which are guaranteed
-    // to be multiples of 4 bytes.
-    debug_assert_eq!(data.len() % 4, 0);
+    if data.is_empty() {
+        return [0xffu8; 2];
+    }
 
     // Longer than this, our 32-bit temporary sum would overflow.
-    debug_assert!(data.len() <= 65536);
-
-    // No need to support empty case.
-    debug_assert!(data.len() > 0);
+    debug_assert!(data.len() <= ((u32::MAX / (u16::MAX as u32)) * 2) as usize);
 
     // Split into the aligned and unaligned case.  We could sum 32 bits at a
     // time instead, but we're mostly summing short spans, so having only
     // one unaligned case shortens the branch logic here.
     if (&data[0] as *const u8 as *const u16).is_aligned() {
+        let last_byte = if data.len() % 2 == 0 {
+            0
+        } else {
+            data[data.len() - 1]
+        };
+        let extra_sum = u16::from_ne_bytes([last_byte, 0]);
+
         // SAFETY: we have verified alignment and length
         let data16 = unsafe {
             std::slice::from_raw_parts(&data[0] as *const u8 as *const u16, data.len() / 2)
         };
-        inet_checksum_helper(0, data16).to_be_bytes()
+
+        inet_checksum_helper(extra_sum, data16).to_be_bytes()
     } else {
-        let extra_sum = u16::from_ne_bytes([data[data.len() - 1], data[0]]);
+        let last_byte = if data.len() % 2 == 0 {
+            data[data.len() - 1]
+        } else {
+            0
+        };
+        let extra_sum = u16::from_ne_bytes([last_byte, data[0]]);
+
         // SAFETY: we are compensating for alignment
         let data16 = unsafe {
-            std::slice::from_raw_parts(&data[1] as *const u8 as *const u16, data.len() / 2 - 1)
+            std::slice::from_raw_parts(&data[1] as *const u8 as *const u16, (data.len() - 1) / 2)
         };
         // NOTE: purposefully to_le_bytes(), to compensate for misalignment
         inet_checksum_helper(extra_sum, data16).to_le_bytes()
@@ -103,6 +113,11 @@ pub fn inet_checksum(data: &[u8]) -> [u8; 2] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_checksum_empty() {
+        assert_eq!(inet_checksum(&[]), [0xffu8; 2]);
+    }
 
     #[test]
     fn test_checksum() {
@@ -123,11 +138,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_checksum_max_len() {
+        assert_eq!(inet_checksum(&[0xffu8; (1 << 17) + 2]), [0u8; 2]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_checksum_over_max_len() {
+        let _ = inet_checksum(&[0xffu8; (1 << 17) + 3]);
+    }
+
     // NOTE: because of how these sequences are stored in the object file,
     // they are arbitrarily aligned.  In order to ensure a specific
     // alignment, copy them into a Vec before using.  Memory allocated to a
     // Vec is all-but-guaranteed to be aligned at least to the system word size.
     const TEST_DATA: &[&[u8]] = &[
+        // IP headers from the wild
         &[
             0x45, 0x00, 0x00, 0x5b, 0xd7, 0xbe, 0x40, 0x00, 0x40, 0x06, 0x6a, 0x45, 0xc0, 0xa8,
             0x58, 0x93, 0x8e, 0xfa, 0x50, 0x63,
@@ -140,5 +167,7 @@ mod tests {
             0x45, 0x00, 0x01, 0x88, 0x03, 0xe6, 0x00, 0x00, 0x78, 0x06, 0x6c, 0xc5, 0x8e, 0xfb,
             0x28, 0x8e, 0xc0, 0xa8, 0x58, 0x93,
         ],
+        // odd length
+        &[0x01, 0x02, 0x03, 0x04, 0x05, 0xf9, 0xf6],
     ];
 }

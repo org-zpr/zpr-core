@@ -1,0 +1,38 @@
+name: Rust-cbpfrs
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  zpr-ext-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build + test cbpf
+      run: cd zpr-ext && cargo build --verbose && cargo test --verbose
+
+  zpr-ext-format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check format
+      run: cd zpr-ext && cargo fmt --check
+
+  zpr-ext-warnings:
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check warnings
+      run: cd zpr-ext && cargo rustc -- -D warnings
+
+  zpr-ext-test-warnings:
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check test warnings
+      run: cd zpr-ext && cargo rustc --tests -- -D warnings
