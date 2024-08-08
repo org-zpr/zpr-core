@@ -16,6 +16,7 @@ use tokio_tun::TunBuilder;
 #[macro_use]
 extern crate arrayref;
 
+mod agent_output_worker;
 mod assembly;
 mod buffer_stack;
 mod capture_worker;
@@ -28,16 +29,15 @@ mod defs;
 mod fastpath;
 mod flow_control;
 mod inbound_processor_worker;
-mod inbound_recv_worker;
 mod net_defs;
 mod options;
 mod outbound_processor_worker;
-mod outbound_recv_worker;
 mod packet;
 mod pcap_writer;
 mod queues;
 mod rcu;
 mod rpc_worker;
+mod substrate_ingress_worker;
 mod test_packet;
 mod tun_ctl;
 mod zdp;
@@ -101,9 +101,9 @@ fn main() -> ExitCode {
     // sizes below which are all just double the batch size.  Performance
     // testing will inform us the correct values for these, which balance
     // throughput with service time.
-    let inbound_recv_batch_size = 8;
+    let substrate_ingress_batch_size = 8;
     let inbound_processor_batch_size = 16;
-    let outbound_recv_batch_size = 4;
+    let agent_output_batch_size = 4;
     let outbound_processor_batch_size = 16;
     let capture_queue_size = 16;
     let capture_batch_size = 8;
@@ -228,9 +228,9 @@ fn main() -> ExitCode {
             ));
 
             for tun_dev in tun_devs.iter() {
-                js.spawn(outbound_recv_worker::launch(
-                    &outbound_recv_worker::Config {
-                        batch_size: outbound_recv_batch_size,
+                js.spawn(agent_output_worker::launch(
+                    &agent_output_worker::Config {
+                        batch_size: agent_output_batch_size,
                     },
                     &*asm,
                     tun_dev,
@@ -259,9 +259,9 @@ fn main() -> ExitCode {
             eprintln!("Connected!"); // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
 
-            js.spawn(inbound_recv_worker::launch(
-                &inbound_recv_worker::Config {
-                    batch_size: inbound_recv_batch_size,
+            js.spawn(substrate_ingress_worker::launch(
+                &substrate_ingress_worker::Config {
+                    batch_size: substrate_ingress_batch_size,
                 },
                 &*asm,
                 &*socket,
