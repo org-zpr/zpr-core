@@ -80,7 +80,7 @@ fn main() -> std::io::Result<()> {
         _ => {
             eprintln!("Command '{command}' not recognized");
         }
-    }
+    };
 
     Ok(())
 }
@@ -97,7 +97,7 @@ fn basic_call_response(comm: &str, port: &str) -> std::io::Result<()> {
     stream.flush()?;
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
-    println!("{response}");
+    println!("{response}")
 
     Ok(())
 }
