@@ -80,7 +80,7 @@ fn main() -> std::io::Result<()> {
         _ => {
             eprintln!("Command '{command}' not recognized");
         }
-    };
+    }
 
     Ok(())
 }
