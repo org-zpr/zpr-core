@@ -288,9 +288,9 @@ pub fn substrate_ingress<'pktbuf>(
 
     // enqueue non-transit packets with the management processor
     if base_hdr.packet_type != zdp::ZdpPacketType::TransitPacket {
-        *pkt.alloc_zeroed_header() = base_hdr;
-
         // TODO: should we peel off the ZDP header here??
+        // (instead of this silly code to restore it?)
+        *pkt.alloc_zeroed_header() = base_hdr;
 
         match asm.inbound_processor.try_enqueue_packet(pkt) {
             Ok(()) => (),
@@ -304,16 +304,14 @@ pub fn substrate_ingress<'pktbuf>(
 
     pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into();  // TODO: is this necessary?
 
-    // TODO: forwarding!
-
-    agent_input(asm, per_flow_hdr.stream_id.into(), pkt);
+    forward(asm, link_id, per_flow_hdr.stream_id.into(), pkt);
 }
 
 /// Send a compressed agent packet to the agent.
 /// The packet will be decompressed according to the given stream ID.
 pub fn agent_input<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    _stream_id: zpr::StreamId,  // TODO: should we keep this in metadata?
+    _stream_id: zpr::StreamId,  // TODO: should we keep this in metadata? or per-flow header?
     pkt: Packet<'pktbuf>,
 ) {
     // TODO: decompress
@@ -329,27 +327,53 @@ pub fn agent_input<'pktbuf>(
     }
 }
 
-// Process packets from the agent.
+/// Process uncompressed packet from the agent.
+/// The packet will be compressed, or trigger a Bind request.
 pub fn agent_output<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    mut pkt: Packet<'pktbuf>,
+    pkt: Packet<'pktbuf>,
 ) {
+    // TODO: lookup in ALT
+    let stream_id = 0;  // TODO: should we keep this in metadata? or as per-flow header?
+
     // TODO: compress
 
-    // TODO: forwarding!
-    let stream_id = 0;
+    forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
+}
 
-    // allocate and fill in the headers
-    let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
-    per_flow_hdr.stream_id = stream_id.into();
+/// Forward compressed packet.
+pub fn forward<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    ingress_link_id: zpr::LinkId,
+    ingress_stream_id: zpr::StreamId,
+    mut pkt: Packet<'pktbuf>,
+) {
+    // TODO: node forwarding
 
-    let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
-    base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
+    // adapter forwarding
+    match ingress_link_id {
+        zpr::AGENT_LINK_ID => {
+            // in from agent; out to dock
 
-    substrate_egress(
-        asm,
-        zpr::ADAPTER_DOCKING_SESSION_ID,
-        zpr::ZPI_0,
-        pkt,
-    );
+            let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
+            per_flow_hdr.stream_id = ingress_stream_id.into();
+
+            let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+            base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
+
+            substrate_egress(
+                asm,
+                zpr::ADAPTER_DOCKING_SESSION_ID,
+                zpr::ZPI_0,
+                pkt,
+            );
+        }
+
+        zpr::ADAPTER_DOCKING_SESSION_ID => {
+            // in from dock; out to agent
+            agent_input(asm, ingress_stream_id, pkt);
+        }
+
+        _ => panic!("bad link ID")
+    }
 }
