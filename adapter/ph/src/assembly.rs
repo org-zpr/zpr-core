@@ -101,10 +101,11 @@ pub enum SyncReqError {
 }
 
 impl<'pktbuf> Assembly<'pktbuf> {
-    // Sender functions for non-per flow request management packet.
-    // Requires the type of ZDP packet being sent as well as the type of the
-    // expected response packet.
-    // Returns the received packet or an error
+    /// Sender function for non-per flow request management packet.
+    /// Requires the type of ZDP packet being sent as well as the type of the
+    /// expected response packet.
+    /// pkt_fn allows the function to create the proper body of the ZDP packet to send
+    /// Returns the received packet without any ZdpHeader (just management response body) or an error
     pub async fn send_sync_non_flow_req(
         &self,
         zdp_request_type: ZdpPacketType,
@@ -115,10 +116,11 @@ impl<'pktbuf> Assembly<'pktbuf> {
             .await
     }
 
-    // Sender functions for per flow request management packet.
-    // Requires the type of ZDP packet being sent as well as the type of the
-    // expected response packet.
-    // Returns the received packet or an error
+    /// Sender function for per flow request management packet.
+    /// Requires the type of ZDP packet being sent as well as the type of the
+    /// expected response packet. Also requires stream_id of the packet.
+    /// pkt_fn allows the function to create the proper body of the ZDP packet to send
+    /// Returns the received packet without any ZdpHeader (just management response body) or an error
     #[allow(dead_code)]
     pub async fn send_sync_per_flow_req(
         &self,
@@ -142,6 +144,13 @@ impl<'pktbuf> Assembly<'pktbuf> {
         }
     }
 
+    /// Helper for send management request function
+    /// Requires the type of ZDP packet being sent as well as the type of the
+    /// expected response packet. The Option determines whether the function is helping the per-flow or
+    /// non-per flow sender.
+    /// pkt_fn allows the function to create the proper body of the ZDP packet to send
+    /// Returns the received packet without the ZdpBaseHeader, but still any other Zdp header information
+    /// not included in the ZdpBaseHeader, or an error
     async fn send_sync_req_helper(
         &self,
         zdp_request_type: ZdpPacketType,
