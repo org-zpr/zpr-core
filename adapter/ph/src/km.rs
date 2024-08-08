@@ -1,9 +1,9 @@
 // km.rs - Key Management for ZDP
 
 //! An API for a Key Management protocol to be used to set up and maintain a
-//! security association (SA) with a peer.  In ZPR adapters set up SAs with 
+//! security association (SA) with a peer.  In ZPR adapters set up SAs with
 //! their docks.  And nodes set up SAs on their links to other nodes.
-//! 
+//!
 //! The [KeyManager] is runs a state machine, dispatching to an implementation
 //! of a [KeyManagerStateMachine] which does the actual work of creating and
 //! parsing key management ZDP messages.
@@ -308,9 +308,9 @@ impl KeyManager<'_> {
 
     /// Blocking run loop for the key manager.  This runs the key management algorithm
     /// state machine handing KM messages in and out.
-    /// 
+    ///
     /// Use the CancellationToken to stop the run loop.
-    /// 
+    ///
     /// `km_buffers_out` will be filled with outbound ZDP Key Management messages for our peer. These are
     /// just the payloads.  The caller is responsible for adding the ZPI header, if required.
     ///
@@ -458,10 +458,10 @@ impl fmt::Display for EncryptionError {
 }
 
 /// The state of the [KeyManagerStateMachine].
-/// 
+///
 /// State transitions:
 ///
-/// 
+///
 /// ```text
 ///      *
 ///      ↓
@@ -469,7 +469,7 @@ impl fmt::Display for EncryptionError {
 ///      ↓ ↑          ↓
 ///     Error <-------+
 ///```
-/// 
+///
 /// Not accounting for "rekeying" -- for now assuming that can happen
 /// internally and machine can just stay in transport state.
 #[derive(Debug, Clone, PartialEq)]
@@ -500,7 +500,7 @@ pub struct KMSettings {
 /// Not to be used for Key Management messages.
 pub trait TransportEncr: Send + Sync {
     /// Encrypt `payload` into `message`.
-    /// 
+    ///
     /// `sa_id` is the Security Association ID in use.
     fn encrypt_transport(
         self: &Self,
@@ -510,7 +510,7 @@ pub trait TransportEncr: Send + Sync {
     ) -> Result<usize, EncryptionError>;
 
     /// Decrypt `payload` into `message`
-    /// 
+    ///
     /// `sa_id` is the Security Association ID in use.
     fn decrypt_transport(
         self: &Self,
