@@ -22,6 +22,7 @@ pub mod outbound_recv_worker;
 pub mod packet;
 pub mod pcap_writer;
 pub mod queues;
+pub mod rcu;
 pub mod rpc_worker;
 pub mod test_packet;
 pub mod tun_ctl;

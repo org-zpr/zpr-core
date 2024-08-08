@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+aarc = { version = "0.2.1", optional = true }
 arrayref = { version = "0.3.7" }
 bytes = { version = "1.7.1" }
 cbpf-rs = { path = "../../cbpf-rs" }
 clap = { version = "4.5.7", features = ["derive"] }
+crossbeam-epoch = { version = "0.9.18", optional = true }
 enum-map = { version = "2.7.3" }
 foreign-types = { version = "0.3.2" }
 hdrhistogram = { version = "7.5.4" }
@@ -24,7 +26,12 @@ zerocopy = { version = "0.7.34", features = ["byteorder"] }
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }
 
 [features]
+default = ["rcu-crossbeam-epoch"]
 ci = []
+rcu-rwlock = []
+rcu-mutex-arc = []
+rcu-crossbeam-epoch = ["dep:crossbeam-epoch"]
+rcu-aarc = ["dep:aarc"]
 
 [lib] 
 test = false
