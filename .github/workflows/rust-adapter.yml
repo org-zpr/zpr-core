@@ -45,7 +45,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build + test ph
-      run: cd adapter/ph && make build && make test
+      run: |
+        cd adapter/ph
+        make build 
+        make test
 
   ph-format:
     needs: [ph-build]
@@ -53,7 +56,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Check format
-      run: cd adapter/ph && cargo fmt --check
+      run: |
+        cd adapter/ph
+        cargo fmt --check
 
   ph-warnings:
     needs: [ph-build]
@@ -61,7 +66,10 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check warnings 
-      run: cd adapter/ph && cargo rustc --lib -- -D warnings && cargo rustc --bin ph -- -D warnings
+      run: |
+        cd adapter/ph 
+        cargo rustc --lib -- -D warnings 
+        cargo rustc --bin ph -- -D warnings
 
   ph-test-warnings:
     needs: [ph-build]
@@ -69,7 +77,9 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
-      run: cd adapter/ph && cargo rustc --tests -- -D warnings
+      run: | 
+        cd adapter/ph
+        cargo rustc --tests -- -D warnings
 
   ph-basic-test:
     needs: [ph-build]
@@ -77,7 +87,10 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
-      run: cd adapter/ph && cargo build && test/basic-test.sh
+      run: |
+        cd adapter/ph
+        cargo build
+        test/basic-test.sh
 
   ph-debug-build:
     runs-on: ubuntu-latest
