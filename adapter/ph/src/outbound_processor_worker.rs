@@ -21,22 +21,6 @@ async fn worker<'pktbuf>(
     while let count @ 1.. = queue.recv_many(&mut pkts, config.batch_size).await {
         for pkt in pkts.drain(..) {
             match pkt {
-                OutboundProcessorMessage::Packet(mut pkt) => {
-                    // allocate and fill in the headers
-                    let stream_id = pkt.metadata().flow_id;
-                    let per_flow_hdr = pkt.alloc_zeroed_header::<ZdpPerFlowHeader>();
-                    per_flow_hdr.stream_id = stream_id.into();
-
-                    let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
-                    base_hdr.packet_type = ZdpPacketType::TransitPacket;
-
-                    fastpath::substrate_egress(
-                        asm,
-                        zpr::ADAPTER_DOCKING_SESSION_ID,
-                        zpr::ZPI_0,
-                        pkt,
-                    );
-                }
                 OutboundProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), count),
                 OutboundProcessorMessage::NonFlowMgmt(pack_type, mut pkt) => {
                     let hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();

@@ -328,3 +328,28 @@ pub fn agent_input<'pktbuf>(
         }
     }
 }
+
+// Process packets from the agent.
+pub fn agent_output<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    mut pkt: Packet<'pktbuf>,
+) {
+    // TODO: compress
+
+    // TODO: forwarding!
+    let stream_id = 0;
+
+    // allocate and fill in the headers
+    let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
+    per_flow_hdr.stream_id = stream_id.into();
+
+    let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+    base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
+
+    substrate_egress(
+        asm,
+        zpr::ADAPTER_DOCKING_SESSION_ID,
+        zpr::ZPI_0,
+        pkt,
+    );
+}

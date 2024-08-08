@@ -113,9 +113,7 @@ impl<'a> InboundSend<'a> {
 /// All packets from the host are sent here for encapsulation, and any
 /// CPU-intensive preprocessing (e.g. signature generation).
 /// This may morph into more or fewer (i.e. zero) stages depending on future requirements.
-#[allow(dead_code)]
 pub enum OutboundProcessorMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>),
     TestPacket(TestPacket),
     NonFlowMgmt(zdp::ZdpPacketType, Packet<'pktbuf>),
     PerFlowMgmt(zdp::ZdpPacketType, u32, Packet<'pktbuf>),
@@ -129,15 +127,8 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
     #[allow(dead_code)]
-    pub(crate) fn new(sender: mpsc::Sender<OutboundProcessorMessage<'pktbuf>>) -> Self {
+    pub fn new(sender: mpsc::Sender<OutboundProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
-    }
-
-    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
-        self.sender
-            .send(OutboundProcessorMessage::Packet(packet))
-            .await
-            .unwrap();
     }
 
     pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {

@@ -30,18 +30,26 @@ async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
 
         // read & forward packets one at a time, no sense to batch really
         // since neither `read_buf()` nor `enqueue()` support it
-        for buf in bufs.drain(..) {
-            let mut pkt = Packet::new(buf, OUTBOUND_PACKET_HEADROOM);
+        for mut buf in bufs.drain(..) {
+            let pkt = loop {
+                let mut pkt = Packet::new(buf, OUTBOUND_PACKET_HEADROOM);
 
-            tun_recv_buf(tun, &mut pkt).await.unwrap();
-            let pi = tun_pi::read_pi(&mut pkt);
-            if pi.strip || !is_ip(pi) {
-                // packet was too large or non-IP; drop
-                fastpath::drop_and_count(asm, pkt, CounterType::OutPacksDrop);
-                continue;
-            }
+                tun_recv_buf(tun, &mut pkt).await.unwrap();
+                let pi = tun_pi::read_pi(&mut pkt);
+                if pi.strip || !is_ip(pi) {
+                    // packet was too large or non-IP; drop
+                    asm.counters[CounterType::OutPacksDrop].increment();
+                    // reuse `buf`
+                    buf = pkt.destroy();
+                    continue;
+                }
+
+                break pkt;
+            };
+
             asm.counters[CounterType::OutPacksRec].increment();
-            asm.outbound_processor.enqueue_packet(pkt).await;
+
+            fastpath::agent_output(asm, pkt);
         }
     }
 }
