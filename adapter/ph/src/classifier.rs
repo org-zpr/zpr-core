@@ -1,10 +1,8 @@
-#[allow(unused_imports)]
-use crate::config;
+#![allow(dead_code)]
 use crate::net_defs::*;
 use crate::packet;
 use std::mem::size_of;
-#[allow(unused_imports)]
-use zerocopy::{ByteOrder, FromBytes, FromZeroes, NetworkEndian};
+use zerocopy::{ByteOrder, FromBytes, NetworkEndian};
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, KnownLayout, Unaligned};
 
 #[derive(Debug, PartialEq)]

@@ -1,10 +1,7 @@
 use crate::assembly::Assembly;
-use crate::classifier::classify;
 use crate::config;
 use crate::counters_enum::CounterType;
-use crate::defs::Direction;
 use crate::fastpath;
-use crate::options::PhMode;
 use crate::packet::Packet;
 use crate::queues::InboundProcessorMessage;
 use crate::zdp::*;
@@ -17,7 +14,6 @@ use zpr_ext::zerocopy::*;
 #[derive(Copy, Clone)]
 pub struct Config {
     pub batch_size: usize,
-    pub mode: PhMode,
 }
 
 async fn worker<'pktbuf>(
@@ -31,7 +27,7 @@ async fn worker<'pktbuf>(
         for msg in msgs.drain(..) {
             match msg {
                 InboundProcessorMessage::Packet(pkt) => {
-                    handle_packet(config, asm, pkt).await;
+                    handle_packet(asm, pkt).await;
                 }
                 InboundProcessorMessage::TestPacket(pkt) => {
                     pkt.acknowledge(queue.len(), count);
@@ -54,33 +50,12 @@ where
 }
 
 async fn handle_packet<'pktbuf>(
-    config: &Config,
     asm: &Assembly<'pktbuf>,
     mut pkt: Packet<'pktbuf>,
 ) {
-    match fastpath::decrypt(asm, 0, &mut pkt) {
-        Ok(()) => (),
-        Err(err) => {
-            fastpath::drop_and_count(asm, pkt, err);
-            return;
-        }
-    }
-
-    fastpath::maybe_capture(asm, Direction::Inbound, &mut pkt);
-
-    let _zpi = match fastpath::decap_zpi(asm, 0, &mut pkt) {
-        Ok(zpi) => zpi,
-        Err(err) => {
-            fastpath::drop_and_count(asm, pkt, err);
-            return;
-        }
-    };
-
     let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
 
-    // copy out relevant header info
     let packet_type = base_hdr.packet_type;
-    let _sequence_number = base_hdr.sequence_number;
 
     if packet_type.is_response() {
         let channel = asm.sync_req_state.get_sender();
@@ -100,20 +75,10 @@ async fn handle_packet<'pktbuf>(
             }
         }
     } else if base_hdr.packet_type.is_per_flow() {
-        let per_flow_hdr =
+        let _per_flow_hdr =
             ZdpPerFlowHeader::read_from_buf(&mut pkt).expect("too-short per-flow message");
 
         match base_hdr.packet_type {
-            ZdpPacketType::TransitPacket => {
-                pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into();
-                if config.mode == PhMode::Server {
-                    // TODO: drop error packets
-                    let _ = classify(&mut pkt);
-                }
-
-                fastpath::agent_input(asm, 0, pkt);
-            }
-
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     } else {

@@ -222,7 +222,6 @@ fn main() -> ExitCode {
             js.spawn(inbound_processor_worker::launch(
                 &inbound_processor_worker::Config {
                     batch_size: inbound_processor_batch_size,
-                    mode: cmd_line.mode,
                 },
                 &*asm,
                 ip_outq,

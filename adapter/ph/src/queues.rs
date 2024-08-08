@@ -39,15 +39,19 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
     #[allow(dead_code)]
-    pub(crate) fn new(sender: mpsc::Sender<InboundProcessorMessage<'pktbuf>>) -> Self {
+    pub fn new(sender: mpsc::Sender<InboundProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
     }
 
-    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
-        self.sender
-            .send(InboundProcessorMessage::Packet(packet))
-            .await
-            .unwrap();
+    pub fn try_enqueue_packet(&self, packet: Packet<'pktbuf>) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        match self.sender.try_send(InboundProcessorMessage::Packet(packet)) {
+            Ok(()) => Ok(()),
+
+            Err(TrySendError::Full(pkt) | TrySendError::Closed(pkt)) => {
+                let InboundProcessorMessage::Packet(pkt) = pkt else { unreachable!() };
+                Err(TryEnqueueError::Full(pkt))
+            }
+        }
     }
 
     pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
