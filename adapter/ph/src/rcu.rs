@@ -5,7 +5,7 @@
 //!
 //! The capability expected of an RCU implementation, beyond what the API
 //! directly implies, is as follows.  Writes need not be efficient, but must
-//! not block reads, but should eventually complete even under contention. 
+//! not block reads, but should eventually complete even under contention.
 //! Reads must be very efficient and not contend with each other.
 //! Garbage collection should be performed by the writer, not the reader.
 //!
@@ -14,10 +14,20 @@
 //! which do not meet the above performance requirements, but are useful
 //! for testing.  The active implementation is selected by a feature flag.
 
-#[cfg(all(feature = "rcu-rwlock", feature = "rcu-mutex-arc", feature = "rcu-crossbeam-epoch", feature = "rcu-aarc"))]
+#[cfg(all(
+    feature = "rcu-rwlock",
+    feature = "rcu-mutex-arc",
+    feature = "rcu-crossbeam-epoch",
+    feature = "rcu-aarc"
+))]
 compile_error!("exactly one rcu-* feature must be selected");
 
-#[cfg(not(any(feature = "rcu-rwlock", feature = "rcu-mutex-arc", feature = "rcu-crossbeam-epoch", feature = "rcu-aarc")))]
+#[cfg(not(any(
+    feature = "rcu-rwlock",
+    feature = "rcu-mutex-arc",
+    feature = "rcu-crossbeam-epoch",
+    feature = "rcu-aarc"
+)))]
 compile_error!("exactly one rcu-* feature must be selected");
 
 #[cfg(feature = "rcu-rwlock")]
@@ -40,7 +50,7 @@ mod rcu_impl {
         }
 
         /// Replace the boxed value with a new value.  The old value
-        /// will be destructed once all readers have completed. 
+        /// will be destructed once all readers have completed.
         pub fn write(&self, new_value: T) {
             let mut lock = self.0.write().unwrap();
             let old = std::mem::replace(&mut *lock, new_value);
@@ -99,9 +109,13 @@ mod rcu_impl {
 
         pub fn write(&self, new_value: T) {
             let guard = epoch::pin();
-            let old_value = self.0.swap(epoch::Owned::from(new_value), Ordering::AcqRel, &guard);
+            let old_value = self
+                .0
+                .swap(epoch::Owned::from(new_value), Ordering::AcqRel, &guard);
             // SAFETY: `old_value` is now unreachable
-            unsafe { guard.defer_destroy(old_value); }
+            unsafe {
+                guard.defer_destroy(old_value);
+            }
         }
     }
 }
