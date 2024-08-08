@@ -49,10 +49,7 @@ where
     async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
-async fn handle_packet<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    mut pkt: Packet<'pktbuf>,
-) {
+async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
     let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
 
     let packet_type = base_hdr.packet_type;

@@ -43,12 +43,20 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
         Self { sender }
     }
 
-    pub fn try_enqueue_packet(&self, packet: Packet<'pktbuf>) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
-        match self.sender.try_send(InboundProcessorMessage::Packet(packet)) {
+    pub fn try_enqueue_packet(
+        &self,
+        packet: Packet<'pktbuf>,
+    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        match self
+            .sender
+            .try_send(InboundProcessorMessage::Packet(packet))
+        {
             Ok(()) => Ok(()),
 
             Err(TrySendError::Full(pkt) | TrySendError::Closed(pkt)) => {
-                let InboundProcessorMessage::Packet(pkt) = pkt else { unreachable!() };
+                let InboundProcessorMessage::Packet(pkt) = pkt else {
+                    unreachable!()
+                };
                 Err(TryEnqueueError::Full(pkt))
             }
         }

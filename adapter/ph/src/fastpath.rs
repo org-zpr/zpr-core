@@ -258,7 +258,7 @@ pub fn substrate_egress<'pktbuf>(
 pub fn substrate_ingress<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     _peer_sa: &SocketAddr,
-    mut pkt: Packet<'pktbuf>
+    mut pkt: Packet<'pktbuf>,
 ) {
     asm.counters[CounterType::InPacksRec].increment();
 
@@ -283,8 +283,9 @@ pub fn substrate_ingress<'pktbuf>(
         }
     };
 
-    let Some(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt)
-        else { return drop_and_count(asm, pkt, CounterType::BadStructure); };
+    let Some(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
+        return drop_and_count(asm, pkt, CounterType::BadStructure);
+    };
 
     // enqueue non-transit packets with the management processor
     if base_hdr.packet_type != zdp::ZdpPacketType::TransitPacket {
@@ -299,10 +300,11 @@ pub fn substrate_ingress<'pktbuf>(
         return;
     }
 
-    let Some(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt)
-        else { return drop_and_count(asm, pkt, CounterType::BadStructure); };
+    let Some(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
+        return drop_and_count(asm, pkt, CounterType::BadStructure);
+    };
 
-    pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into();  // TODO: is this necessary?
+    pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into(); // TODO: is this necessary?
 
     forward(asm, link_id, per_flow_hdr.stream_id.into(), pkt);
 }
@@ -311,7 +313,7 @@ pub fn substrate_ingress<'pktbuf>(
 /// The packet will be decompressed according to the given stream ID.
 pub fn agent_input<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    _stream_id: zpr::StreamId,  // TODO: should we keep this in metadata? or per-flow header?
+    _stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
     pkt: Packet<'pktbuf>,
 ) {
     // TODO: decompress
@@ -329,12 +331,9 @@ pub fn agent_input<'pktbuf>(
 
 /// Process uncompressed packet from the agent.
 /// The packet will be compressed, or trigger a Bind request.
-pub fn agent_output<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    pkt: Packet<'pktbuf>,
-) {
+pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pktbuf>) {
     // TODO: lookup in ALT
-    let stream_id = 0;  // TODO: should we keep this in metadata? or as per-flow header?
+    let stream_id = 0; // TODO: should we keep this in metadata? or as per-flow header?
 
     // TODO: compress
 
@@ -361,12 +360,7 @@ pub fn forward<'pktbuf>(
             let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
             base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
 
-            substrate_egress(
-                asm,
-                zpr::ADAPTER_DOCKING_SESSION_ID,
-                zpr::ZPI_0,
-                pkt,
-            );
+            substrate_egress(asm, zpr::ADAPTER_DOCKING_SESSION_ID, zpr::ZPI_0, pkt);
         }
 
         zpr::ADAPTER_DOCKING_SESSION_ID => {
@@ -374,6 +368,6 @@ pub fn forward<'pktbuf>(
             agent_input(asm, ingress_stream_id, pkt);
         }
 
-        _ => panic!("bad link ID")
+        _ => panic!("bad link ID"),
     }
 }
