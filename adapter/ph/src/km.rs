@@ -1,5 +1,13 @@
 // km.rs - Key Management for ZDP
 
+//! An API for a Key Management protocol to be used to set up and maintain a
+//! security association (SA) with a peer.  In ZPR adapters set up SAs with 
+//! their docks.  And nodes set up SAs on their links to other nodes.
+//! 
+//! The [KeyManager] is runs a state machine, dispatching to an implementation
+//! of a [KeyManagerStateMachine] which does the actual work of creating and
+//! parsing key management ZDP messages.
+
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
@@ -67,13 +75,14 @@ use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpPerFlowHeader};
          Those two bytes need to be taken into consideration when computing padding.
 */
 
+/// Stateful key manager for ZDP.  Requires an instance of a [KeyManagerStateMachine] to do the actual work.
 #[derive(Debug, Clone)]
 pub struct KeyManager<'mgr> {
     shared: Arc<KMShared<'mgr>>,
 }
 
 #[derive(Debug)]
-pub struct KMShared<'mgr> {
+struct KMShared<'mgr> {
     state: Mutex<KMState<'mgr>>,
 }
 
@@ -94,10 +103,10 @@ impl fmt::Debug for KMState<'_> {
     }
 }
 
-// KeyManager maintains an SA with its peer.
-//
-// Note that this is written prior to implementing the actual key management algorithm. So
-// some of the abstractions here may not be quite right -- yet.
+/// KeyManager maintains an SA with its peer.
+///
+/// Note that this is written prior to implementing the actual key management algorithm. So
+/// some of the abstractions here may not be quite right -- yet.
 impl KeyManager<'_> {
     /// `statemachine` is the key management algorithm.
     pub fn new<'a>(statemachine: Box<dyn KeyManagerStateMachine>) -> KeyManager<'a> {
@@ -127,19 +136,19 @@ impl KeyManager<'_> {
         state.sa_id = sa_id;
     }
 
-    // Encrypt a ZDP message for transport.  Key Management messages should not be sent here.
-    // This overwrites the plaintext ZDP header at least.
-    // For everything except transit packets, this also overwrites the payload.
-    //
-    // For all packets, there must be enough padding included in the body length to
-    // accomodate any expansion caused by encryption.
-    //
-    // For transit packets the padding space must be between the ZDP header and the
-    // agent data bits.
-    //
-    // `message` is expected to be a ZDP message wihout a ZPI value.  We add a ZPI
-    // value to the front of the message -- note that the value we add is just the
-    // SA_ID.  It's up to caller to mix in the configuration ID value.
+    /// Encrypt a ZDP message for transport.  Key Management messages should not be sent here.
+    /// This overwrites the plaintext ZDP header at least.
+    /// For everything except transit packets, this also overwrites the payload.
+    ///
+    /// For all packets, there must be enough padding included in the body length to
+    /// accomodate any expansion caused by encryption.
+    ///
+    /// For transit packets the padding space must be between the ZDP header and the
+    /// agent data bits.
+    ///
+    /// `message` is expected to be a ZDP message wihout a ZPI value.  We add a ZPI
+    /// value to the front of the message -- note that the value we add is just the
+    /// SA_ID.  It's up to caller to mix in the configuration ID value.
     pub fn encrypt_transport(&self, message: &mut Packet) -> io::Result<()> {
         let base_hdr =
             ZdpBaseHeader::ref_from_prefix(message.body()).expect("too-short ZDP message");
@@ -212,10 +221,10 @@ impl KeyManager<'_> {
         Ok(())
     }
 
-    // The message here must start with the ZPI value.
-    // We assume that packet ZPI value has been clensed of the config ID and is only the SA_ID.
-    // Key Management packets should not be sent here.
-    // Does not remove the ZPI/SA_ID value.
+    /// The message here must start with the ZPI value.
+    /// We assume that packet ZPI value has been clensed of the config ID and is only the SA_ID.
+    /// Key Management packets should not be sent here.
+    /// Does not remove the ZPI/SA_ID value.
     pub fn decrypt_transport(&self, message: &mut Packet) -> io::Result<()> {
         if message.body().len() < 1 {
             return Err(io::Error::new(io::ErrorKind::Other, "message too short"));
@@ -267,9 +276,9 @@ impl KeyManager<'_> {
         Ok(())
     }
 
-    // Pass in a full Key Management payload here (does not include ZDP header).
-    //
-    // We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
+    /// Pass in a full Key Management payload from our peer here (should not include ZDP header).
+    ///
+    /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
     pub async fn handle_km_message(&self, message: &[u8]) -> io::Result<()> {
         let tx: mpsc::Sender<Bytes>;
         {
@@ -297,11 +306,16 @@ impl KeyManager<'_> {
         }
     }
 
-    // Blocking run loop for the key manager.  This runs the key management algorithm
-    // state machine handing KM messages in and out.
-    //
-    // If `initiate` is true, the key manager will initiate a new handshake.  In the adapter-dock
-    // scenario, the adapter should be the initiator and the node should not.
+    /// Blocking run loop for the key manager.  This runs the key management algorithm
+    /// state machine handing KM messages in and out.
+    /// 
+    /// Use the CancellationToken to stop the run loop.
+    /// 
+    /// `km_buffers_out` will be filled with outbound ZDP Key Management messages for our peer. These are
+    /// just the payloads.  The caller is responsible for adding the ZPI header, if required.
+    ///
+    /// If `initiate` is true, the key manager will initiate a new handshake.  In the adapter-dock
+    /// scenario, the adapter should be the initiator and the node should not.
     pub async fn start(
         &mut self,
         initiate: bool,
@@ -434,7 +448,7 @@ impl KeyManager<'_> {
     }
 }
 
-// Generic encryption error (to be fleshed out later).
+/// Generic encryption error (to be fleshed out later).
 pub struct EncryptionError;
 
 impl fmt::Display for EncryptionError {
@@ -443,16 +457,21 @@ impl fmt::Display for EncryptionError {
     }
 }
 
-// State transitions:
-//
-//      *
-//      ↓
-// Configuring -> Transport
-//      ↓ ↑          ↓
-//     Error <-------+
-//
-// Not accounting for "rekeying" -- for now assuming that can happen
-// internally and machine can just stay in transport state.
+/// The state of the [KeyManagerStateMachine].
+/// 
+/// State transitions:
+///
+/// 
+/// ```text
+///      *
+///      ↓
+/// Configuring -> Transport
+///      ↓ ↑          ↓
+///     Error <-------+
+///```
+/// 
+/// Not accounting for "rekeying" -- for now assuming that can happen
+/// internally and machine can just stay in transport state.
 #[derive(Debug, Clone, PartialEq)]
 pub enum KMSMState {
     Configuring,
@@ -460,17 +479,29 @@ pub enum KMSMState {
     Error,
 }
 
-// Static settigns for the key management routine.
+/// A set of constant settings for a particular [KeyManagerStateMachine].  Used
+/// to configure the running of the [KeyManager].
 #[derive(Debug, Clone)]
 pub struct KMSettings {
+    /// The ZDP defined type value for this Key Management system.
     pub zdp_km_type: u16,
+
+    /// Number of additional bytes required to encrypt a payload for transport.
     pub padlen: usize,
+
+    /// If non-zero, then `payload`+`padlen` must be a multiple of `alignment`.
     pub alignment: u8,
+
+    /// How often the statement runloop should call into [KeyManagerStateMachine::tick].
     pub tick_interval: Duration,
 }
 
+/// Interface for a thing which can encrypt and decrypt ZDP trasport payloads.
+/// Not to be used for Key Management messages.
 pub trait TransportEncr: Send + Sync {
-    /// encrypt `payload` into `message`
+    /// Encrypt `payload` into `message`.
+    /// 
+    /// `sa_id` is the Security Association ID in use.
     fn encrypt_transport(
         self: &Self,
         sa_id: u8,
@@ -478,7 +509,9 @@ pub trait TransportEncr: Send + Sync {
         message: &mut [u8],
     ) -> Result<usize, EncryptionError>;
 
-    /// decrypt `payload` into `message`
+    /// Decrypt `payload` into `message`
+    /// 
+    /// `sa_id` is the Security Association ID in use.
     fn decrypt_transport(
         self: &Self,
         sa_id: u8,
@@ -487,32 +520,34 @@ pub trait TransportEncr: Send + Sync {
     ) -> Result<usize, EncryptionError>;
 }
 
+/// Interface to a Key Management protocol.
 pub trait KeyManagerStateMachine: Send + Sync {
-    // These do not change (TODO: is there a way to state that in rust?)
+    /// These do not change (TODO: is there a way to state that in rust?)
     fn get_settings(self: &Self) -> KMSettings;
 
-    // State can only change through handle_message, tick, or reset.
+    /// State can only change through handle_message, tick, or reset.
     fn get_state(self: &Self) -> KMSMState;
 
-    // Reset state machine and optionally initiate a new handshake.
-    // Must clear error state.
+    /// Reset state machine and optionally initiate a new handshake.
+    /// Must clear error state.
     fn reset(self: &mut Self, initiate: bool) -> Option<Bytes>;
 
-    // process an inbound KM message.
-    // may produce an output message.
-    // may transition internal state.
+    /// Process an inbound KM message.
+    /// May produce an output message.
+    /// May transition internal state.
     fn handle_message(self: &mut Self, message: &[u8]) -> Option<Bytes>;
 
-    // Optional outbound KM message
-    // May transition internal state
+    /// Optional outbound KM message
+    /// May transition internal state
     fn tick(self: &mut Self) -> Option<Bytes>;
 
-    // The encrypt/decrypt should not alter internal state of SA. So any state needed
-    // must be part of the message. Not sure about this assumption -- but hoping to
-    // avoid locking whole machine during encrypt/decrypt.
+    /// The encrypt/decrypt should not alter internal state of SA. So any state needed
+    /// must be part of the message. Not sure about this assumption -- but hoping to
+    /// avoid locking whole machine during encrypt/decrypt.
     fn get_transport_encryptor(self: &Self) -> Box<dyn TransportEncr>;
 }
 
+/// Placeholder code -- will be removed once we have a real key manager implementation.
 pub struct SillyKeyManager {
     state: KMSMState,
     settings: KMSettings,
