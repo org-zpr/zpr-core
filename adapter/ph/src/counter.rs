@@ -54,7 +54,7 @@ mod tests {
 
     #[test]
     fn test_new_get_count() {
-        let counter = Counter::new();
+        let _counter = Counter::new();
         assert_eq!(counter.get_count(), 0);
     }
 
