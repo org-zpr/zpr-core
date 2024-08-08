@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Wrapper for RCU-"ish" functionality (<https://en.wikipedia.org/wiki/Read-copy-update>)
 //!
 //! This API is deliberately minimal, to restrict via what functionality
