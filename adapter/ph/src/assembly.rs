@@ -20,6 +20,8 @@ use tokio::sync::{
 };
 use tokio::time::sleep;
 use zerocopy::FromBytes;
+use zpr_ext::std::mem::{drop_guard, DropGuard};
+
 // Interface to full assembly of all stages.
 
 // This is the "public interface" that all stages of the system use to talk
@@ -113,20 +115,22 @@ impl<'pktbuf> Assembly<'pktbuf> {
         self.sync_req_state.set_sender(Some(sender));
 
         for _i in 0..=config::DEFAULT_REQUEST_RETRY_COUNT {
-            let buf = self.buffer_stack.get_buffer().await;
-            let mut packet = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+            let buf = drop_guard(self.buffer_stack.get_buffer().await, |buf| {
+                self.buffer_stack.put_buffer(buf)
+            });
+            let mut packet = Packet::new_guarded(buf, config::DEFAULT_MESSAGE_HEADROOM);
             pkt_fn(&mut packet);
 
             // Determine if sending a non-flow or per-flow message
             match stream_id {
                 Some(stream_id) => {
                     self.outbound_processor
-                        .enqueue_per_flow_mgmt(zdp_request_type, stream_id, packet)
+                        .enqueue_per_flow_mgmt(zdp_request_type, stream_id, packet.into_inner())
                         .await
                 }
                 None => {
                     self.outbound_processor
-                        .enqueue_non_flow_mgmt(zdp_request_type, packet)
+                        .enqueue_non_flow_mgmt(zdp_request_type, packet.into_inner())
                         .await
                 }
             }
