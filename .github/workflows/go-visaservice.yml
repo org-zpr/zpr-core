@@ -27,5 +27,5 @@ jobs:
 
     - name: Test
       run: |
-        visaservice
+        cd visaservice
         make test-go
