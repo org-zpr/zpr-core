@@ -1,12 +1,4 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
-//!
-//! "Inbound" refers to the dock->adapter direction (i.e., inbound to this host).
-//! "Outbound" refers to the adapter->dock direction (i.e., outbound from this host).
-//!
-//! InboundProcessor is responsible for all "processing" of packets in the inbound direction.
-//! All agent packets from the dock are sent here for decapsulation, and any
-//! CPU-intensive postprocessing (e.g. signature verification).
-//! This may morph into more or fewer (i.e. zero) stages depending on future requirements.
 
 use crate::net_defs;
 use crate::packet::Packet;
@@ -25,20 +17,20 @@ pub enum TryEnqueueError<T> {
     Full(T),
 }
 
-pub enum InboundProcessorMessage<'pktbuf> {
+pub enum MgmtProcessorMessage<'pktbuf> {
     Packet(Packet<'pktbuf>),
     TestPacket(TestPacket),
 }
 
-pub struct InboundProcessor<'pktbuf> {
-    sender: mpsc::Sender<InboundProcessorMessage<'pktbuf>>,
+pub struct MgmtProcessor<'pktbuf> {
+    sender: mpsc::Sender<MgmtProcessorMessage<'pktbuf>>,
 }
 
-impl<'pktbuf> InboundProcessor<'pktbuf> {
+impl<'pktbuf> MgmtProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
     #[allow(dead_code)]
-    pub fn new(sender: mpsc::Sender<InboundProcessorMessage<'pktbuf>>) -> Self {
+    pub fn new(sender: mpsc::Sender<MgmtProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
     }
 
@@ -48,12 +40,12 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
         match self
             .sender
-            .try_send(InboundProcessorMessage::Packet(packet))
+            .try_send(MgmtProcessorMessage::Packet(packet))
         {
             Ok(()) => Ok(()),
 
             Err(TrySendError::Full(pkt) | TrySendError::Closed(pkt)) => {
-                let InboundProcessorMessage::Packet(pkt) = pkt else {
+                let MgmtProcessorMessage::Packet(pkt) = pkt else {
                     unreachable!()
                 };
                 Err(TryEnqueueError::Full(pkt))
@@ -65,7 +57,7 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
         let test_tuple = TestPacket::create();
 
         self.sender
-            .send(InboundProcessorMessage::TestPacket(test_tuple.0))
+            .send(MgmtProcessorMessage::TestPacket(test_tuple.0))
             .await
             .unwrap();
 
@@ -73,13 +65,13 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
     }
 }
 
-/// InboundSend is responsible for emitting decapsulated agent packets on the
+/// AgentInput is responsible for emitting decapsulated agent packets on the
 /// host's TUN interface.
-pub struct InboundSend<'a> {
+pub struct AgentInput<'a> {
     tuns: Box<[&'a tokio_tun::Tun]>,
 }
 
-impl<'a> InboundSend<'a> {
+impl<'a> AgentInput<'a> {
     // We necessarily have multiple queues, corresponding to the multiple
     // FDs of a multiqueue-enabled TUN interface.
     pub fn new(tuns: impl IntoIterator<Item = &'a tokio_tun::Tun>) -> Self {
@@ -111,18 +103,19 @@ impl<'a> InboundSend<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn fanout(&self) -> usize {
         self.tuns.len()
     }
 }
 
 
-/// OutboundSend is responsible for sending encapsulated agent packets to the dock.
-pub struct OutboundSend<'a> {
+/// SubstrateEgress is responsible for sending encapsulated agent packets to the dock.
+pub struct SubstrateEgress<'a> {
     sockets: Box<[&'a UdpSocket]>,
 }
 
-impl<'a> OutboundSend<'a> {
+impl<'a> SubstrateEgress<'a> {
     pub fn new(sockets: impl IntoIterator<Item = &'a UdpSocket>) -> Self {
         Self {
             sockets: sockets.into_iter().collect(),

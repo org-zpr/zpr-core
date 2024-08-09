@@ -43,14 +43,9 @@ pub struct Assembly<'pktbuf> {
     // Shared resources.  These may be accessed by any part of the system.
     pub buffer_stack: BufferStack<'pktbuf, { config::PACKET_BUFFER_SIZE }>,
 
-    // Inbound (dock->adapter) agent packet path.  Keep these topologically
-    // sorted according to expected packet flow.
-    pub inbound_processor: InboundProcessor<'pktbuf>,
-    pub inbound_send: InboundSend<'pktbuf>,
-
-    // Outbound (adapter->dock) agent packet path.  Keep these topologically
-    // sorted according to expected packet flow.
-    pub outbound_send: OutboundSend<'pktbuf>,
+    pub mgmt_processor: MgmtProcessor<'pktbuf>,
+    pub agent_input: AgentInput<'pktbuf>,
+    pub substrate_egress: SubstrateEgress<'pktbuf>,
 
     // Used to intercept packets that are unencrypted but still have ZDP headers
     pub capture_queue: Capture<'pktbuf>,
@@ -64,7 +59,6 @@ pub struct Assembly<'pktbuf> {
     pub sync_req_state: SyncReqState<'pktbuf>,
 }
 
-#[allow(dead_code)]
 pub struct SyncReqState<'pktbuf> {
     inner_req: Mutex<SyncReqInnerState<'pktbuf>>,
     semaphore: Semaphore,

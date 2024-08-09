@@ -4,7 +4,7 @@ use crate::counters_enum::CounterType;
 use crate::fastpath;
 use crate::mgmt;
 use crate::packet::Packet;
-use crate::queues::InboundProcessorMessage;
+use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
 use crate::zpr;
 use bytes::Buf;
@@ -13,42 +13,29 @@ use tokio::sync::mpsc;
 use zerocopy::FromBytes;
 use zpr_ext::zerocopy::*;
 
-#[derive(Copy, Clone)]
-pub struct Config {
-    pub batch_size: usize,
-}
-
 async fn worker<'pktbuf>(
-    config: &Config,
     asm: &Assembly<'pktbuf>,
-    queue: &mut mpsc::Receiver<InboundProcessorMessage<'pktbuf>>,
+    queue: &mut mpsc::Receiver<MgmtProcessorMessage<'pktbuf>>,
 ) {
-    let mut msgs = Vec::new();
+    while let Some(msg) = queue.recv().await {
+        match msg {
+            MgmtProcessorMessage::Packet(pkt) =>
+                handle_packet(asm, pkt).await,
 
-    while let count @ 1.. = queue.recv_many(&mut msgs, config.batch_size).await {
-        for msg in msgs.drain(..) {
-            match msg {
-                InboundProcessorMessage::Packet(pkt) => {
-                    handle_packet(asm, pkt).await;
-                }
-                InboundProcessorMessage::TestPacket(pkt) => {
-                    pkt.acknowledge(queue.len(), count);
-                }
-            }
+            MgmtProcessorMessage::TestPacket(pkt) =>
+                pkt.acknowledge(queue.len(), 1),
         }
     }
 }
 
 pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
-    config: &Config,
     asm: AsmRef,
-    mut queue: mpsc::Receiver<InboundProcessorMessage<'pktbuf>>,
+    mut queue: mpsc::Receiver<MgmtProcessorMessage<'pktbuf>>,
 ) -> impl Future<Output = ()> + Send + 'pktbuf
 where
     AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
 {
-    let cfg = *config;
-    async move { worker(&cfg, &*asm, &mut queue).await }
+    async move { worker(&*asm, &mut queue).await }
 }
 
 async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
@@ -78,6 +65,7 @@ async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf
             ZdpPerFlowHeader::read_from_buf(&mut pkt).expect("too-short per-flow message");
 
         match base_hdr.packet_type {
+            ZdpPacketType::TransitPacket => panic!("unexpected TransitPacket in management path"),
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     } else {
