@@ -1,8 +1,8 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
-
+//!
 //! "Inbound" refers to the dock->adapter direction (i.e., inbound to this host).
 //! "Outbound" refers to the adapter->dock direction (i.e., outbound from this host).
-
+//!
 //! InboundProcessor is responsible for all "processing" of packets in the inbound direction.
 //! All agent packets from the dock are sent here for decapsulation, and any
 //! CPU-intensive postprocessing (e.g. signature verification).

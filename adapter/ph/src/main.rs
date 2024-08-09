@@ -254,8 +254,8 @@ fn main() -> ExitCode {
                 &*socket,
             ));
 
-            asm.send_report("Reporting for Duty!").await;
-            asm.send_discard().await;
+            mgmt::send_report(asm, zpr::ADAPTER_DOCKING_SESSION_ID, "Reporting for Duty!").await;
+            mgmt::send_discard(asm, zpr::ADAPTER_DOCKING_SESSION_ID).await;
             asm.send_hello_req().await;
 
             while let Some(res) = js.join_next().await {

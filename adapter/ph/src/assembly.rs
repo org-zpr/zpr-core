@@ -11,7 +11,7 @@ use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use crate::zdp::*;
 use crate::zpr;
-use bytes::{Buf, BufMut};
+use bytes::Buf;
 use core::time::Duration;
 use enum_map::EnumMap;
 use std::result::Result;
@@ -22,21 +22,22 @@ use tokio::sync::{
 };
 use tokio::time::sleep;
 use zerocopy::FromBytes;
-// Interface to full assembly of all stages.
 
-// This is the "public interface" that all stages of the system use to talk
-// to each other (via queues), and to shared resources (e.g. the buffer stack).
-
-// All queues and shared resources here should be bounded, so that
-// backpressure can flow from any processing stage all the way back to the
-// kernel network ingest queues, and that service time of any packet
-// transiting the system is not permitted to grow indefinitely under
-// pressure.
-
-// The intention is that there are no hidden unbounded queues in the system
-// (such as a mutex held over a blocking operation).  If a resource is
-// highly contended resulting in a bottleneck, that should result in some
-// visible queue becoming full.
+/// Interface to full assembly of all stages.
+///
+/// This is the "public interface" that all stages of the system use to talk
+/// to each other (via queues), and to shared resources (e.g. the buffer stack).
+///
+/// All queues and shared resources here should be bounded, so that
+/// backpressure can flow from any processing stage all the way back to the
+/// kernel network ingest queues, and that service time of any packet
+/// transiting the system is not permitted to grow indefinitely under
+/// pressure.
+///
+/// The intention is that there are no hidden unbounded queues in the system
+/// (such as a mutex held over a blocking operation).  If a resource is
+/// highly contended resulting in a bottleneck, that should result in some
+/// visible queue becoming full.
 
 pub struct Assembly<'pktbuf> {
     // Shared resources.  These may be accessed by any part of the system.
@@ -214,26 +215,6 @@ impl<'pktbuf> Assembly<'pktbuf> {
             }
             Err(_) => return Err(err_type),
         }
-    }
-
-    pub async fn send_report(&self, to_send: &str) {
-        // this condition will need to be adjusted when we have complete ZPR packets
-        // with the information at the end of the packet at well
-        if PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < to_send.len() {
-            return;
-        }
-        let buf = self.buffer_stack.get_buffer().await;
-        let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
-        let hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
-        hdr.report_data_length = (to_send.len() as u16).into();
-        pkt.put(to_send.as_bytes());
-        mgmt::send_non_flow_mgmt(self, zpr::ADAPTER_DOCKING_SESSION_ID /* FIXME */, ZdpPacketType::Report, pkt);
-    }
-
-    pub async fn send_discard(&self) {
-        let buf = self.buffer_stack.get_buffer().await;
-        let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
-        mgmt::send_non_flow_mgmt(self, zpr::ADAPTER_DOCKING_SESSION_ID /* FIXME */, ZdpPacketType::Discard, pkt);
     }
 
     pub async fn send_hello_req(&self) {

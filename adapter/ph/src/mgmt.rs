@@ -1,10 +1,13 @@
 //! Management packet functions.
 
 use crate::assembly::Assembly;
+use crate::config;
 use crate::fastpath;
-use crate::packet::Packet;
+use crate::mgmt;
+use crate::packet::{self, Packet};
 use crate::zdp;
 use crate::zpr;
+use bytes::BufMut;
 
 /// Send a unidirectional non-flow management message on the given link.
 /// The packet should contain only the message body.
@@ -50,4 +53,24 @@ pub fn send_per_flow_mgmt<'pktbuf>(
         zpr::ZPI_0,  // TODO
         packet,
     );
+}
+
+pub async fn send_report<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId, report: &str) {
+    // this condition will need to be adjusted when we have complete ZPR packets
+    // with the information at the end of the packet at well
+    if packet::PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < report.len() {
+        return;
+    }
+    let buf = asm.buffer_stack.get_buffer().await;
+    let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+    let hdr = pkt.alloc_zeroed_header::<zdp::ZdpReportHeader>();
+    hdr.report_data_length = (report.len() as u16).into();
+    pkt.put(report.as_bytes());
+    send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Report, pkt);
+}
+
+pub async fn send_discard<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId) {
+    let buf = asm.buffer_stack.get_buffer().await;
+    let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+    mgmt::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt);
 }
