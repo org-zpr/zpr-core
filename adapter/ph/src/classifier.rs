@@ -288,9 +288,9 @@ fn classify_udp(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::config;
     use zerocopy::FromZeroes;
-    use super::*;
 
     #[test]
     fn test_non_ip() {
