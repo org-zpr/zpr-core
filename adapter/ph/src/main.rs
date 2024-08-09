@@ -29,9 +29,9 @@ mod defs;
 mod fastpath;
 mod flow_control;
 mod inbound_processor_worker;
+mod mgmt;
 mod net_defs;
 mod options;
-mod outbound_processor_worker;
 mod packet;
 mod pcap_writer;
 mod queues;
@@ -104,7 +104,6 @@ fn main() -> ExitCode {
     let substrate_ingress_batch_size = 8;
     let inbound_processor_batch_size = 16;
     let agent_output_batch_size = 4;
-    let outbound_processor_batch_size = 16;
     let capture_queue_size = 16;
     let capture_batch_size = 8;
     let tun_queue_count = 1;
@@ -113,9 +112,6 @@ fn main() -> ExitCode {
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
     let (ip_inq, ip_outq) = mpsc::channel(inbound_processor_batch_size * 2);
     let inbound_processor = InboundProcessor::new(ip_inq);
-
-    let (op_inq, op_outq) = mpsc::channel(outbound_processor_batch_size * 2);
-    let outbound_processor = OutboundProcessor::new(op_inq);
 
     let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
@@ -179,7 +175,6 @@ fn main() -> ExitCode {
                 buffer_stack,
                 inbound_processor,
                 inbound_send,
-                outbound_processor,
                 outbound_send,
                 capture_queue,
                 capture_worker,
@@ -236,14 +231,6 @@ fn main() -> ExitCode {
                     tun_dev,
                 ));
             }
-
-            js.spawn(outbound_processor_worker::launch(
-                &outbound_processor_worker::Config {
-                    batch_size: outbound_processor_batch_size,
-                },
-                &*asm,
-                op_outq,
-            ));
 
             js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
 

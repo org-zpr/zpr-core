@@ -2,9 +2,11 @@ use crate::assembly::Assembly;
 use crate::config;
 use crate::counters_enum::CounterType;
 use crate::fastpath;
+use crate::mgmt;
 use crate::packet::Packet;
 use crate::queues::InboundProcessorMessage;
 use crate::zdp::*;
+use crate::zpr;
 use bytes::Buf;
 use std::future::Future;
 use tokio::sync::mpsc;
@@ -103,9 +105,8 @@ async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf
                 let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
                 let hdr = send_pkt.alloc_zeroed_header::<ZdpHelloResponseHeader>();
                 hdr.status = 0;
-                asm.outbound_processor
-                    .enqueue_non_flow_mgmt(ZdpPacketType::HelloResponse, send_pkt)
-                    .await;
+                mgmt::send_non_flow_mgmt(asm, zpr::ADAPTER_DOCKING_SESSION_ID /* FIXME */,
+                    ZdpPacketType::HelloResponse, send_pkt);
                 eprintln!("Received HelloRequest");
             }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),

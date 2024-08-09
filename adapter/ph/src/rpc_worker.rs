@@ -170,9 +170,6 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     let mut inbound_processor_duration = Histogram::<u64>::new(1).unwrap();
     let mut inbound_processor_depth = Histogram::<u64>::new(1).unwrap();
     let mut inbound_processor_batch = Histogram::<u64>::new(1).unwrap();
-    let mut outbound_processor_duration = Histogram::<u64>::new(1).unwrap();
-    let mut outbound_processor_depth = Histogram::<u64>::new(1).unwrap();
-    let mut outbound_processor_batch = Histogram::<u64>::new(1).unwrap();
 
     send_interval.tick().await;
     let mut queue_num = 0;
@@ -192,14 +189,6 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
             &mut inbound_processor_batch,
         );
 
-        let out_processor = asm.outbound_processor.enqueue_test_packet().await;
-        record_metrics(
-            out_processor,
-            &mut outbound_processor_duration,
-            &mut outbound_processor_depth,
-            &mut outbound_processor_batch,
-        );
-
         // TODO: record metrics from TUN interface and UDP socket
 
         send_interval.tick().await;
@@ -213,14 +202,8 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         &inbound_processor_depth,
         &inbound_processor_batch,
     );
-    let out_processor = three_hists_values(
-        "Outbound Processor",
-        &outbound_processor_duration,
-        &outbound_processor_depth,
-        &outbound_processor_batch,
-    );
 
-    format!("{in_processor}{out_processor}")
+    format!("{in_processor}")
 }
 
 // Helper for perf_sample

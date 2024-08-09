@@ -5,10 +5,12 @@ use crate::counter::*;
 use crate::counters_enum::*;
 use crate::fastpath;
 use crate::flow_control::FlowControl;
+use crate::mgmt;
 use crate::packet::*;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use crate::zdp::*;
+use crate::zpr;
 use bytes::{Buf, BufMut};
 use core::time::Duration;
 use enum_map::EnumMap;
@@ -47,7 +49,6 @@ pub struct Assembly<'pktbuf> {
 
     // Outbound (adapter->dock) agent packet path.  Keep these topologically
     // sorted according to expected packet flow.
-    pub outbound_processor: OutboundProcessor<'pktbuf>,
     pub outbound_send: OutboundSend<'pktbuf>,
 
     // Used to intercept packets that are unencrypted but still have ZDP headers
@@ -171,14 +172,12 @@ impl<'pktbuf> Assembly<'pktbuf> {
             // Determine if sending a non-flow or per-flow message
             match stream_id {
                 Some(stream_id) => {
-                    self.outbound_processor
-                        .enqueue_per_flow_mgmt(zdp_request_type, stream_id, packet)
-                        .await
+                    mgmt::send_per_flow_mgmt(self, zpr::ADAPTER_DOCKING_SESSION_ID /* FIXME */,
+                        zdp_request_type, stream_id, packet);
                 }
                 None => {
-                    self.outbound_processor
-                        .enqueue_non_flow_mgmt(zdp_request_type, packet)
-                        .await
+                    mgmt::send_non_flow_mgmt(self, zpr::ADAPTER_DOCKING_SESSION_ID /* FIXME */,
+                        zdp_request_type, packet);
                 }
             }
             tokio::select! {
@@ -228,17 +227,13 @@ impl<'pktbuf> Assembly<'pktbuf> {
         let hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
         hdr.report_data_length = (to_send.len() as u16).into();
         pkt.put(to_send.as_bytes());
-        self.outbound_processor
-            .enqueue_non_flow_mgmt(ZdpPacketType::Report, pkt)
-            .await;
+        mgmt::send_non_flow_mgmt(self, zpr::ADAPTER_DOCKING_SESSION_ID /* FIXME */, ZdpPacketType::Report, pkt);
     }
 
     pub async fn send_discard(&self) {
         let buf = self.buffer_stack.get_buffer().await;
         let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
-        self.outbound_processor
-            .enqueue_non_flow_mgmt(ZdpPacketType::Discard, pkt)
-            .await;
+        mgmt::send_non_flow_mgmt(self, zpr::ADAPTER_DOCKING_SESSION_ID /* FIXME */, ZdpPacketType::Discard, pkt);
     }
 
     pub async fn send_hello_req(&self) {
