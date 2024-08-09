@@ -22,6 +22,7 @@ zerocopy = { version = "0.7.34", features = ["byteorder"] }
 tokio-util = { version = "0.7.11", features = ["rt"] }
 tracing = "0.1.40"
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }
+snow = "0.9.6"
 
 [features]
 default = ["rcu-crossbeam-epoch"]

@@ -17,6 +17,7 @@ pub mod flow_control;
 pub mod km;
 pub mod mgmt;
 pub mod mgmt_processor_worker;
+pub mod km_noise;
 pub mod net_defs;
 pub mod options;
 pub mod packet;
