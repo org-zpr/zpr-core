@@ -191,11 +191,14 @@ pub mod os {
 
             pub enum AncillaryData<'a> {
                 ScmRights(ScmRights<'a>),
+                ScmCredentials(ScmCredentials<'a>),
             }
 
             pub type AncillaryError = ();
 
             pub type ScmRights<'a> = std::iter::Cloned<std::slice::Iter<'a, RawFd>>;
+
+            pub struct ScmCredentials<'a>(std::marker::PhantomData<&'a ()>);
 
             pub trait UnixStreamExt {
                 #[cfg(any(doc, target_os = "android", target_os = "linux"))]
@@ -380,6 +383,7 @@ pub mod os {
 
                     let fds: Vec<_> = match messages.next().unwrap().unwrap() {
                         AncillaryData::ScmRights(fds) => fds.collect(),
+                        AncillaryData::ScmCredentials(_) => panic!("expected ScmRights"),
                     };
                     assert!(fds.len() == 1);
 
