@@ -80,33 +80,33 @@ pub fn inet_checksum(data: &[u8]) -> [u8; 2] {
     // time instead, but we're mostly summing short spans, so having only
     // one unaligned case shortens the branch logic here.
     if (&data[0] as *const u8 as *const u16).is_aligned() ^ (data.len() % 2 == 1) {
-        let first_byte = if data.len() % 2 == 0 {
-            0
-        } else {
-            data[0]
-        };
+        let first_byte = if data.len() % 2 == 0 { 0 } else { data[0] };
         let extra_sum = u16::from_ne_bytes([0, first_byte]);
 
         // SAFETY: we have verified alignment and length
         let data16 = unsafe {
-            std::slice::from_raw_parts(&data[data.len() % 2] as *const u8 as *const u16, data.len() / 2)
+            std::slice::from_raw_parts(
+                &data[data.len() % 2] as *const u8 as *const u16,
+                data.len() / 2,
+            )
         };
 
         inet_checksum_helper(extra_sum, data16).to_ne_bytes()
     } else {
-        let first_byte = if data.len() % 2 == 0 {
-            data[0]
-        } else {
-            0
-        };
+        let first_byte = if data.len() % 2 == 0 { data[0] } else { 0 };
         let extra_sum = u16::from_ne_bytes([data[data.len() - 1], first_byte]);
 
         // SAFETY: we are compensating for alignment
         let data16 = unsafe {
-            std::slice::from_raw_parts(&data[1 - data.len() % 2] as *const u8 as *const u16, (data.len() - 1) / 2)
+            std::slice::from_raw_parts(
+                &data[1 - data.len() % 2] as *const u8 as *const u16,
+                (data.len() - 1) / 2,
+            )
         };
         // NOTE: purposefully to_le_bytes(), to compensate for misalignment
-        inet_checksum_helper(extra_sum, data16).swap_bytes().to_ne_bytes()
+        inet_checksum_helper(extra_sum, data16)
+            .swap_bytes()
+            .to_ne_bytes()
     }
 }
 

@@ -181,7 +181,10 @@ pub fn encrypt<'pktbuf>(
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == zpr::ZPI_0 {
-        pkt.put(net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]).as_slice());
+        pkt.put(
+            net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..])
+                .as_slice(),
+        );
     } else {
         todo!("encryption");
     }
@@ -217,11 +220,13 @@ pub fn decrypt<'pktbuf>(
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == zpr::ZPI_0 {
-        if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
+        if !net_defs::validate_inet_checksum(
+            &pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..],
+        ) {
             return Err(DecryptError::MicvFailure);
         }
 
-        pkt.shrink(2);  // remove checksum
+        pkt.shrink(2); // remove checksum
 
         Ok(())
     } else {
