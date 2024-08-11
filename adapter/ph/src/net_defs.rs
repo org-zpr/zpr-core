@@ -14,7 +14,7 @@ pub mod ethertype {
 pub const IPV6_ADDRESS_SIZE: usize = 16;
 
 #[derive(
-    AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned, Copy, Clone, Hash, Debug, PartialEq,
+    AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned, Copy, Clone, Hash, Debug, PartialEq, Eq,
 )]
 #[repr(transparent)]
 pub struct IpAddress {
@@ -48,6 +48,8 @@ pub fn ip_ethertype(ip_version: u8) -> u16 {
         _ => 0,
     }
 }
+
+pub type IpProtocol = u8;
 
 /// RFC 1071 Internet Checksum.  The input data must be non-empty, and
 /// length at most ~128 KiB.

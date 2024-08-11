@@ -40,3 +40,12 @@ pub const KM_ID_IKEV2: KmId = 1;
 
 /// Key Management Identifier indicating Noise algorithm.
 pub const KM_ID_NOISE: KmId = 2;
+
+pub type CompressionMode = usize;
+
+pub mod compression_mode {
+    use super::CompressionMode;
+
+    pub const COMPRESS_SOURCE_PORT: CompressionMode = 1;
+    pub const COMPRESS_DEST_PORT: CompressionMode = 2;
+}

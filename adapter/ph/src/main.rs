@@ -16,6 +16,7 @@ use tokio_tun::TunBuilder;
 use tracing::warn;
 use zpr_ext::tokio::net::UdpSocketExt;
 
+mod adapter_tables;
 mod agent_output_worker;
 mod assembly;
 mod buffer_stack;
@@ -271,6 +272,7 @@ fn main() -> ExitCode {
                 sync_req_state,
                 peer_table,
                 adapter_docking_session_id,
+                alt: adapter_tables::AgentLookupTable::new(),
             }));
 
             // TODO signal handler goes here

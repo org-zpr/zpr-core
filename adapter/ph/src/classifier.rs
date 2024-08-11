@@ -167,7 +167,7 @@ fn classify_ipv6(
 fn classify_next_header(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
-    protocol: u8,
+    protocol: IpProtocol,
 ) -> Result<ClassifierResult, &'static str> {
     metadata.set_protocol(protocol);
     match protocol {
