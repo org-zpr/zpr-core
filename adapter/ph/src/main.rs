@@ -273,6 +273,7 @@ fn main() -> ExitCode {
                 peer_table,
                 adapter_docking_session_id,
                 alt: adapter_tables::AgentLookupTable::new(),
+                dlt: adapter_tables::DockLookupTable::new(),
             }));
 
             // TODO signal handler goes here
