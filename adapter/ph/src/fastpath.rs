@@ -6,12 +6,13 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
+use crate::net_defs;
 use crate::packet::Packet;
 use crate::queues::TryEnqueueError;
 use crate::zdp;
 use crate::zdp_ll;
 use crate::zpr;
-use bytes::Buf;
+use bytes::{Buf, BufMut};
 use std::time::SystemTime;
 use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
@@ -180,7 +181,7 @@ pub fn encrypt<'pktbuf>(
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == zpr::ZPI_0 {
-        // TODO: MAC
+        pkt.put(net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]).as_slice());
     } else {
         todo!("encryption");
     }
@@ -216,7 +217,12 @@ pub fn decrypt<'pktbuf>(
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == zpr::ZPI_0 {
-        // TODO: MAC
+        if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
+            return Err(DecryptError::MicvFailure);
+        }
+
+        pkt.shrink(2);  // remove checksum
+
         Ok(())
     } else {
         todo!("decryption");

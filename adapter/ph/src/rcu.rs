@@ -14,6 +14,8 @@
 //! which do not meet the above performance requirements, but are useful
 //! for testing.  The active implementation is selected by a feature flag.
 
+#![allow(dead_code)]
+
 #[cfg(all(
     feature = "rcu-rwlock",
     feature = "rcu-mutex-arc",
