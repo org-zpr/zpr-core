@@ -22,7 +22,7 @@ pub enum CounterType {
     BadMgmtResponse,
     UnexpectedMgmtResponse,
 
-    // § 8.2.1
+    // RFC 6.5 § 8.2.1
     UnknownZpi,
     SequenceError,
     MicvFailure,

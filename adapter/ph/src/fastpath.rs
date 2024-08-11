@@ -181,6 +181,7 @@ pub fn encrypt<'pktbuf>(
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == zpr::ZPI_0 {
+        // RFC 6.5 § 5.25.2
         pkt.put(
             net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..])
                 .as_slice(),
@@ -220,6 +221,7 @@ pub fn decrypt<'pktbuf>(
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == zpr::ZPI_0 {
+        // RFC 6.5 § 5.25.2
         if !net_defs::validate_inet_checksum(
             &pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..],
         ) {
