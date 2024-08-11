@@ -48,8 +48,8 @@ pub fn ip_ethertype(ip_version: u8) -> u16 {
     }
 }
 
-/// RFC 1071 Internet Checksum.  The input data must be non-empty, length at
-/// most 64 KiB, and length a multiple of 4.
+/// RFC 1071 Internet Checksum.  The input data must be non-empty, and
+/// length at most ~128 KiB.
 pub fn inet_checksum(data: &[u8]) -> [u8; 2] {
     // NOTE: This benchmarks about twice as fast as the `internet-checksum` crate,
     // and is many fewer lines of code.
@@ -79,35 +79,39 @@ pub fn inet_checksum(data: &[u8]) -> [u8; 2] {
     // Split into the aligned and unaligned case.  We could sum 32 bits at a
     // time instead, but we're mostly summing short spans, so having only
     // one unaligned case shortens the branch logic here.
-    if (&data[0] as *const u8 as *const u16).is_aligned() {
-        let last_byte = if data.len() % 2 == 0 {
+    if (&data[0] as *const u8 as *const u16).is_aligned() ^ (data.len() % 2 == 1) {
+        let first_byte = if data.len() % 2 == 0 {
             0
         } else {
-            data[data.len() - 1]
+            data[0]
         };
-        let extra_sum = u16::from_ne_bytes([last_byte, 0]);
+        let extra_sum = u16::from_ne_bytes([0, first_byte]);
 
         // SAFETY: we have verified alignment and length
         let data16 = unsafe {
-            std::slice::from_raw_parts(&data[0] as *const u8 as *const u16, data.len() / 2)
+            std::slice::from_raw_parts(&data[data.len() % 2] as *const u8 as *const u16, data.len() / 2)
         };
 
-        inet_checksum_helper(extra_sum, data16).to_be_bytes()
+        inet_checksum_helper(extra_sum, data16).to_ne_bytes()
     } else {
-        let last_byte = if data.len() % 2 == 0 {
-            data[data.len() - 1]
+        let first_byte = if data.len() % 2 == 0 {
+            data[0]
         } else {
             0
         };
-        let extra_sum = u16::from_ne_bytes([last_byte, data[0]]);
+        let extra_sum = u16::from_ne_bytes([data[data.len() - 1], first_byte]);
 
         // SAFETY: we are compensating for alignment
         let data16 = unsafe {
-            std::slice::from_raw_parts(&data[1] as *const u8 as *const u16, (data.len() - 1) / 2)
+            std::slice::from_raw_parts(&data[1 - data.len() % 2] as *const u8 as *const u16, (data.len() - 1) / 2)
         };
         // NOTE: purposefully to_le_bytes(), to compensate for misalignment
-        inet_checksum_helper(extra_sum, data16).to_le_bytes()
+        inet_checksum_helper(extra_sum, data16).swap_bytes().to_ne_bytes()
     }
+}
+
+pub fn validate_inet_checksum(data: &[u8]) -> bool {
+    inet_checksum(data) == [0u8; 2]
 }
 
 #[cfg(test)]
@@ -129,12 +133,31 @@ mod tests {
     }
 
     #[test]
+    fn test_checksum_order() {
+        for buf in TEST_DATA {
+            let mut v = Vec::new();
+            v.extend_from_slice(&buf[..buf.len() - 2]);
+            assert_eq!(inet_checksum(v.as_slice()), buf[buf.len() - 2..]);
+        }
+    }
+
+    #[test]
     fn test_checksum_unaligned() {
         for buf in TEST_DATA {
             let mut v = Vec::new();
             v.push(0);
             v.extend_from_slice(buf);
             assert_eq!(inet_checksum(&v[1..]), [0u8; 2]);
+        }
+    }
+
+    #[test]
+    fn test_checksum_order_unaligned() {
+        for buf in TEST_DATA {
+            let mut v = Vec::new();
+            v.push(0);
+            v.extend_from_slice(&buf[..buf.len() - 2]);
+            assert_eq!(inet_checksum(v.as_slice()), buf[buf.len() - 2..]);
         }
     }
 
