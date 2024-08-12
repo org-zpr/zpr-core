@@ -140,8 +140,8 @@ impl KeyManagerStateMachine for KMNoise {
                     return Err(KMError::MachineError(format!("failed to build initiator: {}", e.to_string())));
                 }
             };
-            //let mut buf = [0u8; 4096];
-            let mut buf = BytesMut::zeroed(4096);
+
+            let mut buf = BytesMut::zeroed(1024);
             let len = match initiator.write_message(&b"todo:cert here"[..], &mut buf) {
                 Ok(l) => l,
                 Err(e) => {
@@ -179,7 +179,7 @@ impl KeyManagerStateMachine for KMNoise {
             }
             if self.hs_state.is_some() {
                 hs = self.hs_state.take().unwrap();
-                let mut buf = BytesMut::zeroed(4096);
+                let mut buf = BytesMut::zeroed(1024);
                 match hs.read_message(&message[..], &mut buf) {
                     Ok(len) => {
                         // TODO: In future we plan to send the certificate over in the first handshake message buffer.
@@ -196,7 +196,7 @@ impl KeyManagerStateMachine for KMNoise {
                 let mut hs_msg: Option<Bytes> = None;
 
                 if !hs.is_handshake_finished() {
-                    let mut buf = BytesMut::zeroed(4096);
+                    let mut buf = BytesMut::zeroed(1024);
                     match hs.write_message(&[], &mut buf) {
                         Ok(len) => {
                             buf.truncate(len);
