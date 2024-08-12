@@ -39,15 +39,27 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
     #[allow(dead_code)]
-    pub(crate) fn new(sender: mpsc::Sender<InboundProcessorMessage<'pktbuf>>) -> Self {
+    pub fn new(sender: mpsc::Sender<InboundProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
     }
 
-    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
-        self.sender
-            .send(InboundProcessorMessage::Packet(packet))
-            .await
-            .unwrap();
+    pub fn try_enqueue_packet(
+        &self,
+        packet: Packet<'pktbuf>,
+    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        match self
+            .sender
+            .try_send(InboundProcessorMessage::Packet(packet))
+        {
+            Ok(()) => Ok(()),
+
+            Err(TrySendError::Full(pkt) | TrySendError::Closed(pkt)) => {
+                let InboundProcessorMessage::Packet(pkt) = pkt else {
+                    unreachable!()
+                };
+                Err(TryEnqueueError::Full(pkt))
+            }
+        }
     }
 
     pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
@@ -109,9 +121,7 @@ impl<'a> InboundSend<'a> {
 /// All packets from the host are sent here for encapsulation, and any
 /// CPU-intensive preprocessing (e.g. signature generation).
 /// This may morph into more or fewer (i.e. zero) stages depending on future requirements.
-#[allow(dead_code)]
 pub enum OutboundProcessorMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>),
     TestPacket(TestPacket),
     NonFlowMgmt(zdp::ZdpPacketType, Packet<'pktbuf>),
     PerFlowMgmt(zdp::ZdpPacketType, u32, Packet<'pktbuf>),
@@ -125,15 +135,8 @@ impl<'pktbuf> OutboundProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
     #[allow(dead_code)]
-    pub(crate) fn new(sender: mpsc::Sender<OutboundProcessorMessage<'pktbuf>>) -> Self {
+    pub fn new(sender: mpsc::Sender<OutboundProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
-    }
-
-    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
-        self.sender
-            .send(OutboundProcessorMessage::Packet(packet))
-            .await
-            .unwrap();
     }
 
     pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
