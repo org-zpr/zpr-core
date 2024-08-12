@@ -288,8 +288,6 @@ fn classify_udp(
 
 #[cfg(test)]
 mod tests {
-    use crate::config;
-    use zerocopy::FromZeroes;
     use super::*;
     use crate::config;
     use zerocopy::FromZeroes;
