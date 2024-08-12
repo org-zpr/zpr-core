@@ -283,8 +283,7 @@ pub mod os {
                         && (*cmsghdr).cmsg_level == libc::SOL_SOCKET
                         && (*cmsghdr).cmsg_type == libc::SCM_RIGHTS
                     {
-                        let size_of_hdr = (2
-                            * libc::CMSG_LEN(std::mem::size_of::<RawFd>() as _)
+                        let size_of_hdr = (2 * libc::CMSG_LEN(std::mem::size_of::<RawFd>() as _)
                             - libc::CMSG_LEN((2 * std::mem::size_of::<RawFd>()) as _))
                             as usize;
                         let num_fds =
@@ -321,9 +320,9 @@ pub mod os {
                     &self,
                     bufs: &mut [IoSliceMut<'_>],
                     ancillary: &mut SocketAncillary<'_>,
-               ) -> Result<usize> {
+                ) -> Result<usize> {
                     uds_recv_vectored_with_ancillary(self.as_fd(), bufs, ancillary)
-               }
+                }
             }
 
             #[cfg(test)]

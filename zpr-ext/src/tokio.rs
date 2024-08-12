@@ -1,5 +1,7 @@
 pub mod net {
-    use crate::std::os::unix::net::{SocketAncillary, uds_recv_vectored_with_ancillary, uds_send_vectored_with_ancillary};
+    use crate::std::os::unix::net::{
+        uds_recv_vectored_with_ancillary, uds_send_vectored_with_ancillary, SocketAncillary,
+    };
     use nix::sys::socket;
     use std::io::{self, IoSlice, IoSliceMut};
     use std::os::fd::AsFd;
@@ -28,7 +30,9 @@ pub mod net {
     ) -> io::Result<usize> {
         loop {
             stream.writable().await?;
-            match stream.try_io(Interest::WRITABLE, || uds_send_vectored_with_ancillary(stream.as_fd(), bufs, ancillary)) {
+            match stream.try_io(Interest::WRITABLE, || {
+                uds_send_vectored_with_ancillary(stream.as_fd(), bufs, ancillary)
+            }) {
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => continue,
                 res => break res,
             }
@@ -43,7 +47,9 @@ pub mod net {
     ) -> io::Result<usize> {
         loop {
             stream.readable().await?;
-            match stream.try_io(Interest::WRITABLE, || uds_recv_vectored_with_ancillary(stream.as_fd(), bufs, ancillary)) {
+            match stream.try_io(Interest::WRITABLE, || {
+                uds_recv_vectored_with_ancillary(stream.as_fd(), bufs, ancillary)
+            }) {
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => continue,
                 res => break res,
             }
@@ -75,7 +81,9 @@ pub mod net {
                         &s2,
                         &mut [IoSliceMut::new(&mut data_out[..])],
                         &mut ancillary_out
-                    ).await.unwrap(),
+                    )
+                    .await
+                    .unwrap(),
                     3
                 );
 
@@ -107,7 +115,9 @@ pub mod net {
                     &s1,
                     &[IoSlice::new(data_in)],
                     &mut ancillary_in
-                ).await.unwrap(),
+                )
+                .await
+                .unwrap(),
                 3
             );
 
