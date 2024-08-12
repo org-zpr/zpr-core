@@ -5,16 +5,19 @@ edition = "2021"
 
 [dependencies]
 bytes = { version = "1.7.1", optional = true }
-libc = { version = "0.2.155", optional = true }
+libc = { version = "0.2.155" }
 nix = { version = "0.29.0", features = ["ioctl", "net"], optional = true }
 tokio-tun = { version = "0.11.5", optional = true }
 tokio = { version = "1.37.0", features = ["net"], optional = true }
 zerocopy = { version = "0.7.34", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.37.0", features = ["macros", "time", "rt"] }
 
 [features]
 # Each feature flag is the name of a library the user is already using
 # and would like to have "extended".
 bytes = ["dep:bytes"]
 tokio = ["dep:tokio", "dep:nix"]
-tokio-tun = ["dep:tokio-tun", "dep:bytes", "dep:libc", "dep:nix", "dep:tokio"]
+tokio-tun = ["dep:tokio-tun", "dep:bytes", "dep:nix", "dep:tokio"]
 zerocopy = ["dep:zerocopy"]

@@ -1,6 +1,7 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+// Implement counter type. Uses Atomic values, ensuring saftey for values in
+// multi-thread environment.
 
-// Implement counter type used in the Assembly struct
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub struct Counter {
     number: AtomicU64,

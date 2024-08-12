@@ -5,11 +5,13 @@ use crate::counter::*;
 use crate::counters_enum::*;
 use crate::fastpath;
 use crate::flow_control::FlowControl;
+use crate::mgmt;
 use crate::packet::*;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use crate::zdp::*;
-use bytes::{Buf, BufMut};
+use crate::zpr;
+use bytes::Buf;
 use core::time::Duration;
 use enum_map::EnumMap;
 use std::result::Result;
@@ -22,35 +24,29 @@ use tokio::time::sleep;
 use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 
-// Interface to full assembly of all stages.
-
-// This is the "public interface" that all stages of the system use to talk
-// to each other (via queues), and to shared resources (e.g. the buffer stack).
-
-// All queues and shared resources here should be bounded, so that
-// backpressure can flow from any processing stage all the way back to the
-// kernel network ingest queues, and that service time of any packet
-// transiting the system is not permitted to grow indefinitely under
-// pressure.
-
-// The intention is that there are no hidden unbounded queues in the system
-// (such as a mutex held over a blocking operation).  If a resource is
-// highly contended resulting in a bottleneck, that should result in some
-// visible queue becoming full.
+/// Interface to full assembly of all stages.
+///
+/// This is the "public interface" that all stages of the system use to talk
+/// to each other (via queues), and to shared resources (e.g. the buffer stack).
+///
+/// All queues and shared resources here should be bounded, so that
+/// backpressure can flow from any processing stage all the way back to the
+/// kernel network ingest queues, and that service time of any packet
+/// transiting the system is not permitted to grow indefinitely under
+/// pressure.
+///
+/// The intention is that there are no hidden unbounded queues in the system
+/// (such as a mutex held over a blocking operation).  If a resource is
+/// highly contended resulting in a bottleneck, that should result in some
+/// visible queue becoming full.
 
 pub struct Assembly<'pktbuf> {
     // Shared resources.  These may be accessed by any part of the system.
     pub buffer_stack: BufferStack<'pktbuf, { config::PACKET_BUFFER_SIZE }>,
 
-    // Inbound (dock->adapter) agent packet path.  Keep these topologically
-    // sorted according to expected packet flow.
-    pub inbound_processor: InboundProcessor<'pktbuf>,
-    pub inbound_send: InboundSend<'pktbuf>,
-
-    // Outbound (adapter->dock) agent packet path.  Keep these topologically
-    // sorted according to expected packet flow.
-    pub outbound_processor: OutboundProcessor<'pktbuf>,
-    pub outbound_send: OutboundSend<'pktbuf>,
+    pub mgmt_processor: MgmtProcessor<'pktbuf>,
+    pub agent_input: AgentInput<'pktbuf>,
+    pub substrate_egress: SubstrateEgress<'pktbuf>,
 
     // Used to intercept packets that are unencrypted but still have ZDP headers
     pub capture_queue: Capture<'pktbuf>,
@@ -64,7 +60,6 @@ pub struct Assembly<'pktbuf> {
     pub sync_req_state: SyncReqState<'pktbuf>,
 }
 
-#[allow(dead_code)]
 pub struct SyncReqState<'pktbuf> {
     inner_req: Mutex<SyncReqInnerState<'pktbuf>>,
     semaphore: Semaphore,
@@ -88,6 +83,7 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
         self.inner_req.lock().unwrap().reply_channel.take()
     }
 
+    // Private to prevent a rogue agent from setting the sender.
     fn set_sender(&self, sender: Option<Sender<(Packet<'pktbuf>, ZdpPacketType)>>) {
         let mut inner_req = self.inner_req.lock().unwrap();
         inner_req.reply_channel = sender;
@@ -102,6 +98,56 @@ pub enum SyncReqError {
 }
 
 impl<'pktbuf> Assembly<'pktbuf> {
+    /// Sender function for non-per flow request management packet.
+    /// Requires the type of ZDP packet being sent as well as the type of the
+    /// expected response packet.
+    /// pkt_fn allows the function to create the proper body of the ZDP packet to send
+    /// Returns the received packet without any ZdpHeader (just management response body) or an error
+    pub async fn send_sync_non_flow_req(
+        &self,
+        zdp_request_type: ZdpPacketType,
+        zdp_response_type: ZdpPacketType,
+        pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
+    ) -> Result<Packet<'pktbuf>, SyncReqError> {
+        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, pkt_fn)
+            .await
+    }
+
+    /// Sender function for per flow request management packet.
+    /// Requires the type of ZDP packet being sent as well as the type of the
+    /// expected response packet. Also requires stream_id of the packet.
+    /// pkt_fn allows the function to create the proper body of the ZDP packet to send
+    /// Returns the received packet without any ZdpHeader (just management response body) or an error
+    #[allow(dead_code)]
+    pub async fn send_sync_per_flow_req(
+        &self,
+        zdp_request_type: ZdpPacketType,
+        zdp_response_type: ZdpPacketType,
+        stream_id: u32,
+        pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
+    ) -> Result<(u32, Packet<'pktbuf>), SyncReqError> {
+        match self
+            .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), pkt_fn)
+            .await
+        {
+            Ok(mut pkt) => {
+                let per_flow_hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body())
+                    .expect("too-short inbound packet");
+                let stream_id = per_flow_hdr.stream_id;
+                pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
+                Ok((stream_id.into(), pkt))
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Helper for send management request function
+    /// Requires the type of ZDP packet being sent as well as the type of the
+    /// expected response packet. The Option determines whether the function is helping the per-flow or
+    /// non-per flow sender.
+    /// pkt_fn allows the function to create the proper body of the ZDP packet to send
+    /// Returns the received packet without the ZdpBaseHeader, but still any other Zdp header information
+    /// not included in the ZdpBaseHeader, or an error
     async fn send_sync_req_helper(
         &self,
         zdp_request_type: ZdpPacketType,
@@ -124,14 +170,21 @@ impl<'pktbuf> Assembly<'pktbuf> {
             // Determine if sending a non-flow or per-flow message
             match stream_id {
                 Some(stream_id) => {
-                    self.outbound_processor
-                        .enqueue_per_flow_mgmt(zdp_request_type, stream_id, packet.into_inner())
-                        .await
+                    mgmt::send_per_flow_mgmt(
+                        self,
+                        zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
+                        zdp_request_type,
+                        stream_id,
+                        packet.into_inner(),
+                    );
                 }
                 None => {
-                    self.outbound_processor
-                        .enqueue_non_flow_mgmt(zdp_request_type, packet.into_inner())
-                        .await
+                    mgmt::send_non_flow_mgmt(
+                        self,
+                        zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
+                        zdp_request_type,
+                        packet.into_inner(),
+                    );
                 }
             }
             tokio::select! {
@@ -168,63 +221,6 @@ impl<'pktbuf> Assembly<'pktbuf> {
             }
             Err(_) => return Err(err_type),
         }
-    }
-    #[allow(dead_code)]
-    pub async fn send_sync_non_flow_req(
-        &self,
-        zdp_request_type: ZdpPacketType,
-        zdp_response_type: ZdpPacketType,
-        pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
-    ) -> Result<Packet<'pktbuf>, SyncReqError> {
-        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, pkt_fn)
-            .await
-    }
-
-    #[allow(dead_code)]
-    pub async fn send_sync_per_flow_req(
-        &self,
-        zdp_request_type: ZdpPacketType,
-        zdp_response_type: ZdpPacketType,
-        stream_id: u32,
-        pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
-    ) -> Result<(u32, Packet<'pktbuf>), SyncReqError> {
-        match self
-            .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), pkt_fn)
-            .await
-        {
-            Ok(mut pkt) => {
-                let per_flow_hdr = ZdpPerFlowHeader::ref_from_prefix(pkt.body())
-                    .expect("too-short inbound packet");
-                let stream_id = per_flow_hdr.stream_id;
-                pkt.advance(std::mem::size_of::<ZdpPerFlowHeader>());
-                Ok((stream_id.into(), pkt))
-            }
-            Err(err) => Err(err),
-        }
-    }
-
-    pub async fn send_report(&self, to_send: &str) {
-        // this condition will need to be adjusted when we have complete ZPR packets
-        // with the information at the end of the packet at well
-        if PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < to_send.len() {
-            return;
-        }
-        let buf = self.buffer_stack.get_buffer().await;
-        let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
-        let hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
-        hdr.report_data_length = (to_send.len() as u16).into();
-        pkt.put(to_send.as_bytes());
-        self.outbound_processor
-            .enqueue_non_flow_mgmt(ZdpPacketType::Report, pkt)
-            .await;
-    }
-
-    pub async fn send_discard(&self) {
-        let buf = self.buffer_stack.get_buffer().await;
-        let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
-        self.outbound_processor
-            .enqueue_non_flow_mgmt(ZdpPacketType::Discard, pkt)
-            .await;
     }
 
     pub async fn send_hello_req(&self) {

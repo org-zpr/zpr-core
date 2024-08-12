@@ -1,6 +1,6 @@
 use crate::assembly::Assembly;
 use crate::config;
-use crate::counters_enum::CounterType;
+use crate::fastpath;
 use crate::packet::Packet;
 use std::future::Future;
 use std::io::ErrorKind;
@@ -23,24 +23,20 @@ async fn worker<'a>(config: &Config, asm: &Assembly<'a>, socket: &UdpSocket) {
         // TODO: batch receive
         for buf in bufs.drain(..) {
             let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
-            loop {
-                match socket.recv_buf(&mut pkt).await {
-                    Ok(_) => (),
+            let sender = loop {
+                match socket.recv_buf_from(&mut pkt).await {
+                    Ok((_size, sender)) => break sender,
 
                     Err(err) => {
                         match err.kind() {
                             ErrorKind::ConnectionRefused => (), // FIXME: do something with this later...
                             _ => panic!("got socket error {}", err),
                         }
-                        continue;
                     }
                 }
+            };
 
-                asm.counters[CounterType::InPacksRec].increment();
-                // FIXME: Detect a too-large packet.
-                asm.inbound_processor.enqueue_packet(pkt).await;
-                break;
-            }
+            fastpath::substrate_ingress(asm, &sender, pkt);
         }
     }
 }

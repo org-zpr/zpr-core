@@ -16,6 +16,7 @@ use tokio_tun::TunBuilder;
 #[macro_use]
 extern crate arrayref;
 
+mod agent_output_worker;
 mod assembly;
 mod buffer_stack;
 mod capture_worker;
@@ -27,16 +28,16 @@ mod counters_enum;
 mod defs;
 mod fastpath;
 mod flow_control;
-mod inbound_processor_worker;
-mod inbound_recv_worker;
+mod mgmt;
+mod mgmt_processor_worker;
 mod net_defs;
 mod options;
-mod outbound_processor_worker;
-mod outbound_recv_worker;
 mod packet;
 mod pcap_writer;
 mod queues;
+mod rcu;
 mod rpc_worker;
+mod substrate_ingress_worker;
 mod test_packet;
 mod tun_ctl;
 mod zdp;
@@ -100,21 +101,17 @@ fn main() -> ExitCode {
     // sizes below which are all just double the batch size.  Performance
     // testing will inform us the correct values for these, which balance
     // throughput with service time.
-    let inbound_recv_batch_size = 8;
-    let inbound_processor_batch_size = 16;
-    let outbound_recv_batch_size = 4;
-    let outbound_processor_batch_size = 16;
+    let substrate_ingress_batch_size = 8;
+    let mgmt_processor_queue_size = 16;
+    let agent_output_batch_size = 4;
     let capture_queue_size = 16;
     let capture_batch_size = 8;
     let tun_queue_count = 1;
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
-    let (ip_inq, ip_outq) = mpsc::channel(inbound_processor_batch_size * 2);
-    let inbound_processor = InboundProcessor::new(ip_inq);
-
-    let (op_inq, op_outq) = mpsc::channel(outbound_processor_batch_size * 2);
-    let outbound_processor = OutboundProcessor::new(op_inq);
+    let (mp_inq, mp_outq) = mpsc::channel(mgmt_processor_queue_size);
+    let mgmt_processor = MgmtProcessor::new(mp_inq);
 
     let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
@@ -171,15 +168,14 @@ fn main() -> ExitCode {
                 .await
                 .expect("unable to connect to peer addr");
 
-            let inbound_send = InboundSend::new(tun_devs.iter());
-            let outbound_send = OutboundSend::new([&*socket]);
+            let agent_input = AgentInput::new(tun_devs.iter());
+            let substrate_egress = SubstrateEgress::new([&*socket]);
 
             let asm = Box::leak(Box::new(Assembly {
                 buffer_stack,
-                inbound_processor,
-                inbound_send,
-                outbound_processor,
-                outbound_send,
+                mgmt_processor,
+                agent_input,
+                substrate_egress,
                 capture_queue,
                 capture_worker,
                 flow_control,
@@ -218,32 +214,17 @@ fn main() -> ExitCode {
                 }
             });
 
-            js.spawn(inbound_processor_worker::launch(
-                &inbound_processor_worker::Config {
-                    batch_size: inbound_processor_batch_size,
-                    mode: cmd_line.mode,
-                },
-                &*asm,
-                ip_outq,
-            ));
+            js.spawn(mgmt_processor_worker::launch(&*asm, mp_outq));
 
             for tun_dev in tun_devs.iter() {
-                js.spawn(outbound_recv_worker::launch(
-                    &outbound_recv_worker::Config {
-                        batch_size: outbound_recv_batch_size,
+                js.spawn(agent_output_worker::launch(
+                    &agent_output_worker::Config {
+                        batch_size: agent_output_batch_size,
                     },
                     &*asm,
                     tun_dev,
                 ));
             }
-
-            js.spawn(outbound_processor_worker::launch(
-                &outbound_processor_worker::Config {
-                    batch_size: outbound_processor_batch_size,
-                },
-                &*asm,
-                op_outq,
-            ));
 
             js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
 
@@ -259,16 +240,16 @@ fn main() -> ExitCode {
             eprintln!("Connected!"); // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
 
-            js.spawn(inbound_recv_worker::launch(
-                &inbound_recv_worker::Config {
-                    batch_size: inbound_recv_batch_size,
+            js.spawn(substrate_ingress_worker::launch(
+                &substrate_ingress_worker::Config {
+                    batch_size: substrate_ingress_batch_size,
                 },
                 &*asm,
                 &*socket,
             ));
 
-            asm.send_report("Reporting for Duty!").await;
-            asm.send_discard().await;
+            mgmt::send_report(asm, zpr::ADAPTER_DOCKING_SESSION_ID, "Reporting for Duty!").await;
+            mgmt::send_discard(asm, zpr::ADAPTER_DOCKING_SESSION_ID).await;
             asm.send_hello_req().await;
 
             while let Some(res) = js.join_next().await {

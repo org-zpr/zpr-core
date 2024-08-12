@@ -6,12 +6,14 @@
 use crate::assembly::Assembly;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
+use crate::net_defs;
 use crate::packet::Packet;
 use crate::queues::TryEnqueueError;
 use crate::zdp;
 use crate::zdp_ll;
 use crate::zpr;
-use bytes::Buf;
+use bytes::{Buf, BufMut};
+use std::net::SocketAddr;
 use std::time::SystemTime;
 use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
@@ -180,7 +182,11 @@ pub fn encrypt<'pktbuf>(
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == zpr::ZPI_0 {
-        // TODO: MAC
+        // RFC 6.5 § 5.25.2
+        pkt.put(
+            net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..])
+                .as_slice(),
+        );
     } else {
         todo!("encryption");
     }
@@ -216,7 +222,15 @@ pub fn decrypt<'pktbuf>(
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == zpr::ZPI_0 {
-        // TODO: MAC
+        // RFC 6.5 § 5.25.2
+        if !net_defs::validate_inet_checksum(
+            &pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..],
+        ) {
+            return Err(DecryptError::MicvFailure);
+        }
+
+        pkt.shrink(2); // remove checksum
+
         Ok(())
     } else {
         todo!("decryption");
@@ -231,6 +245,8 @@ pub fn substrate_egress<'pktbuf>(
     zpi: zpr::Zpi,
     mut pkt: Packet<'pktbuf>,
 ) {
+    // TODO: should we add ZDP header here also??
+
     encap_zpi(asm, link_id, zpi, &mut pkt);
 
     maybe_capture(asm, Direction::Outbound, &mut pkt);
@@ -241,9 +257,11 @@ pub fn substrate_egress<'pktbuf>(
         todo!("link routing");
     }
 
-    match asm.outbound_send.try_enqueue_packet(drop_guard(pkt, |p| {
-        drop_and_count(asm, p, CounterType::OutPacksSent)
-    })) {
+    match asm
+        .substrate_egress
+        .try_enqueue_packet(drop_guard(pkt, |p| {
+            drop_and_count(asm, p, CounterType::OutPacksSent)
+        })) {
         Ok(()) => (),
         Err(TryEnqueueError::Full(pkt)) => {
             drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr)
@@ -251,22 +269,120 @@ pub fn substrate_egress<'pktbuf>(
     }
 }
 
+/// Process packets ingressing from the specified SA.
+pub fn substrate_ingress<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    _peer_sa: &SocketAddr,
+    mut pkt: Packet<'pktbuf>,
+) {
+    asm.counters[CounterType::InPacksRec].increment();
+
+    // TODO: link routing
+    let link_id = zpr::ADAPTER_DOCKING_SESSION_ID;
+
+    match decrypt(asm, link_id, &mut pkt) {
+        Ok(()) => (),
+        Err(err) => {
+            drop_and_count(asm, pkt, err);
+            return;
+        }
+    }
+
+    maybe_capture(asm, Direction::Inbound, &mut pkt);
+
+    let _zpi = match decap_zpi(asm, link_id, &mut pkt) {
+        Ok(zpi) => zpi,
+        Err(err) => {
+            drop_and_count(asm, pkt, err);
+            return;
+        }
+    };
+
+    let Some(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
+        return drop_and_count(asm, pkt, CounterType::BadStructure);
+    };
+
+    // enqueue non-transit packets with the management processor
+    if base_hdr.packet_type != zdp::ZdpPacketType::TransitPacket {
+        // TODO: should we peel off the ZDP header here??
+        // (instead of this silly code to restore it?)
+        *pkt.alloc_zeroed_header() = base_hdr;
+
+        match asm.mgmt_processor.try_enqueue_packet(pkt) {
+            Ok(()) => (),
+            Err(TryEnqueueError::Full(pkt)) => drop_and_count(asm, pkt, CounterType::InPacksDrop),
+        }
+        return;
+    }
+
+    let Some(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
+        return drop_and_count(asm, pkt, CounterType::BadStructure);
+    };
+
+    pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into(); // TODO: is this necessary?
+
+    forward(asm, link_id, per_flow_hdr.stream_id.into(), pkt);
+}
+
 /// Send a compressed agent packet to the agent.
 /// The packet will be decompressed according to the given stream ID.
 pub fn agent_input<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    _stream_id: zpr::StreamId,
+    _stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
     pkt: Packet<'pktbuf>,
 ) {
     // TODO: decompress
 
     // send out decapsulated packet
-    match asm.inbound_send.try_enqueue_packet(drop_guard(pkt, |p| {
+    match asm.agent_input.try_enqueue_packet(drop_guard(pkt, |p| {
         drop_and_count(asm, p, CounterType::InPacksSent)
     })) {
         Ok(()) => (),
         Err(TryEnqueueError::Full(pkt)) => {
             drop_and_count(asm, pkt.into_inner(), CounterType::InPacksDrop)
         }
+    }
+}
+
+/// Process uncompressed packet from the agent.
+/// The packet will be compressed, or trigger a Bind request.
+pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pktbuf>) {
+    // TODO: lookup in ALT
+    let stream_id = 0; // TODO: should we keep this in metadata? or as per-flow header?
+
+    // TODO: compress
+
+    forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
+}
+
+/// Forward compressed packet.
+pub fn forward<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    ingress_link_id: zpr::LinkId,
+    ingress_stream_id: zpr::StreamId,
+    mut pkt: Packet<'pktbuf>,
+) {
+    // TODO: node forwarding
+
+    // adapter forwarding
+    match ingress_link_id {
+        zpr::AGENT_LINK_ID => {
+            // in from agent; out to dock
+
+            let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
+            per_flow_hdr.stream_id = ingress_stream_id.into();
+
+            let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+            base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
+
+            substrate_egress(asm, zpr::ADAPTER_DOCKING_SESSION_ID, zpr::ZPI_0, pkt);
+        }
+
+        zpr::ADAPTER_DOCKING_SESSION_ID => {
+            // in from dock; out to agent
+            agent_input(asm, ingress_stream_id, pkt);
+        }
+
+        _ => panic!("bad link ID"),
     }
 }
