@@ -15,6 +15,8 @@ pub struct TestPacketMetrics {
 }
 
 impl TestPacket {
+    // Creates a TestPacket as well as the receiver corresponding to the sender
+    // stored in the TestPacket. Returns both the TestPacket and the Receiver
     pub fn create() -> (TestPacket, Receiver<TestPacketMetrics>) {
         let (sender, receiver) = channel::<TestPacketMetrics>();
         let time = Instant::now();
