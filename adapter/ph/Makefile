@@ -8,4 +8,4 @@ build:
 
 .PHONY: test
 test:
-	cargo test --verbose
+	cargo test --verbose && cargo test --lib --verbose
