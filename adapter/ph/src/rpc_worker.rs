@@ -182,60 +182,37 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     let begin_time = Instant::now();
     let mut send_interval = interval(Duration::new(0, 1000000000 / rate.parse::<u32>().unwrap()));
 
-    let mut inbound_processor_duration = Histogram::<u64>::new(1).unwrap();
-    let mut inbound_processor_depth = Histogram::<u64>::new(1).unwrap();
-    let mut inbound_processor_batch = Histogram::<u64>::new(1).unwrap();
-    let mut outbound_processor_duration = Histogram::<u64>::new(1).unwrap();
-    let mut outbound_processor_depth = Histogram::<u64>::new(1).unwrap();
-    let mut outbound_processor_batch = Histogram::<u64>::new(1).unwrap();
+    let mut mgmt_processor_duration = Histogram::<u64>::new(1).unwrap();
+    let mut mgmt_processor_depth = Histogram::<u64>::new(1).unwrap();
+    let mut mgmt_processor_batch = Histogram::<u64>::new(1).unwrap();
 
     send_interval.tick().await;
-    let mut queue_num = 0;
 
     // Enqueue test packets at the frequency desired by the user for the
     // desired amount of time
     while begin_time.elapsed().as_secs() < send_duration.as_secs() {
-        if queue_num == (asm.inbound_send.fanout()) {
-            queue_num = 0;
-        }
-
-        let in_processor = asm.inbound_processor.enqueue_test_packet().await;
+        let in_processor = asm.mgmt_processor.enqueue_test_packet().await;
         record_metrics(
             in_processor,
-            &mut inbound_processor_duration,
-            &mut inbound_processor_depth,
-            &mut inbound_processor_batch,
-        );
-
-        let out_processor = asm.outbound_processor.enqueue_test_packet().await;
-        record_metrics(
-            out_processor,
-            &mut outbound_processor_duration,
-            &mut outbound_processor_depth,
-            &mut outbound_processor_batch,
+            &mut mgmt_processor_duration,
+            &mut mgmt_processor_depth,
+            &mut mgmt_processor_batch,
         );
 
         // TODO: record metrics from TUN interface and UDP socket
 
         send_interval.tick().await;
-        queue_num += 1;
     }
 
     // Get values at 10, 25, 50, 75, 90 quantiles for each hist as well as the mean
-    let in_processor = three_hists_values(
-        "Inbound Processor",
-        &inbound_processor_duration,
-        &inbound_processor_depth,
-        &inbound_processor_batch,
-    );
-    let out_processor = three_hists_values(
-        "Outbound Processor",
-        &outbound_processor_duration,
-        &outbound_processor_depth,
-        &outbound_processor_batch,
+    let mgmt_processor = three_hists_values(
+        "Management Processor",
+        &mgmt_processor_duration,
+        &mgmt_processor_depth,
+        &mgmt_processor_batch,
     );
 
-    format!("{in_processor}{out_processor}")
+    format!("{mgmt_processor}")
 }
 
 // Helper for perf_sample

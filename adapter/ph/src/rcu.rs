@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Wrapper for RCU-"ish" functionality (<https://en.wikipedia.org/wiki/Read-copy-update>)
 //!
 //! This API is deliberately minimal, to restrict via what functionality
@@ -13,6 +14,8 @@
 //! best yet.  A couple simple std-only implementations are also provided,
 //! which do not meet the above performance requirements, but are useful
 //! for testing.  The active implementation is selected by a feature flag.
+
+#![allow(dead_code)]
 
 #[cfg(all(
     feature = "rcu-rwlock",
