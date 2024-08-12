@@ -13,6 +13,9 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
+use crate::config;
+use std::os::unix::net::{SocketAncillary, AncillaryData};
+use std::io::IoSliceMut;
 
 async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
     let mut set = JoinSet::<Result<(), Error>>::new();
@@ -40,12 +43,18 @@ async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
 
 async fn handle_connection(
     asm: &'static Assembly<'static>,
-    mut stream: UnixStream,
+    stream: UnixStream,
 ) -> std::io::Result<()> {
     eprintln!("Connection received");
 
     let mut str_message = String::new();
-    let split_buf = stream.split(); // split stream into read/write streams
+
+    // TODO rework, unfortunate to have to do this for every single command
+    let std_stream = stream.into_std()?;
+    let std_stream_copy = std_stream.try_clone()?;
+    let mut tokio_stream = UnixStream::from_std(std_stream)?;
+    let split_buf = tokio_stream.split(); // split stream into read/write streams
+
     let mut buf_reader = BufReader::new(split_buf.0);
     let mut buf_writer = BufWriter::new(split_buf.1);
     buf_reader.read_line(&mut str_message).await?;
@@ -87,15 +96,21 @@ async fn handle_connection(
                 _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
             },
             // SET-CAPTURE <file_path>
-            "SET-CAPTURE" => match vec_message.len() {
-                2 => {
-                    buf_writer
-                        .write_all(set_capture(asm, vec_message[1]).await.as_bytes())
-                        .await?;
-                    buf_writer.write_all("OK\n".as_bytes()).await?
-                }
-                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
-            },
+            "SET-CAPTURE" => {
+                println!("this stuff");
+                let mut ancillary_buffer = [0; config::ANCILLARY_BUFFER_SIZE];
+                let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
+
+                let mut buf = [1; 8];
+                let bufs = &mut [IoSliceMut::new(&mut buf)][..];
+                println!("error with recv");
+                std_stream_copy.recv_vectored_with_ancillary(bufs, &mut ancillary)?;
+                println!("going to write");
+                buf_writer
+                    .write_all(set_capture(asm, ancillary).await.as_bytes())
+                    .await?;
+                buf_writer.write_all("OK\n".as_bytes()).await?
+            }
             "FLUSH-CAPTURE" => {
                 buf_writer
                     .write_all(flush_capture(asm).await.as_bytes())
@@ -317,7 +332,15 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
     values
 }
 
-async fn set_capture(asm: &Assembly<'_>, path_str: &str) -> String {
+async fn set_capture(asm: &Assembly <'_>, ancillary: SocketAncillary<'_>) -> String {
+    println!("in set capture");
+    let anc_message = ancillary.messages().nth(0).unwrap();
+    if let AncillaryData::ScmRights(scm_rights) = anc_message.unwrap() {
+        for fd in scm_rights {
+            println!("receive file descriptor: {fd}");
+        }
+    }
+    let path_str = "/tmp/hello.txt";
     let path = Path::new(path_str);
     match asm.capture_worker.open_capture_file(path).await {
         Ok(()) => format!("Capture file opened at {}\n", path_str),

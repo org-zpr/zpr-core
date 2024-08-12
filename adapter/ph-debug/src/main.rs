@@ -1,3 +1,5 @@
+#![feature(unix_socket_ancillary_data)]
+
 // Tool to help debug PH
 // Note: at this moment the program can only handle one-word commands, so
 // when a command is multiple words, this program assumes the spaces are replaced
@@ -10,10 +12,15 @@ use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
 use std::io::prelude::*;
 use std::net::Shutdown;
-use std::os::unix::net::UnixStream;
+use std::os::unix::net::{UnixStream, SocketAncillary};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
+use std::fs::OpenOptions;
+use std::os::fd::AsRawFd;
+use std::io::IoSlice;
+
+const ANCILLARY_BUFFER_SIZE: usize = 128;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "This program controls the RPC calls to the ZPR Packet Handler", long_about = None)]
@@ -149,9 +156,22 @@ fn handle_perf_sample(duration: u64, frequency: u64, port: &str) -> std::io::Res
 }
 
 fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
-    let command = format!("SET-CAPTURE {}\n", file_path);
+    let file_descriptor = OpenOptions::new().read(true).write(true).create(true).open(file_path).unwrap().as_raw_fd();
+    let mut ancillary_buffer = [0; ANCILLARY_BUFFER_SIZE];
+    let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
+    ancillary.add_fds(&[file_descriptor]);
 
-    basic_call_response(&command, port)?;
+    let buf = [1; 8];
+    let bufs = &mut [IoSlice::new(&buf)];
+
+    let stream = &mut UnixStream::connect(port).unwrap();
+    stream.write_all("SET-CAPTURE\n".as_bytes())?;
+    stream.send_vectored_with_ancillary(bufs, &mut ancillary)?;
+    stream.flush()?;
+
+    let mut response = String::new();
+    stream.read_to_string(&mut response)?;
+    println!("{response}");
 
     Ok(())
 }

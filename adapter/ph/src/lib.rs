@@ -1,3 +1,5 @@
+#![feature(unix_socket_ancillary_data)]
+
 #[allow(unused_imports)]
 #[macro_use]
 extern crate arrayref;
