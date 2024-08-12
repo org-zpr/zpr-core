@@ -38,10 +38,7 @@ impl<'pktbuf> MgmtProcessor<'pktbuf> {
         &self,
         packet: Packet<'pktbuf>,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
-        match self
-            .sender
-            .try_send(MgmtProcessorMessage::Packet(packet))
-        {
+        match self.sender.try_send(MgmtProcessorMessage::Packet(packet)) {
             Ok(()) => Ok(()),
 
             Err(TrySendError::Full(pkt) | TrySendError::Closed(pkt)) => {
@@ -108,7 +105,6 @@ impl<'a> AgentInput<'a> {
         self.tuns.len()
     }
 }
-
 
 /// SubstrateEgress is responsible for sending encapsulated agent packets to the dock.
 pub struct SubstrateEgress<'a> {

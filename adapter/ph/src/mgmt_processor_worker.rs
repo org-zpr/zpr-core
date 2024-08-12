@@ -19,11 +19,9 @@ async fn worker<'pktbuf>(
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
-            MgmtProcessorMessage::Packet(pkt) =>
-                handle_packet(asm, pkt).await,
+            MgmtProcessorMessage::Packet(pkt) => handle_packet(asm, pkt).await,
 
-            MgmtProcessorMessage::TestPacket(pkt) =>
-                pkt.acknowledge(queue.len(), 1),
+            MgmtProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), 1),
         }
     }
 }
@@ -93,8 +91,12 @@ async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf
                 let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
                 let hdr = send_pkt.alloc_zeroed_header::<ZdpHelloResponseHeader>();
                 hdr.status = 0;
-                mgmt::send_non_flow_mgmt(asm, zpr::ADAPTER_DOCKING_SESSION_ID /* FIXME */,
-                    ZdpPacketType::HelloResponse, send_pkt);
+                mgmt::send_non_flow_mgmt(
+                    asm,
+                    zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
+                    ZdpPacketType::HelloResponse,
+                    send_pkt,
+                );
                 eprintln!("Received HelloRequest");
             }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),

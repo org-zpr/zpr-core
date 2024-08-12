@@ -25,7 +25,7 @@ pub fn send_non_flow_mgmt<'pktbuf>(
     fastpath::substrate_egress(
         asm,
         link_id,
-        zpr::ZPI_0,  // TODO
+        zpr::ZPI_0, // TODO
         packet,
     );
 }
@@ -50,7 +50,7 @@ pub fn send_per_flow_mgmt<'pktbuf>(
     fastpath::substrate_egress(
         asm,
         link_id,
-        zpr::ZPI_0,  // TODO
+        zpr::ZPI_0, // TODO
         packet,
     );
 }

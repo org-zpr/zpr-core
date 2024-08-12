@@ -167,12 +167,21 @@ impl<'pktbuf> Assembly<'pktbuf> {
             // Determine if sending a non-flow or per-flow message
             match stream_id {
                 Some(stream_id) => {
-                    mgmt::send_per_flow_mgmt(self, zpr::ADAPTER_DOCKING_SESSION_ID /* FIXME */,
-                        zdp_request_type, stream_id, packet);
+                    mgmt::send_per_flow_mgmt(
+                        self,
+                        zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
+                        zdp_request_type,
+                        stream_id,
+                        packet,
+                    );
                 }
                 None => {
-                    mgmt::send_non_flow_mgmt(self, zpr::ADAPTER_DOCKING_SESSION_ID /* FIXME */,
-                        zdp_request_type, packet);
+                    mgmt::send_non_flow_mgmt(
+                        self,
+                        zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
+                        zdp_request_type,
+                        packet,
+                    );
                 }
             }
             tokio::select! {

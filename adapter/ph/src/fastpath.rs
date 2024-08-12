@@ -257,9 +257,11 @@ pub fn substrate_egress<'pktbuf>(
         todo!("link routing");
     }
 
-    match asm.substrate_egress.try_enqueue_packet(drop_guard(pkt, |p| {
-        drop_and_count(asm, p, CounterType::OutPacksSent)
-    })) {
+    match asm
+        .substrate_egress
+        .try_enqueue_packet(drop_guard(pkt, |p| {
+            drop_and_count(asm, p, CounterType::OutPacksSent)
+        })) {
         Ok(()) => (),
         Err(TryEnqueueError::Full(pkt)) => {
             drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr)
