@@ -28,6 +28,7 @@ use tracing::{error, info};
 use crate::config;
 use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpPerFlowHeader};
+use crate::zpr;
 
 /*
         According to 6.2.8 the key management packets can run in native mode
@@ -92,7 +93,7 @@ struct KMState<'mgr> {
     statemachine: Box<dyn KeyManagerStateMachine + 'mgr>,
     kmsettings: KMSettings,
 
-    sa_id: u8, // current SA identifier
+    sa_id: zpr::SaId, // current SA identifier
 
     mgmt_tx: Option<mpsc::Sender<Bytes>>, // Internal queue for key management messages to be processed.
 }

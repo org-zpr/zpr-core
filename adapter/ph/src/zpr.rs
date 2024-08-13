@@ -4,6 +4,10 @@
 /// ZPR Parameter Index
 pub type Zpi = u8;
 
+/// The Security Association ID must fit no more than 8 bits.  Note that it shares
+/// space with the ZPI.
+pub type SaId = u8;
+
 /// ZPI 0, used for keying and early ZARP.
 pub const ZPI_0: Zpi = 0;
 
@@ -18,3 +22,4 @@ pub type StreamId = u32;
 
 /// Reserved for node-to-node / control-plane traffic.
 pub const NODE_TO_NODE_STREAM_ID: StreamId = 0;
+
