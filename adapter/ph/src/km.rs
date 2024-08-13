@@ -338,7 +338,6 @@ impl KeyManager<'_> {
         }
     }
 
-
     /// Blocking run loop for the key manager.  This runs the key management algorithm
     /// state machine handing KM messages in and out.
     ///
@@ -594,7 +593,7 @@ impl SillyKeyManager {
             state: KMSMState::Configuring,
             settings: KMSettings {
                 zdp_km_type: zpr::KM_ID_EXPERIMENTAL,
-                padlen: 2,        // we need 2 extra bytes
+                padlen: 2, // we need 2 extra bytes
                 alignment: 0,
                 tick_interval: Duration::from_millis(1000),
             },
@@ -872,7 +871,6 @@ mod test {
         assert!(kinternals.state.lock().unwrap().handle_count == 1);
         ctok.cancel()
     }
-
 
     #[tokio::test]
     async fn test_km_passes_inbound_msg_no_buffer() {
