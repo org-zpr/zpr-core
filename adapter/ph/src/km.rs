@@ -17,7 +17,6 @@ use std::mem;
 use std::time::Duration;
 
 use std::fmt;
-use std::io;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
@@ -79,6 +78,77 @@ use crate::zpr;
 
 
 
+
+
+// [derive(Debug, PartialEq)]
+#[derive(Debug)]
+pub enum KMError {
+    ConfigurationError,
+    InvalidState,
+    InvalidPacketType,
+    EncryptionError,
+    HandshakeError,
+    NoHeadroom,
+    ShortPacket,
+    SaIdZero,
+    SaIdMismatch,
+    EnqueueFailed,
+    MachineError(String),
+    IoError(std::io::Error),
+}
+
+impl fmt::Display for KMError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            KMError::InvalidState => {
+                write!(f, "InvalidState")
+            }
+            KMError::EncryptionError => {
+                write!(f, "EncryptionError")
+            }
+            KMError::HandshakeError => {
+                write!(f, "HandshakeError")
+            }
+            KMError::ConfigurationError => {
+                write!(f, "ConfigurationError")
+            }
+            KMError::MachineError(ref s) => {
+                write!(f, "MachineError: {}", s)
+            }
+            KMError::IoError(ref e) => {
+                write!(f, "IoError: {}", e)
+            }
+            KMError::InvalidPacketType => {
+                write!(f, "InvalidPacketType")
+            }
+            KMError::NoHeadroom => {
+                write!(f, "NoHeadroom")
+            }
+            KMError::ShortPacket => {
+                write!(f, "ShortPacket")
+            }
+            KMError::SaIdZero => {
+                write!(f, "SaIdZero")
+            }
+            KMError::SaIdMismatch => {
+                write!(f, "SaIdMismatch")
+            }
+            KMError::EnqueueFailed => {
+                write!(f, "EnqueueFailed")
+            }
+        }
+    }
+}
+
+impl From<std::io::Error> for KMError {
+    fn from(e: std::io::Error) -> KMError {
+        KMError::IoError(e)
+    }
+}
+
+
+// Copying of off std::io::Result
+pub type KMResult<T> = Result<T, KMError>;
 
 
 /// Stateful key manager for ZDP.  Requires an instance of a [KeyManagerStateMachine] to do the actual work.
@@ -156,23 +226,16 @@ impl KeyManager<'_> {
     /// `message` is expected to be a ZDP message wihout a ZPI value.  We add a ZPI
     /// value to the front of the message -- note that the value we add is just the
     /// SA_ID.  It's up to caller to mix in the configuration ID value.
-    pub fn encrypt_transport(&self, message: &mut Packet) -> io::Result<()> {
+    pub fn encrypt_transport(&self, message: &mut Packet) -> KMResult<()> {
         let base_hdr =
             ZdpBaseHeader::ref_from_prefix(message.body()).expect("too-short ZDP message");
         if message.headroom_available() < 1 {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "insufficient headroom",
-            ));
+            return Err(KMError::NoHeadroom);
         }
-
 
         let mut state = self.shared.state.lock().unwrap();
         if state.statemachine.get_state() != KMSMState::Transport {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "SA not in transport state",
-            ));
+            return Err(KMError::InvalidState);
         }
         if state.sa_id == 0 {
             // programming error
@@ -184,10 +247,7 @@ impl KeyManager<'_> {
         match base_hdr.packet_type {
             ZdpPacketType::KeyManagement => {
                 // Programmer error
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Key Management packets should not be sent here",
-                ));
+                return Err(KMError::InvalidPacketType);
             }
             ZdpPacketType::TransitPacket => {
                 // So the data to be encrypted is ZDP header plus stream ID.  Padding is still assumed to after that.
@@ -213,10 +273,7 @@ impl KeyManager<'_> {
                 zpi_buf[0] = state.sa_id;
             }
             Err(e) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("encrypt failed: {}", e),
-                ));
+                return Err(KMError::MachineError(e.to_string()));
             }
         }
         Ok(())
@@ -226,29 +283,19 @@ impl KeyManager<'_> {
     /// We assume that packet ZPI value has been clensed of the config ID and is only the SA_ID.
     /// Key Management packets should not be sent here.
     /// Does not remove the ZPI/SA_ID value.
-    pub fn decrypt_transport(&self, message: &mut Packet) -> io::Result<()> {
+    pub fn decrypt_transport(&self, message: &mut Packet) -> KMResult<()> {
         if message.body().len() < 1 {
-            return Err(io::Error::new(io::ErrorKind::Other, "message too short"));
+            return Err(KMError::ShortPacket);
         }
         let mut state = self.shared.state.lock().unwrap();
         if message.body()[0] == 0 {
-            return Err(io::Error::new(io::ErrorKind::Other, "ZPI value is 0"));
+            return Err(KMError::SaIdZero);
         }
         if state.sa_id != message.body()[0] {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                format!(
-                    "SA_ID mismatch: expect {}, found {}",
-                    state.sa_id,
-                    message.body()[0]
-                ),
-            ));
+            return Err(KMError::SaIdMismatch);
         }
         if state.statemachine.get_state() != KMSMState::Transport {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "SA not in transport state",
-            ));
+            return Err(KMError::InvalidState);
         }
 
         // TODO: Ability to decrypt in place. Not sure how to accomplish.  At very least we could use our own buffer pool.
@@ -263,10 +310,7 @@ impl KeyManager<'_> {
                 message.body_mut()[1..len + 1].copy_from_slice(&decr_buf[0..len]);
             }
             Err(e) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("decrypt failed: {}", e),
-                ));
+                return Err(KMError::MachineError(e.to_string()));
             }
         }
         Ok(())
@@ -276,7 +320,7 @@ impl KeyManager<'_> {
     /// This waits until space available in our KM message queue.
     ///
     /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
-    pub async fn handle_km_message(&self, message: &[u8]) -> io::Result<()> {
+    pub async fn handle_km_message(&self, message: &[u8]) -> KMResult<()> {
         let tx: mpsc::Sender<Bytes>;
         {
             let state = self.shared.state.lock().unwrap();
@@ -285,20 +329,14 @@ impl KeyManager<'_> {
                     tx = t.clone();
                 }
                 None => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "KeyManager not running",
-                    ));
+                    return Err(KMError::InvalidState);
                 }
             }
         }
         let km_buf = Bytes::copy_from_slice(message);
         match tx.send(km_buf.into()).await {
             Ok(_) => Ok(()),
-            Err(_) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "failed to enqueue inbound KM message",
-            )),
+            Err(_) => Err(KMError::EnqueueFailed),
         }
     }
 
@@ -306,7 +344,7 @@ impl KeyManager<'_> {
     /// This will fail if there is no space in queue.
     ///
     /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
-    pub fn try_handle_km_message(&self, message: &[u8]) -> io::Result<()> {
+    pub fn try_handle_km_message(&self, message: &[u8]) -> KMResult<()> {
         let tx: mpsc::Sender<Bytes>;
         {
             let state = self.shared.state.lock().unwrap();
@@ -315,20 +353,14 @@ impl KeyManager<'_> {
                     tx = t.clone();
                 }
                 None => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "KeyManager not running",
-                    ));
+                    return Err(KMError::InvalidState);
                 }
             }
         }
         let km_buf = Bytes::copy_from_slice(message);
         match tx.try_send(km_buf.into()) {
             Ok(_) => Ok(()),
-            Err(_) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                "failed to enqueue inbound KM message",
-            )),
+            Err(_) => Err(KMError::EnqueueFailed),
         }
     }
 
@@ -344,7 +376,7 @@ impl KeyManager<'_> {
         &mut self,
         ctok: CancellationToken,
         km_buffers_out: mpsc::Sender<Bytes>,
-    ) -> io::Result<()> {
+    ) -> KMResult<()> {
         let (km_tx, mut km_rx) = mpsc::channel(16);
         let tick_interval: Duration;
         {
@@ -361,10 +393,7 @@ impl KeyManager<'_> {
             handshake = match state.statemachine.reset() {
                 Ok(h) => h,
                 Err(e) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!("failed to reset key manager: {}", e),
-                    ))
+                    return Err(KMError::MachineError(e.to_string()))
                 }
             };
         }
@@ -372,10 +401,7 @@ impl KeyManager<'_> {
             match km_buffers_out.send(handshake).await {
                 Ok(_) => {}
                 Err(_) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "failed to enqueue outbound KM message",
-                    ))
+                    return Err(KMError::EnqueueFailed)
                 }
             }
         };
@@ -398,10 +424,7 @@ impl KeyManager<'_> {
                         resp = match state.statemachine.reset() {
                             Ok(h) => h,
                             Err(e) => {
-                                return Err(io::Error::new(
-                                    io::ErrorKind::Other,
-                                    format!("failed to reset key manager: {}", e),
-                                ))
+                                return Err(KMError::MachineError(e.to_string()));
                             }
                         };
                     }
@@ -487,10 +510,7 @@ impl KeyManager<'_> {
                 }
             } else if next_state == KMSMState::Error {
                 error!("KM: stuck in error state");
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Key Manager in error state",
-                ));
+                return Err(KMError::MachineError(String::from("stuck in error state")));
                 // TODO: Maybe use a timer and keep trying to reset?
             }
         }
@@ -538,36 +558,6 @@ pub struct KMSettings {
 
     /// How often the statement runloop should call into [KeyManagerStateMachine::tick].
     pub tick_interval: Duration,
-}
-#[derive(Debug, PartialEq)]
-pub enum KMError {
-    ConfigurationError,
-    InvalidState,
-    EncryptionError,
-    HandshakeError,
-    MachineError(String),
-}
-
-impl fmt::Display for KMError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            KMError::InvalidState => {
-                write!(f, "InvalidState")
-            }
-            KMError::EncryptionError => {
-                write!(f, "EncryptionError")
-            }
-            KMError::HandshakeError => {
-                write!(f, "HandshakeError")
-            }
-            KMError::ConfigurationError => {
-                write!(f, "ConfigurationError")
-            }
-            KMError::MachineError(ref s) => {
-                write!(f, "MachineError: {}", s)
-            }
-        }
-    }
 }
 
 

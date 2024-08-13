@@ -943,7 +943,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "zerocopy",
- "zerocopy-derive",
  "zpr-ext",
 ]
 
