@@ -12,7 +12,7 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::{BufReader, Error, IoSlice};
 use std::net::Shutdown;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::sleep;
@@ -165,7 +165,8 @@ fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
 
     let mut ancillary_buffer = [0; ANCILLARY_BUFFER_SIZE];
     let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
-    ancillary.add_fds(&[file_descriptor]);
+    let borrowed_fd = unsafe { BorrowedFd::borrow_raw(file_descriptor) };
+    ancillary.add_fds(&[borrowed_fd]);
 
     let buf = [1; 8];
     let bufs = &mut [IoSlice::new(&buf)];
