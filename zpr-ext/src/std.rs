@@ -228,9 +228,10 @@ pub mod os {
 
     pub mod unix {
         pub mod net {
+            use crate::std::os::fd::CowFd;
             use libc;
             use std::io::{Error, IoSlice, IoSliceMut, Result};
-            use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
+            use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, RawFd};
             use std::os::unix::net::UnixStream;
             use std::ptr;
             use std::vec::Vec;
@@ -238,7 +239,7 @@ pub mod os {
             #[cfg(any(doc, target_os = "android", target_os = "linux"))]
             pub struct SocketAncillary<'a> {
                 buffer: &'a mut [u8],
-                fds: Vec<RawFd>,
+                fds: Vec<CowFd<'a>>,
             }
 
             impl<'a> SocketAncillary<'a> {
@@ -249,8 +250,10 @@ pub mod os {
                     }
                 }
 
-                pub fn add_fds(&mut self, fds: &[RawFd]) -> bool {
-                    self.fds.extend_from_slice(fds);
+                pub fn add_fds(&mut self, fds: &[BorrowedFd<'a>]) -> bool {
+                    for fd in fds {
+                        self.fds.push((*fd).into());
+                    }
                     true // FIXME: it's a lie!
                 }
 
@@ -262,16 +265,19 @@ pub mod os {
                     self.fds.is_empty()
                 }
 
-                pub fn messages(&self) -> Messages<'_> {
+                // NOTE: This differs from the proposed API, which suffers from a resource leak
+                // (and potential DoS) if the ancillary data is not consumed.  So here,
+                // we instead own the FDs; into_messages() here is then used to avoid duping the FDs.
+                pub fn into_messages(self) -> OwnedMessages<'a> {
                     if self.fds.is_empty() {
                         None.into_iter()
                     } else {
-                        Some(Ok(AncillaryData::ScmRights(self.fds.iter().cloned()))).into_iter()
+                        Some(Ok(AncillaryData::ScmRights(self.fds.into_iter()))).into_iter()
                     }
                 }
             }
 
-            pub type Messages<'a> =
+            pub type OwnedMessages<'a> =
                 std::option::IntoIter<std::result::Result<AncillaryData<'a>, AncillaryError>>;
 
             pub enum AncillaryData<'a> {
@@ -281,7 +287,7 @@ pub mod os {
 
             pub type AncillaryError = ();
 
-            pub type ScmRights<'a> = std::iter::Cloned<std::slice::Iter<'a, RawFd>>;
+            pub type ScmRights<'a> = std::vec::IntoIter<CowFd<'a>>;
 
             pub struct ScmCredentials<'a>(std::marker::PhantomData<&'a ()>);
 
@@ -307,7 +313,9 @@ pub mod os {
                 bufs: &[IoSlice<'_>],
                 ancillary: &mut SocketAncillary<'_>,
             ) -> Result<usize> {
-                let fds_size = std::mem::size_of_val(&ancillary.fds[..]);
+                let fds: Box<[BorrowedFd<'_>]> =
+                    ancillary.fds.iter().map(|fd| fd.as_fd()).collect();
+                let fds_size = fds.len() * std::mem::size_of::<RawFd>();
 
                 let mut msghdr = libc::msghdr {
                     msg_name: ptr::null_mut(),
@@ -328,10 +336,8 @@ pub mod os {
                         (*cmsghdr).cmsg_len = libc::CMSG_LEN(fds_size as _) as _;
                         (*cmsghdr).cmsg_level = libc::SOL_SOCKET;
                         (*cmsghdr).cmsg_type = libc::SCM_RIGHTS;
-                        libc::CMSG_DATA(cmsghdr).copy_from_nonoverlapping(
-                            (&ancillary.fds[..]).as_ptr().cast(),
-                            fds_size,
-                        );
+                        libc::CMSG_DATA(cmsghdr)
+                            .copy_from_nonoverlapping((&fds[..]).as_ptr().cast(), fds_size);
                     }
                 }
 
@@ -373,11 +379,11 @@ pub mod os {
                             as usize;
                         let num_fds =
                             ((*cmsghdr).cmsg_len - size_of_hdr) / std::mem::size_of::<RawFd>();
-                        ancillary.fds.clear();
-                        ancillary.fds.extend_from_slice(std::slice::from_raw_parts(
-                            libc::CMSG_DATA(cmsghdr).cast(),
-                            num_fds,
-                        ));
+                        ancillary.fds =
+                            std::slice::from_raw_parts(libc::CMSG_DATA(cmsghdr).cast(), num_fds)
+                                .into_iter()
+                                .map(|&fd| CowFd::from_raw_fd(fd))
+                                .collect();
                     }
                 }
 
@@ -416,7 +422,6 @@ pub mod os {
                 use super::*;
                 use std::fs::File;
                 use std::io::Read;
-                use std::os::fd::{AsRawFd, FromRawFd};
                 use std::os::unix::net::UnixStream;
 
                 #[test]
@@ -447,7 +452,7 @@ pub mod os {
                         3
                     );
 
-                    assert!(ancillary_out.messages().next().is_none());
+                    assert!(ancillary_out.into_messages().next().is_none());
                 }
 
                 #[test]
@@ -459,7 +464,7 @@ pub mod os {
                     let data_in = &[1u8, 2u8, 3u8];
                     let mut ancillary_in_buf = [0u8; 256];
                     let mut ancillary_in = SocketAncillary::new(&mut ancillary_in_buf);
-                    ancillary_in.add_fds(&[zero_file.as_raw_fd()]);
+                    ancillary_in.add_fds(&[zero_file.as_fd()]);
                     assert_eq!(
                         s1.send_vectored_with_ancillary(
                             &[IoSlice::new(data_in)],
@@ -481,7 +486,7 @@ pub mod os {
                         3
                     );
 
-                    let mut messages = ancillary_out.messages();
+                    let mut messages = ancillary_out.into_messages();
 
                     let fds: Vec<_> = match messages.next().unwrap().unwrap() {
                         AncillaryData::ScmRights(fds) => fds.collect(),
@@ -489,13 +494,15 @@ pub mod os {
                     };
                     assert!(fds.len() == 1);
 
-                    let mut buf = 123u8;
-                    unsafe { File::from_raw_fd(fds[0]) }
-                        .read_exact(std::slice::from_mut(&mut buf))
-                        .unwrap();
-                    assert_eq!(buf, 0u8);
-
                     assert!(messages.next().is_none());
+
+                    for fd in fds {
+                        let mut buf = 123u8;
+                        File::from(fd.try_into_owned().unwrap())
+                            .read_exact(std::slice::from_mut(&mut buf))
+                            .unwrap();
+                        assert_eq!(buf, 0u8);
+                    }
                 }
             }
         }
