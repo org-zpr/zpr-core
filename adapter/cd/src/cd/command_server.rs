@@ -192,7 +192,7 @@ async fn handle_connect(
     }
 
     writer
-        .write_all(format!("2\nOK\nconnect starting for {} (not really)\n", cname).as_bytes())
+        .write_all(format!("2\nOK\nconnect starting for {}\n", cname).as_bytes())
         .await?;
     Ok(())
 }

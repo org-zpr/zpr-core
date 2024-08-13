@@ -163,10 +163,10 @@ impl CMonitor {
         let passed_ctok = ctok.clone();
         let dock_addr: SocketAddr = match addr_port.parse() {
             Ok(addr) => addr,
-            Err(_) => {
+            Err(e) => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "Invalid dock address",
+                    format!("Invalid dock address: {}", e),
                 ));
             }
         };

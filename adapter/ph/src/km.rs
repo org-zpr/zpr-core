@@ -18,7 +18,7 @@ use std::time::Duration;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use bytes::Bytes;
+use bytes::{Bytes, BufMut};
 
 use zerocopy::FromBytes;
 
@@ -26,11 +26,11 @@ use tracing::{error, info};
 
 use crate::config;
 use crate::packet::Packet;
-use crate::zdp::{ZdpBaseHeader, ZdpPacketType};
+use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
 use crate::zpr;
 
 
-// [derive(Debug, PartialEq)]
+
 #[derive(Debug)]
 pub enum KMError {
     ConfigurationError,
@@ -101,6 +101,17 @@ impl From<std::io::Error> for KMError {
 pub type KMResult<T> = Result<T, KMError>;
 
 
+#[derive(Debug)]
+pub enum KMSignal {
+    Reset,
+    Error,
+    SaIdChange{ old: zpr::SaId, new: zpr::SaId },
+}
+
+
+
+
+
 /// Stateful key manager for ZDP.  Requires an instance of a [KeyManagerStateMachine] to do the actual work.
 #[derive(Debug, Clone)]
 pub struct KeyManager<'mgr> {
@@ -167,8 +178,8 @@ impl KeyManager<'_> {
     /// This overwrites the plaintext ZDP header at least.
     /// For everything except transit packets, this also overwrites the payload.
     ///
-    /// For all packets, there must be enough padding included in the body length to
-    /// accomodate any expansion caused by encryption.
+    /// For all packets, there must be enough space remaining in the packet buffer to
+    /// accomodate expansion caused by encryption.
     ///
     /// Note that we encrypt body.len() bytes from body[0].  Body length will expand by
     /// the PADLEN indicated in the KM algorithm.
@@ -223,7 +234,9 @@ impl KeyManager<'_> {
                 info!("noise: encrypt input {} bytes, output {} bytes", encr_len, len);
                 // Copy the encrypted data back into the message -- there should be sufficient room for it since
                 // caller should know our required padding space and alignment.
-                message.body_mut()[0..len].copy_from_slice(&encr_buf[0..len]);
+
+                message.shrink(message.body().len()); // remove body
+                message.put(&encr_buf[0..len]); // write a new body
 
                 // Now write our headroom info:
                 let head_buf = message.alloc_zeroed_headroom(3); // ZPI + LEN
@@ -268,14 +281,14 @@ impl KeyManager<'_> {
             return Err(KMError::ShortPacket);
         }
 
-        // TODO: pass sa_id into decrypt
         match state.statemachine.decrypt_transport(&message.body()[3..3 + encr_len], &mut decr_buf) {
             Ok(len) => {
                 info!("noise: decrypt input {} bytes, output {} bytes", message.body().len(), len);
                 // Copy the decrypted data back into the message -- do not overwrite ZPI.
-                message.body_mut()[1..len + 1].copy_from_slice(&decr_buf[0..len]);
+                message.shrink(message.body().len()); // remove body
+                message.put(&decr_buf[0..len]); // write a new body
 
-                // Note at this point the "padding" space on the message is probably filled with leftover ciphertext.
+                message.alloc_zeroed_header::<ZdpZpiHeader>().zpi = state.sa_id;
             }
             Err(e) => {
                 return Err(KMError::MachineError(e.to_string()));
@@ -340,10 +353,12 @@ impl KeyManager<'_> {
     /// `km_buffers_out` will be filled with outbound ZDP Key Management messages for our peer. These are
     /// just the payloads.  The caller is responsible for adding the ZPI header, if required.
     ///
+    /// `km_signals_out` will be recieve signals from the machine.
     pub async fn start(
         &mut self,
         ctok: CancellationToken,
         km_buffers_out: mpsc::Sender<Bytes>,
+        km_signals_out: mpsc::Sender<KMSignal>,
     ) -> KMResult<()> {
         let (km_tx, mut km_rx) = mpsc::channel(16);
         let tick_interval: Duration;
@@ -364,6 +379,12 @@ impl KeyManager<'_> {
                     return Err(KMError::MachineError(e.to_string()))
                 }
             };
+        }
+        match km_signals_out.send(KMSignal::Reset).await {
+            Ok(_) => {}
+            Err(_) => {
+                error!("failed to enqueue reset signal")
+            }
         }
         if let Some(handshake) = handshake {
             match km_buffers_out.send(handshake).await {
@@ -386,6 +407,12 @@ impl KeyManager<'_> {
             match prev_state {
                 KMSMState::Error => {
                     // If error, send reset and loop again
+                    match km_signals_out.send(KMSignal::Error).await {
+                        Ok(_) => {}
+                        Err(_) => {
+                            error!("failed to enqueue error signal")
+                        }
+                    }
                     let resp: Option<Bytes>;
                     {
                         let mut state = self.shared.state.lock().unwrap();
@@ -395,6 +422,12 @@ impl KeyManager<'_> {
                                 return Err(KMError::MachineError(e.to_string()));
                             }
                         };
+                    }
+                    match km_signals_out.send(KMSignal::Reset).await {
+                        Ok(_) => {}
+                        Err(_) => {
+                            error!("failed to enqueue reset signal")
+                        }
                     }
                     if let Some(resp) = resp {
                         match km_buffers_out.send(resp).await {
@@ -465,16 +498,26 @@ impl KeyManager<'_> {
             }
 
             if next_state != prev_state {
-                // state transition
                 info!("KM state transition {:?} -> {:?}", prev_state, next_state);
-
                 if next_state == KMSMState::Transport {
-                    let mut state = self.shared.state.lock().unwrap();
-                    state.sa_id += 1;
-                    if state.sa_id == 0 {
-                        state.sa_id = 1;
+                    let prev_id: zpr::SaId;
+                    let cur_id: zpr::SaId;
+                    {
+                        let mut state = self.shared.state.lock().unwrap();
+                        prev_id = state.sa_id;
+                        state.sa_id += 1;
+                        if state.sa_id == 0 {
+                            state.sa_id = 1;
+                        }
+                        cur_id = state.sa_id;
                     }
-                    info!("KM: New SA_ID: {}", state.sa_id);
+                    info!("KM: New SA_ID: {}", cur_id);
+                    match km_signals_out.send(KMSignal::SaIdChange{old: prev_id, new: cur_id}).await {
+                        Ok(_) => {}
+                        Err(_) => {
+                            error!("failed to enqueue SaIdChange signal")
+                        }
+                    }
                 }
             } else if next_state == KMSMState::Error {
                 error!("KM: stuck in error state");
@@ -657,7 +700,7 @@ impl KeyManagerStateMachine for SillyKeyManager {
             return Err(KMError::EncryptionError);
         }
         let szbytes = (sz as u16).to_be_bytes();
-        message[0..3].copy_from_slice(&szbytes); // write SIZE as u16 to front of buffer
+        message[0..2].copy_from_slice(&szbytes); // write SIZE as u16 to front of buffer
         message[2..sz].copy_from_slice(payload); // then copy rest of payload
         Ok(sz)
     }
@@ -687,7 +730,6 @@ impl KeyManagerStateMachine for SillyKeyManager {
 mod test {
     use tokio::task::yield_now;
     use tokio::time::sleep;
-    // use zerocopy::AsBytes;
     use zpr_ext::zerocopy::*;
 
     use crate::config::PACKET_BUFFER_SIZE;
@@ -787,10 +829,11 @@ mod test {
         let mut km = KeyManager::new(kmb);
         let ctok = CancellationToken::new();
         let (tx, mut _rx) = mpsc::channel(4);
+        let (sig_tx, mut _sig_rx) = mpsc::channel(4);
 
         let sp_ctok = ctok.clone();
         tokio::spawn(async move {
-            let _ = km.start(sp_ctok, tx).await;
+            let _ = km.start(sp_ctok, tx, sig_tx).await;
         });
 
         yield_now().await;
@@ -808,10 +851,11 @@ mod test {
         let mut km = KeyManager::new(kmb);
         let ctok = CancellationToken::new();
         let (tx, mut _rx) = mpsc::channel(4);
+        let (sig_tx, mut _sig_rx) = mpsc::channel(4);
 
         let sp_ctok = ctok.clone();
         tokio::spawn(async move {
-            let _ = km.start(sp_ctok, tx).await;
+            let _ = km.start(sp_ctok, tx, sig_tx).await;
         });
 
         sleep(Duration::from_millis(900)).await;
@@ -830,11 +874,12 @@ mod test {
 
         let ctok = CancellationToken::new();
         let (tx, mut _rx) = mpsc::channel(4);
+        let (sig_tx, mut _sig_rx) = mpsc::channel(4);
 
         let sp_ctok = ctok.clone();
         let mut sp_km = km.clone();
         tokio::spawn(async move {
-            let _ = sp_km.start(sp_ctok, tx).await;
+            let _ = sp_km.start(sp_ctok, tx, sig_tx).await;
         });
         yield_now().await;
 
@@ -859,11 +904,12 @@ mod test {
 
         let ctok = CancellationToken::new();
         let (tx, mut _rx) = mpsc::channel(4);
+        let (sig_tx, mut _sig_rx) = mpsc::channel(4);
 
         let sp_ctok = ctok.clone();
         let mut sp_km = km.clone();
         tokio::spawn(async move {
-            let _ = sp_km.start(sp_ctok, tx).await;
+            let _ = sp_km.start(sp_ctok, tx, sig_tx).await;
         });
         yield_now().await;
 

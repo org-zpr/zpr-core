@@ -763,6 +763,7 @@ dependencies = [
 name = "node"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chrono",
  "clap",
  "daemonize",
@@ -776,6 +777,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "zerocopy",
 ]
 
 [[package]]

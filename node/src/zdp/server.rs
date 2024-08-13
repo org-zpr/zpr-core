@@ -8,7 +8,20 @@ use tokio_util::sync::CancellationToken;
 
 use tracing::info;
 
-use ph::km::{KeyManager, SillyKeyManager};
+use bytes::BufMut;
+
+use ph::km::{KeyManager, KMSignal, SillyKeyManager};
+use ph::{config, zdp::*};
+use ph::packet::Packet;
+
+use zerocopy::FromBytes;
+
+
+const HEADROOM: usize = 128;
+
+const ZDP_BASE_HDR_OFFSET: usize = std::mem::size_of::<ZdpZpiHeader>();
+const ZDP_REPORT_HDR_OFFSET: usize = ZDP_BASE_HDR_OFFSET + std::mem::size_of::<ZdpBaseHeader>();
+const ZDP_REPORT_DATA_OFFSET: usize = ZDP_REPORT_HDR_OFFSET + std::mem::size_of::<ZdpReportHeader>();
 
 #[derive(Debug, Clone)]
 pub struct ZDPServer {
@@ -31,13 +44,15 @@ impl ZDPServer {
         let s_send = s_recv.clone();
 
         let (km_tx, mut km_rx) = mpsc::channel(16);
+        let (km_sig_tx, mut km_sig_rx) = mpsc::channel(16);
+
         let km_ctok = ctok.clone();
 
         // In real implemntation each client gets a KM instance.
         let mgr = KeyManager::new(Box::new(SillyKeyManager::new(false)));
         let mut mgr_cc = mgr.clone();
         tokio::spawn(async move {
-            mgr_cc.start(km_ctok, km_tx).await.unwrap();
+            mgr_cc.start(km_ctok, km_tx, km_sig_tx).await.unwrap();
         });
 
         // This dummy node only allows for one connection at a time.
@@ -45,12 +60,57 @@ impl ZDPServer {
         // Then we attempt to set up an SA using our key management system.
         let mut cur_client: Option<SocketAddr> = None;
 
-        let mut buf = [0u8; 1024];
+
+
+
+        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
         loop {
             tokio::select! {
                 _ = ctok.cancelled() => {
                     info!("ZDP Server cancelled");
                     break;
+                }
+
+                Some(sig) = km_sig_rx.recv() => {
+                    // This is a signal from the KM.  We need to act on it.
+                    match sig {
+                        KMSignal::SaIdChange { old, new } => {
+                            if old == 0 && new > 0 {
+                                info!("SA has been established!");
+                                let mut pkt = Packet::new(&mut buf, 128);
+
+                                let message = b"hello to you dear client adapter!";
+                                let mlen = message.len() as u16;
+                                let report_hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
+                                report_hdr.report_data_length =  mlen.into();
+
+                                let zdp_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
+                                zdp_hdr.packet_type = ZdpPacketType::Report;
+                                zdp_hdr.excess_length =  0;
+                                zdp_hdr.sequence_number = 0.into();
+
+                                // Do not add ZPI here - SA_ID is added by KM.
+
+                                pkt.put(&message[..]);
+                                match mgr.encrypt_transport(&mut pkt) {
+                                    Ok(_) => {
+                                        match s_send.send_to(&pkt.body(), cur_client.unwrap()).await {
+                                            Ok(sz) => {
+                                                info!("zdp/server - sent {} byte transport message", sz);
+                                            },
+                                            Err(e) => {
+                                                info!("zdp/server - error sending transport message: {:?}", e);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        info!("zdp/server - error encrypting transport message: {:?}", e);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                 }
 
                 Some(km_buf) = km_rx.recv() => {
@@ -70,25 +130,92 @@ impl ZDPServer {
                     }
                 }
 
-                Ok((n, src)) = s_recv.recv_from(&mut buf) => {
-                    info!("Received {} bytes from {}", n, src);
+                Ok((read_len, src)) = s_recv.recv_from(&mut buf) => {
+                    info!("Received {} bytes from {}", read_len, src);
                     if cur_client.is_none() {
                         cur_client = Some(src);
                     } else if cur_client != Some(src) {
                         info!("Ignoring message from unknown source");
                         continue;
                     }
-                    // Normally we would look at the SPI/ZPI or other header information to determine
-                    // what to do with the message.  For now we assume this is a key management message.
-                    // If this is a transport message we would also use KM, but would use the decrypt fn instead of
-                    // this channel.
-                    match mgr.handle_km_message(&buf[..n]).await {
-                        Ok(_) => {},
-                        Err(e) => {
-                            info!("zdp/server - error handling KM message: {:?}", e);
-                            // TODO: Drop client? Reset KM?
-                        }
+
+                    let zpi_hdr = ZdpZpiHeader::ref_from_prefix(&buf[0..read_len]);
+                    if zpi_hdr.is_none() {
+                        info!("zdp/server - error parsing ZPI header");
+                        continue;
                     }
+    ;                let zpi_hdr = zpi_hdr.unwrap();
+
+                    // For this demo code all the UDP messages look like
+                    //
+                    //   [ZPI][PAYLOAD]
+                    //
+                    // If ZPI is 0 then it's a KM message. Else it's transport.
+                    match zpi_hdr.zpi {
+                        0 => {
+                            info!("zdp/server - received KM message");
+                            match mgr.handle_km_message(&buf[0..read_len]).await {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    info!("zdp/server - error handling KM message: {:?}", e);
+                                    // TODO: Drop client? Reset KM?
+                                }
+                            };
+                        }
+                        _ => {
+                            info!("zdp/server - received transport message");
+                            // Not sure the correct way to use these packet things.  But here we just create yet another buffer.
+                            let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
+                            let mut pkt = Packet::new(&mut pkt_buf, HEADROOM);
+                            pkt.put(&buf[..read_len]);
+                            match mgr.decrypt_transport(&mut pkt) {
+                                Ok(_) => {
+                                    // Demo code sends a ZDP message like
+                                    //     [ZPI]
+                                    //     [BASE HEADER type = report]
+                                    //     [REPORT HEADER]
+                                    //     <STRING DATA>
+                                    let zpi_hdr = ZdpZpiHeader::ref_from_prefix(&pkt.body());
+                                    if zpi_hdr.is_none() {
+                                        info!("zdp/server - error parsing ZPI header from decrypted payload");
+                                        continue;
+                                    }
+                                    let zdp_hdr = ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HDR_OFFSET..]);
+                                    if zdp_hdr.is_none() {
+                                        info!("zdp/server - error parsing ZDP header from decrypted payload");
+                                        continue;
+                                    }
+                                    let zdp_hdr = zdp_hdr.unwrap();
+                                    if zdp_hdr.packet_type != ZdpPacketType::Report {
+                                        info!("zdp/server - expected REPORT packet, got {:?}", zdp_hdr.packet_type);
+                                        continue;
+                                    }
+                                    let report_hdr = ZdpReportHeader::ref_from_prefix(&pkt.body()[ZDP_REPORT_HDR_OFFSET..]);
+                                    if report_hdr.is_none() {
+                                        info!("zdp/server - error parsing REPORT header from decrypted payload");
+                                        continue;
+                                    }
+                                    let report_hdr = report_hdr.unwrap();
+                                    let strlen = usize::from(report_hdr.report_data_length);
+                                    if ZDP_REPORT_DATA_OFFSET + strlen > pkt.body().len() {
+                                        info!("zdp/server - report data length exceeds packet length");
+                                        continue;
+                                    }
+                                    match std::str::from_utf8(&pkt.body()[ZDP_REPORT_DATA_OFFSET..ZDP_REPORT_DATA_OFFSET+strlen]) {
+                                        Ok(s) => {
+                                            info!("zdp/server - received report: *** {} ***", s);
+                                        }
+                                        Err(e) => {
+                                            info!("zdp/server - error parsing report data: {:?}", e);
+                                        }
+                                    };
+                                }
+                                Err(e) => {
+                                    info!("zdp/server - error decrypting transport message: {:?}", e);
+                                }
+                            }
+                        }
+                    };
                 }
             }
         }
@@ -96,3 +223,4 @@ impl ZDPServer {
         Ok(())
     }
 }
+

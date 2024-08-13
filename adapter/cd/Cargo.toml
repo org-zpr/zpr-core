@@ -24,6 +24,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 ph = { path = "../ph" }
 bytes = "1"
+zerocopy = "0.7.35"
 
 [features]
 ci = []

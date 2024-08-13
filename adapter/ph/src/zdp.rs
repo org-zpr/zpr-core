@@ -5,7 +5,7 @@ use zerocopy::byteorder::network_endian::*;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
 #[open_enum]
-#[derive(Copy, Clone, FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(Copy, Clone, Debug, FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(u8)]
 pub enum ZdpPacketType {
     // Flow-based
