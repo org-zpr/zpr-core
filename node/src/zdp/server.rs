@@ -34,10 +34,10 @@ impl ZDPServer {
         let km_ctok = ctok.clone();
 
         // In real implemntation each client gets a KM instance.
-        let mgr = KeyManager::new(Box::new(SillyKeyManager::new()));
+        let mgr = KeyManager::new(Box::new(SillyKeyManager::new(false)));
         let mut mgr_cc = mgr.clone();
         tokio::spawn(async move {
-            mgr_cc.start(false, km_ctok, km_tx).await.unwrap();
+            mgr_cc.start(km_ctok, km_tx).await.unwrap();
         });
 
         // This dummy node only allows for one connection at a time.

@@ -25,7 +25,7 @@ impl ZDPClient {
 
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-        let mgr = KeyManager::new(Box::new(SillyKeyManager::new()));
+        let mgr = KeyManager::new(Box::new(SillyKeyManager::new(true)));
 
         let local_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
 
@@ -40,7 +40,7 @@ impl ZDPClient {
         let km_ctok = ctok.clone();
         let mut mgr_cc = mgr.clone();
         tokio::spawn(async move {
-            mgr_cc.start(true, km_ctok, km_tx).await.unwrap();
+            mgr_cc.start(km_ctok, km_tx).await.unwrap();
         });
 
         // Now loop -
