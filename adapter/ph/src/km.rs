@@ -13,7 +13,6 @@ use tokio::sync::mpsc;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
-use std::mem;
 use std::time::Duration;
 
 use std::fmt;
@@ -27,7 +26,7 @@ use tracing::{error, info};
 
 use crate::config;
 use crate::packet::Packet;
-use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpPerFlowHeader};
+use crate::zdp::{ZdpBaseHeader, ZdpPacketType};
 use crate::zpr;
 
 
@@ -169,11 +168,19 @@ impl KeyManager<'_> {
     /// For everything except transit packets, this also overwrites the payload.
     ///
     /// For all packets, there must be enough padding included in the body length to
-    /// accomodate any expansion caused by encryption.  Remember that the KM itself
-    /// adds 2 bytes (for a length field).
+    /// accomodate any expansion caused by encryption.
     ///
-    /// The transit packets the extra space for the crypto must be between the ZDP header
-    /// part and the agent part.
+    /// Note that we encrypt body.len() bytes from body[0].  Body length will expand by
+    /// the PADLEN indicated in the KM algorithm.
+    ///
+    /// We also write into the headroom of the packet:
+    ///
+    /// ```text
+    ///     00     ZPI
+    ///     01,02  LENGTH of encrypted payload
+    /// ```
+    ///
+    /// TODO: Not sure this works at all for transit packet encryption -- if we are doing that.
     ///
     /// `message` is expected to be a ZDP message wihout a ZPI value.  We add a ZPI
     /// value to the front of the message -- note that the value we add is just the
@@ -202,8 +209,7 @@ impl KeyManager<'_> {
                 return Err(KMError::InvalidPacketType);
             }
             ZdpPacketType::TransitPacket => {
-                // So the data to be encrypted is ZDP header plus stream ID.  Padding is still assumed to after that.
-                encr_len = mem::size_of::<ZdpBaseHeader>() + mem::size_of::<ZdpPerFlowHeader>();
+                panic!("Transit packet encryption not implemented");
             }
             _ => {
                 encr_len = message.body().len();
@@ -217,18 +223,14 @@ impl KeyManager<'_> {
                 info!("noise: encrypt input {} bytes, output {} bytes", encr_len, len);
                 // Copy the encrypted data back into the message -- there should be sufficient room for it since
                 // caller should know our required padding space and alignment.
+                message.body_mut()[0..len].copy_from_slice(&encr_buf[0..len]);
 
-                // Write the size of encrypted data as first two bytes.
+                // Now write our headroom info:
+                let head_buf = message.alloc_zeroed_headroom(3); // ZPI + LEN
+                head_buf[0] = state.sa_id;
+
                 let szbytes = (len as u16).to_be_bytes();
-                message.body_mut()[0..2].copy_from_slice(&szbytes);
-
-                // Followed by encrypted payload:
-                message.body_mut()[2..len+2].copy_from_slice(&encr_buf[0..len]);
-
-                // Now we need to push a our SA id onto the front.
-                // (Note ZPI should be part of integrity protected data)
-                let zpi_buf = message.alloc_zeroed_headroom(1);
-                zpi_buf[0] = state.sa_id;
+                head_buf[1..3].copy_from_slice(&szbytes);
             }
             Err(e) => {
                 return Err(KMError::MachineError(e.to_string()));
@@ -270,9 +272,10 @@ impl KeyManager<'_> {
         match state.statemachine.decrypt_transport(&message.body()[3..3 + encr_len], &mut decr_buf) {
             Ok(len) => {
                 info!("noise: decrypt input {} bytes, output {} bytes", message.body().len(), len);
-                // Copy the decrypted data back into the message.
-                // Note at this point the "padding" space on the message is probably filled with leftover ciphertext.
+                // Copy the decrypted data back into the message -- do not overwrite ZPI.
                 message.body_mut()[1..len + 1].copy_from_slice(&decr_buf[0..len]);
+
+                // Note at this point the "padding" space on the message is probably filled with leftover ciphertext.
             }
             Err(e) => {
                 return Err(KMError::MachineError(e.to_string()));
@@ -688,7 +691,6 @@ mod test {
     use zpr_ext::zerocopy::*;
 
     use crate::config::PACKET_BUFFER_SIZE;
-    use crate::zdp::ZdpZpiHeader;
 
     use super::*;
 
@@ -729,8 +731,8 @@ mod test {
         fn get_settings(&self) -> KMSettings {
             KMSettings {
                 zdp_km_type: zpr::KM_ID_EXPERIMENTAL,
-                padlen: 8,
-                alignment: 8,
+                padlen: 0,
+                alignment: 0,
                 tick_interval: Duration::from_millis(200),
             }
         }
@@ -896,7 +898,6 @@ mod test {
         //let hbytes = hdr.as_bytes();
         //pkt.body_mut()[0..hbytes.len()].copy_from_slice(&hbytes);
         hdr.write_to_buf(&mut pkt);
-
         match km.encrypt_transport(&mut pkt) {
             Ok(_) => {}
             Err(e) => {
@@ -907,8 +908,9 @@ mod test {
         // The encrypt function writes a SA_ID to first byte.
         assert!(pkt.body()[0] == 33);
 
+        // Rest of input is after the length...
         let encr_hdr =
-            ZdpBaseHeader::ref_from_prefix(&pkt.body()[1..]).expect("failed to read back header");
+            ZdpBaseHeader::ref_from_prefix(&pkt.body()[3..]).expect("failed to read back header");
 
         assert!(encr_hdr.packet_type == hdr.packet_type);
         assert!(encr_hdr.excess_length == hdr.excess_length);
@@ -923,19 +925,23 @@ mod test {
         // No need to start the machine since encrypt only cares about transport state and SA_ID.
         km.set_sa_id(33);
 
-        let zpi_hdr = ZdpZpiHeader { zpi: 33 };
+        let mut buf = [0u8; PACKET_BUFFER_SIZE];
+        let mut pkt = Packet::new(&mut buf, 64);
 
         let hdr = ZdpBaseHeader {
             packet_type: ZdpPacketType::EchoRequest,
-            excess_length: 22u8,
-            sequence_number: 19u16.into(),
+            excess_length: 0u8,
+            sequence_number: 0u16.into(),
         };
-        let mut buf = [0u8; PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 64);
+        //let hbytes = hdr.as_bytes();
+        //pkt.body_mut()[0..hbytes.len()].copy_from_slice(&hbytes);
         hdr.write_to_buf(&mut pkt);
-        *pkt.alloc_zeroed_header::<ZdpZpiHeader>() = zpi_hdr;
-
-        assert!(pkt.body()[0] == 33); // sanity check
+        match km.encrypt_transport(&mut pkt) {
+            Ok(_) => {}
+            Err(e) => {
+                panic!("encrypt_transport failed: {}", e);
+            }
+        }
 
         match km.decrypt_transport(&mut pkt) {
             Ok(_) => {}
