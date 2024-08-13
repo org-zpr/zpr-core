@@ -118,6 +118,30 @@ impl<'a> SubstrateEgress<'a> {
         }
     }
 
+    pub async fn enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
+        &self,
+        packet: P,
+    ) -> Result<(), P> {
+        let socket = self.sockets[packet.flowhash() as usize % self.sockets.len()];
+
+        match socket.send(packet.body()).await {
+            Ok(_) => Ok(()),
+
+            Err(err) => {
+                match err.kind() {
+                    ErrorKind::InvalidInput | ErrorKind::Unsupported => {
+                        panic!("unrecoverable I/O error: {}", err)
+                    }
+
+                    // most other network errors are temporary; return packet to caller
+                    // TODO: it would be nice to report to the user _why_ packets aren't moving;
+                    // this depends on <https://github.com/rust-lang/rust/issues/86442> though
+                    _ => Err(packet),
+                }
+            }
+        }
+    }
+
     // TODO: batch enqueue
     pub fn try_enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
         &self,
@@ -131,7 +155,7 @@ impl<'a> SubstrateEgress<'a> {
             Err(err) => {
                 match err.kind() {
                     ErrorKind::InvalidInput | ErrorKind::Unsupported => {
-                        panic!("Unrecoverable I/O error: {}", err)
+                        panic!("unrecoverable I/O error: {}", err)
                     }
 
                     ErrorKind::WouldBlock => Err(TryEnqueueError::Full(packet)),

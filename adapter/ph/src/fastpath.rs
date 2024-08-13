@@ -237,6 +237,25 @@ pub fn decrypt<'pktbuf>(
     }
 }
 
+fn substrate_egress_common<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+    zpi: zpr::Zpi,
+    pkt: &mut Packet<'pktbuf>,
+) {
+    // TODO: should we add ZDP header here also??
+
+    encap_zpi(asm, link_id, zpi, pkt);
+
+    maybe_capture(asm, Direction::Outbound, pkt);
+
+    encrypt(asm, link_id, pkt);
+
+    if link_id != zpr::ADAPTER_DOCKING_SESSION_ID {
+        todo!("link routing");
+    }
+}
+
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
 /// The ZPI header will be added to the packet.
 pub fn substrate_egress<'pktbuf>(
@@ -245,17 +264,7 @@ pub fn substrate_egress<'pktbuf>(
     zpi: zpr::Zpi,
     mut pkt: Packet<'pktbuf>,
 ) {
-    // TODO: should we add ZDP header here also??
-
-    encap_zpi(asm, link_id, zpi, &mut pkt);
-
-    maybe_capture(asm, Direction::Outbound, &mut pkt);
-
-    encrypt(asm, link_id, &mut pkt);
-
-    if link_id != zpr::ADAPTER_DOCKING_SESSION_ID {
-        todo!("link routing");
-    }
+    substrate_egress_common(asm, link_id, zpi, &mut pkt);
 
     match asm
         .substrate_egress
@@ -266,6 +275,22 @@ pub fn substrate_egress<'pktbuf>(
         Err(TryEnqueueError::Full(pkt)) => {
             drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr)
         }
+    }
+}
+
+/// A blocking/async version of `substrate_egress()`, for management path use.
+/// Useful to ensure fairness under high load.
+pub async fn substrate_egress_blocking<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+    zpi: zpr::Zpi,
+    mut pkt: impl DropGuard<Packet<'pktbuf>>,
+) {
+    substrate_egress_common(asm, link_id, zpi, &mut pkt);
+
+    match asm.substrate_egress.enqueue_packet(pkt).await {
+        Ok(()) => asm.counters[CounterType::OutPacksSent].increment(),
+        Err(pkt) => drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr),
     }
 }
 
