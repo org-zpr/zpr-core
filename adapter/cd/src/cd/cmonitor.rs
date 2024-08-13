@@ -1,11 +1,11 @@
 use std::io;
 use std::time::Instant;
+use std::net::SocketAddr;
 
 use tokio::sync::mpsc::{self, Sender};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use tracing::info;
@@ -161,19 +161,18 @@ impl CMonitor {
 
         let ctok = CancellationToken::new();
         let passed_ctok = ctok.clone();
-
-        let remote_addr: SocketAddr = match addr_port.parse() {
+        let dock_addr: SocketAddr = match addr_port.parse() {
             Ok(addr) => addr,
-            Err(e) => {
+            Err(_) => {
                 return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("failed to parse address: {}", e),
+                    io::ErrorKind::InvalidInput,
+                    "Invalid dock address",
                 ));
             }
         };
 
         let handle: JoinHandle<io::Result<()>> = tokio::spawn(async move {
-            let cli = client::ZDPClient::new(&remote_addr);
+            let cli = client::ZDPClient::new(&dock_addr);
             cli.run(passed_ctok).await // blocking, long running
         });
         // well hopefully that launched!

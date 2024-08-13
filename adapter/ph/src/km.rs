@@ -895,7 +895,7 @@ mod test {
 
     #[tokio::test]
     async fn test_km_passes_inbound_msg_no_buffer() {
-        let kmb = Box::new(TestKM::new(KMSMState::Configuring));
+        let kmb = Box::new(TestKM::new(true, KMSMState::Configuring));
         let kinternals = kmb.shared.clone();
         let km = KeyManager::new(kmb);
 
@@ -905,7 +905,7 @@ mod test {
         let sp_ctok = ctok.clone();
         let mut sp_km = km.clone();
         tokio::spawn(async move {
-            let _ = sp_km.start(true, sp_ctok, tx).await;
+            let _ = sp_km.start(sp_ctok, tx).await;
         });
         yield_now().await;
 

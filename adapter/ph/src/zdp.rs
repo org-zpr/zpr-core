@@ -2,7 +2,7 @@
 
 use open_enum::open_enum;
 use zerocopy::byteorder::network_endian::*;
-use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, Unaligned};
+use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
 #[open_enum]
 #[derive(Copy, Clone, FromZeroes, FromBytes, AsBytes, Unaligned)]

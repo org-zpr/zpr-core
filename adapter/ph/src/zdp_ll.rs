@@ -1,7 +1,7 @@
 //! ZDP libpcap link-layer
 
 use crate::defs::*;
-use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, Unaligned};
+use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
 #[derive(AsBytes, FromBytes, FromZeroes, Unaligned)]
 #[repr(packed)]

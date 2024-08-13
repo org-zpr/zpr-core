@@ -8,7 +8,7 @@ use crate::packet::Packet;
 use bytes::Buf;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use zerocopy::FromBytes;
-use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, Unaligned};
+use zerocopy::{AsBytes, FromZeroes, Unaligned};
 
 #[derive(AsBytes, FromZeroes, FromBytes, Unaligned)]
 #[repr(packed)]

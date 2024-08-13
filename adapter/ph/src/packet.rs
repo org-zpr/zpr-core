@@ -5,7 +5,6 @@ use crate::net_defs::*;
 use bytes::buf;
 use std::mem::{size_of, size_of_val};
 use zerocopy::{AsBytes, ByteOrder, FromBytes, FromZeroes, NetworkEndian};
-use zerocopy_derive::{AsBytes, FromBytes, FromZeroes};
 use zpr_ext::std::mem::DropGuard;
 
 /** Exclusive handle to an in-use packet buffer.

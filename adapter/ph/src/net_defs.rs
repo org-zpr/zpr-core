@@ -1,7 +1,7 @@
 //! Standard network constants.
 
 use zerocopy::FromZeroes;
-use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, KnownLayout, Unaligned};
+use zerocopy::{AsBytes, FromBytes, KnownLayout, Unaligned};
 
 pub mod ethertype {
     //! Ethertype / IEEE 802 numbers

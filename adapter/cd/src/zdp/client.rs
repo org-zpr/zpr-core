@@ -26,7 +26,6 @@ impl ZDPClient {
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
         let mgr = KeyManager::new(Box::new(SillyKeyManager::new(true)));
-
         let local_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
 
         let socket = UdpSocket::bind(local_addr).await?;
