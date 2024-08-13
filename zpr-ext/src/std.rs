@@ -145,7 +145,7 @@ pub mod os {
         pub mod net {
             use libc;
             use std::io::{Error, IoSlice, IoSliceMut, Result};
-            use std::os::fd::{AsRawFd, RawFd};
+            use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
             use std::os::unix::net::UnixStream;
             use std::ptr;
             use std::vec::Vec;
@@ -216,6 +216,93 @@ pub mod os {
                 ) -> Result<usize>;
             }
 
+            #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+            pub(crate) fn uds_send_vectored_with_ancillary(
+                fd: BorrowedFd<'_>,
+                bufs: &[IoSlice<'_>],
+                ancillary: &mut SocketAncillary<'_>,
+            ) -> Result<usize> {
+                let fds_size = std::mem::size_of_val(&ancillary.fds[..]);
+
+                let mut msghdr = libc::msghdr {
+                    msg_name: ptr::null_mut(),
+                    msg_namelen: 0,
+                    msg_iov: bufs.as_ptr() as *mut _,
+                    msg_iovlen: bufs.len(),
+                    msg_control: ptr::null_mut(),
+                    msg_controllen: 0,
+                    msg_flags: 0,
+                };
+
+                if fds_size > 0 {
+                    unsafe {
+                        msghdr.msg_control = (&mut ancillary.buffer).as_mut_ptr().cast();
+                        msghdr.msg_controllen = libc::CMSG_SPACE(fds_size as _) as _;
+
+                        let cmsghdr = libc::CMSG_FIRSTHDR(&msghdr);
+                        (*cmsghdr).cmsg_len = libc::CMSG_LEN(fds_size as _) as _;
+                        (*cmsghdr).cmsg_level = libc::SOL_SOCKET;
+                        (*cmsghdr).cmsg_type = libc::SCM_RIGHTS;
+                        libc::CMSG_DATA(cmsghdr).copy_from_nonoverlapping(
+                            (&ancillary.fds[..]).as_ptr().cast(),
+                            fds_size,
+                        );
+                    }
+                }
+
+                let res = unsafe { libc::sendmsg(fd.as_raw_fd(), &msghdr, 0) };
+
+                if res > 0 {
+                    Ok(res as usize)
+                } else {
+                    Err(Error::last_os_error())
+                }
+            }
+
+            #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+            pub(crate) fn uds_recv_vectored_with_ancillary(
+                fd: BorrowedFd<'_>,
+                bufs: &mut [IoSliceMut<'_>],
+                ancillary: &mut SocketAncillary<'_>,
+            ) -> Result<usize> {
+                let mut msghdr = libc::msghdr {
+                    msg_name: ptr::null_mut(),
+                    msg_namelen: 0,
+                    msg_iov: bufs.as_ptr() as *mut _,
+                    msg_iovlen: bufs.len(),
+                    msg_control: (&mut ancillary.buffer).as_mut_ptr().cast(),
+                    msg_controllen: ancillary.buffer.len() as _,
+                    msg_flags: 0,
+                };
+
+                let res = unsafe { libc::recvmsg(fd.as_raw_fd(), &mut msghdr, 0) };
+
+                unsafe {
+                    let cmsghdr = libc::CMSG_FIRSTHDR(&msghdr);
+                    if !cmsghdr.is_null()
+                        && (*cmsghdr).cmsg_level == libc::SOL_SOCKET
+                        && (*cmsghdr).cmsg_type == libc::SCM_RIGHTS
+                    {
+                        let size_of_hdr = (2 * libc::CMSG_LEN(std::mem::size_of::<RawFd>() as _)
+                            - libc::CMSG_LEN((2 * std::mem::size_of::<RawFd>()) as _))
+                            as usize;
+                        let num_fds =
+                            ((*cmsghdr).cmsg_len - size_of_hdr) / std::mem::size_of::<RawFd>();
+                        ancillary.fds.clear();
+                        ancillary.fds.extend_from_slice(std::slice::from_raw_parts(
+                            libc::CMSG_DATA(cmsghdr).cast(),
+                            num_fds,
+                        ));
+                    }
+                }
+
+                if res > 0 {
+                    Ok(res as usize)
+                } else {
+                    Err(Error::last_os_error())
+                }
+            }
+
             impl UnixStreamExt for UnixStream {
                 /// This is a very silly and limited implementation of `send_vectored_with_ancillary()` as we await
                 /// stabilization of [unix_socket_ancillary_data](https://github.com/rust-lang/rust/issues/76915).
@@ -225,41 +312,7 @@ pub mod os {
                     bufs: &[IoSlice<'_>],
                     ancillary: &mut SocketAncillary<'_>,
                 ) -> Result<usize> {
-                    let fds_size = std::mem::size_of_val(&ancillary.fds[..]);
-
-                    let mut msghdr = libc::msghdr {
-                        msg_name: ptr::null_mut(),
-                        msg_namelen: 0,
-                        msg_iov: bufs.as_ptr() as *mut _,
-                        msg_iovlen: bufs.len(),
-                        msg_control: ptr::null_mut(),
-                        msg_controllen: 0,
-                        msg_flags: 0,
-                    };
-
-                    if fds_size > 0 {
-                        unsafe {
-                            msghdr.msg_control = (&mut ancillary.buffer).as_mut_ptr().cast();
-                            msghdr.msg_controllen = libc::CMSG_SPACE(fds_size as _) as _;
-
-                            let cmsghdr = libc::CMSG_FIRSTHDR(&msghdr);
-                            (*cmsghdr).cmsg_len = libc::CMSG_LEN(fds_size as _) as _;
-                            (*cmsghdr).cmsg_level = libc::SOL_SOCKET;
-                            (*cmsghdr).cmsg_type = libc::SCM_RIGHTS;
-                            libc::CMSG_DATA(cmsghdr).copy_from_nonoverlapping(
-                                (&ancillary.fds[..]).as_ptr().cast(),
-                                fds_size,
-                            );
-                        }
-                    }
-
-                    let res = unsafe { libc::sendmsg(self.as_raw_fd(), &msghdr, 0) };
-
-                    if res > 0 {
-                        Ok(res as usize)
-                    } else {
-                        Err(Error::last_os_error())
-                    }
+                    uds_send_vectored_with_ancillary(self.as_fd(), bufs, ancillary)
                 }
 
                 #[cfg(any(doc, target_os = "android", target_os = "linux"))]
@@ -268,43 +321,7 @@ pub mod os {
                     bufs: &mut [IoSliceMut<'_>],
                     ancillary: &mut SocketAncillary<'_>,
                 ) -> Result<usize> {
-                    let mut msghdr = libc::msghdr {
-                        msg_name: ptr::null_mut(),
-                        msg_namelen: 0,
-                        msg_iov: bufs.as_ptr() as *mut _,
-                        msg_iovlen: bufs.len(),
-                        msg_control: (&mut ancillary.buffer).as_mut_ptr().cast(),
-                        msg_controllen: ancillary.buffer.len() as _,
-                        msg_flags: 0,
-                    };
-
-                    let res = unsafe { libc::recvmsg(self.as_raw_fd(), &mut msghdr, 0) };
-
-                    unsafe {
-                        let cmsghdr = libc::CMSG_FIRSTHDR(&msghdr);
-                        if !cmsghdr.is_null()
-                            && (*cmsghdr).cmsg_level == libc::SOL_SOCKET
-                            && (*cmsghdr).cmsg_type == libc::SCM_RIGHTS
-                        {
-                            let size_of_hdr = (2
-                                * libc::CMSG_LEN(std::mem::size_of::<RawFd>() as _)
-                                - libc::CMSG_LEN((2 * std::mem::size_of::<RawFd>()) as _))
-                                as usize;
-                            let num_fds =
-                                ((*cmsghdr).cmsg_len - size_of_hdr) / std::mem::size_of::<RawFd>();
-                            ancillary.fds.clear();
-                            ancillary.fds.extend_from_slice(std::slice::from_raw_parts(
-                                libc::CMSG_DATA(cmsghdr).cast(),
-                                num_fds,
-                            ));
-                        }
-                    }
-
-                    if res > 0 {
-                        Ok(res as usize)
-                    } else {
-                        Err(Error::last_os_error())
-                    }
+                    uds_recv_vectored_with_ancillary(self.as_fd(), bufs, ancillary)
                 }
             }
 

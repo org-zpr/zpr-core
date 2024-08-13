@@ -22,6 +22,7 @@ use tokio::sync::{
 };
 use tokio::time::sleep;
 use zerocopy::FromBytes;
+use zpr_ext::std::mem::{drop_guard, DropGuard};
 
 /// Interface to full assembly of all stages.
 ///
@@ -160,8 +161,10 @@ impl<'pktbuf> Assembly<'pktbuf> {
         self.sync_req_state.set_sender(Some(sender));
 
         for _i in 0..=config::DEFAULT_REQUEST_RETRY_COUNT {
-            let buf = self.buffer_stack.get_buffer().await;
-            let mut packet = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+            let buf = drop_guard(self.buffer_stack.get_buffer().await, |buf| {
+                self.buffer_stack.put_buffer(buf)
+            });
+            let mut packet = Packet::new_guarded(buf, config::DEFAULT_MESSAGE_HEADROOM);
             pkt_fn(&mut packet);
 
             // Determine if sending a non-flow or per-flow message
@@ -172,7 +175,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                         zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
                         zdp_request_type,
                         stream_id,
-                        packet,
+                        packet.into_inner(),
                     );
                 }
                 None => {
@@ -180,7 +183,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                         self,
                         zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
                         zdp_request_type,
-                        packet,
+                        packet.into_inner(),
                     );
                 }
             }

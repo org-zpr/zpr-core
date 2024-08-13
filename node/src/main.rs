@@ -14,6 +14,7 @@ mod vs;
 
 pub mod vsapi;
 pub mod vssapi;
+pub mod zdp;
 
 const LOG_DIR: &str = "/var/run/zpr";
 const PID_DIR: &str = "/var/run/zpr";

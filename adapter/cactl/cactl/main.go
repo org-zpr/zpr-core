@@ -15,7 +15,7 @@ import (
 
 const VERSION = "0.0.1-beta"
 
-const CD_CONTROL_SOCKET = "/var/run/zpr/cd.sock"
+const CD_CONTROL_SOCKET_NAME = "cd.sock"
 
 func main() {
 	app := &cli.App{
@@ -33,6 +33,14 @@ func main() {
 		fmt.Println(color.Red(err.Error()))
 		os.Exit(0)
 	}
+}
+
+func get_control_socket() string {
+	dd := os.Getenv("XDG_DATA_HOME")
+	if dd == "" {
+		dd = filepath.Join(os.Getenv("HOME"), ".local", "share")
+	}
+	return filepath.Join(dd, "zpr", CD_CONTROL_SOCKET_NAME)
 }
 
 func connectCmd() *cli.Command {
@@ -55,7 +63,7 @@ func connectCmd() *cli.Command {
 				}
 				connectArg = cpath
 			}
-			ctl, err := ipc.NewCDCtl(CD_CONTROL_SOCKET)
+			ctl, err := ipc.NewCDCtl(get_control_socket())
 			if err != nil {
 				return err
 			}
@@ -79,7 +87,7 @@ func statusCmd() *cli.Command {
 		Name:  "status",
 		Usage: "Show status of active ZPR connections",
 		Action: func(c *cli.Context) error {
-			ctl, err := ipc.NewCDCtl(CD_CONTROL_SOCKET)
+			ctl, err := ipc.NewCDCtl(get_control_socket())
 			if err != nil {
 				return err
 			}
@@ -104,7 +112,7 @@ func disconnectCmd() *cli.Command {
 		UsageText: "cactl disconnect [ CONFIG_NAME ]",
 		Action: func(c *cli.Context) error {
 			configName := c.Args().Get(0)
-			ctl, err := ipc.NewCDCtl(CD_CONTROL_SOCKET)
+			ctl, err := ipc.NewCDCtl(get_control_socket())
 			if err != nil {
 				return err
 			}
