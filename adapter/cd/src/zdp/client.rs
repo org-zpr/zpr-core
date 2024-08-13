@@ -13,13 +13,13 @@ use ph::km::{KeyManager, SillyKeyManager};
 
 #[derive(Debug, Clone)]
 pub struct ZDPClient {
-    addr: String,
+    addr: SocketAddr,
 }
 
 impl ZDPClient {
-    pub fn new(addr_port: &str) -> ZDPClient {
+    pub fn new(addr: &SocketAddr) -> ZDPClient {
         ZDPClient {
-            addr: addr_port.to_owned(),
+            addr: addr.to_owned(),
         }
     }
 
@@ -27,20 +27,10 @@ impl ZDPClient {
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
         let mgr = KeyManager::new(Box::new(SillyKeyManager::new()));
 
-        let remote_addr: SocketAddr = match self.addr.parse() {
-            Ok(addr) => addr,
-            Err(e) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("failed to parse address: {}", e),
-                ));
-            }
-        };
-
         let local_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
 
         let socket = UdpSocket::bind(local_addr).await?;
-        socket.connect(remote_addr).await?;
+        socket.connect(self.addr).await?;
 
         let s_recv = Arc::new(socket);
         let s_send = s_recv.clone();

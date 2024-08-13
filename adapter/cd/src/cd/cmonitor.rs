@@ -6,6 +6,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use std::sync::{Arc, Mutex};
+use std::net::SocketAddr;
 
 use tracing::info;
 
@@ -160,9 +161,19 @@ impl CMonitor {
 
         let ctok = CancellationToken::new();
         let passed_ctok = ctok.clone();
-        let passed_addr_port = addr_port.clone();
+
+        let remote_addr: SocketAddr = match addr_port.parse() {
+            Ok(addr) => addr,
+            Err(e) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("failed to parse address: {}", e),
+                ));
+            }
+        };
+
         let handle: JoinHandle<io::Result<()>> = tokio::spawn(async move {
-            let cli = client::ZDPClient::new(&passed_addr_port);
+            let cli = client::ZDPClient::new(&remote_addr);
             cli.run(passed_ctok).await // blocking, long running
         });
         // well hopefully that launched!
