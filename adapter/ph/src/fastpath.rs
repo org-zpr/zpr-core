@@ -284,12 +284,18 @@ pub async fn substrate_egress_blocking<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     link_id: zpr::LinkId,
     zpi: zpr::Zpi,
-    mut pkt: impl DropGuard<Packet<'pktbuf>>,
+    mut pkt: Packet<'pktbuf>,
 ) {
     substrate_egress_common(asm, link_id, zpi, &mut pkt);
 
-    match asm.substrate_egress.enqueue_packet(pkt).await {
-        Ok(()) => asm.counters[CounterType::OutPacksSent].increment(),
+    match asm
+        .substrate_egress
+        .enqueue_packet(drop_guard(pkt, |p| {
+            drop_and_count(asm, p, CounterType::OutPacksSent)
+        }))
+        .await
+    {
+        Ok(()) => (),
         Err(pkt) => drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr),
     }
 }

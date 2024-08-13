@@ -22,7 +22,7 @@ use tokio::sync::{
 };
 use tokio::time::sleep;
 use zerocopy::FromBytes;
-use zpr_ext::std::mem::drop_guard;
+use zpr_ext::std::mem::{drop_guard, DropGuard};
 
 /// Interface to full assembly of all stages.
 ///
@@ -175,7 +175,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                         zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
                         zdp_request_type,
                         stream_id,
-                        packet,
+                        packet.into_inner(),
                     )
                     .await;
                 }
@@ -184,7 +184,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                         self,
                         zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
                         zdp_request_type,
-                        packet,
+                        packet.into_inner(),
                     )
                     .await;
                 }

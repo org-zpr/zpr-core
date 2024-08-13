@@ -11,7 +11,6 @@ use bytes::Buf;
 use std::future::Future;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
-use zpr_ext::std::mem::drop_guard;
 use zpr_ext::zerocopy::*;
 
 async fn worker<'pktbuf>(
@@ -89,10 +88,7 @@ async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf
                 eprintln!("Discard message received");
             }
             ZdpPacketType::HelloRequest => {
-                let mut send_pkt = Packet::new_guarded(
-                    drop_guard(pkt.destroy(), |b| asm.buffer_stack.put_buffer(b)),
-                    config::DEFAULT_MESSAGE_HEADROOM,
-                );
+                let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
                 let hdr = send_pkt.alloc_zeroed_header::<ZdpHelloResponseHeader>();
                 hdr.status = 0;
                 mgmt::send_non_flow_mgmt(
