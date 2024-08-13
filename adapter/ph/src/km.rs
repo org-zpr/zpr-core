@@ -517,7 +517,7 @@ pub enum KMSMState {
 #[derive(Debug, Clone)]
 pub struct KMSettings {
     /// The ZDP defined type value for this Key Management system.
-    pub zdp_km_type: u16,
+    pub zdp_km_type: zpr::KmId,
 
     /// Number of additional bytes required to encrypt a payload for transport.
     pub padlen: usize,
@@ -593,7 +593,7 @@ impl SillyKeyManager {
         SillyKeyManager {
             state: KMSMState::Configuring,
             settings: KMSettings {
-                zdp_km_type: 255, // experimental
+                zdp_km_type: zpr::KM_ID_EXPERIMENTAL,
                 padlen: 2,        // we need 2 extra bytes
                 alignment: 0,
                 tick_interval: Duration::from_millis(1000),
@@ -765,7 +765,7 @@ mod test {
     impl KeyManagerStateMachine for TestKM {
         fn get_settings(&self) -> KMSettings {
             KMSettings {
-                zdp_km_type: 255,
+                zdp_km_type: zpr::KM_ID_EXPERIMENTAL,
                 padlen: 8,
                 alignment: 8,
                 tick_interval: Duration::from_millis(200),
