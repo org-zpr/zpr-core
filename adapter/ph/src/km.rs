@@ -30,55 +30,6 @@ use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpPerFlowHeader};
 use crate::zpr;
 
-/*
-        According to 6.2.8 the key management packets can run in native mode
-        when running over a an IP substrate.
-
-
-         non per-flow management packet
-
-         0    1    ZPI   (for KM this is always set 0)
-         1    1    TYPE  (KM = 0x81)    sec. 6.2.8
-         2    1    excess len (0)
-         3    2    seqnum
-         5    x    MANAGEMENT_DATA (km packet)
-         x    x    PADDING
-         x    x    MAC    (w/ ZPI=0 this is just internet checksum)
-
-
-         The managemnt data looks like:
-
-         0    2    TYPE       0=none, 1=ikeV2, 2=noise
-         2    2    LENGTH     includes type and length
-         4    x    KM_PACKET
-
-
-         ZDP management packets (non-km) are fully encrypted, so we
-         can pass full buffer to the transport encrypt/decrypt.
-
-         0    1    ZPI
-         1    n    payload (encrypted by KM transport routine)
-
-
-         ZDP transit packets are more complicated.
-
-         0    1    ZPI
-         1    n    ZPR header (encrypted by KM transport routine)
-         n+1  m    agent data (d2d-sa + data + micv) -- not encrypted by KM transport
-
-         In order to properly decrypt a transit packet, the KM routine should
-         put the encrypted length on the front of the buffer AND protect that with AEAD.
-         So something like:
-
-         encr_len = u16::from_be_bytes(payload[0], payload[1]);
-         plaintext = decrypt_aead(payload[2..encr_len+2], [ZPI, payload[0], payload[1]]);
-
-         Those two bytes need to be taken into consideration when computing padding.
-*/
-
-
-
-
 
 // [derive(Debug, PartialEq)]
 #[derive(Debug)]
@@ -218,10 +169,11 @@ impl KeyManager<'_> {
     /// For everything except transit packets, this also overwrites the payload.
     ///
     /// For all packets, there must be enough padding included in the body length to
-    /// accomodate any expansion caused by encryption.
+    /// accomodate any expansion caused by encryption.  Remember that the KM itself
+    /// adds 2 bytes (for a length field).
     ///
-    /// For transit packets the padding space must be between the ZDP header and the
-    /// agent data bits.
+    /// The transit packets the extra space for the crypto must be between the ZDP header
+    /// part and the agent part.
     ///
     /// `message` is expected to be a ZDP message wihout a ZPI value.  We add a ZPI
     /// value to the front of the message -- note that the value we add is just the
@@ -265,7 +217,13 @@ impl KeyManager<'_> {
                 info!("noise: encrypt input {} bytes, output {} bytes", encr_len, len);
                 // Copy the encrypted data back into the message -- there should be sufficient room for it since
                 // caller should know our required padding space and alignment.
-                message.body_mut()[0..len].copy_from_slice(&encr_buf[0..len]);
+
+                // Write the size of encrypted data as first two bytes.
+                let szbytes = (len as u16).to_be_bytes();
+                message.body_mut()[0..2].copy_from_slice(&szbytes);
+
+                // Followed by encrypted payload:
+                message.body_mut()[2..len+2].copy_from_slice(&encr_buf[0..len]);
 
                 // Now we need to push a our SA id onto the front.
                 // (Note ZPI should be part of integrity protected data)
@@ -284,7 +242,7 @@ impl KeyManager<'_> {
     /// Key Management packets should not be sent here.
     /// Does not remove the ZPI/SA_ID value.
     pub fn decrypt_transport(&self, message: &mut Packet) -> KMResult<()> {
-        if message.body().len() < 1 {
+        if message.body().len() < 3 { // ZPI + LEN
             return Err(KMError::ShortPacket);
         }
         let mut state = self.shared.state.lock().unwrap();
@@ -301,8 +259,15 @@ impl KeyManager<'_> {
         // TODO: Ability to decrypt in place. Not sure how to accomplish.  At very least we could use our own buffer pool.
         let mut decr_buf = [0u8; config::PACKET_BUFFER_SIZE];
 
+        // read the size of the encrypted payload.  Size follows the ZPI/SA_ID value:
+        let encr_len: usize = u16::from_be_bytes([message.body()[1], message.body()[2]]) as usize;
+
+        if encr_len + 3 > message.body().len() {
+            return Err(KMError::ShortPacket);
+        }
+
         // TODO: pass sa_id into decrypt
-        match state.statemachine.decrypt_transport(&message.body()[1..], &mut decr_buf) {
+        match state.statemachine.decrypt_transport(&message.body()[3..3 + encr_len], &mut decr_buf) {
             Ok(len) => {
                 info!("noise: decrypt input {} bytes, output {} bytes", message.body().len(), len);
                 // Copy the decrypted data back into the message.
@@ -551,6 +516,7 @@ pub struct KMSettings {
     pub zdp_km_type: zpr::KmId,
 
     /// Number of additional bytes required to encrypt a payload for transport.
+    /// Note that the KM itself adds 2 bytes for a length field.
     pub padlen: usize,
 
     /// If non-zero, then `payload`+`padlen` must be a multiple of `alignment`.

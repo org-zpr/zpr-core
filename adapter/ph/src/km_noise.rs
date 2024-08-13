@@ -18,12 +18,15 @@
 //!    |-------- n + 16 bytes ----------||--- 8 bytes ---|
 //!    [ encrypted buffer               ][     nonce     ]
 //!
+//!    So total extra space needed by encryption is 16 + 8 = 24 bytes.
 //! ```
 //!
-//! Note that we do not handleing the padding here. If padding is desireable
+//! Note that we do not handle padding here. If padding is desireable
 //! caller needs to apply padding before calling encrypt.
 //!
-
+//! Note that the encrypt/decrypt functions expect to operate on entire
+//! buffer.  Caller is responsible for dealing with cases when only
+//! part of the buffer is to be encrypted or decrypted.
 
 
 use std::time::Duration;
@@ -38,6 +41,7 @@ use crate::km::*;
 
 static PATTERN: &'static str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
+const NOISE_PADLEN: usize = 24; // 16 byte tag + 8 byte nonce
 
 
 
@@ -73,7 +77,7 @@ impl KMNoise {
 
         let settings = KMSettings {
             zdp_km_type: 2,
-            padlen: 24, // 16 byte tag plus 8 byte nonce
+            padlen: NOISE_PADLEN,
             alignment: 0,
             tick_interval: Duration::from_millis(500),
         };
@@ -98,13 +102,6 @@ impl KMNoise {
 }
 
 
-//
-// ENCRYPTION
-//
-//    payload = [plaintext to be encrypted]
-//
-//    message = [ciphertext including tag | nonce (8 bytes)]
-//
 
 
 impl KeyManagerStateMachine for KMNoise {
@@ -392,7 +389,7 @@ mod test {
             }
         };
 
-        let expect_ciphertext_len = plaintext.len() + 24;
+        let expect_ciphertext_len = plaintext.len() + NOISE_PADLEN;
 
         assert!(out_len == expect_ciphertext_len, "unexpected encrypted message length, got {}", out_len);
 
@@ -406,7 +403,6 @@ mod test {
 
         assert!(in_len == plaintext.len(), "unexpected decrypted message length, got {}", in_len);
         assert!(in_buf[..in_len] == plaintext[..], "unexpected decrypted message content");
-
     }
 
 }
