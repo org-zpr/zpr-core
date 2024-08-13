@@ -12,30 +12,20 @@ use ph::km::{KeyManager, SillyKeyManager};
 
 #[derive(Debug, Clone)]
 pub struct ZDPServer {
-    addr: String, // listen address, "host:port"
+    addr: SocketAddr, // listen address, "host:port"
 }
 
 // Placeholder or demonstration code for a dock server component on a node.
 // Here to help with testing the KM code.
 impl ZDPServer {
-    pub fn new(addr_port: &str) -> ZDPServer {
+    pub fn new(addr: &SocketAddr) -> ZDPServer {
         ZDPServer {
-            addr: addr_port.to_string(),
+            addr: addr.to_owned(),
         }
     }
 
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-        let local_addr: SocketAddr = match self.addr.parse() {
-            Ok(addr) => addr,
-            Err(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "Invalid address",
-                ));
-            }
-        };
-
-        let socket = UdpSocket::bind(local_addr).await?;
+        let socket = UdpSocket::bind(self.addr).await?;
         info!("ZDP server listening on {}", self.addr);
         let s_recv = Arc::new(socket);
         let s_send = s_recv.clone();

@@ -1,4 +1,5 @@
 use std::io;
+use std::net::SocketAddr;
 
 use tracing::{error, info};
 
@@ -107,7 +108,17 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
     if nconfig.is_dock_enabled() {
         info!("setting up dock at {}", nconfig.get_dock_listen_addr());
         let zctok = ctoken.clone();
-        let zserver = ZDPServer::new(nconfig.get_dock_listen_addr());
+
+        let listen_addr: SocketAddr = match nconfig.get_dock_listen_addr().parse() {
+            Ok(addr) => addr,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Invalid listen address",
+                ));
+            }
+        };
+        let zserver = ZDPServer::new(&listen_addr);
         tasks.spawn(async move {
             match zserver.run(zctok).await {
                 Ok(_) => {
