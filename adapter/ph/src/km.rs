@@ -279,6 +279,7 @@ impl KeyManager<'_> {
     }
 
     /// Pass in a full Key Management payload from our peer here (should not include ZDP header).
+    /// This waits until space available in our KM message queue.
     ///
     /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
     pub async fn handle_km_message(&self, message: &[u8]) -> io::Result<()> {
@@ -306,6 +307,37 @@ impl KeyManager<'_> {
             )),
         }
     }
+
+    /// Pass in a full Key Management payload from our peer here (should not include ZDP header).
+    /// This will fail if there is no space in queue.
+    ///
+    /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
+    pub fn try_handle_km_message(&self, message: &[u8]) -> io::Result<()> {
+        let tx: mpsc::Sender<Bytes>;
+        {
+            let state = self.shared.state.lock().unwrap();
+            match state.mgmt_tx {
+                Some(ref t) => {
+                    tx = t.clone();
+                }
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "KeyManager not running",
+                    ));
+                }
+            }
+        }
+        let km_buf = Bytes::copy_from_slice(message);
+        match tx.try_send(km_buf.into()) {
+            Ok(_) => Ok(()),
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                "failed to enqueue inbound KM message",
+            )),
+        }
+    }
+
 
     /// Blocking run loop for the key manager.  This runs the key management algorithm
     /// state machine handing KM messages in and out.
@@ -841,6 +873,36 @@ mod test {
         ctok.cancel()
     }
 
+
+    #[tokio::test]
+    async fn test_km_passes_inbound_msg_no_buffer() {
+        let kmb = Box::new(TestKM::new(KMSMState::Configuring));
+        let kinternals = kmb.shared.clone();
+        let km = KeyManager::new(kmb);
+
+        let ctok = CancellationToken::new();
+        let (tx, mut _rx) = mpsc::channel(4);
+
+        let sp_ctok = ctok.clone();
+        let mut sp_km = km.clone();
+        tokio::spawn(async move {
+            let _ = sp_km.start(true, sp_ctok, tx).await;
+        });
+        yield_now().await;
+
+        let msg = Bytes::from_static(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        match km.try_handle_km_message(&msg) {
+            Ok(_) => {}
+            Err(e) => {
+                panic!("handle_km_message failed: {}", e);
+            }
+        }
+        yield_now().await;
+
+        assert!(kinternals.state.lock().unwrap().handle_count == 1);
+        ctok.cancel()
+    }
+
     #[tokio::test]
     async fn test_km_encrypt_transport_non_transit() {
         let kmb = Box::new(TestKM::new(KMSMState::Transport));
@@ -886,7 +948,7 @@ mod test {
         // No need to start the machine since encrypt only cares about transport state and SA_ID.
         km.set_sa_id(33);
 
-        let mut zpi_hdr = ZdpZpiHeader { zpi: 33 };
+        let zpi_hdr = ZdpZpiHeader { zpi: 33 };
 
         let hdr = ZdpBaseHeader {
             packet_type: ZdpPacketType::EchoRequest,
