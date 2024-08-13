@@ -19,7 +19,7 @@ use std::fmt;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 
 use zerocopy::FromBytes;
 
@@ -297,8 +297,7 @@ impl KeyManager<'_> {
                 }
             }
         }
-        let mut km_buf = BytesMut::with_capacity(message.len());
-        km_buf.put(message);
+        let km_buf = Bytes::copy_from_slice(message);
         match tx.send(km_buf.into()).await {
             Ok(_) => Ok(()),
             Err(_) => Err(io::Error::new(
