@@ -19,7 +19,7 @@ pub struct ZDPClient {
 impl ZDPClient {
     pub fn new(addr_port: &str) -> ZDPClient {
         ZDPClient {
-            addr: addr_port.to_string(),
+            addr: addr_port.to_owned(),
         }
     }
 
