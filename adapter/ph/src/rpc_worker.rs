@@ -15,6 +15,7 @@ use tokio::task::JoinSet;
 use tokio::time::interval;
 // use std::os::unix::net::{SocketAncillary, AncillaryData};
 use std::io::IoSliceMut;
+use std::os::fd::AsRawFd;
 use std::os::fd::FromRawFd;
 use tokio::fs::File;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
@@ -319,14 +320,14 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
 
 async fn set_capture(asm: &Assembly<'_>, ancillary: SocketAncillary<'_>) -> String {
     // Get the ancillary data
-    let anc_message = ancillary.messages().nth(0).unwrap();
+    let anc_message = ancillary.into_messages().nth(0).unwrap();
     // Get the SCM rights from the ancillary data
     if let AncillaryData::ScmRights(mut scm_rights) = anc_message.unwrap() {
         // See if there's actually data in the scm_rights, if yes try to open a
         // capture file, otherwise report failure to open file
         match scm_rights.nth(0) {
             Some(fd) => {
-                let file = unsafe { File::from_raw_fd(fd) };
+                let file = unsafe { File::from_raw_fd(fd.as_raw_fd()) };
                 match asm.capture_worker.open_capture_file(file).await {
                     Ok(()) => format!("Capture file opened\n"),
                     Err(err) => format!("Error opening Capture file: {}\n", err),
