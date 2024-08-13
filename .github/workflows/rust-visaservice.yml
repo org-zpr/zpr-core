@@ -15,8 +15,12 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Build
-      run: cd visaservice && make all-rs
+      run: |
+        cd visaservice
+        make all-rs
 
     - name: Test
-      run: cd visaservice && make test-rs
+      run: |
+        cd visaservice
+        make test-rs
 

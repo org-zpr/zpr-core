@@ -2,6 +2,7 @@
 #[macro_use]
 extern crate arrayref;
 
+pub mod agent_output_worker;
 pub mod assembly;
 pub mod buffer_stack;
 pub mod capture_worker;
@@ -13,17 +14,17 @@ pub mod counters_enum;
 pub mod defs;
 pub mod fastpath;
 pub mod flow_control;
-pub mod inbound_processor_worker;
-pub mod inbound_recv_worker;
 pub mod km;
+pub mod mgmt;
+pub mod mgmt_processor_worker;
 pub mod net_defs;
 pub mod options;
-pub mod outbound_processor_worker;
-pub mod outbound_recv_worker;
 pub mod packet;
 pub mod pcap_writer;
 pub mod queues;
+pub mod rcu;
 pub mod rpc_worker;
+pub mod substrate_ingress_worker;
 pub mod test_packet;
 pub mod tun_ctl;
 pub mod zdp;

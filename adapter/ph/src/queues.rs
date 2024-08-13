@@ -1,17 +1,8 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
 
-//! "Inbound" refers to the dock->adapter direction (i.e., inbound to this host).
-//! "Outbound" refers to the adapter->dock direction (i.e., outbound from this host).
-
-//! InboundProcessor is responsible for all "processing" of packets in the inbound direction.
-//! All agent packets from the dock are sent here for decapsulation, and any
-//! CPU-intensive postprocessing (e.g. signature verification).
-//! This may morph into more or fewer (i.e. zero) stages depending on future requirements.
-
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
-use crate::zdp;
 use std::io::ErrorKind;
 use std::result::Result;
 use std::time::SystemTime;
@@ -26,35 +17,44 @@ pub enum TryEnqueueError<T> {
     Full(T),
 }
 
-pub enum InboundProcessorMessage<'pktbuf> {
+pub enum MgmtProcessorMessage<'pktbuf> {
     Packet(Packet<'pktbuf>),
     TestPacket(TestPacket),
 }
 
-pub struct InboundProcessor<'pktbuf> {
-    sender: mpsc::Sender<InboundProcessorMessage<'pktbuf>>,
+pub struct MgmtProcessor<'pktbuf> {
+    sender: mpsc::Sender<MgmtProcessorMessage<'pktbuf>>,
 }
 
-impl<'pktbuf> InboundProcessor<'pktbuf> {
+impl<'pktbuf> MgmtProcessor<'pktbuf> {
     // TODO: this will almost certainly morph into multiple queues
 
     #[allow(dead_code)]
-    pub(crate) fn new(sender: mpsc::Sender<InboundProcessorMessage<'pktbuf>>) -> Self {
+    pub fn new(sender: mpsc::Sender<MgmtProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
     }
 
-    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
-        self.sender
-            .send(InboundProcessorMessage::Packet(packet))
-            .await
-            .unwrap();
+    pub fn try_enqueue_packet(
+        &self,
+        packet: Packet<'pktbuf>,
+    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        match self.sender.try_send(MgmtProcessorMessage::Packet(packet)) {
+            Ok(()) => Ok(()),
+
+            Err(TrySendError::Full(pkt) | TrySendError::Closed(pkt)) => {
+                let MgmtProcessorMessage::Packet(pkt) = pkt else {
+                    unreachable!()
+                };
+                Err(TryEnqueueError::Full(pkt))
+            }
+        }
     }
 
     pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
         let test_tuple = TestPacket::create();
 
         self.sender
-            .send(InboundProcessorMessage::TestPacket(test_tuple.0))
+            .send(MgmtProcessorMessage::TestPacket(test_tuple.0))
             .await
             .unwrap();
 
@@ -62,13 +62,13 @@ impl<'pktbuf> InboundProcessor<'pktbuf> {
     }
 }
 
-/// InboundSend is responsible for emitting decapsulated agent packets on the
+/// AgentInput is responsible for emitting decapsulated agent packets on the
 /// host's TUN interface.
-pub struct InboundSend<'a> {
+pub struct AgentInput<'a> {
     tuns: Box<[&'a tokio_tun::Tun]>,
 }
 
-impl<'a> InboundSend<'a> {
+impl<'a> AgentInput<'a> {
     // We necessarily have multiple queues, corresponding to the multiple
     // FDs of a multiqueue-enabled TUN interface.
     pub fn new(tuns: impl IntoIterator<Item = &'a tokio_tun::Tun>) -> Self {
@@ -100,91 +100,18 @@ impl<'a> InboundSend<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn fanout(&self) -> usize {
         self.tuns.len()
     }
 }
 
-/// OutboundProcessor is responsible for all "processing" of packets in the outbound direction.
-/// All packets from the host are sent here for encapsulation, and any
-/// CPU-intensive preprocessing (e.g. signature generation).
-/// This may morph into more or fewer (i.e. zero) stages depending on future requirements.
-#[allow(dead_code)]
-pub enum OutboundProcessorMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>),
-    TestPacket(TestPacket),
-    NonFlowMgmt(zdp::ZdpPacketType, Packet<'pktbuf>),
-    PerFlowMgmt(zdp::ZdpPacketType, u32, Packet<'pktbuf>),
-}
-
-pub struct OutboundProcessor<'pktbuf> {
-    sender: mpsc::Sender<OutboundProcessorMessage<'pktbuf>>,
-}
-
-impl<'pktbuf> OutboundProcessor<'pktbuf> {
-    // TODO: this will almost certainly morph into multiple queues
-
-    #[allow(dead_code)]
-    pub(crate) fn new(sender: mpsc::Sender<OutboundProcessorMessage<'pktbuf>>) -> Self {
-        Self { sender }
-    }
-
-    pub async fn enqueue_packet(&self, packet: Packet<'pktbuf>) {
-        self.sender
-            .send(OutboundProcessorMessage::Packet(packet))
-            .await
-            .unwrap();
-    }
-
-    pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
-        let test_tuple = TestPacket::create();
-
-        self.sender
-            .send(OutboundProcessorMessage::TestPacket(test_tuple.0))
-            .await
-            .unwrap();
-
-        Ok(test_tuple.1.await?)
-    }
-
-    pub async fn enqueue_non_flow_mgmt(
-        &self,
-        zdp_packet_type: zdp::ZdpPacketType,
-        packet: Packet<'pktbuf>,
-    ) {
-        self.sender
-            .send(OutboundProcessorMessage::NonFlowMgmt(
-                zdp_packet_type,
-                packet,
-            ))
-            .await
-            .unwrap();
-    }
-
-    #[allow(dead_code)]
-    pub async fn enqueue_per_flow_mgmt(
-        &self,
-        zdp_packet_type: zdp::ZdpPacketType,
-        stream_id: u32,
-        packet: Packet<'pktbuf>,
-    ) {
-        self.sender
-            .send(OutboundProcessorMessage::PerFlowMgmt(
-                zdp_packet_type,
-                stream_id,
-                packet,
-            ))
-            .await
-            .unwrap();
-    }
-}
-
-/// OutboundSend is responsible for sending encapsulated agent packets to the dock.
-pub struct OutboundSend<'a> {
+/// SubstrateEgress is responsible for sending encapsulated agent packets to the dock.
+pub struct SubstrateEgress<'a> {
     sockets: Box<[&'a UdpSocket]>,
 }
 
-impl<'a> OutboundSend<'a> {
+impl<'a> SubstrateEgress<'a> {
     pub fn new(sockets: impl IntoIterator<Item = &'a UdpSocket>) -> Self {
         Self {
             sockets: sockets.into_iter().collect(),

@@ -165,7 +165,8 @@ impl<'buf> Packet<'buf> {
         self.clone_prefix_into_with_headroom(buf, headroom, self.body().len())
     }
 
-    fn clone_prefix_into_with_headroom<'other>(
+    /// Like `clone_into_with_headroom()`, but only copy a prefix of the packet's data.
+    pub fn clone_prefix_into_with_headroom<'other>(
         &self,
         buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
         headroom: usize,
@@ -251,6 +252,13 @@ impl<'buf> Packet<'buf> {
     /// The structure allocated will be zeroed.
     pub fn alloc_zeroed_header<T: AsBytes + FromBytes + FromZeroes>(&mut self) -> &mut T {
         T::mut_from(self.alloc_zeroed_headroom(size_of::<T>())).unwrap()
+    }
+
+    /// Shrink the packet by `cnt` bytes (removing data from the tail).
+    pub fn shrink(&mut self, cnt: usize) {
+        let md = self.metadata_mut();
+        assert!(cnt <= md.len);
+        md.len -= cnt;
     }
 
     /// `flowhash()` is different for different flows, but not necessarily vice-versa.
@@ -491,7 +499,7 @@ mod tests {
         let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
         let mut pkt = Packet::new(&mut buf, 0);
         pkt.put_u64(0x0102030405060708u64);
-        assert_eq!(pkt.body()[..8], [1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(pkt.body(), [1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
     #[test]
@@ -500,7 +508,7 @@ mod tests {
         let mut pkt = Packet::new(&mut buf, 0);
         pkt.put_u32(0x01020304u32);
         pkt.put_u32(0x05060708u32);
-        assert_eq!(pkt.body()[..8], [1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(pkt.body(), [1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
     #[test]
@@ -509,5 +517,23 @@ mod tests {
         let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
         let mut pkt = Packet::new(&mut buf, PACKET_BUFFER_MAX_BODY_SIZE);
         pkt.put_u8(1);
+    }
+
+    #[test]
+    fn shrink_test() {
+        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
+        let mut pkt = Packet::new(&mut buf, 0);
+        pkt.put_u64(0x0102030405060708u64);
+        pkt.shrink(2);
+        assert_eq!(pkt.body(), [1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn shrink_too_much_test() {
+        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
+        let mut pkt = Packet::new(&mut buf, 0);
+        pkt.put_u64(0x0102030405060708u64);
+        pkt.shrink(10);
     }
 }

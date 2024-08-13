@@ -1,86 +1,45 @@
 use crate::assembly::Assembly;
-use crate::classifier::classify;
 use crate::config;
 use crate::counters_enum::CounterType;
-use crate::defs::Direction;
 use crate::fastpath;
-use crate::options::PhMode;
+use crate::mgmt;
 use crate::packet::Packet;
-use crate::queues::InboundProcessorMessage;
+use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
+use crate::zpr;
 use bytes::Buf;
 use std::future::Future;
 use tokio::sync::mpsc;
 use zerocopy::FromBytes;
 use zpr_ext::zerocopy::*;
 
-#[derive(Copy, Clone)]
-pub struct Config {
-    pub batch_size: usize,
-    pub mode: PhMode,
-}
-
 async fn worker<'pktbuf>(
-    config: &Config,
     asm: &Assembly<'pktbuf>,
-    queue: &mut mpsc::Receiver<InboundProcessorMessage<'pktbuf>>,
+    queue: &mut mpsc::Receiver<MgmtProcessorMessage<'pktbuf>>,
 ) {
-    let mut msgs = Vec::new();
+    while let Some(msg) = queue.recv().await {
+        match msg {
+            MgmtProcessorMessage::Packet(pkt) => handle_packet(asm, pkt).await,
 
-    while let count @ 1.. = queue.recv_many(&mut msgs, config.batch_size).await {
-        for msg in msgs.drain(..) {
-            match msg {
-                InboundProcessorMessage::Packet(pkt) => {
-                    handle_packet(config, asm, pkt).await;
-                }
-                InboundProcessorMessage::TestPacket(pkt) => {
-                    pkt.acknowledge(queue.len(), count);
-                }
-            }
+            MgmtProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), 1),
         }
     }
 }
 
 pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
-    config: &Config,
     asm: AsmRef,
-    mut queue: mpsc::Receiver<InboundProcessorMessage<'pktbuf>>,
+    mut queue: mpsc::Receiver<MgmtProcessorMessage<'pktbuf>>,
 ) -> impl Future<Output = ()> + Send + 'pktbuf
 where
     AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
 {
-    let cfg = *config;
-    async move { worker(&cfg, &*asm, &mut queue).await }
+    async move { worker(&*asm, &mut queue).await }
 }
 
-async fn handle_packet<'pktbuf>(
-    config: &Config,
-    asm: &Assembly<'pktbuf>,
-    mut pkt: Packet<'pktbuf>,
-) {
-    match fastpath::decrypt(asm, 0, &mut pkt) {
-        Ok(()) => (),
-        Err(err) => {
-            fastpath::drop_and_count(asm, pkt, err);
-            return;
-        }
-    }
-
-    fastpath::maybe_capture(asm, Direction::Inbound, &mut pkt);
-
-    let _zpi = match fastpath::decap_zpi(asm, 0, &mut pkt) {
-        Ok(zpi) => zpi,
-        Err(err) => {
-            fastpath::drop_and_count(asm, pkt, err);
-            return;
-        }
-    };
-
+async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
     let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
 
-    // copy out relevant header info
     let packet_type = base_hdr.packet_type;
-    let _sequence_number = base_hdr.sequence_number;
 
     if packet_type.is_response() {
         let channel = asm.sync_req_state.get_sender();
@@ -100,20 +59,11 @@ async fn handle_packet<'pktbuf>(
             }
         }
     } else if base_hdr.packet_type.is_per_flow() {
-        let per_flow_hdr =
+        let _per_flow_hdr =
             ZdpPerFlowHeader::read_from_buf(&mut pkt).expect("too-short per-flow message");
 
         match base_hdr.packet_type {
-            ZdpPacketType::TransitPacket => {
-                pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into();
-                if config.mode == PhMode::Server {
-                    // TODO: drop error packets
-                    let _ = classify(&mut pkt);
-                }
-
-                fastpath::agent_input(asm, 0, pkt);
-            }
-
+            ZdpPacketType::TransitPacket => panic!("unexpected TransitPacket in management path"),
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
         }
     } else {
@@ -141,9 +91,12 @@ async fn handle_packet<'pktbuf>(
                 let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
                 let hdr = send_pkt.alloc_zeroed_header::<ZdpHelloResponseHeader>();
                 hdr.status = 0;
-                asm.outbound_processor
-                    .enqueue_non_flow_mgmt(ZdpPacketType::HelloResponse, send_pkt)
-                    .await;
+                mgmt::send_non_flow_mgmt(
+                    asm,
+                    zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
+                    ZdpPacketType::HelloResponse,
+                    send_pkt,
+                );
                 eprintln!("Received HelloRequest");
             }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
