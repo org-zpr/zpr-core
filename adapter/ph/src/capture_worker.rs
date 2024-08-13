@@ -3,7 +3,6 @@ use crate::pcap_writer::*;
 use crate::queues::CapPacket;
 use core::future::Future;
 use std::io;
-use std::path::Path;
 use tokio::fs::File;
 use tokio::sync::{mpsc, Mutex};
 
@@ -22,10 +21,9 @@ impl CaptureWorker {
         }
     }
 
-    pub async fn open_capture_file(&self, path: &Path) -> Result<(), io::Error> {
+    pub async fn open_capture_file(&self, file: File) -> Result<(), io::Error> {
         let mut inner_cap = self.inner_cap.lock().await;
-        inner_cap.savefile =
-            Some(PcapWriter::open(File::open(path).await?, linktype::USER0).await?);
+        inner_cap.savefile = Some(PcapWriter::open(file, linktype::USER0).await?);
         Ok(())
     }
 

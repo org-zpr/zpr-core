@@ -1,5 +1,4 @@
 #![cfg_attr(feature = "ci", deny(warnings))]
-#![feature(unix_socket_ancillary_data)]
 
 use clap::Parser;
 use enum_map::{enum_map, EnumMap};

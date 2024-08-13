@@ -1,4 +1,5 @@
 use crate::assembly::Assembly;
+use crate::config;
 use crate::test_packet::TestPacketMetrics;
 use cbpf_rs;
 use core::future::Future;
@@ -6,16 +7,18 @@ use hdrhistogram::Histogram;
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
-use std::path::Path;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
-use crate::config;
-use std::os::unix::net::{SocketAncillary, AncillaryData};
+// use std::os::unix::net::{SocketAncillary, AncillaryData};
 use std::io::IoSliceMut;
+use std::os::fd::FromRawFd;
+use tokio::fs::File;
+use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
+use zpr_ext::tokio::net::*;
 
 async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
     let mut set = JoinSet::<Result<(), Error>>::new();
@@ -43,17 +46,14 @@ async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
 
 async fn handle_connection(
     asm: &'static Assembly<'static>,
-    stream: UnixStream,
+    mut stream: UnixStream,
 ) -> std::io::Result<()> {
     eprintln!("Connection received");
 
     let mut str_message = String::new();
 
     // TODO rework, unfortunate to have to do this for every single command
-    let std_stream = stream.into_std()?;
-    let std_stream_copy = std_stream.try_clone()?;
-    let mut tokio_stream = UnixStream::from_std(std_stream)?;
-    let split_buf = tokio_stream.split(); // split stream into read/write streams
+    let split_buf = stream.split(); // split stream into read/write streams
 
     let mut buf_reader = BufReader::new(split_buf.0);
     let mut buf_writer = BufWriter::new(split_buf.1);
@@ -97,15 +97,23 @@ async fn handle_connection(
             },
             // SET-CAPTURE <file_path>
             "SET-CAPTURE" => {
-                println!("this stuff");
+                // Tell debug tool we're ready for the ancillary data
+                buf_writer.write_all("SEND ANCILLARY\n".as_bytes()).await?;
+                buf_writer.flush().await?;
+
+                // Receive ancillary data
                 let mut ancillary_buffer = [0; config::ANCILLARY_BUFFER_SIZE];
                 let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
-
-                let mut buf = [1; 8];
+                let mut buf = [0; 8];
                 let bufs = &mut [IoSliceMut::new(&mut buf)][..];
-                println!("error with recv");
-                std_stream_copy.recv_vectored_with_ancillary(bufs, &mut ancillary)?;
-                println!("going to write");
+                unix_stream_recv_vectored_with_ancillary(
+                    buf_reader.into_inner().as_ref(),
+                    bufs,
+                    &mut ancillary,
+                )
+                .await?;
+
+                // Set capture file using ancillary data
                 buf_writer
                     .write_all(set_capture(asm, ancillary).await.as_bytes())
                     .await?;
@@ -309,19 +317,25 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
     values
 }
 
-async fn set_capture(asm: &Assembly <'_>, ancillary: SocketAncillary<'_>) -> String {
-    println!("in set capture");
+async fn set_capture(asm: &Assembly<'_>, ancillary: SocketAncillary<'_>) -> String {
+    // Get the ancillary data
     let anc_message = ancillary.messages().nth(0).unwrap();
-    if let AncillaryData::ScmRights(scm_rights) = anc_message.unwrap() {
-        for fd in scm_rights {
-            println!("receive file descriptor: {fd}");
+    // Get the SCM rights from the ancillary data
+    if let AncillaryData::ScmRights(mut scm_rights) = anc_message.unwrap() {
+        // See if there's actually data in the scm_rights, if yes try to open a
+        // capture file, otherwise report failure to open file
+        match scm_rights.nth(0) {
+            Some(fd) => {
+                let file = unsafe { File::from_raw_fd(fd) };
+                match asm.capture_worker.open_capture_file(file).await {
+                    Ok(()) => format!("Capture file opened\n"),
+                    Err(err) => format!("Error opening Capture file: {}\n", err),
+                }
+            }
+            None => format!("Error opening Capture file: no ancillary data received\n"),
         }
-    }
-    let path_str = "/tmp/hello.txt";
-    let path = Path::new(path_str);
-    match asm.capture_worker.open_capture_file(path).await {
-        Ok(()) => format!("Capture file opened at {}\n", path_str),
-        Err(err) => format!("Error opening Capture file {}: {}\n", path_str, err),
+    } else {
+        format!("Error opening Capture file: no ancillary data received\n")
     }
 }
 
