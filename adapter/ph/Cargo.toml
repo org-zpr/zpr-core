@@ -15,12 +15,13 @@ hdrhistogram = { version = "7.5.4" }
 open-enum = { version = "0.5.1" }
 openssl-sys = { version = "0.9.102" }
 openssl = { version = "0.10.64" }
+socket2 = { version = "0.5.7" }
 tokio-tun = { version = "0.11.5" }
+tokio-util = { version = "0.7.11", features = ["rt"] }
 tokio = { version = "1.37.0", features = ["full"] }
+tracing = "0.1.40"
 zerocopy-derive = { version = "0.7.34" }
 zerocopy = { version = "0.7.34", features = ["byteorder"] }
-tokio-util = { version = "0.7.11", features = ["rt"] }
-tracing = "0.1.40"
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }
 
 [features]
