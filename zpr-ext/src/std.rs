@@ -141,6 +141,91 @@ pub mod mem {
 }
 
 pub mod os {
+    pub mod fd {
+        use std::io;
+        use std::os::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
+
+        /// Copy-on-"write" FD.  Analogous to `Cow` but for file descriptors.
+        #[derive(Debug)]
+        pub enum CowFd<'a> {
+            Borrowed(BorrowedFd<'a>),
+            Owned(OwnedFd),
+        }
+
+        impl<'a> CowFd<'a> {
+            pub fn try_clone(&self) -> io::Result<CowFd<'a>> {
+                match self {
+                    Self::Borrowed(fd) => Ok(Self::Borrowed(fd.clone())),
+                    Self::Owned(fd) => Ok(Self::Owned(fd.try_clone()?)),
+                }
+            }
+
+            pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
+                match self {
+                    Self::Borrowed(fd) => fd.try_clone_to_owned(),
+                    Self::Owned(fd) => fd.try_clone(),
+                }
+            }
+
+            pub fn try_into_owned(self) -> io::Result<OwnedFd> {
+                match self {
+                    Self::Borrowed(fd) => fd.try_clone_to_owned(),
+                    Self::Owned(fd) => Ok(fd),
+                }
+            }
+
+            pub fn is_borrowed(&self) -> bool {
+                match self {
+                    Self::Borrowed(_) => true,
+                    Self::Owned(_) => false,
+                }
+            }
+
+            pub fn is_owned(&self) -> bool {
+                match self {
+                    Self::Borrowed(_) => false,
+                    Self::Owned(_) => true,
+                }
+            }
+        }
+
+        impl<'a> From<BorrowedFd<'a>> for CowFd<'a> {
+            fn from(fd: BorrowedFd<'a>) -> Self {
+                Self::Borrowed(fd)
+            }
+        }
+
+        impl From<OwnedFd> for CowFd<'_> {
+            fn from(fd: OwnedFd) -> Self {
+                Self::Owned(fd)
+            }
+        }
+
+        impl AsFd for CowFd<'_> {
+            fn as_fd(&self) -> BorrowedFd<'_> {
+                match self {
+                    Self::Borrowed(fd) => fd.clone(),
+                    Self::Owned(fd) => fd.as_fd(),
+                }
+            }
+        }
+
+        impl AsRawFd for CowFd<'_> {
+            fn as_raw_fd(&self) -> RawFd {
+                match self {
+                    Self::Borrowed(fd) => fd.as_raw_fd(),
+                    Self::Owned(fd) => fd.as_raw_fd(),
+                }
+            }
+        }
+
+        impl FromRawFd for CowFd<'_> {
+            unsafe fn from_raw_fd(fd: RawFd) -> Self {
+                Self::Owned(unsafe { OwnedFd::from_raw_fd(fd) })
+            }
+        }
+    }
+
     pub mod unix {
         pub mod net {
             use libc;
