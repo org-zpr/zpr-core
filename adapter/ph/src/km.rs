@@ -95,6 +95,7 @@ struct KMState<'mgr> {
 
     sa_id: zpr::SaId, // current SA identifier
 
+    // TODO: Can we get this channel outside of the mutex?
     mgmt_tx: Option<mpsc::Sender<Bytes>>, // Internal queue for key management messages to be processed.
 }
 
