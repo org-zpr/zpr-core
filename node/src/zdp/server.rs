@@ -1,16 +1,19 @@
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+use tokio::time;
 
 use tracing::info;
 
 use bytes::BufMut;
 
-use ph::km::{KeyManager, KMSignal, SillyKeyManager};
+use ph::km::{KeyManager, KMSignal};
+use ph::km_xor::XorKeyManager;
 use ph::{config, zdp::*};
 use ph::packet::Packet;
 
@@ -49,7 +52,7 @@ impl ZDPServer {
         let km_ctok = ctok.clone();
 
         // In real implemntation each client gets a KM instance.
-        let mgr = KeyManager::new(Box::new(SillyKeyManager::new(false)));
+        let mgr = KeyManager::new(Box::new(XorKeyManager::new(false)));
         let mut mgr_cc = mgr.clone();
         tokio::spawn(async move {
             mgr_cc.start(km_ctok, km_tx, km_sig_tx).await.unwrap();
@@ -60,15 +63,59 @@ impl ZDPServer {
         // Then we attempt to set up an SA using our key management system.
         let mut cur_client: Option<SocketAddr> = None;
 
+        let mut interval = time::interval(Duration::from_secs(1));
+
+        let mut sent_report = false;
+        let mut transition_time: Option<time::Instant> = None;
 
 
 
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
+        let mut input_buf = [0u8; config::PACKET_BUFFER_SIZE];
+
         loop {
             tokio::select! {
                 _ = ctok.cancelled() => {
                     info!("ZDP Server cancelled");
                     break;
+                }
+
+                _ = interval.tick() => {
+                    if let Some(tt) = transition_time {
+                        if !sent_report && tt.elapsed() > Duration::from_secs(2) {
+                            let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
+                            let mut pkt = Packet::new(&mut buf, 128);
+
+                            let message = b"hello to you my darling client adapter!";
+                            let mlen = message.len() as u16;
+                            let report_hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
+                            report_hdr.report_data_length =  mlen.into();
+
+                            let zdp_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
+                            zdp_hdr.packet_type = ZdpPacketType::Report;
+                            zdp_hdr.excess_length =  0;
+                            zdp_hdr.sequence_number = 0.into();
+
+                            // Do not add ZPI here - SA_ID is added by KM.
+
+                            pkt.put(&message[..]);
+                            match mgr.encrypt_transport(&mut pkt) {
+                                Ok(_) => {
+                                    match s_send.send_to(&pkt.body(), cur_client.unwrap()).await {
+                                        Ok(sz) => {
+                                            info!("zdp/server - sent {} byte transport message", sz);
+                                            sent_report = true;
+                                        },
+                                        Err(e) => {
+                                            info!("zdp/server - error sending transport message: {:?}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    info!("zdp/server - error encrypting transport message: {:?}", e);
+                                }
+                            }
+                        }
+                    }
                 }
 
                 Some(sig) = km_sig_rx.recv() => {
@@ -77,36 +124,14 @@ impl ZDPServer {
                         KMSignal::SaIdChange { old, new } => {
                             if old == 0 && new > 0 {
                                 info!("SA has been established!");
-                                let mut pkt = Packet::new(&mut buf, 128);
-
-                                let message = b"hello to you dear client adapter!";
-                                let mlen = message.len() as u16;
-                                let report_hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
-                                report_hdr.report_data_length =  mlen.into();
-
-                                let zdp_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
-                                zdp_hdr.packet_type = ZdpPacketType::Report;
-                                zdp_hdr.excess_length =  0;
-                                zdp_hdr.sequence_number = 0.into();
-
-                                // Do not add ZPI here - SA_ID is added by KM.
-
-                                pkt.put(&message[..]);
-                                match mgr.encrypt_transport(&mut pkt) {
-                                    Ok(_) => {
-                                        match s_send.send_to(&pkt.body(), cur_client.unwrap()).await {
-                                            Ok(sz) => {
-                                                info!("zdp/server - sent {} byte transport message", sz);
-                                            },
-                                            Err(e) => {
-                                                info!("zdp/server - error sending transport message: {:?}", e);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        info!("zdp/server - error encrypting transport message: {:?}", e);
-                                    }
-                                }
+                                // Becuase of the way the messages work, the node will transition into
+                                // transport after recieving the handshake, but the adapter will not
+                                // transition until it gets my response.  We may want an ACK message
+                                // or something with these KM exchanges.
+                                //
+                                // For now I just use a timer to give adapter some time to react.
+                                sent_report = false;
+                                transition_time = Some(time::Instant::now());
                             }
                         }
                         _ => {}
@@ -130,7 +155,7 @@ impl ZDPServer {
                     }
                 }
 
-                Ok((read_len, src)) = s_recv.recv_from(&mut buf) => {
+                Ok((read_len, src)) = s_recv.recv_from(&mut input_buf) => {
                     info!("Received {} bytes from {}", read_len, src);
                     if cur_client.is_none() {
                         cur_client = Some(src);
@@ -139,7 +164,7 @@ impl ZDPServer {
                         continue;
                     }
 
-                    let zpi_hdr = ZdpZpiHeader::ref_from_prefix(&buf[0..read_len]);
+                    let zpi_hdr = ZdpZpiHeader::ref_from_prefix(&input_buf[0..read_len]);
                     if zpi_hdr.is_none() {
                         info!("zdp/server - error parsing ZPI header");
                         continue;
@@ -154,7 +179,7 @@ impl ZDPServer {
                     match zpi_hdr.zpi {
                         0 => {
                             info!("zdp/server - received KM message");
-                            match mgr.handle_km_message(&buf[0..read_len]).await {
+                            match mgr.handle_km_message(&input_buf[0..read_len]).await {
                                 Ok(_) => {},
                                 Err(e) => {
                                     info!("zdp/server - error handling KM message: {:?}", e);
@@ -167,7 +192,7 @@ impl ZDPServer {
                             // Not sure the correct way to use these packet things.  But here we just create yet another buffer.
                             let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
                             let mut pkt = Packet::new(&mut pkt_buf, HEADROOM);
-                            pkt.put(&buf[..read_len]);
+                            pkt.put(&input_buf[..read_len]);
                             match mgr.decrypt_transport(&mut pkt) {
                                 Ok(_) => {
                                     // Demo code sends a ZDP message like

@@ -181,7 +181,7 @@ impl KeyManager<'_> {
     /// For all packets, there must be enough space remaining in the packet buffer to
     /// accomodate expansion caused by encryption.
     ///
-    /// Note that we encrypt body.len() bytes from body[0].  Body length will expand by
+    /// Note that we encrypt body.len() bytes from body index 0.  Body length will expand by
     /// the PADLEN indicated in the KM algorithm.
     ///
     /// We also write into the headroom of the packet:
@@ -619,112 +619,6 @@ pub trait KeyManagerStateMachine: Send + Sync {
 
 }
 
-/// Placeholder code -- will be removed once we have a real key manager implementation.
-pub struct SillyKeyManager {
-    state: KMSMState,
-    settings: KMSettings,
-    hello_t: time::Instant,
-    initiate: bool,
-}
-
-impl SillyKeyManager {
-    pub fn new(initiate: bool) -> SillyKeyManager {
-        SillyKeyManager {
-            state: KMSMState::Configuring,
-            settings: KMSettings {
-                zdp_km_type: zpr::KM_ID_EXPERIMENTAL,
-                padlen: 2, // we need 2 extra bytes
-                alignment: 0,
-                tick_interval: Duration::from_millis(1000),
-            },
-            hello_t: time::Instant::now(),
-            initiate,
-        }
-    }
-}
-
-
-
-impl KeyManagerStateMachine for SillyKeyManager {
-    fn get_settings(&self) -> KMSettings {
-        return self.settings.clone();
-    }
-
-    fn get_state(&self) -> KMSMState {
-        self.state.clone()
-    }
-
-    fn reset(&mut self) -> Result<Option<Bytes>, KMError> {
-        self.state = KMSMState::Configuring;
-        if self.initiate {
-            let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
-            self.hello_t = time::Instant::now();
-            Ok(Some(handshake))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KMError> {
-        if self.state == KMSMState::Configuring {
-            self.state = KMSMState::Transport;
-            if !self.initiate {
-                // Did not initiate, so send a reply back.
-                let handshake_reply = Bytes::from_static(&[0, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD
-                return Ok(Some(handshake_reply));
-            }
-        }
-        Ok(None)
-    }
-
-    fn tick(&mut self) -> Result<Option<Bytes>, KMError> {
-        if self.state == KMSMState::Configuring {
-            if self.initiate && self.hello_t.elapsed() > Duration::from_secs(5) {
-                // too long, send another hello.
-                let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
-                self.hello_t = time::Instant::now();
-                return Ok(Some(handshake));
-            }
-        }
-        Ok(None)
-    }
-
-    // Copy payload into message with a SIZE preamble.
-    fn encrypt_transport(
-        self: &mut Self,
-        payload: &[u8],
-        message: &mut [u8],
-    ) -> Result<usize, KMError> {
-        let sz = payload.len() + 2; // SIZE includes the 2 byte size field.
-        if sz > std::u16::MAX as usize {
-            return Err(KMError::EncryptionError);
-        }
-        let szbytes = (sz as u16).to_be_bytes();
-        message[0..2].copy_from_slice(&szbytes); // write SIZE as u16 to front of buffer
-        message[2..sz].copy_from_slice(payload); // then copy rest of payload
-        Ok(sz)
-    }
-
-    // Check and remove the SIZE preamble, return the payload
-    fn decrypt_transport(
-        self: &mut Self,
-        payload: &[u8],
-        message: &mut [u8],
-    ) -> Result<usize, KMError> {
-        let buf_sz = payload.len();
-        if buf_sz < 2 {
-            return Err(KMError::EncryptionError);
-        }
-        let msg_sz: u16 = u16::from_be_bytes([payload[0], payload[1]]);
-        if buf_sz < msg_sz as usize {
-            return Err(KMError::EncryptionError);
-        }
-        let msg_len: usize = (msg_sz - 2) as usize;
-        message[..msg_len].copy_from_slice(&payload[2..]);
-        Ok(msg_len)
-    }
-
-}
 
 #[cfg(test)]
 mod test {

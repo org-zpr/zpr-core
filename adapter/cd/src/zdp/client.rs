@@ -9,7 +9,8 @@ use std::net::SocketAddr;
 
 use tokio::net::UdpSocket;
 
-use ph::km::{KeyManager, KMSignal, SillyKeyManager};
+use ph::km::{KeyManager, KMSignal};
+use ph::km_xor::XorKeyManager;
 use ph::packet::Packet;
 use ph::config;
 use ph::zdp::*;
@@ -39,7 +40,7 @@ impl ZDPClient {
 
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-        let mgr = KeyManager::new(Box::new(SillyKeyManager::new(true)));
+        let mgr = KeyManager::new(Box::new(XorKeyManager::new(true)));
         let local_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
 
         let socket = UdpSocket::bind(local_addr).await?;
