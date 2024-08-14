@@ -27,6 +27,13 @@
 //! Note that the encrypt/decrypt functions expect to operate on entire
 //! buffer.  Caller is responsible for dealing with cases when only
 //! part of the buffer is to be encrypted or decrypted.
+//!
+//!
+//! Note you can create noise keys with the `wg` command line tool on recent versions of linux.
+//! For example, to generate a private key: `wg genkey`.  Then you can pass that private key
+//! into `wg pubkey` to get the public key.
+
+
 
 
 use std::time::Duration;
@@ -67,7 +74,11 @@ pub struct KMNoise {
 }
 
 impl KMNoise {
-    // TODO: pass in the local RSA cert which we will send over in handshake, or response.
+    /// Create the Noise KeyManager.
+    ///
+    /// This requires Noise keys.  Eventually (TODO) we will also pass certificates through here
+    /// so that each side can check for certificate authority signautre.
+    ///
     /// - `peer_pub_key` is required for initiator, and should match the `local_keypair` of the responder.
     /// - `local_keypair` is optional. If not provided, a new keypair will be generated.
     pub fn new(initiate: bool, peer_pub_key: Option<Vec<u8>>, local_keypair: Option<snow::Keypair>) -> Result<Self, KMError> {
