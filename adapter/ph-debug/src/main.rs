@@ -12,13 +12,12 @@ use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::{BufReader, Error, IoSlice};
 use std::net::Shutdown;
-use std::os::fd::{AsRawFd, BorrowedFd};
+use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
-
 const ANCILLARY_BUFFER_SIZE: usize = 128;
 
 #[derive(Parser, Debug)]
@@ -155,20 +154,17 @@ fn handle_perf_sample(duration: u64, frequency: u64, port: &str) -> std::io::Res
 }
 
 fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
-    let file_descriptor = OpenOptions::new()
-        .read(true)
+    let file = OpenOptions::new()
         .write(true)
         .create(true)
         .open(file_path)
-        .unwrap()
-        .as_raw_fd();
+        .unwrap();
 
     let mut ancillary_buffer = [0; ANCILLARY_BUFFER_SIZE];
     let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
-    let borrowed_fd = unsafe { BorrowedFd::borrow_raw(file_descriptor) };
-    ancillary.add_fds(&[borrowed_fd]);
+    ancillary.add_fds(&[file.as_fd()]);
 
-    let buf = [1; 8];
+    let buf = [1; 1]; // Must send some data with the ancillary data
     let bufs = &mut [IoSlice::new(&buf)];
 
     // Establish connection with RPC worker, send command
@@ -194,8 +190,7 @@ fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
 
     // Read response from
     let mut response = String::new();
-    stream.read_to_string(&mut response)?; // Message from set_capture function or ERR
-    stream.read_to_string(&mut response)?; // OK message or nothing
+    stream.read_to_string(&mut response)?; // Read rest of response
     println!("{response}");
 
     Ok(())

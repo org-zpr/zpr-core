@@ -7,17 +7,14 @@ use hdrhistogram::Histogram;
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
+use std::io::IoSliceMut;
 use std::time::{Duration, Instant};
+use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
-// use std::os::unix::net::{SocketAncillary, AncillaryData};
-use std::io::IoSliceMut;
-use std::os::fd::AsRawFd;
-use std::os::fd::FromRawFd;
-use tokio::fs::File;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
 
@@ -105,7 +102,7 @@ async fn handle_connection(
                 // Receive ancillary data
                 let mut ancillary_buffer = [0; config::ANCILLARY_BUFFER_SIZE];
                 let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
-                let mut buf = [0; 8];
+                let mut buf = [0; 1]; // Must receive data sent with ancillary data
                 let bufs = &mut [IoSliceMut::new(&mut buf)][..];
                 unix_stream_recv_vectored_with_ancillary(
                     buf_reader.into_inner().as_ref(),
@@ -327,8 +324,9 @@ async fn set_capture(asm: &Assembly<'_>, ancillary: SocketAncillary<'_>) -> Stri
         // capture file, otherwise report failure to open file
         match scm_rights.nth(0) {
             Some(fd) => {
-                let file = unsafe { File::from_raw_fd(fd.as_raw_fd()) };
-                match asm.capture_worker.open_capture_file(file).await {
+                let std_file = std::fs::File::from(fd.try_into_owned().unwrap()); // tokio::fs::File doesn't implement From<OwnedFd>
+                let tokio_file = File::from(std_file);
+                match asm.capture_worker.open_capture_file(tokio_file).await {
                     Ok(()) => format!("Capture file opened\n"),
                     Err(err) => format!("Error opening Capture file: {}\n", err),
                 }
