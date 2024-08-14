@@ -15,8 +15,6 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 
-const NUM_COUNTERS: usize = 23;
-
 #[derive(Parser, Debug)]
 #[command(version, about = "This program controls the RPC calls to the ZPR Packet Handler", long_about = None)]
 /// Two help messages when running the program, -h gives succinct information, --help gives
@@ -107,12 +105,14 @@ fn basic_call_response(comm: &str, port: &str) -> std::io::Result<()> {
 }
 
 /// Repeatedly opens UnixStream to make connection with PH, requests COUNTERS data,
-/// and prints the differences
+/// and prints the differences between the counts currently and the counts at the
+/// last sample
 /// Requires how many seconds to wait between samples
 // TODO should we also be handling ctrl+c in this function?
 fn handle_watch(frequency: u64, port: &str) -> std::io::Result<()> {
-    let mut values: [u64; NUM_COUNTERS] = [0; NUM_COUNTERS];
+    let mut values: Vec<u64> = Vec::new();
     let sleep_time = Duration::new(frequency, 0);
+    let mut first_run = true;
 
     loop {
         let stream = &mut UnixStream::connect(port).unwrap();
@@ -126,21 +126,32 @@ fn handle_watch(frequency: u64, port: &str) -> std::io::Result<()> {
         // with each line as a different index of the vector
         let counts: Vec<&str> = response.split('\n').collect(); // Split the messages
 
+        if first_run {
+            for _n in &counts[1..] {
+                values.push(0);
+            }
+        }
         // TODO error checking, make sure actually got a message back, and that it's the correct message
-        for n in 1..=NUM_COUNTERS {
+        let mut n = 0;
+        for count in &counts[1..] {
             // split up the individual lines to get the count from the end and convert to u64
-            let one_line: Vec<&str> = counts[n].split(':').collect();
+            let one_line: Vec<&str> = count.split(':').collect();
+            if one_line[0] == "OK" {
+                break;
+            }
             let mut num: String = one_line[1].to_string();
             num.remove(0);
             let num_packets: u64 = num.parse().unwrap();
 
-            // calculate difference
-            let difference = num_packets - values[n - 1];
+            // calculate difference between current pkt nums and previous pkt nums
+            let difference = num_packets - values[n];
 
             println!("{} increased by: {}", one_line[0], difference);
-            values[n - 1] = num_packets; // store new packet counts
+            values[n] = num_packets; // store new packet counts
+            n += 1;
         }
 
+        first_run = false;
         sleep(sleep_time);
     }
 }
