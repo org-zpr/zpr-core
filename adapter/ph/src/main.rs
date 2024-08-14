@@ -163,10 +163,6 @@ fn main() -> ExitCode {
                     .await
                     .expect("unable to bind to self addr"),
             ));
-            socket
-                .connect(peer_addr)
-                .await
-                .expect("unable to connect to peer addr");
 
             let agent_input = AgentInput::new(tun_devs.iter());
             let substrate_egress = SubstrateEgress::new([&*socket]);
@@ -182,6 +178,7 @@ fn main() -> ExitCode {
                 counters,
                 tun_ctl,
                 sync_req_state,
+                peer_addr,
             }));
 
             // TODO signal handler goes here
