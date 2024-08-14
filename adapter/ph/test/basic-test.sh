@@ -184,6 +184,7 @@ wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
 echo "Carrier has arrived."
 
+stty sane || true
 
 #
 # Run test

@@ -205,6 +205,8 @@ impl<'pktbuf> Assembly<'pktbuf> {
         );
     }
 
+    /// Determines whether the message recieved in response to the request is
+    /// a) a packet and not an error, and b) the expected packet type
     fn match_received<T>(
         &self,
         result: Result<(Packet<'pktbuf>, ZdpPacketType), T>,
