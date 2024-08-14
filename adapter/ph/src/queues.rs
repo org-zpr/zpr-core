@@ -50,9 +50,8 @@ impl<'pktbuf> MgmtProcessor<'pktbuf> {
         }
     }
 
-    // Sends TestPacket through system using MgmtProcessor sender, awaits response from
-    // the corresponding receiver via TestPacket::acknowledge, returns metrics or an error
-
+    /// Sends TestPacket through system using MgmtProcessor sender, awaits response from
+    /// the corresponding receiver via TestPacket::acknowledge, returns metrics or an error
     // TODO perhaps enqueue_test_packet is not the best name, because it does more than
     // just enqueue, it also waits for the response, unlike the other enqueue methods of other
     // queues

@@ -1,6 +1,6 @@
-// Receives commands, either from ph-debug tool or from someone directly interfacing
-// with the socket, performs action based on received command
-// To avoid excess parsing, the command must not have spaces
+//! Receives commands, either from ph-debug tool or from someone directly interfacing
+//! with the socket, performs action based on received command
+//! To avoid excess parsing, the command must not have spaces
 
 use crate::assembly::Assembly;
 use crate::test_packet::TestPacketMetrics;
@@ -153,6 +153,7 @@ where
 
 // Management functions for RPC worker, along with helper functions for the
 // management funcs
+
 async fn echo(_asm: &Assembly<'_>) -> String {
     String::from("echo\n")
 }
@@ -174,9 +175,9 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
     String::from("counters_reset\n")
 }
 
-// Performs a performance sample on the PH by measuring the queue depths and the
-// packet latencies throughout the system. Requires the duration of the
-// sample as well as the number of samples per second.
+/// Performs a performance sample on the PH by measuring the queue depths and the
+/// packet latencies throughout the system. Requires the duration of the
+/// sample as well as the number of samples per second.
 async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     let send_duration = Duration::new(duration.parse().unwrap(), 0);
     let begin_time = Instant::now();
@@ -215,9 +216,9 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
     format!("{mgmt_processor}")
 }
 
-// Helper for perf_sample
-// Records the metrics from a single test packet to the trio of histograms
-// tracking the data from the queue that particular test packet was enqueued on
+/// Helper for perf_sample
+/// Records the metrics from a single test packet to the trio of histograms
+/// tracking the data from the queue that particular test packet was enqueued on
 fn record_metrics(
     metrics: Result<TestPacketMetrics, RecvError>,
     hist_dur: &mut Histogram<u64>,
@@ -237,9 +238,9 @@ fn record_metrics(
     let _ = hist_batch.record(metrics.as_ref().unwrap().batch_size.try_into().unwrap());
 }
 
-// Helper for perf_sample
-// Gets the values from the trio of histograms for each queue. Returns a string with the
-// data from all three histograms
+/// Helper for perf_sample
+/// Gets the values from the trio of histograms for each queue. Returns a string with the
+/// data from all three histograms
 fn three_hists_values(
     hist_name: &str,
     hist_dur: &Histogram<u64>,
@@ -274,10 +275,10 @@ fn three_hists_values(
     info
 }
 
-// Helper for three_hists_values
-// Gets the data from a single histogram. Requires the histogram and units of
-// measurement to format the data, as well as the histogram itself.
-// Returns string with the data from one historgram.
+/// Helper for three_hists_values
+/// Gets the data from a single histogram. Requires the histogram and units of
+/// measurement to format the data, as well as the histogram itself.
+/// Returns string with the data from one historgram.
 fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> String {
     let ten: u64 = hist.value_at_quantile(0.10);
     let twenty_five: u64 = hist.value_at_quantile(0.25);
@@ -333,7 +334,7 @@ async fn close_capture(asm: &Assembly<'_>) -> String {
     String::from("Capture file closed\n")
 }
 
-// Expects the entire string message sent to RPC worker, including the command
+/// Expects the entire string message sent to RPC worker, including the command
 fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
     // Removes the command from the beginning of the str
     let (_command, program) = str_message.split_once(' ').unwrap();

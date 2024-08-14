@@ -1,7 +1,7 @@
-// Tool to help debug PH
-// Note: at this moment the program can only handle one-word commands, so
-// when a command is multiple words, this program assumes the spaces are replaced
-// with a '-' on the command line
+//! Tool to help debug PH
+//! Note: at this moment the program can only handle one-word commands, so
+//! when a command is multiple words, this program assumes the spaces are replaced
+//! with a '-' on the command line
 
 use cbpf_rs;
 use clap::Parser;
@@ -19,8 +19,8 @@ const NUM_COUNTERS: usize = 23;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "This program controls the RPC calls to the ZPR Packet Handler", long_about = None)]
-// Two help messages when running the program, -h gives succinct information, --help gives
-// list of all the commands
+/// Two help messages when running the program, -h gives succinct information, --help gives
+/// list of all the commands
 struct Args {
     #[arg(
         short,
@@ -89,12 +89,12 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-// Handles basic call and response with the rpc_worker in the ph. Sends a string
-// to the specified port, reads and prints the response
-// Opens and closes UnixStream
-// Can be used directly in main for commands that don't have to send any additional data
-// with the command, and can be invoked in helper functions for commands that require
-// extra information to be send once a string with all the information to be sent is created.
+/// Handles basic call and response with the rpc_worker in the ph. Sends a string
+/// to the specified port, reads and prints the response
+/// Opens and closes UnixStream
+/// Can be used directly in main for commands that don't have to send any additional data
+/// with the command, and can be invoked in helper functions for commands that require
+/// extra information to be send once a string with all the information to be sent is created.
 fn basic_call_response(comm: &str, port: &str) -> std::io::Result<()> {
     let stream = &mut UnixStream::connect(port).unwrap();
     stream.write_all(comm.as_bytes())?;
@@ -106,10 +106,9 @@ fn basic_call_response(comm: &str, port: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-// Repeatedly opens UnixStream to make connection with PH, requests COUNTERS data,
-// and prints the differences
-// Requires how many seconds to wait between samples
-
+/// Repeatedly opens UnixStream to make connection with PH, requests COUNTERS data,
+/// and prints the differences
+/// Requires how many seconds to wait between samples
 // TODO should we also be handling ctrl+c in this function?
 fn handle_watch(frequency: u64, port: &str) -> std::io::Result<()> {
     let mut values: [u64; NUM_COUNTERS] = [0; NUM_COUNTERS];
@@ -184,9 +183,9 @@ fn handle_capture_sequence(
     Ok(())
 }
 
-// Converts capture program into serialized format so that the RPC worker doesn't
-// need to use the pcap library, and can just have knowledge of the serialized
-// format and use exclusively cbpf-rs
+/// Converts capture program into serialized format so that the RPC worker doesn't
+/// need to use the pcap library, and can just have knowledge of the serialized
+/// format and use exclusively cbpf-rs
 fn handle_set_capture_program(program: Option<String>, port: &str) -> std::io::Result<()> {
     // Ensures that a program has properly been provided before sending message because
     // there is no default program
@@ -202,9 +201,9 @@ fn handle_set_capture_program(program: Option<String>, port: &str) -> std::io::R
     Ok(())
 }
 
-// Uses combination of pcap and cbpf-rs libraries to serialize program
-// into the following format:
-// <number of instructions>,code1 jt1 jf1 k1,code2 jt2 jf2 k2,...,coden jtn jfn kn
+/// Uses combination of pcap and cbpf-rs libraries to serialize program
+/// into the following format:
+/// <number of instructions>,code1 jt1 jf1 k1,code2 jt2 jf2 k2,...,coden jtn jfn kn
 fn serialize(program: &str) -> String {
     use std::fmt::Write;
 
