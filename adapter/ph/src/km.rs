@@ -8,7 +8,6 @@
 //! of a [KeyManagerStateMachine] which does the actual work of creating and
 //! parsing key management ZDP messages.
 
-
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
@@ -18,7 +17,7 @@ use std::time::Duration;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use bytes::{Bytes, BufMut};
+use bytes::{BufMut, Bytes};
 
 use zerocopy::FromBytes;
 
@@ -28,8 +27,6 @@ use crate::config;
 use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
 use crate::zpr;
-
-
 
 #[derive(Debug)]
 pub enum KMError {
@@ -96,11 +93,8 @@ impl From<std::io::Error> for KMError {
     }
 }
 
-
 // Copying of off std::io::Result
 pub type KMResult<T> = Result<T, KMError>;
-
-
 
 /// Signals emitted by the KeyManager (see the [KeyManager::start] method).
 #[derive(Debug)]
@@ -112,12 +106,8 @@ pub enum KMSignal {
     Error,
 
     /// When the SA_ID changes.
-    SaIdChange{ old: zpr::SaId, new: zpr::SaId },
+    SaIdChange { old: zpr::SaId, new: zpr::SaId },
 }
-
-
-
-
 
 /// Stateful key manager for ZDP.  Requires an instance of a [KeyManagerStateMachine] to do the actual work.
 #[derive(Debug, Clone)]
@@ -236,9 +226,15 @@ impl KeyManager<'_> {
 
         // TODO: Ability to encrypt in place. Not sure how to accomplish. At very least we could use our own buffer pool.
         let mut encr_buf = [0u8; config::PACKET_BUFFER_SIZE];
-        match state.statemachine.encrypt_transport(&message.body()[0..encr_len], &mut encr_buf) {
+        match state
+            .statemachine
+            .encrypt_transport(&message.body()[0..encr_len], &mut encr_buf)
+        {
             Ok(len) => {
-                info!("noise: encrypt input {} bytes, output {} bytes", encr_len, len);
+                info!(
+                    "noise: encrypt input {} bytes, output {} bytes",
+                    encr_len, len
+                );
                 // Copy the encrypted data back into the message -- there should be sufficient room for it since
                 // caller should know our required padding space and alignment.
 
@@ -264,7 +260,8 @@ impl KeyManager<'_> {
     /// Key Management packets should not be sent here.
     /// Does not remove the ZPI/SA_ID value.
     pub fn decrypt_transport(&self, message: &mut Packet) -> KMResult<()> {
-        if message.body().len() < 3 { // ZPI + LEN
+        if message.body().len() < 3 {
+            // ZPI + LEN
             return Err(KMError::ShortPacket);
         }
         let mut state = self.shared.state.lock().unwrap();
@@ -288,9 +285,16 @@ impl KeyManager<'_> {
             return Err(KMError::ShortPacket);
         }
 
-        match state.statemachine.decrypt_transport(&message.body()[3..3 + encr_len], &mut decr_buf) {
+        match state
+            .statemachine
+            .decrypt_transport(&message.body()[3..3 + encr_len], &mut decr_buf)
+        {
             Ok(len) => {
-                info!("noise: decrypt input {} bytes, output {} bytes", message.body().len(), len);
+                info!(
+                    "noise: decrypt input {} bytes, output {} bytes",
+                    message.body().len(),
+                    len
+                );
                 // Copy the decrypted data back into the message -- do not overwrite ZPI.
                 message.shrink(message.body().len()); // remove body
                 message.put(&decr_buf[0..len]); // write a new body
@@ -382,9 +386,7 @@ impl KeyManager<'_> {
             let mut state = self.shared.state.lock().unwrap();
             handshake = match state.statemachine.reset() {
                 Ok(h) => h,
-                Err(e) => {
-                    return Err(KMError::MachineError(e.to_string()))
-                }
+                Err(e) => return Err(KMError::MachineError(e.to_string())),
             };
         }
         match km_signals_out.send(KMSignal::Reset).await {
@@ -396,9 +398,7 @@ impl KeyManager<'_> {
         if let Some(handshake) = handshake {
             match km_buffers_out.send(handshake).await {
                 Ok(_) => {}
-                Err(_) => {
-                    return Err(KMError::EnqueueFailed)
-                }
+                Err(_) => return Err(KMError::EnqueueFailed),
             }
         };
 
@@ -519,7 +519,13 @@ impl KeyManager<'_> {
                         cur_id = state.sa_id;
                     }
                     info!("KM: New SA_ID: {}", cur_id);
-                    match km_signals_out.send(KMSignal::SaIdChange{old: prev_id, new: cur_id}).await {
+                    match km_signals_out
+                        .send(KMSignal::SaIdChange {
+                            old: prev_id,
+                            new: cur_id,
+                        })
+                        .await
+                    {
                         Ok(_) => {}
                         Err(_) => {
                             error!("failed to enqueue SaIdChange signal")
@@ -536,8 +542,6 @@ impl KeyManager<'_> {
         Ok(())
     }
 }
-
-
 
 /// The state of the [KeyManagerStateMachine].
 ///
@@ -579,8 +583,6 @@ pub struct KMSettings {
     pub tick_interval: Duration,
 }
 
-
-
 /// Interface to a Key Management protocol.
 pub trait KeyManagerStateMachine: Send + Sync {
     /// These do not change (TODO: is there a way to state that in rust?)
@@ -605,7 +607,6 @@ pub trait KeyManagerStateMachine: Send + Sync {
     /// If this returns error, internal state should be error too.
     fn tick(self: &mut Self) -> Result<Option<Bytes>, KMError>;
 
-
     /// Encrypt `payload` into `message`.
     ///
     /// `sa_id` is the Security Association ID in use.
@@ -623,9 +624,7 @@ pub trait KeyManagerStateMachine: Send + Sync {
         payload: &[u8],
         message: &mut [u8],
     ) -> Result<usize, KMError>;
-
 }
-
 
 #[cfg(test)]
 mod test {
@@ -652,7 +651,6 @@ mod test {
         handle_count: u8,
         tick_count: u8,
     }
-
 
     impl TestKM {
         pub fn new(initiate: bool, initial_state: KMSMState) -> TestKM {
@@ -720,7 +718,6 @@ mod test {
             message[0..payload.len()].copy_from_slice(payload);
             Ok(payload.len())
         }
-
     }
 
     #[tokio::test]

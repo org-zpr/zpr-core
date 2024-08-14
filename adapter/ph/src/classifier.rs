@@ -2,8 +2,8 @@
 use crate::net_defs::*;
 use crate::packet;
 use std::mem::size_of;
-use zerocopy::{ByteOrder, FromBytes, NetworkEndian};
 use zerocopy::{AsBytes, FromZeroes, KnownLayout, Unaligned};
+use zerocopy::{ByteOrder, FromBytes, NetworkEndian};
 
 #[derive(Debug, PartialEq)]
 pub enum ClassifierResult {

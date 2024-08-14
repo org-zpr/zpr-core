@@ -8,7 +8,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncWrite, AsyncWriteExt, BufWriter};
 use zerocopy::AsBytes;
 
-
 /// Represents an open PCAP writer.
 pub struct PcapWriter<W: AsyncWrite> {
     writer: BufWriter<W>,

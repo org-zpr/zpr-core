@@ -95,8 +95,8 @@ pub struct ZdpBaseHeader {
 pub const ZDP_BASE_HEADER_OFFSET: usize = std::mem::size_of::<ZdpZpiHeader>();
 
 /// Offset into ZDP packet where a non-per-flow header starts.
-pub const ZDP_NON_PER_FLOW_MGMT_HEADER_OFFSET: usize = ZDP_BASE_HEADER_OFFSET + std::mem::size_of::<ZdpBaseHeader>();
-
+pub const ZDP_NON_PER_FLOW_MGMT_HEADER_OFFSET: usize =
+    ZDP_BASE_HEADER_OFFSET + std::mem::size_of::<ZdpBaseHeader>();
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
@@ -124,7 +124,6 @@ pub struct ZdpHelloResponseHeader {
     pub status: U16,
 }
 
-
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpKeyManagementHeader {
@@ -146,8 +145,6 @@ impl ZdpKeyManagementHeader {
         self.message_type.get() == zpr::KM_ID_EXPERIMENTAL
     }
 }
-
-
 
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
 const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);

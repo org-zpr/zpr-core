@@ -25,8 +25,8 @@ pub struct Configuration {
 
 #[derive(Debug, Clone, Deserialize)]
 struct Creds {
-    certificate: String, // this nodes signed certificate file
-    private_key: String, // this nodes private key file
+    certificate: String,       // this nodes signed certificate file
+    private_key: String,       // this nodes private key file
     noise_private_key: String, // base64 encoded private key
 
     #[serde(skip)]
@@ -139,25 +139,24 @@ pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> 
     };
 
     c.node_addr = Some(node_addr);
-    c.creds.noise_private_key_bin = match BASE64_STANDARD.decode(c.creds.noise_private_key.as_bytes()) {
-        Ok(v) => {
-            match v.try_into() {
+    c.creds.noise_private_key_bin =
+        match BASE64_STANDARD.decode(c.creds.noise_private_key.as_bytes()) {
+            Ok(v) => match v.try_into() {
                 Ok(a) => a,
                 Err(_) => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        "noise private key length incorrect")
-                    );
+                        "noise private key length incorrect",
+                    ));
                 }
+            },
+            Err(e) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("failed to decode noise private key from base64: {}", e),
+                ));
             }
-        }
-        Err(e) => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("failed to decode noise private key from base64: {}", e),
-            ));
-        }
-    };
+        };
 
     Ok(c)
 }

@@ -1,15 +1,11 @@
-
 //! Demonstration implementation of a [KeyManagerStateMachine] which does an unchecked
 //! "key exchange" and then uses XOR for encryption with a hard coded key.
 
-
+use crate::km::*;
+use crate::zpr;
 use bytes::Bytes;
 use std::time;
 use std::time::Duration;
-use crate::km::*;
-use crate::zpr;
-
-
 
 pub struct XorKeyManager {
     state: KMSMState,
@@ -33,8 +29,6 @@ impl XorKeyManager {
         }
     }
 }
-
-
 
 impl KeyManagerStateMachine for XorKeyManager {
     fn get_settings(&self) -> KMSettings {
@@ -126,7 +120,6 @@ impl KeyManagerStateMachine for XorKeyManager {
         }
         Ok(msg_len)
     }
-
 }
 
 #[cfg(test)]
@@ -145,5 +138,4 @@ mod test {
         assert_eq!(decsz, 10);
         assert_eq!(&decbuf[0..decsz], &payload[..]);
     }
-
 }

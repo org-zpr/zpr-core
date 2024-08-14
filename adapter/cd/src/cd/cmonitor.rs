@@ -1,6 +1,6 @@
 use std::io;
-use std::time::Instant;
 use std::net::SocketAddr;
+use std::time::Instant;
 
 use tokio::sync::mpsc::{self, Sender};
 use tokio::task::JoinHandle;

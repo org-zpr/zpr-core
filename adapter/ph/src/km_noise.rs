@@ -33,33 +33,21 @@
 //! For example, to generate a private key: `wg genkey`.  Then you can pass that private key
 //! into `wg pubkey` to get the public key.
 
-
-
-
-use std::time::Duration;
-use bytes::{Bytes, BytesMut};
-use tracing::{error, info};
 use crate::km::*;
+use bytes::{Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
-
-
-
-
-
+use std::time::Duration;
+use tracing::{error, info};
 
 static PATTERN: &'static str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
 const NOISE_PADLEN: usize = 24; // 16 byte tag + 8 byte nonce
-
-
 
 impl From<snow::Error> for KMError {
     fn from(e: snow::Error) -> KMError {
         KMError::MachineError(e.to_string())
     }
 }
-
-
 
 /// Not multi-thread safe.
 /// TODO: Figure out how to make encryption/decryption parallelizable.
@@ -81,7 +69,11 @@ impl KMNoise {
     ///
     /// - `peer_pub_key` is required for initiator, and should match the `local_keypair` of the responder.
     /// - `local_keypair` is optional. If not provided, a new keypair will be generated.
-    pub fn new(initiate: bool, peer_pub_key: Option<Vec<u8>>, local_keypair: Option<snow::Keypair>) -> Result<Self, KMError> {
+    pub fn new(
+        initiate: bool,
+        peer_pub_key: Option<Vec<u8>>,
+        local_keypair: Option<snow::Keypair>,
+    ) -> Result<Self, KMError> {
         if initiate && peer_pub_key.is_none() {
             error!("noise: peer public key required for initiator");
             return Err(KMError::ConfigurationError);
@@ -113,18 +105,13 @@ impl KMNoise {
     }
 }
 
-
 /// Helper function to derive public key from private key.
 pub fn derive_public_key(private_key: &[u8; 32]) -> [u8; 32] {
     let point = MontgomeryPoint::mul_base_clamped(*private_key);
     point.to_bytes()
 }
 
-
-
-
 impl KeyManagerStateMachine for KMNoise {
-
     fn get_settings(&self) -> KMSettings {
         return self.settings.clone();
     }
@@ -148,12 +135,16 @@ impl KeyManagerStateMachine for KMNoise {
             let mut initiator = match snow::Builder::new(np)
                 .local_private_key(self.local_keypair.private.as_ref())
                 .remote_public_key(&rpk)
-                .build_initiator() {
+                .build_initiator()
+            {
                 Ok(i) => i,
                 Err(e) => {
                     error!("noise: error building initiator: {:?}", e);
                     self.state = KMSMState::Error;
-                    return Err(KMError::MachineError(format!("failed to build initiator: {}", e.to_string())));
+                    return Err(KMError::MachineError(format!(
+                        "failed to build initiator: {}",
+                        e.to_string()
+                    )));
                 }
             };
 
@@ -163,7 +154,10 @@ impl KeyManagerStateMachine for KMNoise {
                 Err(e) => {
                     error!("noise: error writing handshake message: {:?}", e);
                     self.state = KMSMState::Error;
-                    return Err(KMError::MachineError(format!("failed to write handshake message: {}", e.to_string())));
+                    return Err(KMError::MachineError(format!(
+                        "failed to write handshake message: {}",
+                        e.to_string()
+                    )));
                 }
             };
             buf.truncate(len);
@@ -172,19 +166,22 @@ impl KeyManagerStateMachine for KMNoise {
         } else {
             let responder = match snow::Builder::new(np)
                 .local_private_key(self.local_keypair.private.as_ref())
-                .build_responder() {
+                .build_responder()
+            {
                 Ok(r) => r,
                 Err(e) => {
                     error!("noise: error building responder: {:?}", e);
                     self.state = KMSMState::Error;
-                    return Err(KMError::MachineError(format!("failed to build responder: {}", e.to_string())));
+                    return Err(KMError::MachineError(format!(
+                        "failed to build responder: {}",
+                        e.to_string()
+                    )));
                 }
             };
             self.hs_state = Some(responder);
             Ok(None)
         }
     }
-
 
     fn handle_message(&mut self, message: &[u8]) -> Result<Option<Bytes>, KMError> {
         if self.state == KMSMState::Configuring {
@@ -199,7 +196,10 @@ impl KeyManagerStateMachine for KMNoise {
                 match hs.read_message(&message[..], &mut buf) {
                     Ok(len) => {
                         // TODO: In future we plan to send the certificate over in the first handshake message buffer.
-                        info!("noise: got {} byte payload in handshake message, ignoring", len);
+                        info!(
+                            "noise: got {} byte payload in handshake message, ignoring",
+                            len
+                        );
                     }
                     Err(e) => {
                         error!("noise: error handling handhsake message: {:?}", e);
@@ -288,7 +288,7 @@ impl KeyManagerStateMachine for KMNoise {
         let nonce = ts.sending_nonce();
         match ts.write_message(payload, message) {
             Ok(len) => {
-                message[len..len+8].copy_from_slice(&nonce.to_be_bytes());
+                message[len..len + 8].copy_from_slice(&nonce.to_be_bytes());
                 Ok(len + 8)
             }
             Err(e) => {
@@ -297,7 +297,6 @@ impl KeyManagerStateMachine for KMNoise {
             }
         }
     }
-
 
     fn decrypt_transport(
         self: &mut Self,
@@ -320,7 +319,7 @@ impl KeyManagerStateMachine for KMNoise {
         let nonce: u64 = u64::from_be_bytes(payload[plen - 8..].try_into().unwrap());
 
         ts.set_receiving_nonce(nonce);
-        match ts.read_message(&payload[..plen-8], message) {
+        match ts.read_message(&payload[..plen - 8], message) {
             Ok(len) => Ok(len),
             Err(e) => {
                 error!("noise: error decrypting message: {:?}", e);
@@ -330,16 +329,14 @@ impl KeyManagerStateMachine for KMNoise {
     }
 }
 
-
-
 #[cfg(test)]
 mod test {
     use super::*;
 
     use base64::prelude::*;
-    use tokio::time::timeout;
-    use tokio::task::yield_now;
     use tokio::sync::mpsc;
+    use tokio::task::yield_now;
+    use tokio::time::timeout;
     use tokio_util::sync::CancellationToken;
 
     use crate::km;
@@ -369,13 +366,16 @@ mod test {
                 panic!("error resetting initiator: {:?}", e);
             }
         };
-        assert!(handshake_msg_0.len() == 110, "unexpected handshake message-0 length, got {}", handshake_msg_0.len());
+        assert!(
+            handshake_msg_0.len() == 110,
+            "unexpected handshake message-0 length, got {}",
+            handshake_msg_0.len()
+        );
         assert!(initiator.get_state() == KMSMState::Configuring);
-
 
         match responder.reset() {
             Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
-            Ok(None) => { } // good
+            Ok(None) => {} // good
             Err(e) => {
                 panic!("error resetting responder: {:?}", e);
             }
@@ -391,13 +391,17 @@ mod test {
                 panic!("responder handle_message failed on handshake-0: {:?}", e);
             }
         };
-        assert!(handshake_msg_1.len() == 48, "unexpected handshake message-1 length, got {}", handshake_msg_1.len());
+        assert!(
+            handshake_msg_1.len() == 48,
+            "unexpected handshake message-1 length, got {}",
+            handshake_msg_1.len()
+        );
         assert!(responder.get_state() == KMSMState::Transport);
 
         // <- e, ee, se
         match initiator.handle_message(&handshake_msg_1) {
             Ok(Some(_)) => panic!("unexpected additional handshake message from initiator"),
-            Ok(None) => { } // good
+            Ok(None) => {} // good
             Err(e) => {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
@@ -418,7 +422,11 @@ mod test {
 
         let expect_ciphertext_len = plaintext.len() + NOISE_PADLEN;
 
-        assert!(out_len == expect_ciphertext_len, "unexpected encrypted message length, got {}", out_len);
+        assert!(
+            out_len == expect_ciphertext_len,
+            "unexpected encrypted message length, got {}",
+            out_len
+        );
 
         let mut in_buf = [0u8; 4096];
         let in_len = match responder.decrypt_transport(&out_buf[..out_len], &mut in_buf) {
@@ -428,21 +436,23 @@ mod test {
             }
         };
 
-        assert!(in_len == plaintext.len(), "unexpected decrypted message length, got {}", in_len);
-        assert!(in_buf[..in_len] == plaintext[..], "unexpected decrypted message content");
+        assert!(
+            in_len == plaintext.len(),
+            "unexpected decrypted message length, got {}",
+            in_len
+        );
+        assert!(
+            in_buf[..in_len] == plaintext[..],
+            "unexpected decrypted message content"
+        );
     }
-
-
 
     // Just make sure that our b64 keys work with the code.
     #[test]
     fn test_noise_handshake_manually_static_node_key() {
-
         let nk_private_b64 = "AB2eP6zV7ve0A4eQgNVNXlAM2q0rYerCPXFMl+/ntUw=";
         let nk_private: [u8; 32] = match BASE64_STANDARD.decode(nk_private_b64) {
-            Ok(d) => {
-                d.try_into().unwrap()
-            }
+            Ok(d) => d.try_into().unwrap(),
             Err(e) => {
                 panic!("error decoding base64: {:?}", e);
             }
@@ -469,13 +479,16 @@ mod test {
                 panic!("error resetting initiator: {:?}", e);
             }
         };
-        assert!(handshake_msg_0.len() == 110, "unexpected handshake message-0 length, got {}", handshake_msg_0.len());
+        assert!(
+            handshake_msg_0.len() == 110,
+            "unexpected handshake message-0 length, got {}",
+            handshake_msg_0.len()
+        );
         assert!(initiator.get_state() == KMSMState::Configuring);
-
 
         match responder.reset() {
             Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
-            Ok(None) => { } // good
+            Ok(None) => {} // good
             Err(e) => {
                 panic!("error resetting responder: {:?}", e);
             }
@@ -491,13 +504,17 @@ mod test {
                 panic!("responder handle_message failed on handshake-0: {:?}", e);
             }
         };
-        assert!(handshake_msg_1.len() == 48, "unexpected handshake message-1 length, got {}", handshake_msg_1.len());
+        assert!(
+            handshake_msg_1.len() == 48,
+            "unexpected handshake message-1 length, got {}",
+            handshake_msg_1.len()
+        );
         assert!(responder.get_state() == KMSMState::Transport);
 
         // <- e, ee, se
         match initiator.handle_message(&handshake_msg_1) {
             Ok(Some(_)) => panic!("unexpected additional handshake message from initiator"),
-            Ok(None) => { } // good
+            Ok(None) => {} // good
             Err(e) => {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
@@ -529,7 +546,7 @@ mod test {
 
         let mut sp_node = node.clone();
         tokio::spawn(async move {
-            let _ = sp_node.start(n_ctok, n_km_tx, n_sig_tx).await;  // Start the node
+            let _ = sp_node.start(n_ctok, n_km_tx, n_sig_tx).await; // Start the node
         });
 
         let (a_km_tx, mut a_km_rx) = mpsc::channel(16);
@@ -548,7 +565,7 @@ mod test {
             Ok(resp) => match resp {
                 Some(sig) => {
                     match sig {
-                        km::KMSignal::Reset => {}, // ok!
+                        km::KMSignal::Reset => {} // ok!
                         _ => {
                             panic!("unexpected signal from node: {:?}", sig);
                         }
@@ -557,7 +574,7 @@ mod test {
                 None => {
                     panic!("timed out or failed waiting for node state transition");
                 }
-            }
+            },
             Err(_) => {
                 panic!("timed out waiting for node state transition");
             }
@@ -567,7 +584,7 @@ mod test {
             Ok(resp) => match resp {
                 Some(sig) => {
                     match sig {
-                        km::KMSignal::Reset => {}, // ok!
+                        km::KMSignal::Reset => {} // ok!
                         _ => {
                             panic!("unexpected signal from adapter: {:?}", sig);
                         }
@@ -576,7 +593,7 @@ mod test {
                 None => {
                     panic!("timed out or failed waiting for adapter state transition");
                 }
-            }
+            },
             Err(_) => {
                 panic!("timed out waiting for adapter state transition");
             }
@@ -588,12 +605,16 @@ mod test {
                 Some(msg) => {
                     // Node will process message and then should generate a handshake reply on its output channel.
                     let node_result = node.handle_km_message(&msg).await;
-                    assert!(node_result.is_ok(), "node handle of adapter handshake initiation failed: {:?}", node_result);
+                    assert!(
+                        node_result.is_ok(),
+                        "node handle of adapter handshake initiation failed: {:?}",
+                        node_result
+                    );
                 }
                 None => {
                     panic!("timed out or failed waiting for initial handshake message");
                 }
-            }
+            },
             Err(_) => {
                 panic!("timed out waiting for initial handshake message");
             }
@@ -604,12 +625,16 @@ mod test {
             Ok(resp) => match resp {
                 Some(msg) => {
                     let adapter_result = adapter.handle_km_message(&msg).await;
-                    assert!(adapter_result.is_ok(), "adapter handle of node response failed: {:?}", adapter_result);
+                    assert!(
+                        adapter_result.is_ok(),
+                        "adapter handle of node response failed: {:?}",
+                        adapter_result
+                    );
                 }
                 None => {
                     panic!("timed out or failed waiting for handshake message response from node");
                 }
-            }
+            },
             Err(_) => {
                 panic!("timed out waiting for handshake message from node");
             }
@@ -618,21 +643,19 @@ mod test {
         // And node should have transitioned;
         match timeout(Duration::from_secs(2), n_sig_rx.recv()).await {
             Ok(resp) => match resp {
-                Some(sig) => {
-                    match sig {
-                        km::KMSignal::SaIdChange { old, new } => {
-                            assert!(new > 0, "new SA_ID is still zero!");
-                            assert!(old == 0, "old SA_ID is not zero!");
-                        }
-                        _ => {
-                            panic!("unexpected signal from node: {:?}", sig);
-                        }
+                Some(sig) => match sig {
+                    km::KMSignal::SaIdChange { old, new } => {
+                        assert!(new > 0, "new SA_ID is still zero!");
+                        assert!(old == 0, "old SA_ID is not zero!");
                     }
-                }
+                    _ => {
+                        panic!("unexpected signal from node: {:?}", sig);
+                    }
+                },
                 None => {
                     panic!("timed out or failed waiting for node state transition");
                 }
-            }
+            },
             Err(_) => {
                 panic!("timed out waiting for node state transition");
             }
@@ -641,32 +664,32 @@ mod test {
         // We sent the nodes response to the adapter above, so it should also have transitioned now.
         match timeout(Duration::from_secs(2), a_sig_rx.recv()).await {
             Ok(resp) => match resp {
-                Some(sig) => {
-                    match sig {
-                        km::KMSignal::SaIdChange { old, new } => {
-                            assert!(new > 0, "new adapter SA_ID is still zero!");
-                            assert!(old == 0, "old adapter SA_ID is not zero!");
-                        }
-                        _ => {
-                            panic!("unexpected signal from adapter: {:?}", sig);
-                        }
+                Some(sig) => match sig {
+                    km::KMSignal::SaIdChange { old, new } => {
+                        assert!(new > 0, "new adapter SA_ID is still zero!");
+                        assert!(old == 0, "old adapter SA_ID is not zero!");
                     }
-                }
+                    _ => {
+                        panic!("unexpected signal from adapter: {:?}", sig);
+                    }
+                },
                 None => {
                     panic!("timed out or failed waiting for adapter state transition");
                 }
-            }
+            },
             Err(_) => {
                 panic!("timed out waiting for adapter state transition");
             }
         }
 
         // Finally, both should hve same SA-ID
-        assert!(adapter.get_sa_id() == node.get_sa_id(), "SA-ID mismatch: adapter={}, node={}", adapter.get_sa_id(), node.get_sa_id());
-
+        assert!(
+            adapter.get_sa_id() == node.get_sa_id(),
+            "SA-ID mismatch: adapter={}, node={}",
+            adapter.get_sa_id(),
+            node.get_sa_id()
+        );
 
         ctok.cancel()
     }
-
 }
-

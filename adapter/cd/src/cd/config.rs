@@ -119,17 +119,15 @@ pub fn load_configuration(path: &str) -> Result<ConfigRecord, std::io::Error> {
     let private_key = load_key(base_path.join(&c.adapter.private_key).to_str().unwrap())?;
 
     let noise_pk: [u8; 32] = match BASE64_STANDARD.decode(c.dock.noise_public_key.as_bytes()) {
-        Ok(pk) => {
-            match pk.try_into() {
-                Ok(pk) => pk,
-                Err(_) => {
-                    return Err(Error::new(
-                        ErrorKind::Other,
-                        format!("noise public key length incorrect"),
-                    ))
-                }
+        Ok(pk) => match pk.try_into() {
+            Ok(pk) => pk,
+            Err(_) => {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    format!("noise public key length incorrect"),
+                ))
             }
-        }
+        },
         Err(e) => {
             return Err(Error::new(
                 ErrorKind::Other,

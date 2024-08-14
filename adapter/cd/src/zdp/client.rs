@@ -9,18 +9,15 @@ use std::net::SocketAddr;
 
 use tokio::net::UdpSocket;
 
-use ph::km::{KeyManager, KMSignal};
+use ph::config;
+use ph::km::{KMSignal, KeyManager};
+use ph::km_demo;
 use ph::km_noise::KMNoise;
 use ph::packet::Packet;
-use ph::config;
 use ph::zdp::*;
-use ph::km_demo;
 
-use zerocopy::FromBytes;
 use bytes::BufMut;
-
-
-
+use zerocopy::FromBytes;
 
 #[derive(Debug, Clone)]
 pub struct ZDPClient {
@@ -38,7 +35,7 @@ impl ZDPClient {
 
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-        let noise = match KMNoise::new(true, Some(self.dock_noise_pub_key.into()), None){
+        let noise = match KMNoise::new(true, Some(self.dock_noise_pub_key.into()), None) {
             Ok(n) => n,
             Err(e) => {
                 info!("zdp/client - KMNoise::new failed: {}", e);
