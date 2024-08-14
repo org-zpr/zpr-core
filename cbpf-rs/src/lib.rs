@@ -31,79 +31,76 @@ impl BpfInsn {
     }
 }
 
-#[allow(dead_code)]
-fn code_class(code: u16) -> u16 {
-    code & 0x07
-}
-const LD: u16 = 0x00;
-const LDX: u16 = 0x01;
-const ST: u16 = 0x02;
-const STX: u16 = 0x03;
-const ALU: u16 = 0x04;
-const JMP: u16 = 0x05;
-const RET: u16 = 0x06;
-const MISC: u16 = 0x07;
+pub mod bpf_code {
+    pub fn code_class(code: u16) -> u16 {
+        code & 0x07
+    }
+    pub const LD: u16 = 0x00;
+    pub const LDX: u16 = 0x01;
+    pub const ST: u16 = 0x02;
+    pub const STX: u16 = 0x03;
+    pub const ALU: u16 = 0x04;
+    pub const JMP: u16 = 0x05;
+    pub const RET: u16 = 0x06;
+    pub const MISC: u16 = 0x07;
 
-#[allow(dead_code)]
-fn code_size(code: u16) -> u16 {
-    code & 0x18
-}
-const W: u16 = 0x00;
-const H: u16 = 0x08;
-const B: u16 = 0x10;
+    pub fn code_size(code: u16) -> u16 {
+        code & 0x18
+    }
+    pub const W: u16 = 0x00;
+    pub const H: u16 = 0x08;
+    pub const B: u16 = 0x10;
 
-#[allow(dead_code)]
-fn code_mode(code: u16) -> u16 {
-    code & 0xe0
-}
-const IMM: u16 = 0x00;
-const ABS: u16 = 0x20;
-const IND: u16 = 0x40;
-const MEM: u16 = 0x60;
-const LEN: u16 = 0x80;
-const MSH: u16 = 0xa0;
+    pub fn code_mode(code: u16) -> u16 {
+        code & 0xe0
+    }
+    pub const IMM: u16 = 0x00;
+    pub const ABS: u16 = 0x20;
+    pub const IND: u16 = 0x40;
+    pub const MEM: u16 = 0x60;
+    pub const LEN: u16 = 0x80;
+    pub const MSH: u16 = 0xa0;
 
-#[allow(dead_code)]
-fn code_op(code: u16) -> u16 {
-    code & 0xf0
-}
-const ADD: u16 = 0x00;
-const SUB: u16 = 0x10;
-const MUL: u16 = 0x20;
-const DIV: u16 = 0x30;
-const OR: u16 = 0x40;
-const AND: u16 = 0x50;
-const LSH: u16 = 0x60;
-const RSH: u16 = 0x70;
-const NEG: u16 = 0x80;
-const MOD: u16 = 0x90;
-const XOR: u16 = 0xa0;
+    pub fn code_op(code: u16) -> u16 {
+        code & 0xf0
+    }
+    pub const ADD: u16 = 0x00;
+    pub const SUB: u16 = 0x10;
+    pub const MUL: u16 = 0x20;
+    pub const DIV: u16 = 0x30;
+    pub const OR: u16 = 0x40;
+    pub const AND: u16 = 0x50;
+    pub const LSH: u16 = 0x60;
+    pub const RSH: u16 = 0x70;
+    pub const NEG: u16 = 0x80;
+    pub const MOD: u16 = 0x90;
+    pub const XOR: u16 = 0xa0;
 
-const JA: u16 = 0x00;
-const JEQ: u16 = 0x10;
-const JGT: u16 = 0x20;
-const JGE: u16 = 0x30;
-const JSET: u16 = 0x40;
+    pub const JA: u16 = 0x00;
+    pub const JEQ: u16 = 0x10;
+    pub const JGT: u16 = 0x20;
+    pub const JGE: u16 = 0x30;
+    pub const JSET: u16 = 0x40;
 
-#[allow(dead_code)]
-fn code_src(code: u16) -> u16 {
-    code & 0x08
-}
-const K: u16 = 0x00;
-const X: u16 = 0x08;
+    pub fn code_src(code: u16) -> u16 {
+        code & 0x08
+    }
+    pub const K: u16 = 0x00;
+    pub const X: u16 = 0x08;
 
-#[allow(dead_code)]
-fn code_rval(code: u16) -> u16 {
-    code & 0x18
-}
-const A: u16 = 0x10;
+    pub fn code_rval(code: u16) -> u16 {
+        code & 0x18
+    }
+    pub const A: u16 = 0x10;
 
-#[allow(dead_code)]
-fn code_miscop(code: u16) -> u16 {
-    code & 0xf8
+    pub fn code_miscop(code: u16) -> u16 {
+        code & 0xf8
+    }
+    pub const TAX: u16 = 0x00;
+    pub const TXA: u16 = 0x80;
 }
-const TAX: u16 = 0x00;
-const TXA: u16 = 0x80;
+
+use bpf_code::*;
 
 /// number of words addressable via MEM addressing mode
 const MEMWORDS: usize = 16;
