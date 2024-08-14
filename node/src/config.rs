@@ -6,6 +6,8 @@ use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
+use base64::prelude::*;
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Configuration {
     #[serde(skip)]
@@ -25,6 +27,10 @@ pub struct Configuration {
 struct Creds {
     certificate: String, // this nodes signed certificate file
     private_key: String, // this nodes private key file
+    noise_private_key: String, // base64 encoded private key
+
+    #[serde(skip)]
+    noise_private_key_bin: [u8; 32], // decoded noise private key
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -42,6 +48,10 @@ impl Configuration {
     pub fn get_key_path(&self) -> PathBuf {
         let base = Path::new(&self.base_path);
         base.join(&self.creds.private_key)
+    }
+
+    pub fn get_noise_private_key(&self) -> &[u8; 32] {
+        &self.creds.noise_private_key_bin
     }
 
     // Gets a copy of the claims
@@ -129,6 +139,25 @@ pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> 
     };
 
     c.node_addr = Some(node_addr);
+    c.creds.noise_private_key_bin = match BASE64_STANDARD.decode(c.creds.noise_private_key.as_bytes()) {
+        Ok(v) => {
+            match v.try_into() {
+                Ok(a) => a,
+                Err(_) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "noise private key length incorrect")
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("failed to decode noise private key from base64: {}", e),
+            ));
+        }
+    };
 
     Ok(c)
 }

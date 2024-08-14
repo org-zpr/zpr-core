@@ -168,6 +168,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
 name = "bitflags"
 version = "2.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -593,7 +599,7 @@ version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "765c9198f173dd59ce26ff9f95ef0aafd0a0fe01fb9d72841bc5066a4c06511d"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "byteorder",
  "crossbeam-channel",
  "flate2",
@@ -763,14 +769,17 @@ dependencies = [
 name = "node"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "clap",
+ "curve25519-dalek",
  "daemonize",
  "openssl",
  "ph",
  "rand",
  "serde",
+ "snow",
  "thrift",
  "tokio",
  "tokio-util",
@@ -945,6 +954,7 @@ dependencies = [
  "cbpf-rs",
  "clap",
  "crossbeam-epoch",
+ "curve25519-dalek",
  "enum-map",
  "hdrhistogram",
  "open-enum",

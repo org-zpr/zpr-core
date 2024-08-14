@@ -10,10 +10,11 @@ use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 
 use ph::km::{KeyManager, KMSignal};
-use ph::km_xor::XorKeyManager;
+use ph::km_noise::KMNoise;
 use ph::packet::Packet;
 use ph::config;
 use ph::zdp::*;
+use ph::zpr;
 
 use zerocopy::FromBytes;
 use bytes::BufMut;
@@ -21,26 +22,40 @@ use bytes::BufMut;
 
 const HEADROOM: usize = 128;
 
-const ZDP_BASE_HDR_OFFSET: usize = std::mem::size_of::<ZdpZpiHeader>();
-const ZDP_REPORT_HDR_OFFSET: usize = ZDP_BASE_HDR_OFFSET + std::mem::size_of::<ZdpBaseHeader>();
+
+
+const ZDP_KM_HDR_OFFSET: usize = ZDP_NON_PER_FLOW_MGMT_HEADER_OFFSET;
+const ZDP_KM_DATA_OFFSET: usize = ZDP_KM_HDR_OFFSET + std::mem::size_of::<ZdpKeyManagementHeader>();
+
+const ZDP_REPORT_HDR_OFFSET: usize = ZDP_NON_PER_FLOW_MGMT_HEADER_OFFSET;
 const ZDP_REPORT_DATA_OFFSET: usize = ZDP_REPORT_HDR_OFFSET + std::mem::size_of::<ZdpReportHeader>();
 
 
 #[derive(Debug, Clone)]
 pub struct ZDPClient {
     addr: SocketAddr,
+    dock_noise_pub_key: [u8; 32],
 }
 
 impl ZDPClient {
-    pub fn new(addr: &SocketAddr) -> ZDPClient {
+    pub fn new(addr: &SocketAddr, dock_noise_key: [u8; 32]) -> ZDPClient {
         ZDPClient {
             addr: addr.to_owned(),
+            dock_noise_pub_key: dock_noise_key,
         }
     }
 
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-        let mgr = KeyManager::new(Box::new(XorKeyManager::new(true)));
+        let noise = match KMNoise::new(true, Some(self.dock_noise_pub_key.into()), None){
+            Ok(n) => n,
+            Err(e) => {
+                info!("zdp/client - KMNoise::new failed: {}", e);
+                return Err(io::Error::new(io::ErrorKind::Other, "KMNoise::new failed"));
+            }
+        };
+
+        let mgr = KeyManager::new(Box::new(noise));
         let local_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
 
         let socket = UdpSocket::bind(local_addr).await?;
@@ -111,9 +126,27 @@ impl ZDPClient {
                 }
 
                 Some(km_buf) = km_rx.recv() => {
-                    // This is a KM message to send.  This is a raw KM payload.  Should get a ZDP header
-                    // unless we are running 'bare'.
-                    match s_send.send(&km_buf).await {
+                    // Construct a KM message packet.
+                    // [ ZPI ]
+                    // [ ZDP BASE HEADER, type=KM]
+                    // ---- KM PACKET ---
+                    //   type: noise
+                    //   len: u16
+                    //   PAYLOAD (from KM)
+                    let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
+                    let mut pkt = Packet::new(&mut pkt_buf, HEADROOM);
+                    pkt.put(&km_buf[..]);
+
+                    let km_hdr = pkt.alloc_zeroed_header::<ZdpKeyManagementHeader>();
+                    km_hdr.message_type = zpr::KM_ID_NOISE.into();
+                    km_hdr.message_length = (km_buf.len() as u16).into();
+
+                    let zdp_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
+                    zdp_hdr.packet_type = ZdpPacketType::KeyManagement;
+
+                    pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 0;
+
+                    match s_send.send(pkt.body()).await {
                         Ok(sz) => {
                             info!("zdp/client - sent {} byte KM message", sz);
                         }
@@ -138,7 +171,32 @@ impl ZDPClient {
                             let zpi_hdr = zpi_hdr.unwrap();
                             match zpi_hdr.zpi {
                                 0 => {
-                                    match mgr.handle_km_message(&buf[0..input_len]).await {
+                                    let zdp_hdr = ZdpBaseHeader::ref_from_prefix(&buf[ZDP_BASE_HEADER_OFFSET..]);
+                                    if zdp_hdr.is_none() {
+                                        info!("zdp/server - error parsing ZDP header from ZPI=0 message");
+                                        continue;
+                                    }
+                                    let zdp_hdr = zdp_hdr.unwrap();
+                                    if zdp_hdr.packet_type != ZdpPacketType::KeyManagement {
+                                        info!("zdp/server - expected KM packet, got {:?}", zdp_hdr.packet_type);
+                                        continue;
+                                    }
+                                    let km_hdr = ZdpKeyManagementHeader::ref_from_prefix(&buf[ZDP_KM_HDR_OFFSET..]);
+                                    if km_hdr.is_none() {
+                                        info!("zdp/server - error parsing KM header from ZPI=0 message");
+                                        continue;
+                                    }
+                                    let km_hdr = km_hdr.unwrap();
+                                    if !km_hdr.is_noise() {
+                                        info!("zdp/server - expected NOISE KM message, got {:?}", km_hdr.message_type.get());
+                                        continue;
+                                    }
+                                    let km_msg_len = usize::from(km_hdr.message_length);
+                                    if input_len < ZDP_KM_DATA_OFFSET + km_msg_len {
+                                        info!("zdp/server - KM message truncated: expected {} got {}", ZDP_KM_DATA_OFFSET + km_msg_len, input_len);
+                                        continue;
+                                    }
+                                    match mgr.handle_km_message(&buf[ZDP_KM_DATA_OFFSET..ZDP_KM_DATA_OFFSET+km_msg_len]).await {
                                         Ok(()) => {},
                                         Err(e) => {
                                             info!("zdp/client - handle_km_message failed: {}", e);
@@ -162,7 +220,7 @@ impl ZDPClient {
                                                 info!("zdp/server - error parsing ZPI header from decrypted payload");
                                                 continue;
                                             }
-                                            let zdp_hdr = ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HDR_OFFSET..]);
+                                            let zdp_hdr = ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..]);
                                             if zdp_hdr.is_none() {
                                                 info!("zdp/server - error parsing ZDP header from decrypted payload");
                                                 continue;
@@ -211,3 +269,5 @@ impl ZDPClient {
         Ok(())
     }
 }
+
+

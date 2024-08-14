@@ -90,7 +90,7 @@ async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf
             ZdpPacketType::HelloRequest => {
                 let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
                 let hdr = send_pkt.alloc_zeroed_header::<ZdpHelloResponseHeader>();
-                hdr.status = 0;
+                hdr.status = 0.into();
                 mgmt::send_non_flow_mgmt(
                     asm,
                     zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */

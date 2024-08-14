@@ -118,7 +118,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                 ));
             }
         };
-        let zserver = ZDPServer::new(&listen_addr);
+        let zserver = ZDPServer::new(&listen_addr, nconfig.get_noise_private_key());
         tasks.spawn(async move {
             match zserver.run(zctok).await {
                 Ok(_) => {

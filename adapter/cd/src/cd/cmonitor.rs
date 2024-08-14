@@ -117,6 +117,7 @@ impl CMonitor {
 
         let zpr: Zpr;
         let addr_port: String;
+        let mut noise_key = [0u8; 32];
         let old_cli: Option<ClientRec>;
         {
             let state = self.shared.state.lock().unwrap();
@@ -130,6 +131,12 @@ impl CMonitor {
                 }
                 Some(ap) => ap,
             };
+            if !zpr.copy_dock_noise_key(&configuration, &mut noise_key) {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "No connection string found",
+                ));
+            }
             old_cli = state.cli.client.clone();
         }
 
@@ -172,7 +179,7 @@ impl CMonitor {
         };
 
         let handle: JoinHandle<io::Result<()>> = tokio::spawn(async move {
-            let cli = client::ZDPClient::new(&dock_addr);
+            let cli = client::ZDPClient::new(&dock_addr, noise_key);
             cli.run(passed_ctok).await // blocking, long running
         });
         // well hopefully that launched!

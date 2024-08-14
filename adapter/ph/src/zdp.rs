@@ -4,6 +4,8 @@ use open_enum::open_enum;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
+use crate::zpr;
+
 #[open_enum]
 #[derive(Copy, Clone, Debug, FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(u8)]
@@ -89,6 +91,13 @@ pub struct ZdpBaseHeader {
     pub sequence_number: U16,
 }
 
+/// Offset into ZDP packet where [ZdpBaseHeader] starts.
+pub const ZDP_BASE_HEADER_OFFSET: usize = std::mem::size_of::<ZdpZpiHeader>();
+
+/// Offset into ZDP packet where a non-per-flow header starts.
+pub const ZDP_NON_PER_FLOW_MGMT_HEADER_OFFSET: usize = ZDP_BASE_HEADER_OFFSET + std::mem::size_of::<ZdpBaseHeader>();
+
+
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpPerFlowHeader {
@@ -112,8 +121,33 @@ pub struct ZdpReportHeader {
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpHelloResponseHeader {
-    pub status: u16,
+    pub status: U16,
 }
+
+
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpKeyManagementHeader {
+    pub message_type: U16,
+    pub message_length: U16,
+}
+
+impl ZdpKeyManagementHeader {
+    /// TRUE if this is a noise protocol KM message
+    pub fn is_noise(&self) -> bool {
+        self.message_type.get() == zpr::KM_ID_NOISE
+    }
+    /// TRUE if this is an IKEv2 KM message
+    pub fn is_ikev2(&self) -> bool {
+        self.message_type.get() == zpr::KM_ID_IKEV2
+    }
+    /// TRUE if this is an experimental KM message
+    pub fn is_experiment(&self) -> bool {
+        self.message_type.get() == zpr::KM_ID_EXPERIMENTAL
+    }
+}
+
+
 
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
 const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);

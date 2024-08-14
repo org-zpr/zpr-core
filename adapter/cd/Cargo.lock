@@ -933,6 +933,7 @@ dependencies = [
  "cbpf-rs",
  "clap",
  "crossbeam-epoch",
+ "curve25519-dalek",
  "enum-map",
  "hdrhistogram",
  "open-enum",

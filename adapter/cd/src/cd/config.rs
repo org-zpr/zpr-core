@@ -4,6 +4,8 @@ use openssl::pkey::Private;
 use openssl::rsa::Rsa;
 use openssl::x509::X509;
 
+use base64::prelude::*;
+
 use std::fs;
 use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read};
@@ -32,6 +34,7 @@ struct Profile {
 struct Dock {
     host_or_ip: String,
     port: u16,
+    noise_public_key: String, // base64 encoded public key
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -50,6 +53,7 @@ pub struct ConfigRecord {
     private_key: Rsa<Private>,
     certificate: X509,
     root_ca: X509,
+    dock_noise_public_key: [u8; 32],
 }
 
 fn load_cert(path: &str) -> Result<X509, std::io::Error> {
@@ -114,6 +118,26 @@ pub fn load_configuration(path: &str) -> Result<ConfigRecord, std::io::Error> {
     let cert = load_cert(base_path.join(&c.adapter.certificate).to_str().unwrap())?;
     let private_key = load_key(base_path.join(&c.adapter.private_key).to_str().unwrap())?;
 
+    let noise_pk: [u8; 32] = match BASE64_STANDARD.decode(c.dock.noise_public_key.as_bytes()) {
+        Ok(pk) => {
+            match pk.try_into() {
+                Ok(pk) => pk,
+                Err(_) => {
+                    return Err(Error::new(
+                        ErrorKind::Other,
+                        format!("noise public key length incorrect"),
+                    ))
+                }
+            }
+        }
+        Err(e) => {
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!("Error decoding noise public key: {}", e),
+            ))
+        }
+    };
+
     let conf_rec = ConfigRecord {
         name: c.profile.name,
         source: path.to_string(),
@@ -122,6 +146,7 @@ pub fn load_configuration(path: &str) -> Result<ConfigRecord, std::io::Error> {
         private_key,
         certificate: cert,
         root_ca,
+        dock_noise_public_key: noise_pk,
     };
 
     Ok(conf_rec)
@@ -155,5 +180,9 @@ impl ConfigRecord {
 
     pub fn has_same_source_as(&self, other: &ConfigRecord) -> bool {
         self.source == other.source
+    }
+
+    pub fn get_dock_noise_public_key(&self) -> &[u8; 32] {
+        &self.dock_noise_public_key
     }
 }
