@@ -11,7 +11,11 @@ root_ca = "/path/to/auth.crt"
 [dock]
 # The node listening dock address
 host_or_ip = "a.spacelaser.net"
-startup_port = 13131
+startup_port = 5000
+
+# node's public noise key
+noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
+
 
 
 [adapter]
