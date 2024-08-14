@@ -7,6 +7,9 @@ pub type Zpi = u8;
 /// ZPI 0, used for keying and early ZARP.
 pub const ZPI_0: Zpi = 0;
 
+/// Proposed value to allow easily distinguishing packets with plaintext payloads.
+pub const ZPI_ENCRYPTED_HEADER_FLAG: Zpi = 0x80;
+
 /// The Security Association ID must fit no more than 8 bits.  Note that it shares
 /// space with the ZPI.
 pub type SaId = u8;

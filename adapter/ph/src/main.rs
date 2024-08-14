@@ -1,5 +1,6 @@
 #![cfg_attr(feature = "ci", deny(warnings))]
 
+use cbpf_rs::bpf_code;
 use clap::Parser;
 use enum_map::{enum_map, EnumMap};
 use std::fs;
@@ -12,6 +13,8 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_tun::TunBuilder;
+use tracing::warn;
+use zpr_ext::tokio::net::UdpSocketExt;
 
 mod agent_output_worker;
 mod assembly;
@@ -157,6 +160,7 @@ fn main() -> ExitCode {
 
             tun_ctl.set_carrier(false).unwrap();
 
+            // Open ingress sockets.
             let mut sockets = Vec::new();
             for _i in 0..substrate_socket_count {
                 let socket = socket2::Socket::new(
@@ -172,6 +176,77 @@ fn main() -> ExitCode {
                     .expect("unable to bind to self addr");
                 sockets.push(UdpSocket::from_std(socket.into()).unwrap());
             }
+
+            // Configure packet steering to separate flows for better load balancing.
+            // It's OK if this fails; flows will still be pinned to a queue;
+            // they'll just be pinned there with all other flows from the same link.
+            #[cfg(any(target_os = "android", target_os = "linux"))]
+            {
+                use crate::zdp::*;
+                use bpf_code::*;
+                use libc::sock_filter as sf;
+                use std::mem::{offset_of, size_of};
+
+                // TODO/FIXME: Ideally we want to select the queue by the _sum_ of the
+                // hash and stream ID, thus avoiding clumping due to correlated stream IDs between
+                // links.  That requires eBPF though, since the hash value is only present for
+                // eBPF programs (see <https://github.com/torvalds/linux/blob/master/net/core/sock_reuseport.c#L595-L598>).
+                // (`[SKF_AD_RXHASH]` just reads as 0!)
+                let prog = &[
+                    // [0] load ZPI and packet type
+                    sf {
+                        code: LD | H | ABS,
+                        jt: 0,
+                        jf: 0,
+                        k: 0,
+                    },
+                    // [1] if packet is encrypted, or packet is non-flow, fall back to hash
+                    sf {
+                        code: JMP | JSET | K,
+                        jt: 3,
+                        jf: 0,
+                        k: ((zpr::ZPI_ENCRYPTED_HEADER_FLAG as u32) << 8)
+                            | ZDP_PACKET_TYPE_NON_FLOW_FLAG as u32,
+                    },
+                    // [2] load stream ID
+                    sf {
+                        code: LD | W | ABS,
+                        jt: 0,
+                        jf: 0,
+                        k: (size_of::<ZdpZpiHeader>()
+                            + size_of::<ZdpBaseHeader>()
+                            + offset_of!(ZdpPerFlowHeader, stream_id))
+                            as u32,
+                    },
+                    // [3] modulo # of queues
+                    sf {
+                        code: ALU | MOD | K,
+                        jt: 0,
+                        jf: 0,
+                        k: substrate_socket_count,
+                    },
+                    // [4] return as selected queue #
+                    sf {
+                        code: RET | A,
+                        jt: 0,
+                        jf: 0,
+                        k: 0,
+                    },
+                    // [5] return huge value to force fallback to hash-based steering
+                    sf {
+                        code: RET | K,
+                        jt: 0,
+                        jf: 0,
+                        k: u32::MAX,
+                    },
+                ];
+
+                match sockets[0].attach_reuse_port_cbpf(prog) {
+                    Ok(()) => (),
+                    Err(err) => warn!("Unable to enable ingress packet steering: {err}"),
+                }
+            }
+
             let sockets = sockets.leak();
 
             let agent_input = AgentInput::new(tun_devs.iter());

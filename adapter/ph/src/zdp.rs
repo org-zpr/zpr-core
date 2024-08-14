@@ -47,9 +47,11 @@ pub enum ZdpPacketType {
     Report = 145,
 }
 
+pub const ZDP_PACKET_TYPE_NON_FLOW_FLAG: u8 = 0x80;
+
 impl ZdpPacketType {
     pub fn is_per_flow(self) -> bool {
-        self.0 < 128
+        self.0 & ZDP_PACKET_TYPE_NON_FLOW_FLAG == 0
     }
 
     pub fn is_response(self) -> bool {

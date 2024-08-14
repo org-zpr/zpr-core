@@ -12,6 +12,7 @@ clap = { version = "4.5.7", features = ["derive"] }
 crossbeam-epoch = { version = "0.9.18", optional = true }
 enum-map = { version = "2.7.3" }
 hdrhistogram = { version = "7.5.4" }
+libc = { version = "0.2.155" }
 open-enum = { version = "0.5.1" }
 openssl-sys = { version = "0.9.102" }
 openssl = { version = "0.10.64" }
