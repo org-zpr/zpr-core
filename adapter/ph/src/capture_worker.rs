@@ -63,6 +63,7 @@ async fn worker<'pktbuf>(
 ) {
     let mut messages = Vec::new();
 
+    // Batch accepts values from capture queue and writes them to the savefile
     while let _count @ 1.. = queue.recv_many(&mut messages, config.batch_size).await {
         let mut locked_mutex = asm.capture_worker.inner_cap.lock().await;
         match &mut locked_mutex.savefile {
