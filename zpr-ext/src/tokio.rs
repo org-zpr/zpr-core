@@ -62,7 +62,6 @@ pub mod net {
         use crate::std::os::unix::net::{AncillaryData, SocketAncillary};
         use std::fs::File;
         use std::io::Read;
-        use std::os::fd::{AsRawFd, FromRawFd};
         use tokio::net::UnixStream;
         use tokio::{task, time};
 
@@ -87,7 +86,7 @@ pub mod net {
                     3
                 );
 
-                let mut messages = ancillary_out.messages();
+                let mut messages = ancillary_out.into_messages();
 
                 let fds: Vec<_> = match messages.next().unwrap().unwrap() {
                     AncillaryData::ScmRights(fds) => fds.collect(),
@@ -95,13 +94,15 @@ pub mod net {
                 };
                 assert!(fds.len() == 1);
 
-                let mut buf = 123u8;
-                unsafe { File::from_raw_fd(fds[0]) }
-                    .read_exact(std::slice::from_mut(&mut buf))
-                    .unwrap();
-                assert_eq!(buf, 0u8);
-
                 assert!(messages.next().is_none());
+
+                for fd in fds {
+                    let mut buf = 123u8;
+                    File::from(fd.try_into_owned().unwrap())
+                        .read_exact(std::slice::from_mut(&mut buf))
+                        .unwrap();
+                    assert_eq!(buf, 0u8);
+                }
             });
 
             time::sleep(std::time::Duration::from_secs(1)).await;
@@ -109,7 +110,7 @@ pub mod net {
             let data_in = &[1u8, 2u8, 3u8];
             let mut ancillary_in_buf = [0u8; 256];
             let mut ancillary_in = SocketAncillary::new(&mut ancillary_in_buf);
-            ancillary_in.add_fds(&[zero_file.as_raw_fd()]);
+            ancillary_in.add_fds(&[zero_file.as_fd()]);
             assert_eq!(
                 unix_stream_send_vectored_with_ancillary(
                     &s1,

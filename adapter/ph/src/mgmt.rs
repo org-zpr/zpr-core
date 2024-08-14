@@ -61,7 +61,7 @@ pub async fn send_report<'pktbuf>(
     link_id: zpr::LinkId,
     report: &str,
 ) {
-    // this condition will need to be adjusted when we have complete ZPR packets
+    // TODO this condition will need to be adjusted when we have complete ZPR packets
     // with the information at the end of the packet at well
     if packet::PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < report.len() {
         return;

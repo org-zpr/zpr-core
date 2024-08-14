@@ -1,7 +1,7 @@
-// Tool to help debug PH
-// Note: at this moment the program can only handle one-word commands, so
-// when a command is multiple words, this program assumes the spaces are replaced
-// with a '-' on the command line
+//! Tool to help debug PH
+//! Note: at this moment the program can only handle one-word commands, so
+//! when a command is multiple words, this program assumes the spaces are replaced
+//! with a '-' on the command line
 
 use cbpf_rs;
 use clap::Parser;
@@ -15,8 +15,12 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 
+const NUM_COUNTERS: usize = 23;
+
 #[derive(Parser, Debug)]
 #[command(version, about = "This program controls the RPC calls to the ZPR Packet Handler", long_about = None)]
+/// Two help messages when running the program, -h gives succinct information, --help gives
+/// list of all the commands
 struct Args {
     #[arg(
         short,
@@ -43,7 +47,7 @@ struct Args {
     duration: u64,
 
     #[arg(long, default_value_t = 1)]
-    frequency: u64,
+    frequency: u64, // TODO make another argument, I don't like that in WATCH freq is how many seconds to wait between samples, whereas in PERF-SAMPLE it's samples per second
 
     #[arg(long, default_value = "cap_file.txt")]
     file_path: String,
@@ -74,7 +78,7 @@ fn main() -> std::io::Result<()> {
         "PERF-SAMPLE\n" => handle_perf_sample(args.duration, args.frequency, &port)?,
         "SET-CAPTURE\n" => handle_set_capture(args.file_path, &port)?,
         "CAPTURE-SEQUENCE\n" => {
-            capture_sequence(args.file_path, args.duration, args.program, &port)?
+            handle_capture_sequence(args.file_path, args.duration, args.program, &port)?
         }
         "SET-CAPTURE-PROGRAM\n" => handle_set_capture_program(args.program, &port)?,
         _ => {
@@ -85,12 +89,12 @@ fn main() -> std::io::Result<()> {
     Ok(())
 }
 
-// Handles basic call and response command where all the program has to do
-// is write one command to the PH and await a response
-// Opens and closes UnixStream
-//
-// TODO could rewrite this to return a string, then print in handle_commands
-// also could use in handle_watch - however would lose error checking capabilities
+/// Handles basic call and response with the rpc_worker in the ph. Sends a string
+/// to the specified port, reads and prints the response
+/// Opens and closes UnixStream
+/// Can be used directly in main for commands that don't have to send any additional data
+/// with the command, and can be invoked in helper functions for commands that require
+/// extra information to be send once a string with all the information to be sent is created.
 fn basic_call_response(comm: &str, port: &str) -> std::io::Result<()> {
     let stream = &mut UnixStream::connect(port).unwrap();
     stream.write_all(comm.as_bytes())?;
@@ -102,12 +106,13 @@ fn basic_call_response(comm: &str, port: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-// Performs actions associated with watch command, repeatedly opens UnixStream to make
-// connection with PH, requests COUNTERS data, and prints the differences
-fn handle_watch(time: u64, port: &str) -> std::io::Result<()> {
-    println!("time {}", time);
-    let mut values: [u64; 6] = [0; 6];
-    let sleep_time = Duration::new(time, 0);
+/// Repeatedly opens UnixStream to make connection with PH, requests COUNTERS data,
+/// and prints the differences
+/// Requires how many seconds to wait between samples
+// TODO should we also be handling ctrl+c in this function?
+fn handle_watch(frequency: u64, port: &str) -> std::io::Result<()> {
+    let mut values: [u64; NUM_COUNTERS] = [0; NUM_COUNTERS];
+    let sleep_time = Duration::new(frequency, 0);
 
     loop {
         let stream = &mut UnixStream::connect(port).unwrap();
@@ -122,7 +127,7 @@ fn handle_watch(time: u64, port: &str) -> std::io::Result<()> {
         let counts: Vec<&str> = response.split('\n').collect(); // Split the messages
 
         // TODO error checking, make sure actually got a message back, and that it's the correct message
-        for n in 1..7 {
+        for n in 1..=NUM_COUNTERS {
             // split up the individual lines to get the count from the end and convert to u64
             let one_line: Vec<&str> = counts[n].split(':').collect();
             let mut num: String = one_line[1].to_string();
@@ -156,7 +161,7 @@ fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn capture_sequence(
+fn handle_capture_sequence(
     file_path: String,
     time: u64,
     program: Option<String>,
@@ -168,6 +173,7 @@ fn capture_sequence(
 
     let handler = Arc::new(CtrlcHandle::new());
     let ctrlc_handler = handler.clone();
+    // Will set wait to false in CtrlcHandler if ctrl+c is pressed
     ctrlc::set_handler(move || ctrlc_handler.set_false()).unwrap();
     handler.timed_wait(sleep_time);
 
@@ -177,7 +183,12 @@ fn capture_sequence(
     Ok(())
 }
 
+/// Converts capture program into serialized format so that the RPC worker doesn't
+/// need to use the pcap library, and can just have knowledge of the serialized
+/// format and use exclusively cbpf-rs
 fn handle_set_capture_program(program: Option<String>, port: &str) -> std::io::Result<()> {
+    // Ensures that a program has properly been provided before sending message because
+    // there is no default program
     match program {
         Some(program) => {
             let serialized_program = serialize(&program);
@@ -190,6 +201,9 @@ fn handle_set_capture_program(program: Option<String>, port: &str) -> std::io::R
     Ok(())
 }
 
+/// Uses combination of pcap and cbpf-rs libraries to serialize program
+/// into the following format:
+/// <number of instructions>,code1 jt1 jf1 k1,code2 jt2 jf2 k2,...,coden jtn jfn kn
 fn serialize(program: &str) -> String {
     use std::fmt::Write;
 
@@ -206,7 +220,7 @@ fn serialize(program: &str) -> String {
             insn.code, insn.jt, insn.jf, insn.k
         );
     }
-    let _ = serialized_program.pop();
+    let _ = serialized_program.pop(); // removes trailing comma at end of string
     serialized_program
 }
 
@@ -228,6 +242,8 @@ impl CtrlcHandle {
         self.cv.notify_one();
     }
 
+    // Waits for a specified duration, but the timeout can be interrupted if wait becomes
+    // false
     pub fn timed_wait(&self, dur: Duration) -> bool {
         let (mut guard, _) = self
             .cv

@@ -1,5 +1,5 @@
-// Implement counter type. Uses Atomic values, ensuring saftey for values in
-// multi-thread environment.
+//! Implement counter type. Uses Atomic values, ensuring saftey for values in
+//! multi-thread environment.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 

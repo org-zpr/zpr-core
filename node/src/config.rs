@@ -16,6 +16,8 @@ pub struct Configuration {
 
     creds: Creds,
 
+    dock: Dock,
+
     claims: toml::Table,
 }
 
@@ -23,6 +25,12 @@ pub struct Configuration {
 struct Creds {
     certificate: String, // this nodes signed certificate file
     private_key: String, // this nodes private key file
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct Dock {
+    enabled: bool,
+    listen_address: String, // dock listen address, "host:port"
 }
 
 impl Configuration {
@@ -53,6 +61,14 @@ impl Configuration {
     pub fn get_node_addr(&self) -> IpAddr {
         self.node_addr
             .expect("node address not set in Configuration") // This fair panic since the address is required in load_configuration
+    }
+
+    pub fn is_dock_enabled(&self) -> bool {
+        self.dock.enabled
+    }
+
+    pub fn get_dock_listen_addr(&self) -> &str {
+        &self.dock.listen_address
     }
 }
 
@@ -162,6 +178,10 @@ mod test {
             [creds]
             certificate = "foo-cert.pem"
             private_key = "foo-key.pem"
+
+            [dock]
+            enabled = false
+            listen_address = "0.0.0.0:5000"
 
             [claims]
             "zpr.addr" = "fc00:3001::1"

@@ -12,10 +12,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_tun::TunBuilder;
 
-#[allow(unused_imports)]
-#[macro_use]
-extern crate arrayref;
-
 mod agent_output_worker;
 mod assembly;
 mod buffer_stack;

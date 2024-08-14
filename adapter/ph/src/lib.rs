@@ -14,6 +14,7 @@ pub mod counters_enum;
 pub mod defs;
 pub mod fastpath;
 pub mod flow_control;
+pub mod km;
 pub mod mgmt;
 pub mod mgmt_processor_worker;
 pub mod net_defs;

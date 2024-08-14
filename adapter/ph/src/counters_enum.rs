@@ -1,5 +1,5 @@
-// Allows for easy access to name of each counter as well as index in
-// counters array
+//! Allows for easy access to name of each counter as well as index in
+//! counters array
 
 use enum_map::Enum;
 use std::fmt;

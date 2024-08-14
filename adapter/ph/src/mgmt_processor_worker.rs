@@ -42,6 +42,8 @@ async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf
     let packet_type = base_hdr.packet_type;
 
     if packet_type.is_response() {
+        // Gets the designated sender, attempts to send the response, if not drops
+        // the packet and increments corresponding counter
         let channel = asm.sync_req_state.get_sender();
         match channel {
             Some(channel) => match channel.send((pkt, packet_type)) {
