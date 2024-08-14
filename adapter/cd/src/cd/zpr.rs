@@ -315,6 +315,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             [dock]
             host_or_ip = "localhost"
             port = 2242
+            noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
             [adapter]
             certificate = "@CERT"
             private_key = "@KEY"
@@ -352,6 +353,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             [dock]
             host_or_ip = "localhost"
             port = 2242
+            noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
             [adapter]
             certificate = "@CERT"
             private_key = "@KEY"
@@ -398,6 +400,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             [dock]
             host_or_ip = "localhost"
             port = 2242
+            noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
             [adapter]
             certificate = "@CERT"
             private_key = "@KEY"
@@ -432,6 +435,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             [dock]
             host_or_ip = "another.localhost"
             port = 2243
+            noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
             [adapter]
             certificate = "@CERT"
             private_key = "@KEY"
@@ -476,6 +480,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             [dock]
             host_or_ip = "localhost"
             port = 2242
+            noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
             [adapter]
             certificate = "@CERT"
             private_key = "@KEY"

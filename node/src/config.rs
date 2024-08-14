@@ -206,6 +206,7 @@ mod test {
             [creds]
             certificate = "foo-cert.pem"
             private_key = "foo-key.pem"
+            noise_private_key = "AB2eP6zV7ve0A4eQgNVNXlAM2q0rYerCPXFMl+/ntUw="
 
             [dock]
             enabled = false
