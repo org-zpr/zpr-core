@@ -101,10 +101,17 @@ impl From<std::io::Error> for KMError {
 pub type KMResult<T> = Result<T, KMError>;
 
 
+
+/// Signals emitted by the KeyManager (see the [KeyManager::start] method).
 #[derive(Debug)]
 pub enum KMSignal {
+    /// After [KeyManagerStateMachine::reset] is called.
     Reset,
+
+    /// If the state machine transitions into the error state.
     Error,
+
+    /// When the SA_ID changes.
     SaIdChange{ old: zpr::SaId, new: zpr::SaId },
 }
 

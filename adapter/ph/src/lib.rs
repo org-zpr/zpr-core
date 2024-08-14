@@ -15,6 +15,7 @@ pub mod defs;
 pub mod fastpath;
 pub mod flow_control;
 pub mod km;
+pub mod km_demo;
 pub mod km_noise;
 pub mod km_xor;
 pub mod mgmt;

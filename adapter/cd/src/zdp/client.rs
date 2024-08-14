@@ -14,21 +14,12 @@ use ph::km_noise::KMNoise;
 use ph::packet::Packet;
 use ph::config;
 use ph::zdp::*;
-use ph::zpr;
+use ph::km_demo;
 
 use zerocopy::FromBytes;
 use bytes::BufMut;
 
 
-const HEADROOM: usize = 128;
-
-
-
-const ZDP_KM_HDR_OFFSET: usize = ZDP_NON_PER_FLOW_MGMT_HEADER_OFFSET;
-const ZDP_KM_DATA_OFFSET: usize = ZDP_KM_HDR_OFFSET + std::mem::size_of::<ZdpKeyManagementHeader>();
-
-const ZDP_REPORT_HDR_OFFSET: usize = ZDP_NON_PER_FLOW_MGMT_HEADER_OFFSET;
-const ZDP_REPORT_DATA_OFFSET: usize = ZDP_REPORT_HDR_OFFSET + std::mem::size_of::<ZdpReportHeader>();
 
 
 #[derive(Debug, Clone)]
@@ -89,21 +80,8 @@ impl ZDPClient {
                         KMSignal::SaIdChange { old, new } => {
                             if old == 0 && new > 0 {
                                 info!("zdp/client - new SA established");
-                                let mut pkt = Packet::new(&mut buf, 128);
-
-                                let message = b"hello to you my dear node!";
-                                let mlen = message.len() as u16;
-                                let report_hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
-                                report_hdr.report_data_length =  mlen.into();
-
-                                let zdp_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
-                                zdp_hdr.packet_type = ZdpPacketType::Report;
-                                zdp_hdr.excess_length =  0;
-                                zdp_hdr.sequence_number = 0.into();
-
-                                // Do not at ZPI here, the SA_ID is added there by KM.
-
-                                pkt.put(&message[..]);
+                                let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
+                                let mut pkt = km_demo::build_zdp_report_packet(&mut pkt_buf, b"hello to you my dear node!");
                                 match mgr.encrypt_transport(&mut pkt) {
                                     Ok(()) => {
                                         match s_send.send(&pkt.body()).await {
@@ -134,18 +112,7 @@ impl ZDPClient {
                     //   len: u16
                     //   PAYLOAD (from KM)
                     let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
-                    let mut pkt = Packet::new(&mut pkt_buf, HEADROOM);
-                    pkt.put(&km_buf[..]);
-
-                    let km_hdr = pkt.alloc_zeroed_header::<ZdpKeyManagementHeader>();
-                    km_hdr.message_type = zpr::KM_ID_NOISE.into();
-                    km_hdr.message_length = (km_buf.len() as u16).into();
-
-                    let zdp_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
-                    zdp_hdr.packet_type = ZdpPacketType::KeyManagement;
-
-                    pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 0;
-
+                    let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &km_buf);
                     match s_send.send(pkt.body()).await {
                         Ok(sz) => {
                             info!("zdp/client - sent {} byte KM message", sz);
@@ -171,32 +138,15 @@ impl ZDPClient {
                             let zpi_hdr = zpi_hdr.unwrap();
                             match zpi_hdr.zpi {
                                 0 => {
-                                    let zdp_hdr = ZdpBaseHeader::ref_from_prefix(&buf[ZDP_BASE_HEADER_OFFSET..]);
-                                    if zdp_hdr.is_none() {
-                                        info!("zdp/server - error parsing ZDP header from ZPI=0 message");
-                                        continue;
-                                    }
-                                    let zdp_hdr = zdp_hdr.unwrap();
-                                    if zdp_hdr.packet_type != ZdpPacketType::KeyManagement {
-                                        info!("zdp/server - expected KM packet, got {:?}", zdp_hdr.packet_type);
-                                        continue;
-                                    }
-                                    let km_hdr = ZdpKeyManagementHeader::ref_from_prefix(&buf[ZDP_KM_HDR_OFFSET..]);
-                                    if km_hdr.is_none() {
-                                        info!("zdp/server - error parsing KM header from ZPI=0 message");
-                                        continue;
-                                    }
-                                    let km_hdr = km_hdr.unwrap();
-                                    if !km_hdr.is_noise() {
-                                        info!("zdp/server - expected NOISE KM message, got {:?}", km_hdr.message_type.get());
-                                        continue;
-                                    }
-                                    let km_msg_len = usize::from(km_hdr.message_length);
-                                    if input_len < ZDP_KM_DATA_OFFSET + km_msg_len {
-                                        info!("zdp/server - KM message truncated: expected {} got {}", ZDP_KM_DATA_OFFSET + km_msg_len, input_len);
-                                        continue;
-                                    }
-                                    match mgr.handle_km_message(&buf[ZDP_KM_DATA_OFFSET..ZDP_KM_DATA_OFFSET+km_msg_len]).await {
+                                    info!("zdp/client - received ZPI=0 message");
+                                    let km_payload = match km_demo::parse_km_payload(&buf) {
+                                        Ok(p) => p,
+                                        Err(e) => {
+                                            info!("zdp/client - parse_km_payload failed: {}", e);
+                                            continue;
+                                        }
+                                    };
+                                    match mgr.handle_km_message(km_payload).await {
                                         Ok(()) => {},
                                         Err(e) => {
                                             info!("zdp/client - handle_km_message failed: {}", e);
@@ -206,7 +156,7 @@ impl ZDPClient {
                                 _ => {
                                     info!("zdp/client - received transport message");
                                     let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
-                                    let mut pkt = Packet::new(&mut pkt_buf, HEADROOM);
+                                    let mut pkt = Packet::new(&mut pkt_buf, km_demo::HEADROOM);
                                     pkt.put(&buf[0..input_len]);
                                     match mgr.decrypt_transport(&mut pkt) {
                                         Ok(()) => {
@@ -215,42 +165,15 @@ impl ZDPClient {
                                             //     [BASE HEADER type = report]
                                             //     [REPORT HEADER]
                                             //     <STRING DATA>
-                                            let zpi_hdr = ZdpZpiHeader::ref_from_prefix(&pkt.body());
-                                            if zpi_hdr.is_none() {
-                                                info!("zdp/server - error parsing ZPI header from decrypted payload");
-                                                continue;
-                                            }
-                                            let zdp_hdr = ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..]);
-                                            if zdp_hdr.is_none() {
-                                                info!("zdp/server - error parsing ZDP header from decrypted payload");
-                                                continue;
-                                            }
-                                            let zdp_hdr = zdp_hdr.unwrap();
-                                            if zdp_hdr.packet_type != ZdpPacketType::Report {
-                                                info!("zdp/server - expected REPORT packet, got {:?}", zdp_hdr.packet_type);
-                                                continue;
-                                            }
-                                            let report_hdr = ZdpReportHeader::ref_from_prefix(&pkt.body()[ZDP_REPORT_HDR_OFFSET..]);
-                                            if report_hdr.is_none() {
-                                                info!("zdp/server - error parsing REPORT header from decrypted payload");
-                                                continue;
-                                            }
-                                            let report_hdr = report_hdr.unwrap();
-                                            let strlen = usize::from(report_hdr.report_data_length);
-                                            if ZDP_REPORT_DATA_OFFSET + strlen > pkt.body().len() {
-                                                info!("zdp/server - report data length exceeds packet length");
-                                                continue;
-                                            }
-                                            match std::str::from_utf8(&pkt.body()[ZDP_REPORT_DATA_OFFSET..ZDP_REPORT_DATA_OFFSET+strlen]) {
+                                            match km_demo::parse_zdp_report_pkt(&pkt) {
                                                 Ok(s) => {
-                                                    info!("zdp/server - received report: *** {} ***", s);
+                                                    info!("zdp/client - received report: *** {} ***", s);
                                                 }
                                                 Err(e) => {
-                                                    info!("zdp/server - error parsing report data: {:?}", e);
+                                                    info!("zdp/client - error parsing report: {}", e);
                                                 }
-                                            };
+                                            }
                                         }
-
                                         Err(e) => {
                                             info!("zdp/client - decrypt_transport failed: {}", e);
                                         }
@@ -269,5 +192,3 @@ impl ZDPClient {
         Ok(())
     }
 }
-
-
