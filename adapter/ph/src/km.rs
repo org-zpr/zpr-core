@@ -205,8 +205,7 @@ impl KeyManager<'_> {
             return Err(KMError::InvalidState);
         }
         if state.sa_id == 0 {
-            // programming error
-            panic!("SA_ID is zero");
+            return Err(KMError::SaIdZero);
         }
 
         // The assumption here is that caller has already built in space of any padding required by key manager protocol.
