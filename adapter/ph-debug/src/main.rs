@@ -127,13 +127,11 @@ fn handle_watch(frequency: u64, port: &str) -> std::io::Result<()> {
         let counts: Vec<&str> = response.split('\n').collect(); // Split the messages
 
         if first_run {
-            for _n in &counts[1..] {
-                values.push(0);
-            }
+            values.resize(counts.len(), 0);
         }
+
         // TODO error checking, make sure actually got a message back, and that it's the correct message
-        let mut n = 0;
-        for count in &counts[1..] {
+        for (n, count) in counts[1..].iter().enumerate() {
             // split up the individual lines to get the count from the end and convert to u64
             let one_line: Vec<&str> = count.split(':').collect();
             if one_line[0] == "OK" {
@@ -148,7 +146,6 @@ fn handle_watch(frequency: u64, port: &str) -> std::io::Result<()> {
 
             println!("{} increased by: {}", one_line[0], difference);
             values[n] = num_packets; // store new packet counts
-            n += 1;
         }
 
         first_run = false;
