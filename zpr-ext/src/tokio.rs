@@ -25,25 +25,29 @@ pub mod net {
 
         #[cfg(any(doc, target_os = "android", target_os = "linux"))]
         fn attach_reuse_port_cbpf(&self, filter: &[libc::sock_filter]) -> io::Result<()> {
-            unsafe {
-                let fprog = libc::sock_fprog {
-                    len: filter.len() as u16,
-                    filter: filter.as_ptr() as *mut _,
-                };
+            let fprog = libc::sock_fprog {
+                len: filter.len() as u16,
+                filter: filter.as_ptr().cast_mut(),
+            };
 
-                let res = libc::setsockopt(
+            let fprog_ptr = (&fprog as *const libc::sock_fprog).cast();
+            let fprog_size = std::mem::size_of_val(&fprog) as libc::socklen_t;
+
+            // SAFETY: `fprog_ptr` and `fprog_size` are of the appropriate type for SOL_SOCKET:SO_ATTACH_REUSEPORT_CBPF
+            let res = unsafe {
+                libc::setsockopt(
                     self.as_raw_fd(),
                     libc::SOL_SOCKET,
                     libc::SO_ATTACH_REUSEPORT_CBPF,
-                    (&fprog as *const libc::sock_fprog).cast(),
-                    std::mem::size_of_val(&fprog) as libc::socklen_t,
-                );
+                    fprog_ptr,
+                    fprog_size,
+                )
+            };
 
-                if res < 0 {
-                    Err(io::Error::last_os_error())
-                } else {
-                    Ok(())
-                }
+            if res < 0 {
+                Err(io::Error::last_os_error())
+            } else {
+                Ok(())
             }
         }
     }
