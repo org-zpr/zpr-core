@@ -10,3 +10,4 @@ clap = { version = "4.5.7", features = ["derive"] }
 ctrlc = { version = "3.4.4" }
 pcap = { version = "2.0.0" }
 cbpf-rs = { path = "../../cbpf-rs", features = ['pcap'] }
+zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }

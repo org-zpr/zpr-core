@@ -237,6 +237,25 @@ pub fn decrypt<'pktbuf>(
     }
 }
 
+fn substrate_egress_common<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+    zpi: zpr::Zpi,
+    pkt: &mut Packet<'pktbuf>,
+) {
+    // TODO: should we add ZDP header here also??
+
+    encap_zpi(asm, link_id, zpi, pkt);
+
+    maybe_capture(asm, Direction::Outbound, pkt);
+
+    encrypt(asm, link_id, pkt);
+
+    if link_id != zpr::ADAPTER_DOCKING_SESSION_ID {
+        todo!("link routing");
+    }
+}
+
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
 /// The ZPI header will be added to the packet.
 pub fn substrate_egress<'pktbuf>(
@@ -245,27 +264,40 @@ pub fn substrate_egress<'pktbuf>(
     zpi: zpr::Zpi,
     mut pkt: Packet<'pktbuf>,
 ) {
-    // TODO: should we add ZDP header here also??
+    substrate_egress_common(asm, link_id, zpi, &mut pkt);
 
-    encap_zpi(asm, link_id, zpi, &mut pkt);
+    let dest_sa = asm.peer_addr; // TEMP HACK
 
-    maybe_capture(asm, Direction::Outbound, &mut pkt);
-
-    encrypt(asm, link_id, &mut pkt);
-
-    if link_id != zpr::ADAPTER_DOCKING_SESSION_ID {
-        todo!("link routing");
-    }
-
-    match asm
-        .substrate_egress
-        .try_enqueue_packet(drop_guard(pkt, |p| {
-            drop_and_count(asm, p, CounterType::OutPacksSent)
-        })) {
+    match asm.substrate_egress.try_enqueue_packet(
+        drop_guard(pkt, |p| drop_and_count(asm, p, CounterType::OutPacksSent)),
+        dest_sa,
+    ) {
         Ok(()) => (),
         Err(TryEnqueueError::Full(pkt)) => {
             drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr)
         }
+    }
+}
+
+/// A blocking/async version of `substrate_egress()`, for management path use.
+/// Useful to ensure fairness under high load.
+pub async fn substrate_egress_blocking<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+    zpi: zpr::Zpi,
+    mut pkt: Packet<'pktbuf>,
+) {
+    substrate_egress_common(asm, link_id, zpi, &mut pkt);
+
+    match asm
+        .substrate_egress
+        .enqueue_packet(drop_guard(pkt, |p| {
+            drop_and_count(asm, p, CounterType::OutPacksSent)
+        }))
+        .await
+    {
+        Ok(()) => (),
+        Err(pkt) => drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr),
     }
 }
 
