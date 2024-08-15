@@ -1,4 +1,10 @@
 //! This module contains all state of a packet which is moving through the system.
+//!
+//! A [Packet] is a lightweight wrapper around a byte buffer. Creator of the packet
+//! is responsible for allocating the buffer and keeping it around for as long as
+//! the packet is needed.
+//!
+//! For example usags, see the [Packet] documentation.
 
 use crate::config;
 use crate::net_defs::*;
@@ -8,22 +14,114 @@ use zerocopy::{AsBytes, ByteOrder, FromBytes, FromZeroes, NetworkEndian};
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes};
 use zpr_ext::std::mem::DropGuard;
 
-/** Exclusive handle to an in-use packet buffer.
- *
- * Via this handle, a buffer is divided into four sections in this order:
- *
- * - metadata
- * - headroom
- * - packet body
- * - tailroom
- *
- * Metadata is of a fixed size and contains information about the
- * buffer layout itself, as well as packet classification data.
- *
- * The packet body resides between headroom and tailroom.  It can be
- * extended into either of these, but not beyond.  The size of these
- * is defined when the `Packet` handle is created.
- */
+/// Exclusive handle to an in-use packet buffer.
+///
+/// Via this handle, a buffer is divided into four sections in this order:
+///
+/// - metadata
+/// - headroom
+/// - packet body
+/// - tailroom
+///
+/// *Metadata* is of a fixed size and may contain information about the
+/// buffer layout itself, as well as packet classification data. Access is
+/// via the [Packet::metadata] series of functions. Note that the metadata
+/// properties must be set manually. See, for example the [crate::classifier] module
+/// which takes a [Packet] and sets various metadata fields.
+///
+/// *Headroom* is space in the buffer which is set aside when the packet
+/// is created (see [Packet::new]). It is useful for when you need to slap headers or other
+/// front matter onto the packet.  Use the `alloc_*` series of functions to
+/// push strucutres onto the packet body by taking bytes from the headroom.
+///
+/// The packet *body* resides between headroom and tailroom.  It can be
+/// extended into either of these, but not beyond.  The size of these
+/// is defined when the `Packet` handle is created.
+///
+/// Note that a packet is [bytes::BufMut] (among other things) so you can use the
+/// `put` method on Packet to append data to the packet body. Note that to get
+/// this (and other interesting) functionality you must have the correct traits in
+/// scope.
+///
+///
+/// # Examples
+///
+/// Read ZDP data from a socket, put it in a packet:
+///
+///```
+/// use ph::{packet, config};
+/// use bytes::BufMut;
+///
+///
+/// // Read from socket:
+/// let mut sock_buf = [0u8; 4096];
+/// let (read_len, source_addr) = sock.recv_from(&mut sock_buf)?;
+///
+/// // We need a backing byte buffer for the packet.
+/// let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
+///
+/// // Create the packet. Since we are reading this packet with
+/// // full (ZDP) headers already on it and we don't plan on pushing
+/// // anything on to the front, we don't need any headroom so
+/// // we set it to 0.
+/// let mut pkt = packet::Packet::new(&mut pkt_buf, 0);
+///
+/// // Write (copy) the received data into the packet.
+/// pkt.put(&sock_buf[..read_len]);
+///```
+///
+///
+/// Create a ZDP report message in a packet and send it out a socket:
+///
+/// ```
+/// use ph:packet;
+/// use zdp::*;
+///
+/// use bytes::BufMut;
+/// use zerocopy::FromBytes;
+///
+///
+/// // We need a backing byte buffer for the packet.
+/// let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
+///
+/// // Create the packet. Reserve 128 bytes for adding headers.
+/// let mut pkt = packet::Packet::new(&mut pkt_buf, 128);
+///
+/// let payload = b"here is a payload";
+///
+/// // Write the payload to the packet body.
+/// pkt.put(&payload);
+///
+/// // Now we add the headers. We work backwards from the inner-most header
+/// // to the outer-most.  In our case we want the final packet to look
+/// // like this:
+/// //
+/// //  [ ZpiHeader ] | [ ZdpHeader ] | [ ZdpReportHeader ] | [ payload ]
+/// //  (outer)                                     (inner)
+/// //
+/// // So we start with the ZdpReportHeader.
+///
+/// // Take sizeof(ZdpReportHeader) bytes from the headroom. The
+/// // return value from the alloc call here is a *mutable* reference
+/// // to the header structure that writes directly into the buffer.
+/// let report_hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
+/// let msg_len = payload.len() as u16;///
+/// report_hdr.report_data_length = mlen.into();
+///
+/// // Next the ZdpHeader. No need to set values that are zero since
+/// // the `alloc` function returns zero'd memory.
+/// let zdp_hdr = pkt.alloc_zeroed_header::<ZdpHeader>();
+/// zdp_hdr.packet_type = ZdpPacketType::Report;
+/// zdp_hdr.sequence_number = 22.into();
+///
+/// // Finally the ZpiHeader
+/// let zpi_hdr = pkt.alloc_zeroed_header::<ZpiHeader>().zpi = 5;
+///
+/// // Packet is ready, so send it out the socket. Calling `body()` now
+/// // returns a slice of the buffer starting at the last header we
+/// // pushed, which is our ZpiHeader.
+/// let sent_len = sock.send(&pkt.body())?;
+/// ```
 
 pub struct Packet<'buf> {
     buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE],
