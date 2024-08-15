@@ -49,9 +49,14 @@ use zpr_ext::std::mem::DropGuard;
 /// Read ZDP data from a socket, put it in a packet:
 ///
 ///```
+/// use std::net::UdpSocket;
+///
 /// use ph::{packet, config};
 /// use bytes::BufMut;
 ///
+/// fn reader() -> std::io::Result<()> {
+///
+/// let sock = UdpSocket::bind("0.0.0.0:31337")?;
 ///
 /// // Read from socket:
 /// let mut sock_buf = [0u8; 4096];
@@ -68,18 +73,26 @@ use zpr_ext::std::mem::DropGuard;
 ///
 /// // Write (copy) the received data into the packet.
 /// pkt.put(&sock_buf[..read_len]);
+/// Ok(())
+/// }
 ///```
 ///
 ///
 /// Create a ZDP report message in a packet and send it out a socket:
 ///
 /// ```
-/// use ph:packet;
-/// use zdp::*;
+/// use std::net::UdpSocket;
+///
+/// use ph::packet;
+/// use ph::zdp::*;
+/// use ph::config;
 ///
 /// use bytes::BufMut;
 /// use zerocopy::FromBytes;
 ///
+///
+/// fn writer() -> std::io::Result<()> {
+/// let sock = UdpSocket::bind("0.0.0.0:31337")?;
 ///
 /// // We need a backing byte buffer for the packet.
 /// let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
@@ -90,14 +103,14 @@ use zpr_ext::std::mem::DropGuard;
 /// let payload = b"here is a payload";
 ///
 /// // Write the payload to the packet body.
-/// pkt.put(&payload);
+/// pkt.put(&payload[..]);
 ///
 /// // Now we add the headers. We work backwards from the inner-most header
 /// // to the outer-most.  In our case we want the final packet to look
 /// // like this:
 /// //
-/// //  [ ZpiHeader ] | [ ZdpHeader ] | [ ZdpReportHeader ] | [ payload ]
-/// //  (outer)                                     (inner)
+/// //  [ ZdpZpiHeader ] | [ ZdpBaseHeader ] | [ ZdpReportHeader ] | [ payload ]
+/// //   (outer)                                          (inner)
 /// //
 /// // So we start with the ZdpReportHeader.
 ///
@@ -105,22 +118,24 @@ use zpr_ext::std::mem::DropGuard;
 /// // return value from the alloc call here is a *mutable* reference
 /// // to the header structure that writes directly into the buffer.
 /// let report_hdr = pkt.alloc_zeroed_header::<ZdpReportHeader>();
-/// let msg_len = payload.len() as u16;///
-/// report_hdr.report_data_length = mlen.into();
+/// let msg_len = payload.len() as u16;
+/// report_hdr.report_data_length = msg_len.into();
 ///
 /// // Next the ZdpHeader. No need to set values that are zero since
 /// // the `alloc` function returns zero'd memory.
-/// let zdp_hdr = pkt.alloc_zeroed_header::<ZdpHeader>();
+/// let zdp_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
 /// zdp_hdr.packet_type = ZdpPacketType::Report;
 /// zdp_hdr.sequence_number = 22.into();
 ///
 /// // Finally the ZpiHeader
-/// let zpi_hdr = pkt.alloc_zeroed_header::<ZpiHeader>().zpi = 5;
+/// let zpi_hdr = pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 5;
 ///
 /// // Packet is ready, so send it out the socket. Calling `body()` now
 /// // returns a slice of the buffer starting at the last header we
 /// // pushed, which is our ZpiHeader.
-/// let sent_len = sock.send(&pkt.body())?;
+/// let _ = sock.send(&pkt.body())?;
+/// Ok(())
+/// }
 /// ```
 
 pub struct Packet<'buf> {
