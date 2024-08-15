@@ -3,6 +3,7 @@
 //! To avoid excess parsing, the command must not have spaces
 
 use crate::assembly::Assembly;
+use crate::config;
 use crate::test_packet::TestPacketMetrics;
 use cbpf_rs;
 use core::future::Future;
@@ -10,13 +11,16 @@ use hdrhistogram::Histogram;
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
-use std::path::Path;
+use std::io::IoSliceMut;
 use std::time::{Duration, Instant};
+use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
+use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
+use zpr_ext::tokio::net::*;
 
 async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
     let mut set = JoinSet::<Result<(), Error>>::new();
@@ -97,15 +101,29 @@ async fn handle_connection(
                 _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
             },
             // SET-CAPTURE <file_path>
-            "SET-CAPTURE" => match vec_message.len() {
-                2 => {
-                    buf_writer
-                        .write_all(set_capture(asm, vec_message[1]).await.as_bytes())
-                        .await?;
-                    buf_writer.write_all("OK\n".as_bytes()).await?
-                }
-                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
-            },
+            "SET-CAPTURE" => {
+                // Tell debug tool we're ready for the ancillary data
+                buf_writer.write_all("SEND ANCILLARY\n".as_bytes()).await?;
+                buf_writer.flush().await?;
+
+                // Receive ancillary data
+                let mut ancillary_buffer = [0; config::ANCILLARY_BUFFER_SIZE];
+                let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
+                let mut buf = [0; 1]; // Must receive data sent with ancillary data
+                let bufs = &mut [IoSliceMut::new(&mut buf)][..];
+                unix_stream_recv_vectored_with_ancillary(
+                    buf_reader.into_inner().as_ref(),
+                    bufs,
+                    &mut ancillary,
+                )
+                .await?;
+
+                // Set capture file using ancillary data
+                buf_writer
+                    .write_all(set_capture(asm, ancillary).await.as_bytes())
+                    .await?;
+                buf_writer.write_all("OK\n".as_bytes()).await?
+            }
             "FLUSH-CAPTURE" => {
                 buf_writer
                     .write_all(flush_capture(asm).await.as_bytes())
@@ -313,11 +331,26 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
     values
 }
 
-async fn set_capture(asm: &Assembly<'_>, path_str: &str) -> String {
-    let path = Path::new(path_str);
-    match asm.capture_worker.open_capture_file(path).await {
-        Ok(()) => format!("Capture file opened at {}\n", path_str),
-        Err(err) => format!("Error opening Capture file {}: {}\n", path_str, err),
+async fn set_capture(asm: &Assembly<'_>, ancillary: SocketAncillary<'_>) -> String {
+    // Get the ancillary data
+    let anc_message = ancillary.into_messages().nth(0).unwrap();
+    // Get the SCM rights from the ancillary data
+    if let AncillaryData::ScmRights(mut scm_rights) = anc_message.unwrap() {
+        // See if there's actually data in the scm_rights, if yes try to open a
+        // capture file, otherwise report failure to open file
+        match scm_rights.nth(0) {
+            Some(fd) => {
+                let std_file = std::fs::File::from(fd.try_into_owned().unwrap()); // tokio::fs::File doesn't implement From<OwnedFd>
+                let tokio_file = File::from(std_file);
+                match asm.capture_worker.open_capture_file(tokio_file).await {
+                    Ok(()) => format!("Capture file opened\n"),
+                    Err(err) => format!("Error opening Capture file: {}\n", err),
+                }
+            }
+            None => format!("Error opening Capture file: no ancillary data received\n"),
+        }
+    } else {
+        format!("Error opening Capture file: no ancillary data received\n")
     }
 }
 

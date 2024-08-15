@@ -8,6 +8,8 @@ use tokio::net::UdpSocket;
 
 #[derive(Copy, Clone)]
 pub struct Config {
+    #[allow(dead_code)]
+    pub worker_index: usize,
     pub batch_size: usize,
 }
 

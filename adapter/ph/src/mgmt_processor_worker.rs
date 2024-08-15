@@ -98,7 +98,8 @@ async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf
                     zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
                     ZdpPacketType::HelloResponse,
                     send_pkt,
-                );
+                )
+                .await;
                 eprintln!("Received HelloRequest");
             }
             packet_type => panic!("unhandled inbound packet type {}", packet_type.0),

@@ -3,7 +3,6 @@
 use crate::assembly::Assembly;
 use crate::config;
 use crate::fastpath;
-use crate::mgmt;
 use crate::packet::{self, Packet};
 use crate::zdp;
 use crate::zpr;
@@ -11,7 +10,7 @@ use bytes::BufMut;
 
 /// Send a unidirectional non-flow management message on the given link.
 /// The packet should contain only the message body.
-pub fn send_non_flow_mgmt<'pktbuf>(
+pub async fn send_non_flow_mgmt<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
@@ -22,17 +21,18 @@ pub fn send_non_flow_mgmt<'pktbuf>(
     let hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
     hdr.packet_type = packet_type;
 
-    fastpath::substrate_egress(
+    fastpath::substrate_egress_blocking(
         asm,
         link_id,
         zpr::ZPI_0, // TODO
         packet,
-    );
+    )
+    .await;
 }
 
 /// Send a unidirectional per-flow management message on the given link.
 /// The packet should contain only the message body.
-pub fn send_per_flow_mgmt<'pktbuf>(
+pub async fn send_per_flow_mgmt<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
@@ -47,15 +47,20 @@ pub fn send_per_flow_mgmt<'pktbuf>(
     let hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
     hdr.packet_type = packet_type;
 
-    fastpath::substrate_egress(
+    fastpath::substrate_egress_blocking(
         asm,
         link_id,
         zpr::ZPI_0, // TODO
         packet,
-    );
+    )
+    .await;
 }
 
-pub async fn send_report<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId, report: &str) {
+pub async fn send_report<'pktbuf>(
+    asm: &'pktbuf Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+    report: &str,
+) {
     // TODO this condition will need to be adjusted when we have complete ZPR packets
     // with the information at the end of the packet at well
     if packet::PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < report.len() {
@@ -66,11 +71,11 @@ pub async fn send_report<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId,
     let hdr = pkt.alloc_zeroed_header::<zdp::ZdpReportHeader>();
     hdr.report_data_length = (report.len() as u16).into();
     pkt.put(report.as_bytes());
-    send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Report, pkt);
+    send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Report, pkt).await;
 }
 
-pub async fn send_discard<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId) {
+pub async fn send_discard<'pktbuf>(asm: &'pktbuf Assembly<'pktbuf>, link_id: zpr::LinkId) {
     let buf = asm.buffer_stack.get_buffer().await;
     let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
-    mgmt::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt);
+    send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
 }

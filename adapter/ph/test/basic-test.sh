@@ -65,8 +65,8 @@ function create_network() {
 
   # TUN devices
 
-  sudo ip -n zpr-a tuntap add name tun0 mode tun user "$ZPR_USER"
-  sudo ip -n zpr-b tuntap add name tun0 mode tun user "$ZPR_USER"
+  sudo ip -n zpr-a tuntap add name tun0 mode tun user "$ZPR_USER" multi_queue
+  sudo ip -n zpr-b tuntap add name tun0 mode tun user "$ZPR_USER" multi_queue
 
   sudo ip -n zpr-a addr add "$A_ZPR_ADDR" peer "$B_ZPR_ADDR" dev tun0
   sudo ip -n zpr-b addr add "$B_ZPR_ADDR" peer "$A_ZPR_ADDR" dev tun0

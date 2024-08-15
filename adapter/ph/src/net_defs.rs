@@ -1,5 +1,6 @@
 //! Standard network constants.
 
+use arrayref::array_ref;
 use zerocopy::FromZeroes;
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, KnownLayout, Unaligned};
 

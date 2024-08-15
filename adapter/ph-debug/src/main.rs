@@ -8,14 +8,17 @@ use clap::Parser;
 use ctrlc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
+use std::fs::OpenOptions;
 use std::io::prelude::*;
+use std::io::{BufReader, Error, IoSlice};
 use std::net::Shutdown;
+use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
-
-const NUM_COUNTERS: usize = 23;
+use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
+const ANCILLARY_BUFFER_SIZE: usize = 128;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "This program controls the RPC calls to the ZPR Packet Handler", long_about = None)]
@@ -107,12 +110,14 @@ fn basic_call_response(comm: &str, port: &str) -> std::io::Result<()> {
 }
 
 /// Repeatedly opens UnixStream to make connection with PH, requests COUNTERS data,
-/// and prints the differences
+/// and prints the differences between the counts currently and the counts at the
+/// last sample
 /// Requires how many seconds to wait between samples
 // TODO should we also be handling ctrl+c in this function?
 fn handle_watch(frequency: u64, port: &str) -> std::io::Result<()> {
-    let mut values: [u64; NUM_COUNTERS] = [0; NUM_COUNTERS];
+    let mut values: Vec<u64> = Vec::new();
     let sleep_time = Duration::new(frequency, 0);
+    let mut first_run = true;
 
     loop {
         let stream = &mut UnixStream::connect(port).unwrap();
@@ -126,21 +131,29 @@ fn handle_watch(frequency: u64, port: &str) -> std::io::Result<()> {
         // with each line as a different index of the vector
         let counts: Vec<&str> = response.split('\n').collect(); // Split the messages
 
+        if first_run {
+            values.resize(counts.len(), 0);
+        }
+
         // TODO error checking, make sure actually got a message back, and that it's the correct message
-        for n in 1..=NUM_COUNTERS {
+        for (n, count) in counts[1..].iter().enumerate() {
             // split up the individual lines to get the count from the end and convert to u64
-            let one_line: Vec<&str> = counts[n].split(':').collect();
+            let one_line: Vec<&str> = count.split(':').collect();
+            if one_line[0] == "OK" {
+                break;
+            }
             let mut num: String = one_line[1].to_string();
             num.remove(0);
             let num_packets: u64 = num.parse().unwrap();
 
-            // calculate difference
-            let difference = num_packets - values[n - 1];
+            // calculate difference between current pkt nums and previous pkt nums
+            let difference = num_packets - values[n];
 
             println!("{} increased by: {}", one_line[0], difference);
-            values[n - 1] = num_packets; // store new packet counts
+            values[n] = num_packets; // store new packet counts
         }
 
+        first_run = false;
         sleep(sleep_time);
     }
 }
@@ -154,9 +167,44 @@ fn handle_perf_sample(duration: u64, frequency: u64, port: &str) -> std::io::Res
 }
 
 fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
-    let command = format!("SET-CAPTURE {}\n", file_path);
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(file_path)
+        .unwrap();
 
-    basic_call_response(&command, port)?;
+    let mut ancillary_buffer = [0; ANCILLARY_BUFFER_SIZE];
+    let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
+    ancillary.add_fds(&[file.as_fd()]);
+
+    let buf = [1; 1]; // Must send some data with the ancillary data
+    let bufs = &mut [IoSlice::new(&buf)];
+
+    // Establish connection with RPC worker, send command
+    let stream = &mut UnixStream::connect(port).unwrap();
+    stream.write_all("SET-CAPTURE\n".as_bytes())?;
+    stream.flush()?;
+
+    // Receive response from RPC worker, ensure that it sent the correct response and
+    // is expecting the file descriptor
+    let mut confirmation = String::new();
+    let mut buf_reader = BufReader::new(stream.try_clone().unwrap());
+    buf_reader.read_line(&mut confirmation)?;
+    buf_reader.read_line(&mut confirmation)?;
+    if confirmation != "Message Received\nSEND ANCILLARY\n" {
+        return Err(Error::other("Incorrect Message Received"));
+    }
+    confirmation.pop(); // Removes \n at end of message, simply makes output look nicer
+    println!("{confirmation}");
+
+    // Create fd, ancillary buffer, data buffer, and send ancillary data
+    #[allow(unstable_name_collisions)]
+    stream.send_vectored_with_ancillary(bufs, &mut ancillary)?;
+
+    // Read response from
+    let mut response = String::new();
+    stream.read_to_string(&mut response)?; // Read rest of response
+    println!("{response}");
 
     Ok(())
 }
