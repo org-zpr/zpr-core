@@ -4,7 +4,7 @@
 //! is responsible for allocating the buffer and keeping it around for as long as
 //! the packet is needed.
 //!
-//! For example usags, see the [Packet] documentation.
+//! For usage examples see the [Packet] documentation.
 
 use crate::config;
 use crate::net_defs::*;
@@ -38,7 +38,7 @@ use zpr_ext::std::mem::DropGuard;
 /// extended into either of these, but not beyond.  The size of these
 /// is defined when the `Packet` handle is created.
 ///
-/// Note that a packet is [bytes::BufMut] (among other things) so you can use the
+/// Note that a packet is [bytes::BufMut] and [bytes::Buf] so, for example, you can use the
 /// `put` method on Packet to append data to the packet body. Note that to get
 /// this (and other interesting) functionality you must have the correct traits in
 /// scope.
@@ -62,7 +62,8 @@ use zpr_ext::std::mem::DropGuard;
 ///     let mut sock_buf = [0u8; 4096];
 ///     let (read_len, source_addr) = sock.recv_from(&mut sock_buf)?;
 ///
-///     // We need a backing byte buffer for the packet.
+///     // We need a backing byte buffer for the packet.  This would tupically be allocated
+///     // from a buffer pool.
 ///     let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
 ///
 ///     // Create the packet. Since we are reading this packet with
@@ -76,6 +77,10 @@ use zpr_ext::std::mem::DropGuard;
 ///     Ok(())
 /// }
 ///```
+///
+/// > Note that a [tokio::net::UdpSocket] does support writing into a [bytes::BufMut] directly,
+/// > so you can skip the intermediate buffer (`sock_buf` in the above example) and have the
+/// > socket write directly into a [Packet].
 ///
 ///
 /// Create a ZDP report message in a packet and send it out a socket:
