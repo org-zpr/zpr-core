@@ -151,10 +151,11 @@ impl<'a> SubstrateEgress<'a> {
     pub fn try_enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
         &self,
         packet: P,
+        dest_sa: std::net::SocketAddr,
     ) -> Result<(), TryEnqueueError<P>> {
         let socket = self.sockets[packet.flowhash() as usize % self.sockets.len()];
 
-        match socket.try_send(packet.body()) {
+        match socket.try_send_to(packet.body(), dest_sa) {
             Ok(_) => Ok(()),
 
             Err(err) => {

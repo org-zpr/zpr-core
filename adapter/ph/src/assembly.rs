@@ -58,6 +58,8 @@ pub struct Assembly<'pktbuf> {
     pub tun_ctl: TunCtl<'pktbuf>,
 
     pub sync_req_state: SyncReqState<'pktbuf>,
+
+    pub peer_addr: std::net::SocketAddr, // TEMP HACK
 }
 
 pub struct SyncReqState<'pktbuf> {

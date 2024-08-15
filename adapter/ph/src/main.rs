@@ -98,12 +98,13 @@ fn main() -> ExitCode {
     // sizes below which are all just double the batch size.  Performance
     // testing will inform us the correct values for these, which balance
     // throughput with service time.
+    let substrate_socket_count = 4;
     let substrate_ingress_batch_size = 8;
     let mgmt_processor_queue_size = 16;
     let agent_output_batch_size = 4;
     let capture_queue_size = 16;
     let capture_batch_size = 8;
-    let tun_queue_count = 1;
+    let tun_queue_count = 4;
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
@@ -155,18 +156,26 @@ fn main() -> ExitCode {
             let tun_ctl = tun_ctl::TunCtl::new(&tun_devs[0]);
 
             tun_ctl.set_carrier(false).unwrap();
-            let socket = Box::leak(Box::new(
-                UdpSocket::bind(self_addr)
-                    .await
-                    .expect("unable to bind to self addr"),
-            ));
-            socket
-                .connect(peer_addr)
-                .await
-                .expect("unable to connect to peer addr");
+
+            let mut sockets = Vec::new();
+            for _i in 0..substrate_socket_count {
+                let socket = socket2::Socket::new(
+                    socket2::Domain::for_address(self_addr),
+                    socket2::Type::DGRAM,
+                    None,
+                )
+                .unwrap();
+                socket.set_nonblocking(true).unwrap();
+                socket.set_reuse_port(true).unwrap();
+                socket
+                    .bind(&socket2::SockAddr::from(self_addr))
+                    .expect("unable to bind to self addr");
+                sockets.push(UdpSocket::from_std(socket.into()).unwrap());
+            }
+            let sockets = sockets.leak();
 
             let agent_input = AgentInput::new(tun_devs.iter());
-            let substrate_egress = SubstrateEgress::new([&*socket]);
+            let substrate_egress = SubstrateEgress::new(sockets.iter());
 
             let asm = Box::leak(Box::new(Assembly {
                 buffer_stack,
@@ -179,6 +188,7 @@ fn main() -> ExitCode {
                 counters,
                 tun_ctl,
                 sync_req_state,
+                peer_addr,
             }));
 
             // TODO signal handler goes here
@@ -213,9 +223,10 @@ fn main() -> ExitCode {
 
             js.spawn(mgmt_processor_worker::launch(&*asm, mp_outq));
 
-            for tun_dev in tun_devs.iter() {
+            for (worker_index, tun_dev) in tun_devs.iter().enumerate() {
                 js.spawn(agent_output_worker::launch(
                     &agent_output_worker::Config {
+                        worker_index,
                         batch_size: agent_output_batch_size,
                     },
                     &*asm,
@@ -237,13 +248,16 @@ fn main() -> ExitCode {
             eprintln!("Connected!"); // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
 
-            js.spawn(substrate_ingress_worker::launch(
-                &substrate_ingress_worker::Config {
-                    batch_size: substrate_ingress_batch_size,
-                },
-                &*asm,
-                &*socket,
-            ));
+            for (worker_index, socket) in sockets.iter().enumerate() {
+                js.spawn(substrate_ingress_worker::launch(
+                    &substrate_ingress_worker::Config {
+                        worker_index,
+                        batch_size: substrate_ingress_batch_size,
+                    },
+                    &*asm,
+                    socket,
+                ));
+            }
 
             mgmt::send_report(asm, zpr::ADAPTER_DOCKING_SESSION_ID, "Reporting for Duty!").await;
             mgmt::send_discard(asm, zpr::ADAPTER_DOCKING_SESSION_ID).await;
