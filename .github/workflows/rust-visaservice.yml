@@ -4,7 +4,9 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-
+    paths:
+      - visaservice/cli/**
+      
 env:
   CARGO_TERM_COLOR: always
 
