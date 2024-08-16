@@ -4,8 +4,6 @@ use std::hint::unreachable_unchecked;
 /// BPF compatibility version
 pub const VERSION: i32 = 199606;
 
-// TEMP COMMENT
-
 /// a single BPF instruction
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq)]
