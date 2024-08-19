@@ -4,7 +4,7 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
-    
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -20,7 +20,7 @@ jobs:
         cargo test --verbose
 
   cslab-format:
-    needs: [zpr-ext-build]
+    needs: [cslab-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -30,7 +30,7 @@ jobs:
         cargo fmt --check
 
   cslab-warnings:
-    needs: [zpr-ext-build]
+    needs: [cslab-build]
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
@@ -40,7 +40,7 @@ jobs:
         cargo rustc -- -D warnings
 
   cslab-test-warnings:
-    needs: [zpr-ext-build]
+    needs: [cslab-build]
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
