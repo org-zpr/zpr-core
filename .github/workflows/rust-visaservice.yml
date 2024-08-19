@@ -6,6 +6,7 @@ on:
   pull_request:
     paths:
       - visaservice/cli/**
+      - visaservice/thrift/**
       
 env:
   CARGO_TERM_COLOR: always

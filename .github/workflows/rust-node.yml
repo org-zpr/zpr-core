@@ -6,6 +6,9 @@ on:
   pull_request:
     paths: 
       - node/**
+      - visaservice/thrift/**
+      - adapter/ph/**
+      - zpr-ext/**
 
 env:
   CARGO_TERM_COLOR: always

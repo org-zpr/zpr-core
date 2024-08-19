@@ -10,6 +10,7 @@ on:
     paths:
       - visaservice/mods/**
       - visaservice/core/**
+      - visaservice/thrift/**
 
 jobs:
 

@@ -8,6 +8,7 @@ on:
       - adapter/ph/**
       - adapter/cd/**
       - adapter/ph-debug/**
+      - zpr-ext/**
 
 env:
   CARGO_TERM_COLOR: always
