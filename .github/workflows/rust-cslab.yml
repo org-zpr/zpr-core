@@ -1,0 +1,50 @@
+name: Rust-cslab
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cslab-build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build + test cbpf
+      run: |
+        cd cslab
+        cargo build --verbose
+        cargo test --verbose
+
+  cslab-format:
+    needs: [zpr-ext-build]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Check format
+      run: |
+        cd cslab
+        cargo fmt --check
+
+  cslab-warnings:
+    needs: [zpr-ext-build]
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check warnings
+      run: |
+        cd cslab
+        cargo rustc -- -D warnings
+
+  cslab-test-warnings:
+    needs: [zpr-ext-build]
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check test warnings
+      run: |
+        cd cslab
+        cargo rustc --tests -- -D warnings
