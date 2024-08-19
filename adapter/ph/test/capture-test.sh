@@ -116,7 +116,10 @@ function set_program() {
   FILE_NAME=$2
   PROGRAM=$3
   sudo "$PH_DEBUG_BIN" -c SET-CAPTURE -p "$SOCKET" --file-path "$FILE_NAME"
-  sudo "$PH_DEBUG_BIN" -c SET-CAPTURE-PROGRAM -p "$SOCKET" --program "$PROGRAM"
+
+  if [ "$PROGRAM" != "None" ]
+  then sudo "$PH_DEBUG_BIN" -c SET-CAPTURE-PROGRAM -p "$SOCKET" --program "$PROGRAM"
+  fi 
 }
 
 function close_program() {
@@ -206,7 +209,8 @@ stty sane || true
 # Run test
 #
 
-set_program "$A_ZPR_SOCK" cap_test1.txt 'link[0] == 1 || link[0] == 0'
+set_program "$A_ZPR_SOCK" cap_test1.pcap 'link[0] == 1 || link[0] == 0'
+set_program "$B_ZPR_SOCK" cap_test2.pcap None
 
 PASS=0
 if ! ping_test
@@ -214,11 +218,31 @@ then PASS=1
 fi
 
 close_program "$A_ZPR_SOCK"
+close_program "$B_ZPR_SOCK"
 
-vim cap_test1.txt
+# Make sure correct number of incoming packets were captured, either 23 or 24 depending 
+# on whether two hello requests are received
+sudo tcpdump -r cap_test1.pcap 'link[0] = 1' > checker1.txt
+HELLO_COUNT="$(grep -c '0x0000:  0100 8800 0000' checker1.txt)"
+PACKET_COUNT="$(grep -c '0x0000:  01' checker1.txt)"
+
+if [[ ("$PACKET_COUNT" != "23" || "$HELLO_COUNT" != "1") &&  ("$PACKET_COUNT" != "24" || "$HELLO_COUNT" != "2") ]]
+then PASS=1
+fi
+
+# Make sure no data was captured when program is not set
+SIZE="$(wc -c cap_test2.pcap | awk '{print $1}')"
+
+if [[ "$SIZE" != "0" ]]
+then PASS=1
+fi
+
 #
 # Cleanup
 #
+
+sudo rm cap_test1.pcap
+sudo rm cap_test2.pcap
 
 kill "${CHILDREN[@]}" 2> /dev/null || true
 sleep 1  # FIXME: let's do something better here
