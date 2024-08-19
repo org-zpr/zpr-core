@@ -253,6 +253,10 @@ impl<T> Drop for CslabStorage<T> {
     }
 }
 
+// SAFETY: `CslabStorage` is explicitly designed to be accessed between threads
+unsafe impl<T> Send for CslabStorage<T> {}
+unsafe impl<T> Sync for CslabStorage<T> {}
+
 fn get_impl<T>(storage: &CslabStorage<T>, idx: usize) -> Option<&T> {
     if idx >= storage.len() {
         return None;
@@ -571,7 +575,7 @@ mod tests {
 
 #[cfg(all(test, loom))]
 mod loom_tests {
-    // NOTE: `loom` (and the similar `shuttle` is VERY limited for testing
+    // NOTE: `loom` (and the similar `shuttle`) is VERY limited for testing
     // atomic interactions.  Notably, they assume that atomic operations
     // occur _in the order they are issued_, which means they don't test
     // _any_ reorderings in a single-writer/single-reader interaction.
@@ -635,12 +639,12 @@ mod loom_tests {
 // The design of `RcuCslab` is as follows.  The `RcuCslab` structure is the
 // "writer" interface.  It provides fully synchronized read-write access to
 // the slab.  Reader handles may be cloned from this.  Each reader handle is
-// associated (_n_-to-1) with a "generation" -- reads performed in a given
+// associated (n-to-1) with a "generation" -- reads performed in a given
 // generation definitively cannot see items removed prior to the creation of
 // the generation.  Generations are totally ordered.  New generations are
-// created explicitly by calling `.collect()` on the writer.  Removals are
-// finalized when the generation in which they were removed becomes
-// unreferenced.
+// created explicitly by calling `.schedule_finalization()` on the writer.
+// Removals are finalized when the generation in which they were removed
+// becomes unreferenced.
 //
 // Specifically, item removal proceeds as follows.  The writer may at any
 // time mark an item to be removed with the `.mark_removed()` method.  (The
@@ -722,7 +726,9 @@ pub struct RcuCslabReader<T> {
     // unsynchronized read access to the slab
     reader: CslabReader<T>,
 
-    // reference to the generation we were created in
+    // a reference to the generation we were created in; we don't actually
+    // use the value, but keeping this reference is necessary to maintain
+    // total ordering of generations
     gen: Arc<RcuCslabGen<T>>,
 }
 
@@ -751,6 +757,48 @@ impl<T> Clone for RcuCslabReader<T> {
 }
 
 /// An RCU-friendly concurrent slab.
+///
+/// Example usage, using a mutex instead of RCU:
+///
+/// ```
+/// use cslab::RcuCslab;
+/// use std::sync::{Arc, Mutex};
+///
+/// let mut slab = RcuCslab::with_fixed_capacity(10);
+/// let reader_box = Arc::new(Mutex::new(slab.reader()));
+///
+/// let reader_reader_box = reader_box.clone();
+/// std::thread::spawn(move ||
+///   //
+///   // READER
+///   //
+///
+///   for idx in 0..10 {
+///     let reader = reader_reader_box.lock().unwrap().clone();
+///      match reader.get(idx) {
+///        Some(value) => (),
+///        None => (),
+///      }
+///   }
+/// );
+///
+/// //
+/// // WRITER
+/// //
+///
+/// // insert an item
+/// let idx_a = slab.insert(123).unwrap();
+/// // simple way to remove a single item
+/// *reader_box.lock().unwrap() = slab.remove(idx_a);
+///
+/// // insert several items
+/// let idx_b = slab.insert(456).unwrap();
+/// let idx_c = slab.insert(789).unwrap();
+/// // more efficient way to remove several items at once
+/// slab.mark_removed(idx_b);
+/// slab.mark_removed(idx_c);
+/// *reader_box.lock().unwrap() = slab.schedule_finalization();
+/// ```
 pub struct RcuCslab<T> {
     // unsynchronized access to capacity
     capacity: usize,
@@ -907,7 +955,7 @@ impl<T> RcuCslab<T> {
 
     /// A convenience method for marking and scheduling finalization of a single item.
     ///
-    /// Returns a reader with which the removal is visible.  Once all references to
+    /// Returns a reader via which the removal is visible.  Once all references to
     /// older readers are dropped, finalization will occur immediately.
     pub fn remove(&mut self, idx: usize) -> RcuCslabReader<T> {
         self.mark_removed(idx);
