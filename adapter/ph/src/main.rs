@@ -34,6 +34,7 @@ mod net_defs;
 mod options;
 mod packet;
 mod pcap_writer;
+mod peer_table;
 mod queues;
 mod rcu;
 mod rpc_worker;
@@ -144,6 +145,11 @@ fn main() -> ExitCode {
     ssl_context_builder
         .add_client_ca(&X509::from_pem(&buffer).unwrap())
         .unwrap();*/
+
+    let peer_table = peer_table::PeerTable::new();
+    let adapter_docking_session_id = peer_table
+        .insert(peer_table::PeerState::new(peer_addr))
+        .unwrap();
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -263,7 +269,8 @@ fn main() -> ExitCode {
                 counters,
                 tun_ctl,
                 sync_req_state,
-                peer_addr,
+                peer_table,
+                adapter_docking_session_id,
             }));
 
             // TODO signal handler goes here
@@ -334,8 +341,8 @@ fn main() -> ExitCode {
                 ));
             }
 
-            mgmt::send_report(asm, zpr::ADAPTER_DOCKING_SESSION_ID, "Reporting for Duty!").await;
-            mgmt::send_discard(asm, zpr::ADAPTER_DOCKING_SESSION_ID).await;
+            mgmt::send_report(asm, asm.adapter_docking_session_id, "Reporting for Duty!").await;
+            mgmt::send_discard(asm, asm.adapter_docking_session_id).await;
             asm.send_hello_req().await;
 
             while let Some(res) = js.join_next().await {

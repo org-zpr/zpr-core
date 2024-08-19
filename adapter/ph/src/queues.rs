@@ -126,10 +126,11 @@ impl<'a> SubstrateEgress<'a> {
     pub async fn enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
         &self,
         packet: P,
+        dest_sa: std::net::SocketAddr,
     ) -> Result<(), P> {
         let socket = self.sockets[packet.flowhash() as usize % self.sockets.len()];
 
-        match socket.send(packet.body()).await {
+        match socket.send_to(packet.body(), dest_sa).await {
             Ok(_) => Ok(()),
 
             Err(err) => {

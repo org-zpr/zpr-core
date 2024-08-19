@@ -6,7 +6,6 @@ use crate::mgmt;
 use crate::packet::Packet;
 use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
-use crate::zpr;
 use bytes::Buf;
 use std::future::Future;
 use tokio::sync::mpsc;
@@ -95,7 +94,7 @@ async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf
                 hdr.status = 0;
                 mgmt::send_non_flow_mgmt(
                     asm,
-                    zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
+                    asm.adapter_docking_session_id, /* FIXME: parameterize */
                     ZdpPacketType::HelloResponse,
                     send_pkt,
                 )

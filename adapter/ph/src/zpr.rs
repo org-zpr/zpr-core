@@ -1,6 +1,9 @@
 //! ZPR concepts, excluding the ZDP protocol.
 #![allow(dead_code)]
 
+/// Substrate Address
+pub type SubstrateAddr = std::net::SocketAddr;
+
 /// ZPR Parameter Index
 pub type Zpi = u8;
 
@@ -18,10 +21,7 @@ pub type SaId = u8;
 pub type LinkId = u32;
 
 /// Link ID used to refer to a node or adapter's local agent.
-pub const AGENT_LINK_ID: LinkId = 0;
-
-/// Link ID used by an adapter to refer to its docking session.
-pub const ADAPTER_DOCKING_SESSION_ID: LinkId = 1;
+pub const AGENT_LINK_ID: LinkId = LinkId::MAX;
 
 /// Stream ID
 pub type StreamId = u32;

@@ -8,6 +8,7 @@ use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::net_defs;
 use crate::packet::Packet;
+use crate::peer_table::PeerState;
 use crate::queues::TryEnqueueError;
 use crate::zdp;
 use crate::zdp_ll;
@@ -242,7 +243,7 @@ fn substrate_egress_common<'pktbuf>(
     link_id: zpr::LinkId,
     zpi: zpr::Zpi,
     pkt: &mut Packet<'pktbuf>,
-) {
+) -> Option<zpr::SubstrateAddr> {
     // TODO: should we add ZDP header here also??
 
     encap_zpi(asm, link_id, zpi, pkt);
@@ -251,9 +252,8 @@ fn substrate_egress_common<'pktbuf>(
 
     encrypt(asm, link_id, pkt);
 
-    if link_id != zpr::ADAPTER_DOCKING_SESSION_ID {
-        todo!("link routing");
-    }
+    asm.peer_table
+        .inspect(link_id, |peer_state: &PeerState| peer_state.substrate_addr)
 }
 
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
@@ -264,9 +264,10 @@ pub fn substrate_egress<'pktbuf>(
     zpi: zpr::Zpi,
     mut pkt: Packet<'pktbuf>,
 ) {
-    substrate_egress_common(asm, link_id, zpi, &mut pkt);
-
-    let dest_sa = asm.peer_addr; // TEMP HACK
+    let Some(dest_sa) = substrate_egress_common(asm, link_id, zpi, &mut pkt) else {
+        drop_and_count(asm, pkt, CounterType::PeerRemoved);
+        return;
+    };
 
     match asm.substrate_egress.try_enqueue_packet(
         drop_guard(pkt, |p| drop_and_count(asm, p, CounterType::OutPacksSent)),
@@ -287,13 +288,17 @@ pub async fn substrate_egress_blocking<'pktbuf>(
     zpi: zpr::Zpi,
     mut pkt: Packet<'pktbuf>,
 ) {
-    substrate_egress_common(asm, link_id, zpi, &mut pkt);
+    let Some(dest_sa) = substrate_egress_common(asm, link_id, zpi, &mut pkt) else {
+        drop_and_count(asm, pkt, CounterType::PeerRemoved);
+        return;
+    };
 
     match asm
         .substrate_egress
-        .enqueue_packet(drop_guard(pkt, |p| {
-            drop_and_count(asm, p, CounterType::OutPacksSent)
-        }))
+        .enqueue_packet(
+            drop_guard(pkt, |p| drop_and_count(asm, p, CounterType::OutPacksSent)),
+            dest_sa,
+        )
         .await
     {
         Ok(()) => (),
@@ -304,13 +309,15 @@ pub async fn substrate_egress_blocking<'pktbuf>(
 /// Process packets ingressing from the specified SA.
 pub fn substrate_ingress<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    _peer_sa: &SocketAddr,
+    peer_sa: &SocketAddr,
     mut pkt: Packet<'pktbuf>,
 ) {
     asm.counters[CounterType::InPacksRec].increment();
 
-    // TODO: link routing
-    let link_id = zpr::ADAPTER_DOCKING_SESSION_ID;
+    let Some(link_id) = asm.peer_table.lookup_peer(peer_sa) else {
+        drop_and_count(asm, pkt, CounterType::UnknownPeer);
+        return;
+    };
 
     match decrypt(asm, link_id, &mut pkt) {
         Ok(()) => (),
@@ -397,24 +404,18 @@ pub fn forward<'pktbuf>(
     // TODO: node forwarding
 
     // adapter forwarding
-    match ingress_link_id {
-        zpr::AGENT_LINK_ID => {
-            // in from agent; out to dock
+    if ingress_link_id == zpr::AGENT_LINK_ID {
+        // in from agent; out to dock
 
-            let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
-            per_flow_hdr.stream_id = ingress_stream_id.into();
+        let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
+        per_flow_hdr.stream_id = ingress_stream_id.into();
 
-            let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
-            base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
+        let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+        base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
 
-            substrate_egress(asm, zpr::ADAPTER_DOCKING_SESSION_ID, zpr::ZPI_0, pkt);
-        }
-
-        zpr::ADAPTER_DOCKING_SESSION_ID => {
-            // in from dock; out to agent
-            agent_input(asm, ingress_stream_id, pkt);
-        }
-
-        _ => panic!("bad link ID"),
+        substrate_egress(asm, asm.adapter_docking_session_id, zpr::ZPI_0, pkt);
+    } else {
+        // in from dock; out to agent
+        agent_input(asm, ingress_stream_id, pkt);
     }
 }

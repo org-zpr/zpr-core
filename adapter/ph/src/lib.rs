@@ -1,7 +1,3 @@
-#[allow(unused_imports)]
-#[macro_use]
-extern crate arrayref;
-
 pub mod agent_output_worker;
 pub mod assembly;
 pub mod buffer_stack;
@@ -21,6 +17,7 @@ pub mod net_defs;
 pub mod options;
 pub mod packet;
 pub mod pcap_writer;
+pub mod peer_table;
 pub mod queues;
 pub mod rcu;
 pub mod rpc_worker;
