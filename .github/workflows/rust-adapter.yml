@@ -110,6 +110,8 @@ jobs:
       run: |
         cd adapter/ph
         cargo build
+        sudo apt update
+        sudo apt install libpcap-dev
         cargo build --manifest-path ../ph-debug/Cargo.toml
         test/capture-test.sh
 
