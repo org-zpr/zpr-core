@@ -110,6 +110,7 @@ jobs:
       run: |
         cd adapter/ph
         cargo build
+        cargo build --manifest-path ../ph-debug/Cargo.toml
         test/capture-test.sh
 
   ph-debug-build:
