@@ -7,6 +7,7 @@ pub const VERSION: i32 = 199606;
 /// a single BPF instruction
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BpfInsn {
     pub code: u16,
     pub jt: u8,
@@ -147,7 +148,16 @@ pub enum BpfError {
     DivideByZero,
 }
 
+#[derive(Debug)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub struct FuzzIn {
+    pub insn: Vec<BpfInsn>,
+    pub pkt: Vec<u8>,
+}
+
 /// a validated BPF program
+// #[derive(Debug)]
+// #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BpfProgram {
     insns: Box<[BpfInsn]>,
 }
