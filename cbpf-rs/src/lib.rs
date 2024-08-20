@@ -527,7 +527,10 @@ impl BpfProgram {
             }
         }
 
-        if !insns.last().is_some_and(|insn| code_class(insn.code) == RET) {
+        if !insns
+            .last()
+            .is_some_and(|insn| code_class(insn.code) == RET)
+        {
             return Err(BpfError::MissingReturn);
         }
 
