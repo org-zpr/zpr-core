@@ -1,5 +1,4 @@
 //! An RCU-friendly concurrent slab
-#[allow(unexpected_cfgs)]
 #[cfg(loom)]
 use loom::alloc::{self, Layout};
 #[cfg(not(loom))]
@@ -8,7 +7,6 @@ use std::alloc::{self, Layout};
 use std::cell::UnsafeCell;
 //#[cfg(loom)]
 //use loom::cell::UnsafeCell;
-#[allow(unexpected_cfgs)]
 #[cfg(loom)]
 use loom::sync;
 use std::mem::ManuallyDrop;
