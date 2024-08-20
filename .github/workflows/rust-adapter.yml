@@ -102,7 +102,7 @@ jobs:
         test/basic-test.sh
 
   ph-capture-test:
-    needs: [ph-build, ph-basic-test]
+    needs: [ph-build]
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
@@ -110,7 +110,7 @@ jobs:
       run: |
         cd adapter/ph
         cargo build
-        test/bacapturesic-test.sh
+        test/capture-test.sh
 
   ph-debug-build:
     runs-on: ubuntu-latest
