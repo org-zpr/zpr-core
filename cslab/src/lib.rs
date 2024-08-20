@@ -1,4 +1,5 @@
 //! An RCU-friendly concurrent slab
+#[allow(unexpected_cfgs)]
 
 #[cfg(loom)]
 use loom::alloc::{self, Layout};
