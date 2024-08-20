@@ -51,6 +51,10 @@ pub mod bpf_code {
     pub const H: u16 = 0x08;
     pub const B: u16 = 0x10;
 
+    pub fn valid_code_size(code_size: u16) -> bool {
+        code_size != 0x18
+    }
+
     pub fn code_mode(code: u16) -> u16 {
         code & 0xe0
     }
@@ -280,8 +284,9 @@ impl BpfProgram {
                 u16pat!(LD | MEM) => a = *unsafe { mem.get_unchecked(insn.k as usize) },
                 u16pat!(LDX | MEM) => x = *unsafe { mem.get_unchecked(insn.k as usize) },
 
-                u16pat!(ST) => *unsafe { mem.get_unchecked_mut(insn.k as usize) } = a,
-                u16pat!(STX) => *unsafe { mem.get_unchecked_mut(insn.k as usize) } = x,
+                // NOTE: libpcap is bugged here and doesn't look for MEM
+                u16pat!(ST | MEM) => *unsafe { mem.get_unchecked_mut(insn.k as usize) } = a,
+                u16pat!(STX | MEM) => *unsafe { mem.get_unchecked_mut(insn.k as usize) } = x,
 
                 u16pat!(JMP | JA) => {
                     /* deliberate wrapping for backwards jumps */
@@ -391,14 +396,38 @@ impl BpfProgram {
             }
 
             match code_class(insn.code) {
-                LD | LDX => match code_mode(insn.code) {
+                LD => match code_mode(insn.code) {
                     IMM | LEN => {
                         if code_size(insn.code) != W {
                             return Err(BpfError::InvalidInstruction);
                         }
                     }
 
-                    ABS | IND => (),
+                    ABS | IND => {
+                        if !valid_code_size(code_size(insn.code)) {
+                            return Err(BpfError::InvalidInstruction);
+                        }
+                    }
+
+                    MEM => {
+                        if code_size(insn.code) != W {
+                            return Err(BpfError::InvalidInstruction);
+                        }
+
+                        if insn.k as usize >= MEMWORDS {
+                            return Err(BpfError::BadMemoryAccess);
+                        }
+                    }
+
+                    _ => return Err(BpfError::InvalidInstruction),
+                },
+
+                LDX => match code_mode(insn.code) {
+                    IMM | LEN => {
+                        if code_size(insn.code) != W {
+                            return Err(BpfError::InvalidInstruction);
+                        }
+                    }
 
                     MSH => {
                         if code_size(insn.code) != B {
@@ -498,7 +527,7 @@ impl BpfProgram {
             }
         }
 
-        if !insns.last().is_some_and(|insn| insn.code == RET) {
+        if !insns.last().is_some_and(|insn| code_class(insn.code) == RET) {
             return Err(BpfError::MissingReturn);
         }
 
