@@ -9,7 +9,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Tests for cd
   cd-build:
     runs-on: ubuntu-latest
     steps:
@@ -50,7 +49,6 @@ jobs:
         cd adapter/cd
         cargo rustc --tests -- -D warnings
 
-  # Tests for ph
   ph-build:
     runs-on: ubuntu-latest
     steps:
@@ -92,7 +90,6 @@ jobs:
         cd adapter/ph
         cargo rustc --tests -- -D warnings
   
-  # Tests for ph-debug
   ph-debug-build:
     runs-on: ubuntu-latest
     steps:
@@ -136,7 +133,6 @@ jobs:
         sudo apt install libpcap-dev
         cd adapter/ph-debug && cargo rustc --tests -- -D warnings
 
-  # Integration tests
   basic-integration-test:
     needs: [ph-build]
     runs-on: ubuntu-latest
