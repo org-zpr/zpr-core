@@ -141,12 +141,16 @@ pub fn maybe_capture_batch<'a, 'pktbuf: 'a>(
                 }
 
                 None => {
+                    // remove direction indicator from beginning of packet
+                    pkt.advance(std::mem::size_of::<zdp_ll::ZdpLinkP2P>());
                     // No sense to try acquiring more buffers; exit the loop early.
                     break;
                 }
             }
         } else {
             num_filtered += 1;
+            // remove direction indicator from beginning of packet
+            pkt.advance(std::mem::size_of::<zdp_ll::ZdpLinkP2P>());
         }
     }
 

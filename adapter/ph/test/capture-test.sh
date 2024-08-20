@@ -36,7 +36,6 @@ function set_program() {
 
 function close_program() {
   SOCKET=$1
-  "$PH_DEBUG_BIN" -c DELETE-CAPTURE-PROGRAM -p "$SOCKET"
   "$PH_DEBUG_BIN" -c CLOSE-CAPTURE-FILE -p "$SOCKET"
 }
 
@@ -100,7 +99,7 @@ stty sane || true
 # Run test
 #
 
-set_program "$A_ZPR_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1 || link[0] == 0'
+set_program "$A_ZPR_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
 set_program "$B_ZPR_SOCK" "$TMPDIR/cap_test2.pcap" None
 
 PASS=0
@@ -113,9 +112,9 @@ close_program "$B_ZPR_SOCK"
 
 # Make sure correct number of incoming packets were captured, either 23 or 24 depending 
 # on whether two hello requests are received 
-tcpdump -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1' > "$TMPDIR/checker.pcap"
+tcpdump -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1 or link[0] == 0' > "$TMPDIR/checker.pcap"
 HELLO_COUNT="$(grep -c '0x0000:  0100 8800 0000' "$TMPDIR/checker.pcap")"
-PACKET_COUNT="$(grep -c '0x0000:  01' "$TMPDIR/checker.pcap")"
+PACKET_COUNT="$(grep -c '0x0000:  0' "$TMPDIR/checker.pcap")"
 
 if [[ ("$PACKET_COUNT" != "23" || "$HELLO_COUNT" != "1") &&  ("$PACKET_COUNT" != "24" || "$HELLO_COUNT" != "2") ]]
 then PASS=1
