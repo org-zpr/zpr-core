@@ -101,6 +101,17 @@ jobs:
         cargo build
         test/basic-test.sh
 
+  ph-capture-test:
+    needs: [ph-build, ph-basic-test]
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check test warnings
+      run: |
+        cd adapter/ph
+        cargo build
+        test/bacapturesic-test.sh
+
   ph-debug-build:
     runs-on: ubuntu-latest
     steps:
