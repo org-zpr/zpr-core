@@ -52,7 +52,7 @@ struct Args {
     #[arg(long, default_value_t = 1)]
     frequency: u64, // TODO make another argument, I don't like that in WATCH freq is how many seconds to wait between samples, whereas in PERF-SAMPLE it's samples per second
 
-    #[arg(long, default_value = "cap_file.txt")]
+    #[arg(long, default_value = "cap_file.pcap")]
     file_path: String,
 
     #[arg(
