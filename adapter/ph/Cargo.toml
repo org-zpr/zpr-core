@@ -18,7 +18,6 @@ libc = { version = "0.2.155" }
 open-enum = { version = "0.5.1" }
 openssl-sys = { version = "0.9.102" }
 openssl = { version = "0.10.64" }
-slab = { version = "0.4.9" }
 socket2 = { version = "0.5.7" }
 tokio-tun = { version = "0.11.5" }
 tokio-util = { version = "0.7.11", features = ["rt"] }

@@ -675,7 +675,6 @@ dependencies = [
  "open-enum",
  "openssl",
  "openssl-sys",
- "slab",
  "socket2",
  "tokio",
  "tokio-tun",
