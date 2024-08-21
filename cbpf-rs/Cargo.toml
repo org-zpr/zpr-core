@@ -12,3 +12,4 @@ pcap = { version = "2.0.0" }
 
 [features]
 pcap = ["dep:pcap"]
+arbitrary = ["dep:arbitrary"]

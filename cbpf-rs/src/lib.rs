@@ -148,16 +148,14 @@ pub enum BpfError {
     DivideByZero,
 }
 
-#[derive(Debug)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[cfg(feature = "arbitrary")]
+#[derive(arbitrary::Arbitrary, Debug)]
 pub struct FuzzIn {
     pub insn: Vec<BpfInsn>,
     pub pkt: Vec<u8>,
 }
 
 /// a validated BPF program
-// #[derive(Debug)]
-// #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct BpfProgram {
     insns: Box<[BpfInsn]>,
 }

@@ -11,10 +11,6 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 cbpf-rs = { path = "..", features = ["arbitrary"] }
 
-#[dependencies.cbpf-rs]
-#path = ".."
-#features = ["arbitrary"]
-
 [[bin]]
 name = "validate"
 path = "fuzz_targets/validate.rs"
