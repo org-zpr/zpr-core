@@ -9,6 +9,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Tests for cd
   cd-build:
     runs-on: ubuntu-latest
     steps:
@@ -49,6 +50,7 @@ jobs:
         cd adapter/cd
         cargo rustc --tests -- -D warnings
 
+  # Tests for ph
   ph-build:
     runs-on: ubuntu-latest
     steps:
@@ -89,18 +91,8 @@ jobs:
       run: | 
         cd adapter/ph
         cargo rustc --tests -- -D warnings
-
-  ph-basic-test:
-    needs: [ph-build]
-    runs-on: ubuntu-latest
-    steps: 
-    - uses: actions/checkout@v4
-    - name: Check test warnings
-      run: |
-        cd adapter/ph
-        cargo build
-        test/basic-test.sh
-
+  
+  # Tests for ph-debug
   ph-debug-build:
     runs-on: ubuntu-latest
     steps:
@@ -143,3 +135,29 @@ jobs:
         sudo apt update
         sudo apt install libpcap-dev
         cd adapter/ph-debug && cargo rustc --tests -- -D warnings
+
+  # Integration tests
+  basic-integration-test:
+    needs: [ph-build]
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check test warnings
+      run: |
+        cd adapter/ph
+        cargo build
+        test/basic-test.sh
+
+  capture-integration-test:
+    needs: [ph-build, ph-debug-build]
+    runs-on: ubuntu-latest
+    steps: 
+    - uses: actions/checkout@v4
+    - name: Check test warnings
+      run: |
+        cd adapter/ph
+        cargo build
+        sudo apt update
+        sudo apt install libpcap-dev
+        cargo build --manifest-path ../ph-debug/Cargo.toml
+        test/capture-test.sh
