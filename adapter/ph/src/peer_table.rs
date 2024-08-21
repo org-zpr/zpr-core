@@ -62,8 +62,9 @@ impl PeerTable {
             return;
         };
         self.sa_to_link.remove(&peer_state.substrate_addr);
-        self.peer_slab_reader
-            .write(peer_slab.remove(link_id as usize));
+        let new_reader = peer_slab.remove(link_id as usize);
+        std::mem::drop(peer_slab);
+        self.peer_slab_reader.write(new_reader);
     }
 
     pub fn inspect_sync<T>(
