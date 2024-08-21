@@ -10,6 +10,8 @@ bytes = { version = "1.7.1" }
 cbpf-rs = { path = "../../cbpf-rs" }
 clap = { version = "4.5.7", features = ["derive"] }
 crossbeam-epoch = { version = "0.9.18", optional = true }
+cslab = { path = "../../cslab" }
+dashmap = { version = "6.0.1" }
 enum-map = { version = "2.7.3" }
 hdrhistogram = { version = "7.5.4" }
 libc = { version = "0.2.155" }
