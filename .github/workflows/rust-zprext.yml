@@ -1,9 +1,11 @@
-name: Rust-cbpfrs
+name: Rust-zprext
 
 on:
   push:
     branches: [ "main" ]
   pull_request:
+    paths: 
+      - zpr-ext/**
 
 env:
   CARGO_TERM_COLOR: always

@@ -4,6 +4,13 @@ on:
   push:
     branches: [ "main" ]
   pull_request:
+    paths:
+      - adapter/ph/**
+      - adapter/cd/**
+      - adapter/ph-debug/**
+      - zpr-ext/**
+      - cslab/**
+      - cbpf-rs/**
 
 env:
   CARGO_TERM_COLOR: always
