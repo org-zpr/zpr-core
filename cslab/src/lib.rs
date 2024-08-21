@@ -1,4 +1,5 @@
 //! An RCU-friendly concurrent slab
+
 #[cfg(loom)]
 use loom::alloc::{self, Layout};
 #[cfg(not(loom))]
