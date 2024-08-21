@@ -13,9 +13,10 @@ use crate::zdp;
 use crate::zdp_ll;
 use crate::zpr;
 use bytes::{Buf, BufMut};
+use std::mem::size_of;
 use std::net::SocketAddr;
 use std::time::SystemTime;
-use zerocopy::FromBytes;
+use zerocopy::{AsBytes, FromBytes};
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
 
@@ -371,7 +372,8 @@ pub fn agent_input<'pktbuf>(
 
     // Add empty A2A SAID
     pkt.alloc_zeroed_header::<zdp::ZdpSaidHeader>();
-    pkt.put_u32(0);
+    let micv: zdp::ZdpMicvEnd = zdp::ZdpMicvEnd { micv: 0 };
+    pkt.put(micv.as_bytes());
 
     // send out decapsulated packet
     match asm.agent_input.try_enqueue_packet(drop_guard(pkt, |p| {

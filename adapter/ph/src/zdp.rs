@@ -126,7 +126,7 @@ pub struct ZdpSaidHeader {
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpMicvEnd {
-    pub mivc: u32,
+    pub micv: u32,
 }
 
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
