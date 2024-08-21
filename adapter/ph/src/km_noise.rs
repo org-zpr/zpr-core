@@ -31,7 +31,8 @@
 //!
 //! Note you can create noise keys with the `wg` command line tool on recent versions of linux.
 //! For example, to generate a private key: `wg genkey`.  Then you can pass that private key
-//! into `wg pubkey` to get the public key.
+//! into `wg pubkey` to get the public key.  You can also generate keys using `openssl`, eg
+//! `openssl genpkey -algorithm x25519`.
 
 use crate::km::*;
 use bytes::{Bytes, BytesMut};
