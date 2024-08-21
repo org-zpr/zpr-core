@@ -127,16 +127,13 @@ impl Zpr {
     }
 
     /// Returns noise public key for dock
-    pub fn copy_dock_noise_key(&self, name: &str, key_out: &mut [u8; 32]) -> bool {
+    pub fn copy_dock_noise_key(&self, name: &str) -> Option<[u8; 32]> {
         let state = self.shared.state.lock().unwrap();
-        if let Some(cfg) = state.configs.get(name) {
-            let (conf, _) = cfg;
-            let key = conf.get_dock_noise_public_key();
-            key_out.copy_from_slice(key);
-            return true;
-        } else {
-            return false;
-        }
+        let cfg = state.configs.get(name);
+        cfg?;
+        let (conf, _) = cfg.unwrap();
+        let key = conf.get_dock_noise_public_key();
+        Some(*key)
     }
 
     pub fn get_configuration_state(&self, name: &str) -> Option<ConfigState> {
