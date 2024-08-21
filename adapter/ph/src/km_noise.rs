@@ -35,6 +35,7 @@
 //! `openssl genpkey -algorithm x25519`.
 
 use crate::km::*;
+use crate::zpr;
 use bytes::{Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use std::time::Duration;
@@ -81,7 +82,7 @@ impl KMNoise {
         }
 
         let settings = KMSettings {
-            zdp_km_type: 2,
+            zdp_km_type: zpr::KM_ID_NOISE,
             padlen: NOISE_PADLEN,
             alignment: 0,
             tick_interval: Duration::from_millis(500),
