@@ -365,9 +365,13 @@ pub fn substrate_ingress<'pktbuf>(
 pub fn agent_input<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     _stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
-    pkt: Packet<'pktbuf>,
+    mut pkt: Packet<'pktbuf>,
 ) {
     // TODO: decompress
+
+    // Add empty A2A SAID
+    pkt.alloc_zeroed_header::<zdp::ZdpSaidHeader>();
+    pkt.put_u32(0);
 
     // send out decapsulated packet
     match asm.agent_input.try_enqueue_packet(drop_guard(pkt, |p| {
@@ -382,12 +386,13 @@ pub fn agent_input<'pktbuf>(
 
 /// Process uncompressed packet from the agent.
 /// The packet will be compressed, or trigger a Bind request.
-pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pktbuf>) {
+pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
     // TODO: lookup in ALT
     let stream_id = 0; // TODO: should we keep this in metadata? or as per-flow header?
 
     // TODO: compress
-
+    pkt.advance(size_of::<zdp::ZdpSaidHeader>());
+    pkt.shrink(size_of::<zdp::ZdpMicvEnd>());
     forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
 }
 

@@ -117,5 +117,17 @@ pub struct ZdpHelloResponseHeader {
     pub status: u16,
 }
 
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpSaidHeader {
+    pub a2a_said: u8,
+}
+
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpMicvEnd {
+    pub mivc: u32,
+}
+
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
 const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);
