@@ -100,8 +100,8 @@ async fn handle_connection(
                 }
                 _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
             },
-            // SET-CAPTURE <file_path>
-            "SET-CAPTURE" => {
+            // SET-CAPTURE-FILE <file_path>
+            "SET-CAPTURE-FILE" => {
                 // Tell debug tool we're ready for the ancillary data
                 buf_writer.write_all("SEND ANCILLARY\n".as_bytes()).await?;
                 buf_writer.flush().await?;
@@ -120,19 +120,19 @@ async fn handle_connection(
 
                 // Set capture file using ancillary data
                 buf_writer
-                    .write_all(set_capture(asm, ancillary).await.as_bytes())
+                    .write_all(set_capture_file(asm, ancillary).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "FLUSH-CAPTURE" => {
+            "FLUSH-CAPTURE-FILE" => {
                 buf_writer
-                    .write_all(flush_capture(asm).await.as_bytes())
+                    .write_all(flush_capture_file(asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "CLOSE-CAPTURE" => {
+            "CLOSE-CAPTURE-FILE" => {
                 buf_writer
-                    .write_all(close_capture(asm).await.as_bytes())
+                    .write_all(close_capture_file(asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
@@ -331,7 +331,7 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
     values
 }
 
-async fn set_capture(asm: &Assembly<'_>, ancillary: SocketAncillary<'_>) -> String {
+async fn set_capture_file(asm: &Assembly<'_>, ancillary: SocketAncillary<'_>) -> String {
     // Get the ancillary data
     let anc_message = ancillary.into_messages().nth(0).unwrap();
     // Get the SCM rights from the ancillary data
@@ -354,17 +354,17 @@ async fn set_capture(asm: &Assembly<'_>, ancillary: SocketAncillary<'_>) -> Stri
     }
 }
 
-async fn flush_capture(asm: &Assembly<'_>) -> String {
+async fn flush_capture_file(asm: &Assembly<'_>) -> String {
     let _ = asm.capture_worker.flush_capture_file().await;
 
     String::from("Capture file flushed\n")
 }
 
-async fn close_capture(asm: &Assembly<'_>) -> String {
+async fn close_capture_file(asm: &Assembly<'_>) -> String {
     let _ = asm.capture_worker.close_capture_file().await;
     asm.flow_control.delete_program();
 
-    String::from("Capture file closed\n")
+    String::from("Capture file closed and capture program deleted\n")
 }
 
 /// Expects the entire string message sent to RPC worker, including the command

@@ -1,52 +1,52 @@
-name: Rust-zprext
+name: Rust-cslab
 
 on:
   push:
     branches: [ "main" ]
   pull_request:
-    paths: 
-      - zpr-ext/**
+    paths:
+      - cslab/**
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  zpr-ext-build:
+  cslab-build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Build + test cbpf
       run: |
-        cd zpr-ext
+        cd cslab
         cargo build --verbose
         cargo test --verbose
 
-  zpr-ext-format:
-    needs: [zpr-ext-build]
+  cslab-format:
+    needs: [cslab-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
     - name: Check format
       run: |
-        cd zpr-ext
+        cd cslab
         cargo fmt --check
 
-  zpr-ext-warnings:
-    needs: [zpr-ext-build]
+  cslab-warnings:
+    needs: [cslab-build]
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
     - name: Check warnings
       run: |
-        cd zpr-ext
+        cd cslab
         cargo rustc -- -D warnings
 
-  zpr-ext-test-warnings:
-    needs: [zpr-ext-build]
+  cslab-test-warnings:
+    needs: [cslab-build]
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
       run: |
-        cd zpr-ext
+        cd cslab
         cargo rustc --tests -- -D warnings

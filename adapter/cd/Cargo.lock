@@ -164,7 +164,7 @@ checksum = "8318a53db07bb3f8dca91a600466bdb3f2eaadeedfdbcf02e1accbad9271ba50"
 
 [[package]]
 name = "cbpf-rs"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "cc"
@@ -748,9 +748,11 @@ dependencies = [
  "crossbeam-epoch",
  "enum-map",
  "hdrhistogram",
+ "libc",
  "open-enum",
  "openssl",
  "openssl-sys",
+ "socket2",
  "tokio",
  "tokio-tun",
  "tokio-util",
@@ -917,9 +919,9 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "socket2"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05ffd9c0a93b7543e062e759284fcf5f5e3b098501104bfbdde4d404db792871"
+checksum = "ce305eb0b4296696835b71df73eb912e0f1ffd2556a501fcede6e0c50349191c"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
@@ -1412,7 +1414,7 @@ dependencies = [
 
 [[package]]
 name = "zpr-ext"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytes",
  "libc",
