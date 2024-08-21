@@ -9,6 +9,8 @@ on:
       - visaservice/thrift/**
       - adapter/ph/**
       - zpr-ext/**
+      - cslab/**
+      - cbpf-rs/**
 
 env:
   CARGO_TERM_COLOR: always

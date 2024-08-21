@@ -9,6 +9,8 @@ on:
       - adapter/cd/**
       - adapter/ph-debug/**
       - zpr-ext/**
+      - cslab/**
+      - cbpf-rs/**
 
 env:
   CARGO_TERM_COLOR: always
