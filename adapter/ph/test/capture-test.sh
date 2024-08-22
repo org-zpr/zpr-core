@@ -133,7 +133,7 @@ fi
 
 sudo kill "${CHILDREN[@]}" 2> /dev/null || true
 sleep 1  # FIXME: let's do something better here
-stty sane
+stty sane || true
 
 #
 # Report status
