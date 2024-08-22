@@ -378,10 +378,9 @@ pub fn agent_input<'pktbuf>(
     // TODO: decompress
 
     // Add empty A2A SAID
-    pkt.alloc_zeroed_header::<zdp::ZdpSaidHeader>();
-    let micv: zdp::ZdpMicvEnd = zdp::ZdpMicvEnd { micv: 0 };
-    pkt.put(micv.as_bytes());
-
+    pkt.advance(size_of::<zdp::ZdpSaidHeader>());
+    pkt.shrink(size_of::<zdp::ZdpMicvEnd>());
+    // pkt.put_u32(0);
     // send out decapsulated packet
     match asm.agent_input.try_enqueue_packet(drop_guard(pkt, |p| {
         drop_and_count(asm, p, CounterType::InPacksSent)
@@ -400,8 +399,9 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) 
     let stream_id = 0; // TODO: should we keep this in metadata? or as per-flow header?
 
     // TODO: compress
-    pkt.advance(size_of::<zdp::ZdpSaidHeader>());
-    pkt.shrink(size_of::<zdp::ZdpMicvEnd>());
+    pkt.alloc_zeroed_header::<zdp::ZdpSaidHeader>().a2a_said = 0;
+    let micv: zdp::ZdpMicvEnd = zdp::ZdpMicvEnd { micv: 0 };
+    pkt.put(micv.as_bytes());
     forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
 }
 
