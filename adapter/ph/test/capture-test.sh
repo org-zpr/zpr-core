@@ -31,7 +31,7 @@ function set_program() {
 
   if [ "$PROGRAM" != "None" ]
   then "$PH_DEBUG_BIN" -c SET-CAPTURE-PROGRAM -p "$SOCKET" --program "$PROGRAM"
-  fi 
+  fi
 }
 
 function close_program() {
@@ -131,8 +131,9 @@ fi
 # Cleanup
 #
 
-kill "${CHILDREN[@]}" 2> /dev/null || true
+sudo kill "${CHILDREN[@]}" 2> /dev/null || true
 sleep 1  # FIXME: let's do something better here
+stty sane
 
 #
 # Report status

@@ -86,8 +86,9 @@ fi
 # Cleanup
 #
 
-kill "${CHILDREN[@]}" 2> /dev/null || true
+sudo kill "${CHILDREN[@]}" || true
 sleep 1  # FIXME: let's do something better here
+stty sane
 
 
 #
