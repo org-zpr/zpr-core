@@ -4,6 +4,7 @@
 //! This implies that all functions here must be non-async.
 
 use crate::assembly::Assembly;
+use crate::classifier::{self, ClassifierResult};
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::net_defs;
@@ -372,15 +373,30 @@ pub fn substrate_ingress<'pktbuf>(
 /// The packet will be decompressed according to the given stream ID.
 pub fn agent_input<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    _stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
+    stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
     mut pkt: Packet<'pktbuf>,
 ) {
-    // TODO: decompress
+    // lookup stream ID in DLT
+    if asm
+        .dlt
+        .inspect(stream_id, |pep| {
+            // decompress
+            if pep.compression_mode != 0 {
+                todo!("L4 compression");
+            }
 
-    // Add empty A2A SAID
+            // TODO
+        })
+        .is_none()
+    {
+        drop_and_count(asm, pkt, CounterType::UnknownStreamId);
+        return;
+    }
+
+    // "Check" A2A checksum
     pkt.advance(size_of::<zdp::ZdpSaidHeader>());
     pkt.shrink(size_of::<zdp::ZdpMicvEnd>());
-    // pkt.put_u32(0);
+
     // send out decapsulated packet
     match asm.agent_input.try_enqueue_packet(drop_guard(pkt, |p| {
         drop_and_count(asm, p, CounterType::InPacksSent)
@@ -395,14 +411,56 @@ pub fn agent_input<'pktbuf>(
 /// Process uncompressed packet from the agent.
 /// The packet will be compressed, or trigger a Bind request.
 pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
-    // TODO: lookup in ALT
-    let stream_id = 0; // TODO: should we keep this in metadata? or as per-flow header?
+    let classification = match classifier::classify(&mut pkt) {
+        Ok(cls) => cls,
+        Err(_why) => {
+            drop_and_count(asm, pkt, CounterType::InPacksDrop);
+            return;
+        }
+    };
 
-    // TODO: compress
-    pkt.alloc_zeroed_header::<zdp::ZdpSaidHeader>().a2a_said = 0;
-    let micv: zdp::ZdpMicvEnd = zdp::ZdpMicvEnd { micv: 0 };
-    pkt.put(micv.as_bytes());
-    forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
+    match classification {
+        ClassifierResult::OK | ClassifierResult::UnclassifiedL4 => (),
+
+        ClassifierResult::FirstFragment | ClassifierResult::SubsequentFragment => {
+            // TODO; handle fragments!
+            drop_and_count(asm, pkt, CounterType::InPacksDrop);
+            return;
+        }
+
+        ClassifierResult::NonIP => {
+            // should never happen; TUN doesn't deal in non-IP
+            drop_and_count(asm, pkt, CounterType::InPacksDrop);
+            return;
+        }
+    }
+
+    let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
+
+    match asm.alt.inspect(&five_tuple, |pep| {
+        if pep.compression_mode != 0 {
+            todo!("L4 compression")
+        }
+
+        // TODO: compress!
+
+        // "generate" A2A checksum
+        pkt.alloc_zeroed_header::<zdp::ZdpSaidHeader>().a2a_said = 0;
+        let micv: zdp::ZdpMicvEnd = zdp::ZdpMicvEnd { micv: 0 };
+        pkt.put(micv.as_bytes());
+
+        pep.stream_id
+    }) {
+        Some(stream_id) => {
+            forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
+        }
+
+        None => {
+            // TODO: issue bind request!
+            drop_and_count(asm, pkt, CounterType::OtherError);
+            return;
+        }
+    }
 }
 
 /// Forward compressed packet.

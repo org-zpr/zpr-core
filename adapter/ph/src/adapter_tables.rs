@@ -1,30 +1,26 @@
-//! Agent Lookup Table
+//! Adapter lookup tables
 //!
 //! RFC 6.5 § 5.1
 
 #![allow(dead_code)]
 
 use crate::defs::FiveTuple;
-use crate::zpr::{CompressionMode, StreamId};
+use crate::rcu::RcuBox;
+use crate::zpr::{CompressionMode, L3Type, StreamId};
+use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
+use std::sync::Mutex;
+
+const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 24; // 16 million
 
 pub struct AltPep {
+    pub l3_type: L3Type,
     pub compression_mode: CompressionMode,
     pub stream_id: StreamId,
 }
 
 pub struct AgentLookupTable {
     table: DashMap<FiveTuple, AltPep>,
-}
-
-pub struct AltRef<'a>(dashmap::mapref::one::Ref<'a, FiveTuple, AltPep>);
-
-impl std::ops::Deref for AltRef<'_> {
-    type Target = AltPep;
-
-    fn deref(&self) -> &AltPep {
-        self.0.deref()
-    }
 }
 
 impl AgentLookupTable {
@@ -34,56 +30,63 @@ impl AgentLookupTable {
         }
     }
 
-    pub fn get<'a>(&'a self, key: &FiveTuple) -> Option<AltRef<'a>> {
-        self.table.get(key).map(|r| AltRef(r))
+    pub fn inspect<T>(
+        &self,
+        five_tuple: &FiveTuple,
+        inspector: impl FnOnce(&AltPep) -> T,
+    ) -> Option<T> {
+        self.table.get(five_tuple).map(|pep| inspector(&*pep))
     }
 
     // FIXME: ideally we want `try_insert()` but dashmap doesn't support that…
-    pub fn insert(&self, key: FiveTuple, value: AltPep) {
-        self.table.insert(key, value);
+    pub fn insert(&self, five_tuple: FiveTuple, pep: AltPep) {
+        self.table.insert(five_tuple, pep);
     }
 
-    pub fn remove(&self, key: &FiveTuple) {
-        self.table.remove(key);
+    pub fn remove(&self, five_tuple: &FiveTuple) {
+        self.table.remove(five_tuple);
     }
 }
 
 pub struct DltPep {
+    pub l3_type: L3Type,
     pub compression_mode: CompressionMode,
     pub five_tuple: FiveTuple,
 }
 
 pub struct DockLookupTable {
-    table: DashMap<StreamId, DltPep>,
-}
-
-pub struct DltRef<'a>(dashmap::mapref::one::Ref<'a, StreamId, DltPep>);
-
-impl std::ops::Deref for DltRef<'_> {
-    type Target = DltPep;
-
-    fn deref(&self) -> &DltPep {
-        self.0.deref()
-    }
+    table: Mutex<RcuCslab<DltPep>>,
+    reader: RcuBox<RcuCslabReader<DltPep>>,
 }
 
 impl DockLookupTable {
     pub fn new() -> Self {
+        let table = RcuCslab::with_fixed_capacity(DOCK_LOOKUP_TABLE_SIZE);
+        let reader = table.reader();
+
         Self {
-            table: DashMap::new(),
+            table: Mutex::new(table),
+            reader: RcuBox::new(reader),
         }
     }
 
-    pub fn get<'a>(&'a self, key: &StreamId) -> Option<DltRef<'a>> {
-        self.table.get(key).map(|r| DltRef(r))
+    pub fn inspect<T>(
+        &self,
+        stream_id: StreamId,
+        inspector: impl FnOnce(&DltPep) -> T,
+    ) -> Option<T> {
+        self.reader
+            .inspect(|reader| reader.get(stream_id as usize).map(inspector))
     }
 
-    // FIXME: ideally we want `try_insert()` but dashmap doesn't support that…
-    pub fn insert(&self, key: StreamId, value: DltPep) {
-        self.table.insert(key, value);
+    pub fn insert(&self, pep: DltPep) -> Result<StreamId, ()> {
+        Ok(self.table.lock().unwrap().insert(pep)? as StreamId)
     }
 
-    pub fn remove(&self, key: &StreamId) {
-        self.table.remove(key);
+    pub fn remove(&self, stream_id: StreamId) {
+        let mut table = self.table.lock().unwrap();
+        let new_reader = table.remove(stream_id as usize);
+        std::mem::drop(table);
+        self.reader.write(new_reader);
     }
 }

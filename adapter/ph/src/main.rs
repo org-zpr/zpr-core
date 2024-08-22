@@ -167,6 +167,36 @@ fn main() -> ExitCode {
 
             tun_ctl.set_carrier(false).unwrap();
 
+            let alt = adapter_tables::AgentLookupTable::new();
+            let dlt = adapter_tables::DockLookupTable::new();
+
+            // TEMP HACK: fill ALT & DLT based on TUN local & remote addresses
+            for (remote_stream_id, protocol) in [1, 6, 17].into_iter().enumerate() {
+                let five_tuple = defs::FiveTuple::new(
+                    tun_devs[0].address().unwrap().into(),
+                    tun_devs[0].destination().unwrap().into(),
+                    protocol,
+                    0,
+                    0,
+                );
+                alt.insert(
+                    five_tuple,
+                    adapter_tables::AltPep {
+                        l3_type: zpr::L3Type::IPv4,
+                        compression_mode: 0,
+                        stream_id: remote_stream_id as zpr::StreamId, /* TOTAL HACK */
+                    },
+                );
+                let local_stream_id = dlt
+                    .insert(adapter_tables::DltPep {
+                        l3_type: zpr::L3Type::IPv4,
+                        compression_mode: 0,
+                        five_tuple: five_tuple.reverse(),
+                    })
+                    .unwrap();
+                assert_eq!(local_stream_id, remote_stream_id as zpr::StreamId); // VERY HACK
+            }
+
             // Open ingress sockets.
             let mut sockets = Vec::new();
             for _i in 0..substrate_socket_count {
@@ -272,8 +302,8 @@ fn main() -> ExitCode {
                 sync_req_state,
                 peer_table,
                 adapter_docking_session_id,
-                alt: adapter_tables::AgentLookupTable::new(),
-                dlt: adapter_tables::DockLookupTable::new(),
+                alt,
+                dlt,
             }));
 
             // TODO signal handler goes here

@@ -171,16 +171,16 @@ fn classify_next_header(
 ) -> Result<ClassifierResult, &'static str> {
     metadata.set_protocol(protocol);
     match protocol {
-        0 => return skip_v6_option(metadata, body), // Hop-by-hop
-        1 => return Ok(ClassifierResult::OK),       // ICMP TODO: check type and code
-        4 => return Ok(ClassifierResult::UnclassifiedL4), // IP in IP
-        6 => return classify_tcp(metadata, body),   // TCP
-        17 => return classify_udp(metadata, body),  // UDP
+        0 => return skip_v6_option(metadata, body),  // Hop-by-hop
+        1 => return classify_icmp(metadata, body),   // ICMP
+        4 => return classify_unclassified(metadata), // IP in IP
+        6 => return classify_tcp(metadata, body),    // TCP
+        17 => return classify_udp(metadata, body),   // UDP
         43 => return skip_v6_option(metadata, body), // Routing
-        44 => return classify_frag(metadata, body), // Fragment
+        44 => return classify_frag(metadata, body),  // Fragment
         51 => return skip_auth_header(metadata, body), // AH
         60 => return skip_v6_option(metadata, body), // Dest opts
-        _ => return Ok(ClassifierResult::UnclassifiedL4),
+        _ => return classify_unclassified(metadata),
     }
 }
 
@@ -246,6 +246,16 @@ fn classify_frag(
     return Ok(ClassifierResult::FirstFragment);
 }
 
+fn classify_icmp(
+    metadata: &mut packet::PacketMetadata,
+    _body: &[u8],
+) -> Result<ClassifierResult, &'static str> {
+    // TODO: check type and code
+    metadata.set_src_port([0u8; 2]);
+    metadata.set_dst_port([0u8; 2]);
+    Ok(ClassifierResult::OK)
+}
+
 fn classify_tcp(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
@@ -284,6 +294,14 @@ fn classify_udp(
     metadata.set_dst_port(udp_header.dst_port);
 
     Ok(ClassifierResult::OK)
+}
+
+fn classify_unclassified(
+    metadata: &mut packet::PacketMetadata,
+) -> Result<ClassifierResult, &'static str> {
+    metadata.set_src_port([0u8; 2]);
+    metadata.set_dst_port([0u8; 2]);
+    Ok(ClassifierResult::UnclassifiedL4)
 }
 
 #[cfg(test)]
