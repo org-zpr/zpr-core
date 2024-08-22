@@ -15,6 +15,8 @@ function zdp_link_p2p_proto.dissector(buffer, pinfo, tree)
     local subtree = tree:add(zdp_link_p2p_proto, buffer(), "ZDP Link Layer Data")
     local direction = buffer(0,1):uint()
     subtree:add(in_out, buffer(0,1)):append_text(" (" .. direction_name[direction] .. ")")
+    pinfo.cols.src = location_name[direction]
+    pinfo.cols.dst = location_name[math.fmod(direction + 1, 2)]
 
 end
 
@@ -22,4 +24,10 @@ direction_name =
 {
     [0] = "Inbound",
     [1] = "Outbound",
+}
+
+location_name = 
+{
+    [0] = "Remote",
+    [1] = "Local",
 }

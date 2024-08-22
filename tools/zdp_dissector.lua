@@ -64,7 +64,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     local type = buffer(1, 1):uint()
     local type_name = get_type_name(type)
     zdp_header_subtree:add(zdp_type, buffer(1, 1)):append_text(" (" .. type_name .. ")")
-
+    pinfo.cols.info = type_name
     zdp_header_subtree:add(excess_len, buffer(2, 1))
     zdp_header_subtree:add(seq_num, buffer(3, 2))
 
@@ -108,16 +108,25 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     elseif type <= 127 then 
         -- Stream-oriented Management Message
         zdp_header_subtree:add(stream_id, buffer(5, 4))
-        zdp_header_subtree:add(management_packet, buffer(9, real_len - 21))
+        if real_len > 11 then
+            zdp_header_subtree:add(management_packet, buffer(9, real_len - 11))
+        end
         -- zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
         zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
-        decode_management(type, buffer(9, real_len - 21), tree)
+
+        if real_len > 11 then
+            decode_management(type, buffer(9, real_len - 11), tree)
+        end
     else 
         -- Other Management Message
-        zdp_header_subtree:add(management_packet, buffer(5, real_len - 17))
+        if real_len > 7 then
+            zdp_header_subtree:add(management_packet, buffer(5, real_len - 7))
+        end
         -- zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
         zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
-        decode_management(type, buffer(5, real_len - 17), tree)
+        if real_len > 7 then
+            decode_management(type, buffer(5, real_len - 7), tree)
+        end
     end
 end
 -- Idiomatic way of doing this may be to actually create a whole new dissector, although that might be challenging

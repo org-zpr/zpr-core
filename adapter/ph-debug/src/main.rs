@@ -170,6 +170,7 @@ fn handle_set_capture_file(file_path: String, port: &str) -> std::io::Result<()>
     let file = OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open(file_path)
         .unwrap();
 
