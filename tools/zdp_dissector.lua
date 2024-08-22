@@ -87,6 +87,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         -- I might comment this whole section until line 113 out for the Demo as it's not actually completely accurate. The TCP
         -- dissector expects us to give it a complete TCP packet, which we are not doing. As a result, the TCP traffic
         -- shown in Wireshark is not accurate, I don't think
+
         local agent_header_subtree = tree:add(zdp_proto, buffer(), "Compressed Agent Packet Header Data")
         local v4_v6 = get_first_four(buffer(18, 1):uint())
         agent_header_subtree:add(ip_version, v4_v6)
@@ -131,6 +132,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         end
         -- zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
         zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
+
     end
 end
 -- Idiomatic way of doing this may be to actually create a whole new dissector, although that might be challenging
