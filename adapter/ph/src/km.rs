@@ -172,33 +172,25 @@ impl KeyManager<'_> {
     }
 
     /// Encrypt a ZDP message for transport.  Key Management messages should not be sent here.
-    /// This overwrites the plaintext ZDP header at least.
-    /// For everything except transit packets, this also overwrites the payload.
-    ///
+    /// This will encrypt the entire buffer, adding additional ciphertext on the end.
     /// For all packets, there must be enough space remaining in the packet buffer to
     /// accomodate expansion caused by encryption.
+    /// 
+    /// Do not send here:
+    /// - Key Management messages
+    /// - Agent Transit Data messages
     ///
-    /// Note that we encrypt body.len() bytes from body index 0.  Body length will expand by
-    /// the PADLEN indicated in the KM algorithm.
+    /// Note that we encrypt `body.len()-1 bytes` from body index 1 (right after ZPI).  Body length 
+    /// will expand by the PADLEN indicated in the KM algorithm.
     ///
-    /// We also write into the headroom of the packet:
-    ///
-    /// ```text
-    ///     00     ZPI
-    ///     01,02  LENGTH of encrypted payload
-    /// ```
-    ///
-    /// TODO: Not sure this works at all for transit packet encryption -- if we are doing that.
-    ///
-    /// `message` is expected to be a ZDP message wihout a ZPI value.  We add a ZPI
-    /// value to the front of the message -- note that the value we add is just the
-    /// SA_ID.  It's up to caller to mix in the configuration ID value.
+    /// `message` is expected to be a ZDP message starting with a ZPI value.  We do not check
+    /// the ZPI.  (TODO: A future version will add the ZPI as associated data in the AEAD cipher).
     pub fn encrypt_transport(&self, message: &mut Packet) -> KMResult<()> {
-        let base_hdr =
-            ZdpBaseHeader::ref_from_prefix(message.body()).expect("too-short ZDP message");
-        if message.headroom_available() < 1 {
-            return Err(KMError::NoHeadroom);
+        if message.body().len() < std::mem::size_of::<ZdpZpiHeader>() + std::mem::size_of::<ZdpBaseHeader>() {
+            return Err(KMError::ShortPacket);
         }
+        let base_hdr =
+            ZdpBaseHeader::ref_from_prefix(&message.body()[1..]).expect("too-short ZDP message");
 
         let mut state = self.shared.state.lock().unwrap();
         if state.statemachine.get_state() != KMSMState::Transport {
@@ -215,7 +207,7 @@ impl KeyManager<'_> {
                 return Err(KMError::InvalidPacketType);
             }
             ZdpPacketType::TransitPacket => {
-                panic!("Transit packet encryption not implemented");
+                return Err(KMError::InvalidPacketType);
             }
             _ => message.body().len(),
         };
@@ -224,25 +216,15 @@ impl KeyManager<'_> {
         let mut encr_buf = [0u8; config::PACKET_BUFFER_SIZE];
         match state
             .statemachine
-            .encrypt_transport(&message.body()[0..encr_len], &mut encr_buf)
+            .encrypt_transport(&message.body()[1..encr_len+1], &mut encr_buf)
         {
             Ok(len) => {
                 info!(
                     "noise: encrypt input {} bytes, output {} bytes",
                     encr_len, len
                 );
-                // Copy the encrypted data back into the message -- there should be sufficient room for it since
-                // caller should know our required padding space and alignment.
-
-                message.shrink(message.body().len()); // remove body
+                message.shrink(encr_len); // remove body, leavign ZPI
                 message.put(&encr_buf[0..len]); // write a new body
-
-                // Now write our headroom info:
-                let head_buf = message.alloc_zeroed_headroom(3); // ZPI + LEN
-                head_buf[0] = state.sa_id;
-
-                let szbytes = (len as u16).to_be_bytes();
-                head_buf[1..3].copy_from_slice(&szbytes);
             }
             Err(e) => {
                 return Err(KMError::MachineError(e.to_string()));
@@ -251,39 +233,39 @@ impl KeyManager<'_> {
         Ok(())
     }
 
-    /// The message here must start with the ZPI value.
-    /// We assume that packet ZPI value has been clensed of the config ID and is only the SA_ID.
-    /// Key Management packets should not be sent here.
-    /// Does not remove the ZPI/SA_ID value.
+    /// Decrypt a ZDP message using the current SA.  Expects that the ciphertext starts
+    /// at index 1 (following the ZPI), and extends to `message.body.len()`.
+    /// 
+    /// This will overwrite the ciphertext body with the plaintext.
+    /// 
+    /// Caller must ensure that the SA used to encrypt the message is the one used to
+    /// decrypt it.
+    /// 
+    /// `message` must be ZDP message starting with a ZPI (that we do not check).
     pub fn decrypt_transport(&self, message: &mut Packet) -> KMResult<()> {
-        if message.body().len() < 3 {
-            // ZPI + LEN
+        if message.body().len() < 1 {
             return Err(KMError::ShortPacket);
         }
         let mut state = self.shared.state.lock().unwrap();
-        if message.body()[0] == 0 {
-            return Err(KMError::SaIdZero);
-        }
-        if state.sa_id != message.body()[0] {
-            return Err(KMError::SaIdMismatch);
-        }
         if state.statemachine.get_state() != KMSMState::Transport {
             return Err(KMError::InvalidState);
         }
 
         // TODO: Ability to decrypt in place. Not sure how to accomplish.  At very least we could use our own buffer pool.
         let mut decr_buf = [0u8; config::PACKET_BUFFER_SIZE];
+        let encr_len = message.body().len() - 1;
+        if encr_len == 0 {
+            // empty?
+            return Ok(());
+        }
 
-        // read the size of the encrypted payload.  Size follows the ZPI/SA_ID value:
-        let encr_len: usize = u16::from_be_bytes([message.body()[1], message.body()[2]]) as usize;
-
-        if encr_len + 3 > message.body().len() {
+        if encr_len < state.kmsettings.padlen {
             return Err(KMError::ShortPacket);
         }
 
         match state
             .statemachine
-            .decrypt_transport(&message.body()[3..3 + encr_len], &mut decr_buf)
+            .decrypt_transport(&message.body()[1..encr_len+1], &mut decr_buf)
         {
             Ok(len) => {
                 info!(
@@ -292,10 +274,8 @@ impl KeyManager<'_> {
                     len
                 );
                 // Copy the decrypted data back into the message -- do not overwrite ZPI.
-                message.shrink(message.body().len()); // remove body
+                message.shrink(encr_len); // remove body
                 message.put(&decr_buf[0..len]); // write a new body
-
-                message.alloc_zeroed_header::<ZdpZpiHeader>().zpi = state.sa_id;
             }
             Err(e) => {
                 return Err(KMError::MachineError(e.to_string()));
@@ -571,7 +551,6 @@ pub struct KMSettings {
     pub zdp_km_type: zpr::KmId,
 
     /// Number of additional bytes required to encrypt a payload for transport.
-    /// Note that the KM itself adds 2 bytes for a length field.
     pub padlen: usize,
 
     /// If non-zero, then `payload`+`padlen` must be a multiple of `alignment`.
@@ -839,7 +818,11 @@ mod test {
         let mut pkt = Packet::new(&mut buf, 64);
         //let hbytes = hdr.as_bytes();
         //pkt.body_mut()[0..hbytes.len()].copy_from_slice(&hbytes);
-        hdr.write_to_buf(&mut pkt);
+        hdr.write_to_buf(&mut pkt);        
+        pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 0x33;        
+        let orig_len = pkt.body().len();
+        assert!(orig_len == 1 + std::mem::size_of::<ZdpBaseHeader>());
+
         match km.encrypt_transport(&mut pkt) {
             Ok(_) => {}
             Err(e) => {
@@ -847,12 +830,9 @@ mod test {
             }
         }
 
-        // The encrypt function writes a SA_ID to first byte.
-        assert!(pkt.body()[0] == 33);
-
-        // Rest of input is after the length...
+        assert!(pkt.body().len() == orig_len, "body length changed: expected {}, got {}", orig_len, pkt.body().len());        
         let encr_hdr =
-            ZdpBaseHeader::ref_from_prefix(&pkt.body()[3..]).expect("failed to read back header");
+            ZdpBaseHeader::ref_from_prefix(&pkt.body()[1..]).expect("failed to read back header");
 
         assert!(encr_hdr.packet_type == hdr.packet_type);
         assert!(encr_hdr.excess_length == hdr.excess_length);
@@ -878,22 +858,24 @@ mod test {
         //let hbytes = hdr.as_bytes();
         //pkt.body_mut()[0..hbytes.len()].copy_from_slice(&hbytes);
         hdr.write_to_buf(&mut pkt);
+        pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 33;                
+        let orig_len = pkt.body().len();
+        assert!(orig_len == 1 + std::mem::size_of::<ZdpBaseHeader>());
         match km.encrypt_transport(&mut pkt) {
             Ok(_) => {}
             Err(e) => {
                 panic!("encrypt_transport failed: {}", e);
             }
         }
-
+        assert!(pkt.body()[0] == 33); // encrypt does not touch ZPI
         match km.decrypt_transport(&mut pkt) {
             Ok(_) => {}
             Err(e) => {
                 panic!("decrypt_transport failed: {}", e);
             }
         }
-
-        // The decrypt function leaves the ZPI alone
-        assert!(pkt.body()[0] == 33);
+        assert!(pkt.body()[0] == 33); // decrypt does not touch ZPI       
+        assert!(pkt.body().len() == orig_len, "body length changed: expected {}, got {}", orig_len, pkt.body().len());
 
         let encr_hdr =
             ZdpBaseHeader::ref_from_prefix(&pkt.body()[1..]).expect("failed to read back header");
