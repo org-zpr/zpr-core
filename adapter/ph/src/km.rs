@@ -130,6 +130,8 @@ struct KMState<'mgr> {
 
     // TODO: Can we get this channel outside of the mutex?
     mgmt_tx: Option<mpsc::Sender<Bytes>>, // Internal queue for key management messages to be processed.
+
+    ts: KMTransportState,
 }
 
 impl fmt::Debug for KMState<'_> {
@@ -154,18 +156,52 @@ impl KeyManager<'_> {
                     kmsettings: settings,
                     sa_id: 0,
                     mgmt_tx: None,
+                    ts: KMTransportState::new_empty(),
                 }),
             }),
         }
     }
 
+    /// Returns the current SA identifier.  If handshake has completed, then this is non-zero.
     pub fn get_sa_id(&self) -> u8 {
         let state = self.shared.state.lock().unwrap();
         state.sa_id
     }
 
-    // For testing
-    #[allow(dead_code)]
+    /// Returns the ZPIs used for sending messages, format is (FULL_ENCRYPTION_ZPI, TRANSIT_HMAC_ZPI).
+    /// Only set/valid after handshake is complete and SA is established.a
+    /// Currently safe to cache this after handshake is done because (TODO) these do not change.
+    pub fn get_send_zpis(&self) -> (u8, u8) {
+        let state = self.shared.state.lock().unwrap();
+        state.ts.send_zpis
+    }
+
+    /// Returns the ZPIs used for receiving messages, format is (FULL_ENCRYPTION_ZPI, TRANSIT_HMAC_ZPI)
+    /// Only set/valid after handshake is complete and SA is established.a/// 
+    /// Currently safe to cache this after handshake is done because (TODO) these do not change.
+    pub fn get_recv_zpis(&self) -> (u8, u8) {
+        let state = self.shared.state.lock().unwrap();
+        state.ts.recv_zpis
+    }
+
+    /// Return the key to use for generating HMAC on an outbound transit message.
+    /// Only set/valid after handshake is complete and SA is established.a
+    /// Currently safe to cache this after handshake is done because (TODO) these do not change.
+    pub fn get_send_hmac_key(&self) -> [u8; 32] {
+        let state = self.shared.state.lock().unwrap();
+        state.ts.send_hmac_key
+    }
+
+    /// Return the key to use for verifying the HMAC on an inbound transit message.
+    /// Only set/valid after handshake is complete and SA is established.a
+    /// Currently safe to cache this after handshake is done because (TODO) these do not change.
+    pub fn get_recv_hmac_key(&self) -> [u8; 32] {
+        let state = self.shared.state.lock().unwrap();
+        state.ts.recv_hmac_key
+    }
+    
+
+    #[cfg(test)]
     fn set_sa_id(&self, sa_id: u8) {
         let mut state = self.shared.state.lock().unwrap();
         state.sa_id = sa_id;
@@ -193,7 +229,7 @@ impl KeyManager<'_> {
             ZdpBaseHeader::ref_from_prefix(&message.body()[1..]).expect("too-short ZDP message");
 
         let mut state = self.shared.state.lock().unwrap();
-        if state.statemachine.get_state() != KMSMState::Transport {
+        if !matches!(state.statemachine.get_state(), KMSMState::Transport{..}) {
             return Err(KMError::InvalidState);
         }
         if state.sa_id == 0 {
@@ -247,7 +283,7 @@ impl KeyManager<'_> {
             return Err(KMError::ShortPacket);
         }
         let mut state = self.shared.state.lock().unwrap();
-        if state.statemachine.get_state() != KMSMState::Transport {
+        if !matches!(state.statemachine.get_state(), KMSMState::Transport{..}) {
             return Err(KMError::InvalidState);
         }
 
@@ -484,32 +520,38 @@ impl KeyManager<'_> {
 
             if next_state != prev_state {
                 info!("KM state transition {:?} -> {:?}", prev_state, next_state);
-                if next_state == KMSMState::Transport {
-                    let prev_id: zpr::SaId;
-                    let cur_id: zpr::SaId;
-                    {
-                        let mut state = self.shared.state.lock().unwrap();
-                        prev_id = state.sa_id;
-                        state.sa_id += 1;
-                        if state.sa_id == 0 {
-                            state.sa_id = 1;
+                match next_state {
+                    KMSMState::Transport(ts) => {
+                        let prev_id: zpr::SaId;
+                        let cur_id: zpr::SaId;
+                        {
+                            let mut state = self.shared.state.lock().unwrap();
+                            prev_id = state.sa_id;
+                            state.sa_id += 1;
+                            if state.sa_id == 0 {
+                                state.sa_id = 1;
+                            }
+                            cur_id = state.sa_id;
+                            state.ts = ts;
                         }
-                        cur_id = state.sa_id;
-                    }
-                    info!("KM: New SA_ID: {}", cur_id);
-                    match km_signals_out
-                        .send(KMSignal::SaIdChange {
-                            old: prev_id,
-                            new: cur_id,
-                        })
-                        .await
-                    {
-                        Ok(_) => {}
-                        Err(_) => {
-                            error!("failed to enqueue SaIdChange signal")
+                        info!("KM: New SA_ID: {}", cur_id);
+                        match km_signals_out
+                            .send(KMSignal::SaIdChange {
+                                old: prev_id,
+                                new: cur_id,
+                            })
+                            .await
+                        {
+                            Ok(_) => {}
+                            Err(_) => {
+                                error!("failed to enqueue SaIdChange signal")
+                            }
                         }
+    
                     }
+                    _ => {}
                 }
+
             } else if next_state == KMSMState::Error {
                 error!("KM: stuck in error state");
                 return Err(KMError::MachineError(String::from("stuck in error state")));
@@ -539,8 +581,46 @@ impl KeyManager<'_> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum KMSMState {
     Configuring,
-    Transport,
+    Transport(KMTransportState),
     Error,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct KMTransportState {
+    send_zpis: (u8, u8),  // TODO: create a type for this pair of ZPIs with names
+    recv_zpis: (u8, u8),
+    send_hmac_key: [u8; 32],
+    recv_hmac_key: [u8; 32],
+}
+
+impl KMTransportState {
+    /// ZPI pair ordering is (ZPI_FOR_FULL_ENCRYPTION, ZPI_FOR_TRANSIT_HMAC)
+    pub fn new(send_zpis: (u8, u8), recv_zpis: (u8, u8), send_key: [u8; 32], recv_key: [u8; 32]) -> KMTransportState {    
+        KMTransportState {
+            send_zpis,
+            recv_zpis,
+            send_hmac_key: send_key,
+            recv_hmac_key: recv_key,
+        }
+    }
+    /// Creates zero'd out KMTransportState
+    pub fn new_empty() -> KMTransportState {
+        KMTransportState {
+            send_zpis: (0, 0),
+            recv_zpis: (0, 0),
+            send_hmac_key: [0u8; 32],
+            recv_hmac_key: [0u8; 32],
+        }
+    }
+    /// With ZPIs but empty keys.
+    pub fn new_with_zpis(send_zpis: (u8, u8), recv_zpis: (u8, u8)) -> KMTransportState {
+        KMTransportState {
+            send_zpis,
+            recv_zpis,
+            send_hmac_key: [0u8; 32],
+            recv_hmac_key: [0u8; 32],
+        }
+    }
 }
 
 /// A set of constant settings for a particular [KeyManagerStateMachine].  Used
@@ -803,7 +883,7 @@ mod test {
 
     #[tokio::test]
     async fn test_km_encrypt_transport_non_transit() {
-        let kmb = Box::new(TestKM::new(true, KMSMState::Transport));
+        let kmb = Box::new(TestKM::new(true, KMSMState::Transport(KMTransportState::new_empty())));
         let km = KeyManager::new(kmb);
 
         // No need to start the machine since encrypt only cares about transport state and SA_ID.
@@ -841,7 +921,7 @@ mod test {
 
     #[tokio::test]
     async fn test_km_decrypt_transport_non_transit() {
-        let kmb = Box::new(TestKM::new(true, KMSMState::Transport));
+        let kmb = Box::new(TestKM::new(true, KMSMState::Transport(KMTransportState::new_empty())));
         let km = KeyManager::new(kmb);
 
         // No need to start the machine since encrypt only cares about transport state and SA_ID.

@@ -52,7 +52,7 @@ impl KeyManagerStateMachine for XorKeyManager {
 
     fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KMError> {
         if self.state == KMSMState::Configuring {
-            self.state = KMSMState::Transport;
+            self.state = KMSMState::Transport(KMTransportState::new_empty());
             if !self.initiate {
                 // Did not initiate, so send a reply back.
                 let handshake_reply = Bytes::from_static(&[0, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD
