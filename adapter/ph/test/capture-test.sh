@@ -116,9 +116,6 @@ tcpdump -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1 or link[0] == 0' > "$TMPDIR/che
 HELLO_COUNT="$(grep -c '0x0000:  0100 8800 0000' "$TMPDIR/checker.txt" || 0)"
 PACKET_COUNT="$(grep -c '0x0000:  0' "$TMPDIR/checker.txt" || true)"
 
-echo "$HELLO_COUNT"
-echo "$PACKET_COUNT"
-
 if [[ "$(($PACKET_COUNT - $HELLO_COUNT))" != "23" ]]
 then PASS=1
 fi
