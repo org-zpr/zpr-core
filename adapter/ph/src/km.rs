@@ -209,8 +209,7 @@ impl KeyManager<'_> {
         }
 
         // The assumption here is that caller has already built in space of any padding required by key manager protocol.
-        let encr_len: usize;
-        match base_hdr.packet_type {
+        let encr_len: usize = match base_hdr.packet_type {
             ZdpPacketType::KeyManagement => {
                 // Programmer error
                 return Err(KMError::InvalidPacketType);
@@ -218,10 +217,8 @@ impl KeyManager<'_> {
             ZdpPacketType::TransitPacket => {
                 panic!("Transit packet encryption not implemented");
             }
-            _ => {
-                encr_len = message.body().len();
-            }
-        }
+            _ => message.body().len(),
+        };
 
         // TODO: Ability to encrypt in place. Not sure how to accomplish. At very least we could use our own buffer pool.
         let mut encr_buf = [0u8; config::PACKET_BUFFER_SIZE];
@@ -325,7 +322,7 @@ impl KeyManager<'_> {
             }
         }
         let km_buf = Bytes::copy_from_slice(message);
-        match tx.send(km_buf.into()).await {
+        match tx.send(km_buf).await {
             Ok(_) => Ok(()),
             Err(_) => Err(KMError::EnqueueFailed),
         }
@@ -349,7 +346,7 @@ impl KeyManager<'_> {
             }
         }
         let km_buf = Bytes::copy_from_slice(message);
-        match tx.try_send(km_buf.into()) {
+        match tx.try_send(km_buf) {
             Ok(_) => Ok(()),
             Err(_) => Err(KMError::EnqueueFailed),
         }

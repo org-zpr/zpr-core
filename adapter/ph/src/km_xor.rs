@@ -32,7 +32,7 @@ impl XorKeyManager {
 
 impl KeyManagerStateMachine for XorKeyManager {
     fn get_settings(&self) -> KMSettings {
-        return self.settings.clone();
+        self.settings.clone()
     }
 
     fn get_state(&self) -> KMSMState {
@@ -82,7 +82,7 @@ impl KeyManagerStateMachine for XorKeyManager {
         message: &mut [u8],
     ) -> Result<usize, KMError> {
         let sz = payload.len() + 2; // SIZE includes the 2 byte size field.
-        if sz > std::u16::MAX as usize {
+        if sz > u16::MAX as usize {
             return Err(KMError::EncryptionError);
         }
         let szbytes = (sz as u16).to_be_bytes();

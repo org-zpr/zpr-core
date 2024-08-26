@@ -115,7 +115,7 @@ pub fn derive_public_key(private_key: &[u8; 32]) -> [u8; 32] {
 
 impl KeyManagerStateMachine for KMNoise {
     fn get_settings(&self) -> KMSettings {
-        return self.settings.clone();
+        self.settings.clone()
     }
 
     fn get_state(&self) -> KMSMState {
@@ -136,7 +136,7 @@ impl KeyManagerStateMachine for KMNoise {
             let rpk = self.peer_pub_key.as_ref().unwrap();
             let mut initiator = match snow::Builder::new(np)
                 .local_private_key(self.local_keypair.private.as_ref())
-                .remote_public_key(&rpk)
+                .remote_public_key(rpk)
                 .build_initiator()
             {
                 Ok(i) => i,
@@ -145,7 +145,7 @@ impl KeyManagerStateMachine for KMNoise {
                     self.state = KMSMState::Error;
                     return Err(KMError::MachineError(format!(
                         "failed to build initiator: {}",
-                        e.to_string()
+                        e
                     )));
                 }
             };
@@ -158,7 +158,7 @@ impl KeyManagerStateMachine for KMNoise {
                     self.state = KMSMState::Error;
                     return Err(KMError::MachineError(format!(
                         "failed to write handshake message: {}",
-                        e.to_string()
+                        e
                     )));
                 }
             };
@@ -176,7 +176,7 @@ impl KeyManagerStateMachine for KMNoise {
                     self.state = KMSMState::Error;
                     return Err(KMError::MachineError(format!(
                         "failed to build responder: {}",
-                        e.to_string()
+                        e
                     )));
                 }
             };
@@ -195,7 +195,7 @@ impl KeyManagerStateMachine for KMNoise {
             if self.hs_state.is_some() {
                 hs = self.hs_state.take().unwrap();
                 let mut buf = BytesMut::zeroed(1024);
-                match hs.read_message(&message[..], &mut buf) {
+                match hs.read_message(message, &mut buf) {
                     Ok(len) => {
                         // TODO: In future we plan to send the certificate over in the first handshake message buffer.
                         info!(
