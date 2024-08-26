@@ -29,7 +29,6 @@ pub const ZDP_REPORT_HDR_OFFSET: usize = ZDP_NON_PER_FLOW_MGMT_HEADER_OFFSET;
 pub const ZDP_REPORT_DATA_OFFSET: usize =
     ZDP_REPORT_HDR_OFFSET + std::mem::size_of::<ZdpReportHeader>();
 
-
 /// Creates a packet like: [ZdpZpiHeader][ZdpBaseHeader]|[ZdpReportHeader]|<report_data>
 /// ZPI set to zero.
 pub fn build_zdp_report_packet<'buf>(

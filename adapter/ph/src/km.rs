@@ -200,7 +200,6 @@ impl KeyManager<'_> {
         state.ts.recv_hmac_key
     }
 
-
     #[cfg(test)]
     fn set_sa_id(&self, sa_id: u8) {
         let mut state = self.shared.state.lock().unwrap();
@@ -222,12 +221,13 @@ impl KeyManager<'_> {
     /// `message` is expected to be a ZDP message starting with a ZPI value.  We do not check
     /// the ZPI.  (TODO: A future version will add the ZPI as associated data in the AEAD cipher).
     pub fn encrypt_transport(&self, message: &mut Packet) -> KMResult<()> {
-        if message.body().len() < std::mem::size_of::<ZdpZpiHeader>() + std::mem::size_of::<ZdpBaseHeader>() {
+        if message.body().len()
+            < std::mem::size_of::<ZdpZpiHeader>() + std::mem::size_of::<ZdpBaseHeader>()
+        {
             return Err(KMError::ShortPacket);
         }
         let base_hdr =
             ZdpBaseHeader::ref_from_prefix(&message.body()[1..]).expect("too-short ZDP message");
-
 
         let codec: Arc<dyn Codec>;
         {
@@ -238,7 +238,7 @@ impl KeyManager<'_> {
                 return Err(KMError::SaIdZero);
             }
 
-            if !matches!(state.statemachine.get_state(), KMSMState::Transport{..}) {
+            if !matches!(state.statemachine.get_state(), KMSMState::Transport { .. }) {
                 return Err(KMError::InvalidState);
             }
 
@@ -324,8 +324,7 @@ impl KeyManager<'_> {
         // TODO: Ability to decrypt in place. Not sure how to accomplish.  At very least we could use our own buffer pool.
         let mut decr_buf = [0u8; config::PACKET_BUFFER_SIZE];
 
-        match codec.decrypt_transport_stateless(&message.body()[1..encr_len+1], &mut decr_buf)
-        {
+        match codec.decrypt_transport_stateless(&message.body()[1..encr_len + 1], &mut decr_buf) {
             Ok(len) => {
                 info!(
                     "noise: decrypt input {} bytes, output {} bytes",
@@ -570,11 +569,9 @@ impl KeyManager<'_> {
                                 error!("failed to enqueue SaIdChange signal")
                             }
                         }
-
                     }
                     _ => {}
                 }
-
             } else if next_state == KMSMState::Error {
                 error!("KM: stuck in error state");
                 return Err(KMError::MachineError(String::from("stuck in error state")));
@@ -617,7 +614,6 @@ pub struct KMTransportState {
     pub codec: Arc<dyn Codec>,
 }
 
-
 // Does not check the codec.
 impl PartialEq for KMTransportState {
     fn eq(&self, other: &Self) -> bool {
@@ -639,7 +635,6 @@ impl fmt::Debug for KMTransportState {
     }
 }
 
-
 pub trait Codec: Send + Sync {
     /// Encrypt `payload` into `message`.
     fn encrypt_transport_stateless(
@@ -654,7 +649,6 @@ pub trait Codec: Send + Sync {
         payload: &[u8],
         message: &mut [u8],
     ) -> Result<usize, KMError>;
-
 }
 
 struct UnimplCodec;
@@ -670,7 +664,9 @@ impl Codec for UnimplCodec {
         _payload: &[u8],
         _message: &mut [u8],
     ) -> Result<usize, KMError> {
-        Err(KMError::MachineError(String::from("encrypt not implemented")))
+        Err(KMError::MachineError(String::from(
+            "encrypt not implemented",
+        )))
     }
 
     fn decrypt_transport_stateless(
@@ -678,11 +674,11 @@ impl Codec for UnimplCodec {
         _payload: &[u8],
         _message: &mut [u8],
     ) -> Result<usize, KMError> {
-        Err(KMError::MachineError(String::from("decrypt not implemented")))
+        Err(KMError::MachineError(String::from(
+            "decrypt not implemented",
+        )))
     }
 }
-
-
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ZPIPair {
@@ -694,7 +690,13 @@ pub struct ZPIPair {
 }
 
 impl KMTransportState {
-    pub fn new(send_zpis: ZPIPair, recv_zpis: ZPIPair, send_key: [u8; 32], recv_key: [u8; 32], codec: Arc<dyn Codec>) -> KMTransportState {
+    pub fn new(
+        send_zpis: ZPIPair,
+        recv_zpis: ZPIPair,
+        send_key: [u8; 32],
+        recv_key: [u8; 32],
+        codec: Arc<dyn Codec>,
+    ) -> KMTransportState {
         KMTransportState {
             send_zpis,
             recv_zpis,
@@ -884,7 +886,6 @@ mod test {
             internals.tick_count += 1;
             Ok(None)
         }
-
     }
 
     #[tokio::test]
@@ -993,8 +994,11 @@ mod test {
 
     #[tokio::test]
     async fn test_km_encrypt_transport_non_transit() {
-        let codec = Arc::new(CopyCodec{});
-        let kmb = Box::new(TestKM::new(true, KMSMState::Transport(KMTransportState::new_empty_with_codec(codec))));
+        let codec = Arc::new(CopyCodec {});
+        let kmb = Box::new(TestKM::new(
+            true,
+            KMSMState::Transport(KMTransportState::new_empty_with_codec(codec)),
+        ));
         let km = KeyManager::new(kmb);
 
         // No need to start the machine since encrypt only cares about transport state and SA_ID.
@@ -1021,7 +1025,12 @@ mod test {
             }
         }
 
-        assert!(pkt.body().len() == orig_len, "body length changed: expected {}, got {}", orig_len, pkt.body().len());
+        assert!(
+            pkt.body().len() == orig_len,
+            "body length changed: expected {}, got {}",
+            orig_len,
+            pkt.body().len()
+        );
         let encr_hdr =
             ZdpBaseHeader::ref_from_prefix(&pkt.body()[1..]).expect("failed to read back header");
 
@@ -1032,8 +1041,11 @@ mod test {
 
     #[tokio::test]
     async fn test_km_decrypt_transport_non_transit() {
-        let codec = Arc::new(CopyCodec{});
-        let kmb = Box::new(TestKM::new(true, KMSMState::Transport(KMTransportState::new_empty_with_codec(codec))));
+        let codec = Arc::new(CopyCodec {});
+        let kmb = Box::new(TestKM::new(
+            true,
+            KMSMState::Transport(KMTransportState::new_empty_with_codec(codec)),
+        ));
         let km = KeyManager::new(kmb);
 
         // No need to start the machine since encrypt only cares about transport state and SA_ID.
@@ -1067,7 +1079,12 @@ mod test {
             }
         }
         assert!(pkt.body()[0] == 33); // decrypt does not touch ZPI
-        assert!(pkt.body().len() == orig_len, "body length changed: expected {}, got {}", orig_len, pkt.body().len());
+        assert!(
+            pkt.body().len() == orig_len,
+            "body length changed: expected {}, got {}",
+            orig_len,
+            pkt.body().len()
+        );
 
         let encr_hdr =
             ZdpBaseHeader::ref_from_prefix(&pkt.body()[1..]).expect("failed to read back header");

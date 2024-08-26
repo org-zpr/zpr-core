@@ -32,24 +32,20 @@
 //! `openssl genpkey -algorithm x25519` (but this generates 48 byte keys instead of 32, so
 //! you will need to do some editing to get the expected size).
 
-
 use crate::km::*;
 use crate::zpr;
 use bytes::{Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
-use std::time::Duration;
-use std::sync::Arc;
-use tracing::error;
 use openssl::rand::rand_bytes;
+use std::sync::Arc;
+use std::time::Duration;
+use tracing::error;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
-
 
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
-
 const NOISE_NONCE_LEN: usize = 8;
 const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce
-
 
 impl From<snow::Error> for KMError {
     fn from(e: snow::Error) -> KMError {
@@ -66,7 +62,7 @@ pub struct KMNoise {
     hs_state: Option<snow::HandshakeState>,
     //t_state: Option<snow::TransportState>,
     recv_hmac_key: [u8; 32], // messages sent to us from peer will use this key (we create this)
-    send_hmac_key: Option<[u8; 32]>,  // messages sent to peer will use this key (peers creates this)
+    send_hmac_key: Option<[u8; 32]>, // messages sent to peer will use this key (peers creates this)
     recv_zpis: ZPIPair,
     send_zpis: Option<ZPIPair>,
 }
@@ -78,7 +74,6 @@ struct KeyMsg {
     pub zpi_transit_hmac: u8,
     pub hmac_key: [u8; 32],
 }
-
 
 impl KMNoise {
     /// Create the Noise KeyManager.
@@ -126,8 +121,11 @@ impl KMNoise {
             local_keypair: kp,
             hs_state: None,
             recv_hmac_key: [0u8; 32], // we generate this and send to peer
-            send_hmac_key: None, // we get this during handshake
-            recv_zpis: ZPIPair{ encr: zpi_full_encr, hmac: zpi_transmit_hmac },
+            send_hmac_key: None,      // we get this during handshake
+            recv_zpis: ZPIPair {
+                encr: zpi_full_encr,
+                hmac: zpi_transmit_hmac,
+            },
             send_zpis: None,
         })
     }
@@ -152,7 +150,6 @@ pub fn derive_public_key(private_key: &[u8; 32]) -> [u8; 32] {
     point.to_bytes()
 }
 
-
 struct NoiseCodec {
     snow_state: snow::StatelessTransportState,
 }
@@ -165,10 +162,11 @@ impl Codec for NoiseCodec {
     ) -> Result<usize, KMError> {
         rand_bytes(&mut message[..NOISE_NONCE_LEN]).unwrap();
         let nonce = u64::from_be_bytes(message[..NOISE_NONCE_LEN].try_into().unwrap());
-        match self.snow_state.write_message(nonce, payload, &mut message[NOISE_NONCE_LEN..]) {
-            Ok(len) => {
-                Ok(len + NOISE_NONCE_LEN)
-            }
+        match self
+            .snow_state
+            .write_message(nonce, payload, &mut message[NOISE_NONCE_LEN..])
+        {
+            Ok(len) => Ok(len + NOISE_NONCE_LEN),
             Err(e) => {
                 error!("noise: error encrypting message: {:?}", e);
                 Err(KMError::EncryptionError)
@@ -188,7 +186,10 @@ impl Codec for NoiseCodec {
             return Err(KMError::EncryptionError);
         }
         let nonce: u64 = u64::from_be_bytes(payload[0..NOISE_NONCE_LEN].try_into().unwrap());
-        match self.snow_state.read_message(nonce, &payload[NOISE_NONCE_LEN..plen], message) {
+        match self
+            .snow_state
+            .read_message(nonce, &payload[NOISE_NONCE_LEN..plen], message)
+        {
             Ok(len) => Ok(len),
             Err(e) => {
                 error!("noise: error decrypting message: {:?}", e);
@@ -197,7 +198,6 @@ impl Codec for NoiseCodec {
         }
     }
 }
-
 
 impl KeyManagerStateMachine for KMNoise {
     fn get_settings(&self) -> KMSettings {
@@ -307,7 +307,10 @@ impl KeyManagerStateMachine for KMNoise {
                                 return Err(KMError::HandshakeError);
                             }
                         };
-                        self.send_zpis = Some(ZPIPair{ encr: km.zpi_full_encr, hmac: km.zpi_transit_hmac });
+                        self.send_zpis = Some(ZPIPair {
+                            encr: km.zpi_full_encr,
+                            hmac: km.zpi_transit_hmac,
+                        });
                         self.send_hmac_key = Some(km.hmac_key);
                     }
                     Err(e) => {
@@ -358,10 +361,14 @@ impl KeyManagerStateMachine for KMNoise {
                     };
                     match hs.into_stateless_transport_mode() {
                         Ok(t) => {
-                            let codec = Arc::new(NoiseCodec {
-                                snow_state: t,
-                            });
-                            self.state = KMSMState::Transport(KMTransportState::new(send_zpis, self.recv_zpis, send_key, self.recv_hmac_key, codec));
+                            let codec = Arc::new(NoiseCodec { snow_state: t });
+                            self.state = KMSMState::Transport(KMTransportState::new(
+                                send_zpis,
+                                self.recv_zpis,
+                                send_key,
+                                self.recv_hmac_key,
+                                codec,
+                            ));
                         }
                         Err(e) => {
                             error!("noise: error switching to transport mode: {:?}", e);
@@ -399,10 +406,14 @@ impl KeyManagerStateMachine for KMNoise {
                     };
                     match hs.into_stateless_transport_mode() {
                         Ok(t) => {
-                            let codec = Arc::new(NoiseCodec {
-                                snow_state: t,
-                            });
-                            self.state = KMSMState::Transport(KMTransportState::new(send_zpis, self.recv_zpis, send_key, self.recv_hmac_key, codec));
+                            let codec = Arc::new(NoiseCodec { snow_state: t });
+                            self.state = KMSMState::Transport(KMTransportState::new(
+                                send_zpis,
+                                self.recv_zpis,
+                                send_key,
+                                self.recv_hmac_key,
+                                codec,
+                            ));
                             return Ok(None);
                         }
                         Err(e) => {
@@ -418,7 +429,6 @@ impl KeyManagerStateMachine for KMNoise {
         }
         Ok(None)
     }
-
 }
 
 #[cfg(test)]
@@ -488,7 +498,7 @@ mod test {
             "unexpected handshake message-1 length, got {}",
             handshake_msg_1.len()
         );
-        assert!(matches!(responder.get_state(), KMSMState::Transport{..}));
+        assert!(matches!(responder.get_state(), KMSMState::Transport { .. }));
 
         // <- e, ee, se
         match initiator.handle_message(&handshake_msg_1) {
@@ -498,7 +508,7 @@ mod test {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
         };
-        assert!(matches!(initiator.get_state(), KMSMState::Transport{..}));
+        assert!(matches!(initiator.get_state(), KMSMState::Transport { .. }));
 
         // Handshake complete, now we can encrypt/decrypt
 
@@ -512,7 +522,10 @@ mod test {
         let plaintext = b"hello world";
 
         let mut out_buf = [0u8; 4096];
-        let out_len = match i_transport.codec.encrypt_transport_stateless(plaintext, &mut out_buf) {
+        let out_len = match i_transport
+            .codec
+            .encrypt_transport_stateless(plaintext, &mut out_buf)
+        {
             Ok(l) => l,
             Err(e) => {
                 panic!("error encrypting message: {:?}", e);
@@ -535,7 +548,10 @@ mod test {
         };
 
         let mut in_buf = [0u8; 4096];
-        let in_len = match r_transport.codec.decrypt_transport_stateless(&out_buf[..out_len], &mut in_buf) {
+        let in_len = match r_transport
+            .codec
+            .decrypt_transport_stateless(&out_buf[..out_len], &mut in_buf)
+        {
             Ok(l) => l,
             Err(e) => {
                 panic!("error decrypting message: {:?}", e);
@@ -615,7 +631,7 @@ mod test {
             "unexpected handshake message-1 length, got {}",
             handshake_msg_1.len()
         );
-        assert!(matches!(responder.get_state(), KMSMState::Transport{..}));
+        assert!(matches!(responder.get_state(), KMSMState::Transport { .. }));
 
         // <- e, ee, se
         match initiator.handle_message(&handshake_msg_1) {
@@ -625,7 +641,7 @@ mod test {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
         };
-        assert!(matches!(initiator.get_state(), KMSMState::Transport{..}));
+        assert!(matches!(initiator.get_state(), KMSMState::Transport { .. }));
 
         // At this point each side should know the others hmac key, and the ZPIs should have been exchanged.
 
@@ -818,9 +834,17 @@ mod test {
         );
 
         // ZPIs should be exchanged.
-        assert!(ZPIPair::new(3, 4) == adapter.get_send_zpis(), "adapter send ZPIs mismatch: {:?}", adapter.get_send_zpis());
+        assert!(
+            ZPIPair::new(3, 4) == adapter.get_send_zpis(),
+            "adapter send ZPIs mismatch: {:?}",
+            adapter.get_send_zpis()
+        );
         assert!(ZPIPair::new(1, 2) == adapter.get_recv_zpis());
-        assert!(ZPIPair::new(1, 2) == node.get_send_zpis(), "node send ZPIs mismatch: {:?}", node.get_send_zpis());
+        assert!(
+            ZPIPair::new(1, 2) == node.get_send_zpis(),
+            "node send ZPIs mismatch: {:?}",
+            node.get_send_zpis()
+        );
         assert!(ZPIPair::new(3, 4) == node.get_recv_zpis());
 
         // HMAC keys created

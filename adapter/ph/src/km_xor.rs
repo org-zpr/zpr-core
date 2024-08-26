@@ -4,9 +4,9 @@
 use crate::km::*;
 use crate::zpr;
 use bytes::Bytes;
+use std::sync::Arc;
 use std::time;
 use std::time::Duration;
-use std::sync::Arc;
 
 pub struct XorKeyManager {
     state: KMSMState,
@@ -104,7 +104,7 @@ impl KeyManagerStateMachine for XorKeyManager {
 
     fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KMError> {
         if self.state == KMSMState::Configuring {
-            let codec = Arc::new(XorCodec{});
+            let codec = Arc::new(XorCodec {});
             self.state = KMSMState::Transport(KMTransportState::new_empty_with_codec(codec));
             if !self.initiate {
                 // Did not initiate, so send a reply back.
@@ -116,7 +116,10 @@ impl KeyManagerStateMachine for XorKeyManager {
     }
 
     fn tick(&mut self) -> Result<Option<Bytes>, KMError> {
-        if self.state == KMSMState::Configuring && self.initiate && self.hello_t.elapsed() > Duration::from_secs(5) {
+        if self.state == KMSMState::Configuring
+            && self.initiate
+            && self.hello_t.elapsed() > Duration::from_secs(5)
+        {
             // too long, send another hello.
             let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
             self.hello_t = time::Instant::now();
@@ -124,7 +127,6 @@ impl KeyManagerStateMachine for XorKeyManager {
         }
         Ok(None)
     }
-
 }
 
 #[cfg(test)]
@@ -135,11 +137,15 @@ mod test {
     fn test_encrypt_decrypt() {
         let mut buf = [0u8; 64];
         let payload = Bytes::from_static(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-        let codec = XorCodec{};
-        let sz = codec.encrypt_transport_stateless(&payload, &mut buf).unwrap();
+        let codec = XorCodec {};
+        let sz = codec
+            .encrypt_transport_stateless(&payload, &mut buf)
+            .unwrap();
         assert_eq!(sz, 12);
         let mut decbuf = [0u8; 64];
-        let decsz = codec.decrypt_transport_stateless(&buf[0..sz], &mut decbuf).unwrap();
+        let decsz = codec
+            .decrypt_transport_stateless(&buf[0..sz], &mut decbuf)
+            .unwrap();
         assert_eq!(decsz, 10);
         assert_eq!(&decbuf[0..decsz], &payload[..]);
     }
