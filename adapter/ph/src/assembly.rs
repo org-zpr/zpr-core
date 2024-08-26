@@ -1,3 +1,4 @@
+use crate::adapter_tables;
 use crate::buffer_stack::BufferStack;
 use crate::capture_worker::CaptureWorker;
 use crate::config;
@@ -62,6 +63,9 @@ pub struct Assembly<'pktbuf> {
 
     pub peer_table: peer_table::PeerTable,
     pub adapter_docking_session_id: zpr::LinkId,
+
+    pub alt: adapter_tables::AgentLookupTable,
+    pub dlt: adapter_tables::DockLookupTable,
 }
 
 pub struct SyncReqState<'pktbuf> {

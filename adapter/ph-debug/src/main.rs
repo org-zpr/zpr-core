@@ -70,6 +70,8 @@ fn main() -> std::io::Result<()> {
     let command = args.command + "\n";
     let port = args.port;
 
+    // Commands that don't need any additional data can be sent right here, those
+    // with extra info get sent in their handler funcs
     match command.as_str() {
         "ECHO\n"
         | "COUNTERS\n"
@@ -166,6 +168,9 @@ fn handle_perf_sample(duration: u64, frequency: u64, port: &str) -> std::io::Res
     Ok(())
 }
 
+/// Opens a capture file, sends a message to the RPC worker to prepare to receive
+/// the file descriptor, upon receiving correct response, sends the fd as
+/// ancillary data, and awaits response again.
 fn handle_set_capture_file(file_path: String, port: &str) -> std::io::Result<()> {
     let file = OpenOptions::new()
         .write(true)
@@ -210,6 +215,8 @@ fn handle_set_capture_file(file_path: String, port: &str) -> std::io::Result<()>
     Ok(())
 }
 
+/// Opens capture file, sets appropriate capture program, waits a designated
+/// amount of time, then closes the capture file (which also deletes the program)
 fn handle_capture_sequence(
     file_path: String,
     time: u64,

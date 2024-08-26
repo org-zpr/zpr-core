@@ -51,8 +51,8 @@ zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad,
                      destination_port_present, source_addr, dest_addr, ip_protocol, source_info, 
                      dest_info, status_code, info_len, status_info }
 
-TRANSIT_NON_AGENT_DATA = 26
-IP_NON_AGENT_DATA = 33
+TRANSIT_NON_AGENT_DATA = 18
+IP_NON_AGENT_DATA = 25
 STREAM_MGMT_NON_AGENT_DATA = 11
 MGMT_NON_AGENT_DATA = 7
 
@@ -78,42 +78,40 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     if type == 0 then 
         -- Transit Packet
         zdp_header_subtree:add(stream_id, buffer(5, 4))
-        zdp_header_subtree:add(pad, buffer(9, 8))
-        zdp_header_subtree:add(d2d_said, buffer(17, 1))
-        zdp_header_subtree:add(agent_packet, buffer(18, real_len - TRANSIT_NON_AGENT_DATA))
+        -- zdp_header_subtree:add(pad, buffer(9, 8))
+        zdp_header_subtree:add(d2d_said, buffer(9, 1))
+        zdp_header_subtree:add(agent_packet, buffer(10, real_len - TRANSIT_NON_AGENT_DATA))
         zdp_header_subtree:add(d2d_mac, buffer(real_len - 8, 4))
         zdp_header_subtree:add(mac_addr, buffer(real_len - 4, 4))
-        
-        -- I might comment this whole section until line 113 out for the Demo as it's not actually completely accurate. The TCP
-        -- dissector expects us to give it a complete TCP packet, which we are not doing. As a result, the TCP traffic
-        -- shown in Wireshark is not accurate, I don't think
 
         local agent_header_subtree = tree:add(zdp_proto, buffer(), "Compressed Agent Packet Header Data")
-        local v4_v6 = get_first_four(buffer(18, 1):uint())
+        local v4_v6 = get_first_four(buffer(10, 1):uint())
         agent_header_subtree:add(ip_version, v4_v6)
         if v4_v6 == 4 then
-            local ihl_val = get_back_four(buffer(18, 1):uint())
+            local ihl_val = get_back_four(buffer(10, 1):uint())
             agent_header_subtree:add(ihl, ihl_val)
-            agent_header_subtree:add(dscp, buffer(19, 1))
-            agent_header_subtree:add(frag_id, buffer(20, 2))
-            agent_header_subtree:add(frag_offset, buffer(22, 2))
-            agent_header_subtree:add(ttl, buffer(24, 1))
+            agent_header_subtree:add(dscp, buffer(11, 1))
+            agent_header_subtree:add(frag_id, buffer(12, 2))
+            agent_header_subtree:add(frag_offset, buffer(14, 2))
+            agent_header_subtree:add(ttl, buffer(16, 1))
             if ihl_val > 5 then
                 local options_len = ihl_val - ((ihl_val - 5) * 4)
-                agent_header_subtree:add(ip_options, buffer(25, options_len))
+                agent_header_subtree:add(ip_options, buffer(17, options_len))
                 -- pass ip options to an options dissector here (I could not find an existing IP options dissector)
             else
                 -- Should really be passed to a custom compressed TCP packet dissector
-                Dissector.get("tcp"):call(buffer(25, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
+                -- Perhaps forwarding to the TCP dissector should be commented out for the demo, as it will
+                -- not show accurate information about the packets. 
+                Dissector.get("tcp"):call(buffer(17, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
             end
 
         elseif v4_v6 == 6 then
-            local tc_value = get_middle_eight(buffer(18, 2):uint())
+            local tc_value = get_middle_eight(buffer(10, 2):uint())
             agent_header_subtree:add(tc, tc_value)
-            local fl_value = get_back_twelve(buffer(19, 3):uint())
+            local fl_value = get_back_twelve(buffer(11, 3):uint())
             agent_header_subtree:add(fl, fl_value)
-            agent_header_subtree:add(hop_limit, buffer(22, 1))
-            Dissector.get("tcp"):call(buffer(23, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
+            agent_header_subtree:add(hop_limit, buffer(14, 1))
+            Dissector.get("tcp"):call(buffer(15, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
         end
     elseif type <= 127 then 
         -- Stream-oriented Management Message
@@ -221,6 +219,8 @@ presence_value =
     [1] = "Present",
 }
 
+-- Gets type name for a packet using the table below. Will return nil if type is 
+-- not between 0 and 254
 function get_type_name(type)
     local type_name = type_name_table[type]
 
@@ -275,6 +275,7 @@ type_name_table =
     [255] = "Reserved, must not be used",
 }
 
+-- Bit un-packing funcs
 function get_first_four(one_byte) 
     return bit.rshift(one_byte, 4)
 end

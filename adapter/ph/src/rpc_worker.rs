@@ -331,6 +331,8 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
     values
 }
 
+// Takes in ancillary data, extracts the file descriptor, and creates a file using the
+// fd
 async fn set_capture_file(asm: &Assembly<'_>, ancillary: SocketAncillary<'_>) -> String {
     // Get the ancillary data
     let anc_message = ancillary.into_messages().nth(0).unwrap();

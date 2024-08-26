@@ -7,6 +7,7 @@
 //! For usage examples see the [Packet] documentation.
 
 use crate::config;
+use crate::defs::*;
 use crate::net_defs::*;
 use bytes::buf;
 use std::mem::{size_of, size_of_val};
@@ -153,51 +154,51 @@ pub struct PacketMetadata {
     offset: usize,    // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
     len: usize,       // packet length
     pub flow_id: u32, // flow ID for load-balancing purposes; not otherwise meaningful
-    src_address: IpAddress,
-    dst_address: IpAddress,
-    src_port: u16,
-    dst_port: u16,
-    protocol: u8,
-    _padding: [u8; 7],
+    five_tuple: FiveTuple,
+    _padding: [u8; 6],
 }
 
 #[allow(dead_code)]
 impl PacketMetadata {
     pub fn set_addresses(&mut self, src_addr: IpAddress, dst_addr: IpAddress) {
-        self.src_address = src_addr;
-        self.dst_address = dst_addr;
+        self.five_tuple.src_address = src_addr;
+        self.five_tuple.dst_address = dst_addr;
     }
 
     pub fn set_src_port(&mut self, sport: [u8; 2]) {
-        self.src_port = NetworkEndian::read_u16(&sport)
+        self.five_tuple.src_port = NetworkEndian::read_u16(&sport)
     }
 
     pub fn set_dst_port(&mut self, dport: [u8; 2]) {
-        self.dst_port = NetworkEndian::read_u16(&dport)
+        self.five_tuple.dst_port = NetworkEndian::read_u16(&dport)
     }
 
     pub fn set_protocol(&mut self, proto: u8) {
-        self.protocol = proto
+        self.five_tuple.protocol = proto
     }
 
     pub fn get_src_address(&self) -> IpAddress {
-        self.src_address
+        self.five_tuple.src_address
     }
 
     pub fn get_dst_address(&self) -> IpAddress {
-        self.dst_address
+        self.five_tuple.dst_address
     }
 
     pub fn get_src_port_hbo(&self) -> u16 {
-        self.src_port
+        self.five_tuple.src_port
     }
 
     pub fn get_dst_port_hbo(&self) -> u16 {
-        self.dst_port
+        self.five_tuple.dst_port
     }
 
     pub fn get_protocol(&self) -> u8 {
-        self.protocol
+        self.five_tuple.protocol
+    }
+
+    pub fn five_tuple(&self) -> &FiveTuple {
+        &self.five_tuple
     }
 }
 

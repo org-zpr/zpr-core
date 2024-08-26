@@ -1,6 +1,7 @@
 //! Standard network constants.
 
 use arrayref::array_ref;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use zerocopy::FromZeroes;
 use zerocopy_derive::{AsBytes, FromBytes, FromZeroes, KnownLayout, Unaligned};
 
@@ -14,14 +15,13 @@ pub mod ethertype {
 pub const IPV6_ADDRESS_SIZE: usize = 16;
 
 #[derive(
-    AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned, Copy, Clone, Hash, Debug, PartialEq,
+    AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned, Copy, Clone, Hash, Debug, PartialEq, Eq,
 )]
 #[repr(transparent)]
 pub struct IpAddress {
     pub v6: [u8; IPV6_ADDRESS_SIZE],
 }
 
-#[allow(dead_code)]
 impl IpAddress {
     pub fn new_from_v4(v4_address: [u8; 4]) -> Self {
         // Uses standard v4 to v6 conversion
@@ -37,17 +37,54 @@ impl IpAddress {
     }
 }
 
-pub fn ip_version(pkt: &[u8]) -> u8 {
+impl From<Ipv4Addr> for IpAddress {
+    fn from(addr: Ipv4Addr) -> Self {
+        Self::new_from_v4(addr.octets())
+    }
+}
+
+impl From<Ipv6Addr> for IpAddress {
+    fn from(addr: Ipv6Addr) -> Self {
+        Self { v6: addr.octets() }
+    }
+}
+
+impl From<IpAddr> for IpAddress {
+    fn from(addr: IpAddr) -> Self {
+        match addr {
+            IpAddr::V4(v4) => v4.into(),
+            IpAddr::V6(v6) => v6.into(),
+        }
+    }
+}
+
+impl From<IpAddress> for Ipv6Addr {
+    fn from(addr: IpAddress) -> Self {
+        addr.v6.into()
+    }
+}
+
+impl std::fmt::Display for IpAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        Ipv6Addr::from(*self).fmt(f)
+    }
+}
+
+pub type IpVersion = u8;
+
+pub fn ip_version(pkt: &[u8]) -> IpVersion {
     pkt[0] >> 4
 }
 
-pub fn ip_ethertype(ip_version: u8) -> u16 {
+pub fn ip_ethertype(ip_version: IpVersion) -> u16 {
     match ip_version {
         4 => ethertype::IP,
         6 => ethertype::IPV6,
         _ => 0,
     }
 }
+
+pub type IpProtocol = u8;
 
 /// RFC 1071 Internet Checksum.  The input data must be non-empty, and
 /// length at most ~128 KiB.

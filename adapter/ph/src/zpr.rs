@@ -40,3 +40,23 @@ pub const KM_ID_IKEV2: KmId = 1;
 
 /// Key Management Identifier indicating Noise algorithm.
 pub const KM_ID_NOISE: KmId = 2;
+
+/// ZPR agent packet L3 type (RFC 6.5 § 6.3.11)
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum L3Type {
+    IPv4 = 4,
+    IPv6 = 6,
+}
+
+/// Bitmask indicating how an agent packet is compressed.
+pub type CompressionMode = u8;
+
+/// CompressionMode constants (RFC 6.5 § 6.3.11)
+pub mod compression_mode {
+    use super::CompressionMode;
+
+    pub const DESTINATION_PORT_PRESENT: CompressionMode = 0x20;
+    pub const SOURCE_PORT_PRESENT: CompressionMode = 0x40;
+    pub const IP_PROTOCOL_PRESENT: CompressionMode = 0x80; // FIXME: this seems unused; I have a Q out to Frank about it
+}
