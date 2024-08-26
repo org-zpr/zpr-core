@@ -219,6 +219,8 @@ presence_value =
     [1] = "Present",
 }
 
+-- Gets type name for a packet using the table below. Will return nil if type is 
+-- not between 0 and 254
 function get_type_name(type)
     local type_name = type_name_table[type]
 
@@ -273,6 +275,7 @@ type_name_table =
     [255] = "Reserved, must not be used",
 }
 
+-- Bit un-packing funcs
 function get_first_four(one_byte) 
     return bit.rshift(one_byte, 4)
 end
