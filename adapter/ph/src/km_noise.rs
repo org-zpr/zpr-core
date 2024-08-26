@@ -38,6 +38,7 @@ use crate::zpr;
 use bytes::{Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use std::time::Duration;
+use std::sync::Arc;
 use tracing::error;
 use openssl::rand::rand_bytes;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
@@ -56,8 +57,6 @@ impl From<snow::Error> for KMError {
     }
 }
 
-/// Not multi-thread safe.
-/// TODO: Figure out how to make encryption/decryption parallelizable.
 pub struct KMNoise {
     settings: KMSettings,
     state: KMSMState,
@@ -65,7 +64,7 @@ pub struct KMNoise {
     peer_pub_key: Option<Vec<u8>>, // required if initiator
     local_keypair: snow::Keypair,
     hs_state: Option<snow::HandshakeState>,
-    t_state: Option<snow::TransportState>,
+    //t_state: Option<snow::TransportState>,
     recv_hmac_key: [u8; 32], // messages sent to us from peer will use this key (we create this)
     send_hmac_key: Option<[u8; 32]>,  // messages sent to peer will use this key (peers creates this)
     recv_zpis: ZPIPair,
@@ -126,7 +125,6 @@ impl KMNoise {
             peer_pub_key,
             local_keypair: kp,
             hs_state: None,
-            t_state: None,
             recv_hmac_key: [0u8; 32], // we generate this and send to peer
             send_hmac_key: None, // we get this during handshake
             recv_zpis: ZPIPair{ encr: zpi_full_encr, hmac: zpi_transmit_hmac },
@@ -142,7 +140,7 @@ impl KMNoise {
         self.send_hmac_key
     }
 
-    /// Returns the ZPIs for sending, order is (ZPI_FULL_ENCRYPT, ZPI_TRANSIT_HMAC)
+    /// Returns the ZPIs for sending
     pub fn get_send_zpis(&self) -> Option<ZPIPair> {
         self.send_zpis
     }
@@ -153,6 +151,53 @@ pub fn derive_public_key(private_key: &[u8; 32]) -> [u8; 32] {
     let point = MontgomeryPoint::mul_base_clamped(*private_key);
     point.to_bytes()
 }
+
+
+struct NoiseCodec {
+    snow_state: snow::StatelessTransportState,
+}
+
+impl Codec for NoiseCodec {
+    fn encrypt_transport_stateless(
+        self: &Self,
+        payload: &[u8],
+        message: &mut [u8],
+    ) -> Result<usize, KMError> {
+        rand_bytes(&mut message[..NOISE_NONCE_LEN]).unwrap();
+        let nonce = u64::from_be_bytes(message[..NOISE_NONCE_LEN].try_into().unwrap());
+        match self.snow_state.write_message(nonce, payload, &mut message[NOISE_NONCE_LEN..]) {
+            Ok(len) => {
+                Ok(len + NOISE_NONCE_LEN)
+            }
+            Err(e) => {
+                error!("noise: error encrypting message: {:?}", e);
+                Err(KMError::EncryptionError)
+            }
+        }
+    }
+
+    fn decrypt_transport_stateless(
+        self: &Self,
+        payload: &[u8],
+        message: &mut [u8],
+    ) -> Result<usize, KMError> {
+        // nonce is first 8 bytes of the message.
+        let plen = payload.len();
+        if plen < NOISE_NONCE_LEN {
+            error!("noise: message too short");
+            return Err(KMError::EncryptionError);
+        }
+        let nonce: u64 = u64::from_be_bytes(payload[0..NOISE_NONCE_LEN].try_into().unwrap());
+        match self.snow_state.read_message(nonce, &payload[NOISE_NONCE_LEN..plen], message) {
+            Ok(len) => Ok(len),
+            Err(e) => {
+                error!("noise: error decrypting message: {:?}", e);
+                Err(KMError::EncryptionError)
+            }
+        }
+    }
+}
+
 
 impl KeyManagerStateMachine for KMNoise {
     fn get_settings(&self) -> KMSettings {
@@ -311,10 +356,12 @@ impl KeyManagerStateMachine for KMNoise {
                             [0u8; 32]
                         }
                     };
-                    match hs.into_transport_mode() {
+                    match hs.into_stateless_transport_mode() {
                         Ok(t) => {
-                            self.t_state = Some(t);
-                            self.state = KMSMState::Transport(KMTransportState::new(send_zpis, self.recv_zpis, send_key, self.recv_hmac_key));
+                            let codec = Arc::new(NoiseCodec {
+                                snow_state: t,
+                            });
+                            self.state = KMSMState::Transport(KMTransportState::new(send_zpis, self.recv_zpis, send_key, self.recv_hmac_key, codec));
                         }
                         Err(e) => {
                             error!("noise: error switching to transport mode: {:?}", e);
@@ -350,10 +397,12 @@ impl KeyManagerStateMachine for KMNoise {
                             [0u8; 32]
                         }
                     };
-                    match hs.into_transport_mode() {
+                    match hs.into_stateless_transport_mode() {
                         Ok(t) => {
-                            self.t_state = Some(t);
-                            self.state = KMSMState::Transport(KMTransportState::new(send_zpis, self.recv_zpis, send_key, self.recv_hmac_key));
+                            let codec = Arc::new(NoiseCodec {
+                                snow_state: t,
+                            });
+                            self.state = KMSMState::Transport(KMTransportState::new(send_zpis, self.recv_zpis, send_key, self.recv_hmac_key, codec));
                             return Ok(None);
                         }
                         Err(e) => {
@@ -370,60 +419,6 @@ impl KeyManagerStateMachine for KMNoise {
         Ok(None)
     }
 
-    fn encrypt_transport(
-        self: &mut Self,
-        payload: &[u8],
-        message: &mut [u8],
-    ) -> Result<usize, KMError> {
-        let ts = match &mut self.t_state {
-            Some(t) => t,
-            None => {
-                error!("noise: encrypt_transport called in wrong state");
-                return Err(KMError::InvalidState);
-            }
-        };
-        let nonce = ts.sending_nonce();
-        message[..NOISE_NONCE_LEN].copy_from_slice(&nonce.to_be_bytes());
-        match ts.write_message(payload, &mut message[NOISE_NONCE_LEN..]) {
-            Ok(len) => {
-                Ok(len + NOISE_NONCE_LEN)
-            }
-            Err(e) => {
-                error!("noise: error encrypting message: {:?}", e);
-                Err(KMError::EncryptionError)
-            }
-        }
-    }
-
-    fn decrypt_transport(
-        self: &mut Self,
-        payload: &[u8],
-        message: &mut [u8],
-    ) -> Result<usize, KMError> {
-        let ts = match &mut self.t_state {
-            Some(t) => t,
-            None => {
-                error!("noise: decrypt_transport called in wrong state");
-                return Err(KMError::InvalidState);
-            }
-        };
-        // nonce is first 8 bytes in the message.
-        let plen = payload.len();
-        if plen < NOISE_NONCE_LEN {
-            error!("noise: message too short");
-            return Err(KMError::EncryptionError);
-        }
-        let nonce: u64 = u64::from_be_bytes(payload[0..NOISE_NONCE_LEN].try_into().unwrap());
-
-        ts.set_receiving_nonce(nonce);
-        match ts.read_message(&payload[NOISE_NONCE_LEN..plen], message) {
-            Ok(len) => Ok(len),
-            Err(e) => {
-                error!("noise: error decrypting message: {:?}", e);
-                Err(KMError::EncryptionError)
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -507,10 +502,17 @@ mod test {
 
         // Handshake complete, now we can encrypt/decrypt
 
+        let i_transport = match initiator.get_state() {
+            KMSMState::Transport(t) => t,
+            _ => {
+                panic!("unexpected state after handshake");
+            }
+        };
+
         let plaintext = b"hello world";
 
         let mut out_buf = [0u8; 4096];
-        let out_len = match initiator.encrypt_transport(plaintext, &mut out_buf) {
+        let out_len = match i_transport.codec.encrypt_transport_stateless(plaintext, &mut out_buf) {
             Ok(l) => l,
             Err(e) => {
                 panic!("error encrypting message: {:?}", e);
@@ -525,8 +527,15 @@ mod test {
             out_len
         );
 
+        let r_transport = match responder.get_state() {
+            KMSMState::Transport(t) => t,
+            _ => {
+                panic!("unexpected state after handshake");
+            }
+        };
+
         let mut in_buf = [0u8; 4096];
-        let in_len = match responder.decrypt_transport(&out_buf[..out_len], &mut in_buf) {
+        let in_len = match r_transport.codec.decrypt_transport_stateless(&out_buf[..out_len], &mut in_buf) {
             Ok(l) => l,
             Err(e) => {
                 panic!("error decrypting message: {:?}", e);
