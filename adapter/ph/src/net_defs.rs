@@ -35,6 +35,10 @@ impl IpAddress {
     pub fn read_as_v4(&self) -> [u8; 4] {
         *array_ref!(self.v6, 12, 4)
     }
+
+    pub fn is_v4(&self) -> bool {
+        self.v6[..12] == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff]
+    }
 }
 
 impl From<Ipv4Addr> for IpAddress {
@@ -54,6 +58,18 @@ impl From<IpAddr> for IpAddress {
         match addr {
             IpAddr::V4(v4) => v4.into(),
             IpAddr::V6(v6) => v6.into(),
+        }
+    }
+}
+
+impl TryFrom<IpAddress> for Ipv4Addr {
+    type Error = ();
+
+    fn try_from(addr: IpAddress) -> Result<Self, Self::Error> {
+        if addr.is_v4() {
+            Ok(addr.read_as_v4().into())
+        } else {
+            Err(())
         }
     }
 }

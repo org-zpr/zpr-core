@@ -6,7 +6,7 @@
 
 use crate::defs::FiveTuple;
 use crate::rcu::RcuBox;
-use crate::zpr::{CompressionMode, L3Type, StreamId};
+use crate::zpr::{CompressionMode, StreamId};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use std::sync::Mutex;
@@ -14,7 +14,6 @@ use std::sync::Mutex;
 const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 24; // 16 million
 
 pub struct AltPep {
-    pub l3_type: L3Type,
     pub compression_mode: CompressionMode,
     pub stream_id: StreamId,
 }
@@ -49,7 +48,6 @@ impl AgentLookupTable {
 }
 
 pub struct DltPep {
-    pub l3_type: L3Type,
     pub compression_mode: CompressionMode,
     pub five_tuple: FiveTuple,
 }

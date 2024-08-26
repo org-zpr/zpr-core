@@ -5,6 +5,7 @@
 
 use crate::assembly::Assembly;
 use crate::classifier::{self, ClassifierResult};
+use crate::compress;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::net_defs;
@@ -376,26 +377,21 @@ pub fn agent_input<'pktbuf>(
     stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
     mut pkt: Packet<'pktbuf>,
 ) {
-    // lookup stream ID in DLT
+    // "Check" A2A checksum
+    pkt.advance(size_of::<zdp::ZdpSaidHeader>());
+    pkt.shrink(size_of::<zdp::ZdpMicvEnd>());
+
+    // lookup PEP in DLT and expand compressed packet
     if asm
         .dlt
         .inspect(stream_id, |pep| {
-            // decompress
-            if pep.compression_mode != 0 {
-                todo!("L4 compression");
-            }
-
-            // TODO
+            compress::expand(pep.compression_mode, &pep.five_tuple, &mut pkt)
         })
         .is_none()
     {
         drop_and_count(asm, pkt, CounterType::UnknownStreamId);
         return;
     }
-
-    // "Check" A2A checksum
-    pkt.advance(size_of::<zdp::ZdpSaidHeader>());
-    pkt.shrink(size_of::<zdp::ZdpMicvEnd>());
 
     // send out decapsulated packet
     match asm.agent_input.try_enqueue_packet(drop_guard(pkt, |p| {
@@ -438,11 +434,13 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) 
     let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
 
     match asm.alt.inspect(&five_tuple, |pep| {
-        if pep.compression_mode != 0 {
-            todo!("L4 compression")
-        }
-
-        // TODO: compress!
+        // compress packet
+        compress::compress(
+            pep.compression_mode,
+            five_tuple.l3_type,
+            five_tuple.l4_protocol,
+            &mut pkt,
+        );
 
         // "generate" A2A checksum
         pkt.alloc_zeroed_header::<zdp::ZdpSaidHeader>().a2a_said = 0;

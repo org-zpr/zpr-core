@@ -1,6 +1,9 @@
 //! ZPR concepts, excluding the ZDP protocol.
 #![allow(dead_code)]
 
+use open_enum::open_enum;
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
+
 /// Substrate Address
 pub type SubstrateAddr = std::net::SocketAddr;
 
@@ -42,11 +45,22 @@ pub const KM_ID_IKEV2: KmId = 1;
 pub const KM_ID_NOISE: KmId = 2;
 
 /// ZPR agent packet L3 type (RFC 6.5 § 6.3.11)
-#[derive(Clone, Copy)]
+#[open_enum]
+#[derive(Clone, Copy, Debug, Hash, AsBytes, FromBytes, FromZeroes)]
 #[repr(u8)]
 pub enum L3Type {
-    IPv4 = 4,
-    IPv6 = 6,
+    Ipv4 = 4,
+    Ipv6 = 6,
+}
+
+impl std::fmt::Display for L3Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match *self {
+            Self::Ipv4 => write!(f, "IPv4"),
+            Self::Ipv6 => write!(f, "IPv6"),
+            other => write!(f, "[unknown L3 type {}]", other.0),
+        }
+    }
 }
 
 /// Bitmask indicating how an agent packet is compressed.

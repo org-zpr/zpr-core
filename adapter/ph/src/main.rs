@@ -173,6 +173,7 @@ fn main() -> ExitCode {
             // TEMP HACK: fill ALT & DLT based on TUN local & remote addresses
             for (remote_stream_id, protocol) in [1, 6, 17].into_iter().enumerate() {
                 let five_tuple = defs::FiveTuple::new(
+                    zpr::L3Type::Ipv4,
                     tun_devs[0].address().unwrap().into(),
                     tun_devs[0].destination().unwrap().into(),
                     protocol,
@@ -182,14 +183,12 @@ fn main() -> ExitCode {
                 alt.insert(
                     five_tuple,
                     adapter_tables::AltPep {
-                        l3_type: zpr::L3Type::IPv4,
                         compression_mode: 0,
                         stream_id: remote_stream_id as zpr::StreamId, /* TOTAL HACK */
                     },
                 );
                 let local_stream_id = dlt
                     .insert(adapter_tables::DltPep {
-                        l3_type: zpr::L3Type::IPv4,
                         compression_mode: 0,
                         five_tuple: five_tuple.reverse(),
                     })
