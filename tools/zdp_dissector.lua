@@ -51,6 +51,11 @@ zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad,
                      destination_port_present, source_addr, dest_addr, ip_protocol, source_info, 
                      dest_info, status_code, info_len, status_info }
 
+TRANSIT_NON_AGENT_DATA = 26
+IP_NON_AGENT_DATA = 33
+STREAM_MGMT_NON_AGENT_DATA = 11
+MGMT_NON_AGENT_DATA = 7
+
 function zdp_proto.dissector(buffer, pinfo, tree)
     length = buffer:len()
     if length == 0 then return end
@@ -64,7 +69,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     local type = buffer(1, 1):uint()
     local type_name = get_type_name(type)
     zdp_header_subtree:add(zdp_type, buffer(1, 1)):append_text(" (" .. type_name .. ")")
-
+    pinfo.cols.info = type_name
     zdp_header_subtree:add(excess_len, buffer(2, 1))
     zdp_header_subtree:add(seq_num, buffer(3, 2))
 
@@ -74,50 +79,60 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         -- Transit Packet
         zdp_header_subtree:add(stream_id, buffer(5, 4))
         zdp_header_subtree:add(pad, buffer(9, 8))
-        zdp_header_subtree:add(mac_addr, buffer(17, 4))
-        zdp_header_subtree:add(d2d_said, buffer(21, 1))
-        zdp_header_subtree:add(agent_packet, buffer(22, real_len - 26))
-        zdp_header_subtree:add(d2d_mac, buffer(real_len - 4, 4))
+        zdp_header_subtree:add(d2d_said, buffer(17, 1))
+        zdp_header_subtree:add(agent_packet, buffer(18, real_len - TRANSIT_NON_AGENT_DATA))
+        zdp_header_subtree:add(d2d_mac, buffer(real_len - 8, 4))
+        zdp_header_subtree:add(mac_addr, buffer(real_len - 4, 4))
+        
+        -- I might comment this whole section until line 113 out for the Demo as it's not actually completely accurate. The TCP
+        -- dissector expects us to give it a complete TCP packet, which we are not doing. As a result, the TCP traffic
+        -- shown in Wireshark is not accurate, I don't think
 
         local agent_header_subtree = tree:add(zdp_proto, buffer(), "Compressed Agent Packet Header Data")
-        local v4_v6 = get_first_four(buffer(22, 1):uint())
+        local v4_v6 = get_first_four(buffer(18, 1):uint())
         agent_header_subtree:add(ip_version, v4_v6)
         if v4_v6 == 4 then
-            local ihl_val = get_back_four(buffer(22, 1):uint())
+            local ihl_val = get_back_four(buffer(18, 1):uint())
             agent_header_subtree:add(ihl, ihl_val)
-            agent_header_subtree:add(dscp, buffer(23, 1))
-            agent_header_subtree:add(frag_id, buffer(24, 2))
-            agent_header_subtree:add(frag_offset, buffer(26, 2))
-            agent_header_subtree:add(ttl, buffer(28, 1))
+            agent_header_subtree:add(dscp, buffer(19, 1))
+            agent_header_subtree:add(frag_id, buffer(20, 2))
+            agent_header_subtree:add(frag_offset, buffer(22, 2))
+            agent_header_subtree:add(ttl, buffer(24, 1))
             if ihl_val > 5 then
                 local options_len = ihl_val - ((ihl_val - 5) * 4)
-                agent_header_subtree:add(ip_options, buffer(29, options_len))
+                agent_header_subtree:add(ip_options, buffer(25, options_len))
                 -- pass ip options to an options dissector here (I could not find an existing IP options dissector)
             else
-                Dissector.get("tcp"):call(buffer(29, real_len - 33):tvb(), pinfo, tree)
+                -- Should really be passed to a custom compressed TCP packet dissector
+                Dissector.get("tcp"):call(buffer(25, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
             end
 
         elseif v4_v6 == 6 then
-            local tc_value = get_middle_eight(buffer(22, 2):uint())
+            local tc_value = get_middle_eight(buffer(18, 2):uint())
             agent_header_subtree:add(tc, tc_value)
-            local fl_value = get_back_twelve(buffer(23, 3):uint())
+            local fl_value = get_back_twelve(buffer(19, 3):uint())
             agent_header_subtree:add(fl, fl_value)
-            agent_header_subtree:add(hop_limit, buffer(26, 1))
-            Dissector.get("tcp"):call(buffer(27, real_len - 33):tvb(), pinfo, tree)
+            agent_header_subtree:add(hop_limit, buffer(22, 1))
+            Dissector.get("tcp"):call(buffer(23, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
         end
     elseif type <= 127 then 
         -- Stream-oriented Management Message
         zdp_header_subtree:add(stream_id, buffer(5, 4))
-        zdp_header_subtree:add(management_packet, buffer(9, real_len - 21))
-        zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
-        zdp_header_subtree:add(mac_addr, buffer(real_len - 4, 4))
-        decode_management(type, buffer(9, real_len - 21), tree)
+        if real_len > STREAM_MGMT_NON_AGENT_DATA then
+            zdp_header_subtree:add(management_packet, buffer(9, real_len - STREAM_MGMT_NON_AGENT_DATA))
+            decode_management(type, buffer(9, real_len - STREAM_MGMT_NON_AGENT_DATA), tree)
+        end
+        -- zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
+        zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
     else 
         -- Other Management Message
-        zdp_header_subtree:add(management_packet, buffer(5, real_len - 17))
-        zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
-        zdp_header_subtree:add(mac_addr, buffer(real_len - 4, 4))
-        decode_management(type, buffer(5, real_len - 17), tree)
+        if real_len > MGMT_NON_AGENT_DATA then
+            zdp_header_subtree:add(management_packet, buffer(5, real_len - MGMT_NON_AGENT_DATA))
+            decode_management(type, buffer(5, real_len - MGMT_NON_AGENT_DATA), tree)
+        end
+        -- zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
+        zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
+
     end
 end
 -- Idiomatic way of doing this may be to actually create a whole new dissector, although that might be challenging
@@ -191,6 +206,7 @@ function handle_bind_agent_addr_response(buffer, management_subtree)
         management_subtree:add(status_info, buffer(4, add_info_len)) 
     end                                                          
 end
+
 management_table = 
 {
     [11] = handle_bind_agent_addr_request,

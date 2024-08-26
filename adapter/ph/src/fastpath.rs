@@ -4,18 +4,21 @@
 //! This implies that all functions here must be non-async.
 
 use crate::assembly::Assembly;
+use crate::classifier::{self, ClassifierResult};
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::net_defs;
 use crate::packet::Packet;
+use crate::peer_table::PeerState;
 use crate::queues::TryEnqueueError;
 use crate::zdp;
 use crate::zdp_ll;
 use crate::zpr;
 use bytes::{Buf, BufMut};
+use std::mem::size_of;
 use std::net::SocketAddr;
 use std::time::SystemTime;
-use zerocopy::FromBytes;
+use zerocopy::{AsBytes, FromBytes};
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
 
@@ -141,12 +144,16 @@ pub fn maybe_capture_batch<'a, 'pktbuf: 'a>(
                 }
 
                 None => {
+                    // remove direction indicator from beginning of packet
+                    pkt.advance(std::mem::size_of::<zdp_ll::ZdpLinkP2P>());
                     // No sense to try acquiring more buffers; exit the loop early.
                     break;
                 }
             }
         } else {
             num_filtered += 1;
+            // remove direction indicator from beginning of packet
+            pkt.advance(std::mem::size_of::<zdp_ll::ZdpLinkP2P>());
         }
     }
 
@@ -242,7 +249,7 @@ fn substrate_egress_common<'pktbuf>(
     link_id: zpr::LinkId,
     zpi: zpr::Zpi,
     pkt: &mut Packet<'pktbuf>,
-) {
+) -> Option<zpr::SubstrateAddr> {
     // TODO: should we add ZDP header here also??
 
     encap_zpi(asm, link_id, zpi, pkt);
@@ -251,9 +258,8 @@ fn substrate_egress_common<'pktbuf>(
 
     encrypt(asm, link_id, pkt);
 
-    if link_id != zpr::ADAPTER_DOCKING_SESSION_ID {
-        todo!("link routing");
-    }
+    asm.peer_table
+        .inspect(link_id, |peer_state: &PeerState| peer_state.substrate_addr)
 }
 
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
@@ -264,9 +270,10 @@ pub fn substrate_egress<'pktbuf>(
     zpi: zpr::Zpi,
     mut pkt: Packet<'pktbuf>,
 ) {
-    substrate_egress_common(asm, link_id, zpi, &mut pkt);
-
-    let dest_sa = asm.peer_addr; // TEMP HACK
+    let Some(dest_sa) = substrate_egress_common(asm, link_id, zpi, &mut pkt) else {
+        drop_and_count(asm, pkt, CounterType::PeerRemoved);
+        return;
+    };
 
     match asm.substrate_egress.try_enqueue_packet(
         drop_guard(pkt, |p| drop_and_count(asm, p, CounterType::OutPacksSent)),
@@ -287,13 +294,17 @@ pub async fn substrate_egress_blocking<'pktbuf>(
     zpi: zpr::Zpi,
     mut pkt: Packet<'pktbuf>,
 ) {
-    substrate_egress_common(asm, link_id, zpi, &mut pkt);
+    let Some(dest_sa) = substrate_egress_common(asm, link_id, zpi, &mut pkt) else {
+        drop_and_count(asm, pkt, CounterType::PeerRemoved);
+        return;
+    };
 
     match asm
         .substrate_egress
-        .enqueue_packet(drop_guard(pkt, |p| {
-            drop_and_count(asm, p, CounterType::OutPacksSent)
-        }))
+        .enqueue_packet(
+            drop_guard(pkt, |p| drop_and_count(asm, p, CounterType::OutPacksSent)),
+            dest_sa,
+        )
         .await
     {
         Ok(()) => (),
@@ -304,13 +315,15 @@ pub async fn substrate_egress_blocking<'pktbuf>(
 /// Process packets ingressing from the specified SA.
 pub fn substrate_ingress<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    _peer_sa: &SocketAddr,
+    peer_sa: &SocketAddr,
     mut pkt: Packet<'pktbuf>,
 ) {
     asm.counters[CounterType::InPacksRec].increment();
 
-    // TODO: link routing
-    let link_id = zpr::ADAPTER_DOCKING_SESSION_ID;
+    let Some(link_id) = asm.peer_table.lookup_peer(peer_sa) else {
+        drop_and_count(asm, pkt, CounterType::UnknownPeer);
+        return;
+    };
 
     match decrypt(asm, link_id, &mut pkt) {
         Ok(()) => (),
@@ -360,10 +373,29 @@ pub fn substrate_ingress<'pktbuf>(
 /// The packet will be decompressed according to the given stream ID.
 pub fn agent_input<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    _stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
-    pkt: Packet<'pktbuf>,
+    stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
+    mut pkt: Packet<'pktbuf>,
 ) {
-    // TODO: decompress
+    // lookup stream ID in DLT
+    if asm
+        .dlt
+        .inspect(stream_id, |pep| {
+            // decompress
+            if pep.compression_mode != 0 {
+                todo!("L4 compression");
+            }
+
+            // TODO
+        })
+        .is_none()
+    {
+        drop_and_count(asm, pkt, CounterType::UnknownStreamId);
+        return;
+    }
+
+    // "Check" A2A checksum
+    pkt.advance(size_of::<zdp::ZdpSaidHeader>());
+    pkt.shrink(size_of::<zdp::ZdpMicvEnd>());
 
     // send out decapsulated packet
     match asm.agent_input.try_enqueue_packet(drop_guard(pkt, |p| {
@@ -378,13 +410,57 @@ pub fn agent_input<'pktbuf>(
 
 /// Process uncompressed packet from the agent.
 /// The packet will be compressed, or trigger a Bind request.
-pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pktbuf>) {
-    // TODO: lookup in ALT
-    let stream_id = 0; // TODO: should we keep this in metadata? or as per-flow header?
+pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
+    let classification = match classifier::classify(&mut pkt) {
+        Ok(cls) => cls,
+        Err(_why) => {
+            drop_and_count(asm, pkt, CounterType::InPacksDrop);
+            return;
+        }
+    };
 
-    // TODO: compress
+    match classification {
+        ClassifierResult::OK | ClassifierResult::UnclassifiedL4 => (),
 
-    forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
+        ClassifierResult::FirstFragment | ClassifierResult::SubsequentFragment => {
+            // TODO; handle fragments!
+            drop_and_count(asm, pkt, CounterType::InPacksDrop);
+            return;
+        }
+
+        ClassifierResult::NonIP => {
+            // should never happen; TUN doesn't deal in non-IP
+            drop_and_count(asm, pkt, CounterType::InPacksDrop);
+            return;
+        }
+    }
+
+    let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
+
+    match asm.alt.inspect(&five_tuple, |pep| {
+        if pep.compression_mode != 0 {
+            todo!("L4 compression")
+        }
+
+        // TODO: compress!
+
+        // "generate" A2A checksum
+        pkt.alloc_zeroed_header::<zdp::ZdpSaidHeader>().a2a_said = 0;
+        let micv: zdp::ZdpMicvEnd = zdp::ZdpMicvEnd { micv: 0 };
+        pkt.put(micv.as_bytes());
+
+        pep.stream_id
+    }) {
+        Some(stream_id) => {
+            forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
+        }
+
+        None => {
+            // TODO: issue bind request!
+            drop_and_count(asm, pkt, CounterType::OtherError);
+            return;
+        }
+    }
 }
 
 /// Forward compressed packet.
@@ -397,24 +473,18 @@ pub fn forward<'pktbuf>(
     // TODO: node forwarding
 
     // adapter forwarding
-    match ingress_link_id {
-        zpr::AGENT_LINK_ID => {
-            // in from agent; out to dock
+    if ingress_link_id == zpr::AGENT_LINK_ID {
+        // in from agent; out to dock
 
-            let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
-            per_flow_hdr.stream_id = ingress_stream_id.into();
+        let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
+        per_flow_hdr.stream_id = ingress_stream_id.into();
 
-            let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
-            base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
+        let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+        base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
 
-            substrate_egress(asm, zpr::ADAPTER_DOCKING_SESSION_ID, zpr::ZPI_0, pkt);
-        }
-
-        zpr::ADAPTER_DOCKING_SESSION_ID => {
-            // in from dock; out to agent
-            agent_input(asm, ingress_stream_id, pkt);
-        }
-
-        _ => panic!("bad link ID"),
+        substrate_egress(asm, asm.adapter_docking_session_id, zpr::ZPI_0, pkt);
+    } else {
+        // in from dock; out to agent
+        agent_input(asm, ingress_stream_id, pkt);
     }
 }

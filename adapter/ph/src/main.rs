@@ -1,5 +1,6 @@
 #![cfg_attr(feature = "ci", deny(warnings))]
 
+use cbpf_rs::bpf_code;
 use clap::Parser;
 use enum_map::{enum_map, EnumMap};
 use std::fs;
@@ -12,7 +13,10 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_tun::TunBuilder;
+use tracing::warn;
+use zpr_ext::tokio::net::UdpSocketExt;
 
+mod adapter_tables;
 mod agent_output_worker;
 mod assembly;
 mod buffer_stack;
@@ -31,6 +35,7 @@ mod net_defs;
 mod options;
 mod packet;
 mod pcap_writer;
+mod peer_table;
 mod queues;
 mod rcu;
 mod rpc_worker;
@@ -142,6 +147,11 @@ fn main() -> ExitCode {
         .add_client_ca(&X509::from_pem(&buffer).unwrap())
         .unwrap();*/
 
+    let peer_table = peer_table::PeerTable::new();
+    let adapter_docking_session_id = peer_table
+        .insert(peer_table::PeerState::new(peer_addr))
+        .unwrap();
+
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -157,6 +167,37 @@ fn main() -> ExitCode {
 
             tun_ctl.set_carrier(false).unwrap();
 
+            let alt = adapter_tables::AgentLookupTable::new();
+            let dlt = adapter_tables::DockLookupTable::new();
+
+            // TEMP HACK: fill ALT & DLT based on TUN local & remote addresses
+            for (remote_stream_id, protocol) in [1, 6, 17].into_iter().enumerate() {
+                let five_tuple = defs::FiveTuple::new(
+                    tun_devs[0].address().unwrap().into(),
+                    tun_devs[0].destination().unwrap().into(),
+                    protocol,
+                    0,
+                    0,
+                );
+                alt.insert(
+                    five_tuple,
+                    adapter_tables::AltPep {
+                        l3_type: zpr::L3Type::IPv4,
+                        compression_mode: 0,
+                        stream_id: remote_stream_id as zpr::StreamId, /* TOTAL HACK */
+                    },
+                );
+                let local_stream_id = dlt
+                    .insert(adapter_tables::DltPep {
+                        l3_type: zpr::L3Type::IPv4,
+                        compression_mode: 0,
+                        five_tuple: five_tuple.reverse(),
+                    })
+                    .unwrap();
+                assert_eq!(local_stream_id, remote_stream_id as zpr::StreamId); // VERY HACK
+            }
+
+            // Open ingress sockets.
             let mut sockets = Vec::new();
             for _i in 0..substrate_socket_count {
                 let socket = socket2::Socket::new(
@@ -172,6 +213,77 @@ fn main() -> ExitCode {
                     .expect("unable to bind to self addr");
                 sockets.push(UdpSocket::from_std(socket.into()).unwrap());
             }
+
+            // Configure packet steering to separate flows for better load balancing.
+            // It's OK if this fails; flows will still be pinned to a queue;
+            // they'll just be pinned there with all other flows from the same link.
+            #[cfg(any(target_os = "android", target_os = "linux"))]
+            {
+                use crate::zdp::*;
+                use bpf_code::*;
+                use libc::sock_filter as sf;
+                use std::mem::{offset_of, size_of};
+
+                // TODO/FIXME: Ideally we want to select the queue by the _sum_ of the
+                // hash and stream ID, thus avoiding clumping due to correlated stream IDs between
+                // links.  That requires eBPF though, since the hash value is only present for
+                // eBPF programs (see <https://github.com/torvalds/linux/blob/master/net/core/sock_reuseport.c#L595-L598>).
+                // (`[SKF_AD_RXHASH]` just reads as 0!)
+                let prog = &[
+                    // [0] load ZPI and packet type
+                    sf {
+                        code: LD | H | ABS,
+                        jt: 0,
+                        jf: 0,
+                        k: 0,
+                    },
+                    // [1] if packet is encrypted, or packet is non-flow, fall back to hash
+                    sf {
+                        code: JMP | JSET | K,
+                        jt: 3,
+                        jf: 0,
+                        k: ((zpr::ZPI_ENCRYPTED_HEADER_FLAG as u32) << 8)
+                            | ZDP_PACKET_TYPE_NON_FLOW_FLAG as u32,
+                    },
+                    // [2] load stream ID
+                    sf {
+                        code: LD | W | ABS,
+                        jt: 0,
+                        jf: 0,
+                        k: (size_of::<ZdpZpiHeader>()
+                            + size_of::<ZdpBaseHeader>()
+                            + offset_of!(ZdpPerFlowHeader, stream_id))
+                            as u32,
+                    },
+                    // [3] modulo # of queues
+                    sf {
+                        code: ALU | MOD | K,
+                        jt: 0,
+                        jf: 0,
+                        k: substrate_socket_count,
+                    },
+                    // [4] return as selected queue #
+                    sf {
+                        code: RET | A,
+                        jt: 0,
+                        jf: 0,
+                        k: 0,
+                    },
+                    // [5] return huge value to force fallback to hash-based steering
+                    sf {
+                        code: RET | K,
+                        jt: 0,
+                        jf: 0,
+                        k: u32::MAX,
+                    },
+                ];
+
+                match sockets[0].attach_reuse_port_cbpf(prog) {
+                    Ok(()) => (),
+                    Err(err) => warn!("Unable to enable ingress packet steering: {err}"),
+                }
+            }
+
             let sockets = sockets.leak();
 
             let agent_input = AgentInput::new(tun_devs.iter());
@@ -188,7 +300,10 @@ fn main() -> ExitCode {
                 counters,
                 tun_ctl,
                 sync_req_state,
-                peer_addr,
+                peer_table,
+                adapter_docking_session_id,
+                alt,
+                dlt,
             }));
 
             // TODO signal handler goes here
@@ -259,8 +374,8 @@ fn main() -> ExitCode {
                 ));
             }
 
-            mgmt::send_report(asm, zpr::ADAPTER_DOCKING_SESSION_ID, "Reporting for Duty!").await;
-            mgmt::send_discard(asm, zpr::ADAPTER_DOCKING_SESSION_ID).await;
+            mgmt::send_report(asm, asm.adapter_docking_session_id, "Reporting for Duty!").await;
+            mgmt::send_discard(asm, asm.adapter_docking_session_id).await;
             asm.send_hello_req().await;
 
             while let Some(res) = js.join_next().await {

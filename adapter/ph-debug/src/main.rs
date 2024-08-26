@@ -32,14 +32,14 @@ struct Args {
         long_help = "ECHO\n\
                      COUNTERS\n\
                      COUNTERS-RESET\n\
-                     FLUSH-CAPTURE\n\
-                     CLOSE-CAPTURE\n\
-                     DELETE-CAPTURE-PROGRAM\n\
                      WATCH <frequency>\n\
                      PERF-SAMPLE <duration> <frequency>\n\
-                     SET-CAPTURE <file-path>\n\
-                     CAPTURE-SEQUENCE <file-path> <duration> <program>\n\
-                     SET-CAPTURE-PROGRAM <program>"
+                     SET-CAPTURE-FILE <file-path>\n\
+                     CLOSE-CAPTURE-FILE\n\
+                     DELETE-CAPTURE-PROGRAM\n\
+                     SET-CAPTURE-PROGRAM <program>\n\
+                     FLUSH-CAPTURE-FILE\n\
+                     CAPTURE-SEQUENCE <file-path> <duration> <program>"
     )]
     command: String,
 
@@ -52,7 +52,7 @@ struct Args {
     #[arg(long, default_value_t = 1)]
     frequency: u64, // TODO make another argument, I don't like that in WATCH freq is how many seconds to wait between samples, whereas in PERF-SAMPLE it's samples per second
 
-    #[arg(long, default_value = "cap_file.txt")]
+    #[arg(long, default_value = "cap_file.pcap")]
     file_path: String,
 
     #[arg(
@@ -74,12 +74,12 @@ fn main() -> std::io::Result<()> {
         "ECHO\n"
         | "COUNTERS\n"
         | "COUNTERS-RESET\n"
-        | "FLUSH-CAPTURE\n"
-        | "CLOSE-CAPTURE\n"
+        | "FLUSH-CAPTURE-FILE\n"
+        | "CLOSE-CAPTURE-FILE\n"
         | "DELETE-CAPTURE-PROGRAM\n" => basic_call_response(&command, &port)?,
         "WATCH\n" => handle_watch(args.frequency, &port)?,
         "PERF-SAMPLE\n" => handle_perf_sample(args.duration, args.frequency, &port)?,
-        "SET-CAPTURE\n" => handle_set_capture(args.file_path, &port)?,
+        "SET-CAPTURE-FILE\n" => handle_set_capture_file(args.file_path, &port)?,
         "CAPTURE-SEQUENCE\n" => {
             handle_capture_sequence(args.file_path, args.duration, args.program, &port)?
         }
@@ -166,10 +166,11 @@ fn handle_perf_sample(duration: u64, frequency: u64, port: &str) -> std::io::Res
     Ok(())
 }
 
-fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
+fn handle_set_capture_file(file_path: String, port: &str) -> std::io::Result<()> {
     let file = OpenOptions::new()
         .write(true)
         .create(true)
+        .truncate(true)
         .open(file_path)
         .unwrap();
 
@@ -182,7 +183,7 @@ fn handle_set_capture(file_path: String, port: &str) -> std::io::Result<()> {
 
     // Establish connection with RPC worker, send command
     let stream = &mut UnixStream::connect(port).unwrap();
-    stream.write_all("SET-CAPTURE\n".as_bytes())?;
+    stream.write_all("SET-CAPTURE-FILE\n".as_bytes())?;
     stream.flush()?;
 
     // Receive response from RPC worker, ensure that it sent the correct response and
@@ -216,7 +217,7 @@ fn handle_capture_sequence(
     port: &str,
 ) -> std::io::Result<()> {
     let sleep_time = Duration::new(time, 0);
-    handle_set_capture(file_path, port)?;
+    handle_set_capture_file(file_path, port)?;
     handle_set_capture_program(program, port)?;
 
     let handler = Arc::new(CtrlcHandle::new());
@@ -225,8 +226,7 @@ fn handle_capture_sequence(
     ctrlc::set_handler(move || ctrlc_handler.set_false()).unwrap();
     handler.timed_wait(sleep_time);
 
-    basic_call_response("DELETE-CAPTURE-PROGRAM\n", port)?;
-    basic_call_response("CLOSE-CAPTURE\n", port)?;
+    basic_call_response("CLOSE-CAPTURE-FILE\n", port)?;
 
     Ok(())
 }

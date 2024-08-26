@@ -1,11 +1,17 @@
 //! ZPR concepts, excluding the ZDP protocol.
 #![allow(dead_code)]
 
+/// Substrate Address
+pub type SubstrateAddr = std::net::SocketAddr;
+
 /// ZPR Parameter Index
 pub type Zpi = u8;
 
 /// ZPI 0, used for keying and early ZARP.
 pub const ZPI_0: Zpi = 0;
+
+/// Proposed value to allow easily distinguishing packets with plaintext payloads.
+pub const ZPI_ENCRYPTED_HEADER_FLAG: Zpi = 0x80;
 
 /// The Security Association ID must fit no more than 8 bits.  Note that it shares
 /// space with the ZPI.
@@ -15,10 +21,7 @@ pub type SaId = u8;
 pub type LinkId = u32;
 
 /// Link ID used to refer to a node or adapter's local agent.
-pub const AGENT_LINK_ID: LinkId = 0;
-
-/// Link ID used by an adapter to refer to its docking session.
-pub const ADAPTER_DOCKING_SESSION_ID: LinkId = 1;
+pub const AGENT_LINK_ID: LinkId = LinkId::MAX;
 
 /// Stream ID
 pub type StreamId = u32;
@@ -37,3 +40,23 @@ pub const KM_ID_IKEV2: KmId = 1;
 
 /// Key Management Identifier indicating Noise algorithm.
 pub const KM_ID_NOISE: KmId = 2;
+
+/// ZPR agent packet L3 type (RFC 6.5 § 6.3.11)
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum L3Type {
+    IPv4 = 4,
+    IPv6 = 6,
+}
+
+/// Bitmask indicating how an agent packet is compressed.
+pub type CompressionMode = u8;
+
+/// CompressionMode constants (RFC 6.5 § 6.3.11)
+pub mod compression_mode {
+    use super::CompressionMode;
+
+    pub const DESTINATION_PORT_PRESENT: CompressionMode = 0x20;
+    pub const SOURCE_PORT_PRESENT: CompressionMode = 0x40;
+    pub const IP_PROTOCOL_PRESENT: CompressionMode = 0x80; // FIXME: this seems unused; I have a Q out to Frank about it
+}

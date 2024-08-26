@@ -1,3 +1,4 @@
+use crate::adapter_tables;
 use crate::buffer_stack::BufferStack;
 use crate::capture_worker::CaptureWorker;
 use crate::config;
@@ -7,6 +8,7 @@ use crate::fastpath;
 use crate::flow_control::FlowControl;
 use crate::mgmt;
 use crate::packet::*;
+use crate::peer_table;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use crate::zdp::*;
@@ -59,7 +61,11 @@ pub struct Assembly<'pktbuf> {
 
     pub sync_req_state: SyncReqState<'pktbuf>,
 
-    pub peer_addr: std::net::SocketAddr, // TEMP HACK
+    pub peer_table: peer_table::PeerTable,
+    pub adapter_docking_session_id: zpr::LinkId,
+
+    pub alt: adapter_tables::AgentLookupTable,
+    pub dlt: adapter_tables::DockLookupTable,
 }
 
 pub struct SyncReqState<'pktbuf> {
@@ -174,7 +180,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                 Some(stream_id) => {
                     mgmt::send_per_flow_mgmt(
                         self,
-                        zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
+                        self.adapter_docking_session_id, /* FIXME: parameterize */
                         zdp_request_type,
                         stream_id,
                         packet.into_inner(),
@@ -184,7 +190,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                 None => {
                     mgmt::send_non_flow_mgmt(
                         self,
-                        zpr::ADAPTER_DOCKING_SESSION_ID, /* FIXME */
+                        self.adapter_docking_session_id, /* FIXME: parameterize */
                         zdp_request_type,
                         packet.into_inner(),
                     )

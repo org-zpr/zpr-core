@@ -49,9 +49,11 @@ pub enum ZdpPacketType {
     Report = 145,
 }
 
+pub const ZDP_PACKET_TYPE_NON_FLOW_FLAG: u8 = 0x80;
+
 impl ZdpPacketType {
     pub fn is_per_flow(self) -> bool {
-        self.0 < 128
+        self.0 & ZDP_PACKET_TYPE_NON_FLOW_FLAG == 0
     }
 
     pub fn is_response(self) -> bool {
@@ -144,6 +146,18 @@ impl ZdpKeyManagementHeader {
     pub fn is_experiment(&self) -> bool {
         self.message_type.get() == zpr::KM_ID_EXPERIMENTAL
     }
+}
+
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpSaidHeader {
+    pub a2a_said: u8,
+}
+
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpMicvEnd {
+    pub micv: u32,
 }
 
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
