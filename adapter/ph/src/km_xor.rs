@@ -63,13 +63,11 @@ impl KeyManagerStateMachine for XorKeyManager {
     }
 
     fn tick(&mut self) -> Result<Option<Bytes>, KMError> {
-        if self.state == KMSMState::Configuring {
-            if self.initiate && self.hello_t.elapsed() > Duration::from_secs(5) {
-                // too long, send another hello.
-                let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
-                self.hello_t = time::Instant::now();
-                return Ok(Some(handshake));
-            }
+        if self.state == KMSMState::Configuring && self.initiate && self.hello_t.elapsed() > Duration::from_secs(5) {
+            // too long, send another hello.
+            let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
+            self.hello_t = time::Instant::now();
+            return Ok(Some(handshake));
         }
         Ok(None)
     }

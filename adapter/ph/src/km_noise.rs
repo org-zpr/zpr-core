@@ -45,7 +45,7 @@ use openssl::rand::rand_bytes;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
 
-static PATTERN: &'static str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
 const NOISE_PADLEN: usize = 24; // 16 byte tag + 8 byte nonce
 
@@ -67,8 +67,8 @@ pub struct KMNoise {
     t_state: Option<snow::TransportState>,
     recv_hmac_key: [u8; 32], // messages sent to us from peer will use this key (we create this)
     send_hmac_key: Option<[u8; 32]>,  // messages sent to peer will use this key (peers creates this)
-    recv_zpis: (u8, u8), // (FULL, HMAC) 
-    send_zpis: Option<(u8, u8)>, // (FULL, HMAC)
+    recv_zpis: ZPIPair,
+    send_zpis: Option<ZPIPair>,
 }
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
@@ -88,7 +88,7 @@ impl KMNoise {
     ///
     /// The ZPI stuff here is definately first pass. Currently there is no way to change the
     /// ZPI values.  The ZPIs passed in here are sent to the peer for use in messages sent to us.
-    /// 
+    ///
     /// - `peer_pub_key` is required for initiator, and should match the `local_keypair` of the responder.
     /// - `local_keypair` is optional. If not provided, a new keypair will be generated.
     /// - `zpi_full_encr` is the ZPI peer should use for full encryption messages.
@@ -126,9 +126,9 @@ impl KMNoise {
             local_keypair: kp,
             hs_state: None,
             t_state: None,
-            recv_hmac_key: [0u8; 32], // we generate this and send to peer            
-            send_hmac_key: None, // we get this during handshake            
-            recv_zpis: (zpi_full_encr, zpi_transmit_hmac),
+            recv_hmac_key: [0u8; 32], // we generate this and send to peer
+            send_hmac_key: None, // we get this during handshake
+            recv_zpis: ZPIPair{ encr: zpi_full_encr, hmac: zpi_transmit_hmac },
             send_zpis: None,
         })
     }
@@ -142,7 +142,7 @@ impl KMNoise {
     }
 
     /// Returns the ZPIs for sending, order is (ZPI_FULL_ENCRYPT, ZPI_TRANSIT_HMAC)
-    pub fn get_send_zpis(&self) -> Option<(u8, u8)> {
+    pub fn get_send_zpis(&self) -> Option<ZPIPair> {
         self.send_zpis
     }
 }
@@ -173,7 +173,7 @@ impl KeyManagerStateMachine for KMNoise {
             }
         };
         rand_bytes(&mut self.recv_hmac_key).unwrap(); // generate an HMAC key
-        self.send_hmac_key = None; 
+        self.send_hmac_key = None;
         if self.initiate {
             let rpk = self.peer_pub_key.as_ref().unwrap();
             let mut initiator = match snow::Builder::new(np)
@@ -194,8 +194,8 @@ impl KeyManagerStateMachine for KMNoise {
 
             let mut buf = BytesMut::zeroed(1024);
             let km = KeyMsg {
-                zpi_full_encr: self.recv_zpis.0,
-                zpi_transit_hmac: self.recv_zpis.1,
+                zpi_full_encr: self.recv_zpis.encr,
+                zpi_transit_hmac: self.recv_zpis.hmac,
                 hmac_key: self.recv_hmac_key,
             };
             let len = match initiator.write_message(km.as_bytes(), &mut buf) {
@@ -235,7 +235,7 @@ impl KeyManagerStateMachine for KMNoise {
     fn handle_message(&mut self, message: &[u8]) -> Result<Option<Bytes>, KMError> {
         if self.state == KMSMState::Configuring {
             let mut hs: snow::HandshakeState;
-            if self.hs_state.is_none() {                
+            if self.hs_state.is_none() {
                 error!("noise: handle_message called but no handshake state set up");
                 return Err(KMError::InvalidState);
             }
@@ -261,7 +261,7 @@ impl KeyManagerStateMachine for KMNoise {
                                 return Err(KMError::HandshakeError);
                             }
                         };
-                        self.send_zpis = Some((km.zpi_full_encr, km.zpi_transit_hmac));
+                        self.send_zpis = Some(ZPIPair{ encr: km.zpi_full_encr, hmac: km.zpi_transit_hmac });
                         self.send_hmac_key = Some(km.hmac_key);
                     }
                     Err(e) => {
@@ -276,10 +276,10 @@ impl KeyManagerStateMachine for KMNoise {
 
                 if !hs.is_handshake_finished() {
                     let payload = KeyMsg {
-                        zpi_full_encr: self.recv_zpis.0,
-                        zpi_transit_hmac: self.recv_zpis.1,
+                        zpi_full_encr: self.recv_zpis.encr,
+                        zpi_transit_hmac: self.recv_zpis.hmac,
                         hmac_key: self.recv_hmac_key,
-                    };                    
+                    };
                     let mut buf = BytesMut::zeroed(1024);
                     match hs.write_message(payload.as_bytes(), &mut buf) {
                         Ok(len) => {
@@ -299,8 +299,8 @@ impl KeyManagerStateMachine for KMNoise {
                     let send_zpis = match self.send_zpis {
                         Some(z) => z,
                         None => {
-                            error!("noise: XXX handshake finished by no ZPIs received");
-                            (0, 0)
+                            error!("noise: handshake finished by no ZPIs received");
+                            ZPIPair::new_zero()
                         }
                     };
                     let send_key = match self.send_hmac_key {
@@ -338,8 +338,8 @@ impl KeyManagerStateMachine for KMNoise {
                     let send_zpis = match self.send_zpis {
                         Some(z) => z,
                         None => {
-                            error!("noise: handshake finished by no ZPIs received"); 
-                            (0, 0)
+                            error!("noise: handshake finished by no ZPIs received");
+                            ZPIPair::new_zero()
                         }
                     };
                     let send_key = match self.send_hmac_key {
@@ -626,17 +626,17 @@ mod test {
         assert!(responder.get_send_hmac_key().is_some()); // must have been recieved
 
         assert!(initiator.get_recv_hmac_key() == responder.get_send_hmac_key().unwrap());
-        assert!(responder.get_recv_hmac_key() == initiator.get_send_hmac_key().unwrap());        
+        assert!(responder.get_recv_hmac_key() == initiator.get_send_hmac_key().unwrap());
 
         assert!(initiator.get_send_zpis().is_some());
-        let (initiator_zpi_full, initiator_zpi_hmac) = initiator.get_send_zpis().unwrap();
-        assert!(initiator_zpi_full == 3);
-        assert!(initiator_zpi_hmac == 4);
+        let initiator_zpis = initiator.get_send_zpis().unwrap();
+        assert!(initiator_zpis.encr == 3);
+        assert!(initiator_zpis.hmac == 4);
 
         assert!(responder.get_send_zpis().is_some());
-        let (responder_zpi_full, responder_zpi_hmac) = responder.get_send_zpis().unwrap();
-        assert!(responder_zpi_full == 1);
-        assert!(responder_zpi_hmac == 2);        
+        let responder_zpis = responder.get_send_zpis().unwrap();
+        assert!(responder_zpis.encr == 1);
+        assert!(responder_zpis.hmac == 2);
     }
 
     #[tokio::test]
@@ -808,16 +808,16 @@ mod test {
         );
 
         // ZPIs should be exchanged.
-        assert!((3, 4) == adapter.get_send_zpis(), "adapter send ZPIs mismatch: {:?}", adapter.get_send_zpis());
-        assert!((1, 2) == adapter.get_recv_zpis());  
-        assert!((1, 2) == node.get_send_zpis(), "node send ZPIs mismatch: {:?}", node.get_send_zpis());  
-        assert!((3, 4) == node.get_recv_zpis());                
+        assert!(ZPIPair::new(3, 4) == adapter.get_send_zpis(), "adapter send ZPIs mismatch: {:?}", adapter.get_send_zpis());
+        assert!(ZPIPair::new(1, 2) == adapter.get_recv_zpis());
+        assert!(ZPIPair::new(1, 2) == node.get_send_zpis(), "node send ZPIs mismatch: {:?}", node.get_send_zpis());
+        assert!(ZPIPair::new(3, 4) == node.get_recv_zpis());
 
         // HMAC keys created
         assert!(adapter.get_recv_hmac_key() != [0u8; 32]);
-        assert!(adapter.get_send_hmac_key() != [0u8; 32]);        
+        assert!(adapter.get_send_hmac_key() != [0u8; 32]);
         assert!(node.get_recv_hmac_key() != [0u8; 32]);
-        assert!(node.get_send_hmac_key() != [0u8; 32]);        
+        assert!(node.get_send_hmac_key() != [0u8; 32]);
 
         ctok.cancel()
     }

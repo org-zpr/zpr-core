@@ -110,8 +110,8 @@ impl ZDPServer {
                                 if !sent_report && tt.elapsed() > Duration::from_secs(2) {
                                     let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
                                     let mut pkt =km_demo::build_zdp_report_packet(&mut buf, b"hello to you my darling client adapter!");
-                                    let (encr_zpi, _) = mgr.get_send_zpis();
-                                    pkt.body_mut()[0] = encr_zpi;
+                                    let send_zpis = mgr.get_send_zpis();
+                                    pkt.body_mut()[0] = send_zpis.encr;
                                     match mgr.encrypt_transport(&mut pkt) {
                                         Ok(_) => {
                                             match s_send.send_to(&pkt.body(), cur_client.unwrap()).await {
@@ -217,19 +217,19 @@ impl ZDPServer {
                                 }
                                 _ => {
                                     info!("zdp/server - received transport message");
-                                    let (encr_zpi, transit_zpi) = mgr.get_recv_zpis();
+                                    let recv_zpis = mgr.get_recv_zpis();
                                     // Not sure the correct way to use these packet things.  But here we just create yet another buffer.
                                     let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
                                     let mut pkt = Packet::new(&mut pkt_buf, km_demo::HEADROOM);
                                     pkt.put(&input_buf[..read_len]);
                                     let zpi = pkt.body()[0];
-                                    if zpi == encr_zpi {
+                                    if zpi == recv_zpis.encr {
                                         info!("zdp/server - ZPI indicates encrypted transport message");
-                                    } else if zpi == transit_zpi {
-                                        info!("zdp/server - ZPI indicates transit transport message, discarding");
+                                    } else if zpi == recv_zpis.hmac {
+                                        info!("zdp/server - ZPI indicates agent transit transport message, discarding");
                                         continue;
                                     } else {
-                                        info!("zdp/server - unexpected ZPI on message {} (expected {} or {})", zpi, encr_zpi, transit_zpi);
+                                        info!("zdp/server - unexpected ZPI on message {} (expected {:?})", zpi, recv_zpis);
                                     }
                                     match mgr.decrypt_transport(&mut pkt) {
                                         Ok(_) => {

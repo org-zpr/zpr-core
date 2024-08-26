@@ -83,8 +83,8 @@ impl ZDPClient {
                                 info!("zdp/client - new SA established");
                                 let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
                                 let mut pkt = km_demo::build_zdp_report_packet(&mut pkt_buf, b"hello to you my dear node!");
-                                let (zpi_encr, _) = mgr.get_send_zpis();
-                                pkt.body_mut()[0] = zpi_encr;
+                                let send_zpis = mgr.get_send_zpis();
+                                pkt.body_mut()[0] = send_zpis.encr;
                                 match mgr.encrypt_transport(&mut pkt) {
                                     Ok(()) => {
                                         match s_send.send(&pkt.body()).await {
@@ -139,7 +139,7 @@ impl ZDPClient {
                                 continue;
                             }
                             let zpi_hdr = zpi_hdr.unwrap();
-                            let (zpi_encr, zpi_hmac) = mgr.get_recv_zpis();
+                            let recv_zpis = mgr.get_recv_zpis();
                             match zpi_hdr.zpi {
                                 0 => {
                                     info!("zdp/client - received ZPI=0 message");
@@ -158,9 +158,9 @@ impl ZDPClient {
                                     }
                                 }
                                 _ => {
-                                    if zpi_hdr.zpi == zpi_hmac {
+                                    if zpi_hdr.zpi == recv_zpis.hmac {
                                         info!("zdp/client - received transit ZPI message, discarding");
-                                    } else if zpi_hdr.zpi == zpi_encr {
+                                    } else if zpi_hdr.zpi == recv_zpis.encr {
                                         info!("zdp/client - received transport message");
                                         let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
                                         let mut pkt = Packet::new(&mut pkt_buf, km_demo::HEADROOM);
@@ -184,10 +184,10 @@ impl ZDPClient {
                                             Err(e) => {
                                                 info!("zdp/client - decrypt_transport failed: {}", e);
                                             }
-                                        }    
+                                        }
                                     } else {
-                                        info!("zdp/client - unknown ZPI: {} (expected {} or {})", zpi_hdr.zpi, zpi_encr, zpi_hmac);
-                                    } 
+                                        info!("zdp/client - unknown ZPI: {} (expected {:?}", zpi_hdr.zpi, recv_zpis);
+                                    }
 
                                 }
                             };

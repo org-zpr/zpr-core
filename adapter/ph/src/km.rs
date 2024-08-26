@@ -168,18 +168,18 @@ impl KeyManager<'_> {
         state.sa_id
     }
 
-    /// Returns the ZPIs used for sending messages, format is (FULL_ENCRYPTION_ZPI, TRANSIT_HMAC_ZPI).
+    /// Returns the ZPIs used for sending messages.
     /// Only set/valid after handshake is complete and SA is established.a
     /// Currently safe to cache this after handshake is done because (TODO) these do not change.
-    pub fn get_send_zpis(&self) -> (u8, u8) {
+    pub fn get_send_zpis(&self) -> ZPIPair {
         let state = self.shared.state.lock().unwrap();
         state.ts.send_zpis
     }
 
-    /// Returns the ZPIs used for receiving messages, format is (FULL_ENCRYPTION_ZPI, TRANSIT_HMAC_ZPI)
-    /// Only set/valid after handshake is complete and SA is established.a/// 
+    /// Returns the ZPIs used for receiving messages.
+    /// Only set/valid after handshake is complete and SA is established.a///
     /// Currently safe to cache this after handshake is done because (TODO) these do not change.
-    pub fn get_recv_zpis(&self) -> (u8, u8) {
+    pub fn get_recv_zpis(&self) -> ZPIPair {
         let state = self.shared.state.lock().unwrap();
         state.ts.recv_zpis
     }
@@ -199,7 +199,7 @@ impl KeyManager<'_> {
         let state = self.shared.state.lock().unwrap();
         state.ts.recv_hmac_key
     }
-    
+
 
     #[cfg(test)]
     fn set_sa_id(&self, sa_id: u8) {
@@ -211,12 +211,12 @@ impl KeyManager<'_> {
     /// This will encrypt the entire buffer, adding additional ciphertext on the end.
     /// For all packets, there must be enough space remaining in the packet buffer to
     /// accomodate expansion caused by encryption.
-    /// 
+    ///
     /// Do not send here:
     /// - Key Management messages
     /// - Agent Transit Data messages
     ///
-    /// Note that we encrypt `body.len()-1 bytes` from body index 1 (right after ZPI).  Body length 
+    /// Note that we encrypt `body.len()-1 bytes` from body index 1 (right after ZPI).  Body length
     /// will expand by the PADLEN indicated in the KM algorithm.
     ///
     /// `message` is expected to be a ZDP message starting with a ZPI value.  We do not check
@@ -245,14 +245,14 @@ impl KeyManager<'_> {
             ZdpPacketType::TransitPacket => {
                 return Err(KMError::InvalidPacketType);
             }
-            _ => message.body().len(),
+            _ => message.body().len() - 1,
         };
 
         // TODO: Ability to encrypt in place. Not sure how to accomplish. At very least we could use our own buffer pool.
         let mut encr_buf = [0u8; config::PACKET_BUFFER_SIZE];
         match state
             .statemachine
-            .encrypt_transport(&message.body()[1..encr_len+1], &mut encr_buf)
+            .encrypt_transport(&message.body()[1..encr_len + 1], &mut encr_buf)
         {
             Ok(len) => {
                 info!(
@@ -271,12 +271,12 @@ impl KeyManager<'_> {
 
     /// Decrypt a ZDP message using the current SA.  Expects that the ciphertext starts
     /// at index 1 (following the ZPI), and extends to `message.body.len()`.
-    /// 
+    ///
     /// This will overwrite the ciphertext body with the plaintext.
-    /// 
+    ///
     /// Caller must ensure that the SA used to encrypt the message is the one used to
     /// decrypt it.
-    /// 
+    ///
     /// `message` must be ZDP message starting with a ZPI (that we do not check).
     pub fn decrypt_transport(&self, message: &mut Packet) -> KMResult<()> {
         if message.body().len() < 1 {
@@ -310,7 +310,7 @@ impl KeyManager<'_> {
                     len
                 );
                 // Copy the decrypted data back into the message -- do not overwrite ZPI.
-                message.shrink(encr_len); // remove body
+                message.shrink(encr_len); // remove body, leave ZPI
                 message.put(&decr_buf[0..len]); // write a new body
             }
             Err(e) => {
@@ -547,7 +547,7 @@ impl KeyManager<'_> {
                                 error!("failed to enqueue SaIdChange signal")
                             }
                         }
-    
+
                     }
                     _ => {}
                 }
@@ -587,15 +587,24 @@ pub enum KMSMState {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct KMTransportState {
-    send_zpis: (u8, u8),  // TODO: create a type for this pair of ZPIs with names
-    recv_zpis: (u8, u8),
+    send_zpis: ZPIPair,
+    recv_zpis: ZPIPair,
     send_hmac_key: [u8; 32],
     recv_hmac_key: [u8; 32],
 }
 
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ZPIPair {
+    /// ZPI for full message encryption.
+    pub encr: u8,
+
+    /// ZPI for header hmac only.
+    pub hmac: u8,
+}
+
 impl KMTransportState {
-    /// ZPI pair ordering is (ZPI_FOR_FULL_ENCRYPTION, ZPI_FOR_TRANSIT_HMAC)
-    pub fn new(send_zpis: (u8, u8), recv_zpis: (u8, u8), send_key: [u8; 32], recv_key: [u8; 32]) -> KMTransportState {    
+    pub fn new(send_zpis: ZPIPair, recv_zpis: ZPIPair, send_key: [u8; 32], recv_key: [u8; 32]) -> KMTransportState {
         KMTransportState {
             send_zpis,
             recv_zpis,
@@ -606,20 +615,29 @@ impl KMTransportState {
     /// Creates zero'd out KMTransportState
     pub fn new_empty() -> KMTransportState {
         KMTransportState {
-            send_zpis: (0, 0),
-            recv_zpis: (0, 0),
+            send_zpis: ZPIPair::new_zero(),
+            recv_zpis: ZPIPair::new_zero(),
             send_hmac_key: [0u8; 32],
             recv_hmac_key: [0u8; 32],
         }
     }
     /// With ZPIs but empty keys.
-    pub fn new_with_zpis(send_zpis: (u8, u8), recv_zpis: (u8, u8)) -> KMTransportState {
+    pub fn new_with_zpis(send_zpis: ZPIPair, recv_zpis: ZPIPair) -> KMTransportState {
         KMTransportState {
             send_zpis,
             recv_zpis,
             send_hmac_key: [0u8; 32],
             recv_hmac_key: [0u8; 32],
         }
+    }
+}
+
+impl ZPIPair {
+    pub fn new_zero() -> ZPIPair {
+        ZPIPair { encr: 0, hmac: 0 }
+    }
+    pub fn new(encr: u8, hmac: u8) -> ZPIPair {
+        ZPIPair { encr, hmac }
     }
 }
 
@@ -898,8 +916,8 @@ mod test {
         let mut pkt = Packet::new(&mut buf, 64);
         //let hbytes = hdr.as_bytes();
         //pkt.body_mut()[0..hbytes.len()].copy_from_slice(&hbytes);
-        hdr.write_to_buf(&mut pkt);        
-        pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 0x33;        
+        hdr.write_to_buf(&mut pkt);
+        pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 0x33;
         let orig_len = pkt.body().len();
         assert!(orig_len == 1 + std::mem::size_of::<ZdpBaseHeader>());
 
@@ -910,7 +928,7 @@ mod test {
             }
         }
 
-        assert!(pkt.body().len() == orig_len, "body length changed: expected {}, got {}", orig_len, pkt.body().len());        
+        assert!(pkt.body().len() == orig_len, "body length changed: expected {}, got {}", orig_len, pkt.body().len());
         let encr_hdr =
             ZdpBaseHeader::ref_from_prefix(&pkt.body()[1..]).expect("failed to read back header");
 
@@ -938,7 +956,7 @@ mod test {
         //let hbytes = hdr.as_bytes();
         //pkt.body_mut()[0..hbytes.len()].copy_from_slice(&hbytes);
         hdr.write_to_buf(&mut pkt);
-        pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 33;                
+        pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 33;
         let orig_len = pkt.body().len();
         assert!(orig_len == 1 + std::mem::size_of::<ZdpBaseHeader>());
         match km.encrypt_transport(&mut pkt) {
@@ -954,7 +972,7 @@ mod test {
                 panic!("decrypt_transport failed: {}", e);
             }
         }
-        assert!(pkt.body()[0] == 33); // decrypt does not touch ZPI       
+        assert!(pkt.body()[0] == 33); // decrypt does not touch ZPI
         assert!(pkt.body().len() == orig_len, "body length changed: expected {}, got {}", orig_len, pkt.body().len());
 
         let encr_hdr =
