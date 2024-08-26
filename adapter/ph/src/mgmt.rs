@@ -2,6 +2,7 @@
 
 use crate::assembly::Assembly;
 use crate::config;
+use crate::counters_enum;
 use crate::fastpath;
 use crate::packet::{self, Packet};
 use crate::zdp;
@@ -81,12 +82,33 @@ pub async fn send_discard<'pktbuf>(asm: &'pktbuf Assembly<'pktbuf>, link_id: zpr
     send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
 }
 
+pub enum HandleMgmtError {
+    UnknownType(u8),
+    UnexpectedMgmtResponse,
+    BadStructure,
+}
+
+impl From<HandleMgmtError> for counters_enum::CounterType {
+    fn from(err: HandleMgmtError) -> Self {
+        match err {
+            HandleMgmtError::UnknownType(_type) => Self::UnknownType,
+            HandleMgmtError::UnexpectedMgmtResponse => Self::UnexpectedMgmtResponse,
+            HandleMgmtError::BadStructure => Self::BadStructure,
+        }
+    }
+}
+
+pub type HandleMgmtResult<'pktbuf> = Result<(), (HandleMgmtError, Packet<'pktbuf>)>;
+
 pub async fn handle_report<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
-) {
-    let hdr = zdp::ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+) -> HandleMgmtResult<'pktbuf> {
+    let Some(hdr) = zdp::ZdpReportHeader::ref_from_prefix(pkt.body()) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+
     // TODO handle protocol errors i.e. if the body is shorter
     let report_data_length: usize = hdr.report_data_length.into();
     pkt.advance(std::mem::size_of::<zdp::ZdpReportHeader>());
@@ -99,26 +121,31 @@ pub async fn handle_report<'pktbuf>(
         );
     }
     asm.buffer_stack.put_buffer(pkt.destroy());
+    Ok(())
 }
 
 pub async fn handle_discard<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
     pkt: Packet<'pktbuf>,
-) {
+) -> HandleMgmtResult<'pktbuf> {
     // TODO print to debug log, when implemented
     eprintln!("Discard message received from {}", ingress_link_id);
     asm.buffer_stack.put_buffer(pkt.destroy());
+    Ok(())
 }
 
 pub async fn handle_hello_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
     pkt: Packet<'pktbuf>,
-) {
+) -> HandleMgmtResult<'pktbuf> {
     let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = send_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
     hdr.status = 0.into();
+
+    eprintln!("Received HelloRequest");
+
     send_non_flow_mgmt(
         asm,
         ingress_link_id,
@@ -126,13 +153,19 @@ pub async fn handle_hello_request<'pktbuf>(
         send_pkt,
     )
     .await;
-    eprintln!("Received HelloRequest");
+
+    Ok(())
 }
 
 pub async fn handle_bind_agent_address_request<'pktbuf>(
     _asm: &Assembly<'pktbuf>,
     _ingress_link_id: zpr::LinkId,
     _stream_id: zpr::StreamId,
-    mut _pkt: Packet<'pktbuf>,
-) {
+    pkt: Packet<'pktbuf>,
+) -> HandleMgmtResult<'pktbuf> {
+    let Some(_hdr) = zdp::ZdpBindAgentAddressRequestHeader::ref_from_prefix(pkt.body()) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+
+    Ok(())
 }
