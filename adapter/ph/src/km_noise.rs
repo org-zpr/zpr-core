@@ -15,24 +15,22 @@
 //!    [ ZDP payload or message ]
 //!
 //!
-//!    |-------- n + 16 bytes ----------||--- 8 bytes ---|
-//!    [ encrypted buffer               ][     nonce     ]
+//!    |--- 8 bytes ---||-------- n + 16 bytes ----------|
+//!    [     nonce     ][ encrypted buffer               ]
 //!
 //!    So total extra space needed by encryption is 16 + 8 = 24 bytes.
 //! ```
-//!
-//! Note that we do not handle padding here. If padding is desireable
-//! caller needs to apply padding before calling encrypt.
 //!
 //! Note that the encrypt/decrypt functions expect to operate on entire
 //! buffer.  Caller is responsible for dealing with cases when only
 //! part of the buffer is to be encrypted or decrypted.
 //!
 //!
-//! Note you can create noise keys with the `wg` command line tool on recent versions of linux.
+//! Note you can create 32 byte noise keys with the `wg` command line tool on recent versions of linux.
 //! For example, to generate a private key: `wg genkey`.  Then you can pass that private key
 //! into `wg pubkey` to get the public key.  You can also generate keys using `openssl`, eg
-//! `openssl genpkey -algorithm x25519`.
+//! `openssl genpkey -algorithm x25519` (but this generates 48 byte keys instead of 32, so
+//! you will need to do some editing to get the expected size).
 
 
 use crate::km::*;
@@ -47,7 +45,10 @@ use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
-const NOISE_PADLEN: usize = 24; // 16 byte tag + 8 byte nonce
+
+const NOISE_NONCE_LEN: usize = 8;
+const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce
+
 
 impl From<snow::Error> for KMError {
     fn from(e: snow::Error) -> KMError {
@@ -382,10 +383,10 @@ impl KeyManagerStateMachine for KMNoise {
             }
         };
         let nonce = ts.sending_nonce();
-        match ts.write_message(payload, message) {
+        message[..NOISE_NONCE_LEN].copy_from_slice(&nonce.to_be_bytes());
+        match ts.write_message(payload, &mut message[NOISE_NONCE_LEN..]) {
             Ok(len) => {
-                message[len..len + 8].copy_from_slice(&nonce.to_be_bytes());
-                Ok(len + 8)
+                Ok(len + NOISE_NONCE_LEN)
             }
             Err(e) => {
                 error!("noise: error encrypting message: {:?}", e);
@@ -406,16 +407,16 @@ impl KeyManagerStateMachine for KMNoise {
                 return Err(KMError::InvalidState);
             }
         };
-        // nonce is last 8 bytes in the message.
+        // nonce is first 8 bytes in the message.
         let plen = payload.len();
-        if plen < 8 {
+        if plen < NOISE_NONCE_LEN {
             error!("noise: message too short");
             return Err(KMError::EncryptionError);
         }
-        let nonce: u64 = u64::from_be_bytes(payload[plen - 8..].try_into().unwrap());
+        let nonce: u64 = u64::from_be_bytes(payload[0..NOISE_NONCE_LEN].try_into().unwrap());
 
         ts.set_receiving_nonce(nonce);
-        match ts.read_message(&payload[..plen - 8], message) {
+        match ts.read_message(&payload[NOISE_NONCE_LEN..plen], message) {
             Ok(len) => Ok(len),
             Err(e) => {
                 error!("noise: error decrypting message: {:?}", e);
