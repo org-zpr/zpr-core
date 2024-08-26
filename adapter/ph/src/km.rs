@@ -416,7 +416,8 @@ impl KeyManager<'_> {
                     match km_signals_out.send(KMSignal::Error).await {
                         Ok(_) => {}
                         Err(_) => {
-                            error!("failed to enqueue error signal")
+                            error!("failed to enqueue error signal, aborting");
+                            return Err(KMError::EnqueueFailed);
                         }
                     }
                     let resp: Option<Bytes>;
@@ -432,7 +433,8 @@ impl KeyManager<'_> {
                     match km_signals_out.send(KMSignal::Reset).await {
                         Ok(_) => {}
                         Err(_) => {
-                            error!("failed to enqueue reset signal")
+                            error!("failed to enqueue reset signal, aborting");
+                            return Err(KMError::EnqueueFailed);
                         }
                     }
                     if let Some(resp) = resp {
