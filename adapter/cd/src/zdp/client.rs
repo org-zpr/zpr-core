@@ -19,9 +19,8 @@ use ph::zdp::*;
 use bytes::BufMut;
 use zerocopy::FromBytes;
 
-
-const ZPI_FULL_ENC:u8 = 200;
-const ZPI_TRANSIT_HMAC:u8 = 201;
+const ZPI_FULL_ENC: u8 = 200;
+const ZPI_TRANSIT_HMAC: u8 = 201;
 
 #[derive(Debug, Clone)]
 pub struct ZDPClient {
@@ -39,7 +38,13 @@ impl ZDPClient {
 
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-        let noise = match KMNoise::new(true, Some(self.dock_noise_pub_key.into()), None, ZPI_FULL_ENC, ZPI_TRANSIT_HMAC) {
+        let noise = match KMNoise::new(
+            true,
+            Some(self.dock_noise_pub_key.into()),
+            None,
+            ZPI_FULL_ENC,
+            ZPI_TRANSIT_HMAC,
+        ) {
             Ok(n) => n,
             Err(e) => {
                 info!("zdp/client - KMNoise::new failed: {}", e);
