@@ -132,7 +132,7 @@ impl CMonitor {
                 Some(ap) => ap,
             };
             noise_key = match zpr.copy_dock_noise_key(&configuration) {
-                None => {                        
+                None => {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         "No connection string found",
