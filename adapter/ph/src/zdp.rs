@@ -126,6 +126,27 @@ pub struct ZdpHelloResponseHeader {
     pub status: U16,
 }
 
+/// Bind Agent Address request (§ 6.3.11)
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpBindAgentAddressRequestHeader {
+    pub ip_version: zpr::L3Type,
+    pub compression_mode: zpr::CompressionMode,
+}
+
+/// Bind Agent Address response (§ 6.3.11)
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpBindAgentAddressResponseHeader {
+    pub status_code: u8,
+    pub info_len: u8,
+}
+
+impl ZdpBindAgentAddressResponseHeader {
+    pub const STATUS_CODE_SUCCESS: u8 = 0;
+    pub const STATUS_CODE_OTHER: u8 = 1;
+}
+
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpKeyManagementHeader {
