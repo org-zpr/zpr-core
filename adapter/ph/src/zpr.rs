@@ -32,6 +32,9 @@ pub type StreamId = u32;
 /// Reserved for node-to-node / control-plane traffic.
 pub const NODE_TO_NODE_STREAM_ID: StreamId = 0;
 
+/// Adapter-to-Adapter SAID.
+pub type A2aSaid = u8;
+
 /// Within a ZDP Key Management packet, indicates the Key Managenent algorithm identifier.
 pub type KmId = u16;
 

@@ -150,15 +150,12 @@ impl ZdpKeyManagementHeader {
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
-pub struct ZdpSaidHeader {
-    pub a2a_said: u8,
+pub struct ZdpA2aHeader {
+    pub a2a_said: zpr::A2aSaid,
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
-#[repr(packed)]
-pub struct ZdpMicvEnd {
-    pub micv: u32,
-}
+/// Config-specified size of A2A MAC.  Algorithm-specified MAC may be smaller (but not larger).
+pub const ZDP_A2A_MAC_SIZE: usize = 8;
 
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
 const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);

@@ -382,7 +382,7 @@ impl<'buf> Packet<'buf> {
     }
 
     /// Shrink the packet by `cnt` bytes (removing data from the tail).
-    pub fn shrink(&mut self, cnt: usize) {
+    pub fn shrink_by(&mut self, cnt: usize) {
         let md = self.metadata_mut();
         assert!(cnt <= md.len);
         md.len -= cnt;
@@ -647,20 +647,20 @@ mod tests {
     }
 
     #[test]
-    fn shrink_test() {
+    fn shrink_by_test() {
         let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
         let mut pkt = Packet::new(&mut buf, 0);
         pkt.put_u64(0x0102030405060708u64);
-        pkt.shrink(2);
+        pkt.shrink_by(2);
         assert_eq!(pkt.body(), [1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
     #[should_panic]
-    fn shrink_too_much_test() {
+    fn shrink_by_too_much_test() {
         let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
         let mut pkt = Packet::new(&mut buf, 0);
         pkt.put_u64(0x0102030405060708u64);
-        pkt.shrink(10);
+        pkt.shrink_by(10);
     }
 }

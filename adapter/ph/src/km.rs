@@ -234,7 +234,7 @@ impl KeyManager<'_> {
                 // Copy the encrypted data back into the message -- there should be sufficient room for it since
                 // caller should know our required padding space and alignment.
 
-                message.shrink(message.body().len()); // remove body
+                message.shrink_by(message.body().len()); // remove body
                 message.put(&encr_buf[0..len]); // write a new body
 
                 // Now write our headroom info:
@@ -292,7 +292,7 @@ impl KeyManager<'_> {
                     len
                 );
                 // Copy the decrypted data back into the message -- do not overwrite ZPI.
-                message.shrink(message.body().len()); // remove body
+                message.shrink_by(message.body().len()); // remove body
                 message.put(&decr_buf[0..len]); // write a new body
 
                 message.alloc_zeroed_header::<ZdpZpiHeader>().zpi = state.sa_id;

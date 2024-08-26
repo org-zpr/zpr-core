@@ -15,11 +15,11 @@ use crate::queues::TryEnqueueError;
 use crate::zdp;
 use crate::zdp_ll;
 use crate::zpr;
+use blake3;
 use bytes::{Buf, BufMut};
-use std::mem::size_of;
 use std::net::SocketAddr;
 use std::time::SystemTime;
-use zerocopy::{AsBytes, FromBytes};
+use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
 
@@ -237,7 +237,7 @@ pub fn decrypt<'pktbuf>(
             return Err(DecryptError::MicvFailure);
         }
 
-        pkt.shrink(2); // remove checksum
+        pkt.shrink_by(2); // remove checksum
 
         Ok(())
     } else {
@@ -377,9 +377,25 @@ pub fn agent_input<'pktbuf>(
     stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
     mut pkt: Packet<'pktbuf>,
 ) {
-    // "Check" A2A checksum
-    pkt.advance(size_of::<zdp::ZdpSaidHeader>());
-    pkt.shrink(size_of::<zdp::ZdpMicvEnd>());
+    // extract A2A MAC
+    let Some(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
+        drop_and_count(asm, pkt, CounterType::BadStructure);
+        return;
+    };
+
+    if a2a_hdr.a2a_said != 0 {
+        todo!("A2A SAID");
+    }
+
+    let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: checksum may be shorter depending on A2A SA
+
+    if pkt.body().len() < a2a_mac_size {
+        drop_and_count(asm, pkt, CounterType::BadStructure);
+        return;
+    }
+    let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+    a2a_mac[..a2a_mac_size].copy_from_slice(&pkt.body()[pkt.body().len() - a2a_mac_size..]);
+    pkt.shrink_by(a2a_mac_size);
 
     // lookup PEP in DLT and expand compressed packet
     if asm
@@ -391,6 +407,12 @@ pub fn agent_input<'pktbuf>(
     {
         drop_and_count(asm, pkt, CounterType::UnknownStreamId);
         return;
+    }
+
+    // check A2A MAC
+    // TODO: use actual A2A SAID & keyed hash
+    if blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size] != a2a_mac[..a2a_mac_size] {
+        return drop_and_count(asm, pkt, CounterType::MicvFailure);
     }
 
     // send out decapsulated packet
@@ -407,6 +429,7 @@ pub fn agent_input<'pktbuf>(
 /// Process uncompressed packet from the agent.
 /// The packet will be compressed, or trigger a Bind request.
 pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
+    // determine five tuple
     let classification = match classifier::classify(&mut pkt) {
         Ok(cls) => cls,
         Err(_why) => {
@@ -419,7 +442,7 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) 
         ClassifierResult::OK | ClassifierResult::UnclassifiedL4 => (),
 
         ClassifierResult::FirstFragment | ClassifierResult::SubsequentFragment => {
-            // TODO; handle fragments!
+            // TODO: handle fragments!
             drop_and_count(asm, pkt, CounterType::InPacksDrop);
             return;
         }
@@ -431,10 +454,18 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) 
         }
     }
 
+    // compute A2A MAC
+    // TODO: use actual A2A SAID & keyed hash
+    let a2a_said: zpr::A2aSaid = 0;
+    let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
+    let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+    // SECURITY: truncating BLAKE3 is safe
+    a2a_mac[..a2a_mac_size].copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
+
     let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
 
-    match asm.alt.inspect(&five_tuple, |pep| {
-        // compress packet
+    // lookup five tuple in ALT and compress packet
+    let stream_id = match asm.alt.inspect(&five_tuple, |pep| {
         compress::compress(
             pep.compression_mode,
             five_tuple.l3_type,
@@ -442,23 +473,23 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) 
             &mut pkt,
         );
 
-        // "generate" A2A checksum
-        pkt.alloc_zeroed_header::<zdp::ZdpSaidHeader>().a2a_said = 0;
-        let micv: zdp::ZdpMicvEnd = zdp::ZdpMicvEnd { micv: 0 };
-        pkt.put(micv.as_bytes());
-
         pep.stream_id
     }) {
-        Some(stream_id) => {
-            forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
-        }
+        Some(stream_id) => stream_id,
 
         None => {
             // TODO: issue bind request!
             drop_and_count(asm, pkt, CounterType::OtherError);
             return;
         }
-    }
+    };
+
+    // append A2A MAC
+    pkt.put(&a2a_mac[..a2a_mac_size]);
+    pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
+
+    // forward
+    forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
 }
 
 /// Forward compressed packet.

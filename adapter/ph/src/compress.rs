@@ -125,6 +125,7 @@ fn expand_addrs_v6(
     };
 }
 
+/// Compress a packet.  Does not inspect payload length, so trailers (e.g. A2A MAC) may be present.
 pub fn compress(
     compression_mode: CompressionMode,
     l3_type: L3Type,
@@ -142,6 +143,7 @@ pub fn compress(
     }
 }
 
+/// Expand a packet.  Fills payload length from body length, so trailers (e.g. A2A MAC) must not be present.
 pub fn expand(compression_mode: CompressionMode, five_tuple: &FiveTuple, pkt: &mut Packet) {
     match five_tuple.l3_type {
         L3Type::Ipv4 => expand_addrs_v4(
