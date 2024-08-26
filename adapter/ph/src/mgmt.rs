@@ -6,7 +6,8 @@ use crate::fastpath;
 use crate::packet::{self, Packet};
 use crate::zdp;
 use crate::zpr;
-use bytes::BufMut;
+use bytes::{Buf, BufMut};
+use zerocopy::FromBytes;
 
 /// Send a unidirectional non-flow management message on the given link.
 /// The packet should contain only the message body.
@@ -78,4 +79,60 @@ pub async fn send_discard<'pktbuf>(asm: &'pktbuf Assembly<'pktbuf>, link_id: zpr
     let buf = asm.buffer_stack.get_buffer().await;
     let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
     send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
+}
+
+pub async fn handle_report<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    ingress_link_id: zpr::LinkId,
+    mut pkt: Packet<'pktbuf>,
+) {
+    let hdr = zdp::ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
+    // TODO handle protocol errors i.e. if the body is shorter
+    let report_data_length: usize = hdr.report_data_length.into();
+    pkt.advance(std::mem::size_of::<zdp::ZdpReportHeader>());
+    if pkt.body().len() >= report_data_length {
+        // TODO printing to stderr blocks indefinitely, this is just temporary
+        eprintln!(
+            "{}: {}",
+            ingress_link_id,
+            std::str::from_utf8(&pkt.body()[..report_data_length]).unwrap()
+        );
+    }
+    asm.buffer_stack.put_buffer(pkt.destroy());
+}
+
+pub async fn handle_discard<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    ingress_link_id: zpr::LinkId,
+    pkt: Packet<'pktbuf>,
+) {
+    // TODO print to debug log, when implemented
+    eprintln!("Discard message received from {}", ingress_link_id);
+    asm.buffer_stack.put_buffer(pkt.destroy());
+}
+
+pub async fn handle_hello_request<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    ingress_link_id: zpr::LinkId,
+    pkt: Packet<'pktbuf>,
+) {
+    let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+    let hdr = send_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
+    hdr.status = 0.into();
+    send_non_flow_mgmt(
+        asm,
+        ingress_link_id,
+        zdp::ZdpPacketType::HelloResponse,
+        send_pkt,
+    )
+    .await;
+    eprintln!("Received HelloRequest");
+}
+
+pub async fn handle_bind_agent_address_request<'pktbuf>(
+    _asm: &Assembly<'pktbuf>,
+    _ingress_link_id: zpr::LinkId,
+    _stream_id: zpr::StreamId,
+    mut _pkt: Packet<'pktbuf>,
+) {
 }

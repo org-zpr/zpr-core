@@ -321,12 +321,12 @@ pub fn substrate_ingress<'pktbuf>(
 ) {
     asm.counters[CounterType::InPacksRec].increment();
 
-    let Some(link_id) = asm.peer_table.lookup_peer(peer_sa) else {
+    let Some(ingress_link_id) = asm.peer_table.lookup_peer(peer_sa) else {
         drop_and_count(asm, pkt, CounterType::UnknownPeer);
         return;
     };
 
-    match decrypt(asm, link_id, &mut pkt) {
+    match decrypt(asm, ingress_link_id, &mut pkt) {
         Ok(()) => (),
         Err(err) => {
             drop_and_count(asm, pkt, err);
@@ -336,7 +336,7 @@ pub fn substrate_ingress<'pktbuf>(
 
     maybe_capture(asm, Direction::Inbound, &mut pkt);
 
-    let _zpi = match decap_zpi(asm, link_id, &mut pkt) {
+    let _zpi = match decap_zpi(asm, ingress_link_id, &mut pkt) {
         Ok(zpi) => zpi,
         Err(err) => {
             drop_and_count(asm, pkt, err);
@@ -354,7 +354,7 @@ pub fn substrate_ingress<'pktbuf>(
         // (instead of this silly code to restore it?)
         *pkt.alloc_zeroed_header() = base_hdr;
 
-        match asm.mgmt_processor.try_enqueue_packet(pkt) {
+        match asm.mgmt_processor.try_enqueue_packet(ingress_link_id, pkt) {
             Ok(()) => (),
             Err(TryEnqueueError::Full(pkt)) => drop_and_count(asm, pkt, CounterType::InPacksDrop),
         }
@@ -367,7 +367,7 @@ pub fn substrate_ingress<'pktbuf>(
 
     pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into(); // TODO: is this necessary?
 
-    forward(asm, link_id, per_flow_hdr.stream_id.into(), pkt);
+    forward(asm, ingress_link_id, per_flow_hdr.stream_id.into(), pkt);
 }
 
 /// Send a compressed agent packet to the agent.

@@ -3,6 +3,7 @@
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
+use crate::zpr;
 use std::io::ErrorKind;
 use std::result::Result;
 use std::time::SystemTime;
@@ -18,7 +19,7 @@ pub enum TryEnqueueError<T> {
 }
 
 pub enum MgmtProcessorMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>),
+    Packet(zpr::LinkId, Packet<'pktbuf>),
     TestPacket(TestPacket),
 }
 
@@ -36,13 +37,17 @@ impl<'pktbuf> MgmtProcessor<'pktbuf> {
 
     pub fn try_enqueue_packet(
         &self,
+        ingress_link_id: zpr::LinkId,
         packet: Packet<'pktbuf>,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
-        match self.sender.try_send(MgmtProcessorMessage::Packet(packet)) {
+        match self
+            .sender
+            .try_send(MgmtProcessorMessage::Packet(ingress_link_id, packet))
+        {
             Ok(()) => Ok(()),
 
-            Err(TrySendError::Full(pkt) | TrySendError::Closed(pkt)) => {
-                let MgmtProcessorMessage::Packet(pkt) = pkt else {
+            Err(TrySendError::Full(msg) | TrySendError::Closed(msg)) => {
+                let MgmtProcessorMessage::Packet(_, pkt) = msg else {
                     unreachable!()
                 };
                 Err(TryEnqueueError::Full(pkt))
