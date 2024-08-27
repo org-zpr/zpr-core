@@ -678,8 +678,8 @@ mod test {
         let initiator = KMNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
         let responder = KMNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
 
-        let adapter = km::KeyManager::new(Box::new(initiator));
-        let node = km::KeyManager::new(Box::new(responder));
+        let adapter = km::KeyManager::new(1, Box::new(initiator));
+        let node = km::KeyManager::new(1, Box::new(responder));
 
         let ctok = CancellationToken::new();
 
@@ -707,10 +707,10 @@ mod test {
         match timeout(Duration::from_secs(2), n_sig_rx.recv()).await {
             Ok(resp) => match resp {
                 Some(sig) => {
-                    match sig {
+                    match sig.msg {
                         km::KMSignal::Reset => {} // ok!
                         _ => {
-                            panic!("unexpected signal from node: {:?}", sig);
+                            panic!("unexpected signal from node: {:?}", sig.msg);
                         }
                     }
                 }
@@ -726,10 +726,10 @@ mod test {
         match timeout(Duration::from_secs(2), a_sig_rx.recv()).await {
             Ok(resp) => match resp {
                 Some(sig) => {
-                    match sig {
+                    match sig.msg {
                         km::KMSignal::Reset => {} // ok!
                         _ => {
-                            panic!("unexpected signal from adapter: {:?}", sig);
+                            panic!("unexpected signal from adapter: {:?}", sig.msg);
                         }
                     }
                 }
@@ -745,9 +745,9 @@ mod test {
         // Adapter, as the initiator will send a KM handshake message.
         match timeout(Duration::from_secs(2), a_km_rx.recv()).await {
             Ok(resp) => match resp {
-                Some(msg) => {
+                Some(linkmsg) => {
                     // Node will process message and then should generate a handshake reply on its output channel.
-                    let node_result = node.handle_km_message(&msg).await;
+                    let node_result = node.handle_km_message(&linkmsg.msg).await;
                     assert!(
                         node_result.is_ok(),
                         "node handle of adapter handshake initiation failed: {:?}",
@@ -766,8 +766,8 @@ mod test {
         // now I expect a message on the node output channel.
         match timeout(Duration::from_secs(2), n_km_rx.recv()).await {
             Ok(resp) => match resp {
-                Some(msg) => {
-                    let adapter_result = adapter.handle_km_message(&msg).await;
+                Some(linkmsg) => {
+                    let adapter_result = adapter.handle_km_message(&linkmsg.msg).await;
                     assert!(
                         adapter_result.is_ok(),
                         "adapter handle of node response failed: {:?}",
@@ -786,13 +786,13 @@ mod test {
         // And node should have transitioned;
         match timeout(Duration::from_secs(2), n_sig_rx.recv()).await {
             Ok(resp) => match resp {
-                Some(sig) => match sig {
+                Some(linkmsg) => match linkmsg.msg {
                     km::KMSignal::SaIdChange { old, new } => {
                         assert!(new > 0, "new SA_ID is still zero!");
                         assert!(old == 0, "old SA_ID is not zero!");
                     }
                     _ => {
-                        panic!("unexpected signal from node: {:?}", sig);
+                        panic!("unexpected signal from node: {:?}", linkmsg.msg);
                     }
                 },
                 None => {
@@ -807,13 +807,13 @@ mod test {
         // We sent the nodes response to the adapter above, so it should also have transitioned now.
         match timeout(Duration::from_secs(2), a_sig_rx.recv()).await {
             Ok(resp) => match resp {
-                Some(sig) => match sig {
+                Some(linkmsg) => match linkmsg.msg {
                     km::KMSignal::SaIdChange { old, new } => {
                         assert!(new > 0, "new adapter SA_ID is still zero!");
                         assert!(old == 0, "old adapter SA_ID is not zero!");
                     }
                     _ => {
-                        panic!("unexpected signal from adapter: {:?}", sig);
+                        panic!("unexpected signal from adapter: {:?}", linkmsg.msg);
                     }
                 },
                 None => {
