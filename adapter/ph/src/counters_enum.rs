@@ -19,6 +19,10 @@ pub enum CounterType {
     OutCapPacksDrop,
     InCapPacksFilt,
     OutCapPacksFilt,
+
+    QueueBackpressure,
+    DroppedAwaitingBind,
+
     BadMgmtResponse,
     UnexpectedMgmtResponse,
 
@@ -52,6 +56,10 @@ impl CounterType {
             Self::OutCapPacksDrop => "Outbound Capture Packets Dropped",
             Self::InCapPacksFilt => "Inbound Capture Packets Filtered",
             Self::OutCapPacksFilt => "Outbound Capture Packets Filtered",
+
+            Self::QueueBackpressure => "QueueBackpressure",
+            Self::DroppedAwaitingBind => "Dropped Awaiting Bind",
+
             Self::BadMgmtResponse => "Bad Management Response",
             Self::UnexpectedMgmtResponse => "Unexpected Management Response",
 

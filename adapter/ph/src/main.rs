@@ -110,14 +110,19 @@ fn main() -> ExitCode {
     let capture_queue_size = 16;
     let capture_batch_size = 8;
     let tun_queue_count = 4;
+    let adapter_manager_queue_size = 16;
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
+
     let (mp_inq, mp_outq) = mpsc::channel(mgmt_processor_queue_size);
     let mgmt_processor = MgmtProcessor::new(mp_inq);
 
     let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
+
+    let (am_inq, am_outq) = mpsc::channel(adapter_manager_queue_size);
+    let adapter_manager = AdapterManager::new(am_inq);
 
     let capture_worker = CaptureWorker::new();
     let flow_control = FlowControl::new();
@@ -185,10 +190,10 @@ fn main() -> ExitCode {
                 );
                 alt.insert(
                     five_tuple,
-                    adapter_tables::AltPep {
+                    adapter_tables::AltEntry::Active(adapter_tables::AltPep {
                         compression_mode: 0,
                         stream_id: remote_stream_id as zpr::StreamId, /* TOTAL HACK */
-                    },
+                    }),
                 );
                 let local_stream_id = dlt
                     .insert(adapter_tables::DltPep {
@@ -306,6 +311,7 @@ fn main() -> ExitCode {
                 adapter_docking_session_id,
                 alt,
                 dlt,
+                adapter_manager,
             }));
 
             // TODO signal handler goes here

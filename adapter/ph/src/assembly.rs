@@ -66,6 +66,8 @@ pub struct Assembly<'pktbuf> {
 
     pub alt: adapter_tables::AgentLookupTable,
     pub dlt: adapter_tables::DockLookupTable,
+
+    pub adapter_manager: AdapterManager<'pktbuf>,
 }
 
 pub struct SyncReqState<'pktbuf> {

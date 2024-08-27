@@ -13,13 +13,20 @@ use std::sync::Mutex;
 
 const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 24; // 16 million
 
+#[derive(Clone, Copy)]
 pub struct AltPep {
     pub compression_mode: CompressionMode,
     pub stream_id: StreamId,
 }
 
+#[derive(Clone, Copy)]
+pub enum AltEntry {
+    Active(AltPep),
+    Pending,
+}
+
 pub struct AgentLookupTable {
-    table: DashMap<FiveTuple, AltPep>,
+    table: DashMap<FiveTuple, AltEntry>,
 }
 
 impl AgentLookupTable {
@@ -29,17 +36,34 @@ impl AgentLookupTable {
         }
     }
 
+    // TODO: figure out whether we want to perform partial matching
     pub fn inspect<T>(
         &self,
         five_tuple: &FiveTuple,
-        inspector: impl FnOnce(&AltPep) -> T,
+        inspector: impl FnOnce(&AltEntry) -> T,
     ) -> Option<T> {
-        self.table.get(five_tuple).map(|pep| inspector(&*pep))
+        self.table.get(five_tuple).map(|entry| inspector(&*entry))
     }
 
     // FIXME: ideally we want `try_insert()` but dashmap doesn't support that…
-    pub fn insert(&self, five_tuple: FiveTuple, pep: AltPep) {
-        self.table.insert(five_tuple, pep);
+    pub fn insert(&self, five_tuple: FiveTuple, entry: AltEntry) {
+        self.table.insert(five_tuple, entry);
+    }
+
+    /// Alter an ALT entry according to the provided function.
+    ///
+    /// If the entry exists, returns the alterer function's result.
+    ///
+    /// If the entry doesn't exist, returns `Err`.
+    pub fn alter<T>(
+        &self,
+        five_tuple: &FiveTuple,
+        alterer: impl FnOnce(&mut AltEntry) -> T,
+    ) -> Result<T, ()> {
+        match self.table.get_mut(five_tuple) {
+            Some(mut ref_) => Ok(alterer(ref_.value_mut())),
+            None => Err(()),
+        }
     }
 
     pub fn remove(&self, five_tuple: &FiveTuple) {
