@@ -52,14 +52,13 @@ use capture_worker::CaptureWorker;
 use counter::*;
 use counters_enum::*;
 use flow_control::FlowControl;
-use options::PhMode;
 use queues::*;
 
 #[derive(Parser)]
 #[command(version, about)]
 struct CmdLine {
-    #[arg(long, default_value_t, value_enum)]
-    mode: PhMode,
+    #[arg(long)]
+    name: String,
 
     #[arg(long)]
     control_path: String,
@@ -68,7 +67,14 @@ struct CmdLine {
     self_addr: SocketAddr,
 
     #[arg(long)]
-    dock_addr: SocketAddr,
+    peer_addr1: SocketAddr,
+
+    #[arg(long)]
+    peer_addr2: Option<SocketAddr>,
+
+    // FIXME: Temporary hack until binds are fully working
+    #[arg(long)]
+    zpr_peer: Option<std::net::IpAddr>,
 
     #[arg(long)]
     ca_file: String,
@@ -83,7 +89,8 @@ struct CmdLine {
     tun_if: Option<String>,
 }
 
-fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
+fn emit_counts(system_name: &String, counts_map: &EnumMap<CounterType, Counter>) {
+    println!("\n*** {} Counters ***", system_name);
     for (key, &ref value) in counts_map {
         println!("{}: {}", key, value.get_count());
     }
@@ -92,12 +99,16 @@ fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
 fn main() -> ExitCode {
     let cmd_line = CmdLine::parse();
 
+    let system_name = cmd_line.name;
     let sock_path = cmd_line.control_path;
-    let peer_addr = cmd_line.dock_addr;
     let self_addr = cmd_line.self_addr;
+    let peer_addr1 = cmd_line.peer_addr1;
+    let peer_addr2 = cmd_line.peer_addr2;
+    let zpr_peer = cmd_line.zpr_peer;
     let _ca_file = cmd_line.ca_file;
     let _cert_file = cmd_line.certificate_file;
     let _priv_key_file = cmd_line.private_key_file;
+    let mut is_node = false;
 
     // TODO: These batch sizes are placeholders for now.  So are the queue
     // sizes below which are all just double the batch size.  Performance
@@ -148,12 +159,32 @@ fn main() -> ExitCode {
         .unwrap();*/
 
     let peer_table = peer_table::PeerTable::new();
-    let adapter_docking_session_id = peer_table
-        .insert(peer_table::PeerState::new(
-            peer_table::PeerType::Adapter, /* TEMP HACK */
-            peer_addr,
-        ))
-        .unwrap();
+    let mut peer_ids = Vec::new();
+
+    if peer_addr2.is_some() {
+        peer_ids.push(
+            peer_table
+                .insert(peer_table::PeerState::new(
+                    peer_table::PeerType::Adapter,
+                    peer_addr2.unwrap(),
+                ))
+                .unwrap(),
+        );
+        is_node = true;
+    }
+
+    peer_ids.push(
+        peer_table
+            .insert(peer_table::PeerState::new(
+                if is_node {
+                    peer_table::PeerType::Adapter
+                } else {
+                    peer_table::PeerType::Node
+                },
+                peer_addr1,
+            ))
+            .unwrap(),
+    );
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -174,29 +205,36 @@ fn main() -> ExitCode {
             let dlt = adapter_tables::DockLookupTable::new();
 
             // TEMP HACK: fill ALT & DLT based on TUN local & remote addresses
-            for (remote_stream_id, protocol) in [1, 6, 17].into_iter().enumerate() {
-                let five_tuple = defs::FiveTuple::new(
-                    zpr::L3Type::Ipv4,
-                    tun_devs[0].address().unwrap().into(),
-                    tun_devs[0].destination().unwrap().into(),
-                    protocol,
-                    0,
-                    0,
-                );
-                alt.insert(
-                    five_tuple,
-                    adapter_tables::AltPep {
-                        compression_mode: 0,
-                        stream_id: remote_stream_id as zpr::StreamId, /* TOTAL HACK */
-                    },
-                );
-                let local_stream_id = dlt
-                    .insert(adapter_tables::DltPep {
-                        compression_mode: 0,
-                        five_tuple: five_tuple.reverse(),
-                    })
-                    .unwrap();
-                assert_eq!(local_stream_id, remote_stream_id as zpr::StreamId); // VERY HACK
+            if !is_node {
+                for (remote_stream_id, protocol) in [1, 6, 17].into_iter().enumerate() {
+                    let five_tuple = defs::FiveTuple::new(
+                        zpr::L3Type::Ipv4,
+                        tun_devs[0].address().unwrap().into(),
+                        if zpr_peer.is_some() {
+                            zpr_peer.unwrap().into()
+                        } else {
+                            tun_devs[0].destination().unwrap().into()
+                        },
+                        protocol,
+                        0,
+                        0,
+                    );
+                    alt.insert(
+                        five_tuple,
+                        adapter_tables::AltPep {
+                            compression_mode: 0,
+                            stream_id: remote_stream_id as zpr::StreamId, /* TOTAL HACK */
+                        },
+                    );
+                    let local_stream_id = dlt
+                        .insert(adapter_tables::DltPep {
+                            compression_mode: 0,
+                            five_tuple: five_tuple.reverse(),
+                        })
+                        .unwrap();
+                    assert_eq!(local_stream_id, remote_stream_id as zpr::StreamId);
+                    // VERY HACK
+                }
             }
 
             // Open ingress sockets.
@@ -292,6 +330,7 @@ fn main() -> ExitCode {
             let substrate_egress = SubstrateEgress::new(sockets.iter());
 
             let asm = Box::leak(Box::new(Assembly {
+                system_name,
                 buffer_stack,
                 mgmt_processor,
                 agent_input,
@@ -303,7 +342,7 @@ fn main() -> ExitCode {
                 tun_ctl,
                 sync_req_state,
                 peer_table,
-                adapter_docking_session_id,
+                peer_ids,
                 alt,
                 dlt,
             }));
@@ -329,9 +368,9 @@ fn main() -> ExitCode {
             js.spawn(async {
                 loop {
                     tokio::select! {
-                        _ = usr1_stream.recv() => emit_counts(&asm.counters),
+                        _ = usr1_stream.recv() => emit_counts(&asm.system_name, &asm.counters),
                         _ = term_stream.recv() => {
-                            emit_counts(&asm.counters);
+                            emit_counts(&asm.system_name, &asm.counters);
                             std::process::exit(128 + SignalKind::terminate().as_raw_value())
                         }
                     }
@@ -361,8 +400,8 @@ fn main() -> ExitCode {
                 cap_outq,
             ));
 
-            eprintln!("Connecting...");
-            eprintln!("Connected!"); // FIXME: it's a lie
+            eprintln!("{}: connecting...", asm.system_name);
+            eprintln!("{}: connected!", asm.system_name); // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
 
             for (worker_index, socket) in sockets.iter().enumerate() {
@@ -376,9 +415,11 @@ fn main() -> ExitCode {
                 ));
             }
 
-            mgmt::send_report(asm, asm.adapter_docking_session_id, "Reporting for Duty!").await;
-            mgmt::send_discard(asm, asm.adapter_docking_session_id).await;
-            asm.send_hello_req().await;
+            if !is_node {
+                mgmt::send_report(asm, asm.peer_ids[0], "Reporting for Duty!").await;
+                mgmt::send_discard(asm, asm.peer_ids[0]).await;
+                asm.send_hello_req().await;
+            }
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();

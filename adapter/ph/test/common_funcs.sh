@@ -29,46 +29,53 @@ function wait_for() {
 function create_network() {
   sudo ip netns add zpr-a
   sudo ip netns add zpr-b
-
+  sudo ip netns add zpr-c
 
   # loopback
 
   sudo ip -n zpr-a link set lo up
   sudo ip -n zpr-b link set lo up
-
+  sudo ip -n zpr-c link set lo up
 
   # virtual ethenet pair
 
   sudo ip link add veth0 netns zpr-a type veth peer veth0 netns zpr-b
+  sudo ip link add veth1 netns zpr-c type veth peer veth1 netns zpr-b
 
-  sudo ip -n zpr-a addr add "$A_HOST_ADDR" peer "$B_HOST_ADDR" dev veth0
-  sudo ip -n zpr-b addr add "$B_HOST_ADDR" peer "$A_HOST_ADDR" dev veth0
+  sudo ip -n zpr-a addr add "$A_SUBSTRATE_ADDR" peer "$B_SUBSTRATE_ADDR_1" dev veth0
+  sudo ip -n zpr-b addr add "$B_SUBSTRATE_ADDR_1" peer "$A_SUBSTRATE_ADDR" dev veth0
+  sudo ip -n zpr-b addr add "$B_SUBSTRATE_ADDR_2" peer "$C_SUBSTRATE_ADDR" dev veth1
+  sudo ip -n zpr-c addr add "$C_SUBSTRATE_ADDR" peer "$B_SUBSTRATE_ADDR_2" dev veth1
 
   sudo ip -n zpr-a link set veth0 up
   sudo ip -n zpr-b link set veth0 up
-
+  sudo ip -n zpr-b link set veth1 up
+  sudo ip -n zpr-c link set veth1 up
 
   # TUN devices
 
   sudo ip -n zpr-a tuntap add name tun0 mode tun user "$ZPR_USER" multi_queue
   sudo ip -n zpr-b tuntap add name tun0 mode tun user "$ZPR_USER" multi_queue
+  sudo ip -n zpr-c tuntap add name tun0 mode tun user "$ZPR_USER" multi_queue
 
-  sudo ip -n zpr-a addr add "$A_ZPR_ADDR" peer "$B_ZPR_ADDR" dev tun0 
-  sudo ip -n zpr-b addr add "$B_ZPR_ADDR" peer "$A_ZPR_ADDR" dev tun0
+  sudo ip -n zpr-a addr add "$A_ZPR_ADDR" peer "$C_ZPR_ADDR" dev tun0 
+  sudo ip -n zpr-c addr add "$C_ZPR_ADDR" peer "$A_ZPR_ADDR" dev tun0
 
   sudo ip -n zpr-a link set tun0 up
   sudo ip -n zpr-b link set tun0 up
+  sudo ip -n zpr-c link set tun0 up
 
   # Kernel bug: kernels older than 6.10 don't set peer route correctly
   # when interface is down.  I think <https://github.com/torvalds/linux/commit/d0098e4c6b83e502cc1cd96d67ca86bc79a6c559>
   # fixes this issue.  For now, add the addresses after we bring the link up.
-  sudo ip -n zpr-a addr add "$A_ZPR_ADDR6" peer "$B_ZPR_ADDR6" dev tun0
-  sudo ip -n zpr-b addr add "$B_ZPR_ADDR6" peer "$A_ZPR_ADDR6" dev tun0
+  sudo ip -n zpr-a addr add "$A_ZPR_ADDR6" peer "$C_ZPR_ADDR6" dev tun0
+  sudo ip -n zpr-c addr add "$C_ZPR_ADDR6" peer "$A_ZPR_ADDR6" dev tun0
 }
 
 function destroy_network() {
   sudo ip netns delete zpr-a 2> /dev/null || true
   sudo ip netns delete zpr-b 2> /dev/null || true
+  sudo ip netns delete zpr-c 2> /dev/null || true
 }
 
 function create_ca_key_and_cert() {
@@ -86,8 +93,8 @@ function create_agent_key_and_cert() {
 }
 
 function ping_test() {
-  sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!
-  sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!
+  sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$C_ZPR_ADDR" & wait -f $!
+  sudo ip netns exec zpr-c ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!
 
 # CTP TEMP HACK: no IPv6 support at the moment
 #  sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR6" & wait -f $!

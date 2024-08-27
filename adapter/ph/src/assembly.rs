@@ -44,6 +44,8 @@ use zpr_ext::std::mem::{drop_guard, DropGuard};
 
 pub struct Assembly<'pktbuf> {
     // Shared resources.  These may be accessed by any part of the system.
+    pub system_name: String, // For debugging use
+
     pub buffer_stack: BufferStack<'pktbuf, { config::PACKET_BUFFER_SIZE }>,
 
     pub mgmt_processor: MgmtProcessor<'pktbuf>,
@@ -62,7 +64,7 @@ pub struct Assembly<'pktbuf> {
     pub sync_req_state: SyncReqState<'pktbuf>,
 
     pub peer_table: peer_table::PeerTable,
-    pub adapter_docking_session_id: zpr::LinkId,
+    pub peer_ids: Vec<zpr::LinkId>,
 
     pub alt: adapter_tables::AgentLookupTable,
     pub dlt: adapter_tables::DockLookupTable,
@@ -115,9 +117,10 @@ impl<'pktbuf> Assembly<'pktbuf> {
         &self,
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
+        peer_id: zpr::LinkId,
         pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
-        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, pkt_fn)
+        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, peer_id, pkt_fn)
             .await
     }
 
@@ -132,10 +135,17 @@ impl<'pktbuf> Assembly<'pktbuf> {
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
         stream_id: u32,
+        peer_id: zpr::LinkId,
         pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<(u32, Packet<'pktbuf>), SyncReqError> {
         match self
-            .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), pkt_fn)
+            .send_sync_req_helper(
+                zdp_request_type,
+                zdp_response_type,
+                Some(stream_id),
+                peer_id,
+                pkt_fn,
+            )
             .await
         {
             Ok(mut pkt) => {
@@ -161,6 +171,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
         stream_id: Option<u32>,
+        peer_id: zpr::LinkId,
         pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
         let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit
@@ -180,7 +191,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                 Some(stream_id) => {
                     mgmt::send_per_flow_mgmt(
                         self,
-                        self.adapter_docking_session_id, /* FIXME: parameterize */
+                        peer_id,
                         zdp_request_type,
                         stream_id,
                         packet.into_inner(),
@@ -188,13 +199,8 @@ impl<'pktbuf> Assembly<'pktbuf> {
                     .await;
                 }
                 None => {
-                    mgmt::send_non_flow_mgmt(
-                        self,
-                        self.adapter_docking_session_id, /* FIXME: parameterize */
-                        zdp_request_type,
-                        packet.into_inner(),
-                    )
-                    .await;
+                    mgmt::send_non_flow_mgmt(self, peer_id, zdp_request_type, packet.into_inner())
+                        .await;
                 }
             }
             tokio::select! {
@@ -240,6 +246,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
             .send_sync_non_flow_req(
                 ZdpPacketType::HelloRequest,
                 ZdpPacketType::HelloResponse,
+                self.peer_ids[0],
                 move |_packet| {},
             )
             .await;
@@ -248,12 +255,22 @@ impl<'pktbuf> Assembly<'pktbuf> {
                 let hdr = ZdpHelloResponseHeader::ref_from_prefix(hello_res.body())
                     .expect("too-short inbound packet");
                 let status = hdr.status;
-                println!("Received HelloResponse, status: {}", status);
+                println!(
+                    "{}: Received HelloResponse, status: {}",
+                    self.system_name, status
+                );
             }
             Err(err) => match err {
-                SyncReqError::LinkClosed => eprintln!("LinkClosed error with HelloRequest"),
-                SyncReqError::ProtocolError => eprintln!("ProtocolError error with HelloRequest"),
-                SyncReqError::Timeout => eprintln!("Timeout error with HelloRequest"),
+                SyncReqError::LinkClosed => {
+                    eprintln!("{}: LinkClosed error with HelloRequest", self.system_name)
+                }
+                SyncReqError::ProtocolError => eprintln!(
+                    "{}: ProtocolError error with HelloRequest",
+                    self.system_name
+                ),
+                SyncReqError::Timeout => {
+                    eprintln!("{}: Timeout error with HelloRequest", self.system_name)
+                }
             },
         }
     }

@@ -502,8 +502,16 @@ pub fn forward<'pktbuf>(
     // TODO: node forwarding
 
     // adapter forwarding
-    if ingress_link_id == zpr::AGENT_LINK_ID {
-        // in from agent; out to dock
+    if asm.peer_ids.len() == 1 && ingress_link_id != zpr::AGENT_LINK_ID {
+        // in from dock; out to agent
+        agent_input(asm, ingress_stream_id, pkt);
+    } else {
+        // FIXME: this is a hack
+        let egress_link = if ingress_link_id == zpr::AGENT_LINK_ID {
+            asm.peer_ids[0]
+        } else {
+            (ingress_link_id + 1) % 2
+        };
 
         let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
         per_flow_hdr.stream_id = ingress_stream_id.into();
@@ -511,9 +519,6 @@ pub fn forward<'pktbuf>(
         let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
         base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
 
-        substrate_egress(asm, asm.adapter_docking_session_id, zpr::ZPI_0, pkt);
-    } else {
-        // in from dock; out to agent
-        agent_input(asm, ingress_stream_id, pkt);
+        substrate_egress(asm, egress_link, zpr::ZPI_0, pkt);
     }
 }

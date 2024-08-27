@@ -133,7 +133,10 @@ pub async fn handle_discard<'pktbuf>(
     pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
     // TODO print to debug log, when implemented
-    eprintln!("Discard message received from {}", ingress_link_id);
+    eprintln!(
+        "{}: Discard message received from {}",
+        asm.system_name, ingress_link_id
+    );
     asm.buffer_stack.put_buffer(pkt.destroy());
     Ok(())
 }
@@ -147,7 +150,7 @@ pub async fn handle_hello_request<'pktbuf>(
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
     hdr.status = 0.into();
 
-    eprintln!("Received HelloRequest");
+    eprintln!("{}: Received HelloRequest", asm.system_name);
 
     send_non_flow_mgmt(
         asm,
