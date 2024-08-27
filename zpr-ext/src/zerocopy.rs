@@ -1,5 +1,6 @@
 #[cfg(feature = "bytes")]
 mod zerocopy_bytes {
+    use crate::bytes::BufExt;
     use bytes::{Buf, BufMut};
     use std::mem::MaybeUninit;
     use zerocopy::*;
@@ -11,7 +12,7 @@ mod zerocopy_bytes {
 
     pub trait FromBytesExt {
         /// Get a write-only buffer to modify this value.
-        fn as_bytes_mut(&mut self) -> &mut [MaybeUninit<u8>];
+        fn as_uninit_bytes_mut(&mut self) -> &mut [MaybeUninit<u8>];
 
         /// Like `read_from_prefix()`, but reads from a `Buf`.
         fn read_from_buf(buf: &mut impl Buf) -> Option<Self>
@@ -32,7 +33,7 @@ mod zerocopy_bytes {
     }
 
     impl<T: FromBytes> FromBytesExt for T {
-        fn as_bytes_mut(&mut self) -> &mut [MaybeUninit<u8>] {
+        fn as_uninit_bytes_mut(&mut self) -> &mut [MaybeUninit<u8>] {
             // SAFETY: we are forming the slice as the correct size;
             // MaybeUninit<u8> is always safe to cast to, and
             // T can read anything that's written to it
@@ -52,10 +53,7 @@ mod zerocopy_bytes {
                 None
             } else {
                 let mut ret = T::new_zeroed();
-                // SAFETY: we are immediately writing to all bytes
-                buf.copy_to_slice(unsafe {
-                    crate::std::mem::slice_assume_init_mut(ret.as_bytes_mut())
-                });
+                buf.copy_to_maybe_uninit_slice_mut(ret.as_uninit_bytes_mut());
                 Some(ret)
             }
         }

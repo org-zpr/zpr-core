@@ -7,6 +7,9 @@
 
 pub mod std;
 
+#[cfg(feature = "bytes")]
+pub mod bytes;
+
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
