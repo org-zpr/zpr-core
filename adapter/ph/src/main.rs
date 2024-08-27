@@ -149,7 +149,10 @@ fn main() -> ExitCode {
 
     let peer_table = peer_table::PeerTable::new();
     let adapter_docking_session_id = peer_table
-        .insert(peer_table::PeerState::new(peer_addr))
+        .insert(peer_table::PeerState::new(
+            peer_table::PeerType::Adapter, /* TEMP HACK */
+            peer_addr,
+        ))
         .unwrap();
 
     tokio::runtime::Builder::new_multi_thread()

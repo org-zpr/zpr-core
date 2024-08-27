@@ -72,5 +72,5 @@ pub mod compression_mode {
 
     pub const DESTINATION_PORT_PRESENT: CompressionMode = 0x20;
     pub const SOURCE_PORT_PRESENT: CompressionMode = 0x40;
-    pub const IP_PROTOCOL_PRESENT: CompressionMode = 0x80; // FIXME: this seems unused; I have a Q out to Frank about it
+    //pub const IP_PROTOCOL_PRESENT: CompressionMode = 0x80; // FIXME: this seems unused; I have a Q out to Frank about it
 }

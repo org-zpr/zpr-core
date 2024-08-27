@@ -43,13 +43,25 @@ impl IpAddress {
 
 impl From<Ipv4Addr> for IpAddress {
     fn from(addr: Ipv4Addr) -> Self {
-        Self::new_from_v4(addr.octets())
+        addr.octets().into()
+    }
+}
+
+impl From<[u8; 4]> for IpAddress {
+    fn from(addr: [u8; 4]) -> Self {
+        Self::new_from_v4(addr)
     }
 }
 
 impl From<Ipv6Addr> for IpAddress {
     fn from(addr: Ipv6Addr) -> Self {
-        Self { v6: addr.octets() }
+        addr.octets().into()
+    }
+}
+
+impl From<[u8; 16]> for IpAddress {
+    fn from(addr: [u8; 16]) -> Self {
+        Self { v6: addr }
     }
 }
 

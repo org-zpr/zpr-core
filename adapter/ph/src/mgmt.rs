@@ -1,14 +1,17 @@
 //! Management packet functions.
 
+use crate::adapter_tables;
 use crate::assembly::Assembly;
 use crate::config;
 use crate::counters_enum;
+use crate::defs::*;
 use crate::fastpath;
 use crate::packet::{self, Packet};
 use crate::zdp;
 use crate::zpr;
 use bytes::{Buf, BufMut};
 use zerocopy::FromBytes;
+use zpr_ext::zerocopy::{AsBytesExt, FromBytesExt};
 
 /// Send a unidirectional non-flow management message on the given link.
 /// The packet should contain only the message body.
@@ -140,8 +143,8 @@ pub async fn handle_hello_request<'pktbuf>(
     ingress_link_id: zpr::LinkId,
     pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let hdr = send_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
+    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
     hdr.status = 0.into();
 
     eprintln!("Received HelloRequest");
@@ -150,22 +153,144 @@ pub async fn handle_hello_request<'pktbuf>(
         asm,
         ingress_link_id,
         zdp::ZdpPacketType::HelloResponse,
-        send_pkt,
+        rsp_pkt,
     )
     .await;
 
     Ok(())
 }
 
+// RFC 6.5 § 6.3.11
 pub async fn handle_bind_agent_address_request<'pktbuf>(
-    _asm: &Assembly<'pktbuf>,
-    _ingress_link_id: zpr::LinkId,
-    _stream_id: zpr::StreamId,
-    pkt: Packet<'pktbuf>,
+    asm: &Assembly<'pktbuf>,
+    ingress_link_id: zpr::LinkId,
+    _stream_id: zpr::StreamId, // ignored
+    mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let Some(_hdr) = zdp::ZdpBindAgentAddressRequestHeader::ref_from_prefix(pkt.body()) else {
+    let Some(hdr) = zdp::ZdpBindAgentAddressRequestHeader::ref_from_prefix(pkt.body()) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
+
+    // TODO: handle as node: enter into DFT
+    // TODO: disallow bind requests between nodes
+
+    let ip_version = hdr.ip_version;
+    let compression_mode = hdr.compression_mode;
+
+    // read addresses (always present)
+    let src_address;
+    let dst_address;
+    match ip_version {
+        zpr::L3Type::Ipv4 => {
+            let Some(src_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
+                return Err((HandleMgmtError::BadStructure, pkt));
+            };
+            src_address = src_addr.into();
+
+            let Some(dst_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
+                return Err((HandleMgmtError::BadStructure, pkt));
+            };
+            dst_address = dst_addr.into();
+        }
+
+        zpr::L3Type::Ipv6 => {
+            let Some(src_addr) = <[u8; 16]>::read_from_buf(&mut pkt) else {
+                return Err((HandleMgmtError::BadStructure, pkt));
+            };
+            src_address = src_addr.into();
+
+            let Some(dst_addr) = <[u8; 16]>::read_from_buf(&mut pkt) else {
+                return Err((HandleMgmtError::BadStructure, pkt));
+            };
+            dst_address = dst_addr.into();
+        }
+
+        _ => {
+            return Err((HandleMgmtError::BadStructure, pkt));
+        }
+    };
+
+    // read IP Protocol (always present)
+    if pkt.remaining() < 1 {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    }
+    let ip_protocol = pkt.get_u8();
+
+    // read source port (optional)
+    let mut src_port = 0;
+    if compression_mode & zpr::compression_mode::SOURCE_PORT_PRESENT != 0 {
+        if pkt.remaining() < 2 {
+            return Err((HandleMgmtError::BadStructure, pkt));
+        }
+        src_port = pkt.get_u16();
+    }
+
+    // read destination port (optional)
+    let mut dst_port = 0;
+    if compression_mode & zpr::compression_mode::SOURCE_PORT_PRESENT != 0 {
+        if pkt.remaining() < 2 {
+            return Err((HandleMgmtError::BadStructure, pkt));
+        }
+        dst_port = pkt.get_u16();
+    }
+
+    // form PEP
+    let pep = adapter_tables::DltPep {
+        compression_mode: compression_mode,
+        five_tuple: FiveTuple::new(
+            ip_version,
+            src_address,
+            dst_address,
+            ip_protocol,
+            src_port,
+            dst_port,
+        ),
+    };
+
+    // recycle request buffer for response
+    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+
+    // attempt to insert into DLT
+    let stream_id;
+    match asm.dlt.insert(pep) {
+        Ok(sid) => {
+            // success; respond with stream ID
+            // TODO: maybe tick a counter somewhere?
+            zdp::ZdpBindAgentAddressResponseHeader {
+                status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS,
+                info_len: 0,
+            }
+            .write_to_buf(&mut rsp_pkt);
+
+            stream_id = sid;
+        }
+
+        Err(()) => {
+            // DLT full; respond with error message
+            // TODO: maybe tick a counter somewhere?
+            let message = "DLT full";
+
+            zdp::ZdpBindAgentAddressResponseHeader {
+                status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER,
+                info_len: message.len() as u8,
+            }
+            .write_to_buf(&mut rsp_pkt);
+
+            rsp_pkt.put(message.as_bytes());
+
+            stream_id = 0;
+        }
+    }
+
+    // respond to requestor
+    send_per_flow_mgmt(
+        asm,
+        ingress_link_id,
+        zdp::ZdpPacketType::BindAgentAddressResponse,
+        stream_id,
+        rsp_pkt,
+    )
+    .await;
 
     Ok(())
 }
