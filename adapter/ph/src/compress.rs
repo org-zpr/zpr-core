@@ -1,10 +1,10 @@
 //! ZDP Header Compression (RFC 6.5 § 5.26)
 
-#![allow(dead_code)]
-
 use crate::classifier;
+use crate::defs::FiveTuple;
 use crate::net_defs;
 use crate::packet::Packet;
+use crate::zpr::{CompressionMode, L3Type};
 use bytes::Buf;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use zerocopy::FromBytes;
@@ -12,7 +12,7 @@ use zerocopy::{AsBytes, FromZeroes, Unaligned};
 
 #[derive(AsBytes, FromZeroes, FromBytes, Unaligned)]
 #[repr(packed)]
-pub struct CompressedIPv4Header {
+struct CompressedIPv4Header {
     pub vhl: u8,
     pub dscp: u8,
     pub frag_id: [u8; 2],
@@ -22,22 +22,14 @@ pub struct CompressedIPv4Header {
 
 #[derive(AsBytes, FromZeroes, FromBytes, Unaligned)]
 #[repr(packed)]
-pub struct CompressedIPv6Header {
+struct CompressedIPv6Header {
     pub version_and_tc_upper: u8,
     pub tc_lower_and_fl_upper: u8,
     pub fl_lower: [u8; 2],
     pub hop_limit: u8,
 }
 
-pub fn compress_addrs(pkt: &mut Packet) {
-    match classifier::get_ip_version(pkt.body()) {
-        4 => compress_addrs_v4(pkt),
-        6 => compress_addrs_v6(pkt),
-        _ => (),
-    }
-}
-
-pub fn compress_addrs_v4(pkt: &mut Packet) {
+fn compress_addrs_v4(pkt: &mut Packet) {
     let hdr = classifier::IPv4Header::ref_from_prefix(pkt.body()).unwrap();
     let vhl = hdr.vhl;
     let dscp = hdr.dscp;
@@ -55,7 +47,7 @@ pub fn compress_addrs_v4(pkt: &mut Packet) {
     chdr.ttl = ttl;
 }
 
-pub fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_address: Ipv4Addr) {
+fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_address: Ipv4Addr) {
     let chdr = CompressedIPv4Header::ref_from_prefix(pkt.body()).unwrap();
     let vhl = chdr.vhl;
     let dscp = chdr.dscp;
@@ -86,7 +78,7 @@ pub fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_a
         .header_checksum = csum;
 }
 
-pub fn compress_addrs_v6(pkt: &mut Packet) {
+fn compress_addrs_v6(pkt: &mut Packet) {
     let hdr = classifier::IPv6Header::ref_from_prefix(pkt.body()).unwrap();
     let version_and_tc_upper = hdr.version_and_tc_upper;
     let tc_lower_and_fl_upper = hdr.tc_lower_and_fl_upper;
@@ -102,7 +94,7 @@ pub fn compress_addrs_v6(pkt: &mut Packet) {
     chdr.hop_limit = hop_limit;
 }
 
-pub fn expand_addrs_v6(
+fn expand_addrs_v6(
     pkt: &mut Packet,
     next_header: u8,
     src_address: Ipv6Addr,
@@ -131,4 +123,99 @@ pub fn expand_addrs_v6(
     hdr.dst_address = net_defs::IpAddress {
         v6: dst_address.octets(),
     };
+}
+
+/// Compress a packet.  Does not inspect payload length, so trailers (e.g. A2A MAC) may be present.
+pub fn compress(
+    compression_mode: CompressionMode,
+    l3_type: L3Type,
+    _l4_protocol: net_defs::IpProtocol,
+    pkt: &mut Packet,
+) {
+    match l3_type {
+        L3Type::Ipv4 => compress_addrs_v4(pkt),
+        L3Type::Ipv6 => compress_addrs_v6(pkt),
+        other => panic!("bad L3 type: {}", other.0),
+    }
+
+    if compression_mode != 0 {
+        todo!("L4 compression");
+    }
+}
+
+/// Expand a packet.  Fills payload length from body length, so trailers (e.g. A2A MAC) must not be present.
+pub fn expand(compression_mode: CompressionMode, five_tuple: &FiveTuple, pkt: &mut Packet) {
+    match five_tuple.l3_type {
+        L3Type::Ipv4 => expand_addrs_v4(
+            pkt,
+            five_tuple.l4_protocol,
+            five_tuple.src_address.try_into().unwrap(),
+            five_tuple.dst_address.try_into().unwrap(),
+        ),
+        L3Type::Ipv6 => expand_addrs_v6(
+            pkt,
+            five_tuple.l4_protocol,
+            five_tuple.src_address.into(),
+            five_tuple.dst_address.into(),
+        ),
+        other => panic!("bad L3 type: {}", other.0),
+    }
+
+    if compression_mode != 0 {
+        todo!("L4 compression");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::classifier;
+    use crate::config;
+    use crate::packet::Packet;
+    use crate::zpr::CompressionMode;
+    use bytes::BufMut;
+
+    #[test]
+    fn test_round_trip() {
+        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
+
+        for &body in TEST_CASES {
+            let mut pkt = Packet::new(&mut buf, 256);
+            pkt.put(body);
+
+            let cls_res = classifier::classify(&mut pkt).unwrap();
+            assert!(
+                cls_res == classifier::ClassifierResult::OK
+                    || cls_res == classifier::ClassifierResult::UnclassifiedL4
+            );
+            let ft = *pkt.metadata().five_tuple();
+
+            let compression_mode: CompressionMode = 0; // TODO: iterate through compression modes
+            compress(compression_mode, ft.l3_type, ft.l4_protocol, &mut pkt);
+            expand(compression_mode, &ft, &mut pkt);
+
+            assert_eq!(pkt.body(), body);
+        }
+    }
+
+    const TEST_CASES: &[&[u8]] = &[
+        // ICMP Echo (ping) request
+        &[
+            0x45, 0x00, 0x00, 0x54, 0x46, 0xa2, 0x40, 0x00, 0x40, 0x01, 0x70, 0xb3, 0xc0, 0xa8,
+            0x01, 0x01, 0xc0, 0xa8, 0x01, 0x02, 0x08, 0x00, 0x5d, 0x2e, 0xf6, 0xae, 0x00, 0x01,
+            0x3c, 0xa0, 0xcc, 0x66, 0x00, 0x00, 0x00, 0x00, 0xda, 0x47, 0x02, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
+            0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29,
+            0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+        ],
+        // ICMPv6 Neighbor Soliciation
+        &[
+            0x60, 0x00, 0x00, 0x00, 0x00, 0x20, 0x3a, 0xff, 0xfe, 0x80, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x0c, 0xbb, 0x7e, 0xa4, 0x55, 0xf1, 0x07, 0x9f, 0xff, 0x02, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xf1, 0x00, 0x01, 0x87, 0x00,
+            0x1a, 0xe5, 0x00, 0x00, 0x00, 0x00, 0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x0c, 0xbb, 0x7e, 0xa4, 0x55, 0xf1, 0x00, 0x01, 0x01, 0x01, 0xe4, 0x60, 0x17, 0xd8,
+            0x9a, 0x4b,
+        ],
+    ];
 }

@@ -9,6 +9,7 @@
 use crate::config;
 use crate::defs::*;
 use crate::net_defs::*;
+use crate::zpr::L3Type;
 use bytes::buf;
 use std::mem::{size_of, size_of_val};
 use zerocopy::{AsBytes, ByteOrder, FromBytes, FromZeroes, NetworkEndian};
@@ -159,6 +160,10 @@ pub struct PacketMetadata {
 
 #[allow(dead_code)]
 impl PacketMetadata {
+    pub fn set_l3_type(&mut self, l3_type: L3Type) {
+        self.five_tuple.l3_type = l3_type;
+    }
+
     pub fn set_addresses(&mut self, src_addr: IpAddress, dst_addr: IpAddress) {
         self.five_tuple.src_address = src_addr;
         self.five_tuple.dst_address = dst_addr;
@@ -172,8 +177,12 @@ impl PacketMetadata {
         self.five_tuple.dst_port = NetworkEndian::read_u16(&dport)
     }
 
-    pub fn set_protocol(&mut self, proto: u8) {
-        self.five_tuple.protocol = proto
+    pub fn set_l4_protocol(&mut self, proto: IpProtocol) {
+        self.five_tuple.l4_protocol = proto
+    }
+
+    pub fn get_l3_type(&self) -> L3Type {
+        self.five_tuple.l3_type
     }
 
     pub fn get_src_address(&self) -> IpAddress {
@@ -192,8 +201,8 @@ impl PacketMetadata {
         self.five_tuple.dst_port
     }
 
-    pub fn get_protocol(&self) -> u8 {
-        self.five_tuple.protocol
+    pub fn get_l4_protocol(&self) -> IpProtocol {
+        self.five_tuple.l4_protocol
     }
 
     pub fn five_tuple(&self) -> &FiveTuple {
@@ -224,10 +233,10 @@ impl<'buf> Packet<'buf> {
     /// Same as `new()`, but accepts a `DropGuard`-protected buffer, and produces
     /// a `DropGuard`-protected packet buffer, so manually calling `destroy()`
     /// is unnecessary.
-    pub fn new_guarded<B: DropGuard<&'buf mut [u8; config::PACKET_BUFFER_SIZE]>>(
+    pub fn new_guarded<B: DropGuard<&'buf mut [u8; config::PACKET_BUFFER_SIZE]> + Send>(
         buf: B,
         headroom: usize,
-    ) -> impl DropGuard<Self> {
+    ) -> impl DropGuard<Self> + Send {
         buf.map(move |b| Self::new(b, headroom), |p| p.destroy())
     }
 
@@ -373,7 +382,7 @@ impl<'buf> Packet<'buf> {
     }
 
     /// Shrink the packet by `cnt` bytes (removing data from the tail).
-    pub fn shrink(&mut self, cnt: usize) {
+    pub fn shrink_by(&mut self, cnt: usize) {
         let md = self.metadata_mut();
         assert!(cnt <= md.len);
         md.len -= cnt;
@@ -434,6 +443,22 @@ unsafe impl<'buf> buf::BufMut for Packet<'buf> {
     unsafe fn advance_mut(&mut self, cnt: usize) {
         assert!(cnt <= self.remaining_mut());
         self.metadata_mut().len += cnt;
+    }
+}
+
+impl std::fmt::Debug for Packet<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        // TODO This is a super hacky and inefficient way to do this
+        let body = self.body();
+        for i in 0..body.len() {
+            if i % 16 == 0 {
+                write!(f, "\n{:04x} ", i)?;
+            } else if i % 8 == 0 {
+                write!(f, " ")?;
+            }
+            write!(f, " {:02x}", body[i])?;
+        }
+        writeln!(f, "")
     }
 }
 
@@ -638,20 +663,20 @@ mod tests {
     }
 
     #[test]
-    fn shrink_test() {
+    fn shrink_by_test() {
         let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
         let mut pkt = Packet::new(&mut buf, 0);
         pkt.put_u64(0x0102030405060708u64);
-        pkt.shrink(2);
+        pkt.shrink_by(2);
         assert_eq!(pkt.body(), [1, 2, 3, 4, 5, 6]);
     }
 
     #[test]
     #[should_panic]
-    fn shrink_too_much_test() {
+    fn shrink_by_too_much_test() {
         let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
         let mut pkt = Packet::new(&mut buf, 0);
         pkt.put_u64(0x0102030405060708u64);
-        pkt.shrink(10);
+        pkt.shrink_by(10);
     }
 }

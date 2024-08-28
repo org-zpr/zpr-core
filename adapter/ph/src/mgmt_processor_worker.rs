@@ -1,15 +1,12 @@
 use crate::assembly::Assembly;
-use crate::config;
-use crate::counters_enum::CounterType;
 use crate::fastpath;
-use crate::mgmt;
+use crate::mgmt::{self, HandleMgmtError, HandleMgmtResult};
 use crate::packet::Packet;
 use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
-use bytes::Buf;
+use crate::zpr;
 use std::future::Future;
 use tokio::sync::mpsc;
-use zerocopy::FromBytes;
 use zpr_ext::zerocopy::*;
 
 async fn worker<'pktbuf>(
@@ -18,7 +15,12 @@ async fn worker<'pktbuf>(
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
-            MgmtProcessorMessage::Packet(pkt) => handle_packet(asm, pkt).await,
+            MgmtProcessorMessage::Packet(ingress_link_id, pkt) => {
+                match handle_packet(asm, ingress_link_id, pkt).await {
+                    Ok(()) => (),
+                    Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
+                }
+            }
 
             MgmtProcessorMessage::TestPacket(pkt) => pkt.acknowledge(queue.len(), 1),
         }
@@ -35,8 +37,14 @@ where
     async move { worker(&*asm, &mut queue).await }
 }
 
-async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
-    let base_hdr = ZdpBaseHeader::read_from_buf(&mut pkt).expect("too-short ZDP message");
+async fn handle_packet<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    ingress_link_id: zpr::LinkId,
+    mut pkt: Packet<'pktbuf>,
+) -> HandleMgmtResult<'pktbuf> {
+    let Some(base_hdr) = ZdpBaseHeader::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
 
     let packet_type = base_hdr.packet_type;
 
@@ -46,62 +54,39 @@ async fn handle_packet<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf
         let channel = asm.sync_req_state.get_sender();
         match channel {
             Some(channel) => match channel.send((pkt, packet_type)) {
-                Ok(()) => (),
-                Err(ret_sender) => {
-                    fastpath::drop_and_count(
-                        asm,
-                        ret_sender.0,
-                        CounterType::UnexpectedMgmtResponse,
-                    );
-                }
+                Ok(()) => Ok(()),
+                Err((pkt, _)) => Err((HandleMgmtError::UnexpectedMgmtResponse, pkt)),
             },
-            None => {
-                fastpath::drop_and_count(asm, pkt, CounterType::UnexpectedMgmtResponse);
-            }
+
+            None => Err((HandleMgmtError::UnexpectedMgmtResponse, pkt)),
         }
     } else if base_hdr.packet_type.is_per_flow() {
-        let _per_flow_hdr =
-            ZdpPerFlowHeader::read_from_buf(&mut pkt).expect("too-short per-flow message");
+        let Some(per_flow_hdr) = ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
+            return Err((HandleMgmtError::BadStructure, pkt));
+        };
+
+        let stream_id: zpr::StreamId = per_flow_hdr.stream_id.into();
 
         match base_hdr.packet_type {
-            ZdpPacketType::TransitPacket => panic!("unexpected TransitPacket in management path"),
-            packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
+            ZdpPacketType::TransitPacket => panic!("unexpected Transit Packet in management path"),
+
+            ZdpPacketType::BindAgentAddressRequest => {
+                mgmt::handle_bind_agent_address_request(asm, ingress_link_id, stream_id, pkt).await
+            }
+
+            packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),
         }
     } else {
         match base_hdr.packet_type {
-            ZdpPacketType::Report => {
-                let hdr =
-                    ZdpReportHeader::ref_from_prefix(pkt.body()).expect("too-short inbound packet");
-                // TODO handle protocol errors i.e. if the body is shorter
-                let report_data_length: usize = hdr.report_data_length.into();
-                pkt.advance(std::mem::size_of::<ZdpReportHeader>());
-                if pkt.body().len() >= report_data_length {
-                    // TODO printing to stderr blocks indefinitely, this is just temporary
-                    eprintln!(
-                        "{}",
-                        std::str::from_utf8(&pkt.body()[..report_data_length]).unwrap()
-                    );
-                }
-                asm.buffer_stack.put_buffer(pkt.destroy());
-            }
-            ZdpPacketType::Discard => {
-                // TODO print to debug log, when implemented
-                eprintln!("Discard message received");
-            }
+            ZdpPacketType::Report => mgmt::handle_report(asm, ingress_link_id, pkt).await,
+
+            ZdpPacketType::Discard => mgmt::handle_discard(asm, ingress_link_id, pkt).await,
+
             ZdpPacketType::HelloRequest => {
-                let mut send_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-                let hdr = send_pkt.alloc_zeroed_header::<ZdpHelloResponseHeader>();
-                hdr.status = 0.into();
-                mgmt::send_non_flow_mgmt(
-                    asm,
-                    asm.adapter_docking_session_id, /* FIXME: parameterize */
-                    ZdpPacketType::HelloResponse,
-                    send_pkt,
-                )
-                .await;
-                eprintln!("Received HelloRequest");
+                mgmt::handle_hello_request(asm, ingress_link_id, pkt).await
             }
-            packet_type => panic!("unhandled inbound packet type {}", packet_type.0),
+
+            packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),
         }
     }
 }

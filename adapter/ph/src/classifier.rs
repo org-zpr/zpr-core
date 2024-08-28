@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use crate::net_defs::*;
 use crate::packet;
+use crate::zpr::L3Type;
 use std::mem::size_of;
 use zerocopy::{AsBytes, FromZeroes, KnownLayout, Unaligned};
 use zerocopy::{ByteOrder, FromBytes, NetworkEndian};
@@ -103,6 +104,8 @@ fn classify_ipv4(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
 ) -> Result<ClassifierResult, &'static str> {
+    metadata.set_l3_type(L3Type::Ipv4);
+
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<IPv4Header>() > body.len() {
         return Err("Packet length error");
@@ -129,7 +132,7 @@ fn classify_ipv4(
     const MORE_FRAGMENTS_MASK: u16 = 0x2000;
     let frag_offset = NetworkEndian::read_u16(&ipv4_header.frag_offset);
     if frag_offset & FRAGMENT_OFFSET_MASK != 0 {
-        metadata.set_protocol(ipv4_header.proto);
+        metadata.set_l4_protocol(ipv4_header.proto);
         return Ok(ClassifierResult::SubsequentFragment);
     }
 
@@ -147,6 +150,8 @@ fn classify_ipv6(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
 ) -> Result<ClassifierResult, &'static str> {
+    metadata.set_l3_type(L3Type::Ipv6);
+
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<IPv6Header>() > body.len() {
         return Err("Packet length error");
@@ -169,7 +174,7 @@ fn classify_next_header(
     body: &[u8],
     protocol: IpProtocol,
 ) -> Result<ClassifierResult, &'static str> {
-    metadata.set_protocol(protocol);
+    metadata.set_l4_protocol(protocol);
     match protocol {
         0 => return skip_v6_option(metadata, body),  // Hop-by-hop
         1 => return classify_icmp(metadata, body),   // ICMP
@@ -325,7 +330,7 @@ mod tests {
         assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
-        assert_eq!(0u8, metadata.get_protocol());
+        assert_eq!(0u8, metadata.get_l4_protocol());
     }
 
     // Begin IPv4 tests
@@ -359,7 +364,7 @@ mod tests {
         );
         assert_eq!(0x14u16, metadata.get_src_port_hbo());
         assert_eq!(0x50u16, metadata.get_dst_port_hbo());
-        assert_eq!(6u8, metadata.get_protocol());
+        assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -384,6 +389,7 @@ mod tests {
         );
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
         assert_eq!(
             [0x04, 0x03, 0x02, 0x01],
             metadata.get_dst_address().read_as_v4()
@@ -394,7 +400,7 @@ mod tests {
         );
         assert_eq!(0x14u16, metadata.get_src_port_hbo());
         assert_eq!(0x50u16, metadata.get_dst_port_hbo());
-        assert_eq!(6u8, metadata.get_protocol());
+        assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -419,6 +425,7 @@ mod tests {
         );
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
         assert_eq!(
             [0x04, 0x03, 0x02, 0x01],
             metadata.get_dst_address().read_as_v4()
@@ -429,7 +436,7 @@ mod tests {
         );
         assert_eq!(0x0u16, metadata.get_src_port_hbo());
         assert_eq!(0x0u16, metadata.get_dst_port_hbo());
-        assert_eq!(6u8, metadata.get_protocol());
+        assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -452,7 +459,7 @@ mod tests {
         assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
-        assert_eq!(0u8, metadata.get_protocol());
+        assert_eq!(0u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -474,11 +481,12 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
         assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
         assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
-        assert_eq!(0u8, metadata.get_protocol());
+        assert_eq!(0u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -500,11 +508,12 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
         assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
         assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
-        assert_eq!(0u8, metadata.get_protocol());
+        assert_eq!(0u8, metadata.get_l4_protocol());
     }
 
     // Begin IPv6 tests
@@ -532,6 +541,7 @@ mod tests {
         assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
         assert_eq!(
             IpAddress {
                 v6: [
@@ -552,7 +562,7 @@ mod tests {
         );
         assert_eq!(43424u16, metadata.get_src_port_hbo());
         assert_eq!(8080u16, metadata.get_dst_port_hbo());
-        assert_eq!(6u8, metadata.get_protocol());
+        assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -586,6 +596,7 @@ mod tests {
         );
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
         assert_eq!(
             IpAddress {
                 v6: [
@@ -606,7 +617,7 @@ mod tests {
         );
         assert_eq!(6363u16, metadata.get_dst_port_hbo());
         assert_eq!(6363u16, metadata.get_src_port_hbo());
-        assert_eq!(17u8, metadata.get_protocol());
+        assert_eq!(17u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -633,6 +644,7 @@ mod tests {
         );
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
         assert_eq!(
             IpAddress {
                 v6: [
@@ -653,7 +665,7 @@ mod tests {
         );
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u16, metadata.get_src_port_hbo());
-        assert_eq!(44u8, metadata.get_protocol());
+        assert_eq!(44u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -690,6 +702,7 @@ mod tests {
         );
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
         assert_eq!(
             IpAddress {
                 v6: [
@@ -710,7 +723,7 @@ mod tests {
         );
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u16, metadata.get_src_port_hbo());
-        assert_eq!(41u8, metadata.get_protocol());
+        assert_eq!(41u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -739,6 +752,7 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
         assert_eq!(
             IpAddress {
                 v6: [
@@ -759,7 +773,7 @@ mod tests {
         );
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(0u16, metadata.get_src_port_hbo());
-        assert_eq!(43u8, metadata.get_protocol());
+        assert_eq!(43u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -773,11 +787,12 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
         assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
         assert_eq!(IpAddress::new_zeroed(), metadata.get_dst_address());
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
-        assert_eq!(0u8, metadata.get_protocol());
+        assert_eq!(0u8, metadata.get_l4_protocol());
     }
 
     // Begin TCP tests
@@ -799,6 +814,7 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
         assert_eq!(
             [0x04, 0x03, 0x02, 0x01],
             metadata.get_dst_address().read_as_v4()
@@ -809,7 +825,7 @@ mod tests {
         );
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
-        assert_eq!(6u8, metadata.get_protocol());
+        assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -830,6 +846,7 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
         assert_eq!(
             [0x04, 0x03, 0x02, 0x01],
             metadata.get_dst_address().read_as_v4()
@@ -840,7 +857,7 @@ mod tests {
         );
         assert_eq!(0x0u16, metadata.get_src_port_hbo());
         assert_eq!(0x0u16, metadata.get_dst_port_hbo());
-        assert_eq!(6u8, metadata.get_protocol());
+        assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
     #[test]
@@ -861,6 +878,7 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
         assert_eq!(
             [0x04, 0x03, 0x02, 0x01],
             metadata.get_dst_address().read_as_v4()
@@ -871,7 +889,7 @@ mod tests {
         );
         assert_eq!(0x0u16, metadata.get_src_port_hbo());
         assert_eq!(0x0u16, metadata.get_dst_port_hbo());
-        assert_eq!(6u8, metadata.get_protocol());
+        assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
     // Begin UDP tests
@@ -893,6 +911,7 @@ mod tests {
         assert!(classify(&mut packet).is_err());
 
         let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
         assert_eq!(
             [0x04, 0x03, 0x02, 0x01],
             metadata.get_dst_address().read_as_v4()
@@ -903,6 +922,6 @@ mod tests {
         );
         assert_eq!(0u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
-        assert_eq!(6u8, metadata.get_protocol());
+        assert_eq!(6u8, metadata.get_l4_protocol());
     }
 }

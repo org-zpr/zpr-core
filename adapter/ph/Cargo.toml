@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 aarc = { version = "0.2.1", optional = true }
 arrayref = { version = "0.3.7" }
+blake3 = { version = "1.5.4" }
 bytes = { version = "1.7.1" }
 cbpf-rs = { path = "../../cbpf-rs" }
 clap = { version = "4.5.7", features = ["derive"] }

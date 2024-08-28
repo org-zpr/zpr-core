@@ -3,8 +3,10 @@
 //! General rule: no fastpath operation may block.
 //! This implies that all functions here must be non-async.
 
+use crate::adapter_tables::AltEntry;
 use crate::assembly::Assembly;
 use crate::classifier::{self, ClassifierResult};
+use crate::compress;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::net_defs;
@@ -14,11 +16,11 @@ use crate::queues::TryEnqueueError;
 use crate::zdp;
 use crate::zdp_ll;
 use crate::zpr;
+use blake3;
 use bytes::{Buf, BufMut};
-use std::mem::size_of;
 use std::net::SocketAddr;
 use std::time::SystemTime;
-use zerocopy::{AsBytes, FromBytes};
+use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
 
@@ -236,7 +238,7 @@ pub fn decrypt<'pktbuf>(
             return Err(DecryptError::MicvFailure);
         }
 
-        pkt.shrink(2); // remove checksum
+        pkt.shrink_by(2); // remove checksum
 
         Ok(())
     } else {
@@ -320,12 +322,12 @@ pub fn substrate_ingress<'pktbuf>(
 ) {
     asm.counters[CounterType::InPacksRec].increment();
 
-    let Some(link_id) = asm.peer_table.lookup_peer(peer_sa) else {
+    let Some(ingress_link_id) = asm.peer_table.lookup_peer(peer_sa) else {
         drop_and_count(asm, pkt, CounterType::UnknownPeer);
         return;
     };
 
-    match decrypt(asm, link_id, &mut pkt) {
+    match decrypt(asm, ingress_link_id, &mut pkt) {
         Ok(()) => (),
         Err(err) => {
             drop_and_count(asm, pkt, err);
@@ -335,7 +337,7 @@ pub fn substrate_ingress<'pktbuf>(
 
     maybe_capture(asm, Direction::Inbound, &mut pkt);
 
-    let _zpi = match decap_zpi(asm, link_id, &mut pkt) {
+    let _zpi = match decap_zpi(asm, ingress_link_id, &mut pkt) {
         Ok(zpi) => zpi,
         Err(err) => {
             drop_and_count(asm, pkt, err);
@@ -353,9 +355,11 @@ pub fn substrate_ingress<'pktbuf>(
         // (instead of this silly code to restore it?)
         *pkt.alloc_zeroed_header() = base_hdr;
 
-        match asm.mgmt_processor.try_enqueue_packet(pkt) {
+        match asm.mgmt_processor.try_enqueue_packet(ingress_link_id, pkt) {
             Ok(()) => (),
-            Err(TryEnqueueError::Full(pkt)) => drop_and_count(asm, pkt, CounterType::InPacksDrop),
+            Err(TryEnqueueError::Full(pkt)) => {
+                drop_and_count(asm, pkt, CounterType::QueueBackpressure)
+            }
         }
         return;
     }
@@ -366,26 +370,41 @@ pub fn substrate_ingress<'pktbuf>(
 
     pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into(); // TODO: is this necessary?
 
-    forward(asm, link_id, per_flow_hdr.stream_id.into(), pkt);
+    forward(asm, ingress_link_id, per_flow_hdr.stream_id.into(), pkt);
 }
 
 /// Send a compressed agent packet to the agent.
 /// The packet will be decompressed according to the given stream ID.
 pub fn agent_input<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
+    tether_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
     mut pkt: Packet<'pktbuf>,
 ) {
-    // lookup stream ID in DLT
+    // extract A2A MAC
+    let Some(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
+        drop_and_count(asm, pkt, CounterType::BadStructure);
+        return;
+    };
+
+    if a2a_hdr.a2a_said != 0 {
+        todo!("A2A SAID");
+    }
+
+    let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: checksum may be shorter depending on A2A SA
+
+    if pkt.body().len() < a2a_mac_size {
+        drop_and_count(asm, pkt, CounterType::BadStructure);
+        return;
+    }
+    let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+    a2a_mac[..a2a_mac_size].copy_from_slice(&pkt.body()[pkt.body().len() - a2a_mac_size..]);
+    pkt.shrink_by(a2a_mac_size);
+
+    // lookup PEP in DLT and expand compressed packet
     if asm
         .dlt
-        .inspect(stream_id, |pep| {
-            // decompress
-            if pep.compression_mode != 0 {
-                todo!("L4 compression");
-            }
-
-            // TODO
+        .inspect(tether_id, |pep| {
+            compress::expand(pep.compression_mode, &pep.five_tuple, &mut pkt)
         })
         .is_none()
     {
@@ -393,9 +412,11 @@ pub fn agent_input<'pktbuf>(
         return;
     }
 
-    // "Check" A2A checksum
-    pkt.advance(size_of::<zdp::ZdpSaidHeader>());
-    pkt.shrink(size_of::<zdp::ZdpMicvEnd>());
+    // check A2A MAC
+    // TODO: use actual A2A SAID & keyed hash
+    if blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size] != a2a_mac[..a2a_mac_size] {
+        return drop_and_count(asm, pkt, CounterType::MicvFailure);
+    }
 
     // send out decapsulated packet
     match asm.agent_input.try_enqueue_packet(drop_guard(pkt, |p| {
@@ -411,6 +432,7 @@ pub fn agent_input<'pktbuf>(
 /// Process uncompressed packet from the agent.
 /// The packet will be compressed, or trigger a Bind request.
 pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
+    // determine five tuple
     let classification = match classifier::classify(&mut pkt) {
         Ok(cls) => cls,
         Err(_why) => {
@@ -423,7 +445,7 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) 
         ClassifierResult::OK | ClassifierResult::UnclassifiedL4 => (),
 
         ClassifierResult::FirstFragment | ClassifierResult::SubsequentFragment => {
-            // TODO; handle fragments!
+            // TODO: handle fragments!
             drop_and_count(asm, pkt, CounterType::InPacksDrop);
             return;
         }
@@ -437,28 +459,47 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) 
 
     let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
 
-    match asm.alt.inspect(&five_tuple, |pep| {
-        if pep.compression_mode != 0 {
-            todo!("L4 compression")
+    // lookup five tuple in ALT
+    match asm.alt.inspect(&five_tuple, |entry| *entry) {
+        Some(AltEntry::Active(pep)) => {
+            // compute A2A MAC
+            // TODO: use actual A2A SAID & keyed hash
+            let a2a_said: zpr::A2aSaid = 0;
+            let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
+            let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+            // SECURITY: truncating BLAKE3 is safe
+            a2a_mac[..a2a_mac_size]
+                .copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
+
+            // compress packet
+            compress::compress(
+                pep.compression_mode,
+                five_tuple.l3_type,
+                five_tuple.l4_protocol,
+                &mut pkt,
+            );
+
+            // append A2A MAC
+            pkt.put(&a2a_mac[..a2a_mac_size]);
+            pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
+
+            // forward packet on
+            forward(asm, zpr::AGENT_LINK_ID, pep.tether_id, pkt);
         }
 
-        // TODO: compress!
-
-        // "generate" A2A checksum
-        pkt.alloc_zeroed_header::<zdp::ZdpSaidHeader>().a2a_said = 0;
-        let micv: zdp::ZdpMicvEnd = zdp::ZdpMicvEnd { micv: 0 };
-        pkt.put(micv.as_bytes());
-
-        pep.stream_id
-    }) {
-        Some(stream_id) => {
-            forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
+        Some(AltEntry::Pending) => {
+            // bind request pending; drop this packet
+            drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
         }
 
         None => {
-            // TODO: issue bind request!
-            drop_and_count(asm, pkt, CounterType::OtherError);
-            return;
+            // issue bind request
+            match asm.adapter_manager.try_request_tether_id(pkt) {
+                Ok(()) => (),
+                Err(TryEnqueueError::Full(pkt)) => {
+                    drop_and_count(asm, pkt, CounterType::QueueBackpressure)
+                }
+            }
         }
     }
 }

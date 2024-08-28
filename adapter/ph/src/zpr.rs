@@ -1,6 +1,9 @@
 //! ZPR concepts, excluding the ZDP protocol.
 #![allow(dead_code)]
 
+use open_enum::open_enum;
+use zerocopy::{AsBytes, FromBytes, FromZeroes};
+
 /// Substrate Address
 pub type SubstrateAddr = std::net::SocketAddr;
 
@@ -29,6 +32,9 @@ pub type StreamId = u32;
 /// Reserved for node-to-node / control-plane traffic.
 pub const NODE_TO_NODE_STREAM_ID: StreamId = 0;
 
+/// Adapter-to-Adapter SAID.
+pub type A2aSaid = u8;
+
 /// Within a ZDP Key Management packet, indicates the Key Managenent algorithm identifier.
 pub type KmId = u16;
 
@@ -42,11 +48,22 @@ pub const KM_ID_IKEV2: KmId = 1;
 pub const KM_ID_NOISE: KmId = 2;
 
 /// ZPR agent packet L3 type (RFC 6.5 § 6.3.11)
-#[derive(Clone, Copy)]
+#[open_enum]
+#[derive(Clone, Copy, Debug, Hash, AsBytes, FromBytes, FromZeroes)]
 #[repr(u8)]
 pub enum L3Type {
-    IPv4 = 4,
-    IPv6 = 6,
+    Ipv4 = 4,
+    Ipv6 = 6,
+}
+
+impl std::fmt::Display for L3Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match *self {
+            Self::Ipv4 => write!(f, "IPv4"),
+            Self::Ipv6 => write!(f, "IPv6"),
+            other => write!(f, "[unknown L3 type {}]", other.0),
+        }
+    }
 }
 
 /// Bitmask indicating how an agent packet is compressed.
@@ -58,5 +75,5 @@ pub mod compression_mode {
 
     pub const DESTINATION_PORT_PRESENT: CompressionMode = 0x20;
     pub const SOURCE_PORT_PRESENT: CompressionMode = 0x40;
-    pub const IP_PROTOCOL_PRESENT: CompressionMode = 0x80; // FIXME: this seems unused; I have a Q out to Frank about it
+    //pub const IP_PROTOCOL_PRESENT: CompressionMode = 0x80; // FIXME: this seems unused; I have a Q out to Frank about it
 }

@@ -10,9 +10,9 @@ seq_num = ProtoField.uint16("zdp.seq_num", "Sequence Number", base.DEC)
 stream_id = ProtoField.uint32("zdp.streamid", "Stream ID", base.DEC)
 pad = ProtoField.bytes("zdp.pad", "Pad")
 mac_addr = ProtoField.uint32("zdp.mac", "MAC", base.DEC)
-d2d_said = ProtoField.uint8("zdp.d2d_said", "D2D SAID", base.DEC)
+a2a_said = ProtoField.uint8("zdp.a2a_said", "A2A SAID", base.DEC)
 agent_packet = ProtoField.bytes("zdp.agent_packet", "Agent Packet")
-d2d_mac = ProtoField.uint32("zdp.d2d_mac", "D2D MAC", base.DEC)
+a2a_mac = ProtoField.uint32("zdp.a2a_mac", "A2A MAC", base.DEC)
 management_packet = ProtoField.bytes("zdp.management", "Management Packet")
 
 -- Agent Packet Headers
@@ -45,14 +45,14 @@ info_len = ProtoField.uint8("zdp.info_len", "Information Length", base.DEC)
 status_info = ProtoField.bytes("zdp.status_info", "Optional Additional Status Information")
 
 zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
-                     mac_addr, d2d_said, agent_packet, d2d_mac, management_packet, ip_version,
+                     mac_addr, a2a_said, agent_packet, a2a_mac, management_packet, ip_version,
                      ihl, dscp, frag_id, frag_offset, ttl, tc, fl, hop_limit, ip_options, mbz,
                      adl, aditional_data, req_seq_num, ip_protocol_present, source_port_present, 
                      destination_port_present, source_addr, dest_addr, ip_protocol, source_info, 
                      dest_info, status_code, info_len, status_info }
 
-TRANSIT_NON_AGENT_DATA = 18
-IP_NON_AGENT_DATA = 25
+TRANSIT_NON_AGENT_DATA = 22
+IP_NON_AGENT_DATA = 29
 STREAM_MGMT_NON_AGENT_DATA = 11
 MGMT_NON_AGENT_DATA = 7
 
@@ -79,10 +79,10 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         -- Transit Packet
         zdp_header_subtree:add(stream_id, buffer(5, 4))
         -- zdp_header_subtree:add(pad, buffer(9, 8))
-        zdp_header_subtree:add(d2d_said, buffer(9, 1))
+        zdp_header_subtree:add(a2a_said, buffer(9, 1))
         zdp_header_subtree:add(agent_packet, buffer(10, real_len - TRANSIT_NON_AGENT_DATA))
-        zdp_header_subtree:add(d2d_mac, buffer(real_len - 8, 4))
-        zdp_header_subtree:add(mac_addr, buffer(real_len - 4, 4))
+        zdp_header_subtree:add(a2a_mac, buffer(real_len - 12, 8))
+        zdp_header_subtree:add(mac_addr, buffer(real_len - 8, 4))
 
         local agent_header_subtree = tree:add(zdp_proto, buffer(), "Compressed Agent Packet Header Data")
         local v4_v6 = get_first_four(buffer(10, 1):uint())

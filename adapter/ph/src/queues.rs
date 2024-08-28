@@ -3,6 +3,7 @@
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
+use crate::zpr;
 use std::io::ErrorKind;
 use std::result::Result;
 use std::time::SystemTime;
@@ -18,31 +19,33 @@ pub enum TryEnqueueError<T> {
 }
 
 pub enum MgmtProcessorMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>),
+    Packet(zpr::LinkId, Packet<'pktbuf>),
     TestPacket(TestPacket),
 }
 
+/// MgmtProcessor processes all inbound management packets
 pub struct MgmtProcessor<'pktbuf> {
     sender: mpsc::Sender<MgmtProcessorMessage<'pktbuf>>,
 }
 
 impl<'pktbuf> MgmtProcessor<'pktbuf> {
-    // TODO: this will almost certainly morph into multiple queues
-
-    #[allow(dead_code)]
     pub fn new(sender: mpsc::Sender<MgmtProcessorMessage<'pktbuf>>) -> Self {
         Self { sender }
     }
 
     pub fn try_enqueue_packet(
         &self,
+        ingress_link_id: zpr::LinkId,
         packet: Packet<'pktbuf>,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
-        match self.sender.try_send(MgmtProcessorMessage::Packet(packet)) {
+        match self
+            .sender
+            .try_send(MgmtProcessorMessage::Packet(ingress_link_id, packet))
+        {
             Ok(()) => Ok(()),
 
-            Err(TrySendError::Full(pkt) | TrySendError::Closed(pkt)) => {
-                let MgmtProcessorMessage::Packet(pkt) = pkt else {
+            Err(TrySendError::Full(msg) | TrySendError::Closed(msg)) => {
+                let MgmtProcessorMessage::Packet(_, pkt) = msg else {
                     unreachable!()
                 };
                 Err(TryEnqueueError::Full(pkt))
@@ -183,7 +186,6 @@ impl<'a> SubstrateEgress<'a> {
 }
 
 /// Capture will intercept packets in the PH and dump them into a file for debugging purposes
-#[allow(dead_code)]
 pub struct CapPacket<'pktbuf> {
     pub packet: Packet<'pktbuf>,
     pub timestamp: SystemTime,
@@ -194,13 +196,13 @@ pub struct Capture<'pktbuf> {
     sender: mpsc::Sender<CapPacket<'pktbuf>>,
 }
 
-#[allow(dead_code)]
 impl<'pktbuf> Capture<'pktbuf> {
-    pub(crate) fn new(sender: mpsc::Sender<CapPacket<'pktbuf>>) -> Self {
+    pub fn new(sender: mpsc::Sender<CapPacket<'pktbuf>>) -> Self {
         Self { sender }
     }
 
     /// Blocks until packet is enqueued
+    #[allow(dead_code)]
     pub async fn enqueue_packet(
         &self,
         packet: Packet<'pktbuf>,
@@ -233,5 +235,48 @@ impl<'pktbuf> Capture<'pktbuf> {
                 return Err(TryEnqueueError::Full(cap_pack.packet));
             }
         };
+    }
+}
+
+pub enum AdapterManagerMessage<'pktbuf> {
+    RequestTetherId(Packet<'pktbuf>),
+}
+
+pub struct AdapterManager<'pktbuf> {
+    sender: mpsc::Sender<AdapterManagerMessage<'pktbuf>>,
+}
+
+impl<'pktbuf> AdapterManager<'pktbuf> {
+    pub fn new(sender: mpsc::Sender<AdapterManagerMessage<'pktbuf>>) -> Self {
+        Self { sender }
+    }
+
+    /// Request a tether ID to use for sending packets starting with the
+    /// specified packet.
+    ///
+    /// While awaiting a tether ID, the five-tuple will be marked pending in
+    /// the ALT.  (Note that this occurs asynchronously!  Ensure that this
+    /// race is benign for your use case before relying on the pending mark.)
+    ///
+    /// After a tether ID is received, a PEP will be added to
+    /// the ALT, and an attempt will be made to send the specified packet.
+    ///
+    /// The specified packet must have already been classified.
+    pub fn try_request_tether_id(
+        &self,
+        packet: Packet<'pktbuf>,
+    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        match self
+            .sender
+            .try_send(AdapterManagerMessage::RequestTetherId(packet))
+        {
+            Ok(()) => Ok(()),
+
+            Err(TrySendError::Full(msg) | TrySendError::Closed(msg)) => match msg {
+                AdapterManagerMessage::RequestTetherId(packet) => {
+                    Err(TryEnqueueError::Full(packet))
+                }
+            },
+        }
     }
 }

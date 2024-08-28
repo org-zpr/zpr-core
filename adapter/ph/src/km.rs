@@ -273,7 +273,10 @@ impl KeyManager<'_> {
                     "noise: encrypt input {} bytes, output {} bytes",
                     encr_len, len
                 );
-                message.shrink(encr_len); // remove body, leavign ZPI
+                // Copy the encrypted data back into the message -- there should be sufficient room for it since
+                // caller should know our required padding space and alignment.
+
+                message.shrink_by(encr_len); // remove body
                 message.put(&encr_buf[0..len]); // write a new body
             }
             Err(e) => {
@@ -332,7 +335,7 @@ impl KeyManager<'_> {
                     len
                 );
                 // Copy the decrypted data back into the message -- do not overwrite ZPI.
-                message.shrink(encr_len); // remove body, leave ZPI
+                message.shrink_by(encr_len); // remove body
                 message.put(&decr_buf[0..len]); // write a new body
             }
             Err(e) => {

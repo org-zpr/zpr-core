@@ -126,6 +126,27 @@ pub struct ZdpHelloResponseHeader {
     pub status: U16,
 }
 
+/// Bind Agent Address request (§ 6.3.11)
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpBindAgentAddressRequestHeader {
+    pub ip_version: zpr::L3Type,
+    pub compression_mode: zpr::CompressionMode,
+}
+
+/// Bind Agent Address response (§ 6.3.11)
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+pub struct ZdpBindAgentAddressResponseHeader {
+    pub status_code: u8,
+    pub info_len: u8,
+}
+
+impl ZdpBindAgentAddressResponseHeader {
+    pub const STATUS_CODE_SUCCESS: u8 = 0;
+    pub const STATUS_CODE_OTHER: u8 = 1;
+}
+
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
 pub struct ZdpKeyManagementHeader {
@@ -150,15 +171,12 @@ impl ZdpKeyManagementHeader {
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
-pub struct ZdpSaidHeader {
-    pub a2a_said: u8,
+pub struct ZdpA2aHeader {
+    pub a2a_said: zpr::A2aSaid,
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
-#[repr(packed)]
-pub struct ZdpMicvEnd {
-    pub micv: u32,
-}
+/// Config-specified size of A2A MAC.  Algorithm-specified MAC may be smaller (but not larger).
+pub const ZDP_A2A_MAC_SIZE: usize = 8;
 
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
 const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);

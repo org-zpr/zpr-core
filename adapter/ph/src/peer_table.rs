@@ -7,13 +7,23 @@ use std::sync::Mutex;
 
 const PEER_TABLE_SIZE: usize = 1024;
 
+#[derive(Clone, Copy)]
+pub enum PeerType {
+    Node,
+    Adapter,
+}
+
 pub struct PeerState {
+    pub peer_type: PeerType,
     pub substrate_addr: SubstrateAddr,
 }
 
 impl PeerState {
-    pub fn new(substrate_addr: SubstrateAddr) -> Self {
-        Self { substrate_addr }
+    pub fn new(peer_type: PeerType, substrate_addr: SubstrateAddr) -> Self {
+        Self {
+            peer_type,
+            substrate_addr,
+        }
     }
 }
 

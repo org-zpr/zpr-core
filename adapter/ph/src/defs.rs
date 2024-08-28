@@ -1,6 +1,7 @@
 //! Common definitions that have no more specific place to live.
 
 use crate::net_defs;
+use crate::zpr;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
 /// Packet direction with respect to an interface.
@@ -18,36 +19,38 @@ pub enum Direction {
 pub struct FiveTuple {
     pub src_address: net_defs::IpAddress,
     pub dst_address: net_defs::IpAddress,
-    pub protocol: net_defs::IpProtocol,
-    pub padding: [u8; 1],
+    pub l3_type: zpr::L3Type,
+    pub l4_protocol: net_defs::IpProtocol,
     pub src_port: u16,
     pub dst_port: u16,
 }
 
 impl FiveTuple {
     pub fn new(
+        l3_type: zpr::L3Type,
         src_address: net_defs::IpAddress,
         dst_address: net_defs::IpAddress,
-        protocol: net_defs::IpProtocol,
+        l4_protocol: net_defs::IpProtocol,
         src_port: u16,
         dst_port: u16,
     ) -> Self {
         Self {
             src_address,
             dst_address,
-            protocol,
-            padding: [0],
+            l3_type,
+            l4_protocol,
             src_port,
             dst_port,
         }
     }
 
+    #[allow(dead_code)]
     pub fn reverse(&self) -> FiveTuple {
         Self {
             src_address: self.dst_address,
             dst_address: self.src_address,
-            protocol: self.protocol,
-            padding: [0],
+            l3_type: self.l3_type,
+            l4_protocol: self.l4_protocol,
             src_port: self.dst_port,
             dst_port: self.src_port,
         }
@@ -58,8 +61,13 @@ impl std::fmt::Display for FiveTuple {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
-            "({}, {}, {}, {}, {})",
-            self.src_address, self.dst_address, self.protocol, self.src_port, self.dst_port
+            "({}, {}, {}, {}, {}, {})",
+            self.l3_type,
+            self.src_address,
+            self.dst_address,
+            self.l4_protocol,
+            self.src_port,
+            self.dst_port
         )
     }
 }

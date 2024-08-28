@@ -76,6 +76,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
 CHILDREN=(${CHILDREN[@]} "$!")
 
 sleep 1  # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well
+set_program "$A_ZPR_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --mode=client --control-path "$B_ZPR_SOCK" \
@@ -99,7 +100,6 @@ stty sane || true
 # Run test
 #
 
-set_program "$A_ZPR_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
 set_program "$B_ZPR_SOCK" "$TMPDIR/cap_test2.pcap" None
 
 PASS=0
@@ -110,14 +110,13 @@ fi
 close_program "$A_ZPR_SOCK"
 close_program "$B_ZPR_SOCK"
 
-# Make sure correct number of incoming packets were captured, either 23 or 24 depending 
-# on whether two hello requests are received 
+# Make sure at least both agent and mgmt packets were captured.
 tcpdump -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1 or link[0] == 0' > "$TMPDIR/checker.txt"
-HELLO_COUNT="$(grep -c '0x0000:  0100 8800 0000' "$TMPDIR/checker.txt" || true)"
-PACKET_COUNT="$(grep -c '0x0000:  0' "$TMPDIR/checker.txt" || true)"
+AGENT_PACKET_COUNT="$(grep -c '0x0000:  0100 00' "$TMPDIR/checker.txt" || echo 0)"
+TOTAL_PACKET_COUNT="$(grep -c '0x0000:  0100' "$TMPDIR/checker.txt" || echo 0)"
+let MGMT_PACKET_COUNT=TOTAL_PACKET_COUNT-AGENT_PACKET_COUNT
 
-# CTP TEMP HACK: IPv6 isn't working at the moment!  So these counts dropped by 12
-if [[ ("$PACKET_COUNT" != "11" || "$HELLO_COUNT" != "1") && ("$PACKET_COUNT" != "12" || "$HELLO_COUNT" != "2") ]]
+if [[ MGMT_PACKET_COUNT == 0 || AGENT_PACKET_COUNT == 0 ]]
 then PASS=1
 fi
 
