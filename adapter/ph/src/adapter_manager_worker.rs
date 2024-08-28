@@ -20,7 +20,7 @@ async fn worker<'pktbuf>(
                 // ideally, we place these into a JoinSet,
                 // but let's work out how message sequencing works before doing that!!
                 do_request_tether_id(asm, pkt).await;
-            },
+            }
         }
     }
 }
@@ -28,8 +28,7 @@ async fn worker<'pktbuf>(
 pub fn launch<'pktbuf>(
     asm: impl std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync + 'pktbuf,
     mut queue: mpsc::Receiver<AdapterManagerMessage<'pktbuf>>,
-) -> impl Future<Output = ()> + Send + 'pktbuf
-{
+) -> impl Future<Output = ()> + Send + 'pktbuf {
     async move { worker(&*asm, &mut queue).await }
 }
 
@@ -58,15 +57,26 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
 
     // send Bind request
 
-    match mgmt::send_bind_agent_address_request(asm, asm.adapter_docking_session_id, compression_mode, five_tuple).await {
+    match mgmt::send_bind_agent_address_request(
+        asm,
+        asm.adapter_docking_session_id,
+        compression_mode,
+        five_tuple,
+    )
+    .await
+    {
         Ok(tether_id) => {
             // Bind succeeded; add to ALT.
             eprintln!("Bind of {} succeeded: {}", five_tuple, tether_id);
-            asm.alt.alter(&five_tuple,
-                |entry| {
+            asm.alt
+                .alter(&five_tuple, |entry| {
                     assert!(matches!(entry, AltEntry::Pending));
-                    *entry = AltEntry::Active(AltPep { compression_mode, tether_id });
-                }).unwrap();
+                    *entry = AltEntry::Active(AltPep {
+                        compression_mode,
+                        tether_id,
+                    });
+                })
+                .unwrap();
         }
 
         Err(err) => {

@@ -84,8 +84,10 @@ pub async fn send_discard<'pktbuf>(asm: &'pktbuf Assembly<'pktbuf>, link_id: zpr
     send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
 }
 
-pub async fn send_hello_request<'a, 'pktbuf>(asm: &'a Assembly<'pktbuf>, link_id: zpr::LinkId) -> Result<(), ()>
-{
+pub async fn send_hello_request<'a, 'pktbuf>(
+    asm: &'a Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+) -> Result<(), ()> {
     let response = asm
         .send_sync_non_flow_req(
             link_id,
@@ -131,40 +133,46 @@ impl std::fmt::Display for BindAgentAddressError {
 }
 
 pub async fn send_bind_agent_address_request<'a, 'pktbuf>(
-    asm: &'a Assembly<'pktbuf>, link_id: zpr::LinkId,
-    compression_mode: zpr::CompressionMode, five_tuple: FiveTuple,
+    asm: &'a Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+    compression_mode: zpr::CompressionMode,
+    five_tuple: FiveTuple,
 ) -> Result<zpr::StreamId, BindAgentAddressError> {
-    let response = asm.send_sync_per_flow_req(
-        link_id,
-        zdp::ZdpPacketType::BindAgentAddressRequest,
-        zdp::ZdpPacketType::BindAgentAddressResponse,
-        0, move |mut req| {
-            zdp::ZdpBindAgentAddressRequestHeader {
-                ip_version: five_tuple.l3_type,
-                compression_mode,
-            }.write_to_buf(&mut req);
+    let response = asm
+        .send_sync_per_flow_req(
+            link_id,
+            zdp::ZdpPacketType::BindAgentAddressRequest,
+            zdp::ZdpPacketType::BindAgentAddressResponse,
+            0,
+            move |mut req| {
+                zdp::ZdpBindAgentAddressRequestHeader {
+                    ip_version: five_tuple.l3_type,
+                    compression_mode,
+                }
+                .write_to_buf(&mut req);
 
-            match five_tuple.l3_type {
-                zpr::L3Type::Ipv4 => {
-                    req.put(five_tuple.src_address.read_as_v4().as_slice());
-                    req.put(five_tuple.dst_address.read_as_v4().as_slice());
+                match five_tuple.l3_type {
+                    zpr::L3Type::Ipv4 => {
+                        req.put(five_tuple.src_address.read_as_v4().as_slice());
+                        req.put(five_tuple.dst_address.read_as_v4().as_slice());
+                    }
+
+                    zpr::L3Type::Ipv6 => {
+                        req.put(five_tuple.src_address.v6.as_slice());
+                        req.put(five_tuple.dst_address.v6.as_slice());
+                    }
+
+                    other => panic!("bad L3 type: {}", other.0),
                 }
 
-                zpr::L3Type::Ipv6 => {
-                    req.put(five_tuple.src_address.v6.as_slice());
-                    req.put(five_tuple.dst_address.v6.as_slice());
+                req.put_u8(five_tuple.l4_protocol);
+
+                if compression_mode != 0 {
+                    todo!("L4 compression");
                 }
-
-                other => panic!("bad L3 type: {}", other.0),
-            }
-
-            req.put_u8(five_tuple.l4_protocol);
-
-            if compression_mode != 0 {
-                todo!("L4 compression");
-            }
-        }
-    ).await;
+            },
+        )
+        .await;
 
     match response {
         Ok((tether_id, mut resp)) => {
@@ -202,8 +210,7 @@ pub async fn send_bind_agent_address_request<'a, 'pktbuf>(
             }
         }
 
-        Err(err) =>
-            Err(BindAgentAddressError::SyncReqError(err)),
+        Err(err) => Err(BindAgentAddressError::SyncReqError(err)),
     }
 }
 

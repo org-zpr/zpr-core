@@ -360,7 +360,9 @@ fn main() -> ExitCode {
 
             mgmt::send_report(asm, asm.adapter_docking_session_id, "Reporting for Duty!").await;
             mgmt::send_discard(asm, asm.adapter_docking_session_id).await;
-            mgmt::send_hello_request(asm, asm.adapter_docking_session_id).await.unwrap();
+            mgmt::send_hello_request(asm, asm.adapter_docking_session_id)
+                .await
+                .unwrap();
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();

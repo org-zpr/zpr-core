@@ -110,13 +110,11 @@ pub enum SyncReqError {
 
 impl std::fmt::Display for SyncReqError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        f.write_str(
-            match self {
-                Self::LinkClosed => "link closed",
-                Self::ProtocolError => "protocol error",
-                Self::Timeout => "timeout",
-            }
-        )
+        f.write_str(match self {
+            Self::LinkClosed => "link closed",
+            Self::ProtocolError => "protocol error",
+            Self::Timeout => "timeout",
+        })
     }
 }
 
@@ -151,7 +149,13 @@ impl<'pktbuf> Assembly<'pktbuf> {
         pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<(zpr::StreamId, Packet<'pktbuf>), SyncReqError> {
         match self
-            .send_sync_req_helper(link_id, zdp_request_type, zdp_response_type, Some(stream_id), pkt_fn)
+            .send_sync_req_helper(
+                link_id,
+                zdp_request_type,
+                zdp_response_type,
+                Some(stream_id),
+                pkt_fn,
+            )
             .await
         {
             Ok(mut pkt) => {
@@ -205,13 +209,8 @@ impl<'pktbuf> Assembly<'pktbuf> {
                     .await;
                 }
                 None => {
-                    mgmt::send_non_flow_mgmt(
-                        self,
-                        link_id,
-                        zdp_request_type,
-                        packet.into_inner(),
-                    )
-                    .await;
+                    mgmt::send_non_flow_mgmt(self, link_id, zdp_request_type, packet.into_inner())
+                        .await;
                 }
             }
             tokio::select! {
