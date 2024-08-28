@@ -52,36 +52,55 @@ pub mod net {
         }
     }
 
-    #[cfg(any(doc, target_os = "android", target_os = "linux"))]
-    pub async fn unix_stream_send_vectored_with_ancillary(
-        stream: &UnixStream,
-        bufs: &[IoSlice<'_>],
-        ancillary: &mut SocketAncillary<'_>,
-    ) -> io::Result<usize> {
-        loop {
-            stream.writable().await?;
-            match stream.try_io(Interest::WRITABLE, || {
-                uds_send_vectored_with_ancillary(stream.as_fd(), bufs, ancillary)
-            }) {
-                Err(err) if err.kind() == io::ErrorKind::WouldBlock => continue,
-                res => break res,
-            }
-        }
+    #[allow(async_fn_in_trait)]
+    pub trait UnixStreamExt {
+        #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+        async fn send_vectored_with_ancillary(
+            &self,
+            bufs: &[IoSlice<'_>],
+            ancillary: &mut SocketAncillary<'_>,
+        ) -> io::Result<usize>;
+
+        #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+        async fn recv_vectored_with_ancillary(
+            &self,
+            bufs: &mut [IoSliceMut<'_>],
+            ancillary: &mut SocketAncillary<'_>,
+        ) -> io::Result<usize>;
     }
 
-    #[cfg(any(doc, target_os = "android", target_os = "linux"))]
-    pub async fn unix_stream_recv_vectored_with_ancillary(
-        stream: &UnixStream,
-        bufs: &mut [IoSliceMut<'_>],
-        ancillary: &mut SocketAncillary<'_>,
-    ) -> io::Result<usize> {
-        loop {
-            stream.readable().await?;
-            match stream.try_io(Interest::WRITABLE, || {
-                uds_recv_vectored_with_ancillary(stream.as_fd(), bufs, ancillary)
-            }) {
-                Err(err) if err.kind() == io::ErrorKind::WouldBlock => continue,
-                res => break res,
+    impl UnixStreamExt for UnixStream {
+        #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+        async fn send_vectored_with_ancillary(
+            &self,
+            bufs: &[IoSlice<'_>],
+            ancillary: &mut SocketAncillary<'_>,
+        ) -> io::Result<usize> {
+            loop {
+                self.writable().await?;
+                match self.try_io(Interest::WRITABLE, || {
+                    uds_send_vectored_with_ancillary(self.as_fd(), bufs, ancillary)
+                }) {
+                    Err(err) if err.kind() == io::ErrorKind::WouldBlock => continue,
+                    res => break res,
+                }
+            }
+        }
+
+        #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+        async fn recv_vectored_with_ancillary(
+            &self,
+            bufs: &mut [IoSliceMut<'_>],
+            ancillary: &mut SocketAncillary<'_>,
+        ) -> io::Result<usize> {
+            loop {
+                self.readable().await?;
+                match self.try_io(Interest::WRITABLE, || {
+                    uds_recv_vectored_with_ancillary(self.as_fd(), bufs, ancillary)
+                }) {
+                    Err(err) if err.kind() == io::ErrorKind::WouldBlock => continue,
+                    res => break res,
+                }
             }
         }
     }
@@ -106,8 +125,7 @@ pub mod net {
                 let mut ancillary_out_buf = [0u8; 256];
                 let mut ancillary_out = SocketAncillary::new(&mut ancillary_out_buf);
                 assert_eq!(
-                    unix_stream_recv_vectored_with_ancillary(
-                        &s2,
+                    s2.recv_vectored_with_ancillary(
                         &mut [IoSliceMut::new(&mut data_out[..])],
                         &mut ancillary_out
                     )
@@ -142,8 +160,7 @@ pub mod net {
             let mut ancillary_in = SocketAncillary::new(&mut ancillary_in_buf);
             ancillary_in.add_fds(&[zero_file.as_fd()]);
             assert_eq!(
-                unix_stream_send_vectored_with_ancillary(
-                    &s1,
+                s1.send_vectored_with_ancillary(
                     &[IoSlice::new(data_in)],
                     &mut ancillary_in
                 )
