@@ -160,12 +160,9 @@ pub mod net {
             let mut ancillary_in = SocketAncillary::new(&mut ancillary_in_buf);
             ancillary_in.add_fds(&[zero_file.as_fd()]);
             assert_eq!(
-                s1.send_vectored_with_ancillary(
-                    &[IoSlice::new(data_in)],
-                    &mut ancillary_in
-                )
-                .await
-                .unwrap(),
+                s1.send_vectored_with_ancillary(&[IoSlice::new(data_in)], &mut ancillary_in)
+                    .await
+                    .unwrap(),
                 3
             );
 
