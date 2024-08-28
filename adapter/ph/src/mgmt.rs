@@ -233,7 +233,7 @@ impl From<HandleMgmtError> for counters_enum::CounterType {
             HandleMgmtError::UnexpectedMgmtResponse => Self::UnexpectedMgmtResponse,
             HandleMgmtError::BadStructure => Self::BadStructure,
             HandleMgmtError::UnknownKeyManagementType(_type) => Self::OtherError,
-            HandleMgmtError::InternalError(_) => Self::OtherError
+            HandleMgmtError::InternalError(_desc) => Self::OtherError
         }
     }
 }

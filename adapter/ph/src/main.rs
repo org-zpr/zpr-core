@@ -144,7 +144,7 @@ fn main() -> ExitCode {
     let (km_sig_tx, mut km_sig_rx) = mpsc::channel(16); // TODO: name this constant
     let (km_tx, mut km_rx) = mpsc::channel(km_message_queue_size);
     let km_mpx_ctok = CancellationToken::new();
-    let km_state = KmState::new(km_tx, km_sig_tx, km_mpx_ctok);
+    let km_state = KmState::new(km_tx, km_sig_tx, km_mpx_ctok.clone());
 
 
     /*let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
@@ -371,10 +371,9 @@ fn main() -> ExitCode {
                 cap_outq,
             ));
 
-            // Next thread is for gathering the key management messages from the link state machines and forwarding
-            // them out.
-            /* XXX OFF
-            let km_loop_ctok = Box::leak(Box::new(mp_ctok.clone()));
+
+            // Watch for outbound Key Management messages
+            let km_loop_ctok = Box::leak(Box::new(km_mpx_ctok.clone()));
             let km_loop_rx = Box::leak(Box::new(km_rx));
             js.spawn(async {
                 loop {
@@ -389,8 +388,10 @@ fn main() -> ExitCode {
                     }
                 }
             });
-            */
+
+            // Watch for the state transitions and update assembly
             js.spawn(km_multiplexor::launch(&*asm, km_sig_rx));
+
 
 
             eprintln!("Connecting...");
