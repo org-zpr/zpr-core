@@ -8,16 +8,21 @@ source "$(dirname $0)/common_funcs.sh"
 
 ZPR_USER=$USER
 
-A_HOST_ADDR=10.0.0.1
-B_HOST_ADDR=10.0.0.2
+A_SUBSTRATE_ADDR=10.0.0.1
+B_SUBSTRATE_ADDR_1=10.0.0.2
+B_SUBSTRATE_ADDR_2=10.0.1.2
+C_SUBSTRATE_ADDR=10.0.1.1
 
 A_ZPR_ADDR=192.168.1.1
 B_ZPR_ADDR=192.168.1.2
+C_ZPR_ADDR=192.168.1.3
 A_ZPR_ADDR6=fd00:1:1::1
 B_ZPR_ADDR6=fd00:1:1::2
+C_ZPR_ADDR6=fd00:1:1::3
 
-A_ZPR_SOCK=server.sock
-B_ZPR_SOCK=client.sock
+ADAPTER1_SOCK=adapter1.sock
+ADAPTER2_SOCK=adapter2.sock
+NODE_SOCK=node.sock
 
 #
 # Helper functions
@@ -69,19 +74,27 @@ create_agent_key_and_cert ca client
 #
 
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
-  --mode=server --control-path "$A_ZPR_SOCK" \
-  --self-addr "$A_HOST_ADDR":12345 --dock-addr "$B_HOST_ADDR":12345 \
-  --ca-file ca.crt --certificate-file server.crt --private-key-file server.key \
+  --name "zpr-a" --control-path "$ADAPTER1_SOCK" \
+  --self-addr "$A_SUBSTRATE_ADDR":12345 --peer-addr1 "$B_SUBSTRATE_ADDR_1":12345 \
+  --ca-file ca.crt --certificate-file adapter1.crt --private-key-file adapter1.key \
+  --tun-if tun0 &
+CHILDREN=(${CHILDREN[@]} "$!")
+
+sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
+  --name "zpr-c" --control-path "$ADAPTER2_SOCK" \
+  --self-addr "$C_SUBSTRATE_ADDR":12345 --peer-addr1 "$B_SUBSTRATE_ADDR_2":12345 \
+  --ca-file ca.crt --certificate-file adapter2.crt --private-key-file adapter2.key \
   --tun-if tun0 &
 CHILDREN=(${CHILDREN[@]} "$!")
 
 sleep 1  # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well
-set_program "$A_ZPR_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
+set_program "$ADAPTER1_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
-  --mode=client --control-path "$B_ZPR_SOCK" \
-  --self-addr "$B_HOST_ADDR":12345 --dock-addr "$A_HOST_ADDR":12345 \
-  --ca-file ca.crt --certificate-file client.crt --private-key-file client.key \
+  --name "zpr-b" --control-path "$NODE_SOCK" \
+  --self-addr 0.0.0.0:12345 --peer-addr1 "$A_SUBSTRATE_ADDR":12345 \
+  --peer-addr2 "$C_SUBSTRATE_ADDR":12345 \
+  --ca-file ca.crt --certificate-file node.crt --private-key-file node.key \
   --tun-if tun0 &
 CHILDREN=(${CHILDREN[@]} "$!")
 
@@ -100,15 +113,15 @@ stty sane || true
 # Run test
 #
 
-set_program "$B_ZPR_SOCK" "$TMPDIR/cap_test2.pcap" None
+set_program "$ADAPTER2_SOCK" "$TMPDIR/cap_test2.pcap" None
 
 PASS=0
 if ! ping_test
 then PASS=1
 fi
 
-close_program "$A_ZPR_SOCK"
-close_program "$B_ZPR_SOCK"
+close_program "$ADAPTER1_SOCK"
+close_program "$ADAPTER2_SOCK"
 
 # Make sure at least both agent and mgmt packets were captured.
 tcpdump -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1 or link[0] == 0' > "$TMPDIR/checker.txt"
