@@ -28,7 +28,6 @@ pub async fn send_non_flow_mgmt<'pktbuf>(
     fastpath::substrate_egress_blocking(
         asm,
         link_id,
-        zpr::ZPI_0, // TODO
         packet,
     )
     .await;
@@ -54,7 +53,6 @@ pub async fn send_per_flow_mgmt<'pktbuf>(
     fastpath::substrate_egress_blocking(
         asm,
         link_id,
-        zpr::ZPI_0, // TODO
         packet,
     )
     .await;
@@ -426,4 +424,26 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
     .await;
 
     Ok(())
+}
+
+/// Send a key management message out the given link.
+pub async fn send_key_management<'pktbuf>(
+    asm: &'pktbuf Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+    km_id: zpr::KmId,
+    payload: &[u8],
+) {
+    let buf = asm.buffer_stack.get_buffer().await;
+    let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+
+    let km_hdr = pkt.alloc_zeroed_header::<zdp::ZdpKeyManagementHeader>();
+    km_hdr.message_type = km_id.into();
+    km_hdr.message_length = (payload.len() as u16).into();
+
+    let zdp_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+    zdp_hdr.packet_type = zdp::ZdpPacketType::KeyManagement;
+
+    pkt.put(payload);
+
+    send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::KeyManagement, pkt).await;
 }

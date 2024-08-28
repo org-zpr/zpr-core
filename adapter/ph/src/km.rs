@@ -111,6 +111,17 @@ pub enum KMSignal {
 }
 
 
+pub struct KMTransportSA {
+    pub sa_id: zpr::SaId,
+    pub recv_zpis: ZPIPair,
+    pub send_zpis: ZPIPair,
+    pub send_hmac_key: [u8; 32],
+    pub recv_hmac_key: [u8; 32],
+    pub codec: Arc<dyn Codec>,
+}
+
+
+
 pub struct KMLinkMsg<T> {
     pub link_id: zpr::LinkId,
     pub msg: T,
@@ -176,6 +187,24 @@ impl KeyManager<'_> {
             }),
         }
     }
+
+    /// If we are in a transport state, this returns the details.
+    pub fn get_transport_state(&self) -> Option<KMTransportSA> {
+        let state = self.shared.state.lock().unwrap();
+        if state.sa_id == 0 {
+            return None;
+        }
+        Some(KMTransportSA {
+            sa_id: state.sa_id,
+            recv_zpis: state.ts.recv_zpis,
+            send_zpis: state.ts.send_zpis,
+            send_hmac_key: state.ts.send_hmac_key,
+            recv_hmac_key: state.ts.recv_hmac_key,
+            codec: state.ts.codec.clone(),
+        })
+    }
+
+
 
     /// Returns the current SA identifier.  If handshake has completed, then this is non-zero.
     pub fn get_sa_id(&self) -> u8 {

@@ -45,7 +45,7 @@ use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
 const NOISE_NONCE_LEN: usize = 8;
-const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce
+pub const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce
 
 impl From<snow::Error> for KMError {
     fn from(e: snow::Error) -> KMError {

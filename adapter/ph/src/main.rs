@@ -7,13 +7,16 @@ use std::fs;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::process::ExitCode;
+use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_tun::TunBuilder;
-use tracing::warn;
+use tokio_util::sync::CancellationToken;
+use tracing::{info, warn};
 use zpr_ext::tokio::net::UdpSocketExt;
 
 mod adapter_manager_worker;
@@ -30,6 +33,9 @@ mod counters_enum;
 mod defs;
 mod fastpath;
 mod flow_control;
+mod km;
+mod km_multiplexor;
+mod km_noise;
 mod mgmt;
 mod mgmt_processor_worker;
 mod net_defs;
@@ -55,6 +61,8 @@ use counters_enum::*;
 use flow_control::FlowControl;
 use options::PhMode;
 use queues::*;
+use km::ZPIPair;
+use km_multiplexor::KmState;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -112,6 +120,7 @@ fn main() -> ExitCode {
     let capture_batch_size = 8;
     let tun_queue_count = 4;
     let adapter_manager_queue_size = 16;
+    let km_message_queue_size = 16;
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
@@ -131,6 +140,13 @@ fn main() -> ExitCode {
     let counters = enum_map! { _ => Counter::new(), };
 
     let sync_req_state = SyncReqState::new();
+
+    let (km_sig_tx, mut km_sig_rx) = mpsc::channel(16); // TODO: name this constant
+    let (km_tx, mut km_rx) = mpsc::channel(km_message_queue_size);
+    let km_mpx_ctok = CancellationToken::new();
+    let km_state = KmState::new(km_tx, km_sig_tx, km_mpx_ctok);
+
+
     /*let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
     ssl_context_builder.set_options(
         ssl::SslOptions::NO_COMPRESSION
@@ -287,7 +303,19 @@ fn main() -> ExitCode {
                 alt,
                 dlt,
                 adapter_manager,
+                km_state,
+                sa_states: Arc::new(Mutex::new(HashMap::new())),
             }));
+
+
+
+            // TODO: Shoudl this multiplexor go in assembly?
+            // let mut km_mpx = Box::leak(Box::new(Multiplexor::new(km_tx, mp_ctok.clone())));
+            // km_mpx.launch(&*asm);
+
+            let dock_noise_key = [0; 32]; // XXX TODO
+            km_multiplexor::add_adapter_link(asm, adapter_docking_session_id, ZPIPair::new(1, 2), dock_noise_key)
+                .unwrap();
 
             // TODO signal handler goes here
 
@@ -343,6 +371,28 @@ fn main() -> ExitCode {
                 cap_outq,
             ));
 
+            // Next thread is for gathering the key management messages from the link state machines and forwarding
+            // them out.
+            /* XXX OFF
+            let km_loop_ctok = Box::leak(Box::new(mp_ctok.clone()));
+            let km_loop_rx = Box::leak(Box::new(km_rx));
+            js.spawn(async {
+                loop {
+                    tokio::select! {
+                        _ = km_loop_ctok.cancelled() => {
+                            break;
+                        }
+                        Some(km_buf_msg) = km_loop_rx.recv() => {
+                            info!("TODO: Send KM payload of {} bytes out link {}", km_buf_msg.msg.len(), km_buf_msg.link_id);
+                            mgmt::send_key_management(&*asm, km_buf_msg.link_id, zpr::KM_ID_NOISE, &km_buf_msg.msg).await;
+                        }
+                    }
+                }
+            });
+            */
+            js.spawn(km_multiplexor::launch(&*asm, km_sig_rx));
+
+
             eprintln!("Connecting...");
             eprintln!("Connected!"); // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
@@ -357,6 +407,8 @@ fn main() -> ExitCode {
                     socket,
                 ));
             }
+
+            // XXX TODO - reasonable place to kick off KM.  But where do I actually recieve packets?
 
             mgmt::send_report(asm, asm.adapter_docking_session_id, "Reporting for Duty!").await;
             mgmt::send_discard(asm, asm.adapter_docking_session_id).await;

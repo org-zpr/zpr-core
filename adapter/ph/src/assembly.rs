@@ -13,11 +13,15 @@ use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use crate::zdp::*;
 use crate::zpr;
+use crate::km_multiplexor::{KmState, SAState};
+
+use std::sync::Arc;
 use bytes::Buf;
 use core::time::Duration;
 use enum_map::EnumMap;
 use std::result::Result;
 use std::sync::Mutex;
+use std::collections::HashMap;
 use tokio::sync::{
     oneshot::{channel, Sender},
     Semaphore, SemaphorePermit,
@@ -25,6 +29,9 @@ use tokio::sync::{
 use tokio::time::sleep;
 use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
+
+
+
 
 /// Interface to full assembly of all stages.
 ///
@@ -70,12 +77,26 @@ pub struct Assembly<'pktbuf> {
     pub dlt: adapter_tables::DockLookupTable,
 
     pub adapter_manager: AdapterManager<'pktbuf>,
+    pub km_state: KmState<'pktbuf>,
+
+
+    // The `pa_states` is written to by the KM Multiplexor and is read whenever we need to figure
+    // out the correct ZPI to use on a link, or do encryption, or do HMAC.
+    //
+    // TODO: Use less locking, switch to RcuBox.  The table is modified when connections come or go.
+    //       And then updates to records occur after handshake completes.  In the future there will
+    //       be updates when rekeying occurs.
+    //
+    // TODO: Using the 'pktbuf lifetime on the state is I think not right. We the state only needs
+    //       to live as long as the link, the assembly here lives forever.
+    pub sa_states: Arc<Mutex<HashMap<zpr::LinkId, SAState>>>,  // XXX REMOVE THIS -- use km_state
 }
 
 pub struct SyncReqState<'pktbuf> {
     inner_req: Mutex<SyncReqInnerState<'pktbuf>>,
     semaphore: Semaphore,
 }
+
 
 struct SyncReqInnerState<'pktbuf> {
     reply_channel: Option<Sender<(Packet<'pktbuf>, ZdpPacketType)>>,
@@ -230,6 +251,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
             zdp_response_type,
         );
     }
+
 
     /// Determines whether the message recieved in response to the request is
     /// a) a packet and not an error, and b) the expected packet type
