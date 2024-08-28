@@ -44,6 +44,7 @@ impl FiveTuple {
         }
     }
 
+    #[allow(dead_code)]
     pub fn reverse(&self) -> FiveTuple {
         Self {
             src_address: self.dst_address,

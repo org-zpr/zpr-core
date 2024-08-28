@@ -1,16 +1,15 @@
 //! Management packet functions.
 
 use crate::adapter_tables;
-use crate::assembly::Assembly;
+use crate::assembly::{self, Assembly};
 use crate::config;
-use crate::counters_enum;
+use crate::counters_enum::{self, CounterType};
 use crate::defs::*;
 use crate::fastpath;
 use crate::packet::{self, Packet};
 use crate::zdp;
 use crate::zpr;
 use bytes::{Buf, BufMut};
-use zerocopy::FromBytes;
 use zpr_ext::zerocopy::{AsBytesExt, FromBytesExt};
 
 /// Send a unidirectional non-flow management message on the given link.
@@ -61,6 +60,7 @@ pub async fn send_per_flow_mgmt<'pktbuf>(
     .await;
 }
 
+/// send a Report message (RFC 6.5 § 6.3.13)
 pub async fn send_report<'pktbuf>(
     asm: &'pktbuf Assembly<'pktbuf>,
     link_id: zpr::LinkId,
@@ -79,10 +79,143 @@ pub async fn send_report<'pktbuf>(
     send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Report, pkt).await;
 }
 
+/// send a Discard message (RFC 6.5 § 6.3.1)
 pub async fn send_discard<'pktbuf>(asm: &'pktbuf Assembly<'pktbuf>, link_id: zpr::LinkId) {
     let buf = asm.buffer_stack.get_buffer().await;
     let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
     send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
+}
+
+/// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
+pub async fn send_hello_request<'a, 'pktbuf>(
+    asm: &'a Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+) -> Result<(), ()> {
+    let response = asm
+        .send_sync_non_flow_req(
+            link_id,
+            zdp::ZdpPacketType::HelloRequest,
+            zdp::ZdpPacketType::HelloResponse,
+            move |_packet| {},
+        )
+        .await;
+
+    match response {
+        Ok(mut hello_res) => {
+            let Some(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut hello_res) else {
+                fastpath::drop_and_count(asm, hello_res, CounterType::BadStructure);
+                return Err(());
+            };
+            let status = hdr.status;
+            eprintln!("Received HelloResponse, status: {}", status);
+            asm.buffer_stack.put_buffer(hello_res.destroy());
+            Ok(())
+        }
+
+        Err(err) => {
+            eprintln!("{} error with HelloRequest", err);
+            Err(())
+        }
+    }
+}
+
+pub enum BindAgentAddressError {
+    SyncReqError(assembly::SyncReqError),
+    BadStructure,
+    BindAgentAddressError(Box<str>),
+}
+
+impl std::fmt::Display for BindAgentAddressError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::SyncReqError(err) => err.fmt(f),
+            Self::BadStructure => write!(f, "bad structure"),
+            Self::BindAgentAddressError(msg) => f.write_str(&*msg),
+        }
+    }
+}
+
+/// send a Bind Agent Address Request and wait for the Response (RFC 6.5 § 6.3.11)
+pub async fn send_bind_agent_address_request<'a, 'pktbuf>(
+    asm: &'a Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+    compression_mode: zpr::CompressionMode,
+    five_tuple: FiveTuple,
+) -> Result<zpr::StreamId, BindAgentAddressError> {
+    let response = asm
+        .send_sync_per_flow_req(
+            link_id,
+            zdp::ZdpPacketType::BindAgentAddressRequest,
+            zdp::ZdpPacketType::BindAgentAddressResponse,
+            0,
+            move |mut req| {
+                zdp::ZdpBindAgentAddressRequestHeader {
+                    ip_version: five_tuple.l3_type,
+                    compression_mode,
+                }
+                .write_to_buf(&mut req);
+
+                match five_tuple.l3_type {
+                    zpr::L3Type::Ipv4 => {
+                        req.put(five_tuple.src_address.read_as_v4().as_slice());
+                        req.put(five_tuple.dst_address.read_as_v4().as_slice());
+                    }
+
+                    zpr::L3Type::Ipv6 => {
+                        req.put(five_tuple.src_address.v6.as_slice());
+                        req.put(five_tuple.dst_address.v6.as_slice());
+                    }
+
+                    other => panic!("bad L3 type: {}", other.0),
+                }
+
+                req.put_u8(five_tuple.l4_protocol);
+
+                if compression_mode != 0 {
+                    todo!("L4 compression");
+                }
+            },
+        )
+        .await;
+
+    match response {
+        Ok((tether_id, mut resp)) => {
+            let Some(hdr) = zdp::ZdpBindAgentAddressResponseHeader::read_from_buf(&mut resp) else {
+                fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                return Err(BindAgentAddressError::BadStructure);
+            };
+
+            match hdr.status_code {
+                zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS => {
+                    asm.buffer_stack.put_buffer(resp.destroy());
+                    Ok(tether_id)
+                }
+
+                zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER => {
+                    if hdr.info_len as usize > resp.remaining() {
+                        fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                        return Err(BindAgentAddressError::BadStructure);
+                    }
+
+                    let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
+                        fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                        return Err(BindAgentAddressError::BadStructure);
+                    };
+                    let msg: Box<str> = msg.into();
+
+                    asm.buffer_stack.put_buffer(resp.destroy());
+                    Err(BindAgentAddressError::BindAgentAddressError(msg))
+                }
+
+                _ => {
+                    fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                    Err(BindAgentAddressError::BadStructure)
+                }
+            }
+        }
+
+        Err(err) => Err(BindAgentAddressError::SyncReqError(err)),
+    }
 }
 
 pub enum HandleMgmtError {
@@ -103,12 +236,13 @@ impl From<HandleMgmtError> for counters_enum::CounterType {
 
 pub type HandleMgmtResult<'pktbuf> = Result<(), (HandleMgmtError, Packet<'pktbuf>)>;
 
+/// handle a Report message (RFC 6.5 § 6.3.13)
 pub async fn handle_report<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let Some(hdr) = zdp::ZdpReportHeader::ref_from_prefix(pkt.body()) else {
+    let Some(hdr) = zdp::ZdpReportHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
@@ -127,6 +261,7 @@ pub async fn handle_report<'pktbuf>(
     Ok(())
 }
 
+/// handle a Discard message (RFC 6.5 § 6.3.1)
 pub async fn handle_discard<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
@@ -141,6 +276,7 @@ pub async fn handle_discard<'pktbuf>(
     Ok(())
 }
 
+/// handle a Hello Request (RFC 6.5 § 6.3.4)
 pub async fn handle_hello_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
@@ -163,27 +299,24 @@ pub async fn handle_hello_request<'pktbuf>(
     Ok(())
 }
 
-// RFC 6.5 § 6.3.11
+/// handle a Bind Agent Address Request (RFC 6.5 § 6.3.11)
 pub async fn handle_bind_agent_address_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
     _stream_id: zpr::StreamId, // ignored
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let Some(hdr) = zdp::ZdpBindAgentAddressRequestHeader::ref_from_prefix(pkt.body()) else {
+    let Some(hdr) = zdp::ZdpBindAgentAddressRequestHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
     // TODO: handle as node: enter into DFT
     // TODO: disallow bind requests between nodes
 
-    let ip_version = hdr.ip_version;
-    let compression_mode = hdr.compression_mode;
-
     // read addresses (always present)
     let src_address;
     let dst_address;
-    match ip_version {
+    match hdr.ip_version {
         zpr::L3Type::Ipv4 => {
             let Some(src_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
                 return Err((HandleMgmtError::BadStructure, pkt));
@@ -221,7 +354,7 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
 
     // read source port (optional)
     let mut src_port = 0;
-    if compression_mode & zpr::compression_mode::SOURCE_PORT_PRESENT != 0 {
+    if hdr.compression_mode & zpr::compression_mode::SOURCE_PORT_PRESENT != 0 {
         if pkt.remaining() < 2 {
             return Err((HandleMgmtError::BadStructure, pkt));
         }
@@ -230,7 +363,7 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
 
     // read destination port (optional)
     let mut dst_port = 0;
-    if compression_mode & zpr::compression_mode::SOURCE_PORT_PRESENT != 0 {
+    if hdr.compression_mode & zpr::compression_mode::DESTINATION_PORT_PRESENT != 0 {
         if pkt.remaining() < 2 {
             return Err((HandleMgmtError::BadStructure, pkt));
         }
@@ -239,9 +372,9 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
 
     // form PEP
     let pep = adapter_tables::DltPep {
-        compression_mode: compression_mode,
+        compression_mode: hdr.compression_mode,
         five_tuple: FiveTuple::new(
-            ip_version,
+            hdr.ip_version,
             src_address,
             dst_address,
             ip_protocol,

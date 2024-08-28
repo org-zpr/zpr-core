@@ -80,14 +80,14 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --name "zpr-a" --control-path "$ADAPTER1_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR":12345 --peer-addr1 "$B_SUBSTRATE_ADDR_1":12345 \
   --ca-file ca.crt --certificate-file adapter1.crt --private-key-file adapter1.key \
-  --tun-if tun0 --zpr-peer "$C_ZPR_ADDR" &
+  --tun-if tun0 &
 CHILDREN=(${CHILDREN[@]} "$!")
 
 sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --name "zpr-c" --control-path "$ADAPTER2_SOCK" \
   --self-addr "$C_SUBSTRATE_ADDR":12345 --peer-addr1 "$B_SUBSTRATE_ADDR_2":12345 \
   --ca-file ca.crt --certificate-file adapter2.crt --private-key-file adapter2.key \
-  --tun-if tun0 --zpr-peer "$A_ZPR_ADDR" &
+  --tun-if tun0 &
 CHILDREN=(${CHILDREN[@]} "$!")
 
 sleep 1  # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well

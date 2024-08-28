@@ -3,6 +3,7 @@
 //! General rule: no fastpath operation may block.
 //! This implies that all functions here must be non-async.
 
+use crate::adapter_tables::AltEntry;
 use crate::assembly::Assembly;
 use crate::classifier::{self, ClassifierResult};
 use crate::compress;
@@ -356,7 +357,9 @@ pub fn substrate_ingress<'pktbuf>(
 
         match asm.mgmt_processor.try_enqueue_packet(ingress_link_id, pkt) {
             Ok(()) => (),
-            Err(TryEnqueueError::Full(pkt)) => drop_and_count(asm, pkt, CounterType::InPacksDrop),
+            Err(TryEnqueueError::Full(pkt)) => {
+                drop_and_count(asm, pkt, CounterType::QueueBackpressure)
+            }
         }
         return;
     }
@@ -374,7 +377,7 @@ pub fn substrate_ingress<'pktbuf>(
 /// The packet will be decompressed according to the given stream ID.
 pub fn agent_input<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
+    tether_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
     mut pkt: Packet<'pktbuf>,
 ) {
     // extract A2A MAC
@@ -400,7 +403,7 @@ pub fn agent_input<'pktbuf>(
     // lookup PEP in DLT and expand compressed packet
     if asm
         .dlt
-        .inspect(stream_id, |pep| {
+        .inspect(tether_id, |pep| {
             compress::expand(pep.compression_mode, &pep.five_tuple, &mut pkt)
         })
         .is_none()
@@ -454,42 +457,51 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) 
         }
     }
 
-    // compute A2A MAC
-    // TODO: use actual A2A SAID & keyed hash
-    let a2a_said: zpr::A2aSaid = 0;
-    let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
-    let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
-    // SECURITY: truncating BLAKE3 is safe
-    a2a_mac[..a2a_mac_size].copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
-
     let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
 
-    // lookup five tuple in ALT and compress packet
-    let stream_id = match asm.alt.inspect(&five_tuple, |pep| {
-        compress::compress(
-            pep.compression_mode,
-            five_tuple.l3_type,
-            five_tuple.l4_protocol,
-            &mut pkt,
-        );
+    // lookup five tuple in ALT
+    match asm.alt.inspect(&five_tuple, |entry| *entry) {
+        Some(AltEntry::Active(pep)) => {
+            // compute A2A MAC
+            // TODO: use actual A2A SAID & keyed hash
+            let a2a_said: zpr::A2aSaid = 0;
+            let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
+            let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+            // SECURITY: truncating BLAKE3 is safe
+            a2a_mac[..a2a_mac_size]
+                .copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
 
-        pep.stream_id
-    }) {
-        Some(stream_id) => stream_id,
+            // compress packet
+            compress::compress(
+                pep.compression_mode,
+                five_tuple.l3_type,
+                five_tuple.l4_protocol,
+                &mut pkt,
+            );
+
+            // append A2A MAC
+            pkt.put(&a2a_mac[..a2a_mac_size]);
+            pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
+
+            // forward packet on
+            forward(asm, zpr::AGENT_LINK_ID, pep.tether_id, pkt);
+        }
+
+        Some(AltEntry::Pending) => {
+            // bind request pending; drop this packet
+            drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
+        }
 
         None => {
-            // TODO: issue bind request!
-            drop_and_count(asm, pkt, CounterType::OtherError);
-            return;
+            // issue bind request
+            match asm.adapter_manager.try_request_tether_id(pkt) {
+                Ok(()) => (),
+                Err(TryEnqueueError::Full(pkt)) => {
+                    drop_and_count(asm, pkt, CounterType::QueueBackpressure)
+                }
+            }
         }
-    };
-
-    // append A2A MAC
-    pkt.put(&a2a_mac[..a2a_mac_size]);
-    pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
-
-    // forward
-    forward(asm, zpr::AGENT_LINK_ID, stream_id, pkt);
+    }
 }
 
 /// Forward compressed packet.

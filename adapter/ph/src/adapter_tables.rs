@@ -13,13 +13,20 @@ use std::sync::Mutex;
 
 const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 24; // 16 million
 
+#[derive(Clone, Copy)]
 pub struct AltPep {
     pub compression_mode: CompressionMode,
-    pub stream_id: StreamId,
+    pub tether_id: StreamId,
+}
+
+#[derive(Clone, Copy)]
+pub enum AltEntry {
+    Active(AltPep),
+    Pending,
 }
 
 pub struct AgentLookupTable {
-    table: DashMap<FiveTuple, AltPep>,
+    table: DashMap<FiveTuple, AltEntry>,
 }
 
 impl AgentLookupTable {
@@ -29,17 +36,34 @@ impl AgentLookupTable {
         }
     }
 
+    // TODO: figure out whether we want to perform partial matching
     pub fn inspect<T>(
         &self,
         five_tuple: &FiveTuple,
-        inspector: impl FnOnce(&AltPep) -> T,
+        inspector: impl FnOnce(&AltEntry) -> T,
     ) -> Option<T> {
-        self.table.get(five_tuple).map(|pep| inspector(&*pep))
+        self.table.get(five_tuple).map(|entry| inspector(&*entry))
     }
 
     // FIXME: ideally we want `try_insert()` but dashmap doesn't support that…
-    pub fn insert(&self, five_tuple: FiveTuple, pep: AltPep) {
-        self.table.insert(five_tuple, pep);
+    pub fn insert(&self, five_tuple: FiveTuple, entry: AltEntry) {
+        self.table.insert(five_tuple, entry);
+    }
+
+    /// Alter an ALT entry according to the provided function.
+    ///
+    /// If the entry exists, returns the alterer function's result.
+    ///
+    /// If the entry doesn't exist, returns `Err`.
+    pub fn alter<T>(
+        &self,
+        five_tuple: &FiveTuple,
+        alterer: impl FnOnce(&mut AltEntry) -> T,
+    ) -> Result<T, ()> {
+        match self.table.get_mut(five_tuple) {
+            Some(mut ref_) => Ok(alterer(ref_.value_mut())),
+            None => Err(()),
+        }
     }
 
     pub fn remove(&self, five_tuple: &FiveTuple) {
@@ -70,20 +94,20 @@ impl DockLookupTable {
 
     pub fn inspect<T>(
         &self,
-        stream_id: StreamId,
+        tether_id: StreamId,
         inspector: impl FnOnce(&DltPep) -> T,
     ) -> Option<T> {
         self.reader
-            .inspect(|reader| reader.get(stream_id as usize).map(inspector))
+            .inspect(|reader| reader.get(tether_id as usize).map(inspector))
     }
 
     pub fn insert(&self, pep: DltPep) -> Result<StreamId, ()> {
         Ok(self.table.lock().unwrap().insert(pep)? as StreamId)
     }
 
-    pub fn remove(&self, stream_id: StreamId) {
+    pub fn remove(&self, tether_id: StreamId) {
         let mut table = self.table.lock().unwrap();
-        let new_reader = table.remove(stream_id as usize);
+        let new_reader = table.remove(tether_id as usize);
         std::mem::drop(table);
         self.reader.write(new_reader);
     }

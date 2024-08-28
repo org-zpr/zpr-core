@@ -66,8 +66,12 @@ pub struct Assembly<'pktbuf> {
     pub peer_table: peer_table::PeerTable,
     pub peer_ids: Vec<zpr::LinkId>,
 
+    // Adapter tables
+    // NOTE: only adapter_manager_worker should modify these tables!
     pub alt: adapter_tables::AgentLookupTable,
     pub dlt: adapter_tables::DockLookupTable,
+
+    pub adapter_manager: AdapterManager<'pktbuf>,
 }
 
 pub struct SyncReqState<'pktbuf> {
@@ -100,11 +104,20 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
     }
 }
 
-#[allow(dead_code)]
 pub enum SyncReqError {
     LinkClosed,
     ProtocolError,
     Timeout,
+}
+
+impl std::fmt::Display for SyncReqError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.write_str(match self {
+            Self::LinkClosed => "link closed",
+            Self::ProtocolError => "protocol error",
+            Self::Timeout => "timeout",
+        })
+    }
 }
 
 impl<'pktbuf> Assembly<'pktbuf> {
@@ -115,12 +128,12 @@ impl<'pktbuf> Assembly<'pktbuf> {
     /// Returns the received packet without any ZdpHeader (just management response body) or an error
     pub async fn send_sync_non_flow_req(
         &self,
+        link_id: zpr::LinkId,
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
-        peer_id: zpr::LinkId,
         pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
-        self.send_sync_req_helper(zdp_request_type, zdp_response_type, None, peer_id, pkt_fn)
+        self.send_sync_req_helper(link_id, zdp_request_type, zdp_response_type, None, pkt_fn)
             .await
     }
 
@@ -129,21 +142,20 @@ impl<'pktbuf> Assembly<'pktbuf> {
     /// expected response packet. Also requires stream_id of the packet.
     /// pkt_fn allows the function to create the proper body of the ZDP packet to send
     /// Returns the received packet without any ZdpHeader (just management response body) or an error
-    #[allow(dead_code)]
     pub async fn send_sync_per_flow_req(
         &self,
+        link_id: zpr::LinkId,
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
-        stream_id: u32,
-        peer_id: zpr::LinkId,
+        stream_id: zpr::StreamId,
         pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
-    ) -> Result<(u32, Packet<'pktbuf>), SyncReqError> {
+    ) -> Result<(zpr::StreamId, Packet<'pktbuf>), SyncReqError> {
         match self
             .send_sync_req_helper(
+                link_id,
                 zdp_request_type,
                 zdp_response_type,
                 Some(stream_id),
-                peer_id,
                 pkt_fn,
             )
             .await
@@ -168,10 +180,10 @@ impl<'pktbuf> Assembly<'pktbuf> {
     /// not included in the ZdpBaseHeader, or an error
     async fn send_sync_req_helper(
         &self,
+        link_id: zpr::LinkId,
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
-        stream_id: Option<u32>,
-        peer_id: zpr::LinkId,
+        stream_id: Option<zpr::StreamId>,
         pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
         let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit
@@ -191,7 +203,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                 Some(stream_id) => {
                     mgmt::send_per_flow_mgmt(
                         self,
-                        peer_id,
+                        link_id,
                         zdp_request_type,
                         stream_id,
                         packet.into_inner(),
@@ -199,7 +211,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
                     .await;
                 }
                 None => {
-                    mgmt::send_non_flow_mgmt(self, peer_id, zdp_request_type, packet.into_inner())
+                    mgmt::send_non_flow_mgmt(self, link_id, zdp_request_type, packet.into_inner())
                         .await;
                 }
             }
@@ -238,40 +250,6 @@ impl<'pktbuf> Assembly<'pktbuf> {
                 return Ok(rec_tuple.0);
             }
             Err(_) => return Err(err_type),
-        }
-    }
-
-    pub async fn send_hello_req(&self) {
-        let response = self
-            .send_sync_non_flow_req(
-                ZdpPacketType::HelloRequest,
-                ZdpPacketType::HelloResponse,
-                self.peer_ids[0],
-                move |_packet| {},
-            )
-            .await;
-        match response {
-            Ok(hello_res) => {
-                let hdr = ZdpHelloResponseHeader::ref_from_prefix(hello_res.body())
-                    .expect("too-short inbound packet");
-                let status = hdr.status;
-                println!(
-                    "{}: Received HelloResponse, status: {}",
-                    self.system_name, status
-                );
-            }
-            Err(err) => match err {
-                SyncReqError::LinkClosed => {
-                    eprintln!("{}: LinkClosed error with HelloRequest", self.system_name)
-                }
-                SyncReqError::ProtocolError => eprintln!(
-                    "{}: ProtocolError error with HelloRequest",
-                    self.system_name
-                ),
-                SyncReqError::Timeout => {
-                    eprintln!("{}: Timeout error with HelloRequest", self.system_name)
-                }
-            },
         }
     }
 }

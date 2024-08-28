@@ -253,10 +253,10 @@ impl<'buf> Packet<'buf> {
     /// Same as `new()`, but accepts a `DropGuard`-protected buffer, and produces
     /// a `DropGuard`-protected packet buffer, so manually calling `destroy()`
     /// is unnecessary.
-    pub fn new_guarded<B: DropGuard<&'buf mut [u8; config::PACKET_BUFFER_SIZE]>>(
+    pub fn new_guarded<B: DropGuard<&'buf mut [u8; config::PACKET_BUFFER_SIZE]> + Send>(
         buf: B,
         headroom: usize,
-    ) -> impl DropGuard<Self> {
+    ) -> impl DropGuard<Self> + Send {
         buf.map(move |b| Self::new(b, headroom), |p| p.destroy())
     }
 
@@ -487,6 +487,22 @@ unsafe impl<'buf> buf::BufMut for Packet<'buf> {
     unsafe fn advance_mut(&mut self, cnt: usize) {
         assert!(cnt <= self.remaining_mut());
         self.metadata_mut().len += cnt;
+    }
+}
+
+impl std::fmt::Debug for Packet<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        // TODO This is a super hacky and inefficient way to do this
+        let body = self.body();
+        for i in 0..body.len() {
+            if i % 16 == 0 {
+                write!(f, "\n{:04x} ", i)?;
+            } else if i % 8 == 0 {
+                write!(f, " ")?;
+            }
+            write!(f, " {:02x}", body[i])?;
+        }
+        writeln!(f, "")
     }
 }
 
