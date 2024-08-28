@@ -16,7 +16,7 @@ const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 24; // 16 million
 #[derive(Clone, Copy)]
 pub struct AltPep {
     pub compression_mode: CompressionMode,
-    pub stream_id: StreamId,
+    pub tether_id: StreamId,
 }
 
 #[derive(Clone, Copy)]
@@ -94,20 +94,20 @@ impl DockLookupTable {
 
     pub fn inspect<T>(
         &self,
-        stream_id: StreamId,
+        tether_id: StreamId,
         inspector: impl FnOnce(&DltPep) -> T,
     ) -> Option<T> {
         self.reader
-            .inspect(|reader| reader.get(stream_id as usize).map(inspector))
+            .inspect(|reader| reader.get(tether_id as usize).map(inspector))
     }
 
     pub fn insert(&self, pep: DltPep) -> Result<StreamId, ()> {
         Ok(self.table.lock().unwrap().insert(pep)? as StreamId)
     }
 
-    pub fn remove(&self, stream_id: StreamId) {
+    pub fn remove(&self, tether_id: StreamId) {
         let mut table = self.table.lock().unwrap();
-        let new_reader = table.remove(stream_id as usize);
+        let new_reader = table.remove(tether_id as usize);
         std::mem::drop(table);
         self.reader.write(new_reader);
     }

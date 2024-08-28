@@ -377,7 +377,7 @@ pub fn substrate_ingress<'pktbuf>(
 /// The packet will be decompressed according to the given stream ID.
 pub fn agent_input<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    stream_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
+    tether_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
     mut pkt: Packet<'pktbuf>,
 ) {
     // extract A2A MAC
@@ -403,7 +403,7 @@ pub fn agent_input<'pktbuf>(
     // lookup PEP in DLT and expand compressed packet
     if asm
         .dlt
-        .inspect(stream_id, |pep| {
+        .inspect(tether_id, |pep| {
             compress::expand(pep.compression_mode, &pep.five_tuple, &mut pkt)
         })
         .is_none()
@@ -484,7 +484,7 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) 
             pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
 
             // forward packet on
-            forward(asm, zpr::AGENT_LINK_ID, pep.stream_id, pkt);
+            forward(asm, zpr::AGENT_LINK_ID, pep.tether_id, pkt);
         }
 
         Some(AltEntry::Pending) => {

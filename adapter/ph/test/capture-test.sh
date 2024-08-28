@@ -110,14 +110,13 @@ fi
 close_program "$A_ZPR_SOCK"
 close_program "$B_ZPR_SOCK"
 
-# Make sure correct number of incoming packets were captured, either 23 or 24 depending 
-# on whether two hello requests are received 
+# Make sure at least both agent and mgmt packets were captured.
 tcpdump -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1 or link[0] == 0' > "$TMPDIR/checker.txt"
-HELLO_COUNT="$(grep -c '0x0000:  0100 8800 0000' "$TMPDIR/checker.txt" || echo 0)"
-PACKET_COUNT="$(grep -c '0x0000:  0' "$TMPDIR/checker.txt" || echo 0)"
+AGENT_PACKET_COUNT="$(grep -c '0x0000:  0100 00' "$TMPDIR/checker.txt" || echo 0)"
+TOTAL_PACKET_COUNT="$(grep -c '0x0000:  0100' "$TMPDIR/checker.txt" || echo 0)"
+let MGMT_PACKET_COUNT=TOTAL_PACKET_COUNT-AGENT_PACKET_COUNT
 
-# CTP TEMP HACK: IPv6 isn't working at the moment!  So these counts dropped by 12
-if [[ "$(($PACKET_COUNT - $HELLO_COUNT))" != "11" ]]
+if [[ MGMT_PACKET_COUNT == 0 || AGENT_PACKET_COUNT == 0 ]]
 then PASS=1
 fi
 

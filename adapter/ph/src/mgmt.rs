@@ -10,7 +10,6 @@ use crate::packet::{self, Packet};
 use crate::zdp;
 use crate::zpr;
 use bytes::{Buf, BufMut};
-use zerocopy::FromBytes;
 use zpr_ext::zerocopy::{AsBytesExt, FromBytesExt};
 
 /// Send a unidirectional non-flow management message on the given link.
@@ -108,7 +107,7 @@ pub async fn handle_report<'pktbuf>(
     ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let Some(hdr) = zdp::ZdpReportHeader::ref_from_prefix(pkt.body()) else {
+    let Some(hdr) = zdp::ZdpReportHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
@@ -167,20 +166,17 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
     _stream_id: zpr::StreamId, // ignored
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let Some(hdr) = zdp::ZdpBindAgentAddressRequestHeader::ref_from_prefix(pkt.body()) else {
+    let Some(hdr) = zdp::ZdpBindAgentAddressRequestHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
     // TODO: handle as node: enter into DFT
     // TODO: disallow bind requests between nodes
 
-    let ip_version = hdr.ip_version;
-    let compression_mode = hdr.compression_mode;
-
     // read addresses (always present)
     let src_address;
     let dst_address;
-    match ip_version {
+    match hdr.ip_version {
         zpr::L3Type::Ipv4 => {
             let Some(src_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
                 return Err((HandleMgmtError::BadStructure, pkt));
@@ -218,7 +214,7 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
 
     // read source port (optional)
     let mut src_port = 0;
-    if compression_mode & zpr::compression_mode::SOURCE_PORT_PRESENT != 0 {
+    if hdr.compression_mode & zpr::compression_mode::SOURCE_PORT_PRESENT != 0 {
         if pkt.remaining() < 2 {
             return Err((HandleMgmtError::BadStructure, pkt));
         }
@@ -227,7 +223,7 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
 
     // read destination port (optional)
     let mut dst_port = 0;
-    if compression_mode & zpr::compression_mode::SOURCE_PORT_PRESENT != 0 {
+    if hdr.compression_mode & zpr::compression_mode::DESTINATION_PORT_PRESENT != 0 {
         if pkt.remaining() < 2 {
             return Err((HandleMgmtError::BadStructure, pkt));
         }
@@ -236,9 +232,9 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
 
     // form PEP
     let pep = adapter_tables::DltPep {
-        compression_mode: compression_mode,
+        compression_mode: hdr.compression_mode,
         five_tuple: FiveTuple::new(
-            ip_version,
+            hdr.ip_version,
             src_address,
             dst_address,
             ip_protocol,

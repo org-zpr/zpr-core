@@ -64,6 +64,8 @@ pub struct Assembly<'pktbuf> {
     pub peer_table: peer_table::PeerTable,
     pub adapter_docking_session_id: zpr::LinkId,
 
+    // Adapter tables
+    // NOTE: only adapter_manager_worker should modify these tables!
     pub alt: adapter_tables::AgentLookupTable,
     pub dlt: adapter_tables::DockLookupTable,
 
@@ -100,11 +102,22 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
     }
 }
 
-#[allow(dead_code)]
 pub enum SyncReqError {
     LinkClosed,
     ProtocolError,
     Timeout,
+}
+
+impl std::fmt::Display for SyncReqError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.write_str(
+            match self {
+                Self::LinkClosed => "link closed",
+                Self::ProtocolError => "protocol error",
+                Self::Timeout => "timeout",
+            }
+        )
+    }
 }
 
 impl<'pktbuf> Assembly<'pktbuf> {
@@ -128,14 +141,13 @@ impl<'pktbuf> Assembly<'pktbuf> {
     /// expected response packet. Also requires stream_id of the packet.
     /// pkt_fn allows the function to create the proper body of the ZDP packet to send
     /// Returns the received packet without any ZdpHeader (just management response body) or an error
-    #[allow(dead_code)]
     pub async fn send_sync_per_flow_req(
         &self,
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
-        stream_id: u32,
+        stream_id: zpr::StreamId,
         pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
-    ) -> Result<(u32, Packet<'pktbuf>), SyncReqError> {
+    ) -> Result<(zpr::StreamId, Packet<'pktbuf>), SyncReqError> {
         match self
             .send_sync_req_helper(zdp_request_type, zdp_response_type, Some(stream_id), pkt_fn)
             .await
@@ -162,7 +174,7 @@ impl<'pktbuf> Assembly<'pktbuf> {
         &self,
         zdp_request_type: ZdpPacketType,
         zdp_response_type: ZdpPacketType,
-        stream_id: Option<u32>,
+        stream_id: Option<zpr::StreamId>,
         pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
     ) -> Result<Packet<'pktbuf>, SyncReqError> {
         let permit: SemaphorePermit = self.sync_req_state.semaphore.acquire().await.unwrap(); // TODO error handling in case we don't get permit

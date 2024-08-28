@@ -202,6 +202,7 @@ impl<'pktbuf> Capture<'pktbuf> {
     }
 
     /// Blocks until packet is enqueued
+    #[allow(dead_code)]
     pub async fn enqueue_packet(
         &self,
         packet: Packet<'pktbuf>,

@@ -51,14 +51,14 @@ pub mod mem {
         /// Convert the wrapped value into another type, using `into_fn`.
         /// The new value will be converted back to the original type using
         /// `from_fn` in order to be destructed.
-        fn map<U, IntoFn: FnOnce(T) -> U, FromFn: FnOnce(U) -> T>(
+        fn map<U: Send, IntoFn: FnOnce(T) -> U, FromFn: FnOnce(U) -> T + Send>(
             self,
             into_fn: IntoFn,
             from_fn: FromFn,
-        ) -> impl DropGuard<U>;
+        ) -> impl DropGuard<U> + Send;
     }
 
-    impl<T, F: FnOnce(T)> DropGuard<T> for DropGuardImpl<T, F> {
+    impl<T, F: FnOnce(T) + Send> DropGuard<T> for DropGuardImpl<T, F> {
         fn into_inner(mut self) -> T {
             // SAFETY: we are consuming `self`, and forget it immediately after
             let inner = unsafe { ManuallyDrop::take(&mut self.0) };
@@ -66,11 +66,11 @@ pub mod mem {
             inner.item
         }
 
-        fn map<U, IntoFn: FnOnce(T) -> U, FromFn: FnOnce(U) -> T>(
+        fn map<U: Send, IntoFn: FnOnce(T) -> U, FromFn: FnOnce(U) -> T + Send>(
             mut self,
             into_fn: IntoFn,
             from_fn: FromFn,
-        ) -> impl DropGuard<U> {
+        ) -> impl DropGuard<U> + Send {
             // SAFETY: we are consuming `self`, and forget it immediately after
             let inner = unsafe { ManuallyDrop::take(&mut self.0) };
             std::mem::forget(self);
@@ -83,7 +83,7 @@ pub mod mem {
     }
 
     /// Construct a `DropGuard`, wrapping the specified item, with the specified destructor.
-    pub fn drop_guard<T, F: FnOnce(T)>(item: T, destructor: F) -> impl DropGuard<T> {
+    pub fn drop_guard<T, F: FnOnce(T) + Send>(item: T, destructor: F) -> impl DropGuard<T> {
         DropGuardImpl(ManuallyDrop::new(DropGuardImplInner { item, destructor }))
     }
 
