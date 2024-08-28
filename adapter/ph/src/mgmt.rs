@@ -60,6 +60,7 @@ pub async fn send_per_flow_mgmt<'pktbuf>(
     .await;
 }
 
+/// send a Report message (RFC 6.5 § 6.3.13)
 pub async fn send_report<'pktbuf>(
     asm: &'pktbuf Assembly<'pktbuf>,
     link_id: zpr::LinkId,
@@ -78,12 +79,14 @@ pub async fn send_report<'pktbuf>(
     send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Report, pkt).await;
 }
 
+/// send a Discard message (RFC 6.5 § 6.3.1)
 pub async fn send_discard<'pktbuf>(asm: &'pktbuf Assembly<'pktbuf>, link_id: zpr::LinkId) {
     let buf = asm.buffer_stack.get_buffer().await;
     let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
     send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
 }
 
+/// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
 pub async fn send_hello_request<'a, 'pktbuf>(
     asm: &'a Assembly<'pktbuf>,
     link_id: zpr::LinkId,
@@ -132,6 +135,7 @@ impl std::fmt::Display for BindAgentAddressError {
     }
 }
 
+/// send a Bind Agent Address Request and wait for the Response (RFC 6.5 § 6.3.11)
 pub async fn send_bind_agent_address_request<'a, 'pktbuf>(
     asm: &'a Assembly<'pktbuf>,
     link_id: zpr::LinkId,
@@ -232,6 +236,7 @@ impl From<HandleMgmtError> for counters_enum::CounterType {
 
 pub type HandleMgmtResult<'pktbuf> = Result<(), (HandleMgmtError, Packet<'pktbuf>)>;
 
+/// handle a Report message (RFC 6.5 § 6.3.13)
 pub async fn handle_report<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
@@ -256,6 +261,7 @@ pub async fn handle_report<'pktbuf>(
     Ok(())
 }
 
+/// handle a Discard message (RFC 6.5 § 6.3.1)
 pub async fn handle_discard<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
@@ -267,6 +273,7 @@ pub async fn handle_discard<'pktbuf>(
     Ok(())
 }
 
+/// handle a Hello Request (RFC 6.5 § 6.3.4)
 pub async fn handle_hello_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
@@ -289,7 +296,7 @@ pub async fn handle_hello_request<'pktbuf>(
     Ok(())
 }
 
-// RFC 6.5 § 6.3.11
+/// handle a Bind Agent Address Request (RFC 6.5 § 6.3.11)
 pub async fn handle_bind_agent_address_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
