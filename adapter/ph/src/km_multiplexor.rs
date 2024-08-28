@@ -207,17 +207,23 @@ pub fn add_adapter_link (
 /// The km_payload should be the km-payload part of the ZDP KM message.  We copy the payload before
 /// returning.
 pub async fn handle_inbound_km_msg<'pktbuf>(asm: &Assembly<'pktbuf>, from_link: zpr::LinkId, km_payload: &[u8]) -> Result<(), String> {
-    match asm.km_state.inner.lock().unwrap().km_table.get(&from_link) {
-        None => {
-            Err(format!("no KM found for link {}", from_link))
-        }
-        Some(h) => {
-            // Note holding the lock as we await...
-            match h.mgr.handle_km_message(km_payload).await {
-                Ok(_) => Ok(()),
-                Err(e) => Err(format!("Failed to handle KM message on link{}: {:?}", from_link, e)),
+
+    let mut manager: Option<KeyManager> = None;
+
+    {
+        match asm.km_state.inner.lock().unwrap().km_table.get(&from_link) {
+            None => {
+                return Err(format!("no KM found for link {}", from_link));
             }
-        }
+            Some(h) => {
+                manager = Some(h.mgr.clone());
+            }
+        };
+    }
+
+    match manager.unwrap().handle_km_message(km_payload).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(format!("Failed to handle KM message on link{}: {:?}", from_link, e)),
     }
 }
 

@@ -82,18 +82,7 @@ async fn handle_packet<'pktbuf>(
 
             ZdpPacketType::Discard => mgmt::handle_discard(asm, ingress_link_id, pkt).await,
 
-            ZdpPacketType::KeyManagement => {
-                // This needs to be sent to the KM running on the link.
-                // Um, we need the arriving link ID !
-                //
-
-                todo!("KeyManagement packet arrived but no way to hanle it!");
-
-                // Once we have the link---
-                // - parse down to the payload and hand it off:
-
-                // km_multiplexor::handle_inbound_km_msg(asm, from_link, km_payload);
-            }
+            ZdpPacketType::KeyManagement => mgmt::handle_key_management(asm, ingress_link_id, pkt).await,
 
             ZdpPacketType::HelloRequest => {
                 mgmt::handle_hello_request(asm, ingress_link_id, pkt).await

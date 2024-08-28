@@ -1,6 +1,6 @@
 //! Management packet functions.
 
-use crate::adapter_tables;
+use crate::{adapter_tables, km_multiplexor};
 use crate::assembly::{self, Assembly};
 use crate::config;
 use crate::counters_enum::{self, CounterType};
@@ -11,6 +11,8 @@ use crate::zdp;
 use crate::zpr;
 use bytes::{Buf, BufMut};
 use zpr_ext::zerocopy::{AsBytesExt, FromBytesExt};
+use tracing::error;
+
 
 /// Send a unidirectional non-flow management message on the given link.
 /// The packet should contain only the message body.
@@ -220,6 +222,8 @@ pub enum HandleMgmtError {
     UnknownType(u8),
     UnexpectedMgmtResponse,
     BadStructure,
+    UnknownKeyManagementType(u16),
+    InternalError(String),
 }
 
 impl From<HandleMgmtError> for counters_enum::CounterType {
@@ -228,6 +232,8 @@ impl From<HandleMgmtError> for counters_enum::CounterType {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,
             HandleMgmtError::UnexpectedMgmtResponse => Self::UnexpectedMgmtResponse,
             HandleMgmtError::BadStructure => Self::BadStructure,
+            HandleMgmtError::UnknownKeyManagementType(_type) => Self::OtherError,
+            HandleMgmtError::InternalError(_) => Self::OtherError
         }
     }
 }
@@ -446,4 +452,35 @@ pub async fn send_key_management<'pktbuf>(
     pkt.put(payload);
 
     send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::KeyManagement, pkt).await;
+}
+
+
+// Base header is already gone by the time we get here.  So we expect
+// to parse starting from the KeyManagement header.
+pub async fn handle_key_management<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    ingress_link_id: zpr::LinkId,
+    mut pkt: Packet<'pktbuf>,
+) -> HandleMgmtResult<'pktbuf> {
+
+    let Some(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(&mut pkt) else {
+        error!("KeyManagement packet arrived with unparseable header");
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+    if !km_hdr.is_noise() {
+        error!("KeyManagement packet not using NOISE");
+        return Err((HandleMgmtError::UnknownKeyManagementType(km_hdr.message_type.into()), pkt));
+    }
+    let km_msg_len = usize::from(km_hdr.message_length);
+    if pkt.remaining() < km_msg_len {
+        error!("KeyManagement packet arrived with truncated payload");
+        return Err((HandleMgmtError::BadStructure, pkt));
+    }
+    match km_multiplexor::handle_inbound_km_msg(asm, ingress_link_id, &pkt.body()[..km_msg_len]).await {
+        Ok(()) => (),
+        Err(s) => return Err((HandleMgmtError::InternalError(s), pkt)),
+    };
+    asm.buffer_stack.put_buffer(pkt.destroy());
+
+    Ok(())
 }
