@@ -1,9 +1,9 @@
 //! Management packet functions.
 
 use crate::adapter_tables;
-use crate::assembly::Assembly;
+use crate::assembly::{self, Assembly};
 use crate::config;
-use crate::counters_enum;
+use crate::counters_enum::{self, CounterType};
 use crate::defs::*;
 use crate::fastpath;
 use crate::packet::{self, Packet};
@@ -82,6 +82,129 @@ pub async fn send_discard<'pktbuf>(asm: &'pktbuf Assembly<'pktbuf>, link_id: zpr
     let buf = asm.buffer_stack.get_buffer().await;
     let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
     send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
+}
+
+pub async fn send_hello_request<'a, 'pktbuf>(asm: &'a Assembly<'pktbuf>, link_id: zpr::LinkId) -> Result<(), ()>
+{
+    let response = asm
+        .send_sync_non_flow_req(
+            link_id,
+            zdp::ZdpPacketType::HelloRequest,
+            zdp::ZdpPacketType::HelloResponse,
+            move |_packet| {},
+        )
+        .await;
+
+    match response {
+        Ok(mut hello_res) => {
+            let Some(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut hello_res) else {
+                fastpath::drop_and_count(asm, hello_res, CounterType::BadStructure);
+                return Err(());
+            };
+            let status = hdr.status;
+            eprintln!("Received HelloResponse, status: {}", status);
+            asm.buffer_stack.put_buffer(hello_res.destroy());
+            Ok(())
+        }
+
+        Err(err) => {
+            eprintln!("{} error with HelloRequest", err);
+            Err(())
+        }
+    }
+}
+
+pub enum BindAgentAddressError {
+    SyncReqError(assembly::SyncReqError),
+    BadStructure,
+    BindAgentAddressError(Box<str>),
+}
+
+impl std::fmt::Display for BindAgentAddressError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::SyncReqError(err) => err.fmt(f),
+            Self::BadStructure => write!(f, "bad structure"),
+            Self::BindAgentAddressError(msg) => f.write_str(&*msg),
+        }
+    }
+}
+
+pub async fn send_bind_agent_address_request<'a, 'pktbuf>(
+    asm: &'a Assembly<'pktbuf>, link_id: zpr::LinkId,
+    compression_mode: zpr::CompressionMode, five_tuple: FiveTuple,
+) -> Result<zpr::StreamId, BindAgentAddressError> {
+    let response = asm.send_sync_per_flow_req(
+        link_id,
+        zdp::ZdpPacketType::BindAgentAddressRequest,
+        zdp::ZdpPacketType::BindAgentAddressResponse,
+        0, move |mut req| {
+            zdp::ZdpBindAgentAddressRequestHeader {
+                ip_version: five_tuple.l3_type,
+                compression_mode,
+            }.write_to_buf(&mut req);
+
+            match five_tuple.l3_type {
+                zpr::L3Type::Ipv4 => {
+                    req.put(five_tuple.src_address.read_as_v4().as_slice());
+                    req.put(five_tuple.dst_address.read_as_v4().as_slice());
+                }
+
+                zpr::L3Type::Ipv6 => {
+                    req.put(five_tuple.src_address.v6.as_slice());
+                    req.put(five_tuple.dst_address.v6.as_slice());
+                }
+
+                other => panic!("bad L3 type: {}", other.0),
+            }
+
+            req.put_u8(five_tuple.l4_protocol);
+
+            if compression_mode != 0 {
+                todo!("L4 compression");
+            }
+        }
+    ).await;
+
+    match response {
+        Ok((tether_id, mut resp)) => {
+            let Some(hdr) = zdp::ZdpBindAgentAddressResponseHeader::read_from_buf(&mut resp) else {
+                fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                return Err(BindAgentAddressError::BadStructure);
+            };
+
+            match hdr.status_code {
+                zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS => {
+                    asm.buffer_stack.put_buffer(resp.destroy());
+                    Ok(tether_id)
+                }
+
+                zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER => {
+                    if hdr.info_len as usize > resp.remaining() {
+                        fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                        return Err(BindAgentAddressError::BadStructure);
+                    }
+
+                    let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
+                        fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                        return Err(BindAgentAddressError::BadStructure);
+                    };
+                    let msg: Box<str> = msg.into();
+
+                    asm.buffer_stack.put_buffer(resp.destroy());
+                    Err(BindAgentAddressError::BindAgentAddressError(msg))
+                }
+
+                _ => {
+                    fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                    Err(BindAgentAddressError::BadStructure)
+                }
+            }
+        }
+
+        Err(err) =>
+            Err(BindAgentAddressError::SyncReqError(err)),
+    }
 }
 
 pub enum HandleMgmtError {
