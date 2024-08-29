@@ -11,7 +11,7 @@ use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use std::sync::Mutex;
 
-const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 24; // 16 million
+const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 20; // 1 million
 
 #[derive(Clone, Copy)]
 pub struct AltPep {

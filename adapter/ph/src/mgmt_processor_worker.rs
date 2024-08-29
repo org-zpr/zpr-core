@@ -9,14 +9,24 @@ use std::future::Future;
 use tokio::sync::mpsc;
 use zpr_ext::zerocopy::*;
 
+#[derive(Clone, Copy)]
+pub struct Config {
+    pub link_id: zpr::LinkId,
+}
+
 async fn worker<'pktbuf>(
+    config: &Config,
     asm: &Assembly<'pktbuf>,
     queue: &mut mpsc::Receiver<MgmtProcessorMessage<'pktbuf>>,
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
-            MgmtProcessorMessage::Packet(ingress_link_id, pkt) => {
-                match handle_packet(asm, ingress_link_id, pkt).await {
+            MgmtProcessorMessage::Packet(pkt) => {
+                eprintln!(
+                    "{}: dequeued mgmt message from {}",
+                    asm.system_name, config.link_id
+                );
+                match handle_packet(asm, config.link_id, pkt).await {
                     Ok(()) => (),
                     Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
                 }
@@ -28,13 +38,15 @@ async fn worker<'pktbuf>(
 }
 
 pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
+    config: &Config,
     asm: AsmRef,
     mut queue: mpsc::Receiver<MgmtProcessorMessage<'pktbuf>>,
 ) -> impl Future<Output = ()> + Send + 'pktbuf
 where
     AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
 {
-    async move { worker(&*asm, &mut queue).await }
+    let cfg = *config;
+    async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
 async fn handle_packet<'pktbuf>(
@@ -42,6 +54,11 @@ async fn handle_packet<'pktbuf>(
     ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
+    eprintln!(
+        "{}: handling mgmt message from {}",
+        asm.system_name, ingress_link_id
+    );
+
     let Some(base_hdr) = ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
@@ -49,17 +66,29 @@ async fn handle_packet<'pktbuf>(
     let packet_type = base_hdr.packet_type;
 
     if packet_type.is_response() {
+        eprintln!("{}: got response from {}", asm.system_name, ingress_link_id);
+
         // Gets the designated sender, attempts to send the response, if not drops
         // the packet and increments corresponding counter
-        let channel = asm.sync_req_state.get_sender();
-        match channel {
-            Some(channel) => match channel.send((pkt, packet_type)) {
-                Ok(()) => Ok(()),
-                Err((pkt, _)) => Err((HandleMgmtError::UnexpectedMgmtResponse, pkt)),
-            },
+        asm.peer_table
+            .inspect(ingress_link_id, |peer_state| {
+                let channel = peer_state.sync_req_state.get_sender();
+                match channel {
+                    Some(channel) => {
+                        eprintln!(
+                            "{}: sending response {} to channel!",
+                            asm.system_name, ingress_link_id
+                        );
+                        match channel.send((pkt, packet_type)) {
+                            Ok(()) => Ok(()),
+                            Err((pkt, _)) => Err((HandleMgmtError::UnexpectedMgmtResponse, pkt)),
+                        }
+                    }
 
-            None => Err((HandleMgmtError::UnexpectedMgmtResponse, pkt)),
-        }
+                    None => Err((HandleMgmtError::UnexpectedMgmtResponse, pkt)),
+                }
+            })
+            .unwrap() // FIXME: handle link deleted
     } else if base_hdr.packet_type.is_per_flow() {
         let Some(per_flow_hdr) = ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
             return Err((HandleMgmtError::BadStructure, pkt));

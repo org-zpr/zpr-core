@@ -28,6 +28,7 @@ mod config;
 mod counter;
 mod counters_enum;
 mod defs;
+mod dock_tables;
 mod fastpath;
 mod flow_control;
 mod mgmt;
@@ -41,13 +42,14 @@ mod queues;
 mod rcu;
 mod rpc_worker;
 mod substrate_ingress_worker;
+mod sync_req;
 mod test_packet;
 mod tun_ctl;
 mod zdp;
 mod zdp_ll;
 mod zpr;
 
-use assembly::{Assembly, SyncReqState};
+use assembly::{Assembly, PhMode};
 use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
 use counter::*;
@@ -104,7 +106,7 @@ fn main() -> ExitCode {
     let _ca_file = cmd_line.ca_file;
     let _cert_file = cmd_line.certificate_file;
     let _priv_key_file = cmd_line.private_key_file;
-    let mut is_node = false;
+    let ph_mode;
 
     // TODO: These batch sizes are placeholders for now.  So are the queue
     // sizes below which are all just double the batch size.  Performance
@@ -112,7 +114,6 @@ fn main() -> ExitCode {
     // throughput with service time.
     let substrate_socket_count = 4;
     let substrate_ingress_batch_size = 8;
-    let mgmt_processor_queue_size = 16;
     let agent_output_batch_size = 4;
     let capture_queue_size = 16;
     let capture_batch_size = 8;
@@ -121,9 +122,6 @@ fn main() -> ExitCode {
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
-
-    let (mp_inq, mp_outq) = mpsc::channel(mgmt_processor_queue_size);
-    let mgmt_processor = MgmtProcessor::new(mp_inq);
 
     let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
@@ -136,7 +134,6 @@ fn main() -> ExitCode {
 
     let counters = enum_map! { _ => Counter::new(), };
 
-    let sync_req_state = SyncReqState::new();
     /*let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
     ssl_context_builder.set_options(
         ssl::SslOptions::NO_COMPRESSION
@@ -159,33 +156,11 @@ fn main() -> ExitCode {
         .add_client_ca(&X509::from_pem(&buffer).unwrap())
         .unwrap();*/
 
-    let peer_table = peer_table::PeerTable::new();
-    let mut peer_ids = Vec::new();
-
     if peer_addr2.is_some() {
-        peer_ids.push(
-            peer_table
-                .insert(peer_table::PeerState::new(
-                    peer_table::PeerType::Adapter,
-                    peer_addr2.unwrap(),
-                ))
-                .unwrap(),
-        );
-        is_node = true;
+        ph_mode = PhMode::Node;
+    } else {
+        ph_mode = PhMode::Adapter;
     }
-
-    peer_ids.push(
-        peer_table
-            .insert(peer_table::PeerState::new(
-                if is_node {
-                    peer_table::PeerType::Adapter
-                } else {
-                    peer_table::PeerType::Node
-                },
-                peer_addr1,
-            ))
-            .unwrap(),
-    );
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -298,9 +273,9 @@ fn main() -> ExitCode {
             let substrate_egress = SubstrateEgress::new(sockets.iter());
 
             let asm = Box::leak(Box::new(Assembly {
+                ph_mode,
                 system_name,
                 buffer_stack,
-                mgmt_processor,
                 agent_input,
                 substrate_egress,
                 capture_queue,
@@ -308,13 +283,34 @@ fn main() -> ExitCode {
                 flow_control,
                 counters,
                 tun_ctl,
-                sync_req_state,
-                peer_table,
-                peer_ids,
+                peer_table: peer_table::PeerTable::new(),
+                peer_ids: std::sync::Mutex::new(Vec::new()),
                 alt,
                 dlt,
                 adapter_manager,
             }));
+
+            // TEMP HACK to statically install peers
+            if let Some(pa2) = peer_addr2 {
+                let peer_id2 = asm
+                    .hack_add_peer(peer_table::PeerType::Adapter, pa2)
+                    .unwrap();
+
+                asm.peer_ids.lock().unwrap().push(peer_id2);
+            }
+
+            let peer_id = asm
+                .hack_add_peer(
+                    match ph_mode {
+                        PhMode::Node => peer_table::PeerType::Adapter,
+                        PhMode::Adapter => peer_table::PeerType::Node,
+                    },
+                    peer_addr1,
+                )
+                .unwrap();
+
+            asm.peer_ids.lock().unwrap().push(peer_id);
+            // END HACK
 
             // TODO signal handler goes here
 
@@ -346,7 +342,6 @@ fn main() -> ExitCode {
                 }
             });
 
-            js.spawn(mgmt_processor_worker::launch(&*asm, mp_outq));
             js.spawn(adapter_manager_worker::launch(&*asm, am_outq));
 
             for (worker_index, tun_dev) in tun_devs.iter().enumerate() {
@@ -385,12 +380,11 @@ fn main() -> ExitCode {
                 ));
             }
 
-            if !is_node {
-                mgmt::send_report(asm, asm.peer_ids[0], "Reporting for Duty!").await;
-                mgmt::send_discard(asm, asm.peer_ids[0]).await;
-                mgmt::send_hello_request(asm, asm.peer_ids[0])
-                    .await
-                    .unwrap();
+            if matches!(ph_mode, PhMode::Adapter) {
+                let dsid = asm.hack_get_adapter_docking_session_id();
+                mgmt::send_report(asm, dsid, "Reporting for Duty!").await;
+                mgmt::send_discard(asm, dsid).await;
+                mgmt::send_hello_request(asm, dsid).await.unwrap();
             }
 
             while let Some(res) = js.join_next().await {

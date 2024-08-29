@@ -220,7 +220,7 @@ impl PacketMetadata {
     }
 }
 
-impl std::fmt::Display for PacketMetadata {
+impl std::fmt::Debug for PacketMetadata {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
@@ -415,28 +415,20 @@ impl<'buf> Packet<'buf> {
         self.metadata().flow_id
     }
 
-    pub fn dump_metadata(&self) {
-        print!("{}", self.metadata());
-    }
-
-    pub fn dump_packet_buffer(&self) {
+    pub fn dump_packet_buffer(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
         // TODO This is a super hacky and inefficient way to do this
         for i in 0..self.metadata().len {
             if i % 16 == 0 {
-                print!("\n{:04x} ", i);
+                write!(f, "\n{:04x} ", i)?;
             } else if i % 8 == 0 {
-                print!(" ");
+                write!(f, " ")?;
             }
-            print!(" {:02x}", self.buf[i]);
+            write!(f, " {:02x}", self.buf[i])?;
         }
-        println!("");
-    }
-
-    pub fn dump(&self) {
-        eprintln!("\n=== Begin dumping packet info ===");
-        self.dump_metadata();
-        self.dump_packet_buffer();
-        eprintln!("===  End dumping packet info  ===\n");
+        writeln!(f, "")
     }
 }
 
@@ -492,17 +484,10 @@ unsafe impl<'buf> buf::BufMut for Packet<'buf> {
 
 impl std::fmt::Debug for Packet<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        // TODO This is a super hacky and inefficient way to do this
-        let body = self.body();
-        for i in 0..body.len() {
-            if i % 16 == 0 {
-                write!(f, "\n{:04x} ", i)?;
-            } else if i % 8 == 0 {
-                write!(f, " ")?;
-            }
-            write!(f, " {:02x}", body[i])?;
-        }
-        writeln!(f, "")
+        writeln!(f, "\n=== Begin dumping packet info ===")?;
+        self.metadata().fmt(f)?;
+        self.dump_packet_buffer(f)?;
+        writeln!(f, "===  End dumping packet info  ===\n")
     }
 }
 

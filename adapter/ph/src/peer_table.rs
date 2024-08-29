@@ -1,35 +1,71 @@
 #![allow(dead_code)]
+use crate::dock_tables::DockForwardingTable;
+use crate::queues;
 use crate::rcu::RcuBox;
+use crate::sync_req;
 use crate::zpr::{LinkId, SubstrateAddr};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
-use std::sync::Mutex;
+use std::future::Future;
+use std::sync::{Mutex, MutexGuard};
+use tokio::sync::mpsc;
+use tokio::task;
 
 const PEER_TABLE_SIZE: usize = 1024;
 
-#[derive(Clone, Copy)]
 pub enum PeerType {
     Node,
     Adapter,
 }
 
-pub struct PeerState {
+// FIXME TODO:
+// nodes and adapters have different state requirements.
+// rather than indirecting through an enum, we could/should
+// break adapters/docking sessions out into a separate table.
+// this matches the RFC model of separate docks and forwarders.
+// for now, everyone has a DFT.......
+pub struct PeerState<'pktbuf> {
     pub peer_type: PeerType,
     pub substrate_addr: SubstrateAddr,
+    pub sync_req_state: sync_req::SyncReqState<'pktbuf>,
+    pub dft: DockForwardingTable,
+    pub mgmt_processor: queues::MgmtProcessor<'pktbuf>,
+    pub mgmt_processor_worker: task::JoinHandle<()>,
 }
 
-impl PeerState {
-    pub fn new(peer_type: PeerType, substrate_addr: SubstrateAddr) -> Self {
+const MGMT_PROCESSOR_QUEUE_SIZE: usize = 16;
+
+// FIXME: can we eliminate the reliance on `'static` herein?
+impl PeerState<'static> {
+    pub fn new<Worker>(
+        peer_type: PeerType,
+        substrate_addr: SubstrateAddr,
+        launch_mgmt_processor_worker: impl FnOnce(
+            mpsc::Receiver<queues::MgmtProcessorMessage<'static>>,
+        ) -> Worker,
+    ) -> Self
+    where
+        Worker: Future<Output = ()> + Send + 'static,
+    {
+        let (mp_inq, mp_outq) = mpsc::channel(MGMT_PROCESSOR_QUEUE_SIZE);
+        let mgmt_processor = queues::MgmtProcessor::new(mp_inq);
+
+        let mgmt_processor_worker = task::spawn(launch_mgmt_processor_worker(mp_outq));
+
         Self {
             peer_type,
             substrate_addr,
+            dft: DockForwardingTable::new(),
+            sync_req_state: sync_req::SyncReqState::new(),
+            mgmt_processor,
+            mgmt_processor_worker,
         }
     }
 }
 
-pub struct PeerTable {
-    peer_slab: Mutex<RcuCslab<PeerState>>,
-    peer_slab_reader: RcuBox<RcuCslabReader<PeerState>>,
+pub struct PeerTable<'pktbuf> {
+    peer_slab: Mutex<RcuCslab<PeerState<'pktbuf>>>,
+    peer_slab_reader: RcuBox<RcuCslabReader<PeerState<'pktbuf>>>,
     sa_to_link: DashMap<SubstrateAddr, LinkId>,
 }
 
@@ -38,7 +74,7 @@ pub enum PeerInsertError {
     TableFull,
 }
 
-impl PeerTable {
+impl<'pktbuf> PeerTable<'pktbuf> {
     pub fn new() -> Self {
         let peer_slab = RcuCslab::with_fixed_capacity(PEER_TABLE_SIZE);
         let peer_slab_reader = RcuBox::new(peer_slab.reader());
@@ -51,19 +87,21 @@ impl PeerTable {
         }
     }
 
-    pub fn insert(&self, peer_state: PeerState) -> Result<LinkId, PeerInsertError> {
-        let sa = peer_state.substrate_addr;
+    pub fn insert(&self, peer_state: PeerState<'pktbuf>) -> Result<LinkId, PeerInsertError> {
+        Ok(self.vacant_entry()?.insert(peer_state))
+    }
 
-        let link_id = match self.peer_slab.lock().unwrap().insert(peer_state) {
-            Ok(id) => id as LinkId,
-            Err(()) => return Err(PeerInsertError::TableFull),
+    pub fn vacant_entry(&self) -> Result<VacantPeerTableEntry<'_, 'pktbuf>, PeerInsertError> {
+        let peer_slab_guard = self.peer_slab.lock().unwrap();
+
+        if matches!(peer_slab_guard.vacant_key(), Err(_)) {
+            return Err(PeerInsertError::TableFull);
         };
 
-        if let Some(_) = self.sa_to_link.insert(sa, link_id) {
-            panic!("duplicate peer substrate address");
-        }
-
-        Ok(link_id)
+        Ok(VacantPeerTableEntry {
+            peer_slab_guard,
+            sa_to_link_ref: &self.sa_to_link,
+        })
     }
 
     pub fn remove(&self, link_id: LinkId) {
@@ -96,9 +134,32 @@ impl PeerTable {
     pub fn inspect<T>(
         &self,
         link_id: LinkId,
-        inspector: impl FnOnce(&PeerState) -> T,
+        inspector: impl FnOnce(&PeerState<'pktbuf>) -> T,
     ) -> Option<T> {
         self.peer_slab_reader
             .inspect(|r| r.get(link_id as usize).map(inspector))
+    }
+}
+
+pub struct VacantPeerTableEntry<'a, 'pktbuf> {
+    peer_slab_guard: MutexGuard<'a, RcuCslab<PeerState<'pktbuf>>>,
+    sa_to_link_ref: &'a DashMap<SubstrateAddr, LinkId>,
+}
+
+impl<'pktbuf> VacantPeerTableEntry<'_, 'pktbuf> {
+    pub fn key(&self) -> LinkId {
+        self.peer_slab_guard.vacant_key().unwrap() as LinkId
+    }
+
+    pub fn insert(mut self, peer_state: PeerState<'pktbuf>) -> LinkId {
+        let sa = peer_state.substrate_addr;
+
+        let link_id = self.peer_slab_guard.insert(peer_state).unwrap() as LinkId;
+
+        if let Some(_) = self.sa_to_link_ref.insert(sa, link_id) {
+            panic!("duplicate peer substrate address");
+        }
+
+        link_id
     }
 }
