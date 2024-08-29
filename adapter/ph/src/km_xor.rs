@@ -105,7 +105,7 @@ impl KeyManagerStateMachine for XorKeyManager {
     fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KMError> {
         if self.state == KMSMState::Configuring {
             let codec = Arc::new(XorCodec {});
-            self.state = KMSMState::Transport(KMTransportState::new_empty_with_codec(codec));
+            self.state = KMSMState::Transport(KMTransportSA::new_empty_with_codec(codec));
             if !self.initiate {
                 // Did not initiate, so send a reply back.
                 let handshake_reply = Bytes::from_static(&[0, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD

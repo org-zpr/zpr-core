@@ -362,7 +362,7 @@ impl KeyManagerStateMachine for KMNoise {
                     match hs.into_stateless_transport_mode() {
                         Ok(t) => {
                             let codec = Arc::new(NoiseCodec { snow_state: t });
-                            self.state = KMSMState::Transport(KMTransportState::new(
+                            self.state = KMSMState::Transport(KMTransportSA::new(
                                 send_zpis,
                                 self.recv_zpis,
                                 send_key,
@@ -407,7 +407,7 @@ impl KeyManagerStateMachine for KMNoise {
                     match hs.into_stateless_transport_mode() {
                         Ok(t) => {
                             let codec = Arc::new(NoiseCodec { snow_state: t });
-                            self.state = KMSMState::Transport(KMTransportState::new(
+                            self.state = KMSMState::Transport(KMTransportSA::new(
                                 send_zpis,
                                 self.recv_zpis,
                                 send_key,
@@ -825,33 +825,36 @@ mod test {
             }
         }
 
-        // Both should hve same SA-ID
+        let adapter_sa = adapter.get_transport_state().unwrap();
+        let node_sa = node.get_transport_state().unwrap();
+
+        // Both should hve same SA-ID (well, that is not required but is consequnce of our setup)
         assert!(
-            adapter.get_sa_id() == node.get_sa_id(),
+            adapter_sa.sa_id == node_sa.sa_id,
             "SA-ID mismatch: adapter={}, node={}",
-            adapter.get_sa_id(),
-            node.get_sa_id()
+            adapter_sa.sa_id,
+            node_sa.sa_id
         );
 
         // ZPIs should be exchanged.
         assert!(
-            ZPIPair::new(3, 4) == adapter.get_send_zpis(),
+            ZPIPair::new(3, 4) == adapter_sa.send_zpis,
             "adapter send ZPIs mismatch: {:?}",
-            adapter.get_send_zpis()
+            adapter_sa.send_zpis
         );
-        assert!(ZPIPair::new(1, 2) == adapter.get_recv_zpis());
+        assert!(ZPIPair::new(1, 2) == adapter_sa.recv_zpis);
         assert!(
-            ZPIPair::new(1, 2) == node.get_send_zpis(),
+            ZPIPair::new(1, 2) == node_sa.send_zpis,
             "node send ZPIs mismatch: {:?}",
-            node.get_send_zpis()
+            node_sa.send_zpis
         );
-        assert!(ZPIPair::new(3, 4) == node.get_recv_zpis());
+        assert!(ZPIPair::new(3, 4) == node_sa.recv_zpis);
 
         // HMAC keys created
-        assert!(adapter.get_recv_hmac_key() != [0u8; 32]);
-        assert!(adapter.get_send_hmac_key() != [0u8; 32]);
-        assert!(node.get_recv_hmac_key() != [0u8; 32]);
-        assert!(node.get_send_hmac_key() != [0u8; 32]);
+        assert!(adapter_sa.recv_hmac_key != [0u8; 32]);
+        assert!(adapter_sa.send_hmac_key != [0u8; 32]);
+        assert!(node_sa.recv_hmac_key != [0u8; 32]);
+        assert!(node_sa.send_hmac_key != [0u8; 32]);
 
         ctok.cancel()
     }

@@ -107,18 +107,79 @@ pub enum KMSignal {
     Error,
 
     /// When the SA_ID changes.
+    // XXX TODO - pass a KMTransportSA back here if sa is actually valid or make two signals.
+    //     one indicating valid SA, one indicating invalid.  Do we even handle going invalid yet?
     SaIdChange { old: zpr::SaId, new: zpr::SaId },
 }
 
+/// Encapsulates all the "state" set up by an SA.
+#[derive(Clone)]
 pub struct KMTransportSA {
+
+    /// The SA identifier is mostly just a marker used internally.  If re-keying occurs or
+    /// the identifier will increment.  A zero value indicates that the SA is not established.
+    ///
+    /// Note that when this is used by implementations of [KeyManagerStateMachine] the `sa_id`
+    /// field is not set.  Only the [KeyManager] is setting an ID on the association.
     pub sa_id: zpr::SaId,
+
+    /// These are the ZPIs which we have given to our peer to use for sending us messages.
     pub recv_zpis: ZPIPair,
+
+    /// These are the ZPIs which our peer has given us to use for sending messages.
     pub send_zpis: ZPIPair,
+
+    /// This is the key, shared with our peer, which we should use for sending HMAC messages to the peer.
     pub send_hmac_key: [u8; 32],
+
+    /// The is the key, shared with our peer, which our peer will use to send HMAC messages to us.
     pub recv_hmac_key: [u8; 32],
+
+    /// This is a pointer to the encode/decode functions associated with the current SA.
     pub codec: Arc<dyn Codec>,
 }
 
+
+// Does not check the codec.
+impl PartialEq for KMTransportSA {
+    fn eq(&self, other: &Self) -> bool {
+        self.send_zpis == other.send_zpis
+            && self.recv_zpis == other.recv_zpis
+            && self.send_hmac_key == other.send_hmac_key
+            && self.recv_hmac_key == other.recv_hmac_key
+    }
+}
+
+// Our debug formatter omits the codec.
+impl fmt::Debug for KMTransportSA {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "KMTransportSA {{ sa_id: {}, send_zpis: {:?}, recv_zpis: {:?}, send_hmac_key: {:?}, recv_hmac_key: {:?} }}",
+            self.sa_id, self.send_zpis, self.recv_zpis, self.send_hmac_key, self.recv_hmac_key
+        )
+    }
+}
+
+impl fmt::Display for KMTransportSA {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if self.sa_id == 0 {
+            return write!(f, "KMTransportSA {{ sa_id: 0 }}");
+        }
+        write!(
+            f,
+            "KMTransportSA {{ sa_id: {}, send_zpis: {:?}, recv_zpis: {:?}, send_hmac_key: {:?}, recv_hmac_key: {:?} }}",
+            self.sa_id, self.send_zpis, self.recv_zpis, self.send_hmac_key, self.recv_hmac_key
+        )
+    }
+}
+
+
+
+
+/// The Key Manager emits messages on two queues, and both use this general structure.
+/// The `msg` field is either going to be a [KMSignal] or a payload for a Key Management
+/// ZDP message which will be in a [Bytes].
 pub struct KMLinkMsg<T> {
     pub link_id: zpr::LinkId,
     pub msg: T,
@@ -131,6 +192,7 @@ impl<T> KMLinkMsg<T> {
 }
 
 /// Stateful key manager for ZDP.  Requires an instance of a [KeyManagerStateMachine] to do the actual work.
+/// One of these is needed on every adap-node or node-node link.
 #[derive(Debug, Clone)]
 pub struct KeyManager<'mgr> {
     shared: Arc<KMShared<'mgr>>,
@@ -147,26 +209,26 @@ struct KMState<'mgr> {
     link_id: zpr::LinkId,
     kmsettings: KMSettings,
 
+    // XXX TODO: can I just use ts ?
     sa_id: zpr::SaId, // current SA identifier
 
     // TODO: Can we get this channel outside of the mutex?
+    // XXX look at what we do in assembly/multiplexor I think we can pass this around.
     mgmt_tx: Option<mpsc::Sender<Bytes>>, // Internal queue for key management messages to be processed.
 
-    ts: KMTransportState,
+
+    ts: KMTransportSA, // XXX TODO: Option?
 }
 
 impl fmt::Debug for KMState<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "KMState {{ sa_id: {} }}", self.sa_id)
+        write!(f, "KMState {{ link_id: {}, sa_id: {} }}", self.link_id, self.sa_id)
     }
 }
 
-/// KeyManager maintains an SA with its peer.
-///
-/// Note that this is written prior to implementing the actual key management algorithm. So
-/// some of the abstractions here may not be quite right -- yet.
 impl KeyManager<'_> {
-    /// `statemachine` is the key management algorithm.
+    /// A new KeyManager for a link.
+    /// - `statemachine` is the key management algorithm.
     pub fn new<'a>(
         link_id: zpr::LinkId,
         statemachine: Box<dyn KeyManagerStateMachine>,
@@ -181,7 +243,7 @@ impl KeyManager<'_> {
                     kmsettings: settings,
                     sa_id: 0,
                     mgmt_tx: None,
-                    ts: KMTransportState::new_empty(),
+                    ts: KMTransportSA::new_empty(),
                 }),
             }),
         }
@@ -203,187 +265,10 @@ impl KeyManager<'_> {
         })
     }
 
-    /// Returns the current SA identifier.  If handshake has completed, then this is non-zero.
-    pub fn get_sa_id(&self) -> u8 {
-        let state = self.shared.state.lock().unwrap();
-        state.sa_id
-    }
-
-    /// Returns the ZPIs used for sending messages.
-    /// Only set/valid after handshake is complete and SA is established.a
-    /// Currently safe to cache this after handshake is done because (TODO) these do not change.
-    pub fn get_send_zpis(&self) -> ZPIPair {
-        let state = self.shared.state.lock().unwrap();
-        state.ts.send_zpis
-    }
-
-    /// Returns the ZPIs used for receiving messages.
-    /// Only set/valid after handshake is complete and SA is established.a///
-    /// Currently safe to cache this after handshake is done because (TODO) these do not change.
-    pub fn get_recv_zpis(&self) -> ZPIPair {
-        let state = self.shared.state.lock().unwrap();
-        state.ts.recv_zpis
-    }
-
-    /// Return the key to use for generating HMAC on an outbound transit message.
-    /// Only set/valid after handshake is complete and SA is established.a
-    /// Currently safe to cache this after handshake is done because (TODO) these do not change.
-    pub fn get_send_hmac_key(&self) -> [u8; 32] {
-        let state = self.shared.state.lock().unwrap();
-        state.ts.send_hmac_key
-    }
-
-    /// Return the key to use for verifying the HMAC on an inbound transit message.
-    /// Only set/valid after handshake is complete and SA is established.a
-    /// Currently safe to cache this after handshake is done because (TODO) these do not change.
-    pub fn get_recv_hmac_key(&self) -> [u8; 32] {
-        let state = self.shared.state.lock().unwrap();
-        state.ts.recv_hmac_key
-    }
-
     #[cfg(test)]
     fn set_sa_id(&self, sa_id: u8) {
         let mut state = self.shared.state.lock().unwrap();
         state.sa_id = sa_id;
-    }
-
-    /// Encrypt a ZDP message for transport.  Key Management messages should not be sent here.
-    /// This will encrypt the entire buffer, adding additional ciphertext on the end.
-    /// For all packets, there must be enough space remaining in the packet buffer to
-    /// accomodate expansion caused by encryption.
-    ///
-    /// Do not send here:
-    /// - Key Management messages
-    /// - Agent Transit Data messages
-    ///
-    /// Note that we encrypt `body.len()-1 bytes` from body index 1 (right after ZPI).  Body length
-    /// will expand by the PADLEN indicated in the KM algorithm.
-    ///
-    /// `message` is expected to be a ZDP message starting with a ZPI value.  We do not check
-    /// the ZPI.  (TODO: A future version will add the ZPI as associated data in the AEAD cipher).
-    pub fn encrypt_transport(&self, message: &mut Packet) -> KMResult<()> {
-        if message.body().len()
-            < std::mem::size_of::<ZdpZpiHeader>() + std::mem::size_of::<ZdpBaseHeader>()
-        {
-            return Err(KMError::ShortPacket);
-        }
-        let base_hdr =
-            ZdpBaseHeader::ref_from_prefix(&message.body()[1..]).expect("too-short ZDP message");
-
-        let codec: Arc<dyn Codec>;
-        {
-            // TODO: Here we take a quick lock to get the state. This would be better as an RLock
-            //       or really should use the RCU thing.
-            let state = self.shared.state.lock().unwrap();
-            if state.sa_id == 0 {
-                return Err(KMError::SaIdZero);
-            }
-
-            if !matches!(state.statemachine.get_state(), KMSMState::Transport { .. }) {
-                return Err(KMError::InvalidState);
-            }
-
-            match state.statemachine.get_state() {
-                KMSMState::Transport(ts) => {
-                    codec = ts.codec;
-                }
-                _ => {
-                    return Err(KMError::InvalidState);
-                }
-            }
-        }
-
-        // The assumption here is that caller has already built in space of any padding required by key manager protocol.
-        let encr_len: usize = match base_hdr.packet_type {
-            ZdpPacketType::KeyManagement => {
-                // Programmer error
-                return Err(KMError::InvalidPacketType);
-            }
-            ZdpPacketType::TransitPacket => {
-                return Err(KMError::InvalidPacketType);
-            }
-            _ => message.body().len() - 1,
-        };
-
-        // TODO: Ability to encrypt in place. Not sure how to accomplish. At very least we could use our own buffer pool.
-        let mut encr_buf = [0u8; config::PACKET_BUFFER_SIZE];
-
-        match codec.encrypt_transport_stateless(&message.body()[1..encr_len + 1], &mut encr_buf) {
-            Ok(len) => {
-                info!(
-                    "noise: encrypt input {} bytes, output {} bytes",
-                    encr_len, len
-                );
-                // Copy the encrypted data back into the message -- there should be sufficient room for it since
-                // caller should know our required padding space and alignment.
-
-                message.shrink_by(encr_len); // remove body
-                message.put(&encr_buf[0..len]); // write a new body
-            }
-            Err(e) => {
-                return Err(KMError::MachineError(e.to_string()));
-            }
-        }
-        Ok(())
-    }
-
-    /// Decrypt a ZDP message using the current SA.  Expects that the ciphertext starts
-    /// at index 1 (following the ZPI), and extends to `message.body.len()`.
-    ///
-    /// This will overwrite the ciphertext body with the plaintext.
-    ///
-    /// Caller must ensure that the SA used to encrypt the message is the one used to
-    /// decrypt it.
-    ///
-    /// `message` must be ZDP message starting with a ZPI (that we do not check).
-    pub fn decrypt_transport(&self, message: &mut Packet) -> KMResult<()> {
-        if message.body().len() < 1 {
-            return Err(KMError::ShortPacket);
-        }
-        let padlen: usize;
-        let codec: Arc<dyn Codec>;
-        {
-            // Just like in encrypt, we take a quick lock to get the state. This could be improved.
-            let state = self.shared.state.lock().unwrap();
-            match state.statemachine.get_state() {
-                KMSMState::Transport(ts) => {
-                    codec = ts.codec;
-                }
-                _ => {
-                    return Err(KMError::InvalidState);
-                }
-            }
-            padlen = state.kmsettings.padlen;
-        }
-
-        let encr_len = message.body().len() - 1;
-        if encr_len == 0 {
-            // empty?
-            return Ok(());
-        }
-        if encr_len < padlen {
-            return Err(KMError::ShortPacket);
-        }
-
-        // TODO: Ability to decrypt in place. Not sure how to accomplish.  At very least we could use our own buffer pool.
-        let mut decr_buf = [0u8; config::PACKET_BUFFER_SIZE];
-
-        match codec.decrypt_transport_stateless(&message.body()[1..encr_len + 1], &mut decr_buf) {
-            Ok(len) => {
-                info!(
-                    "noise: decrypt input {} bytes, output {} bytes",
-                    message.body().len(),
-                    len
-                );
-                // Copy the decrypted data back into the message -- do not overwrite ZPI.
-                message.shrink_by(encr_len); // remove body
-                message.put(&decr_buf[0..len]); // write a new body
-            }
-            Err(e) => {
-                return Err(KMError::MachineError(e.to_string()));
-            }
-        }
-        Ok(())
     }
 
     /// Pass in a full Key Management payload from our peer here (should not include ZDP header).
@@ -644,6 +529,126 @@ impl KeyManager<'_> {
     }
 }
 
+
+impl KMTransportSA {
+    pub fn new(
+        send_zpis: ZPIPair,
+        recv_zpis: ZPIPair,
+        send_key: [u8; 32],
+        recv_key: [u8; 32],
+        codec: Arc<dyn Codec>,
+    ) -> KMTransportSA {
+        KMTransportSA {
+            sa_id: 0,
+            send_zpis,
+            recv_zpis,
+            send_hmac_key: send_key,
+            recv_hmac_key: recv_key,
+            codec,
+        }
+    }
+
+    pub fn new_empty() -> KMTransportSA {
+        KMTransportSA {
+            sa_id: 0,
+            send_zpis: ZPIPair::new_zero(),
+            recv_zpis: ZPIPair::new_zero(),
+            send_hmac_key: [0u8; 32],
+            recv_hmac_key: [0u8; 32],
+            codec: Arc::new(UnimplCodec::new()),
+        }
+    }
+
+    pub fn new_empty_with_codec(codec: Arc<dyn Codec>) -> KMTransportSA {
+        KMTransportSA {
+            sa_id: 0,
+            send_zpis: ZPIPair::new_zero(),
+            recv_zpis: ZPIPair::new_zero(),
+            send_hmac_key: [0u8; 32],
+            recv_hmac_key: [0u8; 32],
+            codec,
+        }
+    }
+
+    /// With ZPIs but empty keys.
+    pub fn new_with_zpis(send_zpis: ZPIPair, recv_zpis: ZPIPair) -> KMTransportSA {
+        KMTransportSA {
+            sa_id: 0,
+            send_zpis,
+            recv_zpis,
+            send_hmac_key: [0u8; 32],
+            recv_hmac_key: [0u8; 32],
+            codec: Arc::new(UnimplCodec::new()),
+        }
+    }
+}
+
+/// Helper function which is ZDP aware.  Does some error checking and leaves the ZPI
+/// in place.
+pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMResult<()> {
+    if message.body().len()
+        < std::mem::size_of::<ZdpZpiHeader>() + std::mem::size_of::<ZdpBaseHeader>()
+    {
+        return Err(KMError::ShortPacket);
+    }
+    let base_hdr =
+        ZdpBaseHeader::ref_from_prefix(&message.body()[1..]).expect("too-short ZDP message");
+
+    let encr_len: usize = match base_hdr.packet_type {
+        ZdpPacketType::TransitPacket => {
+            return Err(KMError::InvalidPacketType);
+        }
+        _ => message.body().len() - 1,
+    };
+
+    let mut encr_buf = [0u8; config::PACKET_BUFFER_SIZE];
+
+    match codec.encrypt_transport_stateless(&message.body()[1..encr_len + 1], &mut encr_buf) {
+        Ok(len) => {
+            // Copy the encrypted data back into the message -- there should be sufficient room for it since
+            // caller should know our required padding space and alignment.
+            message.shrink_by(encr_len); // remove body
+            message.put(&encr_buf[0..len]); // write a new body
+        }
+        Err(e) => {
+            return Err(KMError::MachineError(e.to_string()));
+        }
+    }
+    Ok(())
+}
+
+/// Helper function which is ZDP arare.  Does some error checking and leaves the ZPI in place.
+pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMResult<()> {
+    if message.body().len() < 1 {
+        return Err(KMError::ShortPacket);
+    }
+    let padlen: usize;
+
+    let encr_len = message.body().len() - 1;
+    if encr_len == 0 {
+        // empty?
+        return Ok(());
+    }
+
+    // TODO: Ability to decrypt in place. Not sure how to accomplish.  At very least we could use our own buffer pool.
+    let mut decr_buf = [0u8; config::PACKET_BUFFER_SIZE];
+
+    match codec.decrypt_transport_stateless(&message.body()[1..encr_len + 1], &mut decr_buf) {
+        Ok(len) => {
+            // Copy the decrypted data back into the message -- do not overwrite ZPI.
+            message.shrink_by(encr_len); // remove body
+            message.put(&decr_buf[0..len]); // write a new body
+        }
+        Err(e) => {
+            return Err(KMError::MachineError(e.to_string()));
+        }
+    }
+    Ok(())
+}
+
+
+
+
 /// The state of the [KeyManagerStateMachine].
 ///
 /// State transitions:
@@ -657,45 +662,20 @@ impl KeyManager<'_> {
 ///     Error <-------+
 ///```
 ///
-/// Not accounting for "rekeying" -- for now assuming that can happen
-/// internally and machine can just stay in transport state.
+/// Not (yet) accounting for "rekeying".
+///
 #[derive(Debug, Clone, PartialEq)]
 pub enum KMSMState {
     Configuring,
-    Transport(KMTransportState),
+    Transport(KMTransportSA),
     Error,
 }
 
-#[derive(Clone)]
-pub struct KMTransportState {
-    send_zpis: ZPIPair,
-    recv_zpis: ZPIPair,
-    send_hmac_key: [u8; 32],
-    recv_hmac_key: [u8; 32],
-    pub codec: Arc<dyn Codec>,
-}
 
-// Does not check the codec.
-impl PartialEq for KMTransportState {
-    fn eq(&self, other: &Self) -> bool {
-        self.send_zpis == other.send_zpis
-            && self.recv_zpis == other.recv_zpis
-            && self.send_hmac_key == other.send_hmac_key
-            && self.recv_hmac_key == other.recv_hmac_key
-    }
-}
-
-// Our debug formatter omits the codec.
-impl fmt::Debug for KMTransportState {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "KMTransportState {{ send_zpis: {:?}, recv_zpis: {:?}, send_hmac_key: {:?}, recv_hmac_key: {:?} }}",
-            self.send_zpis, self.recv_zpis, self.send_hmac_key, self.recv_hmac_key
-        )
-    }
-}
-
+/// This "codec" must be implemented by a [KeyManagerStateMachine] to handle the actual
+/// encryption and decryption of payloads.  Note that these functions simple encrypt
+/// and decrypt entire buffers.  It is up to implemnentor to make sure that things like
+/// "ZPI" are left alone.
 pub trait Codec: Send + Sync {
     /// Encrypt `payload` into `message`.
     fn encrypt_transport_stateless(
@@ -753,55 +733,6 @@ pub struct ZPIPair {
     pub hmac: u8,
 }
 
-impl KMTransportState {
-    pub fn new(
-        send_zpis: ZPIPair,
-        recv_zpis: ZPIPair,
-        send_key: [u8; 32],
-        recv_key: [u8; 32],
-        codec: Arc<dyn Codec>,
-    ) -> KMTransportState {
-        KMTransportState {
-            send_zpis,
-            recv_zpis,
-            send_hmac_key: send_key,
-            recv_hmac_key: recv_key,
-            codec,
-        }
-    }
-
-    /// Creates zero'd out KMTransportState
-    pub fn new_empty() -> KMTransportState {
-        KMTransportState {
-            send_zpis: ZPIPair::new_zero(),
-            recv_zpis: ZPIPair::new_zero(),
-            send_hmac_key: [0u8; 32],
-            recv_hmac_key: [0u8; 32],
-            codec: Arc::new(UnimplCodec::new()),
-        }
-    }
-
-    pub fn new_empty_with_codec(codec: Arc<dyn Codec>) -> KMTransportState {
-        KMTransportState {
-            send_zpis: ZPIPair::new_zero(),
-            recv_zpis: ZPIPair::new_zero(),
-            send_hmac_key: [0u8; 32],
-            recv_hmac_key: [0u8; 32],
-            codec,
-        }
-    }
-
-    /// With ZPIs but empty keys.
-    pub fn new_with_zpis(send_zpis: ZPIPair, recv_zpis: ZPIPair) -> KMTransportState {
-        KMTransportState {
-            send_zpis,
-            recv_zpis,
-            send_hmac_key: [0u8; 32],
-            recv_hmac_key: [0u8; 32],
-            codec: Arc::new(UnimplCodec::new()),
-        }
-    }
-}
 
 impl ZPIPair {
     pub fn new_zero() -> ZPIPair {
@@ -1059,14 +990,6 @@ mod test {
     #[tokio::test]
     async fn test_km_encrypt_transport_non_transit() {
         let codec = Arc::new(CopyCodec {});
-        let kmb = Box::new(TestKM::new(
-            true,
-            KMSMState::Transport(KMTransportState::new_empty_with_codec(codec)),
-        ));
-        let km = KeyManager::new(1, kmb);
-
-        // No need to start the machine since encrypt only cares about transport state and SA_ID.
-        km.set_sa_id(33);
 
         let hdr = ZdpBaseHeader {
             packet_type: ZdpPacketType::EchoRequest,
@@ -1082,7 +1005,7 @@ mod test {
         let orig_len = pkt.body().len();
         assert!(orig_len == 1 + std::mem::size_of::<ZdpBaseHeader>());
 
-        match km.encrypt_transport(&mut pkt) {
+        match encrypt_transport_zdp(&mut pkt, codec.clone()) {
             Ok(_) => {}
             Err(e) => {
                 panic!("encrypt_transport failed: {}", e);
@@ -1106,14 +1029,6 @@ mod test {
     #[tokio::test]
     async fn test_km_decrypt_transport_non_transit() {
         let codec = Arc::new(CopyCodec {});
-        let kmb = Box::new(TestKM::new(
-            true,
-            KMSMState::Transport(KMTransportState::new_empty_with_codec(codec)),
-        ));
-        let km = KeyManager::new(1, kmb);
-
-        // No need to start the machine since encrypt only cares about transport state and SA_ID.
-        km.set_sa_id(33);
 
         let mut buf = [0u8; PACKET_BUFFER_SIZE];
         let mut pkt = Packet::new(&mut buf, 64);
@@ -1129,14 +1044,15 @@ mod test {
         pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 33;
         let orig_len = pkt.body().len();
         assert!(orig_len == 1 + std::mem::size_of::<ZdpBaseHeader>());
-        match km.encrypt_transport(&mut pkt) {
+
+        match encrypt_transport_zdp(&mut pkt, codec.clone()) {
             Ok(_) => {}
             Err(e) => {
                 panic!("encrypt_transport failed: {}", e);
             }
         }
         assert!(pkt.body()[0] == 33); // encrypt does not touch ZPI
-        match km.decrypt_transport(&mut pkt) {
+        match decrypt_transport_zdp(&mut pkt, codec.clone()) {
             Ok(_) => {}
             Err(e) => {
                 panic!("decrypt_transport failed: {}", e);

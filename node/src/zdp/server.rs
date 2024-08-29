@@ -13,6 +13,7 @@ use tracing::info;
 use bytes::BufMut;
 
 use ph::config;
+use ph::km;
 use ph::km::{KMSignal, KeyManager};
 use ph::km_noise::KMNoise;
 use ph::packet::Packet;
@@ -110,9 +111,9 @@ impl ZDPServer {
                                 if !sent_report && tt.elapsed() > Duration::from_secs(2) {
                                     let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
                                     let mut pkt =km_demo::build_zdp_report_packet(&mut buf, b"hello to you my darling client adapter!");
-                                    let send_zpis = mgr.get_send_zpis();
-                                    pkt.body_mut()[0] = send_zpis.encr;
-                                    match mgr.encrypt_transport(&mut pkt) {
+                                    let my_sa = mgr.get_transport_state().unwrap();
+                                    pkt.body_mut()[0] = my_sa.send_zpis.encr;
+                                    match km::encrypt_transport_zdp(&mut pkt, my_sa.codec.clone()) {
                                         Ok(_) => {
                                             match s_send.send_to(&pkt.body(), cur_client.unwrap()).await {
                                                 Ok(sz) => {
@@ -217,21 +218,21 @@ impl ZDPServer {
                                 }
                                 _ => {
                                     info!("zdp/server - received transport message");
-                                    let recv_zpis = mgr.get_recv_zpis();
+                                    let my_sa = mgr.get_transport_state().unwrap();
                                     // Not sure the correct way to use these packet things.  But here we just create yet another buffer.
                                     let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
                                     let mut pkt = Packet::new(&mut pkt_buf, km_demo::HEADROOM);
                                     pkt.put(&input_buf[..read_len]);
                                     let zpi = pkt.body()[0];
-                                    if zpi == recv_zpis.encr {
+                                    if zpi == my_sa.recv_zpis.encr {
                                         info!("zdp/server - ZPI indicates encrypted transport message");
-                                    } else if zpi == recv_zpis.hmac {
+                                    } else if zpi == my_sa.recv_zpis.hmac {
                                         info!("zdp/server - ZPI indicates agent transit transport message, discarding");
                                         continue;
                                     } else {
-                                        info!("zdp/server - unexpected ZPI on message {} (expected {:?})", zpi, recv_zpis);
+                                        info!("zdp/server - unexpected ZPI on message {} (expected {:?})", zpi, my_sa.recv_zpis);
                                     }
-                                    match mgr.decrypt_transport(&mut pkt) {
+                                    match km::decrypt_transport_zdp(&mut pkt, my_sa.codec.clone()) {
                                         Ok(_) => {
                                             // Demo code sends a ZDP message like
                                             //     [ZPI]
