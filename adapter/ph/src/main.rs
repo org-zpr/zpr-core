@@ -3,12 +3,12 @@
 use cbpf_rs::bpf_code;
 use clap::Parser;
 use enum_map::{enum_map, EnumMap};
+use std::collections::HashMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::signal::unix::{signal, SignalKind};
@@ -59,10 +59,10 @@ use capture_worker::CaptureWorker;
 use counter::*;
 use counters_enum::*;
 use flow_control::FlowControl;
-use options::PhMode;
-use queues::*;
 use km::ZPIPair;
 use km_multiplexor::KmState;
+use options::PhMode;
+use queues::*;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -145,7 +145,6 @@ fn main() -> ExitCode {
     let (km_tx, mut km_rx) = mpsc::channel(km_message_queue_size);
     let km_mpx_ctok = CancellationToken::new();
     let km_state = KmState::new(km_tx, km_sig_tx, km_mpx_ctok.clone());
-
 
     /*let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
     ssl_context_builder.set_options(

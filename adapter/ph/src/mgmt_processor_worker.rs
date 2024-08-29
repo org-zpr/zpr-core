@@ -82,7 +82,9 @@ async fn handle_packet<'pktbuf>(
 
             ZdpPacketType::Discard => mgmt::handle_discard(asm, ingress_link_id, pkt).await,
 
-            ZdpPacketType::KeyManagement => mgmt::handle_key_management(asm, ingress_link_id, pkt).await,
+            ZdpPacketType::KeyManagement => {
+                mgmt::handle_key_management(asm, ingress_link_id, pkt).await
+            }
 
             ZdpPacketType::HelloRequest => {
                 mgmt::handle_hello_request(asm, ingress_link_id, pkt).await

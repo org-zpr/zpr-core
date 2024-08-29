@@ -110,7 +110,6 @@ pub enum KMSignal {
     SaIdChange { old: zpr::SaId, new: zpr::SaId },
 }
 
-
 pub struct KMTransportSA {
     pub sa_id: zpr::SaId,
     pub recv_zpis: ZPIPair,
@@ -119,8 +118,6 @@ pub struct KMTransportSA {
     pub recv_hmac_key: [u8; 32],
     pub codec: Arc<dyn Codec>,
 }
-
-
 
 pub struct KMLinkMsg<T> {
     pub link_id: zpr::LinkId,
@@ -132,7 +129,6 @@ impl<T> KMLinkMsg<T> {
         KMLinkMsg { link_id, msg }
     }
 }
-
 
 /// Stateful key manager for ZDP.  Requires an instance of a [KeyManagerStateMachine] to do the actual work.
 #[derive(Debug, Clone)]
@@ -171,7 +167,10 @@ impl fmt::Debug for KMState<'_> {
 /// some of the abstractions here may not be quite right -- yet.
 impl KeyManager<'_> {
     /// `statemachine` is the key management algorithm.
-    pub fn new<'a>(link_id: zpr::LinkId, statemachine: Box<dyn KeyManagerStateMachine>) -> KeyManager<'a> {
+    pub fn new<'a>(
+        link_id: zpr::LinkId,
+        statemachine: Box<dyn KeyManagerStateMachine>,
+    ) -> KeyManager<'a> {
         let settings = statemachine.get_settings();
 
         KeyManager {
@@ -203,8 +202,6 @@ impl KeyManager<'_> {
             codec: state.ts.codec.clone(),
         })
     }
-
-
 
     /// Returns the current SA identifier.  If handshake has completed, then this is non-zero.
     pub fn get_sa_id(&self) -> u8 {
@@ -472,14 +469,20 @@ impl KeyManager<'_> {
                 Err(e) => return Err(KMError::MachineError(e.to_string())),
             };
         }
-        match km_signals_out.send(KMLinkMsg::new(link_id, KMSignal::Reset)).await {
+        match km_signals_out
+            .send(KMLinkMsg::new(link_id, KMSignal::Reset))
+            .await
+        {
             Ok(_) => {}
             Err(_) => {
                 error!("failed to enqueue reset signal")
             }
         }
         if let Some(handshake) = handshake {
-            match km_buffers_out.send(KMLinkMsg::new(link_id, handshake)).await {
+            match km_buffers_out
+                .send(KMLinkMsg::new(link_id, handshake))
+                .await
+            {
                 Ok(_) => {}
                 Err(_) => return Err(KMError::EnqueueFailed),
             }
@@ -497,7 +500,10 @@ impl KeyManager<'_> {
             match prev_state {
                 KMSMState::Error => {
                     // If error, send reset and loop again
-                    match km_signals_out.send(KMLinkMsg::new(link_id, KMSignal::Error)).await {
+                    match km_signals_out
+                        .send(KMLinkMsg::new(link_id, KMSignal::Error))
+                        .await
+                    {
                         Ok(_) => {}
                         Err(_) => {
                             error!("failed to enqueue error signal, aborting");
@@ -514,7 +520,10 @@ impl KeyManager<'_> {
                             }
                         };
                     }
-                    match km_signals_out.send(KMLinkMsg::new(link_id, KMSignal::Reset)).await {
+                    match km_signals_out
+                        .send(KMLinkMsg::new(link_id, KMSignal::Reset))
+                        .await
+                    {
                         Ok(_) => {}
                         Err(_) => {
                             error!("failed to enqueue reset signal, aborting");
@@ -607,10 +616,13 @@ impl KeyManager<'_> {
                         }
                         info!("KM: New SA_ID: {}", cur_id);
                         match km_signals_out
-                            .send(KMLinkMsg::new(link_id, KMSignal::SaIdChange {
-                                old: prev_id,
-                                new: cur_id,
-                            }))
+                            .send(KMLinkMsg::new(
+                                link_id,
+                                KMSignal::SaIdChange {
+                                    old: prev_id,
+                                    new: cur_id,
+                                },
+                            ))
                             .await
                         {
                             Ok(_) => {}

@@ -9,6 +9,9 @@ use crate::classifier::{self, ClassifierResult};
 use crate::compress;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
+use crate::km::Codec;
+use crate::km_multiplexor::SAState;
+use crate::km_noise::NOISE_PADLEN;
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::peer_table::PeerState;
@@ -19,17 +22,13 @@ use crate::zpr;
 use blake3;
 use bytes::{Buf, BufMut};
 use std::net::SocketAddr;
-use std::time::SystemTime;
-use crate::km_multiplexor::SAState;
-use crate::km::Codec;
-use crate::km_noise::NOISE_PADLEN;
-use tracing::{info, error};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::SystemTime;
+use tracing::{error, info};
 use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
-
 
 /// Drop a packet and count the drop with the given reason.
 pub fn drop_and_count<'pktbuf>(
@@ -188,21 +187,14 @@ pub fn maybe_capture_batch<'a, 'pktbuf: 'a>(
 }
 
 /// Encrypt a ZDP packet according to its ZPI header (which is not encrypted).
-pub fn encrypt_zero<'pktbuf>(
-    pkt: &mut Packet<'pktbuf>,
-) {
+pub fn encrypt_zero<'pktbuf>(pkt: &mut Packet<'pktbuf>) {
     // RFC 6.5 § 5.25.2
     pkt.put(
-        net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..])
-            .as_slice(),
+        net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]).as_slice(),
     );
 }
 
-pub fn encrypt_hmac<'pktbuf>(
-    _send_hmac_key: [u8; 32],
-    _pkt: &mut Packet<'pktbuf>,
-) {
-
+pub fn encrypt_hmac<'pktbuf>(_send_hmac_key: [u8; 32], _pkt: &mut Packet<'pktbuf>) {
     // Run the blake hash key'd with the `send_hmac_key` on the correct parts of the packet
     // and write the (truncated) hash value to the correct header location.
 
@@ -214,11 +206,10 @@ pub fn encrypt_full<'pktbuf>(
     codec: Arc<dyn Codec>,
     pkt: &mut Packet<'pktbuf>,
 ) {
-
     // TODO: Could do some length checks here on the packet body.  Is it too short? Too long? Etc.
 
     let enc_buf = asm.buffer_stack.try_get_buffer().unwrap();
-    let encr_len = pkt.body().len() - 1;  // Everything except the ZPI byte
+    let encr_len = pkt.body().len() - 1; // Everything except the ZPI byte
 
     match codec.encrypt_transport_stateless(&pkt.body()[1..encr_len + 1], enc_buf) {
         Ok(len) => {
@@ -232,7 +223,6 @@ pub fn encrypt_full<'pktbuf>(
 
     asm.buffer_stack.put_buffer(enc_buf);
 }
-
 
 #[allow(dead_code)]
 pub enum DecryptError {
@@ -254,13 +244,9 @@ impl From<DecryptError> for CounterType {
 }
 
 /// Decrypt a ZDP packet according to its ZPI header (which is not removed).
-pub fn decrypt_zero<'pktbuf>(
-    pkt: &mut Packet<'pktbuf>,
-) -> Result<(), DecryptError> {
+pub fn decrypt_zero<'pktbuf>(pkt: &mut Packet<'pktbuf>) -> Result<(), DecryptError> {
     // RFC 6.5 § 5.25.2
-    if !net_defs::validate_inet_checksum(
-        &pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..],
-    ) {
+    if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
         return Err(DecryptError::MicvFailure);
     }
 
@@ -277,7 +263,6 @@ pub fn decrypt_hmac<'pktbuf>(
     info!("decrypt_hmac: not implemented -- NOP");
     Ok(())
 }
-
 
 /// Decrypt a ZDP packet according to its ZPI header (which is not removed).
 pub fn decrypt_full<'pktbuf>(
@@ -314,14 +299,12 @@ pub fn decrypt_full<'pktbuf>(
     Ok(())
 }
 
-
 fn substrate_egress_common<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     link_id: zpr::LinkId,
     pkt: &mut Packet<'pktbuf>,
 ) -> Option<zpr::SubstrateAddr> {
     // TODO: should we add ZDP header here also??
-
 
     let mut transit = true;
     let mut state_cache: Option<&SAState> = None;
@@ -334,7 +317,9 @@ fn substrate_egress_common<'pktbuf>(
                 // If agent transit packet, use HMAC ZPI.
                 // Else use our ENCR ZPI.
                 state_cache = Some(sa_state);
-                if let Some(zdp_hdr) = ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..]) {
+                if let Some(zdp_hdr) =
+                    ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..])
+                {
                     if zdp_hdr.packet_type == zdp::ZdpPacketType::TransitPacket {
                         sa_state.transport_sa.send_zpis.hmac
                     } else {
@@ -346,12 +331,18 @@ fn substrate_egress_common<'pktbuf>(
                     0
                 }
             } else {
-                info!("egress: link {}: SA not established so it's ZPI 0 for you", link_id);
+                info!(
+                    "egress: link {}: SA not established so it's ZPI 0 for you",
+                    link_id
+                );
                 0
             }
         }
         None => {
-            info!("egress: link {}: link not in SA table so it's ZPI 0 for you", link_id);
+            info!(
+                "egress: link {}: link not in SA table so it's ZPI 0 for you",
+                link_id
+            );
             0
         }
     };
@@ -359,7 +350,6 @@ fn substrate_egress_common<'pktbuf>(
     encap_zpi(asm, link_id, real_zpi, pkt);
 
     maybe_capture(asm, Direction::Outbound, pkt);
-
 
     // To "encrypt" we need to know which ZPI is in use, then we may need the HMAC or
     // we may need the codec.
@@ -377,7 +367,6 @@ fn substrate_egress_common<'pktbuf>(
     asm.peer_table
         .inspect(link_id, |peer_state: &PeerState| peer_state.substrate_addr)
 }
-
 
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
 /// The ZPI header will be added to the packet.
@@ -463,7 +452,12 @@ pub fn substrate_ingress<'pktbuf>(
                     }
                 } else if zpi_hdr.zpi == sa_state.transport_sa.recv_zpis.encr {
                     // TODO: Put padlen in state somewhere too
-                    match decrypt_full(asm, sa_state.transport_sa.codec.clone(), NOISE_PADLEN, &mut pkt) {
+                    match decrypt_full(
+                        asm,
+                        sa_state.transport_sa.codec.clone(),
+                        NOISE_PADLEN,
+                        &mut pkt,
+                    ) {
                         Ok(()) => true,
                         Err(err) => {
                             drop_and_count(asm, pkt, err);
@@ -472,7 +466,10 @@ pub fn substrate_ingress<'pktbuf>(
                     }
                 } else {
                     // We have an SA and ZPI does not match.
-                    info!("ingress: link {}: unexpected ZPI value {} (expected {:?})", ingress_link_id, zpi_hdr.zpi, sa_state.transport_sa.recv_zpis);
+                    info!(
+                        "ingress: link {}: unexpected ZPI value {} (expected {:?})",
+                        ingress_link_id, zpi_hdr.zpi, sa_state.transport_sa.recv_zpis
+                    );
                     drop_and_count(asm, pkt, CounterType::UnknownZpi);
                     return;
                 }
@@ -484,7 +481,10 @@ pub fn substrate_ingress<'pktbuf>(
         None => {
             // The link is not even in the SA state table. Is this possible?
             // TODO: Should we abort packet processing here?
-            error!("ingress: link {}: link not in SA state table", ingress_link_id);
+            error!(
+                "ingress: link {}: link not in SA state table",
+                ingress_link_id
+            );
             false
         }
     };
@@ -492,7 +492,10 @@ pub fn substrate_ingress<'pktbuf>(
     if !handled {
         // Not handled which means only ZPI 0 is allowed
         if zpi_hdr.zpi != 0 {
-            info!("ingress: link {}: ZPI {} not allowed on unestablished SA", ingress_link_id, zpi_hdr.zpi);
+            info!(
+                "ingress: link {}: ZPI {} not allowed on unestablished SA",
+                ingress_link_id, zpi_hdr.zpi
+            );
             drop_and_count(asm, pkt, CounterType::UnknownZpi);
             return;
         }
