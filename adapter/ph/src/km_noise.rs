@@ -817,7 +817,6 @@ mod test {
             }
         }
 
-
         // We sent the nodes response to the adapter above, so it should also have transitioned now.
         match timeout(Duration::from_secs(2), a_sig_rx.recv()).await {
             Ok(resp) => match resp {
@@ -856,8 +855,6 @@ mod test {
                 panic!("timed out waiting for adapter state transition (SaIdEstablished)");
             }
         }
-
-
 
         let adapter_sa = adapter.get_transport_state().unwrap();
         let node_sa = node.get_transport_state().unwrap();

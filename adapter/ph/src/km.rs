@@ -117,7 +117,6 @@ pub enum KMSignal {
 /// Encapsulates all the "state" set up by an SA.
 #[derive(Clone)]
 pub struct KMTransportSA {
-
     /// The SA identifier is mostly just a marker used internally.  If re-keying occurs or
     /// the identifier will increment.  A zero value indicates that the SA is not established.
     ///
@@ -140,7 +139,6 @@ pub struct KMTransportSA {
     /// This is a pointer to the encode/decode functions associated with the current SA.
     pub codec: Arc<dyn Codec>,
 }
-
 
 // Does not check the codec.
 impl PartialEq for KMTransportSA {
@@ -176,9 +174,6 @@ impl fmt::Display for KMTransportSA {
     }
 }
 
-
-
-
 /// The Key Manager emits messages on two queues, and both use this general structure.
 /// The `msg` field is either going to be a [KMSignal] or a payload for a Key Management
 /// ZDP message which will be in a [Bytes].
@@ -210,14 +205,18 @@ struct KMState<'mgr> {
     statemachine: Box<dyn KeyManagerStateMachine + 'mgr>,
     link_id: zpr::LinkId,
     kmsettings: KMSettings,
-    sa_id: zpr::SaId, // current SA identifier
+    sa_id: zpr::SaId,                     // current SA identifier
     mgmt_tx: Option<mpsc::Sender<Bytes>>, // Internal queue for key management messages to be processed.
     ts: KMTransportSA,
 }
 
 impl fmt::Debug for KMState<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "KMState {{ link_id: {}, sa_id: {} }}", self.link_id, self.sa_id)
+        write!(
+            f,
+            "KMState {{ link_id: {}, sa_id: {} }}",
+            self.link_id, self.sa_id
+        )
     }
 }
 
@@ -261,7 +260,6 @@ impl KeyManager<'_> {
             codec: state.ts.codec.clone(),
         })
     }
-
 
     /// Pass in a full Key Management payload from our peer here (should not include ZDP header).
     /// This waits until space available in our KM message queue.
@@ -499,14 +497,27 @@ impl KeyManager<'_> {
                             state.ts = my_sa.clone();
                         }
                         info!("KM: New SA_ID: {}", cur_id);
-                        match self.send_signal(&km_signals_out, link_id, KMSignal::SaIdChange { old: prev_id, new: cur_id }).await {
-                            Ok(_) => {},
+                        match self
+                            .send_signal(
+                                &km_signals_out,
+                                link_id,
+                                KMSignal::SaIdChange {
+                                    old: prev_id,
+                                    new: cur_id,
+                                },
+                            )
+                            .await
+                        {
+                            Ok(_) => {}
                             Err(_) => {
                                 error!("failed to enqueue SaIdChange signal");
                                 return Err(KMError::EnqueueFailed);
                             }
                         }
-                        match self.send_signal(&km_signals_out, link_id, KMSignal::SaEstablished(my_sa)).await {
+                        match self
+                            .send_signal(&km_signals_out, link_id, KMSignal::SaEstablished(my_sa))
+                            .await
+                        {
                             Ok(_) => {}
                             Err(_) => {
                                 error!("failed to enqueue SaIdEstablished signal");
@@ -526,18 +537,16 @@ impl KeyManager<'_> {
         Ok(())
     }
 
-
     // Helper to reduce verbosity slightly
-    fn send_signal<'a>(&self, chan: &'a mpsc::Sender<KMLinkMsg<KMSignal>>, link_id: zpr::LinkId, signal: KMSignal)
-        -> impl Future<Output = Result<(), mpsc::error::SendError<KMLinkMsg<KMSignal>>>> + 'a
-        {
-        chan.send(KMLinkMsg::new(
-            link_id,
-            signal,
-        ))
+    fn send_signal<'a>(
+        &self,
+        chan: &'a mpsc::Sender<KMLinkMsg<KMSignal>>,
+        link_id: zpr::LinkId,
+        signal: KMSignal,
+    ) -> impl Future<Output = Result<(), mpsc::error::SendError<KMLinkMsg<KMSignal>>>> + 'a {
+        chan.send(KMLinkMsg::new(link_id, signal))
     }
 }
-
 
 impl KMTransportSA {
     pub fn new(
@@ -658,9 +667,6 @@ pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMR
     Ok(())
 }
 
-
-
-
 /// The state of the [KeyManagerStateMachine].
 ///
 /// State transitions:
@@ -682,7 +688,6 @@ pub enum KMSMState {
     Transport(KMTransportSA),
     Error,
 }
-
 
 /// This "codec" must be implemented by a [KeyManagerStateMachine] to handle the actual
 /// encryption and decryption of payloads.  Note that these functions simple encrypt
@@ -744,7 +749,6 @@ pub struct ZPIPair {
     /// ZPI for header hmac only.
     pub hmac: u8,
 }
-
 
 impl ZPIPair {
     pub fn new_zero() -> ZPIPair {

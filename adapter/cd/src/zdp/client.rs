@@ -10,8 +10,8 @@ use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 
 use ph::config;
-use ph::km::{KMSignal, KeyManager};
 use ph::km;
+use ph::km::{KMSignal, KeyManager};
 use ph::km_demo;
 use ph::km_noise::KMNoise;
 use ph::packet::Packet;
