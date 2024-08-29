@@ -4,6 +4,7 @@
 use crate::km::*;
 use crate::zpr;
 use bytes::Bytes;
+use std::sync::Arc;
 use std::time;
 use std::time::Duration;
 
@@ -30,54 +31,13 @@ impl XorKeyManager {
     }
 }
 
-impl KeyManagerStateMachine for XorKeyManager {
-    fn get_settings(&self) -> KMSettings {
-        self.settings.clone()
-    }
+struct XorCodec;
 
-    fn get_state(&self) -> KMSMState {
-        self.state.clone()
-    }
-
-    fn reset(&mut self) -> Result<Option<Bytes>, KMError> {
-        self.state = KMSMState::Configuring;
-        if self.initiate {
-            let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
-            self.hello_t = time::Instant::now();
-            Ok(Some(handshake))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KMError> {
-        if self.state == KMSMState::Configuring {
-            self.state = KMSMState::Transport;
-            if !self.initiate {
-                // Did not initiate, so send a reply back.
-                let handshake_reply = Bytes::from_static(&[0, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD
-                return Ok(Some(handshake_reply));
-            }
-        }
-        Ok(None)
-    }
-
-    fn tick(&mut self) -> Result<Option<Bytes>, KMError> {
-        if self.state == KMSMState::Configuring {
-            if self.initiate && self.hello_t.elapsed() > Duration::from_secs(5) {
-                // too long, send another hello.
-                let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
-                self.hello_t = time::Instant::now();
-                return Ok(Some(handshake));
-            }
-        }
-        Ok(None)
-    }
-
+impl Codec for XorCodec {
     // Write payload "encrypted" into `message`.
     // Adds a 2 byte SIZE field at the front of the message.
-    fn encrypt_transport(
-        self: &mut Self,
+    fn encrypt_transport_stateless(
+        self: &Self,
         payload: &[u8],
         message: &mut [u8],
     ) -> Result<usize, KMError> {
@@ -96,8 +56,8 @@ impl KeyManagerStateMachine for XorKeyManager {
     }
 
     // "Decrypt" the payload, write cleartext to `message`.
-    fn decrypt_transport(
-        self: &mut Self,
+    fn decrypt_transport_stateless(
+        self: &Self,
         payload: &[u8],
         message: &mut [u8],
     ) -> Result<usize, KMError> {
@@ -122,19 +82,70 @@ impl KeyManagerStateMachine for XorKeyManager {
     }
 }
 
+impl KeyManagerStateMachine for XorKeyManager {
+    fn get_settings(&self) -> KMSettings {
+        self.settings.clone()
+    }
+
+    fn get_state(&self) -> KMSMState {
+        self.state.clone()
+    }
+
+    fn reset(&mut self) -> Result<Option<Bytes>, KMError> {
+        self.state = KMSMState::Configuring;
+        if self.initiate {
+            let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
+            self.hello_t = time::Instant::now();
+            Ok(Some(handshake))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KMError> {
+        if self.state == KMSMState::Configuring {
+            let codec = Arc::new(XorCodec {});
+            self.state = KMSMState::Transport(KMTransportState::new_empty_with_codec(codec));
+            if !self.initiate {
+                // Did not initiate, so send a reply back.
+                let handshake_reply = Bytes::from_static(&[0, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD
+                return Ok(Some(handshake_reply));
+            }
+        }
+        Ok(None)
+    }
+
+    fn tick(&mut self) -> Result<Option<Bytes>, KMError> {
+        if self.state == KMSMState::Configuring
+            && self.initiate
+            && self.hello_t.elapsed() > Duration::from_secs(5)
+        {
+            // too long, send another hello.
+            let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
+            self.hello_t = time::Instant::now();
+            return Ok(Some(handshake));
+        }
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
     fn test_encrypt_decrypt() {
-        let mut km = XorKeyManager::new(true);
         let mut buf = [0u8; 64];
         let payload = Bytes::from_static(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-        let sz = km.encrypt_transport(&payload, &mut buf).unwrap();
+        let codec = XorCodec {};
+        let sz = codec
+            .encrypt_transport_stateless(&payload, &mut buf)
+            .unwrap();
         assert_eq!(sz, 12);
         let mut decbuf = [0u8; 64];
-        let decsz = km.decrypt_transport(&buf[0..sz], &mut decbuf).unwrap();
+        let decsz = codec
+            .decrypt_transport_stateless(&buf[0..sz], &mut decbuf)
+            .unwrap();
         assert_eq!(decsz, 10);
         assert_eq!(&decbuf[0..decsz], &payload[..]);
     }

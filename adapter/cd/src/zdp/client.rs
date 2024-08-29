@@ -19,6 +19,9 @@ use ph::zdp::*;
 use bytes::BufMut;
 use zerocopy::FromBytes;
 
+const ZPI_FULL_ENC: u8 = 200;
+const ZPI_TRANSIT_HMAC: u8 = 201;
+
 #[derive(Debug, Clone)]
 pub struct ZDPClient {
     addr: SocketAddr,
@@ -35,7 +38,13 @@ impl ZDPClient {
 
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-        let noise = match KMNoise::new(true, Some(self.dock_noise_pub_key.into()), None) {
+        let noise = match KMNoise::new(
+            true,
+            Some(self.dock_noise_pub_key.into()),
+            None,
+            ZPI_FULL_ENC,
+            ZPI_TRANSIT_HMAC,
+        ) {
             Ok(n) => n,
             Err(e) => {
                 info!("zdp/client - KMNoise::new failed: {}", e);
@@ -79,6 +88,8 @@ impl ZDPClient {
                                 info!("zdp/client - new SA established");
                                 let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
                                 let mut pkt = km_demo::build_zdp_report_packet(&mut pkt_buf, b"hello to you my dear node!");
+                                let send_zpis = mgr.get_send_zpis();
+                                pkt.body_mut()[0] = send_zpis.encr;
                                 match mgr.encrypt_transport(&mut pkt) {
                                     Ok(()) => {
                                         match s_send.send(&pkt.body()).await {
@@ -133,6 +144,7 @@ impl ZDPClient {
                                 continue;
                             }
                             let zpi_hdr = zpi_hdr.unwrap();
+                            let recv_zpis = mgr.get_recv_zpis();
                             match zpi_hdr.zpi {
                                 0 => {
                                     info!("zdp/client - received ZPI=0 message");
@@ -151,30 +163,37 @@ impl ZDPClient {
                                     }
                                 }
                                 _ => {
-                                    info!("zdp/client - received transport message");
-                                    let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
-                                    let mut pkt = Packet::new(&mut pkt_buf, km_demo::HEADROOM);
-                                    pkt.put(&buf[0..input_len]);
-                                    match mgr.decrypt_transport(&mut pkt) {
-                                        Ok(()) => {
-                                            // Demo code sends a ZDP message like
-                                            //     [ZPI]
-                                            //     [BASE HEADER type = report]
-                                            //     [REPORT HEADER]
-                                            //     <STRING DATA>
-                                            match km_demo::parse_zdp_report_pkt(&pkt) {
-                                                Ok(s) => {
-                                                    info!("zdp/client - received report: *** {} ***", s);
-                                                }
-                                                Err(e) => {
-                                                    info!("zdp/client - error parsing report: {}", e);
+                                    if zpi_hdr.zpi == recv_zpis.hmac {
+                                        info!("zdp/client - received transit ZPI message, discarding");
+                                    } else if zpi_hdr.zpi == recv_zpis.encr {
+                                        info!("zdp/client - received transport message");
+                                        let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
+                                        let mut pkt = Packet::new(&mut pkt_buf, km_demo::HEADROOM);
+                                        pkt.put(&buf[0..input_len]);
+                                        match mgr.decrypt_transport(&mut pkt) {
+                                            Ok(()) => {
+                                                // Demo code sends a ZDP message like
+                                                //     [ZPI]
+                                                //     [BASE HEADER type = report]
+                                                //     [REPORT HEADER]
+                                                //     <STRING DATA>
+                                                match km_demo::parse_zdp_report_pkt(&pkt) {
+                                                    Ok(s) => {
+                                                        info!("zdp/client - received report: *** {} ***", s);
+                                                    }
+                                                    Err(e) => {
+                                                        info!("zdp/client - error parsing report: {}", e);
+                                                    }
                                                 }
                                             }
+                                            Err(e) => {
+                                                info!("zdp/client - decrypt_transport failed: {}", e);
+                                            }
                                         }
-                                        Err(e) => {
-                                            info!("zdp/client - decrypt_transport failed: {}", e);
-                                        }
+                                    } else {
+                                        info!("zdp/client - unknown ZPI: {} (expected {:?}", zpi_hdr.zpi, recv_zpis);
                                     }
+
                                 }
                             };
                         }

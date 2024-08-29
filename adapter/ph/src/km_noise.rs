@@ -15,35 +15,37 @@
 //!    [ ZDP payload or message ]
 //!
 //!
-//!    |-------- n + 16 bytes ----------||--- 8 bytes ---|
-//!    [ encrypted buffer               ][     nonce     ]
+//!    |--- 8 bytes ---||-------- n + 16 bytes ----------|
+//!    [     nonce     ][ encrypted buffer               ]
 //!
 //!    So total extra space needed by encryption is 16 + 8 = 24 bytes.
 //! ```
-//!
-//! Note that we do not handle padding here. If padding is desireable
-//! caller needs to apply padding before calling encrypt.
 //!
 //! Note that the encrypt/decrypt functions expect to operate on entire
 //! buffer.  Caller is responsible for dealing with cases when only
 //! part of the buffer is to be encrypted or decrypted.
 //!
 //!
-//! Note you can create noise keys with the `wg` command line tool on recent versions of linux.
+//! Note you can create 32 byte noise keys with the `wg` command line tool on recent versions of linux.
 //! For example, to generate a private key: `wg genkey`.  Then you can pass that private key
 //! into `wg pubkey` to get the public key.  You can also generate keys using `openssl`, eg
-//! `openssl genpkey -algorithm x25519`.
+//! `openssl genpkey -algorithm x25519` (but this generates 48 byte keys instead of 32, so
+//! you will need to do some editing to get the expected size).
 
 use crate::km::*;
 use crate::zpr;
 use bytes::{Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
+use openssl::rand::rand_bytes;
+use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::error;
+use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
-static PATTERN: &'static str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
-const NOISE_PADLEN: usize = 24; // 16 byte tag + 8 byte nonce
+const NOISE_NONCE_LEN: usize = 8;
+const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce
 
 impl From<snow::Error> for KMError {
     fn from(e: snow::Error) -> KMError {
@@ -51,8 +53,6 @@ impl From<snow::Error> for KMError {
     }
 }
 
-/// Not multi-thread safe.
-/// TODO: Figure out how to make encryption/decryption parallelizable.
 pub struct KMNoise {
     settings: KMSettings,
     state: KMSMState,
@@ -60,7 +60,19 @@ pub struct KMNoise {
     peer_pub_key: Option<Vec<u8>>, // required if initiator
     local_keypair: snow::Keypair,
     hs_state: Option<snow::HandshakeState>,
-    t_state: Option<snow::TransportState>,
+    //t_state: Option<snow::TransportState>,
+    recv_hmac_key: [u8; 32], // messages sent to us from peer will use this key (we create this)
+    send_hmac_key: Option<[u8; 32]>, // messages sent to peer will use this key (peers creates this)
+    recv_zpis: ZPIPair,
+    send_zpis: Option<ZPIPair>,
+}
+
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+struct KeyMsg {
+    pub zpi_full_encr: u8,
+    pub zpi_transit_hmac: u8,
+    pub hmac_key: [u8; 32],
 }
 
 impl KMNoise {
@@ -69,12 +81,19 @@ impl KMNoise {
     /// This requires Noise keys.  Eventually (TODO) we will also pass certificates through here
     /// so that each side can check for certificate authority signautre.
     ///
+    /// The ZPI stuff here is definately first pass. Currently there is no way to change the
+    /// ZPI values.  The ZPIs passed in here are sent to the peer for use in messages sent to us.
+    ///
     /// - `peer_pub_key` is required for initiator, and should match the `local_keypair` of the responder.
     /// - `local_keypair` is optional. If not provided, a new keypair will be generated.
+    /// - `zpi_full_encr` is the ZPI peer should use for full encryption messages.
+    /// - `zpi_transmit_hmac` is the ZPI peer should use for HMAC encrypted messages.
     pub fn new(
         initiate: bool,
         peer_pub_key: Option<Vec<u8>>,
         local_keypair: Option<snow::Keypair>,
+        zpi_full_encr: u8,
+        zpi_transmit_hmac: u8,
     ) -> Result<Self, KMError> {
         if initiate && peer_pub_key.is_none() {
             error!("noise: peer public key required for initiator");
@@ -94,7 +113,6 @@ impl KMNoise {
         } else {
             kp = snow::Builder::new(PATTERN.parse()?).generate_keypair()?;
         }
-
         Ok(KMNoise {
             settings,
             state: KMSMState::Configuring,
@@ -102,8 +120,27 @@ impl KMNoise {
             peer_pub_key,
             local_keypair: kp,
             hs_state: None,
-            t_state: None,
+            recv_hmac_key: [0u8; 32], // we generate this and send to peer
+            send_hmac_key: None,      // we get this during handshake
+            recv_zpis: ZPIPair {
+                encr: zpi_full_encr,
+                hmac: zpi_transmit_hmac,
+            },
+            send_zpis: None,
         })
+    }
+
+    pub fn get_recv_hmac_key(&self) -> [u8; 32] {
+        self.recv_hmac_key
+    }
+
+    pub fn get_send_hmac_key(&self) -> Option<[u8; 32]> {
+        self.send_hmac_key
+    }
+
+    /// Returns the ZPIs for sending
+    pub fn get_send_zpis(&self) -> Option<ZPIPair> {
+        self.send_zpis
     }
 }
 
@@ -111,6 +148,55 @@ impl KMNoise {
 pub fn derive_public_key(private_key: &[u8; 32]) -> [u8; 32] {
     let point = MontgomeryPoint::mul_base_clamped(*private_key);
     point.to_bytes()
+}
+
+struct NoiseCodec {
+    snow_state: snow::StatelessTransportState,
+}
+
+impl Codec for NoiseCodec {
+    fn encrypt_transport_stateless(
+        self: &Self,
+        payload: &[u8],
+        message: &mut [u8],
+    ) -> Result<usize, KMError> {
+        rand_bytes(&mut message[..NOISE_NONCE_LEN]).unwrap();
+        let nonce = u64::from_be_bytes(message[..NOISE_NONCE_LEN].try_into().unwrap());
+        match self
+            .snow_state
+            .write_message(nonce, payload, &mut message[NOISE_NONCE_LEN..])
+        {
+            Ok(len) => Ok(len + NOISE_NONCE_LEN),
+            Err(e) => {
+                error!("noise: error encrypting message: {:?}", e);
+                Err(KMError::EncryptionError)
+            }
+        }
+    }
+
+    fn decrypt_transport_stateless(
+        self: &Self,
+        payload: &[u8],
+        message: &mut [u8],
+    ) -> Result<usize, KMError> {
+        // nonce is first 8 bytes of the message.
+        let plen = payload.len();
+        if plen < NOISE_NONCE_LEN {
+            error!("noise: message too short");
+            return Err(KMError::EncryptionError);
+        }
+        let nonce: u64 = u64::from_be_bytes(payload[0..NOISE_NONCE_LEN].try_into().unwrap());
+        match self
+            .snow_state
+            .read_message(nonce, &payload[NOISE_NONCE_LEN..plen], message)
+        {
+            Ok(len) => Ok(len),
+            Err(e) => {
+                error!("noise: error decrypting message: {:?}", e);
+                Err(KMError::EncryptionError)
+            }
+        }
+    }
 }
 
 impl KeyManagerStateMachine for KMNoise {
@@ -132,6 +218,8 @@ impl KeyManagerStateMachine for KMNoise {
                 return Err(KMError::ConfigurationError);
             }
         };
+        rand_bytes(&mut self.recv_hmac_key).unwrap(); // generate an HMAC key
+        self.send_hmac_key = None;
         if self.initiate {
             let rpk = self.peer_pub_key.as_ref().unwrap();
             let mut initiator = match snow::Builder::new(np)
@@ -151,7 +239,12 @@ impl KeyManagerStateMachine for KMNoise {
             };
 
             let mut buf = BytesMut::zeroed(1024);
-            let len = match initiator.write_message(&b"todo:cert here"[..], &mut buf) {
+            let km = KeyMsg {
+                zpi_full_encr: self.recv_zpis.encr,
+                zpi_transit_hmac: self.recv_zpis.hmac,
+                hmac_key: self.recv_hmac_key,
+            };
+            let len = match initiator.write_message(km.as_bytes(), &mut buf) {
                 Ok(l) => l,
                 Err(e) => {
                     error!("noise: error writing handshake message: {:?}", e);
@@ -194,14 +287,31 @@ impl KeyManagerStateMachine for KMNoise {
             }
             if self.hs_state.is_some() {
                 hs = self.hs_state.take().unwrap();
-                let mut buf = BytesMut::zeroed(1024);
-                match hs.read_message(message, &mut buf) {
+                let mut payload = BytesMut::zeroed(1024);
+                // Our IK pattern has two handshake messages. In each we expect to find a KeyMsg in the payload.
+                match hs.read_message(&message[..], &mut payload) {
                     Ok(len) => {
                         // TODO: In future we plan to send the certificate over in the first handshake message buffer.
-                        info!(
-                            "noise: got {} byte payload in handshake message, ignoring",
-                            len
-                        );
+                        if len < std::mem::size_of::<KeyMsg>() {
+                            error!("noise: handshake payload is too short: {}", len);
+                            self.state = KMSMState::Error;
+                            self.hs_state = Some(hs);
+                            return Err(KMError::HandshakeError);
+                        }
+                        let km = match KeyMsg::ref_from_prefix(&payload[..len]) {
+                            Some(k) => k,
+                            None => {
+                                error!("noise: error parsing KeyMsg handshake payload");
+                                self.state = KMSMState::Error;
+                                self.hs_state = Some(hs);
+                                return Err(KMError::HandshakeError);
+                            }
+                        };
+                        self.send_zpis = Some(ZPIPair {
+                            encr: km.zpi_full_encr,
+                            hmac: km.zpi_transit_hmac,
+                        });
+                        self.send_hmac_key = Some(km.hmac_key);
                     }
                     Err(e) => {
                         error!("noise: error handling handhsake message: {:?}", e);
@@ -214,8 +324,13 @@ impl KeyManagerStateMachine for KMNoise {
                 let mut hs_msg: Option<Bytes> = None;
 
                 if !hs.is_handshake_finished() {
+                    let payload = KeyMsg {
+                        zpi_full_encr: self.recv_zpis.encr,
+                        zpi_transit_hmac: self.recv_zpis.hmac,
+                        hmac_key: self.recv_hmac_key,
+                    };
                     let mut buf = BytesMut::zeroed(1024);
-                    match hs.write_message(&[], &mut buf) {
+                    match hs.write_message(payload.as_bytes(), &mut buf) {
                         Ok(len) => {
                             buf.truncate(len);
                             hs_msg = Some(buf.freeze());
@@ -230,10 +345,30 @@ impl KeyManagerStateMachine for KMNoise {
                 }
 
                 if hs.is_handshake_finished() {
-                    match hs.into_transport_mode() {
+                    let send_zpis = match self.send_zpis {
+                        Some(z) => z,
+                        None => {
+                            error!("noise: handshake finished by no ZPIs received");
+                            ZPIPair::new_zero()
+                        }
+                    };
+                    let send_key = match self.send_hmac_key {
+                        Some(h) => h,
+                        None => {
+                            error!("noise: XXX handshake finished by no HMAC key received");
+                            [0u8; 32]
+                        }
+                    };
+                    match hs.into_stateless_transport_mode() {
                         Ok(t) => {
-                            self.t_state = Some(t);
-                            self.state = KMSMState::Transport;
+                            let codec = Arc::new(NoiseCodec { snow_state: t });
+                            self.state = KMSMState::Transport(KMTransportState::new(
+                                send_zpis,
+                                self.recv_zpis,
+                                send_key,
+                                self.recv_hmac_key,
+                                codec,
+                            ));
                         }
                         Err(e) => {
                             error!("noise: error switching to transport mode: {:?}", e);
@@ -255,10 +390,30 @@ impl KeyManagerStateMachine for KMNoise {
             if self.hs_state.is_some() {
                 hs = self.hs_state.take().unwrap();
                 if hs.is_handshake_finished() {
-                    match hs.into_transport_mode() {
+                    let send_zpis = match self.send_zpis {
+                        Some(z) => z,
+                        None => {
+                            error!("noise: handshake finished by no ZPIs received");
+                            ZPIPair::new_zero()
+                        }
+                    };
+                    let send_key = match self.send_hmac_key {
+                        Some(h) => h,
+                        None => {
+                            error!("noise: handshake finished by no HMAC key received");
+                            [0u8; 32]
+                        }
+                    };
+                    match hs.into_stateless_transport_mode() {
                         Ok(t) => {
-                            self.t_state = Some(t);
-                            self.state = KMSMState::Transport;
+                            let codec = Arc::new(NoiseCodec { snow_state: t });
+                            self.state = KMSMState::Transport(KMTransportState::new(
+                                send_zpis,
+                                self.recv_zpis,
+                                send_key,
+                                self.recv_hmac_key,
+                                codec,
+                            ));
                             return Ok(None);
                         }
                         Err(e) => {
@@ -273,61 +428,6 @@ impl KeyManagerStateMachine for KMNoise {
             }
         }
         Ok(None)
-    }
-
-    fn encrypt_transport(
-        self: &mut Self,
-        payload: &[u8],
-        message: &mut [u8],
-    ) -> Result<usize, KMError> {
-        let ts = match &mut self.t_state {
-            Some(t) => t,
-            None => {
-                error!("noise: encrypt_transport called in wrong state");
-                return Err(KMError::InvalidState);
-            }
-        };
-        let nonce = ts.sending_nonce();
-        match ts.write_message(payload, message) {
-            Ok(len) => {
-                message[len..len + 8].copy_from_slice(&nonce.to_be_bytes());
-                Ok(len + 8)
-            }
-            Err(e) => {
-                error!("noise: error encrypting message: {:?}", e);
-                Err(KMError::EncryptionError)
-            }
-        }
-    }
-
-    fn decrypt_transport(
-        self: &mut Self,
-        payload: &[u8],
-        message: &mut [u8],
-    ) -> Result<usize, KMError> {
-        let ts = match &mut self.t_state {
-            Some(t) => t,
-            None => {
-                error!("noise: decrypt_transport called in wrong state");
-                return Err(KMError::InvalidState);
-            }
-        };
-        // nonce is last 8 bytes in the message.
-        let plen = payload.len();
-        if plen < 8 {
-            error!("noise: message too short");
-            return Err(KMError::EncryptionError);
-        }
-        let nonce: u64 = u64::from_be_bytes(payload[plen - 8..].try_into().unwrap());
-
-        ts.set_receiving_nonce(nonce);
-        match ts.read_message(&payload[..plen - 8], message) {
-            Ok(len) => Ok(len),
-            Err(e) => {
-                error!("noise: error decrypting message: {:?}", e);
-                Err(KMError::EncryptionError)
-            }
-        }
     }
 }
 
@@ -353,10 +453,10 @@ mod test {
             }
         };
 
-        let mut initiator = KMNoise::new(true, Some(node_kp.public.to_vec()), None).unwrap();
+        let mut initiator = KMNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
         assert!(initiator.get_state() == KMSMState::Configuring);
 
-        let mut responder = KMNoise::new(false, None, Some(node_kp)).unwrap();
+        let mut responder = KMNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
         assert!(responder.get_state() == KMSMState::Configuring);
 
         let handshake_msg_0 = match initiator.reset() {
@@ -369,7 +469,7 @@ mod test {
             }
         };
         assert!(
-            handshake_msg_0.len() == 110,
+            handshake_msg_0.len() == 130,
             "unexpected handshake message-0 length, got {}",
             handshake_msg_0.len()
         );
@@ -394,11 +494,11 @@ mod test {
             }
         };
         assert!(
-            handshake_msg_1.len() == 48,
+            handshake_msg_1.len() == 82,
             "unexpected handshake message-1 length, got {}",
             handshake_msg_1.len()
         );
-        assert!(responder.get_state() == KMSMState::Transport);
+        assert!(matches!(responder.get_state(), KMSMState::Transport { .. }));
 
         // <- e, ee, se
         match initiator.handle_message(&handshake_msg_1) {
@@ -408,14 +508,24 @@ mod test {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
         };
-        assert!(initiator.get_state() == KMSMState::Transport);
+        assert!(matches!(initiator.get_state(), KMSMState::Transport { .. }));
 
         // Handshake complete, now we can encrypt/decrypt
+
+        let i_transport = match initiator.get_state() {
+            KMSMState::Transport(t) => t,
+            _ => {
+                panic!("unexpected state after handshake");
+            }
+        };
 
         let plaintext = b"hello world";
 
         let mut out_buf = [0u8; 4096];
-        let out_len = match initiator.encrypt_transport(plaintext, &mut out_buf) {
+        let out_len = match i_transport
+            .codec
+            .encrypt_transport_stateless(plaintext, &mut out_buf)
+        {
             Ok(l) => l,
             Err(e) => {
                 panic!("error encrypting message: {:?}", e);
@@ -430,8 +540,18 @@ mod test {
             out_len
         );
 
+        let r_transport = match responder.get_state() {
+            KMSMState::Transport(t) => t,
+            _ => {
+                panic!("unexpected state after handshake");
+            }
+        };
+
         let mut in_buf = [0u8; 4096];
-        let in_len = match responder.decrypt_transport(&out_buf[..out_len], &mut in_buf) {
+        let in_len = match r_transport
+            .codec
+            .decrypt_transport_stateless(&out_buf[..out_len], &mut in_buf)
+        {
             Ok(l) => l,
             Err(e) => {
                 panic!("error decrypting message: {:?}", e);
@@ -466,10 +586,10 @@ mod test {
             public: nk_public.into(),
         };
 
-        let mut initiator = KMNoise::new(true, Some(node_kp.public.to_vec()), None).unwrap();
+        let mut initiator = KMNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
         assert!(initiator.get_state() == KMSMState::Configuring);
 
-        let mut responder = KMNoise::new(false, None, Some(node_kp)).unwrap();
+        let mut responder = KMNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
         assert!(responder.get_state() == KMSMState::Configuring);
 
         let handshake_msg_0 = match initiator.reset() {
@@ -482,7 +602,7 @@ mod test {
             }
         };
         assert!(
-            handshake_msg_0.len() == 110,
+            handshake_msg_0.len() == 130,
             "unexpected handshake message-0 length, got {}",
             handshake_msg_0.len()
         );
@@ -507,11 +627,11 @@ mod test {
             }
         };
         assert!(
-            handshake_msg_1.len() == 48,
+            handshake_msg_1.len() == 82,
             "unexpected handshake message-1 length, got {}",
             handshake_msg_1.len()
         );
-        assert!(responder.get_state() == KMSMState::Transport);
+        assert!(matches!(responder.get_state(), KMSMState::Transport { .. }));
 
         // <- e, ee, se
         match initiator.handle_message(&handshake_msg_1) {
@@ -521,7 +641,28 @@ mod test {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
         };
-        assert!(initiator.get_state() == KMSMState::Transport);
+        assert!(matches!(initiator.get_state(), KMSMState::Transport { .. }));
+
+        // At this point each side should know the others hmac key, and the ZPIs should have been exchanged.
+
+        assert!(initiator.get_recv_hmac_key() != [0u8; 32]);
+        assert!(initiator.get_send_hmac_key().is_some()); // must have been recieved
+
+        assert!(responder.get_recv_hmac_key() != [0u8; 32]);
+        assert!(responder.get_send_hmac_key().is_some()); // must have been recieved
+
+        assert!(initiator.get_recv_hmac_key() == responder.get_send_hmac_key().unwrap());
+        assert!(responder.get_recv_hmac_key() == initiator.get_send_hmac_key().unwrap());
+
+        assert!(initiator.get_send_zpis().is_some());
+        let initiator_zpis = initiator.get_send_zpis().unwrap();
+        assert!(initiator_zpis.encr == 3);
+        assert!(initiator_zpis.hmac == 4);
+
+        assert!(responder.get_send_zpis().is_some());
+        let responder_zpis = responder.get_send_zpis().unwrap();
+        assert!(responder_zpis.encr == 1);
+        assert!(responder_zpis.hmac == 2);
     }
 
     #[tokio::test]
@@ -534,8 +675,8 @@ mod test {
             }
         };
 
-        let initiator = KMNoise::new(true, Some(node_kp.public.to_vec()), None).unwrap();
-        let responder = KMNoise::new(false, None, Some(node_kp)).unwrap();
+        let initiator = KMNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
+        let responder = KMNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
 
         let adapter = km::KeyManager::new(Box::new(initiator));
         let node = km::KeyManager::new(Box::new(responder));
@@ -684,13 +825,33 @@ mod test {
             }
         }
 
-        // Finally, both should hve same SA-ID
+        // Both should hve same SA-ID
         assert!(
             adapter.get_sa_id() == node.get_sa_id(),
             "SA-ID mismatch: adapter={}, node={}",
             adapter.get_sa_id(),
             node.get_sa_id()
         );
+
+        // ZPIs should be exchanged.
+        assert!(
+            ZPIPair::new(3, 4) == adapter.get_send_zpis(),
+            "adapter send ZPIs mismatch: {:?}",
+            adapter.get_send_zpis()
+        );
+        assert!(ZPIPair::new(1, 2) == adapter.get_recv_zpis());
+        assert!(
+            ZPIPair::new(1, 2) == node.get_send_zpis(),
+            "node send ZPIs mismatch: {:?}",
+            node.get_send_zpis()
+        );
+        assert!(ZPIPair::new(3, 4) == node.get_recv_zpis());
+
+        // HMAC keys created
+        assert!(adapter.get_recv_hmac_key() != [0u8; 32]);
+        assert!(adapter.get_send_hmac_key() != [0u8; 32]);
+        assert!(node.get_recv_hmac_key() != [0u8; 32]);
+        assert!(node.get_send_hmac_key() != [0u8; 32]);
 
         ctok.cancel()
     }

@@ -29,8 +29,8 @@ pub const ZDP_REPORT_HDR_OFFSET: usize = ZDP_NON_PER_FLOW_MGMT_HEADER_OFFSET;
 pub const ZDP_REPORT_DATA_OFFSET: usize =
     ZDP_REPORT_HDR_OFFSET + std::mem::size_of::<ZdpReportHeader>();
 
-/// Note no ZPI is added.
-/// Creates a packet like: [ZdpBaseHeader]|[ZdpReportHeader]|<report_data>
+/// Creates a packet like: [ZdpZpiHeader][ZdpBaseHeader]|[ZdpReportHeader]|<report_data>
+/// ZPI set to zero.
 pub fn build_zdp_report_packet<'buf>(
     pbuf: &'buf mut [u8; config::PACKET_BUFFER_SIZE],
     report_data: &[u8],
@@ -46,7 +46,7 @@ pub fn build_zdp_report_packet<'buf>(
     zdp_hdr.excess_length = 0;
     zdp_hdr.sequence_number = 0.into();
 
-    // Do not add ZPI here - SA_ID is added by KM.
+    pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 0;
 
     pkt.put(&report_data[..]);
     pkt
