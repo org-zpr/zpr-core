@@ -13,12 +13,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 /// Global state for the KM system.
-/// TODO: Move to assembly?  Make this private.  Who accesses this?
+/// TODO: Move to assembly?
 pub struct KmState<'pktbuf> {
-    pub ctok: CancellationToken,
-    pub km_tx: mpsc::Sender<KMLinkMsg<Bytes>>,
-    pub km_sig_tx: mpsc::Sender<KMLinkMsg<KMSignal>>,
-    pub inner: Mutex<KmStateInner<'pktbuf>>,
+    // This token is used to create cancellation tokens for all the link KeyManager state machines.
+    // So cancellign this will shutdown them all.
+    ctok: CancellationToken,
+    km_tx: mpsc::Sender<KMLinkMsg<Bytes>>,
+    km_sig_tx: mpsc::Sender<KMLinkMsg<KMSignal>>,
+    inner: Mutex<KmStateInner<'pktbuf>>,
 }
 pub struct KmStateInner<'pktbuf> {
     km_table: HashMap<zpr::LinkId, KMHandle<'pktbuf>>, // Not sure how to set the lifetime variable here.
@@ -50,10 +52,10 @@ impl<'pktbuf> KmState<'pktbuf> {
 // Which for us is forever -- since map should be created on KmState and stored
 // forever in the Assembly.
 //
-// TODO: move to assembly? Make private?
+// TODO: move to assembly?
 pub struct KMHandle<'pktbuf> {
-    pub ctok: CancellationToken,
-    pub mgr: KeyManager<'pktbuf>, // The manager must remnain valid for lifetime of the link
+    ctok: CancellationToken,
+    mgr: KeyManager<'pktbuf>, // The manager must remnain valid for lifetime of the link
 }
 
 /// SAState is placed in the assembly so that other parts of the code can check
