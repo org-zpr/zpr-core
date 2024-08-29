@@ -108,26 +108,18 @@ async fn worker<'pktbuf>(
                 info!("km_multiplexor: signal {:?} on link {}", linkmsg.msg, linkmsg.link_id);
                 match linkmsg.msg {
                     KMSignal::SaIdChange { old, new } => {
-                        if old == 0 && new > 0 {
+                        info!("km_multiplexor: SA ID change on link {}: {} -> {}", linkmsg.link_id, old, new);
+                    }
+                    KMSignal::SaEstablished(sa) => {
                             let mut state_db = state_table_p.lock().unwrap();
                             if let Some(sa_state) = state_db.get_mut(&linkmsg.link_id) {
-                                if sa_state.sa_established.load(Ordering::Relaxed) {
-                                    error!("km_multiplexor: SA state already established for link {}", linkmsg.link_id);
-                                }
-                                if let Some(handle) = asm.km_state.inner.lock().unwrap().km_table.get(&linkmsg.link_id) {
-                                    // Copy values out of the manager
-                                    // TODO: Should check to make sure get_transport_state returns Some...
-                                    sa_state.transport_sa = handle.mgr.get_transport_state().unwrap();
-                                    sa_state.sa_established.store(true, Ordering::Relaxed);
-                                } else {
-                                    error!("km_multiplexor: no KM handle for link {}", linkmsg.link_id);
-                                }
+                                sa_state.transport_sa = sa;
+                                sa_state.sa_established.store(true, Ordering::Relaxed);
                             } else {
                                 error!("km_multiplexor: no SA state for link {}", linkmsg.link_id);
                             }
-                        }
                     }
-                    _ => {}
+                    _ => {} // TODO: Handle other signals.
                 }
             }
         }

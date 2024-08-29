@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
+use std::future::Future;
 use std::time::Duration;
 
 use std::fmt;
@@ -106,10 +107,11 @@ pub enum KMSignal {
     /// If the state machine transitions into the error state.
     Error,
 
-    /// When the SA_ID changes.
-    // XXX TODO - pass a KMTransportSA back here if sa is actually valid or make two signals.
-    //     one indicating valid SA, one indicating invalid.  Do we even handle going invalid yet?
+    /// When the SA_ID changes.  Note that if new is zero then the SA is no longer established.
     SaIdChange { old: zpr::SaId, new: zpr::SaId },
+
+    /// When a security association is established.
+    SaEstablished(KMTransportSA),
 }
 
 /// Encapsulates all the "state" set up by an SA.
@@ -210,7 +212,7 @@ struct KMState<'mgr> {
     kmsettings: KMSettings,
     sa_id: zpr::SaId, // current SA identifier
     mgmt_tx: Option<mpsc::Sender<Bytes>>, // Internal queue for key management messages to be processed.
-    ts: KMTransportSA, // XXX TODO: Option?
+    ts: KMTransportSA,
 }
 
 impl fmt::Debug for KMState<'_> {
@@ -258,11 +260,6 @@ impl KeyManager<'_> {
         })
     }
 
-    #[cfg(test)]
-    fn set_sa_id(&self, sa_id: u8) {
-        let mut state = self.shared.state.lock().unwrap();
-        state.sa_id = sa_id;
-    }
 
     /// Pass in a full Key Management payload from our peer here (should not include ZDP header).
     /// This waits until space available in our KM message queue.
@@ -412,7 +409,8 @@ impl KeyManager<'_> {
                         match km_buffers_out.send(KMLinkMsg::new(link_id, resp)).await {
                             Ok(_) => {}
                             Err(_) => {
-                                error!("failed to enqueue outbound KM message")
+                                error!("failed to enqueue outbound KM message");
+                                return Err(KMError::EnqueueFailed);
                             }
                         }
                     }
@@ -440,7 +438,8 @@ impl KeyManager<'_> {
                                 match km_buffers_out.send(KMLinkMsg::new(link_id, resp)).await {
                                     Ok(_) => {},
                                     Err(_) => {
-                                        error!("failed to enqueue outbound KM message")
+                                        error!("failed to enqueue outbound KM message");
+                                        return Err(KMError::EnqueueFailed);
                                     }
                                 }
                             }
@@ -462,7 +461,8 @@ impl KeyManager<'_> {
                                 match km_buffers_out.send(KMLinkMsg::new(link_id, resp)).await {
                                     Ok(_) => {},
                                     Err(_) => {
-                                        error!("failed to enqueue oubound KM message")
+                                        error!("failed to enqueue oubound KM message");
+                                        return Err(KMError::EnqueueFailed);
                                     }
                                 }
                             }
@@ -482,6 +482,7 @@ impl KeyManager<'_> {
                     KMSMState::Transport(ts) => {
                         let prev_id: zpr::SaId;
                         let cur_id: zpr::SaId;
+                        let mut my_sa = ts.clone();
                         {
                             let mut state = self.shared.state.lock().unwrap();
                             prev_id = state.sa_id;
@@ -491,24 +492,22 @@ impl KeyManager<'_> {
                             }
                             cur_id = state.sa_id;
                             // Capture the SA and update the SA_ID.
-                            let mut my_sa = ts.clone();
                             my_sa.sa_id = cur_id;
-                            state.ts = my_sa;
+                            state.ts = my_sa.clone();
                         }
                         info!("KM: New SA_ID: {}", cur_id);
-                        match km_signals_out
-                            .send(KMLinkMsg::new(
-                                link_id,
-                                KMSignal::SaIdChange {
-                                    old: prev_id,
-                                    new: cur_id,
-                                },
-                            ))
-                            .await
-                        {
+                        match self.send_signal(&km_signals_out, link_id, KMSignal::SaIdChange { old: prev_id, new: cur_id }).await {
+                            Ok(_) => {},
+                            Err(_) => {
+                                error!("failed to enqueue SaIdChange signal");
+                                return Err(KMError::EnqueueFailed);
+                            }
+                        }
+                        match self.send_signal(&km_signals_out, link_id, KMSignal::SaEstablished(my_sa)).await {
                             Ok(_) => {}
                             Err(_) => {
-                                error!("failed to enqueue SaIdChange signal")
+                                error!("failed to enqueue SaIdEstablished signal");
+                                return Err(KMError::EnqueueFailed);
                             }
                         }
                     }
@@ -522,6 +521,17 @@ impl KeyManager<'_> {
         }
 
         Ok(())
+    }
+
+
+    // Helper to reduce verbosity slightly
+    fn send_signal<'a>(&self, chan: &'a mpsc::Sender<KMLinkMsg<KMSignal>>, link_id: zpr::LinkId, signal: KMSignal)
+        -> impl Future<Output = Result<(), mpsc::error::SendError<KMLinkMsg<KMSignal>>>> + 'a
+        {
+        chan.send(KMLinkMsg::new(
+            link_id,
+            signal,
+        ))
     }
 }
 
@@ -618,7 +628,6 @@ pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMR
     if message.body().len() < 1 {
         return Err(KMError::ShortPacket);
     }
-    let padlen: usize;
 
     let encr_len = message.body().len() - 1;
     if encr_len == 0 {

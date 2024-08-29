@@ -777,7 +777,7 @@ mod test {
             }
         }
 
-        // And node should have transitioned;
+        // And node should have transitioned which will generate two signals: SaIdChange, and SaEstablished
         match timeout(Duration::from_secs(2), n_sig_rx.recv()).await {
             Ok(resp) => match resp {
                 Some(linkmsg) => match linkmsg.msg {
@@ -797,6 +797,25 @@ mod test {
                 panic!("timed out waiting for node state transition");
             }
         }
+        match timeout(Duration::from_secs(2), n_sig_rx.recv()).await {
+            Ok(resp) => match resp {
+                Some(linkmsg) => match linkmsg.msg {
+                    km::KMSignal::SaEstablished(ts) => {
+                        assert!(ts.sa_id > 0, "SA_ID is still zero!");
+                    }
+                    _ => {
+                        panic!("unexpected signal from node: {:?}", linkmsg.msg);
+                    }
+                },
+                None => {
+                    panic!("timed out or failed waiting for SaIdEstablished signal");
+                }
+            },
+            Err(_) => {
+                panic!("timed out waiting for node state transition (SaIdEstablished)");
+            }
+        }
+
 
         // We sent the nodes response to the adapter above, so it should also have transitioned now.
         match timeout(Duration::from_secs(2), a_sig_rx.recv()).await {
@@ -818,6 +837,26 @@ mod test {
                 panic!("timed out waiting for adapter state transition");
             }
         }
+        match timeout(Duration::from_secs(2), a_sig_rx.recv()).await {
+            Ok(resp) => match resp {
+                Some(linkmsg) => match linkmsg.msg {
+                    km::KMSignal::SaEstablished(ts) => {
+                        assert!(ts.sa_id > 0, "adapter SA_ID is still zero!");
+                    }
+                    _ => {
+                        panic!("unexpected signal from adapter: {:?}", linkmsg.msg);
+                    }
+                },
+                None => {
+                    panic!("timed out or failed waiting for SaIdEstablished signal from adapter");
+                }
+            },
+            Err(_) => {
+                panic!("timed out waiting for adapter state transition (SaIdEstablished)");
+            }
+        }
+
+
 
         let adapter_sa = adapter.get_transport_state().unwrap();
         let node_sa = node.get_transport_state().unwrap();
