@@ -308,12 +308,9 @@ fn main() -> ExitCode {
 
 
 
-            // TODO: Shoudl this multiplexor go in assembly?
-            // let mut km_mpx = Box::leak(Box::new(Multiplexor::new(km_tx, mp_ctok.clone())));
-            // km_mpx.launch(&*asm);
-
-            let dock_noise_key = [0; 32]; // XXX TODO
-            km_multiplexor::add_adapter_link(asm, adapter_docking_session_id, ZPIPair::new(1, 2), dock_noise_key)
+            // TODO: Should this multiplexor go in assembly?
+            let dock_noise_public_key = [0; 32]; // XXX TODO
+            km_multiplexor::add_adapter_link(asm, adapter_docking_session_id, ZPIPair::new(1, 2), dock_noise_public_key)
                 .unwrap();
 
             // TODO signal handler goes here

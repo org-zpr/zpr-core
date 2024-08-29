@@ -83,9 +83,7 @@ pub struct Assembly<'pktbuf> {
     //       And then updates to records occur after handshake completes.  In the future there will
     //       be updates when rekeying occurs.
     //
-    // TODO: Using the 'pktbuf lifetime on the state is I think not right. We the state only needs
-    //       to live as long as the link, the assembly here lives forever.
-    pub sa_states: Arc<Mutex<HashMap<zpr::LinkId, SAState>>>, // XXX REMOVE THIS -- use km_state
+    pub sa_states: Arc<Mutex<HashMap<zpr::LinkId, SAState>>>,
 }
 
 pub struct SyncReqState<'pktbuf> {

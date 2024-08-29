@@ -437,7 +437,6 @@ pub fn substrate_ingress<'pktbuf>(
     // If a ZPI is setup on this link, then we expect the message to use one of the valid
     // ZPI values.  Need to check spec, but I think best to drop any ZPI 0 packets IF we
     // have an SA established.
-    //let mut state_cache: Option<&SAState> = None;
     let sa_table = asm.sa_states.lock().unwrap();
     let handled = match sa_table.get(&ingress_link_id) {
         Some(sa_state) => {

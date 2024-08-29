@@ -171,7 +171,7 @@ pub fn add_adapter_link(
 /// Creates a new KeyManager for the link and starts its state machine.  A node link waits for a
 /// KM initiator.
 ///
-/// - `local_noise_key` is the local noise key for the dock (public key is shared out of band with adapters).
+/// - `local_noise_key` is the local noise key for the dock (public part of this key must be shared out of band with adapters).
 #[allow(dead_code)]
 pub fn add_node_link(
     asm: &'static Assembly,
