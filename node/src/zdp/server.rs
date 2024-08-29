@@ -80,7 +80,7 @@ impl ZDPServer {
         };
 
         // In real implemntation each client gets a KM instance.
-        let mgr = KeyManager::new(Box::new(noise));
+        let mgr = KeyManager::new(1, Box::new(noise));
         let mut mgr_cc = mgr.clone();
         tokio::spawn(async move {
             mgr_cc.start(km_ctok, km_tx, km_sig_tx).await.unwrap();
@@ -132,9 +132,9 @@ impl ZDPServer {
                             }
                         }
 
-                        Some(sig) = km_sig_rx.recv() => {
+                        Some(linkmsg) = km_sig_rx.recv() => {
                             // This is a signal from the KM.  We need to act on it.
-                            match sig {
+                            match linkmsg.msg {
                                 KMSignal::SaIdChange { old, new } => {
                                     if old == 0 && new > 0 {
                                         info!("SA has been established!");
@@ -152,7 +152,7 @@ impl ZDPServer {
                             }
                         }
 
-                        Some(km_buf) = km_rx.recv() => {
+                        Some(linkmsg) = km_rx.recv() => {
                             // This is a raw KM message to send to this client (NOTE: the KM needs to be associated with the correct client!)
                             if cur_client.is_none() {
                                 info!("error: KM generated a message but we have no client to send to");
@@ -167,7 +167,7 @@ impl ZDPServer {
                             //   len: u16
                             //   PAYLOAD (from KM)
                             let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
-                            let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &km_buf);
+                            let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &linkmsg.msg);
 
                             match s_send.send_to(pkt.body(), cur_client.unwrap()).await {
                                 Ok(sz) => {
