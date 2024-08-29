@@ -141,8 +141,8 @@ fn main() -> ExitCode {
 
     let sync_req_state = SyncReqState::new();
 
-    let (km_sig_tx, mut km_sig_rx) = mpsc::channel(16); // TODO: name this constant
-    let (km_tx, mut km_rx) = mpsc::channel(km_message_queue_size);
+    let (km_sig_tx, km_sig_rx) = mpsc::channel(16); // TODO: name this constant
+    let (km_tx, km_rx) = mpsc::channel(km_message_queue_size);
     let km_mpx_ctok = CancellationToken::new();
     let km_state = KmState::new(km_tx, km_sig_tx, km_mpx_ctok.clone());
 

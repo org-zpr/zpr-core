@@ -132,6 +132,7 @@ impl KMNoise {
 }
 
 /// Helper function to derive public key from private key.
+#[allow(dead_code)]
 pub fn derive_public_key(private_key: &[u8; 32]) -> [u8; 32] {
     let point = MontgomeryPoint::mul_base_clamped(*private_key);
     point.to_bytes()

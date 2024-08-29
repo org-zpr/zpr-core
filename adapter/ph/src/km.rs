@@ -245,6 +245,8 @@ impl KeyManager<'_> {
     }
 
     /// If we are in a transport state, this returns the details.
+    /// Note that this is also sent "for free" with the SaEstablished signal.
+    #[allow(dead_code)]
     pub fn get_transport_state(&self) -> Option<KMTransportSA> {
         let state = self.shared.state.lock().unwrap();
         if state.sa_id == 0 {
@@ -289,6 +291,7 @@ impl KeyManager<'_> {
     /// This will fail if there is no space in queue.
     ///
     /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
+    #[allow(dead_code)]
     pub fn try_handle_km_message(&self, message: &[u8]) -> KMResult<()> {
         let tx: mpsc::Sender<Bytes>;
         {
@@ -565,6 +568,7 @@ impl KMTransportSA {
         }
     }
 
+    #[allow(dead_code)]
     pub fn new_empty_with_codec(codec: Arc<dyn Codec>) -> KMTransportSA {
         KMTransportSA {
             sa_id: 0,
@@ -577,6 +581,7 @@ impl KMTransportSA {
     }
 
     /// With ZPIs but empty keys.
+    #[allow(dead_code)]
     pub fn new_with_zpis(send_zpis: ZPIPair, recv_zpis: ZPIPair) -> KMTransportSA {
         KMTransportSA {
             sa_id: 0,
@@ -591,6 +596,7 @@ impl KMTransportSA {
 
 /// Helper function which is ZDP aware.  Does some error checking and leaves the ZPI
 /// in place.
+#[allow(dead_code)]
 pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMResult<()> {
     if message.body().len()
         < std::mem::size_of::<ZdpZpiHeader>() + std::mem::size_of::<ZdpBaseHeader>()
@@ -624,6 +630,7 @@ pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMR
 }
 
 /// Helper function which is ZDP arare.  Does some error checking and leaves the ZPI in place.
+#[allow(dead_code)]
 pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMResult<()> {
     if message.body().len() < 1 {
         return Err(KMError::ShortPacket);
@@ -751,6 +758,7 @@ impl ZPIPair {
 /// A set of constant settings for a particular [KeyManagerStateMachine].  Used
 /// to configure the running of the [KeyManager].
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct KMSettings {
     /// The ZDP defined type value for this Key Management system.
     pub zdp_km_type: zpr::KmId,

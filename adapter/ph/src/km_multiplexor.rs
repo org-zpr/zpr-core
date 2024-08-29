@@ -53,8 +53,10 @@ impl<'pktbuf> KmState<'pktbuf> {
 // forever in the Assembly.
 //
 // TODO: move to assembly?
+
+#[allow(dead_code)]
 pub struct KMHandle<'pktbuf> {
-    ctok: CancellationToken,
+    ctok: CancellationToken,  // for this KeyManager
     mgr: KeyManager<'pktbuf>, // The manager must remnain valid for lifetime of the link
 }
 
@@ -170,6 +172,7 @@ pub fn add_adapter_link(
 /// KM initiator.
 ///
 /// - `local_noise_key` is the local noise key for the dock (public key is shared out of band with adapters).
+#[allow(dead_code)]
 pub fn add_node_link(
     asm: &'static Assembly,
     link_id: zpr::LinkId,
@@ -232,6 +235,9 @@ fn add_noise_link(
 ///
 /// The km_payload should be the km-payload part of the ZDP KM message.  We copy the payload before
 /// returning.
+///
+/// TODO: Note this will block if the KeyManager queue is full.  Should this instead be using
+///       the non-blocking call?
 pub async fn handle_inbound_km_msg<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     from_link: zpr::LinkId,
