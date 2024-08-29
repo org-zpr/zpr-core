@@ -129,19 +129,6 @@ impl KMNoise {
             send_zpis: None,
         })
     }
-
-    pub fn get_recv_hmac_key(&self) -> [u8; 32] {
-        self.recv_hmac_key
-    }
-
-    pub fn get_send_hmac_key(&self) -> Option<[u8; 32]> {
-        self.send_hmac_key
-    }
-
-    /// Returns the ZPIs for sending
-    pub fn get_send_zpis(&self) -> Option<ZPIPair> {
-        self.send_zpis
-    }
 }
 
 /// Helper function to derive public key from private key.
@@ -645,24 +632,31 @@ mod test {
 
         // At this point each side should know the others hmac key, and the ZPIs should have been exchanged.
 
-        assert!(initiator.get_recv_hmac_key() != [0u8; 32]);
-        assert!(initiator.get_send_hmac_key().is_some()); // must have been recieved
+        let initiator_sa = match initiator.get_state() {
+            KMSMState::Transport(t) => t,
+            _ => {
+                panic!("unexpected state after handshake");
+            }
+        };
 
-        assert!(responder.get_recv_hmac_key() != [0u8; 32]);
-        assert!(responder.get_send_hmac_key().is_some()); // must have been recieved
+        let responder_sa = match responder.get_state() {
+            KMSMState::Transport(t) => t,
+            _ => {
+                panic!("unexpected state after handshake");
+            }
+        };
 
-        assert!(initiator.get_recv_hmac_key() == responder.get_send_hmac_key().unwrap());
-        assert!(responder.get_recv_hmac_key() == initiator.get_send_hmac_key().unwrap());
+        assert!(initiator_sa.recv_hmac_key != [0u8; 32]);
+        assert!(responder_sa.recv_hmac_key != [0u8; 32]);
 
-        assert!(initiator.get_send_zpis().is_some());
-        let initiator_zpis = initiator.get_send_zpis().unwrap();
-        assert!(initiator_zpis.encr == 3);
-        assert!(initiator_zpis.hmac == 4);
+        assert!(initiator_sa.recv_hmac_key == responder_sa.send_hmac_key);
+        assert!(responder_sa.recv_hmac_key == initiator_sa.send_hmac_key);
 
-        assert!(responder.get_send_zpis().is_some());
-        let responder_zpis = responder.get_send_zpis().unwrap();
-        assert!(responder_zpis.encr == 1);
-        assert!(responder_zpis.hmac == 2);
+        assert!(initiator_sa.send_zpis.encr == 3);
+        assert!(initiator_sa.send_zpis.hmac == 4);
+
+        assert!(responder_sa.send_zpis.encr == 1);
+        assert!(responder_sa.send_zpis.hmac == 2);
     }
 
     #[tokio::test]

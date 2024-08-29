@@ -208,15 +208,8 @@ struct KMState<'mgr> {
     statemachine: Box<dyn KeyManagerStateMachine + 'mgr>,
     link_id: zpr::LinkId,
     kmsettings: KMSettings,
-
-    // XXX TODO: can I just use ts ?
     sa_id: zpr::SaId, // current SA identifier
-
-    // TODO: Can we get this channel outside of the mutex?
-    // XXX look at what we do in assembly/multiplexor I think we can pass this around.
     mgmt_tx: Option<mpsc::Sender<Bytes>>, // Internal queue for key management messages to be processed.
-
-
     ts: KMTransportSA, // XXX TODO: Option?
 }
 
@@ -497,7 +490,10 @@ impl KeyManager<'_> {
                                 state.sa_id = 1;
                             }
                             cur_id = state.sa_id;
-                            state.ts = ts;
+                            // Capture the SA and update the SA_ID.
+                            let mut my_sa = ts.clone();
+                            my_sa.sa_id = cur_id;
+                            state.ts = my_sa;
                         }
                         info!("KM: New SA_ID: {}", cur_id);
                         match km_signals_out
