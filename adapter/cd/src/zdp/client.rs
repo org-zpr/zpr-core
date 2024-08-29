@@ -52,7 +52,7 @@ impl ZDPClient {
             }
         };
 
-        let mgr = KeyManager::new(Box::new(noise));
+        let mgr = KeyManager::new(1, Box::new(noise));
         let local_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
 
         let socket = UdpSocket::bind(local_addr).await?;
@@ -81,8 +81,8 @@ impl ZDPClient {
                     break;
                 }
 
-                Some(sig) = km_sig_rx.recv() => {
-                    match sig {
+                Some(linkmsg) = km_sig_rx.recv() => {
+                    match linkmsg.msg {
                         KMSignal::SaIdChange { old, new } => {
                             if old == 0 && new > 0 {
                                 info!("zdp/client - new SA established");
@@ -111,7 +111,7 @@ impl ZDPClient {
                     }
                 }
 
-                Some(km_buf) = km_rx.recv() => {
+                Some(linkmsg) = km_rx.recv() => {
                     // Construct a KM message packet.
                     // [ ZPI ]
                     // [ ZDP BASE HEADER, type=KM]
@@ -120,7 +120,7 @@ impl ZDPClient {
                     //   len: u16
                     //   PAYLOAD (from KM)
                     let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
-                    let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &km_buf);
+                    let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &linkmsg.msg);
                     match s_send.send(pkt.body()).await {
                         Ok(sz) => {
                             info!("zdp/client - sent {} byte KM message", sz);
