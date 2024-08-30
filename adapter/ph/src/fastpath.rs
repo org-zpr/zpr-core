@@ -6,7 +6,6 @@
 use crate::adapter_tables::AltEntry;
 use crate::assembly::Assembly;
 use crate::classifier::{self, ClassifierResult};
-use crate::{compress, km};
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::km::Codec;
@@ -18,6 +17,7 @@ use crate::queues::TryEnqueueError;
 use crate::zdp::{self, ZdpBaseHeader, ZDP_BASE_HEADER_OFFSET};
 use crate::zdp_ll;
 use crate::zpr;
+use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
 use std::net::SocketAddr;

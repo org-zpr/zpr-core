@@ -17,8 +17,8 @@ use crate::zpr;
 
 use bytes::Buf;
 use core::time::Duration;
-use enum_map::EnumMap;
 use dashmap::DashMap;
+use enum_map::EnumMap;
 use std::result::Result;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -270,7 +270,6 @@ pub mod test {
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
 
-
     pub struct TestAssemblyBuilder<'a> {
         pub buffer_stack: Option<BufferStack<'a, { config::PACKET_BUFFER_SIZE }>>,
         pub mgmt_processor: Option<MgmtProcessor<'a>>,
@@ -374,10 +373,9 @@ pub mod test {
             let km_mpx_ctok = CancellationToken::new();
             KmState::new(km_tx, km_sig_tx, km_mpx_ctok.clone())
         });
-        let sa_states = builder.sa_states.unwrap_or_else(|| {
-            Arc::new(DashMap::new())
-        });
-
+        let sa_states = builder
+            .sa_states
+            .unwrap_or_else(|| Arc::new(DashMap::new()));
 
         Assembly {
             buffer_stack,

@@ -2,6 +2,7 @@
 
 use cbpf_rs::bpf_code;
 use clap::Parser;
+use dashmap::DashMap;
 use enum_map::{enum_map, EnumMap};
 use std::fs;
 use std::io::ErrorKind;
@@ -17,7 +18,6 @@ use tokio_tun::TunBuilder;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use zpr_ext::tokio::net::UdpSocketExt;
-use dashmap::DashMap;
 
 mod adapter_manager_worker;
 mod adapter_tables;

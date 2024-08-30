@@ -163,7 +163,6 @@ pub fn add_adapter_link(
     add_noise_link(asm, link_id, noise)
 }
 
-
 /// Creates a new KeyManager for the link and starts its state machine.  A node link waits for a
 /// KM initiator.
 ///
@@ -193,11 +192,7 @@ pub fn add_node_link(
 
 /// Remove all state for this link, invalidating the SA and stopping the Key Manager.
 #[allow(dead_code)]
-pub fn drop_link(
-    asm: &'static Assembly,
-    link_id: zpr::LinkId,
-) -> Result<(), String> {
-
+pub fn drop_link(asm: &'static Assembly, link_id: zpr::LinkId) -> Result<(), String> {
     // If present in sa_state, turn off the SA.
     if let Some(sa_state) = asm.sa_states.get_mut(&link_id) {
         sa_state.sa_established.store(false, Ordering::Relaxed);
@@ -211,7 +206,6 @@ pub fn drop_link(
         handle.unwrap().1.ctok.cancel(); // stop the KM
     }
 
-
     // Remove from SA
     match asm.sa_states.remove(&link_id) {
         None => {}
@@ -219,7 +213,6 @@ pub fn drop_link(
     }
     Ok(())
 }
-
 
 // Completes the add_*_link functions above.
 fn add_noise_link(
@@ -289,25 +282,22 @@ pub async fn handle_inbound_km_msg<'pktbuf>(
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
 
-    use crate::config;
+    use crate::assembly::test::{create_assembly, TestAssemblyBuilder};
     use crate::buffer_stack::BufferStack;
-    use tokio::time::timeout;
-    use std::time::Duration;
+    use crate::config;
     use crate::km::KMLinkMsg;
-    use tokio::task::yield_now;
     use crate::km_noise;
     use base64::prelude::*;
-    use crate::assembly::test::{TestAssemblyBuilder, create_assembly};
-
+    use std::time::Duration;
+    use tokio::task::yield_now;
+    use tokio::time::timeout;
 
     #[tokio::test]
     async fn test_km_multiplexor_updates_assembly_state() {
-
         let nk_private_b64 = "AB2eP6zV7ve0A4eQgNVNXlAM2q0rYerCPXFMl+/ntUw=";
         let nk_private: [u8; 32] = match BASE64_STANDARD.decode(nk_private_b64) {
             Ok(d) => d.try_into().unwrap(),
@@ -339,8 +329,7 @@ mod test {
         let adapter_link_id = 27;
 
         // Adding a link starts a KM
-        add_adapter_link(asm, adapter_link_id, ZPIPair::new(1, 2), nk_public)
-            .unwrap();
+        add_adapter_link(asm, adapter_link_id, ZPIPair::new(1, 2), nk_public).unwrap();
 
         yield_now().await;
 
@@ -358,17 +347,15 @@ mod test {
                     handshake_req = msg;
                 }
                 None => panic!("Expected KMLinkMessage message"),
-            }
+            },
             Err(_) => panic!("Timed out waiting for KM message"),
         }
-
 
         // Check that initially, our state is not established.
         {
             let sa_state = asm.sa_states.get(&adapter_link_id).unwrap();
             assert!(sa_state.sa_established.load(Ordering::Relaxed) == false);
         }
-
 
         // Pretend to be a node and send back a valid reply.
         let mut responder = KMNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
@@ -392,7 +379,9 @@ mod test {
         };
 
         // Now send the reply back into our link.
-        handle_inbound_km_msg(asm, adapter_link_id, &handshake_reply).await.unwrap();
+        handle_inbound_km_msg(asm, adapter_link_id, &handshake_reply)
+            .await
+            .unwrap();
 
         yield_now().await;
 
@@ -409,5 +398,4 @@ mod test {
             Err(e) => panic!("Failed to drop link: {:?}", e),
         }
     }
-
 }
