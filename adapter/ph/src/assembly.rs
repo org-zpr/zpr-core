@@ -252,7 +252,6 @@ impl<'pktbuf> Assembly<'pktbuf> {
     }
 }
 
-
 #[cfg(test)]
 pub mod test {
 
@@ -333,33 +332,27 @@ pub mod test {
             let (cq_inq, _cq_outq) = mpsc::channel(1);
             Capture::new(cq_inq)
         });
-        let capture_worker = builder.capture_worker.unwrap_or_else(|| {
-            CaptureWorker::new()
-        });
-        let flow_control = builder.flow_control.unwrap_or_else(|| {
-            FlowControl::new()
-        });
+        let capture_worker = builder
+            .capture_worker
+            .unwrap_or_else(|| CaptureWorker::new());
+        let flow_control = builder.flow_control.unwrap_or_else(|| FlowControl::new());
         let counters = builder.counters.unwrap_or_else(|| {
             enum_map! { _ => Counter::new(), }
         });
-        let tun_ctl = builder.tun_ctl.unwrap_or_else(|| {
-            &DummyTunCtl
-        });
-        let sync_req_state = builder.sync_req_state.unwrap_or_else(|| {
-            SyncReqState::new()
-        });
-        let peer_table = builder.peer_table.unwrap_or_else(|| {
-            peer_table::PeerTable::new()
-        });
-        let adapter_docking_session_id = builder.adapter_docking_session_id.unwrap_or_else(|| {
-        0
-        });
-        let alt = builder.alt.unwrap_or_else(|| {
-            adapter_tables::AgentLookupTable::new()
-        });
-        let dlt = builder.dlt.unwrap_or_else(|| {
-            adapter_tables::DockLookupTable::new()
-        });
+        let tun_ctl = builder.tun_ctl.unwrap_or_else(|| &DummyTunCtl);
+        let sync_req_state = builder
+            .sync_req_state
+            .unwrap_or_else(|| SyncReqState::new());
+        let peer_table = builder
+            .peer_table
+            .unwrap_or_else(|| peer_table::PeerTable::new());
+        let adapter_docking_session_id = builder.adapter_docking_session_id.unwrap_or_else(|| 0);
+        let alt = builder
+            .alt
+            .unwrap_or_else(|| adapter_tables::AgentLookupTable::new());
+        let dlt = builder
+            .dlt
+            .unwrap_or_else(|| adapter_tables::DockLookupTable::new());
         let adapter_manager = builder.adapter_manager.unwrap_or_else(|| {
             let (cq_inq, _cq_outq) = mpsc::channel(1);
             AdapterManager::new(cq_inq)
@@ -384,4 +377,3 @@ pub mod test {
         }
     }
 }
-
