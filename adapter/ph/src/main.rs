@@ -16,7 +16,8 @@ use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_tun::TunBuilder;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::warn;
+use tracing_subscriber;
 use zpr_ext::tokio::net::UdpSocketExt;
 
 mod adapter_manager_worker;
@@ -53,7 +54,7 @@ mod zdp;
 mod zdp_ll;
 mod zpr;
 
-use assembly::{Assembly, SyncReqState};
+use assembly::{Assembly, SyncReqState, PhFlags};
 use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
 use counter::*;
@@ -64,6 +65,9 @@ use km_multiplexor::KmState;
 use options::PhMode;
 use queues::*;
 use tun_ctl::CarrierSetter;
+
+
+
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -91,6 +95,12 @@ struct CmdLine {
 
     #[arg(long)]
     tun_if: Option<String>,
+
+    #[arg(long)]
+    disable_km: bool,
+
+    #[arg(long)]
+    allow_insecure_zpi_zero: bool,
 }
 
 fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
@@ -100,6 +110,7 @@ fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
 }
 
 fn main() -> ExitCode {
+    tracing_subscriber::fmt::init();
     let cmd_line = CmdLine::parse();
 
     let sock_path = cmd_line.control_path;
@@ -108,6 +119,11 @@ fn main() -> ExitCode {
     let _ca_file = cmd_line.ca_file;
     let _cert_file = cmd_line.certificate_file;
     let _priv_key_file = cmd_line.private_key_file;
+    let disable_km = cmd_line.disable_km;
+    let allow_insecure_zpi_zero = cmd_line.allow_insecure_zpi_zero;
+    if allow_insecure_zpi_zero {
+        warn!("Insecure ZPI ZERO is enabled.  This is insecure and should only be used for testing.");
+    }
 
     // TODO: These batch sizes are placeholders for now.  So are the queue
     // sizes below which are all just double the batch size.  Performance
@@ -287,7 +303,11 @@ fn main() -> ExitCode {
             let agent_input = AgentInput::new(tun_devs.iter());
             let substrate_egress = SubstrateEgress::new(sockets.iter());
 
+            let mut flags = PhFlags::new();
+            flags.allow_insecure_zpi_zero = allow_insecure_zpi_zero;
+
             let asm = Box::leak(Box::new(Assembly {
+                flags,
                 buffer_stack,
                 mgmt_processor,
                 agent_input,
@@ -309,10 +329,11 @@ fn main() -> ExitCode {
 
 
 
-            // TODO: Should this multiplexor go in assembly?
-            let dock_noise_public_key = [0; 32]; // XXX TODO
-            km_multiplexor::add_adapter_link(asm, adapter_docking_session_id, ZPIPair::new(1, 2), dock_noise_public_key)
-                .unwrap();
+            if !disable_km {
+                let dock_noise_public_key = [0; 32]; // XXX TODO
+                km_multiplexor::add_adapter_link(asm, adapter_docking_session_id, ZPIPair::new(1, 2), dock_noise_public_key)
+                    .unwrap();
+            }
 
             // TODO signal handler goes here
 
@@ -379,7 +400,6 @@ fn main() -> ExitCode {
                             break;
                         }
                         Some(km_buf_msg) = km_loop_rx.recv() => {
-                            info!("TODO: Send KM payload of {} bytes out link {}", km_buf_msg.msg.len(), km_buf_msg.link_id);
                             mgmt::send_key_management(&*asm, km_buf_msg.link_id, zpr::KM_ID_NOISE, &km_buf_msg.msg).await;
                         }
                     }
@@ -405,8 +425,6 @@ fn main() -> ExitCode {
                     socket,
                 ));
             }
-
-            // XXX TODO - reasonable place to kick off KM.  But where do I actually recieve packets?
 
             mgmt::send_report(asm, asm.adapter_docking_session_id, "Reporting for Duty!").await;
             mgmt::send_discard(asm, asm.adapter_docking_session_id).await;

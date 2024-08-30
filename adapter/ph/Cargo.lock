@@ -939,6 +939,7 @@ dependencies = [
  "tokio-tun",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
  "zerocopy",
  "zpr-ext",
 ]

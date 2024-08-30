@@ -47,6 +47,8 @@ use zpr_ext::std::mem::{drop_guard, DropGuard};
 /// visible queue becoming full.
 
 pub struct Assembly<'pktbuf> {
+    pub flags: PhFlags,
+
     // Shared resources.  These may be accessed by any part of the system.
     pub buffer_stack: BufferStack<'pktbuf, { config::PACKET_BUFFER_SIZE }>,
 
@@ -79,6 +81,20 @@ pub struct Assembly<'pktbuf> {
     // The `pa_states` is written to by the KM Multiplexor and is read whenever we need to figure
     // out the correct ZPI to use on a link, or do encryption/HMAC.
     pub sa_states: Arc<DashMap<zpr::LinkId, SAState>>,
+}
+
+pub struct PhFlags {
+    /// If set TRUE this allows any messages on ZPI 0.  VERY INSECURE!!
+    pub allow_insecure_zpi_zero: bool,
+}
+
+impl PhFlags {
+    /// Reasonable defaults
+    pub fn new() -> Self {
+        Self {
+            allow_insecure_zpi_zero: false,
+        }
+    }
 }
 
 pub struct SyncReqState<'pktbuf> {
@@ -271,6 +287,7 @@ pub mod test {
     use tokio_util::sync::CancellationToken;
 
     pub struct TestAssemblyBuilder<'a> {
+        pub flags: Option<PhFlags>,
         pub buffer_stack: Option<BufferStack<'a, { config::PACKET_BUFFER_SIZE }>>,
         pub mgmt_processor: Option<MgmtProcessor<'a>>,
         pub agent_input: Option<AgentInput<'a>>,
@@ -300,6 +317,7 @@ pub mod test {
     impl TestAssemblyBuilder<'_> {
         pub fn new() -> Self {
             Self {
+                flags: None,
                 buffer_stack: None,
                 mgmt_processor: None,
                 agent_input: None,
@@ -322,6 +340,7 @@ pub mod test {
     }
 
     pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
+        let flags = builder.flags.unwrap_or_else(|| PhFlags::new());
         let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
             let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 0];
             BufferStack::new(buf_storage.leak::<'static>())
@@ -378,6 +397,7 @@ pub mod test {
             .unwrap_or_else(|| Arc::new(DashMap::new()));
 
         Assembly {
+            flags,
             buffer_stack,
             mgmt_processor,
             agent_input,

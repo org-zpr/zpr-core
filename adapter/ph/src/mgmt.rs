@@ -435,15 +435,12 @@ pub async fn send_key_management<'pktbuf>(
     km_hdr.message_type = km_id.into();
     km_hdr.message_length = (payload.len() as u16).into();
 
-    let zdp_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
-    zdp_hdr.packet_type = zdp::ZdpPacketType::KeyManagement;
-
     pkt.put(payload);
 
     send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::KeyManagement, pkt).await;
 }
 
-// Base header is already gone by the time we get here.  So we expect
+// ZPI and Base header is already gone by the time we get here.  So we expect
 // to parse starting from the KeyManagement header.
 pub async fn handle_key_management<'pktbuf>(
     asm: &Assembly<'pktbuf>,
@@ -455,7 +452,7 @@ pub async fn handle_key_management<'pktbuf>(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
     if !km_hdr.is_noise() {
-        error!("KeyManagement packet not using NOISE");
+        error!("KeyManagement packet not using NOISE - type is {}", km_hdr.message_type);
         return Err((
             HandleMgmtError::UnknownKeyManagementType(km_hdr.message_type.into()),
             pkt,

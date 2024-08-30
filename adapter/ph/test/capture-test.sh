@@ -72,7 +72,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --mode=server --control-path "$A_ZPR_SOCK" \
   --self-addr "$A_HOST_ADDR":12345 --dock-addr "$B_HOST_ADDR":12345 \
   --ca-file ca.crt --certificate-file server.crt --private-key-file server.key \
-  --tun-if tun0 &
+  --disable-km --allow-insecure-zpi-zero --tun-if tun0 &
 CHILDREN=(${CHILDREN[@]} "$!")
 
 sleep 1  # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well
@@ -82,7 +82,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --mode=client --control-path "$B_ZPR_SOCK" \
   --self-addr "$B_HOST_ADDR":12345 --dock-addr "$A_HOST_ADDR":12345 \
   --ca-file ca.crt --certificate-file client.crt --private-key-file client.key \
-  --tun-if tun0 &
+  --disable-km --allow-insecure-zpi-zero --tun-if tun0 &
 CHILDREN=(${CHILDREN[@]} "$!")
 
 #

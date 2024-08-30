@@ -24,7 +24,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tracing::{error, info};
+use tracing::{error, warn, info};
 use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
@@ -325,22 +325,16 @@ fn substrate_egress_common<'pktbuf>(
                         sa_state.transport_sa.send_zpis.encr
                     }
                 } else {
-                    info!("egress: link {}: failed to parse ZDP header on egress packet, so it's ZPI 0 for you", link_id);
+                    error!("egress: link {}: failed to parse ZDP header on egress packet, assigning ZPI 0", link_id);
                     0
                 }
             } else {
-                info!(
-                    "egress: link {}: SA not established so it's ZPI 0 for you",
-                    link_id
-                );
+                // No SA established
                 0
             }
         }
         None => {
-            info!(
-                "egress: link {}: link not in SA table so it's ZPI 0 for you",
-                link_id
-            );
+            // Link not in SA table -- should not happen -- unless KM is disabled.
             0
         }
     };
@@ -410,11 +404,13 @@ pub async fn substrate_egress_blocking<'pktbuf>(
         .await
     {
         Ok(()) => (),
-        Err(pkt) => drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr),
+        Err(pkt) => {
+            drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr);
+        }
     }
 }
 
-/// Process packets ingressing from the specified SA.
+/// Process packets ingressing from the specified SA (SocketAddr).
 pub fn substrate_ingress<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     peer_sa: &SocketAddr,
@@ -427,7 +423,8 @@ pub fn substrate_ingress<'pktbuf>(
         return;
     };
 
-    let Some(zpi_hdr) = zdp::ZdpZpiHeader::read_from_buf(&mut pkt) else {
+    // Read, but do not remove the ZPI header
+    let Some(zpi_hdr) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
         drop_and_count(asm, pkt, CounterType::BadStructure);
         return;
     };
@@ -435,7 +432,7 @@ pub fn substrate_ingress<'pktbuf>(
     // If a ZPI is setup on this link, then we expect the message to use one of the valid
     // ZPI values.  Need to check spec, but I think best to drop any ZPI 0 packets IF we
     // have an SA established.
-    let handled = match asm.sa_states.get(&ingress_link_id) {
+    let secure = match asm.sa_states.get(&ingress_link_id) {
         Some(sa_state) => {
             if sa_state.sa_established.load(Ordering::Relaxed) {
                 if zpi_hdr.zpi == sa_state.transport_sa.recv_zpis.hmac {
@@ -470,13 +467,13 @@ pub fn substrate_ingress<'pktbuf>(
                     return;
                 }
             } else {
-                // No SA established, only ZPI is allowed, will catch that later.
+                // No SA established, only ZPI zero is allowed, will catch that later.
                 false
             }
         }
         None => {
-            // The link is not even in the SA state table. Is this possible?
-            // TODO: Should we abort packet processing here?
+            // The link is not even in the SA state table. Is this possible? Yes, but only when
+            // the KM system is disabled.
             error!(
                 "ingress: link {}: link not in SA state table",
                 ingress_link_id
@@ -485,8 +482,8 @@ pub fn substrate_ingress<'pktbuf>(
         }
     };
 
-    if !handled {
-        // Not handled which means only ZPI 0 is allowed
+    if !secure {
+        // Not under a security assocation  which means only ZPI 0 is allowed
         if zpi_hdr.zpi != 0 {
             info!(
                 "ingress: link {}: ZPI {} not allowed on unestablished SA",
@@ -504,8 +501,10 @@ pub fn substrate_ingress<'pktbuf>(
         }
     }
 
+    // Watch out -- may not be secure
     maybe_capture(asm, Direction::Inbound, &mut pkt);
 
+    // now pop the ZPI off the packet
     let _zpi = match decap_zpi(asm, ingress_link_id, &mut pkt) {
         Ok(zpi) => zpi,
         Err(err) => {
@@ -518,13 +517,28 @@ pub fn substrate_ingress<'pktbuf>(
         return drop_and_count(asm, pkt, CounterType::BadStructure);
     };
 
+    // In ZPI zero only KM messages are allowed (well, and APR ARP which we don't support yet)
+    // Can be overridden (FOR TESTING ONLY) in the flags.
+    if !secure && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
+        if asm.flags.allow_insecure_zpi_zero {
+            warn!("operating in insecure mode - allow_insecure_zpi_zero is ENABLED");
+        } else {
+            warn!(
+                "ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
+                ingress_link_id, base_hdr.packet_type
+            );
+            drop_and_count(asm, pkt, CounterType::OtherError);
+            return;
+        }
+    }
+
     // enqueue non-transit packets with the management processor
     if base_hdr.packet_type != zdp::ZdpPacketType::TransitPacket {
         // TODO: should we peel off the ZDP header here??
         // (instead of this silly code to restore it?)
         *pkt.alloc_zeroed_header() = base_hdr;
 
-        match asm.mgmt_processor.try_enqueue_packet(ingress_link_id, pkt) {
+        match asm.mgmt_processor.try_enqueue_packet(ingress_link_id, pkt) { // note that ZPI is gone now
             Ok(()) => (),
             Err(TryEnqueueError::Full(pkt)) => {
                 drop_and_count(asm, pkt, CounterType::QueueBackpressure)
@@ -696,5 +710,33 @@ pub fn forward<'pktbuf>(
     } else {
         // in from dock; out to agent
         agent_input(asm, ingress_stream_id, pkt);
+    }
+}
+
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+    use crate::config::PACKET_BUFFER_SIZE;
+
+
+    #[test]
+    fn test_encrypt_decrypt_zero() {
+        let mut buf = [0u8; PACKET_BUFFER_SIZE];
+        let mut pkt = Packet::new(&mut buf, 64);
+
+        pkt.put(&b"this is a test of encrypt zero"[..]);
+
+        let orig_len = pkt.body().len();
+
+        encrypt_zero(&mut pkt);
+
+        assert!(pkt.body().len() == orig_len + 2); // did add checksum
+
+        let res = decrypt_zero(&mut pkt);
+        assert!(res.is_ok());
+
+        assert!(pkt.body().len() == orig_len); // did remove checksum
     }
 }
