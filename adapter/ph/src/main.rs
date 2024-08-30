@@ -54,7 +54,7 @@ mod zdp;
 mod zdp_ll;
 mod zpr;
 
-use assembly::{Assembly, SyncReqState, PhFlags};
+use assembly::{Assembly, PhFlags, SyncReqState};
 use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
 use counter::*;
@@ -65,9 +65,6 @@ use km_multiplexor::KmState;
 use options::PhMode;
 use queues::*;
 use tun_ctl::CarrierSetter;
-
-
-
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -122,7 +119,9 @@ fn main() -> ExitCode {
     let disable_km = cmd_line.disable_km;
     let allow_insecure_zpi_zero = cmd_line.allow_insecure_zpi_zero;
     if allow_insecure_zpi_zero {
-        warn!("Insecure ZPI ZERO is enabled.  This is insecure and should only be used for testing.");
+        warn!(
+            "Insecure ZPI ZERO is enabled.  This is insecure and should only be used for testing."
+        );
     }
 
     // TODO: These batch sizes are placeholders for now.  So are the queue

@@ -24,7 +24,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tracing::{error, warn, info};
+use tracing::{error, info, warn};
 use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
@@ -538,7 +538,8 @@ pub fn substrate_ingress<'pktbuf>(
         // (instead of this silly code to restore it?)
         *pkt.alloc_zeroed_header() = base_hdr;
 
-        match asm.mgmt_processor.try_enqueue_packet(ingress_link_id, pkt) { // note that ZPI is gone now
+        match asm.mgmt_processor.try_enqueue_packet(ingress_link_id, pkt) {
+            // note that ZPI is gone now
             Ok(()) => (),
             Err(TryEnqueueError::Full(pkt)) => {
                 drop_and_count(asm, pkt, CounterType::QueueBackpressure)
@@ -713,13 +714,11 @@ pub fn forward<'pktbuf>(
     }
 }
 
-
 #[cfg(test)]
 mod test {
 
     use super::*;
     use crate::config::PACKET_BUFFER_SIZE;
-
 
     #[test]
     fn test_encrypt_decrypt_zero() {

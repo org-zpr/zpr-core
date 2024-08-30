@@ -452,7 +452,10 @@ pub async fn handle_key_management<'pktbuf>(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
     if !km_hdr.is_noise() {
-        error!("KeyManagement packet not using NOISE - type is {}", km_hdr.message_type);
+        error!(
+            "KeyManagement packet not using NOISE - type is {}",
+            km_hdr.message_type
+        );
         return Err((
             HandleMgmtError::UnknownKeyManagementType(km_hdr.message_type.into()),
             pkt,
