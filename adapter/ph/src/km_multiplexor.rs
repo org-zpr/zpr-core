@@ -46,6 +46,11 @@ impl<'pktbuf> KmState<'pktbuf> {
         let mut inner = self.inner.lock().unwrap();
         inner.km_table.insert(link_id, handle);
     }
+
+    fn drop_link_handle(&self, link_id: zpr::LinkId) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.km_table.remove(&link_id);
+    }
 }
 
 // I'd like the KeyManager to live as long as the hashmap that holds the handle.
@@ -146,6 +151,8 @@ where
 /// Creates a new KeyManager for the link and starts its state machine.  An adapter link will
 /// initiate the KM exchange with its peer.
 ///
+///
+/// - `link_id` is the link to the peer, in this case better be a link to a node.
 /// - `peer_noise_key` is the public noise key for the node/dock.
 pub fn add_adapter_link(
     asm: &'static Assembly,
@@ -168,9 +175,11 @@ pub fn add_adapter_link(
     add_noise_link(asm, link_id, noise)
 }
 
+
 /// Creates a new KeyManager for the link and starts its state machine.  A node link waits for a
 /// KM initiator.
 ///
+/// - `link_id` is the link to the peer, in this case better be a link to an adapter.
 /// - `local_noise_key` is the local noise key for the dock (public part of this key must be shared out of band with adapters).
 #[allow(dead_code)]
 pub fn add_node_link(
@@ -193,6 +202,42 @@ pub fn add_node_link(
     };
     add_noise_link(asm, link_id, noise)
 }
+
+/// Remove all state for this link, invalidating the SA and stopping the Key Manager.
+pub fn drop_link(
+    asm: &'static Assembly,
+    link_id: zpr::LinkId,
+) -> Result<(), String> {
+
+    // If present in sa_state, turn off the SA.
+    {
+        let mut state_db = asm.sa_states.lock().unwrap();
+        if let Some(sa_state) = state_db.get_mut(&link_id) {
+            sa_state.sa_established.store(false, Ordering::Relaxed);
+        }
+    }
+
+    // remove handle from our km state, if found
+    {
+        let handle = {
+            let mut inner = asm.km_state.inner.lock().unwrap();
+            inner.km_table.remove(&link_id)
+        };
+
+        // Stop the KM
+        if handle.is_some() {
+            handle.unwrap().ctok.cancel(); // stop the KM
+        }
+    }
+
+    // Remove from SA
+    match asm.sa_states.lock().unwrap().remove(&link_id) {
+        None => {}
+        Some(_) => (),
+    }
+    Ok(())
+}
+
 
 // Completes the add_*_link functions above.
 fn add_noise_link(
@@ -263,4 +308,134 @@ pub async fn handle_inbound_km_msg<'pktbuf>(
             from_link, e
         )),
     }
+}
+
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::config;
+    use crate::buffer_stack::BufferStack;
+    use tokio::time::timeout;
+    use std::time::Duration;
+    use crate::km::KMLinkMsg;
+    use tokio::task::yield_now;
+    use crate::km_noise;
+    use base64::prelude::*;
+    use crate::assembly::test::{TestAssemblyBuilder, create_assembly};
+
+
+
+
+
+
+
+    #[tokio::test]
+    async fn test_km_multiplexor_updates_assembly_state() {
+
+        let nk_private_b64 = "AB2eP6zV7ve0A4eQgNVNXlAM2q0rYerCPXFMl+/ntUw=";
+        let nk_private: [u8; 32] = match BASE64_STANDARD.decode(nk_private_b64) {
+            Ok(d) => d.try_into().unwrap(),
+            Err(e) => {
+                panic!("error decoding base64: {:?}", e);
+            }
+        };
+        let nk_public = km_noise::derive_public_key(&nk_private);
+        let node_kp = snow::Keypair {
+            private: nk_private.into(),
+            public: nk_public.into(),
+        };
+
+        let (km_sig_tx, km_sig_rx) = mpsc::channel(4);
+        let (km_tx, mut km_rx) = mpsc::channel(4);
+        let km_mpx_ctok = CancellationToken::new();
+        let km_state = KmState::new(km_tx, km_sig_tx, km_mpx_ctok.clone());
+
+        let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 8];
+        let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
+
+        let mut builder = TestAssemblyBuilder::new();
+        builder.km_state = Some(km_state);
+        builder.buffer_stack = Some(buffer_stack);
+
+        let asm = Box::leak(Box::new(create_assembly(builder)));
+
+        // add a fake adapter.
+        let adapter_link_id = 27;
+
+        // Adding a link starts a KM
+        add_adapter_link(asm, adapter_link_id, ZPIPair::new(1, 2), nk_public)
+            .unwrap();
+
+        yield_now().await;
+
+        // Start our multiplexor worker
+        tokio::spawn(launch(&*asm, km_sig_rx));
+        yield_now().await;
+
+        // An adapter should send a KM message over link 1.
+        let handshake_req: Bytes;
+        match timeout(Duration::from_secs(2), km_rx.recv()).await {
+            Ok(resp) => match resp {
+                Some(KMLinkMsg { link_id, msg }) => {
+                    assert_eq!(link_id, adapter_link_id);
+                    assert_eq!(msg.len(), 130); // should be a KM payload
+                    handshake_req = msg;
+                }
+                None => panic!("Expected KMLinkMessage message"),
+            }
+            Err(_) => panic!("Timed out waiting for KM message"),
+        }
+
+
+        // Check that initially, our state is not established.
+        {
+            let s_table = asm.sa_states.lock().unwrap();
+            let sa_state = s_table.get(&adapter_link_id).unwrap();
+            assert!(sa_state.sa_established.load(Ordering::Relaxed) == false);
+        }
+
+
+        // Pretend to be a node and send back a valid reply.
+        let mut responder = KMNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
+        match responder.reset() {
+            Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
+            Ok(None) => {} // good
+            Err(e) => {
+                panic!("error resetting responder: {:?}", e);
+            }
+        };
+
+        // Since we have a "raw" responder, we can just pass the payload (no ZDP headers have been added).
+        let handshake_reply = match responder.handle_message(&handshake_req) {
+            Ok(Some(m)) => m,
+            Ok(None) => {
+                panic!("expected handshake-1 message, got nothing!");
+            }
+            Err(e) => {
+                panic!("responder handle_message failed on handshake-req: {:?}", e);
+            }
+        };
+
+        // Now send the reply back into our link.
+        handle_inbound_km_msg(asm, adapter_link_id, &handshake_reply).await.unwrap();
+
+        yield_now().await;
+
+        // The KM on the link will process the message and transition to established-state.
+        // It will send two signals - SaIdChange followed by SaEstablished.  Both signals
+        // are picked up by our multiplexor worker.  The second one triggers a state update.
+        {
+            let s_table = asm.sa_states.lock().unwrap();
+            let sa_state = s_table.get(&adapter_link_id).unwrap();
+            assert!(sa_state.sa_established.load(Ordering::Relaxed));
+        }
+
+        match drop_link(asm, adapter_link_id) {
+            Ok(_) => (),
+            Err(e) => panic!("Failed to drop link: {:?}", e),
+        }
+    }
+
 }
