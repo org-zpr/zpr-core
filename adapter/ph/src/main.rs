@@ -3,12 +3,11 @@
 use cbpf_rs::bpf_code;
 use clap::Parser;
 use enum_map::{enum_map, EnumMap};
-use std::collections::HashMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::signal::unix::{signal, SignalKind};
@@ -18,6 +17,7 @@ use tokio_tun::TunBuilder;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use zpr_ext::tokio::net::UdpSocketExt;
+use dashmap::DashMap;
 
 mod adapter_manager_worker;
 mod adapter_tables;
@@ -304,7 +304,7 @@ fn main() -> ExitCode {
                 dlt,
                 adapter_manager,
                 km_state,
-                sa_states: Arc::new(Mutex::new(HashMap::new())),
+                sa_states: Arc::new(DashMap::new()),
             }));
 
 

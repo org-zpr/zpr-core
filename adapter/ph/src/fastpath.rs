@@ -6,11 +6,10 @@
 use crate::adapter_tables::AltEntry;
 use crate::assembly::Assembly;
 use crate::classifier::{self, ClassifierResult};
-use crate::compress;
+use crate::{compress, km};
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::km::Codec;
-use crate::km_multiplexor::SAState;
 use crate::km_noise::NOISE_PADLEN;
 use crate::net_defs;
 use crate::packet::Packet;
@@ -307,16 +306,15 @@ fn substrate_egress_common<'pktbuf>(
     // TODO: should we add ZDP header here also??
 
     let mut transit = true;
-    let mut state_cache: Option<&SAState> = None;
+    let mut transport_sa: Option<km::KMTransportSA> = None;
 
-    let sa_table = asm.sa_states.lock().unwrap();
-    let real_zpi = match sa_table.get(&link_id) {
+    let real_zpi = match asm.sa_states.get(&link_id) {
         Some(sa_state) => {
             if sa_state.sa_established.load(Ordering::Relaxed) {
                 // We have SA.
                 // If agent transit packet, use HMAC ZPI.
                 // Else use our ENCR ZPI.
-                state_cache = Some(sa_state);
+                transport_sa = Some(sa_state.transport_sa.clone());
                 if let Some(zdp_hdr) =
                     ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..])
                 {
@@ -356,11 +354,11 @@ fn substrate_egress_common<'pktbuf>(
     if real_zpi == 0 {
         encrypt_zero(pkt);
     } else {
-        let ss = state_cache.unwrap();
+        let tsa = transport_sa.unwrap();
         if transit {
-            encrypt_hmac(ss.transport_sa.send_hmac_key, pkt);
+            encrypt_hmac(tsa.send_hmac_key, pkt);
         } else {
-            encrypt_full(asm, ss.transport_sa.codec.clone(), pkt);
+            encrypt_full(asm, tsa.codec.clone(), pkt);
         }
     }
 
@@ -437,8 +435,7 @@ pub fn substrate_ingress<'pktbuf>(
     // If a ZPI is setup on this link, then we expect the message to use one of the valid
     // ZPI values.  Need to check spec, but I think best to drop any ZPI 0 packets IF we
     // have an SA established.
-    let sa_table = asm.sa_states.lock().unwrap();
-    let handled = match sa_table.get(&ingress_link_id) {
+    let handled = match asm.sa_states.get(&ingress_link_id) {
         Some(sa_state) => {
             if sa_state.sa_established.load(Ordering::Relaxed) {
                 if zpi_hdr.zpi == sa_state.transport_sa.recv_zpis.hmac {

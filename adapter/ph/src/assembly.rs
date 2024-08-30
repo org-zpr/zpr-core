@@ -18,7 +18,7 @@ use crate::zpr;
 use bytes::Buf;
 use core::time::Duration;
 use enum_map::EnumMap;
-use std::collections::HashMap;
+use dashmap::DashMap;
 use std::result::Result;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -77,13 +77,8 @@ pub struct Assembly<'pktbuf> {
     pub km_state: KmState<'pktbuf>,
 
     // The `pa_states` is written to by the KM Multiplexor and is read whenever we need to figure
-    // out the correct ZPI to use on a link, or do encryption, or do HMAC.
-    //
-    // TODO: Use less locking, switch to RcuBox.  The table is modified when connections come or go.
-    //       And then updates to records occur after handshake completes.  In the future there will
-    //       be updates when rekeying occurs.
-    //
-    pub sa_states: Arc<Mutex<HashMap<zpr::LinkId, SAState>>>,
+    // out the correct ZPI to use on a link, or do encryption/HMAC.
+    pub sa_states: Arc<DashMap<zpr::LinkId, SAState>>,
 }
 
 pub struct SyncReqState<'pktbuf> {
@@ -293,7 +288,7 @@ pub mod test {
         pub dlt: Option<adapter_tables::DockLookupTable>,
         pub adapter_manager: Option<AdapterManager<'a>>,
         pub km_state: Option<KmState<'a>>,
-        pub sa_states: Option<Arc<Mutex<HashMap<zpr::LinkId, SAState>>>>,
+        pub sa_states: Option<Arc<DashMap<zpr::LinkId, SAState>>>,
     }
 
     struct DummyTunCtl;
@@ -380,7 +375,7 @@ pub mod test {
             KmState::new(km_tx, km_sig_tx, km_mpx_ctok.clone())
         });
         let sa_states = builder.sa_states.unwrap_or_else(|| {
-            Arc::new(Mutex::new(HashMap::new()))
+            Arc::new(DashMap::new())
         });
 
 
