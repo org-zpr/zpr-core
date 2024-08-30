@@ -46,11 +46,6 @@ impl<'pktbuf> KmState<'pktbuf> {
         let mut inner = self.inner.lock().unwrap();
         inner.km_table.insert(link_id, handle);
     }
-
-    fn drop_link_handle(&self, link_id: zpr::LinkId) {
-        let mut inner = self.inner.lock().unwrap();
-        inner.km_table.remove(&link_id);
-    }
 }
 
 // I'd like the KeyManager to live as long as the hashmap that holds the handle.
@@ -324,11 +319,6 @@ mod test {
     use crate::km_noise;
     use base64::prelude::*;
     use crate::assembly::test::{TestAssemblyBuilder, create_assembly};
-
-
-
-
-
 
 
     #[tokio::test]

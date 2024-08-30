@@ -273,8 +273,9 @@ pub mod test {
     use enum_map::{enum_map, EnumMap};
     use tokio::net::UdpSocket;
     use tokio::sync::mpsc;
+    use tokio_util::sync::CancellationToken;
 
-    #[allow(dead_code)]
+
     pub struct TestAssemblyBuilder<'a> {
         pub buffer_stack: Option<BufferStack<'a, { config::PACKET_BUFFER_SIZE }>>,
         pub mgmt_processor: Option<MgmtProcessor<'a>>,
@@ -291,9 +292,10 @@ pub mod test {
         pub alt: Option<adapter_tables::AgentLookupTable>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
         pub adapter_manager: Option<AdapterManager<'a>>,
+        pub km_state: Option<KmState<'a>>,
+        pub sa_states: Option<Arc<Mutex<HashMap<zpr::LinkId, SAState>>>>,
     }
 
-    #[allow(dead_code)]
     struct DummyTunCtl;
     impl CarrierSetter for DummyTunCtl {
         fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
@@ -301,7 +303,6 @@ pub mod test {
         }
     }
 
-    #[allow(dead_code)]
     impl TestAssemblyBuilder<'_> {
         pub fn new() -> Self {
             Self {
@@ -320,11 +321,12 @@ pub mod test {
                 alt: None,
                 dlt: None,
                 adapter_manager: None,
+                km_state: None,
+                sa_states: None,
             }
         }
     }
 
-    #[allow(dead_code)]
     pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
         let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
             let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 0];
@@ -371,6 +373,16 @@ pub mod test {
             let (cq_inq, _cq_outq) = mpsc::channel(1);
             AdapterManager::new(cq_inq)
         });
+        let km_state = builder.km_state.unwrap_or_else(|| {
+            let (km_sig_tx, _km_sig_rx) = mpsc::channel(1);
+            let (km_tx, _km_rx) = mpsc::channel(1);
+            let km_mpx_ctok = CancellationToken::new();
+            KmState::new(km_tx, km_sig_tx, km_mpx_ctok.clone())
+        });
+        let sa_states = builder.sa_states.unwrap_or_else(|| {
+            Arc::new(Mutex::new(HashMap::new()))
+        });
+
 
         Assembly {
             buffer_stack,
@@ -388,6 +400,8 @@ pub mod test {
             alt,
             dlt,
             adapter_manager,
+            km_state,
+            sa_states,
         }
     }
 }
