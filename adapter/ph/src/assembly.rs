@@ -9,7 +9,6 @@ use crate::mgmt_processor_worker;
 use crate::peer_table;
 use crate::queues::*;
 use crate::tun_ctl::CarrierSetter;
-use crate::zdp::*;
 use crate::zpr;
 use enum_map::EnumMap;
 
@@ -102,9 +101,11 @@ pub mod test {
     use tokio::sync::mpsc;
 
     #[allow(dead_code)]
+    #[derive(Default)]
     pub struct TestAssemblyBuilder<'a> {
+        pub ph_mode: Option<PhMode>,
+        pub system_name: Option<String>,
         pub buffer_stack: Option<BufferStack<'a, { config::PACKET_BUFFER_SIZE }>>,
-        pub mgmt_processor: Option<MgmtProcessor<'a>>,
         pub agent_input: Option<AgentInput<'a>>,
         pub substrate_egress: Option<SubstrateEgress<'a>>,
         pub capture_queue: Option<Capture<'a>>,
@@ -112,9 +113,8 @@ pub mod test {
         pub flow_control: Option<FlowControl>,
         pub counters: Option<EnumMap<CounterType, Counter>>,
         pub tun_ctl: Option<&'a dyn CarrierSetter>,
-        pub sync_req_state: Option<SyncReqState<'a>>,
-        pub peer_table: Option<peer_table::PeerTable>,
-        pub adapter_docking_session_id: Option<zpr::LinkId>,
+        pub peer_table: Option<peer_table::PeerTable<'a>>,
+        pub peer_ids: Option<Vec<zpr::LinkId>>,
         pub alt: Option<adapter_tables::AgentLookupTable>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
         pub adapter_manager: Option<AdapterManager<'a>>,
@@ -131,35 +131,17 @@ pub mod test {
     #[allow(dead_code)]
     impl TestAssemblyBuilder<'_> {
         pub fn new() -> Self {
-            Self {
-                buffer_stack: None,
-                mgmt_processor: None,
-                agent_input: None,
-                substrate_egress: None,
-                capture_queue: None,
-                capture_worker: None,
-                flow_control: None,
-                counters: None,
-                tun_ctl: None,
-                sync_req_state: None,
-                peer_table: None,
-                adapter_docking_session_id: None,
-                alt: None,
-                dlt: None,
-                adapter_manager: None,
-            }
+            Self::default()
         }
     }
 
     #[allow(dead_code)]
     pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
+        let ph_mode = builder.ph_mode.unwrap_or(PhMode::Adapter);
+        let system_name = builder.system_name.unwrap_or("test".into());
         let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
             let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 0];
             BufferStack::new(buf_storage.leak::<'static>())
-        });
-        let mgmt_processor = builder.mgmt_processor.unwrap_or_else(|| {
-            let (mp_inq, _mp_outq) = mpsc::channel(1);
-            MgmtProcessor::new(mp_inq)
         });
         let agent_input = builder.agent_input.unwrap_or_else(|| {
             let v: Vec<&tokio_tun::Tun> = Vec::new();
@@ -180,14 +162,11 @@ pub mod test {
         let counters = builder.counters.unwrap_or_else(|| {
             enum_map! { _ => Counter::new(), }
         });
-        let tun_ctl = builder.tun_ctl.unwrap_or_else(|| &DummyTunCtl);
-        let sync_req_state = builder
-            .sync_req_state
-            .unwrap_or_else(|| SyncReqState::new());
+        let tun_ctl = builder.tun_ctl.unwrap_or(&DummyTunCtl);
         let peer_table = builder
             .peer_table
             .unwrap_or_else(|| peer_table::PeerTable::new());
-        let adapter_docking_session_id = builder.adapter_docking_session_id.unwrap_or_else(|| 0);
+        let peer_ids = std::sync::Mutex::new(builder.peer_ids.unwrap_or(Vec::new()));
         let alt = builder
             .alt
             .unwrap_or_else(|| adapter_tables::AgentLookupTable::new());
@@ -200,8 +179,9 @@ pub mod test {
         });
 
         Assembly {
+            ph_mode,
+            system_name,
             buffer_stack,
-            mgmt_processor,
             agent_input,
             substrate_egress,
             capture_queue,
@@ -209,9 +189,8 @@ pub mod test {
             flow_control,
             counters,
             tun_ctl,
-            sync_req_state,
             peer_table,
-            adapter_docking_session_id,
+            peer_ids,
             alt,
             dlt,
             adapter_manager,
