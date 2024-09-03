@@ -8,7 +8,7 @@ use crate::flow_control::FlowControl;
 use crate::mgmt_processor_worker;
 use crate::peer_table;
 use crate::queues::*;
-use crate::tun_ctl::CarrierSetter;
+use crate::tun_ctl::TunCtl;
 use crate::zpr;
 use enum_map::EnumMap;
 
@@ -52,7 +52,7 @@ pub struct Assembly<'pktbuf> {
 
     pub counters: EnumMap<CounterType, Counter>,
 
-    pub tun_ctl: &'pktbuf dyn CarrierSetter,
+    pub tun_ctl: Box<dyn TunCtl + 'pktbuf>,
 
     pub peer_table: peer_table::PeerTable<'pktbuf>,
     pub peer_ids: std::sync::Mutex<Vec<zpr::LinkId>>, // HACK until peer_table is enumerable
@@ -112,7 +112,7 @@ pub mod test {
         pub capture_worker: Option<CaptureWorker>,
         pub flow_control: Option<FlowControl>,
         pub counters: Option<EnumMap<CounterType, Counter>>,
-        pub tun_ctl: Option<&'a dyn CarrierSetter>,
+        pub tun_ctl: Option<Box<dyn TunCtl + 'a>>,
         pub peer_table: Option<peer_table::PeerTable<'a>>,
         pub peer_ids: Option<Vec<zpr::LinkId>>,
         pub alt: Option<adapter_tables::AgentLookupTable>,
@@ -121,8 +121,8 @@ pub mod test {
     }
 
     #[allow(dead_code)]
-    struct DummyTunCtl;
-    impl CarrierSetter for DummyTunCtl {
+    struct DummyTunCtlImpl;
+    impl TunCtl for DummyTunCtlImpl {
         fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
             Ok(())
         }
@@ -162,7 +162,7 @@ pub mod test {
         let counters = builder.counters.unwrap_or_else(|| {
             enum_map! { _ => Counter::new(), }
         });
-        let tun_ctl = builder.tun_ctl.unwrap_or(&DummyTunCtl);
+        let tun_ctl = builder.tun_ctl.unwrap_or_else(|| Box::new(DummyTunCtlImpl));
         let peer_table = builder
             .peer_table
             .unwrap_or_else(|| peer_table::PeerTable::new());

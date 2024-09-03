@@ -114,12 +114,11 @@ async fn handle_connection(
                 let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
                 let mut buf = [0; 1]; // Must receive data sent with ancillary data
                 let bufs = &mut [IoSliceMut::new(&mut buf)][..];
-                unix_stream_recv_vectored_with_ancillary(
-                    buf_reader.into_inner().as_ref(),
-                    bufs,
-                    &mut ancillary,
-                )
-                .await?;
+                buf_reader
+                    .into_inner()
+                    .as_ref()
+                    .recv_vectored_with_ancillary(bufs, &mut ancillary)
+                    .await?;
 
                 // Set capture file using ancillary data
                 buf_writer
