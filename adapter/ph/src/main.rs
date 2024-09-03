@@ -55,7 +55,7 @@ use counters_enum::*;
 use flow_control::FlowControl;
 use options::PhMode;
 use queues::*;
-use tun_ctl::CarrierSetter;
+use tun_ctl::TunCtl;
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -173,7 +173,7 @@ fn main() -> ExitCode {
                 .expect("unable to open TUN device")
                 .leak();
 
-            let tun_ctl = Box::leak(Box::new(tun_ctl::TunCtl::new(&tun_devs[0])));
+            let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(&tun_devs[0]));
 
             tun_ctl.set_carrier(false).unwrap();
 
@@ -281,7 +281,7 @@ fn main() -> ExitCode {
                 capture_worker,
                 flow_control,
                 counters,
-                tun_ctl: tun_ctl,
+                tun_ctl,
                 sync_req_state,
                 peer_table,
                 adapter_docking_session_id,
