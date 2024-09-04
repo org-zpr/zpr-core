@@ -12,6 +12,7 @@ cbpf-rs = { path = "../../cbpf-rs" }
 clap = { version = "4.5.7", features = ["derive"] }
 crossbeam-epoch = { version = "0.9.18", optional = true }
 cslab = { path = "../../cslab" }
+curve25519-dalek = "4.1.3"
 dashmap = { version = "6.0.1" }
 enum-map = { version = "2.7.3" }
 hdrhistogram = { version = "7.5.4" }
@@ -19,20 +20,18 @@ libc = { version = "0.2.155" }
 open-enum = { version = "0.5.1" }
 openssl-sys = { version = "0.9.102" }
 openssl = { version = "0.10.64" }
+snow = "0.9.6"
 socket2 = { version = "0.5.7" }
 tokio-tun = { version = "0.11.5" }
 tokio-util = { version = "0.7.11", features = ["rt"] }
 tokio = { version = "1.37.0", features = ["full"] }
-zerocopy = { version = "0.7.34", features = ["byteorder", "derive"] }
 tracing = "0.1.40"
-zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }
-snow = "0.9.6"
-curve25519-dalek = "4.1.3"
 tracing-subscriber = "0.3.18"
+zerocopy = { version = "0.7.34", features = ["byteorder", "derive"] }
+zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }
 
 [dev-dependencies]
 base64 = "0.22.1"
-
 
 [features]
 default = ["rcu-crossbeam-epoch"]
@@ -42,5 +41,5 @@ rcu-mutex-arc = []
 rcu-crossbeam-epoch = ["dep:crossbeam-epoch"]
 rcu-aarc = ["dep:aarc"]
 
-[lib] 
+[lib]
 test = false

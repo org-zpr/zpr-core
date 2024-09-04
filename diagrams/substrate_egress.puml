@@ -1,0 +1,13 @@
+@startuml
+
+start
+
+:""encap_zpi()"";
+
+:""maybe_capture()""; <<procedure>>
+
+:""encrypt()"";
+
+stop
+
+@enduml

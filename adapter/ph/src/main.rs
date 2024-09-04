@@ -31,6 +31,7 @@ mod config;
 mod counter;
 mod counters_enum;
 mod defs;
+mod dock_tables;
 mod fastpath;
 mod flow_control;
 mod km;
@@ -47,13 +48,14 @@ mod queues;
 mod rcu;
 mod rpc_worker;
 mod substrate_ingress_worker;
+mod sync_req;
 mod test_packet;
 mod tun_ctl;
 mod zdp;
 mod zdp_ll;
 mod zpr;
 
-use assembly::{Assembly, PhFlags, SyncReqState};
+use assembly::{Assembly, PhMode, PhFlags};
 use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
 use counter::*;
@@ -61,15 +63,14 @@ use counters_enum::*;
 use flow_control::FlowControl;
 use km::ZPIPair;
 use km_multiplexor::KmState;
-use options::PhMode;
 use queues::*;
-use tun_ctl::CarrierSetter;
+use tun_ctl::TunCtl;
 
 #[derive(Parser)]
 #[command(version, about)]
 struct CmdLine {
-    #[arg(long, default_value_t, value_enum)]
-    mode: PhMode,
+    #[arg(long)]
+    name: String,
 
     #[arg(long)]
     control_path: String,
@@ -78,7 +79,10 @@ struct CmdLine {
     self_addr: SocketAddr,
 
     #[arg(long)]
-    dock_addr: SocketAddr,
+    peer_addr1: SocketAddr,
+
+    #[arg(long)]
+    peer_addr2: Option<SocketAddr>,
 
     #[arg(long)]
     ca_file: String,
@@ -99,7 +103,8 @@ struct CmdLine {
     allow_insecure_zpi_zero: bool,
 }
 
-fn emit_counts(counts_map: &EnumMap<CounterType, Counter>) {
+fn emit_counts(system_name: &String, counts_map: &EnumMap<CounterType, Counter>) {
+    println!("\n*** {} Counters ***", system_name);
     for (key, &ref value) in counts_map {
         println!("{}: {}", key, value.get_count());
     }
@@ -109,9 +114,11 @@ fn main() -> ExitCode {
     tracing_subscriber::fmt::init();
     let cmd_line = CmdLine::parse();
 
+    let system_name = cmd_line.name;
     let sock_path = cmd_line.control_path;
-    let peer_addr = cmd_line.dock_addr;
     let self_addr = cmd_line.self_addr;
+    let peer_addr1 = cmd_line.peer_addr1;
+    let peer_addr2 = cmd_line.peer_addr2;
     let _ca_file = cmd_line.ca_file;
     let _cert_file = cmd_line.certificate_file;
     let _priv_key_file = cmd_line.private_key_file;
@@ -122,6 +129,7 @@ fn main() -> ExitCode {
             "Insecure ZPI ZERO is enabled.  This is insecure and should only be used for testing."
         );
     }
+    let ph_mode;
 
     // TODO: These batch sizes are placeholders for now.  So are the queue
     // sizes below which are all just double the batch size.  Performance
@@ -129,7 +137,6 @@ fn main() -> ExitCode {
     // throughput with service time.
     let substrate_socket_count = 4;
     let substrate_ingress_batch_size = 8;
-    let mgmt_processor_queue_size = 16;
     let agent_output_batch_size = 4;
     let capture_queue_size = 16;
     let capture_batch_size = 8;
@@ -139,9 +146,6 @@ fn main() -> ExitCode {
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
-
-    let (mp_inq, mp_outq) = mpsc::channel(mgmt_processor_queue_size);
-    let mgmt_processor = MgmtProcessor::new(mp_inq);
 
     let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
@@ -153,8 +157,6 @@ fn main() -> ExitCode {
     let flow_control = FlowControl::new();
 
     let counters = enum_map! { _ => Counter::new(), };
-
-    let sync_req_state = SyncReqState::new();
 
     let (km_sig_tx, km_sig_rx) = mpsc::channel(16); // TODO: name this constant
     let (km_tx, km_rx) = mpsc::channel(km_message_queue_size);
@@ -183,13 +185,11 @@ fn main() -> ExitCode {
         .add_client_ca(&X509::from_pem(&buffer).unwrap())
         .unwrap();*/
 
-    let peer_table = peer_table::PeerTable::new();
-    let adapter_docking_session_id = peer_table
-        .insert(peer_table::PeerState::new(
-            peer_table::PeerType::Adapter, /* TEMP HACK */
-            peer_addr,
-        ))
-        .unwrap();
+    if peer_addr2.is_some() {
+        ph_mode = PhMode::Node;
+    } else {
+        ph_mode = PhMode::Adapter;
+    }
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -202,7 +202,7 @@ fn main() -> ExitCode {
                 .expect("unable to open TUN device")
                 .leak();
 
-            let tun_ctl = Box::leak(Box::new(tun_ctl::TunCtl::new(&tun_devs[0])));
+            let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(&tun_devs[0]));
 
             tun_ctl.set_carrier(false).unwrap();
 
@@ -306,18 +306,18 @@ fn main() -> ExitCode {
 
             let asm = Box::leak(Box::new(Assembly {
                 flags,
+                ph_mode,
+                system_name,
                 buffer_stack,
-                mgmt_processor,
                 agent_input,
                 substrate_egress,
                 capture_queue,
                 capture_worker,
                 flow_control,
                 counters,
-                tun_ctl: tun_ctl,
-                sync_req_state,
-                peer_table,
-                adapter_docking_session_id,
+                tun_ctl,
+                peer_table: peer_table::PeerTable::new(),
+                peer_ids: std::sync::Mutex::new(Vec::new()),
                 alt,
                 dlt,
                 adapter_manager,
@@ -326,11 +326,50 @@ fn main() -> ExitCode {
 
 
 
+
+            // TEMP HACK to statically install peers
+            let dock_noise_public_key = [0; 32]; // XXX TODO
+            if let Some(pa2) = peer_addr2 {
+                let peer_id2 = asm
+                    .hack_add_peer(peer_table::PeerType::Adapter, pa2)
+                    .unwrap();
+
+                asm.peer_ids.lock().unwrap().push(peer_id2);
+
+                if !disable_km {
+                    km_multiplexor::add_adapter_link(asm, peer_id2, ZPIPair::new(1, 2), dock_noise_public_key)
+                        .unwrap();
+                }
+            }
+
+            let peer_id = asm
+                .hack_add_peer(
+                    match ph_mode {
+                        PhMode::Node => peer_table::PeerType::Adapter,
+                        PhMode::Adapter => peer_table::PeerType::Node,
+                    },
+                    peer_addr1,
+                )
+                .unwrap();
+
+            asm.peer_ids.lock().unwrap().push(peer_id);
             if !disable_km {
+                if ph_mode == PhMode::Adapter {
+                    km_multiplexor::add_adapter_link(asm, peer_id, ZPIPair::new(3, 4), dock_noise_public_key)
+                        .unwrap();
+                } else {
+                    let dock_keypair = snow::Keypair { // XXX also TODO!
+                        private: [0; 32].to_vec(),
+                        public: [0; 32].to_vec(),
+                    };
+                    km_multiplexor::add_node_link(asm, peer_id, ZPIPair::new(5, 6), dock_keypair)
+                        .unwrap();
+                }
                 let dock_noise_public_key = [0; 32]; // XXX TODO
-                km_multiplexor::add_adapter_link(asm, adapter_docking_session_id, ZPIPair::new(1, 2), dock_noise_public_key)
+                km_multiplexor::add_adapter_link(asm, peer_id, ZPIPair::new(1, 2), dock_noise_public_key)
                     .unwrap();
             }
+            // END HACK
 
             // TODO signal handler goes here
 
@@ -353,16 +392,15 @@ fn main() -> ExitCode {
             js.spawn(async {
                 loop {
                     tokio::select! {
-                        _ = usr1_stream.recv() => emit_counts(&asm.counters),
+                        _ = usr1_stream.recv() => emit_counts(&asm.system_name, &asm.counters),
                         _ = term_stream.recv() => {
-                            emit_counts(&asm.counters);
+                            emit_counts(&asm.system_name, &asm.counters);
                             std::process::exit(128 + SignalKind::terminate().as_raw_value())
                         }
                     }
                 }
             });
 
-            js.spawn(mgmt_processor_worker::launch(&*asm, mp_outq));
             js.spawn(adapter_manager_worker::launch(&*asm, am_outq));
 
             for (worker_index, tun_dev) in tun_devs.iter().enumerate() {
@@ -408,8 +446,8 @@ fn main() -> ExitCode {
 
 
 
-            eprintln!("Connecting...");
-            eprintln!("Connected!"); // FIXME: it's a lie
+            eprintln!("{}: connecting...", asm.system_name);
+            eprintln!("{}: connected!", asm.system_name); // FIXME: it's a lie
             asm.tun_ctl.set_carrier(true).unwrap();
 
             for (worker_index, socket) in sockets.iter().enumerate() {
@@ -423,11 +461,12 @@ fn main() -> ExitCode {
                 ));
             }
 
-            mgmt::send_report(asm, asm.adapter_docking_session_id, "Reporting for Duty!").await;
-            mgmt::send_discard(asm, asm.adapter_docking_session_id).await;
-            mgmt::send_hello_request(asm, asm.adapter_docking_session_id)
-                .await
-                .unwrap();
+            if matches!(ph_mode, PhMode::Adapter) {
+                let dsid = asm.hack_get_adapter_docking_session_id();
+                mgmt::send_report(asm, dsid, "Reporting for Duty!").await;
+                mgmt::send_discard(asm, dsid).await;
+                mgmt::send_hello_request(asm, dsid).await.unwrap();
+            }
 
             while let Some(res) = js.join_next().await {
                 res.unwrap();

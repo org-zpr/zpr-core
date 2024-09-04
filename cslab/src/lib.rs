@@ -15,7 +15,7 @@ use std::mem::ManuallyDrop;
 use std::sync;
 use sync::{
     atomic::{AtomicUsize, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, MutexGuard,
 };
 
 // DESIGN NOTES
@@ -401,6 +401,28 @@ impl<T> Cslab<T> {
         Ok(idx)
     }
 
+    /// Returns the index which will be used for the next allocation.
+    pub fn vacant_key(&self) -> Result<usize, ()> {
+        let idx = self.first_free;
+
+        if idx >= self.storage.table().len() {
+            return Err(());
+        }
+
+        Ok(idx)
+    }
+
+    /// Try to reserve a slot for inserting an item.
+    ///
+    /// This way, an item which needs to refer to its own index can be inserted.
+    pub fn vacant_entry(&mut self) -> Result<VacantEntry<'_, T>, ()> {
+        if self.first_free >= self.storage.table().len() {
+            return Err(());
+        }
+
+        Ok(VacantEntry(self))
+    }
+
     /// Mark an element to be removed.
     ///
     /// Panics if there is no element present at the given index.
@@ -461,6 +483,26 @@ impl<T> Cslab<T> {
         self.allocated -= 1;
 
         item
+    }
+}
+
+pub struct VacantEntry<'a, T>(&'a mut Cslab<T>);
+
+impl<T> VacantEntry<'_, T> {
+    /// Returns the index which will be used by calling `insert()`
+    /// on this `VacantEntry`.
+    pub fn key(&self) -> usize {
+        self.0.first_free
+    }
+
+    /// Inserts an item at the index returned by `key()`.
+    pub fn insert(self, item: T) -> usize {
+        // because `self` holds a mut reference to the `Cslab`
+        // which could only have come from `vacant_entry()`,
+        // we're guaranteed (a) that there is an entry free,
+        // and (b) that it hasn't changed since the creation
+        // of `self`
+        self.0.insert(item).unwrap()
     }
 }
 
@@ -899,6 +941,27 @@ impl<T> RcuCslab<T> {
         self.writer.lock().unwrap().insert(item)
     }
 
+    /// Returns the index which will be used for the next allocation.
+    pub fn vacant_key(&self) -> Result<usize, ()> {
+        self.writer.lock().unwrap().vacant_key()
+    }
+
+    /// Try to reserve a slot for inserting an item.
+    ///
+    /// This way, an item which needs to refer to its own index can be inserted.
+    pub fn vacant_entry(&mut self) -> Result<VacantRcuEntry<'_, T>, ()> {
+        // NOTE: we can't just wrap `VacantEntry` here, because we'd
+        // need to return the mutex guard *and* the `VacantEntry`, which
+        // Rust doesn't allow.
+        let guard = self.writer.lock().unwrap();
+
+        if matches!(guard.vacant_key(), Err(_)) {
+            return Err(());
+        }
+
+        Ok(VacantRcuEntry(guard))
+    }
+
     /// Mark an element to be removed.
     ///
     /// Panics if there is no element present at the given index.
@@ -960,5 +1023,20 @@ impl<T> RcuCslab<T> {
     pub fn remove(&mut self, idx: usize) -> RcuCslabReader<T> {
         self.mark_removed(idx);
         self.schedule_finalization()
+    }
+}
+
+pub struct VacantRcuEntry<'a, T>(MutexGuard<'a, Cslab<T>>);
+
+impl<T> VacantRcuEntry<'_, T> {
+    /// Returns the index which will be used by calling `insert()`
+    /// on this `VacantEntry`.
+    pub fn key(&self) -> usize {
+        self.0.vacant_key().unwrap()
+    }
+
+    /// Inserts an item at the index returned by `key()`.
+    pub fn insert(mut self, item: T) -> usize {
+        self.0.insert(item).unwrap()
     }
 }

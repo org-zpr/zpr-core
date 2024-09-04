@@ -9,6 +9,7 @@ info:
 	@echo "  make node        - build the node"
 	@echo "  make adapter     - build the adapter"
 	@echo "  make nodeadapter - build the node and the adapter"
+	@echo "  make diagrams    - build PlantUML diagrams"
 	@echo 
 	@echo \>_
 	@echo
@@ -24,6 +25,7 @@ adapter:
 	$(MAKE) -C adapter/cactl all
 	$(MAKE) -C adapter/cd all
 
+diagrams:
+	$(MAKE) -C diagrams
 
-.PHONY: nodeadapter node adapter
-
+.PHONY: nodeadapter node adapter diagrams

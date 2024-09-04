@@ -3,7 +3,6 @@
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
-use crate::zpr;
 use std::io::ErrorKind;
 use std::result::Result;
 use std::time::SystemTime;
@@ -19,11 +18,13 @@ pub enum TryEnqueueError<T> {
 }
 
 pub enum MgmtProcessorMessage<'pktbuf> {
-    Packet(zpr::LinkId, Packet<'pktbuf>),
+    Packet(Packet<'pktbuf>),
     TestPacket(TestPacket),
 }
 
 /// MgmtProcessor processes all inbound management packets
+/// Unlike other queues, this doesn't live directly in the assembly,
+/// but rather in the peer table, as there is one of these per peer.
 pub struct MgmtProcessor<'pktbuf> {
     sender: mpsc::Sender<MgmtProcessorMessage<'pktbuf>>,
 }
@@ -35,17 +36,13 @@ impl<'pktbuf> MgmtProcessor<'pktbuf> {
 
     pub fn try_enqueue_packet(
         &self,
-        ingress_link_id: zpr::LinkId,
         packet: Packet<'pktbuf>,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
-        match self
-            .sender
-            .try_send(MgmtProcessorMessage::Packet(ingress_link_id, packet))
-        {
+        match self.sender.try_send(MgmtProcessorMessage::Packet(packet)) {
             Ok(()) => Ok(()),
 
             Err(TrySendError::Full(msg) | TrySendError::Closed(msg)) => {
-                let MgmtProcessorMessage::Packet(_, pkt) = msg else {
+                let MgmtProcessorMessage::Packet(pkt) = msg else {
                     unreachable!()
                 };
                 Err(TryEnqueueError::Full(pkt))
@@ -58,6 +55,7 @@ impl<'pktbuf> MgmtProcessor<'pktbuf> {
     // TODO perhaps enqueue_test_packet is not the best name, because it does more than
     // just enqueue, it also waits for the response, unlike the other enqueue methods of other
     // queues
+    #[allow(dead_code)]
     pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
         let test_tuple = TestPacket::create();
 

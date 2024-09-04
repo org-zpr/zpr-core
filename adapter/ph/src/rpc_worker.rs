@@ -2,6 +2,9 @@
 //! with the socket, performs action based on received command
 //! To avoid excess parsing, the command must not have spaces
 
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
 use crate::assembly::Assembly;
 use crate::config;
 use crate::test_packet::TestPacketMetrics;
@@ -111,12 +114,11 @@ async fn handle_connection(
                 let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
                 let mut buf = [0; 1]; // Must receive data sent with ancillary data
                 let bufs = &mut [IoSliceMut::new(&mut buf)][..];
-                unix_stream_recv_vectored_with_ancillary(
-                    buf_reader.into_inner().as_ref(),
-                    bufs,
-                    &mut ancillary,
-                )
-                .await?;
+                buf_reader
+                    .into_inner()
+                    .as_ref()
+                    .recv_vectored_with_ancillary(bufs, &mut ancillary)
+                    .await?;
 
                 // Set capture file using ancillary data
                 buf_writer
@@ -196,8 +198,12 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
 /// Performs a performance sample on the PH by measuring the queue depths and the
 /// packet latencies throughout the system. Requires the duration of the
 /// sample as well as the number of samples per second.
-async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
-    let send_duration = Duration::new(duration.parse().unwrap(), 0);
+async fn perf_sample(_asm: &Assembly<'_>, _duration: &str, _rate: &str) -> String {
+    // FIXME: There are now a dynamically allocated number of mgmt_processors...
+    // this needs to be restructured to account for that fact.
+    Default::default()
+
+    /*let send_duration = Duration::new(duration.parse().unwrap(), 0);
     let begin_time = Instant::now();
     let mut send_interval = interval(Duration::new(0, 1000000000 / rate.parse::<u32>().unwrap()));
 
@@ -231,7 +237,7 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         &mgmt_processor_batch,
     );
 
-    format!("{mgmt_processor}")
+    format!("{mgmt_processor}")*/
 }
 
 /// Helper for perf_sample

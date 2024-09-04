@@ -4,7 +4,7 @@
 //! This implies that all functions here must be non-async.
 
 use crate::adapter_tables::AltEntry;
-use crate::assembly::Assembly;
+use crate::assembly::{Assembly, PhMode};
 use crate::classifier::{self, ClassifierResult};
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
@@ -34,6 +34,8 @@ pub fn drop_and_count<'pktbuf>(
     pkt: Packet<'pktbuf>,
     reason: impl Into<CounterType>,
 ) {
+    let reason = reason.into();
+    eprintln!("{}: dropping packet because {}", asm.system_name, reason);
     asm.buffer_stack.put_buffer(pkt.destroy());
     asm.counters[reason.into()].increment();
 }
@@ -417,6 +419,8 @@ pub fn substrate_ingress<'pktbuf>(
 ) {
     asm.counters[CounterType::InPacksRec].increment();
 
+    eprintln!("{}: got packet from {}", asm.system_name, peer_sa);
+
     let Some(ingress_link_id) = asm.peer_table.lookup_peer(peer_sa) else {
         drop_and_count(asm, pkt, CounterType::UnknownPeer);
         return;
@@ -528,12 +532,29 @@ pub fn substrate_ingress<'pktbuf>(
         // (instead of this silly code to restore it?)
         *pkt.alloc_zeroed_header() = base_hdr;
 
-        match asm.mgmt_processor.try_enqueue_packet(ingress_link_id, pkt) {
-            // note that ZPI is gone now
-            Ok(()) => (),
-            Err(TryEnqueueError::Full(pkt)) => {
-                drop_and_count(asm, pkt, CounterType::QueueBackpressure)
-            }
+        eprintln!("{}: enqueueing!", asm.system_name);
+
+        // because of how `inspect` works the borrow checker can't track
+        // who consumes this when...
+        let mut pkt = Some(pkt);
+
+        if asm
+            .peer_table
+            .inspect(ingress_link_id, |peer_state| {
+                match peer_state
+                    .mgmt_processor
+                    .try_enqueue_packet(pkt.take().unwrap())
+                {
+                    Ok(()) => (),
+                    Err(TryEnqueueError::Full(pkt)) => {
+                        eprintln!("{}: queue backpressure!", asm.system_name);
+                        drop_and_count(asm, pkt, CounterType::QueueBackpressure);
+                    }
+                }
+            })
+            .is_none()
+        {
+            drop_and_count(asm, pkt.take().unwrap(), CounterType::PeerRemoved);
         }
         return;
     }
@@ -688,19 +709,26 @@ pub fn forward<'pktbuf>(
     // TODO: node forwarding
 
     // adapter forwarding
-    if ingress_link_id == zpr::AGENT_LINK_ID {
-        // in from agent; out to dock
+    let egress_link =  // FIXME: this is a hack
+        if ingress_link_id == zpr::AGENT_LINK_ID {
+            0
+        } else {
+            match asm.ph_mode {
+                PhMode::Adapter => zpr::AGENT_LINK_ID,
+                PhMode::Node => (ingress_link_id + 1) % 2,
+            }
+        };
 
+    if egress_link == zpr::AGENT_LINK_ID {
+        agent_input(asm, ingress_stream_id, pkt);
+    } else {
         let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
         per_flow_hdr.stream_id = ingress_stream_id.into();
 
         let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
         base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
 
-        substrate_egress(asm, asm.adapter_docking_session_id, pkt);
-    } else {
-        // in from dock; out to agent
-        agent_input(asm, ingress_stream_id, pkt);
+        substrate_egress(asm, egress_link, pkt);
     }
 }
 

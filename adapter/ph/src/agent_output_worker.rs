@@ -34,7 +34,7 @@ async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
             let pkt = loop {
                 let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
 
-                tun_recv_buf(tun, &mut pkt).await.unwrap();
+                tun.recv_buf(&mut pkt).await.unwrap();
                 let pi = tun_pi::read_pi(&mut pkt);
                 if pi.strip || !is_ip(pi) {
                     // packet was too large or non-IP; drop

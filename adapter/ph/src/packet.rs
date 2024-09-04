@@ -9,6 +9,7 @@
 use crate::config;
 use crate::defs::*;
 use crate::net_defs::*;
+use crate::zpr;
 use crate::zpr::L3Type;
 use bytes::buf;
 use std::mem::{size_of, size_of_val};
@@ -154,8 +155,9 @@ pub struct PacketMetadata {
     offset: usize,    // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
     len: usize,       // packet length
     pub flow_id: u32, // flow ID for load-balancing purposes; not otherwise meaningful
+    ingress_link_id: zpr::LinkId,
     five_tuple: FiveTuple,
-    _padding: [u8; 6],
+    _padding: [u8; 2],
 }
 
 #[allow(dead_code)]
@@ -185,6 +187,10 @@ impl PacketMetadata {
         self.five_tuple.l3_type
     }
 
+    pub fn set_ingress_link_id(&mut self, link_id: zpr::LinkId) {
+        self.ingress_link_id = link_id
+    }
+
     pub fn get_src_address(&self) -> IpAddress {
         self.five_tuple.src_address
     }
@@ -207,6 +213,20 @@ impl PacketMetadata {
 
     pub fn five_tuple(&self) -> &FiveTuple {
         &self.five_tuple
+    }
+
+    pub fn get_ingress_link_id(&self) -> zpr::LinkId {
+        self.ingress_link_id
+    }
+}
+
+impl std::fmt::Debug for PacketMetadata {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "5-tuple: {}\nFlow Id: {}, arrived on: {}, length: {}\n",
+            self.five_tuple, self.flow_id, self.ingress_link_id, self.len
+        )
     }
 }
 
@@ -394,6 +414,22 @@ impl<'buf> Packet<'buf> {
     pub fn flowhash(&self) -> u32 {
         self.metadata().flow_id
     }
+
+    pub fn dump_packet_buffer(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> Result<(), std::fmt::Error> {
+        // TODO This is a super hacky and inefficient way to do this
+        for i in 0..self.metadata().len {
+            if i % 16 == 0 {
+                write!(f, "\n{:04x} ", i)?;
+            } else if i % 8 == 0 {
+                write!(f, " ")?;
+            }
+            write!(f, " {:02x}", self.buf[i])?;
+        }
+        writeln!(f, "")
+    }
 }
 
 impl<'buf> buf::Buf for Packet<'buf> {
@@ -448,17 +484,10 @@ unsafe impl<'buf> buf::BufMut for Packet<'buf> {
 
 impl std::fmt::Debug for Packet<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        // TODO This is a super hacky and inefficient way to do this
-        let body = self.body();
-        for i in 0..body.len() {
-            if i % 16 == 0 {
-                write!(f, "\n{:04x} ", i)?;
-            } else if i % 8 == 0 {
-                write!(f, " ")?;
-            }
-            write!(f, " {:02x}", body[i])?;
-        }
-        writeln!(f, "")
+        writeln!(f, "\n=== Begin dumping packet info ===")?;
+        self.metadata().fmt(f)?;
+        self.dump_packet_buffer(f)?;
+        writeln!(f, "===  End dumping packet info  ===\n")
     }
 }
 
