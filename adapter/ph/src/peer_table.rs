@@ -1,17 +1,17 @@
 #![allow(dead_code)]
+use crate::dock_tables::DockForwardingTable;
 use crate::km::KMTransportSA;
 use crate::km_multiplexor::SAState;
-use crate::dock_tables::DockForwardingTable;
 use crate::queues;
 use crate::rcu::RcuBox;
 use crate::sync_req;
 use crate::zpr::{LinkId, SubstrateAddr};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
+use std::future::Future;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
-use std::future::Future;
 use tokio::sync::mpsc;
 use tokio::task;
 
@@ -86,7 +86,6 @@ pub enum PeerInsertError {
 pub enum SecurityAssocaitionStateError {
     NoAssociationForLink,
 }
-
 
 impl<'pktbuf> PeerTable<'pktbuf> {
     pub fn new() -> Self {

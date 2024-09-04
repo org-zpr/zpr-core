@@ -55,7 +55,7 @@ mod zdp;
 mod zdp_ll;
 mod zpr;
 
-use assembly::{Assembly, PhMode, PhFlags};
+use assembly::{Assembly, PhFlags, PhMode};
 use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
 use counter::*;

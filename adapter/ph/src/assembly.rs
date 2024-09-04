@@ -12,9 +12,9 @@ use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use crate::zpr;
 
+use enum_map::EnumMap;
 use std::default::Default;
 use std::result::Result;
-use enum_map::EnumMap;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum PhMode {

@@ -7,16 +7,16 @@ use crate::counters_enum::{self, CounterType};
 use crate::defs::*;
 use crate::dock_tables;
 use crate::fastpath;
+use crate::km_multiplexor;
 use crate::packet::{self, Packet};
 use crate::sync_req;
 use crate::zdp;
 use crate::zpr;
-use crate::km_multiplexor;
 use bytes::{Buf, BufMut};
-use tracing::error;
 use std::time::Duration;
 use tokio::sync::oneshot::channel;
 use tokio::time::sleep;
+use tracing::error;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::{AsBytesExt, FromBytesExt};
 
