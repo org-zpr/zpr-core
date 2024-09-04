@@ -19,10 +19,10 @@ use bytes::Buf;
 use core::time::Duration;
 use dashmap::DashMap;
 use enum_map::EnumMap;
+use std::default::Default;
 use std::result::Result;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::default::Default;
 use tokio::sync::{
     oneshot::{channel, Sender},
     Semaphore, SemaphorePermit,
@@ -88,7 +88,6 @@ pub struct PhFlags {
     /// If set TRUE this allows any messages on ZPI 0.  VERY INSECURE!!
     pub allow_insecure_zpi_zero: bool,
 }
-
 
 impl Default for PhFlags {
     /// Reasonable (and secure) defaults
