@@ -9,6 +9,7 @@ use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::default::Default;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::signal::unix::{signal, SignalKind};
@@ -302,7 +303,7 @@ fn main() -> ExitCode {
             let agent_input = AgentInput::new(tun_devs.iter());
             let substrate_egress = SubstrateEgress::new(sockets.iter());
 
-            let mut flags = PhFlags::new();
+            let mut flags: PhFlags = Default::default();
             flags.allow_insecure_zpi_zero = allow_insecure_zpi_zero;
 
             let asm = Box::leak(Box::new(Assembly {

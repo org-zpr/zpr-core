@@ -22,6 +22,7 @@ use enum_map::EnumMap;
 use std::result::Result;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::default::Default;
 use tokio::sync::{
     oneshot::{channel, Sender},
     Semaphore, SemaphorePermit,
@@ -88,9 +89,10 @@ pub struct PhFlags {
     pub allow_insecure_zpi_zero: bool,
 }
 
-impl PhFlags {
-    /// Reasonable defaults
-    pub fn new() -> Self {
+
+impl Default for PhFlags {
+    /// Reasonable (and secure) defaults
+    fn default() -> Self {
         Self {
             allow_insecure_zpi_zero: false,
         }
@@ -340,7 +342,7 @@ pub mod test {
     }
 
     pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
-        let flags = builder.flags.unwrap_or_else(|| PhFlags::new());
+        let flags = builder.flags.unwrap_or_else(|| Default::default());
         let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
             let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 0];
             BufferStack::new(buf_storage.leak::<'static>())
