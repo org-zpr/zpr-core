@@ -6,7 +6,7 @@ use crate::zpr;
 use bytes::Bytes;
 use dashmap::DashMap;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -93,7 +93,7 @@ async fn worker<'pktbuf>(
     sig_queue: &mut mpsc::Receiver<KMLinkMsg<KMSignal>>,
 ) {
     let sp_ctok = asm.km_state.ctok.clone();
-    let state_table_p = asm.sa_states.clone();
+    //let state_table_p = asm.sa_states.clone();
 
     loop {
         tokio::select! {
@@ -109,12 +109,20 @@ async fn worker<'pktbuf>(
                         info!("km_multiplexor: SA ID change on link {}: {} -> {}", linkmsg.link_id, old, new);
                     }
                     KMSignal::SaEstablished(sa) => {
+                        match asm.peer_table.set_security_association(linkmsg.link_id, sa) {
+                            Ok(_) => (),
+                            Err(e) => {
+                                error!("km_multiplexor: failed to set SA established: {:?}", e);
+                            }
+                        }
+                        /*
                             if let Some(mut sa_state) = state_table_p.get_mut(&linkmsg.link_id) {
                                 sa_state.transport_sa = sa;
                                 sa_state.sa_established.store(true, Ordering::Relaxed);
                             } else {
                                 error!("km_multiplexor: no SA state for link {}", linkmsg.link_id);
                             }
+                        */
                     }
                     _ => {} // TODO: Handle other signals.
                 }
@@ -194,9 +202,7 @@ pub fn add_node_link(
 #[allow(dead_code)]
 pub fn drop_link(asm: &'static Assembly, link_id: zpr::LinkId) -> Result<(), String> {
     // If present in sa_state, turn off the SA.
-    if let Some(sa_state) = asm.sa_states.get_mut(&link_id) {
-        sa_state.sa_established.store(false, Ordering::Relaxed);
-    }
+    let _ = asm.peer_table.clear_security_association(link_id);
 
     // remove handle from our km state, if found
     let handle = asm.km_state.table.remove(&link_id);
@@ -207,10 +213,7 @@ pub fn drop_link(asm: &'static Assembly, link_id: zpr::LinkId) -> Result<(), Str
     }
 
     // Remove from SA
-    match asm.sa_states.remove(&link_id) {
-        None => {}
-        Some(_) => (),
-    }
+    asm.peer_table.remove_security_association(link_id);
     Ok(())
 }
 
@@ -222,7 +225,7 @@ fn add_noise_link(
 ) -> Result<(), String> {
     let mgr = KeyManager::new(link_id, Box::new(noise));
 
-    asm.sa_states.insert(link_id, SAState::new());
+    asm.peer_table.init_security_association(link_id);
 
     let mut spawn_mgr = mgr.clone();
     let child_ctok = asm.km_state.ctok.child_token();
@@ -353,8 +356,9 @@ mod test {
 
         // Check that initially, our state is not established.
         {
-            let sa_state = asm.sa_states.get(&adapter_link_id).unwrap();
-            assert!(sa_state.sa_established.load(Ordering::Relaxed) == false);
+            assert!(!asm
+                .peer_table
+                .is_security_assocaition_established(adapter_link_id))
         }
 
         // Pretend to be a node and send back a valid reply.
@@ -389,8 +393,9 @@ mod test {
         // It will send two signals - SaIdChange followed by SaEstablished.  Both signals
         // are picked up by our multiplexor worker.  The second one triggers a state update.
         {
-            let sa_state = asm.sa_states.get(&adapter_link_id).unwrap();
-            assert!(sa_state.sa_established.load(Ordering::Relaxed));
+            assert!(asm
+                .peer_table
+                .is_security_assocaition_established(adapter_link_id))
         }
 
         match drop_link(asm, adapter_link_id) {

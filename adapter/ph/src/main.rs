@@ -2,14 +2,12 @@
 
 use cbpf_rs::bpf_code;
 use clap::Parser;
-use dashmap::DashMap;
 use enum_map::{enum_map, EnumMap};
 use std::default::Default;
 use std::fs;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::process::ExitCode;
-use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::signal::unix::{signal, SignalKind};
@@ -324,7 +322,6 @@ fn main() -> ExitCode {
                 dlt,
                 adapter_manager,
                 km_state,
-                sa_states: Arc::new(DashMap::new()),
             }));
 
 

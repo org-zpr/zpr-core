@@ -6,7 +6,7 @@ use crate::counter::*;
 use crate::counters_enum::*;
 use crate::fastpath;
 use crate::flow_control::FlowControl;
-use crate::km_multiplexor::{KmState, SAState};
+use crate::km_multiplexor::KmState;
 use crate::mgmt;
 use crate::packet::*;
 use crate::peer_table;
@@ -17,11 +17,9 @@ use crate::zpr;
 
 use bytes::Buf;
 use core::time::Duration;
-use dashmap::DashMap;
 use enum_map::EnumMap;
 use std::default::Default;
 use std::result::Result;
-use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::{
     oneshot::{channel, Sender},
@@ -78,10 +76,6 @@ pub struct Assembly<'pktbuf> {
 
     pub adapter_manager: AdapterManager<'pktbuf>,
     pub km_state: KmState<'pktbuf>,
-
-    // The `pa_states` is written to by the KM Multiplexor and is read whenever we need to figure
-    // out the correct ZPI to use on a link, or do encryption/HMAC.
-    pub sa_states: Arc<DashMap<zpr::LinkId, SAState>>,
 }
 
 pub struct PhFlags {
@@ -305,7 +299,6 @@ pub mod test {
         pub dlt: Option<adapter_tables::DockLookupTable>,
         pub adapter_manager: Option<AdapterManager<'a>>,
         pub km_state: Option<KmState<'a>>,
-        pub sa_states: Option<Arc<DashMap<zpr::LinkId, SAState>>>,
     }
 
     struct DummyTunCtl;
@@ -335,7 +328,6 @@ pub mod test {
                 dlt: None,
                 adapter_manager: None,
                 km_state: None,
-                sa_states: None,
             }
         }
     }
@@ -393,9 +385,6 @@ pub mod test {
             let km_mpx_ctok = CancellationToken::new();
             KmState::new(km_tx, km_sig_tx, km_mpx_ctok.clone())
         });
-        let sa_states = builder
-            .sa_states
-            .unwrap_or_else(|| Arc::new(DashMap::new()));
 
         Assembly {
             flags,
@@ -415,7 +404,6 @@ pub mod test {
             dlt,
             adapter_manager,
             km_state,
-            sa_states,
         }
     }
 }

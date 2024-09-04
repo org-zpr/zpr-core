@@ -21,7 +21,6 @@ use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
 use std::net::SocketAddr;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::{error, info, warn};
@@ -306,30 +305,30 @@ fn substrate_egress_common<'pktbuf>(
     // TODO: should we add ZDP header here also??
 
     let mut transit = true;
-    let mut transport_sa: Option<km::KMTransportSA> = None;
+    let transport_sa: Option<km::KMTransportSA> = None;
 
-    let real_zpi = match asm.sa_states.get(&link_id) {
-        Some(sa_state) => {
-            if sa_state.sa_established.load(Ordering::Relaxed) {
-                // We have SA.
-                // If agent transit packet, use HMAC ZPI.
-                // Else use our ENCR ZPI.
-                transport_sa = Some(sa_state.transport_sa.clone());
-                if let Some(zdp_hdr) =
-                    ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..])
-                {
-                    if zdp_hdr.packet_type == zdp::ZdpPacketType::TransitPacket {
-                        sa_state.transport_sa.send_zpis.hmac
-                    } else {
-                        transit = false;
-                        sa_state.transport_sa.send_zpis.encr
-                    }
+    let real_zpi = match asm
+        .peer_table
+        .clone_established_transport_association(link_id)
+    {
+        Some(transport_sa) => {
+            // We have SA.
+            // If agent transit packet, use HMAC ZPI.
+            // Else use our ENCR ZPI.
+            if let Some(zdp_hdr) =
+                ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..])
+            {
+                if zdp_hdr.packet_type == zdp::ZdpPacketType::TransitPacket {
+                    transport_sa.send_zpis.hmac
                 } else {
-                    error!("egress: link {}: failed to parse ZDP header on egress packet, assigning ZPI 0", link_id);
-                    0
+                    transit = false;
+                    transport_sa.send_zpis.encr
                 }
             } else {
-                // No SA established
+                error!(
+                    "egress: link {}: failed to parse ZDP header on egress packet, assigning ZPI 0",
+                    link_id
+                );
                 0
             }
         }
@@ -430,52 +429,43 @@ pub fn substrate_ingress<'pktbuf>(
     };
 
     // If a ZPI is setup on this link, then we expect the message to use one of the valid
-    // ZPI values.  Need to check spec, but I think best to drop any ZPI 0 packets IF we
-    // have an SA established.
-    let secure = match asm.sa_states.get(&ingress_link_id) {
-        Some(sa_state) => {
-            if sa_state.sa_established.load(Ordering::Relaxed) {
-                if zpi_hdr.zpi == sa_state.transport_sa.recv_zpis.hmac {
-                    match decrypt_hmac(sa_state.transport_sa.recv_hmac_key, &mut pkt) {
-                        Ok(()) => true,
-                        Err(err) => {
-                            drop_and_count(asm, pkt, err);
-                            return;
-                        }
+    // ZPI values.
+    let secure = match asm
+        .peer_table
+        .clone_established_transport_association(ingress_link_id)
+    {
+        Some(transport_sa) => {
+            if zpi_hdr.zpi == transport_sa.recv_zpis.hmac {
+                match decrypt_hmac(transport_sa.recv_hmac_key, &mut pkt) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        drop_and_count(asm, pkt, err);
+                        return;
                     }
-                } else if zpi_hdr.zpi == sa_state.transport_sa.recv_zpis.encr {
-                    // TODO: Put padlen in state somewhere too
-                    match decrypt_full(
-                        asm,
-                        sa_state.transport_sa.codec.clone(),
-                        NOISE_PADLEN,
-                        &mut pkt,
-                    ) {
-                        Ok(()) => true,
-                        Err(err) => {
-                            drop_and_count(asm, pkt, err);
-                            return;
-                        }
+                }
+            } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
+                // TODO: Put padlen in state somewhere too
+                match decrypt_full(asm, transport_sa.codec.clone(), NOISE_PADLEN, &mut pkt) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        drop_and_count(asm, pkt, err);
+                        return;
                     }
-                } else {
-                    // We have an SA and ZPI does not match.
-                    info!(
-                        "ingress: link {}: unexpected ZPI value {} (expected {:?})",
-                        ingress_link_id, zpi_hdr.zpi, sa_state.transport_sa.recv_zpis
-                    );
-                    drop_and_count(asm, pkt, CounterType::UnknownZpi);
-                    return;
                 }
             } else {
-                // No SA established, only ZPI zero is allowed, will catch that later.
-                false
+                // We have an SA and ZPI does not match.
+                info!(
+                    "ingress: link {}: unexpected ZPI value {} (expected {:?})",
+                    ingress_link_id, zpi_hdr.zpi, transport_sa.recv_zpis
+                );
+                drop_and_count(asm, pkt, CounterType::UnknownZpi);
+                return;
             }
         }
         None => {
-            // The link is not even in the SA state table. Is this possible? Yes, but only when
-            // the KM system is disabled.
+            // Either no security associatio on link, or it is not yet established.
             error!(
-                "ingress: link {}: link not in SA state table",
+                "ingress: link {}: no SA or link not in sa-state table",
                 ingress_link_id
             );
             false
