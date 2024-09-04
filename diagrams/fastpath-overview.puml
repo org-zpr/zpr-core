@@ -1,0 +1,30 @@
+@startuml
+
+split
+    -[hidden]->
+    start
+    :""get_buffer()""; <<procedure>>
+    :substrate ""recv()""; <<input>>
+    :""substrate_ingress()""; <<procedure>>
+split again
+    -[hidden]->
+    start
+    :""get_buffer()""; <<procedure>>
+    :TUN ""recv()""; <<input>>
+    :""agent_output()""; <<procedure>>
+end split
+
+:""forward()""; <<procedure>>
+
+switch (""egress_link"")
+case (link/docking session)
+    :""substrate_egress()""; <<procedure>>
+    :substrate ""send()""; <<output>>
+    stop
+case (internal adaptor)
+    :""agent_input()""; <<procedure>>
+    :TUN ""send()""; <<output>>
+    stop
+endswitch
+
+@enduml

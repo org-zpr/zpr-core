@@ -1,0 +1,34 @@
+@startuml
+
+|fastpath|
+
+start
+
+if (capture packet?) then (yes)
+else (no)
+    stop
+endif
+
+:""try_get_buffer()""; <<procedure>>
+
+if (got buffer?) then (yes)
+else (no)
+    stop
+endif
+
+:clone packet prefix;
+
+split
+    |fastpath|
+    if (queue full) then (yes)
+        end
+    endif
+    stop
+split again
+    |capture worker|
+    -[dotted]-> capture queue;
+    :write packet to capture file; <<save>>
+    stop
+endsplit
+
+@enduml
