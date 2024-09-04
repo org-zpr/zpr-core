@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/gopacket"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -638,16 +639,11 @@ func TestThriftRequestVisaNoPolicy(t *testing.T) {
 	agentTetherAddr := netip.MustParseAddr("fc00:3003::5:10")
 	agentContactAddr := netip.MustParseAddr("fc00:3001::10:20")
 
-	traffic := &vsapi.TrafficDesc{
-		Source:     agentContactAddr.AsSlice(),
-		Dest:       nodeZprAddr.AsSlice(),
-		Protocol:   0x6,
-		SourcePort: 0x31337,
-		DestPort:   22,
-		Flags:      0x2, // SYN
-		Size:       128,
-	}
-	vr, err := svc.RequestVisa(context.Background(), apiKey, agentTetherAddr.AsSlice(), traffic)
+	pktbuf := gopacket.NewSerializeBuffer()
+
+	createPacket(pktbuf, agentContactAddr, nodeZprAddr, 31337, 22)
+
+	vr, err := svc.RequestVisa(context.Background(), apiKey, agentTetherAddr.AsSlice(), 6, pktbuf.Bytes())
 	require.Nil(t, err)
 	require.NotNil(t, vr)
 	require.Equal(t, vsapi.StatusCode_FAIL, vr.Status)
@@ -655,7 +651,7 @@ func TestThriftRequestVisaNoPolicy(t *testing.T) {
 
 	// And as usual, wrong key -- no dice
 	{
-		_, err := svc.RequestVisa(context.Background(), apiKey+"foo", agentTetherAddr.AsSlice(), traffic)
+		_, err := svc.RequestVisa(context.Background(), apiKey+"foo", agentTetherAddr.AsSlice(), 6, pktbuf.Bytes())
 		require.NotNil(t, err)
 		require.ErrorContains(t, err, "Unauthorized")
 	}

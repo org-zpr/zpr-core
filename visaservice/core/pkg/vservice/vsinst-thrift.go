@@ -186,39 +186,6 @@ func verifyHMAC(pubKey *rsa.PublicKey, nonce []byte, sid int32, timestamp int64,
 	return nil
 }
 
-func vsapiTrafficDescToIpTraffic(pd *vsapi.TrafficDesc) *snip.Traffic {
-	tcpflags := uint16(pd.GetFlags())
-	syn := (tcpflags & 0x0002) > 0
-	ack := (tcpflags & 0x0010) > 0
-
-	saddr, _ := netip.AddrFromSlice(pd.GetSource())
-	daddr, _ := netip.AddrFromSlice(pd.GetDest())
-
-	var icmpa netip.Addr
-	if ica := pd.GetIcmpAddr(); ica != nil {
-		icmpa, _ = netip.AddrFromSlice(ica)
-	}
-	return &snip.Traffic{
-		SrcAddr:           saddr,
-		DstAddr:           daddr,
-		Proto:             snip.Protocol(pd.GetProtocol()),
-		SrcPort:           uint16(pd.SourcePort),
-		DstPort:           uint16(pd.DestPort),
-		Connect:           syn && !ack,
-		Syn:               syn,
-		Fin:               (tcpflags & 0x0001) > 0,
-		Rst:               (tcpflags & 0x0004) > 0,
-		Urg:               (tcpflags & 0x0020) > 0,
-		Psh:               (tcpflags & 0x0008) > 0,
-		Ack:               ack,
-		ICMPType:          byte(pd.GetIcmpType()),
-		ICMPCode:          byte(pd.GetIcmpType()),
-		ICMPTargetAddress: icmpa,
-		Size:              int(pd.GetSize()),
-		Flags:             uint32(pd.Flags),
-	}
-}
-
 // --------------------------------- BACKDOOR ------------------------------- //
 //
 // These functions are used by unit tests to get agents into the visa service.
@@ -523,7 +490,7 @@ func (vs *VSInst) Ping(ctx context.Context, key string) (*vsapi.Pong, error) {
 	}, nil
 }
 
-func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []byte, traffic *vsapi.TrafficDesc) (*vsapi.VisaResponse, error) {
+func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []byte, l3_type int8, traffic []byte) (*vsapi.VisaResponse, error) {
 	vs.log.Debug("*REQUEST_VISA*")
 	valid, _, zprAddr := vs.validAPIKeyAndDeets(key)
 	if !valid {
@@ -533,6 +500,12 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 
 	vs.log.Info("request visa", "peer", zprAddr)
 	vs.agentDB.IncrNodeVisaReq(zprAddr)
+
+	trafficDesc, err := snip.DescribePacket(snip.L3Type(l3_type), traffic)
+	if err != nil {
+		vs.log.WithError(err).Warn("failed to parse packet")
+		return nil, errors.New("unparseable traffic")
+	}
 
 	pp := vs.getPolicy() // take & release lock
 	pver := uint64(0)
@@ -544,7 +517,7 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 		return nil, errors.New("invalid tether address on visa request")
 	}
 	vs.log.Debug("invoking request-visa for visa service API", "requesting_node", zprAddr)
-	vsResp, err := vs.doRequestVisa(ctx, tetherAddr, vsapiTrafficDescToIpTraffic(traffic), 0, pver)
+	vsResp, err := vs.doRequestVisa(ctx, tetherAddr, trafficDesc, 0, pver)
 
 	if err != nil {
 		e := err.Error()

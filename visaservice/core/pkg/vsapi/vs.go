@@ -2206,463 +2206,6 @@ func (p *Pong) Validate() error {
   return nil
 }
 // Attributes:
-//  - Source
-//  - Dest
-//  - Protocol
-//  - SourcePort
-//  - DestPort
-//  - Flags
-//  - IcmpType
-//  - IcmpCode
-//  - Size
-//  - IcmpAddr
-type TrafficDesc struct {
-  Source []byte `thrift:"source,1" db:"source" json:"source"`
-  Dest []byte `thrift:"dest,2" db:"dest" json:"dest"`
-  Protocol int32 `thrift:"protocol,3" db:"protocol" json:"protocol"`
-  SourcePort int32 `thrift:"source_port,4" db:"source_port" json:"source_port"`
-  DestPort int32 `thrift:"dest_port,5" db:"dest_port" json:"dest_port"`
-  Flags int32 `thrift:"flags,6" db:"flags" json:"flags"`
-  IcmpType int16 `thrift:"icmp_type,7" db:"icmp_type" json:"icmp_type"`
-  IcmpCode int16 `thrift:"icmp_code,8" db:"icmp_code" json:"icmp_code"`
-  Size int32 `thrift:"size,9" db:"size" json:"size"`
-  IcmpAddr []byte `thrift:"icmp_addr,10" db:"icmp_addr" json:"icmp_addr,omitempty"`
-}
-
-func NewTrafficDesc() *TrafficDesc {
-  return &TrafficDesc{}
-}
-
-
-func (p *TrafficDesc) GetSource() []byte {
-  return p.Source
-}
-
-func (p *TrafficDesc) GetDest() []byte {
-  return p.Dest
-}
-
-func (p *TrafficDesc) GetProtocol() int32 {
-  return p.Protocol
-}
-
-func (p *TrafficDesc) GetSourcePort() int32 {
-  return p.SourcePort
-}
-
-func (p *TrafficDesc) GetDestPort() int32 {
-  return p.DestPort
-}
-
-func (p *TrafficDesc) GetFlags() int32 {
-  return p.Flags
-}
-
-func (p *TrafficDesc) GetIcmpType() int16 {
-  return p.IcmpType
-}
-
-func (p *TrafficDesc) GetIcmpCode() int16 {
-  return p.IcmpCode
-}
-
-func (p *TrafficDesc) GetSize() int32 {
-  return p.Size
-}
-var TrafficDesc_IcmpAddr_DEFAULT []byte
-
-func (p *TrafficDesc) GetIcmpAddr() []byte {
-  return p.IcmpAddr
-}
-func (p *TrafficDesc) IsSetIcmpAddr() bool {
-  return p.IcmpAddr != nil
-}
-
-func (p *TrafficDesc) Read(ctx context.Context, iprot thrift.TProtocol) error {
-  if _, err := iprot.ReadStructBegin(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
-  }
-
-
-  for {
-    _, fieldTypeId, fieldId, err := iprot.ReadFieldBegin(ctx)
-    if err != nil {
-      return thrift.PrependError(fmt.Sprintf("%T field %d read error: ", p, fieldId), err)
-    }
-    if fieldTypeId == thrift.STOP { break; }
-    switch fieldId {
-    case 1:
-      if fieldTypeId == thrift.STRING {
-        if err := p.ReadField1(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 2:
-      if fieldTypeId == thrift.STRING {
-        if err := p.ReadField2(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 3:
-      if fieldTypeId == thrift.I32 {
-        if err := p.ReadField3(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 4:
-      if fieldTypeId == thrift.I32 {
-        if err := p.ReadField4(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 5:
-      if fieldTypeId == thrift.I32 {
-        if err := p.ReadField5(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 6:
-      if fieldTypeId == thrift.I32 {
-        if err := p.ReadField6(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 7:
-      if fieldTypeId == thrift.I16 {
-        if err := p.ReadField7(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 8:
-      if fieldTypeId == thrift.I16 {
-        if err := p.ReadField8(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 9:
-      if fieldTypeId == thrift.I32 {
-        if err := p.ReadField9(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    case 10:
-      if fieldTypeId == thrift.STRING {
-        if err := p.ReadField10(ctx, iprot); err != nil {
-          return err
-        }
-      } else {
-        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-          return err
-        }
-      }
-    default:
-      if err := iprot.Skip(ctx, fieldTypeId); err != nil {
-        return err
-      }
-    }
-    if err := iprot.ReadFieldEnd(ctx); err != nil {
-      return err
-    }
-  }
-  if err := iprot.ReadStructEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T read struct end error: ", p), err)
-  }
-  return nil
-}
-
-func (p *TrafficDesc)  ReadField1(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadBinary(ctx); err != nil {
-  return thrift.PrependError("error reading field 1: ", err)
-} else {
-  p.Source = v
-}
-  return nil
-}
-
-func (p *TrafficDesc)  ReadField2(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadBinary(ctx); err != nil {
-  return thrift.PrependError("error reading field 2: ", err)
-} else {
-  p.Dest = v
-}
-  return nil
-}
-
-func (p *TrafficDesc)  ReadField3(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadI32(ctx); err != nil {
-  return thrift.PrependError("error reading field 3: ", err)
-} else {
-  p.Protocol = v
-}
-  return nil
-}
-
-func (p *TrafficDesc)  ReadField4(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadI32(ctx); err != nil {
-  return thrift.PrependError("error reading field 4: ", err)
-} else {
-  p.SourcePort = v
-}
-  return nil
-}
-
-func (p *TrafficDesc)  ReadField5(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadI32(ctx); err != nil {
-  return thrift.PrependError("error reading field 5: ", err)
-} else {
-  p.DestPort = v
-}
-  return nil
-}
-
-func (p *TrafficDesc)  ReadField6(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadI32(ctx); err != nil {
-  return thrift.PrependError("error reading field 6: ", err)
-} else {
-  p.Flags = v
-}
-  return nil
-}
-
-func (p *TrafficDesc)  ReadField7(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadI16(ctx); err != nil {
-  return thrift.PrependError("error reading field 7: ", err)
-} else {
-  p.IcmpType = v
-}
-  return nil
-}
-
-func (p *TrafficDesc)  ReadField8(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadI16(ctx); err != nil {
-  return thrift.PrependError("error reading field 8: ", err)
-} else {
-  p.IcmpCode = v
-}
-  return nil
-}
-
-func (p *TrafficDesc)  ReadField9(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadI32(ctx); err != nil {
-  return thrift.PrependError("error reading field 9: ", err)
-} else {
-  p.Size = v
-}
-  return nil
-}
-
-func (p *TrafficDesc)  ReadField10(ctx context.Context, iprot thrift.TProtocol) error {
-  if v, err := iprot.ReadBinary(ctx); err != nil {
-  return thrift.PrependError("error reading field 10: ", err)
-} else {
-  p.IcmpAddr = v
-}
-  return nil
-}
-
-func (p *TrafficDesc) Write(ctx context.Context, oprot thrift.TProtocol) error {
-  if err := oprot.WriteStructBegin(ctx, "TrafficDesc"); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write struct begin error: ", p), err) }
-  if p != nil {
-    if err := p.writeField1(ctx, oprot); err != nil { return err }
-    if err := p.writeField2(ctx, oprot); err != nil { return err }
-    if err := p.writeField3(ctx, oprot); err != nil { return err }
-    if err := p.writeField4(ctx, oprot); err != nil { return err }
-    if err := p.writeField5(ctx, oprot); err != nil { return err }
-    if err := p.writeField6(ctx, oprot); err != nil { return err }
-    if err := p.writeField7(ctx, oprot); err != nil { return err }
-    if err := p.writeField8(ctx, oprot); err != nil { return err }
-    if err := p.writeField9(ctx, oprot); err != nil { return err }
-    if err := p.writeField10(ctx, oprot); err != nil { return err }
-  }
-  if err := oprot.WriteFieldStop(ctx); err != nil {
-    return thrift.PrependError("write field stop error: ", err) }
-  if err := oprot.WriteStructEnd(ctx); err != nil {
-    return thrift.PrependError("write struct stop error: ", err) }
-  return nil
-}
-
-func (p *TrafficDesc) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "source", thrift.STRING, 1); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:source: ", p), err) }
-  if err := oprot.WriteBinary(ctx, p.Source); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.source (1) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 1:source: ", p), err) }
-  return err
-}
-
-func (p *TrafficDesc) writeField2(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "dest", thrift.STRING, 2); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 2:dest: ", p), err) }
-  if err := oprot.WriteBinary(ctx, p.Dest); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.dest (2) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 2:dest: ", p), err) }
-  return err
-}
-
-func (p *TrafficDesc) writeField3(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "protocol", thrift.I32, 3); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 3:protocol: ", p), err) }
-  if err := oprot.WriteI32(ctx, int32(p.Protocol)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.protocol (3) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 3:protocol: ", p), err) }
-  return err
-}
-
-func (p *TrafficDesc) writeField4(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "source_port", thrift.I32, 4); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 4:source_port: ", p), err) }
-  if err := oprot.WriteI32(ctx, int32(p.SourcePort)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.source_port (4) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 4:source_port: ", p), err) }
-  return err
-}
-
-func (p *TrafficDesc) writeField5(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "dest_port", thrift.I32, 5); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 5:dest_port: ", p), err) }
-  if err := oprot.WriteI32(ctx, int32(p.DestPort)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.dest_port (5) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 5:dest_port: ", p), err) }
-  return err
-}
-
-func (p *TrafficDesc) writeField6(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "flags", thrift.I32, 6); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 6:flags: ", p), err) }
-  if err := oprot.WriteI32(ctx, int32(p.Flags)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.flags (6) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 6:flags: ", p), err) }
-  return err
-}
-
-func (p *TrafficDesc) writeField7(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "icmp_type", thrift.I16, 7); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 7:icmp_type: ", p), err) }
-  if err := oprot.WriteI16(ctx, int16(p.IcmpType)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.icmp_type (7) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 7:icmp_type: ", p), err) }
-  return err
-}
-
-func (p *TrafficDesc) writeField8(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "icmp_code", thrift.I16, 8); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 8:icmp_code: ", p), err) }
-  if err := oprot.WriteI16(ctx, int16(p.IcmpCode)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.icmp_code (8) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 8:icmp_code: ", p), err) }
-  return err
-}
-
-func (p *TrafficDesc) writeField9(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "size", thrift.I32, 9); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 9:size: ", p), err) }
-  if err := oprot.WriteI32(ctx, int32(p.Size)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.size (9) field write error: ", p), err) }
-  if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 9:size: ", p), err) }
-  return err
-}
-
-func (p *TrafficDesc) writeField10(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if p.IsSetIcmpAddr() {
-    if err := oprot.WriteFieldBegin(ctx, "icmp_addr", thrift.STRING, 10); err != nil {
-      return thrift.PrependError(fmt.Sprintf("%T write field begin error 10:icmp_addr: ", p), err) }
-    if err := oprot.WriteBinary(ctx, p.IcmpAddr); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T.icmp_addr (10) field write error: ", p), err) }
-    if err := oprot.WriteFieldEnd(ctx); err != nil {
-      return thrift.PrependError(fmt.Sprintf("%T write field end error 10:icmp_addr: ", p), err) }
-  }
-  return err
-}
-
-func (p *TrafficDesc) Equals(other *TrafficDesc) bool {
-  if p == other {
-    return true
-  } else if p == nil || other == nil {
-    return false
-  }
-  if bytes.Compare(p.Source, other.Source) != 0 { return false }
-  if bytes.Compare(p.Dest, other.Dest) != 0 { return false }
-  if p.Protocol != other.Protocol { return false }
-  if p.SourcePort != other.SourcePort { return false }
-  if p.DestPort != other.DestPort { return false }
-  if p.Flags != other.Flags { return false }
-  if p.IcmpType != other.IcmpType { return false }
-  if p.IcmpCode != other.IcmpCode { return false }
-  if p.Size != other.Size { return false }
-  if bytes.Compare(p.IcmpAddr, other.IcmpAddr) != 0 { return false }
-  return true
-}
-
-func (p *TrafficDesc) String() string {
-  if p == nil {
-    return "<nil>"
-  }
-  return fmt.Sprintf("TrafficDesc(%+v)", *p)
-}
-
-func (p *TrafficDesc) LogValue() slog.Value {
-  if p == nil {
-    return slog.AnyValue(nil)
-  }
-  v := thrift.SlogTStructWrapper{
-    Type: "*vsapi.TrafficDesc",
-    Value: p,
-  }
-  return slog.AnyValue(v)
-}
-
-var _ slog.LogValuer = (*TrafficDesc)(nil)
-
-func (p *TrafficDesc) Validate() error {
-  return nil
-}
-// Attributes:
 //  - Status
 //  - Visa
 //  - Reason
@@ -2888,17 +2431,18 @@ type VisaService interface {
   //  - Request
   AuthorizeConnect(ctx context.Context, key string, request *ConnectRequest) (_r *ConnectResponse, _err error)
   // Parameters:
-  //  - Keym
+  //  - Key
   //  - ZprAddr
-  AgentDisconnect(ctx context.Context, keym string, zpr_addr []byte) (_err error)
+  AgentDisconnect(ctx context.Context, key string, zpr_addr []byte) (_err error)
   // Parameters:
   //  - Key
   Ping(ctx context.Context, key string) (_r *Pong, _err error)
   // Parameters:
   //  - Key
   //  - SrcTetherAddr
+  //  - L3Type
   //  - Traffic
-  RequestVisa(ctx context.Context, key string, src_tether_addr []byte, traffic *TrafficDesc) (_r *VisaResponse, _err error)
+  RequestVisa(ctx context.Context, key string, src_tether_addr []byte, l3_type int8, traffic []byte) (_r *VisaResponse, _err error)
 }
 
 type VisaServiceClient struct {
@@ -2999,11 +2543,11 @@ func (p *VisaServiceClient) AuthorizeConnect(ctx context.Context, key string, re
 }
 
 // Parameters:
-//  - Keym
+//  - Key
 //  - ZprAddr
-func (p *VisaServiceClient) AgentDisconnect(ctx context.Context, keym string, zpr_addr []byte) (_err error) {
+func (p *VisaServiceClient) AgentDisconnect(ctx context.Context, key string, zpr_addr []byte) (_err error) {
   var _args22 VisaServiceAgentDisconnectArgs
-  _args22.Keym = keym
+  _args22.Key = key
   _args22.ZprAddr = zpr_addr
   var _result24 VisaServiceAgentDisconnectResult
   var _meta23 thrift.ResponseMeta
@@ -3036,11 +2580,13 @@ func (p *VisaServiceClient) Ping(ctx context.Context, key string) (_r *Pong, _er
 // Parameters:
 //  - Key
 //  - SrcTetherAddr
+//  - L3Type
 //  - Traffic
-func (p *VisaServiceClient) RequestVisa(ctx context.Context, key string, src_tether_addr []byte, traffic *TrafficDesc) (_r *VisaResponse, _err error) {
+func (p *VisaServiceClient) RequestVisa(ctx context.Context, key string, src_tether_addr []byte, l3_type int8, traffic []byte) (_r *VisaResponse, _err error) {
   var _args29 VisaServiceRequestVisaArgs
   _args29.Key = key
   _args29.SrcTetherAddr = src_tether_addr
+  _args29.L3Type = l3_type
   _args29.Traffic = traffic
   var _result31 VisaServiceRequestVisaResult
   var _meta30 thrift.ResponseMeta
@@ -3456,7 +3002,7 @@ func (p *visaServiceProcessorAgentDisconnect) Process(ctx context.Context, seqId
   }
 
   result := VisaServiceAgentDisconnectResult{}
-  if err2 := p.handler.AgentDisconnect(ctx, args.Keym, args.ZprAddr); err2 != nil {
+  if err2 := p.handler.AgentDisconnect(ctx, args.Key, args.ZprAddr); err2 != nil {
     tickerCancel()
     err = thrift.WrapTException(err2)
     if errors.Is(err2, thrift.ErrAbandonRequest) {
@@ -3644,7 +3190,7 @@ func (p *visaServiceProcessorRequestVisa) Process(ctx context.Context, seqId int
   }
 
   result := VisaServiceRequestVisaResult{}
-  if retval, err2 := p.handler.RequestVisa(ctx, args.Key, args.SrcTetherAddr, args.Traffic); err2 != nil {
+  if retval, err2 := p.handler.RequestVisa(ctx, args.Key, args.SrcTetherAddr, args.L3Type, args.Traffic); err2 != nil {
     tickerCancel()
     err = thrift.WrapTException(err2)
     if errors.Is(err2, thrift.ErrAbandonRequest) {
@@ -4463,10 +4009,10 @@ func (p *VisaServiceAuthorizeConnectResult) LogValue() slog.Value {
 var _ slog.LogValuer = (*VisaServiceAuthorizeConnectResult)(nil)
 
 // Attributes:
-//  - Keym
+//  - Key
 //  - ZprAddr
 type VisaServiceAgentDisconnectArgs struct {
-  Keym string `thrift:"keym,1" db:"keym" json:"keym"`
+  Key string `thrift:"key,1" db:"key" json:"key"`
   ZprAddr []byte `thrift:"zpr_addr,2" db:"zpr_addr" json:"zpr_addr"`
 }
 
@@ -4475,8 +4021,8 @@ func NewVisaServiceAgentDisconnectArgs() *VisaServiceAgentDisconnectArgs {
 }
 
 
-func (p *VisaServiceAgentDisconnectArgs) GetKeym() string {
-  return p.Keym
+func (p *VisaServiceAgentDisconnectArgs) GetKey() string {
+  return p.Key
 }
 
 func (p *VisaServiceAgentDisconnectArgs) GetZprAddr() []byte {
@@ -4534,7 +4080,7 @@ func (p *VisaServiceAgentDisconnectArgs)  ReadField1(ctx context.Context, iprot 
   if v, err := iprot.ReadString(ctx); err != nil {
   return thrift.PrependError("error reading field 1: ", err)
 } else {
-  p.Keym = v
+  p.Key = v
 }
   return nil
 }
@@ -4563,12 +4109,12 @@ func (p *VisaServiceAgentDisconnectArgs) Write(ctx context.Context, oprot thrift
 }
 
 func (p *VisaServiceAgentDisconnectArgs) writeField1(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "keym", thrift.STRING, 1); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:keym: ", p), err) }
-  if err := oprot.WriteString(ctx, string(p.Keym)); err != nil {
-  return thrift.PrependError(fmt.Sprintf("%T.keym (1) field write error: ", p), err) }
+  if err := oprot.WriteFieldBegin(ctx, "key", thrift.STRING, 1); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field begin error 1:key: ", p), err) }
+  if err := oprot.WriteString(ctx, string(p.Key)); err != nil {
+  return thrift.PrependError(fmt.Sprintf("%T.key (1) field write error: ", p), err) }
   if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 1:keym: ", p), err) }
+    return thrift.PrependError(fmt.Sprintf("%T write field end error 1:key: ", p), err) }
   return err
 }
 
@@ -4886,11 +4432,13 @@ var _ slog.LogValuer = (*VisaServicePingResult)(nil)
 // Attributes:
 //  - Key
 //  - SrcTetherAddr
+//  - L3Type
 //  - Traffic
 type VisaServiceRequestVisaArgs struct {
   Key string `thrift:"key,1" db:"key" json:"key"`
   SrcTetherAddr []byte `thrift:"src_tether_addr,2" db:"src_tether_addr" json:"src_tether_addr"`
-  Traffic *TrafficDesc `thrift:"traffic,3" db:"traffic" json:"traffic"`
+  L3Type int8 `thrift:"l3_type,3" db:"l3_type" json:"l3_type"`
+  Traffic []byte `thrift:"traffic,4" db:"traffic" json:"traffic"`
 }
 
 func NewVisaServiceRequestVisaArgs() *VisaServiceRequestVisaArgs {
@@ -4905,17 +4453,14 @@ func (p *VisaServiceRequestVisaArgs) GetKey() string {
 func (p *VisaServiceRequestVisaArgs) GetSrcTetherAddr() []byte {
   return p.SrcTetherAddr
 }
-var VisaServiceRequestVisaArgs_Traffic_DEFAULT *TrafficDesc
-func (p *VisaServiceRequestVisaArgs) GetTraffic() *TrafficDesc {
-  if !p.IsSetTraffic() {
-    return VisaServiceRequestVisaArgs_Traffic_DEFAULT
-  }
-  return p.Traffic
-}
-func (p *VisaServiceRequestVisaArgs) IsSetTraffic() bool {
-  return p.Traffic != nil
+
+func (p *VisaServiceRequestVisaArgs) GetL3Type() int8 {
+  return p.L3Type
 }
 
+func (p *VisaServiceRequestVisaArgs) GetTraffic() []byte {
+  return p.Traffic
+}
 func (p *VisaServiceRequestVisaArgs) Read(ctx context.Context, iprot thrift.TProtocol) error {
   if _, err := iprot.ReadStructBegin(ctx); err != nil {
     return thrift.PrependError(fmt.Sprintf("%T read error: ", p), err)
@@ -4950,8 +4495,18 @@ func (p *VisaServiceRequestVisaArgs) Read(ctx context.Context, iprot thrift.TPro
         }
       }
     case 3:
-      if fieldTypeId == thrift.STRUCT {
+      if fieldTypeId == thrift.BYTE {
         if err := p.ReadField3(ctx, iprot); err != nil {
+          return err
+        }
+      } else {
+        if err := iprot.Skip(ctx, fieldTypeId); err != nil {
+          return err
+        }
+      }
+    case 4:
+      if fieldTypeId == thrift.STRING {
+        if err := p.ReadField4(ctx, iprot); err != nil {
           return err
         }
       } else {
@@ -4993,10 +4548,21 @@ func (p *VisaServiceRequestVisaArgs)  ReadField2(ctx context.Context, iprot thri
 }
 
 func (p *VisaServiceRequestVisaArgs)  ReadField3(ctx context.Context, iprot thrift.TProtocol) error {
-  p.Traffic = &TrafficDesc{}
-  if err := p.Traffic.Read(ctx, iprot); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T error reading struct: ", p.Traffic), err)
-  }
+  if v, err := iprot.ReadByte(ctx); err != nil {
+  return thrift.PrependError("error reading field 3: ", err)
+} else {
+  temp := int8(v)
+  p.L3Type = temp
+}
+  return nil
+}
+
+func (p *VisaServiceRequestVisaArgs)  ReadField4(ctx context.Context, iprot thrift.TProtocol) error {
+  if v, err := iprot.ReadBinary(ctx); err != nil {
+  return thrift.PrependError("error reading field 4: ", err)
+} else {
+  p.Traffic = v
+}
   return nil
 }
 
@@ -5007,6 +4573,7 @@ func (p *VisaServiceRequestVisaArgs) Write(ctx context.Context, oprot thrift.TPr
     if err := p.writeField1(ctx, oprot); err != nil { return err }
     if err := p.writeField2(ctx, oprot); err != nil { return err }
     if err := p.writeField3(ctx, oprot); err != nil { return err }
+    if err := p.writeField4(ctx, oprot); err != nil { return err }
   }
   if err := oprot.WriteFieldStop(ctx); err != nil {
     return thrift.PrependError("write field stop error: ", err) }
@@ -5036,13 +4603,22 @@ func (p *VisaServiceRequestVisaArgs) writeField2(ctx context.Context, oprot thri
 }
 
 func (p *VisaServiceRequestVisaArgs) writeField3(ctx context.Context, oprot thrift.TProtocol) (err error) {
-  if err := oprot.WriteFieldBegin(ctx, "traffic", thrift.STRUCT, 3); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field begin error 3:traffic: ", p), err) }
-  if err := p.Traffic.Write(ctx, oprot); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T error writing struct: ", p.Traffic), err)
-  }
+  if err := oprot.WriteFieldBegin(ctx, "l3_type", thrift.BYTE, 3); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field begin error 3:l3_type: ", p), err) }
+  if err := oprot.WriteByte(ctx, int8(p.L3Type)); err != nil {
+  return thrift.PrependError(fmt.Sprintf("%T.l3_type (3) field write error: ", p), err) }
   if err := oprot.WriteFieldEnd(ctx); err != nil {
-    return thrift.PrependError(fmt.Sprintf("%T write field end error 3:traffic: ", p), err) }
+    return thrift.PrependError(fmt.Sprintf("%T write field end error 3:l3_type: ", p), err) }
+  return err
+}
+
+func (p *VisaServiceRequestVisaArgs) writeField4(ctx context.Context, oprot thrift.TProtocol) (err error) {
+  if err := oprot.WriteFieldBegin(ctx, "traffic", thrift.STRING, 4); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field begin error 4:traffic: ", p), err) }
+  if err := oprot.WriteBinary(ctx, p.Traffic); err != nil {
+  return thrift.PrependError(fmt.Sprintf("%T.traffic (4) field write error: ", p), err) }
+  if err := oprot.WriteFieldEnd(ctx); err != nil {
+    return thrift.PrependError(fmt.Sprintf("%T write field end error 4:traffic: ", p), err) }
   return err
 }
 

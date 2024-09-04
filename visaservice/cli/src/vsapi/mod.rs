@@ -992,180 +992,6 @@ impl TSerializable for Pong {
 }
 
 //
-// TrafficDesc
-//
-
-#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct TrafficDesc {
-  pub source: Option<Vec<u8>>,
-  pub dest: Option<Vec<u8>>,
-  pub protocol: Option<i32>,
-  pub source_port: Option<i32>,
-  pub dest_port: Option<i32>,
-  pub flags: Option<i32>,
-  pub icmp_type: Option<i16>,
-  pub icmp_code: Option<i16>,
-  pub size: Option<i32>,
-  pub icmp_addr: Option<Vec<u8>>,
-}
-
-impl TrafficDesc {
-  pub fn new<F1, F2, F3, F4, F5, F6, F7, F8, F9, F10>(source: F1, dest: F2, protocol: F3, source_port: F4, dest_port: F5, flags: F6, icmp_type: F7, icmp_code: F8, size: F9, icmp_addr: F10) -> TrafficDesc where F1: Into<Option<Vec<u8>>>, F2: Into<Option<Vec<u8>>>, F3: Into<Option<i32>>, F4: Into<Option<i32>>, F5: Into<Option<i32>>, F6: Into<Option<i32>>, F7: Into<Option<i16>>, F8: Into<Option<i16>>, F9: Into<Option<i32>>, F10: Into<Option<Vec<u8>>> {
-    TrafficDesc {
-      source: source.into(),
-      dest: dest.into(),
-      protocol: protocol.into(),
-      source_port: source_port.into(),
-      dest_port: dest_port.into(),
-      flags: flags.into(),
-      icmp_type: icmp_type.into(),
-      icmp_code: icmp_code.into(),
-      size: size.into(),
-      icmp_addr: icmp_addr.into(),
-    }
-  }
-}
-
-impl TSerializable for TrafficDesc {
-  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<TrafficDesc> {
-    i_prot.read_struct_begin()?;
-    let mut f_1: Option<Vec<u8>> = Some(Vec::new());
-    let mut f_2: Option<Vec<u8>> = Some(Vec::new());
-    let mut f_3: Option<i32> = Some(0);
-    let mut f_4: Option<i32> = Some(0);
-    let mut f_5: Option<i32> = Some(0);
-    let mut f_6: Option<i32> = Some(0);
-    let mut f_7: Option<i16> = Some(0);
-    let mut f_8: Option<i16> = Some(0);
-    let mut f_9: Option<i32> = Some(0);
-    let mut f_10: Option<Vec<u8>> = None;
-    loop {
-      let field_ident = i_prot.read_field_begin()?;
-      if field_ident.field_type == TType::Stop {
-        break;
-      }
-      let field_id = field_id(&field_ident)?;
-      match field_id {
-        1 => {
-          let val = i_prot.read_bytes()?;
-          f_1 = Some(val);
-        },
-        2 => {
-          let val = i_prot.read_bytes()?;
-          f_2 = Some(val);
-        },
-        3 => {
-          let val = i_prot.read_i32()?;
-          f_3 = Some(val);
-        },
-        4 => {
-          let val = i_prot.read_i32()?;
-          f_4 = Some(val);
-        },
-        5 => {
-          let val = i_prot.read_i32()?;
-          f_5 = Some(val);
-        },
-        6 => {
-          let val = i_prot.read_i32()?;
-          f_6 = Some(val);
-        },
-        7 => {
-          let val = i_prot.read_i16()?;
-          f_7 = Some(val);
-        },
-        8 => {
-          let val = i_prot.read_i16()?;
-          f_8 = Some(val);
-        },
-        9 => {
-          let val = i_prot.read_i32()?;
-          f_9 = Some(val);
-        },
-        10 => {
-          let val = i_prot.read_bytes()?;
-          f_10 = Some(val);
-        },
-        _ => {
-          i_prot.skip(field_ident.field_type)?;
-        },
-      };
-      i_prot.read_field_end()?;
-    }
-    i_prot.read_struct_end()?;
-    let ret = TrafficDesc {
-      source: f_1,
-      dest: f_2,
-      protocol: f_3,
-      source_port: f_4,
-      dest_port: f_5,
-      flags: f_6,
-      icmp_type: f_7,
-      icmp_code: f_8,
-      size: f_9,
-      icmp_addr: f_10,
-    };
-    Ok(ret)
-  }
-  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
-    let struct_ident = TStructIdentifier::new("TrafficDesc");
-    o_prot.write_struct_begin(&struct_ident)?;
-    if let Some(ref fld_var) = self.source {
-      o_prot.write_field_begin(&TFieldIdentifier::new("source", TType::String, 1))?;
-      o_prot.write_bytes(fld_var)?;
-      o_prot.write_field_end()?
-    }
-    if let Some(ref fld_var) = self.dest {
-      o_prot.write_field_begin(&TFieldIdentifier::new("dest", TType::String, 2))?;
-      o_prot.write_bytes(fld_var)?;
-      o_prot.write_field_end()?
-    }
-    if let Some(fld_var) = self.protocol {
-      o_prot.write_field_begin(&TFieldIdentifier::new("protocol", TType::I32, 3))?;
-      o_prot.write_i32(fld_var)?;
-      o_prot.write_field_end()?
-    }
-    if let Some(fld_var) = self.source_port {
-      o_prot.write_field_begin(&TFieldIdentifier::new("source_port", TType::I32, 4))?;
-      o_prot.write_i32(fld_var)?;
-      o_prot.write_field_end()?
-    }
-    if let Some(fld_var) = self.dest_port {
-      o_prot.write_field_begin(&TFieldIdentifier::new("dest_port", TType::I32, 5))?;
-      o_prot.write_i32(fld_var)?;
-      o_prot.write_field_end()?
-    }
-    if let Some(fld_var) = self.flags {
-      o_prot.write_field_begin(&TFieldIdentifier::new("flags", TType::I32, 6))?;
-      o_prot.write_i32(fld_var)?;
-      o_prot.write_field_end()?
-    }
-    if let Some(fld_var) = self.icmp_type {
-      o_prot.write_field_begin(&TFieldIdentifier::new("icmp_type", TType::I16, 7))?;
-      o_prot.write_i16(fld_var)?;
-      o_prot.write_field_end()?
-    }
-    if let Some(fld_var) = self.icmp_code {
-      o_prot.write_field_begin(&TFieldIdentifier::new("icmp_code", TType::I16, 8))?;
-      o_prot.write_i16(fld_var)?;
-      o_prot.write_field_end()?
-    }
-    if let Some(fld_var) = self.size {
-      o_prot.write_field_begin(&TFieldIdentifier::new("size", TType::I32, 9))?;
-      o_prot.write_i32(fld_var)?;
-      o_prot.write_field_end()?
-    }
-    if let Some(ref fld_var) = self.icmp_addr {
-      o_prot.write_field_begin(&TFieldIdentifier::new("icmp_addr", TType::String, 10))?;
-      o_prot.write_bytes(fld_var)?;
-      o_prot.write_field_end()?
-    }
-    o_prot.write_field_stop()?;
-    o_prot.write_struct_end()
-  }
-}
-
-//
 // VisaResponse
 //
 
@@ -1259,9 +1085,9 @@ pub trait TVisaServiceSyncClient {
   fn authenticate(&mut self, auth_request: NodeAuthRequest) -> thrift::Result<String>;
   fn de_register(&mut self, key: String) -> thrift::Result<()>;
   fn authorize_connect(&mut self, key: String, request: ConnectRequest) -> thrift::Result<ConnectResponse>;
-  fn agent_disconnect(&mut self, keym: String, zpr_addr: Vec<u8>) -> thrift::Result<()>;
+  fn agent_disconnect(&mut self, key: String, zpr_addr: Vec<u8>) -> thrift::Result<()>;
   fn ping(&mut self, key: String) -> thrift::Result<Pong>;
-  fn request_visa(&mut self, key: String, src_tether_addr: Vec<u8>, traffic: TrafficDesc) -> thrift::Result<VisaResponse>;
+  fn request_visa(&mut self, key: String, src_tether_addr: Vec<u8>, l3_type: i8, traffic: Vec<u8>) -> thrift::Result<VisaResponse>;
 }
 
 pub trait TVisaServiceSyncClientMarker {}
@@ -1383,12 +1209,12 @@ impl <C: TThriftClient + TVisaServiceSyncClientMarker> TVisaServiceSyncClient fo
       result.ok_or()
     }
   }
-  fn agent_disconnect(&mut self, keym: String, zpr_addr: Vec<u8>) -> thrift::Result<()> {
+  fn agent_disconnect(&mut self, key: String, zpr_addr: Vec<u8>) -> thrift::Result<()> {
     (
       {
         self.increment_sequence_number();
         let message_ident = TMessageIdentifier::new("agent_disconnect", TMessageType::Call, self.sequence_number());
-        let call_args = VisaServiceAgentDisconnectArgs { keym, zpr_addr };
+        let call_args = VisaServiceAgentDisconnectArgs { key, zpr_addr };
         self.o_prot_mut().write_message_begin(&message_ident)?;
         call_args.write_to_out_protocol(self.o_prot_mut())?;
         self.o_prot_mut().write_message_end()?;
@@ -1437,12 +1263,12 @@ impl <C: TThriftClient + TVisaServiceSyncClientMarker> TVisaServiceSyncClient fo
       result.ok_or()
     }
   }
-  fn request_visa(&mut self, key: String, src_tether_addr: Vec<u8>, traffic: TrafficDesc) -> thrift::Result<VisaResponse> {
+  fn request_visa(&mut self, key: String, src_tether_addr: Vec<u8>, l3_type: i8, traffic: Vec<u8>) -> thrift::Result<VisaResponse> {
     (
       {
         self.increment_sequence_number();
         let message_ident = TMessageIdentifier::new("request_visa", TMessageType::Call, self.sequence_number());
-        let call_args = VisaServiceRequestVisaArgs { key, src_tether_addr, traffic };
+        let call_args = VisaServiceRequestVisaArgs { key, src_tether_addr, l3_type, traffic };
         self.o_prot_mut().write_message_begin(&message_ident)?;
         call_args.write_to_out_protocol(self.o_prot_mut())?;
         self.o_prot_mut().write_message_end()?;
@@ -1475,9 +1301,9 @@ pub trait VisaServiceSyncHandler {
   fn handle_authenticate(&self, auth_request: NodeAuthRequest) -> thrift::Result<String>;
   fn handle_de_register(&self, key: String) -> thrift::Result<()>;
   fn handle_authorize_connect(&self, key: String, request: ConnectRequest) -> thrift::Result<ConnectResponse>;
-  fn handle_agent_disconnect(&self, keym: String, zpr_addr: Vec<u8>) -> thrift::Result<()>;
+  fn handle_agent_disconnect(&self, key: String, zpr_addr: Vec<u8>) -> thrift::Result<()>;
   fn handle_ping(&self, key: String) -> thrift::Result<Pong>;
-  fn handle_request_visa(&self, key: String, src_tether_addr: Vec<u8>, traffic: TrafficDesc) -> thrift::Result<VisaResponse>;
+  fn handle_request_visa(&self, key: String, src_tether_addr: Vec<u8>, l3_type: i8, traffic: Vec<u8>) -> thrift::Result<VisaResponse>;
 }
 
 pub struct VisaServiceSyncProcessor<H: VisaServiceSyncHandler> {
@@ -1653,7 +1479,7 @@ impl TVisaServiceProcessFunctions {
   }
   pub fn process_agent_disconnect<H: VisaServiceSyncHandler>(handler: &H, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
     let args = VisaServiceAgentDisconnectArgs::read_from_in_protocol(i_prot)?;
-    match handler.handle_agent_disconnect(args.keym, args.zpr_addr) {
+    match handler.handle_agent_disconnect(args.key, args.zpr_addr) {
       Ok(_) => {
         let message_ident = TMessageIdentifier::new("agent_disconnect", TMessageType::Reply, incoming_sequence_number);
         o_prot.write_message_begin(&message_ident)?;
@@ -1727,7 +1553,7 @@ impl TVisaServiceProcessFunctions {
   }
   pub fn process_request_visa<H: VisaServiceSyncHandler>(handler: &H, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
     let args = VisaServiceRequestVisaArgs::read_from_in_protocol(i_prot)?;
-    match handler.handle_request_visa(args.key, args.src_tether_addr, args.traffic) {
+    match handler.handle_request_visa(args.key, args.src_tether_addr, args.l3_type, args.traffic) {
       Ok(handler_return) => {
         let message_ident = TMessageIdentifier::new("request_visa", TMessageType::Reply, incoming_sequence_number);
         o_prot.write_message_begin(&message_ident)?;
@@ -2185,7 +2011,7 @@ impl VisaServiceAuthorizeConnectResult {
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 struct VisaServiceAgentDisconnectArgs {
-  keym: String,
+  key: String,
   zpr_addr: Vec<u8>,
 }
 
@@ -2216,10 +2042,10 @@ impl VisaServiceAgentDisconnectArgs {
       i_prot.read_field_end()?;
     }
     i_prot.read_struct_end()?;
-    verify_required_field_exists("VisaServiceAgentDisconnectArgs.keym", &f_1)?;
+    verify_required_field_exists("VisaServiceAgentDisconnectArgs.key", &f_1)?;
     verify_required_field_exists("VisaServiceAgentDisconnectArgs.zpr_addr", &f_2)?;
     let ret = VisaServiceAgentDisconnectArgs {
-      keym: f_1.expect("auto-generated code should have checked for presence of required fields"),
+      key: f_1.expect("auto-generated code should have checked for presence of required fields"),
       zpr_addr: f_2.expect("auto-generated code should have checked for presence of required fields"),
     };
     Ok(ret)
@@ -2227,8 +2053,8 @@ impl VisaServiceAgentDisconnectArgs {
   fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
     let struct_ident = TStructIdentifier::new("agent_disconnect_args");
     o_prot.write_struct_begin(&struct_ident)?;
-    o_prot.write_field_begin(&TFieldIdentifier::new("keym", TType::String, 1))?;
-    o_prot.write_string(&self.keym)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("key", TType::String, 1))?;
+    o_prot.write_string(&self.key)?;
     o_prot.write_field_end()?;
     o_prot.write_field_begin(&TFieldIdentifier::new("zpr_addr", TType::String, 2))?;
     o_prot.write_bytes(&self.zpr_addr)?;
@@ -2391,7 +2217,8 @@ impl VisaServicePingResult {
 struct VisaServiceRequestVisaArgs {
   key: String,
   src_tether_addr: Vec<u8>,
-  traffic: TrafficDesc,
+  l3_type: i8,
+  traffic: Vec<u8>,
 }
 
 impl VisaServiceRequestVisaArgs {
@@ -2399,7 +2226,8 @@ impl VisaServiceRequestVisaArgs {
     i_prot.read_struct_begin()?;
     let mut f_1: Option<String> = None;
     let mut f_2: Option<Vec<u8>> = None;
-    let mut f_3: Option<TrafficDesc> = None;
+    let mut f_3: Option<i8> = None;
+    let mut f_4: Option<Vec<u8>> = None;
     loop {
       let field_ident = i_prot.read_field_begin()?;
       if field_ident.field_type == TType::Stop {
@@ -2416,8 +2244,12 @@ impl VisaServiceRequestVisaArgs {
           f_2 = Some(val);
         },
         3 => {
-          let val = TrafficDesc::read_from_in_protocol(i_prot)?;
+          let val = i_prot.read_i8()?;
           f_3 = Some(val);
+        },
+        4 => {
+          let val = i_prot.read_bytes()?;
+          f_4 = Some(val);
         },
         _ => {
           i_prot.skip(field_ident.field_type)?;
@@ -2428,11 +2260,13 @@ impl VisaServiceRequestVisaArgs {
     i_prot.read_struct_end()?;
     verify_required_field_exists("VisaServiceRequestVisaArgs.key", &f_1)?;
     verify_required_field_exists("VisaServiceRequestVisaArgs.src_tether_addr", &f_2)?;
-    verify_required_field_exists("VisaServiceRequestVisaArgs.traffic", &f_3)?;
+    verify_required_field_exists("VisaServiceRequestVisaArgs.l3_type", &f_3)?;
+    verify_required_field_exists("VisaServiceRequestVisaArgs.traffic", &f_4)?;
     let ret = VisaServiceRequestVisaArgs {
       key: f_1.expect("auto-generated code should have checked for presence of required fields"),
       src_tether_addr: f_2.expect("auto-generated code should have checked for presence of required fields"),
-      traffic: f_3.expect("auto-generated code should have checked for presence of required fields"),
+      l3_type: f_3.expect("auto-generated code should have checked for presence of required fields"),
+      traffic: f_4.expect("auto-generated code should have checked for presence of required fields"),
     };
     Ok(ret)
   }
@@ -2445,8 +2279,11 @@ impl VisaServiceRequestVisaArgs {
     o_prot.write_field_begin(&TFieldIdentifier::new("src_tether_addr", TType::String, 2))?;
     o_prot.write_bytes(&self.src_tether_addr)?;
     o_prot.write_field_end()?;
-    o_prot.write_field_begin(&TFieldIdentifier::new("traffic", TType::Struct, 3))?;
-    self.traffic.write_to_out_protocol(o_prot)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("l3_type", TType::I08, 3))?;
+    o_prot.write_i8(self.l3_type)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("traffic", TType::String, 4))?;
+    o_prot.write_bytes(&self.traffic)?;
     o_prot.write_field_end()?;
     o_prot.write_field_stop()?;
     o_prot.write_struct_end()

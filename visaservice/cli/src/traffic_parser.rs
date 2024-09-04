@@ -2,8 +2,7 @@ use rand::Rng;
 use regex::Captures;
 use regex::Regex;
 use std::net::IpAddr;
-
-use crate::vsapi;
+use etherparse;
 
 #[derive(Debug, PartialEq)]
 pub enum Protocol {
@@ -13,6 +12,20 @@ pub enum Protocol {
 
 const TCP_FLAGS_SYN: u8 = 0x02;
 const TCP_FLAGS_ACK: u8 = 0x10;
+
+
+#[derive(Debug)]
+pub struct TrafficDesc {
+    pub source: IpAddr,
+    pub dest: IpAddr,
+    pub protocol: Protocol,
+    pub source_port: u16,
+    pub dest_port: u16,
+    pub flags: u8,
+}
+
+
+
 
 // This function parses a string from the user that describes traffic in a succinct way
 // so that we can pass a visa-request to the visa service.
@@ -35,9 +48,9 @@ const TCP_FLAGS_ACK: u8 = 0x10;
 //
 //   IPv6 addresses should be enclosed in square brackets.
 //   Flags are optional
-//   Source port is optiona, and if omitted a high number port is randomly chosen.
+//   Source port is optional, and if omitted a high number port is randomly chosen.
 //
-pub fn parse_traffic(input: &str, prot: Protocol) -> Result<vsapi::TrafficDesc, std::io::Error> {
+pub fn parse_traffic(input: &str, prot: Protocol) -> Result<TrafficDesc, std::io::Error> {
     let input = input.trim();
     // let capts: Captures;
 
@@ -134,13 +147,13 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<vsapi::TrafficDesc, 
         }
     };
 
-    let mut flags: u32 = 0;
+    let mut flags: u8 = 0;
 
     if let Some(fstr) = capts.get(5) {
         for c in fstr.as_str().chars() {
             match c {
-                'S' => flags |= TCP_FLAGS_SYN as u32,
-                'A' => flags |= TCP_FLAGS_ACK as u32,
+                'S' => flags |= TCP_FLAGS_SYN,
+                'A' => flags |= TCP_FLAGS_ACK,
                 _ => {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::Other,
@@ -158,30 +171,71 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<vsapi::TrafficDesc, 
         ));
     }
 
-    let src_octets = match src_addr {
-        IpAddr::V4(v4) => v4.octets().to_vec(),
-        IpAddr::V6(v6) => v6.octets().to_vec(),
-    };
-    let dst_octets = match dst_addr {
-        IpAddr::V4(v4) => v4.octets().to_vec(),
-        IpAddr::V6(v6) => v6.octets().to_vec(),
-    };
-
-    let traffic = vsapi::TrafficDesc {
-        source: Some(src_octets),
-        dest: Some(dst_octets),
-        protocol: Some(prot as i32),
-        source_port: Some(src_port as i32),
-        dest_port: Some(dst_port as i32),
-        flags: Some(flags as i32),
-        icmp_type: None,
-        icmp_code: None,
-        size: Some(rng.gen_range(1025..65534)),
-        icmp_addr: None,
+    let traffic = TrafficDesc {
+        source: src_addr,
+        dest: dst_addr,
+        protocol: prot,
+        source_port: src_port,
+        dest_port: dst_port,
+        flags,
     };
 
     Ok(traffic)
 }
+
+
+
+impl TrafficDesc {
+
+    /// Convert this [TrafficDesc] into a packet bytes with a dummy payload.
+    pub fn build_packet(&self) -> Vec<u8> {
+        let payload = [0, 1, 2, 3, 4, 5, 6, 7];
+        let mut buf = Vec::<u8>::with_capacity(1500);
+
+        let src_octets = match self.source {
+            IpAddr::V4(v4) => v4.octets().to_vec(),
+            IpAddr::V6(v6) => v6.octets().to_vec(),
+        };
+        let dst_octets = match self.dest {
+            IpAddr::V4(v4) => v4.octets().to_vec(),
+            IpAddr::V6(v6) => v6.octets().to_vec(),
+        };
+
+        let builder: etherparse::PacketBuilderStep<_>;
+        if self.source.is_ipv6() {
+            let src_a:[u8; 16] = src_octets.as_slice().try_into().unwrap();
+            let dst_a:[u8; 16] = dst_octets.as_slice().try_into().unwrap();
+            builder = etherparse::PacketBuilder::ipv6(src_a, dst_a, 0);
+        } else {
+            let src_a:[u8; 4] = src_octets.as_slice().try_into().unwrap();
+            let dst_a:[u8; 4] = dst_octets.as_slice().try_into().unwrap();
+            builder = etherparse::PacketBuilder::ipv4(src_a, dst_a, 0);
+        }
+
+        if self.protocol == Protocol::TCP {
+            let builder = builder.tcp(self.source_port, self.dest_port, 1234, 4000);
+            builder.write(&mut buf, &payload).unwrap();
+        } else {
+            let builder = builder.udp(self.source_port, self.dest_port);
+            builder.write(&mut buf, &payload).unwrap();
+        }
+
+        // The very convenient builder interfaces does not give us direct access to the
+        // flags field in the TCP header.  So we have to do it manually.  If checksums
+        // were calculated, this will break them. (Visa service does not verify checksums).
+        if self.protocol == Protocol::TCP {
+            let ip_hdr_len = if self.source.is_ipv6() { 40 } else { 20 };
+            let mut tcp_header = buf.split_off(ip_hdr_len);
+            tcp_header[13] = self.flags;
+            buf.append(&mut tcp_header);
+        }
+
+        buf
+    }
+}
+
+
+
 
 #[cfg(test)]
 mod test {

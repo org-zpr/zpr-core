@@ -126,19 +126,6 @@ struct Pong {
   2: i64 policy_version,
 }
 
-struct TrafficDesc {
-  1: binary source,
-  2: binary dest,
-  3: i32 protocol,
-  4: i32 source_port,
-  5: i32 dest_port,
-  6: i32 flags,
-  7: i16 icmp_type,
-  8: i16 icmp_code,
-  9: i32 size,
-  10: optional binary icmp_addr
-}
-
 struct VisaResponse {
   1: StatusCode status,
   2: VisaHop visa,
@@ -170,11 +157,12 @@ service VisaService {
 
   // Notify the visa service that an agent has disconnected. Pass in the ZPR address
   // assigned to the agent via `authorize_connect`.
-  void agent_disconnect(1:string keym, 2:binary zpr_addr)
+  void agent_disconnect(1:string key, 2:binary zpr_addr)
 
   // For now, fully optional. Use to test connectivity or key or just to check on
   // current policy version and config.  "Pong" message is returned.
   Pong ping(1:string key)
 
-  VisaResponse request_visa(1:string key, 2:binary src_tether_addr, 3:TrafficDesc traffic)
+  // `traffic` is the initial packet detected for an unknown flow.
+  VisaResponse request_visa(1:string key, 2:binary src_tether_addr, 3: i8 l3_type, 4:binary traffic)
 }

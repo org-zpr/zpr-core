@@ -19,6 +19,7 @@ use std::time::SystemTime;
 use crate::vsapi;
 
 use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
+use crate::traffic_parser::TrafficDesc;
 
 // ugh!!
 type VSClientT = VisaServiceSyncClient<
@@ -206,13 +207,22 @@ pub fn request_visa(
     service: &str,
     apikey: &str,
     tether_addr: Ipv6Addr,
-    traffic: &vsapi::TrafficDesc,
+    traffic: &TrafficDesc,
 ) -> thrift::Result<()> {
+
+    let l3_type = match traffic.source.is_ipv4() {
+        true => 4,
+        _ => 6,
+    };
+
+    let pktbuf = traffic.build_packet();
+
     let mut client = newclient(service)?;
     match client.request_visa(
         apikey.into(),
         tether_addr.octets().to_vec(),
-        traffic.clone(),
+        l3_type as i8,
+        pktbuf,
     ) {
         Ok(result) => {
             println!("visa request response:");

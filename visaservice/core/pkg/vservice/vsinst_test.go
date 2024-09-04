@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -21,8 +23,6 @@ import (
 	"zpr.org/vsx/snio/zds"
 	"zpr.org/vsx/zpl/compiler"
 	"zpr.org/vsx/zpl/fs"
-
-	snip "zpr.org/vs/pkg/ip"
 )
 
 const ca0cert = `
@@ -78,21 +78,6 @@ TmgyWDoy+cjbuozxQCbf3fbrq/zRyC5Y288=
 -----END CERTIFICATE-----
 `
 
-func ipTrafficToVsapiTrafficDesc(t *snip.Traffic) *vsapi.TrafficDesc {
-	return &vsapi.TrafficDesc{
-		Source:     t.SrcAddr.AsSlice(),
-		Dest:       t.DstAddr.AsSlice(),
-		Protocol:   int32(t.Proto.Num()),
-		SourcePort: int32(t.SrcPort),
-		DestPort:   int32(t.DstPort),
-		Flags:      int32(t.Flags),
-		IcmpType:   int16(t.ICMPType),
-		IcmpCode:   int16(t.ICMPCode),
-		IcmpAddr:   t.ICMPTargetAddress.AsSlice(),
-		Size:       int32(t.Size),
-	}
-}
-
 func visaFromVsapiVisaResponse(vr *vsapi.VisaResponse) (*vsio.Visa, error) {
 	var visaObj vsio.Visa
 	err := proto.Unmarshal(vr.GetVisa().VisaPb, &visaObj)
@@ -142,6 +127,33 @@ func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 		HopCount:             hopcount,
 		AllowInvalidPeerAddr: true,
 	}
+}
+
+// Helper to createa a TCP SYN packet.
+func createPacket(pktbuf gopacket.SerializeBuffer, src, dst netip.Addr, srcPort, dstPort uint16) {
+	// pktbuf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
+
+	payload := gopacket.Payload([]byte{1, 2, 3, 4})
+	payload.SerializeTo(pktbuf, opts)
+
+	tcph := &layers.TCP{
+		SrcPort: layers.TCPPort(srcPort),
+		DstPort: layers.TCPPort(dstPort),
+		SYN:     true,
+	}
+	tcph.SerializeTo(pktbuf, opts)
+
+	iph := &layers.IPv6{
+		Version:    6,
+		SrcIP:      net.IP(src.AsSlice()),
+		DstIP:      net.IP(dst.AsSlice()),
+		NextHeader: layers.IPProtocolTCP,
+	}
+	iph.SerializeTo(pktbuf, opts)
 }
 
 // Test that the a duration constraint set in policy makes it all the way to
@@ -224,16 +236,9 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 	}
 
 	taddr := netip.MustParseAddr("fc00:3001::9")
-	td := &snip.Traffic{
-		SrcAddr: netip.MustParseAddr("fc00:3001:1::10"),
-		DstAddr: naddr,
-		Proto:   snip.ProtocolTCP,
-		SrcPort: 30000,
-		DstPort: 80, // WEB request
-		Connect: true,
-		Syn:     true,
-		Size:    64,
-	}
+	saddr := netip.MustParseAddr("fc00:3001:1::10")
+	pktbuf := gopacket.NewSerializeBuffer()
+	createPacket(pktbuf, saddr, naddr, 30000, 80)
 
 	// Prior to requesting a visa, we need to have told visa service about the
 	// adapter(s).
@@ -241,10 +246,10 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 		claims := map[string]*agent.ClaimV{
 			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
 		}
-		svc.BackDoorConnectAdapter(taddr, td.SrcAddr, naddr, claims, time.Now().Add(5*time.Minute))
+		svc.BackDoorConnectAdapter(taddr, saddr, naddr, claims, time.Now().Add(5*time.Minute))
 	}
 
-	res, err := svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), ipTrafficToVsapiTrafficDesc(td))
+	res, err := svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), 6, pktbuf.Bytes())
 	require.Nil(t, err)
 	require.Equal(t, "", res.GetReason())
 	require.Equal(t, vsapi.StatusCode_SUCCESS, res.Status)
@@ -340,28 +345,23 @@ func TestRequestVisaDupes(t *testing.T) {
 	}
 
 	taddr := netip.MustParseAddr("fc00:3001::9")
-	td := &snip.Traffic{
-		SrcAddr: netip.MustParseAddr("fc00:3001:1::10"),
-		DstAddr: netip.MustParseAddr("fc00:3001:1::11"),
-		Proto:   snip.ProtocolTCP,
-		SrcPort: 30000,
-		DstPort: 80, // WEB request
-		Connect: true,
-		Syn:     true,
-		Size:    64,
-	}
+
+	saddr := netip.MustParseAddr("fc00:3001:1::10")
+	daddr := netip.MustParseAddr("fc00:3001:1::11")
+	pktbuf := gopacket.NewSerializeBuffer()
+	createPacket(pktbuf, saddr, daddr, 30000, 80)
 
 	{
 		claims := map[string]*agent.ClaimV{
 			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
 		}
-		svc.BackDoorConnectAdapter(taddr, td.SrcAddr, naddr, claims, time.Now().Add(5*time.Minute))
+		svc.BackDoorConnectAdapter(taddr, saddr, naddr, claims, time.Now().Add(5*time.Minute))
 	}
 
 	var resp1, resp2 *vsapi.VisaResponse
 
 	{
-		resp1, err = svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), ipTrafficToVsapiTrafficDesc(td))
+		resp1, err = svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), 6, pktbuf.Bytes())
 		require.Nil(t, err)
 		require.Equal(t, vsapi.StatusCode_SUCCESS, resp1.Status)
 	}
@@ -372,7 +372,7 @@ func TestRequestVisaDupes(t *testing.T) {
 	// visa service must allow new visas to be created that extend the lifetime
 	// but are otherwise the same.
 	{
-		resp2, err = svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), ipTrafficToVsapiTrafficDesc(td))
+		resp2, err = svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), 6, pktbuf.Bytes())
 		require.Nil(t, err)
 		require.Equal(t, vsapi.StatusCode_SUCCESS, resp2.Status)
 	}
@@ -464,25 +464,20 @@ func TestAuthExpireNoVisa(t *testing.T) {
 	}
 
 	taddr := netip.MustParseAddr("fc00:3001::9")
-	td := &snip.Traffic{
-		SrcAddr: netip.MustParseAddr("fc00:3001:1::10"),
-		DstAddr: netip.MustParseAddr("fc00:3001:1::11"),
-		Proto:   snip.ProtocolTCP,
-		SrcPort: 30000,
-		DstPort: 80, // WEB request
-		Connect: true,
-		Syn:     true,
-		Size:    64,
-	}
+
+	saddr := netip.MustParseAddr("fc00:3001:1::10")
+	daddr := netip.MustParseAddr("fc00:3001:1::11")
+	pktbuf := gopacket.NewSerializeBuffer()
+	createPacket(pktbuf, saddr, daddr, 30000, 80)
 
 	{
 		claims := map[string]*agent.ClaimV{
 			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
 		}
-		svc.BackDoorConnectAdapter(taddr, td.SrcAddr, naddr, claims, time.Now().Add(-time.Hour)) // <--- note expired
+		svc.BackDoorConnectAdapter(taddr, saddr, naddr, claims, time.Now().Add(-time.Hour)) // <--- note expired
 	}
 
-	res, err := svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), ipTrafficToVsapiTrafficDesc(td))
+	res, err := svc.RequestVisa(context.Background(), apiKey, taddr.AsSlice(), 6, pktbuf.Bytes())
 	require.Nil(t, err)
 	require.Equal(t, vsapi.StatusCode_FAIL, res.Status)
 	require.Equal(t, "auth expired", res.GetReason())
