@@ -206,7 +206,7 @@ pub fn encrypt_full<'pktbuf>(
     _asm: &Assembly<'pktbuf>,
     codec: &dyn Codec,
     pkt: &mut Packet<'pktbuf>,
-) {
+) -> Result<(), km::EncryptionError> {
     // TODO: Could do some length checks here on the packet body.  Is it too short? Too long? Etc.
 
     let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>(); // = 1
@@ -221,10 +221,9 @@ pub fn encrypt_full<'pktbuf>(
         Ok(len) => {
             pkt.shrink_by(encr_len); // remove cleartext body, leavign ZPI
             pkt.put(&enc_buf[0..len]); // copy ciphertext body over
+            Ok(())
         }
-        Err(e) => {
-            error!("encrypt failed: {}", e);
-        }
+        Err(e) => Err(e),
     }
 }
 
@@ -307,7 +306,7 @@ fn substrate_egress_common<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     link_id: zpr::LinkId,
     pkt: &mut Packet<'pktbuf>,
-) -> Option<zpr::SubstrateAddr> {
+) -> Result<Option<zpr::SubstrateAddr>, km::EncryptionError> {
     // TODO: should we add ZDP header here also??
 
     let mut transit = true;
@@ -357,12 +356,16 @@ fn substrate_egress_common<'pktbuf>(
         if transit {
             encrypt_hmac(tsa.send_hmac_key, pkt);
         } else {
-            encrypt_full(asm, &*tsa.codec, pkt);
+            match encrypt_full(asm, &*tsa.codec, pkt) {
+                Ok(()) => (),
+                Err(err) => return Err(err),
+            }
         }
     }
 
-    asm.peer_table
-        .inspect(link_id, |peer_state: &PeerState| peer_state.substrate_addr)
+    Ok(asm
+        .peer_table
+        .inspect(link_id, |peer_state: &PeerState| peer_state.substrate_addr))
 }
 
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
@@ -372,9 +375,17 @@ pub fn substrate_egress<'pktbuf>(
     link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) {
-    let Some(dest_sa) = substrate_egress_common(asm, link_id, &mut pkt) else {
-        drop_and_count(asm, pkt, CounterType::PeerRemoved);
-        return;
+    let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
+        Ok(Some(dest_sa)) => dest_sa,
+        Ok(None) => {
+            drop_and_count(asm, pkt, CounterType::PeerRemoved);
+            return;
+        }
+        Err(err) => {
+            error!("egress: link {}: encryption error: {}", link_id, err);
+            drop_and_count(asm, pkt, CounterType::EncryptionFailure);
+            return;
+        }
     };
 
     match asm.substrate_egress.try_enqueue_packet(
@@ -395,9 +406,17 @@ pub async fn substrate_egress_blocking<'pktbuf>(
     link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) {
-    let Some(dest_sa) = substrate_egress_common(asm, link_id, &mut pkt) else {
-        drop_and_count(asm, pkt, CounterType::PeerRemoved);
-        return;
+    let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
+        Ok(Some(dest_sa)) => dest_sa,
+        Ok(None) => {
+            drop_and_count(asm, pkt, CounterType::PeerRemoved);
+            return;
+        }
+        Err(err) => {
+            error!("egress: link {}: encryption error: {}", link_id, err);
+            drop_and_count(asm, pkt, CounterType::EncryptionFailure);
+            return;
+        }
     };
 
     match asm

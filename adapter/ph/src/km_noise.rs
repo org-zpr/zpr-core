@@ -147,18 +147,29 @@ impl Codec for NoiseCodec {
         self: &Self,
         payload: &[u8],
         message: &mut [u8],
-    ) -> Result<usize, KMError> {
-        rand_bytes(&mut message[..NOISE_NONCE_LEN]).unwrap();
+    ) -> Result<usize, EncryptionError> {
+        match rand_bytes(&mut message[..NOISE_NONCE_LEN]) {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(EncryptionError::InternalError(format!(
+                    "failed to generate nonce: {}",
+                    e
+                )));
+            }
+        }
         let nonce = u64::from_be_bytes(message[..NOISE_NONCE_LEN].try_into().unwrap());
         match self
             .snow_state
             .write_message(nonce, payload, &mut message[NOISE_NONCE_LEN..])
         {
             Ok(len) => Ok(len + NOISE_NONCE_LEN),
-            Err(e) => {
-                error!("noise: error encrypting message: {:?}", e);
-                Err(KMError::EncryptionError)
-            }
+            Err(e) => match e {
+                snow::error::Error::Input => Err(EncryptionError::MessageTooLarge),
+                _ => Err(EncryptionError::InternalError(format!(
+                    "noise failed to encrypt message: {}",
+                    e
+                ))),
+            },
         }
     }
 
@@ -166,23 +177,26 @@ impl Codec for NoiseCodec {
         self: &Self,
         payload: &[u8],
         message: &mut [u8],
-    ) -> Result<usize, KMError> {
+    ) -> Result<usize, DecryptionError> {
         // nonce is first 8 bytes of the message.
         let plen = payload.len();
         if plen < NOISE_NONCE_LEN {
             error!("noise: message too short");
-            return Err(KMError::EncryptionError);
+            return Err(DecryptionError::MessageTooShort);
         }
-        let nonce: u64 = u64::from_be_bytes(payload[0..NOISE_NONCE_LEN].try_into().unwrap());
+        let nonce: u64 = u64::from_be_bytes(payload[0..NOISE_NONCE_LEN].try_into().unwrap()); // pretty sure this cannot fail
         match self
             .snow_state
             .read_message(nonce, &payload[NOISE_NONCE_LEN..plen], message)
         {
             Ok(len) => Ok(len),
-            Err(e) => {
-                error!("noise: error decrypting message: {:?}", e);
-                Err(KMError::EncryptionError)
-            }
+            Err(e) => match e {
+                snow::error::Error::Decrypt => Err(DecryptionError::DecryptFailed),
+                _ => Err(DecryptionError::InternalError(format!(
+                    "noise failed to decrypt message: {}",
+                    e
+                ))),
+            },
         }
     }
 }

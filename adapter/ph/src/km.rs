@@ -36,7 +36,6 @@ pub enum KMError {
     ConfigurationError,
     InvalidState,
     InvalidPacketType,
-    EncryptionError,
     HandshakeError,
     NoHeadroom,
     ShortPacket,
@@ -47,14 +46,68 @@ pub enum KMError {
     IoError(std::io::Error),
 }
 
+#[derive(Debug)]
+pub enum EncryptionError {
+    /// Unspecified error occurred in the encryption implementation.  The string arg is an error description.
+    InternalError(String),
+
+    /// Message is too large for the encryption implementation to handle.
+    MessageTooLarge,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum DecryptionError {
+    /// Unspecified error occurred in the decryption implementation.  The string arg is an error description.
+    InternalError(String),
+
+    /// Message is too short to be decrypted.
+    MessageTooShort,
+
+    /// Message is malformed in some way.
+    ParseError,
+
+    /// Unable to decrypt the message due to wrong key or some other cipher issue.
+    DecryptFailed,
+}
+
+impl fmt::Display for DecryptionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            DecryptionError::InternalError(ref s) => {
+                write!(f, "InternalError: {}", s)
+            }
+            DecryptionError::MessageTooShort => {
+                write!(f, "MessageTooShort")
+            }
+            DecryptionError::ParseError => {
+                write!(f, "ParseError")
+            }
+            DecryptionError::DecryptFailed => {
+                write!(f, "DecryptFailed")
+            }
+        }
+    }
+}
+
+impl fmt::Display for EncryptionError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            EncryptionError::InternalError(ref s) => {
+                write!(f, "InternalError: {}", s)
+            }
+            EncryptionError::MessageTooLarge => {
+                write!(f, "MessageTooLarge")
+            }
+        }
+    }
+}
+
 impl fmt::Display for KMError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             KMError::InvalidState => {
                 write!(f, "InvalidState")
-            }
-            KMError::EncryptionError => {
-                write!(f, "EncryptionError")
             }
             KMError::HandshakeError => {
                 write!(f, "HandshakeError")
@@ -698,14 +751,14 @@ pub trait Codec: Send + Sync {
         self: &Self,
         payload: &[u8],
         message: &mut [u8],
-    ) -> Result<usize, KMError>;
+    ) -> Result<usize, EncryptionError>;
 
     /// Decrypt `payload` into `message`
     fn decrypt_transport_stateless(
         self: &Self,
         payload: &[u8],
         message: &mut [u8],
-    ) -> Result<usize, KMError>;
+    ) -> Result<usize, DecryptionError>;
 }
 
 /// An implementation of Codec that just throws errors for all operations.
@@ -722,8 +775,8 @@ impl Codec for UnimplCodec {
         self: &Self,
         _payload: &[u8],
         _message: &mut [u8],
-    ) -> Result<usize, KMError> {
-        Err(KMError::MachineError(String::from(
+    ) -> Result<usize, EncryptionError> {
+        Err(EncryptionError::InternalError(String::from(
             "encrypt not implemented",
         )))
     }
@@ -733,8 +786,8 @@ impl Codec for UnimplCodec {
         self: &Self,
         _payload: &[u8],
         _message: &mut [u8],
-    ) -> Result<usize, KMError> {
-        Err(KMError::MachineError(String::from(
+    ) -> Result<usize, DecryptionError> {
+        Err(DecryptionError::InternalError(String::from(
             "decrypt not implemented",
         )))
     }
@@ -850,7 +903,7 @@ mod test {
             self: &Self,
             payload: &[u8],
             message: &mut [u8],
-        ) -> Result<usize, KMError> {
+        ) -> Result<usize, EncryptionError> {
             message[0..payload.len()].copy_from_slice(payload);
             Ok(payload.len())
         }
@@ -859,7 +912,7 @@ mod test {
             self: &Self,
             payload: &[u8],
             message: &mut [u8],
-        ) -> Result<usize, KMError> {
+        ) -> Result<usize, DecryptionError> {
             message[0..payload.len()].copy_from_slice(payload);
             Ok(payload.len())
         }

@@ -40,10 +40,10 @@ impl Codec for XorCodec {
         self: &Self,
         payload: &[u8],
         message: &mut [u8],
-    ) -> Result<usize, KMError> {
+    ) -> Result<usize, EncryptionError> {
         let sz = payload.len() + 2; // SIZE includes the 2 byte size field.
         if sz > u16::MAX as usize {
-            return Err(KMError::EncryptionError);
+            return Err(EncryptionError::MessageTooLarge);
         }
         let szbytes = (sz as u16).to_be_bytes();
         message[0..2].copy_from_slice(&szbytes); // write SIZE as u16 to front of buffer
@@ -60,17 +60,17 @@ impl Codec for XorCodec {
         self: &Self,
         payload: &[u8],
         message: &mut [u8],
-    ) -> Result<usize, KMError> {
+    ) -> Result<usize, DecryptionError> {
         let buf_sz = payload.len();
         if buf_sz < 2 {
-            return Err(KMError::EncryptionError);
+            return Err(DecryptionError::MessageTooShort);
         }
         let msg_sz: u16 = u16::from_be_bytes([payload[0], payload[1]]);
         if buf_sz < msg_sz as usize {
-            return Err(KMError::EncryptionError);
+            return Err(DecryptionError::ParseError);
         }
         if msg_sz < 2 {
-            return Err(KMError::EncryptionError);
+            return Err(DecryptionError::MessageTooShort);
         }
         let msg_len: usize = (msg_sz - 2) as usize;
 
