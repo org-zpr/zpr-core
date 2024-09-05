@@ -14,8 +14,8 @@ use bytes::BufMut;
 
 use ph::config;
 use ph::km;
-use ph::km::{KMSignal, KeyManager};
-use ph::km_noise::KMNoise;
+use ph::km::{KmSignal, KeyManager};
+use ph::km_noise::KmNoise;
 use ph::packet::Packet;
 use ph::zdp::*;
 
@@ -72,7 +72,7 @@ impl ZDPServer {
             private: self.noise_kp.private.clone(),
             public: self.noise_kp.public.clone(),
         };
-        let noise = match KMNoise::new(false, None, Some(kp), ZPI_FULL_ENC, ZPI_TRANSIT_HMAC) {
+        let noise = match KmNoise::new(false, None, Some(kp), ZPI_FULL_ENC, ZPI_TRANSIT_HMAC) {
             Ok(n) => n,
             Err(e) => {
                 info!("error creating noise km: {:?}", e);
@@ -136,7 +136,7 @@ impl ZDPServer {
                         Some(linkmsg) = km_sig_rx.recv() => {
                             // This is a signal from the KM.  We need to act on it.
                             match linkmsg.msg {
-                                KMSignal::SaIdChange { old, new } => {
+                                KmSignal::SaIdChange { old, new } => {
                                     if old == 0 && new > 0 {
                                         info!("SA has been established!");
                                         // Becuase of the way the messages work, the node will transition into

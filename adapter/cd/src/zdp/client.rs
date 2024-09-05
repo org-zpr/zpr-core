@@ -11,9 +11,9 @@ use tokio::net::UdpSocket;
 
 use ph::config;
 use ph::km;
-use ph::km::{KMSignal, KeyManager};
+use ph::km::{KmSignal, KeyManager};
 use ph::km_demo;
-use ph::km_noise::KMNoise;
+use ph::km_noise::KmNoise;
 use ph::packet::Packet;
 use ph::zdp::*;
 
@@ -39,7 +39,7 @@ impl ZDPClient {
 
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-        let noise = match KMNoise::new(
+        let noise = match KmNoise::new(
             true,
             Some(self.dock_noise_pub_key.into()),
             None,
@@ -84,7 +84,7 @@ impl ZDPClient {
 
                 Some(linkmsg) = km_sig_rx.recv() => {
                     match linkmsg.msg {
-                        KMSignal::SaIdChange { old, new } => {
+                        KmSignal::SaIdChange { old, new } => {
                             if old == 0 && new > 0 {
                                 info!("zdp/client - new SA established");
                                 let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];

@@ -32,7 +32,7 @@ use crate::zpr;
 
 #[derive(Debug)]
 #[allow(dead_code)]
-pub enum KMError {
+pub enum KmError {
     ConfigurationError,
     InvalidState,
     InvalidPacketType,
@@ -109,58 +109,58 @@ impl fmt::Display for EncryptionError {
     }
 }
 
-impl fmt::Display for KMError {
+impl fmt::Display for KmError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            KMError::InvalidState => {
+            KmError::InvalidState => {
                 write!(f, "InvalidState")
             }
-            KMError::HandshakeError => {
+            KmError::HandshakeError => {
                 write!(f, "HandshakeError")
             }
-            KMError::ConfigurationError => {
+            KmError::ConfigurationError => {
                 write!(f, "ConfigurationError")
             }
-            KMError::MachineError(ref s) => {
+            KmError::MachineError(ref s) => {
                 write!(f, "MachineError: {}", s)
             }
-            KMError::IoError(ref e) => {
+            KmError::IoError(ref e) => {
                 write!(f, "IoError: {}", e)
             }
-            KMError::InvalidPacketType => {
+            KmError::InvalidPacketType => {
                 write!(f, "InvalidPacketType")
             }
-            KMError::NoHeadroom => {
+            KmError::NoHeadroom => {
                 write!(f, "NoHeadroom")
             }
-            KMError::ShortPacket => {
+            KmError::ShortPacket => {
                 write!(f, "ShortPacket")
             }
-            KMError::SaIdZero => {
+            KmError::SaIdZero => {
                 write!(f, "SaIdZero")
             }
-            KMError::SaIdMismatch => {
+            KmError::SaIdMismatch => {
                 write!(f, "SaIdMismatch")
             }
-            KMError::EnqueueFailed => {
+            KmError::EnqueueFailed => {
                 write!(f, "EnqueueFailed")
             }
         }
     }
 }
 
-impl From<std::io::Error> for KMError {
-    fn from(e: std::io::Error) -> KMError {
-        KMError::IoError(e)
+impl From<std::io::Error> for KmError {
+    fn from(e: std::io::Error) -> KmError {
+        KmError::IoError(e)
     }
 }
 
 // Copying of off std::io::Result
-pub type KMResult<T> = Result<T, KMError>;
+pub type KmResult<T> = Result<T, KmError>;
 
 /// Signals emitted by the KeyManager (see the [KeyManager::start] method).
 #[derive(Debug)]
-pub enum KMSignal {
+pub enum KmSignal {
     /// After [KeyManagerStateMachine::reset] is called.
     Reset,
 
@@ -171,12 +171,12 @@ pub enum KMSignal {
     SaIdChange { old: zpr::SaId, new: zpr::SaId },
 
     /// When a security association is established.
-    SaEstablished(KMTransportSA),
+    SaEstablished(KmTransportSA),
 }
 
 /// Encapsulates all the "state" set up by an SA.
 #[derive(Clone)]
-pub struct KMTransportSA {
+pub struct KmTransportSA {
     /// The SA identifier is mostly just a marker used internally.  If re-keying occurs or
     /// the identifier will increment.  A zero value indicates that the SA is not established.
     ///
@@ -201,7 +201,7 @@ pub struct KMTransportSA {
 }
 
 // Does not check the codec.
-impl PartialEq for KMTransportSA {
+impl PartialEq for KmTransportSA {
     fn eq(&self, other: &Self) -> bool {
         self.send_zpis == other.send_zpis
             && self.recv_zpis == other.recv_zpis
@@ -211,7 +211,7 @@ impl PartialEq for KMTransportSA {
 }
 
 // Our debug formatter omits the codec.
-impl fmt::Debug for KMTransportSA {
+impl fmt::Debug for KmTransportSA {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -221,7 +221,7 @@ impl fmt::Debug for KMTransportSA {
     }
 }
 
-impl fmt::Display for KMTransportSA {
+impl fmt::Display for KmTransportSA {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.sa_id == 0 {
             return write!(f, "KMTransportSA {{ sa_id: 0 }}");
@@ -231,16 +231,16 @@ impl fmt::Display for KMTransportSA {
 }
 
 /// The Key Manager emits messages on two queues, and both use this general structure.
-/// The `msg` field is either going to be a [KMSignal] or a payload for a Key Management
+/// The `msg` field is either going to be a [KmSignal] or a payload for a Key Management
 /// ZDP message which will be in a [Bytes].
-pub struct KMLinkMsg<T> {
+pub struct KmLinkMsg<T> {
     pub link_id: zpr::LinkId,
     pub msg: T,
 }
 
-impl<T> KMLinkMsg<T> {
-    pub fn new(link_id: zpr::LinkId, msg: T) -> KMLinkMsg<T> {
-        KMLinkMsg { link_id, msg }
+impl<T> KmLinkMsg<T> {
+    pub fn new(link_id: zpr::LinkId, msg: T) -> KmLinkMsg<T> {
+        KmLinkMsg { link_id, msg }
     }
 }
 
@@ -248,25 +248,25 @@ impl<T> KMLinkMsg<T> {
 /// One of these is needed on every adap-node or node-node link.
 #[derive(Debug, Clone)]
 pub struct KeyManager<'mgr> {
-    shared: Arc<KMShared<'mgr>>,
+    shared: Arc<KmShared<'mgr>>,
 }
 
 #[derive(Debug)]
-struct KMShared<'mgr> {
-    state: Mutex<KMState<'mgr>>,
+struct KmShared<'mgr> {
+    state: Mutex<KmState<'mgr>>,
 }
 
-struct KMState<'mgr> {
+struct KmState<'mgr> {
     // Lifetime hint here asserts that the impl of KeyManagerStateMachine must live as long as the KeyManager it is passed to.
     statemachine: Box<dyn KeyManagerStateMachine + 'mgr>,
     link_id: zpr::LinkId,
-    kmsettings: KMSettings,
+    kmsettings: KmSettings,
     sa_id: zpr::SaId,                     // current SA identifier
     mgmt_tx: Option<mpsc::Sender<Bytes>>, // Internal queue for key management messages to be processed.
-    ts: KMTransportSA,
+    ts: KmTransportSA,
 }
 
-impl fmt::Debug for KMState<'_> {
+impl fmt::Debug for KmState<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -286,8 +286,8 @@ impl KeyManager<'_> {
         let settings = statemachine.get_settings();
 
         KeyManager {
-            shared: Arc::new(KMShared {
-                state: Mutex::new(KMState {
+            shared: Arc::new(KmShared {
+                state: Mutex::new(KmState {
                     statemachine,
                     link_id,
                     kmsettings: settings,
@@ -302,12 +302,12 @@ impl KeyManager<'_> {
     /// If we are in a transport state, this returns the details.
     /// Note that this is also sent "for free" with the SaEstablished signal.
     #[allow(dead_code)]
-    pub fn get_transport_state(&self) -> Option<KMTransportSA> {
+    pub fn get_transport_state(&self) -> Option<KmTransportSA> {
         let state = self.shared.state.lock().unwrap();
         if state.sa_id == 0 {
             return None;
         }
-        Some(KMTransportSA {
+        Some(KmTransportSA {
             sa_id: state.sa_id,
             recv_zpis: state.ts.recv_zpis,
             send_zpis: state.ts.send_zpis,
@@ -321,7 +321,7 @@ impl KeyManager<'_> {
     /// This waits until space available in our KM message queue.
     ///
     /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
-    pub async fn handle_km_message(&self, message: &[u8]) -> KMResult<()> {
+    pub async fn handle_km_message(&self, message: &[u8]) -> KmResult<()> {
         let tx: mpsc::Sender<Bytes>;
         {
             let state = self.shared.state.lock().unwrap();
@@ -330,14 +330,14 @@ impl KeyManager<'_> {
                     tx = t.clone();
                 }
                 None => {
-                    return Err(KMError::InvalidState);
+                    return Err(KmError::InvalidState);
                 }
             }
         }
         let km_buf = Bytes::copy_from_slice(message);
         match tx.send(km_buf).await {
             Ok(_) => Ok(()),
-            Err(_) => Err(KMError::EnqueueFailed),
+            Err(_) => Err(KmError::EnqueueFailed),
         }
     }
 
@@ -346,7 +346,7 @@ impl KeyManager<'_> {
     ///
     /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
     #[allow(dead_code)]
-    pub fn try_handle_km_message(&self, message: &[u8]) -> KMResult<()> {
+    pub fn try_handle_km_message(&self, message: &[u8]) -> KmResult<()> {
         let tx: mpsc::Sender<Bytes>;
         {
             let state = self.shared.state.lock().unwrap();
@@ -355,14 +355,14 @@ impl KeyManager<'_> {
                     tx = t.clone();
                 }
                 None => {
-                    return Err(KMError::InvalidState);
+                    return Err(KmError::InvalidState);
                 }
             }
         }
         let km_buf = Bytes::copy_from_slice(message);
         match tx.try_send(km_buf) {
             Ok(_) => Ok(()),
-            Err(_) => Err(KMError::EnqueueFailed),
+            Err(_) => Err(KmError::EnqueueFailed),
         }
     }
 
@@ -378,9 +378,9 @@ impl KeyManager<'_> {
     pub async fn start(
         &mut self,
         ctok: CancellationToken,
-        km_buffers_out: mpsc::Sender<KMLinkMsg<Bytes>>,
-        km_signals_out: mpsc::Sender<KMLinkMsg<KMSignal>>,
-    ) -> KMResult<()> {
+        km_buffers_out: mpsc::Sender<KmLinkMsg<Bytes>>,
+        km_signals_out: mpsc::Sender<KmLinkMsg<KmSignal>>,
+    ) -> KmResult<()> {
         let (km_tx, mut km_rx) = mpsc::channel(16);
         let tick_interval: Duration;
         let link_id;
@@ -398,11 +398,11 @@ impl KeyManager<'_> {
             let mut state = self.shared.state.lock().unwrap();
             handshake = match state.statemachine.reset() {
                 Ok(h) => h,
-                Err(e) => return Err(KMError::MachineError(e.to_string())),
+                Err(e) => return Err(KmError::MachineError(e.to_string())),
             };
         }
         match km_signals_out
-            .send(KMLinkMsg::new(link_id, KMSignal::Reset))
+            .send(KmLinkMsg::new(link_id, KmSignal::Reset))
             .await
         {
             Ok(_) => {}
@@ -412,16 +412,16 @@ impl KeyManager<'_> {
         }
         if let Some(handshake) = handshake {
             match km_buffers_out
-                .send(KMLinkMsg::new(link_id, handshake))
+                .send(KmLinkMsg::new(link_id, handshake))
                 .await
             {
                 Ok(_) => {}
-                Err(_) => return Err(KMError::EnqueueFailed),
+                Err(_) => return Err(KmError::EnqueueFailed),
             }
         };
 
-        let mut prev_state: KMSMState;
-        let mut next_state: KMSMState;
+        let mut prev_state: KmSMState;
+        let mut next_state: KmSMState;
 
         loop {
             {
@@ -430,16 +430,16 @@ impl KeyManager<'_> {
             }
 
             match prev_state {
-                KMSMState::Error => {
+                KmSMState::Error => {
                     // If error, send reset and loop again
                     match km_signals_out
-                        .send(KMLinkMsg::new(link_id, KMSignal::Error))
+                        .send(KmLinkMsg::new(link_id, KmSignal::Error))
                         .await
                     {
                         Ok(_) => {}
                         Err(_) => {
                             error!("failed to enqueue error signal, aborting");
-                            return Err(KMError::EnqueueFailed);
+                            return Err(KmError::EnqueueFailed);
                         }
                     }
                     let resp: Option<Bytes>;
@@ -448,26 +448,26 @@ impl KeyManager<'_> {
                         resp = match state.statemachine.reset() {
                             Ok(h) => h,
                             Err(e) => {
-                                return Err(KMError::MachineError(e.to_string()));
+                                return Err(KmError::MachineError(e.to_string()));
                             }
                         };
                     }
                     match km_signals_out
-                        .send(KMLinkMsg::new(link_id, KMSignal::Reset))
+                        .send(KmLinkMsg::new(link_id, KmSignal::Reset))
                         .await
                     {
                         Ok(_) => {}
                         Err(_) => {
                             error!("failed to enqueue reset signal, aborting");
-                            return Err(KMError::EnqueueFailed);
+                            return Err(KmError::EnqueueFailed);
                         }
                     }
                     if let Some(resp) = resp {
-                        match km_buffers_out.send(KMLinkMsg::new(link_id, resp)).await {
+                        match km_buffers_out.send(KmLinkMsg::new(link_id, resp)).await {
                             Ok(_) => {}
                             Err(_) => {
                                 error!("failed to enqueue outbound KM message");
-                                return Err(KMError::EnqueueFailed);
+                                return Err(KmError::EnqueueFailed);
                             }
                         }
                     }
@@ -492,11 +492,11 @@ impl KeyManager<'_> {
                                 };
                             }
                             if let Some(resp) = resp {
-                                match km_buffers_out.send(KMLinkMsg::new(link_id, resp)).await {
+                                match km_buffers_out.send(KmLinkMsg::new(link_id, resp)).await {
                                     Ok(_) => {},
                                     Err(_) => {
                                         error!("failed to enqueue outbound KM message");
-                                        return Err(KMError::EnqueueFailed);
+                                        return Err(KmError::EnqueueFailed);
                                     }
                                 }
                             }
@@ -515,11 +515,11 @@ impl KeyManager<'_> {
                                 };
                             }
                             if let Some(resp) = resp {
-                                match km_buffers_out.send(KMLinkMsg::new(link_id, resp)).await {
+                                match km_buffers_out.send(KmLinkMsg::new(link_id, resp)).await {
                                     Ok(_) => {},
                                     Err(_) => {
                                         error!("failed to enqueue oubound KM message");
-                                        return Err(KMError::EnqueueFailed);
+                                        return Err(KmError::EnqueueFailed);
                                     }
                                 }
                             }
@@ -536,7 +536,7 @@ impl KeyManager<'_> {
             if next_state != prev_state {
                 info!("KM state transition {:?} -> {:?}", prev_state, next_state);
                 match next_state {
-                    KMSMState::Transport(ts) => {
+                    KmSMState::Transport(ts) => {
                         let prev_id: zpr::SaId;
                         let cur_id: zpr::SaId;
                         let mut my_sa = ts.clone();
@@ -557,7 +557,7 @@ impl KeyManager<'_> {
                             .send_signal(
                                 &km_signals_out,
                                 link_id,
-                                KMSignal::SaIdChange {
+                                KmSignal::SaIdChange {
                                     old: prev_id,
                                     new: cur_id,
                                 },
@@ -567,25 +567,25 @@ impl KeyManager<'_> {
                             Ok(_) => {}
                             Err(_) => {
                                 error!("failed to enqueue SaIdChange signal");
-                                return Err(KMError::EnqueueFailed);
+                                return Err(KmError::EnqueueFailed);
                             }
                         }
                         match self
-                            .send_signal(&km_signals_out, link_id, KMSignal::SaEstablished(my_sa))
+                            .send_signal(&km_signals_out, link_id, KmSignal::SaEstablished(my_sa))
                             .await
                         {
                             Ok(_) => {}
                             Err(_) => {
                                 error!("failed to enqueue SaIdEstablished signal");
-                                return Err(KMError::EnqueueFailed);
+                                return Err(KmError::EnqueueFailed);
                             }
                         }
                     }
                     _ => {}
                 }
-            } else if next_state == KMSMState::Error {
+            } else if next_state == KmSMState::Error {
                 error!("KM: stuck in error state");
-                return Err(KMError::MachineError(String::from("stuck in error state")));
+                return Err(KmError::MachineError(String::from("stuck in error state")));
                 // TODO: Maybe use a timer and keep trying to reset?
             }
         }
@@ -596,23 +596,23 @@ impl KeyManager<'_> {
     // Helper to reduce verbosity slightly
     fn send_signal<'a>(
         &self,
-        chan: &'a mpsc::Sender<KMLinkMsg<KMSignal>>,
+        chan: &'a mpsc::Sender<KmLinkMsg<KmSignal>>,
         link_id: zpr::LinkId,
-        signal: KMSignal,
-    ) -> impl Future<Output = Result<(), mpsc::error::SendError<KMLinkMsg<KMSignal>>>> + 'a {
-        chan.send(KMLinkMsg::new(link_id, signal))
+        signal: KmSignal,
+    ) -> impl Future<Output = Result<(), mpsc::error::SendError<KmLinkMsg<KmSignal>>>> + 'a {
+        chan.send(KmLinkMsg::new(link_id, signal))
     }
 }
 
-impl KMTransportSA {
+impl KmTransportSA {
     pub fn new(
         send_zpis: ZPIPair,
         recv_zpis: ZPIPair,
         send_key: [u8; 32],
         recv_key: [u8; 32],
         codec: Arc<dyn Codec>,
-    ) -> KMTransportSA {
-        KMTransportSA {
+    ) -> KmTransportSA {
+        KmTransportSA {
             sa_id: 0,
             send_zpis,
             recv_zpis,
@@ -623,8 +623,8 @@ impl KMTransportSA {
     }
 
     #[allow(dead_code)]
-    pub fn new_with_codec(codec: Arc<dyn Codec>) -> KMTransportSA {
-        KMTransportSA {
+    pub fn new_with_codec(codec: Arc<dyn Codec>) -> KmTransportSA {
+        KmTransportSA {
             sa_id: 0,
             send_zpis: ZPIPair::new_zero(),
             recv_zpis: ZPIPair::new_zero(),
@@ -636,8 +636,8 @@ impl KMTransportSA {
 
     /// With ZPIs but empty keys.
     #[allow(dead_code)]
-    pub fn new_with_zpis(send_zpis: ZPIPair, recv_zpis: ZPIPair) -> KMTransportSA {
-        KMTransportSA {
+    pub fn new_with_zpis(send_zpis: ZPIPair, recv_zpis: ZPIPair) -> KmTransportSA {
+        KmTransportSA {
             sa_id: 0,
             send_zpis,
             recv_zpis,
@@ -648,7 +648,7 @@ impl KMTransportSA {
     }
 }
 
-impl Default for KMTransportSA {
+impl Default for KmTransportSA {
     fn default() -> Self {
         Self {
             sa_id: 0,
@@ -664,18 +664,18 @@ impl Default for KMTransportSA {
 /// Helper function which is ZDP aware.  Does some error checking and leaves the ZPI
 /// in place.
 #[allow(dead_code)]
-pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMResult<()> {
+pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KmResult<()> {
     if message.body().len()
         < std::mem::size_of::<ZdpZpiHeader>() + std::mem::size_of::<ZdpBaseHeader>()
     {
-        return Err(KMError::ShortPacket);
+        return Err(KmError::ShortPacket);
     }
     let base_hdr =
         ZdpBaseHeader::ref_from_prefix(&message.body()[1..]).expect("too-short ZDP message");
 
     let encr_len: usize = match base_hdr.packet_type {
         ZdpPacketType::TransitPacket => {
-            return Err(KMError::InvalidPacketType);
+            return Err(KmError::InvalidPacketType);
         }
         _ => message.body().len() - 1,
     };
@@ -690,7 +690,7 @@ pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMR
             message.put(&encr_buf[0..len]); // write a new body
         }
         Err(e) => {
-            return Err(KMError::MachineError(e.to_string()));
+            return Err(KmError::MachineError(e.to_string()));
         }
     }
     Ok(())
@@ -698,9 +698,9 @@ pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMR
 
 /// Helper function which is ZDP arare.  Does some error checking and leaves the ZPI in place.
 #[allow(dead_code)]
-pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMResult<()> {
+pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KmResult<()> {
     if message.body().len() < 1 {
-        return Err(KMError::ShortPacket);
+        return Err(KmError::ShortPacket);
     }
 
     let encr_len = message.body().len() - 1;
@@ -719,7 +719,7 @@ pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMR
             message.put(&decr_buf[0..len]); // write a new body
         }
         Err(e) => {
-            return Err(KMError::MachineError(e.to_string()));
+            return Err(KmError::MachineError(e.to_string()));
         }
     }
     Ok(())
@@ -741,9 +741,9 @@ pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KMR
 /// Not (yet) accounting for "rekeying".
 ///
 #[derive(Debug, Clone, PartialEq)]
-pub enum KMSMState {
+pub enum KmSMState {
     Configuring,
-    Transport(KMTransportSA),
+    Transport(KmTransportSA),
     Error,
 }
 
@@ -821,7 +821,7 @@ impl ZPIPair {
 /// to configure the running of the [KeyManager].
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-pub struct KMSettings {
+pub struct KmSettings {
     /// The ZDP defined type value for this Key Management system.
     pub zdp_km_type: zpr::KmId,
 
@@ -838,26 +838,26 @@ pub struct KMSettings {
 /// Interface to a Key Management protocol.
 pub trait KeyManagerStateMachine: Send + Sync {
     /// These do not change (TODO: is there a way to state that in rust?)
-    fn get_settings(self: &Self) -> KMSettings;
+    fn get_settings(self: &Self) -> KmSettings;
 
     /// State can only change through handle_message, tick, or reset.
-    fn get_state(self: &Self) -> KMSMState;
+    fn get_state(self: &Self) -> KmSMState;
 
     /// Reset state machine. This is always called as the state machine is
     /// started (prior to first tick).  If this is the initiator this should initiate a
     /// new handshake message.
     /// Must clear error state.
-    fn reset(self: &mut Self) -> Result<Option<Bytes>, KMError>;
+    fn reset(self: &mut Self) -> Result<Option<Bytes>, KmError>;
 
     /// Process an inbound KM message.
     /// May produce an output message.
     /// May transition internal state.
-    fn handle_message(self: &mut Self, message: &[u8]) -> Result<Option<Bytes>, KMError>;
+    fn handle_message(self: &mut Self, message: &[u8]) -> Result<Option<Bytes>, KmError>;
 
     /// Optional outbound KM message
     /// May transition internal state
     /// If this returns error, internal state should be error too.
-    fn tick(self: &mut Self) -> Result<Option<Bytes>, KMError>;
+    fn tick(self: &mut Self) -> Result<Option<Bytes>, KmError>;
 }
 
 #[cfg(test)]
@@ -872,7 +872,7 @@ mod test {
 
     #[allow(dead_code)]
     struct TestKM {
-        state: KMSMState,
+        state: KmSMState,
         shared: Arc<TestKMShared>,
         initiator: bool,
     }
@@ -887,7 +887,7 @@ mod test {
     }
 
     impl TestKM {
-        pub fn new(initiate: bool, initial_state: KMSMState) -> TestKM {
+        pub fn new(initiate: bool, initial_state: KmSMState) -> TestKM {
             TestKM {
                 state: initial_state,
                 shared: Arc::new(TestKMShared {
@@ -925,8 +925,8 @@ mod test {
     }
 
     impl KeyManagerStateMachine for TestKM {
-        fn get_settings(&self) -> KMSettings {
-            KMSettings {
+        fn get_settings(&self) -> KmSettings {
+            KmSettings {
                 zdp_km_type: zpr::KM_ID_EXPERIMENTAL,
                 padlen: 0,
                 alignment: 0,
@@ -934,24 +934,24 @@ mod test {
             }
         }
 
-        fn get_state(&self) -> KMSMState {
+        fn get_state(&self) -> KmSMState {
             return self.state.clone();
         }
 
-        fn reset(&mut self) -> Result<Option<Bytes>, KMError> {
+        fn reset(&mut self) -> Result<Option<Bytes>, KmError> {
             let mut internals = self.shared.state.lock().unwrap();
             internals.reset_count += 1;
-            self.state = KMSMState::Configuring;
+            self.state = KmSMState::Configuring;
             Ok(None)
         }
 
-        fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KMError> {
+        fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KmError> {
             let mut internals = self.shared.state.lock().unwrap();
             internals.handle_count += 1;
             Ok(None)
         }
 
-        fn tick(&mut self) -> Result<Option<Bytes>, KMError> {
+        fn tick(&mut self) -> Result<Option<Bytes>, KmError> {
             let mut internals = self.shared.state.lock().unwrap();
             internals.tick_count += 1;
             Ok(None)
@@ -960,7 +960,7 @@ mod test {
 
     #[tokio::test]
     async fn test_km_sends_initiator_msg() {
-        let kmb = Box::new(TestKM::new(true, KMSMState::Configuring));
+        let kmb = Box::new(TestKM::new(true, KmSMState::Configuring));
         let kinternals = kmb.shared.clone();
         let mut km = KeyManager::new(1, kmb);
         let ctok = CancellationToken::new();
@@ -982,7 +982,7 @@ mod test {
 
     #[tokio::test]
     async fn test_km_ticks() {
-        let kmb = Box::new(TestKM::new(true, KMSMState::Configuring));
+        let kmb = Box::new(TestKM::new(true, KmSMState::Configuring));
         let kinternals = kmb.shared.clone();
         let mut km = KeyManager::new(1, kmb);
         let ctok = CancellationToken::new();
@@ -1004,7 +1004,7 @@ mod test {
 
     #[tokio::test]
     async fn test_km_passes_inbound_msg() {
-        let kmb = Box::new(TestKM::new(true, KMSMState::Configuring));
+        let kmb = Box::new(TestKM::new(true, KmSMState::Configuring));
         let kinternals = kmb.shared.clone();
         let km = KeyManager::new(1, kmb);
 
@@ -1034,7 +1034,7 @@ mod test {
 
     #[tokio::test]
     async fn test_km_passes_inbound_msg_no_buffer() {
-        let kmb = Box::new(TestKM::new(true, KMSMState::Configuring));
+        let kmb = Box::new(TestKM::new(true, KmSMState::Configuring));
         let kinternals = kmb.shared.clone();
         let km = KeyManager::new(1, kmb);
 

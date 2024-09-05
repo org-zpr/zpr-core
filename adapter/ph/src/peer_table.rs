@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use crate::dock_tables::DockForwardingTable;
-use crate::km::KMTransportSA;
+use crate::km::KmTransportSA;
 use crate::km_multiplexor::SAState;
 use crate::queues;
 use crate::rcu::RcuBox;
@@ -74,6 +74,8 @@ pub struct PeerTable<'pktbuf> {
 
     // `link_so_sec_assoc` is state info for the security association per link. This is managed by the
     // KM Multiplexor and used during encrypt/decrypt.
+    //
+    // TODO: put into the slab! (https://github.com/org-zpr/zpr-core/issues/388)
     link_to_sec_assoc: DashMap<LinkId, SAState>,
 }
 
@@ -131,7 +133,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
     pub fn set_security_association(
         &self,
         link_id: LinkId,
-        sa: KMTransportSA,
+        sa: KmTransportSA,
     ) -> Result<(), SecurityAssocaitionStateError> {
         if let Some(mut sa_state) = self.link_to_sec_assoc.get_mut(&link_id) {
             sa_state.transport_sa = sa;
@@ -168,7 +170,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
     pub fn clone_established_transport_association(
         &self,
         link_id: LinkId,
-    ) -> Option<KMTransportSA> {
+    ) -> Option<KmTransportSA> {
         if let Some(sa_state) = self.link_to_sec_assoc.get(&link_id) {
             if sa_state.sa_established.load(Ordering::Relaxed) {
                 Some(sa_state.transport_sa.clone())

@@ -47,15 +47,15 @@ static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 const NOISE_NONCE_LEN: usize = 8;
 pub const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce
 
-impl From<snow::Error> for KMError {
-    fn from(e: snow::Error) -> KMError {
-        KMError::MachineError(e.to_string())
+impl From<snow::Error> for KmError {
+    fn from(e: snow::Error) -> KmError {
+        KmError::MachineError(e.to_string())
     }
 }
 
-pub struct KMNoise {
-    settings: KMSettings,
-    state: KMSMState,
+pub struct KmNoise {
+    settings: KmSettings,
+    state: KmSMState,
     initiate: bool,
     peer_pub_key: Option<Vec<u8>>, // required if initiator
     local_keypair: snow::Keypair,
@@ -75,7 +75,7 @@ struct KeyMsg {
     pub hmac_key: [u8; 32],
 }
 
-impl KMNoise {
+impl KmNoise {
     /// Create the Noise KeyManager.
     ///
     /// This requires Noise keys.  Eventually (TODO) we will also pass certificates through here
@@ -94,13 +94,13 @@ impl KMNoise {
         local_keypair: Option<snow::Keypair>,
         zpi_full_encr: u8,
         zpi_transmit_hmac: u8,
-    ) -> Result<Self, KMError> {
+    ) -> Result<Self, KmError> {
         if initiate && peer_pub_key.is_none() {
             error!("noise: peer public key required for initiator");
-            return Err(KMError::ConfigurationError);
+            return Err(KmError::ConfigurationError);
         }
 
-        let settings = KMSettings {
+        let settings = KmSettings {
             zdp_km_type: zpr::KM_ID_NOISE,
             padlen: NOISE_PADLEN,
             alignment: 0,
@@ -113,9 +113,9 @@ impl KMNoise {
         } else {
             kp = snow::Builder::new(PATTERN.parse()?).generate_keypair()?;
         }
-        Ok(KMNoise {
+        Ok(KmNoise {
             settings,
-            state: KMSMState::Configuring,
+            state: KmSMState::Configuring,
             initiate,
             peer_pub_key,
             local_keypair: kp,
@@ -201,23 +201,23 @@ impl Codec for NoiseCodec {
     }
 }
 
-impl KeyManagerStateMachine for KMNoise {
-    fn get_settings(&self) -> KMSettings {
+impl KeyManagerStateMachine for KmNoise {
+    fn get_settings(&self) -> KmSettings {
         self.settings.clone()
     }
 
-    fn get_state(&self) -> KMSMState {
+    fn get_state(&self) -> KmSMState {
         self.state.clone()
     }
 
-    fn reset(&mut self) -> Result<Option<Bytes>, KMError> {
-        self.state = KMSMState::Configuring;
+    fn reset(&mut self) -> Result<Option<Bytes>, KmError> {
+        self.state = KmSMState::Configuring;
         let np: snow::params::NoiseParams = match PATTERN.parse() {
             Ok(p) => p,
             Err(e) => {
                 error!("noise: error parsing pattern: {:?}", e);
-                self.state = KMSMState::Error;
-                return Err(KMError::ConfigurationError);
+                self.state = KmSMState::Error;
+                return Err(KmError::ConfigurationError);
             }
         };
         rand_bytes(&mut self.recv_hmac_key).unwrap(); // generate an HMAC key
@@ -232,8 +232,8 @@ impl KeyManagerStateMachine for KMNoise {
                 Ok(i) => i,
                 Err(e) => {
                     error!("noise: error building initiator: {:?}", e);
-                    self.state = KMSMState::Error;
-                    return Err(KMError::MachineError(format!(
+                    self.state = KmSMState::Error;
+                    return Err(KmError::MachineError(format!(
                         "failed to build initiator: {}",
                         e
                     )));
@@ -250,8 +250,8 @@ impl KeyManagerStateMachine for KMNoise {
                 Ok(l) => l,
                 Err(e) => {
                     error!("noise: error writing handshake message: {:?}", e);
-                    self.state = KMSMState::Error;
-                    return Err(KMError::MachineError(format!(
+                    self.state = KmSMState::Error;
+                    return Err(KmError::MachineError(format!(
                         "failed to write handshake message: {}",
                         e
                     )));
@@ -268,8 +268,8 @@ impl KeyManagerStateMachine for KMNoise {
                 Ok(r) => r,
                 Err(e) => {
                     error!("noise: error building responder: {:?}", e);
-                    self.state = KMSMState::Error;
-                    return Err(KMError::MachineError(format!(
+                    self.state = KmSMState::Error;
+                    return Err(KmError::MachineError(format!(
                         "failed to build responder: {}",
                         e
                     )));
@@ -280,12 +280,12 @@ impl KeyManagerStateMachine for KMNoise {
         }
     }
 
-    fn handle_message(&mut self, message: &[u8]) -> Result<Option<Bytes>, KMError> {
-        if self.state == KMSMState::Configuring {
+    fn handle_message(&mut self, message: &[u8]) -> Result<Option<Bytes>, KmError> {
+        if self.state == KmSMState::Configuring {
             let mut hs: snow::HandshakeState;
             if self.hs_state.is_none() {
                 error!("noise: handle_message called but no handshake state set up");
-                return Err(KMError::InvalidState);
+                return Err(KmError::InvalidState);
             }
             if self.hs_state.is_some() {
                 hs = self.hs_state.take().unwrap();
@@ -296,17 +296,17 @@ impl KeyManagerStateMachine for KMNoise {
                         // TODO: In future we plan to send the certificate over in the first handshake message buffer.
                         if len < std::mem::size_of::<KeyMsg>() {
                             error!("noise: handshake payload is too short: {}", len);
-                            self.state = KMSMState::Error;
+                            self.state = KmSMState::Error;
                             self.hs_state = Some(hs);
-                            return Err(KMError::HandshakeError);
+                            return Err(KmError::HandshakeError);
                         }
                         let km = match KeyMsg::ref_from_prefix(&payload[..len]) {
                             Some(k) => k,
                             None => {
                                 error!("noise: error parsing KeyMsg handshake payload");
-                                self.state = KMSMState::Error;
+                                self.state = KmSMState::Error;
                                 self.hs_state = Some(hs);
-                                return Err(KMError::HandshakeError);
+                                return Err(KmError::HandshakeError);
                             }
                         };
                         self.send_zpis = Some(ZPIPair {
@@ -317,9 +317,9 @@ impl KeyManagerStateMachine for KMNoise {
                     }
                     Err(e) => {
                         error!("noise: error handling handhsake message: {:?}", e);
-                        self.state = KMSMState::Error;
+                        self.state = KmSMState::Error;
                         self.hs_state = Some(hs);
-                        return Err(KMError::HandshakeError);
+                        return Err(KmError::HandshakeError);
                     }
                 };
 
@@ -340,8 +340,8 @@ impl KeyManagerStateMachine for KMNoise {
                         Err(e) => {
                             error!("noise: error writing handshake message: {:?}", e);
                             self.hs_state = Some(hs);
-                            self.state = KMSMState::Error;
-                            return Err(KMError::HandshakeError);
+                            self.state = KmSMState::Error;
+                            return Err(KmError::HandshakeError);
                         }
                     }
                 }
@@ -364,7 +364,7 @@ impl KeyManagerStateMachine for KMNoise {
                     match hs.into_stateless_transport_mode() {
                         Ok(t) => {
                             let codec = Arc::new(NoiseCodec { snow_state: t });
-                            self.state = KMSMState::Transport(KMTransportSA::new(
+                            self.state = KmSMState::Transport(KmTransportSA::new(
                                 send_zpis,
                                 self.recv_zpis,
                                 send_key,
@@ -374,8 +374,8 @@ impl KeyManagerStateMachine for KMNoise {
                         }
                         Err(e) => {
                             error!("noise: error switching to transport mode: {:?}", e);
-                            self.state = KMSMState::Error;
-                            return Err(KMError::HandshakeError);
+                            self.state = KmSMState::Error;
+                            return Err(KmError::HandshakeError);
                         }
                     };
                 }
@@ -385,9 +385,9 @@ impl KeyManagerStateMachine for KMNoise {
         Ok(None)
     }
 
-    fn tick(&mut self) -> Result<Option<Bytes>, KMError> {
+    fn tick(&mut self) -> Result<Option<Bytes>, KmError> {
         // TODO: Timeout handling
-        if self.state == KMSMState::Configuring {
+        if self.state == KmSMState::Configuring {
             let hs: snow::HandshakeState;
             if self.hs_state.is_some() {
                 hs = self.hs_state.take().unwrap();
@@ -409,7 +409,7 @@ impl KeyManagerStateMachine for KMNoise {
                     match hs.into_stateless_transport_mode() {
                         Ok(t) => {
                             let codec = Arc::new(NoiseCodec { snow_state: t });
-                            self.state = KMSMState::Transport(KMTransportSA::new(
+                            self.state = KmSMState::Transport(KmTransportSA::new(
                                 send_zpis,
                                 self.recv_zpis,
                                 send_key,
@@ -420,8 +420,8 @@ impl KeyManagerStateMachine for KMNoise {
                         }
                         Err(e) => {
                             error!("noise: error switching to transport mode: {:?}", e);
-                            self.state = KMSMState::Error;
-                            return Err(KMError::HandshakeError);
+                            self.state = KmSMState::Error;
+                            return Err(KmError::HandshakeError);
                         }
                     }
                 } else {
@@ -455,11 +455,11 @@ mod test {
             }
         };
 
-        let mut initiator = KMNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
-        assert!(initiator.get_state() == KMSMState::Configuring);
+        let mut initiator = KmNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
+        assert!(initiator.get_state() == KmSMState::Configuring);
 
-        let mut responder = KMNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
-        assert!(responder.get_state() == KMSMState::Configuring);
+        let mut responder = KmNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
+        assert!(responder.get_state() == KmSMState::Configuring);
 
         let handshake_msg_0 = match initiator.reset() {
             Ok(Some(m)) => m,
@@ -475,7 +475,7 @@ mod test {
             "unexpected handshake message-0 length, got {}",
             handshake_msg_0.len()
         );
-        assert!(initiator.get_state() == KMSMState::Configuring);
+        assert!(initiator.get_state() == KmSMState::Configuring);
 
         match responder.reset() {
             Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
@@ -500,7 +500,7 @@ mod test {
             "unexpected handshake message-1 length, got {}",
             handshake_msg_1.len()
         );
-        assert!(matches!(responder.get_state(), KMSMState::Transport { .. }));
+        assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
 
         // <- e, ee, se
         match initiator.handle_message(&handshake_msg_1) {
@@ -510,12 +510,12 @@ mod test {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
         };
-        assert!(matches!(initiator.get_state(), KMSMState::Transport { .. }));
+        assert!(matches!(initiator.get_state(), KmSMState::Transport { .. }));
 
         // Handshake complete, now we can encrypt/decrypt
 
         let i_transport = match initiator.get_state() {
-            KMSMState::Transport(t) => t,
+            KmSMState::Transport(t) => t,
             _ => {
                 panic!("unexpected state after handshake");
             }
@@ -543,7 +543,7 @@ mod test {
         );
 
         let r_transport = match responder.get_state() {
-            KMSMState::Transport(t) => t,
+            KmSMState::Transport(t) => t,
             _ => {
                 panic!("unexpected state after handshake");
             }
@@ -588,11 +588,11 @@ mod test {
             public: nk_public.into(),
         };
 
-        let mut initiator = KMNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
-        assert!(initiator.get_state() == KMSMState::Configuring);
+        let mut initiator = KmNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
+        assert!(initiator.get_state() == KmSMState::Configuring);
 
-        let mut responder = KMNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
-        assert!(responder.get_state() == KMSMState::Configuring);
+        let mut responder = KmNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
+        assert!(responder.get_state() == KmSMState::Configuring);
 
         let handshake_msg_0 = match initiator.reset() {
             Ok(Some(m)) => m,
@@ -608,7 +608,7 @@ mod test {
             "unexpected handshake message-0 length, got {}",
             handshake_msg_0.len()
         );
-        assert!(initiator.get_state() == KMSMState::Configuring);
+        assert!(initiator.get_state() == KmSMState::Configuring);
 
         match responder.reset() {
             Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
@@ -633,7 +633,7 @@ mod test {
             "unexpected handshake message-1 length, got {}",
             handshake_msg_1.len()
         );
-        assert!(matches!(responder.get_state(), KMSMState::Transport { .. }));
+        assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
 
         // <- e, ee, se
         match initiator.handle_message(&handshake_msg_1) {
@@ -643,19 +643,19 @@ mod test {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
         };
-        assert!(matches!(initiator.get_state(), KMSMState::Transport { .. }));
+        assert!(matches!(initiator.get_state(), KmSMState::Transport { .. }));
 
         // At this point each side should know the others hmac key, and the ZPIs should have been exchanged.
 
         let initiator_sa = match initiator.get_state() {
-            KMSMState::Transport(t) => t,
+            KmSMState::Transport(t) => t,
             _ => {
                 panic!("unexpected state after handshake");
             }
         };
 
         let responder_sa = match responder.get_state() {
-            KMSMState::Transport(t) => t,
+            KmSMState::Transport(t) => t,
             _ => {
                 panic!("unexpected state after handshake");
             }
@@ -684,8 +684,8 @@ mod test {
             }
         };
 
-        let initiator = KMNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
-        let responder = KMNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
+        let initiator = KmNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
+        let responder = KmNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
 
         let adapter = km::KeyManager::new(1, Box::new(initiator));
         let node = km::KeyManager::new(1, Box::new(responder));
@@ -717,7 +717,7 @@ mod test {
             Ok(resp) => match resp {
                 Some(sig) => {
                     match sig.msg {
-                        km::KMSignal::Reset => {} // ok!
+                        km::KmSignal::Reset => {} // ok!
                         _ => {
                             panic!("unexpected signal from node: {:?}", sig.msg);
                         }
@@ -736,7 +736,7 @@ mod test {
             Ok(resp) => match resp {
                 Some(sig) => {
                     match sig.msg {
-                        km::KMSignal::Reset => {} // ok!
+                        km::KmSignal::Reset => {} // ok!
                         _ => {
                             panic!("unexpected signal from adapter: {:?}", sig.msg);
                         }
@@ -796,7 +796,7 @@ mod test {
         match timeout(Duration::from_secs(2), n_sig_rx.recv()).await {
             Ok(resp) => match resp {
                 Some(linkmsg) => match linkmsg.msg {
-                    km::KMSignal::SaIdChange { old, new } => {
+                    km::KmSignal::SaIdChange { old, new } => {
                         assert!(new > 0, "new SA_ID is still zero!");
                         assert!(old == 0, "old SA_ID is not zero!");
                     }
@@ -815,7 +815,7 @@ mod test {
         match timeout(Duration::from_secs(2), n_sig_rx.recv()).await {
             Ok(resp) => match resp {
                 Some(linkmsg) => match linkmsg.msg {
-                    km::KMSignal::SaEstablished(ts) => {
+                    km::KmSignal::SaEstablished(ts) => {
                         assert!(ts.sa_id > 0, "SA_ID is still zero!");
                     }
                     _ => {
@@ -835,7 +835,7 @@ mod test {
         match timeout(Duration::from_secs(2), a_sig_rx.recv()).await {
             Ok(resp) => match resp {
                 Some(linkmsg) => match linkmsg.msg {
-                    km::KMSignal::SaIdChange { old, new } => {
+                    km::KmSignal::SaIdChange { old, new } => {
                         assert!(new > 0, "new adapter SA_ID is still zero!");
                         assert!(old == 0, "old adapter SA_ID is not zero!");
                     }
@@ -854,7 +854,7 @@ mod test {
         match timeout(Duration::from_secs(2), a_sig_rx.recv()).await {
             Ok(resp) => match resp {
                 Some(linkmsg) => match linkmsg.msg {
-                    km::KMSignal::SaEstablished(ts) => {
+                    km::KmSignal::SaEstablished(ts) => {
                         assert!(ts.sa_id > 0, "adapter SA_ID is still zero!");
                     }
                     _ => {
