@@ -277,10 +277,6 @@ pub fn decrypt_full<'pktbuf>(
         return Err(DecryptError::BadStructure);
     }
     let encr_len = pkt.body().len() - 1;
-    if encr_len == 0 {
-        // empty?
-        return Err(DecryptError::BadStructure);
-    }
     if encr_len < padlen {
         return Err(DecryptError::BadStructure);
     }
@@ -433,7 +429,7 @@ pub async fn substrate_egress_blocking<'pktbuf>(
     }
 }
 
-/// Process packets ingressing from the specified SA (SocketAddr).
+/// Process packets ingressing from the specified address.
 pub fn substrate_ingress<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     peer_sa: &SocketAddr,
@@ -500,7 +496,7 @@ pub fn substrate_ingress<'pktbuf>(
 
     if !secure {
         // Not under a security assocation  which means only ZPI 0 is allowed
-        if zpi_hdr.zpi != 0 {
+        if zpi_hdr.zpi != zpr::ZPI_0 {
             info!(
                 "ingress: link {}: ZPI {} not allowed on unestablished SA",
                 ingress_link_id, zpi_hdr.zpi
