@@ -304,47 +304,39 @@ fn substrate_egress_common<'pktbuf>(
 ) -> Result<Option<zpr::SubstrateAddr>, km::EncryptionError> {
     // TODO: should we add ZDP header here also??
 
-    let mut transit = true;
-    let transport_sa: Option<km::KMTransportSA> = None;
+    let zdp_hdr = match ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..]) {
+        Some(zdp_hdr) => zdp_hdr,
+        None => {
+            return Err(km::EncryptionError::ParseError);
+        }
+    };
+    let transit = zdp_hdr.packet_type == zdp::ZdpPacketType::TransitPacket;
 
-    let real_zpi = match asm
+    // Get the security association for this link and extrant the correct ZPI.
+    // TODO: Is there some way to avoid a clone here?
+    let real_zpi;
+    let transport_sa = match asm
         .peer_table
         .clone_established_transport_association(link_id)
     {
         Some(transport_sa) => {
-            // We have SA.
-            // If agent transit packet, use HMAC ZPI.
-            // Else use our ENCR ZPI.
-            if let Some(zdp_hdr) =
-                ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..])
-            {
-                if zdp_hdr.packet_type == zdp::ZdpPacketType::TransitPacket {
-                    transport_sa.send_zpis.hmac
-                } else {
-                    transit = false;
-                    transport_sa.send_zpis.encr
-                }
+            if transit {
+                real_zpi = transport_sa.recv_zpis.hmac;
             } else {
-                error!(
-                    "egress: link {}: failed to parse ZDP header on egress packet, assigning ZPI 0",
-                    link_id
-                );
-                0
+                real_zpi = transport_sa.recv_zpis.encr;
             }
+            Some(transport_sa)
         }
         None => {
-            // Link not in SA table -- should not happen -- unless KM is disabled.
-            0
+            real_zpi = zpr::ZPI_0;
+            None
         }
     };
 
     encap_zpi(asm, link_id, real_zpi, pkt);
-
     maybe_capture(asm, Direction::Outbound, pkt);
 
-    // To "encrypt" we need to know which ZPI is in use, then we may need the HMAC or
-    // we may need the codec.
-    if real_zpi == 0 {
+    if real_zpi == zpr::ZPI_0 {
         encrypt_null(pkt);
     } else {
         let tsa = transport_sa.unwrap();

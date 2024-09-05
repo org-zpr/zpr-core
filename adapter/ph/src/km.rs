@@ -53,6 +53,9 @@ pub enum EncryptionError {
 
     /// Message is too large for the encryption implementation to handle.
     MessageTooLarge,
+
+    /// Message is malformed in some way.
+    ParseError,
 }
 
 #[allow(dead_code)]
@@ -98,6 +101,9 @@ impl fmt::Display for EncryptionError {
             }
             EncryptionError::MessageTooLarge => {
                 write!(f, "MessageTooLarge")
+            }
+            EncryptionError::ParseError => {
+                write!(f, "ParseError")
             }
         }
     }
