@@ -246,7 +246,7 @@ impl From<DecryptError> for CounterType {
 }
 
 /// Decrypt a ZDP packet according to its ZPI header (which is not removed).
-pub fn decrypt_zero<'pktbuf>(pkt: &mut Packet<'pktbuf>) -> Result<(), DecryptError> {
+pub fn decrypt_null<'pktbuf>(pkt: &mut Packet<'pktbuf>) -> Result<(), DecryptError> {
     // RFC 6.5 § 5.25.2
     if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
         return Err(DecryptError::MicvFailure);
@@ -499,7 +499,7 @@ pub fn substrate_ingress<'pktbuf>(
             drop_and_count(asm, pkt, CounterType::UnknownZpi);
             return;
         }
-        match decrypt_zero(&mut pkt) {
+        match decrypt_null(&mut pkt) {
             Ok(()) => (),
             Err(err) => {
                 drop_and_count(asm, pkt, err);
@@ -752,7 +752,7 @@ mod test {
     use crate::config::PACKET_BUFFER_SIZE;
 
     #[test]
-    fn test_encrypt_decrypt_zero() {
+    fn test_encrypt_decrypt_null() {
         let mut buf = [0u8; PACKET_BUFFER_SIZE];
         let mut pkt = Packet::new(&mut buf, 64);
 
@@ -764,7 +764,7 @@ mod test {
 
         assert!(pkt.body().len() == orig_len + 2); // did add checksum
 
-        let res = decrypt_zero(&mut pkt);
+        let res = decrypt_null(&mut pkt);
         assert!(res.is_ok());
 
         assert!(pkt.body().len() == orig_len); // did remove checksum
