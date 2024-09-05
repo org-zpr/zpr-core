@@ -188,7 +188,7 @@ pub fn maybe_capture_batch<'a, 'pktbuf: 'a>(
 }
 
 /// Encrypt a ZDP packet according to its ZPI header (which is not encrypted).
-pub fn encrypt_zero<'pktbuf>(pkt: &mut Packet<'pktbuf>) {
+pub fn encrypt_null<'pktbuf>(pkt: &mut Packet<'pktbuf>) {
     // RFC 6.5 § 5.25.2
     pkt.put(
         net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]).as_slice(),
@@ -350,7 +350,7 @@ fn substrate_egress_common<'pktbuf>(
     // To "encrypt" we need to know which ZPI is in use, then we may need the HMAC or
     // we may need the codec.
     if real_zpi == 0 {
-        encrypt_zero(pkt);
+        encrypt_null(pkt);
     } else {
         let tsa = transport_sa.unwrap();
         if transit {
@@ -770,7 +770,7 @@ mod test {
 
         let orig_len = pkt.body().len();
 
-        encrypt_zero(&mut pkt);
+        encrypt_null(&mut pkt);
 
         assert!(pkt.body().len() == orig_len + 2); // did add checksum
 
