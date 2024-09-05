@@ -165,10 +165,7 @@ impl Codec for NoiseCodec {
             Ok(len) => Ok(len + NOISE_NONCE_LEN),
             Err(e) => match e {
                 snow::error::Error::Input => Err(EncryptionError::MessageTooLarge),
-                _ => Err(EncryptionError::InternalError(format!(
-                    "noise failed to encrypt message: {}",
-                    e
-                ))),
+                _ => panic!("noise encryption failed: {}", e),
             },
         }
     }

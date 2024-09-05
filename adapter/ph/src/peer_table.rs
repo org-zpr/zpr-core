@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use crate::dock_tables::DockForwardingTable;
 use crate::km::KmTransportSA;
-use crate::km_multiplexor::SAState;
+use crate::km_multiplexor::LinkSecurityState;
 use crate::queues;
 use crate::rcu::RcuBox;
 use crate::sync_req;
@@ -76,7 +76,7 @@ pub struct PeerTable<'pktbuf> {
     // KM Multiplexor and used during encrypt/decrypt.
     //
     // TODO: put into the slab! (https://github.com/org-zpr/zpr-core/issues/388)
-    link_to_sec_assoc: DashMap<LinkId, SAState>,
+    link_to_sec_assoc: DashMap<LinkId, LinkSecurityState>,
 }
 
 #[derive(Debug)]
@@ -124,7 +124,10 @@ impl<'pktbuf> PeerTable<'pktbuf> {
     /// Initialize state for the security association on the link.  The security association starts out as
     /// not established.
     pub fn init_security_association(&self, link_id: LinkId) {
-        if let Some(_) = self.link_to_sec_assoc.insert(link_id, SAState::new()) {
+        if let Some(_) = self
+            .link_to_sec_assoc
+            .insert(link_id, LinkSecurityState::new())
+        {
             panic!("duplicate security association");
         }
     }
@@ -135,9 +138,9 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         link_id: LinkId,
         sa: KmTransportSA,
     ) -> Result<(), SecurityAssocaitionStateError> {
-        if let Some(mut sa_state) = self.link_to_sec_assoc.get_mut(&link_id) {
-            sa_state.transport_sa = sa;
-            sa_state.sa_established.store(true, Ordering::Relaxed);
+        if let Some(mut ls_state) = self.link_to_sec_assoc.get_mut(&link_id) {
+            ls_state.transport_sa = sa;
+            ls_state.sa_established.store(true, Ordering::Relaxed);
             Ok(())
         } else {
             Err(SecurityAssocaitionStateError::NoAssociationForLink)
@@ -150,8 +153,8 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         &self,
         link_id: LinkId,
     ) -> Result<(), SecurityAssocaitionStateError> {
-        if let Some(sa_state) = self.link_to_sec_assoc.get_mut(&link_id) {
-            sa_state.sa_established.store(false, Ordering::Relaxed);
+        if let Some(ls_state) = self.link_to_sec_assoc.get_mut(&link_id) {
+            ls_state.sa_established.store(false, Ordering::Relaxed);
             Ok(())
         } else {
             Err(SecurityAssocaitionStateError::NoAssociationForLink)
@@ -159,8 +162,8 @@ impl<'pktbuf> PeerTable<'pktbuf> {
     }
 
     pub fn is_security_assocaition_established(&self, link_id: LinkId) -> bool {
-        if let Some(sa_state) = self.link_to_sec_assoc.get(&link_id) {
-            sa_state.sa_established.load(Ordering::Relaxed)
+        if let Some(ls_state) = self.link_to_sec_assoc.get(&link_id) {
+            ls_state.sa_established.load(Ordering::Relaxed)
         } else {
             false
         }
@@ -172,8 +175,8 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         link_id: LinkId,
     ) -> Option<KmTransportSA> {
         match self.link_to_sec_assoc.get(&link_id) {
-            Some(sa_state) if sa_state.sa_established.load(Ordering::Relaxed) => {
-                Some(sa_state.transport_sa.clone())
+            Some(ls_state) if ls_state.sa_established.load(Ordering::Relaxed) => {
+                Some(ls_state.transport_sa.clone())
             }
             _ => None, // either not found or not established
         }

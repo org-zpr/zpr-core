@@ -74,20 +74,20 @@ pub struct KmHandle<'pktbuf> {
     mgr: KeyManager<'pktbuf>, // The manager must remain valid for lifetime of the link
 }
 
-/// SAState is placed in the assembly so that other parts of the code can check
+/// LinkSecurityState is placed in the assembly so that other parts of the code can check
 /// to see if an SA is established, and if so get all the details.
 ///
 /// Do not use any values in here until `sa_established` is true.
 ///
 /// - TODO: Replace this lame synchronization method with RCU ??
 /// - TODO: This could be more tightly integrated into the assembly.
-pub struct SAState {
+pub struct LinkSecurityState {
     pub sa_established: AtomicBool,
     pub transport_sa: KmTransportSA,
 }
 
-impl SAState {
-    /// Create a new, empty SAState.
+impl LinkSecurityState {
+    /// Create a new, empty state.
     pub fn new() -> Self {
         Self {
             sa_established: AtomicBool::new(false),
@@ -113,7 +113,6 @@ async fn signal_worker<'pktbuf>(
     sig_queue: &mut mpsc::Receiver<KmLinkMsg<KmSignal>>,
 ) {
     let sp_ctok = asm.km_state.ctok.clone();
-    //let state_table_p = asm.sa_states.clone();
 
     loop {
         tokio::select! {
@@ -135,14 +134,6 @@ async fn signal_worker<'pktbuf>(
                                 error!("km_multiplexor: failed to set SA established: {:?}", e);
                             }
                         }
-                        /*
-                            if let Some(mut sa_state) = state_table_p.get_mut(&linkmsg.link_id) {
-                                sa_state.transport_sa = sa;
-                                sa_state.sa_established.store(true, Ordering::Relaxed);
-                            } else {
-                                error!("km_multiplexor: no SA state for link {}", linkmsg.link_id);
-                            }
-                        */
                     }
                     _ => {} // TODO: Handle other signals.
                 }
@@ -240,7 +231,7 @@ pub fn add_node_link(
 /// Remove all state for this link, invalidating the SA and stopping the Key Manager.
 #[allow(dead_code)]
 pub async fn drop_link<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId) {
-    // If present in sa_state, turn off the SA.
+    // If present in state, turn off the SA.
     let _ = asm.peer_table.clear_security_association(link_id);
 
     // remove handle from our km state, if found
