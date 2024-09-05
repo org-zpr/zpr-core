@@ -171,14 +171,11 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         &self,
         link_id: LinkId,
     ) -> Option<KmTransportSA> {
-        if let Some(sa_state) = self.link_to_sec_assoc.get(&link_id) {
-            if sa_state.sa_established.load(Ordering::Relaxed) {
+        match self.link_to_sec_assoc.get(&link_id) {
+            Some(sa_state) if sa_state.sa_established.load(Ordering::Relaxed) => {
                 Some(sa_state.transport_sa.clone())
-            } else {
-                None
             }
-        } else {
-            None
+            _ => None, // either not found or not established
         }
     }
 
