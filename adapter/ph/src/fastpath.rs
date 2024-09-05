@@ -6,6 +6,7 @@
 use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
 use crate::classifier::{self, ClassifierResult};
+use crate::config;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::km::Codec;
@@ -202,16 +203,21 @@ pub fn encrypt_hmac<'pktbuf>(_send_hmac_key: [u8; 32], _pkt: &mut Packet<'pktbuf
 }
 
 pub fn encrypt_full<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+    _asm: &Assembly<'pktbuf>,
     codec: &dyn Codec,
     pkt: &mut Packet<'pktbuf>,
 ) {
     // TODO: Could do some length checks here on the packet body.  Is it too short? Too long? Etc.
 
-    let enc_buf = asm.buffer_stack.try_get_buffer().unwrap();
-    let encr_len = pkt.body().len() - 1; // Everything except the ZPI byte
+    let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>(); // = 1
 
-    match codec.encrypt_transport_stateless(&pkt.body()[1..encr_len + 1], enc_buf) {
+    let mut enc_buf = [0u8; config::PACKET_BUFFER_SIZE];
+    let encr_len = pkt.body().len() - zpi_hdr_len; // Everything except the ZPI byte
+
+    match codec.encrypt_transport_stateless(
+        &pkt.body()[zpi_hdr_len..encr_len + zpi_hdr_len],
+        &mut enc_buf,
+    ) {
         Ok(len) => {
             pkt.shrink_by(encr_len); // remove cleartext body, leavign ZPI
             pkt.put(&enc_buf[0..len]); // copy ciphertext body over
@@ -220,8 +226,6 @@ pub fn encrypt_full<'pktbuf>(
             error!("encrypt failed: {}", e);
         }
     }
-
-    asm.buffer_stack.put_buffer(enc_buf);
 }
 
 #[allow(dead_code)]
