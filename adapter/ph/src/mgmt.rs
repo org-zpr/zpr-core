@@ -692,7 +692,7 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
 
 /// Send a key management message out the given link.
 pub async fn send_key_management<'pktbuf>(
-    asm: &'pktbuf Assembly<'pktbuf>,
+    asm: &Assembly<'pktbuf>,
     link_id: zpr::LinkId,
     km_id: zpr::KmId,
     payload: &[u8],

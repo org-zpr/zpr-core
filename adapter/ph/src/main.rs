@@ -435,23 +435,9 @@ fn main() -> ExitCode {
                 cap_outq,
             ));
 
-            // Watch for outbound Key Management messages. This does not need a cancellation token as it should never exit
-            // while program is running.
-            let km_loop_rx = Box::leak(Box::new(km_rx));
-            js.spawn(async {
-                while let Some(km_buf_msg) = km_loop_rx.recv().await {
-                    mgmt::send_key_management(
-                        &*asm,
-                        km_buf_msg.link_id,
-                        zpr::KM_ID_NOISE,
-                        &km_buf_msg.msg,
-                    )
-                    .await;
-                }
-            });
-
-            // Watch for the state transitions and update assembly
-            js.spawn(km_multiplexor::launch(&*asm, km_sig_rx));
+            // Start key managemenent workers
+            js.spawn(km_multiplexor::launch_signal_worker(&*asm, km_sig_rx));
+            js.spawn(km_multiplexor::launch_message_worker(&*asm, km_rx));
 
             eprintln!("{}: connecting...", asm.system_name);
             eprintln!("{}: connected!", asm.system_name); // FIXME: it's a lie
