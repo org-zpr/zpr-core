@@ -14,7 +14,6 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_tun::TunBuilder;
-use tokio_util::sync::CancellationToken;
 use tracing::warn;
 use tracing_subscriber;
 use zpr_ext::tokio::net::UdpSocketExt;
@@ -160,8 +159,7 @@ fn main() -> ExitCode {
 
     let (km_sig_tx, km_sig_rx) = mpsc::channel(16); // TODO: name this constant
     let (km_tx, km_rx) = mpsc::channel(km_message_queue_size);
-    let km_mpx_ctok = CancellationToken::new();
-    let km_state = KmState::new(km_tx, km_sig_tx, km_mpx_ctok.clone());
+    let km_state = KmState::new(km_tx, km_sig_tx);
 
     /*let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
     ssl_context_builder.set_options(
@@ -324,9 +322,6 @@ fn main() -> ExitCode {
                 km_state,
             }));
 
-
-
-
             // TEMP HACK to statically install peers
             let dock_noise_public_key = [0; 32]; // XXX TODO
             if let Some(pa2) = peer_addr2 {
@@ -337,8 +332,13 @@ fn main() -> ExitCode {
                 asm.peer_ids.lock().unwrap().push(peer_id2);
 
                 if !disable_km {
-                    km_multiplexor::add_adapter_link(asm, peer_id2, ZPIPair::new(1, 2), dock_noise_public_key)
-                        .unwrap();
+                    km_multiplexor::add_adapter_link(
+                        asm,
+                        peer_id2,
+                        ZPIPair::new(1, 2),
+                        dock_noise_public_key,
+                    )
+                    .unwrap();
                 }
             }
 
@@ -355,10 +355,16 @@ fn main() -> ExitCode {
             asm.peer_ids.lock().unwrap().push(peer_id);
             if !disable_km {
                 if ph_mode == PhMode::Adapter {
-                    km_multiplexor::add_adapter_link(asm, peer_id, ZPIPair::new(3, 4), dock_noise_public_key)
-                        .unwrap();
+                    km_multiplexor::add_adapter_link(
+                        asm,
+                        peer_id,
+                        ZPIPair::new(3, 4),
+                        dock_noise_public_key,
+                    )
+                    .unwrap();
                 } else {
-                    let dock_keypair = snow::Keypair { // XXX also TODO!
+                    let dock_keypair = snow::Keypair {
+                        // XXX also TODO!
                         private: [0; 32].to_vec(),
                         public: [0; 32].to_vec(),
                     };
@@ -366,8 +372,13 @@ fn main() -> ExitCode {
                         .unwrap();
                 }
                 let dock_noise_public_key = [0; 32]; // XXX TODO
-                km_multiplexor::add_adapter_link(asm, peer_id, ZPIPair::new(1, 2), dock_noise_public_key)
-                    .unwrap();
+                km_multiplexor::add_adapter_link(
+                    asm,
+                    peer_id,
+                    ZPIPair::new(1, 2),
+                    dock_noise_public_key,
+                )
+                .unwrap();
             }
             // END HACK
 
@@ -424,27 +435,23 @@ fn main() -> ExitCode {
                 cap_outq,
             ));
 
-
-            // Watch for outbound Key Management messages
-            let km_loop_ctok = Box::leak(Box::new(km_mpx_ctok.clone()));
+            // Watch for outbound Key Management messages. This does not need a cancellation token as it should never exit
+            // while program is running.
             let km_loop_rx = Box::leak(Box::new(km_rx));
             js.spawn(async {
-                loop {
-                    tokio::select! {
-                        _ = km_loop_ctok.cancelled() => {
-                            break;
-                        }
-                        Some(km_buf_msg) = km_loop_rx.recv() => {
-                            mgmt::send_key_management(&*asm, km_buf_msg.link_id, zpr::KM_ID_NOISE, &km_buf_msg.msg).await;
-                        }
-                    }
+                while let Some(km_buf_msg) = km_loop_rx.recv().await {
+                    mgmt::send_key_management(
+                        &*asm,
+                        km_buf_msg.link_id,
+                        zpr::KM_ID_NOISE,
+                        &km_buf_msg.msg,
+                    )
+                    .await;
                 }
             });
 
             // Watch for the state transitions and update assembly
             js.spawn(km_multiplexor::launch(&*asm, km_sig_rx));
-
-
 
             eprintln!("{}: connecting...", asm.system_name);
             eprintln!("{}: connected!", asm.system_name); // FIXME: it's a lie

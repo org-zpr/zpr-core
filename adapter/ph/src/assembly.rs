@@ -119,7 +119,6 @@ pub mod test {
     use enum_map::{enum_map, EnumMap};
     use tokio::net::UdpSocket;
     use tokio::sync::mpsc;
-    use tokio_util::sync::CancellationToken;
 
     #[allow(dead_code)]
     #[derive(Default)]
@@ -202,8 +201,7 @@ pub mod test {
         let km_state = builder.km_state.unwrap_or_else(|| {
             let (km_sig_tx, _km_sig_rx) = mpsc::channel(1);
             let (km_tx, _km_rx) = mpsc::channel(1);
-            let km_mpx_ctok = CancellationToken::new();
-            KmState::new(km_tx, km_sig_tx, km_mpx_ctok.clone())
+            KmState::new(km_tx, km_sig_tx)
         });
 
         Assembly {
