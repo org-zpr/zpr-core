@@ -234,7 +234,7 @@ impl KeyManager<'_> {
                     kmsettings: settings,
                     sa_id: 0,
                     mgmt_tx: None,
-                    ts: KMTransportSA::new_empty(),
+                    ts: Default::default(),
                 }),
             }),
         }
@@ -563,19 +563,8 @@ impl KMTransportSA {
         }
     }
 
-    pub fn new_empty() -> KMTransportSA {
-        KMTransportSA {
-            sa_id: 0,
-            send_zpis: ZPIPair::new_zero(),
-            recv_zpis: ZPIPair::new_zero(),
-            send_hmac_key: [0u8; 32],
-            recv_hmac_key: [0u8; 32],
-            codec: Arc::new(UnimplCodec::new()),
-        }
-    }
-
     #[allow(dead_code)]
-    pub fn new_empty_with_codec(codec: Arc<dyn Codec>) -> KMTransportSA {
+    pub fn new_with_codec(codec: Arc<dyn Codec>) -> KMTransportSA {
         KMTransportSA {
             sa_id: 0,
             send_zpis: ZPIPair::new_zero(),
@@ -593,6 +582,19 @@ impl KMTransportSA {
             sa_id: 0,
             send_zpis,
             recv_zpis,
+            send_hmac_key: [0u8; 32],
+            recv_hmac_key: [0u8; 32],
+            codec: Arc::new(UnimplCodec::new()),
+        }
+    }
+}
+
+impl Default for KMTransportSA {
+    fn default() -> Self {
+        Self {
+            sa_id: 0,
+            send_zpis: ZPIPair::new_zero(),
+            recv_zpis: ZPIPair::new_zero(),
             send_hmac_key: [0u8; 32],
             recv_hmac_key: [0u8; 32],
             codec: Arc::new(UnimplCodec::new()),
