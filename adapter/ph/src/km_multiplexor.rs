@@ -10,6 +10,7 @@ use std::future::Future;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
@@ -55,8 +56,9 @@ impl<'pktbuf> KmState<'pktbuf> {
 
 #[allow(dead_code)]
 pub struct KMHandle<'pktbuf> {
+    join_handle: JoinHandle<()>,
     ctok: CancellationToken,  // for this KeyManager
-    mgr: KeyManager<'pktbuf>, // The manager must remnain valid for lifetime of the link
+    mgr: KeyManager<'pktbuf>, // The manager must remain valid for lifetime of the link
 }
 
 /// SAState is placed in the assembly so that other parts of the code can check
@@ -226,7 +228,10 @@ pub fn add_node_link(
 
 /// Remove all state for this link, invalidating the SA and stopping the Key Manager.
 #[allow(dead_code)]
-pub fn drop_link(asm: &'static Assembly, link_id: zpr::LinkId) -> Result<(), String> {
+pub async fn drop_link<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+) -> Result<(), String> {
     // If present in sa_state, turn off the SA.
     let _ = asm.peer_table.clear_security_association(link_id);
 
@@ -235,7 +240,17 @@ pub fn drop_link(asm: &'static Assembly, link_id: zpr::LinkId) -> Result<(), Str
 
     // Stop the KM
     if handle.is_some() {
-        handle.unwrap().1.ctok.cancel(); // stop the KM
+        let kmh = handle.unwrap().1;
+        kmh.ctok.cancel(); // stop the KM
+        match kmh.join_handle.await {
+            Ok(_) => (),
+            Err(e) => {
+                error!(
+                    "KeyManager statemachine shutdown join failed on link {}: {:?}",
+                    link_id, e
+                );
+            }
+        }
     }
 
     // Remove from SA
@@ -258,7 +273,8 @@ fn add_noise_link(
     let spawn_ctok = child_ctok.clone();
     let spawn_km_tx = asm.km_state.km_tx.clone();
     let spawn_sig_tx = asm.km_state.km_sig_tx.clone();
-    tokio::spawn(async move {
+
+    let sph = tokio::spawn(async move {
         match spawn_mgr.start(spawn_ctok, spawn_km_tx, spawn_sig_tx).await {
             Ok(_) => (),
             Err(e) => {
@@ -268,6 +284,7 @@ fn add_noise_link(
     });
 
     let handle = KMHandle {
+        join_handle: sph,
         ctok: child_ctok,
         mgr,
     };
@@ -423,7 +440,7 @@ mod test {
                 .is_security_assocaition_established(adapter_link_id))
         }
 
-        match drop_link(asm, adapter_link_id) {
+        match drop_link(asm, adapter_link_id).await {
             Ok(_) => (),
             Err(e) => panic!("Failed to drop link: {:?}", e),
         }
