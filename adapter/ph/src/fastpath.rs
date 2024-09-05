@@ -325,6 +325,7 @@ fn substrate_egress_common<'pktbuf>(
             } else {
                 real_zpi = transport_sa.recv_zpis.encr;
             }
+            assert!(real_zpi != zpr::ZPI_0);
             Some(transport_sa)
         }
         None => {
@@ -336,17 +337,19 @@ fn substrate_egress_common<'pktbuf>(
     encap_zpi(asm, link_id, real_zpi, pkt);
     maybe_capture(asm, Direction::Outbound, pkt);
 
-    if real_zpi == zpr::ZPI_0 {
-        encrypt_null(pkt);
-    } else {
-        let tsa = transport_sa.unwrap();
-        if transit {
-            encrypt_hmac(tsa.send_hmac_key, pkt);
-        } else {
-            match encrypt_full(asm, &*tsa.codec, pkt) {
-                Ok(()) => (),
-                Err(err) => return Err(err),
+    match transport_sa {
+        Some(transport_sa) => {
+            if transit {
+                encrypt_hmac(transport_sa.send_hmac_key, pkt);
+            } else {
+                match encrypt_full(asm, &*transport_sa.codec, pkt) {
+                    Ok(()) => (),
+                    Err(err) => return Err(err),
+                }
             }
+        }
+        None => {
+            encrypt_null(pkt);
         }
     }
 
