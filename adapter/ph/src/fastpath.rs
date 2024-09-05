@@ -188,8 +188,8 @@ pub fn encrypt<'pktbuf>(
     _link_id: zpr::LinkId,
     pkt: &mut Packet<'pktbuf>,
 ) {
-    let zpi_hdr =
-        zdp::ZdpZpiHeader::ref_from_prefix(pkt.body()).expect("ZPI header must be present");
+    let zpi_hdr = zdp::ZdpZpiHeader::ref_from_prefix(pkt.body())
+        .expect("coding error: ZPI header must be present");
     let zpi = zpi_hdr.zpi as zpr::Zpi;
 
     if zpi == zpr::ZPI_0 {
@@ -373,6 +373,7 @@ pub fn substrate_ingress<'pktbuf>(
         if asm
             .peer_table
             .inspect(ingress_link_id, |peer_state| {
+                // note: we know `pkt` is still `Some` as we're the first to get to it
                 match peer_state
                     .mgmt_processor
                     .try_enqueue_packet(pkt.take().unwrap())
@@ -386,6 +387,7 @@ pub fn substrate_ingress<'pktbuf>(
             })
             .is_none()
         {
+            // note: we know `pkt` is still `Some` as we know the above closure hasn't been executed
             drop_and_count(asm, pkt.take().unwrap(), CounterType::PeerRemoved);
         }
         return;
