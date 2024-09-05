@@ -22,7 +22,6 @@ use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::{error, info, warn};
 use zerocopy::FromBytes;
@@ -270,7 +269,7 @@ pub fn decrypt_hmac<'pktbuf>(
 /// Decrypt a ZDP packet according to its ZPI header (which is not removed).
 pub fn decrypt_full<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    codec: Arc<dyn Codec>,
+    codec: &dyn Codec,
     padlen: usize,
     pkt: &mut Packet<'pktbuf>,
 ) -> Result<(), DecryptError> {
@@ -472,7 +471,7 @@ pub fn substrate_ingress<'pktbuf>(
                 }
             } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
                 // TODO: Put padlen in state somewhere too
-                match decrypt_full(asm, transport_sa.codec.clone(), NOISE_PADLEN, &mut pkt) {
+                match decrypt_full(asm, &*transport_sa.codec, NOISE_PADLEN, &mut pkt) {
                     Ok(()) => true,
                     Err(err) => {
                         drop_and_count(asm, pkt, err);
