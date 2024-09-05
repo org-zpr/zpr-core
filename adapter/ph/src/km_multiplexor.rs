@@ -14,6 +14,19 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
+#[derive(Debug)]
+pub enum KmMsgProcessingError {
+    InvalidState,
+    LinkUnconfigured,
+    EnqueueFailed,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum KmSetupError {
+    InitializationError(KMError),
+}
+
 /// Global state for the KM system.
 /// TODO: Move to assembly?
 pub struct KmState<'pktbuf> {
@@ -183,7 +196,7 @@ pub fn add_adapter_link(
     link_id: zpr::LinkId,
     recv_zpis: ZPIPair,
     peer_noise_key: [u8; 32],
-) -> Result<(), String> {
+) -> Result<(), KmSetupError> {
     let noise = match KMNoise::new(
         true,
         Some(peer_noise_key.into()),
@@ -193,7 +206,7 @@ pub fn add_adapter_link(
     ) {
         Ok(n) => n,
         Err(e) => {
-            return Err(format!("Failed to create Noise protocol: {:?}", e));
+            return Err(KmSetupError::InitializationError(e));
         }
     };
     add_noise_link(asm, link_id, noise)
@@ -210,7 +223,7 @@ pub fn add_node_link(
     link_id: zpr::LinkId,
     recv_zpis: ZPIPair,
     local_noise_key: snow::Keypair,
-) -> Result<(), String> {
+) -> Result<(), KmSetupError> {
     let noise = match KMNoise::new(
         false,
         None,
@@ -219,19 +232,14 @@ pub fn add_node_link(
         recv_zpis.hmac,
     ) {
         Ok(n) => n,
-        Err(e) => {
-            return Err(format!("Failed to create Noise protocol: {:?}", e));
-        }
+        Err(e) => return Err(KmSetupError::InitializationError(e)),
     };
     add_noise_link(asm, link_id, noise)
 }
 
 /// Remove all state for this link, invalidating the SA and stopping the Key Manager.
 #[allow(dead_code)]
-pub async fn drop_link<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    link_id: zpr::LinkId,
-) -> Result<(), String> {
+pub async fn drop_link<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId) {
     // If present in sa_state, turn off the SA.
     let _ = asm.peer_table.clear_security_association(link_id);
 
@@ -255,7 +263,6 @@ pub async fn drop_link<'pktbuf>(
 
     // Remove from SA
     asm.peer_table.remove_security_association(link_id);
-    Ok(())
 }
 
 // Completes the add_*_link functions above.
@@ -263,7 +270,7 @@ fn add_noise_link(
     asm: &'static Assembly,
     link_id: zpr::LinkId,
     noise: KMNoise,
-) -> Result<(), String> {
+) -> Result<(), KmSetupError> {
     let mgr = KeyManager::new(link_id, Box::new(noise));
 
     asm.peer_table.init_security_association(link_id);
@@ -296,35 +303,37 @@ fn add_noise_link(
 
 /// When an inbound key management ZDP message arrives on a link, send it here after parsing.
 ///
-/// The km_payload should be the km-payload part of the ZDP KM message.  We copy the payload before
+/// The `km_payload` should be the km-payload part of the ZDP KM message.  We copy the payload before
 /// returning.
 ///
-/// TODO: Note this will block if the KeyManager queue is full.  Should this instead be using
-///       the non-blocking call?
+/// Note that this will block if the KeyManager queue is full.
+///
+/// # Errors
+///
+/// - [KmMsgProcessingError::InvalidState] if the KM state machine is in an invalid state.
+/// - [KmMsgProcessingError::EnqueueFailed] if the message could not be enqueued on the state machine.
+/// - [KmMsgProcessingError::LinkUnconfigured] if the link is not configured for Key Management.
+///
 pub async fn handle_inbound_km_msg<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     from_link: zpr::LinkId,
     km_payload: &[u8],
-) -> Result<(), String> {
+) -> Result<(), KmMsgProcessingError> {
     let manager: Option<KeyManager>;
-
     {
         match asm.km_state.table.get(&from_link) {
-            None => {
-                return Err(format!("no KM found for link {}", from_link));
-            }
+            None => return Err(KmMsgProcessingError::LinkUnconfigured),
             Some(h) => {
                 manager = Some(h.mgr.clone());
             }
         };
     }
-
     match manager.unwrap().handle_km_message(km_payload).await {
         Ok(_) => Ok(()),
-        Err(e) => Err(format!(
-            "Failed to handle KM message on link{}: {:?}",
-            from_link, e
-        )),
+        Err(e) => match e {
+            KMError::InvalidState => Err(KmMsgProcessingError::InvalidState),
+            _ => Err(KmMsgProcessingError::EnqueueFailed),
+        },
     }
 }
 
@@ -440,9 +449,6 @@ mod test {
                 .is_security_assocaition_established(adapter_link_id))
         }
 
-        match drop_link(asm, adapter_link_id).await {
-            Ok(_) => (),
-            Err(e) => panic!("Failed to drop link: {:?}", e),
-        }
+        drop_link(asm, adapter_link_id).await;
     }
 }

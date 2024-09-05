@@ -372,7 +372,7 @@ pub enum HandleMgmtError {
     UnexpectedMgmtResponse,
     BadStructure,
     UnknownKeyManagementType(u16),
-    InternalError(String),
+    KeyManagementError(String),
 }
 
 impl From<HandleMgmtError> for counters_enum::CounterType {
@@ -382,7 +382,7 @@ impl From<HandleMgmtError> for counters_enum::CounterType {
             HandleMgmtError::UnexpectedMgmtResponse => Self::UnexpectedMgmtResponse,
             HandleMgmtError::BadStructure => Self::BadStructure,
             HandleMgmtError::UnknownKeyManagementType(_type) => Self::OtherError,
-            HandleMgmtError::InternalError(_desc) => Self::OtherError,
+            HandleMgmtError::KeyManagementError(_desc) => Self::OtherError,
         }
     }
 }
@@ -739,7 +739,13 @@ pub async fn handle_key_management<'pktbuf>(
         .await
     {
         Ok(()) => (),
-        Err(s) => return Err((HandleMgmtError::InternalError(s), pkt)),
+        Err(e) => {
+            error!(
+                "key management handling failed on link {}: {:?}",
+                ingress_link_id, e
+            );
+            return Err((HandleMgmtError::KeyManagementError(format!("{:?}", e)), pkt));
+        }
     };
     asm.buffer_stack.put_buffer(pkt.destroy());
 
