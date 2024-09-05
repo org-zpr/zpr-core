@@ -203,7 +203,7 @@ pub fn encrypt_hmac<'pktbuf>(_send_hmac_key: [u8; 32], _pkt: &mut Packet<'pktbuf
 
 pub fn encrypt_full<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    codec: Arc<dyn Codec>,
+    codec: &dyn Codec,
     pkt: &mut Packet<'pktbuf>,
 ) {
     // TODO: Could do some length checks here on the packet body.  Is it too short? Too long? Etc.
@@ -353,7 +353,7 @@ fn substrate_egress_common<'pktbuf>(
         if transit {
             encrypt_hmac(tsa.send_hmac_key, pkt);
         } else {
-            encrypt_full(asm, tsa.codec.clone(), pkt);
+            encrypt_full(asm, &*tsa.codec, pkt);
         }
     }
 
