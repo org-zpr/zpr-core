@@ -16,6 +16,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use std::fmt;
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use bytes::{BufMut, Bytes};
@@ -166,11 +167,7 @@ impl fmt::Display for KMTransportSA {
         if self.sa_id == 0 {
             return write!(f, "KMTransportSA {{ sa_id: 0 }}");
         }
-        write!(
-            f,
-            "KMTransportSA {{ sa_id: {}, send_zpis: {:?}, recv_zpis: {:?}, send_hmac_key: {:?}, recv_hmac_key: {:?} }}",
-            self.sa_id, self.send_zpis, self.recv_zpis, self.send_hmac_key, self.recv_hmac_key
-        )
+        Debug::fmt(self, f)
     }
 }
 
