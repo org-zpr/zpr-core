@@ -149,8 +149,8 @@ pub fn expand(compression_mode: CompressionMode, five_tuple: &FiveTuple, pkt: &m
         L3Type::Ipv4 => expand_addrs_v4(
             pkt,
             five_tuple.l4_protocol,
-            five_tuple.src_address.try_into().unwrap(),
-            five_tuple.dst_address.try_into().unwrap(),
+            five_tuple.src_address.read_as_v4().into(),
+            five_tuple.dst_address.read_as_v4().into(),
         ),
         L3Type::Ipv6 => expand_addrs_v6(
             pkt,

@@ -21,7 +21,6 @@ use crate::zpr;
 use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
-use std::net::SocketAddr;
 use std::time::SystemTime;
 use tracing::{error, info, warn};
 use zerocopy::FromBytes;
@@ -427,7 +426,7 @@ pub async fn substrate_egress_blocking<'pktbuf>(
 /// Process packets ingressing from the specified address.
 pub fn substrate_ingress<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    peer_sa: &SocketAddr,
+    peer_sa: &zpr::SubstrateAddr,
     mut pkt: Packet<'pktbuf>,
 ) {
     asm.counters[CounterType::InPacksRec].increment();
@@ -554,6 +553,7 @@ pub fn substrate_ingress<'pktbuf>(
         if asm
             .peer_table
             .inspect(ingress_link_id, |peer_state| {
+                // note: we know `pkt` is still `Some` as we're the first to get to it
                 match peer_state
                     .mgmt_processor
                     .try_enqueue_packet(pkt.take().unwrap())
@@ -567,6 +567,7 @@ pub fn substrate_ingress<'pktbuf>(
             })
             .is_none()
         {
+            // note: we know `pkt` is still `Some` as we know the above closure hasn't been executed
             drop_and_count(asm, pkt.take().unwrap(), CounterType::PeerRemoved);
         }
         return;

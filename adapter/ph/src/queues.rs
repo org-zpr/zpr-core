@@ -41,7 +41,9 @@ impl<'pktbuf> MgmtProcessor<'pktbuf> {
         match self.sender.try_send(MgmtProcessorMessage::Packet(packet)) {
             Ok(()) => Ok(()),
 
-            Err(TrySendError::Full(msg) | TrySendError::Closed(msg)) => {
+            Err(TrySendError::Closed(_)) => panic!("mgmt processor channel closed"),
+
+            Err(TrySendError::Full(msg)) => {
                 let MgmtProcessorMessage::Packet(pkt) = msg else {
                     unreachable!()
                 };
@@ -228,11 +230,10 @@ impl<'pktbuf> Capture<'pktbuf> {
             orig_len,
         };
         match self.sender.try_send(cap_pack) {
-            Ok(()) => return Ok(()),
-            Err(TrySendError::Full(cap_pack)) | Err(TrySendError::Closed(cap_pack)) => {
-                return Err(TryEnqueueError::Full(cap_pack.packet));
-            }
-        };
+            Ok(()) => Ok(()),
+            Err(TrySendError::Closed(_)) => panic!("capture channel closed"),
+            Err(TrySendError::Full(cap_pack)) => Err(TryEnqueueError::Full(cap_pack.packet)),
+        }
     }
 }
 
@@ -270,7 +271,9 @@ impl<'pktbuf> AdapterManager<'pktbuf> {
         {
             Ok(()) => Ok(()),
 
-            Err(TrySendError::Full(msg) | TrySendError::Closed(msg)) => match msg {
+            Err(TrySendError::Closed(_)) => panic!("adapter manager channel closed"),
+
+            Err(TrySendError::Full(msg)) => match msg {
                 AdapterManagerMessage::RequestTetherId(packet) => {
                     Err(TryEnqueueError::Full(packet))
                 }
