@@ -11,7 +11,7 @@ use tokio::net::UdpSocket;
 
 use ph::config;
 use ph::km;
-use ph::km::{KmSignal, KeyManager};
+use ph::km::{KeyManager, KmSignal};
 use ph::km_demo;
 use ph::km_noise::KmNoise;
 use ph::packet::Packet;
