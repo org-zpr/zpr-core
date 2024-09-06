@@ -68,7 +68,7 @@ pub struct Assembly<'pktbuf> {
     pub dlt: adapter_tables::DockLookupTable,
 
     pub adapter_manager: AdapterManager<'pktbuf>,
-    pub km_state: KmState<'pktbuf>,
+    pub km_state: KmState,
 }
 
 pub struct PhFlags {
@@ -139,7 +139,7 @@ pub mod test {
         pub alt: Option<adapter_tables::AgentLookupTable>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
         pub adapter_manager: Option<AdapterManager<'a>>,
-        pub km_state: Option<KmState<'a>>,
+        pub km_state: Option<KmState>,
     }
 
     #[allow(dead_code)]
