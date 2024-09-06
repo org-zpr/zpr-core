@@ -1,22 +1,22 @@
 #![allow(dead_code)]
 use crate::dock_tables::DockForwardingTable;
-use crate::km::{ZPIPair, KeyManager, KmTransportSA, UnimplCodec};
+use crate::km::{KeyManager, KmTransportSA, UnimplCodec, ZPIPair};
 use crate::queues;
 use crate::rcu::RcuBox;
 use crate::sync_req;
 use crate::zpr::{LinkId, SubstrateAddr};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
-use tokio_util::sync::CancellationToken;
 use std::future::Future;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 const PEER_TABLE_SIZE: usize = 1024;
 
@@ -40,14 +40,11 @@ pub struct PeerState<'pktbuf> {
     pub mgmt_processor_worker: task::JoinHandle<()>,
 }
 
-
-
 struct PeerKmState<'pktbuf> {
     handle: Option<KmHandle<'pktbuf>>,
     sa_established: AtomicBool, // if TRUE then `transport_sa` is valid
     transport_sa: KmTransportSA,
 }
-
 
 /// The Key Management "handle" is used by the km_multiplexor to hold per-link
 /// state for the key manager state machine.
@@ -56,7 +53,6 @@ pub struct KmHandle<'pktbuf> {
     pub ctok: CancellationToken,  // for this KeyManager
     pub mgr: KeyManager<'pktbuf>, // The manager must remain valid for lifetime of the link
 }
-
 
 impl<'pktbuf> PeerKmState<'pktbuf> {
     /// Create a new, empty state.
@@ -75,7 +71,6 @@ impl<'pktbuf> PeerKmState<'pktbuf> {
         }
     }
 }
-
 
 const MGMT_PROCESSOR_QUEUE_SIZE: usize = 16;
 
@@ -171,7 +166,6 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         self.peer_slab_reader.write(new_reader);
     }
 
-
     pub fn inspect_sync<T>(
         &self,
         link_id: LinkId,
@@ -197,14 +191,10 @@ impl<'pktbuf> PeerTable<'pktbuf> {
             .inspect(|r| r.get(link_id as usize).map(inspector))
     }
 
-
     /// Initialize state for the security association on the link.  The security association starts out as
     /// not established.
     pub fn init_security_association(&self, link_id: LinkId) {
-        if let Some(_) = self
-            .link_to_km_state
-            .insert(link_id, PeerKmState::new())
-        {
+        if let Some(_) = self.link_to_km_state.insert(link_id, PeerKmState::new()) {
             panic!("duplicate security association");
         }
     }
@@ -273,7 +263,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         match self.link_to_km_state.get(&link_id) {
             Some(km_state) if km_state.handle.is_some() => {
                 Some(km_state.handle.as_ref().unwrap().mgr.clone())
-            },
+            }
             _ => None,
         }
     }
@@ -286,7 +276,6 @@ impl<'pktbuf> PeerTable<'pktbuf> {
             None
         }
     }
-
 }
 
 pub struct VacantPeerTableEntry<'a, 'pktbuf> {

@@ -2,8 +2,8 @@ use crate::assembly::Assembly;
 use crate::km::*;
 use crate::km_noise::KmNoise;
 use crate::mgmt;
-use crate::zpr;
 use crate::peer_table::KmHandle;
+use crate::zpr;
 use bytes::Bytes;
 use std::future::Future;
 use tokio::sync::mpsc;
@@ -50,8 +50,6 @@ impl KmState {
         }
     }
 }
-
-
 
 /// This is one of the multiplexor related workers, the other one is in main.rs.
 /// This watches for signals from the running KeyManagers and updates the SAState
