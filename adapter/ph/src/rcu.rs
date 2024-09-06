@@ -33,12 +33,23 @@ compile_error!("exactly one rcu-* feature must be selected");
 )))]
 compile_error!("exactly one rcu-* feature must be selected");
 
-#[cfg(feature = "rcu-rwlock")]
+#[cfg(any(feature = "rcu-rwlock", doc))]
 mod rcu_impl {
-    use std::sync::RwLock;
+    use std::sync::{RwLock, RwLockReadGuard};
 
     /// An RCU-protected box.
     pub struct RcuBox<T>(RwLock<T>);
+
+    /// A protected reference to the item in an RCU-protected box.
+    pub struct RcuGuard<'a, T>(RwLockReadGuard<'a, T>);
+
+    impl<T> std::ops::Deref for RcuGuard<'_, T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            self.0.deref()
+        }
+    }
 
     impl<T> RcuBox<T> {
         /// Create a new box containing the given value.
@@ -52,6 +63,11 @@ mod rcu_impl {
             f(&*self.0.read().unwrap())
         }
 
+        /// Get a protected reference to the latest version of the boxed value.
+        pub fn get(&self) -> RcuGuard<'_, T> {
+            RcuGuard(self.0.read().unwrap())
+        }
+
         /// Replace the boxed value with a new value.  The old value
         /// will be destructed once all readers have completed.
         pub fn write(&self, new_value: T) {
@@ -63,11 +79,24 @@ mod rcu_impl {
     }
 }
 
-#[cfg(feature = "rcu-mutex-arc")]
+#[cfg(all(feature = "rcu-mutex-arc", not(doc)))]
 mod rcu_impl {
     use std::sync::{Arc, Mutex};
 
     pub struct RcuBox<T>(Mutex<Arc<T>>);
+
+    pub struct RcuGuard<'a, T> {
+        phantom: std::marker::PhantomData<&'a T>,
+        arc: Arc<T>,
+    }
+
+    impl<T> std::ops::Deref for RcuGuard<'_, T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            self.arc.deref()
+        }
+    }
 
     impl<T> RcuBox<T> {
         pub fn new(value: T) -> Self {
@@ -81,6 +110,14 @@ mod rcu_impl {
             f(&*arc)
         }
 
+        pub fn get(&self) -> RcuGuard<'_, T> {
+            let lock = self.0.lock().unwrap();
+            RcuGuard {
+                phantom: std::marker::PhantomData,
+                arc: lock.clone(),
+            }
+        }
+
         pub fn write(&self, new_value: T) {
             let mut lock = self.0.lock().unwrap();
             let old = std::mem::replace(&mut *lock, Arc::new(new_value));
@@ -90,12 +127,27 @@ mod rcu_impl {
     }
 }
 
-#[cfg(feature = "rcu-crossbeam-epoch")]
+#[cfg(all(feature = "rcu-crossbeam-epoch", not(doc)))]
 mod rcu_impl {
     use crossbeam_epoch as epoch;
     use std::sync::atomic::Ordering;
 
     pub struct RcuBox<T>(epoch::Atomic<T>);
+
+    pub struct RcuGuard<'a, T> {
+        guard: epoch::Guard,
+        atomic: &'a epoch::Atomic<T>,
+    }
+
+    impl<T> std::ops::Deref for RcuGuard<'_, T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            let ptr = self.atomic.load(Ordering::Acquire, &self.guard);
+            // SAFETY: we only allow readers to access "live" values
+            unsafe { ptr.deref() }
+        }
+    }
 
     impl<T> RcuBox<T> {
         pub fn new(value: T) -> Self {
@@ -108,6 +160,13 @@ mod rcu_impl {
             // SAFETY: we only allow readers to access "live" values
             let ref_ = unsafe { ptr.deref() };
             f(ref_)
+        }
+
+        pub fn get(&self) -> RcuGuard<'_, T> {
+            RcuGuard {
+                guard: epoch::pin(),
+                atomic: &self.0,
+            }
         }
 
         pub fn write(&self, new_value: T) {
@@ -123,9 +182,26 @@ mod rcu_impl {
     }
 }
 
-#[cfg(feature = "rcu-aarc")]
+// NOTE: `rcu-aarc` doesn't actually compile because of the requirement that
+// the contained type has static lifetime.  However -- I think we *could* work
+// with this constraint in most cases if we change type annotations
+// in some places, so I'm keeping it around for now.
+#[cfg(all(feature = "rcu-aarc", not(doc)))]
 mod rcu_impl {
     pub struct RcuBox<T: 'static>(aarc::AtomicArc<T>);
+
+    pub struct RcuGuard<'a, T> {
+        phantom: std::marker::PhantomData<&'a T>,
+        snapshot: aarc::Snapshot<T>,
+    }
+
+    impl<T> std::ops::Deref for RcuGuard<'_, T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            self.snapshot.deref()
+        }
+    }
 
     impl<T> RcuBox<T> {
         pub fn new(value: T) -> Self {
@@ -134,6 +210,13 @@ mod rcu_impl {
 
         pub fn inspect<U>(&self, f: impl FnOnce(&T) -> U) -> U {
             f(&*self.0.load::<aarc::Snapshot<_>>().unwrap())
+        }
+
+        pub fn get(&self) -> RcuGuard<'_, T> {
+            RcuGuard {
+                phantom: std::marker::PhantomData,
+                snapshot: self.0.load::<aarc::Snapshot<_>>().unwrap(),
+            }
         }
 
         pub fn write(&self, new_value: T) {
