@@ -247,18 +247,17 @@ impl<T> KmLinkMsg<T> {
 /// Stateful key manager for ZDP.  Requires an instance of a [KeyManagerStateMachine] to do the actual work.
 /// One of these is needed on every adap-node or node-node link.
 #[derive(Debug, Clone)]
-pub struct KeyManager<'mgr> {
-    shared: Arc<KmShared<'mgr>>,
+pub struct KeyManager {
+    shared: Arc<KmShared>,
 }
 
 #[derive(Debug)]
-struct KmShared<'mgr> {
-    state: Mutex<KmState<'mgr>>,
+struct KmShared {
+    state: Mutex<KmState>,
 }
 
-struct KmState<'mgr> {
-    // Lifetime hint here asserts that the impl of KeyManagerStateMachine must live as long as the KeyManager it is passed to.
-    statemachine: Box<dyn KeyManagerStateMachine + 'mgr>,
+struct KmState {
+    statemachine: Box<dyn KeyManagerStateMachine>,
     link_id: zpr::LinkId,
     kmsettings: KmSettings,
     sa_id: zpr::SaId,                     // current SA identifier
@@ -266,7 +265,7 @@ struct KmState<'mgr> {
     ts: KmTransportSA,
 }
 
-impl fmt::Debug for KmState<'_> {
+impl fmt::Debug for KmState {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
@@ -276,13 +275,10 @@ impl fmt::Debug for KmState<'_> {
     }
 }
 
-impl KeyManager<'_> {
+impl KeyManager {
     /// A new KeyManager for a link.
     /// - `statemachine` is the key management algorithm.
-    pub fn new<'a>(
-        link_id: zpr::LinkId,
-        statemachine: Box<dyn KeyManagerStateMachine>,
-    ) -> KeyManager<'a> {
+    pub fn new(link_id: zpr::LinkId, statemachine: Box<dyn KeyManagerStateMachine>) -> KeyManager {
         let settings = statemachine.get_settings();
 
         KeyManager {

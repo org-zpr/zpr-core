@@ -40,21 +40,21 @@ pub struct PeerState<'pktbuf> {
     pub mgmt_processor_worker: task::JoinHandle<()>,
 }
 
-struct PeerKmState<'pktbuf> {
-    handle: Option<KmHandle<'pktbuf>>,
+struct PeerKmState {
+    handle: Option<KmHandle>,
     sa_established: AtomicBool, // if TRUE then `transport_sa` is valid
     transport_sa: KmTransportSA,
 }
 
 /// The Key Management "handle" is used by the km_multiplexor to hold per-link
 /// state for the key manager state machine.
-pub struct KmHandle<'pktbuf> {
+pub struct KmHandle {
     pub join_handle: JoinHandle<()>,
-    pub ctok: CancellationToken,  // for this KeyManager
-    pub mgr: KeyManager<'pktbuf>, // The manager must remain valid for lifetime of the link
+    pub ctok: CancellationToken, // for this KeyManager
+    pub mgr: KeyManager,
 }
 
-impl<'pktbuf> PeerKmState<'pktbuf> {
+impl PeerKmState {
     /// Create a new, empty state.
     fn new() -> Self {
         Self {
@@ -108,7 +108,7 @@ pub struct PeerTable<'pktbuf> {
     sa_to_link: DashMap<SubstrateAddr, LinkId>,
 
     // TODO: put this into the "peer_state" slab! (https://github.com/org-zpr/zpr-core/issues/388)
-    link_to_km_state: DashMap<LinkId, PeerKmState<'pktbuf>>,
+    link_to_km_state: DashMap<LinkId, PeerKmState>,
 }
 
 #[derive(Debug)]
@@ -216,7 +216,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
 
     /// At some point shortly after the link security assocaition is initialized, the [km_multiplexor] will
     /// stash its handle in here.
-    pub fn set_km_handle(&self, link_id: LinkId, handle: KmHandle<'pktbuf>) {
+    pub fn set_km_handle(&self, link_id: LinkId, handle: KmHandle) {
         if let Some(mut km_state) = self.link_to_km_state.get_mut(&link_id) {
             km_state.handle = Some(handle);
         } else {
@@ -259,7 +259,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         }
     }
 
-    pub fn clone_km_manager(&self, link_id: LinkId) -> Option<KeyManager<'pktbuf>> {
+    pub fn clone_km_manager(&self, link_id: LinkId) -> Option<KeyManager> {
         match self.link_to_km_state.get(&link_id) {
             Some(km_state) if km_state.handle.is_some() => {
                 Some(km_state.handle.as_ref().unwrap().mgr.clone())
@@ -269,7 +269,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
     }
 
     /// Remove the key manager state from the link, returning the optional KmHandle that was set.
-    pub fn remove_km_state(&self, link_id: LinkId) -> Option<KmHandle<'pktbuf>> {
+    pub fn remove_km_state(&self, link_id: LinkId) -> Option<KmHandle> {
         if let Some((_, state)) = self.link_to_km_state.remove(&link_id) {
             state.handle
         } else {
