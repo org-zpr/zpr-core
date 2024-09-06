@@ -5,9 +5,10 @@
 #![allow(dead_code)]
 
 use crate::defs::FiveTuple;
-use crate::rcu::RcuBox;
+use crate::rcu::{RcuBox, RcuGuard};
 use crate::zpr::{CompressionMode, StreamId};
 use cslab::{RcuCslab, RcuCslabReader};
+use dashmap::mapref::one::Ref as DashMapRef;
 use dashmap::DashMap;
 use std::sync::Mutex;
 
@@ -29,6 +30,16 @@ pub struct AgentLookupTable {
     table: DashMap<FiveTuple, AltEntry>,
 }
 
+pub struct AltEntryGuard<'a>(DashMapRef<'a, FiveTuple, AltEntry>);
+
+impl std::ops::Deref for AltEntryGuard<'_> {
+    type Target = AltEntry;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
+    }
+}
+
 impl AgentLookupTable {
     pub fn new() -> Self {
         Self {
@@ -43,6 +54,10 @@ impl AgentLookupTable {
         inspector: impl FnOnce(&AltEntry) -> T,
     ) -> Option<T> {
         self.table.get(five_tuple).map(|entry| inspector(&*entry))
+    }
+
+    pub fn get(&self, five_tuple: &FiveTuple) -> Option<AltEntryGuard<'_>> {
+        self.table.get(five_tuple).map(AltEntryGuard)
     }
 
     // FIXME: ideally we want `try_insert()` but dashmap doesn't support that…
@@ -81,6 +96,19 @@ pub struct DockLookupTable {
     reader: RcuBox<RcuCslabReader<DltPep>>,
 }
 
+pub struct DltPepGuard<'a> {
+    guard: RcuGuard<'a, RcuCslabReader<DltPep>>,
+    key: usize,
+}
+
+impl std::ops::Deref for DltPepGuard<'_> {
+    type Target = DltPep;
+
+    fn deref(&self) -> &Self::Target {
+        self.guard.get(self.key).unwrap()
+    }
+}
+
 impl DockLookupTable {
     pub fn new() -> Self {
         let table = RcuCslab::with_fixed_capacity(DOCK_LOOKUP_TABLE_SIZE);
@@ -99,6 +127,17 @@ impl DockLookupTable {
     ) -> Option<T> {
         self.reader
             .inspect(|reader| reader.get(tether_id as usize).map(inspector))
+    }
+
+    pub fn get(&self, tether_id: StreamId) -> Option<DltPepGuard<'_>> {
+        let guard = self.reader.get();
+        if guard.get(tether_id as usize).is_none() {
+            return None;
+        }
+        Some(DltPepGuard {
+            guard,
+            key: tether_id as usize,
+        })
     }
 
     pub fn insert(&self, pep: DltPep) -> Result<StreamId, ()> {

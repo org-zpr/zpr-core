@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use crate::rcu::RcuBox;
+use crate::rcu::{RcuBox, RcuGuard};
 use crate::zpr::{LinkId, StreamId};
 use cslab::{RcuCslab, RcuCslabReader};
 use std::sync::Mutex;
@@ -30,6 +30,19 @@ pub struct DockForwardingTable {
     reader: RcuBox<RcuCslabReader<DftPep>>,
 }
 
+pub struct DftPepGuard<'a> {
+    guard: RcuGuard<'a, RcuCslabReader<DftPep>>,
+    key: usize,
+}
+
+impl std::ops::Deref for DftPepGuard<'_> {
+    type Target = DftPep;
+
+    fn deref(&self) -> &Self::Target {
+        self.guard.get(self.key).unwrap()
+    }
+}
+
 impl DockForwardingTable {
     pub fn new() -> Self {
         let table = RcuCslab::with_fixed_capacity(DOCK_FORWARDING_TABLE_SIZE);
@@ -48,6 +61,17 @@ impl DockForwardingTable {
     ) -> Option<T> {
         self.reader
             .inspect(|reader| reader.get(tether_id as usize).map(inspector))
+    }
+
+    pub fn get(&self, tether_id: StreamId) -> Option<DftPepGuard<'_>> {
+        let guard = self.reader.get();
+        if guard.get(tether_id as usize).is_none() {
+            return None;
+        }
+        Some(DftPepGuard {
+            guard,
+            key: tether_id as usize,
+        })
     }
 
     pub fn insert(&self, pep: DftPep) -> Result<StreamId, ()> {

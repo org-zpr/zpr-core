@@ -2,7 +2,7 @@
 use crate::dock_tables::DockForwardingTable;
 use crate::km::{KeyManager, KmTransportSA, UnimplCodec, ZPIPair};
 use crate::queues;
-use crate::rcu::RcuBox;
+use crate::rcu::{RcuBox, RcuGuard};
 use crate::sync_req;
 use crate::zpr::{LinkId, SubstrateAddr};
 use cslab::{RcuCslab, RcuCslabReader};
@@ -111,6 +111,19 @@ pub struct PeerTable<'pktbuf> {
     link_to_km_state: DashMap<LinkId, PeerKmState>,
 }
 
+pub struct PeerStateGuard<'a, 'pktbuf> {
+    guard: RcuGuard<'a, RcuCslabReader<PeerState<'pktbuf>>>,
+    key: usize,
+}
+
+impl<'pktbuf> std::ops::Deref for PeerStateGuard<'_, 'pktbuf> {
+    type Target = PeerState<'pktbuf>;
+
+    fn deref(&self) -> &Self::Target {
+        self.guard.get(self.key).unwrap()
+    }
+}
+
 #[derive(Debug)]
 pub enum PeerInsertError {
     TableFull,
@@ -189,6 +202,17 @@ impl<'pktbuf> PeerTable<'pktbuf> {
     ) -> Option<T> {
         self.peer_slab_reader
             .inspect(|r| r.get(link_id as usize).map(inspector))
+    }
+
+    pub fn get(&self, link_id: LinkId) -> Option<PeerStateGuard<'_, 'pktbuf>> {
+        let guard = self.peer_slab_reader.get();
+        if guard.get(link_id as usize).is_none() {
+            return None;
+        }
+        Some(PeerStateGuard {
+            guard,
+            key: link_id as usize,
+        })
     }
 
     /// Initialize state for the security association on the link.  The security association starts out as
