@@ -14,7 +14,7 @@ use bytes::BufMut;
 
 use ph::config;
 use ph::km;
-use ph::km::{KmSignal, KeyManager};
+use ph::km::{KeyManager, KmSignal};
 use ph::km_noise::KmNoise;
 use ph::packet::Packet;
 use ph::zdp::*;
@@ -26,8 +26,8 @@ use zerocopy::FromBytes;
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use snow;
 
-const ZPI_FULL_ENC:u8 = 100;
-const ZPI_TRANSIT_HMAC:u8 = 101;
+const ZPI_FULL_ENC: u8 = 100;
+const ZPI_TRANSIT_HMAC: u8 = 101;
 
 pub struct ZDPServer {
     addr: SocketAddr, // listen address, "host:port"
