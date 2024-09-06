@@ -148,7 +148,7 @@ async fn send_sync_req_helper<'pktbuf>(
 
     let Some(mut response_future) =
         asm.peer_table.inspect(link_id, |peer_state|
-            peer_state.sync_req_state.install_response_listener()
+            peer_state.sync_req_state.install_response_listener(&permit)
         ) else { return Err(SyncReqError::LinkClosed); };
 
     for _i in 0..=config::DEFAULT_REQUEST_RETRY_COUNT {
@@ -183,7 +183,7 @@ async fn send_sync_req_helper<'pktbuf>(
             _ = sleep(Duration::from_secs(config::DEFAULT_REQUEST_RETRY_TIMER as u64)) => ()
         }
     }
-    asm.peer_table.inspect(link_id, |peer_state| peer_state.sync_req_state.clear_response_listener());
+    asm.peer_table.inspect(link_id, |peer_state| peer_state.sync_req_state.clear_response_listener(&permit));
     let response = response_future.hangup();
     drop(permit);
     match_received(
