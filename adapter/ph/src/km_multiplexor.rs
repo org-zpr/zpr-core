@@ -8,7 +8,7 @@ use bytes::Bytes;
 use std::future::Future;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[derive(Debug)]
 pub enum KmMsgProcessingError {
@@ -83,7 +83,7 @@ async fn signal_worker<'pktbuf>(
                             }
                         }
                     }
-                    _ => {} // TODO: Handle other signals.
+                    _ => { warn!("km_multiplexor: unhandled signal on link {}: {:?}", linkmsg.link_id, linkmsg.msg); }
                 }
             }
         }
