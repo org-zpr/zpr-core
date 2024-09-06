@@ -2,6 +2,9 @@
 //! with the socket, performs action based on received command
 //! To avoid excess parsing, the command must not have spaces
 
+#![allow(unused_imports)]
+#![allow(dead_code)]
+
 use crate::assembly::Assembly;
 use crate::config;
 use crate::test_packet::TestPacketMetrics;
@@ -195,8 +198,12 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
 /// Performs a performance sample on the PH by measuring the queue depths and the
 /// packet latencies throughout the system. Requires the duration of the
 /// sample as well as the number of samples per second.
-async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
-    let send_duration = Duration::new(duration.parse().unwrap(), 0);
+async fn perf_sample(_asm: &Assembly<'_>, _duration: &str, _rate: &str) -> String {
+    // FIXME: There are now a dynamically allocated number of mgmt_processors...
+    // this needs to be restructured to account for that fact.
+    Default::default()
+
+    /*let send_duration = Duration::new(duration.parse().unwrap(), 0);
     let begin_time = Instant::now();
     let mut send_interval = interval(Duration::new(0, 1000000000 / rate.parse::<u32>().unwrap()));
 
@@ -230,7 +237,7 @@ async fn perf_sample(asm: &Assembly<'_>, duration: &str, rate: &str) -> String {
         &mgmt_processor_batch,
     );
 
-    format!("{mgmt_processor}")
+    format!("{mgmt_processor}")*/
 }
 
 /// Helper for perf_sample

@@ -1,5 +1,5 @@
 use crate::adapter_tables::{AltEntry, AltPep};
-use crate::assembly::Assembly;
+use crate::assembly::{Assembly, PhMode};
 use crate::counters_enum::CounterType;
 use crate::fastpath;
 use crate::mgmt;
@@ -35,10 +35,19 @@ pub fn launch<'pktbuf>(
 // RFC 6.5 § 6.3.11
 async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pktbuf>) {
     // TODO: node version... that just allocates a tether ID directly from the internal dock, no messages exchanged
+    if matches!(asm.ph_mode, PhMode::Node) {
+        return;
+    }
 
     // just extract 5t and drop packet for now, storing & resending it later is a TODO
     let five_tuple = *pkt.metadata().five_tuple();
     fastpath::drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
+
+    // VERY HACK: there's some race condition which IPv6's
+    // rapid link-local config traffic exacerbates
+    if five_tuple.l3_type == zpr::L3Type::Ipv6 {
+        return;
+    }
 
     // if there's already an entry, this is a duplicate request
     // (NOTE: we should be the only ones modifying this table!)
@@ -53,13 +62,16 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
     // compress only IP addresses for now
     let compression_mode: zpr::CompressionMode = 0;
 
-    eprintln!("Issuing bind request for {}", five_tuple);
+    eprintln!(
+        "{}: Issuing bind request for {}",
+        asm.system_name, five_tuple
+    );
 
     // send Bind request
 
     match mgmt::send_bind_agent_address_request(
         asm,
-        asm.adapter_docking_session_id,
+        asm.hack_get_adapter_docking_session_id(),
         compression_mode,
         five_tuple,
     )
@@ -67,7 +79,10 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
     {
         Ok(tether_id) => {
             // Bind succeeded; add to ALT.
-            eprintln!("Bind of {} succeeded: {}", five_tuple, tether_id);
+            eprintln!(
+                "{}: Bind of {} succeeded: {}",
+                asm.system_name, five_tuple, tether_id
+            );
             asm.alt
                 .alter(&five_tuple, |entry| {
                     assert!(matches!(entry, AltEntry::Pending));
@@ -81,7 +96,10 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
 
         Err(err) => {
             // Bind failed; remove pending entry from ALT.
-            eprintln!("Bind of {} failed: {}", five_tuple, err);
+            eprintln!(
+                "{}: Bind of {} failed: {}",
+                asm.system_name, five_tuple, err
+            );
             asm.alt.remove(&five_tuple);
         }
     }

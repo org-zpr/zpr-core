@@ -9,8 +9,8 @@ use std::time;
 use std::time::Duration;
 
 pub struct XorKeyManager {
-    state: KMSMState,
-    settings: KMSettings,
+    state: KmSMState,
+    settings: KmSettings,
     hello_t: time::Instant,
     initiate: bool,
 }
@@ -18,8 +18,8 @@ pub struct XorKeyManager {
 impl XorKeyManager {
     pub fn new(initiate: bool) -> XorKeyManager {
         XorKeyManager {
-            state: KMSMState::Configuring,
-            settings: KMSettings {
+            state: KmSMState::Configuring,
+            settings: KmSettings {
                 zdp_km_type: zpr::KM_ID_EXPERIMENTAL,
                 padlen: 2, // we need 2 extra bytes
                 alignment: 0,
@@ -40,10 +40,10 @@ impl Codec for XorCodec {
         self: &Self,
         payload: &[u8],
         message: &mut [u8],
-    ) -> Result<usize, KMError> {
+    ) -> Result<usize, EncryptionError> {
         let sz = payload.len() + 2; // SIZE includes the 2 byte size field.
         if sz > u16::MAX as usize {
-            return Err(KMError::EncryptionError);
+            return Err(EncryptionError::MessageTooLarge);
         }
         let szbytes = (sz as u16).to_be_bytes();
         message[0..2].copy_from_slice(&szbytes); // write SIZE as u16 to front of buffer
@@ -60,17 +60,17 @@ impl Codec for XorCodec {
         self: &Self,
         payload: &[u8],
         message: &mut [u8],
-    ) -> Result<usize, KMError> {
+    ) -> Result<usize, DecryptionError> {
         let buf_sz = payload.len();
         if buf_sz < 2 {
-            return Err(KMError::EncryptionError);
+            return Err(DecryptionError::MessageTooShort);
         }
         let msg_sz: u16 = u16::from_be_bytes([payload[0], payload[1]]);
         if buf_sz < msg_sz as usize {
-            return Err(KMError::EncryptionError);
+            return Err(DecryptionError::ParseError);
         }
         if msg_sz < 2 {
-            return Err(KMError::EncryptionError);
+            return Err(DecryptionError::MessageTooShort);
         }
         let msg_len: usize = (msg_sz - 2) as usize;
 
@@ -83,16 +83,16 @@ impl Codec for XorCodec {
 }
 
 impl KeyManagerStateMachine for XorKeyManager {
-    fn get_settings(&self) -> KMSettings {
+    fn get_settings(&self) -> KmSettings {
         self.settings.clone()
     }
 
-    fn get_state(&self) -> KMSMState {
+    fn get_state(&self) -> KmSMState {
         self.state.clone()
     }
 
-    fn reset(&mut self) -> Result<Option<Bytes>, KMError> {
-        self.state = KMSMState::Configuring;
+    fn reset(&mut self) -> Result<Option<Bytes>, KmError> {
+        self.state = KmSMState::Configuring;
         if self.initiate {
             let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
             self.hello_t = time::Instant::now();
@@ -102,10 +102,10 @@ impl KeyManagerStateMachine for XorKeyManager {
         }
     }
 
-    fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KMError> {
-        if self.state == KMSMState::Configuring {
+    fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KmError> {
+        if self.state == KmSMState::Configuring {
             let codec = Arc::new(XorCodec {});
-            self.state = KMSMState::Transport(KMTransportState::new_empty_with_codec(codec));
+            self.state = KmSMState::Transport(KmTransportSA::new_with_codec(codec));
             if !self.initiate {
                 // Did not initiate, so send a reply back.
                 let handshake_reply = Bytes::from_static(&[0, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD
@@ -115,8 +115,8 @@ impl KeyManagerStateMachine for XorKeyManager {
         Ok(None)
     }
 
-    fn tick(&mut self) -> Result<Option<Bytes>, KMError> {
-        if self.state == KMSMState::Configuring
+    fn tick(&mut self) -> Result<Option<Bytes>, KmError> {
+        if self.state == KmSMState::Configuring
             && self.initiate
             && self.hello_t.elapsed() > Duration::from_secs(5)
         {

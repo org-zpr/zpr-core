@@ -4,11 +4,13 @@
 //! This implies that all functions here must be non-async.
 
 use crate::adapter_tables::AltEntry;
-use crate::assembly::Assembly;
+use crate::assembly::{Assembly, PhMode};
 use crate::classifier::{self, ClassifierResult};
-use crate::compress;
+use crate::config;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
+use crate::km::Codec;
+use crate::km_noise::NOISE_PADLEN;
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::peer_table::PeerState;
@@ -16,10 +18,11 @@ use crate::queues::TryEnqueueError;
 use crate::zdp;
 use crate::zdp_ll;
 use crate::zpr;
+use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
-use std::net::SocketAddr;
 use std::time::SystemTime;
+use tracing::{error, info, warn};
 use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
@@ -30,6 +33,8 @@ pub fn drop_and_count<'pktbuf>(
     pkt: Packet<'pktbuf>,
     reason: impl Into<CounterType>,
 ) {
+    let reason = reason.into();
+    eprintln!("{}: dropping packet because {}", asm.system_name, reason);
     asm.buffer_stack.put_buffer(pkt.destroy());
     asm.counters[reason.into()].increment();
 }
@@ -181,23 +186,42 @@ pub fn maybe_capture_batch<'a, 'pktbuf: 'a>(
 }
 
 /// Encrypt a ZDP packet according to its ZPI header (which is not encrypted).
-pub fn encrypt<'pktbuf>(
-    _asm: &Assembly<'pktbuf>,
-    _link_id: zpr::LinkId,
-    pkt: &mut Packet<'pktbuf>,
-) {
-    let zpi_hdr =
-        zdp::ZdpZpiHeader::ref_from_prefix(pkt.body()).expect("ZPI header must be present");
-    let zpi = zpi_hdr.zpi as zpr::Zpi;
+pub fn encrypt_null<'pktbuf>(pkt: &mut Packet<'pktbuf>) {
+    // RFC 6.5 § 5.25.2
+    pkt.put(
+        net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]).as_slice(),
+    );
+}
 
-    if zpi == zpr::ZPI_0 {
-        // RFC 6.5 § 5.25.2
-        pkt.put(
-            net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..])
-                .as_slice(),
-        );
-    } else {
-        todo!("encryption");
+pub fn encrypt_hmac<'pktbuf>(_send_hmac_key: [u8; 32], _pkt: &mut Packet<'pktbuf>) {
+    // Run the blake hash key'd with the `send_hmac_key` on the correct parts of the packet
+    // and write the (truncated) hash value to the correct header location.
+
+    info!("encrypt_hmac: not implemented - NOP");
+}
+
+pub fn encrypt_full<'pktbuf>(
+    _asm: &Assembly<'pktbuf>,
+    codec: &dyn Codec,
+    pkt: &mut Packet<'pktbuf>,
+) -> Result<(), km::EncryptionError> {
+    // TODO: Could do some length checks here on the packet body.  Is it too short? Too long? Etc.
+
+    let zpi_hdr_len = std::mem::size_of::<zdp::ZdpZpiHeader>(); // = 1
+
+    let mut enc_buf = [0u8; config::PACKET_BUFFER_SIZE];
+    let encr_len = pkt.body().len() - zpi_hdr_len; // Everything except the ZPI byte
+
+    match codec.encrypt_transport_stateless(
+        &pkt.body()[zpi_hdr_len..encr_len + zpi_hdr_len],
+        &mut enc_buf,
+    ) {
+        Ok(len) => {
+            pkt.shrink_by(encr_len); // remove cleartext body, leavign ZPI
+            pkt.put(&enc_buf[0..len]); // copy ciphertext body over
+            Ok(())
+        }
+        Err(e) => Err(e),
     }
 }
 
@@ -221,47 +245,117 @@ impl From<DecryptError> for CounterType {
 }
 
 /// Decrypt a ZDP packet according to its ZPI header (which is not removed).
-pub fn decrypt<'pktbuf>(
-    _asm: &Assembly<'pktbuf>,
-    _link_id: zpr::LinkId,
+pub fn decrypt_null<'pktbuf>(pkt: &mut Packet<'pktbuf>) -> Result<(), DecryptError> {
+    // RFC 6.5 § 5.25.2
+    if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
+        return Err(DecryptError::MicvFailure);
+    }
+
+    pkt.shrink_by(2); // remove checksum
+
+    Ok(())
+}
+
+/// Decrypt a ZDP packet according to its ZPI header (which is not removed).
+pub fn decrypt_hmac<'pktbuf>(
+    _recv_hmac_key: [u8; 32],
+    _pkt: &mut Packet<'pktbuf>,
+) -> Result<(), DecryptError> {
+    info!("decrypt_hmac: not implemented -- NOP");
+    Ok(())
+}
+
+/// Decrypt a ZDP packet according to its ZPI header (which is not removed).
+pub fn decrypt_full<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    codec: &dyn Codec,
+    padlen: usize,
     pkt: &mut Packet<'pktbuf>,
 ) -> Result<(), DecryptError> {
-    let zpi_hdr =
-        zdp::ZdpZpiHeader::ref_from_prefix(pkt.body()).ok_or(DecryptError::BadStructure)?;
-    let zpi = zpi_hdr.zpi as zpr::Zpi;
-
-    if zpi == zpr::ZPI_0 {
-        // RFC 6.5 § 5.25.2
-        if !net_defs::validate_inet_checksum(
-            &pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..],
-        ) {
-            return Err(DecryptError::MicvFailure);
-        }
-
-        pkt.shrink_by(2); // remove checksum
-
-        Ok(())
-    } else {
-        todo!("decryption");
+    if pkt.body().len() < 1 {
+        return Err(DecryptError::BadStructure);
     }
+    let encr_len = pkt.body().len() - 1;
+    if encr_len < padlen {
+        return Err(DecryptError::BadStructure);
+    }
+
+    let decr_buf = asm.buffer_stack.try_get_buffer().unwrap();
+
+    match codec.decrypt_transport_stateless(&pkt.body()[1..encr_len + 1], decr_buf) {
+        Ok(len) => {
+            // Copy the decrypted data back into the message -- do not overwrite ZPI.
+            pkt.shrink_by(encr_len); // remove ciphertext body, leave ZPI
+            pkt.put(&decr_buf[0..len]); // copy over cleartext body
+        }
+        Err(e) => {
+            error!("decryption failed: {}", e);
+            return Err(DecryptError::DecryptionFailure);
+        }
+    }
+    Ok(())
 }
 
 fn substrate_egress_common<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     link_id: zpr::LinkId,
-    zpi: zpr::Zpi,
     pkt: &mut Packet<'pktbuf>,
-) -> Option<zpr::SubstrateAddr> {
+) -> Result<Option<zpr::SubstrateAddr>, km::EncryptionError> {
     // TODO: should we add ZDP header here also??
 
-    encap_zpi(asm, link_id, zpi, pkt);
+    let zdp_hdr = match zdp::ZdpBaseHeader::ref_from_prefix(&pkt.body()) {
+        Some(zdp_hdr) => zdp_hdr,
+        None => {
+            error!("egress: link {}: failed to parse the ZDP header", link_id);
+            return Err(km::EncryptionError::ParseError);
+        }
+    };
+    let transit = zdp_hdr.packet_type == zdp::ZdpPacketType::TransitPacket;
 
+    // Get the security association for this link and extrant the correct ZPI.
+    // TODO: Is there some way to avoid a clone here?
+    let real_zpi;
+    let transport_sa = match asm
+        .peer_table
+        .clone_established_transport_association(link_id)
+    {
+        Some(transport_sa) => {
+            if transit {
+                real_zpi = transport_sa.recv_zpis.hmac;
+            } else {
+                real_zpi = transport_sa.recv_zpis.encr;
+            }
+            assert!(real_zpi != zpr::ZPI_0);
+            Some(transport_sa)
+        }
+        None => {
+            real_zpi = zpr::ZPI_0;
+            None
+        }
+    };
+
+    encap_zpi(asm, link_id, real_zpi, pkt);
     maybe_capture(asm, Direction::Outbound, pkt);
 
-    encrypt(asm, link_id, pkt);
+    match transport_sa {
+        Some(transport_sa) => {
+            if transit {
+                encrypt_hmac(transport_sa.send_hmac_key, pkt);
+            } else {
+                match encrypt_full(asm, &*transport_sa.codec, pkt) {
+                    Ok(()) => (),
+                    Err(err) => return Err(err),
+                }
+            }
+        }
+        None => {
+            encrypt_null(pkt);
+        }
+    }
 
-    asm.peer_table
-        .inspect(link_id, |peer_state: &PeerState| peer_state.substrate_addr)
+    Ok(asm
+        .peer_table
+        .inspect(link_id, |peer_state: &PeerState| peer_state.substrate_addr))
 }
 
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
@@ -269,12 +363,19 @@ fn substrate_egress_common<'pktbuf>(
 pub fn substrate_egress<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     link_id: zpr::LinkId,
-    zpi: zpr::Zpi,
     mut pkt: Packet<'pktbuf>,
 ) {
-    let Some(dest_sa) = substrate_egress_common(asm, link_id, zpi, &mut pkt) else {
-        drop_and_count(asm, pkt, CounterType::PeerRemoved);
-        return;
+    let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
+        Ok(Some(dest_sa)) => dest_sa,
+        Ok(None) => {
+            drop_and_count(asm, pkt, CounterType::PeerRemoved);
+            return;
+        }
+        Err(err) => {
+            error!("egress: link {}: encryption error: {}", link_id, err);
+            drop_and_count(asm, pkt, CounterType::EncryptionFailure);
+            return;
+        }
     };
 
     match asm.substrate_egress.try_enqueue_packet(
@@ -293,12 +394,19 @@ pub fn substrate_egress<'pktbuf>(
 pub async fn substrate_egress_blocking<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     link_id: zpr::LinkId,
-    zpi: zpr::Zpi,
     mut pkt: Packet<'pktbuf>,
 ) {
-    let Some(dest_sa) = substrate_egress_common(asm, link_id, zpi, &mut pkt) else {
-        drop_and_count(asm, pkt, CounterType::PeerRemoved);
-        return;
+    let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
+        Ok(Some(dest_sa)) => dest_sa,
+        Ok(None) => {
+            drop_and_count(asm, pkt, CounterType::PeerRemoved);
+            return;
+        }
+        Err(err) => {
+            error!("egress: link {}: encryption error: {}", link_id, err);
+            drop_and_count(asm, pkt, CounterType::EncryptionFailure);
+            return;
+        }
     };
 
     match asm
@@ -310,33 +418,96 @@ pub async fn substrate_egress_blocking<'pktbuf>(
         .await
     {
         Ok(()) => (),
-        Err(pkt) => drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr),
+        Err(pkt) => {
+            drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr);
+        }
     }
 }
 
-/// Process packets ingressing from the specified SA.
+/// Process packets ingressing from the specified address.
 pub fn substrate_ingress<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    peer_sa: &SocketAddr,
+    peer_sa: &zpr::SubstrateAddr,
     mut pkt: Packet<'pktbuf>,
 ) {
     asm.counters[CounterType::InPacksRec].increment();
+
+    eprintln!("{}: got packet from {}", asm.system_name, peer_sa);
 
     let Some(ingress_link_id) = asm.peer_table.lookup_peer(peer_sa) else {
         drop_and_count(asm, pkt, CounterType::UnknownPeer);
         return;
     };
 
-    match decrypt(asm, ingress_link_id, &mut pkt) {
-        Ok(()) => (),
-        Err(err) => {
-            drop_and_count(asm, pkt, err);
+    // Read, but do not remove the ZPI header
+    let Some(zpi_hdr) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
+        drop_and_count(asm, pkt, CounterType::BadStructure);
+        return;
+    };
+
+    // If a ZPI is setup on this link, then we expect the message to use one of the valid
+    // ZPI values.
+    let secure = match asm
+        .peer_table
+        .clone_established_transport_association(ingress_link_id)
+    {
+        Some(transport_sa) => {
+            if zpi_hdr.zpi == transport_sa.recv_zpis.hmac {
+                match decrypt_hmac(transport_sa.recv_hmac_key, &mut pkt) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        drop_and_count(asm, pkt, err);
+                        return;
+                    }
+                }
+            } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
+                // TODO: Put padlen in state somewhere too
+                match decrypt_full(asm, &*transport_sa.codec, NOISE_PADLEN, &mut pkt) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        drop_and_count(asm, pkt, err);
+                        return;
+                    }
+                }
+            } else {
+                // We have an SA and ZPI does not match.
+                info!(
+                    "ingress: link {}: unexpected ZPI value {} (expected {:?})",
+                    ingress_link_id, zpi_hdr.zpi, transport_sa.recv_zpis
+                );
+                drop_and_count(asm, pkt, CounterType::UnknownZpi);
+                return;
+            }
+        }
+        None => {
+            // Either no security associatio on link, or it is not yet established.
+            false
+        }
+    };
+
+    if !secure {
+        // Not under a security assocation  which means only ZPI 0 is allowed
+        if zpi_hdr.zpi != zpr::ZPI_0 {
+            info!(
+                "ingress: link {}: ZPI {} not allowed on unestablished SA",
+                ingress_link_id, zpi_hdr.zpi
+            );
+            drop_and_count(asm, pkt, CounterType::UnknownZpi);
             return;
+        }
+        match decrypt_null(&mut pkt) {
+            Ok(()) => (),
+            Err(err) => {
+                drop_and_count(asm, pkt, err);
+                return;
+            }
         }
     }
 
+    // Watch out -- may not be secure
     maybe_capture(asm, Direction::Inbound, &mut pkt);
 
+    // now pop the ZPI off the packet
     let _zpi = match decap_zpi(asm, ingress_link_id, &mut pkt) {
         Ok(zpi) => zpi,
         Err(err) => {
@@ -349,17 +520,52 @@ pub fn substrate_ingress<'pktbuf>(
         return drop_and_count(asm, pkt, CounterType::BadStructure);
     };
 
+    // In ZPI zero only KM messages are allowed (well, and APR ARP which we don't support yet)
+    // Can be overridden (FOR TESTING ONLY) in the flags.
+    if !secure && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
+        if asm.flags.allow_insecure_zpi_zero {
+            warn!("operating in insecure mode - allow_insecure_zpi_zero is ENABLED");
+        } else {
+            warn!(
+                "ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
+                ingress_link_id, base_hdr.packet_type
+            );
+            drop_and_count(asm, pkt, CounterType::OtherError);
+            return;
+        }
+    }
+
     // enqueue non-transit packets with the management processor
     if base_hdr.packet_type != zdp::ZdpPacketType::TransitPacket {
         // TODO: should we peel off the ZDP header here??
         // (instead of this silly code to restore it?)
         *pkt.alloc_zeroed_header() = base_hdr;
 
-        match asm.mgmt_processor.try_enqueue_packet(ingress_link_id, pkt) {
-            Ok(()) => (),
-            Err(TryEnqueueError::Full(pkt)) => {
-                drop_and_count(asm, pkt, CounterType::QueueBackpressure)
-            }
+        eprintln!("{}: enqueueing!", asm.system_name);
+
+        // because of how `inspect` works the borrow checker can't track
+        // who consumes this when...
+        let mut pkt = Some(pkt);
+
+        if asm
+            .peer_table
+            .inspect(ingress_link_id, |peer_state| {
+                // note: we know `pkt` is still `Some` as we're the first to get to it
+                match peer_state
+                    .mgmt_processor
+                    .try_enqueue_packet(pkt.take().unwrap())
+                {
+                    Ok(()) => (),
+                    Err(TryEnqueueError::Full(pkt)) => {
+                        eprintln!("{}: queue backpressure!", asm.system_name);
+                        drop_and_count(asm, pkt, CounterType::QueueBackpressure);
+                    }
+                }
+            })
+            .is_none()
+        {
+            // note: we know `pkt` is still `Some` as we know the above closure hasn't been executed
+            drop_and_count(asm, pkt.take().unwrap(), CounterType::PeerRemoved);
         }
         return;
     }
@@ -514,18 +720,51 @@ pub fn forward<'pktbuf>(
     // TODO: node forwarding
 
     // adapter forwarding
-    if ingress_link_id == zpr::AGENT_LINK_ID {
-        // in from agent; out to dock
+    let egress_link =  // FIXME: this is a hack
+        if ingress_link_id == zpr::AGENT_LINK_ID {
+            0
+        } else {
+            match asm.ph_mode {
+                PhMode::Adapter => zpr::AGENT_LINK_ID,
+                PhMode::Node => (ingress_link_id + 1) % 2,
+            }
+        };
 
+    if egress_link == zpr::AGENT_LINK_ID {
+        agent_input(asm, ingress_stream_id, pkt);
+    } else {
         let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
         per_flow_hdr.stream_id = ingress_stream_id.into();
 
         let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
         base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
 
-        substrate_egress(asm, asm.adapter_docking_session_id, zpr::ZPI_0, pkt);
-    } else {
-        // in from dock; out to agent
-        agent_input(asm, ingress_stream_id, pkt);
+        substrate_egress(asm, egress_link, pkt);
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+    use crate::config::PACKET_BUFFER_SIZE;
+
+    #[test]
+    fn test_encrypt_decrypt_null() {
+        let mut buf = [0u8; PACKET_BUFFER_SIZE];
+        let mut pkt = Packet::new(&mut buf, 64);
+
+        pkt.put(&b"this is a test of encrypt zero"[..]);
+
+        let orig_len = pkt.body().len();
+
+        encrypt_null(&mut pkt);
+
+        assert!(pkt.body().len() == orig_len + 2); // did add checksum
+
+        let res = decrypt_null(&mut pkt);
+        assert!(res.is_ok());
+
+        assert!(pkt.body().len() == orig_len); // did remove checksum
     }
 }

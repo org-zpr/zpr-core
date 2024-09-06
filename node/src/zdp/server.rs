@@ -13,8 +13,9 @@ use tracing::info;
 use bytes::BufMut;
 
 use ph::config;
-use ph::km::{KMSignal, KeyManager};
-use ph::km_noise::KMNoise;
+use ph::km;
+use ph::km::{KeyManager, KmSignal};
+use ph::km_noise::KmNoise;
 use ph::packet::Packet;
 use ph::zdp::*;
 
@@ -25,8 +26,8 @@ use zerocopy::FromBytes;
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use snow;
 
-const ZPI_FULL_ENC:u8 = 100;
-const ZPI_TRANSIT_HMAC:u8 = 101;
+const ZPI_FULL_ENC: u8 = 100;
+const ZPI_TRANSIT_HMAC: u8 = 101;
 
 pub struct ZDPServer {
     addr: SocketAddr, // listen address, "host:port"
@@ -71,7 +72,7 @@ impl ZDPServer {
             private: self.noise_kp.private.clone(),
             public: self.noise_kp.public.clone(),
         };
-        let noise = match KMNoise::new(false, None, Some(kp), ZPI_FULL_ENC, ZPI_TRANSIT_HMAC) {
+        let noise = match KmNoise::new(false, None, Some(kp), ZPI_FULL_ENC, ZPI_TRANSIT_HMAC) {
             Ok(n) => n,
             Err(e) => {
                 info!("error creating noise km: {:?}", e);
@@ -80,7 +81,7 @@ impl ZDPServer {
         };
 
         // In real implemntation each client gets a KM instance.
-        let mgr = KeyManager::new(Box::new(noise));
+        let mgr = KeyManager::new(1, Box::new(noise));
         let mut mgr_cc = mgr.clone();
         tokio::spawn(async move {
             mgr_cc.start(km_ctok, km_tx, km_sig_tx).await.unwrap();
@@ -110,9 +111,9 @@ impl ZDPServer {
                                 if !sent_report && tt.elapsed() > Duration::from_secs(2) {
                                     let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
                                     let mut pkt =km_demo::build_zdp_report_packet(&mut buf, b"hello to you my darling client adapter!");
-                                    let send_zpis = mgr.get_send_zpis();
-                                    pkt.body_mut()[0] = send_zpis.encr;
-                                    match mgr.encrypt_transport(&mut pkt) {
+                                    let my_sa = mgr.get_transport_state().unwrap();
+                                    pkt.body_mut()[0] = my_sa.send_zpis.encr;
+                                    match km::encrypt_transport_zdp(&mut pkt, my_sa.codec.clone()) {
                                         Ok(_) => {
                                             match s_send.send_to(&pkt.body(), cur_client.unwrap()).await {
                                                 Ok(sz) => {
@@ -132,10 +133,10 @@ impl ZDPServer {
                             }
                         }
 
-                        Some(sig) = km_sig_rx.recv() => {
+                        Some(linkmsg) = km_sig_rx.recv() => {
                             // This is a signal from the KM.  We need to act on it.
-                            match sig {
-                                KMSignal::SaIdChange { old, new } => {
+                            match linkmsg.msg {
+                                KmSignal::SaIdChange { old, new } => {
                                     if old == 0 && new > 0 {
                                         info!("SA has been established!");
                                         // Becuase of the way the messages work, the node will transition into
@@ -152,7 +153,7 @@ impl ZDPServer {
                             }
                         }
 
-                        Some(km_buf) = km_rx.recv() => {
+                        Some(linkmsg) = km_rx.recv() => {
                             // This is a raw KM message to send to this client (NOTE: the KM needs to be associated with the correct client!)
                             if cur_client.is_none() {
                                 info!("error: KM generated a message but we have no client to send to");
@@ -167,7 +168,7 @@ impl ZDPServer {
                             //   len: u16
                             //   PAYLOAD (from KM)
                             let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
-                            let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &km_buf);
+                            let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &linkmsg.msg);
 
                             match s_send.send_to(pkt.body(), cur_client.unwrap()).await {
                                 Ok(sz) => {
@@ -217,21 +218,21 @@ impl ZDPServer {
                                 }
                                 _ => {
                                     info!("zdp/server - received transport message");
-                                    let recv_zpis = mgr.get_recv_zpis();
+                                    let my_sa = mgr.get_transport_state().unwrap();
                                     // Not sure the correct way to use these packet things.  But here we just create yet another buffer.
                                     let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
                                     let mut pkt = Packet::new(&mut pkt_buf, km_demo::HEADROOM);
                                     pkt.put(&input_buf[..read_len]);
                                     let zpi = pkt.body()[0];
-                                    if zpi == recv_zpis.encr {
+                                    if zpi == my_sa.recv_zpis.encr {
                                         info!("zdp/server - ZPI indicates encrypted transport message");
-                                    } else if zpi == recv_zpis.hmac {
+                                    } else if zpi == my_sa.recv_zpis.hmac {
                                         info!("zdp/server - ZPI indicates agent transit transport message, discarding");
                                         continue;
                                     } else {
-                                        info!("zdp/server - unexpected ZPI on message {} (expected {:?})", zpi, recv_zpis);
+                                        info!("zdp/server - unexpected ZPI on message {} (expected {:?})", zpi, my_sa.recv_zpis);
                                     }
-                                    match mgr.decrypt_transport(&mut pkt) {
+                                    match km::decrypt_transport_zdp(&mut pkt, my_sa.codec.clone()) {
                                         Ok(_) => {
                                             // Demo code sends a ZDP message like
                                             //     [ZPI]

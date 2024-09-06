@@ -3,7 +3,6 @@
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
-use crate::zpr;
 use std::io::ErrorKind;
 use std::result::Result;
 use std::time::SystemTime;
@@ -19,11 +18,13 @@ pub enum TryEnqueueError<T> {
 }
 
 pub enum MgmtProcessorMessage<'pktbuf> {
-    Packet(zpr::LinkId, Packet<'pktbuf>),
+    Packet(Packet<'pktbuf>),
     TestPacket(TestPacket),
 }
 
 /// MgmtProcessor processes all inbound management packets
+/// Unlike other queues, this doesn't live directly in the assembly,
+/// but rather in the peer table, as there is one of these per peer.
 pub struct MgmtProcessor<'pktbuf> {
     sender: mpsc::Sender<MgmtProcessorMessage<'pktbuf>>,
 }
@@ -35,17 +36,15 @@ impl<'pktbuf> MgmtProcessor<'pktbuf> {
 
     pub fn try_enqueue_packet(
         &self,
-        ingress_link_id: zpr::LinkId,
         packet: Packet<'pktbuf>,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
-        match self
-            .sender
-            .try_send(MgmtProcessorMessage::Packet(ingress_link_id, packet))
-        {
+        match self.sender.try_send(MgmtProcessorMessage::Packet(packet)) {
             Ok(()) => Ok(()),
 
-            Err(TrySendError::Full(msg) | TrySendError::Closed(msg)) => {
-                let MgmtProcessorMessage::Packet(_, pkt) = msg else {
+            Err(TrySendError::Closed(_)) => panic!("mgmt processor channel closed"),
+
+            Err(TrySendError::Full(msg)) => {
+                let MgmtProcessorMessage::Packet(pkt) = msg else {
                     unreachable!()
                 };
                 Err(TryEnqueueError::Full(pkt))
@@ -58,6 +57,7 @@ impl<'pktbuf> MgmtProcessor<'pktbuf> {
     // TODO perhaps enqueue_test_packet is not the best name, because it does more than
     // just enqueue, it also waits for the response, unlike the other enqueue methods of other
     // queues
+    #[allow(dead_code)]
     pub async fn enqueue_test_packet(&self) -> Result<TestPacketMetrics, RecvError> {
         let test_tuple = TestPacket::create();
 
@@ -230,11 +230,10 @@ impl<'pktbuf> Capture<'pktbuf> {
             orig_len,
         };
         match self.sender.try_send(cap_pack) {
-            Ok(()) => return Ok(()),
-            Err(TrySendError::Full(cap_pack)) | Err(TrySendError::Closed(cap_pack)) => {
-                return Err(TryEnqueueError::Full(cap_pack.packet));
-            }
-        };
+            Ok(()) => Ok(()),
+            Err(TrySendError::Closed(_)) => panic!("capture channel closed"),
+            Err(TrySendError::Full(cap_pack)) => Err(TryEnqueueError::Full(cap_pack.packet)),
+        }
     }
 }
 
@@ -272,7 +271,9 @@ impl<'pktbuf> AdapterManager<'pktbuf> {
         {
             Ok(()) => Ok(()),
 
-            Err(TrySendError::Full(msg) | TrySendError::Closed(msg)) => match msg {
+            Err(TrySendError::Closed(_)) => panic!("adapter manager channel closed"),
+
+            Err(TrySendError::Full(msg)) => match msg {
                 AdapterManagerMessage::RequestTetherId(packet) => {
                     Err(TryEnqueueError::Full(packet))
                 }

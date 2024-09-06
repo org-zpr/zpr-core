@@ -10,9 +10,10 @@ use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 
 use ph::config;
-use ph::km::{KMSignal, KeyManager};
+use ph::km;
+use ph::km::{KeyManager, KmSignal};
 use ph::km_demo;
-use ph::km_noise::KMNoise;
+use ph::km_noise::KmNoise;
 use ph::packet::Packet;
 use ph::zdp::*;
 
@@ -38,7 +39,7 @@ impl ZDPClient {
 
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-        let noise = match KMNoise::new(
+        let noise = match KmNoise::new(
             true,
             Some(self.dock_noise_pub_key.into()),
             None,
@@ -52,7 +53,7 @@ impl ZDPClient {
             }
         };
 
-        let mgr = KeyManager::new(Box::new(noise));
+        let mgr = KeyManager::new(1, Box::new(noise));
         let local_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
 
         let socket = UdpSocket::bind(local_addr).await?;
@@ -81,16 +82,16 @@ impl ZDPClient {
                     break;
                 }
 
-                Some(sig) = km_sig_rx.recv() => {
-                    match sig {
-                        KMSignal::SaIdChange { old, new } => {
+                Some(linkmsg) = km_sig_rx.recv() => {
+                    match linkmsg.msg {
+                        KmSignal::SaIdChange { old, new } => {
                             if old == 0 && new > 0 {
                                 info!("zdp/client - new SA established");
                                 let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
                                 let mut pkt = km_demo::build_zdp_report_packet(&mut pkt_buf, b"hello to you my dear node!");
-                                let send_zpis = mgr.get_send_zpis();
-                                pkt.body_mut()[0] = send_zpis.encr;
-                                match mgr.encrypt_transport(&mut pkt) {
+                                let my_sa = mgr.get_transport_state().unwrap();
+                                pkt.body_mut()[0] = my_sa.send_zpis.encr;
+                                match km::encrypt_transport_zdp(&mut pkt, my_sa.codec.clone()) {
                                     Ok(()) => {
                                         match s_send.send(&pkt.body()).await {
                                             Ok(sz) => {
@@ -111,7 +112,7 @@ impl ZDPClient {
                     }
                 }
 
-                Some(km_buf) = km_rx.recv() => {
+                Some(linkmsg) = km_rx.recv() => {
                     // Construct a KM message packet.
                     // [ ZPI ]
                     // [ ZDP BASE HEADER, type=KM]
@@ -120,7 +121,7 @@ impl ZDPClient {
                     //   len: u16
                     //   PAYLOAD (from KM)
                     let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
-                    let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &km_buf);
+                    let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &linkmsg.msg);
                     match s_send.send(pkt.body()).await {
                         Ok(sz) => {
                             info!("zdp/client - sent {} byte KM message", sz);
@@ -144,7 +145,7 @@ impl ZDPClient {
                                 continue;
                             }
                             let zpi_hdr = zpi_hdr.unwrap();
-                            let recv_zpis = mgr.get_recv_zpis();
+                            let my_sa = mgr.get_transport_state().unwrap();
                             match zpi_hdr.zpi {
                                 0 => {
                                     info!("zdp/client - received ZPI=0 message");
@@ -163,14 +164,14 @@ impl ZDPClient {
                                     }
                                 }
                                 _ => {
-                                    if zpi_hdr.zpi == recv_zpis.hmac {
+                                    if zpi_hdr.zpi == my_sa.recv_zpis.hmac {
                                         info!("zdp/client - received transit ZPI message, discarding");
-                                    } else if zpi_hdr.zpi == recv_zpis.encr {
+                                    } else if zpi_hdr.zpi == my_sa.recv_zpis.encr {
                                         info!("zdp/client - received transport message");
                                         let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
                                         let mut pkt = Packet::new(&mut pkt_buf, km_demo::HEADROOM);
                                         pkt.put(&buf[0..input_len]);
-                                        match mgr.decrypt_transport(&mut pkt) {
+                                        match km::decrypt_transport_zdp(&mut pkt, my_sa.codec.clone()) {
                                             Ok(()) => {
                                                 // Demo code sends a ZDP message like
                                                 //     [ZPI]
@@ -191,7 +192,7 @@ impl ZDPClient {
                                             }
                                         }
                                     } else {
-                                        info!("zdp/client - unknown ZPI: {} (expected {:?}", zpi_hdr.zpi, recv_zpis);
+                                        info!("zdp/client - unknown ZPI: {} (expected {:?}", zpi_hdr.zpi, my_sa.recv_zpis);
                                     }
 
                                 }

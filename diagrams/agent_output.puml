@@ -1,0 +1,30 @@
+@startuml
+
+:""classify()"";
+
+if (classify OK?) then (yes)
+else (no)
+    end
+endif
+
+switch (ALT lookup)
+case (""Active"")
+    :compute A2A MAC;
+    :""compress()"";
+    :append A2A MAC;
+    stop
+
+case (""Pending"")
+    end
+
+case (not found)
+    if () then (""adapter_manager"")
+        -[dotted]->
+        :""request_tether_id()""|
+        detach
+    else (queue full)
+        end
+    endif
+endswitch
+
+@enduml

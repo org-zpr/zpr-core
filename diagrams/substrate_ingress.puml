@@ -1,0 +1,54 @@
+@startuml
+
+|fastpath|
+
+start
+
+:""lookup_peer()"";
+
+if (peer known?) then (yes)
+else (no)
+    end
+endif
+
+:""decrypt()"";
+
+if (decrypt succeeded?) then (yes)
+else (no)
+    end
+endif
+
+:""maybe_capture()""; <<procedure>>
+
+:""decap_zpi()"";
+
+if (parse OK?) then (yes)
+else (no)
+    end
+endif
+
+:parse ""BaseHeader"";
+
+if (parse OK?) then (yes)
+else (no)
+    end
+endif
+
+if (""TransitPacket"") then (yes)
+else (no)
+    if (try enqueue) then (ok)
+        -[dotted]-> ""mgmt_processor[link_id]"";
+        |""mgmt_processor[link_id]"" worker|
+        :""handle_packet()""; <<procedure>>
+        detach
+    else (queue full)
+        |fastpath|
+        end
+    endif
+endif
+
+:parse ""PerFlowHeader"";
+
+stop
+
+@enduml

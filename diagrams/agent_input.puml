@@ -1,0 +1,25 @@
+@startuml
+
+start
+
+:parse A2A MAC;
+
+if (parse OK?) then (yes)
+else (no)
+    end
+endif
+
+if (DLT lookup) then (not found)
+    end
+endif
+
+:""expand()""; <<procedure>>
+
+if (check A2A MAC) then (OK)
+else (failure)
+    end
+endif
+
+stop
+
+@enduml
