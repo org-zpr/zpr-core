@@ -30,15 +30,13 @@ impl FlowControl {
     }
 
     pub fn check_packet(&self, packet: &[u8]) -> u32 {
-        self.inner_control
-            .inspect(|inner_flow| match &inner_flow.flow {
-                Some(program) => program.filter(packet),
-                None => 0,
-            })
+        match &self.inner_control.get().flow {
+            Some(program) => program.filter(packet),
+            None => 0,
+        }
     }
 
     pub fn program_exists(&self) -> bool {
-        self.inner_control
-            .inspect(|inner_flow| inner_flow.flow.is_some())
+        self.inner_control.get().flow.is_some()
     }
 }

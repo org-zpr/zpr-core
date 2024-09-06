@@ -543,29 +543,17 @@ pub fn substrate_ingress<'pktbuf>(
 
         eprintln!("{}: enqueueing!", asm.system_name);
 
-        // because of how `inspect` works the borrow checker can't track
-        // who consumes this when...
-        let mut pkt = Some(pkt);
+        let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
+            drop_and_count(asm, pkt, CounterType::PeerRemoved);
+            return;
+        };
 
-        if asm
-            .peer_table
-            .inspect(ingress_link_id, |peer_state| {
-                // note: we know `pkt` is still `Some` as we're the first to get to it
-                match peer_state
-                    .mgmt_processor
-                    .try_enqueue_packet(pkt.take().unwrap())
-                {
-                    Ok(()) => (),
-                    Err(TryEnqueueError::Full(pkt)) => {
-                        eprintln!("{}: queue backpressure!", asm.system_name);
-                        drop_and_count(asm, pkt, CounterType::QueueBackpressure);
-                    }
-                }
-            })
-            .is_none()
-        {
-            // note: we know `pkt` is still `Some` as we know the above closure hasn't been executed
-            drop_and_count(asm, pkt.take().unwrap(), CounterType::PeerRemoved);
+        match peer_state.mgmt_processor.try_enqueue_packet(pkt) {
+            Ok(()) => (),
+            Err(TryEnqueueError::Full(pkt)) => {
+                eprintln!("{}: queue backpressure!", asm.system_name);
+                drop_and_count(asm, pkt, CounterType::QueueBackpressure);
+            }
         }
         return;
     }
@@ -607,16 +595,12 @@ pub fn agent_input<'pktbuf>(
     pkt.shrink_by(a2a_mac_size);
 
     // lookup PEP in DLT and expand compressed packet
-    if asm
-        .dlt
-        .inspect(tether_id, |pep| {
-            compress::expand(pep.compression_mode, &pep.five_tuple, &mut pkt)
-        })
-        .is_none()
-    {
+    let Some(pep) = asm.dlt.get(tether_id) else {
         drop_and_count(asm, pkt, CounterType::UnknownStreamId);
         return;
-    }
+    };
+
+    compress::expand(pep.compression_mode, &pep.five_tuple, &mut pkt);
 
     // check A2A MAC
     // TODO: use actual A2A SAID & keyed hash
