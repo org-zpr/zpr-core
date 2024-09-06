@@ -9,12 +9,10 @@ use crate::dock_tables;
 use crate::fastpath;
 use crate::km_multiplexor;
 use crate::packet::{self, Packet};
-use crate::sync_req;
 use crate::zdp;
 use crate::zpr;
 use bytes::{Buf, BufMut};
 use std::time::Duration;
-use tokio::sync::oneshot::channel;
 use tokio::time::sleep;
 use tracing::error;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
@@ -67,7 +65,7 @@ pub async fn send_sync_non_flow_req<'pktbuf>(
     zdp_request_type: zdp::ZdpPacketType,
     zdp_response_type: zdp::ZdpPacketType,
     pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
-) -> Result<Packet<'pktbuf>, sync_req::SyncReqError> {
+) -> Result<Packet<'pktbuf>, SyncReqError> {
     send_sync_req_helper(
         asm,
         link_id,
@@ -91,7 +89,7 @@ pub async fn send_sync_per_flow_req<'pktbuf>(
     zdp_response_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
     pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
-) -> Result<(zpr::StreamId, Packet<'pktbuf>), sync_req::SyncReqError> {
+) -> Result<(zpr::StreamId, Packet<'pktbuf>), SyncReqError> {
     match send_sync_req_helper(
         asm,
         link_id,
@@ -111,6 +109,22 @@ pub async fn send_sync_per_flow_req<'pktbuf>(
     }
 }
 
+pub enum SyncReqError {
+    LinkClosed,
+    ProtocolError,
+    Timeout,
+}
+
+impl std::fmt::Display for SyncReqError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.write_str(match self {
+            Self::LinkClosed => "link closed",
+            Self::ProtocolError => "protocol error",
+            Self::Timeout => "timeout",
+        })
+    }
+}
+
 /// Helper for send management request function
 /// Requires the type of ZDP packet being sent as well as the type of the
 /// expected response packet. The Option determines whether the function is helping the per-flow or
@@ -125,18 +139,17 @@ async fn send_sync_req_helper<'pktbuf>(
     zdp_response_type: zdp::ZdpPacketType,
     stream_id: Option<zpr::StreamId>,
     pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
-) -> Result<Packet<'pktbuf>, sync_req::SyncReqError> {
-    let Some(semaphore) = asm.peer_table.inspect(link_id, |peer_state| {
-        peer_state.sync_req_state.semaphore.clone()
-    }) else {
-        return Err(sync_req::SyncReqError::LinkClosed);
-    };
-    let permit = semaphore.acquire_owned().await.unwrap(); // TODO error handling in case we don't get permit
-    let (sender, mut receiver) = channel::<(Packet<'pktbuf>, zdp::ZdpPacketType)>();
+) -> Result<Packet<'pktbuf>, SyncReqError> {
+    // acquire a permit to send a manamgement message
+    let Some(permit_future) =
+        asm.peer_table.inspect(link_id, |peer_state| peer_state.sync_req_state.acquire_permit())
+    else { return Err(SyncReqError::LinkClosed); };
+    let permit = permit_future.await;
 
-    asm.peer_table.inspect(link_id, move |peer_state| {
-        peer_state.sync_req_state.set_sender(Some(sender))
-    });
+    let Some(mut response_future) =
+        asm.peer_table.inspect(link_id, |peer_state|
+            peer_state.sync_req_state.install_response_listener()
+        ) else { return Err(SyncReqError::LinkClosed); };
 
     for _i in 0..=config::DEFAULT_REQUEST_RETRY_COUNT {
         let buf = drop_guard(asm.buffer_stack.get_buffer().await, |buf| {
@@ -162,23 +175,21 @@ async fn send_sync_req_helper<'pktbuf>(
             }
         }
         tokio::select! {
-            received_val = &mut receiver => {
+            response = &mut response_future => {
                 drop(permit);
                 eprintln!("{}: received response from {} via channel!", asm.system_name, link_id);
-                return match_received(asm, received_val, sync_req::SyncReqError::LinkClosed, zdp_response_type);
+                return match_received(asm, response.ok(), SyncReqError::LinkClosed, zdp_response_type);
             }
             _ = sleep(Duration::from_secs(config::DEFAULT_REQUEST_RETRY_TIMER as u64)) => ()
         }
     }
-    asm.peer_table.inspect(link_id, |peer_state| {
-        peer_state.sync_req_state.set_sender(None)
-    });
-    receiver.close();
+    asm.peer_table.inspect(link_id, |peer_state| peer_state.sync_req_state.clear_response_listener());
+    let response = response_future.hangup();
     drop(permit);
     match_received(
         asm,
-        receiver.try_recv(),
-        sync_req::SyncReqError::Timeout,
+        response,
+        SyncReqError::Timeout,
         zdp_response_type,
     )
 }
@@ -186,21 +197,21 @@ async fn send_sync_req_helper<'pktbuf>(
 /// Determines whether the message recieved in response to the request is
 /// a) a packet and not an error, and b) the expected packet type
 // TODO: rename/move this
-fn match_received<'pktbuf, T>(
+fn match_received<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    result: Result<(Packet<'pktbuf>, zdp::ZdpPacketType), T>,
-    err_type: sync_req::SyncReqError,
+    response: Option<(zdp::ZdpPacketType, Packet<'pktbuf>)>,
+    err_type: SyncReqError,
     zdp_response_type: zdp::ZdpPacketType,
-) -> Result<Packet<'pktbuf>, sync_req::SyncReqError> {
-    match result {
-        Ok(rec_tuple) => {
-            if zdp_response_type != rec_tuple.1 {
-                fastpath::drop_and_count(asm, rec_tuple.0, CounterType::BadMgmtResponse);
-                return Err(sync_req::SyncReqError::ProtocolError);
+) -> Result<Packet<'pktbuf>, SyncReqError> {
+    match response {
+        Some((pkt_type, pkt)) => {
+            if pkt_type != zdp_response_type {
+                fastpath::drop_and_count(asm, pkt, CounterType::BadMgmtResponse);
+                return Err(SyncReqError::ProtocolError);
             }
-            return Ok(rec_tuple.0);
+            return Ok(pkt);
         }
-        Err(_) => return Err(err_type),
+        None => return Err(err_type),
     }
 }
 
@@ -264,7 +275,7 @@ pub async fn send_hello_request<'a, 'pktbuf>(
 }
 
 pub enum BindAgentAddressError {
-    SyncReqError(sync_req::SyncReqError),
+    SyncReqError(SyncReqError),
     BadStructure,
     BindAgentAddressError(Box<str>),
 }
