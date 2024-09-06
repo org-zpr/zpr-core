@@ -435,9 +435,11 @@ fn main() -> ExitCode {
                 cap_outq,
             ));
 
-            // Start key managemenent workers
-            js.spawn(km_multiplexor::launch_signal_worker(&*asm, km_sig_rx));
-            js.spawn(km_multiplexor::launch_message_worker(&*asm, km_rx));
+            if !disable_km {
+                // Start key managemenent workers
+                js.spawn(km_multiplexor::launch_signal_worker(&*asm, km_sig_rx));
+                js.spawn(km_multiplexor::launch_message_worker(&*asm, km_rx));
+            }
 
             eprintln!("{}: connecting...", asm.system_name);
             eprintln!("{}: connected!", asm.system_name); // FIXME: it's a lie

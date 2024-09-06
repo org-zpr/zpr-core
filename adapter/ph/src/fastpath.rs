@@ -15,7 +15,7 @@ use crate::net_defs;
 use crate::packet::Packet;
 use crate::peer_table::PeerState;
 use crate::queues::TryEnqueueError;
-use crate::zdp::{self, ZdpBaseHeader, ZDP_BASE_HEADER_OFFSET};
+use crate::zdp;
 use crate::zdp_ll;
 use crate::zpr;
 use crate::{compress, km};
@@ -303,9 +303,10 @@ fn substrate_egress_common<'pktbuf>(
 ) -> Result<Option<zpr::SubstrateAddr>, km::EncryptionError> {
     // TODO: should we add ZDP header here also??
 
-    let zdp_hdr = match ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..]) {
+    let zdp_hdr = match zdp::ZdpBaseHeader::ref_from_prefix(&pkt.body()) {
         Some(zdp_hdr) => zdp_hdr,
         None => {
+            error!("egress: link {}: failed to parse the ZDP header", link_id);
             return Err(km::EncryptionError::ParseError);
         }
     };
@@ -480,10 +481,6 @@ pub fn substrate_ingress<'pktbuf>(
         }
         None => {
             // Either no security associatio on link, or it is not yet established.
-            error!(
-                "ingress: link {}: no SA or link not in sa-state table",
-                ingress_link_id
-            );
             false
         }
     };
