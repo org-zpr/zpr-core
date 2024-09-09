@@ -28,7 +28,7 @@ async fn worker<'pktbuf>(
 pub fn launch<'pktbuf>(
     asm: impl std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync + 'pktbuf,
     mut queue: mpsc::Receiver<AdapterManagerMessage<'pktbuf>>,
-) -> impl Future<Output = ()> + Send + 'pktbuf {
+) -> impl Future<Output = ()> + 'pktbuf {
     async move { worker(&*asm, &mut queue).await }
 }
 

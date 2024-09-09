@@ -84,12 +84,12 @@ impl PeerState<'static> {
         ) -> Worker,
     ) -> Self
     where
-        Worker: Future<Output = ()> + Send + 'static,
+        Worker: Future<Output = ()> + 'static,
     {
         let (mp_inq, mp_outq) = mpsc::channel(MGMT_PROCESSOR_QUEUE_SIZE);
         let mgmt_processor = queues::MgmtProcessor::new(mp_inq);
 
-        let mgmt_processor_worker = task::spawn(launch_mgmt_processor_worker(mp_outq));
+        let mgmt_processor_worker = task::spawn_local(launch_mgmt_processor_worker(mp_outq));
 
         Self {
             peer_type,

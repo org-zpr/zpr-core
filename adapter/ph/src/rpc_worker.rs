@@ -164,7 +164,7 @@ async fn handle_connection(
 pub fn launch<'pktbuf, UnixListenerRef: 'pktbuf>(
     asm: &'static Assembly<'static>,
     socket: UnixListenerRef,
-) -> impl Future<Output = ()> + Send + 'pktbuf
+) -> impl Future<Output = ()> + 'pktbuf
 where
     UnixListenerRef: std::ops::Deref<Target = UnixListener> + Send + Sync,
 {

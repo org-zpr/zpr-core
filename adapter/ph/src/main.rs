@@ -325,7 +325,7 @@ fn main() -> ExitCode {
         km_state,
     }));
 
-    runtime.block_on(async {
+    tokio::task::LocalSet::new().block_on(&runtime, async {
         // TEMP HACK to statically install peers
         let dock_noise_public_key = [0; 32]; // XXX TODO
         if let Some(pa2) = peer_addr2 {
@@ -416,7 +416,7 @@ fn main() -> ExitCode {
             }
         });
 
-        js.spawn(adapter_manager_worker::launch(&*asm, am_outq));
+        js.spawn_local(adapter_manager_worker::launch(&*asm, am_outq));
 
         for (worker_index, tun_dev) in tun_devs.iter().enumerate() {
             js.spawn(agent_output_worker::launch(
@@ -429,7 +429,7 @@ fn main() -> ExitCode {
             ));
         }
 
-        js.spawn(rpc_worker::launch(&*asm, &*unix_socket));
+        js.spawn_local(rpc_worker::launch(&*asm, &*unix_socket));
 
         js.spawn(capture_worker::launch(
             &capture_worker::Config {

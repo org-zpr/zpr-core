@@ -41,7 +41,7 @@ pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
     config: &Config,
     asm: AsmRef,
     mut queue: mpsc::Receiver<MgmtProcessorMessage<'pktbuf>>,
-) -> impl Future<Output = ()> + Send + 'pktbuf
+) -> impl Future<Output = ()> + 'pktbuf
 where
     AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
 {
