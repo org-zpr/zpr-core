@@ -2,7 +2,7 @@ use crate::packet::Packet;
 use crate::zdp;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use tokio::sync::{oneshot, Semaphore, OwnedSemaphorePermit, TryAcquireError};
+use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore, TryAcquireError};
 
 pub struct SyncReqState<'pktbuf> {
     state: Mutex<SyncReqStateInner<'pktbuf>>,
@@ -34,22 +34,33 @@ impl<'pktbuf> ResponseFuture<'pktbuf> {
 impl<'pktbuf> Future for ResponseFuture<'pktbuf> {
     type Output = Result<Response<'pktbuf>, ResponseError>;
 
-    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-        std::pin::pin!(&mut self.receiver).poll(cx).map_err(|_| ResponseError())
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        std::pin::pin!(&mut self.receiver)
+            .poll(cx)
+            .map_err(|_| ResponseError())
     }
 }
 
 impl<'pktbuf> SyncReqState<'pktbuf> {
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(SyncReqStateInner { response_listener: None }),
+            state: Mutex::new(SyncReqStateInner {
+                response_listener: None,
+            }),
             permit_semaphore: Arc::new(Semaphore::new(1)),
         }
     }
 
     pub fn acquire_permit(&self) -> impl Future<Output = Permit> {
         let sem = self.permit_semaphore.clone();
-        async { sem.acquire_owned().await.expect("coding error: semaphore closed") }
+        async {
+            sem.acquire_owned()
+                .await
+                .expect("coding error: semaphore closed")
+        }
     }
 
     pub fn is_associated_permit(&self, permit: &Permit) -> bool {
@@ -79,11 +90,10 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
 
     pub fn forward_response(&self, response: Response<'pktbuf>) -> Result<(), Packet<'pktbuf>> {
         match self.state.lock().unwrap().response_listener.take() {
-            Some(sender) =>
-                match sender.send(response) {
-                    Ok(()) => Ok(()),
-                    Err(response) => Err(response.1),
-                },
+            Some(sender) => match sender.send(response) {
+                Ok(()) => Ok(()),
+                Err(response) => Err(response.1),
+            },
 
             None => Err(response.1),
         }

@@ -72,9 +72,13 @@ async fn handle_packet<'pktbuf>(
         // the packet and increments corresponding counter
         let mut pkt = Some(pkt);
         asm.peer_table
-            .inspect(ingress_link_id, |peer_state|
-                peer_state.sync_req_state.forward_response((packet_type, pkt.take().unwrap())).map_err(|pkt| (HandleMgmtError::UnexpectedMgmtResponse, pkt))
-            ).unwrap_or_else(|| Err((HandleMgmtError::UnexpectedMgmtResponse, pkt.take().unwrap())))
+            .inspect(ingress_link_id, |peer_state| {
+                peer_state
+                    .sync_req_state
+                    .forward_response((packet_type, pkt.take().unwrap()))
+                    .map_err(|pkt| (HandleMgmtError::UnexpectedMgmtResponse, pkt))
+            })
+            .unwrap_or_else(|| Err((HandleMgmtError::UnexpectedMgmtResponse, pkt.take().unwrap())))
     } else if base_hdr.packet_type.is_per_flow() {
         let Some(per_flow_hdr) = ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
             return Err((HandleMgmtError::BadStructure, pkt));
