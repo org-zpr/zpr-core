@@ -56,7 +56,7 @@ async fn handle_packet<'pktbuf>(
 
     let packet_type = base_hdr.packet_type;
 
-    debug_assert!(
+    assert!(
         !packet_type.is_response(),
         "stray mgmt response in mgmt processor"
     );
