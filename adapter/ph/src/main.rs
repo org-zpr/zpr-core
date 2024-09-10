@@ -15,7 +15,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_tun::TunBuilder;
-use tracing::warn;
+use tracing::{info, warn};
 use tracing_subscriber;
 use zpr_ext::tokio::net::UdpSocketExt;
 
@@ -445,8 +445,8 @@ fn main() -> ExitCode {
             js.spawn(km_multiplexor::launch_message_worker(&*asm, km_rx));
         }
 
-        eprintln!("{}: connecting...", asm.system_name);
-        eprintln!("{}: connected!", asm.system_name); // FIXME: it's a lie
+        info!("{}: connecting...", asm.system_name);
+        info!("{}: connected!", asm.system_name); // FIXME: it's a lie
         asm.tun_ctl.set_carrier(true).unwrap();
 
         for (worker_index, socket) in sockets.iter().enumerate() {

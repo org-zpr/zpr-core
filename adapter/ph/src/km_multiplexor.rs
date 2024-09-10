@@ -317,7 +317,7 @@ fn add_noise_link(
 /// - [KmMsgProcessingError::EnqueueFailed] if the message could not be enqueued on the state machine.
 /// - [KmMsgProcessingError::LinkUnconfigured] if the link is not configured for Key Management.
 ///
-pub async fn handle_inbound_km_msg<'pktbuf>(
+pub fn handle_inbound_km_msg<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     from_link: zpr::LinkId,
     km_payload: &[u8],
@@ -326,7 +326,7 @@ pub async fn handle_inbound_km_msg<'pktbuf>(
         Some(h) => h,
         None => return Err(KmMsgProcessingError::LinkUnconfigured),
     };
-    match manager.handle_km_message(km_payload).await {
+    match manager.try_handle_km_message(km_payload) {
         Ok(_) => Ok(()),
         Err(e) => match e {
             KmError::InvalidState => Err(KmMsgProcessingError::InvalidState),
@@ -432,9 +432,7 @@ mod test {
         };
 
         // Now send the reply back into our link.
-        handle_inbound_km_msg(asm, adapter_link_id, &handshake_reply)
-            .await
-            .unwrap();
+        handle_inbound_km_msg(asm, adapter_link_id, &handshake_reply).unwrap();
 
         yield_now().await;
 
