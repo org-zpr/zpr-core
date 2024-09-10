@@ -36,15 +36,8 @@ endif
 
 if (""TransitPacket"") then (yes)
 else (no)
-    if (try enqueue) then (ok)
-        -[dotted]-> ""mgmt_processor[link_id]"";
-        |""mgmt_processor[link_id]"" worker|
-        :""handle_packet()""; <<procedure>>
-        detach
-    else (queue full)
-        |fastpath|
-        end
-    endif
+    :""dispatch_mgmt_packet()""; <<procedure>>
+    detach
 endif
 
 :parse ""PerFlowHeader"";

@@ -22,6 +22,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
+use tracing::error;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
 
@@ -36,8 +37,8 @@ async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
             Some(ret) = set.join_next() =>
                 match ret {
                     Ok(Ok(())) => (),
-                    Ok(Err(err)) => eprintln!("Handle Connection Failed: {err}"),
-                    Err(err) => eprintln!("join_next panicked: {err}")
+                    Ok(Err(err)) => error!("Handle Connection Failed: {err}"),
+                    Err(err) => error!("join_next panicked: {err}")
                 },
             accepted = socket.accept() =>
                 match accepted {
@@ -45,7 +46,7 @@ async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
                         set.spawn(handle_connection(asm, stream));
                     },
                     Err(_e) => {
-                        eprintln!("Connection failed");
+                        error!("Connection failed");
                     }
             }
         }
@@ -56,8 +57,6 @@ async fn handle_connection(
     asm: &'static Assembly<'static>,
     mut stream: UnixStream,
 ) -> std::io::Result<()> {
-    eprintln!("Connection received");
-
     let mut str_message = String::new();
 
     let split_buf = stream.split(); // split stream into read/write streams

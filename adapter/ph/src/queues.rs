@@ -22,7 +22,7 @@ pub enum MgmtProcessorMessage<'pktbuf> {
     TestPacket(TestPacket),
 }
 
-/// MgmtProcessor processes all inbound management packets
+/// MgmtProcessor processes all inbound management requests.
 /// Unlike other queues, this doesn't live directly in the assembly,
 /// but rather in the peer table, as there is one of these per peer.
 pub struct MgmtProcessor<'pktbuf> {

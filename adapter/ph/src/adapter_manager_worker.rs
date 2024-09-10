@@ -8,6 +8,7 @@ use crate::queues::AdapterManagerMessage;
 use crate::zpr;
 use std::future::Future;
 use tokio::sync::mpsc;
+use tracing::debug;
 
 async fn worker<'pktbuf>(
     asm: &Assembly<'pktbuf>,
@@ -43,12 +44,6 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
     let five_tuple = *pkt.metadata().five_tuple();
     fastpath::drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
 
-    // VERY HACK: there's some race condition which IPv6's
-    // rapid link-local config traffic exacerbates
-    if five_tuple.l3_type == zpr::L3Type::Ipv6 {
-        return;
-    }
-
     // if there's already an entry, this is a duplicate request
     // (NOTE: we should be the only ones modifying this table!)
     if asm.alt.get(&five_tuple).is_some() {
@@ -62,7 +57,7 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
     // compress only IP addresses for now
     let compression_mode: zpr::CompressionMode = 0;
 
-    eprintln!(
+    debug!(
         "{}: Issuing bind request for {}",
         asm.system_name, five_tuple
     );
@@ -79,7 +74,7 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
     {
         Ok(tether_id) => {
             // Bind succeeded; add to ALT.
-            eprintln!(
+            debug!(
                 "{}: Bind of {} succeeded: {}",
                 asm.system_name, five_tuple, tether_id
             );
@@ -96,7 +91,7 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
 
         Err(err) => {
             // Bind failed; remove pending entry from ALT.
-            eprintln!(
+            debug!(
                 "{}: Bind of {} failed: {}",
                 asm.system_name, five_tuple, err
             );

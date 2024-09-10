@@ -317,6 +317,7 @@ impl KeyManager {
     /// This waits until space available in our KM message queue.
     ///
     /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
+    #[allow(dead_code)]
     pub async fn handle_km_message(&self, message: &[u8]) -> KmResult<()> {
         let tx: mpsc::Sender<Bytes>;
         {
@@ -341,7 +342,6 @@ impl KeyManager {
     /// This will fail if there is no space in queue.
     ///
     /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
-    #[allow(dead_code)]
     pub fn try_handle_km_message(&self, message: &[u8]) -> KmResult<()> {
         let tx: mpsc::Sender<Bytes>;
         {

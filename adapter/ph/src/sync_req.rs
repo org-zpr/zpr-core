@@ -5,6 +5,7 @@ use std::future::Future;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::oneshot;
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
+use tracing::debug;
 
 pub struct SyncReqState<'pktbuf> {
     listener_state: StdMutex<ListenerState<'pktbuf>>,
@@ -115,7 +116,7 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
         match listener {
             Some((expected_seq_num, _)) => {
                 if seq_num != *expected_seq_num {
-                    eprintln!("expected seq num {} got {}", expected_seq_num, seq_num);
+                    debug!("expected seq num {} got {}", expected_seq_num, seq_num);
                     return Err(response.1);
                 }
 

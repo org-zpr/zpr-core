@@ -7,6 +7,7 @@ use crate::zdp::*;
 use crate::zpr;
 use std::future::Future;
 use tokio::sync::mpsc;
+use tracing::debug;
 use zpr_ext::zerocopy::*;
 
 #[derive(Clone, Copy)]
@@ -22,10 +23,6 @@ async fn worker<'pktbuf>(
     while let Some(msg) = queue.recv().await {
         match msg {
             MgmtProcessorMessage::Packet(pkt) => {
-                eprintln!(
-                    "{}: dequeued mgmt message from {}",
-                    asm.system_name, config.link_id
-                );
                 match handle_packet(asm, config.link_id, pkt).await {
                     Ok(()) => (),
                     Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
@@ -58,28 +55,19 @@ async fn handle_packet<'pktbuf>(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
-    eprintln!(
+    debug!(
         "{}: handling mgmt message from {} type {:?} seq_num {}",
         asm.system_name, ingress_link_id, base_hdr.packet_type, base_hdr.sequence_number
     );
 
-    let packet_type = base_hdr.packet_type;
+    assert!(
+        !base_hdr.packet_type.is_response(),
+        "stray mgmt response in mgmt processor"
+    );
+
     let seq_num = base_hdr.sequence_number.get() as u64; // TODO: reconstitute full seq num given expected seq num state
 
-    if packet_type.is_response() {
-        eprintln!("{}: got response from {}", asm.system_name, ingress_link_id);
-
-        // Gets the designated sender, attempts to send the response, if not drops
-        // the packet and increments corresponding counter
-        let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
-            return Err((HandleMgmtError::UnexpectedMgmtResponse, pkt));
-        };
-
-        peer_state
-            .sync_req_state
-            .forward_response(seq_num, (packet_type, pkt))
-            .map_err(|pkt| (HandleMgmtError::UnexpectedMgmtResponse, pkt))
-    } else if base_hdr.packet_type.is_per_flow() {
+    if base_hdr.packet_type.is_per_flow() {
         let Some(per_flow_hdr) = ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
             return Err((HandleMgmtError::BadStructure, pkt));
         };
@@ -109,7 +97,7 @@ async fn handle_packet<'pktbuf>(
             ZdpPacketType::Discard => mgmt::handle_discard(asm, ingress_link_id, pkt).await,
 
             ZdpPacketType::KeyManagement => {
-                mgmt::handle_key_management(asm, ingress_link_id, pkt).await
+                panic!("unexpected Key Management message in mgmt processor")
             }
 
             ZdpPacketType::HelloRequest => {

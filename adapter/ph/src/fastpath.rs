@@ -11,6 +11,7 @@ use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::km::Codec;
 use crate::km_noise::NOISE_PADLEN;
+use crate::mgmt;
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::peer_table::PeerState;
@@ -22,7 +23,7 @@ use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
 use std::time::SystemTime;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use zerocopy::FromBytes;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
@@ -34,7 +35,7 @@ pub fn drop_and_count<'pktbuf>(
     reason: impl Into<CounterType>,
 ) {
     let reason = reason.into();
-    eprintln!("{}: dropping packet because {}", asm.system_name, reason);
+    debug!("{}: dropping packet because {}", asm.system_name, reason);
     asm.buffer_stack.put_buffer(pkt.destroy());
     asm.counters[reason.into()].increment();
 }
@@ -193,11 +194,13 @@ pub fn encrypt_null<'pktbuf>(pkt: &mut Packet<'pktbuf>) {
     );
 }
 
-pub fn encrypt_hmac<'pktbuf>(_send_hmac_key: [u8; 32], _pkt: &mut Packet<'pktbuf>) {
-    // Run the blake hash key'd with the `send_hmac_key` on the correct parts of the packet
-    // and write the (truncated) hash value to the correct header location.
-
-    info!("encrypt_hmac: not implemented - NOP");
+/// Slap an HMAC onto the end of the packet.
+pub fn encrypt_hmac<'pktbuf>(send_hmac_key: [u8; 32], pkt: &mut Packet<'pktbuf>) {
+    let mut link_mac = [0u8; zdp::ZDP_PACKET_MAC_SIZE];
+    link_mac[..zdp::ZDP_PACKET_MAC_SIZE].copy_from_slice(
+        &blake3::keyed_hash(&send_hmac_key, pkt.body()).as_bytes()[..zdp::ZDP_PACKET_MAC_SIZE],
+    );
+    pkt.put(&link_mac[..zdp::ZDP_PACKET_MAC_SIZE]);
 }
 
 pub fn encrypt_full<'pktbuf>(
@@ -256,12 +259,26 @@ pub fn decrypt_null<'pktbuf>(pkt: &mut Packet<'pktbuf>) -> Result<(), DecryptErr
     Ok(())
 }
 
-/// Decrypt a ZDP packet according to its ZPI header (which is not removed).
+/// Check and remove the link-2-link HMAC on the (presumed) transit packet.
 pub fn decrypt_hmac<'pktbuf>(
-    _recv_hmac_key: [u8; 32],
-    _pkt: &mut Packet<'pktbuf>,
+    recv_hmac_key: [u8; 32],
+    pkt: &mut Packet<'pktbuf>,
 ) -> Result<(), DecryptError> {
-    info!("decrypt_hmac: not implemented -- NOP");
+    if pkt.body().len() < zdp::ZDP_PACKET_MAC_SIZE {
+        return Err(DecryptError::BadStructure);
+    }
+
+    let mut link_mac = [0u8; zdp::ZDP_PACKET_MAC_SIZE];
+
+    link_mac.copy_from_slice(&pkt.body()[pkt.body().len() - zdp::ZDP_PACKET_MAC_SIZE..]);
+    pkt.shrink_by(zdp::ZDP_PACKET_MAC_SIZE);
+
+    if &blake3::keyed_hash(&recv_hmac_key, &pkt.body()).as_bytes()[..zdp::ZDP_PACKET_MAC_SIZE]
+        != &link_mac[..zdp::ZDP_PACKET_MAC_SIZE]
+    {
+        return Err(DecryptError::MicvFailure);
+    }
+
     Ok(())
 }
 
@@ -432,8 +449,6 @@ pub fn substrate_ingress<'pktbuf>(
 ) {
     asm.counters[CounterType::InPacksRec].increment();
 
-    eprintln!("{}: got packet from {}", asm.system_name, peer_sa);
-
     let Some(ingress_link_id) = asm.peer_table.lookup_peer(peer_sa) else {
         drop_and_count(asm, pkt, CounterType::UnknownPeer);
         return;
@@ -538,21 +553,7 @@ pub fn substrate_ingress<'pktbuf>(
         // TODO: should we peel off the ZDP header here??
         // (instead of this silly code to restore it?)
         *pkt.alloc_zeroed_header() = base_hdr;
-
-        eprintln!("{}: enqueueing!", asm.system_name);
-
-        let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
-            drop_and_count(asm, pkt, CounterType::PeerRemoved);
-            return;
-        };
-
-        match peer_state.mgmt_processor.try_enqueue_packet(pkt) {
-            Ok(()) => (),
-            Err(TryEnqueueError::Full(pkt)) => {
-                eprintln!("{}: queue backpressure!", asm.system_name);
-                drop_and_count(asm, pkt, CounterType::QueueBackpressure);
-            }
-        }
+        mgmt::dispatch_mgmt_packet(asm, ingress_link_id, pkt);
         return;
     }
 
@@ -748,5 +749,45 @@ mod test {
         assert!(res.is_ok());
 
         assert!(pkt.body().len() == orig_len); // did remove checksum
+    }
+
+    #[test]
+    fn test_add_and_check_hmac() {
+        let mut buf = [0u8; PACKET_BUFFER_SIZE];
+        let mut pkt = Packet::new(&mut buf, 64);
+
+        pkt.put(&b"this is a test of hmac"[..]);
+        let key: [u8; 32] = [6u8; 32];
+
+        let orig_len = pkt.body().len();
+
+        encrypt_hmac(key, &mut pkt);
+
+        assert!(pkt.body().len() == orig_len + zdp::ZDP_PACKET_MAC_SIZE); // did add hmac
+
+        let res = decrypt_hmac(key, &mut pkt);
+        assert!(res.is_ok());
+
+        assert!(pkt.body().len() == orig_len); // did remove hmac
+    }
+
+    #[test]
+    fn test_add_and_check_hmac_fail() {
+        let mut buf = [0u8; PACKET_BUFFER_SIZE];
+        let mut pkt = Packet::new(&mut buf, 64);
+
+        pkt.put(&b"this is a test of hmac"[..]);
+        let key: [u8; 32] = [6u8; 32];
+
+        let orig_len = pkt.body().len();
+
+        encrypt_hmac(key, &mut pkt);
+
+        assert!(pkt.body().len() == orig_len + zdp::ZDP_PACKET_MAC_SIZE); // did add hmac
+
+        let wrong_key: [u8; 32] = [7u8; 32];
+
+        let res = decrypt_hmac(wrong_key, &mut pkt);
+        assert!(res.is_err());
     }
 }
