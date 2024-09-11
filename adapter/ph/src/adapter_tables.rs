@@ -11,7 +11,7 @@ use crate::zpr::{CompressionMode, StreamId};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::mapref::one::Ref as DashMapRef;
 use dashmap::DashMap;
-use std::sync::{atomic, Mutex};
+use std::sync::Mutex;
 
 const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 20; // 1 million
 
@@ -23,10 +23,7 @@ pub struct AltPep {
 
 pub enum AltEntry<'pktbuf> {
     Active(AltPep),
-    Pending {
-        initial_packet: Packet<'pktbuf>,
-        more_packets_seen: atomic::AtomicBool,
-    },
+    Pending(Packet<'pktbuf>),
 }
 
 pub struct AgentLookupTable<'pktbuf> {

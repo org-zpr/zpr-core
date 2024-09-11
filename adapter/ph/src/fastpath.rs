@@ -22,7 +22,6 @@ use crate::zpr;
 use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
-use std::sync::atomic;
 use std::time::SystemTime;
 use tracing::{debug, error, info, warn};
 use zerocopy::FromBytes;
@@ -691,16 +690,8 @@ pub fn agent_output_post_classify<'pktbuf>(
                 forward(asm, zpr::AGENT_LINK_ID, pep.tether_id, pkt);
             }
 
-            AltEntry::Pending {
-                more_packets_seen, ..
-            } => {
-                // Bind request pending; mark that the first packet
-                // is no longer important (and therefore shouldn't be re-sent)
-                // and also drop this packet.
-                // NOTE: the atomic ordering here is unimportant, as this
-                // is a best-effort mechanism.  Our behavior is still correct
-                // if this flag is racily read as false.
-                more_packets_seen.store(true, atomic::Ordering::Relaxed);
+            AltEntry::Pending(_) => {
+                // Bind request pending; drop this packet
                 drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
             }
         },

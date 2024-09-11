@@ -54,13 +54,7 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
 
     // mark ALT entry as pending to attempt to (i.e. racily) prevent
     // fastpath from issuing multiple requests
-    asm.alt.insert(
-        five_tuple,
-        AltEntry::Pending {
-            initial_packet: pkt,
-            more_packets_seen: false.into(),
-        },
-    );
+    asm.alt.insert(five_tuple, AltEntry::Pending(pkt));
 
     // compress only IP addresses for now
     let compression_mode: zpr::CompressionMode = 0;
@@ -87,14 +81,11 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
                 asm.system_name, five_tuple, tether_id
             );
 
-            let AltEntry::Pending {
-                initial_packet,
-                more_packets_seen,
-            } = asm
+            let AltEntry::Pending(initial_packet) = asm
                 .alt
                 .alter(&five_tuple, |entry| {
                     assert!(
-                        matches!(entry, AltEntry::Pending { .. }),
+                        matches!(entry, AltEntry::Pending(_)),
                         "coding error: race to activate pending ALT entry"
                     );
 
@@ -111,18 +102,12 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
                 unreachable!();
             };
 
-            if more_packets_seen.into_inner() {
-                // don't bother re-sending this initial packet; it's already out-of-order
-                // and the upper-layer protocol is seemingly chatty & will try again
-                fastpath::drop_and_count(asm, initial_packet, CounterType::DroppedAwaitingBind);
-            } else {
-                // no more packets seen, this initial one is probably important, let's send it on now
-                fastpath::agent_output_post_classify(
-                    asm,
-                    initial_packet,
-                    /* allow_bind_request */ false,
-                );
-            }
+            // now send out initial packet
+            fastpath::agent_output_post_classify(
+                asm,
+                initial_packet,
+                /* allow_bind_request */ false,
+            );
         }
 
         Err(err) => {
