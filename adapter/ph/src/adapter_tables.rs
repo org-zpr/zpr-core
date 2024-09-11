@@ -5,12 +5,13 @@
 #![allow(dead_code)]
 
 use crate::defs::FiveTuple;
+use crate::packet::Packet;
 use crate::rcu::{RcuBox, RcuGuard};
 use crate::zpr::{CompressionMode, StreamId};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::mapref::one::Ref as DashMapRef;
 use dashmap::DashMap;
-use std::sync::Mutex;
+use std::sync::{atomic, Mutex};
 
 const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 20; // 1 million
 
@@ -20,27 +21,29 @@ pub struct AltPep {
     pub tether_id: StreamId,
 }
 
-#[derive(Clone, Copy)]
-pub enum AltEntry {
+pub enum AltEntry<'pktbuf> {
     Active(AltPep),
-    Pending,
+    Pending {
+        initial_packet: Packet<'pktbuf>,
+        more_packets_seen: atomic::AtomicBool,
+    },
 }
 
-pub struct AgentLookupTable {
-    table: DashMap<FiveTuple, AltEntry>,
+pub struct AgentLookupTable<'pktbuf> {
+    table: DashMap<FiveTuple, AltEntry<'pktbuf>>,
 }
 
-pub struct AltEntryGuard<'a>(DashMapRef<'a, FiveTuple, AltEntry>);
+pub struct AltEntryGuard<'a, 'pktbuf>(DashMapRef<'a, FiveTuple, AltEntry<'pktbuf>>);
 
-impl std::ops::Deref for AltEntryGuard<'_> {
-    type Target = AltEntry;
+impl<'pktbuf> std::ops::Deref for AltEntryGuard<'_, 'pktbuf> {
+    type Target = AltEntry<'pktbuf>;
 
     fn deref(&self) -> &Self::Target {
         self.0.deref()
     }
 }
 
-impl AgentLookupTable {
+impl<'pktbuf> AgentLookupTable<'pktbuf> {
     pub fn new() -> Self {
         Self {
             table: DashMap::new(),
@@ -51,17 +54,17 @@ impl AgentLookupTable {
     pub fn inspect<T>(
         &self,
         five_tuple: &FiveTuple,
-        inspector: impl FnOnce(&AltEntry) -> T,
+        inspector: impl FnOnce(&AltEntry<'pktbuf>) -> T,
     ) -> Option<T> {
         self.table.get(five_tuple).map(|entry| inspector(&*entry))
     }
 
-    pub fn get(&self, five_tuple: &FiveTuple) -> Option<AltEntryGuard<'_>> {
+    pub fn get(&self, five_tuple: &FiveTuple) -> Option<AltEntryGuard<'_, 'pktbuf>> {
         self.table.get(five_tuple).map(AltEntryGuard)
     }
 
     // FIXME: ideally we want `try_insert()` but dashmap doesn't support that…
-    pub fn insert(&self, five_tuple: FiveTuple, entry: AltEntry) {
+    pub fn insert(&self, five_tuple: FiveTuple, entry: AltEntry<'pktbuf>) {
         self.table.insert(five_tuple, entry);
     }
 
@@ -73,7 +76,7 @@ impl AgentLookupTable {
     pub fn alter<T>(
         &self,
         five_tuple: &FiveTuple,
-        alterer: impl FnOnce(&mut AltEntry) -> T,
+        alterer: impl FnOnce(&mut AltEntry<'pktbuf>) -> T,
     ) -> Result<T, ()> {
         match self.table.get_mut(five_tuple) {
             Some(mut ref_) => Ok(alterer(ref_.value_mut())),

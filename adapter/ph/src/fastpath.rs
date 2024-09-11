@@ -22,6 +22,7 @@ use crate::zpr;
 use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
+use std::sync::atomic;
 use std::time::SystemTime;
 use tracing::{debug, error, info, warn};
 use zerocopy::FromBytes;
@@ -646,42 +647,72 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) 
         }
     }
 
+    agent_output_post_classify(asm, pkt, /* allow_bind_request */ true);
+}
+
+/// Post-classification portion of `agent_output` function.  Used for
+/// re-injecting already-classified packets e.g.  which were held awaiting
+/// bind.  `allow_bind_request` should be true for "real" packets; false for
+/// packets re-injected from mgmt plane after fulfilling a bind request (so
+/// as to prevent the theoretical possibility of a packet loop).
+pub fn agent_output_post_classify<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    mut pkt: Packet<'pktbuf>,
+    allow_bind_request: bool,
+) {
     let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
 
     // lookup five tuple in ALT
-    match asm.alt.inspect(&five_tuple, |entry| *entry) {
-        Some(AltEntry::Active(pep)) => {
-            // compute A2A MAC
-            // TODO: use actual A2A SAID & keyed hash
-            let a2a_said: zpr::A2aSaid = 0;
-            let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
-            let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
-            // SECURITY: truncating BLAKE3 is safe
-            a2a_mac[..a2a_mac_size]
-                .copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
+    match asm.alt.get(&five_tuple) {
+        Some(entry) => match &*entry {
+            AltEntry::Active(pep) => {
+                // compute A2A MAC
+                // TODO: use actual A2A SAID & keyed hash
+                let a2a_said: zpr::A2aSaid = 0;
+                let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
+                let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+                // SECURITY: truncating BLAKE3 is safe
+                a2a_mac[..a2a_mac_size]
+                    .copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
 
-            // compress packet
-            compress::compress(
-                pep.compression_mode,
-                five_tuple.l3_type,
-                five_tuple.l4_protocol,
-                &mut pkt,
-            );
+                // compress packet
+                compress::compress(
+                    pep.compression_mode,
+                    five_tuple.l3_type,
+                    five_tuple.l4_protocol,
+                    &mut pkt,
+                );
 
-            // append A2A MAC
-            pkt.put(&a2a_mac[..a2a_mac_size]);
-            pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
+                // append A2A MAC
+                pkt.put(&a2a_mac[..a2a_mac_size]);
+                pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
 
-            // forward packet on
-            forward(asm, zpr::AGENT_LINK_ID, pep.tether_id, pkt);
-        }
+                // forward packet on
+                forward(asm, zpr::AGENT_LINK_ID, pep.tether_id, pkt);
+            }
 
-        Some(AltEntry::Pending) => {
-            // bind request pending; drop this packet
-            drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
-        }
+            AltEntry::Pending {
+                more_packets_seen, ..
+            } => {
+                // Bind request pending; mark that the first packet
+                // is no longer important (and therefore shouldn't be re-sent)
+                // and also drop this packet.
+                // NOTE: the atomic ordering here is unimportant, as this
+                // is a best-effort mechanism.  Our behavior is still correct
+                // if this flag is racily read as false.
+                more_packets_seen.store(true, atomic::Ordering::Relaxed);
+                drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
+            }
+        },
 
         None => {
+            if !allow_bind_request {
+                // avoid the (all-but purely theoretical) chance of a packet loop,
+                // when this is called from bind setup code
+                drop_and_count(asm, pkt, CounterType::OtherError);
+                return;
+            }
+
             // issue bind request
             match asm.adapter_manager.try_request_tether_id(pkt) {
                 Ok(()) => (),

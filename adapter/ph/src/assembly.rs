@@ -64,7 +64,7 @@ pub struct Assembly<'pktbuf> {
 
     // Adapter tables
     // NOTE: only adapter_manager_worker should modify these tables!
-    pub alt: adapter_tables::AgentLookupTable,
+    pub alt: adapter_tables::AgentLookupTable<'pktbuf>,
     pub dlt: adapter_tables::DockLookupTable,
 
     pub adapter_manager: AdapterManager<'pktbuf>,
@@ -136,7 +136,7 @@ pub mod test {
         pub tun_ctl: Option<Box<dyn TunCtl + 'a>>,
         pub peer_table: Option<peer_table::PeerTable<'a>>,
         pub peer_ids: Option<Vec<zpr::LinkId>>,
-        pub alt: Option<adapter_tables::AgentLookupTable>,
+        pub alt: Option<adapter_tables::AgentLookupTable<'a>>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
         pub adapter_manager: Option<AdapterManager<'a>>,
         pub km_state: Option<KmState>,
