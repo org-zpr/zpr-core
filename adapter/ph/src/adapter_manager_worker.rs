@@ -41,7 +41,6 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
         return;
     }
 
-
     let five_tuple = pkt.metadata().five_tuple();
 
     // if there's already an entry, this is a duplicate request
@@ -53,7 +52,6 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
 
     // copy out five tuple so we can give away packet
     let five_tuple = *five_tuple;
-
 
     // if there's already an entry, this is a duplicate request
     // (NOTE: we should be the only ones modifying this table!)
@@ -72,7 +70,6 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
         fastpath::drop_and_count(asm, pkt, CounterType::DroppedNoSA);
         return;
     }
-
 
     // mark ALT entry as pending to attempt to (i.e. racily) prevent
     // fastpath from issuing multiple requests
