@@ -40,15 +40,17 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
         return;
     }
 
-    // just extract 5t and drop packet for now, storing & resending it later is a TODO
-    let five_tuple = *pkt.metadata().five_tuple();
+    let five_tuple = pkt.metadata().five_tuple();
 
     // if there's already an entry, this is a duplicate request
     // (NOTE: we should be the only ones modifying this table!)
-    if asm.alt.get(&five_tuple).is_some() {
+    if asm.alt.get(five_tuple).is_some() {
         fastpath::drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
         return;
     }
+
+    // copy out five tuple so we can give away packet
+    let five_tuple = *five_tuple;
 
     // mark ALT entry as pending to attempt to (i.e. racily) prevent
     // fastpath from issuing multiple requests
@@ -91,6 +93,8 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
             } = asm
                 .alt
                 .alter(&five_tuple, |entry| {
+                    assert!(matches!(entry, AltEntry::Pending { .. }), "coding error: race to activate pending ALT entry");
+
                     std::mem::replace(
                         entry,
                         AltEntry::Active(AltPep {
@@ -100,9 +104,7 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
                     )
                 })
                 .unwrap()
-            else {
-                panic!("coding error: race to activate pending ALT entry");
-            };
+            else { unreachable!(); };
 
             if more_packets_seen.into_inner() {
                 // don't bother re-sending this initial packet; it's already out-of-order
