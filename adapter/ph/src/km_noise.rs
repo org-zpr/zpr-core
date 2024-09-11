@@ -46,7 +46,7 @@ static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
 /// Will transition to error state if we are handshake initator and do not get
 /// a handshake response within this time.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 const NOISE_NONCE_LEN: usize = 8;
 pub const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce
