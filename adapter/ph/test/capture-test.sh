@@ -35,8 +35,8 @@ function set_program() {
   PROGRAM=$3
   "$PH_DEBUG_BIN" -c SET-CAPTURE-FILE -p "$SOCKET" --file-path "$FILE_NAME"
 
-  if [ "$PROGRAM" != "None" ]
-  then "$PH_DEBUG_BIN" -c SET-CAPTURE-PROGRAM -p "$SOCKET" --program "$PROGRAM"
+  if [ "$PROGRAM" != "None" ]; then
+    "$PH_DEBUG_BIN" -c SET-CAPTURE-PROGRAM -p "$SOCKET" --program "$PROGRAM"
   fi
 }
 
@@ -54,8 +54,7 @@ CHILDREN=()
 trap cleanup EXIT
 
 TMPDIR=$(mktemp -d)
-pushd "$TMPDIR" > /dev/null
-
+pushd "$TMPDIR" >/dev/null
 
 #
 # Prepare for test
@@ -69,46 +68,51 @@ create_ca_key_and_cert ca
 create_agent_key_and_cert ca server
 create_agent_key_and_cert ca client
 
-
 #
 # Launch PHs
 #
+sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
+  --name "zpr-node" --control-path "$NODE_SOCK" \
+  --self-addr 0.0.0.0:12345 --peer-addr1 "$A_SUBSTRATE_ADDR":12345 \
+  --peer-addr2 "$B_SUBSTRATE_ADDR":12345 \
+  --ca-file ca.crt --certificate-file node.crt --private-key-file node.key \
+  --tun-if tun0 &
+CHILDREN=(${CHILDREN[@]} "$!")
 
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --name "zpr-a" --control-path "$ADAPTER1_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR":12345 --peer-addr1 "$NODE_SUBSTRATE_ADDR_A":12345 \
   --ca-file ca.crt --certificate-file adapter1.crt --private-key-file adapter1.key \
-  --disable-km --allow-insecure-zpi-zero --tun-if tun0 &
+  --tun-if tun0 &
 CHILDREN=(${CHILDREN[@]} "$!")
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --name "zpr-b" --control-path "$ADAPTER2_SOCK" \
   --self-addr "$B_SUBSTRATE_ADDR":12345 --peer-addr1 "$NODE_SUBSTRATE_ADDR_B":12345 \
   --ca-file ca.crt --certificate-file adapter2.crt --private-key-file adapter2.key \
-  --disable-km --allow-insecure-zpi-zero --tun-if tun0 &
+  --tun-if tun0 &
 CHILDREN=(${CHILDREN[@]} "$!")
 
-sleep 1  # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well
+sleep 1 # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well
 set_program "$ADAPTER1_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
-
-sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
-  --name "zpr-node" --control-path "$NODE_SOCK" \
-  --self-addr 0.0.0.0:12345 --peer-addr1 "$A_SUBSTRATE_ADDR":12345 \
-  --peer-addr2 "$B_SUBSTRATE_ADDR":12345 \
-  --ca-file ca.crt --certificate-file node.crt --private-key-file node.key \
-  --disable-km --allow-insecure-zpi-zero --tun-if tun0 &
-CHILDREN=(${CHILDREN[@]} "$!")
 
 #
 # Wait for connectivity
 #
 
 echo "Wait for TUN carrier..."
-wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
-wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
+wait_for 5 check_carrier zpr-a tun0 || {
+  echo "FAILURE"
+  exit 1
+}
+wait_for 5 check_carrier zpr-b tun0 || {
+  echo "FAILURE"
+  exit 1
+}
 echo "Carrier has arrived."
 
 stty sane || true
+
 
 #
 # Run test
@@ -116,37 +120,49 @@ stty sane || true
 
 set_program "$ADAPTER2_SOCK" "$TMPDIR/cap_test2.pcap" None
 
+
+echo "wait for KM"
+sleep 7
+
+
+echo "starting PING test..."
+
 PASS=0
-if ! ping_test
-then PASS=1
+if ! ping_test; then
+  PASS=1
 fi
 
 close_program "$ADAPTER1_SOCK"
 close_program "$ADAPTER2_SOCK"
 
 # Make sure at least both agent and mgmt packets were captured.
-tcpdump -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1 or link[0] == 0' > "$TMPDIR/checker.txt"
+tcpdump -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1 or link[0] == 0' >"$TMPDIR/checker.txt"
 AGENT_PACKET_COUNT="$(grep -c '0x0000:  0100 00' "$TMPDIR/checker.txt" || echo 0)"
 TOTAL_PACKET_COUNT="$(grep -c '0x0000:  0100' "$TMPDIR/checker.txt" || echo 0)"
+
+echo "TOTAL_PACKET_COUNT = ${TOTAL_PACKET_COUNT}"
+echo "AGENT_PACHET_COUNT = ${AGENT_PACKET_COUNT}"
+
+
 let MGMT_PACKET_COUNT=TOTAL_PACKET_COUNT-AGENT_PACKET_COUNT
 
-if [[ MGMT_PACKET_COUNT == 0 || AGENT_PACKET_COUNT == 0 ]]
-then PASS=1
+if [[ MGMT_PACKET_COUNT == 0 || AGENT_PACKET_COUNT == 0 ]]; then
+  PASS=1
 fi
 
 # Make sure no data was captured when program is not set
 SIZE="$(stat -c %s "$TMPDIR/cap_test2.pcap")"
 
-if [[ "$SIZE" != "24" ]]
-then PASS=1
+if [[ "$SIZE" != "24" ]]; then
+  PASS=1
 fi
 
 #
 # Cleanup
 #
 
-sudo kill "${CHILDREN[@]}" 2> /dev/null || true
-sleep 1  # FIXME: let's do something better here
+sudo kill "${CHILDREN[@]}" 2>/dev/null || true
+sleep 1 # FIXME: let's do something better here
 stty sane || true
 
 #
@@ -154,9 +170,10 @@ stty sane || true
 #
 
 echo
-if [[ "$PASS" == 0 ]]
-then echo "SUCCESS"
-else echo "FAILURE"
+if [[ "$PASS" == 0 ]]; then
+  echo "SUCCESS"
+else
+  echo "FAILURE"
 fi
 
 exit "$PASS"
