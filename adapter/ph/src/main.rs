@@ -485,7 +485,12 @@ fn main() -> ExitCode {
                 asm.system_name, dsid
             );
 
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            // HACK - In our tests we need to send from adapter through the node to the adapter.
+            // We do not know when the other adapter has setup its association. So lets give
+            // it a little time here.
+            info!("{}: waiting for the other adapter to (hopfully) establish its security association...", asm.system_name);
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+
 
             mgmt::send_report(asm, dsid, "Reporting for Duty!").await;
             mgmt::send_discard(asm, dsid).await;

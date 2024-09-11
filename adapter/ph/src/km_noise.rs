@@ -38,11 +38,16 @@ use bytes::{Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use openssl::rand::rand_bytes;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::error;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+
+
+/// Will transition to error state if we are handshake initator and do not get
+/// a handshake response within this time.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
 
 const NOISE_NONCE_LEN: usize = 8;
 pub const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce
@@ -59,6 +64,7 @@ pub struct KmNoise {
     initiate: bool,
     peer_pub_key: Option<Vec<u8>>, // required if initiator
     local_keypair: snow::Keypair,
+    hs_sent_t: Option<Instant>,
     hs_state: Option<snow::HandshakeState>,
     //t_state: Option<snow::TransportState>,
     recv_hmac_key: [u8; 32], // messages sent to us from peer will use this key (we create this)
@@ -119,6 +125,7 @@ impl KmNoise {
             initiate,
             peer_pub_key,
             local_keypair: kp,
+            hs_sent_t: None,
             hs_state: None,
             recv_hmac_key: [0u8; 32], // we generate this and send to peer
             send_hmac_key: None,      // we get this during handshake
@@ -256,6 +263,7 @@ impl KeyManagerStateMachine for KmNoise {
             };
             buf.truncate(len);
             self.hs_state = Some(initiator);
+            self.hs_sent_t = Some(Instant::now());
             Ok(Some(buf.freeze()))
         } else {
             let responder = match snow::Builder::new(np)
@@ -383,7 +391,6 @@ impl KeyManagerStateMachine for KmNoise {
     }
 
     fn tick(&mut self) -> Result<Option<Bytes>, KmError> {
-        // TODO: Timeout handling
         if self.state == KmSMState::Configuring {
             let hs: snow::HandshakeState;
             if self.hs_state.is_some() {
@@ -422,6 +429,13 @@ impl KeyManagerStateMachine for KmNoise {
                         }
                     }
                 } else {
+                    if self.initiate && self.hs_sent_t.is_some() && Instant::now().duration_since(self.hs_sent_t.unwrap()) > HANDSHAKE_TIMEOUT {
+                        error!("noise: handhsake timeout");
+                        self.hs_state = None;
+                        self.hs_sent_t = None;
+                        self.state = KmSMState::Error;
+                        return Err(KmError::HandshakeError);
+                    }
                     self.hs_state = Some(hs);
                 }
             }

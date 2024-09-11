@@ -15,7 +15,7 @@ use tracing::{error, info, warn};
 /// on the KeyManager state machines.  Indirectly, this controls how
 /// quickly the KeyManager state machines will restart the handshake
 /// process in case of error.
-const CHECK_ERROR_INTERVAL: time::Duration = time::Duration::from_secs(1);
+const CHECK_ERROR_INTERVAL: time::Duration = time::Duration::from_millis(500);
 
 #[derive(Debug)]
 pub enum KmMsgProcessingError {

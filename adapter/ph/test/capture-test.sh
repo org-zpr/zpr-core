@@ -113,17 +113,14 @@ echo "Carrier has arrived."
 
 stty sane || true
 
-
 #
 # Run test
 #
 
 set_program "$ADAPTER2_SOCK" "$TMPDIR/cap_test2.pcap" None
 
-
 echo "wait for KM"
 sleep 7
-
 
 echo "starting PING test..."
 
@@ -141,17 +138,12 @@ tcpdump -r "$TMPDIR/cap_test1.pcap" 'link[0] = 1 or link[0] == 0' >"$TMPDIR/chec
 # The node is configured in main.rs to expect ZPI 5 for management packets and 6 for transit
 # when getting messages from peer 1.
 MGMT_PACKET_COUNT="$(grep -c '0x0105: ' "$TMPDIR/checker.txt" || echo 0)"
-TOTAL_PACKET_COUNT="$(grep -c '0x0106: ' "$TMPDIR/checker.txt" || echo 0)"
+AGENT_PACKET_COUNT="$(grep -c '0x0106: ' "$TMPDIR/checker.txt" || echo 0)"
 
 echo "============================= CHECKER"
 cat "$TMPDIR/checker.txt"
 
 echo
-
-
-echo "TOTAL_PACKET_COUNT = ${TOTAL_PACKET_COUNT}"
-echo "AGENT_PACHET_COUNT = ${AGENT_PACKET_COUNT}"
-
 
 if [[ MGMT_PACKET_COUNT == 0 || AGENT_PACKET_COUNT == 0 ]]; then
   PASS=1
