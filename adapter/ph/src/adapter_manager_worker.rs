@@ -93,7 +93,10 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
             } = asm
                 .alt
                 .alter(&five_tuple, |entry| {
-                    assert!(matches!(entry, AltEntry::Pending { .. }), "coding error: race to activate pending ALT entry");
+                    assert!(
+                        matches!(entry, AltEntry::Pending { .. }),
+                        "coding error: race to activate pending ALT entry"
+                    );
 
                     std::mem::replace(
                         entry,
@@ -104,7 +107,9 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
                     )
                 })
                 .unwrap()
-            else { unreachable!(); };
+            else {
+                unreachable!();
+            };
 
             if more_packets_seen.into_inner() {
                 // don't bother re-sending this initial packet; it's already out-of-order
