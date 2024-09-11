@@ -44,7 +44,6 @@ use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
-
 /// Will transition to error state if we are handshake initator and do not get
 /// a handshake response within this time.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -429,7 +428,11 @@ impl KeyManagerStateMachine for KmNoise {
                         }
                     }
                 } else {
-                    if self.initiate && self.hs_sent_t.is_some() && Instant::now().duration_since(self.hs_sent_t.unwrap()) > HANDSHAKE_TIMEOUT {
+                    if self.initiate
+                        && self.hs_sent_t.is_some()
+                        && Instant::now().duration_since(self.hs_sent_t.unwrap())
+                            > HANDSHAKE_TIMEOUT
+                    {
                         error!("noise: handhsake timeout");
                         self.hs_state = None;
                         self.hs_sent_t = None;
