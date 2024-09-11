@@ -23,7 +23,7 @@ use bytes::{BufMut, Bytes};
 
 use zerocopy::FromBytes;
 
-use tracing::{error, warn, info};
+use tracing::{error, info, warn};
 
 use crate::config;
 use crate::packet::Packet;
@@ -425,7 +425,6 @@ impl KeyManager {
                 prev_state = state.statemachine.get_state();
             }
 
-
             tokio::select! {
                 _ = ctok.cancelled() => {
                     match self.send_signal(&km_signals_out, link_id, KmSignal::Termination).await {
@@ -535,7 +534,6 @@ impl KeyManager {
         km_signals_out: &mpsc::Sender<KmLinkMsg<KmSignal>>,
         cur_state: &KmSMState,
     ) -> KmResult<()> {
-
         let mut resp: Option<Bytes> = None;
         let mut did_reset = false;
 
@@ -720,7 +718,6 @@ impl KeyManager {
         }
         Ok(())
     }
-
 }
 
 impl KmTransportSA {
