@@ -63,6 +63,7 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
      --tun-if tun0 &
 CHILDREN=(${CHILDREN[@]} "$!")
 
+sleep 2
 
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --name "zpr-a" --control-path "$ADAPTER1_SOCK" \
