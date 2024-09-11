@@ -23,7 +23,7 @@ use bytes::{BufMut, Bytes};
 
 use zerocopy::FromBytes;
 
-use tracing::{error, info};
+use tracing::{error, warn, info};
 
 use crate::config;
 use crate::packet::Packet;
@@ -266,7 +266,7 @@ struct KmState {
     sa_id: zpr::SaId,                     // current SA identifier
     mgmt_tx: Option<mpsc::Sender<Bytes>>, // Internal queue for key management messages to be processed.
     ts: KmTransportSA,
-    restart_request: Option<bool>,
+    restart_request: bool,
     error_signaled: bool,
 }
 
@@ -295,7 +295,7 @@ impl KeyManager {
                     sa_id: 0,
                     mgmt_tx: None,
                     ts: Default::default(),
-                    restart_request: None,
+                    restart_request: false,
                     error_signaled: false,
                 }),
             }),
@@ -378,7 +378,7 @@ impl KeyManager {
         if state.statemachine.get_state() != KmSMState::Error {
             return Err(KmError::InvalidState);
         }
-        state.restart_request = Some(true);
+        state.restart_request = true;
         Ok(())
     }
 
@@ -425,46 +425,34 @@ impl KeyManager {
                 prev_state = state.statemachine.get_state();
             }
 
-            match prev_state {
-                KmSMState::Error => match self
-                    .handle_state_error(link_id, &km_signals_out, &km_buffers_out)
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        return Err(e);
-                    }
-                },
-                _ => {
-                    tokio::select! {
-                        _ = ctok.cancelled() => {
-                            match self.send_signal(&km_signals_out, link_id, KmSignal::Termination).await {
-                                Ok(_) => {}
-                                Err(_) => {}
-                            };
-                            break;
-                        }
 
-                        Some(inmsg) = km_rx.recv() => {
-                            match self.dispatch_km_message(inmsg, link_id, &km_buffers_out).await {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    return Err(e);
-                                }
-                            }
-                        }
+            tokio::select! {
+                _ = ctok.cancelled() => {
+                    match self.send_signal(&km_signals_out, link_id, KmSignal::Termination).await {
+                        Ok(_) => {}
+                        Err(_) => {}
+                    };
+                    break;
+                }
 
-                        _ = interval.tick() => {
-                            match self.tick_statemachine(link_id, &km_buffers_out).await {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    return Err(e);
-                                }
-                            }
+                Some(inmsg) = km_rx.recv() => {
+                    match self.dispatch_km_message(inmsg, link_id, &km_buffers_out).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            return Err(e);
                         }
                     }
                 }
-            };
+
+                _ = interval.tick() => {
+                    match self.tick_statemachine(link_id, &km_buffers_out, &km_signals_out, &prev_state).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
 
             {
                 let state = self.shared.state.lock().unwrap();
@@ -544,14 +532,60 @@ impl KeyManager {
         &self,
         link_id: zpr::LinkId,
         km_buffers_out: &mpsc::Sender<KmLinkMsg<Bytes>>,
+        km_signals_out: &mpsc::Sender<KmLinkMsg<KmSignal>>,
+        cur_state: &KmSMState,
     ) -> KmResult<()> {
+
+        let mut resp: Option<Bytes> = None;
+        let mut did_reset = false;
+
+        if *cur_state == KmSMState::Error {
+            {
+                let mut state = self.shared.state.lock().unwrap();
+                if state.restart_request {
+                    resp = match state.statemachine.reset() {
+                        Ok(h) => {
+                            did_reset = true;
+                            h
+                        }
+                        Err(e) => {
+                            return Err(KmError::MachineError(e.to_string()));
+                        }
+                    };
+                    state.restart_request = false;
+                }
+            }
+            if let Some(r) = resp {
+                match km_buffers_out.send(KmLinkMsg::new(link_id, r)).await {
+                    Ok(_) => {}
+                    Err(_) => {
+                        error!("failed to enqueue outbound KM message");
+                        return Err(KmError::EnqueueFailed);
+                    }
+                }
+            }
+            if did_reset {
+                match self
+                    .send_signal(km_signals_out, link_id, KmSignal::Reset)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(_) => {
+                        error!("failed to enqueue reset signal, aborting");
+                        return Err(KmError::EnqueueFailed);
+                    }
+                }
+            }
+        }
+
+        // Tick machine, even during error.
         let resp: Option<Bytes>;
         {
             let mut state = self.shared.state.lock().unwrap();
             resp = match state.statemachine.tick() {
                 Ok(h) => h,
                 Err(e) => {
-                    error!("failed to tick key manager: {}", e);
+                    warn!("error during tick processing: {}", e);
                     None
                 }
             };
@@ -580,7 +614,7 @@ impl KeyManager {
             // We transitioned out of error state -- clear error related settings.
             let mut state = self.shared.state.lock().unwrap();
             state.error_signaled = false;
-            state.restart_request = None;
+            state.restart_request = false;
         }
         match next_state {
             KmSMState::Transport(ts) => {
@@ -628,7 +662,30 @@ impl KeyManager {
                     }
                 }
             }
-            _ => {}
+            KmSMState::Error => {
+                let needs_error_signal: bool;
+                {
+                    let state = self.shared.state.lock().unwrap();
+                    needs_error_signal = !state.error_signaled;
+                }
+                if needs_error_signal {
+                    match self
+                        .send_signal(km_signals_out, link_id, KmSignal::Error)
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(_) => {
+                            error!("failed to enqueue error signal, aborting");
+                            return Err(KmError::EnqueueFailed);
+                        }
+                    }
+                    {
+                        let mut state = self.shared.state.lock().unwrap();
+                        state.error_signaled = true;
+                    }
+                }
+            }
+            KmSMState::Configuring => {}
         };
         Ok(())
     }
@@ -664,76 +721,6 @@ impl KeyManager {
         Ok(())
     }
 
-    /// Deal with case where the state machine is in the error state.
-    /// If we have been instructed previously to restart the machine (see [KeyManager::restart]) then
-    /// this will reset the state machine and send a reset signal, possibly also generating
-    /// a new handshake message.
-    async fn handle_state_error(
-        &self,
-        link_id: zpr::LinkId,
-        km_signals_out: &mpsc::Sender<KmLinkMsg<KmSignal>>,
-        km_buffers_out: &mpsc::Sender<KmLinkMsg<Bytes>>,
-    ) -> KmResult<()> {
-        let mut resp: Option<Bytes> = None;
-        let mut did_reset = false;
-        let restart_request;
-
-        let needs_error_signal: bool;
-        {
-            let state = self.shared.state.lock().unwrap();
-            needs_error_signal = !state.error_signaled;
-            restart_request = state.restart_request.unwrap_or(false);
-        }
-        if needs_error_signal {
-            match self
-                .send_signal(km_signals_out, link_id, KmSignal::Error)
-                .await
-            {
-                Ok(_) => {}
-                Err(_) => {
-                    error!("failed to enqueue error signal, aborting");
-                    return Err(KmError::EnqueueFailed);
-                }
-            }
-            {
-                let mut state = self.shared.state.lock().unwrap();
-                state.error_signaled = true;
-            }
-        }
-        if restart_request {
-            let mut state = self.shared.state.lock().unwrap();
-            resp = match state.statemachine.reset() {
-                Ok(h) => h,
-                Err(e) => {
-                    return Err(KmError::MachineError(e.to_string()));
-                }
-            };
-            did_reset = true;
-            state.restart_request = None;
-        }
-        if did_reset {
-            match self
-                .send_signal(km_signals_out, link_id, KmSignal::Reset)
-                .await
-            {
-                Ok(_) => {}
-                Err(_) => {
-                    error!("failed to enqueue reset signal, aborting");
-                    return Err(KmError::EnqueueFailed);
-                }
-            }
-            if let Some(r) = resp {
-                match km_buffers_out.send(KmLinkMsg::new(link_id, r)).await {
-                    Ok(_) => {}
-                    Err(_) => {
-                        error!("failed to enqueue outbound KM message");
-                        return Err(KmError::EnqueueFailed);
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 impl KmTransportSA {
