@@ -8,7 +8,7 @@ use crate::queues::AdapterManagerMessage;
 use crate::zpr;
 use std::future::Future;
 use tokio::sync::mpsc;
-use tracing::debug;
+use tracing::{debug, error};
 
 async fn worker<'pktbuf>(
     asm: &Assembly<'pktbuf>,
@@ -37,16 +37,28 @@ pub fn launch<'pktbuf>(
 async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pktbuf>) {
     // TODO: node version... that just allocates a tether ID directly from the internal dock, no messages exchanged
     if matches!(asm.ph_mode, PhMode::Node) {
+        fastpath::drop_and_count(asm, pkt, CounterType::DroppedNop);
         return;
     }
 
     // just extract 5t and drop packet for now, storing & resending it later is a TODO
     let five_tuple = *pkt.metadata().five_tuple();
-    fastpath::drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
 
     // if there's already an entry, this is a duplicate request
     // (NOTE: we should be the only ones modifying this table!)
     if asm.alt.get(&five_tuple).is_some() {
+        fastpath::drop_and_count(asm, pkt, CounterType::DroppedDuplicate);
+        return;
+    }
+
+    // NOPE ! not if the link is not ready.
+    let link_id = asm.hack_get_adapter_docking_session_id();
+    if !asm.peer_table.is_security_assocaition_established(link_id) {
+        error!(
+            "{}: Link {} has no security association, aborting bind request operation",
+            asm.system_name, link_id
+        );
+        fastpath::drop_and_count(asm, pkt, CounterType::DroppedNoSA);
         return;
     }
 
@@ -58,11 +70,9 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
     let compression_mode: zpr::CompressionMode = 0;
 
     debug!(
-        "{}: Issuing bind request for {}",
-        asm.system_name, five_tuple
+        "{}: link {}: Issuing bind request for {} (is now set PENDING)",
+        asm.system_name, link_id, five_tuple
     );
-
-    // send Bind request
 
     match mgmt::send_bind_agent_address_request(
         asm,

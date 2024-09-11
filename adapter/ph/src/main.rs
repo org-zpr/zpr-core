@@ -15,7 +15,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_tun::TunBuilder;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber;
 use zpr_ext::tokio::net::UdpSocketExt;
 
@@ -101,6 +101,9 @@ struct CmdLine {
 
     #[arg(long)]
     allow_insecure_zpi_zero: bool,
+
+    #[arg(long)]
+    debug: bool,
 }
 
 fn emit_counts(system_name: &String, counts_map: &EnumMap<CounterType, Counter>) {
@@ -111,8 +114,16 @@ fn emit_counts(system_name: &String, counts_map: &EnumMap<CounterType, Counter>)
 }
 
 fn main() -> ExitCode {
-    tracing_subscriber::fmt::init();
     let cmd_line = CmdLine::parse();
+
+    let mut subscriber = tracing_subscriber::fmt::fmt();
+    if cmd_line.debug {
+        subscriber = subscriber.with_max_level(tracing::Level::DEBUG);
+    } else {
+        subscriber = subscriber.with_max_level(tracing::Level::INFO);
+    }
+    let subscriber = subscriber.finish();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let system_name = cmd_line.name;
     let sock_path = cmd_line.control_path;
@@ -337,6 +348,7 @@ fn main() -> ExitCode {
             .unwrap();
         let dock_noise_public_key = km_noise::derive_public_key(&dock_noise_private_key);
 
+        // Presence of peer2 means we are a node.
         if let Some(pa2) = peer_addr2 {
             let peer_id2 = asm
                 .hack_add_peer(peer_table::PeerType::Adapter, pa2)
@@ -345,13 +357,12 @@ fn main() -> ExitCode {
             asm.peer_ids.lock().unwrap().push(peer_id2);
 
             if !disable_km {
-                km_multiplexor::add_adapter_link(
-                    asm,
-                    peer_id2,
-                    ZPIPair::new(1, 2),
-                    dock_noise_public_key,
-                )
-                .unwrap();
+                let dock_keypair = snow::Keypair {
+                    private: dock_noise_private_key.to_vec(),
+                    public: dock_noise_public_key.to_vec(),
+                };
+                km_multiplexor::add_node_link(asm, peer_id2, ZPIPair::new(1, 2), dock_keypair)
+                    .unwrap();
             }
         }
 
@@ -462,9 +473,32 @@ fn main() -> ExitCode {
 
         if matches!(ph_mode, PhMode::Adapter) {
             let dsid = asm.hack_get_adapter_docking_session_id();
+            info!(
+                "{}: waiting on security assocaition establishment on link {}",
+                asm.system_name, dsid
+            );
+            while !asm.peer_table.is_security_assocaition_established(dsid) {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            info!(
+                "{}: security assocaition established successfully on link {}",
+                asm.system_name, dsid
+            );
+
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
             mgmt::send_report(asm, dsid, "Reporting for Duty!").await;
             mgmt::send_discard(asm, dsid).await;
-            mgmt::send_hello_request(asm, dsid).await.unwrap();
+            match mgmt::send_hello_request(asm, dsid).await {
+                Ok(_) => info!(
+                    "{}: hello request sent successfully on link {}",
+                    asm.system_name, dsid
+                ),
+                Err(e) => error!(
+                    "{}: hello request failed on link {}: {:?}",
+                    asm.system_name, dsid, e
+                ),
+            }
         }
 
         while let Some(res) = js.join_next().await {

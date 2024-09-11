@@ -22,6 +22,9 @@ pub enum CounterType {
 
     QueueBackpressure,
     DroppedAwaitingBind,
+    DroppedNop,       // normal, not an error drop
+    DroppedDuplicate, // some sort of duplicate detected
+    DroppedNoSA,      // no security association on link
 
     BadMgmtResponse,
     UnexpectedMgmtResponse,
@@ -60,6 +63,9 @@ impl CounterType {
 
             Self::QueueBackpressure => "QueueBackpressure",
             Self::DroppedAwaitingBind => "Dropped Awaiting Bind",
+            Self::DroppedDuplicate => "Dropped Duplicate",
+            Self::DroppedNop => "Dropped No Operation",
+            Self::DroppedNoSA => "Dropped No Security Association",
 
             Self::BadMgmtResponse => "Bad Management Response",
             Self::UnexpectedMgmtResponse => "Unexpected Management Response",

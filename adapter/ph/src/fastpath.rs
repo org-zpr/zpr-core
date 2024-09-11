@@ -50,38 +50,6 @@ pub fn encap_zpi<'pktbuf>(
     pkt.alloc_zeroed_header::<zdp::ZdpZpiHeader>().zpi = zpi;
 }
 
-pub enum DecapZpiError {
-    BadStructure,
-    UnknownZpi,
-}
-
-impl From<DecapZpiError> for CounterType {
-    fn from(value: DecapZpiError) -> Self {
-        match value {
-            DecapZpiError::BadStructure => Self::BadStructure,
-            DecapZpiError::UnknownZpi => Self::UnknownZpi,
-        }
-    }
-}
-
-/// Remove the ZPI header from a packet.
-/// Returns the ZPI value, or an error if it's invalid for the given link.
-pub fn decap_zpi<'pktbuf>(
-    _asm: &Assembly<'pktbuf>,
-    _link_id: zpr::LinkId,
-    pkt: &mut Packet<'pktbuf>,
-) -> Result<zpr::Zpi, DecapZpiError> {
-    let zpi_hdr = zdp::ZdpZpiHeader::read_from_buf(pkt).ok_or(DecapZpiError::BadStructure)?;
-    let zpi = zpi_hdr.zpi as zpr::Zpi;
-
-    if zpi == zpr::ZPI_0 {
-        Ok(zpi)
-    } else {
-        // TODO: lookup in table
-        Err(DecapZpiError::UnknownZpi)
-    }
-}
-
 /// Offer a packet to be captured by the packet capture facility.
 /// The packet must be a complete ZDP message.
 /// Despite the &mut borrow, the packet will return materially unchanged.
@@ -338,9 +306,9 @@ fn substrate_egress_common<'pktbuf>(
     {
         Some(transport_sa) => {
             if transit {
-                real_zpi = transport_sa.recv_zpis.hmac;
+                real_zpi = transport_sa.send_zpis.hmac;
             } else {
-                real_zpi = transport_sa.recv_zpis.encr;
+                real_zpi = transport_sa.send_zpis.encr;
             }
             assert!(real_zpi != zpr::ZPI_0);
             Some(transport_sa)
@@ -487,8 +455,8 @@ pub fn substrate_ingress<'pktbuf>(
             } else {
                 // We have an SA and ZPI does not match.
                 info!(
-                    "ingress: link {}: unexpected ZPI value {} (expected {:?})",
-                    ingress_link_id, zpi_hdr.zpi, transport_sa.recv_zpis
+                    "{}: ingress: link {}: unexpected ZPI value {} (expected {:?})",
+                    asm.system_name, ingress_link_id, zpi_hdr.zpi, transport_sa.recv_zpis
                 );
                 drop_and_count(asm, pkt, CounterType::UnknownZpi);
                 return;
@@ -504,8 +472,8 @@ pub fn substrate_ingress<'pktbuf>(
         // Not under a security assocation  which means only ZPI 0 is allowed
         if zpi_hdr.zpi != zpr::ZPI_0 {
             info!(
-                "ingress: link {}: ZPI {} not allowed on unestablished SA",
-                ingress_link_id, zpi_hdr.zpi
+                "{}: ingress: link {}: ZPI {} not allowed on unestablished SA",
+                asm.system_name, ingress_link_id, zpi_hdr.zpi
             );
             drop_and_count(asm, pkt, CounterType::UnknownZpi);
             return;
@@ -522,14 +490,14 @@ pub fn substrate_ingress<'pktbuf>(
     // Watch out -- may not be secure
     maybe_capture(asm, Direction::Inbound, &mut pkt);
 
-    // now pop the ZPI off the packet
-    let _zpi = match decap_zpi(asm, ingress_link_id, &mut pkt) {
-        Ok(zpi) => zpi,
-        Err(err) => {
-            drop_and_count(asm, pkt, err);
+    // now pop the ZPI off the packet. We've already checked it.
+    match zdp::ZdpZpiHeader::read_from_buf(&mut pkt) {
+        Some(_) => (),
+        None => {
+            drop_and_count(asm, pkt, CounterType::BadStructure);
             return;
         }
-    };
+    }
 
     let Some(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return drop_and_count(asm, pkt, CounterType::BadStructure);
@@ -540,8 +508,8 @@ pub fn substrate_ingress<'pktbuf>(
     if !secure && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
         if !asm.flags.allow_insecure_zpi_zero {
             warn!(
-                "ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
-                ingress_link_id, base_hdr.packet_type
+                "{}: ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
+                asm.system_name, ingress_link_id, base_hdr.packet_type
             );
             drop_and_count(asm, pkt, CounterType::OtherError);
             return;

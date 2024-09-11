@@ -82,7 +82,7 @@ async fn signal_worker<'pktbuf>(
     loop {
         tokio::select! {
             _ = sp_ctok.cancelled() => {
-                info!("KM Multiplexor shutting down");
+                info!("{}: KM Multiplexor shutting down", asm.system_name);
                 break;
             }
 
@@ -93,35 +93,38 @@ async fn signal_worker<'pktbuf>(
                         if let Some(km) = asm.peer_table.clone_km_manager(*link_id) {
                             match km.restart() {
                                 Ok(_) => {
-                                    info!("km_multiplexor: restarted key manager on link {} (error_count = {})", link_id, stat.error_count);
+                                    info!("{}: km_multiplexor: restarted key manager on link {} (error_count = {})", asm.system_name, link_id, stat.error_count);
                                     stat.restart_t = now;
                                 }
                                 Err(e) => {
-                                    error!("km_multiplexor: failed to restart KM on link {}: {:?}", link_id, e);
+                                    error!("{}: km_multiplexor: failed to restart KM on link {}: {:?}", asm.system_name, link_id, e);
                                     stat.error_count += 1;
                                 }
                             }
                         } else {
-                            error!("km_multiplexor: unable to restart key manager on link {}: not found in peer table", link_id);
+                            error!("{}: km_multiplexor: unable to restart key manager on link {}: not found in peer table", asm.system_name, link_id);
                         }
                     }
                 }
             }
 
             Some(linkmsg) = sig_queue.recv() => {
-                info!("km_multiplexor: signal {:?} on link {}", linkmsg.msg, linkmsg.link_id);
+                info!("{}: km_multiplexor: link: {}, signal {:?}", asm.system_name, linkmsg.link_id, linkmsg.msg);
                 match linkmsg.msg {
                     KmSignal::SaIdChange { old, new } => {
-                        info!("km_multiplexor: SA ID change on link {}: {} -> {}", linkmsg.link_id, old, new);
+                        info!("{}: km_multiplexor: SA ID change on link {}: {} -> {}", asm.system_name, linkmsg.link_id, old, new);
                         if old == 0 {
                             let _ = status.remove(&linkmsg.link_id);
                         }
                     }
                     KmSignal::SaEstablished(sa) => {
+                        info!("{}: km_multiplexor: link {}: SA established (SEND_ZPIS: {:?}, RECV_ZPIS: {:?}",
+                            asm.system_name, linkmsg.link_id, sa.send_zpis, sa.recv_zpis);
+
                         match asm.peer_table.set_security_association(linkmsg.link_id, sa) {
                             Ok(_) => (),
                             Err(e) => {
-                                error!("km_multiplexor: failed to set SA established: {:?}", e);
+                                error!("{}: km_multiplexor: failed to set SA established: {:?}", asm.system_name, e);
                             }
                         }
                         match status.get_mut(&linkmsg.link_id) {
@@ -149,11 +152,11 @@ async fn signal_worker<'pktbuf>(
                         };
                         stat.error_count += 1;
                         stat.last_error_t = time::Instant::now();
-                        warn!("km_multiplexor: Error signal on link {}", linkmsg.link_id);
+                        warn!("{}: km_multiplexor: Error signal on link {}", asm.system_name, linkmsg.link_id);
                     }
                     KmSignal::Termination => {
                         let _ = status.remove(&linkmsg.link_id);
-                        info!("km_multiplexor: termination signal on link {}", linkmsg.link_id);
+                        info!("{}: km_multiplexor: termination signal on link {}", asm.system_name, linkmsg.link_id);
                     }
                 }
             }
@@ -260,8 +263,8 @@ pub async fn drop_link<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId) {
             Ok(_) => (),
             Err(e) => {
                 error!(
-                    "KeyManager statemachine shutdown join failed on link {}: {:?}",
-                    link_id, e
+                    "{}: KeyManager statemachine shutdown join failed on link {}: {:?}",
+                    asm.system_name, link_id, e
                 );
             }
         }
@@ -288,7 +291,10 @@ fn add_noise_link(
         match spawn_mgr.start(spawn_ctok, spawn_km_tx, spawn_sig_tx).await {
             Ok(_) => (),
             Err(e) => {
-                error!("KeyManager failed on link {}: {:?}", link_id, e);
+                error!(
+                    "{}: KeyManager failed on link {}: {:?}",
+                    asm.system_name, link_id, e
+                );
             }
         }
     });
