@@ -1,4 +1,10 @@
-PLANTUML = plantuml
+
+# Either set PLANTUML in env to point to plantuml binary, or 
+# ensure that `plantuml` is in your PATH.
+ifeq ($(PLANTUML),"")
+	PLANTUML = plantuml
+endif
+
 
 PLANTUML_OPTS = -noerror -failfast
 
