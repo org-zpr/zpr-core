@@ -171,6 +171,10 @@ async fn message_worker<'pktbuf>(
     msg_queue: &mut mpsc::Receiver<KmLinkMsg<Bytes>>,
 ) {
     while let Some(km_buf_msg) = msg_queue.recv().await {
+        info!(
+            "{}: km_multiplexor: sending KM message generated on link {}",
+            asm.system_name, km_buf_msg.link_id
+        );
         mgmt::send_key_management(&*asm, km_buf_msg.link_id, zpr::KM_ID_NOISE, &km_buf_msg.msg)
             .await;
     }

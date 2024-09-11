@@ -576,24 +576,26 @@ impl KeyManager {
             }
         }
 
-        // Tick machine, even during error.
-        let resp: Option<Bytes>;
-        {
-            let mut state = self.shared.state.lock().unwrap();
-            resp = match state.statemachine.tick() {
-                Ok(h) => h,
-                Err(e) => {
-                    warn!("error during tick processing: {}", e);
-                    None
-                }
-            };
-        }
-        if let Some(r) = resp {
-            match km_buffers_out.send(KmLinkMsg::new(link_id, r)).await {
-                Ok(_) => {}
-                Err(_) => {
-                    error!("failed to enqueue oubound KM message");
-                    return Err(KmError::EnqueueFailed);
+        // Unless we did a reset, tick machine, even during error.
+        if !did_reset {
+            let resp: Option<Bytes>;
+            {
+                let mut state = self.shared.state.lock().unwrap();
+                resp = match state.statemachine.tick() {
+                    Ok(h) => h,
+                    Err(e) => {
+                        warn!("error during tick processing: {}", e);
+                        None
+                    }
+                };
+            }
+            if let Some(r) = resp {
+                match km_buffers_out.send(KmLinkMsg::new(link_id, r)).await {
+                    Ok(_) => {}
+                    Err(_) => {
+                        error!("failed to enqueue oubound KM message");
+                        return Err(KmError::EnqueueFailed);
+                    }
                 }
             }
         }
