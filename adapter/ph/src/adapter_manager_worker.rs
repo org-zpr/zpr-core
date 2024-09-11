@@ -41,8 +41,19 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
         return;
     }
 
-    // just extract 5t and drop packet for now, storing & resending it later is a TODO
-    let five_tuple = *pkt.metadata().five_tuple();
+
+    let five_tuple = pkt.metadata().five_tuple();
+
+    // if there's already an entry, this is a duplicate request
+    // (NOTE: we should be the only ones modifying this table!)
+    if asm.alt.get(five_tuple).is_some() {
+        fastpath::drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
+        return;
+    }
+
+    // copy out five tuple so we can give away packet
+    let five_tuple = *five_tuple;
+
 
     // if there's already an entry, this is a duplicate request
     // (NOTE: we should be the only ones modifying this table!)
@@ -62,9 +73,16 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
         return;
     }
 
+
     // mark ALT entry as pending to attempt to (i.e. racily) prevent
     // fastpath from issuing multiple requests
-    asm.alt.insert(five_tuple, AltEntry::Pending);
+    asm.alt.insert(
+        five_tuple,
+        AltEntry::Pending {
+            initial_packet: pkt,
+            more_packets_seen: false.into(),
+        },
+    );
 
     // compress only IP addresses for now
     let compression_mode: zpr::CompressionMode = 0;
@@ -88,15 +106,43 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
                 "{}: Bind of {} succeeded: {}",
                 asm.system_name, five_tuple, tether_id
             );
-            asm.alt
+
+            let AltEntry::Pending {
+                initial_packet,
+                more_packets_seen,
+            } = asm
+                .alt
                 .alter(&five_tuple, |entry| {
-                    assert!(matches!(entry, AltEntry::Pending));
-                    *entry = AltEntry::Active(AltPep {
-                        compression_mode,
-                        tether_id,
-                    });
+                    assert!(
+                        matches!(entry, AltEntry::Pending { .. }),
+                        "coding error: race to activate pending ALT entry"
+                    );
+
+                    std::mem::replace(
+                        entry,
+                        AltEntry::Active(AltPep {
+                            compression_mode,
+                            tether_id,
+                        }),
+                    )
                 })
-                .unwrap();
+                .unwrap()
+            else {
+                unreachable!();
+            };
+
+            if more_packets_seen.into_inner() {
+                // don't bother re-sending this initial packet; it's already out-of-order
+                // and the upper-layer protocol is seemingly chatty & will try again
+                fastpath::drop_and_count(asm, initial_packet, CounterType::DroppedAwaitingBind);
+            } else {
+                // no more packets seen, this initial one is probably important, let's send it on now
+                fastpath::agent_output_post_classify(
+                    asm,
+                    initial_packet,
+                    /* allow_bind_request */ false,
+                );
+            }
         }
 
         Err(err) => {
