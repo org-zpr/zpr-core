@@ -177,6 +177,30 @@ pub enum KmSignal {
     Termination,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ZPIPair {
+    /// ZPI for full message encryption.
+    pub encr: u8,
+
+    /// ZPI for header hmac only.
+    pub hmac: u8,
+}
+
+impl ZPIPair {
+    pub fn new_zero() -> ZPIPair {
+        ZPIPair { encr: 0, hmac: 0 }
+    }
+    pub fn new(encr: u8, hmac: u8) -> ZPIPair {
+        ZPIPair { encr, hmac }
+    }
+}
+
+impl fmt::Display for ZPIPair {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "(encr: {}, hmac: {})", self.encr, self.hmac)
+    }
+}
+
 /// Encapsulates all the "state" set up by an SA.
 #[derive(Clone)]
 pub struct KmTransportSA {
@@ -218,7 +242,7 @@ impl fmt::Debug for KmTransportSA {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "KMTransportSA {{ sa_id: {}, send_zpis: {:?}, recv_zpis: {:?}, send_hmac_key: {:?}, recv_hmac_key: {:?} }}",
+            "KMTransportSA {{ sa_id: {}, send_zpis: {}, recv_zpis: {}, send_hmac_key: {:02x?}, recv_hmac_key: {:02x?} }}",
             self.sa_id, self.send_zpis, self.recv_zpis, self.send_hmac_key, self.recv_hmac_key
         )
     }
@@ -911,24 +935,6 @@ impl Codec for UnimplCodec {
         Err(DecryptionError::InternalError(String::from(
             "decrypt not implemented",
         )))
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ZPIPair {
-    /// ZPI for full message encryption.
-    pub encr: u8,
-
-    /// ZPI for header hmac only.
-    pub hmac: u8,
-}
-
-impl ZPIPair {
-    pub fn new_zero() -> ZPIPair {
-        ZPIPair { encr: 0, hmac: 0 }
-    }
-    pub fn new(encr: u8, hmac: u8) -> ZPIPair {
-        ZPIPair { encr, hmac }
     }
 }
 

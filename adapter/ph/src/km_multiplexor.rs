@@ -118,7 +118,7 @@ async fn signal_worker<'pktbuf>(
                         }
                     }
                     KmSignal::SaEstablished(sa) => {
-                        info!("{}: km_multiplexor: link {}: SA established (SEND_ZPIS: {:?}, RECV_ZPIS: {:?}",
+                        info!("{}: km_multiplexor: link {}: SA established (SEND_ZPIS: {}, RECV_ZPIS: {}",
                             asm.system_name, linkmsg.link_id, sa.send_zpis, sa.recv_zpis);
 
                         match asm.peer_table.set_security_association(linkmsg.link_id, sa) {
