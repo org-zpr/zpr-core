@@ -37,6 +37,7 @@ use crate::zpr;
 use bytes::{Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use openssl::rand::rand_bytes;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::error;
@@ -85,6 +86,7 @@ impl KmNoise {
     ///
     /// This requires Noise keys.  Eventually (TODO) we will also pass certificates through here
     /// so that each side can check for certificate authority signautre.
+    /// (https://github.com/org-zpr/zpr-core/issues/419)
     ///
     /// The ZPI stuff here is definately first pass. Currently there is no way to change the
     /// ZPI values.  The ZPIs passed in here are sent to the peer for use in messages sent to us.
@@ -146,6 +148,16 @@ pub fn derive_public_key(private_key: &[u8; 32]) -> [u8; 32] {
 
 struct NoiseCodec {
     snow_state: snow::StatelessTransportState,
+    encr_nonce: AtomicUsize,
+}
+
+impl NoiseCodec {
+    fn new(snow_state: snow::StatelessTransportState) -> Self {
+        NoiseCodec {
+            snow_state,
+            encr_nonce: AtomicUsize::new(1),
+        }
+    }
 }
 
 impl Codec for NoiseCodec {
@@ -154,16 +166,10 @@ impl Codec for NoiseCodec {
         payload: &[u8],
         message: &mut [u8],
     ) -> Result<usize, EncryptionError> {
-        match rand_bytes(&mut message[..NOISE_NONCE_LEN]) {
-            Ok(_) => {}
-            Err(e) => {
-                return Err(EncryptionError::InternalError(format!(
-                    "failed to generate nonce: {}",
-                    e
-                )));
-            }
-        }
-        let nonce = u64::from_be_bytes(message[..NOISE_NONCE_LEN].try_into().unwrap());
+        let nonce = self
+            .encr_nonce
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u64;
+        message[..NOISE_NONCE_LEN].copy_from_slice(&nonce.to_be_bytes());
         match self
             .snow_state
             .write_message(nonce, payload, &mut message[NOISE_NONCE_LEN..])
@@ -367,7 +373,7 @@ impl KeyManagerStateMachine for KmNoise {
                     };
                     match hs.into_stateless_transport_mode() {
                         Ok(t) => {
-                            let codec = Arc::new(NoiseCodec { snow_state: t });
+                            let codec = Arc::new(NoiseCodec::new(t));
                             self.state = KmSMState::Transport(KmTransportSA::new(
                                 send_zpis,
                                 self.recv_zpis,
@@ -411,7 +417,7 @@ impl KeyManagerStateMachine for KmNoise {
                     };
                     match hs.into_stateless_transport_mode() {
                         Ok(t) => {
-                            let codec = Arc::new(NoiseCodec { snow_state: t });
+                            let codec = Arc::new(NoiseCodec::new(t));
                             self.state = KmSMState::Transport(KmTransportSA::new(
                                 send_zpis,
                                 self.recv_zpis,
