@@ -134,7 +134,11 @@ fn main() -> ExitCode {
     let _cert_file = cmd_line.certificate_file;
     let _priv_key_file = cmd_line.private_key_file;
     let disable_km = cmd_line.disable_km;
-    let allow_insecure_zpi_zero = if disable_km { true } else { cmd_line.allow_insecure_zpi_zero };
+    let allow_insecure_zpi_zero = if disable_km {
+        true
+    } else {
+        cmd_line.allow_insecure_zpi_zero
+    };
     if allow_insecure_zpi_zero {
         warn!(
             "Insecure ZPI ZERO is enabled.  This is insecure and should only be used for testing."
