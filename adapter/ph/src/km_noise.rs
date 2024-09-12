@@ -37,7 +37,7 @@ use crate::zpr;
 use bytes::{Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use openssl::rand::rand_bytes;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::error;
@@ -148,14 +148,14 @@ pub fn derive_public_key(private_key: &[u8; 32]) -> [u8; 32] {
 
 struct NoiseCodec {
     snow_state: snow::StatelessTransportState,
-    encr_nonce: AtomicUsize,
+    encr_nonce: AtomicU64,
 }
 
 impl NoiseCodec {
     fn new(snow_state: snow::StatelessTransportState) -> Self {
         NoiseCodec {
             snow_state,
-            encr_nonce: AtomicUsize::new(1),
+            encr_nonce: AtomicU64::new(1),
         }
     }
 }
