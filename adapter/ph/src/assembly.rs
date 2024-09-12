@@ -74,6 +74,7 @@ pub struct Assembly<'pktbuf> {
 pub struct PhFlags {
     /// If set TRUE this allows any messages on ZPI 0.  VERY INSECURE!!
     pub allow_insecure_zpi_zero: bool,
+    pub disable_key_management: bool,
 }
 
 impl Default for PhFlags {
@@ -81,6 +82,7 @@ impl Default for PhFlags {
     fn default() -> Self {
         Self {
             allow_insecure_zpi_zero: false,
+            disable_key_management: false,
         }
     }
 }

@@ -134,7 +134,7 @@ fn main() -> ExitCode {
     let _cert_file = cmd_line.certificate_file;
     let _priv_key_file = cmd_line.private_key_file;
     let disable_km = cmd_line.disable_km;
-    let allow_insecure_zpi_zero = cmd_line.allow_insecure_zpi_zero;
+    let allow_insecure_zpi_zero = if disable_km { true } else { cmd_line.allow_insecure_zpi_zero };
     if allow_insecure_zpi_zero {
         warn!(
             "Insecure ZPI ZERO is enabled.  This is insecure and should only be used for testing."
@@ -316,6 +316,7 @@ fn main() -> ExitCode {
 
     let mut flags: PhFlags = Default::default();
     flags.allow_insecure_zpi_zero = allow_insecure_zpi_zero;
+    flags.disable_key_management = disable_km;
 
     // TEMP HACK to statically install peers
     let asm = Box::leak(Box::new(Assembly {
@@ -473,23 +474,25 @@ fn main() -> ExitCode {
 
         if matches!(ph_mode, PhMode::Adapter) {
             let dsid = asm.hack_get_adapter_docking_session_id();
-            info!(
-                "{}: waiting on security assocaition establishment on link {}",
-                asm.system_name, dsid
-            );
-            while !asm.peer_table.is_security_assocaition_established(dsid) {
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            }
-            info!(
-                "{}: security assocaition established successfully on link {}",
-                asm.system_name, dsid
-            );
+            if !disable_km {
+                info!(
+                    "{}: waiting on security assocaition establishment on link {}",
+                    asm.system_name, dsid
+                );
+                while !asm.peer_table.is_security_assocaition_established(dsid) {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+                info!(
+                    "{}: security assocaition established successfully on link {}",
+                    asm.system_name, dsid
+                );
 
-            // HACK - In our tests we need to send from adapter through the node to the adapter.
-            // We do not know when the other adapter has setup its association. So lets give
-            // it a little time here.
-            info!("{}: waiting for the other adapter to (hopfully) establish its security association...", asm.system_name);
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                // HACK - In our tests we need to send from adapter through the node to the adapter.
+                // We do not know when the other adapter has setup its association. So lets give
+                // it a little time here.
+                info!("{}: waiting for the other adapter to (hopfully) establish its security association...", asm.system_name);
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            }
 
 
             mgmt::send_report(asm, dsid, "Reporting for Duty!").await;
