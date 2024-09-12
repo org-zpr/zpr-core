@@ -484,10 +484,10 @@ impl KeyManager {
         km_signals_out: &mpsc::Sender<KmLinkMsg<KmSignal>>,
         km_buffers_out: &mpsc::Sender<KmLinkMsg<Bytes>>,
     ) -> KmResult<()> {
-        let handshake: Option<Bytes>;
+        let handshakes: Option<Vec<Bytes>>;
         {
             let mut state = self.shared.state.lock().unwrap();
-            handshake = match state.statemachine.reset() {
+            handshakes = match state.statemachine.reset() {
                 Ok(h) => h,
                 Err(e) => return Err(KmError::MachineError(e.to_string())),
             };
@@ -503,13 +503,12 @@ impl KeyManager {
             }
         };
 
-        if let Some(handshake) = handshake {
-            match km_buffers_out
-                .send(KmLinkMsg::new(link_id, handshake))
-                .await
-            {
-                Ok(_) => {}
-                Err(_) => return Err(KmError::EnqueueFailed),
+        if let Some(msgs) = handshakes {
+            for handshake in msgs {
+                km_buffers_out
+                    .send(KmLinkMsg::new(link_id, handshake))
+                    .await
+                    .or(Err(KmError::EnqueueFailed))?;
             }
         };
 
@@ -534,14 +533,14 @@ impl KeyManager {
         km_signals_out: &mpsc::Sender<KmLinkMsg<KmSignal>>,
         cur_state: &KmSMState,
     ) -> KmResult<()> {
-        let mut resp: Option<Bytes> = None;
+        let mut responses: Option<Vec<Bytes>> = None;
         let mut did_reset = false;
 
         if *cur_state == KmSMState::Error {
             {
                 let mut state = self.shared.state.lock().unwrap();
                 if state.restart_request {
-                    resp = match state.statemachine.reset() {
+                    responses = match state.statemachine.reset() {
                         Ok(h) => {
                             did_reset = true;
                             h
@@ -553,13 +552,12 @@ impl KeyManager {
                     state.restart_request = false;
                 }
             }
-            if let Some(r) = resp {
-                match km_buffers_out.send(KmLinkMsg::new(link_id, r)).await {
-                    Ok(_) => {}
-                    Err(_) => {
-                        error!("failed to enqueue outbound KM message");
-                        return Err(KmError::EnqueueFailed);
-                    }
+            if let Some(msgs) = responses {
+                for r in msgs {
+                    km_buffers_out
+                        .send(KmLinkMsg::new(link_id, r))
+                        .await
+                        .or(Err(KmError::EnqueueFailed))?;
                 }
             }
             if did_reset {
@@ -578,10 +576,10 @@ impl KeyManager {
 
         // Unless we did a reset, tick machine, even during error.
         if !did_reset {
-            let resp: Option<Bytes>;
+            let responses: Option<Vec<Bytes>>;
             {
                 let mut state = self.shared.state.lock().unwrap();
-                resp = match state.statemachine.tick() {
+                responses = match state.statemachine.tick() {
                     Ok(h) => h,
                     Err(e) => {
                         warn!("error during tick processing: {}", e);
@@ -589,13 +587,12 @@ impl KeyManager {
                     }
                 };
             }
-            if let Some(r) = resp {
-                match km_buffers_out.send(KmLinkMsg::new(link_id, r)).await {
-                    Ok(_) => {}
-                    Err(_) => {
-                        error!("failed to enqueue oubound KM message");
-                        return Err(KmError::EnqueueFailed);
-                    }
+            if let Some(messages) = responses {
+                for r in messages {
+                    km_buffers_out
+                        .send(KmLinkMsg::new(link_id, r))
+                        .await
+                        .or(Err(KmError::EnqueueFailed))?;
                 }
             }
         }
@@ -698,10 +695,10 @@ impl KeyManager {
         link_id: zpr::LinkId,
         km_buffers_out: &mpsc::Sender<KmLinkMsg<Bytes>>,
     ) -> KmResult<()> {
-        let resp: Option<Bytes>;
+        let responses: Option<Vec<Bytes>>;
         {
             let mut state = self.shared.state.lock().unwrap();
-            resp = match state.statemachine.handle_message(&inmsg) {
+            responses = match state.statemachine.handle_message(&inmsg) {
                 Ok(h) => h,
                 Err(e) => {
                     error!("failed to handle key manager message: {}", e);
@@ -709,13 +706,12 @@ impl KeyManager {
                 }
             };
         }
-        if let Some(r) = resp {
-            match km_buffers_out.send(KmLinkMsg::new(link_id, r)).await {
-                Ok(_) => {}
-                Err(_) => {
-                    error!("failed to enqueue outbound KM message");
-                    return Err(KmError::EnqueueFailed);
-                }
+        if let Some(msgs) = responses {
+            for r in msgs {
+                km_buffers_out
+                    .send(KmLinkMsg::new(link_id, r))
+                    .await
+                    .or(Err(KmError::EnqueueFailed))?;
             }
         }
         Ok(())
@@ -966,17 +962,17 @@ pub trait KeyManagerStateMachine: Send + Sync {
     /// started (prior to first tick).  If this is the initiator this should initiate a
     /// new handshake message.
     /// Must clear error state.
-    fn reset(self: &mut Self) -> Result<Option<Bytes>, KmError>;
+    fn reset(self: &mut Self) -> Result<Option<Vec<Bytes>>, KmError>;
 
     /// Process an inbound KM message.
     /// May produce an output message.
     /// May transition internal state.
-    fn handle_message(self: &mut Self, message: &[u8]) -> Result<Option<Bytes>, KmError>;
+    fn handle_message(self: &mut Self, message: &[u8]) -> Result<Option<Vec<Bytes>>, KmError>;
 
     /// Optional outbound KM message
     /// May transition internal state
     /// If this returns error, internal state should be error too.
-    fn tick(self: &mut Self) -> Result<Option<Bytes>, KmError>;
+    fn tick(self: &mut Self) -> Result<Option<Vec<Bytes>>, KmError>;
 }
 
 #[cfg(test)]
@@ -1057,20 +1053,20 @@ mod test {
             return self.state.clone();
         }
 
-        fn reset(&mut self) -> Result<Option<Bytes>, KmError> {
+        fn reset(&mut self) -> Result<Option<Vec<Bytes>>, KmError> {
             let mut internals = self.shared.state.lock().unwrap();
             internals.reset_count += 1;
             self.state = KmSMState::Configuring;
             Ok(None)
         }
 
-        fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KmError> {
+        fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Vec<Bytes>>, KmError> {
             let mut internals = self.shared.state.lock().unwrap();
             internals.handle_count += 1;
             Ok(None)
         }
 
-        fn tick(&mut self) -> Result<Option<Bytes>, KmError> {
+        fn tick(&mut self) -> Result<Option<Vec<Bytes>>, KmError> {
             let mut internals = self.shared.state.lock().unwrap();
             internals.tick_count += 1;
             Ok(None)

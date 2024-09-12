@@ -5,7 +5,11 @@
 //! is that an adapter wanting to connect to a remote node will have access to this key.
 //! Maybe through a special DNS record.
 //!
-//! The key management messages are all handled by the noise protocol.
+//! The key management pattern requires only two messages. One from the initiator (adapter) and
+//! a reply from the responder (node).  However to help avoid crossed signals, we send a final
+//! ACK message from the initiator (adapter) to the responder (node).
+//!
+//!
 //!
 //! Transport messages are encoded as follows:
 //!
@@ -44,8 +48,9 @@ use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
-/// Will transition to error state if we are handshake initator and do not get
-/// a handshake response within this time.
+/// Will transition to error state if:
+/// a) we are handshake initator and do not get a handshake response within this time.
+/// b) we are responder and do not get a final ACK message within this time.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 const NOISE_NONCE_LEN: usize = 8;
@@ -61,11 +66,11 @@ pub struct KmNoise {
     settings: KmSettings,
     state: KmSMState,
     initiate: bool,
+    acknowledged: bool,
     peer_pub_key: Option<Vec<u8>>, // required if initiator
     local_keypair: snow::Keypair,
     hs_sent_t: Option<Instant>,
     hs_state: Option<snow::HandshakeState>,
-    //t_state: Option<snow::TransportState>,
     recv_hmac_key: [u8; 32], // messages sent to us from peer will use this key (we create this)
     send_hmac_key: Option<[u8; 32]>, // messages sent to peer will use this key (peers creates this)
     recv_zpis: ZPIPair,
@@ -78,6 +83,13 @@ struct KeyMsg {
     pub zpi_full_encr: u8,
     pub zpi_transit_hmac: u8,
     pub hmac_key: [u8; 32],
+}
+
+#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[repr(packed)]
+struct AckMsg {
+    pub zpi_full_encr: u8,
+    pub zpi_transit_hmac: u8,
 }
 
 impl KmNoise {
@@ -122,6 +134,7 @@ impl KmNoise {
             settings,
             state: KmSMState::Configuring,
             initiate,
+            acknowledged: false,
             peer_pub_key,
             local_keypair: kp,
             hs_sent_t: None,
@@ -134,6 +147,179 @@ impl KmNoise {
             },
             send_zpis: None,
         })
+    }
+
+    fn handle_noise_hs_message(&mut self, message: &[u8]) -> Result<Option<Vec<Bytes>>, KmError> {
+        let mut hs: snow::HandshakeState;
+        assert!(self.hs_state.is_some()); // checked prior to calling
+
+        hs = self.hs_state.take().unwrap();
+        let mut payload = BytesMut::zeroed(1024);
+        // Our IK pattern has two handshake messages. In each we expect to find a KeyMsg in the payload.
+        match hs.read_message(&message[..], &mut payload) {
+            Ok(len) => {
+                // TODO: In future we plan to send the certificate over in the first handshake message buffer.
+                if len < std::mem::size_of::<KeyMsg>() {
+                    error!("noise: handshake payload is too short: {}", len);
+                    self.state = KmSMState::Error;
+                    self.hs_state = Some(hs);
+                    return Err(KmError::HandshakeError);
+                }
+                let km = match KeyMsg::ref_from_prefix(&payload[..len]) {
+                    Some(k) => k,
+                    None => {
+                        error!("noise: error parsing KeyMsg handshake payload");
+                        self.state = KmSMState::Error;
+                        self.hs_state = Some(hs);
+                        return Err(KmError::HandshakeError);
+                    }
+                };
+                self.send_zpis = Some(ZPIPair {
+                    encr: km.zpi_full_encr,
+                    hmac: km.zpi_transit_hmac,
+                });
+                self.send_hmac_key = Some(km.hmac_key);
+            }
+            Err(e) => {
+                error!("noise: error handling handhsake message: {:?}", e);
+                self.state = KmSMState::Error;
+                self.hs_state = Some(hs);
+                return Err(KmError::HandshakeError);
+            }
+        };
+
+        let mut msgs = Vec::<Bytes>::new();
+
+        if !hs.is_handshake_finished() {
+            let payload = KeyMsg {
+                zpi_full_encr: self.recv_zpis.encr,
+                zpi_transit_hmac: self.recv_zpis.hmac,
+                hmac_key: self.recv_hmac_key,
+            };
+            // Note that only the responder sends a noise HS message back.
+            // Keep track of time so we can watch for a timeout.
+            self.hs_sent_t = Some(Instant::now());
+            let mut buf = BytesMut::zeroed(1024);
+            match hs.write_message(payload.as_bytes(), &mut buf) {
+                Ok(len) => {
+                    buf.truncate(len);
+                    msgs.push(buf.freeze());
+                }
+                Err(e) => {
+                    error!("noise: error writing handshake message: {:?}", e);
+                    self.hs_state = Some(hs);
+                    self.state = KmSMState::Error;
+                    return Err(KmError::HandshakeError);
+                }
+            }
+        }
+
+        if hs.is_handshake_finished() {
+            let send_zpis = match self.send_zpis {
+                Some(z) => z,
+                None => {
+                    error!("noise: handshake finished by no ZPIs received");
+                    self.hs_state = Some(hs);
+                    self.state = KmSMState::Error;
+                    return Err(KmError::HandshakeError);
+                }
+            };
+            let send_key = match self.send_hmac_key {
+                Some(h) => h,
+                None => {
+                    error!("noise: handshake finished by no HMAC key received");
+                    self.hs_state = Some(hs);
+                    self.state = KmSMState::Error;
+                    return Err(KmError::HandshakeError);
+                }
+            };
+
+            if self.initiate {
+                // As initiator, we just got our final KM message from responder. We send an ACK and
+                // transition to transport mode.
+                self.enter_transport_state(hs, send_zpis, send_key)?;
+                let ack = AckMsg {
+                    zpi_full_encr: send_zpis.encr,
+                    zpi_transit_hmac: send_zpis.hmac,
+                };
+                msgs.push(Bytes::copy_from_slice(ack.as_bytes()));
+            } else {
+                // We are responder. We have just finished the noise handshake so now we need
+                // an ACK.  Remain in configuring state for now.
+                self.acknowledged = false;
+                self.hs_state = Some(hs);
+            }
+        }
+
+        if msgs.len() > 0 {
+            Ok(Some(msgs))
+        } else {
+            Ok(None)
+        }
+    }
+
+    // Prior to call we have confirmed we are in correct state to handle this.
+    //
+    // This is an initiators acknoledgement of the responders handshake response.
+    fn handle_noise_ack_message(&mut self, message: &[u8]) -> Result<Option<Vec<Bytes>>, KmError> {
+        let km = match AckMsg::ref_from_prefix(message) {
+            Some(k) => k,
+            None => {
+                error!("noise: error parsing AckMsg handshake payload");
+                self.state = KmSMState::Error;
+                return Err(KmError::HandshakeError);
+            }
+        };
+
+        if km.zpi_full_encr != self.recv_zpis.encr || km.zpi_transit_hmac != self.recv_zpis.hmac {
+            let ack_zpis = ZPIPair {
+                encr: km.zpi_full_encr,
+                hmac: km.zpi_transit_hmac,
+            };
+            error!(
+                "noise: ZPIs in ACK message do not match expected: got {:?}, expected {:?}",
+                ack_zpis, self.recv_zpis
+            );
+            self.state = KmSMState::Error;
+            return Err(KmError::HandshakeError);
+        }
+        self.acknowledged = true;
+
+        // Ok as responder, handshake is officially over.  We can now transition to transport mode.
+        // We have already checked that we have ZPIs from initiator.
+        let hs = self.hs_state.take().unwrap();
+
+        self.enter_transport_state(hs, self.send_zpis.unwrap(), self.send_hmac_key.unwrap())?;
+
+        // And no more messages.
+        Ok(None)
+    }
+
+    /// Sets up transport mode. Alters our state.
+    fn enter_transport_state(
+        &mut self,
+        hs: snow::HandshakeState,
+        send_zpis: ZPIPair,
+        send_key: [u8; 32],
+    ) -> Result<(), KmError> {
+        match hs.into_stateless_transport_mode() {
+            Ok(t) => {
+                let codec = Arc::new(NoiseCodec { snow_state: t });
+                self.state = KmSMState::Transport(KmTransportSA::new(
+                    send_zpis,
+                    self.recv_zpis,
+                    send_key,
+                    self.recv_hmac_key,
+                    codec,
+                ));
+                Ok(())
+            }
+            Err(e) => {
+                error!("noise: error switching to transport mode: {:?}", e);
+                self.state = KmSMState::Error;
+                Err(KmError::HandshakeError)
+            }
+        }
     }
 }
 
@@ -213,7 +399,7 @@ impl KeyManagerStateMachine for KmNoise {
         self.state.clone()
     }
 
-    fn reset(&mut self) -> Result<Option<Bytes>, KmError> {
+    fn reset(&mut self) -> Result<Option<Vec<Bytes>>, KmError> {
         self.state = KmSMState::Configuring;
         let np: snow::params::NoiseParams = match PATTERN.parse() {
             Ok(p) => p,
@@ -263,7 +449,7 @@ impl KeyManagerStateMachine for KmNoise {
             buf.truncate(len);
             self.hs_state = Some(initiator);
             self.hs_sent_t = Some(Instant::now());
-            Ok(Some(buf.freeze()))
+            Ok(Some(vec![buf.freeze()]))
         } else {
             let responder = match snow::Builder::new(np)
                 .local_private_key(self.local_keypair.private.as_ref())
@@ -279,168 +465,44 @@ impl KeyManagerStateMachine for KmNoise {
                     )));
                 }
             };
+            self.hs_sent_t = None;
             self.hs_state = Some(responder);
             Ok(None)
         }
     }
 
-    fn handle_message(&mut self, message: &[u8]) -> Result<Option<Bytes>, KmError> {
-        if self.state == KmSMState::Configuring {
-            let mut hs: snow::HandshakeState;
-            if self.hs_state.is_none() {
-                error!("noise: handle_message called but no handshake state set up");
-                return Err(KmError::InvalidState);
-            }
-            if self.hs_state.is_some() {
-                hs = self.hs_state.take().unwrap();
-                let mut payload = BytesMut::zeroed(1024);
-                // Our IK pattern has two handshake messages. In each we expect to find a KeyMsg in the payload.
-                match hs.read_message(&message[..], &mut payload) {
-                    Ok(len) => {
-                        // TODO: In future we plan to send the certificate over in the first handshake message buffer.
-                        if len < std::mem::size_of::<KeyMsg>() {
-                            error!("noise: handshake payload is too short: {}", len);
-                            self.state = KmSMState::Error;
-                            self.hs_state = Some(hs);
-                            return Err(KmError::HandshakeError);
-                        }
-                        let km = match KeyMsg::ref_from_prefix(&payload[..len]) {
-                            Some(k) => k,
-                            None => {
-                                error!("noise: error parsing KeyMsg handshake payload");
-                                self.state = KmSMState::Error;
-                                self.hs_state = Some(hs);
-                                return Err(KmError::HandshakeError);
-                            }
-                        };
-                        self.send_zpis = Some(ZPIPair {
-                            encr: km.zpi_full_encr,
-                            hmac: km.zpi_transit_hmac,
-                        });
-                        self.send_hmac_key = Some(km.hmac_key);
-                    }
-                    Err(e) => {
-                        error!("noise: error handling handhsake message: {:?}", e);
-                        self.state = KmSMState::Error;
-                        self.hs_state = Some(hs);
-                        return Err(KmError::HandshakeError);
-                    }
-                };
-
-                let mut hs_msg: Option<Bytes> = None;
-
-                if !hs.is_handshake_finished() {
-                    let payload = KeyMsg {
-                        zpi_full_encr: self.recv_zpis.encr,
-                        zpi_transit_hmac: self.recv_zpis.hmac,
-                        hmac_key: self.recv_hmac_key,
-                    };
-                    let mut buf = BytesMut::zeroed(1024);
-                    match hs.write_message(payload.as_bytes(), &mut buf) {
-                        Ok(len) => {
-                            buf.truncate(len);
-                            hs_msg = Some(buf.freeze());
-                        }
-                        Err(e) => {
-                            error!("noise: error writing handshake message: {:?}", e);
-                            self.hs_state = Some(hs);
-                            self.state = KmSMState::Error;
-                            return Err(KmError::HandshakeError);
-                        }
-                    }
-                }
-
-                if hs.is_handshake_finished() {
-                    let send_zpis = match self.send_zpis {
-                        Some(z) => z,
-                        None => {
-                            error!("noise: handshake finished by no ZPIs received");
-                            ZPIPair::new_zero()
-                        }
-                    };
-                    let send_key = match self.send_hmac_key {
-                        Some(h) => h,
-                        None => {
-                            error!("noise: XXX handshake finished by no HMAC key received");
-                            [0u8; 32]
-                        }
-                    };
-                    match hs.into_stateless_transport_mode() {
-                        Ok(t) => {
-                            let codec = Arc::new(NoiseCodec { snow_state: t });
-                            self.state = KmSMState::Transport(KmTransportSA::new(
-                                send_zpis,
-                                self.recv_zpis,
-                                send_key,
-                                self.recv_hmac_key,
-                                codec,
-                            ));
-                        }
-                        Err(e) => {
-                            error!("noise: error switching to transport mode: {:?}", e);
-                            self.state = KmSMState::Error;
-                            return Err(KmError::HandshakeError);
-                        }
-                    };
-                }
-                return Ok(hs_msg);
-            }
+    // Handle a KM message.
+    //
+    // For noise we expect a KM message during configuration. Or, if we are a responder (eg a node)
+    // then we accept a final KM message while in transport state which is an ACK to our last
+    // handshake.
+    fn handle_message(&mut self, message: &[u8]) -> Result<Option<Vec<Bytes>>, KmError> {
+        if self.state != KmSMState::Configuring {
+            error!("noise: KM message arrives in unexpected state");
+            self.state = KmSMState::Error;
+            return Err(KmError::InvalidState);
         }
-        Ok(None)
+
+        // If we are responder, and we have sent our handshake response message... we expect an ACK
+        if !self.initiate && self.hs_sent_t.is_some() {
+            return self.handle_noise_ack_message(message);
+        }
+
+        self.handle_noise_hs_message(message)
     }
 
-    fn tick(&mut self) -> Result<Option<Bytes>, KmError> {
-        if self.state == KmSMState::Configuring {
-            let hs: snow::HandshakeState;
-            if self.hs_state.is_some() {
-                hs = self.hs_state.take().unwrap();
-                if hs.is_handshake_finished() {
-                    let send_zpis = match self.send_zpis {
-                        Some(z) => z,
-                        None => {
-                            error!("noise: handshake finished by no ZPIs received");
-                            ZPIPair::new_zero()
-                        }
-                    };
-                    let send_key = match self.send_hmac_key {
-                        Some(h) => h,
-                        None => {
-                            error!("noise: handshake finished by no HMAC key received");
-                            [0u8; 32]
-                        }
-                    };
-                    match hs.into_stateless_transport_mode() {
-                        Ok(t) => {
-                            let codec = Arc::new(NoiseCodec { snow_state: t });
-                            self.state = KmSMState::Transport(KmTransportSA::new(
-                                send_zpis,
-                                self.recv_zpis,
-                                send_key,
-                                self.recv_hmac_key,
-                                codec,
-                            ));
-                            return Ok(None);
-                        }
-                        Err(e) => {
-                            error!("noise: error switching to transport mode: {:?}", e);
-                            self.state = KmSMState::Error;
-                            return Err(KmError::HandshakeError);
-                        }
-                    }
-                } else {
-                    if self.initiate
-                        && self.hs_sent_t.is_some()
-                        && Instant::now().duration_since(self.hs_sent_t.unwrap())
-                            > HANDSHAKE_TIMEOUT
-                    {
-                        error!("noise: handhsake timeout");
-                        self.hs_state = None;
-                        self.hs_sent_t = None;
-                        self.state = KmSMState::Error;
-                        return Err(KmError::HandshakeError);
-                    }
-                    self.hs_state = Some(hs);
-                }
+    fn tick(&mut self) -> Result<Option<Vec<Bytes>>, KmError> {
+        if self.state == KmSMState::Configuring && self.hs_state.is_some() {
+            // Still in handshake.  Either it is finished or not finished.
+            // Check for a timeout.
+            if self.hs_sent_t.is_some()
+                && Instant::now().duration_since(self.hs_sent_t.unwrap()) > HANDSHAKE_TIMEOUT
+            {
+                error!("noise: handhsake timeout");
+                self.hs_state = None;
+                self.hs_sent_t = None;
+                self.state = KmSMState::Error;
+                return Err(KmError::HandshakeError);
             }
         }
         Ok(None)
@@ -475,7 +537,7 @@ mod test {
         let mut responder = KmNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
         assert!(responder.get_state() == KmSMState::Configuring);
 
-        let handshake_msg_0 = match initiator.reset() {
+        let mut msgs = match initiator.reset() {
             Ok(Some(m)) => m,
             Ok(None) => {
                 panic!("expected handshake message");
@@ -484,6 +546,12 @@ mod test {
                 panic!("error resetting initiator: {:?}", e);
             }
         };
+        assert!(
+            msgs.len() == 1,
+            "unexpected number of messages from reset, got {}",
+            msgs.len()
+        );
+        let handshake_msg_0 = msgs.pop().unwrap();
         assert!(
             handshake_msg_0.len() == 130,
             "unexpected handshake message-0 length, got {}",
@@ -500,7 +568,7 @@ mod test {
         };
 
         // -> e, es, s, ss
-        let handshake_msg_1 = match responder.handle_message(&handshake_msg_0) {
+        let mut msgs = match responder.handle_message(&handshake_msg_0) {
             Ok(Some(m)) => m,
             Ok(None) => {
                 panic!("expected handshake-1 message, got nothing!");
@@ -510,21 +578,55 @@ mod test {
             }
         };
         assert!(
+            msgs.len() == 1,
+            "unexpected number of messages from handle_message, got {}",
+            msgs.len()
+        );
+        let handshake_msg_1 = msgs.pop().unwrap();
+        assert!(
             handshake_msg_1.len() == 82,
             "unexpected handshake message-1 length, got {}",
             handshake_msg_1.len()
         );
-        assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
 
-        // <- e, ee, se
-        match initiator.handle_message(&handshake_msg_1) {
-            Ok(Some(_)) => panic!("unexpected additional handshake message from initiator"),
-            Ok(None) => {} // good
+        assert!(responder.get_state() == KmSMState::Configuring); // responder still needs an ACK
+
+        // <- e, ee, se , -> ACK
+        let mut msgs = match initiator.handle_message(&handshake_msg_1) {
+            Ok(Some(m)) => m,
+            Ok(None) => {
+                panic!("expected ACK message, got nothing!");
+            }
             Err(e) => {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
         };
+
+        assert!(
+            msgs.len() == 1,
+            "unexpected number of messages from handle_message, got {}",
+            msgs.len()
+        );
+        let handshak_ack = msgs.pop().unwrap();
+        assert!(
+            handshak_ack.len() == 2,
+            "unexpected ACK message length, got {}",
+            handshak_ack.len()
+        );
+
         assert!(matches!(initiator.get_state(), KmSMState::Transport { .. }));
+
+        // Finally, send ACK
+        match responder.handle_message(&handshak_ack) {
+            Ok(Some(_)) => {
+                panic!("unexpected message from responder.handle_message to ACK");
+            }
+            Ok(None) => {} // good
+            Err(e) => {
+                panic!("error handling ACK message: {:?}", e);
+            }
+        }
+        assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
 
         // Handshake complete, now we can encrypt/decrypt
 
@@ -608,7 +710,7 @@ mod test {
         let mut responder = KmNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
         assert!(responder.get_state() == KmSMState::Configuring);
 
-        let handshake_msg_0 = match initiator.reset() {
+        let mut msgs = match initiator.reset() {
             Ok(Some(m)) => m,
             Ok(None) => {
                 panic!("expected handshake message");
@@ -617,6 +719,7 @@ mod test {
                 panic!("error resetting initiator: {:?}", e);
             }
         };
+        let handshake_msg_0 = msgs.pop().unwrap();
         assert!(
             handshake_msg_0.len() == 130,
             "unexpected handshake message-0 length, got {}",
@@ -633,7 +736,7 @@ mod test {
         };
 
         // -> e, es, s, ss
-        let handshake_msg_1 = match responder.handle_message(&handshake_msg_0) {
+        let mut msgs = match responder.handle_message(&handshake_msg_0) {
             Ok(Some(m)) => m,
             Ok(None) => {
                 panic!("expected handshake-1 message, got nothing!");
@@ -642,22 +745,39 @@ mod test {
                 panic!("responder handle_message failed on handshake-0: {:?}", e);
             }
         };
+        let handshake_msg_1 = msgs.pop().unwrap();
         assert!(
             handshake_msg_1.len() == 82,
             "unexpected handshake message-1 length, got {}",
             handshake_msg_1.len()
         );
-        assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
 
-        // <- e, ee, se
-        match initiator.handle_message(&handshake_msg_1) {
-            Ok(Some(_)) => panic!("unexpected additional handshake message from initiator"),
-            Ok(None) => {} // good
+        assert!(responder.get_state() == KmSMState::Configuring);
+
+        // <- e, ee, se , -> ACK
+        let mut msgs = match initiator.handle_message(&handshake_msg_1) {
+            Ok(Some(m)) => m,
+            Ok(None) => {
+                panic!("unexpected additional handshake message from initiator");
+            }
             Err(e) => {
                 panic!("initiator.handle_message failed on handshake-1: {:?}", e);
             }
         };
+        let handshak_ack = msgs.pop().unwrap();
+
         assert!(matches!(initiator.get_state(), KmSMState::Transport { .. }));
+
+        match responder.handle_message(&handshak_ack) {
+            Ok(Some(_)) => {
+                panic!("unexpected message from responder.handle_message to ACK");
+            }
+            Ok(None) => {} // good
+            Err(e) => {
+                panic!("error handling ACK message: {:?}", e);
+            }
+        }
+        assert!(matches!(responder.get_state(), KmSMState::Transport { .. }));
 
         // At this point each side should know the others hmac key, and the ZPIs should have been exchanged.
 
@@ -790,6 +910,7 @@ mod test {
         match timeout(Duration::from_secs(2), n_km_rx.recv()).await {
             Ok(resp) => match resp {
                 Some(linkmsg) => {
+                    // Adapter will process message and transition to TRANSPORT and will emit an ACK.
                     let adapter_result = adapter.handle_km_message(&linkmsg.msg).await;
                     assert!(
                         adapter_result.is_ok(),
@@ -803,6 +924,27 @@ mod test {
             },
             Err(_) => {
                 panic!("timed out waiting for handshake message from node");
+            }
+        }
+
+        // Expect an ACK message from adapter output channel.
+        match timeout(Duration::from_secs(2), a_km_rx.recv()).await {
+            Ok(resp) => match resp {
+                Some(linkmsg) => {
+                    // Give ACK to node which is final message it needs.
+                    let node_result = node.handle_km_message(&linkmsg.msg).await;
+                    assert!(
+                        node_result.is_ok(),
+                        "node handle of adapter handshake ACK failed: {:?}",
+                        node_result
+                    );
+                }
+                None => {
+                    panic!("timed out or failed waiting for ACK handshake message");
+                }
+            },
+            Err(_) => {
+                panic!("timed out waiting for ACK handshake message");
             }
         }
 

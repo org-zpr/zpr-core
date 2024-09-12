@@ -427,7 +427,7 @@ mod test {
         };
 
         // Since we have a "raw" responder, we can just pass the payload (no ZDP headers have been added).
-        let handshake_reply = match responder.handle_message(&handshake_req) {
+        let mut replys = match responder.handle_message(&handshake_req) {
             Ok(Some(m)) => m,
             Ok(None) => {
                 panic!("expected handshake-1 message, got nothing!");
@@ -437,6 +437,8 @@ mod test {
             }
         };
 
+        let handshake_reply = replys.pop().unwrap();
+
         // Now send the reply back into our link.
         handle_inbound_km_msg(asm, adapter_link_id, &handshake_reply).unwrap();
 
@@ -445,6 +447,8 @@ mod test {
         // The KM on the link will process the message and transition to established-state.
         // It will send two signals - SaIdChange followed by SaEstablished.  Both signals
         // are picked up by our multiplexor worker.  The second one triggers a state update.
+        //
+        // Note we are ignoding the ACK sent by our adapter.
         {
             assert!(asm
                 .peer_table

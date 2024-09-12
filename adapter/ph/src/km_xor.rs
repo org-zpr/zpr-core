@@ -91,31 +91,31 @@ impl KeyManagerStateMachine for XorKeyManager {
         self.state.clone()
     }
 
-    fn reset(&mut self) -> Result<Option<Bytes>, KmError> {
+    fn reset(&mut self) -> Result<Option<Vec<Bytes>>, KmError> {
         self.state = KmSMState::Configuring;
         if self.initiate {
             let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
             self.hello_t = time::Instant::now();
-            Ok(Some(handshake))
+            Ok(Some(vec![handshake]))
         } else {
             Ok(None)
         }
     }
 
-    fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KmError> {
+    fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Vec<Bytes>>, KmError> {
         if self.state == KmSMState::Configuring {
             let codec = Arc::new(XorCodec {});
             self.state = KmSMState::Transport(KmTransportSA::new_with_codec(codec));
             if !self.initiate {
                 // Did not initiate, so send a reply back.
                 let handshake_reply = Bytes::from_static(&[0, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD
-                return Ok(Some(handshake_reply));
+                return Ok(Some(vec![handshake_reply]));
             }
         }
         Ok(None)
     }
 
-    fn tick(&mut self) -> Result<Option<Bytes>, KmError> {
+    fn tick(&mut self) -> Result<Option<Vec<Bytes>>, KmError> {
         if self.state == KmSMState::Configuring
             && self.initiate
             && self.hello_t.elapsed() > Duration::from_secs(5)
@@ -123,7 +123,7 @@ impl KeyManagerStateMachine for XorKeyManager {
             // too long, send another hello.
             let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
             self.hello_t = time::Instant::now();
-            return Ok(Some(handshake));
+            return Ok(Some(vec![handshake]));
         }
         Ok(None)
     }
