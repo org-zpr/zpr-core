@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	jwt "github.com/dgrijalva/jwt-go"
+	"github.com/golang-jwt/jwt/v5"
+
 	"zpr.org/vs/pkg/agent"
 	log "zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"

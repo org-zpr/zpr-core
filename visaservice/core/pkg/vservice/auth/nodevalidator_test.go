@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	jwt "github.com/dgrijalva/jwt-go"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vsx/snio/zds"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsx/snio/zds"
 )
 
 const (
@@ -274,7 +274,8 @@ func TestJWTCreateOneCert(t *testing.T) {
 	// Decode the JWT
 	parts := strings.Split(jwts, ".")
 	require.Equal(t, 3, len(parts)) // JWT has three sections
-	js, err := jwt.DecodeSegment(parts[1])
+	parser := jwt.NewParser()
+	js, err := parser.DecodeSegment(parts[1])
 	require.Nil(t, err)
 
 	jwtClaims := make(map[string]interface{})

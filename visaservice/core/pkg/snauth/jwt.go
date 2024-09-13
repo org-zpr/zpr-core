@@ -7,20 +7,17 @@ import (
 	"fmt"
 	"strings"
 
-	jwt "github.com/dgrijalva/jwt-go"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
-
-func jtiClaimFromJWTStr(jwtStr string) string {
-	return GetStrClaimFromJWTStr("jti", jwtStr)
-}
 
 func jwtPayload(ss string) (map[string]interface{}, error) {
 	parts := strings.Split(ss, ".")
 	if len(parts) != 3 {
 		return nil, fmt.Errorf("invalid JWT, expected three parts")
 	}
-	js, err := jwt.DecodeSegment(parts[1])
+	parser := jwt.NewParser()
+	js, err := parser.DecodeSegment(parts[1])
 	if err != nil {
 		return nil, err
 	}
