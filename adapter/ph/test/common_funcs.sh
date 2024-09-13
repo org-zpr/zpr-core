@@ -107,6 +107,7 @@ function check_carrier() {
   return $(( ! $(sudo ip netns exec "$NETNS" cat "/sys/class/net/$IF/carrier") ))
 }
 
+# Visible sleep for n seconds.  Takes one arg: number of seconds.
 function countdown() {
     count=$1
     (( ++count ))
