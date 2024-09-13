@@ -19,7 +19,6 @@ import (
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vs/pkg/vservice/adb"
-	"zpr.org/vs/pkg/vssapi"
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/google/uuid"
@@ -31,8 +30,8 @@ const (
 )
 
 type PollResponse struct {
-	Visas       []*vssapi.VisaHop
-	Revocations []*vssapi.VisaRevocation
+	Visas       []*vsapi.VisaHop
+	Revocations []*vsapi.VisaRevocation
 }
 type Revocation struct {
 	IssuerID uint32

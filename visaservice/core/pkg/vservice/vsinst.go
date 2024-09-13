@@ -15,9 +15,9 @@ import (
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
-	"zpr.org/vs/pkg/vssapi"
 	"zpr.org/vsx/polio"
 	"zpr.org/vsx/snio/vsio"
 )
@@ -351,11 +351,6 @@ func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration,
 				//       I think we used to put this in the mailbox for all nodes,
 				//       for now I am doing a search here to find the correct node(s)
 				//       to push to.
-				vssV := &vssapi.VisaHop{
-					VisaPb:   resp.Visa.VisaPb,
-					HopCount: resp.Visa.HopCount,
-					IssuerID: resp.Visa.IssuerID,
-				}
 				targetNodes := make(map[netip.Addr]bool)
 				for _, addr := range [][]byte{ve.v.Source, ve.v.Dest, ve.v.SourceContact, ve.v.DestContact} {
 					if a, ok := netip.AddrFromSlice(addr); ok {
@@ -365,7 +360,7 @@ func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration,
 					}
 				}
 				for a := range targetNodes {
-					vs.EnqueuePushVisasToNode(a, []*vssapi.VisaHop{vssV})
+					vs.EnqueuePushVisasToNode(a, []*vsapi.VisaHop{resp.Visa})
 				}
 			}
 		}
@@ -391,10 +386,10 @@ func (vs *VSInst) expireAllVisas(config uint64) {
 	vs.vtable.mtx.Lock()
 	defer vs.vtable.mtx.Unlock()
 	count := 0
-	var revokes []*vssapi.VisaRevocation
+	var revokes []*vsapi.VisaRevocation
 	for vID, ve := range vs.vtable.table {
 		if ve.v.Configuration == config {
-			revokes = append(revokes, &vssapi.VisaRevocation{
+			revokes = append(revokes, &vsapi.VisaRevocation{
 				IssuerID:      int32(vID),
 				Configuration: int64(config),
 			})

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/protobuf/proto"
 	"zpr.org/vs/pkg/agent"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/libvisa"
@@ -218,13 +217,8 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 	resp := new(vsapi.VisaResponse)
 	resp.Status = vsapi.StatusCode_SUCCESS
 
-	pbuf, err := proto.Marshal(vent.v)
-	if err != nil {
-		vs.log.WithError(err).Error("failed to marshal visa for mailbox")
-		return nil, fmt.Errorf("internal error")
-	}
 	resp.Visa = &vsapi.VisaHop{
-		VisaPb:   pbuf,
+		Visa:     libvisa.VsioVisaToThrift(vent.v),
 		HopCount: int32(vs.hopCount),
 		IssuerID: int32(vent.v.IssuerId),
 	}

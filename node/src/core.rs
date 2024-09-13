@@ -152,7 +152,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                         info!("VSS policy install: {:?}", pi);
                     }
                     vss::VSSMsg::PushedVisa(v) => {
-                        info!("VSS pushed visa: issuer_id={} size={}bytes", v.issuer_id, v.visa_pb.len());
+                        info!("VSS pushed visa: issuer_id={}", v.issuer_id);
                     }
                     _ => {
                         info!("VSConn::run received VSS message: {:?}", vss_msg);

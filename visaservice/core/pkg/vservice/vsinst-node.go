@@ -9,7 +9,6 @@ import (
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vs/pkg/vservice/adb"
-	"zpr.org/vs/pkg/vssapi"
 )
 
 // Called by InstallPolicy
@@ -28,7 +27,7 @@ func (vs *VSInst) installPolicyWithVisasForNodes(pp *policy.Policy, configID uin
 }
 
 func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.Policy, configID uint64) error {
-	var visas []*vssapi.VisaHop
+	var visas []*vsapi.VisaHop
 	var vssPort uint16
 
 	serviceAddr := vs.agentDB.GetNodeVSSAddr(nodeAddr)
@@ -62,11 +61,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 		} else if vsr.Status != vsapi.StatusCode_SUCCESS {
 			vs.log.Warn("failed to generate a visa-service visa for the node", "node", nodeAddr, "reason", vsr.Reason)
 		} else {
-			visas = append(visas, &vssapi.VisaHop{
-				VisaPb:   vsr.Visa.VisaPb,
-				HopCount: vsr.Visa.HopCount,
-				IssuerID: vsr.Visa.IssuerID,
-			})
+			visas = append(visas, vsr.Visa)
 		}
 	}
 	{
@@ -79,11 +74,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 		} else if vsr.Status != vsapi.StatusCode_SUCCESS {
 			vs.log.Warn("failed to generate a visa-support-service visa for the node", "reason", vsr.Reason)
 		} else {
-			visas = append(visas, &vssapi.VisaHop{
-				VisaPb:   vsr.Visa.VisaPb,
-				HopCount: vsr.Visa.HopCount,
-				IssuerID: vsr.Visa.IssuerID,
-			})
+			visas = append(visas, vsr.Visa)
 		}
 	}
 
@@ -105,7 +96,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 // If it completes, we update the LastXXX values in the peer record too.
 //
 // This does not use the push-buffer.
-func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uint64, visas []*vssapi.VisaHop) error {
+func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uint64, visas []*vsapi.VisaHop) error {
 	var serviceAddr string
 	var opErr error
 
@@ -149,7 +140,7 @@ RELEASE_UPDATE:
 	return opErr
 }
 
-func (vs *VSInst) EnqueuePushVisasToNode(addr netip.Addr, visas []*vssapi.VisaHop) {
+func (vs *VSInst) EnqueuePushVisasToNode(addr netip.Addr, visas []*vsapi.VisaHop) {
 	item := &adb.PushItem{
 		NodeAddr: addr,
 		Visas:    visas,
@@ -188,8 +179,8 @@ func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, items []*adb.PushItem)
 	client := NewVSSCli(serviceAddr)
 	failing := adb.PushItem{}
 
-	var revocations []*vssapi.VisaRevocation
-	var visas []*vssapi.VisaHop
+	var revocations []*vsapi.VisaRevocation
+	var visas []*vsapi.VisaHop
 	for _, itm := range items {
 		revocations = append(revocations, itm.Revocations...)
 		visas = append(visas, itm.Visas...)

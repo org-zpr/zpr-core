@@ -78,15 +78,6 @@ TmgyWDoy+cjbuozxQCbf3fbrq/zRyC5Y288=
 -----END CERTIFICATE-----
 `
 
-func visaFromVsapiVisaResponse(vr *vsapi.VisaResponse) (*vsio.Visa, error) {
-	var visaObj vsio.Visa
-	err := proto.Unmarshal(vr.GetVisa().VisaPb, &visaObj)
-	if err != nil {
-		return nil, err
-	}
-	return &visaObj, nil
-}
-
 func mustUnmarshalVisa(pb []byte) *vsio.Visa {
 	var visaObj vsio.Visa
 	err := proto.Unmarshal(pb, &visaObj)
@@ -254,11 +245,8 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 	require.Equal(t, "", res.GetReason())
 	require.Equal(t, vsapi.StatusCode_SUCCESS, res.Status)
 
-	require.NotNil(t, res.GetVisa().VisaPb)
-
-	var visaObj vsio.Visa
-	err = proto.Unmarshal(res.GetVisa().VisaPb, &visaObj)
-	require.Nil(t, err)
+	require.NotNil(t, res.GetVisa().Visa)
+	visaObj := res.GetVisa().Visa
 
 	require.Less(t, visaObj.Expires, time.Now().Add(95*time.Second).Unix()*1000)
 
@@ -365,7 +353,7 @@ func TestRequestVisaDupes(t *testing.T) {
 		require.Nil(t, err)
 		require.Equal(t, vsapi.StatusCode_SUCCESS, resp1.Status)
 	}
-	require.NotNil(t, resp1.GetVisa().VisaPb)
+	require.NotNil(t, resp1.GetVisa().Visa)
 
 	// Now request again. For now the visa service will happily create another
 	// visa. Possibly we want to prevent this, but one tricky issue is that the
@@ -376,14 +364,14 @@ func TestRequestVisaDupes(t *testing.T) {
 		require.Nil(t, err)
 		require.Equal(t, vsapi.StatusCode_SUCCESS, resp2.Status)
 	}
-	require.NotNil(t, resp2.GetVisa().VisaPb)
+	require.NotNil(t, resp2.GetVisa().Visa)
 
-	v1, err := visaFromVsapiVisaResponse(resp1)
+	v1 := resp1.Visa.Visa
 	require.Nil(t, err)
-	v2, err := visaFromVsapiVisaResponse(resp2)
+	v2 := resp2.Visa.Visa
 	require.Nil(t, err)
 
-	require.NotEqual(t, v1.IssuerId, v2.IssuerId) // New unique issuer IDs
+	require.NotEqual(t, v1.IssuerID, v2.IssuerID) // New unique issuer IDs
 }
 
 // Ensure that if agent auth has expired, no visa is issued.
@@ -610,7 +598,7 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	for _, v := range presp.Visas {
 		require.Greater(t, v.GetHopCount(), int32(0))
 
-		newV := mustUnmarshalVisa(v.VisaPb)
+		newV := v.Visa
 
 		require.NotNil(t, newV)
 		require.NotNil(t, newV.GetSource())

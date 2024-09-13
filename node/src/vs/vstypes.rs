@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use crate::vsapi;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -13,7 +14,7 @@ pub struct PolicyInfo {
 pub struct Visa {
     pub hop_count: u32,
     pub issuer_id: u32,
-    pub visa_pb: Vec<u8>, // TODO: Visas are still in serialized protocol buffer format
+    pub visa: vsapi::Visa,
 }
 
 #[derive(Debug, Clone)]

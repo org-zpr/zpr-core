@@ -10,8 +10,8 @@ use tracing::{debug, error, info};
 
 use std::collections::BTreeMap;
 
-use crate::vssapi;
-use vssapi::{VisaSupportSyncHandler, VisaSupportSyncProcessor};
+use crate::vsapi;
+use vsapi::{VisaSupportSyncHandler, VisaSupportSyncProcessor};
 
 use crate::vs::vstypes::{PolicyInfo, Revocation, Visa};
 
@@ -57,7 +57,7 @@ pub fn start_vss_server(tx_chan: Sender<VSSMsg>, listen_addr: &str) {
 }
 
 impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
-    fn handle_network_policy_installed(&self, pi: vssapi::PolicyInfo) -> thrift::Result<()> {
+    fn handle_network_policy_installed(&self, pi: vsapi::PolicyInfo) -> thrift::Result<()> {
         debug!("handle_network_policy_installed: {:?}", pi);
 
         let mut config = BTreeMap::new();
@@ -83,13 +83,13 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
         }
     }
 
-    fn handle_install_visas(&self, vh: Vec<vssapi::VisaHop>) -> thrift::Result<()> {
+    fn handle_install_visas(&self, vh: Vec<vsapi::VisaHop>) -> thrift::Result<()> {
         debug!("handle_install_visas");
         for v in vh {
             let visa = Visa {
-                hop_count: v.hop_count as u32,
-                issuer_id: v.issuer_id as u32,
-                visa_pb: v.visa_pb,
+                hop_count: v.hop_count.unwrap() as u32,
+                issuer_id: v.issuer_id.unwrap() as u32,
+                visa: v.visa.unwrap(),
             };
             let msg = VSSMsg::PushedVisa(visa);
             match self.msg_chan_out.blocking_send(msg) {
@@ -103,7 +103,7 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
         Ok(())
     }
 
-    fn handle_revoke_visas(&self, vr: Vec<vssapi::VisaRevocation>) -> thrift::Result<()> {
+    fn handle_revoke_visas(&self, vr: Vec<vsapi::VisaRevocation>) -> thrift::Result<()> {
         info!("handle_revoke_visas not implemented: {:?}", vr);
         Ok(())
     }

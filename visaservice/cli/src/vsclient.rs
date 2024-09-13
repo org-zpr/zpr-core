@@ -253,7 +253,7 @@ pub fn request_visa(
                 if let Some(visa) = result.visa {
                     println!("  visa issuer_id: {}", visa.issuer_id.unwrap());
                     println!("  visa hop_count: {}", visa.hop_count.unwrap());
-                    println!("  visa size: {} bytes", visa.visa_pb.unwrap().len());
+                    println!("  visa {:?}", visa.visa.unwrap());
                 }
             }
         }

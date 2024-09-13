@@ -2,7 +2,6 @@ use std::process::Command;
 
 fn main() {
     check_md5_sum("../../node/src/vsapi/vs.thrift.sum");
-    check_md5_sum("../../node/src/vssapi/vss.thrift.sum");
 }
 
 fn check_md5_sum(fname: &str) {

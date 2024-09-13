@@ -15,9 +15,10 @@ After a successful build the `vservice` binary will be found in
 
 ## Visa Service Admin API
 
-This is an HTTPS API for controlling the visa service designed for network administratora. Access is protected by policy.
-The default port is TCP/8182 (see `core/pkg/vservice/constants.go`), and this uses the ZPR
-contact address of the adapter in front of the visa service.
+This is an HTTPS API for controlling the visa service designed for network
+administrators. Access is protected by policy. The default port is TCP/8182 (see
+`core/pkg/vservice/constants.go`), and this uses the ZPR contact address of the
+adapter in front of the visa service.
 
 The API code is in `core/pkg/vservice/admin.go`.  
 
@@ -59,7 +60,8 @@ Returns:
 
 ### Install a policy `POST /admin/policy`
 
-Takes a JSON encoded `PolicyBundle` struct (see `core/pkg/vservice/admin.go`) filled in as follows:
+Takes a JSON encoded `PolicyBundle` struct (see `core/pkg/vservice/admin.go`)
+filled in as follows:
 
 ```json
 {
@@ -73,8 +75,8 @@ Takes a JSON encoded `PolicyBundle` struct (see `core/pkg/vservice/admin.go`) fi
 Note that the `41` in the `format` field should be the current serialization ID for the policy schema.  
 In the code this is `SerialVersion` which can be found in `mods/polio/const.go`.
 
-If you do set `version` then the admin service will ensure that the current (running) policy matches the value
-before attempting to install the new policy.
+If you do set `version` then the admin service will ensure that the current
+(running) policy matches the value before attempting to install the new policy.
 
 
 Returns the config ID and version:
@@ -90,16 +92,17 @@ Returns the config ID and version:
 
 ## Visa Service API
 
-The main visa service api (for requesting visas and connection control) is a THRIFT API. 
-This runs on TCP/5002 by default.  See `thrift/vs.thrift` for documentation.
+The main visa service api (for requesting visas and connection control) is a
+THRIFT API. This runs on TCP/5002 by default. See `thrift/vs.thrift` for
+documentation.
 
 
 
 
 ## Protocol Buffers
 
-The compiled protocol buffers are included in source, but if you need to
-rebuild them you must install:
+The compiled protocol buffers are included in source, but if you need to rebuild
+them you must install:
 
 ```
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
@@ -109,8 +112,8 @@ go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 
 ## Thrift
 
-The compiled thrift files are included in the source, but if you need to
-rebuild them then you will need the thrift compiler.
+The compiled thrift files are included in the source, but if you need to rebuild
+them then you will need the thrift compiler.
 
 ```
 cd thrift

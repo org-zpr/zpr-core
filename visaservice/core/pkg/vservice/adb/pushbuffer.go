@@ -3,14 +3,14 @@ package adb
 import (
 	"net/netip"
 
-	"zpr.org/vs/pkg/vssapi"
+	"zpr.org/vs/pkg/vsapi"
 )
 
 type PushItem struct {
 	Broadcast   bool
 	NodeAddr    netip.Addr
-	Visas       []*vssapi.VisaHop
-	Revocations []*vssapi.VisaRevocation
+	Visas       []*vsapi.VisaHop
+	Revocations []*vsapi.VisaRevocation
 }
 
 type PushBuffer struct {

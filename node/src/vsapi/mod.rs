@@ -27,6 +27,60 @@ use thrift::protocol::verify_required_field_exists;
 use thrift::server::TProcessor;
 
 #[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PEPIndex(pub i32);
+
+impl PEPIndex {
+  pub const UDP: PEPIndex = PEPIndex(1);
+  pub const TCP: PEPIndex = PEPIndex(2);
+  pub const ICMP: PEPIndex = PEPIndex(3);
+  pub const ENUM_VALUES: &'static [Self] = &[
+    Self::UDP,
+    Self::TCP,
+    Self::ICMP,
+  ];
+}
+
+impl TSerializable for PEPIndex {
+  #[allow(clippy::trivially_copy_pass_by_ref)]
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    o_prot.write_i32(self.0)
+  }
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<PEPIndex> {
+    let enum_value = i_prot.read_i32()?;
+    Ok(PEPIndex::from(enum_value))
+  }
+}
+
+impl From<i32> for PEPIndex {
+  fn from(i: i32) -> Self {
+    match i {
+      1 => PEPIndex::UDP,
+      2 => PEPIndex::TCP,
+      3 => PEPIndex::ICMP,
+      _ => PEPIndex(i)
+    }
+  }
+}
+
+impl From<&i32> for PEPIndex {
+  fn from(i: &i32) -> Self {
+    PEPIndex::from(*i)
+  }
+}
+
+impl From<PEPIndex> for i32 {
+  fn from(e: PEPIndex) -> i32 {
+    e.0
+  }
+}
+
+impl From<&PEPIndex> for i32 {
+  fn from(e: &PEPIndex) -> i32 {
+    e.0
+  }
+}
+
+#[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct StatusCode(pub i32);
 
 impl StatusCode {
@@ -125,6 +179,713 @@ impl From<AgentType> for i32 {
 impl From<&AgentType> for i32 {
   fn from(e: &AgentType) -> i32 {
     e.0
+  }
+}
+
+//
+// KeySet
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct KeySet {
+  pub format: i32,
+  pub ingress_key: Option<Vec<u8>>,
+  pub egress_key: Option<Vec<u8>>,
+}
+
+impl KeySet {
+  pub fn new<F2, F3>(format: i32, ingress_key: F2, egress_key: F3) -> KeySet where F2: Into<Option<Vec<u8>>>, F3: Into<Option<Vec<u8>>> {
+    KeySet {
+      format,
+      ingress_key: ingress_key.into(),
+      egress_key: egress_key.into(),
+    }
+  }
+}
+
+impl TSerializable for KeySet {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<KeySet> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<i32> = None;
+    let mut f_2: Option<Vec<u8>> = Some(Vec::new());
+    let mut f_3: Option<Vec<u8>> = Some(Vec::new());
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let val = i_prot.read_i32()?;
+          f_1 = Some(val);
+        },
+        2 => {
+          let val = i_prot.read_bytes()?;
+          f_2 = Some(val);
+        },
+        3 => {
+          let val = i_prot.read_bytes()?;
+          f_3 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    verify_required_field_exists("KeySet.format", &f_1)?;
+    let ret = KeySet {
+      format: f_1.expect("auto-generated code should have checked for presence of required fields"),
+      ingress_key: f_2,
+      egress_key: f_3,
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("KeySet");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("format", TType::I32, 1))?;
+    o_prot.write_i32(self.format)?;
+    o_prot.write_field_end()?;
+    if let Some(ref fld_var) = self.ingress_key {
+      o_prot.write_field_begin(&TFieldIdentifier::new("ingress_key", TType::String, 2))?;
+      o_prot.write_bytes(fld_var)?;
+      o_prot.write_field_end()?
+    }
+    if let Some(ref fld_var) = self.egress_key {
+      o_prot.write_field_begin(&TFieldIdentifier::new("egress_key", TType::String, 3))?;
+      o_prot.write_bytes(fld_var)?;
+      o_prot.write_field_end()?
+    }
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// Constraints
+//
+
+#[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Constraints {
+  pub bw: Option<bool>,
+  pub bw_limit_bps: Option<i64>,
+  pub data_cap_id: Option<String>,
+  pub data_cap_bytes: Option<i64>,
+  pub data_cap_affinity_addr: Option<Vec<u8>>,
+}
+
+impl Constraints {
+  pub fn new<F1, F2, F3, F4, F5>(bw: F1, bw_limit_bps: F2, data_cap_id: F3, data_cap_bytes: F4, data_cap_affinity_addr: F5) -> Constraints where F1: Into<Option<bool>>, F2: Into<Option<i64>>, F3: Into<Option<String>>, F4: Into<Option<i64>>, F5: Into<Option<Vec<u8>>> {
+    Constraints {
+      bw: bw.into(),
+      bw_limit_bps: bw_limit_bps.into(),
+      data_cap_id: data_cap_id.into(),
+      data_cap_bytes: data_cap_bytes.into(),
+      data_cap_affinity_addr: data_cap_affinity_addr.into(),
+    }
+  }
+}
+
+impl TSerializable for Constraints {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<Constraints> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<bool> = Some(false);
+    let mut f_2: Option<i64> = Some(0);
+    let mut f_3: Option<String> = Some("".to_owned());
+    let mut f_4: Option<i64> = Some(0);
+    let mut f_5: Option<Vec<u8>> = Some(Vec::new());
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let val = i_prot.read_bool()?;
+          f_1 = Some(val);
+        },
+        2 => {
+          let val = i_prot.read_i64()?;
+          f_2 = Some(val);
+        },
+        3 => {
+          let val = i_prot.read_string()?;
+          f_3 = Some(val);
+        },
+        4 => {
+          let val = i_prot.read_i64()?;
+          f_4 = Some(val);
+        },
+        5 => {
+          let val = i_prot.read_bytes()?;
+          f_5 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    let ret = Constraints {
+      bw: f_1,
+      bw_limit_bps: f_2,
+      data_cap_id: f_3,
+      data_cap_bytes: f_4,
+      data_cap_affinity_addr: f_5,
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("Constraints");
+    o_prot.write_struct_begin(&struct_ident)?;
+    if let Some(fld_var) = self.bw {
+      o_prot.write_field_begin(&TFieldIdentifier::new("bw", TType::Bool, 1))?;
+      o_prot.write_bool(fld_var)?;
+      o_prot.write_field_end()?
+    }
+    if let Some(fld_var) = self.bw_limit_bps {
+      o_prot.write_field_begin(&TFieldIdentifier::new("bw_limit_bps", TType::I64, 2))?;
+      o_prot.write_i64(fld_var)?;
+      o_prot.write_field_end()?
+    }
+    if let Some(ref fld_var) = self.data_cap_id {
+      o_prot.write_field_begin(&TFieldIdentifier::new("data_cap_id", TType::String, 3))?;
+      o_prot.write_string(fld_var)?;
+      o_prot.write_field_end()?
+    }
+    if let Some(fld_var) = self.data_cap_bytes {
+      o_prot.write_field_begin(&TFieldIdentifier::new("data_cap_bytes", TType::I64, 4))?;
+      o_prot.write_i64(fld_var)?;
+      o_prot.write_field_end()?
+    }
+    if let Some(ref fld_var) = self.data_cap_affinity_addr {
+      o_prot.write_field_begin(&TFieldIdentifier::new("data_cap_affinity_addr", TType::String, 5))?;
+      o_prot.write_bytes(fld_var)?;
+      o_prot.write_field_end()?
+    }
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// Signature
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Signature {
+  pub type_: i32,
+  pub signature: Vec<u8>,
+}
+
+impl Signature {
+  pub fn new(type_: i32, signature: Vec<u8>) -> Signature {
+    Signature {
+      type_,
+      signature,
+    }
+  }
+}
+
+impl TSerializable for Signature {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<Signature> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<i32> = None;
+    let mut f_2: Option<Vec<u8>> = None;
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let val = i_prot.read_i32()?;
+          f_1 = Some(val);
+        },
+        2 => {
+          let val = i_prot.read_bytes()?;
+          f_2 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    verify_required_field_exists("Signature.type_", &f_1)?;
+    verify_required_field_exists("Signature.signature", &f_2)?;
+    let ret = Signature {
+      type_: f_1.expect("auto-generated code should have checked for presence of required fields"),
+      signature: f_2.expect("auto-generated code should have checked for presence of required fields"),
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("Signature");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("type", TType::I32, 1))?;
+    o_prot.write_i32(self.type_)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("signature", TType::String, 2))?;
+    o_prot.write_bytes(&self.signature)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// PEPArgsTCPUDP
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PEPArgsTCPUDP {
+  pub source_contact_addr: Vec<u8>,
+  pub dest_contact_addr: Vec<u8>,
+  pub source_port: i32,
+  pub dest_port: i32,
+  pub server: bool,
+  pub icmp_allowed: Option<Vec<i32>>,
+}
+
+impl PEPArgsTCPUDP {
+  pub fn new<F6>(source_contact_addr: Vec<u8>, dest_contact_addr: Vec<u8>, source_port: i32, dest_port: i32, server: bool, icmp_allowed: F6) -> PEPArgsTCPUDP where F6: Into<Option<Vec<i32>>> {
+    PEPArgsTCPUDP {
+      source_contact_addr,
+      dest_contact_addr,
+      source_port,
+      dest_port,
+      server,
+      icmp_allowed: icmp_allowed.into(),
+    }
+  }
+}
+
+impl TSerializable for PEPArgsTCPUDP {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<PEPArgsTCPUDP> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<Vec<u8>> = None;
+    let mut f_2: Option<Vec<u8>> = None;
+    let mut f_3: Option<i32> = None;
+    let mut f_4: Option<i32> = None;
+    let mut f_5: Option<bool> = None;
+    let mut f_6: Option<Vec<i32>> = Some(Vec::new());
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let val = i_prot.read_bytes()?;
+          f_1 = Some(val);
+        },
+        2 => {
+          let val = i_prot.read_bytes()?;
+          f_2 = Some(val);
+        },
+        3 => {
+          let val = i_prot.read_i32()?;
+          f_3 = Some(val);
+        },
+        4 => {
+          let val = i_prot.read_i32()?;
+          f_4 = Some(val);
+        },
+        5 => {
+          let val = i_prot.read_bool()?;
+          f_5 = Some(val);
+        },
+        6 => {
+          let list_ident = i_prot.read_list_begin()?;
+          let mut val: Vec<i32> = Vec::with_capacity(list_ident.size as usize);
+          for _ in 0..list_ident.size {
+            let list_elem_0 = i_prot.read_i32()?;
+            val.push(list_elem_0);
+          }
+          i_prot.read_list_end()?;
+          f_6 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    verify_required_field_exists("PEPArgsTCPUDP.source_contact_addr", &f_1)?;
+    verify_required_field_exists("PEPArgsTCPUDP.dest_contact_addr", &f_2)?;
+    verify_required_field_exists("PEPArgsTCPUDP.source_port", &f_3)?;
+    verify_required_field_exists("PEPArgsTCPUDP.dest_port", &f_4)?;
+    verify_required_field_exists("PEPArgsTCPUDP.server", &f_5)?;
+    let ret = PEPArgsTCPUDP {
+      source_contact_addr: f_1.expect("auto-generated code should have checked for presence of required fields"),
+      dest_contact_addr: f_2.expect("auto-generated code should have checked for presence of required fields"),
+      source_port: f_3.expect("auto-generated code should have checked for presence of required fields"),
+      dest_port: f_4.expect("auto-generated code should have checked for presence of required fields"),
+      server: f_5.expect("auto-generated code should have checked for presence of required fields"),
+      icmp_allowed: f_6,
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("PEPArgsTCPUDP");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("source_contact_addr", TType::String, 1))?;
+    o_prot.write_bytes(&self.source_contact_addr)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("dest_contact_addr", TType::String, 2))?;
+    o_prot.write_bytes(&self.dest_contact_addr)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("source_port", TType::I32, 3))?;
+    o_prot.write_i32(self.source_port)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("dest_port", TType::I32, 4))?;
+    o_prot.write_i32(self.dest_port)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("server", TType::Bool, 5))?;
+    o_prot.write_bool(self.server)?;
+    o_prot.write_field_end()?;
+    if let Some(ref fld_var) = self.icmp_allowed {
+      o_prot.write_field_begin(&TFieldIdentifier::new("icmp_allowed", TType::List, 6))?;
+      o_prot.write_list_begin(&TListIdentifier::new(TType::I32, fld_var.len() as i32))?;
+      for e in fld_var {
+        o_prot.write_i32(*e)?;
+      }
+      o_prot.write_list_end()?;
+      o_prot.write_field_end()?
+    }
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// PEPArgsICMP
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PEPArgsICMP {
+  pub source_contact_addr: Vec<u8>,
+  pub dest_contact_addr: Vec<u8>,
+  pub icmp_type_code: i32,
+  pub icmp_antecedent: i32,
+  pub state_timeout_ms: Option<i32>,
+  pub one_shot: bool,
+}
+
+impl PEPArgsICMP {
+  pub fn new<F5>(source_contact_addr: Vec<u8>, dest_contact_addr: Vec<u8>, icmp_type_code: i32, icmp_antecedent: i32, state_timeout_ms: F5, one_shot: bool) -> PEPArgsICMP where F5: Into<Option<i32>> {
+    PEPArgsICMP {
+      source_contact_addr,
+      dest_contact_addr,
+      icmp_type_code,
+      icmp_antecedent,
+      state_timeout_ms: state_timeout_ms.into(),
+      one_shot,
+    }
+  }
+}
+
+impl TSerializable for PEPArgsICMP {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<PEPArgsICMP> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<Vec<u8>> = None;
+    let mut f_2: Option<Vec<u8>> = None;
+    let mut f_3: Option<i32> = None;
+    let mut f_4: Option<i32> = None;
+    let mut f_5: Option<i32> = None;
+    let mut f_6: Option<bool> = None;
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let val = i_prot.read_bytes()?;
+          f_1 = Some(val);
+        },
+        2 => {
+          let val = i_prot.read_bytes()?;
+          f_2 = Some(val);
+        },
+        3 => {
+          let val = i_prot.read_i32()?;
+          f_3 = Some(val);
+        },
+        4 => {
+          let val = i_prot.read_i32()?;
+          f_4 = Some(val);
+        },
+        5 => {
+          let val = i_prot.read_i32()?;
+          f_5 = Some(val);
+        },
+        6 => {
+          let val = i_prot.read_bool()?;
+          f_6 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    verify_required_field_exists("PEPArgsICMP.source_contact_addr", &f_1)?;
+    verify_required_field_exists("PEPArgsICMP.dest_contact_addr", &f_2)?;
+    verify_required_field_exists("PEPArgsICMP.icmp_type_code", &f_3)?;
+    verify_required_field_exists("PEPArgsICMP.icmp_antecedent", &f_4)?;
+    verify_required_field_exists("PEPArgsICMP.one_shot", &f_6)?;
+    let ret = PEPArgsICMP {
+      source_contact_addr: f_1.expect("auto-generated code should have checked for presence of required fields"),
+      dest_contact_addr: f_2.expect("auto-generated code should have checked for presence of required fields"),
+      icmp_type_code: f_3.expect("auto-generated code should have checked for presence of required fields"),
+      icmp_antecedent: f_4.expect("auto-generated code should have checked for presence of required fields"),
+      state_timeout_ms: f_5,
+      one_shot: f_6.expect("auto-generated code should have checked for presence of required fields"),
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("PEPArgsICMP");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("source_contact_addr", TType::String, 1))?;
+    o_prot.write_bytes(&self.source_contact_addr)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("dest_contact_addr", TType::String, 2))?;
+    o_prot.write_bytes(&self.dest_contact_addr)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("icmp_type_code", TType::I32, 3))?;
+    o_prot.write_i32(self.icmp_type_code)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("icmp_antecedent", TType::I32, 4))?;
+    o_prot.write_i32(self.icmp_antecedent)?;
+    o_prot.write_field_end()?;
+    if let Some(fld_var) = self.state_timeout_ms {
+      o_prot.write_field_begin(&TFieldIdentifier::new("state_timeout_ms", TType::I32, 5))?;
+      o_prot.write_i32(fld_var)?;
+      o_prot.write_field_end()?
+    }
+    o_prot.write_field_begin(&TFieldIdentifier::new("one_shot", TType::Bool, 6))?;
+    o_prot.write_bool(self.one_shot)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// Visa
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Visa {
+  pub issuer_id: i32,
+  pub configuration: i64,
+  pub expires: i64,
+  pub source: Vec<u8>,
+  pub dest: Vec<u8>,
+  pub source_contact: Vec<u8>,
+  pub dest_contact: Vec<u8>,
+  pub dock_pep: PEPIndex,
+  pub tcpudp_pep_args: Option<PEPArgsTCPUDP>,
+  pub icmp_pep_args: Option<PEPArgsICMP>,
+  pub session_key: KeySet,
+  pub cons: Option<Constraints>,
+  pub sig: Option<Signature>,
+}
+
+impl Visa {
+  pub fn new<F9, F10, F12, F13>(issuer_id: i32, configuration: i64, expires: i64, source: Vec<u8>, dest: Vec<u8>, source_contact: Vec<u8>, dest_contact: Vec<u8>, dock_pep: PEPIndex, tcpudp_pep_args: F9, icmp_pep_args: F10, session_key: KeySet, cons: F12, sig: F13) -> Visa where F9: Into<Option<PEPArgsTCPUDP>>, F10: Into<Option<PEPArgsICMP>>, F12: Into<Option<Constraints>>, F13: Into<Option<Signature>> {
+    Visa {
+      issuer_id,
+      configuration,
+      expires,
+      source,
+      dest,
+      source_contact,
+      dest_contact,
+      dock_pep,
+      tcpudp_pep_args: tcpudp_pep_args.into(),
+      icmp_pep_args: icmp_pep_args.into(),
+      session_key,
+      cons: cons.into(),
+      sig: sig.into(),
+    }
+  }
+}
+
+impl TSerializable for Visa {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<Visa> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<i32> = None;
+    let mut f_2: Option<i64> = None;
+    let mut f_3: Option<i64> = None;
+    let mut f_4: Option<Vec<u8>> = None;
+    let mut f_5: Option<Vec<u8>> = None;
+    let mut f_6: Option<Vec<u8>> = None;
+    let mut f_7: Option<Vec<u8>> = None;
+    let mut f_8: Option<PEPIndex> = None;
+    let mut f_9: Option<PEPArgsTCPUDP> = None;
+    let mut f_10: Option<PEPArgsICMP> = None;
+    let mut f_11: Option<KeySet> = None;
+    let mut f_12: Option<Constraints> = None;
+    let mut f_13: Option<Signature> = None;
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let val = i_prot.read_i32()?;
+          f_1 = Some(val);
+        },
+        2 => {
+          let val = i_prot.read_i64()?;
+          f_2 = Some(val);
+        },
+        3 => {
+          let val = i_prot.read_i64()?;
+          f_3 = Some(val);
+        },
+        4 => {
+          let val = i_prot.read_bytes()?;
+          f_4 = Some(val);
+        },
+        5 => {
+          let val = i_prot.read_bytes()?;
+          f_5 = Some(val);
+        },
+        6 => {
+          let val = i_prot.read_bytes()?;
+          f_6 = Some(val);
+        },
+        7 => {
+          let val = i_prot.read_bytes()?;
+          f_7 = Some(val);
+        },
+        8 => {
+          let val = PEPIndex::read_from_in_protocol(i_prot)?;
+          f_8 = Some(val);
+        },
+        9 => {
+          let val = PEPArgsTCPUDP::read_from_in_protocol(i_prot)?;
+          f_9 = Some(val);
+        },
+        10 => {
+          let val = PEPArgsICMP::read_from_in_protocol(i_prot)?;
+          f_10 = Some(val);
+        },
+        11 => {
+          let val = KeySet::read_from_in_protocol(i_prot)?;
+          f_11 = Some(val);
+        },
+        12 => {
+          let val = Constraints::read_from_in_protocol(i_prot)?;
+          f_12 = Some(val);
+        },
+        13 => {
+          let val = Signature::read_from_in_protocol(i_prot)?;
+          f_13 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    verify_required_field_exists("Visa.issuer_id", &f_1)?;
+    verify_required_field_exists("Visa.configuration", &f_2)?;
+    verify_required_field_exists("Visa.expires", &f_3)?;
+    verify_required_field_exists("Visa.source", &f_4)?;
+    verify_required_field_exists("Visa.dest", &f_5)?;
+    verify_required_field_exists("Visa.source_contact", &f_6)?;
+    verify_required_field_exists("Visa.dest_contact", &f_7)?;
+    verify_required_field_exists("Visa.dock_pep", &f_8)?;
+    verify_required_field_exists("Visa.session_key", &f_11)?;
+    let ret = Visa {
+      issuer_id: f_1.expect("auto-generated code should have checked for presence of required fields"),
+      configuration: f_2.expect("auto-generated code should have checked for presence of required fields"),
+      expires: f_3.expect("auto-generated code should have checked for presence of required fields"),
+      source: f_4.expect("auto-generated code should have checked for presence of required fields"),
+      dest: f_5.expect("auto-generated code should have checked for presence of required fields"),
+      source_contact: f_6.expect("auto-generated code should have checked for presence of required fields"),
+      dest_contact: f_7.expect("auto-generated code should have checked for presence of required fields"),
+      dock_pep: f_8.expect("auto-generated code should have checked for presence of required fields"),
+      tcpudp_pep_args: f_9,
+      icmp_pep_args: f_10,
+      session_key: f_11.expect("auto-generated code should have checked for presence of required fields"),
+      cons: f_12,
+      sig: f_13,
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("Visa");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("issuer_id", TType::I32, 1))?;
+    o_prot.write_i32(self.issuer_id)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("configuration", TType::I64, 2))?;
+    o_prot.write_i64(self.configuration)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("expires", TType::I64, 3))?;
+    o_prot.write_i64(self.expires)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("source", TType::String, 4))?;
+    o_prot.write_bytes(&self.source)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("dest", TType::String, 5))?;
+    o_prot.write_bytes(&self.dest)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("source_contact", TType::String, 6))?;
+    o_prot.write_bytes(&self.source_contact)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("dest_contact", TType::String, 7))?;
+    o_prot.write_bytes(&self.dest_contact)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("dock_pep", TType::I32, 8))?;
+    self.dock_pep.write_to_out_protocol(o_prot)?;
+    o_prot.write_field_end()?;
+    if let Some(ref fld_var) = self.tcpudp_pep_args {
+      o_prot.write_field_begin(&TFieldIdentifier::new("tcpudp_pep_args", TType::Struct, 9))?;
+      fld_var.write_to_out_protocol(o_prot)?;
+      o_prot.write_field_end()?
+    }
+    if let Some(ref fld_var) = self.icmp_pep_args {
+      o_prot.write_field_begin(&TFieldIdentifier::new("icmp_pep_args", TType::Struct, 10))?;
+      fld_var.write_to_out_protocol(o_prot)?;
+      o_prot.write_field_end()?
+    }
+    o_prot.write_field_begin(&TFieldIdentifier::new("session_key", TType::Struct, 11))?;
+    self.session_key.write_to_out_protocol(o_prot)?;
+    o_prot.write_field_end()?;
+    if let Some(ref fld_var) = self.cons {
+      o_prot.write_field_begin(&TFieldIdentifier::new("cons", TType::Struct, 12))?;
+      fld_var.write_to_out_protocol(o_prot)?;
+      o_prot.write_field_end()?
+    }
+    if let Some(ref fld_var) = self.sig {
+      o_prot.write_field_begin(&TFieldIdentifier::new("sig", TType::Struct, 13))?;
+      fld_var.write_to_out_protocol(o_prot)?;
+      o_prot.write_field_end()?
+    }
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
   }
 }
 
@@ -233,9 +994,9 @@ impl TSerializable for Agent {
           let map_ident = i_prot.read_map_begin()?;
           let mut val: BTreeMap<String, String> = BTreeMap::new();
           for _ in 0..map_ident.size {
-            let map_key_0 = i_prot.read_string()?;
-            let map_val_1 = i_prot.read_string()?;
-            val.insert(map_key_0, map_val_1);
+            let map_key_1 = i_prot.read_string()?;
+            let map_val_2 = i_prot.read_string()?;
+            val.insert(map_key_1, map_val_2);
           }
           i_prot.read_map_end()?;
           f_2 = Some(val);
@@ -260,8 +1021,8 @@ impl TSerializable for Agent {
           let list_ident = i_prot.read_list_begin()?;
           let mut val: Vec<String> = Vec::with_capacity(list_ident.size as usize);
           for _ in 0..list_ident.size {
-            let list_elem_2 = i_prot.read_string()?;
-            val.push(list_elem_2);
+            let list_elem_3 = i_prot.read_string()?;
+            val.push(list_elem_3);
           }
           i_prot.read_list_end()?;
           f_7 = Some(val);
@@ -663,9 +1424,9 @@ impl TSerializable for ConnectRequest {
           let map_ident = i_prot.read_map_begin()?;
           let mut val: BTreeMap<String, String> = BTreeMap::new();
           for _ in 0..map_ident.size {
-            let map_key_3 = i_prot.read_string()?;
-            let map_val_4 = i_prot.read_string()?;
-            val.insert(map_key_3, map_val_4);
+            let map_key_4 = i_prot.read_string()?;
+            let map_val_5 = i_prot.read_string()?;
+            val.insert(map_key_4, map_val_5);
           }
           i_prot.read_map_end()?;
           f_3 = Some(val);
@@ -678,8 +1439,8 @@ impl TSerializable for ConnectRequest {
           let list_ident = i_prot.read_list_begin()?;
           let mut val: Vec<Vec<u8>> = Vec::with_capacity(list_ident.size as usize);
           for _ in 0..list_ident.size {
-            let list_elem_5 = i_prot.read_bytes()?;
-            val.push(list_elem_5);
+            let list_elem_6 = i_prot.read_bytes()?;
+            val.push(list_elem_6);
           }
           i_prot.read_list_end()?;
           f_5 = Some(val);
@@ -844,15 +1605,15 @@ impl TSerializable for ConnectResponse {
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct VisaHop {
-  pub visa_pb: Option<Vec<u8>>,
+  pub visa: Option<Visa>,
   pub hop_count: Option<i32>,
   pub issuer_id: Option<i32>,
 }
 
 impl VisaHop {
-  pub fn new<F1, F2, F3>(visa_pb: F1, hop_count: F2, issuer_id: F3) -> VisaHop where F1: Into<Option<Vec<u8>>>, F2: Into<Option<i32>>, F3: Into<Option<i32>> {
+  pub fn new<F1, F2, F3>(visa: F1, hop_count: F2, issuer_id: F3) -> VisaHop where F1: Into<Option<Visa>>, F2: Into<Option<i32>>, F3: Into<Option<i32>> {
     VisaHop {
-      visa_pb: visa_pb.into(),
+      visa: visa.into(),
       hop_count: hop_count.into(),
       issuer_id: issuer_id.into(),
     }
@@ -862,7 +1623,7 @@ impl VisaHop {
 impl TSerializable for VisaHop {
   fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaHop> {
     i_prot.read_struct_begin()?;
-    let mut f_1: Option<Vec<u8>> = Some(Vec::new());
+    let mut f_1: Option<Visa> = None;
     let mut f_2: Option<i32> = Some(0);
     let mut f_3: Option<i32> = Some(0);
     loop {
@@ -873,7 +1634,7 @@ impl TSerializable for VisaHop {
       let field_id = field_id(&field_ident)?;
       match field_id {
         1 => {
-          let val = i_prot.read_bytes()?;
+          let val = Visa::read_from_in_protocol(i_prot)?;
           f_1 = Some(val);
         },
         2 => {
@@ -892,7 +1653,7 @@ impl TSerializable for VisaHop {
     }
     i_prot.read_struct_end()?;
     let ret = VisaHop {
-      visa_pb: f_1,
+      visa: f_1,
       hop_count: f_2,
       issuer_id: f_3,
     };
@@ -901,9 +1662,9 @@ impl TSerializable for VisaHop {
   fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
     let struct_ident = TStructIdentifier::new("VisaHop");
     o_prot.write_struct_begin(&struct_ident)?;
-    if let Some(ref fld_var) = self.visa_pb {
-      o_prot.write_field_begin(&TFieldIdentifier::new("visa_pb", TType::String, 1))?;
-      o_prot.write_bytes(fld_var)?;
+    if let Some(ref fld_var) = self.visa {
+      o_prot.write_field_begin(&TFieldIdentifier::new("visa", TType::Struct, 1))?;
+      fld_var.write_to_out_protocol(o_prot)?;
       o_prot.write_field_end()?
     }
     if let Some(fld_var) = self.hop_count {
@@ -1067,6 +1828,167 @@ impl TSerializable for VisaResponse {
     if let Some(ref fld_var) = self.reason {
       o_prot.write_field_begin(&TFieldIdentifier::new("reason", TType::String, 3))?;
       o_prot.write_string(fld_var)?;
+      o_prot.write_field_end()?
+    }
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// VisaRevocation
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct VisaRevocation {
+  pub issuer_id: i32,
+  pub configuration: i64,
+}
+
+impl VisaRevocation {
+  pub fn new(issuer_id: i32, configuration: i64) -> VisaRevocation {
+    VisaRevocation {
+      issuer_id,
+      configuration,
+    }
+  }
+}
+
+impl TSerializable for VisaRevocation {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaRevocation> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<i32> = None;
+    let mut f_2: Option<i64> = None;
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let val = i_prot.read_i32()?;
+          f_1 = Some(val);
+        },
+        2 => {
+          let val = i_prot.read_i64()?;
+          f_2 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    verify_required_field_exists("VisaRevocation.issuer_id", &f_1)?;
+    verify_required_field_exists("VisaRevocation.configuration", &f_2)?;
+    let ret = VisaRevocation {
+      issuer_id: f_1.expect("auto-generated code should have checked for presence of required fields"),
+      configuration: f_2.expect("auto-generated code should have checked for presence of required fields"),
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("VisaRevocation");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("issuer_id", TType::I32, 1))?;
+    o_prot.write_i32(self.issuer_id)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("configuration", TType::I64, 2))?;
+    o_prot.write_i64(self.configuration)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// PolicyInfo
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PolicyInfo {
+  pub policy_id: i64,
+  pub config_id: i64,
+  pub node_config: Option<BTreeMap<String, String>>,
+}
+
+impl PolicyInfo {
+  pub fn new<F3>(policy_id: i64, config_id: i64, node_config: F3) -> PolicyInfo where F3: Into<Option<BTreeMap<String, String>>> {
+    PolicyInfo {
+      policy_id,
+      config_id,
+      node_config: node_config.into(),
+    }
+  }
+}
+
+impl TSerializable for PolicyInfo {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<PolicyInfo> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<i64> = None;
+    let mut f_2: Option<i64> = None;
+    let mut f_3: Option<BTreeMap<String, String>> = Some(BTreeMap::new());
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let val = i_prot.read_i64()?;
+          f_1 = Some(val);
+        },
+        2 => {
+          let val = i_prot.read_i64()?;
+          f_2 = Some(val);
+        },
+        3 => {
+          let map_ident = i_prot.read_map_begin()?;
+          let mut val: BTreeMap<String, String> = BTreeMap::new();
+          for _ in 0..map_ident.size {
+            let map_key_7 = i_prot.read_string()?;
+            let map_val_8 = i_prot.read_string()?;
+            val.insert(map_key_7, map_val_8);
+          }
+          i_prot.read_map_end()?;
+          f_3 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    verify_required_field_exists("PolicyInfo.policy_id", &f_1)?;
+    verify_required_field_exists("PolicyInfo.config_id", &f_2)?;
+    let ret = PolicyInfo {
+      policy_id: f_1.expect("auto-generated code should have checked for presence of required fields"),
+      config_id: f_2.expect("auto-generated code should have checked for presence of required fields"),
+      node_config: f_3,
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("PolicyInfo");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("policy_id", TType::I64, 1))?;
+    o_prot.write_i64(self.policy_id)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("config_id", TType::I64, 2))?;
+    o_prot.write_i64(self.config_id)?;
+    o_prot.write_field_end()?;
+    if let Some(ref fld_var) = self.node_config {
+      o_prot.write_field_begin(&TFieldIdentifier::new("node_config", TType::Map, 3))?;
+      o_prot.write_map_begin(&TMapIdentifier::new(TType::String, TType::String, fld_var.len() as i32))?;
+      for (k, v) in fld_var {
+        o_prot.write_string(k)?;
+        o_prot.write_string(v)?;
+      }
+      o_prot.write_map_end()?;
       o_prot.write_field_end()?
     }
     o_prot.write_field_stop()?;
@@ -2348,6 +3270,564 @@ impl VisaServiceRequestVisaResult {
       fld_var.write_to_out_protocol(o_prot)?;
       o_prot.write_field_end()?
     }
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// VisaSupport service client
+//
+
+pub trait TVisaSupportSyncClient {
+  fn network_policy_installed(&mut self, pi: PolicyInfo) -> thrift::Result<()>;
+  fn install_visas(&mut self, vh: Vec<VisaHop>) -> thrift::Result<()>;
+  fn revoke_visas(&mut self, vr: Vec<VisaRevocation>) -> thrift::Result<()>;
+}
+
+pub trait TVisaSupportSyncClientMarker {}
+
+pub struct VisaSupportSyncClient<IP, OP> where IP: TInputProtocol, OP: TOutputProtocol {
+  _i_prot: IP,
+  _o_prot: OP,
+  _sequence_number: i32,
+}
+
+impl <IP, OP> VisaSupportSyncClient<IP, OP> where IP: TInputProtocol, OP: TOutputProtocol {
+  pub fn new(input_protocol: IP, output_protocol: OP) -> VisaSupportSyncClient<IP, OP> {
+    VisaSupportSyncClient { _i_prot: input_protocol, _o_prot: output_protocol, _sequence_number: 0 }
+  }
+}
+
+impl <IP, OP> TThriftClient for VisaSupportSyncClient<IP, OP> where IP: TInputProtocol, OP: TOutputProtocol {
+  fn i_prot_mut(&mut self) -> &mut dyn TInputProtocol { &mut self._i_prot }
+  fn o_prot_mut(&mut self) -> &mut dyn TOutputProtocol { &mut self._o_prot }
+  fn sequence_number(&self) -> i32 { self._sequence_number }
+  fn increment_sequence_number(&mut self) -> i32 { self._sequence_number += 1; self._sequence_number }
+}
+
+impl <IP, OP> TVisaSupportSyncClientMarker for VisaSupportSyncClient<IP, OP> where IP: TInputProtocol, OP: TOutputProtocol {}
+
+impl <C: TThriftClient + TVisaSupportSyncClientMarker> TVisaSupportSyncClient for C {
+  fn network_policy_installed(&mut self, pi: PolicyInfo) -> thrift::Result<()> {
+    (
+      {
+        self.increment_sequence_number();
+        let message_ident = TMessageIdentifier::new("NetworkPolicyInstalled", TMessageType::Call, self.sequence_number());
+        let call_args = VisaSupportNetworkPolicyInstalledArgs { pi };
+        self.o_prot_mut().write_message_begin(&message_ident)?;
+        call_args.write_to_out_protocol(self.o_prot_mut())?;
+        self.o_prot_mut().write_message_end()?;
+        self.o_prot_mut().flush()
+      }
+    )?;
+    {
+      let message_ident = self.i_prot_mut().read_message_begin()?;
+      verify_expected_sequence_number(self.sequence_number(), message_ident.sequence_number)?;
+      verify_expected_service_call("NetworkPolicyInstalled", &message_ident.name)?;
+      if message_ident.message_type == TMessageType::Exception {
+        let remote_error = thrift::Error::read_application_error_from_in_protocol(self.i_prot_mut())?;
+        self.i_prot_mut().read_message_end()?;
+        return Err(thrift::Error::Application(remote_error))
+      }
+      verify_expected_message_type(TMessageType::Reply, message_ident.message_type)?;
+      let result = VisaSupportNetworkPolicyInstalledResult::read_from_in_protocol(self.i_prot_mut())?;
+      self.i_prot_mut().read_message_end()?;
+      result.ok_or()
+    }
+  }
+  fn install_visas(&mut self, vh: Vec<VisaHop>) -> thrift::Result<()> {
+    (
+      {
+        self.increment_sequence_number();
+        let message_ident = TMessageIdentifier::new("InstallVisas", TMessageType::Call, self.sequence_number());
+        let call_args = VisaSupportInstallVisasArgs { vh };
+        self.o_prot_mut().write_message_begin(&message_ident)?;
+        call_args.write_to_out_protocol(self.o_prot_mut())?;
+        self.o_prot_mut().write_message_end()?;
+        self.o_prot_mut().flush()
+      }
+    )?;
+    {
+      let message_ident = self.i_prot_mut().read_message_begin()?;
+      verify_expected_sequence_number(self.sequence_number(), message_ident.sequence_number)?;
+      verify_expected_service_call("InstallVisas", &message_ident.name)?;
+      if message_ident.message_type == TMessageType::Exception {
+        let remote_error = thrift::Error::read_application_error_from_in_protocol(self.i_prot_mut())?;
+        self.i_prot_mut().read_message_end()?;
+        return Err(thrift::Error::Application(remote_error))
+      }
+      verify_expected_message_type(TMessageType::Reply, message_ident.message_type)?;
+      let result = VisaSupportInstallVisasResult::read_from_in_protocol(self.i_prot_mut())?;
+      self.i_prot_mut().read_message_end()?;
+      result.ok_or()
+    }
+  }
+  fn revoke_visas(&mut self, vr: Vec<VisaRevocation>) -> thrift::Result<()> {
+    (
+      {
+        self.increment_sequence_number();
+        let message_ident = TMessageIdentifier::new("RevokeVisas", TMessageType::Call, self.sequence_number());
+        let call_args = VisaSupportRevokeVisasArgs { vr };
+        self.o_prot_mut().write_message_begin(&message_ident)?;
+        call_args.write_to_out_protocol(self.o_prot_mut())?;
+        self.o_prot_mut().write_message_end()?;
+        self.o_prot_mut().flush()
+      }
+    )?;
+    {
+      let message_ident = self.i_prot_mut().read_message_begin()?;
+      verify_expected_sequence_number(self.sequence_number(), message_ident.sequence_number)?;
+      verify_expected_service_call("RevokeVisas", &message_ident.name)?;
+      if message_ident.message_type == TMessageType::Exception {
+        let remote_error = thrift::Error::read_application_error_from_in_protocol(self.i_prot_mut())?;
+        self.i_prot_mut().read_message_end()?;
+        return Err(thrift::Error::Application(remote_error))
+      }
+      verify_expected_message_type(TMessageType::Reply, message_ident.message_type)?;
+      let result = VisaSupportRevokeVisasResult::read_from_in_protocol(self.i_prot_mut())?;
+      self.i_prot_mut().read_message_end()?;
+      result.ok_or()
+    }
+  }
+}
+
+//
+// VisaSupport service processor
+//
+
+pub trait VisaSupportSyncHandler {
+  fn handle_network_policy_installed(&self, pi: PolicyInfo) -> thrift::Result<()>;
+  fn handle_install_visas(&self, vh: Vec<VisaHop>) -> thrift::Result<()>;
+  fn handle_revoke_visas(&self, vr: Vec<VisaRevocation>) -> thrift::Result<()>;
+}
+
+pub struct VisaSupportSyncProcessor<H: VisaSupportSyncHandler> {
+  handler: H,
+}
+
+impl <H: VisaSupportSyncHandler> VisaSupportSyncProcessor<H> {
+  pub fn new(handler: H) -> VisaSupportSyncProcessor<H> {
+    VisaSupportSyncProcessor {
+      handler,
+    }
+  }
+  fn process_network_policy_installed(&self, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    TVisaSupportProcessFunctions::process_network_policy_installed(&self.handler, incoming_sequence_number, i_prot, o_prot)
+  }
+  fn process_install_visas(&self, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    TVisaSupportProcessFunctions::process_install_visas(&self.handler, incoming_sequence_number, i_prot, o_prot)
+  }
+  fn process_revoke_visas(&self, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    TVisaSupportProcessFunctions::process_revoke_visas(&self.handler, incoming_sequence_number, i_prot, o_prot)
+  }
+}
+
+pub struct TVisaSupportProcessFunctions;
+
+impl TVisaSupportProcessFunctions {
+  pub fn process_network_policy_installed<H: VisaSupportSyncHandler>(handler: &H, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let args = VisaSupportNetworkPolicyInstalledArgs::read_from_in_protocol(i_prot)?;
+    match handler.handle_network_policy_installed(args.pi) {
+      Ok(_) => {
+        let message_ident = TMessageIdentifier::new("NetworkPolicyInstalled", TMessageType::Reply, incoming_sequence_number);
+        o_prot.write_message_begin(&message_ident)?;
+        let ret = VisaSupportNetworkPolicyInstalledResult {  };
+        ret.write_to_out_protocol(o_prot)?;
+        o_prot.write_message_end()?;
+        o_prot.flush()
+      },
+      Err(e) => {
+        match e {
+          thrift::Error::Application(app_err) => {
+            let message_ident = TMessageIdentifier::new("NetworkPolicyInstalled", TMessageType::Exception, incoming_sequence_number);
+            o_prot.write_message_begin(&message_ident)?;
+            thrift::Error::write_application_error_to_out_protocol(&app_err, o_prot)?;
+            o_prot.write_message_end()?;
+            o_prot.flush()
+          },
+          _ => {
+            let ret_err = {
+              ApplicationError::new(
+                ApplicationErrorKind::Unknown,
+                e.to_string()
+              )
+            };
+            let message_ident = TMessageIdentifier::new("NetworkPolicyInstalled", TMessageType::Exception, incoming_sequence_number);
+            o_prot.write_message_begin(&message_ident)?;
+            thrift::Error::write_application_error_to_out_protocol(&ret_err, o_prot)?;
+            o_prot.write_message_end()?;
+            o_prot.flush()
+          },
+        }
+      },
+    }
+  }
+  pub fn process_install_visas<H: VisaSupportSyncHandler>(handler: &H, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let args = VisaSupportInstallVisasArgs::read_from_in_protocol(i_prot)?;
+    match handler.handle_install_visas(args.vh) {
+      Ok(_) => {
+        let message_ident = TMessageIdentifier::new("InstallVisas", TMessageType::Reply, incoming_sequence_number);
+        o_prot.write_message_begin(&message_ident)?;
+        let ret = VisaSupportInstallVisasResult {  };
+        ret.write_to_out_protocol(o_prot)?;
+        o_prot.write_message_end()?;
+        o_prot.flush()
+      },
+      Err(e) => {
+        match e {
+          thrift::Error::Application(app_err) => {
+            let message_ident = TMessageIdentifier::new("InstallVisas", TMessageType::Exception, incoming_sequence_number);
+            o_prot.write_message_begin(&message_ident)?;
+            thrift::Error::write_application_error_to_out_protocol(&app_err, o_prot)?;
+            o_prot.write_message_end()?;
+            o_prot.flush()
+          },
+          _ => {
+            let ret_err = {
+              ApplicationError::new(
+                ApplicationErrorKind::Unknown,
+                e.to_string()
+              )
+            };
+            let message_ident = TMessageIdentifier::new("InstallVisas", TMessageType::Exception, incoming_sequence_number);
+            o_prot.write_message_begin(&message_ident)?;
+            thrift::Error::write_application_error_to_out_protocol(&ret_err, o_prot)?;
+            o_prot.write_message_end()?;
+            o_prot.flush()
+          },
+        }
+      },
+    }
+  }
+  pub fn process_revoke_visas<H: VisaSupportSyncHandler>(handler: &H, incoming_sequence_number: i32, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let args = VisaSupportRevokeVisasArgs::read_from_in_protocol(i_prot)?;
+    match handler.handle_revoke_visas(args.vr) {
+      Ok(_) => {
+        let message_ident = TMessageIdentifier::new("RevokeVisas", TMessageType::Reply, incoming_sequence_number);
+        o_prot.write_message_begin(&message_ident)?;
+        let ret = VisaSupportRevokeVisasResult {  };
+        ret.write_to_out_protocol(o_prot)?;
+        o_prot.write_message_end()?;
+        o_prot.flush()
+      },
+      Err(e) => {
+        match e {
+          thrift::Error::Application(app_err) => {
+            let message_ident = TMessageIdentifier::new("RevokeVisas", TMessageType::Exception, incoming_sequence_number);
+            o_prot.write_message_begin(&message_ident)?;
+            thrift::Error::write_application_error_to_out_protocol(&app_err, o_prot)?;
+            o_prot.write_message_end()?;
+            o_prot.flush()
+          },
+          _ => {
+            let ret_err = {
+              ApplicationError::new(
+                ApplicationErrorKind::Unknown,
+                e.to_string()
+              )
+            };
+            let message_ident = TMessageIdentifier::new("RevokeVisas", TMessageType::Exception, incoming_sequence_number);
+            o_prot.write_message_begin(&message_ident)?;
+            thrift::Error::write_application_error_to_out_protocol(&ret_err, o_prot)?;
+            o_prot.write_message_end()?;
+            o_prot.flush()
+          },
+        }
+      },
+    }
+  }
+}
+
+impl <H: VisaSupportSyncHandler> TProcessor for VisaSupportSyncProcessor<H> {
+  fn process(&self, i_prot: &mut dyn TInputProtocol, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let message_ident = i_prot.read_message_begin()?;
+    let res = match &*message_ident.name {
+      "NetworkPolicyInstalled" => {
+        self.process_network_policy_installed(message_ident.sequence_number, i_prot, o_prot)
+      },
+      "InstallVisas" => {
+        self.process_install_visas(message_ident.sequence_number, i_prot, o_prot)
+      },
+      "RevokeVisas" => {
+        self.process_revoke_visas(message_ident.sequence_number, i_prot, o_prot)
+      },
+      method => {
+        Err(
+          thrift::Error::Application(
+            ApplicationError::new(
+              ApplicationErrorKind::UnknownMethod,
+              format!("unknown method {}", method)
+            )
+          )
+        )
+      },
+    };
+    thrift::server::handle_process_result(&message_ident, res, o_prot)
+  }
+}
+
+//
+// VisaSupportNetworkPolicyInstalledArgs
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct VisaSupportNetworkPolicyInstalledArgs {
+  pi: PolicyInfo,
+}
+
+impl VisaSupportNetworkPolicyInstalledArgs {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaSupportNetworkPolicyInstalledArgs> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<PolicyInfo> = None;
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let val = PolicyInfo::read_from_in_protocol(i_prot)?;
+          f_1 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    verify_required_field_exists("VisaSupportNetworkPolicyInstalledArgs.pi", &f_1)?;
+    let ret = VisaSupportNetworkPolicyInstalledArgs {
+      pi: f_1.expect("auto-generated code should have checked for presence of required fields"),
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("NetworkPolicyInstalled_args");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("pi", TType::Struct, 1))?;
+    self.pi.write_to_out_protocol(o_prot)?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// VisaSupportNetworkPolicyInstalledResult
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct VisaSupportNetworkPolicyInstalledResult {
+}
+
+impl VisaSupportNetworkPolicyInstalledResult {
+  fn ok_or(self) -> thrift::Result<()> {
+    Ok(())
+  }
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaSupportNetworkPolicyInstalledResult> {
+    i_prot.read_struct_begin()?;
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      i_prot.skip(field_ident.field_type)?;
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    let ret = VisaSupportNetworkPolicyInstalledResult {};
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("VisaSupportNetworkPolicyInstalledResult");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// VisaSupportInstallVisasArgs
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct VisaSupportInstallVisasArgs {
+  vh: Vec<VisaHop>,
+}
+
+impl VisaSupportInstallVisasArgs {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaSupportInstallVisasArgs> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<Vec<VisaHop>> = None;
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let list_ident = i_prot.read_list_begin()?;
+          let mut val: Vec<VisaHop> = Vec::with_capacity(list_ident.size as usize);
+          for _ in 0..list_ident.size {
+            let list_elem_9 = VisaHop::read_from_in_protocol(i_prot)?;
+            val.push(list_elem_9);
+          }
+          i_prot.read_list_end()?;
+          f_1 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    verify_required_field_exists("VisaSupportInstallVisasArgs.vh", &f_1)?;
+    let ret = VisaSupportInstallVisasArgs {
+      vh: f_1.expect("auto-generated code should have checked for presence of required fields"),
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("InstallVisas_args");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("vh", TType::List, 1))?;
+    o_prot.write_list_begin(&TListIdentifier::new(TType::Struct, self.vh.len() as i32))?;
+    for e in &self.vh {
+      e.write_to_out_protocol(o_prot)?;
+    }
+    o_prot.write_list_end()?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// VisaSupportInstallVisasResult
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct VisaSupportInstallVisasResult {
+}
+
+impl VisaSupportInstallVisasResult {
+  fn ok_or(self) -> thrift::Result<()> {
+    Ok(())
+  }
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaSupportInstallVisasResult> {
+    i_prot.read_struct_begin()?;
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      i_prot.skip(field_ident.field_type)?;
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    let ret = VisaSupportInstallVisasResult {};
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("VisaSupportInstallVisasResult");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// VisaSupportRevokeVisasArgs
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct VisaSupportRevokeVisasArgs {
+  vr: Vec<VisaRevocation>,
+}
+
+impl VisaSupportRevokeVisasArgs {
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaSupportRevokeVisasArgs> {
+    i_prot.read_struct_begin()?;
+    let mut f_1: Option<Vec<VisaRevocation>> = None;
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      let field_id = field_id(&field_ident)?;
+      match field_id {
+        1 => {
+          let list_ident = i_prot.read_list_begin()?;
+          let mut val: Vec<VisaRevocation> = Vec::with_capacity(list_ident.size as usize);
+          for _ in 0..list_ident.size {
+            let list_elem_10 = VisaRevocation::read_from_in_protocol(i_prot)?;
+            val.push(list_elem_10);
+          }
+          i_prot.read_list_end()?;
+          f_1 = Some(val);
+        },
+        _ => {
+          i_prot.skip(field_ident.field_type)?;
+        },
+      };
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    verify_required_field_exists("VisaSupportRevokeVisasArgs.vr", &f_1)?;
+    let ret = VisaSupportRevokeVisasArgs {
+      vr: f_1.expect("auto-generated code should have checked for presence of required fields"),
+    };
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("RevokeVisas_args");
+    o_prot.write_struct_begin(&struct_ident)?;
+    o_prot.write_field_begin(&TFieldIdentifier::new("vr", TType::List, 1))?;
+    o_prot.write_list_begin(&TListIdentifier::new(TType::Struct, self.vr.len() as i32))?;
+    for e in &self.vr {
+      e.write_to_out_protocol(o_prot)?;
+    }
+    o_prot.write_list_end()?;
+    o_prot.write_field_end()?;
+    o_prot.write_field_stop()?;
+    o_prot.write_struct_end()
+  }
+}
+
+//
+// VisaSupportRevokeVisasResult
+//
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct VisaSupportRevokeVisasResult {
+}
+
+impl VisaSupportRevokeVisasResult {
+  fn ok_or(self) -> thrift::Result<()> {
+    Ok(())
+  }
+  fn read_from_in_protocol(i_prot: &mut dyn TInputProtocol) -> thrift::Result<VisaSupportRevokeVisasResult> {
+    i_prot.read_struct_begin()?;
+    loop {
+      let field_ident = i_prot.read_field_begin()?;
+      if field_ident.field_type == TType::Stop {
+        break;
+      }
+      i_prot.skip(field_ident.field_type)?;
+      i_prot.read_field_end()?;
+    }
+    i_prot.read_struct_end()?;
+    let ret = VisaSupportRevokeVisasResult {};
+    Ok(ret)
+  }
+  fn write_to_out_protocol(&self, o_prot: &mut dyn TOutputProtocol) -> thrift::Result<()> {
+    let struct_ident = TStructIdentifier::new("VisaSupportRevokeVisasResult");
+    o_prot.write_struct_begin(&struct_ident)?;
     o_prot.write_field_stop()?;
     o_prot.write_struct_end()
   }

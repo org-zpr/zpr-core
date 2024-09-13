@@ -43,7 +43,6 @@ clean:
 # If check fails, the thrift files need to be rebuilt
 check:
 	cd ../thrift && md5sum -c ../core/pkg/vsapi/vs.thrift.sum
-	cd ../thrift && md5sum -c ../core/pkg/vssapi/vss.thrift.sum
 
 
 .PHONY: all build vservice test clean check

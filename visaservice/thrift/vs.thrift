@@ -1,39 +1,9 @@
-// vs.thrift - api for the visa service
 
-// This is the new visa-service API for the Reference Implementation. Note that
-// the Visa Support Serice API is not longer needed because we have changed
-// the way that a visa service and node connect.
-//
-// The new connection protocol is:
-//
-//     1. Start a node. Node is given a visa from the compiler that will allow
-//        it to communicate the the visa service when it comes online.
-//
-//     2. Start the visa service's adatper.  This adapter will present a
-//        certificate to the node that is (a) signed by the ZPR authority and
-//        (b) has a well known CN that tells the node that it is the visa
-//        service's adapter.
-//
-//     3. The node allows this adapter to connect -- even though the node has
-//        has no policy yet.  The pre-built visa includes the hard-coded visa
-//        service adapter's ZPR address.
-//
-//     ~~ Now this visa sercice API kicks in ~~
-//
-//     4. The node sends a HELLO message to the visa service.
-//
-//     5. The visa sercice sends a HELLO-RESPONSE which includes a challenge.
-//
-//     6. The node performs the crypto operations to satisfy the challenge and
-//        sends back the AUTHENTICATE message.
-//
-//     6. The visa service checks the nodes crypto, checks policy, and if all
-//        is well will send back an API Key that the node can use when calling
-//        any of the other functions on this API.
-//
-//
-// TODO: There is currently no mechanism described for how to expire or
-//       refresh the API key.
+// vs.thrift
+// 
+// This file includes APIs for the visa service and the visa support
+// service as well as the Visa struct.
+// 
 
 
 
@@ -44,18 +14,92 @@ namespace go vsapi
 namespace rs vsapi
 
 
+
+
+
+// Which pre-defined PEP the visa is targeting.
+enum PEPIndex {
+  UDP = 1,
+  TCP = 2,
+  ICMP =3,
+}
+
+
+// The visa session key
+struct KeySet {
+    1: required i32 format,
+    2: binary ingress_key, // session key encrypted for ingress node to read
+    3: binary egress_key,  // session key encrypted for egress node to read
+}
+
+
+// Visa constraints.
+struct Constraints {
+    1: bool bw, // not set or none means no bandwidth constraint
+    2: i64 bw_limit_bps,
+    3: string data_cap_id, // empty/None means no data cap
+    4: i64 data_cap_bytes,
+    5: binary data_cap_affinity_addr, // tether address of service agent
+}
+
+
+// Visa can be signed
+struct Signature {
+    1: required i32 type,
+    2: required binary signature,
+}
+
+
+// Shared by both TCP and UDP basic PEPs.
+struct PEPArgsTCPUDP {
+    1: required binary source_contact_addr,
+    2: required binary dest_contact_addr,
+    3: required i32 source_port = 0,
+    4: required i32 dest_port = 0,
+    5: required bool server, // If this visa is for dock on server side.
+    6: list<i32> icmp_allowed, // list of allowed ICMP types
+}
+
+
+struct PEPArgsICMP {
+    1: required binary source_contact_addr,
+    2: required binary dest_contact_addr,
+    3: required i32 icmp_type_code, // the allowed ICMP type and code (in lower 16 bits)
+    4: required i32 icmp_antecedent, // use 0xFF for none
+    5: optional i32 state_timeout_ms, // timeout for state in milliseconds
+    6: required bool one_shot = false, // If we allow only one reply to a request
+}
+
+
+// Visa is a thrift copy of the protocol buffer visa format used in the
+// prototype and still used in the prototype-derived visa service.
+//
+struct Visa {
+  1: required i32 issuer_id,
+  2: required i64 configuration,
+  3: required i64 expires, // unix time (milliseconds)
+  4: required binary source, // packet source (tether address)
+  5: required binary dest, // packet sink (tether address)
+  6: required binary source_contact, // source contact addr
+  7: required binary dest_contact, // dest contact addr
+  8: required PEPIndex dock_pep,
+  9: optional PEPArgsTCPUDP tcpudp_pep_args,
+  10: optional PEPArgsICMP icmp_pep_args,
+  11: required KeySet session_key,
+  12: Constraints cons,
+  13: Signature sig,
+}
+
+
+
 exception UnauthorizedError {}
-
-
-// Means visa service sends a nonce buffer, and node is expected to
-// create a suitable HMAC.
-const i32 CHALLENGE_TYPE_HMAC_SHA256 = 0
 
 
 enum StatusCode {
   SUCCESS = 0,
   FAIL = 1
 }
+
 
 enum AgentType {
   ADAPTER = 0,
@@ -76,6 +120,9 @@ struct Agent {
 }
 
 
+// Means visa service sends a nonce buffer, and node is expected to
+// create a suitable HMAC.
+const i32 CHALLENGE_TYPE_HMAC_SHA256 = 0
 
 struct Challenge {
   1: i32 challenge_type,
@@ -115,7 +162,7 @@ struct ConnectResponse {
 }
 
 struct VisaHop {
-  1: binary visa_pb, // visa in "old" protocol buffer form
+  1: Visa visa,
   2: i32 hop_count,
   3: i32 issuer_id,   // copied out of visa
 }
@@ -132,6 +179,57 @@ struct VisaResponse {
   3: optional string reason, // optional message if request has failed.
 }
 
+
+
+struct VisaRevocation {
+  1: required i32 issuer_id,
+  2: required i64 configuration
+}
+
+struct PolicyInfo {
+  1: required i64 policy_id,
+  2: required i64 config_id,
+  3: map<string, string> node_config
+  // TODO: links
+}
+
+
+
+
+
+
+// This is the new visa-service API for the Reference Implementation.
+//
+// The new connection protocol is:
+//
+//     1. Start a node. Node is given a visa from the compiler that will allow
+//        it to communicate the the visa service when it comes online.
+//
+//     2. Start the visa service's adatper.  This adapter will present a
+//        certificate to the node that is (a) signed by the ZPR authority and
+//        (b) has a well known CN that tells the node that it is the visa
+//        service's adapter.
+//
+//     3. The node allows this adapter to connect -- even though the node has
+//        has no policy yet.  The pre-built visa includes the hard-coded visa
+//        service adapter's ZPR address.
+//
+//     ~~ Now this visa sercice API kicks in ~~
+//
+//     4. The node sends a HELLO message to the visa service.
+//
+//     5. The visa sercice sends a HELLO-RESPONSE which includes a challenge.
+//
+//     6. The node performs the crypto operations to satisfy the challenge and
+//        sends back the AUTHENTICATE message.
+//
+//     6. The visa service checks the nodes crypto, checks policy, and if all
+//        is well will send back an API Key that the node can use when calling
+//        any of the other functions on this API.
+//
+//
+// TODO: There is currently no mechanism described for how to expire or
+//       refresh the API key.
 service VisaService {
 
   // Visa Service response to this with a challenge.
@@ -166,3 +264,46 @@ service VisaService {
   // `traffic` is the initial packet detected for an unknown flow.
   VisaResponse request_visa(1:string key, 2:binary src_tether_addr, 3: i8 l3_type, 4:binary traffic)
 }
+
+
+
+
+// Access to the visa support socket on the node is controlled by ZPR.
+// TODO: What if someone is on node host and connects via localhost?
+//
+//       Need to figure out how to secure this (and other thrift stuff too).
+//       For this API specifically, a visa service should not call this
+//       until the node has registered with the visa service first.
+//       So the node knows the address of the visa service and we could
+//       check that (TODO: how to get client addr in thrift server?).
+//       Or we could generate an API key and pass it to the visa service
+//       during registration.  Or, and maybe best, the node can get the
+//       visa service cert during registration and we can enable TLS on
+//       this service and check the visa service key.
+//
+service VisaSupport {
+
+  // Visa service tells node when policy and config IDs change. In the future
+  // there may be links that need to be brought up or turn down.  There may
+  // also be updated configuration details for the node.
+  void NetworkPolicyInstalled(1:PolicyInfo pi)
+
+  // Visa service pushes visas to the node.  Node need not tell other nodes
+  // about these since the visa service is in contact with all nodes.
+  void InstallVisas(1:list<VisaHop> vh)
+
+  // Visa service revokes visas.  Node need not tell other nodes about these as
+  // the visa service is in contact with all nodes.
+  void RevokeVisas(1:list<VisaRevocation> vr)
+
+  // TODO: Revocation of credentials/agents.  Could be implemented at the
+  //       visa service and just end up being a series of visa revocations.
+  //       Though how do we tell a node to disconnect an adapter?
+
+}
+
+
+
+
+
+

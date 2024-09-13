@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/apache/thrift/lib/go/thrift"
-	"zpr.org/vs/pkg/vssapi"
+	"zpr.org/vs/pkg/vsapi"
 )
 
 type VSSCli struct {
@@ -18,7 +18,7 @@ func NewVSSCli(serviceAddr string) *VSSCli {
 	}
 }
 
-type ThriftCallF func(*vssapi.VisaSupportClient) error
+type ThriftCallF func(*vsapi.VisaSupportClient) error
 
 func (vc *VSSCli) withClient(f ThriftCallF) error {
 	protoFac := thrift.NewTBinaryProtocolFactoryConf(nil)
@@ -37,50 +37,50 @@ func (vc *VSSCli) withClient(f ThriftCallF) error {
 	iprot := protoFac.GetProtocol(transport)
 	oprot := protoFac.GetProtocol(transport)
 
-	client := vssapi.NewVisaSupportClient(thrift.NewTStandardClient(iprot, oprot))
+	client := vsapi.NewVisaSupportClient(thrift.NewTStandardClient(iprot, oprot))
 	return f(client) // ensures transport is closed
 }
 
 // `serviceAddr` is nodes vss service address in 'ADDR:PORT' form.
 func (vc *VSSCli) SendNetworkPolicy(policyID uint64, configID uint64) error {
-	pi := vssapi.PolicyInfo{
+	pi := vsapi.PolicyInfo{
 		PolicyID: int64(policyID),
 		ConfigID: int64(configID),
 	}
-	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
+	return vc.withClient(func(client *vsapi.VisaSupportClient) error {
 		return client.NetworkPolicyInstalled(context.Background(), &pi)
 	})
 }
 
 func (vc *VSSCli) SendRevocation(config_id uint64, issuer_id uint32) error {
-	rev := vssapi.VisaRevocation{
+	rev := vsapi.VisaRevocation{
 		IssuerID:      int32(issuer_id),
 		Configuration: int64(config_id),
 	}
-	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
-		return client.RevokeVisas(context.Background(), []*vssapi.VisaRevocation{&rev})
+	return vc.withClient(func(client *vsapi.VisaSupportClient) error {
+		return client.RevokeVisas(context.Background(), []*vsapi.VisaRevocation{&rev})
 	})
 }
 
-func (vc *VSSCli) SendRevocations(revocations []*vssapi.VisaRevocation) error {
-	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
+func (vc *VSSCli) SendRevocations(revocations []*vsapi.VisaRevocation) error {
+	return vc.withClient(func(client *vsapi.VisaSupportClient) error {
 		return client.RevokeVisas(context.Background(), revocations)
 	})
 }
 
-func (vc *VSSCli) SendVisa(issuerID uint32, visaBuffer []byte, hopCount uint32) error {
-	hoppity := vssapi.VisaHop{
-		VisaPb:   visaBuffer,
+func (vc *VSSCli) SendVisa(issuerID uint32, v *vsapi.Visa, hopCount uint32) error {
+	hoppity := vsapi.VisaHop{
+		Visa:     v,
 		HopCount: int32(hopCount),
 		IssuerID: int32(issuerID),
 	}
-	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
-		return client.InstallVisas(context.Background(), []*vssapi.VisaHop{&hoppity})
+	return vc.withClient(func(client *vsapi.VisaSupportClient) error {
+		return client.InstallVisas(context.Background(), []*vsapi.VisaHop{&hoppity})
 	})
 }
 
-func (vc *VSSCli) SendVisas(visas []*vssapi.VisaHop) error {
-	return vc.withClient(func(client *vssapi.VisaSupportClient) error {
+func (vc *VSSCli) SendVisas(visas []*vsapi.VisaHop) error {
+	return vc.withClient(func(client *vsapi.VisaSupportClient) error {
 		return client.InstallVisas(context.Background(), visas)
 	})
 }
