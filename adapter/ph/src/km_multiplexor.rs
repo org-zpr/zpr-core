@@ -28,6 +28,7 @@ pub enum KmMsgProcessingError {
 #[derive(Debug)]
 pub enum KmSetupError {
     InitializationError(KmError),
+    LinkNotFound,
 }
 
 /// Global state for the KM system.
@@ -204,6 +205,8 @@ where
 ///
 /// - `link_id` is the link to the peer, in this case better be a link to a node.
 /// - `peer_noise_key` is the public noise key for the node/dock.
+///
+/// Note that the link must already have a peer_table entry.
 pub fn add_adapter_link(
     asm: &'static Assembly,
     link_id: zpr::LinkId,
@@ -230,6 +233,8 @@ pub fn add_adapter_link(
 ///
 /// - `link_id` is the link to the peer, in this case better be a link to an adapter.
 /// - `local_noise_key` is the local noise key for the dock (public part of this key must be shared out of band with adapters).
+///
+/// Note that the link must already have a peer_table entry.
 #[allow(dead_code)]
 pub fn add_node_link(
     asm: &'static Assembly,
@@ -279,7 +284,11 @@ fn add_noise_link(
 ) -> Result<(), KmSetupError> {
     let mgr = KeyManager::new(link_id, Box::new(noise));
 
-    asm.peer_table.init_security_association(link_id);
+    // Link must already have a table entry
+    assert!(
+        asm.peer_table.get(link_id).is_some(),
+        "link_id must be in peer_table before adding key management"
+    );
 
     let mut spawn_mgr = mgr.clone();
     let child_ctok = asm.km_state.ctok.child_token();
@@ -305,9 +314,9 @@ fn add_noise_link(
         mgr,
     };
 
-    asm.peer_table.set_km_handle(link_id, handle);
-
-    Ok(())
+    asm.peer_table
+        .set_km_handle(link_id, handle)
+        .or(Err(KmSetupError::LinkNotFound))
 }
 
 /// When an inbound key management ZDP message arrives on a link, send it here after parsing.
@@ -350,9 +359,12 @@ mod test {
     use crate::config;
     use crate::km::KmLinkMsg;
     use crate::km_noise;
+    use crate::mgmt_processor_worker;
+    use crate::peer_table;
     use base64::prelude::*;
+    use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
-    use tokio::task::yield_now;
+    use tokio::task::{self, yield_now};
     use tokio::time::timeout;
 
     #[tokio::test]
@@ -383,74 +395,101 @@ mod test {
 
         let asm = Box::leak(Box::new(create_assembly(builder)));
 
-        // add a fake adapter.
-        let adapter_link_id = 27;
+        // Create this local "taskset" becuase adding an entry to the peer table ends up
+        // calling `spawn_local`.  Not sure I need the whole rest of this unit test in here
+        // but does appear to work.  Note that default tokio unit test runtime is
+        // single-threaded.
 
-        // Adding a link starts a KM
-        add_adapter_link(asm, adapter_link_id, ZPIPair::new(1, 2), nk_public).unwrap();
+        let local = task::LocalSet::new();
+        local
+            .run_until(async move {
+                // add a fake adapter.
+                let adapter_link_id: zpr::LinkId;
+                {
+                    let entry = asm.peer_table.vacant_entry().unwrap();
 
-        yield_now().await;
+                    let worker_config = mgmt_processor_worker::Config {
+                        link_id: entry.key(),
+                    };
 
-        // Start our multiplexor worker
-        tokio::spawn(launch_signal_worker(&*asm, km_sig_rx));
-        yield_now().await;
+                    let fake_sa =
+                        zpr::SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9000);
 
-        // An adapter should send a KM message over link 1.
-        let handshake_req: Bytes;
-        match timeout(Duration::from_secs(2), km_rx.recv()).await {
-            Ok(resp) => match resp {
-                Some(KmLinkMsg { link_id, msg }) => {
-                    assert_eq!(link_id, adapter_link_id);
-                    assert_eq!(msg.len(), 130); // should be a KM payload
-                    handshake_req = msg;
+                    let peer_state =
+                        peer_table::PeerState::new(peer_table::PeerType::Adapter, fake_sa, |q| {
+                            mgmt_processor_worker::launch(&worker_config, &*asm, q)
+                        });
+
+                    adapter_link_id = entry.insert(peer_state);
                 }
-                None => panic!("Expected KMLinkMessage message"),
-            },
-            Err(_) => panic!("Timed out waiting for KM message"),
-        }
 
-        // Check that initially, our state is not established.
-        {
-            assert!(!asm
-                .peer_table
-                .is_security_assocaition_established(adapter_link_id))
-        }
+                // Adding a link starts a KM
+                add_adapter_link(asm, adapter_link_id, ZPIPair::new(1, 2), nk_public).unwrap();
 
-        // Pretend to be a node and send back a valid reply.
-        let mut responder = KmNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
-        match responder.reset() {
-            Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
-            Ok(None) => {} // good
-            Err(e) => {
-                panic!("error resetting responder: {:?}", e);
-            }
-        };
+                yield_now().await;
 
-        // Since we have a "raw" responder, we can just pass the payload (no ZDP headers have been added).
-        let handshake_reply = match responder.handle_message(&handshake_req) {
-            Ok(Some(m)) => m,
-            Ok(None) => {
-                panic!("expected handshake-1 message, got nothing!");
-            }
-            Err(e) => {
-                panic!("responder handle_message failed on handshake-req: {:?}", e);
-            }
-        };
+                // Start our multiplexor worker
+                tokio::spawn(launch_signal_worker(&*asm, km_sig_rx));
+                yield_now().await;
 
-        // Now send the reply back into our link.
-        handle_inbound_km_msg(asm, adapter_link_id, &handshake_reply).unwrap();
+                // An adapter should send a KM message over link 1.
+                let handshake_req: Bytes;
+                match timeout(Duration::from_secs(2), km_rx.recv()).await {
+                    Ok(resp) => match resp {
+                        Some(KmLinkMsg { link_id, msg }) => {
+                            assert_eq!(link_id, adapter_link_id);
+                            assert_eq!(msg.len(), 130); // should be a KM payload
+                            handshake_req = msg;
+                        }
+                        None => panic!("Expected KMLinkMessage message"),
+                    },
+                    Err(_) => panic!("Timed out waiting for KM message"),
+                }
 
-        yield_now().await;
+                // Check that initially, our state is not established.
+                {
+                    assert!(!asm
+                        .peer_table
+                        .is_security_assocaition_established(adapter_link_id))
+                }
 
-        // The KM on the link will process the message and transition to established-state.
-        // It will send two signals - SaIdChange followed by SaEstablished.  Both signals
-        // are picked up by our multiplexor worker.  The second one triggers a state update.
-        {
-            assert!(asm
-                .peer_table
-                .is_security_assocaition_established(adapter_link_id))
-        }
+                // Pretend to be a node and send back a valid reply.
+                let mut responder = KmNoise::new(false, None, Some(node_kp), 3, 4).unwrap();
+                match responder.reset() {
+                    Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
+                    Ok(None) => {} // good
+                    Err(e) => {
+                        panic!("error resetting responder: {:?}", e);
+                    }
+                };
 
-        drop_link(asm, adapter_link_id).await;
+                // Since we have a "raw" responder, we can just pass the payload (no ZDP headers have been added).
+                let handshake_reply = match responder.handle_message(&handshake_req) {
+                    Ok(Some(m)) => m,
+                    Ok(None) => {
+                        panic!("expected handshake-1 message, got nothing!");
+                    }
+                    Err(e) => {
+                        panic!("responder handle_message failed on handshake-req: {:?}", e);
+                    }
+                };
+
+                // Now send the reply back into our link.
+                handle_inbound_km_msg(asm, adapter_link_id, &handshake_reply).unwrap();
+
+                yield_now().await;
+
+                // The KM on the link will process the message and transition to established-state.
+                // It will send two signals - SaIdChange followed by SaEstablished.  Both signals
+                // are picked up by our multiplexor worker.  The second one triggers a state update.
+                {
+                    assert!(asm
+                        .peer_table
+                        .is_security_assocaition_established(adapter_link_id))
+                }
+
+                drop_link(asm, adapter_link_id).await;
+            })
+            .await;
     }
 }
