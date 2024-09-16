@@ -1,8 +1,10 @@
 
 // vs.thrift
 // 
-// This file includes APIs for the visa service and the visa support
-// service as well as the Visa struct.
+// This file includes:
+//  - the visa struct (passed around in the visa service APIs)
+//  - the visa service API (runs on a visa service)
+//  - the visa support service API (runs on a node)
 // 
 
 
@@ -14,6 +16,13 @@ namespace go vsapi
 namespace rs vsapi
 
 
+
+////////////////////////////////////////////////////////////////////////////////
+//
+// Types related to the visa data structure
+// ========================================
+//
+//
 
 
 
@@ -92,6 +101,13 @@ struct Visa {
 
 
 
+////////////////////////////////////////////////////////////////////////////////
+//
+// Types related to the two APIs (visa service and visa support service)
+// =====================================================================
+//
+
+
 exception UnauthorizedError {}
 
 
@@ -124,15 +140,18 @@ struct Agent {
 // create a suitable HMAC.
 const i32 CHALLENGE_TYPE_HMAC_SHA256 = 0
 
+
 struct Challenge {
   1: i32 challenge_type,
   2: binary challenge_data,
 }
 
+
 struct HelloResponse {
   1: i32 session_id,
   2: Challenge challenge,
 }
+
 
 struct NodeAuthRequest {
   1: i32 session_id,
@@ -161,17 +180,20 @@ struct ConnectResponse {
   4: optional string reason,  // Optional message in case of non SUCCESS
 }
 
+
 struct VisaHop {
   1: Visa visa,
   2: i32 hop_count,
   3: i32 issuer_id,   // copied out of visa
 }
 
+
 // Response to the Ping call.
 struct Pong {
   1: i64 configuration,
   2: i64 policy_version,
 }
+
 
 struct VisaResponse {
   1: StatusCode status,
@@ -180,24 +202,29 @@ struct VisaResponse {
 }
 
 
-
 struct VisaRevocation {
   1: required i32 issuer_id,
   2: required i64 configuration
 }
 
+
 struct PolicyInfo {
   1: required i64 policy_id,
   2: required i64 config_id,
   3: map<string, string> node_config
-  // TODO: links
+  // TODO: links. Prototype includes network topology information. Once we have
+  //       more than one node we will need to add that info back in.
 }
 
 
 
 
-
-
+////////////////////////////////////////////////////////////////////////////////
+//
+//  The visa service API
+//  ====================
+//
+//
 // This is the new visa-service API for the Reference Implementation.
 //
 // The new connection protocol is:
@@ -267,7 +294,11 @@ service VisaService {
 
 
 
-
+////////////////////////////////////////////////////////////////////////////////
+//
+//  The visa support service API
+//  ============================
+//
 // Access to the visa support socket on the node is controlled by ZPR.
 // TODO: What if someone is on node host and connects via localhost?
 //
