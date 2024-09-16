@@ -24,7 +24,9 @@ impl CaptureWorker {
 
     pub async fn open_capture_file(&self, file: File) -> Result<(), io::Error> {
         let mut inner_cap = self.inner_cap.lock().await;
-        inner_cap.savefile = Some(PcapWriter::open(file, linktype::USER0).await?);
+        let mut savefile = PcapWriter::open(file, linktype::USER0).await?;
+        savefile.flush().await?;
+        inner_cap.savefile = Some(savefile);
         Ok(())
     }
 
@@ -66,20 +68,28 @@ async fn worker<'pktbuf>(
 
     // Batch accepts values from capture queue and writes them to the savefile
     while let _count @ 1.. = queue.recv_many(&mut messages, config.batch_size).await {
-        let mut inner_cap = asm.capture_worker.inner_cap.lock().await;
-        match &mut inner_cap.savefile {
-            Some(ref mut savefile) => match savefile_write_batch(savefile, messages.iter()).await {
-                Ok(()) => (),
-                Err(err) => {
-                    error!("Error writing to capture file, ending capture: {}", err);
-                    match inner_cap.savefile.take().unwrap().close().await {
-                        Ok(_file) => (),
-                        Err(err) => error!("Error closing capture file: {}", err),
+        let mut state = asm.capture_worker.inner_cap.lock().await;
+
+        match &mut state.savefile {
+            Some(ref mut savefile) => {
+                // Write the packets out.  If the queue is empty, force a flush
+                // to make sure these packets get written out in timely fashion.
+                match savefile_write_batch(savefile, messages.iter(), queue.is_empty()).await {
+                    Ok(()) => (),
+
+                    Err(err) => {
+                        error!("Error writing to capture file, ending capture: {}", err);
+                        match state.savefile.take().unwrap().close().await {
+                            Ok(_file) => (),
+                            Err(err) => error!("Error closing capture file: {}", err),
+                        }
                     }
                 }
-            },
+            }
+
             None => (),
         }
+
         asm.buffer_stack
             .put_buffers(messages.drain(..).map(|cap_pack| cap_pack.packet.destroy()));
     }
@@ -100,9 +110,17 @@ where
 async fn savefile_write_batch<'a, 'b: 'a>(
     savefile: &'a mut PcapWriter<File>,
     cap_packs: impl IntoIterator<Item = &'a CapPacket<'b>>,
+    force_flush: bool,
 ) -> io::Result<()> {
     for cap_pack in cap_packs.into_iter() {
         savefile_write(savefile, cap_pack).await?;
+    }
+
+    // Note, we don't actually care _when_ the flush completes, just that
+    // we've kicked it off...  (akin to sync_file_range(SYNC_FILE_RANGE_WRITE))
+    // but tokio provides no way to express this without launching a separate task.
+    if force_flush {
+        savefile.flush().await?;
     }
 
     Ok(())
