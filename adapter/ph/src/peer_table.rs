@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use crate::dock_tables::DockForwardingTable;
-use crate::km::{KeyManager, KmTransportSA, UnimplCodec, ZPIPair};
+use crate::km::{KeyManager, KmTransportSA};
 use crate::queues;
 use crate::rcu::{RcuBox, RcuGuard};
 use crate::sync_req;
@@ -8,9 +8,6 @@ use crate::zpr::{LinkId, SubstrateAddr};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use std::future::Future;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use tokio::sync::mpsc;
@@ -44,8 +41,7 @@ pub struct PeerState<'pktbuf> {
 // Key Management state per peer.
 struct PeerKmState {
     handle: Mutex<Option<KmHandle>>, // Once the KM state machine starts, it's join handle and related info is stashed here.
-    sa_established: AtomicBool,      // if TRUE then `transport_sa` is valid
-    transport_sa: RcuBox<KmTransportSA>,
+    transport_sa: RcuBox<Option<KmTransportSA>>,
 }
 
 /// The Key Management "handle" is used by the km_multiplexor to hold per-link
@@ -61,15 +57,7 @@ impl PeerKmState {
     fn new() -> Self {
         Self {
             handle: Mutex::new(None),
-            sa_established: AtomicBool::new(false),
-            transport_sa: RcuBox::new(KmTransportSA {
-                sa_id: 0,
-                recv_zpis: ZPIPair::new_zero(),
-                send_zpis: ZPIPair::new_zero(),
-                send_hmac_key: [0; 32],
-                recv_hmac_key: [0; 32],
-                codec: Arc::new(UnimplCodec::new()),
-            }),
+            transport_sa: RcuBox::new(None),
         }
     }
 }
@@ -219,8 +207,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         let entry = self
             .get(link_id)
             .ok_or(SecurityAssocaitionStateError::NoAssociationForLink)?;
-        entry.km_state.transport_sa.write(sa);
-        entry.km_state.sa_established.store(true, Ordering::Release);
+        entry.km_state.transport_sa.write(Some(sa));
         Ok(())
     }
 
@@ -249,10 +236,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         let entry = self
             .get(link_id)
             .ok_or(SecurityAssocaitionStateError::NoAssociationForLink)?;
-        entry
-            .km_state
-            .sa_established
-            .store(false, Ordering::Release);
+        entry.km_state.transport_sa.write(None);
         Ok(())
     }
 
@@ -261,7 +245,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
     /// that there is no link found under the ID.
     pub fn is_security_assocaition_established(&self, link_id: LinkId) -> bool {
         if let Some(entry) = self.get(link_id) {
-            return entry.km_state.sa_established.load(Ordering::Acquire);
+            return entry.km_state.transport_sa.get().is_some();
         }
         false
     }
@@ -272,10 +256,11 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         link_id: LinkId,
     ) -> Option<KmTransportSA> {
         let entry = self.get(link_id)?;
-        if entry.km_state.sa_established.load(Ordering::Acquire) {
-            return Some(entry.km_state.transport_sa.get().clone());
+        let tsa = entry.km_state.transport_sa.get();
+        if tsa.is_none() {
+            return None;
         }
-        None
+        tsa.clone()
     }
 
     /// Clone the Key Manager on the link if link exists, and if there is a handle set.
@@ -290,15 +275,10 @@ impl<'pktbuf> PeerTable<'pktbuf> {
     /// Doesn't really _remove_ the state, but does invalidate the security assocation and wipes
     /// the reference to the handle.
     pub fn remove_km_state(&self, link_id: LinkId) -> Option<KmHandle> {
-        let entry = self.get(link_id)?;
+        // If SA is set, un-set it - don't care about errors.
+        let _ = self.clear_security_association(link_id);
 
-        // If SA is set, un-set it.
-        if entry.km_state.sa_established.load(Ordering::Acquire) {
-            entry
-                .km_state
-                .sa_established
-                .store(false, Ordering::Release);
-        }
+        let entry = self.get(link_id)?;
 
         // If there is a handle, remove it and return it.
         let mut handle = entry.km_state.handle.lock().unwrap();
