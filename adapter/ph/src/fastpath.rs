@@ -306,6 +306,8 @@ fn substrate_egress_common<'pktbuf>(
     //       SA exchange, the node goes into transport mode as it consumes
     //       the message from the adapter.  But we need to send that initial
     //       message back under ZIP-0.
+    //
+    //       See https://github.com/org-zpr/zpr-core/issues/444
     if zdp_hdr.packet_type == zdp::ZdpPacketType::KeyManagement {
         debug!(
             "{}: link {}: KM message detected, using ZPI=0 ignoring security association",
