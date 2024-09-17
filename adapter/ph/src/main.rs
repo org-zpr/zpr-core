@@ -499,9 +499,9 @@ fn main() -> ExitCode {
             }
 
 
-            mgmt::send_report(asm, dsid, "Reporting for Duty!").await;
-            mgmt::send_discard(asm, dsid).await;
-            match mgmt::send_hello_request(asm, dsid).await {
+            mgmt::requests::send_report(asm, dsid, "Reporting for Duty!").await;
+            mgmt::requests::send_discard(asm, dsid).await;
+            match mgmt::requests::send_hello_request(asm, dsid).await {
                 Ok(_) => info!(
                     "{}: hello request sent successfully on link {}",
                     asm.system_name, dsid

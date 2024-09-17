@@ -11,7 +11,7 @@ use crate::counters_enum::CounterType;
 use crate::defs::Direction;
 use crate::km::Codec;
 use crate::km_noise::NOISE_PADLEN;
-use crate::mgmt;
+use crate::mgmt::dispatch;
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::peer_table::PeerState;
@@ -521,7 +521,7 @@ pub fn substrate_ingress<'pktbuf>(
         // TODO: should we peel off the ZDP header here??
         // (instead of this silly code to restore it?)
         *pkt.alloc_zeroed_header() = base_hdr;
-        mgmt::dispatch_mgmt_packet(asm, ingress_link_id, pkt);
+        dispatch::dispatch_mgmt_packet(asm, ingress_link_id, pkt);
         return;
     }
 

@@ -2,7 +2,7 @@ use crate::adapter_tables::{AltEntry, AltPep};
 use crate::assembly::{Assembly, PhMode};
 use crate::counters_enum::CounterType;
 use crate::fastpath;
-use crate::mgmt;
+use crate::mgmt::requests;
 use crate::packet::Packet;
 use crate::queues::AdapterManagerMessage;
 use crate::zpr;
@@ -85,7 +85,7 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
         asm.system_name, link_id, five_tuple
     );
 
-    match mgmt::send_bind_agent_address_request(
+    match requests::send_bind_agent_address_request(
         asm,
         asm.hack_get_adapter_docking_session_id(),
         compression_mode,

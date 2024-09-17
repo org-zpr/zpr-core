@@ -1,7 +1,7 @@
 use crate::assembly::Assembly;
 use crate::km::*;
 use crate::km_noise::KmNoise;
-use crate::mgmt;
+use crate::mgmt::requests;
 use crate::peer_table::KmHandle;
 use crate::zpr;
 use bytes::Bytes;
@@ -171,7 +171,7 @@ async fn message_worker<'pktbuf>(
     msg_queue: &mut mpsc::Receiver<KmLinkMsg<Bytes>>,
 ) {
     while let Some(km_buf_msg) = msg_queue.recv().await {
-        mgmt::send_key_management(&*asm, km_buf_msg.link_id, zpr::KM_ID_NOISE, &km_buf_msg.msg)
+        requests::send_key_management(&*asm, km_buf_msg.link_id, zpr::KM_ID_NOISE, &km_buf_msg.msg)
             .await;
     }
 }
