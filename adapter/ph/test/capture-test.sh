@@ -124,7 +124,7 @@ stty sane || true
 set_program "$ADAPTER2_SOCK" "$TMPDIR/cap_test2.pcap" None
 
 echo "pausing for key management exchange..."
-countdown 7
+countdown 10
 
 echo "starting PING test..."
 
