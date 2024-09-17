@@ -9,7 +9,7 @@ use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
-use crate::km::Codec;
+use crate::km::{Codec, KmTransportSA};
 use crate::km_noise::NOISE_PADLEN;
 use crate::mgmt::dispatch;
 use crate::net_defs;
@@ -295,29 +295,46 @@ fn substrate_egress_common<'pktbuf>(
             return Err(km::EncryptionError::ParseError);
         }
     };
+
+    let real_zpi;
+    let transport_sa: Option<KmTransportSA>;
     let transit = zdp_hdr.packet_type == zdp::ZdpPacketType::TransitPacket;
 
-    // Get the security association for this link and extrant the correct ZPI.
-    // TODO: Is there some way to avoid a clone here?
-    let real_zpi;
-    let transport_sa = match asm
-        .peer_table
-        .clone_established_transport_association(link_id)
-    {
-        Some(transport_sa) => {
-            if transit {
-                real_zpi = transport_sa.send_zpis.hmac;
-            } else {
-                real_zpi = transport_sa.send_zpis.encr;
+    // If this is key management we do not use transport security.
+    // TODO: Not quite correct.  We ought to be able to use an existing
+    //       security association for re-keying.  But for the intitial
+    //       SA exchange, the node goes into transport mode as it consumes
+    //       the message from the adapter.  But we need to send that initial
+    //       message back under ZIP-0.
+    if zdp_hdr.packet_type == zdp::ZdpPacketType::KeyManagement {
+        debug!(
+            "{}: link {}: KM message detected, using ZPI=0 ignoring security association",
+            asm.system_name, link_id
+        );
+        real_zpi = zpr::ZPI_0;
+        transport_sa = None;
+    } else {
+        // Get the security association for this link and extrant the correct ZPI.
+        // TODO: Is there some way to avoid a clone here?
+        transport_sa = match asm
+            .peer_table
+            .clone_established_transport_association(link_id)
+        {
+            Some(transport_sa) => {
+                if transit {
+                    real_zpi = transport_sa.send_zpis.hmac;
+                } else {
+                    real_zpi = transport_sa.send_zpis.encr;
+                }
+                assert!(real_zpi != zpr::ZPI_0);
+                Some(transport_sa)
             }
-            assert!(real_zpi != zpr::ZPI_0);
-            Some(transport_sa)
-        }
-        None => {
-            real_zpi = zpr::ZPI_0;
-            None
-        }
-    };
+            None => {
+                real_zpi = zpr::ZPI_0;
+                None
+            }
+        };
+    }
 
     encap_zpi(asm, link_id, real_zpi, pkt);
     maybe_capture(asm, Direction::Outbound, pkt);
@@ -469,7 +486,7 @@ pub fn substrate_ingress<'pktbuf>(
     };
 
     if !secure {
-        // Not under a security assocation  which means only ZPI 0 is allowed
+        // Not under a security assocation  which means only ZPI 0 is allowed.
         if zpi_hdr.zpi != zpr::ZPI_0 {
             info!(
                 "{}: ingress: link {}: ZPI {} not allowed on unestablished SA",
