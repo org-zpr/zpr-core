@@ -4,6 +4,7 @@ use crate::fastpath;
 use crate::packet::Packet;
 use std::future::Future;
 use std::io::ErrorKind;
+use std::net::SocketAddr;
 use tokio::net::UdpSocket;
 
 #[derive(Copy, Clone)]
@@ -25,7 +26,7 @@ async fn worker<'a>(config: &Config, asm: &Assembly<'a>, socket: &UdpSocket) {
         // TODO: batch receive
         for buf in bufs.drain(..) {
             let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
-            let sender = loop {
+            let mut sender = loop {
                 match socket.recv_buf_from(&mut pkt).await {
                     Ok((_size, sender)) => break sender,
 
@@ -37,6 +38,13 @@ async fn worker<'a>(config: &Config, asm: &Assembly<'a>, socket: &UdpSocket) {
                     }
                 }
             };
+
+            // SocketAddrV6 distinguishes addresses also by `flowinfo` which
+            // we do not want -- only the 5-tuple.  So clear it.
+            match &mut sender {
+                SocketAddr::V4(_) => (),
+                SocketAddr::V6(sender) => sender.set_flowinfo(0),
+            }
 
             fastpath::substrate_ingress(asm, &sender, pkt);
         }
