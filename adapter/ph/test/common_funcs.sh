@@ -107,6 +107,30 @@ function check_carrier() {
   return $(( ! $(sudo ip netns exec "$NETNS" cat "/sys/class/net/$IF/carrier") ))
 }
 
+# Visible sleep for n seconds.  Takes one arg: number of seconds.
+function countdown() {
+    count=$1
+    (( ++count ))
+    while (( --count > 0 )); do
+        echo -n "$count...   "
+        sleep 1
+    done
+    echo
+}
+
+
+# Takes one arg- filepath relative to TMPDIR
+function emitlog() {
+    echo -e "\n\n==== $1 ====\n"
+    if [ -e "$TMPDIR/$1" ]
+        then
+            cat "$TMPDIR/$1"
+        else
+            echo "(MISSING)"
+    fi
+}
+
+
 function cleanup() {
   for child in $(jobs -p)
   do kill -9 "$child" 2> /dev/null || true
@@ -115,6 +139,15 @@ function cleanup() {
   wait -f
 
   destroy_network || true
+
+  SHOW_LOGS="${ZPR_TEST_VERBOSE:-no}"
+
+  if [ "$SHOW_LOGS" != "no" ]
+     then
+         emitlog "node.log"
+         emitlog "zpr-a.log"
+         emitlog "zpr-b.log"
+  fi
 
   popd > /dev/null
   rm -r "$TMPDIR" || true

@@ -1,6 +1,6 @@
 use crate::assembly::Assembly;
 use crate::fastpath;
-use crate::mgmt::{self, HandleMgmtError, HandleMgmtResult};
+use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
 use crate::packet::Packet;
 use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
@@ -78,7 +78,7 @@ async fn handle_packet<'pktbuf>(
             ZdpPacketType::TransitPacket => panic!("unexpected Transit Packet in management path"),
 
             ZdpPacketType::BindAgentAddressRequest => {
-                mgmt::handle_bind_agent_address_request(
+                handlers::handle_bind_agent_address_request(
                     asm,
                     ingress_link_id,
                     stream_id,
@@ -92,16 +92,16 @@ async fn handle_packet<'pktbuf>(
         }
     } else {
         match base_hdr.packet_type {
-            ZdpPacketType::Report => mgmt::handle_report(asm, ingress_link_id, pkt).await,
+            ZdpPacketType::Report => handlers::handle_report(asm, ingress_link_id, pkt).await,
 
-            ZdpPacketType::Discard => mgmt::handle_discard(asm, ingress_link_id, pkt).await,
+            ZdpPacketType::Discard => handlers::handle_discard(asm, ingress_link_id, pkt).await,
 
             ZdpPacketType::KeyManagement => {
                 panic!("unexpected Key Management message in mgmt processor")
             }
 
             ZdpPacketType::HelloRequest => {
-                mgmt::handle_hello_request(asm, ingress_link_id, seq_num, pkt).await
+                handlers::handle_hello_request(asm, ingress_link_id, seq_num, pkt).await
             }
 
             packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),

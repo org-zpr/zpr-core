@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use crate::dock_tables::DockForwardingTable;
-use crate::km::{KeyManager, KmTransportSA, UnimplCodec, ZPIPair};
+use crate::km::{KeyManager, KmTransportSA};
 use crate::queues;
 use crate::rcu::{RcuBox, RcuGuard};
 use crate::sync_req;
@@ -8,9 +8,6 @@ use crate::zpr::{LinkId, SubstrateAddr};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use std::future::Future;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use tokio::sync::mpsc;
@@ -38,12 +35,13 @@ pub struct PeerState<'pktbuf> {
     pub dft: DockForwardingTable,
     pub mgmt_processor: queues::MgmtProcessor<'pktbuf>,
     pub mgmt_processor_worker: task::JoinHandle<()>,
+    km_state: PeerKmState,
 }
 
+// Key Management state per peer.
 struct PeerKmState {
-    handle: Option<KmHandle>,
-    sa_established: AtomicBool, // if TRUE then `transport_sa` is valid
-    transport_sa: KmTransportSA,
+    handle: Mutex<Option<KmHandle>>, // Once the KM state machine starts, it's join handle and related info is stashed here.
+    transport_sa: RcuBox<Option<KmTransportSA>>,
 }
 
 /// The Key Management "handle" is used by the km_multiplexor to hold per-link
@@ -55,19 +53,11 @@ pub struct KmHandle {
 }
 
 impl PeerKmState {
-    /// Create a new, empty state.
+    /// Create a new, empty state.  This is what is attached to a new PeerTable entry.
     fn new() -> Self {
         Self {
-            handle: None,
-            sa_established: AtomicBool::new(false),
-            transport_sa: KmTransportSA {
-                sa_id: 0,
-                recv_zpis: ZPIPair::new_zero(),
-                send_zpis: ZPIPair::new_zero(),
-                send_hmac_key: [0; 32],
-                recv_hmac_key: [0; 32],
-                codec: Arc::new(UnimplCodec::new()),
-            },
+            handle: Mutex::new(None),
+            transport_sa: RcuBox::new(None),
         }
     }
 }
@@ -98,6 +88,7 @@ impl PeerState<'static> {
             sync_req_state: sync_req::SyncReqState::new(),
             mgmt_processor,
             mgmt_processor_worker,
+            km_state: PeerKmState::new(),
         }
     }
 }
@@ -106,9 +97,6 @@ pub struct PeerTable<'pktbuf> {
     peer_slab: Mutex<RcuCslab<PeerState<'pktbuf>>>,
     peer_slab_reader: RcuBox<RcuCslabReader<PeerState<'pktbuf>>>,
     sa_to_link: DashMap<SubstrateAddr, LinkId>,
-
-    // TODO: put this into the "peer_state" slab! (https://github.com/org-zpr/zpr-core/issues/388)
-    link_to_km_state: DashMap<LinkId, PeerKmState>,
 }
 
 pub struct PeerStateGuard<'a, 'pktbuf> {
@@ -139,15 +127,10 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         let peer_slab = RcuCslab::with_fixed_capacity(PEER_TABLE_SIZE);
         let peer_slab_reader = RcuBox::new(peer_slab.reader());
         let sa_to_link = DashMap::with_capacity(PEER_TABLE_SIZE);
-        //let link_to_sec_assoc = DashMap::with_capacity(PEER_TABLE_SIZE);
-        //let link_to_km_handle = DashMap::with_capacity(PEER_TABLE_SIZE);
-        let link_to_km_state = DashMap::with_capacity(PEER_TABLE_SIZE);
-
         Self {
             peer_slab: Mutex::new(peer_slab),
             peer_slab_reader,
             sa_to_link,
-            link_to_km_state,
         }
     }
 
@@ -215,37 +198,33 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         })
     }
 
-    /// Initialize state for the security association on the link.  The security association starts out as
-    /// not established.
-    pub fn init_security_association(&self, link_id: LinkId) {
-        if let Some(_) = self.link_to_km_state.insert(link_id, PeerKmState::new()) {
-            panic!("duplicate security association");
-        }
-    }
-
     /// Sets an established security association on the link.
     pub fn set_security_association(
         &self,
         link_id: LinkId,
         sa: KmTransportSA,
     ) -> Result<(), SecurityAssocaitionStateError> {
-        if let Some(mut km_state) = self.link_to_km_state.get_mut(&link_id) {
-            km_state.transport_sa = sa;
-            km_state.sa_established.store(true, Ordering::Release);
-            Ok(())
-        } else {
-            Err(SecurityAssocaitionStateError::NoAssociationForLink)
-        }
+        let entry = self
+            .get(link_id)
+            .ok_or(SecurityAssocaitionStateError::NoAssociationForLink)?;
+        entry.km_state.transport_sa.write(Some(sa));
+        Ok(())
     }
 
     /// At some point shortly after the link security assocaition is initialized, the [km_multiplexor] will
     /// stash its handle in here.
-    pub fn set_km_handle(&self, link_id: LinkId, handle: KmHandle) {
-        if let Some(mut km_state) = self.link_to_km_state.get_mut(&link_id) {
-            km_state.handle = Some(handle);
-        } else {
-            panic!("no security association for link");
-        }
+    ///
+    /// Only possible error is if there is no entry in the table under the `link_id`.
+    pub fn set_km_handle(
+        &self,
+        link_id: LinkId,
+        handle: KmHandle,
+    ) -> Result<(), SecurityAssocaitionStateError> {
+        let entry = self
+            .get(link_id)
+            .ok_or(SecurityAssocaitionStateError::NoAssociationForLink)?;
+        entry.km_state.handle.lock().unwrap().replace(handle);
+        Ok(())
     }
 
     /// After this, [PeerTable::is_security_assocaition_established] will return false for the link until
@@ -254,51 +233,59 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         &self,
         link_id: LinkId,
     ) -> Result<(), SecurityAssocaitionStateError> {
-        if let Some(km_state) = self.link_to_km_state.get_mut(&link_id) {
-            km_state.sa_established.store(false, Ordering::Release);
-            Ok(())
-        } else {
-            Err(SecurityAssocaitionStateError::NoAssociationForLink)
-        }
+        let entry = self
+            .get(link_id)
+            .ok_or(SecurityAssocaitionStateError::NoAssociationForLink)?;
+        entry.km_state.transport_sa.write(None);
+        Ok(())
     }
 
+    /// Check if a security assocaition is estabolished for the link.
+    /// False returned here means that either the assocaition is not established, or
+    /// that there is no link found under the ID.
     pub fn is_security_assocaition_established(&self, link_id: LinkId) -> bool {
-        if let Some(km_state) = self.link_to_km_state.get(&link_id) {
-            km_state.sa_established.load(Ordering::Acquire)
-        } else {
-            false
+        if let Some(entry) = self.get(link_id) {
+            return entry.km_state.transport_sa.get().is_some();
         }
+        false
     }
 
-    /// Return a clone of the transport SA if there is an SA on the link, and it is established.
+    /// Return a clone of the transport SA if there is an SA on the link, and if it is established.
     pub fn clone_established_transport_association(
         &self,
         link_id: LinkId,
     ) -> Option<KmTransportSA> {
-        match self.link_to_km_state.get(&link_id) {
-            Some(km_state) if km_state.sa_established.load(Ordering::Acquire) => {
-                Some(km_state.transport_sa.clone())
-            }
-            _ => None, // either not found or not established
+        let entry = self.get(link_id)?;
+        let tsa = entry.km_state.transport_sa.get();
+        if tsa.is_none() {
+            return None;
         }
+        tsa.clone()
     }
 
+    /// Clone the Key Manager on the link if link exists, and if there is a handle set.
+    /// See [PeerTable::set_km_handle].
     pub fn clone_km_manager(&self, link_id: LinkId) -> Option<KeyManager> {
-        match self.link_to_km_state.get(&link_id) {
-            Some(km_state) if km_state.handle.is_some() => {
-                Some(km_state.handle.as_ref().unwrap().mgr.clone())
-            }
-            _ => None,
-        }
+        let entry = self.get(link_id)?;
+        let handle = entry.km_state.handle.lock().unwrap();
+        handle.as_ref().map(|h| h.mgr.clone())
     }
 
     /// Remove the key manager state from the link, returning the optional KmHandle that was set.
+    /// Doesn't really _remove_ the state, but does invalidate the security assocation and wipes
+    /// the reference to the handle.
     pub fn remove_km_state(&self, link_id: LinkId) -> Option<KmHandle> {
-        if let Some((_, state)) = self.link_to_km_state.remove(&link_id) {
-            state.handle
-        } else {
-            None
+        // If SA is set, un-set it - don't care about errors.
+        let _ = self.clear_security_association(link_id);
+
+        let entry = self.get(link_id)?;
+
+        // If there is a handle, remove it and return it.
+        let mut handle = entry.km_state.handle.lock().unwrap();
+        if handle.is_none() {
+            return None;
         }
+        handle.take()
     }
 }
 
