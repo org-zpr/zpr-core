@@ -3,7 +3,9 @@
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
+use crate::zpr;
 use std::io::ErrorKind;
+use std::net::SocketAddr;
 use std::result::Result;
 use std::time::SystemTime;
 use tokio::net::UdpSocket;
@@ -129,9 +131,9 @@ impl<'a> SubstrateEgress<'a> {
     pub async fn enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
         &self,
         packet: P,
-        dest_sa: std::net::SocketAddr,
+        mut dest_sa: zpr::SubstrateAddr,
     ) -> Result<(), P> {
-        let socket = self.sockets[packet.flowhash() as usize % self.sockets.len()];
+        let socket = self.select_socket_and_set_flowinfo(&*packet, &mut dest_sa);
 
         match socket.send_to(packet.body(), dest_sa).await {
             Ok(_) => Ok(()),
@@ -155,9 +157,9 @@ impl<'a> SubstrateEgress<'a> {
     pub fn try_enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
         &self,
         packet: P,
-        dest_sa: std::net::SocketAddr,
+        mut dest_sa: zpr::SubstrateAddr,
     ) -> Result<(), TryEnqueueError<P>> {
-        let socket = self.sockets[packet.flowhash() as usize % self.sockets.len()];
+        let socket = self.select_socket_and_set_flowinfo(&*packet, &mut dest_sa);
 
         match socket.try_send_to(packet.body(), dest_sa) {
             Ok(_) => Ok(()),
@@ -177,6 +179,19 @@ impl<'a> SubstrateEgress<'a> {
                 }
             }
         }
+    }
+
+    fn select_socket_and_set_flowinfo(
+        &self,
+        packet: &Packet<'_>,
+        dest_sa: &mut zpr::SubstrateAddr,
+    ) -> &'a UdpSocket {
+        match dest_sa {
+            SocketAddr::V4(_) => (),
+            SocketAddr::V6(dest_sa) => dest_sa.set_flowinfo(packet.flowhash()),
+        }
+
+        self.sockets[packet.flowhash() as usize % self.sockets.len()]
     }
 
     #[allow(dead_code)]
