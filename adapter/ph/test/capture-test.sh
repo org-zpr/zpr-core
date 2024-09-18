@@ -78,7 +78,7 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --self-addr 0.0.0.0:12345 --peer-addr1 "$A_SUBSTRATE_ADDR":12345 \
   --peer-addr2 "$B_SUBSTRATE_ADDR":12345 \
   --ca-file ca.crt --certificate-file node.crt --private-key-file node.key \
-  --tun-if tun0 2>&1 |tee node.log &
+  --tun-if tun0 --disable-km --allow-insecure-zpi-zero 2>&1 |tee node.log &
 CHILDREN=(${CHILDREN[@]} "$!")
 
 sleep 2
@@ -87,18 +87,18 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --name "zpr-a" --control-path "$ADAPTER1_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR":12345 --peer-addr1 "$NODE_SUBSTRATE_ADDR_A":12345 \
   --ca-file ca.crt --certificate-file adapter1.crt --private-key-file adapter1.key \
-  --tun-if tun0 2>&1 |tee zpr-a.log &
+  --tun-if tun0 --disable-km --allow-insecure-zpi-zero 2>&1 |tee zpr-a.log &
 CHILDREN=(${CHILDREN[@]} "$!")
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --name "zpr-b" --control-path "$ADAPTER2_SOCK" \
   --self-addr "$B_SUBSTRATE_ADDR":12345 --peer-addr1 "$NODE_SUBSTRATE_ADDR_B":12345 \
   --ca-file ca.crt --certificate-file adapter2.crt --private-key-file adapter2.key \
-  --tun-if tun0 2>&1 |tee zpr-b.log &
+  --tun-if tun0 --disable-km --allow-insecure-zpi-zero 2>&1 |tee zpr-b.log &
 CHILDREN=(${CHILDREN[@]} "$!")
 
-sleep 1 # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well
-set_program "$ADAPTER1_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
+wait_for 3 set_program "$ADAPTER1_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
+
 
 #
 # Wait for connectivity
@@ -122,11 +122,6 @@ stty sane || true
 #
 
 set_program "$ADAPTER2_SOCK" "$TMPDIR/cap_test2.pcap" None
-
-echo "pausing for key management exchange..."
-countdown 10
-
-echo "starting PING test..."
 
 PASS=0
 if ! ping_test; then
