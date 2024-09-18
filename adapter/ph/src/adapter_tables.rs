@@ -139,7 +139,7 @@ impl DockLookupTable {
         }
         Some(DltPepGuard {
             guard,
-            key: tether_id as usize,
+            key: (tether_id as usize).wrapping_sub(1),
         })
     }
 
