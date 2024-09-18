@@ -266,6 +266,7 @@ impl<T> From<T> for RcuBox<T> {
     }
 }
 
+/// `RcuGuard` for an `RcuCslab` entry known to be present.
 pub struct RcuCslabEntryGuard<'a, T> {
     guard: RcuGuard<'a, cslab::RcuCslabReader<T>>,
     key: usize,
@@ -282,12 +283,11 @@ impl<T> std::ops::Deref for RcuCslabEntryGuard<'_, T> {
     }
 }
 
-pub trait RcuCslabReaderExt<T> {
-    fn get_guarded(&self, key: usize) -> Option<RcuCslabEntryGuard<'_, T>>;
-}
-
-impl<T> RcuCslabReaderExt<T> for RcuBox<cslab::RcuCslabReader<T>> {
-    fn get_guarded(&self, key: usize) -> Option<RcuCslabEntryGuard<'_, T>> {
+impl<T> RcuBox<cslab::RcuCslabReader<T>> {
+    /// Like `RcuCslabReader::get()`, but for an `RcuCslabReader` living in
+    /// an `RcuBox` (as it ought to).  Hoists the `Option` outside of the guard
+    /// for efficiency/ease of use.
+    pub fn get_guarded(&self, key: usize) -> Option<RcuCslabEntryGuard<'_, T>> {
         let guard = self.get();
         if guard.get(key).is_none() {
             None

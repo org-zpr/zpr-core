@@ -2,7 +2,7 @@
 use crate::dock_tables::DockForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::queues;
-use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuCslabReaderExt};
+use crate::rcu::{RcuBox, RcuCslabEntryGuard};
 use crate::sync_req;
 use crate::zpr::{LinkId, SubstrateAddr};
 use cslab::{RcuCslab, RcuCslabReader};
