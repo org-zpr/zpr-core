@@ -265,3 +265,34 @@ impl<T> From<T> for RcuBox<T> {
         Self::new(value)
     }
 }
+
+pub struct RcuCslabEntryGuard<'a, T> {
+    guard: RcuGuard<'a, cslab::RcuCslabReader<T>>,
+    key: usize,
+}
+
+impl<T> std::ops::Deref for RcuCslabEntryGuard<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        let entry = self.guard.get(self.key);
+        // SAFETY: this can only be constructed via methods
+        // which validate that the guarded entry is present
+        unsafe { entry.unwrap_unchecked() }
+    }
+}
+
+pub trait RcuCslabReaderExt<T> {
+    fn get_guarded(&self, key: usize) -> Option<RcuCslabEntryGuard<'_, T>>;
+}
+
+impl<T> RcuCslabReaderExt<T> for RcuBox<cslab::RcuCslabReader<T>> {
+    fn get_guarded(&self, key: usize) -> Option<RcuCslabEntryGuard<'_, T>> {
+        let guard = self.get();
+        if guard.get(key).is_none() {
+            None
+        } else {
+            Some(RcuCslabEntryGuard { guard, key })
+        }
+    }
+}
