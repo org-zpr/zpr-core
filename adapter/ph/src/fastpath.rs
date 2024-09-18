@@ -428,9 +428,18 @@ pub async fn substrate_egress_blocking<'pktbuf>(
     }
 }
 
+#[cfg(debug_assertions)]
+/// This table is used to track whether a flow ever switches from one worker
+/// to another (indicating potential for out-of-order packets) -- meaning
+/// our packet steerer isn't steering correctly.  This is used only in debug mode.
+const AGENT_PACKET_FLOW_TRACKER: std::sync::LazyLock<
+    dashmap::DashMap<(zpr::LinkId, zpr::StreamId), usize>,
+> = std::sync::LazyLock::new(|| dashmap::DashMap::new());
+
 /// Process packets ingressing from the specified address.
 pub fn substrate_ingress<'pktbuf>(
     asm: &Assembly<'pktbuf>,
+    #[cfg_attr(not(debug_assertions), allow(unused_variables))] worker_index: usize,
     peer_sa: &zpr::SubstrateAddr,
     mut pkt: Packet<'pktbuf>,
 ) {
@@ -548,9 +557,23 @@ pub fn substrate_ingress<'pktbuf>(
         return drop_and_count(asm, pkt, CounterType::BadStructure);
     };
 
-    pkt.metadata_mut().flow_id = per_flow_hdr.stream_id.into(); // TODO: is this necessary?
+    let stream_id: zpr::StreamId = per_flow_hdr.stream_id.into(); // TODO: is this necessary?
 
-    forward(asm, ingress_link_id, per_flow_hdr.stream_id.into(), pkt);
+    // in debug builds, track which worker this agent traffic came in on
+    // ensure a given flow isn't hopping between workers (potentially
+    // resulting in out-of-order packets)
+    #[cfg(debug_assertions)]
+    if let Some(old_index) =
+        AGENT_PACKET_FLOW_TRACKER.insert((ingress_link_id, stream_id), worker_index)
+    {
+        if old_index != worker_index {
+            asm.counters[CounterType::AgentPacketsOutOfOrder].increment();
+        }
+    }
+
+    pkt.metadata_mut().flow_id = stream_id; // TODO: is this necessary?
+
+    forward(asm, ingress_link_id, stream_id, pkt);
 }
 
 /// Send a compressed agent packet to the agent.

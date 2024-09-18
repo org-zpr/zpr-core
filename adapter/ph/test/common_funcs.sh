@@ -145,8 +145,8 @@ function cleanup() {
   if [ "$SHOW_LOGS" != "no" ]
      then
          emitlog "node.log"
-         emitlog "zpr-a.log"
-         emitlog "zpr-b.log"
+         emitlog "adapter1.log"
+         emitlog "adapter2.log"
   fi
 
   popd > /dev/null

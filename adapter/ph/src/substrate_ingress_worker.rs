@@ -8,7 +8,6 @@ use tokio::net::UdpSocket;
 
 #[derive(Copy, Clone)]
 pub struct Config {
-    #[allow(dead_code)]
     pub worker_index: usize,
     pub batch_size: usize,
 }
@@ -38,7 +37,7 @@ async fn worker<'a>(config: &Config, asm: &Assembly<'a>, socket: &UdpSocket) {
                 }
             };
 
-            fastpath::substrate_ingress(asm, &sender, pkt);
+            fastpath::substrate_ingress(asm, config.worker_index, &sender, pkt);
         }
     }
 }

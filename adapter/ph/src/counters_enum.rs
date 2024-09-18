@@ -42,6 +42,9 @@ pub enum CounterType {
     UnknownStreamId,
     BadStructure,
     OtherError,
+
+    #[cfg(debug_assertions)]
+    AgentPacketsOutOfOrder,
 }
 
 impl CounterType {
@@ -83,6 +86,9 @@ impl CounterType {
             Self::UnknownStreamId => "Unknown Stream ID",
             Self::BadStructure => "Bad Structure",
             Self::OtherError => "Other Error",
+
+            #[cfg(debug_assertions)]
+            Self::AgentPacketsOutOfOrder => "Agent Packets Out-Of-Order",
         }
     }
 }

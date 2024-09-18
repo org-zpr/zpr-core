@@ -2,6 +2,7 @@
 set -euo pipefail
 
 PH_BIN=$(realpath "$(dirname $0)/../target/debug/ph")
+PH_DEBUG_BIN=$(realpath "$(dirname $0)/../../ph-debug/target/debug/ph-debug")
 
 source "$(dirname $0)/common_funcs.sh"
 
@@ -24,6 +25,12 @@ ADAPTER1_SOCK=adapter1.sock
 ADAPTER2_SOCK=adapter2.sock
 NODE_SOCK=node.sock
 
+function counters() {
+  SOCKET=$1
+  "$PH_DEBUG_BIN" -c COUNTERS -p "$SOCKET"
+}
+
+
 #
 # Set up automatic cleanup
 #
@@ -36,6 +43,7 @@ TMPDIR=$(mktemp -d)
 pushd "$TMPDIR" > /dev/null
 
 echo "Setting up network"
+
 
 #
 # Prepare for test
@@ -51,6 +59,7 @@ create_agent_key_and_cert ca adapter2
 create_agent_key_and_cert ca node
 
 echo "Launching DUTs"
+
 
 #
 # Launch PHs
@@ -69,7 +78,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --name "zpr-a" --control-path "$ADAPTER1_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR":12345 --peer-addr1 "$NODE_SUBSTRATE_ADDR_A":12345 \
   --ca-file ca.crt --certificate-file adapter1.crt --private-key-file adapter1.key \
-  --tun-if tun0 2>&1 |tee zpr-a.log &
+  --tun-if tun0 2>&1 |tee adapter1.log &
 CHILDREN=(${CHILDREN[@]} "$!")
 
 
@@ -77,9 +86,8 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --name "zpr-b" --control-path "$ADAPTER2_SOCK" \
   --self-addr "$B_SUBSTRATE_ADDR":12345 --peer-addr1 "$NODE_SUBSTRATE_ADDR_B":12345 \
   --ca-file ca.crt --certificate-file adapter2.crt --private-key-file adapter2.key \
-  --tun-if tun0 2>&1 |tee zpr-b.log &
+  --tun-if tun0 2>&1 |tee adapter2.log &
 CHILDREN=(${CHILDREN[@]} "$!")
-
 
 
 #
@@ -109,6 +117,22 @@ PASS=0
 if ! ping_test
 then PASS=1
 fi
+
+
+#
+# Check stats
+#
+
+for SOCK in "$ADAPTER1_SOCK" "$ADAPTER2_SOCK" "$NODE_SOCK"
+do
+	# TODO: test also with encrypted agent traffic
+	APOOO=$(counters "$SOCK" | awk -F': ' '$1 == "Agent Packets Out-Of-Order" { print $2 }')
+	if (( APOOO != 0 ))
+	then
+		echo "$(basename "$SOCK"): ERROR: found agent packets out-of-order: $APOOO"
+		PASS=1
+	fi
+done
 
 
 #
