@@ -9,12 +9,11 @@ use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters_enum::CounterType;
 use crate::defs::Direction;
-use crate::km::{Codec, KmTransportSA};
+use crate::km::Codec;
 use crate::km_noise::NOISE_PADLEN;
 use crate::mgmt::dispatch;
 use crate::net_defs;
 use crate::packet::Packet;
-use crate::peer_table::PeerState;
 use crate::queues::TryEnqueueError;
 use crate::zdp;
 use crate::zdp_ll;
@@ -296,9 +295,12 @@ fn substrate_egress_common<'pktbuf>(
         }
     };
 
-    let real_zpi;
-    let transport_sa: Option<KmTransportSA>;
     let transit = zdp_hdr.packet_type == zdp::ZdpPacketType::TransitPacket;
+
+    // Get the security association for this link and extrant the correct ZPI.
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        return Ok(None);
+    };
 
     // If this is key management we do not use transport security.
     // TODO: Not quite correct.  We ought to be able to use an existing
@@ -308,41 +310,39 @@ fn substrate_egress_common<'pktbuf>(
     //       message back under ZIP-0.
     //
     //       See https://github.com/org-zpr/zpr-core/issues/444
+    let transport_sa;
     if zdp_hdr.packet_type == zdp::ZdpPacketType::KeyManagement {
         debug!(
             "{}: link {}: KM message detected, using ZPI=0 ignoring security association",
             asm.system_name, link_id
         );
-        real_zpi = zpr::ZPI_0;
         transport_sa = None;
     } else {
-        // Get the security association for this link and extrant the correct ZPI.
-        // TODO: Is there some way to avoid a clone here?
-        transport_sa = match asm
+        transport_sa = asm
             .peer_table
-            .clone_established_transport_association(link_id)
-        {
-            Some(transport_sa) => {
-                if transit {
-                    real_zpi = transport_sa.send_zpis.hmac;
-                } else {
-                    real_zpi = transport_sa.send_zpis.encr;
-                }
-                assert!(real_zpi != zpr::ZPI_0);
-                Some(transport_sa)
+            .clone_established_transport_association(link_id);
+    }
+
+    let real_zpi;
+    match transport_sa {
+        Some(ref transport_sa) => {
+            if transit {
+                real_zpi = transport_sa.send_zpis.hmac;
+            } else {
+                real_zpi = transport_sa.send_zpis.encr;
             }
-            None => {
-                real_zpi = zpr::ZPI_0;
-                None
-            }
-        };
+            assert!(real_zpi != zpr::ZPI_0);
+        }
+        None => {
+            real_zpi = zpr::ZPI_0;
+        }
     }
 
     encap_zpi(asm, link_id, real_zpi, pkt);
     maybe_capture(asm, Direction::Outbound, pkt);
 
     match transport_sa {
-        Some(transport_sa) => {
+        Some(ref transport_sa) => {
             if transit {
                 encrypt_hmac(transport_sa.send_hmac_key, pkt);
             } else {
@@ -357,9 +357,7 @@ fn substrate_egress_common<'pktbuf>(
         }
     }
 
-    Ok(asm
-        .peer_table
-        .inspect(link_id, |peer_state: &PeerState| peer_state.substrate_addr))
+    Ok(Some(peer_state.substrate_addr))
 }
 
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
@@ -449,14 +447,15 @@ pub fn substrate_ingress<'pktbuf>(
 
     // If a ZPI is setup on this link, then we expect the message to use one of the valid
     // ZPI values.
-    let secure = match asm
+    let secure;
+    match asm
         .peer_table
         .clone_established_transport_association(ingress_link_id)
     {
-        Some(transport_sa) => {
+        Some(ref transport_sa) => {
             if zpi_hdr.zpi == transport_sa.recv_zpis.hmac {
                 match decrypt_hmac(transport_sa.recv_hmac_key, &mut pkt) {
-                    Ok(()) => true,
+                    Ok(()) => secure = true,
                     Err(err) => {
                         drop_and_count(asm, pkt, err);
                         return;
@@ -465,7 +464,7 @@ pub fn substrate_ingress<'pktbuf>(
             } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
                 // TODO: Put padlen in state somewhere too
                 match decrypt_full(asm, &*transport_sa.codec, NOISE_PADLEN, &mut pkt) {
-                    Ok(()) => true,
+                    Ok(()) => secure = true,
                     Err(err) => {
                         drop_and_count(asm, pkt, err);
                         return;
@@ -483,7 +482,7 @@ pub fn substrate_ingress<'pktbuf>(
         }
         None => {
             // Either no security associatio on link, or it is not yet established.
-            false
+            secure = false;
         }
     };
 
