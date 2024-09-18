@@ -3,6 +3,7 @@
 #
 # Functions used in multiple integration tests
 #
+
 function wait_for() {
   RETRIES=$1
   shift
@@ -39,16 +40,20 @@ function create_network() {
 
   # virtual Ethernet pair
 
-  sudo ip link add veth0 netns zpr-a type veth peer veth0 netns zpr-node
-  sudo ip link add veth1 netns zpr-b type veth peer veth1 netns zpr-node
+  # Kernel bug: Linux refuses to create a veth device in a netns with
+  # a name matching that of a veth device in the root ns, but not the other
+  # way around.  And weirdly, it will happily _autogenerate_ such names.
+  # So we rely on that for now rather than explicitly specifying the names.
+  sudo ip link add netns zpr-a type veth peer netns zpr-node  # zpr-a:veth0 / zpr-node:veth0
+  sudo ip link add netns zpr-b type veth peer netns zpr-node  # zpr-b:veth0 / zpr-node:veth1
 
   sudo ip -n zpr-a addr add "$A_SUBSTRATE_ADDR" peer "$NODE_SUBSTRATE_ADDR_A" dev veth0
-  sudo ip -n zpr-b addr add "$B_SUBSTRATE_ADDR" peer "$NODE_SUBSTRATE_ADDR_B" dev veth1
+  sudo ip -n zpr-b addr add "$B_SUBSTRATE_ADDR" peer "$NODE_SUBSTRATE_ADDR_B" dev veth0
   sudo ip -n zpr-node addr add "$NODE_SUBSTRATE_ADDR_A" peer "$A_SUBSTRATE_ADDR" dev veth0
   sudo ip -n zpr-node addr add "$NODE_SUBSTRATE_ADDR_B" peer "$B_SUBSTRATE_ADDR" dev veth1
 
   sudo ip -n zpr-a link set veth0 up
-  sudo ip -n zpr-b link set veth1 up
+  sudo ip -n zpr-b link set veth0 up
   sudo ip -n zpr-node link set veth0 up
   sudo ip -n zpr-node link set veth1 up
 
