@@ -125,8 +125,11 @@ impl DockLookupTable {
         tether_id: StreamId,
         inspector: impl FnOnce(&DltPep) -> T,
     ) -> Option<T> {
-        self.reader
-            .inspect(|reader| reader.get((tether_id as usize).wrapping_sub(1)).map(inspector))
+        self.reader.inspect(|reader| {
+            reader
+                .get((tether_id as usize).wrapping_sub(1))
+                .map(inspector)
+        })
     }
 
     pub fn get(&self, tether_id: StreamId) -> Option<DltPepGuard<'_>> {
