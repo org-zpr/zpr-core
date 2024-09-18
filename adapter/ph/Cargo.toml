@@ -30,6 +30,7 @@ tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 zerocopy = { version = "0.7.34", features = ["byteorder", "derive"] }
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }
+flate2 = { version = "1.0.33", features = ["zlib-ng"] }
 
 [dev-dependencies]
 
