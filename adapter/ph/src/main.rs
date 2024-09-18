@@ -366,7 +366,7 @@ fn main() -> ExitCode {
                     private: dock_noise_private_key.to_vec(),
                     public: dock_noise_public_key.to_vec(),
                 };
-                km_multiplexor::add_node_link(asm, peer_id2, ZPIPair::new(1, 2), dock_keypair)
+                km_multiplexor::add_node_link(asm, peer_id2, ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 1, 2), dock_keypair)
                     .unwrap();
             }
         }
@@ -387,7 +387,7 @@ fn main() -> ExitCode {
                 km_multiplexor::add_adapter_link(
                     asm,
                     peer_id,
-                    ZPIPair::new(3, 4),
+                    ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
                     dock_noise_public_key,
                 )
                 .unwrap();
@@ -396,7 +396,7 @@ fn main() -> ExitCode {
                     private: dock_noise_private_key.to_vec(),
                     public: dock_noise_public_key.to_vec(),
                 };
-                km_multiplexor::add_node_link(asm, peer_id, ZPIPair::new(5, 6), dock_keypair)
+                km_multiplexor::add_node_link(asm, peer_id, ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6), dock_keypair)
                     .unwrap();
             }
         }
