@@ -318,9 +318,7 @@ fn substrate_egress_common<'pktbuf>(
         );
         transport_sa = None;
     } else {
-        transport_sa = asm
-            .peer_table
-            .clone_established_transport_association(link_id);
+        transport_sa = peer_state.get_established_transport_association();
     }
 
     let real_zpi;
@@ -445,13 +443,15 @@ pub fn substrate_ingress<'pktbuf>(
         return;
     };
 
+    let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
+        drop_and_count(asm, pkt, CounterType::UnknownPeer);
+        return;
+    };
+
     // If a ZPI is setup on this link, then we expect the message to use one of the valid
     // ZPI values.
     let secure;
-    match asm
-        .peer_table
-        .clone_established_transport_association(ingress_link_id)
-    {
+    match peer_state.get_established_transport_association() {
         Some(ref transport_sa) => {
             if zpi_hdr.zpi == transport_sa.recv_zpis.hmac {
                 match decrypt_hmac(transport_sa.recv_hmac_key, &mut pkt) {
