@@ -1,0 +1,28 @@
+@startuml
+
+[*] --> Configuring: impl::reset()
+
+Configuring --> Transport: handshake completes
+
+Configuring --> Configuring: handle/emit\n km messages
+
+Configuring --> [*]: cancelled
+
+
+Transport --> Error: error/timeout
+
+Transport --> Transport: handle/emit\n km messages
+
+Transport --> [*]: cancelled
+
+Configuring --> Error: error/timeout
+
+Error --> Configuring : restart();\n impl::reset()
+
+Error --> [*]: cancelled
+
+
+@enduml
+
+
+

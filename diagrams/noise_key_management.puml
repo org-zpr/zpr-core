@@ -1,0 +1,50 @@
+@startuml
+
+note left of Initiator
+Configured with ZPI values
+it will accept from responder. And
+generates its own HMAC key (KEY<sub>i</sub>).
+end note
+
+/ note right of Responder
+Configured with ZPI values
+it will accept from initiator. And
+generates its own HMAC key (KEY<sub>R</sub>).
+end note
+
+note left of Initiator #aqua
+  state CONFIGURING
+end note
+
+/ note right of Responder #aqua
+  state CONFIGURING
+end note
+
+
+Initiator -> Responder: handshake_msg(<noise>)\n+ payload [zpiE<sub>i</sub>, zpiH<sub>i</sub>, KEY<sub>i</sub>]
+
+note right of Responder
+now has (zpiE<sub>i</sub>, zpiH<sub>i</sub>, KEY<sub>i</sub>)
+end note
+
+
+Responder --> Responder:
+note right #aqua
+  enter state TRANSPORT
+end note
+
+
+
+Responder -> Initiator: handshake_reply(<noise>)\n+ payload [zpiE<sub>R</sub>, zpiH<sub>R</sub>, KEY<sub>R</sub>]
+
+note left of Initiator
+now has (zpiE<sub>R</sub>, zpiH<sub>R</sub>, KEY<sub>R</sub>)
+end note
+
+Initiator <-- Initiator:
+note left #aqua
+  enter state TRANSPORT
+end note
+
+
+@enduml

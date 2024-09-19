@@ -10,7 +10,9 @@ DIAGRAMS = \
 	fastpath-overview \
 	maybe_capture \
 	substrate_egress \
-	substrate_ingress
+	substrate_ingress \
+	key_management \
+	noise_key_management
 
 $(OUTDIR)/%.svg: %.puml
 	$(PLANTUML) $(PLANTUML_OPTS) -tsvg -o$(dir $@) $< || $(PLANTUML) -ttxt -p < $<
