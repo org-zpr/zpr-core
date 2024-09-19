@@ -56,8 +56,14 @@ use tracing::error;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
+
+
 const CERT_FINGERPRINT_LEN: usize = 20; // sha-1
-const RSA_SIGNATURE_LEN: usize = 256; // assumes/requires 2048bit keys
+
+// A note on signature length. A 2048 bit RSA key will have a 256 byte signature.
+// Since we always put the signatures last on the message, we don't need to
+// specify a length.  So the code should work fine with various key sizes.
+
 
 const MSG_BUF_SIZE: usize = 4096;
 
@@ -97,8 +103,8 @@ struct CertHelloHdr {
 #[repr(packed)]
 struct CertResponseHdr {
     pub nonce: U64,
-    pub cert_fingerprint: [u8; 20], // SHA-1 certificate fingerprint
-                                    // Followed by the SHA256 RSA signature (256 bytes)
+    pub cert_fingerprint: [u8; CERT_FINGERPRINT_LEN], // SHA-1 certificate fingerprint
+    // Followed by the SHA256 RSA signature (256 bytes)
 }
 
 #[derive(Debug, PartialEq)]
@@ -293,8 +299,6 @@ impl KmCertExchange {
         signer.update(&compressed).unwrap();
 
         let sig = signer.sign_to_vec().unwrap();
-        assert!(sig.len() == RSA_SIGNATURE_LEN);
-
         buf.put(&sig[..]);
 
         Ok(buf.freeze())
@@ -323,8 +327,8 @@ impl KmCertExchange {
             return Err(CertExchangeError::RoleError);
         }
 
-        // Payload should be at minimum: CertHelloHdr + signature
-        if payload.len() < std::mem::size_of::<CertHelloHdr>() + RSA_SIGNATURE_LEN {
+        // Payload should be at minimum: CertHelloHdr + signature (lenght not known, but we'll use 1 here)
+        if payload.len() < std::mem::size_of::<CertHelloHdr>() + 1 {
             return Err(CertExchangeError::ShortPayloadError);
         }
         let hello = match CertHelloHdr::ref_from_prefix(&payload) {
@@ -336,7 +340,7 @@ impl KmCertExchange {
 
         // Now we have the cert length, so check again.
         let cert_len: usize = hello.cert_len.into();
-        if payload.len() < std::mem::size_of::<CertHelloHdr>() + cert_len + RSA_SIGNATURE_LEN {
+        if payload.len() < std::mem::size_of::<CertHelloHdr>() + cert_len + 1 {
             return Err(CertExchangeError::ShortPayloadError);
         }
 
@@ -405,7 +409,6 @@ impl KmCertExchange {
         let mut signer = Signer::new(MessageDigest::sha256(), &my_pkey).unwrap();
         signer.update(&buf[0..buf.len()]).unwrap();
         let sig = signer.sign_to_vec().unwrap();
-        assert!(sig.len() == RSA_SIGNATURE_LEN); // sanity check
         buf.put(&sig[..]);
 
         Ok((initiator_cert, buf.freeze()))
@@ -432,7 +435,7 @@ impl KmCertExchange {
         }
 
         // Payload should be exactly the CertResponseHdr + signature
-        if payload.len() != std::mem::size_of::<CertResponseHdr>() + RSA_SIGNATURE_LEN {
+        if payload.len() < std::mem::size_of::<CertResponseHdr>() + 1 {
             return Err(CertExchangeError::ShortPayloadError);
         }
 
@@ -542,8 +545,6 @@ fn get_cert_fingerprint(cert: &X509) -> [u8; CERT_FINGERPRINT_LEN] {
 
 #[cfg(test)]
 mod test {
-    use libc::BUFSIZ;
-
     use super::*;
 
     // certificate-authority certificate
@@ -696,6 +697,7 @@ DeCZBXjYdUB7u/8lFF40mw==
 
     // This is the public key extracted from the NODE_CERT_DATA.
     // Eg, `openssl x509 -pubkey -noout -in node-cert.pem > node.pub`
+    #[allow(dead_code)]
     const NODE_PUBLIC_KEY_DATA: &str = r#"-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAomv2Rwx/y32QnSp8hjj2
 +vA+6uURXwz+h8SRw5xk0TQRL218xQSrnG8O5iWr/Ho2rSWo9TmltluocR2InAcb
