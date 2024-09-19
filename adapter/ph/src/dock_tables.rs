@@ -56,7 +56,8 @@ impl DockForwardingTable {
     }
 
     pub fn get(&self, tether_id: StreamId) -> Option<DftPepGuard<'_>> {
-        self.reader.get_guarded((tether_id as usize).wrapping_sub(1))
+        self.reader
+            .get_guarded((tether_id as usize).wrapping_sub(1))
     }
 
     pub fn insert(&self, pep: DftPep) -> Result<StreamId, ()> {
