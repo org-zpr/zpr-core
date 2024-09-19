@@ -131,11 +131,11 @@ impl<'a> SubstrateEgress<'a> {
     pub async fn enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
         &self,
         packet: P,
-        mut dest_sa: zpr::SubstrateAddr,
+        dest_sa: zpr::SubstrateAddr,
     ) -> Result<(), P> {
-        let socket = self.select_socket_and_set_flowinfo(&*packet, &mut dest_sa);
+        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(&*packet, dest_sa);
 
-        match socket.send_to(packet.body(), dest_sa).await {
+        match socket.send_to(packet.body(), dest_sockaddr).await {
             Ok(_) => Ok(()),
 
             Err(err) => {
@@ -157,11 +157,11 @@ impl<'a> SubstrateEgress<'a> {
     pub fn try_enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
         &self,
         packet: P,
-        mut dest_sa: zpr::SubstrateAddr,
+        dest_sa: zpr::SubstrateAddr,
     ) -> Result<(), TryEnqueueError<P>> {
-        let socket = self.select_socket_and_set_flowinfo(&*packet, &mut dest_sa);
+        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(&*packet, dest_sa);
 
-        match socket.try_send_to(packet.body(), dest_sa) {
+        match socket.try_send_to(packet.body(), dest_sockaddr) {
             Ok(_) => Ok(()),
 
             Err(err) => {
@@ -184,14 +184,14 @@ impl<'a> SubstrateEgress<'a> {
     fn select_socket_and_set_flowinfo(
         &self,
         packet: &Packet<'_>,
-        dest_sa: &mut zpr::SubstrateAddr,
-    ) -> &'a UdpSocket {
-        match dest_sa {
+        mut dest_sa: zpr::SubstrateAddr,
+    ) -> (&'a UdpSocket, std::net::SocketAddr) {
+        match &mut dest_sa {
             SocketAddr::V4(_) => (),
             SocketAddr::V6(dest_sa) => dest_sa.set_flowinfo(packet.flowhash()),
         }
 
-        self.sockets[packet.flowhash() as usize % self.sockets.len()]
+        (self.sockets[packet.flowhash() as usize % self.sockets.len()], dest_sa)
     }
 
     #[allow(dead_code)]
