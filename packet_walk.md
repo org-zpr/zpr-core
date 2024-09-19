@@ -34,7 +34,7 @@ The Dock, upon receiving the Visa Response, will install the visa in its Dock Fo
 
 ### Ingress Adapter Receives A Bind Response
 
-The Adapter's outstanding Bind Request finally gets a response.  If the response indicates success, the Adapter will map the 5-tuple of the packet to the Tether ID registered in the Bind Response in its Agent Lookup Table.  If the full packet had been too large to forward to the Dock in the Bind Request, the cached packet is now forwarded to the Dock, using the compression specified in the Bind Response.
+The Adapter's outstanding Bind Request finally gets a response.  If the response indicates success, the Adapter will map the 5-tuple of the packet to the Tether ID registered in the Bind Response in its Agent Lookup Table.  If the full packet had been too large to forward to the Dock in the Bind Request, the cached packet is now forwarded to the Dock, using the compression specified in the Bind Response and with an A2A HMAC appended to it.
 
 Any packets that were received on the stream between the issuance of the Bind Request and receiving the Response have been dropped.
 
