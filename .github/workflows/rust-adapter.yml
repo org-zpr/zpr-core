@@ -153,6 +153,9 @@ jobs:
       run: |
         cd adapter/ph
         cargo build
+        sudo apt update
+        sudo apt install libpcap-dev
+        cargo build --manifest-path ../ph-debug/Cargo.toml
         ZPR_TEST_VERBOSE=1 test/basic-test.sh
 
   capture-integration-test:
