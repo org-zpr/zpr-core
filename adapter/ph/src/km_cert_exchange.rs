@@ -56,14 +56,11 @@ use tracing::error;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
-
-
 const CERT_FINGERPRINT_LEN: usize = 20; // sha-1
 
 // A note on signature length. A 2048 bit RSA key will have a 256 byte signature.
 // Since we always put the signatures last on the message, we don't need to
 // specify a length.  So the code should work fine with various key sizes.
-
 
 const MSG_BUF_SIZE: usize = 4096;
 
@@ -104,7 +101,7 @@ struct CertHelloHdr {
 struct CertResponseHdr {
     pub nonce: U64,
     pub cert_fingerprint: [u8; CERT_FINGERPRINT_LEN], // SHA-1 certificate fingerprint
-    // Followed by the SHA256 RSA signature (256 bytes)
+                                                      // Followed by the SHA256 RSA signature (256 bytes)
 }
 
 #[derive(Debug, PartialEq)]
