@@ -191,7 +191,10 @@ impl<'a> SubstrateEgress<'a> {
             SocketAddr::V6(dest_sa) => dest_sa.set_flowinfo(packet.flowhash()),
         }
 
-        (self.sockets[packet.flowhash() as usize % self.sockets.len()], dest_sa)
+        (
+            self.sockets[packet.flowhash() as usize % self.sockets.len()],
+            dest_sa,
+        )
     }
 
     #[allow(dead_code)]
