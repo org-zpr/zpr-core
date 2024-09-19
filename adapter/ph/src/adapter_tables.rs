@@ -114,21 +114,24 @@ impl DockLookupTable {
         tether_id: StreamId,
         inspector: impl FnOnce(&DltPep) -> T,
     ) -> Option<T> {
-        self.reader
-            .inspect(|reader| reader.get(tether_id as usize).map(inspector))
+        self.reader.inspect(|reader| {
+            reader
+                .get((tether_id as usize).wrapping_sub(1))
+                .map(inspector)
+        })
     }
 
     pub fn get(&self, tether_id: StreamId) -> Option<DltPepGuard<'_>> {
-        self.reader.get_guarded(tether_id as usize)
+        self.reader.get_guarded((tether_id as usize).wrapping_sub(1))
     }
 
     pub fn insert(&self, pep: DltPep) -> Result<StreamId, ()> {
-        Ok(self.table.lock().unwrap().insert(pep)? as StreamId)
+        Ok((self.table.lock().unwrap().insert(pep)? + 1) as StreamId)
     }
 
     pub fn remove(&self, tether_id: StreamId) {
         let mut table = self.table.lock().unwrap();
-        let new_reader = table.remove(tether_id as usize);
+        let new_reader = table.remove((tether_id as usize).wrapping_sub(1));
         std::mem::drop(table);
         self.reader.write(new_reader);
     }

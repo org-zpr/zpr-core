@@ -2,7 +2,7 @@
 use crate::dock_tables::DockForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::queues;
-use crate::rcu::{RcuBox, RcuCslabEntryGuard};
+use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::sync_req;
 use crate::zpr::{LinkId, SubstrateAddr};
 use cslab::{RcuCslab, RcuCslabReader};
@@ -90,6 +90,15 @@ impl PeerState<'static> {
             mgmt_processor_worker,
             km_state: PeerKmState::new(),
         }
+    }
+}
+
+impl PeerState<'_> {
+    /// Return a reference to the transport SA if there is an SA on the link, and if it is established.
+    pub fn get_established_transport_association(
+        &self,
+    ) -> Option<RcuOptionGuard<'_, KmTransportSA>> {
+        self.km_state.transport_sa.get().into()
     }
 }
 
@@ -230,19 +239,6 @@ impl<'pktbuf> PeerTable<'pktbuf> {
             return entry.km_state.transport_sa.get().is_some();
         }
         false
-    }
-
-    /// Return a clone of the transport SA if there is an SA on the link, and if it is established.
-    pub fn clone_established_transport_association(
-        &self,
-        link_id: LinkId,
-    ) -> Option<KmTransportSA> {
-        let entry = self.get(link_id)?;
-        let tsa = entry.km_state.transport_sa.get();
-        if tsa.is_none() {
-            return None;
-        }
-        tsa.clone()
     }
 
     /// Clone the Key Manager on the link if link exists, and if there is a handle set.

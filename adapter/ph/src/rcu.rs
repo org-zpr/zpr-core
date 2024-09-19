@@ -266,6 +266,41 @@ impl<T> From<T> for RcuBox<T> {
     }
 }
 
+/// `RcuGuard` for an `Option` value known to be `Some`.
+pub struct RcuOptionGuard<'a, T>(RcuGuard<'a, Option<T>>);
+
+impl<T> std::ops::Deref for RcuOptionGuard<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: this can only be constructed via methods
+        // which validate that the guarded value is `Some`
+        unsafe { self.0.as_ref().unwrap_unchecked() }
+    }
+}
+
+impl<'a, T> From<RcuGuard<'a, Option<T>>> for Option<RcuOptionGuard<'a, T>> {
+    fn from(guard: RcuGuard<'a, Option<T>>) -> Self {
+        if guard.is_none() {
+            None
+        } else {
+            Some(RcuOptionGuard(guard))
+        }
+    }
+}
+
+impl<'a, T> TryFrom<RcuGuard<'a, Option<T>>> for RcuOptionGuard<'a, T> {
+    type Error = ();
+
+    fn try_from(guard: RcuGuard<'a, Option<T>>) -> Result<Self, Self::Error> {
+        if guard.is_none() {
+            Err(())
+        } else {
+            Ok(RcuOptionGuard(guard))
+        }
+    }
+}
+
 /// `RcuGuard` for an `RcuCslab` entry known to be present.
 pub struct RcuCslabEntryGuard<'a, T> {
     guard: RcuGuard<'a, cslab::RcuCslabReader<T>>,
