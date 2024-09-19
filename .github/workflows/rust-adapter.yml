@@ -145,7 +145,7 @@ jobs:
 
   # Integration tests
   basic-integration-test:
-    needs: [ph-build]
+    needs: [ph-build, ph-debug-build]
     runs-on: ubuntu-latest
     steps: 
     - uses: actions/checkout@v4
