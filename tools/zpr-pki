@@ -166,18 +166,14 @@ function do_gencacert() {
 	SUBJ=$1
 	DAYS=$2
 
-	CACNF=$(mktemp)
+	exec {cacnffd}<<-EOF
+		subjectKeyIdentifier=hash
+		authorityKeyIdentifier=keyid:always,issuer
+		basicConstraints=critical,CA:true
+		keyUsage=cRLSign,keyCertSign
+	EOF
 
-	cat > "$CACNF" <<EOF
-subjectKeyIdentifier=hash
-authorityKeyIdentifier=keyid:always,issuer
-basicConstraints=critical,CA:true
-keyUsage=cRLSign,keyCertSign
-EOF
-
-	openssl x509 -new -subj "$SUBJ" -key /dev/stdin -extfile "$CACNF" -days "$DAYS"
-
-	rm "$CACNF"
+	exec openssl x509 -new -subj "$SUBJ" -key /dev/stdin -extfile /dev/fd/$cacnffd -days "$DAYS"
 }
 
 case "$CMD" in
