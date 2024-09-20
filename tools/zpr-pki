@@ -5,6 +5,9 @@ function usage() {
 	cat <<EOF
 Usage: $0 <command>
 
+Tool for working with RFC 8410 compliant X.509 certificates containing
+X25519 public keys as used in ZPR.
+
 Available commands:
 
   genkey: Generate private key
