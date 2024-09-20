@@ -52,13 +52,11 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const NOISE_NONCE_LEN: usize = 8;
 pub const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce
 
-
 // The size (in bytes) of the random HMAC key used for messages over which we just compute a hmac.
 const HMAC_KEY_LEN: usize = 32;
 
 // The size in bytes of a noise key.
 pub const NOISE_KEY_LEN: usize = 32;
-
 
 impl From<snow::Error> for KmError {
     fn from(e: snow::Error) -> KmError {
@@ -137,7 +135,7 @@ impl KmNoise {
             hs_sent_t: None,
             hs_state: None,
             recv_hmac_key: [0u8; HMAC_KEY_LEN], // we generate this and send to peer
-            send_hmac_key: None,      // we get this during handshake
+            send_hmac_key: None,                // we get this during handshake
             recv_zpis: ZPIPair {
                 encr: zpi_full_encr,
                 hmac: zpi_transmit_hmac,
@@ -189,8 +187,6 @@ impl KmNoise {
         Ok(())
     }
 }
-
-
 
 /// Helper function to derive public key from private key.
 #[allow(dead_code)]

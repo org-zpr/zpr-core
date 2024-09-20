@@ -24,7 +24,6 @@ use tracing::error;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
 
-
 const PEM_BEGIN_CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END_CERTIFICATE: &str = "-----END CERTIFICATE-----";
 
@@ -54,8 +53,6 @@ struct CertExchgHdr {
     // Followed by the cert bytes (DER)
 }
 
-
-
 /// The Certificate Exchange object holds the local certificate (which includes the noise public key)
 /// and the certificate for our trusted signing authority.
 pub struct KmCertExchange {
@@ -80,17 +77,11 @@ impl KmCertExchange {
     ) -> Result<Self, ParseError> {
         let cert = load_cert(cert_file)?;
         let authority_cert = load_cert(authority_cert_file)?;
-        Ok(KmCertExchange::new(
-            cert,
-            authority_cert,
-        ))
+        Ok(KmCertExchange::new(cert, authority_cert))
     }
 
     /// Like [KmCertExchange::new] but takes the paths to the various PEM files.
-    pub fn new_from_pem(
-        cert_pem: &str,
-        authority_cert_pem: &str,
-    ) -> Result<Self, ParseError> {
+    pub fn new_from_pem(cert_pem: &str, authority_cert_pem: &str) -> Result<Self, ParseError> {
         let cert = match X509::from_pem(cert_pem.as_bytes()) {
             Ok(c) => c,
             Err(e) => {
@@ -105,10 +96,7 @@ impl KmCertExchange {
                 return Err(ParseError::PEMFormatError);
             }
         };
-        Ok(KmCertExchange::new(
-            cert,
-            authority_cert,
-        ))
+        Ok(KmCertExchange::new(cert, authority_cert))
     }
 
     /// Write a cert exhange payload into the supplied buffer, returns number of bytes written.
@@ -133,8 +121,6 @@ impl KmCertExchange {
         Ok(n)
     }
 
-
-
     /// Process a payload from a peer.
     ///
     /// ## Errors
@@ -150,9 +136,8 @@ impl KmCertExchange {
         payload: &[u8],
         expected_peer_public_key: &Vec<u8>,
     ) -> Result<X509, CertExchangeError> {
-
         // Payload should be at minimum: CertExchgHdr
-        if payload.len() < std::mem::size_of::<CertExchgHdr>()  {
+        if payload.len() < std::mem::size_of::<CertExchgHdr>() {
             return Err(CertExchangeError::ShortPayloadError);
         }
         let msg = match CertExchgHdr::ref_from_prefix(&payload) {
@@ -214,7 +199,6 @@ impl KmCertExchange {
     }
 }
 
-
 /// Look for first instance of "-----BEGIN CERTIFICATE-----" and return that up to and
 /// including the "-----END CERTIFICATE-----" line.
 ///
@@ -246,7 +230,6 @@ fn extract_cert_pem_data(textdata: &str) -> Result<String, ParseError> {
     }
 }
 
-
 /// Load a certificate from a file.
 fn load_cert(path: &Path) -> Result<X509, ParseError> {
     let contents = match fs::read_to_string(path) {
@@ -263,17 +246,13 @@ fn load_cert(path: &Path) -> Result<X509, ParseError> {
     }
 }
 
-
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::km_noise::{NOISE_KEY_LEN, derive_public_key};
+    use crate::km_noise::{derive_public_key, NOISE_KEY_LEN};
     use base64::prelude::*;
 
-
     const MSG_BUF_SIZE: usize = 4096;
-
 
     const CA_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
 MIIDijCCAnICCQDvR2uxX2eKJTANBgkqhkiG9w0BAQsFADCBhjELMAkGA1UEBhMC
@@ -349,12 +328,10 @@ JjLI9OaLcE83mA==
 -----END CERTIFICATE-----
 "#;
 
-
     #[test]
     fn test_km_cert_payload_create_and_process() {
         let mut adapter_exchanger =
-            KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA)
-                .unwrap();
+            KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA).unwrap();
 
         let mut buffer = [0u8; MSG_BUF_SIZE];
         let msg_len = match adapter_exchanger.write_payload(&mut buffer) {
@@ -367,11 +344,9 @@ JjLI9OaLcE83mA==
 
         // Now a node will accept the payload and check the clients cert and signature.
         // Returning its key fingerprint and a signature.
-        let node_exchanger =
-            KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA)
-                .unwrap();
+        let node_exchanger = KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
 
-        let public_key:Vec::<u8>;
+        let public_key: Vec<u8>;
         {
             let ak_private: [u8; NOISE_KEY_LEN] = match BASE64_STANDARD.decode(ADAPTER_NOISE_KEY) {
                 Ok(d) => d.try_into().unwrap(),
@@ -398,8 +373,7 @@ JjLI9OaLcE83mA==
     #[test]
     fn test_km_cert_key_not_match() {
         let mut adapter_exchanger =
-            KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA)
-                .unwrap();
+            KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA).unwrap();
         let mut buffer = [0u8; MSG_BUF_SIZE];
         let msg_len = match adapter_exchanger.write_payload(&mut buffer) {
             Ok(m) => m,
@@ -408,11 +382,9 @@ JjLI9OaLcE83mA==
             }
         };
 
-        let node_exchanger =
-            KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA)
-                .unwrap();
+        let node_exchanger = KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
 
-        let public_key:Vec::<u8> = vec![7; NOISE_KEY_LEN];
+        let public_key: Vec<u8> = vec![7; NOISE_KEY_LEN];
         match node_exchanger.process_payload(&buffer[..msg_len], &public_key) {
             Ok(_) => panic!("Should not have succeeded"),
             Err(CertExchangeError::KeyMismatchError) => {
