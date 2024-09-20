@@ -18,7 +18,9 @@ Available commands:
   showcert: Pretty-print a certificate
   showcertsubject: Print a certificate's subject
   showcertpubkey: Print a certificate's public key
-  validatecert: Validate a certificate
+  verifycert: Verify a certificate
+  gencakey: Generate private key for a micro-CA
+  gencacert: Generate a certificate for a micro-CA
 
 Unless otherwise noted, all keys and certificates are in PEM format.
 
@@ -102,7 +104,7 @@ function do_showpubkey() {
 
 function do_gensignedcert() {
 	if [[ $# != 4 ]]
-	then cmd_usage "ca.crt cakey.pem /CN=common-name days < key.pem > cert.crt" 1>&2; exit 1
+	then cmd_usage "ca.crt cakey.pem /CN=common-name days < pubkey.pem > cert.crt" 1>&2; exit 1
 	fi
 
 	CA=$1
@@ -110,23 +112,8 @@ function do_gensignedcert() {
 	SUBJ=$3
 	DAYS=$4
 
-	TMPDIR=$(mktemp -d)
-
-	openssl genrsa -out "$TMPDIR/signing.key"
-
-	cat > "$TMPDIR/x25519.cnf" <<EOF
-[req]
-req_extensions = v3_req
-prompt = no
-[v3_req]
-keyUsage = keyAgreement
-EOF
-
-	openssl req -new -subj "$SUBJ" -key "$TMPDIR/signing.key" -config "$TMPDIR/x25519.cnf" -reqexts v3_req > "$TMPDIR/temp.csr"
-
-	openssl x509 -req -CA "$CA" -CAkey "$CAKEY" -copy_extensions copyall -days "$DAYS" -force_pubkey /dev/stdin -in "$TMPDIR/temp.csr"
-
-	rm -r "$TMPDIR"
+	openssl x509 -req -CA "$CA" -CAkey "$CAKEY" -copy_extensions copyall -days "$DAYS" -force_pubkey /dev/stdin \
+		-in <(openssl genrsa | openssl req -new -batch -subj "$SUBJ" -key /dev/stdin -addext keyUsage=keyAgreement)
 }
 
 function do_showcert() {
@@ -153,7 +140,7 @@ function do_showcertpubkey() {
 	exec openssl x509 -pubkey -noout -in /dev/stdin
 }
 
-function do_validatecert() {
+function do_verifycert() {
 	if [[ $# != 1 ]]
 	then cmd_usage "ca.crt < cert.crt" 1>&2; exit 1
 	fi
@@ -161,6 +148,36 @@ function do_validatecert() {
 	CA=$1
 
 	exec openssl verify -trusted "$CA"
+}
+
+function do_gencakey() {
+	if [[ $# > 0 ]]
+	then cmd_usage "> cakey.pem" 1>&2; exit 1
+	fi
+
+	exec openssl genrsa
+}
+
+function do_gencacert() {
+	if [[ $# != 2 ]]
+	then cmd_usage "/CN=common-name days < cakey.pem > cert.crt" 1>&2; exit 1
+	fi
+
+	SUBJ=$1
+	DAYS=$2
+
+	CACNF=$(mktemp)
+
+	cat > "$CACNF" <<EOF
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid:always,issuer
+basicConstraints=critical,CA:true
+keyUsage=cRLSign,keyCertSign
+EOF
+
+	openssl x509 -new -subj "$SUBJ" -key /dev/stdin -extfile "$CACNF" -days "$DAYS"
+
+	rm "$CACNF"
 }
 
 case "$CMD" in
@@ -175,7 +192,9 @@ gensignedcert) do_gensignedcert "$@";;
 showcert) do_showcert "$@";;
 showcertsubject) do_showcertsubject "$@";;
 showcertpubkey) do_showcertpubkey "$@";;
-validatecert) do_validatecert "$@";;
+verifycert) do_verifycert "$@";;
+gencakey) do_gencakey "$@";;
+gencacert) do_gencacert "$@";;
 help|--help|-h|"-?") usage;;
 *) usage 1>&2; exit 1;;
 esac
