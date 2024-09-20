@@ -1,0 +1,181 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+function usage() {
+	cat <<EOF
+Usage: $0 <command>
+
+Available commands:
+
+  genkey: Generate private key
+  pubkey: Extract public key from private key
+  toraw: Convert a PKCS #8-encoded X22519 key into raw Base64
+  fromraw: Convert a raw Base64-encoded X22519 private key into PKCS #8
+  fromrawpub: Convert a raw Base64-encoded X22519 public key into PKCS #8
+  showkey: Pretty-print a private key
+  showpubkey: Pretty-print only the public part of a private key
+  gensignedcert: Generate a signed certificate for a private key
+  showcert: Pretty-print a certificate
+  showcertsubject: Print a certificate's subject
+  showcertpubkey: Print a certificate's public key
+  validatecert: Validate a certificate
+
+Unless otherwise noted, all keys and certificates are in PEM format.
+
+EOF
+}
+
+function cmd_usage() {
+	cat <<EOF
+Usage: $0 $CMD $*
+EOF
+}
+
+if [[ $# < 1 ]]
+then
+	usage 1>&2
+	exit 1
+fi
+
+CMD=$1
+shift
+
+function do_genkey() {
+	if [[ $# > 0 ]]
+	then cmd_usage "> privkey.pem" 1>&2; exit 1
+	fi
+
+	exec openssl genpkey -algorithm X25519
+}
+
+function do_pubkey() {
+	if [[ $# > 0 ]]
+	then cmd_usage "< privkey.pem > pubkey.pem" 1>&2; exit 1
+	fi
+
+	exec openssl pkey -pubout
+}
+
+function do_toraw() {
+	if [[ $# > 0 ]]
+	then cmd_usage "< key.pem > key.txt" 1>&2; exit 1
+	fi
+
+	exec openssl asn1parse -noout -out - | tail -c 32 | base64
+}
+
+function do_fromraw() {
+	if [[ $# > 0 ]]
+	then cmd_usage "< privkey.txt > privkey.pem" 1>&2; exit 1
+	fi
+
+	echo "-----BEGIN PRIVATE KEY-----"
+	{ echo -en '\x30\x2e\x02\x01\x00\x30\x05\x06\x03\x2b\x65\x6e\x04\x22\x04\x20'; base64 -d; } | base64
+	echo "-----END PRIVATE KEY-----"
+}
+
+function do_fromrawpub() {
+	if [[ $# > 0 ]]
+	then cmd_usage "< pubkey.txt > pubkey.pem" 1>&2; exit 1
+	fi
+
+	echo "-----BEGIN PUBLIC KEY-----"
+	{ echo -en '\x30\x2a\x30\x05\x06\x03\x2b\x65\x6e\x03\x21\x00'; base64 -d; } | base64
+	echo "-----END PUBLIC KEY-----"
+}
+
+function do_showkey() {
+	if [[ $# > 0 ]]
+	then cmd_usage "< privkey.pem" 1>&2; exit 1
+	fi
+
+	exec openssl pkey -text -noout
+}
+
+function do_showpubkey() {
+	if [[ $# > 0 ]]
+	then cmd_usage "< privkey.pem" 1>&2; exit 1
+	fi
+
+	exec openssl pkey -text_pub -noout
+}
+
+function do_gensignedcert() {
+	if [[ $# != 4 ]]
+	then cmd_usage "ca.crt cakey.pem /CN=common-name days < key.pem > cert.crt" 1>&2; exit 1
+	fi
+
+	CA=$1
+	CAKEY=$2
+	SUBJ=$3
+	DAYS=$4
+
+	TMPDIR=$(mktemp -d)
+
+	openssl genrsa -out "$TMPDIR/signing.key"
+
+	cat > "$TMPDIR/x25519.cnf" <<EOF
+[req]
+req_extensions = v3_req
+prompt = no
+[v3_req]
+keyUsage = keyAgreement
+EOF
+
+	openssl req -new -subj "$SUBJ" -key "$TMPDIR/signing.key" -config "$TMPDIR/x25519.cnf" -reqexts v3_req > "$TMPDIR/temp.csr"
+
+	openssl x509 -req -CA "$CA" -CAkey "$CAKEY" -copy_extensions copyall -days "$DAYS" -force_pubkey /dev/stdin -in "$TMPDIR/temp.csr"
+
+	rm -r "$TMPDIR"
+}
+
+function do_showcert() {
+	if [[ $# > 0 ]]
+	then cmd_usage "< cert.crt" 1>&2; exit 1
+	fi
+
+	exec openssl x509 -text -noout -in /dev/stdin
+}
+
+function do_showcertsubject() {
+	if [[ $# > 0 ]]
+	then cmd_usage "< cert.crt" 1>&2; exit 1
+	fi
+
+	exec openssl x509 -subject -noout -in /dev/stdin | sed 's/^subject=//'
+}
+
+function do_showcertpubkey() {
+	if [[ $# > 0 ]]
+	then cmd_usage "< cert.crt" 1>&2; exit 1
+	fi
+
+	exec openssl x509 -pubkey -noout -in /dev/stdin
+}
+
+function do_validatecert() {
+	if [[ $# != 1 ]]
+	then cmd_usage "ca.crt < cert.crt" 1>&2; exit 1
+	fi
+
+	CA=$1
+
+	exec openssl verify -trusted "$CA"
+}
+
+case "$CMD" in
+genkey) do_genkey "$@";;
+pubkey) do_pubkey "$@";;
+toraw) do_toraw "$@";;
+fromraw) do_fromraw "$@";;
+fromrawpub) do_fromrawpub "$@";;
+showkey) do_showkey "$@";;
+showpubkey) do_showpubkey "$@";;
+gensignedcert) do_gensignedcert "$@";;
+showcert) do_showcert "$@";;
+showcertsubject) do_showcertsubject "$@";;
+showcertpubkey) do_showcertpubkey "$@";;
+validatecert) do_validatecert "$@";;
+help|--help|-h|"-?") usage;;
+*) usage 1>&2; exit 1;;
+esac
