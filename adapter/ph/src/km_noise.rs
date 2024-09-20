@@ -52,6 +52,14 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const NOISE_NONCE_LEN: usize = 8;
 pub const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce
 
+
+// The size (in bytes) of the random HMAC key used for messages over which we just compute a hmac.
+const HMAC_KEY_LEN: usize = 32;
+
+// The size in bytes of a noise key.
+pub const NOISE_KEY_LEN: usize = 32;
+
+
 impl From<snow::Error> for KmError {
     fn from(e: snow::Error) -> KmError {
         KmError::MachineError(e.to_string())
@@ -67,8 +75,8 @@ pub struct KmNoise {
     hs_sent_t: Option<Instant>,
     hs_state: Option<snow::HandshakeState>,
     //t_state: Option<snow::TransportState>,
-    recv_hmac_key: [u8; 32], // messages sent to us from peer will use this key (we create this)
-    send_hmac_key: Option<[u8; 32]>, // messages sent to peer will use this key (peers creates this)
+    recv_hmac_key: [u8; HMAC_KEY_LEN], // messages sent to us from peer will use this key (we create this)
+    send_hmac_key: Option<[u8; HMAC_KEY_LEN]>, // messages sent to peer will use this key (peers creates this)
     recv_zpis: ZPIPair,
     send_zpis: Option<ZPIPair>,
 }
@@ -78,7 +86,7 @@ pub struct KmNoise {
 struct KeyMsg {
     pub zpi_full_encr: u8,
     pub zpi_transit_hmac: u8,
-    pub hmac_key: [u8; 32],
+    pub hmac_key: [u8; HMAC_KEY_LEN],
 }
 
 impl KmNoise {
@@ -128,7 +136,7 @@ impl KmNoise {
             local_keypair: kp,
             hs_sent_t: None,
             hs_state: None,
-            recv_hmac_key: [0u8; 32], // we generate this and send to peer
+            recv_hmac_key: [0u8; HMAC_KEY_LEN], // we generate this and send to peer
             send_hmac_key: None,      // we get this during handshake
             recv_zpis: ZPIPair {
                 encr: zpi_full_encr,
@@ -182,9 +190,11 @@ impl KmNoise {
     }
 }
 
+
+
 /// Helper function to derive public key from private key.
 #[allow(dead_code)]
-pub fn derive_public_key(private_key: &[u8; 32]) -> [u8; 32] {
+pub fn derive_public_key(private_key: &[u8; NOISE_KEY_LEN]) -> [u8; NOISE_KEY_LEN] {
     let point = MontgomeryPoint::mul_base_clamped(*private_key);
     point.to_bytes()
 }
@@ -568,7 +578,7 @@ mod test {
     #[test]
     fn test_noise_handshake_manually_static_node_key() {
         let nk_private_b64 = "AB2eP6zV7ve0A4eQgNVNXlAM2q0rYerCPXFMl+/ntUw=";
-        let nk_private: [u8; 32] = match BASE64_STANDARD.decode(nk_private_b64) {
+        let nk_private: [u8; NOISE_KEY_LEN] = match BASE64_STANDARD.decode(nk_private_b64) {
             Ok(d) => d.try_into().unwrap(),
             Err(e) => {
                 panic!("error decoding base64: {:?}", e);
@@ -654,8 +664,8 @@ mod test {
             }
         };
 
-        assert!(initiator_sa.recv_hmac_key != [0u8; 32]);
-        assert!(responder_sa.recv_hmac_key != [0u8; 32]);
+        assert!(initiator_sa.recv_hmac_key != [0u8; HMAC_KEY_LEN]);
+        assert!(responder_sa.recv_hmac_key != [0u8; HMAC_KEY_LEN]);
 
         assert!(initiator_sa.recv_hmac_key == responder_sa.send_hmac_key);
         assert!(responder_sa.recv_hmac_key == initiator_sa.send_hmac_key);
@@ -889,10 +899,10 @@ mod test {
         assert!(ZPIPair::new(3, 4) == node_sa.recv_zpis);
 
         // HMAC keys created
-        assert!(adapter_sa.recv_hmac_key != [0u8; 32]);
-        assert!(adapter_sa.send_hmac_key != [0u8; 32]);
-        assert!(node_sa.recv_hmac_key != [0u8; 32]);
-        assert!(node_sa.send_hmac_key != [0u8; 32]);
+        assert!(adapter_sa.recv_hmac_key != [0u8; HMAC_KEY_LEN]);
+        assert!(adapter_sa.send_hmac_key != [0u8; HMAC_KEY_LEN]);
+        assert!(node_sa.recv_hmac_key != [0u8; HMAC_KEY_LEN]);
+        assert!(node_sa.send_hmac_key != [0u8; HMAC_KEY_LEN]);
 
         ctok.cancel()
     }
