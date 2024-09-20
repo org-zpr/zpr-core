@@ -112,7 +112,7 @@ function do_gensignedcert() {
 	SUBJ=$3
 	DAYS=$4
 
-	openssl x509 -req -CA "$CA" -CAkey "$CAKEY" -copy_extensions copyall -days "$DAYS" -force_pubkey /dev/stdin \
+	exec openssl x509 -req -CA "$CA" -CAkey "$CAKEY" -copy_extensions copyall -days "$DAYS" -force_pubkey /dev/stdin \
 		-in <(openssl genrsa | openssl req -new -batch -subj "$SUBJ" -key /dev/stdin -addext keyUsage=keyAgreement)
 }
 
