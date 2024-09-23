@@ -35,6 +35,7 @@ pub enum CertExchangeError {
     CertificateParseError,
     InvalidPayloadError,
     ShortPayloadError,
+    BufferSizeError,
     CertificateVerificationError,
     KeyMismatchError,
 }
@@ -80,7 +81,7 @@ impl KmCertExchange {
         Ok(KmCertExchange::new(cert, authority_cert))
     }
 
-    /// Like [KmCertExchange::new] but takes the paths to the various PEM files.
+    /// Like [KmCertExchange::new] but takes the contents of the various PEM files.
     pub fn new_from_pem(cert_pem: &str, authority_cert_pem: &str) -> Result<Self, ParseError> {
         let cert = match X509::from_pem(cert_pem.as_bytes()) {
             Ok(c) => c,
@@ -99,26 +100,28 @@ impl KmCertExchange {
         Ok(KmCertExchange::new(cert, authority_cert))
     }
 
-    /// Write a cert exhange payload into the supplied buffer, returns number of bytes written.
+    /// Write a cert exhange payload into the supplied buffer.
     ///
     /// ## Errors
-    /// - [CertExchangeError::ShortPayloadError] - the buffer is too short to hold the payload.
-    pub fn write_payload(&mut self, buf: &mut [u8]) -> Result<usize, CertExchangeError> {
+    /// - [CertExchangeError::BufferSizeError] - the buffer is too short to hold the payload.
+    /// - [CertExchangeError::CertificateFormatError] - the certificate is too large to be encoded in the payload.
+    pub fn write_payload(&self, buf: &mut impl bytes::BufMut) -> Result<(), CertExchangeError> {
         let cert_der = self.local_cert.to_der().unwrap();
+        if cert_der.len() > u16::MAX as usize {
+            return Err(CertExchangeError::CertificateFormatError);
+        }
         let sz = cert_der.len() as u16;
 
-        if buf.len() < std::mem::size_of::<CertExchgHdr>() + cert_der.len() {
-            return Err(CertExchangeError::ShortPayloadError);
+        if buf.remaining_mut() < std::mem::size_of::<CertExchgHdr>() + cert_der.len() {
+            return Err(CertExchangeError::BufferSizeError);
         }
 
         let msg = CertExchgHdr {
             cert_len: sz.into(),
         };
-        let mut n: usize = std::mem::size_of::<CertExchgHdr>();
-        buf[0..n].copy_from_slice(&msg.as_bytes());
-        buf[n..n + cert_der.len()].copy_from_slice(&cert_der);
-        n += cert_der.len();
-        Ok(n)
+        buf.put(msg.as_bytes());
+        buf.put(cert_der.as_slice());
+        Ok(())
     }
 
     /// Process a payload from a peer.
@@ -134,7 +137,7 @@ impl KmCertExchange {
     pub fn process_payload(
         &self,
         payload: &[u8],
-        expected_peer_public_key: &Vec<u8>,
+        expected_peer_public_key: &[u8],
     ) -> Result<X509, CertExchangeError> {
         // Payload should be at minimum: CertExchgHdr
         if payload.len() < std::mem::size_of::<CertExchgHdr>() {
@@ -251,6 +254,7 @@ mod test {
     use super::*;
     use crate::km_noise::{derive_public_key, NOISE_KEY_LEN};
     use base64::prelude::*;
+    use bytes::BytesMut;
 
     const MSG_BUF_SIZE: usize = 4096;
 
@@ -330,17 +334,18 @@ JjLI9OaLcE83mA==
 
     #[test]
     fn test_km_cert_payload_create_and_process() {
-        let mut adapter_exchanger =
+        let adapter_exchanger =
             KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA).unwrap();
 
-        let mut buffer = [0u8; MSG_BUF_SIZE];
-        let msg_len = match adapter_exchanger.write_payload(&mut buffer) {
-            Ok(m) => m,
+        let mut buffer = BytesMut::with_capacity(MSG_BUF_SIZE);
+        //let mut buffer = [0u8; MSG_BUF_SIZE];
+        match adapter_exchanger.write_payload(&mut buffer) {
+            Ok(()) => (),
             Err(e) => {
                 panic!("Error creating payload: {:?}", e)
             }
         };
-        assert_eq!(msg_len, 783);
+        assert_eq!(buffer.len(), 783);
 
         // Now a node will accept the payload and check the clients cert and signature.
         // Returning its key fingerprint and a signature.
@@ -358,7 +363,7 @@ JjLI9OaLcE83mA==
             public_key = ak_public.to_vec();
         }
 
-        let i_cert = match node_exchanger.process_payload(&buffer[..msg_len], &public_key) {
+        let i_cert = match node_exchanger.process_payload(&buffer[..buffer.len()], &public_key) {
             Ok(c) => c,
             Err(e) => {
                 panic!("Error processing payload: {:?}", e)
@@ -372,11 +377,11 @@ JjLI9OaLcE83mA==
 
     #[test]
     fn test_km_cert_key_not_match() {
-        let mut adapter_exchanger =
+        let adapter_exchanger =
             KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA).unwrap();
-        let mut buffer = [0u8; MSG_BUF_SIZE];
-        let msg_len = match adapter_exchanger.write_payload(&mut buffer) {
-            Ok(m) => m,
+        let mut buffer = BytesMut::with_capacity(MSG_BUF_SIZE);
+        match adapter_exchanger.write_payload(&mut buffer) {
+            Ok(()) => (),
             Err(e) => {
                 panic!("Error creating payload: {:?}", e)
             }
@@ -385,7 +390,7 @@ JjLI9OaLcE83mA==
         let node_exchanger = KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
 
         let public_key: Vec<u8> = vec![7; NOISE_KEY_LEN];
-        match node_exchanger.process_payload(&buffer[..msg_len], &public_key) {
+        match node_exchanger.process_payload(&buffer[..buffer.len()], &public_key) {
             Ok(_) => panic!("Should not have succeeded"),
             Err(CertExchangeError::KeyMismatchError) => {
                 // Expected
