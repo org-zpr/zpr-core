@@ -241,11 +241,11 @@ struct PolicyInfo {
 //        has no policy yet.  The pre-built visa includes the hard-coded visa
 //        service adapter's ZPR address.
 //
-//     ~~ Now this visa sercice API kicks in ~~
+//     ~~ Now this visa service API kicks in ~~
 //
 //     4. The node sends a HELLO message to the visa service.
 //
-//     5. The visa sercice sends a HELLO-RESPONSE which includes a challenge.
+//     5. The visa service sends a HELLO-RESPONSE which includes a challenge.
 //
 //     6. The node performs the crypto operations to satisfy the challenge and
 //        sends back the AUTHENTICATE message.
