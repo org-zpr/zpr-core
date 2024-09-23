@@ -1,3 +1,4 @@
+use ph::km_noise::derive_public_key;
 use serde::Deserialize;
 
 use openssl::pkey::Private;
@@ -7,16 +8,19 @@ use openssl::x509::X509;
 use base64::prelude::*;
 
 use std::fs;
+use std::fmt;
 use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read};
 use std::path::PathBuf;
+
 
 // "Config" is configuration details for the CD binary.
 pub struct Config {
     pub socket_path: PathBuf,
 }
 
-// "Configuration" is the CD configuration file.
+// "Configuration" is the ZPR connection configuration file.
+// There is one of these for each ZPR network the adapter can conenct to.
 #[derive(Debug, Clone, Deserialize)]
 struct Configuration {
     profile: Profile,
@@ -39,10 +43,54 @@ struct Dock {
 
 #[derive(Debug, Clone, Deserialize)]
 struct Adapter {
-    certificate: String, // path to PEM file
-    private_key: String, // path to PEM file
+    noise_certificate: String, // path to PEM file
+    noise_private_key: String, // base64 encoded private key
 }
 
+
+/// The bits of the configuration that relate to the cryptography
+/// used in setting up the security assocaition.
+#[derive(Clone, Debug)]
+pub struct CryptoConfig {
+    pub remote_noise_public_key: [u8; 32],
+    pub local_noise_keypair: NoiseKeypair,
+    pub local_certificate: X509,
+    pub root_ca: X509,
+}
+
+
+#[derive(Clone, Debug)]
+pub struct NoiseKeypair {
+    pub private: [u8; 32],
+    pub public: [u8; 32],
+}
+
+impl fmt::Display for NoiseKeypair {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "NoiseKeypair ( private: {}, public: {} )", BASE64_STANDARD.encode(&self.private), BASE64_STANDARD.encode(&self.public))
+    }
+}
+
+impl NoiseKeypair {
+    pub fn new(private: [u8; 32]) -> NoiseKeypair {
+        NoiseKeypair {
+            private,
+            public: derive_public_key(&private),
+        }
+    }
+}
+
+impl Into<snow::Keypair> for NoiseKeypair {
+    fn into(self) -> snow::Keypair {
+        snow::Keypair {
+            private: self.private.to_vec(),
+            public: self.public.to_vec(),
+        }
+    }
+}
+
+
+/// The ConfigRecord is a parsed and loaded configuration file.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct ConfigRecord {
@@ -50,7 +98,7 @@ pub struct ConfigRecord {
     source: String, // path name of Configuration that loaded this
     host_or_ip: String,
     port: u16,
-    private_key: Rsa<Private>,
+    adapter_noise_keypair: NoiseKeypair,
     certificate: X509,
     root_ca: X509,
     dock_noise_public_key: [u8; 32],
@@ -72,6 +120,7 @@ fn load_cert(path: &str) -> Result<X509, std::io::Error> {
     Ok(cert)
 }
 
+#[allow(dead_code)]
 fn load_key(path: &str) -> Result<Rsa<Private>, std::io::Error> {
     let mut file = match File::open(path) {
         Ok(f) => f,
@@ -115,8 +164,27 @@ pub fn load_configuration(path: &str) -> Result<ConfigRecord, std::io::Error> {
     let base_path = std::path::Path::new(path).parent().unwrap();
 
     let root_ca = load_cert(base_path.join(&c.profile.root_ca).to_str().unwrap())?;
-    let cert = load_cert(base_path.join(&c.adapter.certificate).to_str().unwrap())?;
-    let private_key = load_key(base_path.join(&c.adapter.private_key).to_str().unwrap())?;
+    let cert = load_cert(base_path.join(&c.adapter.noise_certificate).to_str().unwrap())?;
+
+    let private_key: [u8; 32] = match BASE64_STANDARD.decode(c.adapter.noise_private_key.as_bytes()) {
+        Ok(pk) => match pk.try_into() {
+            Ok(pk) => pk,
+            Err(_) => {
+                return Err(Error::new(
+                    ErrorKind::Other,
+                    format!("noise private key length incorrect"),
+                ))
+            }
+        },
+        Err(e) => {
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!("Error decoding noise private key: {}", e),
+            ))
+        }
+    };
+
+    let adapter_keypar = NoiseKeypair::new(private_key);
 
     let noise_pk: [u8; 32] = match BASE64_STANDARD.decode(c.dock.noise_public_key.as_bytes()) {
         Ok(pk) => match pk.try_into() {
@@ -141,7 +209,7 @@ pub fn load_configuration(path: &str) -> Result<ConfigRecord, std::io::Error> {
         source: path.to_string(),
         host_or_ip: c.dock.host_or_ip,
         port: c.dock.port,
-        private_key,
+        adapter_noise_keypair: adapter_keypar,
         certificate: cert,
         root_ca,
         dock_noise_public_key: noise_pk,
@@ -183,4 +251,22 @@ impl ConfigRecord {
     pub fn get_dock_noise_public_key(&self) -> &[u8; 32] {
         &self.dock_noise_public_key
     }
+
+    pub fn get_certificate(&self) -> &X509 {
+        &self.certificate
+    }
+
+    pub fn get_root_ca(&self) -> &X509 {
+        &self.root_ca
+    }
+
+    pub fn get_crypto_particulars(&self) -> CryptoConfig {
+        CryptoConfig {
+            remote_noise_public_key: self.dock_noise_public_key,
+            local_noise_keypair: self.adapter_noise_keypair.clone(),
+            local_certificate: self.certificate.clone(),
+            root_ca: self.root_ca.clone(),
+        }
+    }
+
 }

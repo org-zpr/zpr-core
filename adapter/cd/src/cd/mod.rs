@@ -1,7 +1,7 @@
 mod command_server;
 pub use crate::cd::command_server::command_server;
 
-mod config;
+pub mod config;
 pub use crate::cd::config::Config;
 
 mod zpr;

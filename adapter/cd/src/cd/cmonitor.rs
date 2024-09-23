@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use tracing::info;
 
 pub use crate::cd::zpr::{ConfigState, Zpr};
+use crate::cd::config::CryptoConfig;
 
 pub use crate::zdp::client;
 
@@ -117,7 +118,7 @@ impl CMonitor {
 
         let zpr: Zpr;
         let addr_port: String;
-        let noise_key: [u8; 32];
+        let crypto: CryptoConfig;
         let old_cli: Option<ClientRec>;
         {
             let state = self.shared.state.lock().unwrap();
@@ -131,14 +132,14 @@ impl CMonitor {
                 }
                 Some(ap) => ap,
             };
-            noise_key = match zpr.copy_dock_noise_key(&configuration) {
+            crypto = match zpr.get_crypto_config(&configuration) {
                 None => {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
-                        "No connection string found",
+                        "No crypto config found",
                     ));
                 }
-                Some(k) => k,
+                Some(c) => c,
             };
             old_cli = state.cli.client.clone();
         }
@@ -182,7 +183,7 @@ impl CMonitor {
         };
 
         let handle: JoinHandle<io::Result<()>> = tokio::spawn(async move {
-            let cli = client::ZDPClient::new(&dock_addr, noise_key);
+            let cli = client::ZDPClient::new(&dock_addr, crypto);
             cli.run(passed_ctok).await // blocking, long running
         });
         // well hopefully that launched!
