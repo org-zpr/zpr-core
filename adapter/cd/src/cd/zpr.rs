@@ -3,7 +3,7 @@ use std::io::{Error, ErrorKind};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::cd::config::ConfigRecord;
+use crate::cd::config::{ConfigRecord, CryptoConfig};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigState {
@@ -134,6 +134,14 @@ impl Zpr {
         let (conf, _) = cfg.unwrap();
         let key = conf.get_dock_noise_public_key();
         Some(*key)
+    }
+
+    pub fn get_crypto_config(&self, name: &str) -> Option<CryptoConfig> {
+        let state = self.shared.state.lock().unwrap();
+        let cfg = state.configs.get(name);
+        cfg?;
+        let (conf, _) = cfg.unwrap();
+        Some(conf.get_crypto_particulars())
     }
 
     pub fn get_configuration_state(&self, name: &str) -> Option<ConfigState> {

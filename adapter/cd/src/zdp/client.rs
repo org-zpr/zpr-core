@@ -20,20 +20,22 @@ use ph::zdp::*;
 use bytes::BufMut;
 use zerocopy::FromBytes;
 
+use crate::cd::config::CryptoConfig;
+
 const ZPI_FULL_ENC: u8 = 200;
 const ZPI_TRANSIT_HMAC: u8 = 201;
 
 #[derive(Debug, Clone)]
 pub struct ZDPClient {
     addr: SocketAddr,
-    dock_noise_pub_key: [u8; 32],
+    crypto: CryptoConfig,
 }
 
 impl ZDPClient {
-    pub fn new(addr: &SocketAddr, dock_noise_key: [u8; 32]) -> ZDPClient {
+    pub fn new(addr: &SocketAddr, crypto: CryptoConfig) -> ZDPClient {
         ZDPClient {
             addr: addr.to_owned(),
-            dock_noise_pub_key: dock_noise_key,
+            crypto,
         }
     }
 
@@ -41,8 +43,8 @@ impl ZDPClient {
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
         let noise = match KmNoise::new(
             true,
-            Some(self.dock_noise_pub_key.into()),
-            None,
+            Some(self.crypto.remote_noise_public_key.into()),
+            Some(self.crypto.local_noise_keypair.clone().into()),
             ZPI_FULL_ENC,
             ZPI_TRANSIT_HMAC,
         ) {
