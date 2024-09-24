@@ -1,6 +1,6 @@
 use crate::assembly::Assembly;
 use crate::km::*;
-use crate::km_noise::KmNoise;
+use crate::km_noise::{KmNoise, NoiseKeypair};
 use crate::mgmt::requests;
 use crate::peer_table::KmHandle;
 use crate::zpr;
@@ -240,7 +240,7 @@ pub fn add_node_link(
     asm: &'static Assembly,
     link_id: zpr::LinkId,
     recv_zpis: ZPIPair,
-    local_noise_key: snow::Keypair,
+    local_noise_key: NoiseKeypair,
 ) -> Result<(), KmSetupError> {
     let noise = match KmNoise::new(
         false,
@@ -358,7 +358,6 @@ mod test {
     use crate::buffer_stack::BufferStack;
     use crate::config;
     use crate::km::KmLinkMsg;
-    use crate::km_noise;
     use crate::mgmt_processor_worker;
     use crate::peer_table;
     use base64::prelude::*;
@@ -376,11 +375,7 @@ mod test {
                 panic!("error decoding base64: {:?}", e);
             }
         };
-        let nk_public = km_noise::derive_public_key(&nk_private);
-        let node_kp = snow::Keypair {
-            private: nk_private.into(),
-            public: nk_public.into(),
-        };
+        let node_kp = NoiseKeypair::new(nk_private);
 
         let (km_sig_tx, km_sig_rx) = mpsc::channel(4);
         let (km_tx, mut km_rx) = mpsc::channel(4);
@@ -424,7 +419,7 @@ mod test {
                 }
 
                 // Adding a link starts a KM
-                add_adapter_link(asm, adapter_link_id, ZPIPair::new(1, 2), nk_public).unwrap();
+                add_adapter_link(asm, adapter_link_id, ZPIPair::new(1, 2), node_kp.public.clone()).unwrap();
 
                 yield_now().await;
 

@@ -39,9 +39,11 @@ use curve25519_dalek::montgomery::MontgomeryPoint;
 use openssl::rand::rand_bytes;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::fmt::{self, Display, Formatter};
 use std::time::{Duration, Instant};
 use tracing::error;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
+use base64::prelude::*;
 
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
@@ -69,7 +71,7 @@ pub struct KmNoise {
     state: KmSMState,
     initiate: bool,
     peer_pub_key: Option<Vec<u8>>, // required if initiator
-    local_keypair: snow::Keypair,
+    local_keypair: NoiseKeypair,
     hs_sent_t: Option<Instant>,
     hs_state: Option<snow::HandshakeState>,
     //t_state: Option<snow::TransportState>,
@@ -78,6 +80,77 @@ pub struct KmNoise {
     recv_zpis: ZPIPair,
     send_zpis: Option<ZPIPair>,
 }
+
+
+/// Holds a noise keypair.
+/// 
+/// Slightly more convenient than a [snow::Keypair] in our context as it implements
+/// `Display`, `Debug`, and `Clone`.  Can also easily be converted to/from
+/// a [snow::Keypair].  Makes assumption about the crypto algorithm in use.
+#[derive(Debug, Clone)]
+pub struct NoiseKeypair {
+    pub private: [u8; NOISE_KEY_LEN],
+    pub public: [u8; NOISE_KEY_LEN],
+}
+
+impl NoiseKeypair {
+    /// Create keypair from a private key.
+    pub fn new(private: [u8; NOISE_KEY_LEN]) -> Self {
+        NoiseKeypair { 
+            private, 
+            public: derive_public_key(&private),
+        }
+    }
+
+    /// Create an all zeros keypair (not a valid keypair).
+    pub fn new_zeroed() -> Self {
+        NoiseKeypair {
+            private: [0u8; NOISE_KEY_LEN],
+            public: [0u8; NOISE_KEY_LEN],
+        }
+    }
+
+    /// Generate a new, random keypair.
+    pub fn generate() -> Self {
+        let pat = PATTERN.parse().unwrap();
+        let skp = match snow::Builder::new(pat).generate_keypair() {
+            Ok(k) => k,
+            Err(e) => {
+                panic!("error generating keypair: {:?}", e);
+            }
+        };
+        skp.into()
+    }
+}
+
+impl Into<snow::Keypair> for NoiseKeypair {
+    fn into(self) -> snow::Keypair {
+        snow::Keypair {
+            private: self.private.into(),
+            public: self.public.into(),
+        }
+    }
+}
+
+impl From<snow::Keypair> for NoiseKeypair {
+    fn from(kp: snow::Keypair) -> NoiseKeypair {
+        let mut npk = NoiseKeypair::new_zeroed();
+        npk.private.copy_from_slice(&kp.private);
+        npk.public.copy_from_slice(&kp.public);
+        npk
+    }
+}
+
+impl Display for NoiseKeypair {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "NoiseKeypair (private: {}, public: {})", 
+            BASE64_STANDARD.encode(&self.private), 
+            BASE64_STANDARD.encode(&self.public))
+    }
+}
+
+
+
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
@@ -104,7 +177,7 @@ impl KmNoise {
     pub fn new(
         initiate: bool,
         peer_pub_key: Option<Vec<u8>>,
-        local_keypair: Option<snow::Keypair>,
+        local_keypair: Option<NoiseKeypair>,
         zpi_full_encr: u8,
         zpi_transmit_hmac: u8,
     ) -> Result<Self, KmError> {
@@ -120,11 +193,11 @@ impl KmNoise {
             tick_interval: Duration::from_millis(500),
         };
 
-        let kp: snow::Keypair;
+        let kp: NoiseKeypair;
         if let Some(kkp) = local_keypair {
             kp = kkp;
         } else {
-            kp = snow::Builder::new(PATTERN.parse()?).generate_keypair()?;
+            kp = NoiseKeypair::generate();
         }
         Ok(KmNoise {
             settings,
@@ -436,7 +509,6 @@ impl KeyManagerStateMachine for KmNoise {
 mod test {
     use super::*;
 
-    use base64::prelude::*;
     use tokio::sync::mpsc;
     use tokio::task::yield_now;
     use tokio::time::timeout;
@@ -446,13 +518,7 @@ mod test {
 
     #[test]
     fn test_noise_handshake_manually() {
-        let pat = PATTERN.parse().unwrap();
-        let node_kp = match snow::Builder::new(pat).generate_keypair() {
-            Ok(k) => k,
-            Err(e) => {
-                panic!("error generating keypair: {:?}", e);
-            }
-        };
+        let node_kp = NoiseKeypair::generate();
 
         let mut initiator = KmNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
         assert!(initiator.get_state() == KmSMState::Configuring);
@@ -580,12 +646,8 @@ mod test {
                 panic!("error decoding base64: {:?}", e);
             }
         };
-        let nk_public = derive_public_key(&nk_private);
-
-        let node_kp = snow::Keypair {
-            private: nk_private.into(),
-            public: nk_public.into(),
-        };
+        
+        let node_kp = NoiseKeypair::new(nk_private);
 
         let mut initiator = KmNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
         assert!(initiator.get_state() == KmSMState::Configuring);
@@ -675,13 +737,7 @@ mod test {
 
     #[tokio::test]
     async fn test_noise_handshake_via_km() {
-        let pat = PATTERN.parse().unwrap();
-        let node_kp = match snow::Builder::new(pat).generate_keypair() {
-            Ok(k) => k,
-            Err(e) => {
-                panic!("error generating keypair: {:?}", e);
-            }
-        };
+        let node_kp = NoiseKeypair::generate();
 
         let initiator = KmNoise::new(true, Some(node_kp.public.to_vec()), None, 1, 2).unwrap();
         let responder = KmNoise::new(false, None, Some(node_kp), 3, 4).unwrap();

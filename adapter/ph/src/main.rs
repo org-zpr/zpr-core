@@ -62,6 +62,7 @@ use counter::*;
 use counters_enum::*;
 use flow_control::FlowControl;
 use km::ZPIPair;
+use km_noise::NoiseKeypair;
 use km_multiplexor::KmState;
 use queues::*;
 use tun_ctl::TunCtl;
@@ -351,7 +352,7 @@ fn main() -> ExitCode {
             .unwrap()
             .try_into()
             .unwrap();
-        let dock_noise_public_key = km_noise::derive_public_key(&dock_noise_private_key);
+        let dock_noise_kp = NoiseKeypair::new(dock_noise_private_key);
 
         // Presence of peer2 means we are a node.
         if let Some(pa2) = peer_addr2 {
@@ -362,11 +363,7 @@ fn main() -> ExitCode {
             asm.peer_ids.lock().unwrap().push(peer_id2);
 
             if !disable_km {
-                let dock_keypair = snow::Keypair {
-                    private: dock_noise_private_key.to_vec(),
-                    public: dock_noise_public_key.to_vec(),
-                };
-                km_multiplexor::add_node_link(asm, peer_id2, ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 1, 2), dock_keypair)
+                km_multiplexor::add_node_link(asm, peer_id2, ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 1, 2), dock_noise_kp.clone())
                     .unwrap();
             }
         }
@@ -388,15 +385,11 @@ fn main() -> ExitCode {
                     asm,
                     peer_id,
                     ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
-                    dock_noise_public_key,
+                    dock_noise_kp.public.clone(),
                 )
                 .unwrap();
             } else {
-                let dock_keypair = snow::Keypair {
-                    private: dock_noise_private_key.to_vec(),
-                    public: dock_noise_public_key.to_vec(),
-                };
-                km_multiplexor::add_node_link(asm, peer_id, ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6), dock_keypair)
+                km_multiplexor::add_node_link(asm, peer_id, ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6), dock_noise_kp.clone())
                     .unwrap();
             }
         }
