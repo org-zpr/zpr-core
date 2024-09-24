@@ -1,4 +1,4 @@
-use ph::km_noise::derive_public_key;
+use ph::km_noise::NoiseKeypair;
 use serde::Deserialize;
 
 use openssl::pkey::Private;
@@ -8,7 +8,6 @@ use openssl::x509::X509;
 use base64::prelude::*;
 
 use std::fs;
-use std::fmt;
 use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read};
 use std::path::PathBuf;
@@ -58,36 +57,6 @@ pub struct CryptoConfig {
     pub root_ca: X509,
 }
 
-
-#[derive(Clone, Debug)]
-pub struct NoiseKeypair {
-    pub private: [u8; 32],
-    pub public: [u8; 32],
-}
-
-impl fmt::Display for NoiseKeypair {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "NoiseKeypair ( private: {}, public: {} )", BASE64_STANDARD.encode(&self.private), BASE64_STANDARD.encode(&self.public))
-    }
-}
-
-impl NoiseKeypair {
-    pub fn new(private: [u8; 32]) -> NoiseKeypair {
-        NoiseKeypair {
-            private,
-            public: derive_public_key(&private),
-        }
-    }
-}
-
-impl Into<snow::Keypair> for NoiseKeypair {
-    fn into(self) -> snow::Keypair {
-        snow::Keypair {
-            private: self.private.to_vec(),
-            public: self.public.to_vec(),
-        }
-    }
-}
 
 
 /// The ConfigRecord is a parsed and loaded configuration file.
