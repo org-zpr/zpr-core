@@ -242,10 +242,16 @@ impl PartialEq for KmTransportSA {
 // Our debug formatter omits the codec.
 impl fmt::Debug for KmTransportSA {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let cert_str = match &self.peer_cert {
+            Some(c) => {
+                format!("{:?}", c.subject_name())
+            }
+            None => "None".to_string(),
+        };
         write!(
             f,
-            "KMTransportSA {{ sa_id: {}, send_zpis: {}, recv_zpis: {}, send_hmac_key: {:02x?}, recv_hmac_key: {:02x?} }}",
-            self.sa_id, self.send_zpis, self.recv_zpis, self.send_hmac_key, self.recv_hmac_key
+            "KMTransportSA {{ sa_id: {}, send_zpis: {}, recv_zpis: {}, send_hmac_key: {:02x?}, recv_hmac_key: {:02x?}, peer_cert: {}}}",
+            self.sa_id, self.send_zpis, self.recv_zpis, self.send_hmac_key, self.recv_hmac_key, cert_str
         )
     }
 }
