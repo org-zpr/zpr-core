@@ -11,20 +11,15 @@
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
-
 use std::future::Future;
 use std::time::Duration;
-
 use std::fmt;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
-
+use openssl::x509::X509;
 use bytes::{BufMut, Bytes};
-
 use zerocopy::FromBytes;
-
 use tracing::{error, info, warn};
-
 use crate::config;
 use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
@@ -37,6 +32,7 @@ pub enum KmError {
     InvalidState,
     InvalidPacketType,
     HandshakeError,
+    CertExchangeError,
     NoHeadroom,
     ShortPacket,
     SaIdZero,
@@ -117,6 +113,9 @@ impl fmt::Display for KmError {
             }
             KmError::HandshakeError => {
                 write!(f, "HandshakeError")
+            }
+            KmError::CertExchangeError => {
+                write!(f, "CertExchangeError")
             }
             KmError::ConfigurationError => {
                 write!(f, "ConfigurationError")
@@ -225,6 +224,9 @@ pub struct KmTransportSA {
 
     /// This is a pointer to the encode/decode functions associated with the current SA.
     pub codec: Arc<dyn Codec>,
+
+    /// If we got (and validated) a certificate from our peer, it is stored here.
+    pub peer_cert: Option<X509>,
 }
 
 // Does not check the codec.
@@ -341,6 +343,7 @@ impl KeyManager {
             send_hmac_key: state.ts.send_hmac_key,
             recv_hmac_key: state.ts.recv_hmac_key,
             codec: state.ts.codec.clone(),
+            peer_cert: state.ts.peer_cert.clone(),
         })
     }
 
@@ -753,6 +756,7 @@ impl KmTransportSA {
         send_key: [u8; 32],
         recv_key: [u8; 32],
         codec: Arc<dyn Codec>,
+        peer_cert: Option<X509>,
     ) -> KmTransportSA {
         KmTransportSA {
             sa_id: 0,
@@ -761,6 +765,7 @@ impl KmTransportSA {
             send_hmac_key: send_key,
             recv_hmac_key: recv_key,
             codec,
+            peer_cert,
         }
     }
 
@@ -773,6 +778,7 @@ impl KmTransportSA {
             send_hmac_key: [0u8; 32],
             recv_hmac_key: [0u8; 32],
             codec,
+            peer_cert: None,
         }
     }
 
@@ -786,6 +792,7 @@ impl KmTransportSA {
             send_hmac_key: [0u8; 32],
             recv_hmac_key: [0u8; 32],
             codec: Arc::new(UnimplCodec::new()),
+            peer_cert: None,
         }
     }
 }
@@ -799,6 +806,7 @@ impl Default for KmTransportSA {
             send_hmac_key: [0u8; 32],
             recv_hmac_key: [0u8; 32],
             codec: Arc::new(UnimplCodec::new()),
+            peer_cert: None,
         }
     }
 }
@@ -838,7 +846,7 @@ pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KmR
     Ok(())
 }
 
-/// Helper function which is ZDP arare.  Does some error checking and leaves the ZPI in place.
+/// Helper function which is ZDP aware.  Does some error checking and leaves the ZPI in place.
 #[allow(dead_code)]
 pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KmResult<()> {
     if message.body().len() < 1 {

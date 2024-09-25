@@ -18,18 +18,21 @@
 //!
 
 use openssl::x509::X509;
+use openssl::pkey::PKey;
 use std::fs;
+use std::fmt;
 use std::path::Path;
 use tracing::error;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
+
+use crate::km_noise::NOISE_KEY_LEN;
 
 const PEM_BEGIN_CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END_CERTIFICATE: &str = "-----END CERTIFICATE-----";
 
 #[derive(Debug)]
 pub enum CertExchangeError {
-    CertificateError,
     CertificateFormatError,
     KeyError,
     CertificateParseError,
@@ -40,11 +43,23 @@ pub enum CertExchangeError {
     KeyMismatchError,
 }
 
-#[derive(Debug)]
+
 pub enum ParseError {
     PEMCertNotFound,
     PEMFormatError,
+    KeyError,
     IOError(std::io::Error),
+}
+
+impl fmt::Debug for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ParseError::PEMCertNotFound => write!(f, "PEMCertNotFound"),
+            ParseError::PEMFormatError => write!(f, "PEMFormatError"),
+            ParseError::KeyError => write!(f, "KeyError"),
+            ParseError::IOError(e) => write!(f, "IO Error: {}", e),
+        }
+    }
 }
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
@@ -82,6 +97,7 @@ impl KmCertExchange {
     }
 
     /// Like [KmCertExchange::new] but takes the contents of the various PEM files.
+    #[allow(dead_code)]
     pub fn new_from_pem(cert_pem: &str, authority_cert_pem: &str) -> Result<Self, ParseError> {
         let cert = match X509::from_pem(cert_pem.as_bytes()) {
             Ok(c) => c,
@@ -234,7 +250,7 @@ fn extract_cert_pem_data(textdata: &str) -> Result<String, ParseError> {
 }
 
 /// Load a certificate from a file.
-fn load_cert(path: &Path) -> Result<X509, ParseError> {
+pub fn load_cert(path: &Path) -> Result<X509, ParseError> {
     let contents = match fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => return Err(ParseError::IOError(e)),
@@ -248,6 +264,62 @@ fn load_cert(path: &Path) -> Result<X509, ParseError> {
         }
     }
 }
+
+/// Load a pruvate X22519 key from a PEM file
+pub fn load_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
+    let contents = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => return Err(ParseError::IOError(e)),
+    };
+
+    let pk = match PKey::private_key_from_pem(&contents.as_bytes()) {
+        Ok(k) => k,
+        Err(e) => {
+            error!("error reading key from PEM data: {}", e);
+            return Err(ParseError::PEMFormatError);
+        }
+    };
+
+    match pk.raw_private_key() {
+        Ok(k) => {
+            let mut key = [0u8; NOISE_KEY_LEN];
+            key.copy_from_slice(&k);
+            Ok(key)
+        }
+        Err(e) => {
+            error!("error extracting raw key: {}", e);
+            Err(ParseError::KeyError)
+        }
+    }
+}
+
+pub fn load_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
+    let contents = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => return Err(ParseError::IOError(e)),
+    };
+
+    let pk = match PKey::public_key_from_pem(&contents.as_bytes()) {
+        Ok(k) => k,
+        Err(e) => {
+            error!("error reading key from PEM data: {}", e);
+            return Err(ParseError::PEMFormatError);
+        }
+    };
+
+    match pk.raw_public_key() {
+        Ok(k) => {
+            let mut key = [0u8; NOISE_KEY_LEN];
+            key.copy_from_slice(&k);
+            Ok(key)
+        }
+        Err(e) => {
+            error!("error extracting raw key: {}", e);
+            Err(ParseError::KeyError)
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod test {

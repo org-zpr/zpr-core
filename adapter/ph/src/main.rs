@@ -1,11 +1,12 @@
 #![cfg_attr(feature = "ci", deny(warnings))]
 
-use base64::prelude::*;
 use cbpf_rs::bpf_code;
 use clap::Parser;
 use enum_map::{enum_map, EnumMap};
+use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
+use std::path::Path;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::process::ExitCode;
@@ -36,6 +37,7 @@ mod fastpath;
 mod flow_control;
 mod km;
 mod km_multiplexor;
+mod km_cert_exchange;
 mod km_noise;
 mod mgmt;
 mod mgmt_processor_worker;
@@ -86,13 +88,16 @@ struct CmdLine {
     peer_addr2: Option<SocketAddr>,
 
     #[arg(long)]
-    ca_file: String,
+    ca_file: Option<String>,
 
     #[arg(long)]
-    certificate_file: String,
+    certificate_file: Option<String>, // noise public key signed by authority
 
     #[arg(long)]
-    private_key_file: String,
+    private_key_file: Option<String>, // noise private key
+
+    #[arg(long)]
+    node_public_key_file: Option<String>, // noise public key for node (only specified when starting an adapter)
 
     #[arg(long)]
     tun_if: Option<String>,
@@ -131,10 +136,22 @@ fn main() -> ExitCode {
     let self_addr = cmd_line.self_addr;
     let peer_addr1 = cmd_line.peer_addr1;
     let peer_addr2 = cmd_line.peer_addr2;
-    let _ca_file = cmd_line.ca_file;
-    let _cert_file = cmd_line.certificate_file;
-    let _priv_key_file = cmd_line.private_key_file;
+    let ca_file = cmd_line.ca_file;
+    let cert_file = cmd_line.certificate_file;
+    let priv_key_file = cmd_line.private_key_file;
+    let node_pubkey_file = cmd_line.node_public_key_file;
     let disable_km = cmd_line.disable_km;
+    if !disable_km {
+        if ca_file.is_none() {
+            panic!("Authority certificate file must be specified when key management is enabled");
+        }
+        if cert_file.is_none() {
+            panic!("Certificate file must be specified when key management is enabled");
+        }
+        if priv_key_file.is_none() {
+            panic!("Private key file must be specified when key management is enabled");
+        }
+    }
     let allow_insecure_zpi_zero = if disable_km {
         true
     } else {
@@ -178,32 +195,13 @@ fn main() -> ExitCode {
     let (km_tx, km_rx) = mpsc::channel(km_message_queue_size);
     let km_state = KmState::new(km_tx, km_sig_tx);
 
-    /*let mut ssl_context_builder = ssl::SslContext::builder(ssl::SslMethod::dtls()).unwrap();
-    ssl_context_builder.set_options(
-        ssl::SslOptions::NO_COMPRESSION
-            | (ssl::SslOptions::NO_SSL_MASK & !ssl::SslOptions::NO_DTLSV1_2),
-    );
-
-    ssl_context_builder.set_ca_file(&ca_file).unwrap();
-    ssl_context_builder.set_verify(ssl::SslVerifyMode::PEER);
-    ssl_context_builder
-        .set_certificate_file(cert_file, ssl::SslFiletype::PEM)
-        .unwrap();
-    ssl_context_builder
-        .set_private_key_file(priv_key_file, ssl::SslFiletype::PEM)
-        .unwrap();
-
-    let mut open_ca = File::open(ca_file).unwrap();
-    let mut buffer = Vec::new();
-    open_ca.read_to_end(&mut buffer).unwrap();
-    ssl_context_builder
-        .add_client_ca(&X509::from_pem(&buffer).unwrap())
-        .unwrap();*/
-
     if peer_addr2.is_some() {
         ph_mode = PhMode::Node;
     } else {
         ph_mode = PhMode::Adapter;
+        if !disable_km && node_pubkey_file.is_none() {
+            panic!("Node public key file must be specified when starting an adapter");            
+        }
     }
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -347,12 +345,27 @@ fn main() -> ExitCode {
     tokio::task::LocalSet::new().block_on(&runtime, async {
         // TEMP HACK to statically install peers
 
-        let dock_noise_private_key: [u8; 32] = BASE64_STANDARD
-            .decode("AB2eP6zV7ve0A4eQgNVNXlAM2q0rYerCPXFMl+/ntUw=")
-            .unwrap()
-            .try_into()
-            .unwrap();
-        let dock_noise_kp = NoiseKeypair::new(dock_noise_private_key);
+        // If we are running as adapter, we only have the node public key.
+        // If we are running as node then we have a private key (and can derive public).
+        let dock_noise_kp: NoiseKeypair;
+        let adapter_noise_kp: NoiseKeypair;
+        if !disable_km {
+            let private_key = km_cert_exchange::load_private_key(&Path::new(&priv_key_file.unwrap())).unwrap();            
+            if ph_mode == PhMode::Node {
+                dock_noise_kp = NoiseKeypair::new(private_key);
+                adapter_noise_kp = NoiseKeypair::new_zeroed(); // not used
+            } else {
+                let public_key = km_cert_exchange::load_public_key(&Path::new(&node_pubkey_file.unwrap())).unwrap();
+                dock_noise_kp = NoiseKeypair {
+                    public: public_key,
+                    private: [0u8; 32], // unknown
+                };                
+                adapter_noise_kp = NoiseKeypair::new(private_key);
+            }
+        } else {
+            dock_noise_kp = NoiseKeypair::new_zeroed(); // not used
+            adapter_noise_kp = NoiseKeypair::new_zeroed(); // not used            
+        }
 
         // Presence of peer2 means we are a node.
         if let Some(pa2) = peer_addr2 {
@@ -363,8 +376,18 @@ fn main() -> ExitCode {
             asm.peer_ids.lock().unwrap().push(peer_id2);
 
             if !disable_km {
-                km_multiplexor::add_node_link(asm, peer_id2, ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 1, 2), dock_noise_kp.clone())
-                    .unwrap();
+                let certx = KmCertExchange::new_from_paths(
+                    &Path::new(&cert_file.as_ref().unwrap()), 
+                    &Path::new(&ca_file.as_ref().unwrap())
+                    ).unwrap();
+                km_multiplexor::add_node_link(
+                    asm, 
+                    peer_id2,
+                     ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 1, 2), 
+                    dock_noise_kp.clone(), 
+                    certx
+                )
+                .unwrap();
             }
         }
 
@@ -380,17 +403,29 @@ fn main() -> ExitCode {
 
         asm.peer_ids.lock().unwrap().push(peer_id);
         if !disable_km {
-            if ph_mode == PhMode::Adapter {
+            let certx = KmCertExchange::new_from_paths(
+                &Path::new(&cert_file.unwrap()),
+                &Path::new(&ca_file.unwrap())
+            ).unwrap();
+            if ph_mode == PhMode::Adapter {                
                 km_multiplexor::add_adapter_link(
                     asm,
                     peer_id,
                     ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
+                    adapter_noise_kp.clone(),
                     dock_noise_kp.public.clone(),
+                    certx
                 )
                 .unwrap();
             } else {
-                km_multiplexor::add_node_link(asm, peer_id, ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6), dock_noise_kp.clone())
-                    .unwrap();
+                km_multiplexor::add_node_link(
+                    asm, 
+                    peer_id, 
+                    ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6), 
+                    dock_noise_kp.clone(),
+                    certx
+                )
+                .unwrap();
             }
         }
         // END HACK
