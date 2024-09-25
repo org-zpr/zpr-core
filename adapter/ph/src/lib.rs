@@ -36,3 +36,6 @@ pub mod tun_ctl;
 pub mod zdp;
 pub mod zdp_ll;
 pub mod zpr;
+
+#[cfg(test)]
+mod km_testdata;

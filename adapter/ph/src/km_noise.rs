@@ -35,17 +35,17 @@
 use crate::km::*;
 use crate::km_cert_exchange::KmCertExchange;
 use crate::zpr;
-use bytes::{Bytes, BytesMut, BufMut};
+use base64::prelude::*;
+use bytes::{BufMut, Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use openssl::rand::rand_bytes;
 use openssl::x509::X509;
+use std::fmt::{self, Display, Formatter};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-use std::fmt::{self, Display, Formatter};
 use std::time::{Duration, Instant};
-use tracing::{warn, error};
+use tracing::{error, warn};
 use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
-use base64::prelude::*;
 
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
@@ -87,9 +87,8 @@ pub struct KmNoise {
     peer_cert: Option<X509>, // result of key exchange
 }
 
-
 /// Holds a noise keypair.
-/// 
+///
 /// Slightly more convenient than a [snow::Keypair] in our context as it implements
 /// `Display`, `Debug`, and `Clone`.  Can also easily be converted to/from
 /// a [snow::Keypair].  Makes assumption about the crypto algorithm in use.
@@ -102,8 +101,8 @@ pub struct NoiseKeypair {
 impl NoiseKeypair {
     /// Create keypair from a private key.
     pub fn new(private: [u8; NOISE_KEY_LEN]) -> Self {
-        NoiseKeypair { 
-            private, 
+        NoiseKeypair {
+            private,
             public: derive_public_key(&private),
         }
     }
@@ -149,14 +148,14 @@ impl From<snow::Keypair> for NoiseKeypair {
 
 impl Display for NoiseKeypair {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "NoiseKeypair (private: {}, public: {})", 
-            BASE64_STANDARD.encode(&self.private), 
-            BASE64_STANDARD.encode(&self.public))
+        write!(
+            f,
+            "NoiseKeypair (private: {}, public: {})",
+            BASE64_STANDARD.encode(&self.private),
+            BASE64_STANDARD.encode(&self.public)
+        )
     }
 }
-
-
-
 
 #[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
 #[repr(packed)]
@@ -217,7 +216,7 @@ impl KmNoise {
             send_hmac_key: None,                // we get this during handshake
             recv_zpis: zpis,
             send_zpis: None,
-            certx, 
+            certx,
             peer_cert: None,
         })
     }
@@ -255,7 +254,6 @@ impl KmNoise {
     }
 
     fn parse_km_payload(&mut self, payload: &[u8], peer_public_key: &[u8]) -> KmResult<()> {
-
         if payload.len() < std::mem::size_of::<KeyMsg>() {
             error!("noise: handshake payload is too short: {}", payload.len());
             return Err(KmError::HandshakeError);
@@ -274,10 +272,16 @@ impl KmNoise {
         self.send_hmac_key = Some(km.hmac_key);
 
         // The key exchange payload follows the KeyMsg.'
-        let peer_cert = match self.certx.process_payload(&payload[std::mem::size_of::<KeyMsg>()..], peer_public_key) {
+        let peer_cert = match self
+            .certx
+            .process_payload(&payload[std::mem::size_of::<KeyMsg>()..], peer_public_key)
+        {
             Ok(c) => c,
             Err(e) => {
-                error!("noise: error processing certificate exchange payload: {:?}", e);
+                error!(
+                    "noise: error processing certificate exchange payload: {:?}",
+                    e
+                );
                 return Err(KmError::CertExchangeError);
             }
         };
@@ -403,7 +407,7 @@ impl KeyManagerStateMachine for KmNoise {
                     return Err(KmError::HandshakeError);
                 }
             };
-            println!("XXX got an HS message OK!");            
+            println!("XXX got an HS message OK!");
             self.hs_state = Some(initiator);
             self.hs_sent_t = Some(Instant::now());
             Ok(Some(hs_msg))
@@ -463,7 +467,7 @@ impl KeyManagerStateMachine for KmNoise {
                         return Err(KmError::HandshakeError);
                     }
                 }
-            },
+            }
             Err(e) => {
                 error!("noise: error handling handhsake message: {:?}", e);
                 self.state = KmSMState::Error;
@@ -560,83 +564,8 @@ mod test {
     use tokio_util::sync::CancellationToken;
 
     use crate::km;
+    use crate::km_testdata::test::*;
 
-
-    const CA_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
-MIIDijCCAnICCQDvR2uxX2eKJTANBgkqhkiG9w0BAQsFADCBhjELMAkGA1UEBhMC
-VVMxCzAJBgNVBAgMAktZMQ4wDAYDVQQHDAVWaWxsZTEQMA4GA1UECgwHc3VyZW5l
-dDEWMBQGA1UECwwNYXV0aG9yaXphdGlvbjEXMBUGA1UEAwwOYXV0aDAuaW50ZXJu
-YWwxFzAVBgkqhkiG9w0BCQEWCGF1dGhAZm9vMB4XDTIwMDIyODE5MjMyN1oXDTI1
-MDIyNjE5MjMyN1owgYYxCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJLWTEOMAwGA1UE
-BwwFVmlsbGUxEDAOBgNVBAoMB3N1cmVuZXQxFjAUBgNVBAsMDWF1dGhvcml6YXRp
-b24xFzAVBgNVBAMMDmF1dGgwLmludGVybmFsMRcwFQYJKoZIhvcNAQkBFghhdXRo
-QGZvbzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMCxt6RgI11Q3aZa
-DTUp6Q+5uMB+fqhhuaPoeqEZYujgLbeJrldMQ2aIHlqntC1y4tPSCCYriVRS5j6V
-cqgtu3saFsA/8MwAvaeY5LmD8wE7fl4b/MGst86FVyD3TLlTt5FDIkhJK+jpgKf1
-4NjGDBYSiYVuZ54Kxg8HQXPGXx5txjTxmcBY44b5g5ARxOVu/u/ut0ZeS3z2Uf7K
-q4cZ2/C+xxpYo+NMgg3sfuUDfMDAhLymfmWGa5SEj8XCUoYZv3bJLUDjMLtB06yo
-alxQowZovSpUdJOjb0e+B8FvaziwRVohQ4Y1hEpx9X/idvwgHxzGzR9mSax+iz+p
-OUbw3TMCAwEAATANBgkqhkiG9w0BAQsFAAOCAQEAChfVONalJLlRCgbqC9gxjhYq
-3fA3E4r9yVVlWQmkx8XTK4Z2NWqSdE5PmaYQdvdnzMAsxGHjxgaN/KH/wctEL+qK
-2C7bnaevDBrHTtrVM6UUZfec5eerf7UA1MDKq0BqsaUamhzqxygh9Ei2mrG36+LK
-my2Mk/tFcvSOS8tB8Q+gAGDKX/4DshR3aEkIDzqpdmwK8ffxD9sJp8HewjNtO3Pv
-nsdyXmJ65z95DU5GIsshL7og94933hCN/b86R9Zq6/RAoAM/87TJFnxCywG39Zr5
-GRAzgLWJLdkNEos8XB42MCS7tn/jefKDGquuI625jeARa2eCoJT9yk95pQbuAQ==
------END CERTIFICATE-----
-"#;
-
-    // adapter private key
-    const ADAPTER_NOISE_KEY: &str = "ICP2umiV9w/+UdjlaChamy62cBN8BuvVDTbSoeLDQlY=";
-        
-    // signed cert with adapter noise public key inside
-    const ADAPTER_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
-MIIDCTCCAfGgAwIBAgIUWkavw7sjL6ozyx+qGjrbT1wBz40wDQYJKoZIhvcNAQEL
-BQAwgYYxCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJLWTEOMAwGA1UEBwwFVmlsbGUx
-EDAOBgNVBAoMB3N1cmVuZXQxFjAUBgNVBAsMDWF1dGhvcml6YXRpb24xFzAVBgNV
-BAMMDmF1dGgwLmludGVybmFsMRcwFQYJKoZIhvcNAQkBFghhdXRoQGZvbzAeFw0y
-NDA5MjAxNDU0MTdaFw0yNTA3MTcxNDU0MTdaMBYxFDASBgNVBAMMC2FkYXRwZXIu
-Zm9vMCowBQYDK2VuAyEAqKvsuYwjYHnc0quenQkf1yT+4v9yvNh3YDNiDpvZkQ+j
-gdcwgdQwCwYDVR0PBAQDAgMIMB0GA1UdDgQWBBQfedYns4Xqx51VngzPQn7d+abZ
-pDCBpQYDVR0jBIGdMIGaoYGMpIGJMIGGMQswCQYDVQQGEwJVUzELMAkGA1UECAwC
-S1kxDjAMBgNVBAcMBVZpbGxlMRAwDgYDVQQKDAdzdXJlbmV0MRYwFAYDVQQLDA1h
-dXRob3JpemF0aW9uMRcwFQYDVQQDDA5hdXRoMC5pbnRlcm5hbDEXMBUGCSqGSIb3
-DQEJARYIYXV0aEBmb2+CCQDvR2uxX2eKJTANBgkqhkiG9w0BAQsFAAOCAQEAtQCp
-8F03nB5xje/yGbt8OKAfrTv4pXJgYr6OYhD/kkc9Q5KtwdXxXwUGrZ4gA/Uhg6Cw
-im7y1N6UHjIv+ZTRjGOLlI6hvOz6rsCquq0CMWzOMgphf8WCxwvFlLlP4nD8Z7Rb
-qX06qsVy5ZihoOY3jWIFd8o8NS/n/vcVcCWdQ0A5y2Qab4vS9DpanvzkHHLByt/i
-hLUjYXBhQlHoxCoJBrWZFdxzebl6LIBoGlhBLjv/8JXIkj0vxS9r16RV1/cafgkr
-YdmdJcbVt762z8y6FONk3Ig7z4xWg1VKWixh2CLXtqzZbyD7vBbpe+Mr5MiFyGhk
-MrOCC7A2J3IpFxNcjg==
------END CERTIFICATE-----
-"#;
-
-    // node private key
-    #[allow(dead_code)]
-    const NODE_NOISE_KEY: &str = "QMBJE5qUTPv9klauHFNY/XNjWLJ+oWkzGRmDKmnKYkg=";
-
-    // signed cert with node noise public key inside
-    const NODE_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
-MIIDBjCCAe6gAwIBAgIUVWbapktKdShwnGJPQ95JufVu/CIwDQYJKoZIhvcNAQEL
-BQAwgYYxCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJLWTEOMAwGA1UEBwwFVmlsbGUx
-EDAOBgNVBAoMB3N1cmVuZXQxFjAUBgNVBAsMDWF1dGhvcml6YXRpb24xFzAVBgNV
-BAMMDmF1dGgwLmludGVybmFsMRcwFQYJKoZIhvcNAQkBFghhdXRoQGZvbzAeFw0y
-NDA5MjAxNDU3MTVaFw0yNTA3MTcxNDU3MTVaMBMxETAPBgNVBAMMCG5vZGUuZm9v
-MCowBQYDK2VuAyEAaWeYgl7LDyt9fUr6JcM0/8oUIDzosI1rJqx3Ni9eNmyjgdcw
-gdQwCwYDVR0PBAQDAgMIMB0GA1UdDgQWBBSGKEJ+62uAKTbov8lkdwKJ5lVaIzCB
-pQYDVR0jBIGdMIGaoYGMpIGJMIGGMQswCQYDVQQGEwJVUzELMAkGA1UECAwCS1kx
-DjAMBgNVBAcMBVZpbGxlMRAwDgYDVQQKDAdzdXJlbmV0MRYwFAYDVQQLDA1hdXRo
-b3JpemF0aW9uMRcwFQYDVQQDDA5hdXRoMC5pbnRlcm5hbDEXMBUGCSqGSIb3DQEJ
-ARYIYXV0aEBmb2+CCQDvR2uxX2eKJTANBgkqhkiG9w0BAQsFAAOCAQEAk4+AO6tL
-fiQPiZVF8PUE1vV2SJP8Rtz2Wij2ak5mdfofejsWrYMkdyp9/hXaFC0N/GEMJbW7
-v+8qTNsYiMRXehLYDGQfWkPV7qUMAJ5/eU/Wk0oxu1Buv2NLXoDUERMTfMcntSFz
-8PKizVLuFYrT7JEtrl7CYwZqarW22mlkIafTmxrLW2qnwO3gPWB3SYtbpZV5LaUs
-z0FTkzHeWMtDPgUMU6sgXUEHZNyAxOLJgdGg3olYhF0uQNT5LdegfQafANYEQpnu
-/l2BW2DoIhyiVwKfGPYNJ8X94ZkShzlftXD4raIL0/ZNRALVbqj6j8PWxuCDLbRN
-JjLI9OaLcE83mA==
------END CERTIFICATE-----
-"#;
-
-    
     #[test]
     fn test_noise_handshake_manually_1() {
         let node_kp = NoiseKeypair::new(
@@ -659,23 +588,26 @@ JjLI9OaLcE83mA==
         );
 
         let mut initiator = KmNoise::new(
-            true, 
-            Some(node_kp.public.to_vec()), 
-            Some(initiator_keypair), 
-            ZPIPair::new(1,2),
+            true,
+            Some(node_kp.public.to_vec()),
+            Some(initiator_keypair),
+            ZPIPair::new(1, 2),
             initiator_exchanger,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(initiator.get_state() == KmSMState::Configuring);
 
-        let responder_exchanger = KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
+        let responder_exchanger =
+            KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
 
         let mut responder = KmNoise::new(
-            false, 
-            None, 
-            Some(node_kp), 
+            false,
+            None,
+            Some(node_kp),
             ZPIPair::new(3, 4),
             responder_exchanger,
-        ).unwrap();
+        )
+        .unwrap();
         assert!(responder.get_state() == KmSMState::Configuring);
 
         let handshake_msg_0 = match initiator.reset() {
@@ -818,7 +750,6 @@ JjLI9OaLcE83mA==
     // Just make sure that our b64 keys work with the code.
     #[test]
     fn test_noise_handshake_manually_static_node_key() {
-
         let node_kp = NoiseKeypair::new(
             BASE64_STANDARD
                 .decode(NODE_NOISE_KEY)
@@ -836,25 +767,27 @@ JjLI9OaLcE83mA==
 
         let initiator_exchanger =
             KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA).unwrap();
-        let responder_exchanger = 
+        let responder_exchanger =
             KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
 
         let mut initiator = KmNoise::new(
             true,
-             Some(node_kp.public.to_vec()),
-              Some(adapter_kp),
-               ZPIPair::new(1, 2),
-                initiator_exchanger,
-            ).unwrap();
+            Some(node_kp.public.to_vec()),
+            Some(adapter_kp),
+            ZPIPair::new(1, 2),
+            initiator_exchanger,
+        )
+        .unwrap();
         assert!(initiator.get_state() == KmSMState::Configuring);
 
         let mut responder = KmNoise::new(
             false,
-             None,
-              Some(node_kp),
-              ZPIPair::new(3, 4),
-                responder_exchanger,
-            ).unwrap();
+            None,
+            Some(node_kp),
+            ZPIPair::new(3, 4),
+            responder_exchanger,
+        )
+        .unwrap();
         assert!(responder.get_state() == KmSMState::Configuring);
 
         let handshake_msg_0 = match initiator.reset() {
@@ -956,25 +889,26 @@ JjLI9OaLcE83mA==
 
         let initiator_exchanger =
             KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA).unwrap();
-        let responder_exchanger = 
+        let responder_exchanger =
             KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
 
-
         let initiator = KmNoise::new(
-            true, 
-            Some(node_kp.public.to_vec()),             
+            true,
+            Some(node_kp.public.to_vec()),
             Some(adapter_kp),
             ZPIPair::new(1, 2),
             initiator_exchanger,
-        ).unwrap();
-        
+        )
+        .unwrap();
+
         let responder = KmNoise::new(
-            false, 
-            None, 
-            Some(node_kp), 
+            false,
+            None,
+            Some(node_kp),
             ZPIPair::new(3, 4),
             responder_exchanger,
-        ).unwrap();
+        )
+        .unwrap();
 
         let adapter = km::KeyManager::new(1, Box::new(initiator));
         let node = km::KeyManager::new(1, Box::new(responder));

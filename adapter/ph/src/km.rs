@@ -8,22 +8,22 @@
 //! of a [KeyManagerStateMachine] which does the actual work of creating and
 //! parsing key management ZDP messages.
 
-use tokio::sync::mpsc;
-use tokio::time;
-use tokio_util::sync::CancellationToken;
-use std::future::Future;
-use std::time::Duration;
-use std::fmt;
-use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
-use openssl::x509::X509;
-use bytes::{BufMut, Bytes};
-use zerocopy::FromBytes;
-use tracing::{error, info, warn};
 use crate::config;
 use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
 use crate::zpr;
+use bytes::{BufMut, Bytes};
+use openssl::x509::X509;
+use std::fmt;
+use std::fmt::Debug;
+use std::future::Future;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio::time;
+use tokio_util::sync::CancellationToken;
+use tracing::{error, info, warn};
+use zerocopy::FromBytes;
 
 #[derive(Debug)]
 #[allow(dead_code)]

@@ -6,9 +6,9 @@ use enum_map::{enum_map, EnumMap};
 use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
-use std::path::Path;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::process::ExitCode;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
@@ -36,8 +36,8 @@ mod dock_tables;
 mod fastpath;
 mod flow_control;
 mod km;
-mod km_multiplexor;
 mod km_cert_exchange;
+mod km_multiplexor;
 mod km_noise;
 mod mgmt;
 mod mgmt_processor_worker;
@@ -57,6 +57,9 @@ mod zdp;
 mod zdp_ll;
 mod zpr;
 
+#[cfg(test)]
+mod km_testdata;
+
 use assembly::{Assembly, PhFlags, PhMode};
 use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
@@ -64,8 +67,8 @@ use counter::*;
 use counters_enum::*;
 use flow_control::FlowControl;
 use km::ZPIPair;
-use km_noise::NoiseKeypair;
 use km_multiplexor::KmState;
+use km_noise::NoiseKeypair;
 use queues::*;
 use tun_ctl::TunCtl;
 
@@ -200,7 +203,7 @@ fn main() -> ExitCode {
     } else {
         ph_mode = PhMode::Adapter;
         if !disable_km && node_pubkey_file.is_none() {
-            panic!("Node public key file must be specified when starting an adapter");            
+            panic!("Node public key file must be specified when starting an adapter");
         }
     }
 
@@ -350,7 +353,7 @@ fn main() -> ExitCode {
         let dock_noise_kp: NoiseKeypair;
         let adapter_noise_kp: NoiseKeypair;
         if !disable_km {
-            let private_key = km_cert_exchange::load_private_key(&Path::new(&priv_key_file.unwrap())).unwrap();            
+            let private_key = km_cert_exchange::load_private_key(&Path::new(&priv_key_file.unwrap())).unwrap();
             if ph_mode == PhMode::Node {
                 dock_noise_kp = NoiseKeypair::new(private_key);
                 adapter_noise_kp = NoiseKeypair::new_zeroed(); // not used
@@ -359,12 +362,12 @@ fn main() -> ExitCode {
                 dock_noise_kp = NoiseKeypair {
                     public: public_key,
                     private: [0u8; 32], // unknown
-                };                
+                };
                 adapter_noise_kp = NoiseKeypair::new(private_key);
             }
         } else {
             dock_noise_kp = NoiseKeypair::new_zeroed(); // not used
-            adapter_noise_kp = NoiseKeypair::new_zeroed(); // not used            
+            adapter_noise_kp = NoiseKeypair::new_zeroed(); // not used
         }
 
         // Presence of peer2 means we are a node.
@@ -377,14 +380,14 @@ fn main() -> ExitCode {
 
             if !disable_km {
                 let certx = KmCertExchange::new_from_paths(
-                    &Path::new(&cert_file.as_ref().unwrap()), 
+                    &Path::new(&cert_file.as_ref().unwrap()),
                     &Path::new(&ca_file.as_ref().unwrap())
                     ).unwrap();
                 km_multiplexor::add_node_link(
-                    asm, 
+                    asm,
                     peer_id2,
-                     ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 1, 2), 
-                    dock_noise_kp.clone(), 
+                     ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 1, 2),
+                    dock_noise_kp.clone(),
                     certx
                 )
                 .unwrap();
@@ -407,7 +410,7 @@ fn main() -> ExitCode {
                 &Path::new(&cert_file.unwrap()),
                 &Path::new(&ca_file.unwrap())
             ).unwrap();
-            if ph_mode == PhMode::Adapter {                
+            if ph_mode == PhMode::Adapter {
                 km_multiplexor::add_adapter_link(
                     asm,
                     peer_id,
@@ -419,9 +422,9 @@ fn main() -> ExitCode {
                 .unwrap();
             } else {
                 km_multiplexor::add_node_link(
-                    asm, 
-                    peer_id, 
-                    ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6), 
+                    asm,
+                    peer_id,
+                    ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
                     dock_noise_kp.clone(),
                     certx
                 )

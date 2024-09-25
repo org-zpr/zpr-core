@@ -12,7 +12,6 @@ use tokio::{sync::mpsc, time};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
-
 /// How often the signal monitor worker checks the error conditions
 /// on the KeyManager state machines.  Indirectly, this controls how
 /// quickly the KeyManager state machines will restart the handshake
@@ -213,9 +212,9 @@ pub fn add_adapter_link(
     asm: &'static Assembly,
     link_id: zpr::LinkId,
     recv_zpis: ZPIPair,
-    local_noise_key: NoiseKeypair,  
+    local_noise_key: NoiseKeypair,
     peer_noise_key: [u8; 32],
-    certx: KmCertExchange
+    certx: KmCertExchange,
 ) -> Result<(), KmSetupError> {
     let noise = match KmNoise::new(
         true,
@@ -247,13 +246,7 @@ pub fn add_node_link(
     local_noise_key: NoiseKeypair,
     certx: KmCertExchange,
 ) -> Result<(), KmSetupError> {
-    let noise = match KmNoise::new(
-        false,
-        None,
-        Some(local_noise_key),
-        recv_zpis,
-        certx
-    ) {
+    let noise = match KmNoise::new(false, None, Some(local_noise_key), recv_zpis, certx) {
         Ok(n) => n,
         Err(e) => return Err(KmSetupError::InitializationError(e)),
     };
@@ -363,6 +356,7 @@ mod test {
     use crate::buffer_stack::BufferStack;
     use crate::config;
     use crate::km::KmLinkMsg;
+    use crate::km_testdata::test::*;
     use crate::mgmt_processor_worker;
     use crate::peer_table;
     use base64::prelude::*;
@@ -370,82 +364,6 @@ mod test {
     use std::time::Duration;
     use tokio::task::{self, yield_now};
     use tokio::time::timeout;
-
-    const CA_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
-MIIDijCCAnICCQDvR2uxX2eKJTANBgkqhkiG9w0BAQsFADCBhjELMAkGA1UEBhMC
-VVMxCzAJBgNVBAgMAktZMQ4wDAYDVQQHDAVWaWxsZTEQMA4GA1UECgwHc3VyZW5l
-dDEWMBQGA1UECwwNYXV0aG9yaXphdGlvbjEXMBUGA1UEAwwOYXV0aDAuaW50ZXJu
-YWwxFzAVBgkqhkiG9w0BCQEWCGF1dGhAZm9vMB4XDTIwMDIyODE5MjMyN1oXDTI1
-MDIyNjE5MjMyN1owgYYxCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJLWTEOMAwGA1UE
-BwwFVmlsbGUxEDAOBgNVBAoMB3N1cmVuZXQxFjAUBgNVBAsMDWF1dGhvcml6YXRp
-b24xFzAVBgNVBAMMDmF1dGgwLmludGVybmFsMRcwFQYJKoZIhvcNAQkBFghhdXRo
-QGZvbzCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAMCxt6RgI11Q3aZa
-DTUp6Q+5uMB+fqhhuaPoeqEZYujgLbeJrldMQ2aIHlqntC1y4tPSCCYriVRS5j6V
-cqgtu3saFsA/8MwAvaeY5LmD8wE7fl4b/MGst86FVyD3TLlTt5FDIkhJK+jpgKf1
-4NjGDBYSiYVuZ54Kxg8HQXPGXx5txjTxmcBY44b5g5ARxOVu/u/ut0ZeS3z2Uf7K
-q4cZ2/C+xxpYo+NMgg3sfuUDfMDAhLymfmWGa5SEj8XCUoYZv3bJLUDjMLtB06yo
-alxQowZovSpUdJOjb0e+B8FvaziwRVohQ4Y1hEpx9X/idvwgHxzGzR9mSax+iz+p
-OUbw3TMCAwEAATANBgkqhkiG9w0BAQsFAAOCAQEAChfVONalJLlRCgbqC9gxjhYq
-3fA3E4r9yVVlWQmkx8XTK4Z2NWqSdE5PmaYQdvdnzMAsxGHjxgaN/KH/wctEL+qK
-2C7bnaevDBrHTtrVM6UUZfec5eerf7UA1MDKq0BqsaUamhzqxygh9Ei2mrG36+LK
-my2Mk/tFcvSOS8tB8Q+gAGDKX/4DshR3aEkIDzqpdmwK8ffxD9sJp8HewjNtO3Pv
-nsdyXmJ65z95DU5GIsshL7og94933hCN/b86R9Zq6/RAoAM/87TJFnxCywG39Zr5
-GRAzgLWJLdkNEos8XB42MCS7tn/jefKDGquuI625jeARa2eCoJT9yk95pQbuAQ==
------END CERTIFICATE-----
-"#;
-
-    // adapter private key
-    const ADAPTER_NOISE_KEY: &str = "ICP2umiV9w/+UdjlaChamy62cBN8BuvVDTbSoeLDQlY=";
-
-    // signed cert with adapter noise public key inside
-    const ADAPTER_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
-MIIDCTCCAfGgAwIBAgIUWkavw7sjL6ozyx+qGjrbT1wBz40wDQYJKoZIhvcNAQEL
-BQAwgYYxCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJLWTEOMAwGA1UEBwwFVmlsbGUx
-EDAOBgNVBAoMB3N1cmVuZXQxFjAUBgNVBAsMDWF1dGhvcml6YXRpb24xFzAVBgNV
-BAMMDmF1dGgwLmludGVybmFsMRcwFQYJKoZIhvcNAQkBFghhdXRoQGZvbzAeFw0y
-NDA5MjAxNDU0MTdaFw0yNTA3MTcxNDU0MTdaMBYxFDASBgNVBAMMC2FkYXRwZXIu
-Zm9vMCowBQYDK2VuAyEAqKvsuYwjYHnc0quenQkf1yT+4v9yvNh3YDNiDpvZkQ+j
-gdcwgdQwCwYDVR0PBAQDAgMIMB0GA1UdDgQWBBQfedYns4Xqx51VngzPQn7d+abZ
-pDCBpQYDVR0jBIGdMIGaoYGMpIGJMIGGMQswCQYDVQQGEwJVUzELMAkGA1UECAwC
-S1kxDjAMBgNVBAcMBVZpbGxlMRAwDgYDVQQKDAdzdXJlbmV0MRYwFAYDVQQLDA1h
-dXRob3JpemF0aW9uMRcwFQYDVQQDDA5hdXRoMC5pbnRlcm5hbDEXMBUGCSqGSIb3
-DQEJARYIYXV0aEBmb2+CCQDvR2uxX2eKJTANBgkqhkiG9w0BAQsFAAOCAQEAtQCp
-8F03nB5xje/yGbt8OKAfrTv4pXJgYr6OYhD/kkc9Q5KtwdXxXwUGrZ4gA/Uhg6Cw
-im7y1N6UHjIv+ZTRjGOLlI6hvOz6rsCquq0CMWzOMgphf8WCxwvFlLlP4nD8Z7Rb
-qX06qsVy5ZihoOY3jWIFd8o8NS/n/vcVcCWdQ0A5y2Qab4vS9DpanvzkHHLByt/i
-hLUjYXBhQlHoxCoJBrWZFdxzebl6LIBoGlhBLjv/8JXIkj0vxS9r16RV1/cafgkr
-YdmdJcbVt762z8y6FONk3Ig7z4xWg1VKWixh2CLXtqzZbyD7vBbpe+Mr5MiFyGhk
-MrOCC7A2J3IpFxNcjg==
------END CERTIFICATE-----
-"#;
-
-    // node private key
-    #[allow(dead_code)]
-    const NODE_NOISE_KEY: &str = "QMBJE5qUTPv9klauHFNY/XNjWLJ+oWkzGRmDKmnKYkg=";
-
-    // signed cert with node noise public key inside
-    const NODE_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
-MIIDBjCCAe6gAwIBAgIUVWbapktKdShwnGJPQ95JufVu/CIwDQYJKoZIhvcNAQEL
-BQAwgYYxCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJLWTEOMAwGA1UEBwwFVmlsbGUx
-EDAOBgNVBAoMB3N1cmVuZXQxFjAUBgNVBAsMDWF1dGhvcml6YXRpb24xFzAVBgNV
-BAMMDmF1dGgwLmludGVybmFsMRcwFQYJKoZIhvcNAQkBFghhdXRoQGZvbzAeFw0y
-NDA5MjAxNDU3MTVaFw0yNTA3MTcxNDU3MTVaMBMxETAPBgNVBAMMCG5vZGUuZm9v
-MCowBQYDK2VuAyEAaWeYgl7LDyt9fUr6JcM0/8oUIDzosI1rJqx3Ni9eNmyjgdcw
-gdQwCwYDVR0PBAQDAgMIMB0GA1UdDgQWBBSGKEJ+62uAKTbov8lkdwKJ5lVaIzCB
-pQYDVR0jBIGdMIGaoYGMpIGJMIGGMQswCQYDVQQGEwJVUzELMAkGA1UECAwCS1kx
-DjAMBgNVBAcMBVZpbGxlMRAwDgYDVQQKDAdzdXJlbmV0MRYwFAYDVQQLDA1hdXRo
-b3JpemF0aW9uMRcwFQYDVQQDDA5hdXRoMC5pbnRlcm5hbDEXMBUGCSqGSIb3DQEJ
-ARYIYXV0aEBmb2+CCQDvR2uxX2eKJTANBgkqhkiG9w0BAQsFAAOCAQEAk4+AO6tL
-fiQPiZVF8PUE1vV2SJP8Rtz2Wij2ak5mdfofejsWrYMkdyp9/hXaFC0N/GEMJbW7
-v+8qTNsYiMRXehLYDGQfWkPV7qUMAJ5/eU/Wk0oxu1Buv2NLXoDUERMTfMcntSFz
-8PKizVLuFYrT7JEtrl7CYwZqarW22mlkIafTmxrLW2qnwO3gPWB3SYtbpZV5LaUs
-z0FTkzHeWMtDPgUMU6sgXUEHZNyAxOLJgdGg3olYhF0uQNT5LdegfQafANYEQpnu
-/l2BW2DoIhyiVwKfGPYNJ8X94ZkShzlftXD4raIL0/ZNRALVbqj6j8PWxuCDLbRN
-JjLI9OaLcE83mA==
------END CERTIFICATE-----
-"#;
-
-
 
     #[tokio::test]
     async fn test_km_multiplexor_updates_assembly_state() {
@@ -464,11 +382,9 @@ JjLI9OaLcE83mA==
                 .unwrap(),
         );
 
-
         let adapter_exchanger =
             KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA).unwrap();
-        let node_exchanger =
-            KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
+        let node_exchanger = KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
 
         let (km_sig_tx, km_sig_rx) = mpsc::channel(4);
         let (km_tx, mut km_rx) = mpsc::channel(4);
@@ -513,13 +429,14 @@ JjLI9OaLcE83mA==
 
                 // Adding a link starts a KM
                 add_adapter_link(
-                    asm, 
-                    adapter_link_id, 
-                    ZPIPair::new(1, 2), 
+                    asm,
+                    adapter_link_id,
+                    ZPIPair::new(1, 2),
                     adapter_kp,
-                     node_kp.public.clone(),
-                      adapter_exchanger
-                ).unwrap();
+                    node_kp.public.clone(),
+                    adapter_exchanger,
+                )
+                .unwrap();
 
                 yield_now().await;
 
@@ -550,12 +467,13 @@ JjLI9OaLcE83mA==
 
                 // Pretend to be a node and send back a valid reply.
                 let mut responder = KmNoise::new(
-                    false, 
+                    false,
                     None,
                     Some(node_kp),
-                    ZPIPair::new(3, 4), 
-                    node_exchanger
-                ).unwrap();
+                    ZPIPair::new(3, 4),
+                    node_exchanger,
+                )
+                .unwrap();
                 match responder.reset() {
                     Ok(Some(_m)) => panic!("unexpected message from responder.reset!"),
                     Ok(None) => {} // good
