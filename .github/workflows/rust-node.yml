@@ -22,7 +22,7 @@ jobs:
     - uses: actions/checkout@v4
 
   install_thrift:
-     uses: org-zpr/zpr-core/.github/workflows/install-thrift.yml
+     uses: org-zpr/zpr-core/.github/workflows/install-thrift.yml@${{ github.ref }}
 
   build_and_test:
     steps:
