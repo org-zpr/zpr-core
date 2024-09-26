@@ -22,14 +22,25 @@ else
 endif
 
 
-all: check build
+pkg/vsapi: thrift-go
+
+
+.PHONY: all build vservice test clean dist-clean thrift-go
+
+all: build
 
 
 build: vservice
 
 
-vservice:
+vservice: pkg/vsapi
 	go build $(GFLAGS) -o $(OUT_DIR)/vservice -v $(PKG_VSERVICE)
+
+
+thrift-go:
+	$(MAKE) -C ../thrift go
+	rm -rf pkg/vsapi && mkdir pkg/vsapi
+	cp ../thrift/gen-go/vsapi/*.go pkg/vsapi
 
 
 test:
@@ -39,10 +50,10 @@ test:
 clean:
 	rm -rf $(OUT_DIR)
 
-
-# If check fails, the thrift files need to be rebuilt
-check:
-	cd ../thrift && md5sum -c ../core/pkg/vsapi/vs.thrift.sum
+dist-clean:
+	rm -rf pkg/vsapi
 
 
-.PHONY: all build vservice test clean check
+.DEFAULT_GOAL := all
+
+
