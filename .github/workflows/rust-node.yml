@@ -24,9 +24,9 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build
       run: |
-        cd node
-        cargo build --verbose
+        cd node && make all
+
     - name: Run tests
       run: |
-        cd node
-        cargo test --verbose
+        cd node && make test
+
