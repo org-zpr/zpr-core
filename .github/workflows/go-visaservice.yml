@@ -15,13 +15,23 @@ on:
 jobs:
 
   setup:
-    uses: ./.github/workflows/install-thrift-gors.yml
     runs-on: ubuntu-latest
     steps:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
         go-version: '1.22'
+
+    - name: install thrift
+      run: |
+        sudo apt-get install libboost-dev libboost-test-dev libboost-program-options-dev libboost-filesystem-dev libboost-thread-dev libevent-dev automake libtool flex bison pkg-config g++ libssl-dev
+        wget https://dlcdn.apache.org/thrift/0.21.0/thrift-0.21.0.tar.gz
+        tar -xvf thrift-0.21.0.tar.gz
+        cd thrift-0.21.0
+        ./bootstrap.sh
+        ./configure --with-go --with-rs --without-python --without-java --disable-dependency-tracking
+        make
+        sudo make install
 
     - name: Build
       run: |
