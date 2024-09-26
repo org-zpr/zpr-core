@@ -50,7 +50,7 @@ test:
 clean:
 	rm -rf $(OUT_DIR)
 
-dist-clean:
+dist-clean: clean
 	rm -rf pkg/vsapi
 
 
