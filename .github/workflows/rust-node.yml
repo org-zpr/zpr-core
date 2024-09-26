@@ -25,6 +25,7 @@ jobs:
      uses: org-zpr/zpr-core/.github/workflows/install-thrift.yml@main
 
   build_and_test:
+    steps:
     - name: Build
       run: |
         cd node && make all
