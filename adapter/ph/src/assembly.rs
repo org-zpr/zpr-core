@@ -67,6 +67,7 @@ pub struct Assembly<'pktbuf> {
     pub alt: adapter_tables::AgentLookupTable<'pktbuf>,
     pub dlt: adapter_tables::DockLookupTable,
 
+    pub mgmt_dispatch: MgmtDispatch<'pktbuf>,
     pub adapter_manager: AdapterManager<'pktbuf>,
     pub km_state: KmState,
 }
@@ -140,6 +141,7 @@ pub mod test {
         pub peer_ids: Option<Vec<zpr::LinkId>>,
         pub alt: Option<adapter_tables::AgentLookupTable<'a>>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
+        pub mgmt_dispatch: Option<MgmtDispatch<'a>>,
         pub adapter_manager: Option<AdapterManager<'a>>,
         pub km_state: Option<KmState>,
     }
@@ -196,9 +198,13 @@ pub mod test {
         let dlt = builder
             .dlt
             .unwrap_or_else(|| adapter_tables::DockLookupTable::new());
+        let mgmt_dispatch = builder.mgmt_dispatch.unwrap_or_else(|| {
+            let (md_inq, _md_outq) = mpsc::channel(1);
+            MgmtDispatch::new(md_inq)
+        });
         let adapter_manager = builder.adapter_manager.unwrap_or_else(|| {
-            let (cq_inq, _cq_outq) = mpsc::channel(1);
-            AdapterManager::new(cq_inq)
+            let (am_inq, _am_outq) = mpsc::channel(1);
+            AdapterManager::new(am_inq)
         });
         let km_state = builder.km_state.unwrap_or_else(|| {
             let (km_sig_tx, _km_sig_rx) = mpsc::channel(1);
@@ -222,6 +228,7 @@ pub mod test {
             peer_ids,
             alt,
             dlt,
+            mgmt_dispatch,
             adapter_manager,
             km_state,
         }

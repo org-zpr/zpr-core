@@ -38,6 +38,7 @@ mod km;
 mod km_multiplexor;
 mod km_noise;
 mod mgmt;
+mod mgmt_dispatch_worker;
 mod mgmt_processor_worker;
 mod net_defs;
 mod options;
@@ -156,6 +157,7 @@ fn main() -> ExitCode {
     let capture_queue_size = 16;
     let capture_batch_size = 8;
     let tun_queue_count = 4;
+    let mgmt_dispatch_queue_size = 16;
     let adapter_manager_queue_size = 16;
     let km_message_queue_size = 16;
 
@@ -164,6 +166,9 @@ fn main() -> ExitCode {
 
     let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
+
+    let (md_inq, md_outq) = mpsc::channel(mgmt_dispatch_queue_size);
+    let mgmt_dispatch = MgmtDispatch::new(md_inq);
 
     let (am_inq, am_outq) = mpsc::channel(adapter_manager_queue_size);
     let adapter_manager = AdapterManager::new(am_inq);
@@ -339,6 +344,7 @@ fn main() -> ExitCode {
         peer_ids: std::sync::Mutex::new(Vec::new()),
         alt,
         dlt,
+        mgmt_dispatch,
         adapter_manager,
         km_state,
     }));
@@ -431,6 +437,8 @@ fn main() -> ExitCode {
                 }
             }
         });
+
+        js.spawn_local(mgmt_dispatch_worker::launch(&*asm, md_outq));
 
         js.spawn_local(adapter_manager_worker::launch(&*asm, am_outq));
 
