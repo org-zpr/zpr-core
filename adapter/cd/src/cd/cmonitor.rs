@@ -10,8 +10,8 @@ use std::sync::{Arc, Mutex};
 
 use tracing::info;
 
-pub use crate::cd::zpr::{ConfigState, Zpr};
 use crate::cd::config::CryptoConfig;
+pub use crate::cd::zpr::{ConfigState, Zpr};
 
 pub use crate::zdp::client;
 

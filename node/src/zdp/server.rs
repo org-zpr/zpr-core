@@ -1,27 +1,26 @@
+use bytes::BufMut;
+use openssl::x509::X509;
+use ph::km_cert_exchange::KmCertExchange;
 use std::io;
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use std::path::Path;
-use ph::km_cert_exchange::KmCertExchange;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-use bytes::BufMut;
 use zerocopy::FromBytes;
-use openssl::x509::X509;
 
 use ph::config;
 use ph::km;
 use ph::km::{KeyManager, KmSignal, ZPIPair};
-use ph::km_noise::{KmNoise, NoiseKeypair};
 use ph::km_cert_exchange::load_cert;
+use ph::km_demo;
+use ph::km_noise::{KmNoise, NoiseKeypair};
 use ph::packet::Packet;
 use ph::zdp::*;
-use ph::km_demo;
-
 
 const ZPI_FULL_ENC: u8 = 100;
 const ZPI_TRANSIT_HMAC: u8 = 101;
@@ -33,13 +32,17 @@ pub struct ZDPServer {
     node_cert: X509,
 }
 
-
 // Placeholder or demonstration code for a dock server component on a node.
 // Here to help with testing the KM code.
 impl ZDPServer {
     // Uses the NOISE KM so we need the private key here. A future implementation
     // could maybe just pass in a KeyManagerStateMachine implentation.
-    pub fn new(addr: &SocketAddr, noise_private_key: &[u8; 32], node_cert: &Path, ca_cert: &Path) -> ZDPServer {
+    pub fn new(
+        addr: &SocketAddr,
+        noise_private_key: &[u8; 32],
+        node_cert: &Path,
+        ca_cert: &Path,
+    ) -> ZDPServer {
         let kp = NoiseKeypair::new(*noise_private_key);
         let ncert = match load_cert(node_cert) {
             Ok(c) => c,
@@ -73,7 +76,13 @@ impl ZDPServer {
         let km_ctok = ctok.clone();
 
         let certx = KmCertExchange::new(self.node_cert.clone(), self.ca_cert.clone());
-        let noise = match KmNoise::new(false, None, Some(self.noise_kp.clone()), ZPIPair::new(ZPI_FULL_ENC, ZPI_TRANSIT_HMAC), certx) {
+        let noise = match KmNoise::new(
+            false,
+            None,
+            Some(self.noise_kp.clone()),
+            ZPIPair::new(ZPI_FULL_ENC, ZPI_TRANSIT_HMAC),
+            certx,
+        ) {
             Ok(n) => n,
             Err(e) => {
                 info!("error creating noise km: {:?}", e);

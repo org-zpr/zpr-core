@@ -25,17 +25,17 @@ pub struct Configuration {
 
 #[derive(Debug, Clone, Deserialize)]
 struct Creds {
-    ca_certificate: String,    // path to the CA certificate
-    rsa_certificate: String,   // path to the RSA certificate
-    rsa_private_key: String,   // path to the RSA private key
+    ca_certificate: String,  // path to the CA certificate
+    rsa_certificate: String, // path to the RSA certificate
+    rsa_private_key: String, // path to the RSA private key
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct Dock {
     enabled: bool,
-    listen_address: String, // dock listen address, "host:port"
-    noise_certificate: String,       // this nodes signed (noise) certificate file
-    noise_private_key: String,       // base64 noise private key for this node
+    listen_address: String,    // dock listen address, "host:port"
+    noise_certificate: String, // this nodes signed (noise) certificate file
+    noise_private_key: String, // base64 noise private key for this node
 
     #[serde(skip)]
     noise_private_key_bin: [u8; 32], // decoded noise private key
@@ -151,24 +151,24 @@ pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> 
     };
 
     c.node_addr = Some(node_addr);
-    c.dock.noise_private_key_bin =
-        match BASE64_STANDARD.decode(c.dock.noise_private_key.as_bytes()) {
-            Ok(v) => match v.try_into() {
-                Ok(a) => a,
-                Err(_) => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "noise private key length incorrect",
-                    ));
-                }
-            },
-            Err(e) => {
+    c.dock.noise_private_key_bin = match BASE64_STANDARD.decode(c.dock.noise_private_key.as_bytes())
+    {
+        Ok(v) => match v.try_into() {
+            Ok(a) => a,
+            Err(_) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("failed to decode noise private key from base64: {}", e),
+                    "noise private key length incorrect",
                 ));
             }
-        };
+        },
+        Err(e) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("failed to decode noise private key from base64: {}", e),
+            ));
+        }
+    };
 
     Ok(c)
 }

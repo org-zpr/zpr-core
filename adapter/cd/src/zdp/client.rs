@@ -1,22 +1,22 @@
+use bytes::BufMut;
 use std::io;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-use tokio::sync::mpsc;
-use std::net::SocketAddr;
-use tokio::net::UdpSocket;
-use bytes::BufMut;
 use zerocopy::FromBytes;
 
+use crate::cd::config::CryptoConfig;
 use ph::config;
 use ph::km;
 use ph::km::{KeyManager, KmSignal, ZPIPair};
+use ph::km_cert_exchange::KmCertExchange;
 use ph::km_demo;
 use ph::km_noise::KmNoise;
-use ph::km_cert_exchange::KmCertExchange;
 use ph::packet::Packet;
 use ph::zdp::*;
-use crate::cd::config::CryptoConfig;
 
 const ZPI_FULL_ENC: u8 = 200;
 const ZPI_TRANSIT_HMAC: u8 = 201;
@@ -37,13 +37,16 @@ impl ZDPClient {
 
     // Dummy function for my testing only
     pub async fn run(&self, ctok: CancellationToken) -> io::Result<()> {
-        let certx = KmCertExchange::new(self.crypto.local_certificate.clone(), self.crypto.root_ca.clone());
+        let certx = KmCertExchange::new(
+            self.crypto.local_certificate.clone(),
+            self.crypto.root_ca.clone(),
+        );
         let noise = match KmNoise::new(
             true,
             Some(self.crypto.remote_noise_public_key.into()),
             Some(self.crypto.local_noise_keypair.clone().into()),
             ZPIPair::new(ZPI_FULL_ENC, ZPI_TRANSIT_HMAC),
-            certx
+            certx,
         ) {
             Ok(n) => n,
             Err(e) => {

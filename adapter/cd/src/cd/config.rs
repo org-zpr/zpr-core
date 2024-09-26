@@ -12,7 +12,6 @@ use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read};
 use std::path::PathBuf;
 
-
 // "Config" is configuration details for the CD binary.
 pub struct Config {
     pub socket_path: PathBuf,
@@ -46,7 +45,6 @@ struct Adapter {
     noise_private_key: String, // base64 encoded private key
 }
 
-
 /// The bits of the configuration that relate to the cryptography
 /// used in setting up the security assocaition.
 #[derive(Clone, Debug)]
@@ -56,8 +54,6 @@ pub struct CryptoConfig {
     pub local_certificate: X509,
     pub root_ca: X509,
 }
-
-
 
 /// The ConfigRecord is a parsed and loaded configuration file.
 #[derive(Debug, Clone)]
@@ -133,9 +129,15 @@ pub fn load_configuration(path: &str) -> Result<ConfigRecord, std::io::Error> {
     let base_path = std::path::Path::new(path).parent().unwrap();
 
     let root_ca = load_cert(base_path.join(&c.profile.root_ca).to_str().unwrap())?;
-    let cert = load_cert(base_path.join(&c.adapter.noise_certificate).to_str().unwrap())?;
+    let cert = load_cert(
+        base_path
+            .join(&c.adapter.noise_certificate)
+            .to_str()
+            .unwrap(),
+    )?;
 
-    let private_key: [u8; 32] = match BASE64_STANDARD.decode(c.adapter.noise_private_key.as_bytes()) {
+    let private_key: [u8; 32] = match BASE64_STANDARD.decode(c.adapter.noise_private_key.as_bytes())
+    {
         Ok(pk) => match pk.try_into() {
             Ok(pk) => pk,
             Err(_) => {
@@ -237,5 +239,4 @@ impl ConfigRecord {
             root_ca: self.root_ca.clone(),
         }
     }
-
 }

@@ -122,7 +122,8 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
             &listen_addr,
             nconfig.get_noise_private_key(),
             &nconfig.get_noise_cert_path(),
-            &nconfig.get_ca_cert_path());
+            &nconfig.get_ca_cert_path(),
+        );
         tasks.spawn(async move {
             match zserver.run(zctok).await {
                 Ok(_) => {
