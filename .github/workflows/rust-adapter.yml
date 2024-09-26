@@ -23,9 +23,7 @@ jobs:
     - uses: actions/checkout@v4
     - name: Build + test cd
       run: |
-        cd adapter/cd
-        make build
-        make test
+        cd adapter/cd && make all && make test
 
   cd-format:
     needs: [cd-build]
