@@ -2,58 +2,62 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-
+use std::path::Path;
+use ph::km_cert_exchange::KmCertExchange;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
-
 use tracing::info;
-
 use bytes::BufMut;
+use zerocopy::FromBytes;
+use openssl::x509::X509;
 
 use ph::config;
 use ph::km;
-use ph::km::{KeyManager, KmSignal};
-use ph::km_noise::KmNoise;
+use ph::km::{KeyManager, KmSignal, ZPIPair};
+use ph::km_noise::{KmNoise, NoiseKeypair};
+use ph::km_cert_exchange::load_cert;
 use ph::packet::Packet;
 use ph::zdp::*;
-
 use ph::km_demo;
 
-use zerocopy::FromBytes;
-
-use curve25519_dalek::montgomery::MontgomeryPoint;
-use snow;
 
 const ZPI_FULL_ENC: u8 = 100;
 const ZPI_TRANSIT_HMAC: u8 = 101;
 
 pub struct ZDPServer {
     addr: SocketAddr, // listen address, "host:port"
-    noise_kp: snow::Keypair,
+    noise_kp: NoiseKeypair,
+    ca_cert: X509,
+    node_cert: X509,
 }
 
-// Get public key from private key.
-fn derive_public_key(private_key: &[u8; 32]) -> [u8; 32] {
-    let point = MontgomeryPoint::mul_base_clamped(*private_key);
-    point.to_bytes()
-}
 
 // Placeholder or demonstration code for a dock server component on a node.
 // Here to help with testing the KM code.
 impl ZDPServer {
     // Uses the NOISE KM so we need the private key here. A future implementation
     // could maybe just pass in a KeyManagerStateMachine implentation.
-    pub fn new(addr: &SocketAddr, noise_private_key: &[u8; 32]) -> ZDPServer {
-        let pubkey = derive_public_key(noise_private_key);
-        let kp = snow::Keypair {
-            private: noise_private_key.to_vec(),
-            public: pubkey.to_vec(),
+    pub fn new(addr: &SocketAddr, noise_private_key: &[u8; 32], node_cert: &Path, ca_cert: &Path) -> ZDPServer {
+        let kp = NoiseKeypair::new(*noise_private_key);
+        let ncert = match load_cert(node_cert) {
+            Ok(c) => c,
+            Err(e) => {
+                panic!("error loading node cert: {:?}", e);
+            }
+        };
+        let cacert = match load_cert(ca_cert) {
+            Ok(c) => c,
+            Err(e) => {
+                panic!("error loading ca cert: {:?}", e);
+            }
         };
         ZDPServer {
             addr: addr.to_owned(),
             noise_kp: kp,
+            ca_cert: cacert,
+            node_cert: ncert,
         }
     }
 
@@ -68,11 +72,8 @@ impl ZDPServer {
 
         let km_ctok = ctok.clone();
 
-        let kp = snow::Keypair {
-            private: self.noise_kp.private.clone(),
-            public: self.noise_kp.public.clone(),
-        };
-        let noise = match KmNoise::new(false, None, Some(kp), ZPI_FULL_ENC, ZPI_TRANSIT_HMAC) {
+        let certx = KmCertExchange::new(self.node_cert.clone(), self.ca_cert.clone());
+        let noise = match KmNoise::new(false, None, Some(self.noise_kp.clone()), ZPIPair::new(ZPI_FULL_ENC, ZPI_TRANSIT_HMAC), certx) {
             Ok(n) => n,
             Err(e) => {
                 info!("error creating noise km: {:?}", e);

@@ -206,63 +206,28 @@ GRAzgLWJLdkNEos8XB42MCS7tn/jefKDGquuI625jeARa2eCoJT9yk95pQbuAQ==
 -----END CERTIFICATE-----
 "#;
 
-    const ADAPTER_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
-MIIEWzCCA0OgAwIBAgIJAMSVUe6Pd/Z7MA0GCSqGSIb3DQEBBQUAMIGGMQswCQYD
-VQQGEwJVUzELMAkGA1UECAwCS1kxDjAMBgNVBAcMBVZpbGxlMRAwDgYDVQQKDAdz
-dXJlbmV0MRYwFAYDVQQLDA1hdXRob3JpemF0aW9uMRcwFQYDVQQDDA5hdXRoMC5p
-bnRlcm5hbDEXMBUGCSqGSIb3DQEJARYIYXV0aEBmb28wHhcNMjQwNjE4MTQzMjI4
-WhcNMjUwNjE4MTQzMjI4WjBLMQswCQYDVQQGEwJVUzELMAkGA1UECAwCS1kxCzAJ
-BgNVBAoMAllZMQswCQYDVQQLDAJaWjEVMBMGA1UEAwwMdGVzdG5vZGUuenByMIIB
-IjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAk0x4ui48znwmmnbeVrRMXeiz
-DdR2EKbZwsoW/sfePCTa50UJHgA3vPPTGhJTTfjJrVyp2nazpaBuy66h85PQWS2x
-FqstxHVTj0+CF4t+YKUyHFZiF2rLWQonO5R43v489NF9JHKH2SgxKMjTsPpJY8sd
-yFgUTbiD6G8T/j/ZIojBIkQG2wWNpdjqUDnzeaU32MGHV8iigUrpc3xDqw+RWhKP
-kPjoyInoA4tNNrfHrddu61w3FPx6KTN1L8UV9K+BlNW/s3buluYMSi2vW24fjdTn
-F3ev2+w+QUcvWP94/pFRiLEDAO+LO3hxFC16qNU33LMvAo8BdJvPG3GbN2+fIwID
-AQABo4IBBDCCAQAwgaUGA1UdIwSBnTCBmqGBjKSBiTCBhjELMAkGA1UEBhMCVVMx
-CzAJBgNVBAgMAktZMQ4wDAYDVQQHDAVWaWxsZTEQMA4GA1UECgwHc3VyZW5ldDEW
-MBQGA1UECwwNYXV0aG9yaXphdGlvbjEXMBUGA1UEAwwOYXV0aDAuaW50ZXJuYWwx
-FzAVBgkqhkiG9w0BCQEWCGF1dGhAZm9vggkA70drsV9niiUwCQYDVR0TBAIwADAL
-BgNVHQ8EBAMCBPAwHwYDVR0RBBgwFoIUYXV0aDAuc3BhY2VsYXNlci5uZXQwHQYD
-VR0OBBYEFFdtDdU6IP12wNv4YUdyZejdx8EaMA0GCSqGSIb3DQEBBQUAA4IBAQBp
-gM2xMYgo6ntaPTV7xhLmAbwlhoKBt3I+i6KQUU9Ec/3AEiiZsyQxcPHAtmeU4han
-5JpOK3hUYVH/SaSj2BHqkXH0yfFyIkAf0V1UsfWwcD8OEZffb5yP02RzIWCqdBN7
-pdx9gtGwy4l779FNvHGQ8AI4y+cpxwiXyBiXdB3Mv1wG5gUNe4pGk7JWA5lb9XQ9
-sOwVMjkwcUsqGr489gqYRWl1mAMz1D2T+U91HavGybvUBlgb/3+dgjksa/ZWTUhD
-2CRFn7sqmwcPHLoGV/+yCjjuheyx+z7LrPqyqPfWwrr68udK4Yqz8iiqwMC1b8m0
-1Hm6nwN1sHYkYgYgk/Ey
------END CERTIFICATE-----
-"#;
+    // adapter private key
+    pub const ADAPTER_NOISE_KEY: &str = "ICP2umiV9w/+UdjlaChamy62cBN8BuvVDTbSoeLDQlY=";
 
-    const ADAPTER_KEY_DATA: &str = r#"
------BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCTTHi6LjzOfCaa
-dt5WtExd6LMN1HYQptnCyhb+x948JNrnRQkeADe889MaElNN+MmtXKnadrOloG7L
-rqHzk9BZLbEWqy3EdVOPT4IXi35gpTIcVmIXastZCic7lHje/jz00X0kcofZKDEo
-yNOw+kljyx3IWBRNuIPobxP+P9kiiMEiRAbbBY2l2OpQOfN5pTfYwYdXyKKBSulz
-fEOrD5FaEo+Q+OjIiegDi002t8et127rXDcU/HopM3UvxRX0r4GU1b+zdu6W5gxK
-La9bbh+N1OcXd6/b7D5BRy9Y/3j+kVGIsQMA74s7eHEULXqo1Tfcsy8CjwF0m88b
-cZs3b58jAgMBAAECggEAQYQ8FqPGTBmQmhfRIUOkzAhazAX6VcHBDhERVVXVFW9X
-JpLgUUXLhPH2rZwFDaNhIQkcS52MnljTrykHw+21OFVIdUrCWqXM+utkc9CJ77bK
-qSwLCVtpAzuu46NQd+8hcctUHEgNAJwN8ZQSBJ/u0MJhhuEWdtNhaJsvi2Ee1WrN
-ZvUkpn6SpCHVvEtZjJZL0elQrgk7EMzWSWz/1a8ORzbmBDw5X/0dV/VKCfx1kJ+w
-9fmIhfGU3lFT8rOpqcx3MlB+PzRVV4P3hUBirovxBu2TEqp01hvPnb5m6ZGE0U/p
-B4LBke3S23iSkYwPaHwcbLVLhF2pruYmXS1hvCZxEQKBgQC3gBWKZZeV8uT0vKN+
-FScBk5WLYSq63dUSonszWr0AxN03WsoHjkr4AqB+wtMPI2L7Kpy8whwtTXehqNpT
-W+Zz12eVQI2fuGTYZg7zjxN0+H2nRxTOWyVcpW4h1tavzzXAzTDo1jc8DYvMhgXp
-IIOMYDbOCQPCnopdE0Xd2QF7NQKBgQDNftHfeNOINkt3RTTI5NY9pTibl/alzqJf
-aW8BXEsnKM8BB6ux/sTNE4ejaK7a4xvKhgss+Z0FkM11Ycoa2D5/X9CyXT/cOmhF
-E2vt6yyQUSscMQMAaUmma8Gvu5dDF3a7/5liphjafPyFRa275JIxdbDgaCvV62kH
-EjPLMjOj9wKBgQCHhe9iwVlNA5EZN2DAM7sVLPybbe3zCPbexmWbLf683KhMw57G
-Kc8wkDAcrqLWYVovCe+scOgChV4/ZMeqHQt8rq/vyTdPqQ3BzM5qD1ddYlDbBGJX
-bXWQkRVfpJ32RmD6vhDLRbqRfaesK6ed38eIG18emAXQ7Opfh2ZoTGcNqQKBgDKN
-/53lwMyi5t/506mUuqxByHJm6VQTSNkGPDvuc8K3hG2xcGkCz3HQWy81YscQ1lZ1
-sawn4Jxs6k71dt4x0vZNIS+wRzSr3dkYlRXcJIOApIVz/VQNkwPxQJ42HVlxHVHU
-6OxfBoBB/XHgGYS/D8RBOvmKRzaCir0lmj5kJFYzAoGBAKEEaHn0LvmDpHYSUOA4
-FgJnFmtHTHcYFaFus/oqwEtylftAsM5h8o5ww2OCJDa2FSxzaayV1wpm2r1HwvDn
-p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
-+VS382WYhn8T/WeSmWHmF69D
------END PRIVATE KEY-----
+    const ADAPTER_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
+MIIDCTCCAfGgAwIBAgIUWkavw7sjL6ozyx+qGjrbT1wBz40wDQYJKoZIhvcNAQEL
+BQAwgYYxCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJLWTEOMAwGA1UEBwwFVmlsbGUx
+EDAOBgNVBAoMB3N1cmVuZXQxFjAUBgNVBAsMDWF1dGhvcml6YXRpb24xFzAVBgNV
+BAMMDmF1dGgwLmludGVybmFsMRcwFQYJKoZIhvcNAQkBFghhdXRoQGZvbzAeFw0y
+NDA5MjAxNDU0MTdaFw0yNTA3MTcxNDU0MTdaMBYxFDASBgNVBAMMC2FkYXRwZXIu
+Zm9vMCowBQYDK2VuAyEAqKvsuYwjYHnc0quenQkf1yT+4v9yvNh3YDNiDpvZkQ+j
+gdcwgdQwCwYDVR0PBAQDAgMIMB0GA1UdDgQWBBQfedYns4Xqx51VngzPQn7d+abZ
+pDCBpQYDVR0jBIGdMIGaoYGMpIGJMIGGMQswCQYDVQQGEwJVUzELMAkGA1UECAwC
+S1kxDjAMBgNVBAcMBVZpbGxlMRAwDgYDVQQKDAdzdXJlbmV0MRYwFAYDVQQLDA1h
+dXRob3JpemF0aW9uMRcwFQYDVQQDDA5hdXRoMC5pbnRlcm5hbDEXMBUGCSqGSIb3
+DQEJARYIYXV0aEBmb2+CCQDvR2uxX2eKJTANBgkqhkiG9w0BAQsFAAOCAQEAtQCp
+8F03nB5xje/yGbt8OKAfrTv4pXJgYr6OYhD/kkc9Q5KtwdXxXwUGrZ4gA/Uhg6Cw
+im7y1N6UHjIv+ZTRjGOLlI6hvOz6rsCquq0CMWzOMgphf8WCxwvFlLlP4nD8Z7Rb
+qX06qsVy5ZihoOY3jWIFd8o8NS/n/vcVcCWdQ0A5y2Qab4vS9DpanvzkHHLByt/i
+hLUjYXBhQlHoxCoJBrWZFdxzebl6LIBoGlhBLjv/8JXIkj0vxS9r16RV1/cafgkr
+YdmdJcbVt762z8y6FONk3Ig7z4xWg1VKWixh2CLXtqzZbyD7vBbpe+Mr5MiFyGhk
+MrOCC7A2J3IpFxNcjg==
+-----END CERTIFICATE-----
 "#;
 
     struct TempFile {
@@ -322,18 +287,17 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             port = 2242
             noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
             [adapter]
-            certificate = "@CERT"
-            private_key = "@KEY"
+            noise_certificate = "@CERT"
+            noise_private_key = "@KEY"
             #blank
         "#;
 
         let ca_certf = TempFile::new_pem(CA_CERT_DATA);
         let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
-        let adapter_keyf = TempFile::new_pem(ADAPTER_KEY_DATA);
 
         let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
         let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
-        let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
+        let toml_txt = toml_txt.replace("@KEY", ADAPTER_NOISE_KEY);
 
         let tmpfile = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile.get_path());
@@ -346,7 +310,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         assert_eq!(c.get_name(), "test");
         assert_eq!(c.get_dock_host(), "localhost");
         assert_eq!(c.get_dock_port(), 2242);
-        assert_eq!(c.get_cn(), "testnode.zpr");
+        assert_eq!(c.get_cn(), "adatper.foo");
     }
 
     #[test]
@@ -360,18 +324,17 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             port = 2242
             noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
             [adapter]
-            certificate = "@CERT"
-            private_key = "@KEY"
+            noise_certificate = "@CERT"
+            noise_private_key = "@KEY"
             #blank
         "#;
 
         let ca_certf = TempFile::new_pem(CA_CERT_DATA);
         let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
-        let adapter_keyf = TempFile::new_pem(ADAPTER_KEY_DATA);
 
         let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
         let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
-        let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
+        let toml_txt = toml_txt.replace("@KEY", ADAPTER_NOISE_KEY);
 
         let tmpfile = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile.get_path());
@@ -391,7 +354,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
         stats = zpr.get_status();
         assert_eq!(stats.len(), 1);
-        assert_eq!(stats[0].0, "test/testnode.zpr");
+        assert_eq!(stats[0].0, "test/adatper.foo");
         assert_eq!(stats[0].1, "localhost");
         assert_eq!(stats[0].2, "disconnected");
     }
@@ -407,18 +370,17 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             port = 2242
             noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
             [adapter]
-            certificate = "@CERT"
-            private_key = "@KEY"
+            noise_certificate = "@CERT"
+            noise_private_key = "@KEY"
             #blank
         "#;
 
         let ca_certf = TempFile::new_pem(CA_CERT_DATA);
         let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
-        let adapter_keyf = TempFile::new_pem(ADAPTER_KEY_DATA);
 
         let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
         let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
-        let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
+        let toml_txt = toml_txt.replace("@KEY", ADAPTER_NOISE_KEY);
 
         let tmpfile1 = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile1.get_path());
@@ -442,13 +404,13 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             port = 2243
             noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
             [adapter]
-            certificate = "@CERT"
-            private_key = "@KEY"
+            noise_certificate = "@CERT"
+            noise_private_key = "@KEY"
             #blank
         "#;
         let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
         let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
-        let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
+        let toml_txt = toml_txt.replace("@KEY", ADAPTER_NOISE_KEY);
 
         let tmpfile2 = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile2.get_path());
@@ -487,18 +449,17 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             port = 2242
             noise_public_key = "ABfny3qb3/RSLJqJAvl0+d8pYAcf9wb9F2Er+sXEEGo="
             [adapter]
-            certificate = "@CERT"
-            private_key = "@KEY"
+            noise_certificate = "@CERT"
+            noise_private_key = "@KEY"
             #blank
         "#;
 
         let ca_certf = TempFile::new_pem(CA_CERT_DATA);
         let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
-        let adapter_keyf = TempFile::new_pem(ADAPTER_KEY_DATA);
 
         let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
         let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
-        let toml_txt = toml_txt.replace("@KEY", adapter_keyf.get_path());
+        let toml_txt = toml_txt.replace("@KEY", ADAPTER_NOISE_KEY);
 
         let tmpfile = TempFile::new_toml(&toml_txt);
         let c = load_configuration(tmpfile.get_path());

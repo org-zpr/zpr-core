@@ -25,33 +25,45 @@ pub struct Configuration {
 
 #[derive(Debug, Clone, Deserialize)]
 struct Creds {
-    certificate: String,       // this nodes signed certificate file
-    private_key: String,       // this nodes private key file
-    noise_private_key: String, // base64 encoded private key
-
-    #[serde(skip)]
-    noise_private_key_bin: [u8; 32], // decoded noise private key
+    ca_certificate: String,    // path to the CA certificate
+    rsa_certificate: String,   // path to the RSA certificate
+    rsa_private_key: String,   // path to the RSA private key
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct Dock {
     enabled: bool,
     listen_address: String, // dock listen address, "host:port"
+    noise_certificate: String,       // this nodes signed (noise) certificate file
+    noise_private_key: String,       // base64 noise private key for this node
+
+    #[serde(skip)]
+    noise_private_key_bin: [u8; 32], // decoded noise private key
 }
 
 impl Configuration {
-    pub fn get_cert_path(&self) -> PathBuf {
+    pub fn get_ca_cert_path(&self) -> PathBuf {
         let base = Path::new(&self.base_path);
-        base.join(&self.creds.certificate)
+        base.join(&self.creds.ca_certificate)
     }
 
-    pub fn get_key_path(&self) -> PathBuf {
+    pub fn get_noise_cert_path(&self) -> PathBuf {
         let base = Path::new(&self.base_path);
-        base.join(&self.creds.private_key)
+        base.join(&self.dock.noise_certificate)
     }
 
     pub fn get_noise_private_key(&self) -> &[u8; 32] {
-        &self.creds.noise_private_key_bin
+        &self.dock.noise_private_key_bin
+    }
+
+    pub fn get_rsa_cert_path(&self) -> PathBuf {
+        let base = Path::new(&self.base_path);
+        base.join(&self.creds.rsa_certificate)
+    }
+
+    pub fn get_rsa_private_key_path(&self) -> PathBuf {
+        let base = Path::new(&self.base_path);
+        base.join(&self.creds.rsa_private_key)
     }
 
     // Gets a copy of the claims
@@ -139,8 +151,8 @@ pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> 
     };
 
     c.node_addr = Some(node_addr);
-    c.creds.noise_private_key_bin =
-        match BASE64_STANDARD.decode(c.creds.noise_private_key.as_bytes()) {
+    c.dock.noise_private_key_bin =
+        match BASE64_STANDARD.decode(c.dock.noise_private_key.as_bytes()) {
             Ok(v) => match v.try_into() {
                 Ok(a) => a,
                 Err(_) => {
@@ -204,13 +216,15 @@ mod test {
     fn test_get_claims() {
         let toml_txt = r#"
             [creds]
-            certificate = "foo-cert.pem"
-            private_key = "foo-key.pem"
-            noise_private_key = "AB2eP6zV7ve0A4eQgNVNXlAM2q0rYerCPXFMl+/ntUw="
+            ca_certificate = "foo-ca-cert.pem"
+            rsa_certificate = "foo-cert.pem"
+            rsa_private_key = "rsa-key.pem"
 
             [dock]
             enabled = false
             listen_address = "0.0.0.0:5000"
+            noise_private_key = "AB2eP6zV7ve0A4eQgNVNXlAM2q0rYerCPXFMl+/ntUw="
+            noise_certificate = "noise-cert.pem"
 
             [claims]
             "zpr.addr" = "fc00:3001::1"

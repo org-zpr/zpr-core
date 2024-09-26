@@ -118,7 +118,11 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                 ));
             }
         };
-        let zserver = ZDPServer::new(&listen_addr, nconfig.get_noise_private_key());
+        let zserver = ZDPServer::new(
+            &listen_addr,
+            nconfig.get_noise_private_key(),
+            &nconfig.get_noise_cert_path(),
+            &nconfig.get_ca_cert_path());
         tasks.spawn(async move {
             match zserver.run(zctok).await {
                 Ok(_) => {
@@ -189,8 +193,8 @@ async fn vs_force_connect(
     let vs_conn = VSConn::new(
         tx.clone(),
         &opts.vsforceconnect.unwrap(),
-        &nconfig.get_cert_path(),
-        &nconfig.get_key_path(),
+        &nconfig.get_rsa_cert_path(),
+        &nconfig.get_rsa_private_key_path(),
         nconfig.get_node_addr(),
         vss_addr,
     )?;
