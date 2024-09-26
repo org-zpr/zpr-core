@@ -13,12 +13,9 @@ env:
 
 jobs:
   setup:
+    uses: ./.github/workflows/install-thrift-rs.yml
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-
-    - uses: org-zpr/zpr-core/.github/workflows/install-thrift.yml@mk-rm-autogen
-
     - name: Build
       run: |
         cd visaservice

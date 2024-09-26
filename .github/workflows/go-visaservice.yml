@@ -15,16 +15,13 @@ on:
 jobs:
 
   setup:
+    uses: ./.github/workflows/install-thrift-gors.yml
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
         go-version: '1.22'
-
-    - uses: org-zpr/zpr-core/.github/workflows/install-thrift.yml@mk-rm-autogen
 
     - name: Build
       run: |
