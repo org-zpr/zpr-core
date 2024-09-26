@@ -27,7 +27,7 @@ build-go:
 
 
 build-rs:
-	$(MAKE) -C cli make all
+	$(MAKE) -C cli all
 
 
 test-go:
