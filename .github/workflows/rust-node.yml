@@ -17,15 +17,14 @@ env:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v4
 
-    -name: install thrift
+  install_thrift:
      uses: org-zpr/zpr-core/.github/workflows/install-thrift.yml@main
 
+  build_and_test:
     - name: Build
       run: |
         cd node && make all
