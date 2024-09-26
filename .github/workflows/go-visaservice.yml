@@ -24,12 +24,8 @@ jobs:
       with:
         go-version: '1.22'
 
-  install_thrift:
-     uses: org-zpr/zpr-core/.github/workflows/install-thrift.yml@mk-rm-autogen
+    - uses: org-zpr/zpr-core/.github/workflows/install-thrift.yml@mk-rm-autogen
 
-  build_and_test:
-    runs-on: ubuntu-latest
-    steps:
     - name: Build
       run: |
         cd visaservice
