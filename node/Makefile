@@ -9,7 +9,7 @@ all: build
 
 
 build: src/vsapi/mod.rs
-	cargo build --verbose
+	cargo build
 
 test:
 	cargo test --verbose
