@@ -31,7 +31,7 @@ jobs:
         tar xf thrift-0.21.0.tar.gz
         cd thrift-0.21.0
         ./bootstrap.sh
-        ./configure --with-go --with-rs --without-python --without-py3 --without-swift --without-php --without-kotlin --without-java --without-nodejs --without-dotnet --disable-tests --disable-tutorial --disable-dependency-tracking
+        ./configure --with-go --with-rs --without-python --without-py3 --without-swift --without-php --without-kotlin --without-java --without-nodejs --without-netstd --disable-tests --disable-tutorial
         make
         sudo make install
 
