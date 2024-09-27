@@ -19,10 +19,6 @@ jobs:
     container:
       image: docker://ghcr.io/org-zpr/bf2007c1b8a5:latest
     steps:
-      with:
-        username: ${{ github.actor }}
-        password: ${{ secrets.github_token }}
-
     - uses: actions/checkout@v4
 
     - name: Build
