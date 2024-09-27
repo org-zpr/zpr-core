@@ -25,24 +25,36 @@ jobs:
     - name: install build deps
       run: sudo apt-get install libboost-dev libboost-test-dev libboost-program-options-dev libboost-filesystem-dev libboost-thread-dev libevent-dev automake libtool flex bison pkg-config g++ libssl-dev
 
-    - name: install thrift
+    - name: cache thrift
+      id: cache-thrift
+      uses: actions/cache@v3
+      env:
+        cache-name: cache-thriftcc-0210
+      with:
+        path: ~/thrift-0.21.0/compiler/cpp
+        key: ${{ runner.os }}-build-${{ env.cache-name }}
+
+    - if ${{ steps.cache-thrift.outputs.cache-hit != 'true' }}
+      name: install thrift
       run: |
         wget -nv https://dlcdn.apache.org/thrift/0.21.0/thrift-0.21.0.tar.gz
         tar xf thrift-0.21.0.tar.gz
-        cd thrift-0.21.0
+        pushd thrift-0.21.0
         ./bootstrap.sh
         ./configure --with-go --with-rs --without-python --without-py3 --without-swift --without-php --without-kotlin --without-java --without-nodejs --without-netstd --disable-tests --disable-tutorial --disable-dependency-tracking
         echo -e "\n\n=== PASS 2 STARTS ===\n\n"
         ./configure --with-go --with-rs --without-python --without-py3 --without-swift --without-php --without-kotlin --without-java --without-nodejs --without-netstd --disable-tests --disable-tutorial 
         make
-        sudo make install
+        popd
 
     - name: Build
       run: |
-        cd visaservice
-        make all-go
+        pushd visaservice
+        make THRIFTCC=~/thrift-0.21.0/compiler/cpp/thrift all-go
+        popd
 
     - name: Test
       run: |
-        cd visaservice
+        pushd visaservice
         make test-go
+
