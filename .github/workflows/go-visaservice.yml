@@ -31,7 +31,7 @@ jobs:
       env:
         cache-name: cache-thriftcc-0210
       with:
-        path: ~/thrift-0.21.0/compiler/cpp
+        path: ${{ env.GITHUB_WORKSPACE }}/thrift-0.21.0/compiler/cpp
         key: ${{ runner.os }}-build-${{ env.cache-name }}
 
     - if: ${{ steps.cache-thrift.outputs.cache-hit != 'true' }}
@@ -45,16 +45,15 @@ jobs:
         echo -e "\n\n=== PASS 2 STARTS ===\n\n"
         ./configure --with-go --with-rs --without-python --without-py3 --without-swift --without-php --without-kotlin --without-java --without-nodejs --without-netstd --disable-tests --disable-tutorial 
         make
-        popd
 
     - name: Build
       run: |
-        pushd visaservice
-        make THRIFTCC=~/thrift-0.21.0/compiler/cpp/thrift all-go
+        cd $GITHUB_WORKSPACE/visaservice
+        make THRIFTCC=$GITHUB_WORKSPACE/thrift-0.21.0/compiler/cpp/thrift all-go
         popd
 
     - name: Test
       run: |
-        pushd visaservice
+        cd $GITHUB_WORKSPACE/visaservice
         make test-go
 
