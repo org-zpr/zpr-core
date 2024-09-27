@@ -41,7 +41,7 @@ jobs:
       run: |
         wget -nv https://dlcdn.apache.org/thrift/0.21.0/thrift-0.21.0.tar.gz
         tar xf thrift-0.21.0.tar.gz
-        pushd thrift-0.21.0
+        cd thrift-0.21.0
         ./bootstrap.sh
         ./configure --with-go --with-rs --without-python --without-py3 --without-swift --without-php --without-kotlin --without-java --without-nodejs --without-netstd --disable-tests --disable-tutorial --disable-dependency-tracking
         echo -e "\n\n=== PASS 2 STARTS ===\n\n"
@@ -52,7 +52,6 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/visaservice
         make THRIFTCC=$GITHUB_WORKSPACE/thrift-0.21.0/compiler/cpp/thrift all-go
-        popd
 
     - name: Test
       run: |
