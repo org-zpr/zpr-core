@@ -17,44 +17,17 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     steps:
+    - uses: docker://ghcr.io/org-zpr/bf2007c1b8a5:latest
+
     - uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.22'
-
-    - name: install build deps
-      run: sudo apt-get install libboost-dev libboost-test-dev libboost-program-options-dev libboost-filesystem-dev libboost-thread-dev libevent-dev automake libtool flex bison pkg-config g++ libssl-dev
-
-    - name: cache thrift
-      id: cache-thrift
-      uses: actions/cache@v3
-      env:
-        cache-name: cache-thriftcc-0210
-      with:
-        path: ${{ env.GITHUB_WORKSPACE }}/thrift-0.21.0/compiler/cpp
-        key: ${{ runner.os }}-build-${{ env.cache-name }}
-
-    - if: ${{ steps.cache-thrift.outputs.cache-hit != 'true' }}
-      name: install thrift
-      run: |
-        wget -nv https://dlcdn.apache.org/thrift/0.21.0/thrift-0.21.0.tar.gz
-        tar xf thrift-0.21.0.tar.gz
-        cd thrift-0.21.0
-        ./bootstrap.sh
-        ./configure --with-go --with-rs --without-python --without-py3 --without-swift --without-php --without-kotlin --without-java --without-nodejs --without-netstd --disable-tests --disable-tutorial --disable-dependency-tracking
-        echo -e "\n\n=== PASS 2 STARTS ===\n\n"
-        ./configure --with-go --with-rs --without-python --without-py3 --without-swift --without-php --without-kotlin --without-java --without-nodejs --without-netstd --disable-tests --disable-tutorial 
-        make
 
     - name: Build
       run: |
-        cd $GITHUB_WORKSPACE/visaservice
-        make THRIFTCC=$GITHUB_WORKSPACE/thrift-0.21.0/compiler/cpp/thrift all-go
+        cd visaservice
+        make all-go
 
     - name: Test
       run: |
-        cd $GITHUB_WORKSPACE/visaservice
+        cd visaservice
         make test-go
 
