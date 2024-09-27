@@ -34,7 +34,7 @@ jobs:
         path: ~/thrift-0.21.0/compiler/cpp
         key: ${{ runner.os }}-build-${{ env.cache-name }}
 
-    - if ${{ steps.cache-thrift.outputs.cache-hit != 'true' }}
+    - if: ${{ steps.cache-thrift.outputs.cache-hit != 'true' }}
       name: install thrift
       run: |
         wget -nv https://dlcdn.apache.org/thrift/0.21.0/thrift-0.21.0.tar.gz
