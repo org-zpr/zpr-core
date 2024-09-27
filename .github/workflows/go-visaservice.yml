@@ -16,9 +16,10 @@ jobs:
 
   setup:
     runs-on: ubuntu-latest
+    container:
+      image: docker://ghcr.io/org-zpr/bf2007c1b8a5:latest
     steps:
-    - uses: docker://ghcr.io/org-zpr/bf2007c1b8a5:latest
-      credentials:
+      with:
         username: ${{ github.actor }}
         password: ${{ secrets.github_token }}
 
