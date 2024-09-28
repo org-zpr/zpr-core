@@ -14,6 +14,8 @@ env:
 jobs:
   setup:
     runs-on: ubuntu-latest
+    container:
+      image: docker://ghcr.io/org-zpr/38f3bb925e5e:latest
     steps:
     - uses: actions/checkout@v4
 
