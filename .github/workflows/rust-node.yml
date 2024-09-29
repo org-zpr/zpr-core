@@ -23,6 +23,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Prepare Rust
+      run: rustup default stable
+
     - name: Build
       run: |
         cd node && make all
