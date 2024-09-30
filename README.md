@@ -69,7 +69,8 @@ ADAPTER                 NODE                VISASVC
                           .                    .
 ```
 
-### NOTES:
+```
+NOTES:
 
 (1) The auth_connect message is not fully filled in. We just include a couple of
     claims: the adapater ZPR address and the CN from the adapter certificate.
@@ -78,6 +79,7 @@ ADAPTER                 NODE                VISASVC
     ZDP messages we will use.  Note that we may want to establish liveness before
     calling auth_connect.  It is possible for the key management handshake to
     fail and one side not realize it.
+```
 
 
 
