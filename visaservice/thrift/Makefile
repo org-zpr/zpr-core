@@ -20,11 +20,9 @@ $(SUMS): %.thrift.sum: %.thrift
 	md5sum $< >$@
 
 
-.PHONY: all intall go rs clean
+.PHONY: all go rs clean
 
 all: go rs
-
-install: install-go install-rs
 
 go: $(BUILD_GO)/vsapi
 
