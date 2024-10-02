@@ -90,6 +90,11 @@ func VsioVisaToThrift(pb_visa *vsio.Visa) *vsapi.Visa {
 			Type:      int32(pb_visa.Sig.Type),
 			Signature: pb_visa.Sig.Signature,
 		}
+	} else {
+		vv.Sig = &vsapi.Signature{
+			Type:      0,
+			Signature: []byte{0},
+		}
 	}
 	return vv
 }

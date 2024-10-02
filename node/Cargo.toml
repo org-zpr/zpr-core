@@ -19,6 +19,7 @@ toml = "0.8.14"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 ph = { path = "../adapter/ph" }
+libnode = { path = "../libnode" }
 zerocopy = "0.7.35"
 bytes = "1.7.1"
 snow = "0.9.6"

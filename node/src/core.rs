@@ -9,10 +9,9 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::config;
-use crate::vs::VSConn;
-use crate::vs::VSOutput::PingSuccess;
 
-use crate::vs::vss;
+use libnode::vss;
+use libnode::vsconn::{VSConn, VSOutput, new_node_agent};
 use crate::zdp::server::ZDPServer;
 
 pub const VERSION: &str = "0.1.0";
@@ -152,7 +151,7 @@ pub async fn tokio_main(nconfig: config::Configuration, opts: CoreOpts) -> io::R
                         info!("VSS policy install: {:?}", pi);
                     }
                     vss::VSSMsg::PushedVisa(v) => {
-                        info!("VSS pushed visa: issuer_id={}", v.issuer_id);
+                        info!("VSS pushed visa: issuer_id={:?}", v.issuer_id);
                     }
                     _ => {
                         info!("VSConn::run received VSS message: {:?}", vss_msg);
@@ -186,55 +185,51 @@ async fn vs_force_connect(
 
     let (tx, mut rx) = mpsc::channel(VS_OUTPUT_CHANNEL_SIZE);
 
+    let node_agent = new_node_agent(&nconfig.get_node_addr(), &nconfig.get_claims());
+
     let vs_conn = VSConn::new(
+        node_agent,
         tx.clone(),
         &opts.vsforceconnect.unwrap(),
         &nconfig.get_cert_path(),
         &nconfig.get_key_path(),
-        nconfig.get_node_addr(),
-        vss_addr,
-    )?;
-    for (k, v) in nconfig.get_claims() {
-        vs_conn.add_claim(&k, &v);
-    }
+        &nconfig.get_node_addr(),
+        Some(vss_addr),
+    ).or_else(|e| {
+        error!("VSConn::new failed: {:?}", e);
+        Err(io::Error::new(io::ErrorKind::Other, "VSConn::new failed"))
+    })?;
 
     let vs_ctoken = ctoken.clone();
     tasks.spawn(async move {
-        let init_ok = match vs_conn.initialize(None) {
+        match vs_conn.run(vs_ctoken).await {
             Ok(_) => {
-                info!("visa service initialized OK");
-                true
+                info!("visa service exits without error");
             }
             Err(e) => {
-                error!("failed to connect to visa service: {}", e);
-                false
-            }
-        };
-
-        if init_ok {
-            match vs_conn.run(vs_ctoken).await {
-                Ok(_) => {
-                    info!("visa service exits without error");
-                }
-                Err(e) => {
-                    error!("visa service exits with error: {}", e);
-                }
+                error!("visa service exits with error: {}", e);
             }
         }
+
         let _ = cs_shutdown_tx.send(()); // visa service exits.
     });
 
     // Now we fire up another task to watch for output messages from
-    // the visa service.  In the future this will include visa-request
-    // responses and authentication responses.
+    // the visa service.
     let dbg_ctoken = ctoken.clone();
     tasks.spawn(async move {
         loop {
             tokio::select! {
                 Some(vs_output) = rx.recv() => {
                     match vs_output {
-                      PingSuccess(config_id, policy_version) => {
-                          info!("PingSuccess: config={} policy={}", config_id, policy_version);
+                      VSOutput::PingSuccess(config_id, policy_version) => {
+                          info!("*=> PingSuccess: config={} policy={}", config_id, policy_version);
+                      },
+                      VSOutput::VisaResponse(r) => {
+                          info!("*=> VisaResponse: {:?}", r);
+                      },
+                      VSOutput::ConnectResponse(r) => {
+                        info!("*=> ConnectResponse: {:?}", r);
                       }
                     }
                 }

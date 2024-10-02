@@ -1,38 +1,78 @@
-use tokio::sync::mpsc::Sender;
+//! Implements the receiving end of the Visa Support Service.
+//!
+//! Really doesn't do very much except for translate incoming visa service
+//! messages into enums on a channel.
+
 
 use thrift::protocol::{TBinaryInputProtocolFactory, TBinaryOutputProtocolFactory};
 use thrift::protocol::{TInputProtocolFactory, TOutputProtocolFactory};
 use thrift::server::TServer;
 use thrift::transport::{TFramedReadTransportFactory, TReadTransportFactory};
 use thrift::transport::{TFramedWriteTransportFactory, TWriteTransportFactory};
-
+use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info};
-use std::collections::BTreeMap;
+use std::fmt::{self, Formatter};
 
-use crate::vsapi::{self, VisaSupportSyncHandler, VisaSupportSyncProcessor};
-use crate::vstypes::{PolicyInfo, Revocation, Visa};
+use crate::vsapi;
+use crate::vsapi::{VisaSupportSyncHandler, VisaSupportSyncProcessor, PolicyInfo, VisaHop, VisaRevocation};
 
 
+/// Default port for the visa support service. Note that the visa support service
+/// should only listen on the ZPR interface (not substrate interface!).
+#[allow(dead_code)]
+pub const DEFAULT_VSS_PORT: u16 = 8183;
+
+
+/// Messages from the visa service. These wrap the thrift message types.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum VSSMsg {
+    /// Indicates a policy has been installed.
     PolicyInstall(PolicyInfo),
-    PushedVisa(Visa),
-    PushedRevocation(Revocation),
+
+    /// Pushed visas from the visa service.
+    PushedVisa(VisaHop),
+
+    /// Pushed visa revokcations from the visa service.
+    PushedRevocation(VisaRevocation),
 }
 
+
+impl fmt::Display for VSSMsg {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            VSSMsg::PolicyInstall(pi) => write!(f, "PolicyInstall(policy_id: {})", pi.policy_id),
+            VSSMsg::PushedVisa(v) => write!(f, "Visa(issuer_id: {:?})", v.issuer_id),
+            VSSMsg::PushedRevocation(r) => write!(f, "Revocation(issuer_id: {})", r.issuer_id),
+        }
+    }
+}
+
+
+/// The VisaSupportHandlerImpl is a light wrapper around the thrift
+/// VisaSupportService client code which takes the messages from the
+/// visa service and places them on a channel.
 pub struct VisaSupportHandlerImpl {
     msg_chan_out: Sender<VSSMsg>,
 }
 
 impl VisaSupportHandlerImpl {
+
+    /// Create a VisaSupportHandlerImpl. Messages from the visa service are placed on the
+    /// passed `msg_chan_out` channel.
+    #[allow(dead_code)]
     pub fn new(msg_chan_out: Sender<VSSMsg>) -> Self {
         VisaSupportHandlerImpl { msg_chan_out }
     }
 }
 
-/// Start the VSS server.
+/// Start the VSS (thrift) server (blocks forever). Messages from the visa service are
+/// placed on the provided channel.
+/// - `tx_chan` for arriving messages from the visa service.
 /// - `listen_addr` is the address to listen on as 'ADDR:PORT'.
+///
+/// TODO: Need to add TLS to the thrift connection.
+#[allow(dead_code)]
 pub fn start_vss_server(tx_chan: Sender<VSSMsg>, listen_addr: &str) {
     // Create the thrift server and run it.
     let handler = VisaSupportHandlerImpl::new(tx_chan);
@@ -55,54 +95,37 @@ pub fn start_vss_server(tx_chan: Sender<VSSMsg>, listen_addr: &str) {
 }
 
 impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
+
+    /// Accept the visa service message and put in on the message channel.
     fn handle_network_policy_installed(&self, pi: vsapi::PolicyInfo) -> thrift::Result<()> {
         debug!("handle_network_policy_installed: {:?}", pi);
-
-        let mut config = BTreeMap::new();
-        if let Some(nc) = pi.node_config {
-            for (k, v) in nc {
-                config.insert(k, v);
-            }
-        }
-
-        let pi = PolicyInfo {
-            policy_id: pi.policy_id as u64,
-            configuration_id: pi.config_id as u64,
-            node_config: config,
-        };
-
-        let msg = VSSMsg::PolicyInstall(pi);
-        match self.msg_chan_out.blocking_send(msg) {
-            Ok(_) => Ok(()),
-            Err(e) => {
+        self.msg_chan_out.blocking_send(VSSMsg::PolicyInstall(pi)).or_else(|e| {
                 error!("failed to enque policy message to node: {}", e);
-                Err(thrift::Error::from("enque failed"))
-            }
-        }
+                Err(thrift::Error::from("enqueue failed"))
+        })
     }
 
+    /// Accept the pushed visa(s) and put on to the message channel.
     fn handle_install_visas(&self, vh: Vec<vsapi::VisaHop>) -> thrift::Result<()> {
-        debug!("handle_install_visas");
+        debug!("handle_install_visas, count={}", vh.len());
         for v in vh {
-            let visa = Visa {
-                hop_count: v.hop_count.unwrap() as u32,
-                issuer_id: v.issuer_id.unwrap() as u32,
-                visa: v.visa.unwrap(),
-            };
-            let msg = VSSMsg::PushedVisa(visa);
-            match self.msg_chan_out.blocking_send(msg) {
-                Ok(_) => (),
-                Err(e) => {
-                    error!("failed to enqueue visa message to node: {}", e);
-                    return Err(thrift::Error::from("enqueue failed"));
-                }
-            }
+            self.msg_chan_out.blocking_send(VSSMsg::PushedVisa(v)).or_else(|e| {
+                error!("failed to enqueue visa message to node: {}", e);
+                Err(thrift::Error::from("enqueue failed"))
+            })?;
         }
         Ok(())
     }
 
+    /// Accept the visa revocation(s) and put on to the message channel.
     fn handle_revoke_visas(&self, vr: Vec<vsapi::VisaRevocation>) -> thrift::Result<()> {
-        info!("handle_revoke_visas not implemented: {:?}", vr);
+        debug!("handle_revoke_visas, count={}", vr.len());
+        for r in vr {
+            self.msg_chan_out.blocking_send(VSSMsg::PushedRevocation(r)).or_else(|e| {
+                error!("failed to enque visa revocation to node: {}", e);
+                Err(thrift::Error::from("enqueue failed"))
+            })?;
+        }
         Ok(())
     }
 }

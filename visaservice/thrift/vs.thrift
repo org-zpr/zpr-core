@@ -165,7 +165,7 @@ struct NodeAuthRequest {
 
 
 struct ConnectRequest {
-  1: i32 connection_id,
+  1: required i32 connection_id,
   2: binary dock_addr, // dock ZPR address
   3: map<string, string> claims,
   4: binary challenge,  // assume this is old protocol buffer challenge-request
@@ -174,8 +174,8 @@ struct ConnectRequest {
 
 
 struct ConnectResponse {
-  1: i32 connection_id, // copied from request
-  2: StatusCode status, // SUCCESS if connect request granted
+  1: required i32 connection_id, // copied from request
+  2: required StatusCode status, // SUCCESS if connect request granted
   3: optional Agent agent,
   4: optional string reason,  // Optional message in case of non SUCCESS
 }
