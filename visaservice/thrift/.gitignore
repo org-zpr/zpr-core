@@ -1,3 +1,4 @@
 gen-go/
 gen-rs/
+gen-html/
 *.thrift.sum

@@ -20,7 +20,7 @@ $(SUMS): %.thrift.sum: %.thrift
 	md5sum $< >$@
 
 
-.PHONY: all go rs clean
+.PHONY: all go rs clean doc
 
 all: go rs
 
@@ -31,6 +31,7 @@ rs: $(BUILD_RS)/vs.rs
 clean:
 	rm -rf $(BUILD_GO) && rm -rf $(BUILD_RS) 
 
-
+doc:
+	$(THRIFTCC) -gen html vs.thrift
 
 .DEFAULT_GOAL := all
