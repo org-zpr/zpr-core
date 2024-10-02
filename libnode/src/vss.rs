@@ -41,9 +41,9 @@ pub enum VSSMsg {
 impl fmt::Display for VSSMsg {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            VSSMsg::PolicyInstall(pi) => write!(f, "PolicyInstall(policy_id: {})", pi.policy_id),
+            VSSMsg::PolicyInstall(pi) => write!(f, "PolicyInstall(policy_id: {:?})", pi.policy_id),
             VSSMsg::PushedVisa(v) => write!(f, "Visa(issuer_id: {:?})", v.issuer_id),
-            VSSMsg::PushedRevocation(r) => write!(f, "Revocation(issuer_id: {})", r.issuer_id),
+            VSSMsg::PushedRevocation(r) => write!(f, "Revocation(issuer_id: {:?})", r.issuer_id),
         }
     }
 }

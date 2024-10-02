@@ -263,34 +263,34 @@ struct PolicyInfo {
  *
  * The new connection protocol is:
  *
- *     1. Start a node. Node is given a visa from the compiler that will allow
- *        it to communicate the the visa service when it comes online.
+ * 1. Start a node. Node is given a visa from the compiler that will allow
+ *    it to communicate the the visa service when it comes online.
  *
- *     2. Start the visa service's adatper.  This adapter will present a
- *        certificate to the node that is (a) signed by the ZPR authority and
- *        (b) has a well known CN that tells the node that it is the visa
- *        service's adapter.
+ * 2. Start the visa service's adatper.  This adapter will present a
+ *    certificate to the node that is (a) signed by the ZPR authority and
+ *    (b) has a well known CN that tells the node that it is the visa
+ *    service's adapter.
  *
- *     3. The node allows this adapter to connect -- even though the node has
- *        has no policy yet.  The pre-built visa includes the hard-coded visa
- *        service adapter's ZPR address.
+ * 3. The node allows this adapter to connect -- even though the node has
+ *    has no policy yet.  The pre-built visa includes the hard-coded visa
+ *    service adapter's ZPR address.
  *
- *     ~~ Now this visa service API kicks in ~~
+ * ~~ Now this visa service API kicks in ~~
  *
- *     4. The node sends a HELLO message to the visa service.
+ * 4. The node sends a HELLO message to the visa service.
  *
- *     5. The visa service sends a HELLO-RESPONSE which includes a challenge.
+ * 5. The visa service sends a HELLO-RESPONSE which includes a challenge.
  *
- *     6. The node performs the crypto operations to satisfy the challenge and
- *        sends back the AUTHENTICATE message.
+ * 6. The node performs the crypto operations to satisfy the challenge and
+ *    sends back the AUTHENTICATE message.
  *
- *     6. The visa service checks the nodes crypto, checks policy, and if all
- *        is well will send back an API Key that the node can use when calling
- *        any of the other functions on this API.
+ * 6. The visa service checks the nodes crypto, checks policy, and if all
+ *    is well will send back an API Key that the node can use when calling
+ *    any of the other functions on this API.
  *
  *
  * TODO: There is currently no mechanism described for how to expire or
- *       refresh the API key.
+ * refresh the API key.
  */
 service VisaService {
 
@@ -337,25 +337,12 @@ service VisaService {
   VisaResponse request_visa(1:string key, 2:binary src_tether_addr, 3: i8 l3_type, 4:binary traffic)
 }
 
-
-
 /**
  *
  *  The visa support service API
  *  ============================
  *
  * Access to the visa support socket on the node is controlled by ZPR.
- * TODO: What if someone is on node host and connects via localhost?
- *
- *       Need to figure out how to secure this (and other thrift stuff too).
- *       For this API specifically, a visa service should not call this
- *       until the node has registered with the visa service first.
- *       So the node knows the address of the visa service and we could
- *       check that (TODO: how to get client addr in thrift server?).
- *       Or we could generate an API key and pass it to the visa service
- *       during registration.  Or, and maybe best, the node can get the
- *       visa service cert during registration and we can enable TLS on
- *       this service and check the visa service key.
  */
 service VisaSupport {
 

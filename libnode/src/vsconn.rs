@@ -127,6 +127,12 @@ pub struct AuthorizeConnectResponse {
     pub response: Option<vsapi::ConnectResponse>,
 }
 
+#[derive(Debug)]
+pub struct DisconnectStatus {
+    pub zpr_addr: IpAddr,
+    pub api_error: Option<VSClientError>,
+}
+
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -144,6 +150,7 @@ pub enum VSOutput {
     PingSuccess(u64, u64), // (CONFIG_ID, POLICY_VERSION)
     VisaResponse(VisaRequestResponse),
     ConnectResponse(AuthorizeConnectResponse),
+    AgentDisconnect(DisconnectStatus),
 }
 
 
@@ -408,7 +415,10 @@ impl VSConn {
                         }
 
                         VSCommand::AuthorizeConnect(cr) => {
-                            let id = cr.connection_id;
+                            let id = match cr.connection_id {
+                                Some(i) => i,
+                                None => 0,
+                            };
                             let resp = match client.authorize_connect(cr) {
                                 Ok(acr) => AuthorizeConnectResponse{
                                     connection_id: id,
@@ -434,10 +444,24 @@ impl VSConn {
                         }
 
                         VSCommand::AgentDisconnect(ipa) => {
-                            match client.agent_disconnect(ipa) {
-                                Ok(_) => {}
+                            let resp = match client.agent_disconnect(ipa) {
+                                Ok(_) => DisconnectStatus {
+                                    zpr_addr: ipa,
+                                    api_error: None,
+                                },
                                 Err(e) => {
                                     error!("ailed to call agent disconnect: {}", e);
+                                    DisconnectStatus {
+                                        zpr_addr: ipa,
+                                        api_error: Some(e),
+                                    }
+                                }
+                            };
+                            match output_tx.send(VSOutput::AgentDisconnect(resp)).await {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    error!("failed to queue agent disconnect: {}", e);
+                                    return Err(VSError::EnqueueError);
                                 }
                             }
                         }
@@ -492,7 +516,8 @@ impl VSConn {
     }
 
 
-    /// Async message to visa service noting that an agent has disconnected. There is no response to this message.
+    /// Async message to visa service noting that an agent has disconnected. A [VSOutput::AgentDisconnect]
+    /// message will be generated when this runs.
     ///
     /// ## Errors
     /// - [VSError::EnqueueError] if the request could not be enqueued.
@@ -510,11 +535,12 @@ mod test {
 
     use tokio::sync::mpsc;
     use tokio_util::sync::CancellationToken;
+    use tokio::time::timeout;
 
     use rand::Rng;
     use std::env;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{SystemTime, UNIX_EPOCH, Duration};
 
     const CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
 MIIEWzCCA0OgAwIBAgIJAMSVUe6Pd/Z7MA0GCSqGSIb3DQEBBQUAMIGGMQswCQYD
@@ -606,26 +632,27 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         }
     }
 
-    // In an effort to leave the client trait implementation as simple as possible
-    // it does not allow for modification of `self`... so we can't have any mutable
-    // state in there.  For these tests, we track state in a static variable.
+    // Due to the way the client is instantiated through the simple factory function
+    // we keep track our our test state in these static variables here.
     //
-    // Also turns out that `cargo test` likes to run tests in parallel which is not
+    // Turns out that `cargo test` likes to run tests in parallel which is not
     // good for our static state which is shared with all these tests. So there is a
-    // MUTEX to protect it which the test acquires for the duration of its run.
+    // MUTEX to protect it which each test acquires for the duration of its run.
     //
-    // Its a fair amount of hackery for a couple of tests that don't actually test much!
     //
     struct TestState {
         auth_count: u32,
         ping_count: u32,
         de_register_count: u32,
+        disconnect_count: u32,
+        next_error: Option<VSClientError>,
     }
 
     enum CounterT {
         Auth,
         Ping,
         DeRegister,
+        AgentDisconnect,
     }
 
     static mut RUN_LOCK: Mutex<u32> = Mutex::new(0); // Each test holds this while running.
@@ -634,6 +661,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         auth_count: 0,
         ping_count: 0,
         de_register_count: 0,
+        disconnect_count: 0,
+        next_error: None,
     };
 
     fn reset_state() {
@@ -641,6 +670,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             TEST_STATE.auth_count = 0;
             TEST_STATE.ping_count = 0;
             TEST_STATE.de_register_count = 0;
+            TEST_STATE.disconnect_count = 0;
+            TEST_STATE.next_error = None;
         }
     }
 
@@ -650,6 +681,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
                 CounterT::Auth => TEST_STATE.auth_count,
                 CounterT::Ping => TEST_STATE.ping_count,
                 CounterT::DeRegister => TEST_STATE.de_register_count,
+                CounterT::AgentDisconnect => TEST_STATE.disconnect_count,
             }
         }
     }
@@ -660,9 +692,23 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
                 CounterT::Auth => TEST_STATE.auth_count += 1,
                 CounterT::Ping => TEST_STATE.ping_count += 1,
                 CounterT::DeRegister => TEST_STATE.de_register_count += 1,
+                CounterT::AgentDisconnect => TEST_STATE.disconnect_count += 1,
             }
         }
     }
+
+    fn set_next_error(e: VSClientError) {
+        unsafe {
+            TEST_STATE.next_error = Some(e);
+        }
+    }
+
+    fn take_next_error() -> Option<VSClientError> {
+        unsafe {
+            TEST_STATE.next_error.take()
+        }
+    }
+
 
     #[derive(Debug)]
     struct TestVSCli {}
@@ -676,11 +722,17 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             _vss_service_addr: &str,
         ) -> Result<String, VSClientError> {
             incr(CounterT::Auth);
+            if let Some(e) = take_next_error() {
+                return Err(e);
+            }
             Ok(String::from("le_key"))
         }
 
         fn ping_vs(&mut self) -> Result<vsapi::Pong, VSClientError> {
             incr(CounterT::Ping);
+            if let Some(e) = take_next_error() {
+                return Err(e);
+            }
             Ok(vsapi::Pong {
                 configuration: Some(1),
                 policy_version: Some(2),
@@ -689,28 +741,69 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
         fn de_register(&mut self) -> Result<(), VSClientError> {
             incr(CounterT::DeRegister);
+            if let Some(e) = take_next_error() {
+                return Err(e);
+            }
             Ok(())
         }
 
-        fn request_visa(&mut self, source_tether_addr: IpAddr, l3_type: zpr::L3Type, packet: Vec<u8>) -> Result<vsapi::VisaResponse, VSClientError>
+        fn request_visa(&mut self, source_tether_addr: IpAddr, l3_type: zpr::L3Type, _packet: Vec<u8>) -> Result<vsapi::VisaResponse, VSClientError>
         {
-            todo!("not implemented");
+            if let Some(e) = take_next_error() {
+                return Err(e);
+            }
+            let vrr = vsapi::VisaResponse {
+                status: Some(vsapi::StatusCode::FAIL),
+                visa: None,
+                reason: Some(format!("addr: {}, type: {}", source_tether_addr, l3_type)),
+            };
+            Ok(vrr)
         }
 
         fn authorize_connect(&mut self, req: vsapi::ConnectRequest) -> Result<vsapi::ConnectResponse, VSClientError>
         {
-            todo!("not implemented");
+            if let Some(e) = take_next_error() {
+                return Err(e);
+            }
+            let mut attrs = BTreeMap::new();
+            match req.claims {
+                Some(c) => {
+                    for (k, v) in c {
+                        attrs.insert(k, v);
+                    }
+                }
+                None => {}
+            };
+            let agnt = vsapi::Agent {
+                agent_type: Some(vsapi::AgentType::ADAPTER),
+                attrs: Some(attrs),
+                auth_expires: Some(0),
+                zpr_addr: None,
+                tether_addr: None,
+                ident: None,
+                provides: None,
+            };
+            let cr = vsapi::ConnectResponse {
+                connection_id: req.connection_id,
+                status: Some(vsapi::StatusCode::SUCCESS),
+                agent: Some(agnt),
+                reason: Some(format!(""))
+            };
+            Ok(cr)
         }
 
-        fn agent_disconnect(&mut self, agent_zpr_addr: IpAddr) -> Result<(), VSClientError>
+        fn agent_disconnect(&mut self, _agent_zpr_addr: IpAddr) -> Result<(), VSClientError>
         {
-            todo!("not implemented");
+            incr(CounterT::AgentDisconnect);
+            if let Some(e) = take_next_error() {
+                return Err(e);
+            }
+            Ok(())
         }
-
     }
 
     fn testvscli_factory(_service_addr: &str) -> Result<Box<dyn VSClientI>, VSClientError> {
-        Ok(Box::new(TestVSCli {}))
+        Ok(Box::new(TestVSCli{}))
     }
 
     #[tokio::test]
@@ -758,5 +851,349 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         assert_eq!(get_counter(CounterT::Auth), 1);
         assert_eq!(get_counter(CounterT::DeRegister), 1);
         assert_eq!(get_counter(CounterT::Ping), 1);
+    }
+
+
+    #[tokio::test]
+    async fn test_visa_req_resp() {
+        let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
+        reset_state();
+        let certfile = TempFile::new_pem(CERT_DATA);
+        let keyfile = TempFile::new_pem(KEY_DATA);
+
+        let node_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+
+        let (tx, mut rx) = mpsc::channel(8);
+
+        let mut claims = BTreeMap::new();
+        claims.insert(String::from("foo"), String::from("fee"));
+        let agnt = new_node_agent(&node_addr, &claims);
+
+
+        let conn = VSConn::new(
+            agnt,
+            tx,
+            "127.0.0.1:0",
+            certfile.get_path(),
+            keyfile.get_path(),
+            &node_addr,
+            None,
+        )
+        .unwrap();
+
+        conn.set_client_factory(testvscli_factory);
+
+        let ctoken = CancellationToken::new();
+        let vs_tok = ctoken.clone();
+        let sp_conn = conn.clone();
+        tokio::spawn(async move {
+            let _ = sp_conn.run(vs_tok).await;
+        });
+
+        // Should get a ping message
+        match timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(resp) => {
+                let output = resp.unwrap();
+                if !matches!(output, VSOutput::PingSuccess(_, _)) {
+                    panic!("expected ping message, not {:?}", output);
+                }
+            }
+            _ => {
+                panic!("expected ping message, but got nothing (timeout)");
+            }
+        }
+
+
+        let req = VisaRequest {
+            request_id: 123,
+            source_tether_addr: node_addr,
+            l3_type: zpr::L3Type::Ipv4,
+            packet: vec![1, 2, 3, 4],
+        };
+        conn.request_visa(req).await.unwrap();
+
+        match timeout(Duration::from_millis(100), rx.recv()).await {
+            Ok(resp) => {
+                let output = resp.unwrap();
+                match output {
+                    VSOutput::VisaResponse(vrr) => {
+                        assert_eq!(vrr.request_id, 123);
+                        assert!(vrr.api_error.is_none());
+                        assert!(vrr.response.is_some());
+                        let vr = vrr.response.unwrap();
+                        assert_eq!(vr.status, Some(vsapi::StatusCode::FAIL));
+                        assert!(vr.reason.is_some());
+                        let reason = vr.reason.unwrap();
+                        assert!(reason.contains(&node_addr.to_string()));
+                        assert!(reason.contains(format!("type: {}", zpr::L3Type::Ipv4).as_str()));
+                    }
+                    _ => {
+                        panic!("expected visa-response message, not {:?}", output);
+                    }
+                }
+            }
+            _ => {
+                panic!("expected visa-response message, but got nothing (timeout)");
+            }
+        }
+
+        {
+            // Run again check that we get the error:
+            let req = VisaRequest {
+                request_id: 123,
+                source_tether_addr: node_addr,
+                l3_type: zpr::L3Type::Ipv4,
+                packet: vec![1, 2, 3, 4],
+            };
+            set_next_error(VSClientError::NoAPIKey);
+            conn.request_visa(req).await.unwrap();
+            match timeout(Duration::from_millis(100), rx.recv()).await {
+                Ok(resp) => {
+                    let output = resp.unwrap();
+                    match output {
+                        VSOutput::VisaResponse(vrr) => {
+                            assert_eq!(vrr.request_id, 123);
+                            assert!(vrr.api_error.is_some());
+                            assert!(matches!(vrr.api_error.unwrap(), VSClientError::NoAPIKey));
+                        }
+                        _ => {
+                            panic!("expected visa-response message, not {:?}", output);
+                        }
+                    }
+                }
+                _ => {
+                    panic!("expected visa-response message, but got nothing (timeout)");
+                }
+            }
+        }
+
+        ctoken.cancel(); // stop the vs
+    }
+
+
+    #[tokio::test]
+    async fn test_connect_request() {
+        let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
+        reset_state();
+        let certfile = TempFile::new_pem(CERT_DATA);
+        let keyfile = TempFile::new_pem(KEY_DATA);
+
+        let node_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+
+        let (tx, mut rx) = mpsc::channel(8);
+
+        let mut claims = BTreeMap::new();
+        claims.insert(String::from("foo"), String::from("fee"));
+        let agnt = new_node_agent(&node_addr, &claims);
+
+
+        let conn = VSConn::new(
+            agnt,
+            tx,
+            "127.0.0.1:0",
+            certfile.get_path(),
+            keyfile.get_path(),
+            &node_addr,
+            None,
+        )
+        .unwrap();
+
+        conn.set_client_factory(testvscli_factory);
+
+        let ctoken = CancellationToken::new();
+        let vs_tok = ctoken.clone();
+        let sp_conn = conn.clone();
+        tokio::spawn(async move {
+            let _ = sp_conn.run(vs_tok).await;
+        });
+
+        // Should get a ping message
+        match timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(resp) => {
+                let output = resp.unwrap();
+                if !matches!(output, VSOutput::PingSuccess(_, _)) {
+                    panic!("expected ping message, not {:?}", output);
+                }
+            }
+            _ => {
+                panic!("expected ping message, but got nothing (timeout)");
+            }
+        }
+
+
+        let mut claims = BTreeMap::new();
+        claims.insert("foo".to_string(), "fee".to_string());
+        claims.insert("hello".to_string(), "goodbye".to_string());
+
+        let req = vsapi::ConnectRequest {
+            connection_id: Some(456),
+            dock_addr: Some(vec![10, 0, 0, 1]),
+            claims: Some(claims.clone()),
+            challenge: Some(vec![1, 2, 3, 4]),
+            challenge_responses: Some(vec![vec![5, 6, 7, 8]])
+        };
+        conn.authorize_connect(req).await.unwrap();
+
+        match timeout(Duration::from_millis(100), rx.recv()).await {
+            Ok(resp) => {
+                let output = resp.unwrap();
+                match output {
+                    VSOutput::ConnectResponse(cr) => {
+                        assert_eq!(cr.connection_id, 456);
+                        assert!(cr.api_error.is_none());
+                        assert!(cr.response.is_some());
+                        let cresp = cr.response.unwrap();
+                        assert!(cresp.agent.is_some());
+                        let agnt = cresp.agent.unwrap();
+                        let attrs = agnt.attrs.unwrap();
+                        for (k, v) in attrs {
+                            assert_eq!(v, *(claims.get(&k).unwrap()));
+                        }
+                    }
+                    _ => {
+                        panic!("expected connect-response message, not {:?}", output);
+                    }
+                }
+            }
+            _ => {
+                panic!("expected connect-response message, but got nothing (timeout)");
+            }
+        }
+
+        {
+            // Run again check that we get the error:
+            let req = vsapi::ConnectRequest {
+                connection_id: Some(456),
+                dock_addr: None,
+                claims: None,
+                challenge: None,
+                challenge_responses: None,
+            };
+            set_next_error(VSClientError::NoAPIKey);
+            conn.authorize_connect(req).await.unwrap();
+            match timeout(Duration::from_millis(100), rx.recv()).await {
+                Ok(resp) => {
+                    let output = resp.unwrap();
+                    match output {
+                        VSOutput::ConnectResponse(cr) => {
+                            assert_eq!(cr.connection_id, 456);
+                            assert!(cr.api_error.is_some());
+                            assert!(matches!(cr.api_error.unwrap(), VSClientError::NoAPIKey));
+                        }
+                        _ => {
+                            panic!("expected connect-response message, not {:?}", output);
+                        }
+                    }
+                }
+                _ => {
+                    panic!("expected connect-response message, but got nothing (timeout)");
+                }
+            }
+        }
+
+        ctoken.cancel(); // stop the vs
+    }
+
+    #[tokio::test]
+    async fn test_agent_disconnect() {
+        let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
+        reset_state();
+        let certfile = TempFile::new_pem(CERT_DATA);
+        let keyfile = TempFile::new_pem(KEY_DATA);
+
+        let node_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+
+        let (tx, mut rx) = mpsc::channel(8);
+
+        let mut claims = BTreeMap::new();
+        claims.insert(String::from("foo"), String::from("fee"));
+        let agnt = new_node_agent(&node_addr, &claims);
+
+
+        let conn = VSConn::new(
+            agnt,
+            tx,
+            "127.0.0.1:0",
+            certfile.get_path(),
+            keyfile.get_path(),
+            &node_addr,
+            None,
+        )
+        .unwrap();
+
+        conn.set_client_factory(testvscli_factory);
+
+        let ctoken = CancellationToken::new();
+        let vs_tok = ctoken.clone();
+        let sp_conn = conn.clone();
+        tokio::spawn(async move {
+            let _ = sp_conn.run(vs_tok).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+
+        // Should get a ping message
+        match timeout(Duration::from_millis(10), rx.recv()).await {
+            Ok(resp) => {
+                let output = resp.unwrap();
+                if !matches!(output, VSOutput::PingSuccess(_, _)) {
+                    panic!("expected ping message, not {:?}", output);
+                }
+            }
+            _ => {
+                panic!("expected ping message, but got nothing (timeout)");
+            }
+        }
+
+        assert_eq!(get_counter(CounterT::AgentDisconnect), 0);
+
+        conn.agent_disconnect(node_addr).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        match timeout(Duration::from_millis(10), rx.recv()).await {
+            Ok(resp) => {
+                let output = resp.unwrap();
+                match output {
+                    VSOutput::AgentDisconnect(dr) => {
+                        assert_eq!(dr.zpr_addr, node_addr);
+                        assert!(dr.api_error.is_none());
+                    }
+                    _ => {
+                        panic!("expected agent-disconnect message, not {:?}", output);
+                    }
+                }
+            }
+            _ => {
+                panic!("expected agent-disconnect-response message, but got nothing (timeout)");
+            }
+        }
+        assert_eq!(get_counter(CounterT::AgentDisconnect), 1);
+
+        // Run disconnect again check that we get the error:
+        set_next_error(VSClientError::NoAPIKey);
+        conn.agent_disconnect(node_addr).await.unwrap();
+
+        match timeout(Duration::from_millis(100), rx.recv()).await {
+            Ok(resp) => {
+                let output = resp.unwrap();
+                match output {
+                    VSOutput::AgentDisconnect(dr) => {
+                        assert_eq!(dr.zpr_addr, node_addr);
+                        assert!(dr.api_error.is_some());
+                        assert!(matches!(dr.api_error.unwrap(), VSClientError::NoAPIKey));
+                    }
+                    _ => {
+                        panic!("expected agent-disconnect message, not {:?}", output);
+                    }
+                }
+            }
+            _ => {
+                panic!("expected agent-disconnect-response message, but got nothing (timeout)");
+            }
+        }
+
+        ctoken.cancel(); // stop the vs
     }
 }

@@ -3,7 +3,7 @@
 src/vsapi/mod.rs: thrift
 
 
-.PHONY: all build test thrift clean dist-clean
+.PHONY: all build test thrift clean dist-clean thrift-clean
 
 all: build
 
@@ -23,6 +23,9 @@ clean:
 	cargo clean
 
 dist-clean: clean
+	rm -rf src/vsapi
+
+thrift-clean:
 	rm -rf src/vsapi
 
 .DEFAULT_GOAL := all
