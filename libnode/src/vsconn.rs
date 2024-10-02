@@ -4,27 +4,6 @@
 //! generated client code to communicate with the visa service.
 //!
 
-// Node will start up a visa service client process when:
-//   1- During a bootstrap when nothing is connected, the well-known visa service adapter connects.
-//   2- Another node may open a link to us and tell us how to get to the visa service.
-//
-// Either way, the next step is registering with the visa service.
-// Registration is:
-//
-//     NODE -> VS:  Hello()
-//     NODE <- VS:  HelloResponse(challenge)
-//     NODE -> VS:  Authenticate(challenge + challenge_response)
-//     NODE <- VS:  Ok(apikey)
-//
-//   At this point the node is "registered" with the visa service.
-//   TODO: The node should call authroize_connect on itself once registered.
-//
-//   Now the node can request visas or call for connect authorizations.
-//
-
-
-
-
 use openssl::pkey::Private;
 use openssl::rsa::Rsa;
 
@@ -324,9 +303,6 @@ impl VSConn {
     ///
     /// This little run loop is fairly basic: all requests of the visa service run one at a time and
     /// in order.
-    ///
-    ///
-    /// TODO: This function is too long
     pub async fn run(&self, ctok: CancellationToken) -> Result<(), VSError> {
         info!("VSConn::run starts");
 
@@ -388,88 +364,82 @@ impl VSConn {
 
                 // Handle one of the "async" requests.
                 Some(cmd) = rx.recv() => {
-                    match cmd {
-                        VSCommand::RequestVisa(req) => {
-                            let resp = match client.request_visa(req.source_tether_addr, req.l3_type, req.packet) {
-                                Ok(vr) => VisaRequestResponse {
-                                        request_id: req.request_id,
-                                        api_error: None,
-                                        response: Some(vr),
-                                    },
-                                Err(e) => {
-                                    error!("failed to request visa: {}", e);
-                                    VisaRequestResponse {
-                                        request_id: req.request_id,
-                                        api_error: Some(e),
-                                        response: None,
-                                    }
-                                }
-                            };
-                            match output_tx.send(VSOutput::VisaResponse(resp)).await {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    error!("failed to queue visa response: {}", e);
-                                    return Err(VSError::EnqueueError);
-                                }
-                            }
-                        }
-
-                        VSCommand::AuthorizeConnect(cr) => {
-                            let id = match cr.connection_id {
-                                Some(i) => i,
-                                None => 0,
-                            };
-                            let resp = match client.authorize_connect(cr) {
-                                Ok(acr) => AuthorizeConnectResponse{
-                                    connection_id: id,
-                                    api_error: None,
-                                    response: Some(acr),
-                                },
-                                Err(e) => {
-                                    error!("failed to authorize connect: {}", e);
-                                    AuthorizeConnectResponse {
-                                        connection_id: id,
-                                        api_error: Some(e),
-                                        response: None,
-                                    }
-                                }
-                            };
-                            match output_tx.send(VSOutput::ConnectResponse(resp)).await {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    error!("failed to queue connect response: {}", e);
-                                    return Err(VSError::EnqueueError);
-                                }
-                            }
-                        }
-
-                        VSCommand::AgentDisconnect(ipa) => {
-                            let resp = match client.agent_disconnect(ipa) {
-                                Ok(_) => DisconnectStatus {
-                                    zpr_addr: ipa,
-                                    api_error: None,
-                                },
-                                Err(e) => {
-                                    error!("ailed to call agent disconnect: {}", e);
-                                    DisconnectStatus {
-                                        zpr_addr: ipa,
-                                        api_error: Some(e),
-                                    }
-                                }
-                            };
-                            match output_tx.send(VSOutput::AgentDisconnect(resp)).await {
-                                Ok(_) => {}
-                                Err(e) => {
-                                    error!("failed to queue agent disconnect: {}", e);
-                                    return Err(VSError::EnqueueError);
-                                }
-                            }
+                    let resp = match cmd {
+                        VSCommand::RequestVisa(req) => self.handle_request_visa(&mut client, req),
+                        VSCommand::AuthorizeConnect(cr) => self.handle_authorize_connect(&mut client, cr),
+                        VSCommand::AgentDisconnect(ipa) => self.handle_agent_disconnect(&mut client, ipa),
+                    };
+                    match output_tx.send(resp).await {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("failed to enqueue a response: {}", e);
+                            return Err(VSError::EnqueueError);
                         }
                     }
                 }
             }
         }
         Ok(())
+    }
+
+
+    fn handle_request_visa(&self, client: &mut Box<dyn VSClientI>, req: VisaRequest) -> VSOutput {
+        let resp = match client.request_visa(req.source_tether_addr, req.l3_type, req.packet) {
+            Ok(vr) => VisaRequestResponse {
+                    request_id: req.request_id,
+                    api_error: None,
+                    response: Some(vr),
+                },
+            Err(e) => {
+                error!("failed to request visa: {}", e);
+                VisaRequestResponse {
+                    request_id: req.request_id,
+                    api_error: Some(e),
+                    response: None,
+                }
+            }
+        };
+        VSOutput::VisaResponse(resp)
+    }
+
+    fn handle_authorize_connect(&self, client: &mut Box<dyn VSClientI>, cr: vsapi::ConnectRequest) -> VSOutput {
+        let id = match cr.connection_id {
+            Some(i) => i,
+            None => 0,
+        };
+        let resp = match client.authorize_connect(cr) {
+            Ok(acr) => AuthorizeConnectResponse{
+                connection_id: id,
+                api_error: None,
+                response: Some(acr),
+            },
+            Err(e) => {
+                error!("failed to authorize connect: {}", e);
+                AuthorizeConnectResponse {
+                    connection_id: id,
+                    api_error: Some(e),
+                    response: None,
+                }
+            }
+        };
+        VSOutput::ConnectResponse(resp)
+    }
+
+    fn handle_agent_disconnect(&self, client: &mut Box<dyn VSClientI>, ipa: IpAddr) -> VSOutput {
+        let resp = match client.agent_disconnect(ipa) {
+            Ok(_) => DisconnectStatus {
+                zpr_addr: ipa,
+                api_error: None,
+            },
+            Err(e) => {
+                error!("ailed to call agent disconnect: {}", e);
+                DisconnectStatus {
+                    zpr_addr: ipa,
+                    api_error: Some(e),
+                }
+            }
+        };
+        VSOutput::AgentDisconnect(resp)
     }
 
     /// Attempt to enqueue an async command to the runloop.
