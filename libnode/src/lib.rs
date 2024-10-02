@@ -1,6 +1,4 @@
-pub mod vss;
-pub mod vsconn;
-mod vscli;
 mod vsapi;
-
-
+mod vscli;
+pub mod vsconn;
+pub mod vss;

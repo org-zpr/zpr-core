@@ -6,35 +6,27 @@
 
 use openssl::pkey::Private;
 use openssl::rsa::Rsa;
-
 use std::collections::BTreeMap;
+use std::fmt;
+use std::fmt::Formatter;
 use std::fs::File;
 use std::io::prelude::*;
 use std::net::IpAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
-use std::fmt;
-use std::fmt::Formatter;
-
 use tokio::sync::mpsc::{self, Sender};
 use tokio::time::{self, Duration};
 use tokio_util::sync::CancellationToken;
+use tracing::{error, info};
 
 use crate::vsapi;
 use crate::vscli::{self, VSClientError, VSClientI};
 use crate::vss::DEFAULT_VSS_PORT;
-
 use ph::zpr;
-
-use tracing::{error, info};
-
-
 
 const PING_INTERVAL: Duration = Duration::from_millis(10000);
 const MAX_PING_ERRORS: u32 = 5;
-
-
 
 #[derive(Debug)]
 pub enum VSError {
@@ -64,14 +56,10 @@ impl fmt::Display for VSError {
             VSError::IOError(e) => write!(f, "IOError: {}", e),
             VSError::CertificateError(s) => write!(f, "CertificateError: {}", s),
             VSError::EnqueueError => write!(f, "EnqueueError"),
-            VSError::Disconnect => write!(f, "Disconnect")
+            VSError::Disconnect => write!(f, "Disconnect"),
         }
     }
 }
-
-
-
-
 
 #[derive(Debug)]
 pub struct VisaRequest {
@@ -92,7 +80,6 @@ pub struct VisaRequestResponse {
     /// Response from visa service -- Even if this is some, it may not be a successful request.
     pub response: Option<vsapi::VisaResponse>,
 }
-
 
 #[derive(Debug)]
 pub struct AuthorizeConnectResponse {
@@ -132,8 +119,6 @@ pub enum VSOutput {
     AgentDisconnect(DisconnectStatus),
 }
 
-
-
 #[derive(Clone)]
 pub struct VSConn {
     shared: Arc<Shared>,
@@ -142,7 +127,6 @@ pub struct VSConn {
 struct Shared {
     state: Mutex<State>,
 }
-
 
 struct State {
     service_addr: String, // visa service address, format "HOST:PORT"
@@ -155,12 +139,10 @@ struct State {
     agent: vsapi::Agent,
 }
 
-
-
 /// Helper function to create a basic node agent. Probably only useful for early versions
 /// of the node.  In the future the node will create it's own agent datastructure and
 /// had it to [VSConn::new].
-pub fn new_node_agent(node_addr: &IpAddr, claims: &BTreeMap<String, String>) -> vsapi::Agent{
+pub fn new_node_agent(node_addr: &IpAddr, claims: &BTreeMap<String, String>) -> vsapi::Agent {
     let provides = vec![String::from("/zpr/node")];
 
     // In prototype, the node zpr address is the same as its tether address. May not be true going forward.
@@ -218,14 +200,14 @@ impl VSConn {
     ) -> Result<VSConn, VSError> {
         let mut certfile = match File::open(node_cert_file) {
             Ok(f) => f,
-            Err(e) => { return Err(e.into()) }
+            Err(e) => return Err(e.into()),
         };
         let mut cert_pem_data = String::new();
         certfile.read_to_string(&mut cert_pem_data)?;
 
         let mut keyfile = match File::open(node_key_file) {
             Ok(f) => f,
-            Err(e) => { return Err(e.into()) }
+            Err(e) => return Err(e.into()),
         };
         let mut key_pem_data = String::new();
         keyfile.read_to_string(&mut key_pem_data)?;
@@ -233,7 +215,10 @@ impl VSConn {
         let private_key = match Rsa::private_key_from_pem(key_pem_data.as_bytes()) {
             Ok(k) => k,
             Err(e) => {
-                return Err(VSError::CertificateError(format!("failed to parse private RSA key: {:?}", e)));
+                return Err(VSError::CertificateError(format!(
+                    "failed to parse private RSA key: {:?}",
+                    e
+                )));
             }
         };
 
@@ -243,7 +228,6 @@ impl VSConn {
                 format!("{}:{}", node_zpr_addr, DEFAULT_VSS_PORT)
             }
         };
-
 
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
@@ -267,7 +251,6 @@ impl VSConn {
         state.client_fac = fac;
     }
 
-
     /// Registers with visa service and obtains an API key.
     /// Blocking network call.
     fn initialize(&self, client: &mut Box<dyn VSClientI>) -> Result<(), VSError> {
@@ -285,14 +268,9 @@ impl VSConn {
             agnt = state.agent.clone();
         }
 
-        let _apikey = match client.authenticate(
-            agnt,
-            &pem_data,
-            pkey,
-            &vss_svc_addr
-        ) {
+        let _apikey = match client.authenticate(agnt, &pem_data, pkey, &vss_svc_addr) {
             Ok(k) => k,
-            Err(e) => { return Err(e.into()) }
+            Err(e) => return Err(e.into()),
         };
 
         Ok(())
@@ -321,12 +299,9 @@ impl VSConn {
         // All use of the client is in our little loop. So we honor its non-multithreaded aspect.
         let mut client = match (fac)(&service_addr) {
             Ok(c) => c,
-            Err(e) => {
-                return Err(e.into())
-            }
+            Err(e) => return Err(e.into()),
         };
         self.initialize(&mut client)?;
-
 
         let mut interval = time::interval(PING_INTERVAL);
         let mut ping_errors = 0;
@@ -382,14 +357,13 @@ impl VSConn {
         Ok(())
     }
 
-
     fn handle_request_visa(&self, client: &mut Box<dyn VSClientI>, req: VisaRequest) -> VSOutput {
         let resp = match client.request_visa(req.source_tether_addr, req.l3_type, req.packet) {
             Ok(vr) => VisaRequestResponse {
-                    request_id: req.request_id,
-                    api_error: None,
-                    response: Some(vr),
-                },
+                request_id: req.request_id,
+                api_error: None,
+                response: Some(vr),
+            },
             Err(e) => {
                 error!("failed to request visa: {}", e);
                 VisaRequestResponse {
@@ -402,13 +376,17 @@ impl VSConn {
         VSOutput::VisaResponse(resp)
     }
 
-    fn handle_authorize_connect(&self, client: &mut Box<dyn VSClientI>, cr: vsapi::ConnectRequest) -> VSOutput {
+    fn handle_authorize_connect(
+        &self,
+        client: &mut Box<dyn VSClientI>,
+        cr: vsapi::ConnectRequest,
+    ) -> VSOutput {
         let id = match cr.connection_id {
             Some(i) => i,
             None => 0,
         };
         let resp = match client.authorize_connect(cr) {
-            Ok(acr) => AuthorizeConnectResponse{
+            Ok(acr) => AuthorizeConnectResponse {
                 connection_id: id,
                 api_error: None,
                 response: Some(acr),
@@ -474,7 +452,6 @@ impl VSConn {
         self.send_command(VSCommand::RequestVisa(req)).await
     }
 
-
     /// Perform an async authorize_connect. The response will come back over the channel set in the
     /// [VSConn::new] function and will have a connection_id matching the request.
     ///
@@ -485,7 +462,6 @@ impl VSConn {
         self.send_command(VSCommand::AuthorizeConnect(req)).await
     }
 
-
     /// Async message to visa service noting that an agent has disconnected. A [VSOutput::AgentDisconnect]
     /// message will be generated when this runs.
     ///
@@ -493,7 +469,8 @@ impl VSConn {
     /// - [VSError::EnqueueError] if the request could not be enqueued.
     #[allow(dead_code)]
     pub async fn agent_disconnect(&self, zpr_addr: IpAddr) -> Result<(), VSError> {
-        self.send_command(VSCommand::AgentDisconnect(zpr_addr)).await
+        self.send_command(VSCommand::AgentDisconnect(zpr_addr))
+            .await
     }
 }
 
@@ -504,13 +481,13 @@ mod test {
     use super::*;
 
     use tokio::sync::mpsc;
-    use tokio_util::sync::CancellationToken;
     use tokio::time::timeout;
+    use tokio_util::sync::CancellationToken;
 
     use rand::Rng;
     use std::env;
     use std::fs;
-    use std::time::{SystemTime, UNIX_EPOCH, Duration};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     const CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
 MIIEWzCCA0OgAwIBAgIJAMSVUe6Pd/Z7MA0GCSqGSIb3DQEBBQUAMIGGMQswCQYD
@@ -674,11 +651,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
     }
 
     fn take_next_error() -> Option<VSClientError> {
-        unsafe {
-            TEST_STATE.next_error.take()
-        }
+        unsafe { TEST_STATE.next_error.take() }
     }
-
 
     #[derive(Debug)]
     struct TestVSCli {}
@@ -717,8 +691,12 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             Ok(())
         }
 
-        fn request_visa(&mut self, source_tether_addr: IpAddr, l3_type: zpr::L3Type, _packet: Vec<u8>) -> Result<vsapi::VisaResponse, VSClientError>
-        {
+        fn request_visa(
+            &mut self,
+            source_tether_addr: IpAddr,
+            l3_type: zpr::L3Type,
+            _packet: Vec<u8>,
+        ) -> Result<vsapi::VisaResponse, VSClientError> {
             if let Some(e) = take_next_error() {
                 return Err(e);
             }
@@ -730,8 +708,10 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             Ok(vrr)
         }
 
-        fn authorize_connect(&mut self, req: vsapi::ConnectRequest) -> Result<vsapi::ConnectResponse, VSClientError>
-        {
+        fn authorize_connect(
+            &mut self,
+            req: vsapi::ConnectRequest,
+        ) -> Result<vsapi::ConnectResponse, VSClientError> {
             if let Some(e) = take_next_error() {
                 return Err(e);
             }
@@ -757,13 +737,12 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
                 connection_id: req.connection_id,
                 status: Some(vsapi::StatusCode::SUCCESS),
                 agent: Some(agnt),
-                reason: Some(format!(""))
+                reason: Some(format!("")),
             };
             Ok(cr)
         }
 
-        fn agent_disconnect(&mut self, _agent_zpr_addr: IpAddr) -> Result<(), VSClientError>
-        {
+        fn agent_disconnect(&mut self, _agent_zpr_addr: IpAddr) -> Result<(), VSClientError> {
             incr(CounterT::AgentDisconnect);
             if let Some(e) = take_next_error() {
                 return Err(e);
@@ -773,7 +752,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
     }
 
     fn testvscli_factory(_service_addr: &str) -> Result<Box<dyn VSClientI>, VSClientError> {
-        Ok(Box::new(TestVSCli{}))
+        Ok(Box::new(TestVSCli {}))
     }
 
     #[tokio::test]
@@ -790,7 +769,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(&node_addr, &claims);
-
 
         let conn = VSConn::new(
             agnt,
@@ -817,12 +795,10 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
-
         assert_eq!(get_counter(CounterT::Auth), 1);
         assert_eq!(get_counter(CounterT::DeRegister), 1);
         assert_eq!(get_counter(CounterT::Ping), 1);
     }
-
 
     #[tokio::test]
     async fn test_visa_req_resp() {
@@ -838,7 +814,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(&node_addr, &claims);
-
 
         let conn = VSConn::new(
             agnt,
@@ -872,7 +847,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
                 panic!("expected ping message, but got nothing (timeout)");
             }
         }
-
 
         let req = VisaRequest {
             request_id: 123,
@@ -940,7 +914,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         ctoken.cancel(); // stop the vs
     }
 
-
     #[tokio::test]
     async fn test_connect_request() {
         let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
@@ -955,7 +928,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(&node_addr, &claims);
-
 
         let conn = VSConn::new(
             agnt,
@@ -990,7 +962,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             }
         }
 
-
         let mut claims = BTreeMap::new();
         claims.insert("foo".to_string(), "fee".to_string());
         claims.insert("hello".to_string(), "goodbye".to_string());
@@ -1000,7 +971,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             dock_addr: Some(vec![10, 0, 0, 1]),
             claims: Some(claims.clone()),
             challenge: Some(vec![1, 2, 3, 4]),
-            challenge_responses: Some(vec![vec![5, 6, 7, 8]])
+            challenge_responses: Some(vec![vec![5, 6, 7, 8]]),
         };
         conn.authorize_connect(req).await.unwrap();
 
@@ -1079,7 +1050,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(&node_addr, &claims);
 
-
         let conn = VSConn::new(
             agnt,
             tx,
@@ -1101,7 +1071,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         });
 
         tokio::time::sleep(Duration::from_millis(500)).await;
-
 
         // Should get a ping message
         match timeout(Duration::from_millis(10), rx.recv()).await {

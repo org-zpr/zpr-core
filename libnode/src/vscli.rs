@@ -1,23 +1,21 @@
-use thrift::protocol::{TBinaryInputProtocol, TBinaryOutputProtocol};
-use thrift::transport::{ReadHalf, WriteHalf};
-use thrift::transport::{TFramedReadTransport, TFramedWriteTransport};
-use thrift::transport::{TIoChannel, TTcpChannel};
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
 use openssl::rsa::Rsa;
 use openssl::sign::Signer;
-use std::io::prelude::*;
-use std::time::SystemTime;
 use std::fmt;
 use std::fmt::Formatter;
+use std::io::prelude::*;
 use std::net::IpAddr;
+use std::time::SystemTime;
+use thrift::protocol::{TBinaryInputProtocol, TBinaryOutputProtocol};
+use thrift::transport::{ReadHalf, WriteHalf};
+use thrift::transport::{TFramedReadTransport, TFramedWriteTransport};
+use thrift::transport::{TIoChannel, TTcpChannel};
 use tracing::debug;
 
-use ph::zpr;
 use crate::vsapi;
+use ph::zpr;
 use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
-
-
 
 // ugh!!
 type VSClientT = VisaServiceSyncClient<
@@ -48,8 +46,6 @@ impl From<thrift::Error> for VSClientError {
     }
 }
 
-
-
 /// Wrapper around the thrift visa service client. Single threaded.
 /// Caches the service address and API key.
 pub struct VSClient {
@@ -71,18 +67,23 @@ pub trait VSClientI: Send {
     ) -> Result<String, VSClientError>;
     fn ping_vs(&mut self) -> Result<vsapi::Pong, VSClientError>;
     fn de_register(&mut self) -> Result<(), VSClientError>;
-    fn request_visa(&mut self, source_tether_addr: IpAddr, l3_type: zpr::L3Type, packet: Vec<u8>) -> Result<vsapi::VisaResponse, VSClientError>;
-    fn authorize_connect(&mut self, req: vsapi::ConnectRequest) -> Result<vsapi::ConnectResponse, VSClientError>;
+    fn request_visa(
+        &mut self,
+        source_tether_addr: IpAddr,
+        l3_type: zpr::L3Type,
+        packet: Vec<u8>,
+    ) -> Result<vsapi::VisaResponse, VSClientError>;
+    fn authorize_connect(
+        &mut self,
+        req: vsapi::ConnectRequest,
+    ) -> Result<vsapi::ConnectResponse, VSClientError>;
     fn agent_disconnect(&mut self, agent_zpr_addr: IpAddr) -> Result<(), VSClientError>;
 }
-
-
 
 /// Wrapper on top of the the THRIFT generated code.
 impl VSClient {
     // Not public; use the factory.
     fn new(service: &str) -> Result<VSClient, VSClientError> {
-
         // create thrift client:
         let mut c = TTcpChannel::new();
         c.open(service.to_string())?;
@@ -102,10 +103,8 @@ impl VSClient {
     }
 }
 
-
 /// That which can create a [VSClientI]
 pub type VSClientFactory = fn(service_addr: &str) -> Result<Box<dyn VSClientI>, VSClientError>;
-
 
 /// Convenience function that creates the noraml VSClient set up to communicate using thrift.
 /// - `service_addr` address of the visa service thrift endpoint.
@@ -123,7 +122,6 @@ impl VSClientI for VSClient {
         private_key: Rsa<Private>,
         vss_service_addr: &str,
     ) -> Result<String, VSClientError> {
-
         debug!("sending HELLO to {}", self.service);
         let hello_response = self.cli.hello()?;
 
@@ -163,9 +161,7 @@ impl VSClientI for VSClient {
         debug!("sending AUTHENTICATE to {}", self.service);
         let apikey = match self.cli.authenticate(authreq) {
             Ok(result) => result,
-            Err(e) => {
-                return Err(e.into())
-            }
+            Err(e) => return Err(e.into()),
         };
         self.key = Some(apikey.clone());
         Ok(apikey)
@@ -195,10 +191,13 @@ impl VSClientI for VSClient {
         }
     }
 
-
     /// Synchronous visa request.
-    fn request_visa(&mut self, source_tether_addr: IpAddr, l3_type: zpr::L3Type, packet: Vec<u8>) -> Result<vsapi::VisaResponse, VSClientError>
-    {
+    fn request_visa(
+        &mut self,
+        source_tether_addr: IpAddr,
+        l3_type: zpr::L3Type,
+        packet: Vec<u8>,
+    ) -> Result<vsapi::VisaResponse, VSClientError> {
         if self.key.is_none() {
             return Err(VSClientError::NoAPIKey);
         }
@@ -215,7 +214,6 @@ impl VSClientI for VSClient {
             _ => return Err(VSClientError::UnsupportedTrafficType),
         };
 
-
         debug!("sending VISA_REQUEST to {}", self.service);
         match self.cli.request_visa(key.clone(), addr_bytes, l3t, packet) {
             Ok(result) => Ok(result),
@@ -224,8 +222,10 @@ impl VSClientI for VSClient {
     }
 
     /// Synchronous authorize connect request.
-    fn authorize_connect(&mut self, req: vsapi::ConnectRequest) -> Result<vsapi::ConnectResponse, VSClientError>
-    {
+    fn authorize_connect(
+        &mut self,
+        req: vsapi::ConnectRequest,
+    ) -> Result<vsapi::ConnectResponse, VSClientError> {
         if self.key.is_none() {
             return Err(VSClientError::NoAPIKey);
         }
@@ -238,8 +238,7 @@ impl VSClientI for VSClient {
     }
 
     /// Synchronous agent disconnect request.
-    fn agent_disconnect(&mut self, agent_zpr_addr: IpAddr) -> Result<(), VSClientError>
-    {
+    fn agent_disconnect(&mut self, agent_zpr_addr: IpAddr) -> Result<(), VSClientError> {
         if self.key.is_none() {
             return Err(VSClientError::NoAPIKey);
         }

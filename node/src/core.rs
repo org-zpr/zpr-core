@@ -231,6 +231,9 @@ async fn vs_force_connect(
                       VSOutput::ConnectResponse(r) => {
                         info!("*=> ConnectResponse: {:?}", r);
                       }
+                      VSOutput::AgentDisconnect(r) => {
+                        info!("*=> AgentDisconnect: {:?}", r);
+                      }
                     }
                 }
                 _ = dbg_ctoken.cancelled() => {
