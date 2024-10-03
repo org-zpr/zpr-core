@@ -180,6 +180,7 @@ mod test {
     use crate::cd::config::load_configuration;
     use rand::Rng;
     use std::env;
+    use std::path::{Path, PathBuf};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -231,7 +232,7 @@ MrOCC7A2J3IpFxNcjg==
 "#;
 
     struct TempFile {
-        path: String,
+        path: PathBuf,
     }
 
     impl Drop for TempFile {
@@ -252,7 +253,7 @@ MrOCC7A2J3IpFxNcjg==
             let path = dir.join(format!("org_zpr_cd_test_{}_{}.toml", num, tstamp));
             fs::write(&path, contents).expect("Unable to write file");
             TempFile {
-                path: path.to_str().unwrap().to_string(),
+                path
             }
         }
 
@@ -267,12 +268,12 @@ MrOCC7A2J3IpFxNcjg==
             let path = dir.join(format!("org_zpr_cd_test_{}_{}.pem", num, tstamp));
             fs::write(&path, contents).expect("Unable to write file");
             TempFile {
-                path: path.to_str().unwrap().to_string(),
+                path
             }
         }
 
-        fn get_path(&self) -> &str {
-            self.path.as_str()
+        fn get_path(&self) -> &Path {
+            &self.path
         }
     }
 
@@ -295,8 +296,8 @@ MrOCC7A2J3IpFxNcjg==
         let ca_certf = TempFile::new_pem(CA_CERT_DATA);
         let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
 
-        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
-        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
+        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path().to_str().unwrap());
+        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path().to_str().unwrap());
         let toml_txt = toml_txt.replace("@KEY", ADAPTER_NOISE_KEY);
 
         let tmpfile = TempFile::new_toml(&toml_txt);
@@ -332,8 +333,8 @@ MrOCC7A2J3IpFxNcjg==
         let ca_certf = TempFile::new_pem(CA_CERT_DATA);
         let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
 
-        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
-        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
+        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path().to_str().unwrap());
+        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path().to_str().unwrap());
         let toml_txt = toml_txt.replace("@KEY", ADAPTER_NOISE_KEY);
 
         let tmpfile = TempFile::new_toml(&toml_txt);
@@ -378,8 +379,8 @@ MrOCC7A2J3IpFxNcjg==
         let ca_certf = TempFile::new_pem(CA_CERT_DATA);
         let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
 
-        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
-        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
+        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path().to_str().unwrap());
+        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path().to_str().unwrap());
         let toml_txt = toml_txt.replace("@KEY", ADAPTER_NOISE_KEY);
 
         let tmpfile1 = TempFile::new_toml(&toml_txt);
@@ -408,8 +409,8 @@ MrOCC7A2J3IpFxNcjg==
             noise_private_key = "@KEY"
             #blank
         "#;
-        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
-        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
+        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path().to_str().unwrap());
+        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path().to_str().unwrap());
         let toml_txt = toml_txt.replace("@KEY", ADAPTER_NOISE_KEY);
 
         let tmpfile2 = TempFile::new_toml(&toml_txt);
@@ -457,8 +458,8 @@ MrOCC7A2J3IpFxNcjg==
         let ca_certf = TempFile::new_pem(CA_CERT_DATA);
         let adapter_certf = TempFile::new_pem(ADAPTER_CERT_DATA);
 
-        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path());
-        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path());
+        let toml_txt = toml_txt.replace("@ROOT_CA", ca_certf.get_path().to_str().unwrap());
+        let toml_txt = toml_txt.replace("@CERT", adapter_certf.get_path().to_str().unwrap());
         let toml_txt = toml_txt.replace("@KEY", ADAPTER_NOISE_KEY);
 
         let tmpfile = TempFile::new_toml(&toml_txt);

@@ -8,9 +8,10 @@ use openssl::x509::X509;
 use base64::prelude::*;
 
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read};
-use std::path::PathBuf;
+
 
 // "Config" is configuration details for the CD binary.
 pub struct Config {
@@ -29,7 +30,7 @@ struct Configuration {
 #[derive(Debug, Clone, Deserialize)]
 struct Profile {
     name: String,
-    root_ca: String, // path to PEM file
+    root_ca: PathBuf, // path to PEM file
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -41,7 +42,7 @@ struct Dock {
 
 #[derive(Debug, Clone, Deserialize)]
 struct Adapter {
-    noise_certificate: String, // path to PEM file
+    noise_certificate: PathBuf, // path to PEM file
     noise_private_key: String, // base64 encoded private key
 }
 
@@ -60,7 +61,7 @@ pub struct CryptoConfig {
 #[allow(dead_code)]
 pub struct ConfigRecord {
     name: String,
-    source: String, // path name of Configuration that loaded this
+    source: PathBuf, // path name of Configuration that loaded this
     host_or_ip: String,
     port: u16,
     adapter_noise_keypair: NoiseKeypair,
@@ -69,13 +70,13 @@ pub struct ConfigRecord {
     dock_noise_public_key: [u8; 32],
 }
 
-fn load_cert(path: &str) -> Result<X509, std::io::Error> {
+fn load_cert(path: &Path) -> Result<X509, std::io::Error> {
     let mut file = match File::open(path) {
         Ok(f) => f,
         Err(e) => {
             return Err(Error::new(
                 e.kind(),
-                format!("Error opening certificate file {}: {}", path, e),
+                format!("Error opening certificate file {:#?}: {}", path, e),
             ))
         }
     };
@@ -86,13 +87,13 @@ fn load_cert(path: &str) -> Result<X509, std::io::Error> {
 }
 
 #[allow(dead_code)]
-fn load_key(path: &str) -> Result<Rsa<Private>, std::io::Error> {
+fn load_key(path: &Path) -> Result<Rsa<Private>, std::io::Error> {
     let mut file = match File::open(path) {
         Ok(f) => f,
         Err(e) => {
             return Err(Error::new(
                 e.kind(),
-                format!("Error opening private key file {}: {}", path, e),
+                format!("Error opening private key file {:#?}: {}", path, e),
             ))
         }
     };
@@ -103,7 +104,7 @@ fn load_key(path: &str) -> Result<Rsa<Private>, std::io::Error> {
 }
 
 // Read and parse the configuration, read in all the keys (etc), create and return the ConfigRecord.
-pub fn load_configuration(path: &str) -> Result<ConfigRecord, std::io::Error> {
+pub fn load_configuration(path: &Path) -> Result<ConfigRecord, std::io::Error> {
     let file = fs::File::open(path)?;
     let mut reader = BufReader::new(file);
     let mut toml_text = String::new();
@@ -111,7 +112,7 @@ pub fn load_configuration(path: &str) -> Result<ConfigRecord, std::io::Error> {
     if len == 0 {
         return Err(Error::new(
             ErrorKind::Other,
-            format!("Empty configuration file: {}", path),
+            format!("Empty configuration file: {:#?}", path)
         ));
     }
 
@@ -121,20 +122,15 @@ pub fn load_configuration(path: &str) -> Result<ConfigRecord, std::io::Error> {
         Err(e) => {
             return Err(Error::new(
                 ErrorKind::Other,
-                format!("Error parsing configuration file {}: {}", path, e),
+                format!("Error parsing configuration file {:#?}: {}", path, e),
             ))
         }
     };
 
     let base_path = std::path::Path::new(path).parent().unwrap();
 
-    let root_ca = load_cert(base_path.join(&c.profile.root_ca).to_str().unwrap())?;
-    let cert = load_cert(
-        base_path
-            .join(&c.adapter.noise_certificate)
-            .to_str()
-            .unwrap(),
-    )?;
+    let root_ca = load_cert(&base_path.join(&c.profile.root_ca))?;
+    let cert = load_cert(&base_path.join(&c.adapter.noise_certificate))?;
 
     let private_key: [u8; 32] = match BASE64_STANDARD.decode(c.adapter.noise_private_key.as_bytes())
     {
@@ -177,7 +173,7 @@ pub fn load_configuration(path: &str) -> Result<ConfigRecord, std::io::Error> {
 
     let conf_rec = ConfigRecord {
         name: c.profile.name,
-        source: path.to_string(),
+        source: path.to_path_buf(),
         host_or_ip: c.dock.host_or_ip,
         port: c.dock.port,
         adapter_noise_keypair: adapter_keypar,
@@ -211,8 +207,8 @@ impl ConfigRecord {
         self.port
     }
 
-    pub fn get_path(&self) -> &str {
-        self.source.as_str()
+    pub fn get_path(&self) -> &Path {
+        &self.source
     }
 
     pub fn has_same_source_as(&self, other: &ConfigRecord) -> bool {
