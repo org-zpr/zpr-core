@@ -8,10 +8,9 @@ use openssl::x509::X509;
 use base64::prelude::*;
 
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::fs::File;
 use std::io::{BufReader, Error, ErrorKind, Read};
-
+use std::path::{Path, PathBuf};
 
 // "Config" is configuration details for the CD binary.
 pub struct Config {
@@ -43,7 +42,7 @@ struct Dock {
 #[derive(Debug, Clone, Deserialize)]
 struct Adapter {
     noise_certificate: PathBuf, // path to PEM file
-    noise_private_key: String, // base64 encoded private key
+    noise_private_key: String,  // base64 encoded private key
 }
 
 /// The bits of the configuration that relate to the cryptography
@@ -112,7 +111,7 @@ pub fn load_configuration(path: &Path) -> Result<ConfigRecord, std::io::Error> {
     if len == 0 {
         return Err(Error::new(
             ErrorKind::Other,
-            format!("Empty configuration file: {:#?}", path)
+            format!("Empty configuration file: {:#?}", path),
         ));
     }
 

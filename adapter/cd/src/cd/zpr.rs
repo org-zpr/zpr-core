@@ -176,8 +176,8 @@ mod test {
     use crate::cd::config::load_configuration;
     use rand::Rng;
     use std::env;
-    use std::path::{Path, PathBuf};
     use std::fs;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const CA_CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
@@ -248,9 +248,7 @@ MrOCC7A2J3IpFxNcjg==
             let num: u32 = rng.gen();
             let path = dir.join(format!("org_zpr_cd_test_{}_{}.toml", num, tstamp));
             fs::write(&path, contents).expect("Unable to write file");
-            TempFile {
-                path
-            }
+            TempFile { path }
         }
 
         fn new_pem(contents: &str) -> TempFile {
@@ -263,9 +261,7 @@ MrOCC7A2J3IpFxNcjg==
             let num: u32 = rng.gen();
             let path = dir.join(format!("org_zpr_cd_test_{}_{}.pem", num, tstamp));
             fs::write(&path, contents).expect("Unable to write file");
-            TempFile {
-                path
-            }
+            TempFile { path }
         }
 
         fn get_path(&self) -> &Path {
