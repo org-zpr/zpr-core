@@ -90,8 +90,8 @@ function destroy_network() {
 
 function create_ca_key_and_cert() {
   CA_NAME=$1
-  $ZPR_PKI_BIN gencakey >"$CA_NAME.key"
-  $ZPR_PKI_BIN gencacert /CN="$CA_NAME" 1 <"$CA_NAME.key" >"$CA_NAME.crt"
+  "$ZPR_PKI_BIN" gencakey >"$CA_NAME.key"
+  "$ZPR_PKI_BIN" gencacert /CN="$CA_NAME" 1 <"$CA_NAME.key" >"$CA_NAME.crt"
   #openssl genrsa -out "$CA_NAME.key"
   #openssl x509 -new -subj /CN="$CA_NAME" -key "$CA_NAME.key" -extfile /etc/ssl/openssl.cnf -extensions v3_ca -days 1 -out "$CA_NAME.crt"
 }
@@ -99,9 +99,9 @@ function create_ca_key_and_cert() {
 function create_agent_key_and_cert() {
   CA_NAME=$1
   AGENT_NAME=$2
-  $ZPR_PKI_BIN genkey >"$AGENT_NAME.key"
-  $ZPR_PKI_BIN pubkey <"$AGENT_NAME.key" >"$AGENT_NAME.pubkey"
-  $ZPR_PKI_BIN gensignedcert "$CA_NAME.crt" "$CA_NAME.key" /CN="$AGENT_NAME" 1 <"$AGENT_NAME.pubkey" >"$AGENT_NAME.crt"
+  "$ZPR_PKI_BIN" genkey >"$AGENT_NAME.key"
+  "$ZPR_PKI_BIN" pubkey <"$AGENT_NAME.key" >"$AGENT_NAME.pubkey"
+  "$ZPR_PKI_BIN" gensignedcert "$CA_NAME.crt" "$CA_NAME.key" /CN="$AGENT_NAME" 1 <"$AGENT_NAME.pubkey" >"$AGENT_NAME.crt"
   
   #openssl genrsa -out "$AGENT_NAME.key"
   #openssl req -new -subj /CN="$AGENT_NAME" -key "$AGENT_NAME.key" -config /etc/ssl/openssl.cnf -reqexts v3_req -out "$AGENT_NAME.csr" 2> /dev/null
