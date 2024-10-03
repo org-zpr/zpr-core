@@ -4,8 +4,6 @@ set -euo pipefail
 PH_BIN=$(realpath "$(dirname $0)/../target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../../ph-debug/target/debug/ph-debug")
 
-ZPR_PKI_BIN=$(realpath "$(dirname $0)/../../../tools/zpr-pki")
-
 source "$(dirname $0)/common_funcs.sh"
 
 ZPR_USER=$USER
