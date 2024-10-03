@@ -18,52 +18,52 @@ ADAPTER                 NODE                VISASVC
   .                       |                    |
   .     V/S ADAPTER       |                    |
   .     ===========       |                    |
-  .         | kmh1        |                    |    <---\
+  .         | kmh1        |                    |       =\
   .         +------------>|                    |        | security 
   .         |        kmh2 |---+                |        | association
   .         |<------------+   | node detect    |        |
-  .         |             |   | VS CN          |    <---/
+  .         |             |   | VS CN          |       =/
   .         .             |<--+                |
   .         .             |                    |
-  |                       | hello              |    <----\
-  |                       +------------------->|         |
-  |                       |         hello-resp |         | node establishes    
-  |                       |<-------------------+         | connection to 
-  |                       |                    |         | visa service
-  |                       | authenticate       |         |
-  |                       +------------------->|         |
-  |                       |           response |         |
-  |                       |<----------=--------+         |
-  .                       .                    .    <----/
+  |                       | hello              |       =\
+  |                       +------------------->|        |
+  |                       |         hello-resp |        | node establishes    
+  |                       |<-------------------+        | connection to 
+  |                       |                    |        | visa service
+  |                       | authenticate       |        |
+  |                       +------------------->|        |
+  |                       |           response |        |
+  |                       |<----------=--------+        |
+  .                       .                    .       =/
   .                       .                    .
   |                       |                    |
-  |  kmh1                 |                    |    <----\ 
-  +---------------------->|                    |         | security 
-  |                  kmh2 |                    |         | association
-  |<----------------------+                    |    <----/
+  |  kmh1                 |                    |       =\ 
+  +---------------------->|                    |        | security 
+  |                  kmh2 |                    |        | association
+  |<----------------------+                    |       =/
   |                       |                    |
-  |                       | auth_connect(1)    |    <----\
-  |                       +------------------->|         | node tell
-  |                       |         auth_reply |         | visa service
-  |                       |<-------------------+    <----/
+  |                       | auth_connect(1)    |       =\
+  |                       +------------------->|        | node tell
+  |                       |         auth_reply |        | visa service
+  |                       |<-------------------+       =/
   |                       |                    |
-  | echo(2)               |                    |    <----\
-  +---------------------->|                    |         | keep alive
-  |             echo-resp |                    |         | connect check
-  |<----------------------+                    |    <----/
-  |                       |                    |
-  .                       .                    .
-  . (traffic)             .                    .    <----\
-  +---------------------->| visa-req           |         | visa 
-  |                       +------------------->|         | request
-  |                       |         visa-resp  |         |
-  |                       |<-------------------+    <----/
+  | echo(2)               |                    |       =\
+  +---------------------->|                    |        | keep alive
+  |             echo-resp |                    |        | connect check
+  |<----------------------+                    |       =/
   |                       |                    |
   .                       .                    .
+  . (traffic)             .                    .       =\
+  +---------------------->| visa-req           |        | visa 
+  |                       +------------------->|        | request
+  |                       |         visa-resp  |        |
+  |                       |<-------------------+       =/
+  |                       |                    |
   .                       .                    .
-  | terminate             |                    |    <----\
-  +---------------------->| agent_disconnect   |         | polite link down
-  |                       |------------------->|    <----/
+  .                       .                    .
+  | terminate             |                    |       =\
+  +---------------------->| agent_disconnect   |        | polite link down
+  |                       |------------------->|       =/
   X                       |                    |
                           .                    .
                           .                    .
