@@ -247,7 +247,6 @@ impl KmNoise {
             }
             Err(e) => {
                 error!("noise: error creating handshake message: {:?}", e);
-                println!("XXX error creating handshake message: {:?}", e);
                 Err(KmError::HandshakeError)
             }
         }
@@ -399,7 +398,6 @@ impl KeyManagerStateMachine for KmNoise {
                     )));
                 }
             };
-            println!("XXX calling for an HS message...");
             let hs_msg = match self.create_hs_message(&mut initiator) {
                 Ok(m) => m,
                 Err(_) => {
@@ -407,7 +405,6 @@ impl KeyManagerStateMachine for KmNoise {
                     return Err(KmError::HandshakeError);
                 }
             };
-            println!("XXX got an HS message OK!");
             self.hs_state = Some(initiator);
             self.hs_sent_t = Some(Instant::now());
             Ok(Some(hs_msg))
