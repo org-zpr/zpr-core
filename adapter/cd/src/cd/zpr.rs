@@ -121,8 +121,7 @@ impl Zpr {
     pub fn get_connect_string(&self, name: &str) -> Option<String> {
         let state = self.shared.state.lock().unwrap();
         let cfg = state.configs.get(name);
-        cfg?;
-        let (conf, _) = cfg.unwrap();
+        let (conf, _) = cfg?;
         Some(format!("{}:{}", conf.get_dock_host(), conf.get_dock_port()))
     }
 
@@ -130,8 +129,7 @@ impl Zpr {
     pub fn copy_dock_noise_key(&self, name: &str) -> Option<[u8; 32]> {
         let state = self.shared.state.lock().unwrap();
         let cfg = state.configs.get(name);
-        cfg?;
-        let (conf, _) = cfg.unwrap();
+        let (conf, _) = cfg?;
         let key = conf.get_dock_noise_public_key();
         Some(*key)
     }
@@ -139,16 +137,14 @@ impl Zpr {
     pub fn get_crypto_config(&self, name: &str) -> Option<CryptoConfig> {
         let state = self.shared.state.lock().unwrap();
         let cfg = state.configs.get(name);
-        cfg?;
-        let (conf, _) = cfg.unwrap();
+        let (conf, _) = cfg?;
         Some(conf.get_crypto_particulars())
     }
 
     pub fn get_configuration_state(&self, name: &str) -> Option<ConfigState> {
         let state = self.shared.state.lock().unwrap();
         let cfg = state.configs.get(name);
-        cfg?;
-        let (_, cs) = cfg.unwrap();
+        let (_, cs) = cfg?;
         Some(cs.clone())
     }
 
