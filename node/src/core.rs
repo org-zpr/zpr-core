@@ -10,9 +10,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config;
 
-use libnode::vss;
-use libnode::vsconn::{VSConn, VSOutput, new_node_agent};
 use crate::zdp::server::ZDPServer;
+use libnode::vsconn::{new_node_agent, VSConn, VSOutput};
+use libnode::vss;
 
 pub const VERSION: &str = "0.1.0";
 
@@ -200,7 +200,8 @@ async fn vs_force_connect(
         &nconfig.get_rsa_private_key_path(),
         &nconfig.get_node_addr(),
         Some(vss_addr),
-    ).or_else(|e| {
+    )
+    .or_else(|e| {
         error!("VSConn::new failed: {}", e);
         Err(io::Error::new(io::ErrorKind::Other, "VSConn::new failed"))
     })?;

@@ -137,7 +137,6 @@ impl From<NoiseKeypair> for snow::Keypair {
     }
 }
 
-
 impl From<snow::Keypair> for NoiseKeypair {
     fn from(kp: snow::Keypair) -> NoiseKeypair {
         let mut npk = NoiseKeypair::new_zeroed();
