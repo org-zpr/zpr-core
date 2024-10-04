@@ -308,8 +308,11 @@ pub fn load_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
 
     match pk.raw_public_key() {
         Ok(k) => {
-            let mut key = [0u8; NOISE_KEY_LEN];
-            key.copy_from_slice(&k);
+            if k.len() != NOISE_KEY_LEN {
+                error!("public key in cert is incorrect length (got {} bytes, expected {})", k.len(), NOISE_KEY_LEN);
+                return Err(ParseError::KeyError);
+            }
+            let key = <[u8; NOISE_KEY_LEN]>::try_from(k).unwrap();
             Ok(key)
         }
         Err(e) => {

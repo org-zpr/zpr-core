@@ -128,14 +128,15 @@ impl NoiseKeypair {
     }
 }
 
-impl Into<snow::Keypair> for NoiseKeypair {
-    fn into(self) -> snow::Keypair {
+impl From<NoiseKeypair> for snow::Keypair {
+    fn from(kp: NoiseKeypair) -> snow::Keypair {
         snow::Keypair {
-            private: self.private.into(),
-            public: self.public.into(),
+            private: kp.private.into(),
+            public: kp.public.into(),
         }
     }
 }
+
 
 impl From<snow::Keypair> for NoiseKeypair {
     fn from(kp: snow::Keypair) -> NoiseKeypair {
@@ -239,7 +240,7 @@ impl KmNoise {
                 return Err(KmError::CertExchangeError);
             }
         };
-        let mut buf = BytesMut::zeroed(MSG_BUF_SIZE); // TODO: using with_capacity does not work when passed into hs. Why?
+        let mut buf = BytesMut::zeroed(MSG_BUF_SIZE);
         match hs.write_message(&payload_buf.freeze(), &mut buf) {
             Ok(len) => {
                 buf.truncate(len);
