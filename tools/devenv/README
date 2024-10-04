@@ -1,0 +1,60 @@
+# devenv/Dockerfile
+
+This is the dockerfile used in our github workflows. In includes the built 
+thrift compuiler (for go and rust), a go installation and rust.
+
+This is container id `38f3bb925e5e`
+
+
+## To install into github
+
+1. You need to generate a "classic" access token with permissions to write to the
+   package repository.
+
+2. Build image as usual with docker.
+
+3. Login to the github package repository:
+
+```bash
+# First put your token into env var (eg) $GH_TOK
+echo $GH_TOK | sudo docker login ghcr.io -u <YOUR_GITHUB_EMAIL> --password-stdin
+```
+
+4. Tag the image with the ghcr name:
+
+```bash
+sudo docker tag <THE_IMAGE_ID> ghcr.io/org-zpr/38f3bb925e5e
+```
+
+5. Push
+
+```bash
+sudo docker tag 6b3fb097c915 ghcr.io/org-zpr/38f3bb925e5e
+```
+
+## Odditites
+
+For some reason the two rust builds that are using this have issues when running
+cargo.  It complains like this:
+
+```
+cargo build
+error: rustup could not choose a version of cargo to run, because one wasn't specified explicitly, and no default is configured.
+help: run 'rustup default stable' to download the latest stable release of Rust and set it as your default toolchain.
+```
+
+To "fix" this, add `rustup default stable` to the workflow, eg:
+
+```yaml
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    container:
+      image: docker://ghcr.io/org-zpr/38f3bb925e5e:latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Prepare Rust
+      run: rustup default stable
+
+```

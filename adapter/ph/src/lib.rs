@@ -20,6 +20,7 @@ pub mod km_multiplexor;
 pub mod km_noise;
 pub mod km_xor;
 pub mod mgmt;
+pub mod mgmt_dispatch_worker;
 pub mod mgmt_processor_worker;
 pub mod net_defs;
 pub mod options;

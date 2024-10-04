@@ -3,7 +3,6 @@ package libvisa
 import (
 	"fmt"
 
-	"github.com/apache/thrift/lib/go/thrift"
 	"google.golang.org/protobuf/proto"
 	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vsx/snio/vsio"
@@ -66,7 +65,7 @@ func VsioVisaToThrift(pb_visa *vsio.Visa) *vsapi.Visa {
 			DestContactAddr:   pargs.DestContactAddr,
 			IcmpTypeCode:      int32(pargs.IcmpTypeCode),
 			IcmpAntecedent:    int32(pargs.IcmpAntecedent),
-			StateTimeoutMs:    thrift.Int32Ptr(int32(pargs.StateTimeoutMs)),
+			StateTimeoutMs:    int32(pargs.StateTimeoutMs),
 			OneShot:           pargs.OneShot,
 		}
 		vv.IcmpPepArgs_ = vsapiArgs
@@ -85,11 +84,13 @@ func VsioVisaToThrift(pb_visa *vsio.Visa) *vsapi.Visa {
 		DataCapBytes:        int64(pb_visa.Cons.DataCapBytes),
 		DataCapAffinityAddr: pb_visa.Cons.DataCapAffinity,
 	}
+	vv.Sig = &vsapi.Signature{
+		Type:      int32(0),
+		Signature: []byte{0},
+	}
 	if pb_visa.Sig != nil {
-		vv.Sig = &vsapi.Signature{
-			Type:      int32(pb_visa.Sig.Type),
-			Signature: pb_visa.Sig.Signature,
-		}
+		vv.Sig.Type = int32(pb_visa.Sig.Type)
+		vv.Sig.Signature = pb_visa.Sig.Signature
 	}
 	return vv
 }

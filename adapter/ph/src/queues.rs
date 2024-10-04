@@ -255,6 +255,39 @@ impl<'pktbuf> Capture<'pktbuf> {
     }
 }
 
+pub enum MgmtDispatchMessage<'pktbuf> {
+    Packet(zpr::LinkId, Packet<'pktbuf>), // FIXME: reserve link ID 0, store link ID in packet
+}
+
+pub struct MgmtDispatch<'pktbuf> {
+    sender: mpsc::Sender<MgmtDispatchMessage<'pktbuf>>,
+}
+
+impl<'pktbuf> MgmtDispatch<'pktbuf> {
+    pub fn new(sender: mpsc::Sender<MgmtDispatchMessage<'pktbuf>>) -> Self {
+        Self { sender }
+    }
+
+    pub fn try_dispatch_mgmt_packet(
+        &self,
+        ingress_link_id: zpr::LinkId,
+        packet: Packet<'pktbuf>,
+    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        match self
+            .sender
+            .try_send(MgmtDispatchMessage::Packet(ingress_link_id, packet))
+        {
+            Ok(()) => Ok(()),
+
+            Err(TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
+
+            Err(TrySendError::Full(msg)) => match msg {
+                MgmtDispatchMessage::Packet(_, packet) => Err(TryEnqueueError::Full(packet)),
+            },
+        }
+    }
+}
+
 pub enum AdapterManagerMessage<'pktbuf> {
     RequestTetherId(Packet<'pktbuf>),
 }

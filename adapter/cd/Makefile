@@ -4,7 +4,7 @@ all: build
 
 .PHONY: build
 build:
-	cargo build --verbose
+	cargo build
 
 .PHONY: test
 test:

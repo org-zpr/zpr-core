@@ -10,7 +10,7 @@ use daemonize::Daemonize;
 
 mod config;
 mod core;
-mod vs;
+
 
 pub mod vsapi;
 pub mod zdp;

@@ -5,28 +5,37 @@ on:
     branches: [ "main" ]
   pull_request:
     paths: 
-      - node/**
-      - visaservice/thrift/**
-      - adapter/ph/**
-      - zpr-ext/**
-      - cslab/**
-      - cbpf-rs/**
+      - 'node/**'
+      - 'libnode/**'
+      - 'visaservice/thrift/**'
+      - 'adapter/ph/**'
+      - 'zpr-ext/**'
+      - 'cslab/**'
+      - 'cbpf-rs/**'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
+    container:
+      image: docker://ghcr.io/org-zpr/38f3bb925e5e:latest
     steps:
     - uses: actions/checkout@v4
+
+    - name: Prepare Rust
+      run: rustup default stable
+
+    - name: Build libnode
+      run: |
+        cd libnode && make all
+
     - name: Build
       run: |
-        cd node
-        cargo build --verbose
+        cd node && make all
+
     - name: Run tests
       run: |
-        cd node
-        cargo test --verbose
+        cd node && make test
+

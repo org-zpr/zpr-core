@@ -1,18 +1,19 @@
-name: Rust-visaservice
+name: Rust-node
 
 on:
   push:
     branches: [ "main" ]
   pull_request:
-    paths:
-      - 'visaservice/cli/**'
+    paths: 
+      - 'libnode/**'
       - 'visaservice/thrift/**'
+      - 'adapter/ph/**'
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  setup:
+  build:
     runs-on: ubuntu-latest
     container:
       image: docker://ghcr.io/org-zpr/38f3bb925e5e:latest
@@ -22,13 +23,11 @@ jobs:
     - name: Prepare Rust
       run: rustup default stable
 
-    - name: Build
+    - name: Build libnode
       run: |
-        cd visaservice
-        make all-rs
+        cd libnode && make all
 
-    - name: Test
+    - name: Run tests
       run: |
-        cd visaservice
-        make test-rs
+        cd libnode && make test
 
