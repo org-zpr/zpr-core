@@ -92,6 +92,6 @@ visaservice:
 	$(MAKE) -C visaservice all
 
 
-.PHONY: it-so it-gone deps nodeadapter node libnode ph ph-debug adapter diagrams cbpf cslab zpr-ext thrift visaservice
+.PHONY: it-so it-gone test deps nodeadapter node libnode ph ph-debug adapter diagrams cbpf cslab zpr-ext thrift visaservice
 
 .DEFAULT_GOAL := info
