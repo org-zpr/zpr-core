@@ -5,27 +5,93 @@ info:
 	@echo Welcome to ZPR core
 	@echo ===================
 	@echo 
-	@echo There are three exits here:
+	@echo Build your own adventure:
+	@echo "  make it-so       - build everything!"
+	@echo "  make test        - run all unit tests!"
+	@echo "  make it-gone     - clean everything!"
+	@echo ""
 	@echo "  make node        - build the node"
 	@echo "  make adapter     - build the adapter"
 	@echo "  make nodeadapter - build the node and the adapter"
+	@echo "  make ph          - build the packet handler"
+	@echo "  make libnode     - build the node library"
+	@echo ""
+	@echo "  make deps        - build the ancillary packages"
 	@echo "  make diagrams    - build PlantUML diagrams"
 	@echo 
 	@echo \>_
 	@echo
 
 
-# Build the node, cd, and cactl
+it-so: deps adapter ph-debug node visaservice diagrams
+
+it-gone:
+	$(MAKE) -C adapter/cactl clean
+	cd adapter/cd && cargo clean
+	cd adapter/ph && cargo clean
+	cd adapter/ph-debug && cargo clean
+	cd cbpf-rs && cargo clean
+	cd cslab && cargo clean
+	$(MAKE) -C libnode dist-clean
+	$(MAKE) -C node dist-clean
+	$(MAKE) -C visaservice/core dist-clean
+	$(MAKE) -C visaservice clean
+	$(MAKE) -C visaservice/thrift clean
+	rm -rf diagrams/output
+
+
+test:
+	$(MAKE) -C adapter/cactl test
+	$(MAKE) -C adapter/cd test
+	$(MAKE) -C adapter/ph test
+	cd adapter/ph-debug && cargo test
+	cd cbpf-rs && cargo test
+	cd cslab && cargo test
+	$(MAKE) -C libnode test
+	$(MAKE) -C node test
+	$(MAKE) -C visaservice test
+
+
+
+deps: cbpf cslab zpr-ext thrift
+
 nodeadapter: node adapter
 
-node:
+node: ph libnode
 	$(MAKE) -C node all
 
-adapter:
+libnode:
+	$(MAKE) -C libnode
+
+ph:
+	$(MAKE) -C adapter/ph
+
+ph-debug:
+	cd adapter/ph-debug && cargo build
+
+adapter: ph
 	$(MAKE) -C adapter/cactl all
 	$(MAKE) -C adapter/cd all
 
 diagrams:
 	$(MAKE) -C diagrams
 
-.PHONY: nodeadapter node adapter diagrams
+cbpf: 
+	cd cbpf-rs && cargo build
+
+cslab:
+	cd cslab && cargo build
+
+zpr-ext:
+	cd zpr-ext && cargo build
+
+thrift:
+	$(MAKE) -C visaservice/thrift
+
+visaservice:
+	$(MAKE) -C visaservice all
+
+
+.PHONY: it-so it-gone deps nodeadapter node libnode ph ph-debug adapter diagrams cbpf cslab zpr-ext thrift visaservice
+
+.DEFAULT_GOAL := info
