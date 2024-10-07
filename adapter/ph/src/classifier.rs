@@ -15,8 +15,8 @@ pub enum ClassifierResult {
     SubsequentFragment,
 }
 
-const IP_VERSION_MASK: u8 = 0xF0;
-const IPV4_HEADER_LENGTH_MASK: u8 = 0x0F;
+pub const IP_VERSION_MASK: u8 = 0xF0;
+pub const IPV4_HEADER_LENGTH_MASK: u8 = 0x0F;
 
 #[derive(AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned)]
 #[repr(C)]
