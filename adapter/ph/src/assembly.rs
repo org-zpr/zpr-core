@@ -5,16 +5,26 @@ use crate::config;
 use crate::counter::*;
 use crate::counters_enum::*;
 use crate::flow_control::FlowControl;
+use crate::km::ZPIPair;
+use crate::km_cert_exchange::KmCertExchange;
+use crate::km_multiplexor;
 use crate::km_multiplexor::KmState;
+use crate::km_noise;
+use crate::link_state::LinkType;
 use crate::mgmt_processor_worker;
 use crate::peer_table;
+use crate::peer_table::PeerInsertError;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use crate::zpr;
+use crate::zpr::ZPI_ENCRYPTED_HEADER_FLAG;
+use crate::zpr::{LinkId, SubstrateAddr};
 
 use enum_map::EnumMap;
+use km_noise::NoiseKeypair;
 use std::default::Default;
 use std::result::Result;
+use tracing::info;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum PhMode {
@@ -70,6 +80,10 @@ pub struct Assembly<'pktbuf> {
     pub mgmt_dispatch: MgmtDispatch<'pktbuf>,
     pub adapter_manager: AdapterManager<'pktbuf>,
     pub km_state: KmState,
+
+    pub self_noise_keypair: Option<NoiseKeypair>,
+    pub peer_noise_keypair: Option<NoiseKeypair>,
+    pub certx: Option<KmCertExchange>,
 }
 
 pub struct PhFlags {
@@ -89,29 +103,98 @@ impl Default for PhFlags {
 }
 
 impl Assembly<'_> {
-    pub fn hack_get_adapter_docking_session_id(&self) -> zpr::LinkId {
-        assert!(matches!(self.ph_mode, PhMode::Adapter));
-        let peer_ids = self.peer_ids.lock().unwrap();
-        assert_eq!(peer_ids.len(), 1);
-        peer_ids[0]
+    pub fn is_node(&self) -> bool {
+        self.ph_mode == PhMode::Node
     }
 
-    pub fn hack_add_peer(
+    pub fn is_adapter(&self) -> bool {
+        self.ph_mode == PhMode::Adapter
+    }
+
+    fn add_peer(
         &'static self,
-        peer_type: peer_table::PeerType,
-        substrate_addr: zpr::SubstrateAddr,
-    ) -> Result<zpr::LinkId, peer_table::PeerInsertError> {
+        link_type: LinkType,
+        peer_addr: &SubstrateAddr,
+    ) -> Result<LinkId, PeerInsertError> {
         let entry = self.peer_table.vacant_entry()?;
 
         let worker_config = mgmt_processor_worker::Config {
             link_id: entry.key(),
         };
 
-        let peer_state = peer_table::PeerState::new(peer_type, substrate_addr, |q| {
+        let peer_state = peer_table::PeerState::new(link_type, *peer_addr, |q| {
             mgmt_processor_worker::launch(&worker_config, self, q)
         });
 
         Ok(entry.insert(peer_state))
+    }
+
+    /// Add an adapter to the peer table
+    pub fn accept_tether(
+        &'static self,
+        adapter_addr: &SubstrateAddr,
+    ) -> Result<LinkId, PeerInsertError> {
+        assert!(self.is_node());
+        info!(
+            "{}: Accepting tether from {}",
+            self.system_name, adapter_addr
+        );
+        let peer_id = self.add_peer(LinkType::NodeToAdapter, adapter_addr)?;
+        self.peer_ids.lock().unwrap().push(peer_id);
+
+        km_multiplexor::add_node_link(
+            &self,
+            peer_id,
+            ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
+            self.self_noise_keypair.clone().unwrap(),
+            self.certx.clone().unwrap(),
+        )
+        .unwrap();
+
+        info!(
+            "{}: Successfully accepted tether from {}.  Assigned ID {}",
+            self.system_name, adapter_addr, peer_id
+        );
+
+        return Ok(peer_id);
+    }
+
+    /// Add a node to the peer table as an adapter
+    pub fn initiate_tether(
+        &'static self,
+        node_addr: &SubstrateAddr,
+    ) -> Result<LinkId, PeerInsertError> {
+        assert!(self.is_adapter());
+        info!(
+            "{}: Initiating tether towards {}",
+            self.system_name, node_addr
+        );
+        let peer_id = self.add_peer(LinkType::AdapterToNode, node_addr)?;
+        self.peer_ids.lock().unwrap().push(peer_id);
+
+        km_multiplexor::add_adapter_link(
+            &self,
+            peer_id,
+            ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
+            self.self_noise_keypair.clone().unwrap(),
+            self.peer_noise_keypair.clone().unwrap().public,
+            self.certx.clone().unwrap(),
+        )
+        .unwrap();
+
+        info!(
+            "{}: Successfully initiated tether to {}.  Assigned ID {}",
+            self.system_name, node_addr, peer_id
+        );
+
+        return Ok(peer_id);
+    }
+
+    pub fn hack_get_adapter_docking_session_id(&self) -> zpr::LinkId {
+        assert!(matches!(self.ph_mode, PhMode::Adapter));
+        let peer_ids = self.peer_ids.lock().unwrap();
+        assert_eq!(peer_ids.len(), 1);
+        peer_ids[0]
     }
 }
 
@@ -231,6 +314,9 @@ pub mod test {
             mgmt_dispatch,
             adapter_manager,
             km_state,
+            self_noise_keypair: None,
+            peer_noise_keypair: None,
+            certx: None,
         }
     }
 }

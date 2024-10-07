@@ -6,22 +6,22 @@ use crate::queues::MgmtDispatchMessage;
 use std::future::Future;
 use tokio::sync::mpsc;
 
-async fn worker<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    queue: &mut mpsc::Receiver<MgmtDispatchMessage<'pktbuf>>,
+async fn worker(
+    asm: &'static Assembly<'_>,
+    queue: &mut mpsc::Receiver<MgmtDispatchMessage<'static>>,
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
-            MgmtDispatchMessage::Packet(ingress_link_id, pkt) => {
-                dispatch::dispatch_mgmt_packet(asm, ingress_link_id, pkt);
+            MgmtDispatchMessage::Packet(ingress_link_id, peer_sa, pkt) => {
+                dispatch::dispatch_mgmt_packet(asm, ingress_link_id, peer_sa, pkt);
             }
         }
     }
 }
 
-pub fn launch<'pktbuf>(
-    asm: impl std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync + 'pktbuf,
-    mut queue: mpsc::Receiver<MgmtDispatchMessage<'pktbuf>>,
-) -> impl Future<Output = ()> + 'pktbuf {
+pub fn launch(
+    asm: &'static Assembly,
+    mut queue: mpsc::Receiver<MgmtDispatchMessage<'static>>,
+) -> impl Future<Output = ()> + 'static {
     async move { worker(&*asm, &mut queue).await }
 }

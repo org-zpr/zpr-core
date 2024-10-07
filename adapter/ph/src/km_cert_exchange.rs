@@ -70,6 +70,7 @@ struct CertExchgHdr {
 
 /// The Certificate Exchange object holds the local certificate (which includes the noise public key)
 /// and the certificate for our trusted signing authority.
+#[derive(Clone)]
 pub struct KmCertExchange {
     local_cert: X509,
     authority_cert: X509,

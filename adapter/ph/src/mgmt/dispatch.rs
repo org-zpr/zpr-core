@@ -19,13 +19,23 @@ use zpr_ext::zerocopy::FromBytesExt;
 /// This function does not block, and does not perform significant processing.
 /// It merely dispatches the management packet to the correct queue.
 pub fn dispatch_mgmt_packet<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    ingress_link_id: zpr::LinkId,
+    asm: &'static Assembly<'pktbuf>,
+    ingress_link_id: Option<zpr::LinkId>,
+    peer_sa: zpr::SubstrateAddr,
     mut pkt: Packet<'pktbuf>,
 ) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
         Some(base_hdr) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
+
+            // TODO: once we have multi-node, how do we know whether this is a link or a
+            // tether?
+            let Some(ingress_link_id) =
+                ingress_link_id.or_else(|| asm.accept_tether(&peer_sa).ok())
+            else {
+                return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
+            };
+
             match handle_key_management(asm, ingress_link_id, pkt) {
                 Ok(()) => (),
                 Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
@@ -33,6 +43,10 @@ pub fn dispatch_mgmt_packet<'pktbuf>(
         }
 
         Some(base_hdr) if base_hdr.packet_type.is_response() => {
+            let Some(ingress_link_id) = ingress_link_id else {
+                return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
+            };
+
             match handle_response(asm, ingress_link_id, pkt) {
                 Ok(()) => (),
                 Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
@@ -40,6 +54,10 @@ pub fn dispatch_mgmt_packet<'pktbuf>(
         }
 
         _ => {
+            let Some(ingress_link_id) = ingress_link_id else {
+                return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
+            };
+
             let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
                 fastpath::drop_and_count(asm, pkt, CounterType::PeerRemoved);
                 return;
@@ -87,7 +105,7 @@ fn handle_response<'pktbuf>(
 // ZPI and Base header is already gone by the time we get here.  So we expect
 // to parse starting from the KeyManagement header.
 fn handle_key_management<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+    asm: &'static Assembly<'pktbuf>,
     ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
@@ -110,6 +128,7 @@ fn handle_key_management<'pktbuf>(
         error!("KeyManagement packet arrived with truncated payload");
         return Err((HandleMgmtError::BadStructure, pkt));
     }
+
     match km_multiplexor::handle_inbound_km_msg(asm, ingress_link_id, &pkt.body()[..km_msg_len]) {
         Ok(()) => (),
         Err(e) => {

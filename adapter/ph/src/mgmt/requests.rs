@@ -39,6 +39,7 @@ pub async fn send_discard(asm: &Assembly<'_>, link_id: zpr::LinkId) {
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
 }
 
+#[allow(dead_code)]
 /// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
 pub async fn send_hello_request<'a, 'pktbuf>(
     asm: &'a Assembly<'pktbuf>,
