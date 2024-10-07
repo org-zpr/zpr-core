@@ -5,20 +5,14 @@ use crate::defs::FiveTuple;
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::zpr::{CompressionMode, L3Type};
+use arrayref::array_ref;
 use bytes::Buf;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use zerocopy::FromBytes;
 use zerocopy::{AsBytes, FromZeroes, Unaligned};
+use zpr_ext::bytes::BufExt;
 
-#[derive(AsBytes, FromZeroes, FromBytes, Unaligned)]
-#[repr(packed)]
-struct CompressedIPv4Header {
-    pub vhl: u8,
-    pub dscp: u8,
-    pub frag_id: [u8; 2],
-    pub frag_offset: [u8; 2],
-    pub ttl: u8,
-}
+const ZDP_V4_FRAG_INFO_PRESENT: u8 = 0b00001000;
 
 #[derive(AsBytes, FromZeroes, FromBytes, Unaligned)]
 #[repr(packed)]
@@ -31,47 +25,68 @@ struct CompressedIPv6Header {
 
 fn compress_addrs_v4(pkt: &mut Packet) {
     let hdr = classifier::IPv4Header::ref_from_prefix(pkt.body()).unwrap();
-    let vhl = hdr.vhl;
+    let hl = hdr.vhl & classifier::IPV4_HEADER_LENGTH_MASK;
     let dscp = hdr.dscp;
-    let frag_id = hdr.frag_id;
-    let frag_offset = hdr.frag_offset;
+    let frag_info = [
+        hdr.frag_id[0],
+        hdr.frag_id[1],
+        hdr.frag_offset[0],
+        hdr.frag_offset[1],
+    ];
     let ttl = hdr.ttl;
 
     pkt.advance(std::mem::size_of::<classifier::IPv4Header>());
 
-    let chdr = pkt.alloc_zeroed_header::<CompressedIPv4Header>();
-    chdr.vhl = vhl;
-    chdr.dscp = dscp;
-    chdr.frag_id = frag_id;
-    chdr.frag_offset = frag_offset;
-    chdr.ttl = ttl;
+    pkt.push_header(&ttl);
+
+    let frag_info_present = frag_info != [0u8; 4];
+    // NOTE/TODO: this differs slightly from the spec, in that the ID field
+    // is also optional.  I have an ask out to Frank to change this in the spec.
+    if frag_info_present {
+        pkt.push_header(&frag_info);
+    }
+
+    let hl_zdpflags = (hl << 4)
+        | (if frag_info_present {
+            ZDP_V4_FRAG_INFO_PRESENT
+        } else {
+            0
+        });
+
+    pkt.push_header(&[hl_zdpflags, dscp]);
 }
 
 fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_address: Ipv4Addr) {
-    let chdr = CompressedIPv4Header::ref_from_prefix(pkt.body()).unwrap();
-    let vhl = chdr.vhl;
-    let dscp = chdr.dscp;
-    let frag_id = chdr.frag_id;
-    let frag_offset = chdr.frag_offset;
-    let ttl = chdr.ttl;
+    let hl_zdpflags_tos = pkt.get_array::<2>();
+    let hl_zdpflags = hl_zdpflags_tos[0];
+    let tos = hl_zdpflags_tos[1];
 
-    pkt.advance(std::mem::size_of::<CompressedIPv4Header>());
+    let frag_info_present = (hl_zdpflags & ZDP_V4_FRAG_INFO_PRESENT) != 0;
+    let frag_info;
+    if frag_info_present {
+        frag_info = pkt.get_array::<4>();
+    } else {
+        frag_info = [0u8; 4];
+    }
 
+    let ttl = pkt.get_u8();
+
+    let hl = hl_zdpflags >> 4;
     let body_len = pkt.body().len();
 
     let hdr = pkt.alloc_zeroed_header::<classifier::IPv4Header>();
-    hdr.vhl = vhl;
-    hdr.dscp = dscp;
+    hdr.vhl = (4 << 4) | hl;
+    hdr.dscp = tos;
     hdr.total_length =
         ((body_len + std::mem::size_of::<classifier::IPv4Header>()) as u16).to_be_bytes();
-    hdr.frag_id = frag_id;
-    hdr.frag_offset = frag_offset;
+    hdr.frag_id = *array_ref!(frag_info, 0, 2);
+    hdr.frag_offset = *array_ref!(frag_info, 2, 2);
     hdr.ttl = ttl;
     hdr.proto = proto;
     hdr.src_address = src_address.octets();
     hdr.dst_address = dst_address.octets();
 
-    let header_len = ((vhl & 0x0f) as usize) << 2;
+    let header_len = (hl as usize) << 2;
     let csum = net_defs::inet_checksum(&pkt.body()[..header_len]);
     classifier::IPv4Header::mut_from_prefix(pkt.body_mut())
         .unwrap()
