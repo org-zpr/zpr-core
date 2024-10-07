@@ -27,10 +27,11 @@ fn compress_addrs_v4(pkt: &mut Packet) {
     let hdr = classifier::IPv4Header::ref_from_prefix(pkt.body()).unwrap();
     let hl = hdr.vhl & classifier::IPV4_HEADER_LENGTH_MASK;
     let dscp = hdr.dscp;
+    let frag_flags = hdr.frag_offset[0] >> 5; // fragmentation flags
     let frag_info = [
         hdr.frag_id[0],
         hdr.frag_id[1],
-        hdr.frag_offset[0],
+        hdr.frag_offset[0] & 0x1f, // ignores fragmentation flags; NOTE/TODO: spec deviation
         hdr.frag_offset[1],
     ];
     let ttl = hdr.ttl;
@@ -51,7 +52,8 @@ fn compress_addrs_v4(pkt: &mut Packet) {
             ZDP_V4_FRAG_INFO_PRESENT
         } else {
             0
-        });
+        })
+        | frag_flags;
 
     pkt.push_header(&[hl_zdpflags, dscp]);
 }
@@ -61,17 +63,20 @@ fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_addre
     let hl_zdpflags = hl_zdpflags_tos[0];
     let tos = hl_zdpflags_tos[1];
 
+    let hl = hl_zdpflags >> 4;
     let frag_info_present = (hl_zdpflags & ZDP_V4_FRAG_INFO_PRESENT) != 0;
-    let frag_info;
+    let frag_flags = hl_zdpflags & 0x07;
+
+    let mut frag_info;
     if frag_info_present {
         frag_info = pkt.get_array::<4>();
     } else {
         frag_info = [0u8; 4];
     }
+    frag_info[2] |= frag_flags << 5; // NOTE/TODO: spec deviation
 
     let ttl = pkt.get_u8();
 
-    let hl = hl_zdpflags >> 4;
     let body_len = pkt.body().len();
 
     let hdr = pkt.alloc_zeroed_header::<classifier::IPv4Header>();
