@@ -1,11 +1,16 @@
 use clap::{Parser, Subcommand};
-use std::net::Ipv6Addr;
-
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 pub mod traffic_parser;
 pub mod vsapi;
 pub mod vsclient;
+mod vssd;
 
 use crate::traffic_parser::{parse_traffic, Protocol};
+
+
+const DEFAULT_SERVICE: &str = "[fd5a:5052::1]:5002";
+const DEFAULT_VSS_PORT: u16 = 8183;
+
 
 #[derive(Parser)]
 #[command(version, about = "Visa Service THRIFT API Client", long_about = None)]
@@ -18,12 +23,12 @@ struct Cli {
 enum Commands {
     #[command(about = "Call the hello function")]
     Hello {
-        #[arg(short, long, value_name = "HOST:PORT")]
+        #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
     },
     #[command(about = "Call the authenticate function, returns an API key")]
     Authenticate {
-        #[arg(short, long, value_name = "HOST:PORT")]
+        #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
 
         #[arg(
@@ -39,10 +44,16 @@ enum Commands {
 
         #[arg(long, value_name = "FILE", help = "path to PEM encoded private key")]
         key: String, // private key
+
+        #[arg(long, value_name = "ADDR", help = "nodes ZPR address")]
+        zpr_addr: IpAddr,
+
+        #[arg(long, value_name = "PORT", default_value_t = DEFAULT_VSS_PORT)]
+        vss_port: u16,
     },
     #[command(about = "Call the de_register function, requires an API key")]
     Deregister {
-        #[arg(short, long, value_name = "HOST:PORT")]
+        #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
 
         #[arg(short, long, value_name = "APIKEY")]
@@ -50,7 +61,7 @@ enum Commands {
     },
     #[command(about = "Call the agent_disconnect function, requires an API key")]
     Disconnect {
-        #[arg(short, long, value_name = "HOST:PORT")]
+        #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
 
         #[arg(short, long, value_name = "APIKEY")]
@@ -61,14 +72,15 @@ enum Commands {
     },
     #[command(about = "Call the ping function, requires an API key")]
     Ping {
-        #[arg(short, long, value_name = "HOST:PORT")]
+        #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
 
         #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
     },
+    #[command(about = "Issue a visa request")]
     Requestvisa {
-        #[arg(short, long, value_name = "HOST:PORT")]
+        #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
 
         #[arg(short, long, value_name = "APIKEY")]
@@ -95,11 +107,20 @@ enum Commands {
         )]
         udp: Option<String>,
     },
+    #[command(about = "Run a visa support service server")]
+    Runvss {
+        #[arg(long, value_name = "ADDR", help = "nodes ZPR address (should be same as passed to authenticate)")]
+        zpr_addr: IpAddr,
+
+        #[arg(long, value_name = "PORT", default_value_t = DEFAULT_VSS_PORT)]
+        vss_port: u16,
+    },
     #[command(about = "View syntax for traffic format when requesting a visa")]
     Helptraffic {},
 }
 
 fn main() {
+    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
     match cli.command {
         Some(Commands::Hello { service }) => match vsclient::hello(&service) {
@@ -115,7 +136,9 @@ fn main() {
             claim,
             cert,
             key,
-        }) => match vsclient::authenticate(&service, claim, &cert, &key) {
+            zpr_addr,
+            vss_port,
+        }) => match vsclient::authenticate(&service, claim, &cert, &key, &zpr_addr, vss_port) {
             Ok(_) => {
                 println!("Authenticate command executed successfully");
             }
@@ -217,6 +240,16 @@ fn main() {
                 },
                 _ => {
                     println!("Either TCP or UDP traffic description must be provided");
+                }
+            }
+        }
+        Some(Commands::Runvss { zpr_addr, vss_port }) => {
+            match vssd::run_vss(SocketAddr::new(zpr_addr, vss_port)) {
+                Ok(_) => {
+                    println!("Runvss command executed successfully");
+                }
+                Err(e) => {
+                    println!("Error: {:?}", e);
                 }
             }
         }

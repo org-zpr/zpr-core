@@ -13,3 +13,8 @@ openssl = "0.10.64"
 rand = "0.8.5"
 regex = "1.10.5"
 thrift = "0.17.0"
+libnode = { path = "../../libnode" }
+tokio = "1.40.0"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+

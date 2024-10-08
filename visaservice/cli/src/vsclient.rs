@@ -13,7 +13,7 @@ use openssl::sign::Signer;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::prelude::*;
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::SystemTime;
 
 use crate::vsapi;
@@ -26,6 +26,9 @@ type VSClientT = VisaServiceSyncClient<
     TBinaryInputProtocol<TFramedReadTransport<ReadHalf<TTcpChannel>>>,
     TBinaryOutputProtocol<TFramedWriteTransport<WriteHalf<TTcpChannel>>>,
 >;
+
+
+
 
 fn newclient(service: &str) -> thrift::Result<VSClientT> {
     let mut c = TTcpChannel::new();
@@ -65,6 +68,8 @@ pub fn authenticate(
     claim: Vec<String>,
     cert_file: &str,
     private_key_file: &str,
+    zpr_addr: &IpAddr,
+    vss_port: u16,
 ) -> thrift::Result<()> {
     let mut client = newclient(service)?;
 
@@ -88,15 +93,19 @@ pub fn authenticate(
     let provides = vec![String::from("/zpr/node")];
 
     // Two IPv6 addresses
-    let zpraddr = vec![0xfc, 0, 0x30, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
-    let tetheraddr = vec![0xfc, 0, 0x30, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2];
+    // TODO: Make sure the visa service is checking policy when processing this call.
+
+    let addr_bytes = match zpr_addr {
+        IpAddr::V4(v4) => v4.octets().to_vec(),
+        IpAddr::V6(v6) => v6.octets().to_vec(),
+    };
 
     let agent = vsapi::Agent {
         agent_type: Some(vsapi::AgentType::NODE),
         attrs: Some(attrs),
         auth_expires: Some((timestamp + 60 * 60) as i64),
-        zpr_addr: Some(zpraddr),
-        tether_addr: Some(tetheraddr),
+        zpr_addr: Some(addr_bytes.clone()),
+        tether_addr: Some(addr_bytes),
         ident: Some(String::from("ident-not-generated")), // TODO
         provides: Some(provides),
     };
@@ -134,7 +143,7 @@ pub fn authenticate(
         timestamp: Some(timestamp as i64),
         node_cert: Some(cert_pem_data.into()),
         hmac: Some(hmac),
-        vss_service: Some(String::from("127.0.0.1:0")),
+        vss_service: Some(SocketAddr::new(*zpr_addr, vss_port).to_string()),
         node_agent: Some(agent),
     };
 
