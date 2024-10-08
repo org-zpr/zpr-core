@@ -590,8 +590,8 @@ func (a *Authenticator) updateVStoreFromPolicy(p *polio.Policy) error {
 	}
 
 	pool := snauth.NewCertCollection()
-
 	for _, c := range p.GetCertificates() {
+		a.log.Info("found a certifiate", "name", c.Name)
 		if svcName, found := extPrefixes[c.Name]; found {
 			cert, err := x509.ParseCertificate(c.GetAsn1Data())
 			if err != nil {
@@ -604,7 +604,7 @@ func (a *Authenticator) updateVStoreFromPolicy(p *polio.Policy) error {
 			a.log.Info("adding certificate", "prefix", c.Name, "name", svcName)
 		} else {
 			// Must be in internal prefix.
-			a.log.Info("found internal prefix", "prefix", c.Name)
+			a.log.Info("found internally validated prefix", "prefix", c.Name)
 			intPrefixes = append(intPrefixes, c.Name)
 		}
 	}

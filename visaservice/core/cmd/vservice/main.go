@@ -25,8 +25,6 @@ const (
 	versionMinor = 1
 	versionPatch = 0
 
-	PIDDir = "/var/run/zpr"
-
 	// Default Max lifetime for authenticated. When they expire we require
 	// re-auth from the peer.
 	DefaultMaxAuthDuration = 6 * time.Hour
@@ -258,7 +256,16 @@ type PidFile struct {
 
 // NewPidFile writes a pid file in the default location.
 func NewPidFile(appname string) (*PidFile, error) {
-	fpath := filepath.Join(PIDDir, "visaservice.pid")
+	datadir := os.Getenv("XDG_DATA_HOME")
+	if datadir == "" {
+		datadir = os.Getenv("HOME")
+		if datadir == "" {
+			datadir = "/var/run"
+		} else {
+			datadir = filepath.Join(datadir, ".local", "share")
+		}
+	}
+	fpath := filepath.Join(datadir, "zpr", "vservice.pid")
 	odir := filepath.Dir(fpath)
 	if err := os.MkdirAll(odir, 0755); err != nil {
 		return nil, err

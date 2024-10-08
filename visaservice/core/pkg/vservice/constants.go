@@ -34,7 +34,7 @@ const (
 	NetConfigSettleTime = 10 * time.Second
 
 	// ZPR hard coded visa service address.
-	VisaServiceAddress = "fc00:3003::1"
+	VisaServiceAddress = "fd5a:5052::1"
 
 	// AdminPort is the admin control port for visa service
 	AdminPort = 8182 // TCP

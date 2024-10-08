@@ -75,8 +75,9 @@ func (svc *AdminService) StartAdminService(listenAddr netip.Addr, port int) erro
 	router.HandleFunc("/admin/policy/{config_id}/current", svc.handleGetCurrentPolicy).Methods("GET")
 	router.HandleFunc("/admin/policy", svc.handleInstallPolicy).Methods("POST")
 
+	addrPort := netip.AddrPortFrom(listenAddr, uint16(port))
 	server := http.Server{
-		Addr:         fmt.Sprintf("%v:%d", listenAddr.String(), port),
+		Addr:         addrPort.String(),
 		Handler:      router,
 		TLSConfig:    svc.creds,
 		ReadTimeout:  5 * time.Second,

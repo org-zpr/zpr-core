@@ -83,7 +83,7 @@ func makeVSWithPolicy(t *testing.T, pyaml string) (*vservice.VSInst, *policy.Pol
 
 	// Minimal config:
 	vc := vservice.VSIConfig{
-		VSAddr:   netip.MustParseAddr("fc00:3003::1"),
+		VSAddr:   netip.MustParseAddr(vservice.VisaServiceAddress),
 		Log:      llog,
 		HopCount: uint(99),
 	}
