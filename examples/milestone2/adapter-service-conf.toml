@@ -1,0 +1,20 @@
+
+[profile]
+name = "zprfoo"
+root_ca = "ca-cert.pem"
+
+
+[dock]
+host_or_ip = "10.0.0.1"
+port = 5000
+noise_public_key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
+
+
+[adapter]
+noise_certificate = "adapter-service-cert.pem"
+noise_private_key = "AC1yJ8aoQx4JkqoX6x2O8GjkkHwrRATYJdwKPWHZx1M="
+
+
+
+
+
