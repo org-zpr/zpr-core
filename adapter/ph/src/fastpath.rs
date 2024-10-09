@@ -287,8 +287,8 @@ fn substrate_egress_common<'pktbuf>(
     // TODO: should we add ZDP header here also??
 
     let zdp_hdr = match zdp::ZdpBaseHeader::ref_from_prefix(&pkt.body()) {
-        Some(zdp_hdr) => zdp_hdr,
-        None => {
+        Ok((zdp_hdr, _)) => zdp_hdr,
+        Err(_) => {
             error!("egress: link {}: failed to parse the ZDP header", link_id);
             return Err(km::EncryptionError::ParseError);
         }
@@ -446,7 +446,7 @@ pub fn substrate_ingress<'pktbuf>(
     };
 
     // Read, but do not remove the ZPI header
-    let Some(zpi_hdr) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
+    let Ok((zpi_hdr, _)) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
         drop_and_count(asm, pkt, CounterType::BadStructure);
         return;
     };
@@ -517,15 +517,12 @@ pub fn substrate_ingress<'pktbuf>(
     maybe_capture(asm, Direction::Inbound, &mut pkt);
 
     // now pop the ZPI off the packet. We've already checked it.
-    match zdp::ZdpZpiHeader::read_from_buf(&mut pkt) {
-        Some(_) => (),
-        None => {
-            drop_and_count(asm, pkt, CounterType::BadStructure);
-            return;
-        }
+    if zdp::ZdpZpiHeader::read_from_buf(&mut pkt).is_err() {
+        drop_and_count(asm, pkt, CounterType::BadStructure);
+        return;
     }
 
-    let Some(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
+    let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return drop_and_count(asm, pkt, CounterType::BadStructure);
     };
 
@@ -559,7 +556,7 @@ pub fn substrate_ingress<'pktbuf>(
         return;
     }
 
-    let Some(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
+    let Ok(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
         return drop_and_count(asm, pkt, CounterType::BadStructure);
     };
 
@@ -590,7 +587,7 @@ pub fn agent_input<'pktbuf>(
     mut pkt: Packet<'pktbuf>,
 ) {
     // extract A2A MAC
-    let Some(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
+    let Ok(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
         drop_and_count(asm, pkt, CounterType::BadStructure);
         return;
     };

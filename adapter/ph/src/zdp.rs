@@ -2,12 +2,12 @@
 
 use open_enum::open_enum;
 use zerocopy::byteorder::network_endian::*;
-use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 use crate::zpr;
 
 #[open_enum]
-#[derive(Copy, Clone, Debug, FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(u8)]
 pub enum ZdpPacketType {
     // Flow-based
@@ -79,13 +79,13 @@ impl ZdpPacketType {
     }
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpZpiHeader {
     pub zpi: u8,
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBaseHeader {
     pub packet_type: ZdpPacketType,
@@ -100,13 +100,13 @@ pub const ZDP_BASE_HEADER_OFFSET: usize = std::mem::size_of::<ZdpZpiHeader>();
 pub const ZDP_NON_PER_FLOW_MGMT_HEADER_OFFSET: usize =
     ZDP_BASE_HEADER_OFFSET + std::mem::size_of::<ZdpBaseHeader>();
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpPerFlowHeader {
     pub stream_id: U32,
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpEchoHeader {
     pub base_header: ZdpBaseHeader,
@@ -114,20 +114,20 @@ pub struct ZdpEchoHeader {
     pub additional_length: U16,
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpReportHeader {
     pub report_data_length: U16,
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpHelloResponseHeader {
     pub status: U16,
 }
 
 /// Bind Agent Address request (§ 6.3.11)
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBindAgentAddressRequestHeader {
     pub ip_version: zpr::L3Type,
@@ -135,7 +135,7 @@ pub struct ZdpBindAgentAddressRequestHeader {
 }
 
 /// Bind Agent Address response (§ 6.3.11)
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBindAgentAddressResponseHeader {
     pub status_code: u8,
@@ -147,7 +147,7 @@ impl ZdpBindAgentAddressResponseHeader {
     pub const STATUS_CODE_OTHER: u8 = 1;
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpKeyManagementHeader {
     pub message_type: U16,
@@ -169,7 +169,7 @@ impl ZdpKeyManagementHeader {
     }
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpA2aHeader {
     pub a2a_said: zpr::A2aSaid,

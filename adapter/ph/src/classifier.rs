@@ -2,9 +2,10 @@
 use crate::net_defs::*;
 use crate::packet;
 use crate::zpr::L3Type;
+use arrayref::array_ref;
 use std::mem::size_of;
-use zerocopy::{AsBytes, FromZeroes, KnownLayout, Unaligned};
-use zerocopy::{ByteOrder, FromBytes, NetworkEndian};
+use zerocopy::byteorder::network_endian::*;
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 #[derive(Debug, PartialEq)]
 pub enum ClassifierResult {
@@ -18,14 +19,14 @@ pub enum ClassifierResult {
 pub const IP_VERSION_MASK: u8 = 0xF0;
 pub const IPV4_HEADER_LENGTH_MASK: u8 = 0x0F;
 
-#[derive(AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 pub struct IPv4Header {
     pub vhl: u8,
     pub dscp: u8,
-    pub total_length: [u8; 2],
+    pub total_length: U16,
     pub frag_id: [u8; 2],
-    pub frag_offset: [u8; 2],
+    pub frag_offset: U16,
     pub ttl: u8,
     pub proto: u8,
     pub header_checksum: [u8; 2],
@@ -33,7 +34,7 @@ pub struct IPv4Header {
     pub dst_address: [u8; 4],
 }
 
-#[derive(AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 pub struct IPv6Header {
     pub version_and_tc_upper: u8,
@@ -48,11 +49,11 @@ pub struct IPv6Header {
 
 const NO_NEXT_HEADER: u8 = 59;
 
-#[derive(FromZeroes, FromBytes, KnownLayout, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 struct TCPHeader {
-    pub src_port: [u8; 2],
-    pub dst_port: [u8; 2],
+    pub src_port: U16,
+    pub dst_port: U16,
     pub sequence_number: [u8; 4],
     pub acknowledgement_number: [u8; 4],
     pub data_offset_and_reserved: u8,
@@ -62,11 +63,11 @@ struct TCPHeader {
     pub urgent_pointer: [u8; 2],
 }
 
-#[derive(FromZeroes, FromBytes, KnownLayout, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(C)]
 struct UDPHeader {
-    pub src_port: [u8; 2],
-    pub dst_port: [u8; 2],
+    pub src_port: U16,
+    pub dst_port: U16,
     pub length: [u8; 2],
     pub checksum: [u8; 2],
 }
@@ -112,11 +113,11 @@ fn classify_ipv4(
     }
 
     let header_bytes = &body[..size_of::<IPv4Header>()];
-    let ipv4_header = IPv4Header::ref_from(header_bytes).unwrap();
+    let ipv4_header = IPv4Header::ref_from_bytes(header_bytes).unwrap();
 
     let header_length = ipv4_header.vhl & IPV4_HEADER_LENGTH_MASK;
-    let total_length = NetworkEndian::read_u16(&ipv4_header.total_length);
-    if usize::from(total_length) != body.len()
+    let total_length = ipv4_header.total_length.get();
+    if total_length as usize != body.len()
         || header_length < 5
         || u16::from(header_length * 4) > total_length
     {
@@ -130,7 +131,7 @@ fn classify_ipv4(
 
     const FRAGMENT_OFFSET_MASK: u16 = 0x1FFF;
     const MORE_FRAGMENTS_MASK: u16 = 0x2000;
-    let frag_offset = NetworkEndian::read_u16(&ipv4_header.frag_offset);
+    let frag_offset = ipv4_header.frag_offset.get();
     if frag_offset & FRAGMENT_OFFSET_MASK != 0 {
         metadata.set_l4_protocol(ipv4_header.proto);
         return Ok(ClassifierResult::SubsequentFragment);
@@ -158,7 +159,7 @@ fn classify_ipv6(
     }
 
     let header_bytes = &body[..size_of::<IPv6Header>()];
-    let ipv6_header = IPv6Header::ref_from(header_bytes).unwrap();
+    let ipv6_header = IPv6Header::ref_from_bytes(header_bytes).unwrap();
 
     metadata.set_addresses(ipv6_header.src_address, ipv6_header.dst_address);
 
@@ -241,7 +242,7 @@ fn classify_frag(
     }
 
     const FRAG_OFFSET_MASK: u16 = 0xFFF8;
-    let frag_offset = NetworkEndian::read_u16(&body[2..4]);
+    let frag_offset = U16::from_bytes(*array_ref!(body, 2, 2)).get();
     if frag_offset & FRAG_OFFSET_MASK != 0 {
         // Subsequent fragments can't be parsed further
         return Ok(ClassifierResult::SubsequentFragment);
@@ -256,8 +257,8 @@ fn classify_icmp(
     _body: &[u8],
 ) -> Result<ClassifierResult, &'static str> {
     // TODO: check type and code
-    metadata.set_src_port([0u8; 2]);
-    metadata.set_dst_port([0u8; 2]);
+    metadata.set_src_port(0);
+    metadata.set_dst_port(0);
     Ok(ClassifierResult::OK)
 }
 
@@ -271,15 +272,15 @@ fn classify_tcp(
     }
 
     let header_bytes = &body[..size_of::<TCPHeader>()];
-    let tcp_header = TCPHeader::ref_from(header_bytes).unwrap();
+    let tcp_header = TCPHeader::ref_from_bytes(header_bytes).unwrap();
 
     let data_offset = (tcp_header.data_offset_and_reserved >> 4) * 4;
     if data_offset < 20 || data_offset as usize > body.len() {
         return Err("Packet length error");
     }
 
-    metadata.set_src_port(tcp_header.src_port);
-    metadata.set_dst_port(tcp_header.dst_port);
+    metadata.set_src_port(tcp_header.src_port.get());
+    metadata.set_dst_port(tcp_header.dst_port.get());
 
     Ok(ClassifierResult::OK)
 }
@@ -293,10 +294,10 @@ fn classify_udp(
     }
 
     let header_bytes = &body[..size_of::<UDPHeader>()];
-    let udp_header = UDPHeader::ref_from(header_bytes).unwrap();
+    let udp_header = UDPHeader::ref_from_bytes(header_bytes).unwrap();
 
-    metadata.set_src_port(udp_header.src_port);
-    metadata.set_dst_port(udp_header.dst_port);
+    metadata.set_src_port(udp_header.src_port.get());
+    metadata.set_dst_port(udp_header.dst_port.get());
 
     Ok(ClassifierResult::OK)
 }
@@ -304,8 +305,8 @@ fn classify_udp(
 fn classify_unclassified(
     metadata: &mut packet::PacketMetadata,
 ) -> Result<ClassifierResult, &'static str> {
-    metadata.set_src_port([0u8; 2]);
-    metadata.set_dst_port([0u8; 2]);
+    metadata.set_src_port(0);
+    metadata.set_dst_port(0);
     Ok(ClassifierResult::UnclassifiedL4)
 }
 
@@ -313,7 +314,7 @@ fn classify_unclassified(
 mod tests {
     use super::*;
     use crate::config;
-    use zerocopy::FromZeroes;
+    use zerocopy::FromZeros;
 
     #[test]
     fn test_non_ip() {

@@ -2,7 +2,7 @@
 
 use crate::net_defs;
 use crate::zpr;
-use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use zerocopy::*;
 
 /// Packet direction with respect to an interface.
 /// Primary use is for constructing libpcap link-layer header.
@@ -14,7 +14,7 @@ pub enum Direction {
 }
 
 /// IP 5-tuple used for hashing.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, AsBytes, FromBytes, FromZeroes)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, FromBytes, IntoBytes, Immutable, KnownLayout)]
 #[repr(C)]
 pub struct FiveTuple {
     pub src_address: net_defs::IpAddress,

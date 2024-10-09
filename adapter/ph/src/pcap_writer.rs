@@ -6,7 +6,7 @@
 use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncWrite, AsyncWriteExt, BufWriter};
-use zerocopy::AsBytes;
+use zerocopy::{Immutable, IntoBytes, KnownLayout};
 
 /// Represents an open PCAP writer.
 pub struct PcapWriter<W: AsyncWrite> {
@@ -22,7 +22,7 @@ const PCAP_HDR_VERSION_MINOR: u16 = 4;
 /// Maximum size packet which may be captured.
 pub const MAX_SNAPLEN: usize = 1 << 18;
 
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, KnownLayout)]
 #[repr(C)]
 struct PcapHdr {
     magic_number: u32,
@@ -34,7 +34,7 @@ struct PcapHdr {
     network: u32,
 }
 
-#[derive(AsBytes)]
+#[derive(IntoBytes, Immutable, KnownLayout)]
 #[repr(C)]
 struct PcaprecHdr {
     ts_sec: u32,

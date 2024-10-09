@@ -11,7 +11,7 @@ use crate::zdp;
 use crate::zpr;
 use bytes::{Buf, BufMut};
 use tracing::info;
-use zpr_ext::zerocopy::{AsBytesExt, FromBytesExt};
+use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 pub enum HandleMgmtError {
     UnknownType(u8),
@@ -41,7 +41,7 @@ pub async fn handle_report<'pktbuf>(
     ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let Some(hdr) = zdp::ZdpReportHeader::read_from_buf(&mut pkt) else {
+    let Ok(hdr) = zdp::ZdpReportHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
@@ -107,7 +107,7 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
     seq_num: zpr::SeqNum,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let Some(hdr) = zdp::ZdpBindAgentAddressRequestHeader::read_from_buf(&mut pkt) else {
+    let Ok(hdr) = zdp::ZdpBindAgentAddressRequestHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
@@ -119,24 +119,24 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
     let dst_address;
     match hdr.ip_version {
         zpr::L3Type::Ipv4 => {
-            let Some(src_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
+            let Ok(src_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
                 return Err((HandleMgmtError::BadStructure, pkt));
             };
             src_address = src_addr.into();
 
-            let Some(dst_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
+            let Ok(dst_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
                 return Err((HandleMgmtError::BadStructure, pkt));
             };
             dst_address = dst_addr.into();
         }
 
         zpr::L3Type::Ipv6 => {
-            let Some(src_addr) = <[u8; 16]>::read_from_buf(&mut pkt) else {
+            let Ok(src_addr) = <[u8; 16]>::read_from_buf(&mut pkt) else {
                 return Err((HandleMgmtError::BadStructure, pkt));
             };
             src_address = src_addr.into();
 
-            let Some(dst_addr) = <[u8; 16]>::read_from_buf(&mut pkt) else {
+            let Ok(dst_addr) = <[u8; 16]>::read_from_buf(&mut pkt) else {
                 return Err((HandleMgmtError::BadStructure, pkt));
             };
             dst_address = dst_addr.into();
@@ -225,7 +225,8 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
                                         zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS,
                                     info_len: 0,
                                 }
-                                .write_to_buf(&mut rsp_pkt);
+                                .write_to_buf(&mut rsp_pkt)
+                                .unwrap();
 
                                 tid
                             }
@@ -240,7 +241,8 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
                                         zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER,
                                     info_len: message.len() as u8,
                                 }
-                                .write_to_buf(&mut rsp_pkt);
+                                .write_to_buf(&mut rsp_pkt)
+                                .unwrap();
 
                                 rsp_pkt.put(message.as_bytes());
 
@@ -269,7 +271,8 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
                         status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER,
                         info_len: message.len() as u8,
                     }
-                    .write_to_buf(&mut rsp_pkt);
+                    .write_to_buf(&mut rsp_pkt)
+                    .unwrap();
 
                     rsp_pkt.put(message.as_bytes());
 
@@ -294,7 +297,8 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
                         status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS,
                         info_len: 0,
                     }
-                    .write_to_buf(&mut rsp_pkt);
+                    .write_to_buf(&mut rsp_pkt)
+                    .unwrap();
 
                     ingress_tether_id = tid;
                 }
@@ -308,7 +312,8 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
                         status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER,
                         info_len: message.len() as u8,
                     }
-                    .write_to_buf(&mut rsp_pkt);
+                    .write_to_buf(&mut rsp_pkt)
+                    .unwrap();
 
                     rsp_pkt.put(message.as_bytes());
 

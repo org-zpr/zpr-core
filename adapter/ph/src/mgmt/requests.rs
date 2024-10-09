@@ -11,7 +11,7 @@ use crate::zdp;
 use crate::zpr;
 use bytes::{Buf, BufMut};
 use tracing::{info, warn};
-use zpr_ext::zerocopy::{AsBytesExt, FromBytesExt};
+use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 /// send a Key Management message (RFC 6.5 § 6.2.8)
 pub async fn send_key_management<'pktbuf>(
@@ -55,7 +55,7 @@ pub async fn send_hello_request<'a, 'pktbuf>(
 
     match response {
         Ok(mut hello_res) => {
-            let Some(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut hello_res) else {
+            let Ok(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut hello_res) else {
                 fastpath::drop_and_count(asm, hello_res, CounterType::BadStructure);
                 return Err(());
             };
@@ -106,7 +106,8 @@ pub async fn send_bind_agent_address_request<'a, 'pktbuf>(
                 ip_version: five_tuple.l3_type,
                 compression_mode,
             }
-            .write_to_buf(&mut req);
+            .write_to_buf(&mut req)
+            .unwrap();
 
             match five_tuple.l3_type {
                 zpr::L3Type::Ipv4 => {
@@ -133,7 +134,7 @@ pub async fn send_bind_agent_address_request<'a, 'pktbuf>(
 
     match response {
         Ok((tether_id, mut resp)) => {
-            let Some(hdr) = zdp::ZdpBindAgentAddressResponseHeader::read_from_buf(&mut resp) else {
+            let Ok(hdr) = zdp::ZdpBindAgentAddressResponseHeader::read_from_buf(&mut resp) else {
                 fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
                 return Err(BindAgentAddressError::BadStructure);
             };
