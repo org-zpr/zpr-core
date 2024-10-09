@@ -141,12 +141,11 @@ impl ZDPClient {
                         Ok(input_len) => {
                             info!("zdp/client - read {} bytes", input_len);
 
-                            let zpi_hdr = ZdpZpiHeader::ref_from_prefix(&buf[0..input_len]);
-                            if zpi_hdr.is_none() {
+                            let Ok((zpi_hdr, _)) = ZdpZpiHeader::ref_from_prefix(&buf[0..input_len]) else {
                                 info!("zdp/server - error parsing ZPI header");
                                 continue;
-                            }
-                            let zpi_hdr = zpi_hdr.unwrap();
+                            };
+
                             match zpi_hdr.zpi {
                                 0 => {
                                     info!("zdp/client - received ZPI=0 message");
