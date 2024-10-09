@@ -87,6 +87,7 @@ func initVisaservice(t *testing.T) *vservice.VSInst {
 	alog := logr.NewTestLogger()
 	vc := &vservice.VSIConfig{
 		Log:                  alog,
+		CN:                   "vs.zpr.org",
 		VSAddr:               netip.MustParseAddr(vservice.VisaServiceAddress),
 		HopCount:             99,
 		AllowInvalidPeerAddr: true,

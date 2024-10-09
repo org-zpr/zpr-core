@@ -113,6 +113,7 @@ type VSIConfig struct {
 	Log                    logr.Logger   // General logging
 	VSAddr                 netip.Addr    // Visa service ZPR public address
 	HopCount               uint          // Is set on every visa we create
+	CN                     string        // Visa service CN value used by the vs adapter
 	Creds                  *tls.Config   // TLS for the thrift channel
 	ReauthBumpTimeOverride time.Duration // For unit testing (see DefaultReauthBumpTime defined above)
 	AccessToken            []byte        // Auth token for node to access special VS capabilities
@@ -126,6 +127,9 @@ var EMPTY_ADDR = netip.Addr{}
 func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	if vcf.VSAddr == EMPTY_ADDR || vcf.VSAddr.IsUnspecified() {
 		return nil, fmt.Errorf("visa service address 'VSAddr' must be set")
+	}
+	if vcf.CN == "" {
+		return nil, fmt.Errorf("visa service CN must be set")
 	}
 
 	vs := &VSInst{
@@ -162,6 +166,9 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	// We need a visa service agent to exist.
 	// TODO: These claims need to come from configuration. Note that the adapter holds the claims
 	//       for the visa service agent.
+	//
+	// TODO: In prototype, the dock attached to the visa service adapter would evetually authenticate with the
+	//       visa service after bootstrap.  We need to do something like that too.
 	visaServiceAgent := agent.NewAgentFromUnsubstantiatedClaims(nil)
 	{
 		visaServiceAgent.SetProvides([]string{
@@ -175,6 +182,10 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		}
 		authedClaims[agent.KAttrEPID] = &agent.ClaimV{
 			V:   vcf.VSAddr.String(),
+			Exp: time.Now().Add(BootstrapAuthLifetime),
+		}
+		authedClaims["zpr.adapter.cn"] = &agent.ClaimV{
+			V:   vcf.CN,
 			Exp: time.Now().Add(BootstrapAuthLifetime),
 		}
 		visaServiceAgent.SetTetherAddr(vcf.VSAddr)

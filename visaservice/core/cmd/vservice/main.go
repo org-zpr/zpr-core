@@ -2,6 +2,8 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/netip"
 	"os"
@@ -109,6 +111,12 @@ service using the visa service API.
 		}
 		tconfig := &tls.Config{Certificates: []tls.Certificate{cert}}
 
+		a_cert, err := loadCertFromFile(config.AdapterCert)
+		if err != nil {
+			return fmt.Errorf("failed to load adapter certificate: %w", err)
+		}
+		cn := a_cert.Subject.CommonName
+
 		pidf, err := NewPidFile("vservice")
 		if err != nil {
 			serviceLog.WithError(err).Warnm("failed to write pid file")
@@ -127,7 +135,7 @@ service using the visa service API.
 		}
 
 		maxAuthDuration := DefaultMaxAuthDuration // TODO: add a command line arg for this
-		service, err := vservice.NewVisaService(c.String("policy"), jwtpk, tconfig, maxAuthDuration, serviceLog)
+		service, err := vservice.NewVisaService(c.String("policy"), cn, jwtpk, tconfig, maxAuthDuration, serviceLog)
 		if err != nil {
 			return fmt.Errorf("failed to create visa service: %w", err)
 		}
@@ -187,6 +195,18 @@ service using the visa service API.
 		serviceLog.Infom("visa service has exited")
 		serviceLog.Sync()
 	}
+}
+
+func loadCertFromFile(certFile string) (*x509.Certificate, error) {
+	pemdata, err := os.ReadFile(certFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read certificate file: %w", err)
+	}
+	blk, _ := pem.Decode(pemdata)
+	if blk == nil {
+		return nil, fmt.Errorf("no PEM block found")
+	}
+	return x509.ParseCertificate(blk.Bytes)
 }
 
 // This initLogging function copied from the ZPR node code.

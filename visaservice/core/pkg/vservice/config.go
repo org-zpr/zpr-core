@@ -9,6 +9,8 @@ import (
 )
 
 type VSConfig struct {
+	// Used to obtain the correct CN for visa service bootstrap agent.
+	AdapterCert string `yaml:"adapter_cert,omitempty"`
 
 	// The VSCert/VSKey keypair are used for:
 	//   - The admin service gRPC TLS session.
@@ -61,12 +63,17 @@ func (c *VSConfig) check() error {
 
 	c.VSCert, err = c.fixPath(c.VSCert, true)
 	if err != nil {
-		return fmt.Errorf("invalid vs_cert: %v", err)
+		return fmt.Errorf("invalid vs_cert: %w", err)
 	}
 
 	c.VSKey, err = c.fixPath(c.VSKey, true)
 	if err != nil {
-		return fmt.Errorf("invalid vs_key: %v", err)
+		return fmt.Errorf("invalid vs_key: %w", err)
+	}
+
+	c.AdapterCert, err = c.fixPath(c.AdapterCert, true)
+	if err != nil {
+		return fmt.Errorf("invalid adapter_cert: %w", err)
 	}
 	return nil
 }

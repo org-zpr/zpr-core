@@ -22,6 +22,7 @@ import (
 
 type VisaService struct {
 	log               logr.Logger
+	cn                string
 	myAddr            netip.Addr // visa serice ZPR contact address
 	authToken         []byte
 	vsWg              sync.WaitGroup
@@ -51,12 +52,13 @@ type VisaService struct {
 
 const BootstrapAuthLifetime = 1 * time.Hour
 
-func NewVisaService(initialPolicyFile string, privateKey *rsa.PrivateKey, vsServerCreds *tls.Config, maxAuthDuration time.Duration, log logr.Logger) (*VisaService, error) {
+func NewVisaService(initialPolicyFile string, vs_cn string, privateKey *rsa.PrivateKey, vsServerCreds *tls.Config, maxAuthDuration time.Duration, log logr.Logger) (*VisaService, error) {
 	if _, err := os.Stat(initialPolicyFile); err != nil {
 		return nil, fmt.Errorf("policy file stat error: %w", err)
 	}
 	svc := &VisaService{
 		log:               log,
+		cn:                vs_cn,
 		shutdownC:         make(chan struct{}),
 		initialPolicyFile: initialPolicyFile,
 		maxAuthDuration:   maxAuthDuration,
@@ -103,6 +105,7 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16,
 	s.log.Infom("bootstrap: starting visa service")
 	icfg := &VSIConfig{
 		Log:         s.log,
+		CN:          "vs.zpr.org",
 		VSAddr:      vsAddr,
 		HopCount:    99, // TODO
 		Creds:       s.keys.visaServiceTLSCreds,

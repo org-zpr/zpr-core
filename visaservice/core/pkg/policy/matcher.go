@@ -433,7 +433,7 @@ POLICYLOOP:
 		}
 
 		m.log.Debug("[MX] checking policy", "ID", pcy.CPol.GetId(), "FWD?", pcy.FWD)
-		m.log.Debugf("[MX] -- agent attributes: %v", formatClaimedAttrs(clientAttrs))
+		m.log.Debugf("[MX] -- agent claims attributes: %v", formatClaimedAttrs(clientAttrs))
 		if len(clientAttrs) == 0 {
 			m.log.Warn("[MX] client agent has no attributes") // probably indicates some sort of bug
 		}
@@ -494,9 +494,9 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 	var pset []*polio.MatchedPolicy
 
 	// In all cases, either the source or destination must have a service to offer. Possibly they both do.
-
+	m.log.Debug("[MX] matcher - running policiesForScope")
 	for _, svcID := range dstAgent.AgentProvides {
-		m.log.Debug("[MX] checking dest agent provides", "provides", svcID)
+		m.log.Debug("[MX] found dest agent provides", "provides", svcID)
 		if protIdx, match := m.trafficIdx[svcID]; match {
 			m.log.Debug("[MX]  -- found service in match table", "protocolCount", len(protIdx))
 			if portIdx, match := protIdx[td.Proto.Num()]; match {
@@ -509,7 +509,7 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 				}
 			}
 		} else { // XXX DEBUG
-			m.log.Debug("[MX] XXX   FAILED to find service in our traffic index.  Dumping index::")
+			m.log.Debugf("[MX] XXX   FAILED to find service '%v' in our traffic index.  Dumping index::", svcID)
 			for svcID, protIdx := range m.trafficIdx {
 				m.log.Debug("[MX] XXX     index level 1", "svcID", svcID, "->protocol+", protIdx)
 			}
@@ -529,6 +529,7 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 			}
 		}
 	}
+	m.log.Debug("[MX] matcher - policiesForScope completes", "matched_policy_count", len(pset))
 	return pset
 }
 

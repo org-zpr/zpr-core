@@ -114,6 +114,7 @@ func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 	// Minimal config:
 	return &vservice.VSIConfig{
 		Log:                  alog,
+		CN:                   "vs.zpr.org",
 		VSAddr:               netip.MustParseAddr(vservice.VisaServiceAddress),
 		HopCount:             hopcount,
 		AllowInvalidPeerAddr: true,
@@ -516,7 +517,7 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 
 	alog := logr.NewTestLogger()
 
-	vsaddr := netip.MustParseAddr(vservice.VisaServiceAddress) // fc00:3003::1
+	vsaddr := netip.MustParseAddr(vservice.VisaServiceAddress)
 	vssListenAddr := fmt.Sprintf("127.0.0.1:%d", vservice.VSSDefaultPort)
 
 	// Minimal config:
