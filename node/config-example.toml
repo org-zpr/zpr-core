@@ -1,5 +1,7 @@
 # Example node configuration file.
 
+# node_name must match the ZPL
+node_name = "n0"
 
 [creds]
 ca_certificate = "ca-cert.pem"

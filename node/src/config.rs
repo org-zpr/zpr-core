@@ -16,6 +16,9 @@ pub struct Configuration {
     #[serde(skip)]
     node_addr: Option<IpAddr>,
 
+    // Must match ZPL node name (I think only required for visa service bootstrap)
+    node_name: Option<String>,
+
     creds: Creds,
 
     dock: Dock,
@@ -92,6 +95,13 @@ impl Configuration {
     pub fn get_dock_listen_addr(&self) -> &str {
         &self.dock.listen_address
     }
+
+    pub fn get_node_name(&self) -> &str {
+        match &self.node_name {
+            Some(n) => n,
+            None => "",
+        }
+    }
 }
 
 pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> {
@@ -117,6 +127,14 @@ pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> 
             ))
         }
     };
+    // Node name is required at the moment when there is just one node, so to
+    // prevent head scratching later, let's check for it now and error if missing.
+    if c.node_name.is_none() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "node_name must be set in config",
+        ));
+    }
 
     c.base_path = match std::path::Path::new(path).parent() {
         Some(p) => PathBuf::from(p),
@@ -215,6 +233,8 @@ mod test {
     #[test]
     fn test_get_claims() {
         let toml_txt = r#"
+            node_name = "n0"
+
             [creds]
             ca_certificate = "foo-ca-cert.pem"
             rsa_certificate = "foo-cert.pem"
