@@ -40,6 +40,10 @@ For this to work, you need to add some IP aliases addresses to your host.
 
 ### Compile the policy
 
+Note the correct version of `zplc` to use is in the `zpr-prototype` repo
+in the `refimpl-m2` branch.
+
+
 ```bash
 cd policies
 /path/to/zpr-prototype/cmd/zplc/zplc -k ../zpr-rsa-key.pem ./policy-m2.yaml
