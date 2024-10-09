@@ -26,11 +26,19 @@ Related github issues:
 ## Manual Testing
 
 You can fairly easily test some of the visa service (VS) and visa support
-service (VSS) interactions using just the visa service and the `cli` tool.
+service (VSS) interactions without any ZPR or ZDP using just the visa service
+and the `cli` tool.
 
 Shown here using the baked in configs in this directory.
 
-### Compiler the policy
+For this to work, you need to add some IP aliases addresses to your host.
+
+* The visa service address, `fd5a:5052::1` (is hard-coded, well known address).
+* The node address, `fd5a:5052:90de::1` (must match policy).
+* The service address, `10.1.0.8` (must match policy).
+
+
+### Compile the policy
 
 ```bash
 cd policies
