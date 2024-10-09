@@ -42,6 +42,11 @@ ADAPTER                 NODE                VISASVC
   |                  kmh2 |                    |        | association
   |<----------------------+                    |       =/
   |                       |                    |
+  | ??? (addr)            |                    |
+  +---------------------->|--+ node know knows |
+  |           ??? (empty) |  | adapters ZPR    |
+  |<----------------------|<-+ address         |
+  |                       |                    |
   |                       | auth_connect(1)    |       =\
   |                       +------------------->|        | node tell
   |                       |         auth_reply |        | visa service
