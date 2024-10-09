@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	VisaServiceAddress = "fc00:3003::1"
+  VisaServiceAddress = "fd5a:5052::1"
 )
 
 const ca0cert = `

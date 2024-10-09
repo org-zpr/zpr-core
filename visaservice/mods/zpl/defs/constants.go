@@ -10,7 +10,7 @@ const (
 
 const (
 	DefaultPMCTLPort              = 8182 // TCP
-	DefaultVisaServiceAddress     = "fc00:3003::1"
+	DefaultVisaServiceAddress     = "fd5a:5052::1"
 	DefaultVisaSupportServicePort = 8183 // TCP
 	DefaultVisaServicePort        = 5002 // TCP
 	DefaultTetherBaseAddress      = "fc00:3002::0"
