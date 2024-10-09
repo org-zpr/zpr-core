@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 pub mod traffic_parser;
 pub mod vsapi;
 pub mod vsclient;
@@ -21,12 +21,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Call the hello function")]
+    /// Call the visa service hello function
+    #[command()]
     Hello {
         #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
     },
-    #[command(about = "Call the authenticate function, returns an API key")]
+    /// Call the visa service authenticate function, returns an API key
+    #[command()]
     Authenticate {
         #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
@@ -54,7 +56,8 @@ enum Commands {
         #[arg(long, value_name = "PORT", default_value_t = DEFAULT_VSS_PORT)]
         vss_port: u16,
     },
-    #[command(about = "Call the de_register function, requires an API key")]
+    /// Call the visa service de_register function, requires an API key
+    #[command()]
     Deregister {
         #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
@@ -62,7 +65,30 @@ enum Commands {
         #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
     },
-    #[command(about = "Call the agent_disconnect function, requires an API key")]
+    /// Call the visa service authorize_connect function, requires an API key
+    #[command()]
+    AuthorizeConnect {
+        #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
+        service: String,
+
+        #[arg(short, long, value_name = "APIKEY")]
+        apikey: String,
+
+        /// The nodes ZPR address.
+        #[arg(long, value_name = "ADDR")]
+        node_zpr_addr: IpAddr,
+
+        /// Claims to send with the request. Use multiple times to set multiple claims.
+        /// Required claims: "zpr.addr" and "zpr.adapter.cn"
+        #[arg(
+            short,
+            long,
+            value_name = "KEY=VALUE",
+        )]
+        claim: Vec<String>,
+    },
+    /// Call the visa service agent_disconnect function, requires an API key
+    #[command()]
     Disconnect {
         #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
@@ -73,7 +99,8 @@ enum Commands {
         #[arg(long, value_name = "ADDR", help = "IPv4 or IPv6 address")]
         addr: String,
     },
-    #[command(about = "Call the ping function, requires an API key")]
+    /// Call the visa service ping function, requires an API key
+    #[command()]
     Ping {
         #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
@@ -81,16 +108,14 @@ enum Commands {
         #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
     },
-    #[command(about = "Issue a visa request")]
+    /// Call the visa service visa-request function
+    #[command()]
     Requestvisa {
         #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
         service: String,
 
         #[arg(short, long, value_name = "APIKEY")]
         apikey: String,
-
-        #[arg(long, value_name = "IPv6_ADDR", help = "source tether address")]
-        tether_addr: String,
 
         #[arg(
             short,
@@ -110,7 +135,8 @@ enum Commands {
         )]
         udp: Option<String>,
     },
-    #[command(about = "Run a visa support service server")]
+    /// Start a visa support service server in the foreground
+    #[command()]
     Runvss {
         #[arg(long, value_name = "ADDR", help = "nodes ZPR address (should be same as passed to authenticate)")]
         zpr_addr: IpAddr,
@@ -118,7 +144,8 @@ enum Commands {
         #[arg(long, value_name = "PORT", default_value_t = DEFAULT_VSS_PORT)]
         vss_port: u16,
     },
-    #[command(about = "View syntax for traffic format when requesting a visa")]
+    /// View syntax for traffic format used when requesting a visa
+    #[command()]
     Helptraffic {},
 }
 
@@ -160,11 +187,26 @@ fn main() {
                 }
             }
         }
+        Some(Commands::AuthorizeConnect {
+            service,
+            apikey,
+            node_zpr_addr,
+            claim,
+        }) => {
+            match vsclient::authorize_connect(&service, &apikey, &node_zpr_addr, claim) {
+                Ok(_) => {
+                    println!("AuthorizeConnect command executed successfully");
+                }
+                Err(e) => {
+                    println!("Error: {:?}", e);
+                }
+            }
+        }
         Some(Commands::Disconnect {
             service,
             apikey,
             addr,
-        }) => match vsclient::disconnect(&service, &apikey, &addr) {
+        }) => match vsclient::agent_disconnect(&service, &apikey, &addr) {
             Ok(_) => {
                 println!("Disconnect command executed successfully");
             }
@@ -200,21 +242,13 @@ fn main() {
         Some(Commands::Requestvisa {
             service,
             apikey,
-            tether_addr,
             tcp,
             udp,
         }) => {
-            let taddr = match tether_addr.parse::<Ipv6Addr>() {
-                Ok(addr) => addr,
-                Err(_) => {
-                    println!("Invalid tether address");
-                    return;
-                }
-            };
             match (tcp, udp) {
                 (Some(tcp), None) => match parse_traffic(&tcp, Protocol::TCP) {
                     Ok(traffic) => {
-                        match vsclient::request_visa(&service, &apikey, taddr, &traffic) {
+                        match vsclient::request_visa(&service, &apikey, &traffic) {
                             Ok(_) => {
                                 println!("Requestvisa command executed successfully");
                             }
@@ -229,7 +263,7 @@ fn main() {
                 },
                 (None, Some(udp)) => match parse_traffic(&udp, Protocol::UDP) {
                     Ok(traffic) => {
-                        match vsclient::request_visa(&service, &apikey, taddr, &traffic) {
+                        match vsclient::request_visa(&service, &apikey, &traffic) {
                             Ok(_) => {
                                 println!("Requestvisa command executed successfully");
                             }

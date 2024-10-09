@@ -172,7 +172,83 @@ pub fn deregister(service: &str, apikey: &str) -> thrift::Result<()> {
     Ok(())
 }
 
-pub fn disconnect(service: &str, apikey: &str, addrstr: &str) -> thrift::Result<()> {
+
+pub fn authorize_connect(service: &str, apikey: &str, node_zpr_addr: &IpAddr, claims: Vec<String>) -> thrift::Result<()> {
+    let node_addr_bytes = match node_zpr_addr {
+        IpAddr::V4(v4) => v4.octets().to_vec(),
+        IpAddr::V6(v6) => v6.octets().to_vec(),
+    };
+
+    let mut attrs = BTreeMap::new();
+    for c in claims {
+        let parts: Vec<&str> = c.splitn(2, '=').collect();
+        if parts.len() == 2 {
+            attrs.insert(parts[0].to_string(), parts[1].to_string());
+        }
+    }
+
+    // In initial version of the connect messaging with visa service the following
+    // claims must be set:
+    //   - "zpr.adapater.cn" set to the CN in the noise certificate presented by the adapter.
+    //   - "zpr.addr" the ZPR contact address in use by the adapter.
+    if !attrs.contains_key("zpr.adapter.cn") {
+        return Err(thrift::Error::from("missing required claim 'zpr.adapter.cn'"));
+    }
+    if !attrs.contains_key("zpr.addr") {
+        return Err(thrift::Error::from("missing required claim 'zpr.addr'"));
+    }
+
+    let cid = rand::random::<u16>() as i32;
+
+    // In initial version of this visa service integration we are not using the challenge or challenge-response.
+    let req = vsapi::ConnectRequest{
+        connection_id: Some(cid),
+        dock_addr: Some(node_addr_bytes),
+        claims: Some(attrs),
+        challenge: None,
+        challenge_responses: None,
+    };
+
+    let mut client = newclient(service)?;
+    match client.authorize_connect(apikey.into(), req) {
+        Ok(resp) => {
+            let rid = resp.connection_id.unwrap();
+            if rid != cid {
+                println!("authorize_connect response: connection_id mismatch (got {}, expected {})", rid, cid);
+                return Ok(());
+            }
+            println!("authorize_connect response:");
+            match resp.status {
+                Some(vsapi::StatusCode::SUCCESS) => {
+                    println!("  status: SUCCESS");
+                }
+                Some(vsapi::StatusCode::FAIL) => {
+                    println!("  status: FAILURE");
+                }
+                None => {
+                    println!("  status: none given / unknown") // unexpected
+                }
+                _ => {
+                    println!("  status: {:?}", resp.status) // unexpected
+                }
+            }
+            if let Some(agnt) = resp.agent {
+                println!("  agent: {:?}", agnt);
+            }
+            if let Some(reason) = resp.reason {
+                println!("  reason: {}", reason);
+            }
+        }
+        Err(e) => {
+            return Err(e);
+        }
+    };
+
+    Ok(())
+}
+
+
+pub fn agent_disconnect(service: &str, apikey: &str, addrstr: &str) -> thrift::Result<()> {
     let addr: IpAddr = addrstr.parse().unwrap();
 
     let octets = match addr {
@@ -213,7 +289,6 @@ pub fn ping(service: &str, apikey: &str) -> thrift::Result<()> {
 pub fn request_visa(
     service: &str,
     apikey: &str,
-    tether_addr: Ipv6Addr,
     traffic: &TrafficDesc,
 ) -> thrift::Result<()> {
 
@@ -224,10 +299,13 @@ pub fn request_visa(
 
     let pktbuf = traffic.build_packet();
 
+    // Tether address is not used in the current version of the ZPR.
+    let fake_tether_addr = Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0);
+
     let mut client = newclient(service)?;
     match client.request_visa(
         apikey.into(),
-        tether_addr.octets().to_vec(),
+        fake_tether_addr.octets().to_vec(),
         l3_type as i8,
         pktbuf,
     ) {
