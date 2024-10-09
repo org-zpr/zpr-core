@@ -79,19 +79,45 @@ have been pushed (that would be a visa allowing the Node to talk to the Visa
 Service, and a visa allowing the Visa Service to talk to the Nodes Visa Support
 Service).
 
+Authenticate also returns an API key, it will be on the line starting with `RESULT`:
+
+```bash
+sending HELLO
+HELLO OK
+authenticate sent!
+result = "063bb4a7-f2b7-4ee0-83c1-57d959ea75b8"
+Authenticate command executed successfully
+```
+
+In this case, the API key is `"063bb4a7-f2b7-4ee0-83c1-57d959ea75b8`.
+
+It is convenient to put that in an environment variable like so:
+
+```bash
+export ZAPIKEY=063bb4a7-f2b7-4ee0-83c1-57d959ea75b8
+```
+
 
 ### Issue a connect call (for the service adapter in policy)
 
-_TODO_
+```bash
+./target/debug/cli authorize-connect --apikey "$ZAPIKEY" --node-zpr-addr fd5a:5052:90de::1 -c zpr.addr=10.1.0.8 -c zpr.adapter.cn=service.zpr.org
+```
+
 
 
 ### Issue a connect call (for a fake client adapter)
 
-_TODO_
+```bash
+./target/debug/cli authorize-connect --apikey "$ZAPIKEY" --node-zpr-addr fd5a:5052:90de::1 -c zpr.addr=10.1.0.10 -c zpr.adapter.cn=client.zpr.org
+```
 
 
 ### Request a visa for client to service
 
-_TODO_
+
+```bash
+./target/debug/cli requestvisa -a $ZAPIKEY --tcp '10.1.0.10:31337>10.1.0.8:80[S]'
+```
 
 
