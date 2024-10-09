@@ -142,8 +142,8 @@ struct State {
 /// Helper function to create a basic node agent. Probably only useful for early versions
 /// of the node.  In the future the node will create it's own agent datastructure and
 /// had it to [VSConn::new].
-pub fn new_node_agent(node_addr: &IpAddr, claims: &BTreeMap<String, String>) -> vsapi::Agent {
-    let provides = vec![String::from("/zpr/node")];
+pub fn new_node_agent(node_addr: &IpAddr, node_name: &str, claims: &BTreeMap<String, String>) -> vsapi::Agent {
+    let provides = vec![format!("/zpr/{}", node_name)];
 
     // In prototype, the node zpr address is the same as its tether address. May not be true going forward.
     let zaddr_bytes = match node_addr {
@@ -768,7 +768,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(&node_addr, &claims);
+        let agnt = new_node_agent(&node_addr, "n0", &claims);
 
         let conn = VSConn::new(
             agnt,
@@ -813,7 +813,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(&node_addr, &claims);
+        let agnt = new_node_agent(&node_addr, "n0", &claims);
 
         let conn = VSConn::new(
             agnt,
@@ -927,7 +927,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(&node_addr, &claims);
+        let agnt = new_node_agent(&node_addr, "n0", &claims);
 
         let conn = VSConn::new(
             agnt,
@@ -1048,7 +1048,7 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(&node_addr, &claims);
+        let agnt = new_node_agent(&node_addr, "n0", &claims);
 
         let conn = VSConn::new(
             agnt,
