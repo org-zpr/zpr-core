@@ -1,4 +1,4 @@
-THRIFTCC=thrift
+THRIFTCC?=thrift
 
 # Build output directories for the go and rust
 BUILD_GO := gen-go
