@@ -48,6 +48,9 @@ enum Commands {
         #[arg(long, value_name = "ADDR", help = "nodes ZPR address")]
         zpr_addr: IpAddr,
 
+        #[arg(long, value_name = "NAME", help = "node name (must match ZPL)")]
+        node_name: String,
+
         #[arg(long, value_name = "PORT", default_value_t = DEFAULT_VSS_PORT)]
         vss_port: u16,
     },
@@ -137,8 +140,9 @@ fn main() {
             cert,
             key,
             zpr_addr,
+            node_name,
             vss_port,
-        }) => match vsclient::authenticate(&service, claim, &cert, &key, &zpr_addr, vss_port) {
+        }) => match vsclient::authenticate(&service, claim, &cert, &key, &zpr_addr, &node_name, vss_port) {
             Ok(_) => {
                 println!("Authenticate command executed successfully");
             }

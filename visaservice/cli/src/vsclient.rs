@@ -69,6 +69,7 @@ pub fn authenticate(
     cert_file: &str,
     private_key_file: &str,
     zpr_addr: &IpAddr,
+    node_name: &str,
     vss_port: u16,
 ) -> thrift::Result<()> {
     let mut client = newclient(service)?;
@@ -90,10 +91,7 @@ pub fn authenticate(
         }
     }
 
-    let provides = vec![String::from("/zpr/node")];
-
-    // Two IPv6 addresses
-    // TODO: Make sure the visa service is checking policy when processing this call.
+    let provides = vec![format!("/zpr/{}", node_name)];
 
     let addr_bytes = match zpr_addr {
         IpAddr::V4(v4) => v4.octets().to_vec(),
