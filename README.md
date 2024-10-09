@@ -23,9 +23,9 @@ ADAPTER                 NODE                VISASVC
   .         |        kmh2 |---+                |        | association
   .         |<------------+   | node detect    |        |
   .         |             |   | VS CN          |       =/
-  .         | ???         |   |                |
+  .         | raa         |   |                |
   .         +------------>|   |                |       =\
-  .         |         ??? |   |                |        | ZPR address reg
+  .         |        raar |   |                |        | ZPR address reg
   .         |<------------+   |                |       =/
   .         .             |<--+                |
   .         .             |                    |
@@ -46,10 +46,10 @@ ADAPTER                 NODE                VISASVC
   |                  kmh2 |                    |        | association
   |<----------------------+                    |       =/
   |                       |                    |
-  | ??? (addr)            |                    |
+  | raa(3)                |                    |
   +---------------------->|                    |       =\
-  |           ??? (empty) |                    |        | ZPR address reg
-  |<----------------------|                    |       =/
+  |                  raar |                    |        | ZPR address reg
+  |<----------------------+                    |       =/
   |                       |                    |
   |                       | auth_connect(1)    |       =\
   |                       +------------------->|        | node tell
@@ -72,7 +72,7 @@ ADAPTER                 NODE                VISASVC
   .                       .                    .
   | terminate             |                    |       =\
   +---------------------->| agent_disconnect   |        | polite link down
-  |                       |------------------->|       =/
+  |                       +------------------->|       =/
   X                       |                    |
                           .                    .
                           .                    .
@@ -88,6 +88,10 @@ NOTES:
     ZDP messages we will use.  Note that we may want to establish liveness before
     calling auth_connect.  It is possible for the key management handshake to
     fail and one side not realize it.
+    
+(3) "raa" is RegisterAgentAddress in which the agent sends its ZPR address to the
+    node. Required since the node includes this in the connect message to the 
+    visa service.  "raar" is RegisterAgentAddressResponse.
 ```
 
 
