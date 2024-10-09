@@ -205,7 +205,7 @@ func (suite *VSRunnerSuite) TestAdminListPolicy() {
 
 	go func() {
 		alog.Info("< TEST > starting visa service")
-		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), vsPort, adminPort); err != nil {
+		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), vsPort, adminPort, false); err != nil {
 			alog.WithError(err).Info("< TEST > visa service has stopped")
 		} else {
 			alog.Info("< TEST > visa service has stopped")
@@ -261,7 +261,7 @@ func (suite *VSRunnerSuite) TestGetCurrentPolicy() {
 
 	go func() {
 		alog.Info("< TEST > starting visa service")
-		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), vsPort, adminPort); err != nil {
+		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), vsPort, adminPort, false); err != nil {
 			alog.WithError(err).Info("< TEST > visa service has stopped")
 		} else {
 			alog.Info("< TEST > visa service has stopped")
@@ -333,7 +333,7 @@ func (suite *VSRunnerSuite) TestInstallPolicy() {
 
 	go func() {
 		alog.Info("< TEST > starting visa service")
-		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), vsPort, adminPort); err != nil {
+		if err := svc.Start("vs0", netip.MustParseAddr("127.0.0.1"), vsPort, adminPort, false); err != nil {
 			alog.WithError(err).Info("< TEST > visa service has stopped")
 		} else {
 			alog.Info("< TEST > visa service has stopped")

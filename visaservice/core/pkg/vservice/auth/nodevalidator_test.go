@@ -17,6 +17,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
+	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vservice/auth"
@@ -433,4 +434,24 @@ func TestRevokeCertificate(t *testing.T) {
 	require.Equal(t, "", vresp.VResp.GetError())
 	require.Equal(t, zds.ValidateResponse_SUCCESS, vresp.VResp.GetStat())
 	require.Nil(t, err)
+}
+
+func TestSelfValidate(t *testing.T) {
+	pk, err := snauth.LoadRSAKeyFromPEM([]byte(nodePrivateKeyPEM))
+	if err != nil {
+		panic(err)
+	}
+
+	require.Nil(t, err)
+
+	nv := auth.NewNodeValidator(tlog, 20*time.Minute, "nodename", pk)
+
+	reqAddr := netip.MustParseAddr("fd00:3001::22")
+	claims := make(map[string]string)
+	claims[agent.KAttrEPID] = reqAddr.String()
+	claims[agent.KAttrCN] = "ma.hatma"
+
+	aok, err := nv.SelfAuthenticate(netip.MustParseAddr("fd00:3001::22"), claims)
+	require.Nil(t, err)
+	require.NotEmpty(t, aok.Identities)
 }

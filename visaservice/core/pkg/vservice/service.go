@@ -95,7 +95,7 @@ func mustNewRandToken() []byte {
 // `vsPort` is the port of the THRIFT visa service.
 // `adminPort` is port for HTTP admin service
 // `issuerName` is used on the JWT tokens we issue.
-func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16, adminPort uint16) error {
+func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16, adminPort uint16, validationDisabled bool) error {
 	s.log.Info("starting visa service", "name", issuerName)
 	s.vsWg.Add(1)
 	defer s.vsWg.Done()
@@ -104,13 +104,14 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16,
 
 	s.log.Infom("bootstrap: starting visa service")
 	icfg := &VSIConfig{
-		Log:         s.log,
-		CN:          "vs.zpr.org",
-		VSAddr:      vsAddr,
-		HopCount:    99, // TODO
-		Creds:       s.keys.visaServiceTLSCreds,
-		AccessToken: s.authToken,
-		Constrainer: NewDummyConstraintService(),
+		Log:                      s.log,
+		CN:                       s.cn,
+		VSAddr:                   vsAddr,
+		HopCount:                 99, // TODO
+		Creds:                    s.keys.visaServiceTLSCreds,
+		AccessToken:              s.authToken,
+		Constrainer:              NewDummyConstraintService(),
+		DisableConnectValidation: validationDisabled,
 	}
 	vsinst, err := NewVSInst(icfg)
 	if err != nil {

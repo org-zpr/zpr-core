@@ -177,7 +177,11 @@ service using the visa service API.
 			adminPort = vservice.AdminPort // constant
 		}
 
-		err = service.Start(issuerName, vsAddr, vsPort, adminPort) // Blocking!
+		if config.DisableConnectValidation {
+			serviceLog.Warnm("connect validation is disabled")
+		}
+
+		err = service.Start(issuerName, vsAddr, vsPort, adminPort, config.DisableConnectValidation) // Blocking!
 		close(sigExitChan)
 
 		return err

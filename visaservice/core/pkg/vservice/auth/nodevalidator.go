@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -185,6 +186,41 @@ func (v *NodeValidator) Validate(msg *zds.ValidateRequest, cdb CertificateDB, re
 		},
 	}
 	return resp, nil
+}
+
+// Fake validation for use during initial version of node-visaservice integration.
+// To be removed eventually.
+//
+// This produces a result that is similar enough to a "real" validation result that the
+// visa service is able to use it to enforce policy.
+func (v *NodeValidator) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string) (*AuthenticateOK, error) {
+	expiration := time.Now().Add(v.maxAuthDuration)
+
+	if claims[agent.KAttrCN] == "" {
+		return nil, fmt.Errorf("missing required claim: %v", agent.KAttrCN)
+	}
+
+	snjwt, err := v.makeJWT(claims[agent.KAttrCN], expiration, nil, nil)
+	if err != nil {
+		v.Log.WithError(err).Error("[NV] JWT create failed")
+		snjwt = "jwt_create_failed"
+	}
+
+	aok := &AuthenticateOK{
+		Identities:  []string{snjwt},
+		Expire:      expiration,
+		Credentials: []string{},
+		Prefixes:    []string{"zpr.adapter"},
+		Claims:      make(map[string]*agent.ClaimV),
+	}
+	for k, v := range claims {
+		if k == agent.KAttrCN {
+			aok.Claims[agent.KAttrCN] = &agent.ClaimV{V: v, Exp: aok.Expire}
+			continue
+		}
+	}
+	aok.Claims[agent.KAttrEPID] = &agent.ClaimV{V: reqAddr.String(), Exp: aok.Expire}
+	return aok, nil
 }
 
 // validateCert validates one of our cert type auth schemes. Either x509 or

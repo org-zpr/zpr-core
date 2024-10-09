@@ -9,6 +9,7 @@ const (
 	KAttrVisaServiceAdapter = "zpr.visa_service_adapter" // true or false
 	KAttrHash               = "zpr.hash"
 	KAttrConfigID           = "zpr.config_id"
+	KAttrCN                 = "zpr.adapter.cn"
 )
 
 const (

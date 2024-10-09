@@ -72,6 +72,7 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 
 	srcAgent, dstAgent, err := vs.endpointsForTraffic(pktData)
 	if err != nil {
+		vs.agentDB.Dump(vs.log) // For help debugging endpoint not found
 		return nil, err
 	}
 

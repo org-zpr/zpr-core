@@ -10,6 +10,7 @@ import (
 	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vs/pkg/vservice/auth"
 
 	"zpr.org/vsx/polio"
 	"zpr.org/vsx/snio/zds"
@@ -85,7 +86,8 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest, authedAgent *agent
 	}
 
 	// At this point the agent must have an address.
-	if _, ok := validatedAgent.GetZPRID(); !ok {
+	zprAddr, ok := validatedAgent.GetZPRID()
+	if !ok {
 		vs.log.Error("failed to assign an address to the agent, denying connection")
 		return nil, fmt.Errorf("failed to get an address")
 	}
@@ -100,6 +102,12 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest, authedAgent *agent
 	// Convert the agent.Agent into an snio.Agent for sending back
 	resp.Agent = agentToVsapiAgent(validatedAgent, nil) // we don't know the tether address.
 	resp.Status = vsapi.StatusCode_SUCCESS
+
+	// presumably nodes get added when they HELLO. But they may also need updating here.
+	if validatedAgent.IsAdapter() {
+		vs.agentDB.AddAdapter(zprAddr, zprAddr, validatedAgent)
+	}
+
 	return resp, nil
 }
 
@@ -132,14 +140,18 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRe
 	// In case sn.authority is not set explicitly, we set it from incomming
 	// auth types.
 
-	// If there are no challenge-responses, we cannot validate anything.
-	if len(cr.ChallengeResponses) == 0 {
-		return nil, fmt.Errorf("no challenge responses")
-	}
+	var err error
+	var authPrefix string
 
-	authPrefix, err := vs.SelectValidateDSPrefix(curpol, cr)
-	if err != nil {
-		return nil, err
+	if vs.validationEnabled {
+		// If there are no challenge-responses, we cannot validate anything.
+		if len(cr.ChallengeResponses) == 0 {
+			return nil, fmt.Errorf("no challenge responses")
+		}
+		authPrefix, err = vs.SelectValidateDSPrefix(curpol, cr)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// The address assigned to the agent is either requested by the agent and propogated by the node
@@ -159,24 +171,33 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRe
 	agnt := agent.NewAgentFromUnsubstantiatedClaims(cr.Claims) // TODO: Why bother with the unsubstantiated claims?
 	vs.log.Debug("NEW AGENT", "claims_in", cr.Claims)
 
-	var chal zds.Challenge
-	if err := proto.Unmarshal(cr.Challenge, &chal); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal challenge: %w", err)
-	}
-	var chalResps []*zds.ChallengeResponse
-	for i, crb := range cr.ChallengeResponses {
-		var zcr zds.ChallengeResponse
-		if err := proto.Unmarshal(crb, &zcr); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal challenge response %d: %w", i+1, err)
-		}
-		chalResps = append(chalResps, &zcr)
-	}
+	var aok *auth.AuthenticateOK
 
-	// Finally, perform authentication.  Note `reqAddr` may be unset.
-	// Blocking call:
-	aok, err := vs.authr.Authenticate(authPrefix, reqAddr, &chal, chalResps, cr.Claims) // hmm, no prefix?
-	if err != nil {
-		return nil, fmt.Errorf("authenticate failed: %w", err)
+	if vs.validationEnabled {
+		var chal zds.Challenge
+		if err := proto.Unmarshal(cr.Challenge, &chal); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal challenge: %w", err)
+		}
+		var chalResps []*zds.ChallengeResponse
+		for i, crb := range cr.ChallengeResponses {
+			var zcr zds.ChallengeResponse
+			if err := proto.Unmarshal(crb, &zcr); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal challenge response %d: %w", i+1, err)
+			}
+			chalResps = append(chalResps, &zcr)
+		}
+
+		// Finally, perform authentication.  Note `reqAddr` may be unset.
+		// Blocking call:
+		aok, err = vs.authr.Authenticate(authPrefix, reqAddr, &chal, chalResps, cr.Claims) // hmm, no prefix?
+		if err != nil {
+			return nil, fmt.Errorf("authenticate failed: %w", err)
+		}
+	} else {
+		aok, err = vs.authr.SelfAuthenticate(reqAddr, cr.Claims)
+		if err != nil {
+			return nil, fmt.Errorf("self-authenticate failed: %w", err)
+		}
 	}
 
 	aok.Claims[agent.KAttrAuthority] = &agent.ClaimV{V: strings.Join(aok.Prefixes, ","), Exp: aok.Expire}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/logr"
 )
 
 var (
@@ -53,6 +54,21 @@ type AgentDB struct {
 	sync.RWMutex
 	agents  map[netip.Addr]*HostRecord
 	watcher Watcher
+}
+
+func (db *AgentDB) Dump(out logr.Logger) {
+	db.RLock()
+	defer db.RUnlock()
+
+	out.Infof("===== dumping of agent database of size %d =====", len(db.agents))
+	for addr, rec := range db.agents {
+		atype := "adapter"
+		if rec.node {
+			atype = "node"
+		}
+		out.Infof("  [ %s ]  =>  (%v)  agent: %v", addr, atype, rec.Agent.String())
+	}
+	out.Infof("===== dumping of agent database complete =====")
 }
 
 func NewAgentDB(watcher Watcher) *AgentDB {

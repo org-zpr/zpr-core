@@ -68,6 +68,7 @@ type VSInst struct {
 	accessToken          []byte // Access token for special node operations
 	allowInvalidPeerAddr bool   // Set to TRUE for testing only.
 	agentDB              *adb.AgentDB
+	validationEnabled    bool // normally yes.
 
 	cfgRemoves struct {
 		sync.Mutex
@@ -110,15 +111,16 @@ type vtableEnt struct {
 
 // VSIConfig is the rather complex configuration bundle for the visa service.
 type VSIConfig struct {
-	Log                    logr.Logger   // General logging
-	VSAddr                 netip.Addr    // Visa service ZPR public address
-	HopCount               uint          // Is set on every visa we create
-	CN                     string        // Visa service CN value used by the vs adapter
-	Creds                  *tls.Config   // TLS for the thrift channel
-	ReauthBumpTimeOverride time.Duration // For unit testing (see DefaultReauthBumpTime defined above)
-	AccessToken            []byte        // Auth token for node to access special VS capabilities
-	AllowInvalidPeerAddr   bool          // Set to TRUE for testing only.
-	Constrainer            ConstraintService
+	Log                      logr.Logger   // General logging
+	VSAddr                   netip.Addr    // Visa service ZPR public address
+	HopCount                 uint          // Is set on every visa we create
+	CN                       string        // Visa service CN value used by the vs adapter
+	Creds                    *tls.Config   // TLS for the thrift channel
+	ReauthBumpTimeOverride   time.Duration // For unit testing (see DefaultReauthBumpTime defined above)
+	AccessToken              []byte        // Auth token for node to access special VS capabilities
+	AllowInvalidPeerAddr     bool          // Set to TRUE for testing only.
+	Constrainer              ConstraintService
+	DisableConnectValidation bool // Set to TRUE to disable connect validation for adapters
 }
 
 var EMPTY_ADDR = netip.Addr{}
@@ -144,6 +146,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		allowInvalidPeerAddr: vcf.AllowInvalidPeerAddr,
 		nodeState:            vcf.Constrainer,
 		vsMsgC:               make(chan *VSMsg, 16),
+		validationEnabled:    !vcf.DisableConnectValidation,
 	}
 	if vcf.ReauthBumpTimeOverride > 0 {
 		vs.reauthBumpTime = vcf.ReauthBumpTimeOverride

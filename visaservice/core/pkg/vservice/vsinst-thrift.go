@@ -411,7 +411,7 @@ func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
 func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsapi.ConnectRequest) (*vsapi.ConnectResponse, error) {
 	vs.log.Debug("*AUTHORIZE_CONNECT*")
 	if !vs.validAPIKey(key) {
-		vs.log.Debug("agent-disconnect called with invalid key", "key", key)
+		vs.log.Debug("authorize-connect called with invalid key", "key", key)
 		return nil, vsapi.NewUnauthorizedError()
 	}
 
@@ -455,7 +455,6 @@ func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byt
 	vs.log.Info("agent disconnect", "zpr_addr", zaddr)
 
 	// Normally this would be an adapter disconnect.
-
 	found := vs.agentDB.Contains(zaddr)
 	isNode := vs.agentDB.IsNode(zaddr)
 

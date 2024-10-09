@@ -328,6 +328,11 @@ func (a *Authenticator) Authenticate(extDsPrefix string,
 	}, nil
 }
 
+// Dispatch the self-authentication to our NodeValidator.
+func (a *Authenticator) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string) (*AuthenticateOK, error) {
+	return a.local.SelfAuthenticate(reqAddr, claims)
+}
+
 // Query runs an attribute query against datasources.
 // Note that the attributes passed in the request will have prefixes on them, and
 // the attributes in the response will too.

@@ -23,6 +23,8 @@ type VSConfig struct {
 	VSCert string `yaml:"vs_cert,omitempty"`
 	VSKey  string `yaml:"vs_key,omitempty"`
 
+	DisableConnectValidation bool `yaml:"disable_connect_validation,omitempty"`
+
 	Verbose bool `yaml:"verbose,omitempty"`
 
 	source string

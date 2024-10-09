@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	fmt "fmt"
-	"net"
 	"net/netip"
 	"sort"
 	"strings"
@@ -179,12 +178,14 @@ func (a *Agent) setAuthedClaimIgnoreHash(k string, v *ClaimV) {
 	}
 	a.authClaims[k] = v
 	if k == KAttrEPID {
-		if ipa := net.ParseIP(v.V); ipa != nil {
-			a.authedEPID, _ = netip.AddrFromSlice(ipa)
-		} else {
+		ipa, err := netip.ParseAddr(v.V)
+		if err != nil {
 			// TODO: Return error from this method!
 			panic(fmt.Sprintf("invalid ZPRID (not an IPv6 address): %v", v))
 		}
+		a.authedEPID = ipa
+		// We aren't currently using tether addrs
+		a.SetTetherAddr(ipa)
 	}
 }
 
@@ -292,7 +293,15 @@ func (a *Agent) GetProvides() []string {
 	return a.provides
 }
 
-func (a *Agent) GetRole() string {
+func (a *Agent) IsNode() bool {
+	return a.getRole() == "node"
+}
+
+func (a *Agent) IsAdapter() bool {
+	return a.getRole() == "adapter"
+}
+
+func (a *Agent) getRole() string {
 	if a.authClaims == nil {
 		return ""
 	}

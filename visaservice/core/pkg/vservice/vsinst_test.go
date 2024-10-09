@@ -93,6 +93,9 @@ func (tas *TestAS) Authenticate(domain string, epID netip.Addr,
 	chal *zds.Challenge, chalResp []*zds.ChallengeResponse, claims map[string]string) (*auth.AuthenticateOK, error) {
 	return nil, fmt.Errorf("Authenticate not implemented")
 }
+func (tas *TestAS) SelfAuthenticate(_ netip.Addr, _ map[string]string) (*auth.AuthenticateOK, error) {
+	return nil, fmt.Errorf("SelfAuthenticate not implemented")
+}
 func (tas *TestAS) Query(*zds.QueryRequest) (*zds.QueryResponse, error) {
 	return nil, fmt.Errorf("Query not implemented")
 }

@@ -10,9 +10,9 @@ import (
 
 	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsx/snio/zds"
 	"zpr.org/vs/pkg/vservice"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsx/snio/zds"
 )
 
 // An auth service
@@ -38,6 +38,10 @@ func (s *TAuthSvc) Authenticate(domain string,
 	chalResp []*zds.ChallengeResponse,
 	claims map[string]string) (*auth.AuthenticateOK, error) {
 	return nil, fmt.Errorf("Authenticate not implemented")
+}
+
+func (s *TAuthSvc) SelfAuthenticate(_ netip.Addr, _ map[string]string) (*auth.AuthenticateOK, error) {
+	return nil, fmt.Errorf("SelfAuthenticate not implemented")
 }
 
 func (s *TAuthSvc) Query(*zds.QueryRequest) (*zds.QueryResponse, error) {
