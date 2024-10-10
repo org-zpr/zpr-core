@@ -198,7 +198,7 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
             // HACK: for now, we assume a visa which forwards through to the other adapter
             // AND ALSO we manually issue a bind request out to that adapter
 
-            let egress_link_id = (ingress_link_id + 1) % 2;
+            let egress_link_id = ingress_link_id % 2 + 1;
 
             match super::requests::send_bind_agent_address_request(
                 asm,

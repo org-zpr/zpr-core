@@ -31,10 +31,11 @@ use zpr_ext::std::mem::DropGuard;
 /// properties must be set manually. See, for example the [crate::classifier] module
 /// which takes a [Packet] and sets various metadata fields.
 ///
-/// *Headroom* is space in the buffer which is set aside when the packet
-/// is created (see [Packet::new]). It is useful for when you need to slap headers or other
-/// front matter onto the packet.  Use the `alloc_*` series of functions to
-/// push strucutres onto the packet body by taking bytes from the headroom.
+/// *Headroom* is space in the buffer which is set aside when the packet is
+/// created (see [Packet::new]).  It is useful for when you need to slap
+/// headers or other front matter onto the packet.  Use the `alloc_*` series
+/// of functions or `push_header()` to push strucutres onto the packet body
+/// by taking bytes from the headroom.
 ///
 /// The packet *body* resides between headroom and tailroom.  It can be
 /// extended into either of these, but not beyond.  The size of these
@@ -399,6 +400,21 @@ impl<'buf> Packet<'buf> {
     /// The structure allocated will be zeroed.
     pub fn alloc_zeroed_header<T: AsBytes + FromBytes + FromZeroes>(&mut self) -> &mut T {
         T::mut_from(self.alloc_zeroed_headroom(size_of::<T>())).unwrap()
+    }
+
+    /// Copy the given data as a header into the packet's headroom.
+    /// (Avoids needlessly zeroing the allocated headroom.)
+    pub fn push_header<T: AsBytes + FromBytes + FromZeroes>(&mut self, header: &T) {
+        let cnt = size_of::<T>();
+        assert!(cnt <= self.headroom_available());
+        let md = self.metadata_mut();
+        md.offset -= cnt;
+        md.len += cnt;
+        let res = header.write_to_prefix(&mut self.body_mut()[..cnt]);
+        unsafe {
+            // SAFETY: we know we've allocated exactly the right number of bytes
+            res.unwrap_unchecked()
+        };
     }
 
     /// Shrink the packet by `cnt` bytes (removing data from the tail).
