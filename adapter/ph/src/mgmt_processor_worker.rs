@@ -51,7 +51,7 @@ async fn handle_packet<'pktbuf>(
     ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let Some(base_hdr) = ZdpBaseHeader::read_from_buf(&mut pkt) else {
+    let Ok(base_hdr) = ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
@@ -68,7 +68,7 @@ async fn handle_packet<'pktbuf>(
     let seq_num = base_hdr.sequence_number.get() as u64; // TODO: reconstitute full seq num given expected seq num state
 
     if base_hdr.packet_type.is_per_flow() {
-        let Some(per_flow_hdr) = ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
+        let Ok(per_flow_hdr) = ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
             return Err((HandleMgmtError::BadStructure, pkt));
         };
 

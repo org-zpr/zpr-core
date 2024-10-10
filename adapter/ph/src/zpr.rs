@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use open_enum::open_enum;
-use zerocopy::{AsBytes, FromBytes, FromZeroes};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 /// Substrate Address
 pub type SubstrateAddr = std::net::SocketAddr;
@@ -56,7 +56,7 @@ pub const KM_ID_NOISE: KmId = 2;
 
 /// ZPR agent packet L3 type (RFC 6.5 § 6.3.11)
 #[open_enum]
-#[derive(Clone, Copy, Debug, Hash, AsBytes, FromBytes, FromZeroes)]
+#[derive(Copy, Clone, Debug, FromBytes, Hash, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(u8)]
 pub enum L3Type {
     Ipv4 = 4,

@@ -45,7 +45,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, warn};
-use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
@@ -157,7 +157,7 @@ impl Display for NoiseKeypair {
     }
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 struct KeyMsg {
     pub zpi_full_encr: u8,
@@ -257,13 +257,12 @@ impl KmNoise {
             error!("noise: handshake payload is too short: {}", payload.len());
             return Err(KmError::HandshakeError);
         }
-        let km = match KeyMsg::ref_from_prefix(&payload) {
-            Some(k) => k,
-            None => {
-                error!("noise: error parsing KeyMsg handshake payload");
-                return Err(KmError::HandshakeError);
-            }
+
+        let Ok((km, _)) = KeyMsg::ref_from_prefix(&payload) else {
+            error!("noise: error parsing KeyMsg handshake payload");
+            return Err(KmError::HandshakeError);
         };
+
         self.send_zpis = Some(ZPIPair {
             encr: km.zpi_full_encr,
             hmac: km.zpi_transit_hmac,

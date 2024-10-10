@@ -24,7 +24,7 @@ pub fn dispatch_mgmt_packet_with_addr<'pktbuf>(
     mut pkt: Packet<'pktbuf>,
 ) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
-        Some(base_hdr) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
+        Ok(base_hdr) if base_hdr.0.packet_type == zdp::ZdpPacketType::KeyManagement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
 
             // TODO: once we have multi-node, how do we know whether this is a link or a
@@ -54,7 +54,7 @@ pub fn dispatch_mgmt_packet_with_link<'pktbuf>(
     mut pkt: Packet<'pktbuf>,
 ) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
-        Some(base_hdr) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
+        Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
 
             match handle_key_management(asm, ingress_link_id, pkt) {
@@ -63,7 +63,7 @@ pub fn dispatch_mgmt_packet_with_link<'pktbuf>(
             }
         }
 
-        Some(base_hdr) if base_hdr.packet_type.is_response() => {
+        Ok((base_hdr, _)) if base_hdr.packet_type.is_response() => {
             match handle_response(asm, ingress_link_id, pkt) {
                 Ok(()) => (),
                 Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
@@ -91,7 +91,7 @@ fn handle_response<'pktbuf>(
     ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let Some(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
+    let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
@@ -122,10 +122,11 @@ fn handle_key_management<'pktbuf>(
     ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
-    let Some(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(&mut pkt) else {
+    let Ok(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(&mut pkt) else {
         error!("KeyManagement packet arrived with unparseable header");
         return Err((HandleMgmtError::BadStructure, pkt));
     };
+
     if !km_hdr.is_noise() {
         error!(
             "KeyManagement packet not using NOISE - type is {}",
@@ -136,6 +137,7 @@ fn handle_key_management<'pktbuf>(
             pkt,
         ));
     }
+
     let km_msg_len = usize::from(km_hdr.message_length);
     if pkt.remaining() < km_msg_len {
         error!("KeyManagement packet arrived with truncated payload");

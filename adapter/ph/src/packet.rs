@@ -13,7 +13,7 @@ use crate::zpr;
 use crate::zpr::L3Type;
 use bytes::buf;
 use std::mem::{size_of, size_of_val};
-use zerocopy::{AsBytes, ByteOrder, FromBytes, FromZeroes, NetworkEndian};
+use zerocopy::*;
 use zpr_ext::std::mem::DropGuard;
 
 /// Exclusive handle to an in-use packet buffer.
@@ -150,7 +150,7 @@ pub struct Packet<'buf> {
     buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE],
 }
 
-#[derive(AsBytes, FromZeroes, FromBytes)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout)]
 #[repr(C)]
 pub struct PacketMetadata {
     offset: usize,    // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
@@ -172,12 +172,12 @@ impl PacketMetadata {
         self.five_tuple.dst_address = dst_addr;
     }
 
-    pub fn set_src_port(&mut self, sport: [u8; 2]) {
-        self.five_tuple.src_port = NetworkEndian::read_u16(&sport)
+    pub fn set_src_port(&mut self, sport: u16) {
+        self.five_tuple.src_port = sport;
     }
 
-    pub fn set_dst_port(&mut self, dport: [u8; 2]) {
-        self.five_tuple.dst_port = NetworkEndian::read_u16(&dport)
+    pub fn set_dst_port(&mut self, dport: u16) {
+        self.five_tuple.dst_port = dport;
     }
 
     pub fn set_l4_protocol(&mut self, proto: IpProtocol) {
@@ -335,7 +335,7 @@ impl<'buf> Packet<'buf> {
 
     /// Returns a reference to the packet metadata.
     pub fn metadata(&self) -> &PacketMetadata {
-        let opt = PacketMetadata::ref_from(&self.buf[..size_of::<PacketMetadata>()]);
+        let opt = PacketMetadata::ref_from_bytes(&self.buf[..size_of::<PacketMetadata>()]);
         unsafe {
             // SAFETY: we know this fits in PACKET_BUFFER_SIZE
             opt.unwrap_unchecked()
@@ -344,7 +344,7 @@ impl<'buf> Packet<'buf> {
 
     /// Returns a mutable reference to the packet metadata.
     pub fn metadata_mut(&mut self) -> &mut PacketMetadata {
-        let opt = PacketMetadata::mut_from(&mut self.buf[..size_of::<PacketMetadata>()]);
+        let opt = PacketMetadata::mut_from_bytes(&mut self.buf[..size_of::<PacketMetadata>()]);
         unsafe {
             // SAFETY: we know this fits in PACKET_BUFFER_SIZE
             opt.unwrap_unchecked()
@@ -368,7 +368,7 @@ impl<'buf> Packet<'buf> {
     /// Returns mutable references to both the packet metadata and body.
     pub fn metadata_mut_and_body_mut(&mut self) -> (&mut PacketMetadata, &mut [u8]) {
         let (md, bd) = self.buf.split_at_mut(size_of::<PacketMetadata>());
-        let opt = PacketMetadata::mut_from(md);
+        let opt = PacketMetadata::mut_from_bytes(md);
         let md = unsafe {
             // SAFETY: we know this fits in PACKET_BUFFER_SIZE
             opt.unwrap_unchecked()
@@ -398,13 +398,20 @@ impl<'buf> Packet<'buf> {
     /// Extend the start of the packet into available headroom enough to
     /// hold a structure of the given type, and return a reference to the space.
     /// The structure allocated will be zeroed.
-    pub fn alloc_zeroed_header<T: AsBytes + FromBytes + FromZeroes>(&mut self) -> &mut T {
-        T::mut_from(self.alloc_zeroed_headroom(size_of::<T>())).unwrap()
+    pub fn alloc_zeroed_header<T: FromBytes + IntoBytes + KnownLayout + Unaligned>(
+        &mut self,
+    ) -> &mut T {
+        let res = T::mut_from_bytes(self.alloc_zeroed_headroom(size_of::<T>()))
+            .map_err(Into::<SizeError<_, _>>::into);
+        unsafe {
+            // SAFETY: we know we've allocated exactly the right number of bytes
+            res.unwrap_unchecked()
+        }
     }
 
     /// Copy the given data as a header into the packet's headroom.
     /// (Avoids needlessly zeroing the allocated headroom.)
-    pub fn push_header<T: AsBytes + FromBytes + FromZeroes>(&mut self, header: &T) {
+    pub fn push_header<T: IntoBytes + Immutable>(&mut self, header: &T) {
         let cnt = size_of::<T>();
         assert!(cnt <= self.headroom_available());
         let md = self.metadata_mut();

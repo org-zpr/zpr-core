@@ -5,16 +5,14 @@ use crate::defs::FiveTuple;
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::zpr::{CompressionMode, L3Type};
-use arrayref::array_ref;
 use bytes::Buf;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use zerocopy::FromBytes;
-use zerocopy::{AsBytes, FromZeroes, Unaligned};
+use zerocopy::*;
 use zpr_ext::bytes::BufExt;
 
 const ZDP_V4_FRAG_INFO_PRESENT: u8 = 0b00001000;
 
-#[derive(AsBytes, FromZeroes, FromBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 struct CompressedIPv6Header {
     pub version_and_tc_upper: u8,
@@ -24,27 +22,26 @@ struct CompressedIPv6Header {
 }
 
 fn compress_addrs_v4(pkt: &mut Packet) {
-    let hdr = classifier::IPv4Header::ref_from_prefix(pkt.body()).unwrap();
+    let hdr = classifier::IPv4Header::ref_from_prefix(pkt.body())
+        .unwrap()
+        .0;
     let hl = hdr.vhl & classifier::IPV4_HEADER_LENGTH_MASK;
     let dscp = hdr.dscp;
-    let frag_flags = hdr.frag_offset[0] >> 5; // fragmentation flags
-    let frag_info = [
-        hdr.frag_id[0],
-        hdr.frag_id[1],
-        hdr.frag_offset[0] & 0x1f, // ignores fragmentation flags; NOTE/TODO: spec deviation
-        hdr.frag_offset[1],
-    ];
+    let frag_flags = hdr.frag_offset.get() >> 13; // fragmentation flags
+    let frag_id = hdr.frag_id;
+    let frag_offset = hdr.frag_offset & 0x1fff; // ignores fragmentation flags; NOTE/TODO: spec deviation
     let ttl = hdr.ttl;
 
     pkt.advance(std::mem::size_of::<classifier::IPv4Header>());
 
     pkt.push_header(&ttl);
 
-    let frag_info_present = frag_info != [0u8; 4];
+    let frag_info_present = frag_id != [0u8; 2] || frag_offset.get() != 0;
     // NOTE/TODO: this differs slightly from the spec, in that the ID field
     // is also optional.  I have an ask out to Frank to change this in the spec.
     if frag_info_present {
-        pkt.push_header(&frag_info);
+        pkt.push_header(&frag_offset);
+        pkt.push_header(&frag_id);
     }
 
     let hl_zdpflags = (hl << 4)
@@ -53,7 +50,7 @@ fn compress_addrs_v4(pkt: &mut Packet) {
         } else {
             0
         })
-        | frag_flags;
+        | (frag_flags as u8);
 
     pkt.push_header(&[hl_zdpflags, dscp]);
 }
@@ -67,13 +64,16 @@ fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_addre
     let frag_info_present = (hl_zdpflags & ZDP_V4_FRAG_INFO_PRESENT) != 0;
     let frag_flags = hl_zdpflags & 0x07;
 
-    let mut frag_info;
+    let frag_id;
+    let mut frag_offset;
     if frag_info_present {
-        frag_info = pkt.get_array::<4>();
+        frag_id = pkt.get_array::<2>();
+        frag_offset = pkt.get_u16();
     } else {
-        frag_info = [0u8; 4];
+        frag_id = [0u8; 2];
+        frag_offset = 0u16;
     }
-    frag_info[2] |= frag_flags << 5; // NOTE/TODO: spec deviation
+    frag_offset |= (frag_flags as u16) << 13; // NOTE/TODO: spec deviation
 
     let ttl = pkt.get_u8();
 
@@ -82,10 +82,9 @@ fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_addre
     let hdr = pkt.alloc_zeroed_header::<classifier::IPv4Header>();
     hdr.vhl = (4 << 4) | hl;
     hdr.dscp = tos;
-    hdr.total_length =
-        ((body_len + std::mem::size_of::<classifier::IPv4Header>()) as u16).to_be_bytes();
-    hdr.frag_id = *array_ref!(frag_info, 0, 2);
-    hdr.frag_offset = *array_ref!(frag_info, 2, 2);
+    hdr.total_length = ((body_len + std::mem::size_of::<classifier::IPv4Header>()) as u16).into();
+    hdr.frag_id = frag_id;
+    hdr.frag_offset = frag_offset.into();
     hdr.ttl = ttl;
     hdr.proto = proto;
     hdr.src_address = src_address.octets();
@@ -95,11 +94,14 @@ fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_addre
     let csum = net_defs::inet_checksum(&pkt.body()[..header_len]);
     classifier::IPv4Header::mut_from_prefix(pkt.body_mut())
         .unwrap()
+        .0
         .header_checksum = csum;
 }
 
 fn compress_addrs_v6(pkt: &mut Packet) {
-    let hdr = classifier::IPv6Header::ref_from_prefix(pkt.body()).unwrap();
+    let hdr = classifier::IPv6Header::ref_from_prefix(pkt.body())
+        .unwrap()
+        .0;
     let version_and_tc_upper = hdr.version_and_tc_upper;
     let tc_lower_and_fl_upper = hdr.tc_lower_and_fl_upper;
     let fl_lower = hdr.fl_lower;
@@ -120,7 +122,7 @@ fn expand_addrs_v6(
     src_address: Ipv6Addr,
     dst_address: Ipv6Addr,
 ) {
-    let chdr = CompressedIPv6Header::ref_from_prefix(pkt.body()).unwrap();
+    let chdr = CompressedIPv6Header::ref_from_prefix(pkt.body()).unwrap().0;
     let version_and_tc_upper = chdr.version_and_tc_upper;
     let tc_lower_and_fl_upper = chdr.tc_lower_and_fl_upper;
     let fl_lower = chdr.fl_lower;
