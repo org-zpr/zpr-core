@@ -12,8 +12,11 @@ async fn worker(
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
-            MgmtDispatchMessage::Packet(ingress_link_id, peer_sa, pkt) => {
-                dispatch::dispatch_mgmt_packet(asm, ingress_link_id, peer_sa, pkt);
+            MgmtDispatchMessage::WithLink(ingress_link_id, pkt) => {
+                dispatch::dispatch_mgmt_packet_with_link(asm, ingress_link_id, pkt);
+            }
+            MgmtDispatchMessage::WithAddr(peer_sa, pkt) => {
+                dispatch::dispatch_mgmt_packet_with_addr(asm, peer_sa, pkt);
             }
         }
     }

@@ -142,14 +142,16 @@ impl Assembly<'_> {
         let peer_id = self.add_peer(LinkType::NodeToAdapter, adapter_addr)?;
         self.peer_ids.lock().unwrap().push(peer_id);
 
-        km_multiplexor::add_node_link(
-            &self,
-            peer_id,
-            ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
-            self.self_noise_keypair.clone().unwrap(),
-            self.certx.clone().unwrap(),
-        )
-        .unwrap();
+        if !self.flags.disable_key_management {
+            km_multiplexor::add_node_link(
+                &self,
+                peer_id,
+                ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
+                self.self_noise_keypair.clone().unwrap(),
+                self.certx.clone().unwrap(),
+            )
+            .unwrap();
+        }
 
         info!(
             "{}: Successfully accepted tether from {}.  Assigned ID {}",
@@ -172,15 +174,17 @@ impl Assembly<'_> {
         let peer_id = self.add_peer(LinkType::AdapterToNode, node_addr)?;
         self.peer_ids.lock().unwrap().push(peer_id);
 
-        km_multiplexor::add_adapter_link(
-            &self,
-            peer_id,
-            ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
-            self.self_noise_keypair.clone().unwrap(),
-            self.peer_noise_keypair.clone().unwrap().public,
-            self.certx.clone().unwrap(),
-        )
-        .unwrap();
+        if !self.flags.disable_key_management {
+            km_multiplexor::add_adapter_link(
+                &self,
+                peer_id,
+                ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
+                self.self_noise_keypair.clone().unwrap(),
+                self.peer_noise_keypair.clone().unwrap().public,
+                self.certx.clone().unwrap(),
+            )
+            .unwrap();
+        }
 
         info!(
             "{}: Successfully initiated tether to {}.  Assigned ID {}",

@@ -256,7 +256,8 @@ impl<'pktbuf> Capture<'pktbuf> {
 }
 
 pub enum MgmtDispatchMessage<'pktbuf> {
-    Packet(Option<zpr::LinkId>, zpr::SubstrateAddr, Packet<'pktbuf>), // FIXME: reserve link ID 0, store link ID in packet
+    WithLink(zpr::LinkId, Packet<'pktbuf>), // FIXME: store link ID in packet
+    WithAddr(zpr::SubstrateAddr, Packet<'pktbuf>),
 }
 
 pub struct MgmtDispatch<'pktbuf> {
@@ -268,24 +269,47 @@ impl<'pktbuf> MgmtDispatch<'pktbuf> {
         Self { sender }
     }
 
-    pub fn try_dispatch_mgmt_packet(
+    pub fn try_dispatch_mgmt_packet_with_link(
         &self,
-        ingress_link_id: Option<zpr::LinkId>,
-        peer_sa: &zpr::SubstrateAddr,
+        ingress_link_id: zpr::LinkId,
         packet: Packet<'pktbuf>,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
-        match self.sender.try_send(MgmtDispatchMessage::Packet(
-            ingress_link_id,
-            *peer_sa,
-            packet,
-        )) {
+        match self
+            .sender
+            .try_send(MgmtDispatchMessage::WithLink(ingress_link_id, packet))
+        {
             Ok(()) => Ok(()),
 
             Err(TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
 
-            Err(TrySendError::Full(msg)) => match msg {
-                MgmtDispatchMessage::Packet(_, _, packet) => Err(TryEnqueueError::Full(packet)),
-            },
+            Err(TrySendError::Full(msg)) => {
+                let MgmtDispatchMessage::WithLink(_, pkt) = msg else {
+                    unreachable!()
+                };
+                Err(TryEnqueueError::Full(pkt))
+            }
+        }
+    }
+
+    pub fn try_dispatch_mgmt_packet_with_addr(
+        &self,
+        peer_sa: &zpr::SubstrateAddr,
+        packet: Packet<'pktbuf>,
+    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        match self
+            .sender
+            .try_send(MgmtDispatchMessage::WithAddr(*peer_sa, packet))
+        {
+            Ok(()) => Ok(()),
+
+            Err(TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
+
+            Err(TrySendError::Full(msg)) => {
+                let MgmtDispatchMessage::WithLink(_, pkt) = msg else {
+                    unreachable!()
+                };
+                Err(TryEnqueueError::Full(pkt))
+            }
         }
     }
 }

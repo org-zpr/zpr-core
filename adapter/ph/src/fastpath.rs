@@ -502,8 +502,8 @@ pub fn substrate_ingress<'pktbuf>(
     };
 
     if !secure {
-        // Not under a security assocation  which means only ZPI 0 is allowed.
-        if zpi_hdr.zpi != zpr::ZPI_0 {
+        // Not under a security assocation, which means only ZPI 0 is allowed.
+        if zpi_hdr.zpi != zpr::ZPI_0 && ingress_link_id.is_some() {
             info!(
                 "{}: ingress: {}: ZPI {} not allowed on unestablished SA",
                 asm.system_name,
@@ -534,6 +534,19 @@ pub fn substrate_ingress<'pktbuf>(
         }
     }
 
+    let Some(ingress_link_id) = ingress_link_id else {
+        match asm
+            .mgmt_dispatch
+            .try_dispatch_mgmt_packet_with_addr(peer_sa, pkt)
+        {
+            Ok(()) => (),
+            Err(TryEnqueueError::Full(pkt)) => {
+                drop_and_count(asm, pkt, CounterType::QueueBackpressure)
+            }
+        }
+        return;
+    };
+
     let Some(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return drop_and_count(asm, pkt, CounterType::BadStructure);
     };
@@ -544,9 +557,7 @@ pub fn substrate_ingress<'pktbuf>(
         if !asm.flags.allow_insecure_zpi_zero {
             warn!(
                 "{}: ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
-                asm.system_name,
-                format_link_id(ingress_link_id),
-                base_hdr.packet_type
+                asm.system_name, ingress_link_id, base_hdr.packet_type
             );
             drop_and_count(asm, pkt, CounterType::OtherError);
             return;
@@ -560,7 +571,7 @@ pub fn substrate_ingress<'pktbuf>(
         *pkt.alloc_zeroed_header() = base_hdr;
         match asm
             .mgmt_dispatch
-            .try_dispatch_mgmt_packet(ingress_link_id, peer_sa, pkt)
+            .try_dispatch_mgmt_packet_with_link(ingress_link_id, pkt)
         {
             Ok(()) => (),
             Err(TryEnqueueError::Full(pkt)) => {
@@ -569,10 +580,6 @@ pub fn substrate_ingress<'pktbuf>(
         }
         return;
     }
-
-    let Some(ingress_link_id) = ingress_link_id else {
-        return drop_and_count(asm, pkt, CounterType::UnknownPeer);
-    };
 
     let Some(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
         return drop_and_count(asm, pkt, CounterType::BadStructure);

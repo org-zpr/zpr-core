@@ -14,13 +14,12 @@ use tracing::error;
 use zerocopy::FromBytes;
 use zpr_ext::zerocopy::FromBytesExt;
 
-/// Dispatch the given management packet.
+/// Dispatch a management packet for a link that hasn't been established yet
 ///
 /// This function does not block, and does not perform significant processing.
 /// It merely dispatches the management packet to the correct queue.
-pub fn dispatch_mgmt_packet<'pktbuf>(
+pub fn dispatch_mgmt_packet_with_addr<'pktbuf>(
     asm: &'static Assembly<'pktbuf>,
-    ingress_link_id: Option<zpr::LinkId>,
     peer_sa: zpr::SubstrateAddr,
     mut pkt: Packet<'pktbuf>,
 ) {
@@ -30,9 +29,7 @@ pub fn dispatch_mgmt_packet<'pktbuf>(
 
             // TODO: once we have multi-node, how do we know whether this is a link or a
             // tether?
-            let Some(ingress_link_id) =
-                ingress_link_id.or_else(|| asm.accept_tether(&peer_sa).ok())
-            else {
+            let Some(ingress_link_id) = asm.accept_tether(&peer_sa).ok() else {
                 return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
             };
 
@@ -41,12 +38,32 @@ pub fn dispatch_mgmt_packet<'pktbuf>(
                 Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
             }
         }
+        _ => {
+            return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
+        }
+    }
+}
+
+/// Dispatch the given management packet.
+///
+/// This function does not block, and does not perform significant processing.
+/// It merely dispatches the management packet to the correct queue.
+pub fn dispatch_mgmt_packet_with_link<'pktbuf>(
+    asm: &'static Assembly<'pktbuf>,
+    ingress_link_id: zpr::LinkId,
+    mut pkt: Packet<'pktbuf>,
+) {
+    match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
+        Some(base_hdr) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
+            pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
+
+            match handle_key_management(asm, ingress_link_id, pkt) {
+                Ok(()) => (),
+                Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
+            }
+        }
 
         Some(base_hdr) if base_hdr.packet_type.is_response() => {
-            let Some(ingress_link_id) = ingress_link_id else {
-                return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
-            };
-
             match handle_response(asm, ingress_link_id, pkt) {
                 Ok(()) => (),
                 Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
@@ -54,10 +71,6 @@ pub fn dispatch_mgmt_packet<'pktbuf>(
         }
 
         _ => {
-            let Some(ingress_link_id) = ingress_link_id else {
-                return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
-            };
-
             let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
                 fastpath::drop_and_count(asm, pkt, CounterType::PeerRemoved);
                 return;
