@@ -21,6 +21,8 @@ use ph::zdp::*;
 const ZPI_FULL_ENC: u8 = 200;
 const ZPI_TRANSIT_HMAC: u8 = 201;
 
+const TEST_LINK_ID: ph::zpr::LinkId = unsafe { std::num::NonZero::new_unchecked(1) };
+
 #[derive(Debug, Clone)]
 pub struct ZDPClient {
     addr: SocketAddr,
@@ -55,7 +57,7 @@ impl ZDPClient {
             }
         };
 
-        let mgr = KeyManager::new(1, Box::new(noise));
+        let mgr = KeyManager::new(TEST_LINK_ID, Box::new(noise));
         let local_addr: SocketAddr = "0.0.0.0:0".parse().unwrap();
 
         let socket = UdpSocket::bind(local_addr).await?;
