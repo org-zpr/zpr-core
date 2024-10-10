@@ -27,6 +27,9 @@ pub type SaId = u8;
 /// Link or Docking Session ID
 pub type LinkId = u32;
 
+/// Link ID used to refer to a packet not associated with a link (typically a link setup packet).
+pub const LINK_ID_UNKNOWN: LinkId = 0;
+
 /// Link ID used to refer to a node or adapter's local agent.
 pub const AGENT_LINK_ID: LinkId = LinkId::MAX;
 

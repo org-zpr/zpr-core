@@ -151,11 +151,11 @@ impl<'pktbuf> PeerTable<'pktbuf> {
 
     pub fn remove(&self, link_id: LinkId) {
         let mut peer_slab = self.peer_slab.lock().unwrap();
-        let Some(peer_state) = peer_slab.get(link_id as usize) else {
+        let Some(peer_state) = peer_slab.get((link_id as usize).wrapping_sub(1)) else {
             return;
         };
         self.sa_to_link.remove(&peer_state.substrate_addr);
-        let new_reader = peer_slab.remove(link_id as usize);
+        let new_reader = peer_slab.remove((link_id as usize).wrapping_sub(1));
         std::mem::drop(peer_slab);
         self.peer_slab_reader.write(new_reader);
     }
@@ -168,7 +168,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         self.peer_slab
             .lock()
             .unwrap()
-            .get(link_id as usize)
+            .get((link_id as usize).wrapping_sub(1))
             .map(inspector)
     }
 
@@ -182,11 +182,12 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         inspector: impl FnOnce(&PeerState<'pktbuf>) -> T,
     ) -> Option<T> {
         self.peer_slab_reader
-            .inspect(|r| r.get(link_id as usize).map(inspector))
+            .inspect(|r| r.get((link_id as usize).wrapping_sub(1)).map(inspector))
     }
 
     pub fn get(&self, link_id: LinkId) -> Option<PeerTableEntryGuard<'_, 'pktbuf>> {
-        self.peer_slab_reader.get_guarded(link_id as usize)
+        self.peer_slab_reader
+            .get_guarded((link_id as usize).wrapping_sub(1))
     }
 
     /// Sets an established security association on the link.
@@ -274,13 +275,13 @@ pub struct VacantPeerTableEntry<'a, 'pktbuf> {
 
 impl<'pktbuf> VacantPeerTableEntry<'_, 'pktbuf> {
     pub fn key(&self) -> LinkId {
-        self.peer_slab_guard.vacant_key().unwrap() as LinkId
+        (self.peer_slab_guard.vacant_key().unwrap() + 1) as LinkId
     }
 
     pub fn insert(mut self, peer_state: PeerState<'pktbuf>) -> LinkId {
         let sa = peer_state.substrate_addr;
 
-        let link_id = self.peer_slab_guard.insert(peer_state).unwrap() as LinkId;
+        let link_id = (self.peer_slab_guard.insert(peer_state).unwrap() + 1) as LinkId;
 
         if let Some(_) = self.sa_to_link_ref.insert(sa, link_id) {
             panic!("duplicate peer substrate address");
