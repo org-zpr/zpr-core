@@ -9,6 +9,7 @@ use crate::zpr::{LinkId, SubstrateAddr};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use std::future::Future;
+use std::num::NonZero;
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use tokio::sync::mpsc;
@@ -116,6 +117,14 @@ pub enum SecurityAssocaitionStateError {
     NoAssociationForLink,
 }
 
+fn peer_slab_index_to_link_id(idx: usize) -> LinkId {
+    NonZero::new((idx + 1) as u32).unwrap()
+}
+
+fn link_id_to_peer_slab_index(id: LinkId) -> usize {
+    (id.get() as usize) - 1
+}
+
 impl<'pktbuf> PeerTable<'pktbuf> {
     pub fn new() -> Self {
         let peer_slab = RcuCslab::with_fixed_capacity(PEER_TABLE_SIZE);
@@ -147,11 +156,12 @@ impl<'pktbuf> PeerTable<'pktbuf> {
 
     pub fn remove(&self, link_id: LinkId) {
         let mut peer_slab = self.peer_slab.lock().unwrap();
-        let Some(peer_state) = peer_slab.get((link_id as usize).wrapping_sub(1)) else {
+        let idx = link_id_to_peer_slab_index(link_id);
+        let Some(peer_state) = peer_slab.get(idx) else {
             return;
         };
         self.sa_to_link.remove(&peer_state.substrate_addr);
-        let new_reader = peer_slab.remove((link_id as usize).wrapping_sub(1));
+        let new_reader = peer_slab.remove(idx);
         std::mem::drop(peer_slab);
         self.peer_slab_reader.write(new_reader);
     }
@@ -164,7 +174,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         self.peer_slab
             .lock()
             .unwrap()
-            .get((link_id as usize).wrapping_sub(1))
+            .get(link_id_to_peer_slab_index(link_id))
             .map(inspector)
     }
 
@@ -178,12 +188,12 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         inspector: impl FnOnce(&PeerState<'pktbuf>) -> T,
     ) -> Option<T> {
         self.peer_slab_reader
-            .inspect(|r| r.get((link_id as usize).wrapping_sub(1)).map(inspector))
+            .inspect(|r| r.get(link_id_to_peer_slab_index(link_id)).map(inspector))
     }
 
     pub fn get(&self, link_id: LinkId) -> Option<PeerTableEntryGuard<'_, 'pktbuf>> {
         self.peer_slab_reader
-            .get_guarded((link_id as usize).wrapping_sub(1))
+            .get_guarded(link_id_to_peer_slab_index(link_id))
     }
 
     /// Sets an established security association on the link.
@@ -272,13 +282,13 @@ pub struct VacantPeerTableEntry<'a, 'pktbuf> {
 
 impl<'pktbuf> VacantPeerTableEntry<'_, 'pktbuf> {
     pub fn key(&self) -> LinkId {
-        (self.peer_slab_guard.vacant_key().unwrap() + 1) as LinkId
+        peer_slab_index_to_link_id(self.peer_slab_guard.vacant_key().unwrap())
     }
 
     pub fn insert(mut self, peer_state: PeerState<'pktbuf>) -> LinkId {
         let sa = peer_state.substrate_addr;
 
-        let link_id = (self.peer_slab_guard.insert(peer_state).unwrap() + 1) as LinkId;
+        let link_id = peer_slab_index_to_link_id(self.peer_slab_guard.insert(peer_state).unwrap());
 
         if let Some(_) = self.sa_to_link_ref.insert(sa, link_id) {
             panic!("duplicate peer substrate address");

@@ -156,7 +156,7 @@ pub struct PacketMetadata {
     offset: usize,    // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
     len: usize,       // packet length
     pub flow_id: u32, // flow ID for load-balancing purposes; not otherwise meaningful
-    ingress_link_id: zpr::LinkId,
+    ingress_link_id: Option<zpr::LinkId>,
     five_tuple: FiveTuple,
     _padding: [u8; 2],
 }
@@ -189,7 +189,11 @@ impl PacketMetadata {
     }
 
     pub fn set_ingress_link_id(&mut self, link_id: zpr::LinkId) {
-        self.ingress_link_id = link_id
+        self.ingress_link_id = Some(link_id);
+    }
+
+    pub fn clear_ingress_link_id(&mut self) {
+        self.ingress_link_id = None;
     }
 
     pub fn get_src_address(&self) -> IpAddress {
@@ -216,7 +220,7 @@ impl PacketMetadata {
         &self.five_tuple
     }
 
-    pub fn get_ingress_link_id(&self) -> zpr::LinkId {
+    pub fn get_ingress_link_id(&self) -> Option<zpr::LinkId> {
         self.ingress_link_id
     }
 }
@@ -226,7 +230,10 @@ impl std::fmt::Debug for PacketMetadata {
         write!(
             f,
             "5-tuple: {}\nFlow Id: {}, arrived on: {}, length: {}\n",
-            self.five_tuple, self.flow_id, self.ingress_link_id, self.len
+            self.five_tuple,
+            self.flow_id,
+            self.ingress_link_id.map_or(0, |id| id.get()),
+            self.len
         )
     }
 }

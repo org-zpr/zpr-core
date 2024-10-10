@@ -562,6 +562,8 @@ mod test {
     use crate::km;
     use crate::km_testdata::test::*;
 
+    const TEST_LINK_ID: zpr::LinkId = unsafe { std::num::NonZero::new_unchecked(1) };
+
     #[test]
     fn test_noise_handshake_manually_1() {
         let node_kp = NoiseKeypair::new(
@@ -906,8 +908,8 @@ mod test {
         )
         .unwrap();
 
-        let adapter = km::KeyManager::new(1, Box::new(initiator));
-        let node = km::KeyManager::new(1, Box::new(responder));
+        let adapter = km::KeyManager::new(TEST_LINK_ID, Box::new(initiator));
+        let node = km::KeyManager::new(TEST_LINK_ID, Box::new(responder));
 
         let ctok = CancellationToken::new();
 

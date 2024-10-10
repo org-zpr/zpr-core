@@ -1,4 +1,4 @@
-use crate::zpr::{LinkId, LINK_ID_UNKNOWN};
+use crate::zpr::LinkId;
 
 /// State machine for links and docking sessions
 
@@ -33,7 +33,7 @@ pub enum LinkStatus {
 
 #[allow(dead_code)]
 pub struct LinkStateMachine {
-    link_id: LinkId,
+    link_id: Option<LinkId>,
     link_type: LinkType,
     link_state: LinkState,
     link_status: LinkStatus,
@@ -43,7 +43,7 @@ pub struct LinkStateMachine {
 impl LinkStateMachine {
     pub fn new(new_link_type: LinkType) -> Self {
         Self {
-            link_id: LINK_ID_UNKNOWN,
+            link_id: None,
             link_type: new_link_type,
             link_state: LinkState::Initial,
             link_status: LinkStatus::Down,

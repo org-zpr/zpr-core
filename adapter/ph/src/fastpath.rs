@@ -762,11 +762,11 @@ pub fn forward<'pktbuf>(
     // adapter forwarding
     let egress_link =  // FIXME: this is a hack
         if ingress_link_id == zpr::AGENT_LINK_ID {
-            1
+            std::num::NonZero::new(1).unwrap()
         } else {
             match asm.ph_mode {
                 PhMode::Adapter => zpr::AGENT_LINK_ID,
-                PhMode::Node => ingress_link_id % 2 + 1,
+                PhMode::Node => std::num::NonZero::new(ingress_link_id.get() % 2 + 1).unwrap(),
             }
         };
 
