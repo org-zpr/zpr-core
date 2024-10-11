@@ -256,7 +256,7 @@ impl<'pktbuf> Capture<'pktbuf> {
 }
 
 pub enum MgmtDispatchMessage<'pktbuf> {
-    WithLink(zpr::LinkId, Packet<'pktbuf>), // FIXME: store link ID in packet
+    WithLink(Packet<'pktbuf>), // Link ID stored in packet metadata
     WithAddr(zpr::SubstrateAddr, Packet<'pktbuf>),
 }
 
@@ -271,19 +271,16 @@ impl<'pktbuf> MgmtDispatch<'pktbuf> {
 
     pub fn try_dispatch_mgmt_packet_with_link(
         &self,
-        ingress_link_id: zpr::LinkId,
         packet: Packet<'pktbuf>,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
-        match self
-            .sender
-            .try_send(MgmtDispatchMessage::WithLink(ingress_link_id, packet))
-        {
+        debug_assert_ne!(packet.metadata().ingress_link_id, 0);
+        match self.sender.try_send(MgmtDispatchMessage::WithLink(packet)) {
             Ok(()) => Ok(()),
 
             Err(TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
 
             Err(TrySendError::Full(msg)) => {
-                let MgmtDispatchMessage::WithLink(_, pkt) = msg else {
+                let MgmtDispatchMessage::WithLink(pkt) = msg else {
                     unreachable!()
                 };
                 Err(TryEnqueueError::Full(pkt))
@@ -296,6 +293,7 @@ impl<'pktbuf> MgmtDispatch<'pktbuf> {
         peer_sa: &zpr::SubstrateAddr,
         packet: Packet<'pktbuf>,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        debug_assert_eq!(packet.metadata().ingress_link_id, 0);
         match self
             .sender
             .try_send(MgmtDispatchMessage::WithAddr(*peer_sa, packet))
@@ -305,7 +303,7 @@ impl<'pktbuf> MgmtDispatch<'pktbuf> {
             Err(TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
 
             Err(TrySendError::Full(msg)) => {
-                let MgmtDispatchMessage::WithLink(_, pkt) = msg else {
+                let MgmtDispatchMessage::WithAddr(_, pkt) = msg else {
                     unreachable!()
                 };
                 Err(TryEnqueueError::Full(pkt))

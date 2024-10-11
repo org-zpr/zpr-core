@@ -38,7 +38,6 @@ pub type HandleMgmtResult<'pktbuf> = Result<(), (HandleMgmtError, Packet<'pktbuf
 /// handle a Report message (RFC 6.5 § 6.3.13)
 pub async fn handle_report<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
     let Ok(hdr) = zdp::ZdpReportHeader::read_from_buf(&mut pkt) else {
@@ -51,7 +50,7 @@ pub async fn handle_report<'pktbuf>(
     if pkt.body().len() >= report_data_length {
         info!(
             "{}: {}",
-            ingress_link_id,
+            pkt.metadata().ingress_link_id,
             std::str::from_utf8(&pkt.body()[..report_data_length]).unwrap()
         );
     }
@@ -62,13 +61,13 @@ pub async fn handle_report<'pktbuf>(
 /// handle a Discard message (RFC 6.5 § 6.3.1)
 pub async fn handle_discard<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    ingress_link_id: zpr::LinkId,
     pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
     // TODO print to debug log, when implemented
     info!(
         "{}: Discard message received from {}",
-        asm.system_name, ingress_link_id
+        asm.system_name,
+        pkt.metadata().ingress_link_id
     );
     asm.buffer_stack.put_buffer(pkt.destroy());
     Ok(())
@@ -77,10 +76,10 @@ pub async fn handle_discard<'pktbuf>(
 /// handle a Hello Request (RFC 6.5 § 6.3.4)
 pub async fn handle_hello_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    ingress_link_id: zpr::LinkId,
     seq_num: zpr::SeqNum,
     pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
+    let ingress_link_id = pkt.metadata().ingress_link_id;
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
     hdr.status = 0.into();
@@ -102,8 +101,6 @@ pub async fn handle_hello_request<'pktbuf>(
 /// handle a Bind Agent Address Request (RFC 6.5 § 6.3.11)
 pub async fn handle_bind_agent_address_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    ingress_link_id: zpr::LinkId,
-    _stream_id: zpr::StreamId, // ignored
     seq_num: zpr::SeqNum,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
@@ -185,6 +182,8 @@ pub async fn handle_bind_agent_address_request<'pktbuf>(
         src_port,
         dst_port,
     );
+
+    let ingress_link_id = pkt.metadata().ingress_link_id;
 
     // recycle request buffer for response
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);

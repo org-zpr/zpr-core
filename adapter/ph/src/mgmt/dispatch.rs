@@ -33,7 +33,9 @@ pub fn dispatch_mgmt_packet_with_addr<'pktbuf>(
                 return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
             };
 
-            match handle_key_management(asm, ingress_link_id, pkt) {
+            pkt.metadata_mut().ingress_link_id = ingress_link_id;
+
+            match handle_key_management(asm, pkt) {
                 Ok(()) => (),
                 Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
             }
@@ -50,28 +52,27 @@ pub fn dispatch_mgmt_packet_with_addr<'pktbuf>(
 /// It merely dispatches the management packet to the correct queue.
 pub fn dispatch_mgmt_packet_with_link<'pktbuf>(
     asm: &'static Assembly<'pktbuf>,
-    ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
         Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
 
-            match handle_key_management(asm, ingress_link_id, pkt) {
+            match handle_key_management(asm, pkt) {
                 Ok(()) => (),
                 Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
             }
         }
 
         Ok((base_hdr, _)) if base_hdr.packet_type.is_response() => {
-            match handle_response(asm, ingress_link_id, pkt) {
+            match handle_response(asm, pkt) {
                 Ok(()) => (),
                 Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
             }
         }
 
         _ => {
-            let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
+            let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
                 fastpath::drop_and_count(asm, pkt, CounterType::PeerRemoved);
                 return;
             };
@@ -88,7 +89,6 @@ pub fn dispatch_mgmt_packet_with_link<'pktbuf>(
 
 fn handle_response<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
     let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
@@ -105,7 +105,7 @@ fn handle_response<'pktbuf>(
 
     // Gets the designated sender, attempts to send the response, if not drops
     // the packet and increments corresponding counter
-    let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
+    let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
         return Err((HandleMgmtError::UnexpectedMgmtResponse, pkt));
     };
 
@@ -119,7 +119,6 @@ fn handle_response<'pktbuf>(
 // to parse starting from the KeyManagement header.
 fn handle_key_management<'pktbuf>(
     asm: &'static Assembly<'pktbuf>,
-    ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
     let Ok(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(&mut pkt) else {
@@ -144,12 +143,17 @@ fn handle_key_management<'pktbuf>(
         return Err((HandleMgmtError::BadStructure, pkt));
     }
 
-    match km_multiplexor::handle_inbound_km_msg(asm, ingress_link_id, &pkt.body()[..km_msg_len]) {
+    match km_multiplexor::handle_inbound_km_msg(
+        asm,
+        pkt.metadata().ingress_link_id,
+        &pkt.body()[..km_msg_len],
+    ) {
         Ok(()) => (),
         Err(e) => {
             error!(
                 "key management handling failed on link {}: {:?}",
-                ingress_link_id, e
+                pkt.metadata().ingress_link_id,
+                e
             );
             return Err((HandleMgmtError::KeyManagementError(format!("{:?}", e)), pkt));
         }

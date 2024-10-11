@@ -1,4 +1,5 @@
 use crate::assembly::Assembly;
+use crate::counters_enum::CounterType;
 use crate::fastpath;
 use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
 use crate::packet::Packet;
@@ -23,7 +24,14 @@ async fn worker<'pktbuf>(
     while let Some(msg) = queue.recv().await {
         match msg {
             MgmtProcessorMessage::Packet(pkt) => {
-                match handle_packet(asm, config.link_id, pkt).await {
+                // Drop packets which are intended for a link other than the one we are assigned to,
+                // since processing them here will violate concurrency assumptions.
+                if pkt.metadata().ingress_link_id != config.link_id {
+                    fastpath::drop_and_count(asm, pkt, CounterType::InternalRoutingError);
+                    continue;
+                }
+
+                match handle_packet(asm, pkt).await {
                     Ok(()) => (),
                     Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
                 }
@@ -48,7 +56,6 @@ where
 
 async fn handle_packet<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    ingress_link_id: zpr::LinkId,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
     let Ok(base_hdr) = ZdpBaseHeader::read_from_buf(&mut pkt) else {
@@ -57,7 +64,10 @@ async fn handle_packet<'pktbuf>(
 
     debug!(
         "{}: handling mgmt message from {} type {:?} seq_num {}",
-        asm.system_name, ingress_link_id, base_hdr.packet_type, base_hdr.sequence_number
+        asm.system_name,
+        pkt.metadata().ingress_link_id,
+        base_hdr.packet_type,
+        base_hdr.sequence_number
     );
 
     assert!(
@@ -72,37 +82,28 @@ async fn handle_packet<'pktbuf>(
             return Err((HandleMgmtError::BadStructure, pkt));
         };
 
-        let stream_id: zpr::StreamId = per_flow_hdr.stream_id.into();
+        pkt.metadata_mut().ingress_stream_id = per_flow_hdr.stream_id.into();
 
         match base_hdr.packet_type {
             ZdpPacketType::TransitPacket => panic!("unexpected Transit Packet in management path"),
 
             ZdpPacketType::BindAgentAddressRequest => {
-                handlers::handle_bind_agent_address_request(
-                    asm,
-                    ingress_link_id,
-                    stream_id,
-                    seq_num,
-                    pkt,
-                )
-                .await
+                handlers::handle_bind_agent_address_request(asm, seq_num, pkt).await
             }
 
             packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),
         }
     } else {
         match base_hdr.packet_type {
-            ZdpPacketType::Report => handlers::handle_report(asm, ingress_link_id, pkt).await,
+            ZdpPacketType::Report => handlers::handle_report(asm, pkt).await,
 
-            ZdpPacketType::Discard => handlers::handle_discard(asm, ingress_link_id, pkt).await,
+            ZdpPacketType::Discard => handlers::handle_discard(asm, pkt).await,
 
             ZdpPacketType::KeyManagement => {
                 panic!("unexpected Key Management message in mgmt processor")
             }
 
-            ZdpPacketType::HelloRequest => {
-                handlers::handle_hello_request(asm, ingress_link_id, seq_num, pkt).await
-            }
+            ZdpPacketType::HelloRequest => handlers::handle_hello_request(asm, seq_num, pkt).await,
 
             packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),
         }

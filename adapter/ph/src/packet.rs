@@ -153,11 +153,17 @@ pub struct Packet<'buf> {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout)]
 #[repr(C)]
 pub struct PacketMetadata {
-    offset: usize,    // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
-    len: usize,       // packet length
-    pub flow_id: u32, // flow ID for load-balancing purposes; not otherwise meaningful
-    ingress_link_id: zpr::LinkId,
+    offset: usize, // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
+    len: usize,    // packet length
+
+    /// which link this packet arrived on
+    pub ingress_link_id: zpr::LinkId,
+
+    /// which stream ID this packet is associated with
+    pub ingress_stream_id: zpr::StreamId,
+
     five_tuple: FiveTuple,
+
     _padding: [u8; 2],
 }
 
@@ -188,10 +194,6 @@ impl PacketMetadata {
         self.five_tuple.l3_type
     }
 
-    pub fn set_ingress_link_id(&mut self, link_id: zpr::LinkId) {
-        self.ingress_link_id = link_id
-    }
-
     pub fn get_src_address(&self) -> IpAddress {
         self.five_tuple.src_address
     }
@@ -215,10 +217,6 @@ impl PacketMetadata {
     pub fn five_tuple(&self) -> &FiveTuple {
         &self.five_tuple
     }
-
-    pub fn get_ingress_link_id(&self) -> zpr::LinkId {
-        self.ingress_link_id
-    }
 }
 
 impl std::fmt::Debug for PacketMetadata {
@@ -226,7 +224,7 @@ impl std::fmt::Debug for PacketMetadata {
         write!(
             f,
             "5-tuple: {}\nFlow Id: {}, arrived on: {}, length: {}\n",
-            self.five_tuple, self.flow_id, self.ingress_link_id, self.len
+            self.five_tuple, self.ingress_stream_id, self.ingress_link_id, self.len
         )
     }
 }
@@ -282,7 +280,8 @@ impl<'buf> Packet<'buf> {
         let md = pkt.metadata_mut();
         md.offset = offset;
         md.len = len;
-        md.flow_id = 0;
+        md.ingress_link_id = 0;
+        md.ingress_stream_id = 0;
         pkt
     }
 
@@ -435,7 +434,7 @@ impl<'buf> Packet<'buf> {
     /// Ideally this is a high-entropy value useful for load balancing.
     /// Must be cheap to query.
     pub fn flowhash(&self) -> u32 {
-        self.metadata().flow_id
+        self.metadata().ingress_stream_id
     }
 
     pub fn dump_packet_buffer(
@@ -612,10 +611,13 @@ mod tests {
         buf[offset..offset + 8].copy_from_slice(data);
         let mut pkt =
             Packet::new_with_existing_data(&mut buf, PACKET_BUFFER_MIN_BODY_OFFSET + 123, 8);
-        pkt.metadata_mut().flow_id = 100;
+        pkt.metadata_mut().ingress_stream_id = 100;
         let mut buf2 = [0u8; config::PACKET_BUFFER_SIZE];
         let pkt2 = pkt.clone_into_with_headroom(&mut buf2, 456);
-        assert_eq!(pkt.metadata().flow_id, pkt2.metadata().flow_id);
+        assert_eq!(
+            pkt.metadata().ingress_stream_id,
+            pkt2.metadata().ingress_stream_id
+        );
         assert_eq!(*pkt.body(), *pkt2.body());
     }
 
