@@ -25,8 +25,6 @@ use ph::zdp::*;
 const ZPI_FULL_ENC: u8 = 100;
 const ZPI_TRANSIT_HMAC: u8 = 101;
 
-const TEST_LINK_ID: ph::zpr::LinkId = unsafe { std::num::NonZero::new_unchecked(1) };
-
 pub struct ZDPServer {
     addr: SocketAddr, // listen address, "host:port"
     noise_kp: NoiseKeypair,
@@ -93,7 +91,7 @@ impl ZDPServer {
         };
 
         // In real implemntation each client gets a KM instance.
-        let mgr = KeyManager::new(TEST_LINK_ID, Box::new(noise));
+        let mgr = KeyManager::new(1, Box::new(noise));
         let mut mgr_cc = mgr.clone();
         tokio::spawn(async move {
             mgr_cc.start(km_ctok, km_tx, km_sig_tx).await.unwrap();

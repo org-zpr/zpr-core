@@ -1009,8 +1009,6 @@ mod test {
 
     use super::*;
 
-    const TEST_LINK_ID: zpr::LinkId = unsafe { std::num::NonZero::new_unchecked(1) };
-
     #[allow(dead_code)]
     struct TestKM {
         state: KmSMState,
@@ -1103,7 +1101,7 @@ mod test {
     async fn test_km_sends_initiator_msg() {
         let kmb = Box::new(TestKM::new(true, KmSMState::Configuring));
         let kinternals = kmb.shared.clone();
-        let mut km = KeyManager::new(TEST_LINK_ID, kmb);
+        let mut km = KeyManager::new(1, kmb);
         let ctok = CancellationToken::new();
         let (tx, mut _rx) = mpsc::channel(4);
         let (sig_tx, mut _sig_rx) = mpsc::channel(4);
@@ -1125,7 +1123,7 @@ mod test {
     async fn test_km_ticks() {
         let kmb = Box::new(TestKM::new(true, KmSMState::Configuring));
         let kinternals = kmb.shared.clone();
-        let mut km = KeyManager::new(TEST_LINK_ID, kmb);
+        let mut km = KeyManager::new(1, kmb);
         let ctok = CancellationToken::new();
         let (tx, mut _rx) = mpsc::channel(4);
         let (sig_tx, mut _sig_rx) = mpsc::channel(4);
@@ -1147,7 +1145,7 @@ mod test {
     async fn test_km_passes_inbound_msg() {
         let kmb = Box::new(TestKM::new(true, KmSMState::Configuring));
         let kinternals = kmb.shared.clone();
-        let km = KeyManager::new(TEST_LINK_ID, kmb);
+        let km = KeyManager::new(1, kmb);
 
         let ctok = CancellationToken::new();
         let (tx, mut _rx) = mpsc::channel(4);
@@ -1177,7 +1175,7 @@ mod test {
     async fn test_km_passes_inbound_msg_no_buffer() {
         let kmb = Box::new(TestKM::new(true, KmSMState::Configuring));
         let kinternals = kmb.shared.clone();
-        let km = KeyManager::new(TEST_LINK_ID, kmb);
+        let km = KeyManager::new(1, kmb);
 
         let ctok = CancellationToken::new();
         let (tx, mut _rx) = mpsc::channel(4);

@@ -2,7 +2,6 @@
 #![allow(dead_code)]
 
 use open_enum::open_enum;
-use std::num::NonZero;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 /// Substrate Address
@@ -26,7 +25,10 @@ pub type SeqNum = u64;
 pub type SaId = u8;
 
 /// Link or Docking Session ID
-pub type LinkId = NonZero<u32>;
+pub type LinkId = u32;
+
+/// Link ID used to refer to a packet not associated with a link (typically a link setup packet).
+pub const LINK_ID_UNKNOWN: LinkId = 0;
 
 /// Link ID used to refer to a node or adapter's local agent.
 pub const AGENT_LINK_ID: LinkId = LinkId::MAX;
