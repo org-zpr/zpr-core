@@ -116,11 +116,12 @@ func (ts *TestAS) AddDatasourceProvider(_ string, _ netip.Addr, _ uint64) error 
 func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 	// Minimal config:
 	return &vservice.VSIConfig{
-		Log:                  alog,
-		CN:                   "vs.zpr.org",
-		VSAddr:               netip.MustParseAddr(vservice.VisaServiceAddress),
-		HopCount:             hopcount,
-		AllowInvalidPeerAddr: true,
+		Log:                   alog,
+		CN:                    "vs.zpr.org",
+		VSAddr:                netip.MustParseAddr(vservice.VisaServiceAddress),
+		HopCount:              hopcount,
+		AllowInvalidPeerAddr:  true,
+		BootstrapAuthDuration: 1 * time.Hour,
 	}
 }
 

@@ -335,7 +335,7 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 	// For now I am fabricating a node-agent here.  Eventually the node will reun through
 	// the ZDP authentication steps to establish proper credentials.
 
-	expiration := time.Now().Add(1 * time.Hour)
+	expiration := time.Now().Add(vs.bootstrapAuthDuration)
 	naddr, ok := netip.AddrFromSlice(req.NodeAgent.ZprAddr)
 	if !ok {
 		vs.log.Warn("registration: node passes invalid ZPR address", "addr", req.NodeAgent.ZprAddr)

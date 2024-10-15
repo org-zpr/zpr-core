@@ -194,7 +194,7 @@ func (suite *VSRunnerSuite) TestAdminListPolicy() {
 
 	serverCreds := &tls.Config{Certificates: []tls.Certificate{cer}}
 
-	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, alog)
+	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, 1*time.Hour, alog)
 	require.Nil(t, err)
 	suite.svc = svc
 
@@ -250,7 +250,7 @@ func (suite *VSRunnerSuite) TestGetCurrentPolicy() {
 
 	serverCreds := &tls.Config{Certificates: []tls.Certificate{cer}}
 
-	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, alog)
+	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, 1*time.Hour, alog)
 	require.Nil(t, err)
 	suite.svc = svc
 
@@ -322,7 +322,7 @@ func (suite *VSRunnerSuite) TestInstallPolicy() {
 
 	serverCreds := &tls.Config{Certificates: []tls.Certificate{cer}}
 
-	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, alog)
+	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, 1*time.Hour, alog)
 	require.Nil(t, err)
 	suite.svc = svc
 

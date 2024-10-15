@@ -51,7 +51,6 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	}
 
 	{
-
 		vs.log.Info("generating a new visa-service visa for the node->VS", "node_addr_src", nodeAddr, "vs_addr_dest", vs.localAddr)
 		pktData := snip.NewTCPConnect(nodeAddr, 0, vs.localAddr, VisaServicePort)
 		vs.log.Debug("invoking request-visa for part of policy install (1/2)", "for_node", nodeAddr)

@@ -3,6 +3,7 @@ package vservice_test
 import (
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -83,10 +84,11 @@ func makeVSWithPolicy(t *testing.T, pyaml string) (*vservice.VSInst, *policy.Pol
 
 	// Minimal config:
 	vc := vservice.VSIConfig{
-		CN:       "vs.zpr.org",
-		VSAddr:   netip.MustParseAddr(vservice.VisaServiceAddress),
-		Log:      llog,
-		HopCount: uint(99),
+		CN:                    "vs.zpr.org",
+		VSAddr:                netip.MustParseAddr(vservice.VisaServiceAddress),
+		Log:                   llog,
+		HopCount:              uint(99),
+		BootstrapAuthDuration: 1 * time.Hour,
 	}
 
 	// TODO: This initializer is insane. Too hard to test, need to refactor.

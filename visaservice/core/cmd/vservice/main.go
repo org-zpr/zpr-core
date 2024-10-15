@@ -28,8 +28,15 @@ const (
 	versionPatch = 0
 
 	// Default Max lifetime for authenticated. When they expire we require
-	// re-auth from the peer.
-	DefaultMaxAuthDuration = 6 * time.Hour
+	// re-auth from the peer. For milestone two we do not have real auth
+	// or re-auth, so this is set high.
+	DefaultMaxAuthDuration = 24 * time.Hour
+
+	// The bootstrap auth is used while we are bringing up a visa service
+	// and is also used for the expiration time of temporary visas issued
+	// to nodes prior to auth.  Again, this is set artifically high for
+	// milestone 2.
+	DefaultBootstrapAuthDuration = DefaultMaxAuthDuration
 )
 
 var (
@@ -134,8 +141,9 @@ service using the visa service API.
 			return fmt.Errorf("failed to load private key: %w", err)
 		}
 
-		maxAuthDuration := DefaultMaxAuthDuration // TODO: add a command line arg for this
-		service, err := vservice.NewVisaService(c.String("policy"), cn, jwtpk, tconfig, maxAuthDuration, serviceLog)
+		maxAuthDuration := DefaultMaxAuthDuration             // TODO: from config or command line
+		bootstrapAuthDuration := DefaultBootstrapAuthDuration // TODO: from config or command line
+		service, err := vservice.NewVisaService(c.String("policy"), cn, jwtpk, tconfig, bootstrapAuthDuration, maxAuthDuration, serviceLog)
 		if err != nil {
 			return fmt.Errorf("failed to create visa service: %w", err)
 		}
