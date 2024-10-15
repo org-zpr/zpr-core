@@ -1,3 +1,4 @@
+# config for a "client" adapter which talks to the service.
 
 [profile]
 name = "zprfoo"
@@ -5,8 +6,11 @@ root_ca = "ca-cert.pem"
 
 
 [dock]
-host_or_ip = "10.0.0.1"
+
+# Must match interface address in policy
+host_or_ip = "192.168.0.55"
 port = 5000
+
 noise_public_key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
 
 

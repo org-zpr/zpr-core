@@ -15,6 +15,7 @@ noise_private_key = "UFIB5WPx5eMEtn6XY55//vGn+HXRVLdcwQC0BtDZhkU="
 
 
 [claims]
-"zpr.addr" = "fc00:3001:abd5::3836"
+# Should match policy
+"zpr.addr" = "fc5a:5052:90de::1"
 
 
