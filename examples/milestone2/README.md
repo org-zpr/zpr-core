@@ -105,7 +105,7 @@ export ZAPIKEY=063bb4a7-f2b7-4ee0-83c1-57d959ea75b8
 ### Issue a connect call (for the service adapter in policy)
 
 ```bash
-./target/debug/cli authorize-connect --apikey "$ZAPIKEY" --node-zpr-addr fd5a:5052:90de::1 -c zpr.addr=10.1.0.8 -c zpr.adapter.cn=service.zpr.org
+./target/debug/cli authorize-connect -a $ZAPIKEY --node-zpr-addr fd5a:5052:90de::1 -c zpr.addr=10.1.0.8 -c zpr.adapter.cn=service.zpr.org
 ```
 
 
@@ -113,7 +113,7 @@ export ZAPIKEY=063bb4a7-f2b7-4ee0-83c1-57d959ea75b8
 ### Issue a connect call (for a fake client adapter)
 
 ```bash
-./target/debug/cli authorize-connect --apikey "$ZAPIKEY" --node-zpr-addr fd5a:5052:90de::1 -c zpr.addr=10.1.0.10 -c zpr.adapter.cn=client.zpr.org
+./target/debug/cli authorize-connect -a $ZAPIKEY --node-zpr-addr fd5a:5052:90de::1 -c zpr.addr=10.1.0.10 -c zpr.adapter.cn=client.zpr.org
 ```
 
 

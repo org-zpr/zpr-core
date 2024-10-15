@@ -24,8 +24,6 @@ jobs:
 
     - name: Build
       run: |
-	cd libnode 
-	make
         cd visaservice
         make all-rs
 
