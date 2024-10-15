@@ -20,7 +20,6 @@ const CHECK_ERROR_INTERVAL: time::Duration = time::Duration::from_millis(500);
 
 #[derive(Debug)]
 pub enum KmMsgProcessingError {
-    InvalidState,
     LinkUnconfigured,
     EnqueueFailed,
 }
@@ -294,8 +293,10 @@ fn add_noise_link(
     let spawn_km_tx = asm.km_state.km_tx.clone();
     let spawn_sig_tx = asm.km_state.km_sig_tx.clone();
 
+    let (km_tx, km_rx) = mpsc::channel(16);
+
     let sph = tokio::spawn(async move {
-        match spawn_mgr.start(spawn_ctok, spawn_km_tx, spawn_sig_tx).await {
+        match spawn_mgr.start(spawn_ctok, spawn_km_tx, spawn_sig_tx, km_rx).await {
             Ok(_) => (),
             Err(e) => {
                 error!(
@@ -310,6 +311,7 @@ fn add_noise_link(
         join_handle: sph,
         ctok: child_ctok,
         mgr,
+        km_tx,
     };
 
     asm.peer_table
@@ -335,16 +337,14 @@ pub fn handle_inbound_km_msg<'pktbuf>(
     from_link: zpr::LinkId,
     km_payload: &[u8],
 ) -> Result<(), KmMsgProcessingError> {
-    let manager = match asm.peer_table.clone_km_manager(from_link) {
+    let tx = match asm.peer_table.clone_km_tx_chan(from_link) {
         Some(h) => h,
         None => return Err(KmMsgProcessingError::LinkUnconfigured),
     };
-    match manager.try_handle_km_message(km_payload) {
+    let km_buf = Bytes::copy_from_slice(km_payload);
+    match tx.try_send(km_buf) {
         Ok(_) => Ok(()),
-        Err(e) => match e {
-            KmError::InvalidState => Err(KmMsgProcessingError::InvalidState),
-            _ => Err(KmMsgProcessingError::EnqueueFailed),
-        },
+        Err(_) => Err(KmMsgProcessingError::EnqueueFailed),
     }
 }
 

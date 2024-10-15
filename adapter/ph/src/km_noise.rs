@@ -915,9 +915,12 @@ mod test {
         let (n_sig_tx, mut n_sig_rx) = mpsc::channel(16);
         let n_ctok = ctok.clone();
 
+        let (n_km_payload_tx, n_km_payload_rx) = mpsc::channel(16);
+        let (a_km_payload_tx, a_km_payload_rx) = mpsc::channel(16);
+
         let mut sp_node = node.clone();
         tokio::spawn(async move {
-            let _ = sp_node.start(n_ctok, n_km_tx, n_sig_tx).await; // Start the node
+            let _ = sp_node.start(n_ctok, n_km_tx, n_sig_tx, n_km_payload_rx).await; // Start the node
         });
 
         let (a_km_tx, mut a_km_rx) = mpsc::channel(16);
@@ -926,7 +929,7 @@ mod test {
 
         let mut sp_adapter = adapter.clone();
         tokio::spawn(async move {
-            let _ = sp_adapter.start(a_ctok, a_km_tx, a_sig_tx).await; // Start the adapter
+            let _ = sp_adapter.start(a_ctok, a_km_tx, a_sig_tx, a_km_payload_rx).await; // Start the adapter
         });
 
         yield_now().await;
@@ -975,12 +978,7 @@ mod test {
             Ok(resp) => match resp {
                 Some(linkmsg) => {
                     // Node will process message and then should generate a handshake reply on its output channel.
-                    let node_result = node.handle_km_message(&linkmsg.msg).await;
-                    assert!(
-                        node_result.is_ok(),
-                        "node handle of adapter handshake initiation failed: {:?}",
-                        node_result
-                    );
+                    n_km_payload_tx.send(linkmsg.msg).await.unwrap();
                 }
                 None => {
                     panic!("timed out or failed waiting for initial handshake message");
@@ -995,12 +993,7 @@ mod test {
         match timeout(Duration::from_secs(2), n_km_rx.recv()).await {
             Ok(resp) => match resp {
                 Some(linkmsg) => {
-                    let adapter_result = adapter.handle_km_message(&linkmsg.msg).await;
-                    assert!(
-                        adapter_result.is_ok(),
-                        "adapter handle of node response failed: {:?}",
-                        adapter_result
-                    );
+                    a_km_payload_tx.send(linkmsg.msg).await.unwrap();
                 }
                 None => {
                     panic!("timed out or failed waiting for handshake message response from node");
@@ -1123,3 +1116,4 @@ mod test {
         ctok.cancel()
     }
 }
+
