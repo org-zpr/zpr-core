@@ -6,6 +6,7 @@ use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::sync_req;
 use crate::zpr::{LinkId, SubstrateAddr};
+use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use std::future::Future;
@@ -15,7 +16,6 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use bytes::Bytes;
 
 const PEER_TABLE_SIZE: usize = 1024;
 
@@ -249,7 +249,6 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         handle.as_ref().map(|h| h.mgr.clone())
     }
 
-
     /// Clone the key message sender channel on the link if link exists, and if there is a handle set.
     /// See [PeerTable::set_km_handle].
     pub fn clone_km_tx_chan(&self, link_id: LinkId) -> Option<mpsc::Sender<Bytes>> {
@@ -257,7 +256,6 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         let handle = entry.km_state.handle.lock().unwrap();
         handle.as_ref().map(|h| h.km_tx.clone())
     }
-
 
     /// Remove the key manager state from the link, returning the optional KmHandle that was set.
     /// Doesn't really _remove_ the state, but does invalidate the security assocation and wipes

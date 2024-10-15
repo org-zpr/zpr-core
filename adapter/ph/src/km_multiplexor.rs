@@ -296,7 +296,10 @@ fn add_noise_link(
     let (km_tx, km_rx) = mpsc::channel(16);
 
     let sph = tokio::spawn(async move {
-        match spawn_mgr.start(spawn_ctok, spawn_km_tx, spawn_sig_tx, km_rx).await {
+        match spawn_mgr
+            .start(spawn_ctok, spawn_km_tx, spawn_sig_tx, km_rx)
+            .await
+        {
             Ok(_) => (),
             Err(e) => {
                 error!(

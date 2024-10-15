@@ -920,7 +920,9 @@ mod test {
 
         let mut sp_node = node.clone();
         tokio::spawn(async move {
-            let _ = sp_node.start(n_ctok, n_km_tx, n_sig_tx, n_km_payload_rx).await; // Start the node
+            let _ = sp_node
+                .start(n_ctok, n_km_tx, n_sig_tx, n_km_payload_rx)
+                .await; // Start the node
         });
 
         let (a_km_tx, mut a_km_rx) = mpsc::channel(16);
@@ -929,7 +931,9 @@ mod test {
 
         let mut sp_adapter = adapter.clone();
         tokio::spawn(async move {
-            let _ = sp_adapter.start(a_ctok, a_km_tx, a_sig_tx, a_km_payload_rx).await; // Start the adapter
+            let _ = sp_adapter
+                .start(a_ctok, a_km_tx, a_sig_tx, a_km_payload_rx)
+                .await; // Start the adapter
         });
 
         yield_now().await;
@@ -1116,4 +1120,3 @@ mod test {
         ctok.cancel()
     }
 }
-

@@ -295,7 +295,7 @@ struct KmState {
     statemachine: Box<dyn KeyManagerStateMachine>,
     link_id: zpr::LinkId,
     kmsettings: KmSettings,
-    sa_id: zpr::SaId,                     // current SA identifier
+    sa_id: zpr::SaId, // current SA identifier
     ts: KmTransportSA,
     restart_request: bool,
     error_signaled: bool,
@@ -350,7 +350,6 @@ impl KeyManager {
             peer_cert: state.ts.peer_cert.clone(),
         })
     }
-
 
     /// Indicate that the KM state machine should restart out of the error state.
     /// For an initiator type link, this will trigger generation of a new handshake message.
