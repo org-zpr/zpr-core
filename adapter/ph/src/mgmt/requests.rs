@@ -3,7 +3,7 @@
 use super::core;
 use crate::assembly::Assembly;
 use crate::config;
-use crate::counters_enum::CounterType;
+use crate::counters::CounterType;
 use crate::defs::*;
 use crate::fastpath;
 use crate::packet::{self, Packet};

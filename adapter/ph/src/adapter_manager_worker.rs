@@ -1,6 +1,6 @@
 use crate::adapter_tables::{AltEntry, AltPep};
 use crate::assembly::{Assembly, PhMode};
-use crate::counters_enum::CounterType;
+use crate::counters::CounterType;
 use crate::fastpath;
 use crate::mgmt::requests;
 use crate::packet::Packet;

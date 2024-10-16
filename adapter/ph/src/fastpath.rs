@@ -7,7 +7,7 @@ use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
-use crate::counters_enum::CounterType;
+use crate::counters::CounterType;
 use crate::defs::Direction;
 use crate::km::Codec;
 use crate::km_noise::NOISE_PADLEN;

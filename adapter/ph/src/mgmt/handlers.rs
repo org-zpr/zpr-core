@@ -3,7 +3,7 @@
 use crate::adapter_tables;
 use crate::assembly::{Assembly, PhMode};
 use crate::config;
-use crate::counters_enum;
+use crate::counters;
 use crate::defs::*;
 use crate::dock_tables;
 use crate::packet::Packet;
@@ -21,7 +21,7 @@ pub enum HandleMgmtError {
     KeyManagementError(String),
 }
 
-impl From<HandleMgmtError> for counters_enum::CounterType {
+impl From<HandleMgmtError> for counters::CounterType {
     fn from(err: HandleMgmtError) -> Self {
         match err {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,

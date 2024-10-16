@@ -5,7 +5,7 @@
 
 use crate::assembly::Assembly;
 use crate::config;
-use crate::counters_enum::CounterType;
+use crate::counters::CounterType;
 use crate::fastpath;
 use crate::packet::Packet;
 use crate::zdp;

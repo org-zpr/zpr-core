@@ -1,5 +1,5 @@
 use crate::assembly::Assembly;
-use crate::counters_enum::CounterType;
+use crate::counters::CounterType;
 use crate::fastpath;
 use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
 use crate::packet::Packet;

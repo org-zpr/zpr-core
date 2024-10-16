@@ -2,7 +2,7 @@
 
 use super::handlers::{HandleMgmtError, HandleMgmtResult}; // TODO: make our own error type
 use crate::assembly::Assembly;
-use crate::counters_enum::CounterType;
+use crate::counters::CounterType;
 use crate::fastpath;
 use crate::km_multiplexor;
 use crate::packet::Packet;

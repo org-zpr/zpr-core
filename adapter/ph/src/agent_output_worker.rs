@@ -1,6 +1,6 @@
 use crate::assembly::Assembly;
 use crate::config;
-use crate::counters_enum::*;
+use crate::counters::*;
 use crate::fastpath;
 use crate::net_defs;
 use crate::packet::Packet;

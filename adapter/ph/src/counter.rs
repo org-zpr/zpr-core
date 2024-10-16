@@ -9,41 +9,41 @@ pub struct Counter {
 
 #[allow(dead_code)]
 impl Counter {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             number: AtomicU64::new(0),
         }
     }
 
-    pub(crate) fn reset(&self) {
+    pub fn reset(&self) {
         self.number.store(0, Ordering::Relaxed);
     }
 
-    pub(crate) fn set(&self, value: u64) {
+    pub fn set(&self, value: u64) {
         self.number.store(value, Ordering::Relaxed);
     }
 
-    pub(crate) fn increment(&self) {
+    pub fn increment(&self) {
         self.number.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn decrement(&self) {
+    pub fn decrement(&self) {
         self.number.fetch_sub(1, Ordering::Relaxed);
     }
 
-    pub(crate) fn increase_by(&self, amount: u64) {
+    pub fn increase_by(&self, amount: u64) {
         self.number.fetch_add(amount, Ordering::Relaxed);
     }
 
-    pub(crate) fn decrease_by(&self, amount: u64) {
+    pub fn decrease_by(&self, amount: u64) {
         self.number.fetch_sub(amount, Ordering::Relaxed);
     }
 
-    pub(crate) fn get_count(&self) -> u64 {
+    pub fn get_count(&self) -> u64 {
         self.number.load(Ordering::Relaxed)
     }
 
-    pub(crate) fn print(&self) {
+    pub fn print(&self) {
         let count = self.number.load(Ordering::Relaxed);
         println!("count: {count}")
     }
