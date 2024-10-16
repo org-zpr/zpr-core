@@ -2,7 +2,6 @@
 
 use cbpf_rs::bpf_code;
 use clap::Parser;
-use enum_map::{enum_map, EnumMap};
 use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
@@ -111,9 +110,9 @@ struct CmdLine {
     debug: bool,
 }
 
-fn emit_counts(system_name: &String, counts_map: &EnumMap<CounterType, Counter>) {
+fn emit_counts(system_name: &String, counters: &Counters) {
     println!("\n*** {} Counters ***", system_name);
-    for (key, &ref value) in counts_map {
+    for (key, ref value) in counters {
         println!("{}: {}", key, value.get_count());
     }
 }
@@ -182,8 +181,6 @@ fn main() -> ExitCode {
     let (km_sig_tx, km_sig_rx) = mpsc::channel(topology_config.km_signal_queue_size);
     let (km_tx, km_rx) = mpsc::channel(topology_config.km_message_queue_size);
     let km_state = KmState::new(km_tx, km_sig_tx);
-
-    let counters = enum_map! { _ => Counter::new(), };
 
     if node_addr.is_some() {
         ph_mode = PhMode::Adapter;
@@ -322,7 +319,7 @@ fn main() -> ExitCode {
         capture_queue,
         capture_worker,
         flow_control,
-        counters,
+        counters: Default::default(),
         tun_ctl,
         peer_table: peer_table::PeerTable::new(),
         peer_ids: std::sync::Mutex::new(Vec::new()),

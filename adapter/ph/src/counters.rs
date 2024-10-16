@@ -1,8 +1,11 @@
-/// Atomic performance counters.
+//! Atomic performance counters.
 
-use enum_map::Enum;
+use enum_map::{Enum, EnumMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Array of the system's performance counters.
+pub type Counters = EnumMap<CounterType, Counter>;
 
 /// Implement counter type. Uses Atomic values, ensuring saftey for values in
 /// multi-thread environment.
@@ -45,11 +48,12 @@ impl Counter {
     pub fn get_count(&self) -> u64 {
         self.number.load(Ordering::Relaxed)
     }
+}
 
-/*    pub fn print(&self) {
-        let count = self.number.load(Ordering::Relaxed);
-        println!("count: {count}")
-    }*/
+impl Default for Counter {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Allows for easy access to name of each counter as well as index in
