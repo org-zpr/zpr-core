@@ -6,7 +6,7 @@ Core ZPR components
 Here is the general "startup" sequence for milestone 2.
 
  * NODE - the only node
- * V/S ADAPTER - the adapter in front fo the visa service.
+ * V/S ADAPTER - the adapter in front of the visa service.
  * VISASVC - the visa service
  * ADAPTER - one of the "regular" (non-visa service) adapters.
 
@@ -23,20 +23,25 @@ ADAPTER                 NODE                VISASVC
   .         |        kmh2 |---+                |        | association
   .         |<------------+   | node detect    |        |
   .         |             |   | VS CN          |       =/
+  .         |hello(4)     |   |                |
+  .         +------------>|   |                |
+  .         |      hellor |   |                |
+  .         |<------------+   |                |
+  .         |             |   |                |
   .         | raa         |   |                |
   .         +------------>|   |                |       =\
   .         |        raar |   |                |        | ZPR address reg
   .         |<------------+   |                |       =/
   .         .             |<--+                |
   .         .             |                    |
-  |                       | hello              |       =\
+  |                       | vs.hello           |       =\
   |                       +------------------->|        |
-  |                       |         hello-resp |        | node establishes    
+  |                       |      vs.hello-resp |        | node establishes    
   |                       |<-------------------+        | connection to 
   |                       |                    |        | visa service
-  |                       | authenticate       |        |
+  |                       | vs.authenticate    |        |
   |                       +------------------->|        |
-  |                       |           response |        |
+  |                       |        vs.response |        |
   |                       |<-------------------+        |
   .                       .                    .       =/
   .                       .                    .
@@ -46,14 +51,19 @@ ADAPTER                 NODE                VISASVC
   |                  kmh2 |                    |        | association
   |<----------------------+                    |       =/
   |                       |                    |
+  | hello                 |                    |
+  +---------------------->|                    |
+  |                hellor |                    |
+  |<----------------------+                    |
+  |                       |                    |  
   | raa(3)                |                    |
   +---------------------->|                    |       =\
   |                  raar |                    |        | ZPR address reg
   |<----------------------+                    |       =/
   |                       |                    |
-  |                       | auth_connect(1)    |       =\
+  |                       | vs.auth_connect(1) |       =\
   |                       +------------------->|        | node tell
-  |                       |         auth_reply |        | visa service
+  |                       |      vs.auth_reply |        | visa service
   |                       |<-------------------+       =/
   |                       |                    |
   | echo(2)               |                    |       =\
@@ -63,19 +73,22 @@ ADAPTER                 NODE                VISASVC
   |                       |                    |
   .                       .                    .
   . (traffic)             .                    .       =\
-  +---------------------->| visa-req           |        | visa 
+  +---------------------->| vs.visa-req        |        | visa 
   |                       +------------------->|        | request
-  |                       |         visa-resp  |        |
+  |                       |       vs.visa-resp |        |
   |                       |<-------------------+       =/
   |                       |                    |
   .                       .                    .
   .                       .                    .
   | terminate             |                    |       =\
-  +---------------------->| agent_disconnect   |        | polite link down
+  +---------------------->| vs.agent_disconnect|        | polite link down
   |                       +------------------->|       =/
   X                       |                    |
                           .                    .
                           .                    .
+
+  - 'vs.' prefix indicates a visa service API call which runs on top of ZPR.
+    All other messages are ZDP.
 ```
 
 ```
@@ -92,6 +105,9 @@ NOTES:
 (3) "raa" is RegisterAgentAddress in which the agent sends its ZPR address to the
     node. Required since the node includes this in the connect message to the 
     visa service.  "raar" is RegisterAgentAddressResponse.
+    
+(4) The "hello" and "hellor" (hello-response) messages are placeholders and do not
+    transfer any information at the moment.
 ```
 
 
