@@ -164,40 +164,28 @@ fn main() -> ExitCode {
     }
     let ph_mode;
 
-    // TODO: These batch sizes are placeholders for now.  So are the queue
-    // sizes below which are all just double the batch size.  Performance
-    // testing will inform us the correct values for these, which balance
-    // throughput with service time.
-    let substrate_socket_count = 4;
-    let substrate_ingress_batch_size = 8;
-    let agent_output_batch_size = 4;
-    let capture_queue_size = 16;
-    let capture_batch_size = 8;
-    let tun_queue_count = 4;
-    let mgmt_dispatch_queue_size = 16;
-    let adapter_manager_queue_size = 16;
-    let km_message_queue_size = 16;
+    let topology_config = config::TopologyConfig::default();
 
-    let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 256];
+    let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; topology_config.buffer_count];
     let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
 
-    let (cap_inq, cap_outq) = mpsc::channel(capture_queue_size);
+    let (cap_inq, cap_outq) = mpsc::channel(topology_config.capture_queue_size);
     let capture_queue = Capture::new(cap_inq);
 
-    let (md_inq, md_outq) = mpsc::channel(mgmt_dispatch_queue_size);
+    let (md_inq, md_outq) = mpsc::channel(topology_config.mgmt_dispatch_queue_size);
     let mgmt_dispatch = MgmtDispatch::new(md_inq);
 
-    let (am_inq, am_outq) = mpsc::channel(adapter_manager_queue_size);
+    let (am_inq, am_outq) = mpsc::channel(topology_config.adapter_manager_queue_size);
     let adapter_manager = AdapterManager::new(am_inq);
 
     let capture_worker = CaptureWorker::new();
     let flow_control = FlowControl::new();
 
-    let counters = enum_map! { _ => Counter::new(), };
-
-    let (km_sig_tx, km_sig_rx) = mpsc::channel(16); // TODO: name this constant
-    let (km_tx, km_rx) = mpsc::channel(km_message_queue_size);
+    let (km_sig_tx, km_sig_rx) = mpsc::channel(topology_config.km_signal_queue_size);
+    let (km_tx, km_rx) = mpsc::channel(topology_config.km_message_queue_size);
     let km_state = KmState::new(km_tx, km_sig_tx);
+
+    let counters = enum_map! { _ => Counter::new(), };
 
     if node_addr.is_some() {
         ph_mode = PhMode::Adapter;
@@ -216,7 +204,7 @@ fn main() -> ExitCode {
     let tun_devs = runtime.block_on(async {
         TunBuilder::new()
             .name(cmd_line.tun_if.unwrap_or(String::new()).as_str())
-            .try_build_mq(tun_queue_count)
+            .try_build_mq(topology_config.agent_output_concurrency)
             .expect("unable to open TUN device")
             .leak()
     });
@@ -231,7 +219,7 @@ fn main() -> ExitCode {
     // Open ingress sockets.
     let mut sockets = Vec::new();
     runtime.block_on(async {
-        for _i in 0..substrate_socket_count {
+        for _i in 0..topology_config.substrate_ingress_concurrency {
             let socket = socket2::Socket::new(
                 socket2::Domain::for_address(self_addr),
                 socket2::Type::DGRAM,
@@ -292,7 +280,7 @@ fn main() -> ExitCode {
                 code: ALU | MOD | K,
                 jt: 0,
                 jf: 0,
-                k: substrate_socket_count,
+                k: topology_config.substrate_ingress_concurrency as u32,
             },
             // [4] return as selected queue #
             sf {
@@ -417,7 +405,7 @@ fn main() -> ExitCode {
             js.spawn(agent_output_worker::launch(
                 &agent_output_worker::Config {
                     worker_index,
-                    batch_size: agent_output_batch_size,
+                    batch_size: topology_config.agent_output_batch_size,
                 },
                 &*asm,
                 tun_dev,
@@ -428,7 +416,7 @@ fn main() -> ExitCode {
 
         js.spawn(capture_worker::launch(
             &capture_worker::Config {
-                batch_size: capture_batch_size,
+                batch_size: topology_config.capture_batch_size,
             },
             &*asm,
             cap_outq,
@@ -445,7 +433,7 @@ fn main() -> ExitCode {
             js.spawn(substrate_ingress_worker::launch(
                 &substrate_ingress_worker::Config {
                     worker_index,
-                    batch_size: substrate_ingress_batch_size,
+                    batch_size: topology_config.substrate_ingress_batch_size,
                 },
                 &*asm,
                 socket,
