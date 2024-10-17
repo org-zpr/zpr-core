@@ -1,6 +1,5 @@
 #![cfg_attr(feature = "ci", deny(warnings))]
 
-use cbpf_rs::bpf_code;
 use clap::Parser;
 use km_cert_exchange::KmCertExchange;
 use std::default::Default;
@@ -16,7 +15,6 @@ use tokio::task::JoinSet;
 use tokio_tun::TunBuilder;
 use tracing::{info, warn};
 use tracing_subscriber;
-use zpr_ext::tokio::net::UdpSocketExt;
 
 mod adapter_manager_worker;
 mod adapter_tables;
@@ -43,6 +41,7 @@ mod mgmt_processor_worker;
 mod net_defs;
 mod options;
 mod packet;
+mod packet_steering;
 mod pcap_writer;
 mod peer_table;
 mod queues;
@@ -278,73 +277,18 @@ fn main() -> ExitCode {
 
     let substrate_sockets = substrate_sockets.leak();
 
-    // Configure packet steering to separate flows for better load balancing.
-    // It's OK if this fails; flows will still be pinned to a queue;
-    // they'll just be pinned there with all other flows from the same link.
-    #[cfg(any(target_os = "android", target_os = "linux"))]
-    {
-        use crate::zdp::*;
-        use bpf_code::*;
-        use libc::sock_filter as sf;
-        use std::mem::{offset_of, size_of};
+    //
+    // configure packet steering for better load balancing
+    //
 
-        // TODO/FIXME: Ideally we want to select the queue by the _sum_ of the
-        // hash and stream ID, thus avoiding clumping due to correlated stream IDs between
-        // links.  That requires eBPF though, since the hash value is only present for
-        // eBPF programs (see <https://github.com/torvalds/linux/blob/master/net/core/sock_reuseport.c#L595-L598>).
-        // (`[SKF_AD_RXHASH]` just reads as 0!)
-        let prog = &[
-            // [0] load ZPI and packet type
-            sf {
-                code: LD | H | ABS,
-                jt: 0,
-                jf: 0,
-                k: 0,
-            },
-            // [1] if packet is encrypted, or packet is non-flow, fall back to hash
-            sf {
-                code: JMP | JSET | K,
-                jt: 3,
-                jf: 0,
-                k: ((zpr::ZPI_ENCRYPTED_HEADER_FLAG as u32) << 8)
-                    | ZDP_PACKET_TYPE_NON_FLOW_FLAG as u32,
-            },
-            // [2] load stream ID
-            sf {
-                code: LD | W | ABS,
-                jt: 0,
-                jf: 0,
-                k: (size_of::<ZdpZpiHeader>()
-                    + size_of::<ZdpBaseHeader>()
-                    + offset_of!(ZdpPerFlowHeader, stream_id)) as u32,
-            },
-            // [3] modulo # of queues
-            sf {
-                code: ALU | MOD | K,
-                jt: 0,
-                jf: 0,
-                k: topology_config.substrate_ingress_concurrency as u32,
-            },
-            // [4] return as selected queue #
-            sf {
-                code: RET | A,
-                jt: 0,
-                jf: 0,
-                k: 0,
-            },
-            // [5] return huge value to force fallback to hash-based steering
-            sf {
-                code: RET | K,
-                jt: 0,
-                jf: 0,
-                k: u32::MAX,
-            },
-        ];
-
-        match substrate_sockets[0].attach_reuse_port_cbpf(prog) {
-            Ok(()) => (),
-            Err(err) => warn!("Unable to enable ingress packet steering: {err}"),
-        }
+    if let Err(err) = packet_steering::set_steering(
+        &substrate_sockets[0],
+        topology_config.substrate_ingress_concurrency,
+        packet_steering::SteeringMethod::ZdpStreamId,
+    ) {
+        // It's OK if this fails; flows will still be pinned to a queue;
+        // they'll just be pinned there with all other flows from the same link.
+        warn!("Unable to enable ingress packet steering: {err}");
     }
 
     //

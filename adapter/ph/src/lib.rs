@@ -25,6 +25,7 @@ pub mod mgmt_processor_worker;
 pub mod net_defs;
 pub mod options;
 pub mod packet;
+pub mod packet_steering;
 pub mod pcap_writer;
 pub mod peer_table;
 pub mod queues;
