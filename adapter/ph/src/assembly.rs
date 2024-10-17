@@ -25,7 +25,7 @@ use std::default::Default;
 use std::result::Result;
 use tracing::info;
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {
     Node,
     Adapter,

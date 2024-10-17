@@ -1,4 +1,5 @@
 //! Management requests.
+#![allow(dead_code)]
 
 use super::core;
 use crate::assembly::Assembly;

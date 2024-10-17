@@ -72,7 +72,7 @@ use tun_ctl::TunCtl;
 
 #[derive(Parser)]
 #[command(version, about)]
-struct CmdLine {
+struct Config {
     #[arg(long)]
     name: String,
 
@@ -118,117 +118,173 @@ fn emit_counts(system_name: &String, counters: &Counters) {
 }
 
 fn main() -> ExitCode {
-    let cmd_line = CmdLine::parse();
+    //
+    // parse configuration from command line
+    //
 
-    let mut subscriber = tracing_subscriber::fmt::fmt();
-    if cmd_line.debug {
-        subscriber = subscriber.with_max_level(tracing::Level::DEBUG);
+    let config = Config::parse();
+
+    let ph_mode;
+    if config.node_addr.is_some() {
+        ph_mode = PhMode::Adapter;
     } else {
-        subscriber = subscriber.with_max_level(tracing::Level::INFO);
+        ph_mode = PhMode::Node;
     }
-    let subscriber = subscriber.finish();
-    tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    let system_name = cmd_line.name;
-    let sock_path = cmd_line.control_path;
-    let self_addr = cmd_line.self_addr;
-    let node_addr = cmd_line.node_addr;
-    let ca_file = cmd_line.ca_file;
-    let cert_file = cmd_line.certificate_file;
-    let priv_key_file = cmd_line.private_key_file;
-    let node_pubkey_file = cmd_line.node_public_key_file;
-    let disable_km = cmd_line.disable_km;
-    if !disable_km {
-        if ca_file.is_none() {
+    //
+    // validate configuration
+    //
+
+    if !config.disable_km {
+        if config.ca_file.is_none() {
             panic!("Authority certificate file must be specified when key management is enabled");
         }
-        if cert_file.is_none() {
+        if config.certificate_file.is_none() {
             panic!("Certificate file must be specified when key management is enabled");
         }
-        if priv_key_file.is_none() {
+        if config.private_key_file.is_none() {
             panic!("Private key file must be specified when key management is enabled");
         }
     }
-    let allow_insecure_zpi_zero = if disable_km {
-        true
-    } else {
-        cmd_line.allow_insecure_zpi_zero
-    };
-    if allow_insecure_zpi_zero {
-        warn!(
-            "Insecure ZPI ZERO is enabled.  This is insecure and should only be used for testing."
-        );
+
+    if ph_mode == PhMode::Adapter && !config.disable_km && config.node_public_key_file.is_none() {
+        panic!("Node public key file must be specified when starting an adapter");
     }
-    let ph_mode;
+
+    //
+    // set up logging
+    //
+
+    let tracing_max_level;
+    if config.debug {
+        tracing_max_level = tracing::Level::DEBUG;
+    } else {
+        tracing_max_level = tracing::Level::INFO;
+    }
+
+    let subscriber = tracing_subscriber::fmt::fmt()
+        .with_max_level(tracing_max_level)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    //
+    // read key material
+    //
+
+    let self_noise_keypair;
+    let peer_noise_keypair;
+    let certx;
+
+    if !config.disable_km {
+        let private_key =
+            km_cert_exchange::load_private_key(&Path::new(&config.private_key_file.unwrap()))
+                .unwrap();
+        if ph_mode == PhMode::Node {
+            peer_noise_keypair = None;
+            self_noise_keypair = Some(NoiseKeypair::new(private_key));
+        } else {
+            let public_key = km_cert_exchange::load_public_key(&Path::new(
+                &config.node_public_key_file.unwrap(),
+            ))
+            .unwrap();
+            peer_noise_keypair = Some(NoiseKeypair {
+                public: public_key,
+                private: [0u8; 32], // unknown
+            });
+            self_noise_keypair = Some(NoiseKeypair::new(private_key));
+        }
+
+        certx = Some(
+            KmCertExchange::new_from_paths(
+                &Path::new(&config.certificate_file.as_ref().unwrap()),
+                &Path::new(&config.ca_file.as_ref().unwrap()),
+            )
+            .unwrap(),
+        );
+    } else {
+        peer_noise_keypair = None;
+        self_noise_keypair = None;
+        certx = None;
+    }
+
+    //
+    // instantiate bounded resources (queues and buffers)
+    //
 
     let topology_config = config::TopologyConfig::default();
 
     let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; topology_config.buffer_count];
-    let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
 
     let (cap_inq, cap_outq) = mpsc::channel(topology_config.capture_queue_size);
-    let capture_queue = Capture::new(cap_inq);
-
     let (md_inq, md_outq) = mpsc::channel(topology_config.mgmt_dispatch_queue_size);
-    let mgmt_dispatch = MgmtDispatch::new(md_inq);
-
     let (am_inq, am_outq) = mpsc::channel(topology_config.adapter_manager_queue_size);
-    let adapter_manager = AdapterManager::new(am_inq);
+    let (km_sig_inq, km_sig_outq) = mpsc::channel(topology_config.km_signal_queue_size);
+    let (km_inq, km_outq) = mpsc::channel(topology_config.km_message_queue_size);
 
-    let capture_worker = CaptureWorker::new();
-    let flow_control = FlowControl::new();
-
-    let (km_sig_tx, km_sig_rx) = mpsc::channel(topology_config.km_signal_queue_size);
-    let (km_tx, km_rx) = mpsc::channel(topology_config.km_message_queue_size);
-    let km_state = KmState::new(km_tx, km_sig_tx);
-
-    if node_addr.is_some() {
-        ph_mode = PhMode::Adapter;
-        if !disable_km && node_pubkey_file.is_none() {
-            panic!("Node public key file must be specified when starting an adapter");
-        }
-    } else {
-        ph_mode = PhMode::Node;
-    }
+    //
+    // startup Tokio
+    //
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap();
 
-    let tun_devs = runtime.block_on(async {
-        TunBuilder::new()
-            .name(cmd_line.tun_if.unwrap_or(String::new()).as_str())
-            .try_build_mq(topology_config.agent_output_concurrency)
-            .expect("unable to open TUN device")
-            .leak()
-    });
+    let _runtime_guard = runtime.enter();
+
+    //
+    // create control socket
+    //
+
+    fs::remove_file(&config.control_path)
+        .or_else(|e| {
+            if e.kind() == ErrorKind::NotFound {
+                Ok(())
+            } else {
+                Err(e)
+            }
+        })
+        .unwrap();
+
+    let control_socket = Box::leak(Box::new(UnixListener::bind(config.control_path).unwrap()));
+
+    //
+    // open TUN devices
+    //
+
+    let tun_devs = TunBuilder::new()
+        .name(config.tun_if.unwrap_or(String::new()).as_str())
+        .try_build_mq(topology_config.agent_output_concurrency)
+        .expect("unable to open TUN device")
+        .leak();
 
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(&tun_devs[0]));
 
     tun_ctl.set_carrier(false).unwrap();
 
-    let alt = adapter_tables::AgentLookupTable::new();
-    let dlt = adapter_tables::DockLookupTable::new();
+    //
+    // open substrate sockets
+    //
 
-    // Open ingress sockets.
-    let mut sockets = Vec::new();
-    runtime.block_on(async {
-        for _i in 0..topology_config.substrate_ingress_concurrency {
-            let socket = socket2::Socket::new(
-                socket2::Domain::for_address(self_addr),
-                socket2::Type::DGRAM,
-                None,
-            )
-            .unwrap();
-            socket.set_nonblocking(true).unwrap();
-            socket.set_reuse_port(true).unwrap();
-            socket
-                .bind(&socket2::SockAddr::from(self_addr))
-                .expect("unable to bind to self addr");
-            sockets.push(UdpSocket::from_std(socket.into()).unwrap());
-        }
-    });
+    let mut substrate_sockets = Vec::new();
+
+    for _i in 0..topology_config.substrate_ingress_concurrency {
+        let socket = socket2::Socket::new(
+            socket2::Domain::for_address(config.self_addr),
+            socket2::Type::DGRAM,
+            None,
+        )
+        .unwrap();
+        socket.set_nonblocking(true).unwrap();
+        socket.set_reuse_port(true).unwrap();
+        socket
+            .bind(&socket2::SockAddr::from(config.self_addr))
+            .expect("unable to bind to self addr");
+        substrate_sockets.push(UdpSocket::from_std(socket.into()).unwrap());
+    }
+
+    let substrate_sockets = substrate_sockets.leak();
 
     // Configure packet steering to separate flows for better load balancing.
     // It's OK if this fails; flows will still be pinned to a queue;
@@ -293,164 +349,161 @@ fn main() -> ExitCode {
             },
         ];
 
-        match sockets[0].attach_reuse_port_cbpf(prog) {
+        match substrate_sockets[0].attach_reuse_port_cbpf(prog) {
             Ok(()) => (),
             Err(err) => warn!("Unable to enable ingress packet steering: {err}"),
         }
     }
 
-    let sockets = sockets.leak();
+    //
+    // create system assembly
+    //
 
-    let agent_input = AgentInput::new(tun_devs.iter());
-    let substrate_egress = SubstrateEgress::new(sockets.iter());
+    let flags = PhFlags {
+        allow_insecure_zpi_zero: config.disable_km || config.allow_insecure_zpi_zero,
+        disable_key_management: config.disable_km,
+        ..Default::default()
+    };
 
-    let mut flags: PhFlags = Default::default();
-    flags.allow_insecure_zpi_zero = allow_insecure_zpi_zero;
-    flags.disable_key_management = disable_km;
+    if flags.allow_insecure_zpi_zero {
+        warn!(
+            "Insecure ZPI ZERO is enabled.  This is insecure and should only be used for testing."
+        );
+    }
 
-    // TEMP HACK to statically install peers
     let asm = Box::leak(Box::new(Assembly {
         flags,
         ph_mode,
-        system_name,
-        buffer_stack,
-        agent_input,
-        substrate_egress,
-        capture_queue,
-        capture_worker,
-        flow_control,
+        system_name: config.name,
+        buffer_stack: BufferStack::new(buf_storage.leak::<'static>()),
+        agent_input: AgentInput::new(tun_devs.iter()),
+        substrate_egress: SubstrateEgress::new(substrate_sockets.iter()),
+        capture_queue: Capture::new(cap_inq),
+        capture_worker: CaptureWorker::new(),
+        flow_control: FlowControl::new(),
         counters: Default::default(),
         tun_ctl,
         peer_table: peer_table::PeerTable::new(),
-        peer_ids: std::sync::Mutex::new(Vec::new()),
-        alt,
-        dlt,
-        mgmt_dispatch,
-        adapter_manager,
-        km_state,
-        self_noise_keypair: None,
-        peer_noise_keypair: None,
-        certx: None,
+        peer_ids: Default::default(),
+        alt: adapter_tables::AgentLookupTable::new(),
+        dlt: adapter_tables::DockLookupTable::new(),
+        mgmt_dispatch: MgmtDispatch::new(md_inq),
+        adapter_manager: AdapterManager::new(am_inq),
+        km_state: KmState::new(km_inq, km_sig_inq),
+        self_noise_keypair,
+        peer_noise_keypair,
+        certx,
     }));
 
-    tokio::task::LocalSet::new().block_on(&runtime, async {
-        if !disable_km {
-            let private_key = km_cert_exchange::load_private_key(&Path::new(&priv_key_file.unwrap())).unwrap();
-            if ph_mode == PhMode::Node {
-                asm.self_noise_keypair = Some(NoiseKeypair::new(private_key));
-            } else {
-                let public_key = km_cert_exchange::load_public_key(&Path::new(&node_pubkey_file.unwrap())).unwrap();
-                asm.peer_noise_keypair = Some(NoiseKeypair {
-                    public: public_key,
-                    private: [0u8; 32], // unknown
-                });
-                asm.self_noise_keypair = Some(NoiseKeypair::new(private_key));
-            }
+    //
+    // create a Tokio "local set" to schedule all our management workers on
+    //
 
-            asm.certx = Some(KmCertExchange::new_from_paths(
-                &Path::new(&cert_file.as_ref().unwrap()),
-                &Path::new(&ca_file.as_ref().unwrap())
-                ).unwrap());
-        }
+    let local_set = tokio::task::LocalSet::new();
 
+    let _local_set_guard = local_set.enter();
 
-        let dsid = match ph_mode {
-            PhMode::Adapter => match asm.initiate_tether(node_addr.as_ref().unwrap()) {
-                Ok(dsid) => Some(dsid),
-                Err(_) => None
-            },
-            PhMode::Node => None
-        };
+    //
+    // instantiate tether if we're an adapter
+    // NOTE: must occur before we start any other workers!
+    //
 
-        // TODO signal handler goes here
+    let dsid = match ph_mode {
+        PhMode::Adapter => Some(
+            asm.initiate_tether(config.node_addr.as_ref().unwrap())
+                .unwrap(),
+        ),
+        PhMode::Node => None,
+    };
 
-        fs::remove_file(&sock_path)
-            .or_else(|e| {
-                if e.kind() == ErrorKind::NotFound {
-                    Ok(())
-                } else {
-                    Err(e)
-                }
-            })
-            .unwrap();
-        let unix_socket = Box::leak(Box::new(UnixListener::bind(sock_path).unwrap())); //TODO not sure if this needs the Box leak wrapper
+    //
+    // start mgmt workers
+    //
 
-        let mut js = JoinSet::new();
+    let mut js = JoinSet::new();
 
-        let usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
-        let term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
+    let usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
+    let term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
 
-        js.spawn(async {
-            loop {
-                tokio::select! {
-                    _ = usr1_stream.recv() => emit_counts(&asm.system_name, &asm.counters),
-                    _ = term_stream.recv() => {
-                        emit_counts(&asm.system_name, &asm.counters);
-                        std::process::exit(128 + SignalKind::terminate().as_raw_value())
-                    }
+    js.spawn_local(async {
+        loop {
+            tokio::select! {
+                _ = usr1_stream.recv() => emit_counts(&asm.system_name, &asm.counters),
+                _ = term_stream.recv() => {
+                    emit_counts(&asm.system_name, &asm.counters);
+                    std::process::exit(128 + SignalKind::terminate().as_raw_value())
                 }
             }
-        });
-
-        js.spawn_local(mgmt_dispatch_worker::launch(&*asm, md_outq));
-
-        js.spawn_local(adapter_manager_worker::launch(&*asm, am_outq));
-
-        for (worker_index, tun_dev) in tun_devs.iter().enumerate() {
-            js.spawn(agent_output_worker::launch(
-                &agent_output_worker::Config {
-                    worker_index,
-                    batch_size: topology_config.agent_output_batch_size,
-                },
-                &*asm,
-                tun_dev,
-            ));
         }
+    });
 
-        js.spawn_local(rpc_worker::launch(&*asm, &*unix_socket));
+    js.spawn_local(mgmt_dispatch_worker::launch(&*asm, md_outq));
+    js.spawn_local(adapter_manager_worker::launch(&*asm, am_outq));
+    js.spawn_local(rpc_worker::launch(&*asm, &*control_socket));
+    if !config.disable_km {
+        js.spawn_local(km_multiplexor::launch_signal_worker(&*asm, km_sig_outq));
+        js.spawn_local(km_multiplexor::launch_message_worker(&*asm, km_outq));
+    }
 
-        js.spawn(capture_worker::launch(
-            &capture_worker::Config {
-                batch_size: topology_config.capture_batch_size,
+    //
+    // start data path workers
+    //
+
+    for (worker_index, tun_dev) in tun_devs.iter().enumerate() {
+        js.spawn(agent_output_worker::launch(
+            &agent_output_worker::Config {
+                worker_index,
+                batch_size: topology_config.agent_output_batch_size,
             },
             &*asm,
-            cap_outq,
+            tun_dev,
         ));
+    }
 
-        if !disable_km {
-            // Start key managemenent workers
-            js.spawn(km_multiplexor::launch_signal_worker(&*asm, km_sig_rx));
-            js.spawn(km_multiplexor::launch_message_worker(&*asm, km_rx));
-        }
+    for (worker_index, socket) in substrate_sockets.iter().enumerate() {
+        js.spawn(substrate_ingress_worker::launch(
+            &substrate_ingress_worker::Config {
+                worker_index,
+                batch_size: topology_config.substrate_ingress_batch_size,
+            },
+            &*asm,
+            socket,
+        ));
+    }
 
-        info!("{}: Starting substrate ingress workers", asm.system_name);
-        for (worker_index, socket) in sockets.iter().enumerate() {
-            js.spawn(substrate_ingress_worker::launch(
-                &substrate_ingress_worker::Config {
-                    worker_index,
-                    batch_size: topology_config.substrate_ingress_batch_size,
-                },
-                &*asm,
-                socket,
-            ));
-        }
-        //if asm.is_node() {
-            asm.tun_ctl.set_carrier(true).unwrap();
-        //}
+    js.spawn(capture_worker::launch(
+        &capture_worker::Config {
+            batch_size: topology_config.capture_batch_size,
+        },
+        &*asm,
+        cap_outq,
+    ));
 
+    //
+    // TEMP HACK: set TUN carrier up
+    //
 
-        if matches!(ph_mode, PhMode::Adapter) {
-            if !disable_km && dsid.is_some() {
+    asm.tun_ctl.set_carrier(true).unwrap();
+
+    //
+    // TEMP HACK: bring up tether if we're an adapter
+    //
+
+    local_set.block_on(&runtime, async {
+        if ph_mode == PhMode::Adapter {
+            let Some(dsid) = dsid else { panic!("we are an adapter but have no tether configured"); };
+
+            if !config.disable_km {
                 info!(
                     "{}: waiting on security assocaition establishment on link {}",
-                    asm.system_name, dsid.unwrap()
+                    asm.system_name, dsid
                 );
-                while !asm.peer_table.is_security_assocaition_established(dsid.unwrap()) {
+                while !asm.peer_table.is_security_assocaition_established(dsid) {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 }
                 info!(
                     "{}: security assocaition established successfully on link {}",
-                    asm.system_name, dsid.unwrap()
+                    asm.system_name, dsid
                 );
 
                 // HACK - In our tests we need to send from adapter through the node to the adapter.
@@ -459,12 +512,14 @@ fn main() -> ExitCode {
                 info!("{}: waiting for the other adapter to (hopfully) establish its security association...", asm.system_name);
                 tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             }
-
-
-            mgmt::requests::send_report(asm, dsid.unwrap(), "Reporting for Duty!").await;
-            mgmt::requests::send_discard(asm, dsid.unwrap()).await;
         }
+    });
 
+    //
+    // drive the local set, and handle worker termination
+    //
+
+    local_set.block_on(&runtime, async {
         while let Some(res) = js.join_next().await {
             res.unwrap();
         }
