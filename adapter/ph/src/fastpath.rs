@@ -287,8 +287,8 @@ fn substrate_egress_common<'pktbuf>(
     // TODO: should we add ZDP header here also??
 
     let zdp_hdr = match zdp::ZdpBaseHeader::ref_from_prefix(&pkt.body()) {
-        Some(zdp_hdr) => zdp_hdr,
-        None => {
+        Ok((zdp_hdr, _)) => zdp_hdr,
+        Err(_) => {
             error!("egress: link {}: failed to parse the ZDP header", link_id);
             return Err(km::EncryptionError::ParseError);
         }
@@ -440,66 +440,74 @@ pub fn substrate_ingress<'pktbuf>(
 ) {
     asm.counters[CounterType::InPacksRec].increment();
 
-    let Some(ingress_link_id) = asm.peer_table.lookup_peer(peer_sa) else {
-        drop_and_count(asm, pkt, CounterType::UnknownPeer);
-        return;
-    };
+    pkt.metadata_mut().ingress_link_id = asm
+        .peer_table
+        .lookup_peer(peer_sa)
+        .unwrap_or(zpr::LINK_ID_UNKNOWN);
 
     // Read, but do not remove the ZPI header
-    let Some(zpi_hdr) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
+    let Ok((zpi_hdr, _)) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
         drop_and_count(asm, pkt, CounterType::BadStructure);
         return;
     };
 
-    let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
-        drop_and_count(asm, pkt, CounterType::UnknownPeer);
-        return;
-    };
+    let peer_state = asm.peer_table.get(pkt.metadata().ingress_link_id);
 
     // If a ZPI is setup on this link, then we expect the message to use one of the valid
     // ZPI values.
     let secure;
-    match peer_state.get_established_transport_association() {
-        Some(ref transport_sa) => {
-            if zpi_hdr.zpi == transport_sa.recv_zpis.hmac {
-                match decrypt_hmac(transport_sa.recv_hmac_key, &mut pkt) {
-                    Ok(()) => secure = true,
-                    Err(err) => {
-                        drop_and_count(asm, pkt, err);
-                        return;
+    match peer_state {
+        Some(state) => match state.get_established_transport_association() {
+            Some(ref transport_sa) => {
+                if zpi_hdr.zpi == transport_sa.recv_zpis.hmac {
+                    match decrypt_hmac(transport_sa.recv_hmac_key, &mut pkt) {
+                        Ok(()) => secure = true,
+                        Err(err) => {
+                            drop_and_count(asm, pkt, err);
+                            return;
+                        }
                     }
-                }
-            } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
-                // TODO: Put padlen in state somewhere too
-                match decrypt_full(asm, &*transport_sa.codec, NOISE_PADLEN, &mut pkt) {
-                    Ok(()) => secure = true,
-                    Err(err) => {
-                        drop_and_count(asm, pkt, err);
-                        return;
+                } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
+                    // TODO: Put padlen in state somewhere too
+                    match decrypt_full(asm, &*transport_sa.codec, NOISE_PADLEN, &mut pkt) {
+                        Ok(()) => secure = true,
+                        Err(err) => {
+                            drop_and_count(asm, pkt, err);
+                            return;
+                        }
                     }
+                } else {
+                    // We have an SA and ZPI does not match.
+                    info!(
+                        "{}: ingress: link {}: unexpected ZPI value {} (expected {:?})",
+                        asm.system_name,
+                        pkt.metadata().ingress_link_id,
+                        zpi_hdr.zpi,
+                        transport_sa.recv_zpis
+                    );
+                    drop_and_count(asm, pkt, CounterType::UnknownZpi);
+                    return;
                 }
-            } else {
-                // We have an SA and ZPI does not match.
-                info!(
-                    "{}: ingress: link {}: unexpected ZPI value {} (expected {:?})",
-                    asm.system_name, ingress_link_id, zpi_hdr.zpi, transport_sa.recv_zpis
-                );
-                drop_and_count(asm, pkt, CounterType::UnknownZpi);
-                return;
             }
-        }
+            None => {
+                // Either no security association on link, or it is not yet established.
+                secure = false;
+            }
+        },
         None => {
-            // Either no security associatio on link, or it is not yet established.
+            // No link in peer table
             secure = false;
         }
     };
 
     if !secure {
-        // Not under a security assocation  which means only ZPI 0 is allowed.
-        if zpi_hdr.zpi != zpr::ZPI_0 {
+        // Not under a security assocation, which means only ZPI 0 is allowed.
+        if zpi_hdr.zpi != zpr::ZPI_0 && pkt.metadata().ingress_link_id != zpr::LINK_ID_UNKNOWN {
             info!(
-                "{}: ingress: link {}: ZPI {} not allowed on unestablished SA",
-                asm.system_name, ingress_link_id, zpi_hdr.zpi
+                "{}: ingress: {}: ZPI {} not allowed on unestablished SA",
+                asm.system_name,
+                pkt.metadata().ingress_link_id,
+                zpi_hdr.zpi
             );
             drop_and_count(asm, pkt, CounterType::UnknownZpi);
             return;
@@ -517,15 +525,27 @@ pub fn substrate_ingress<'pktbuf>(
     maybe_capture(asm, Direction::Inbound, &mut pkt);
 
     // now pop the ZPI off the packet. We've already checked it.
-    match zdp::ZdpZpiHeader::read_from_buf(&mut pkt) {
-        Some(_) => (),
-        None => {
-            drop_and_count(asm, pkt, CounterType::BadStructure);
-            return;
-        }
+    if zdp::ZdpZpiHeader::read_from_buf(&mut pkt).is_err() {
+        drop_and_count(asm, pkt, CounterType::BadStructure);
+        return;
     }
 
-    let Some(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
+    // If we weren't able to match this packet to an existing link,
+    // send it off to be processed as a potential new link.
+    if pkt.metadata().ingress_link_id == zpr::LINK_ID_UNKNOWN {
+        match asm
+            .mgmt_dispatch
+            .try_dispatch_mgmt_packet_with_addr(peer_sa, pkt)
+        {
+            Ok(()) => (),
+            Err(TryEnqueueError::Full(pkt)) => {
+                drop_and_count(asm, pkt, CounterType::QueueBackpressure)
+            }
+        }
+        return;
+    }
+
+    let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return drop_and_count(asm, pkt, CounterType::BadStructure);
     };
 
@@ -535,7 +555,9 @@ pub fn substrate_ingress<'pktbuf>(
         if !asm.flags.allow_insecure_zpi_zero {
             warn!(
                 "{}: ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
-                asm.system_name, ingress_link_id, base_hdr.packet_type
+                asm.system_name,
+                pkt.metadata().ingress_link_id,
+                base_hdr.packet_type
             );
             drop_and_count(asm, pkt, CounterType::OtherError);
             return;
@@ -547,10 +569,7 @@ pub fn substrate_ingress<'pktbuf>(
         // TODO: should we peel off the ZDP header here??
         // (instead of this silly code to restore it?)
         *pkt.alloc_zeroed_header() = base_hdr;
-        match asm
-            .mgmt_dispatch
-            .try_dispatch_mgmt_packet(ingress_link_id, pkt)
-        {
+        match asm.mgmt_dispatch.try_dispatch_mgmt_packet_with_link(pkt) {
             Ok(()) => (),
             Err(TryEnqueueError::Full(pkt)) => {
                 drop_and_count(asm, pkt, CounterType::QueueBackpressure)
@@ -559,27 +578,30 @@ pub fn substrate_ingress<'pktbuf>(
         return;
     }
 
-    let Some(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
+    let Ok(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
         return drop_and_count(asm, pkt, CounterType::BadStructure);
     };
 
-    let stream_id: zpr::StreamId = per_flow_hdr.stream_id.into(); // TODO: is this necessary?
+    let ingress_stream_id: zpr::StreamId = per_flow_hdr.stream_id.into();
+    pkt.metadata_mut().ingress_stream_id = ingress_stream_id;
 
     // in debug builds, track which worker this agent traffic came in on
     // ensure a given flow isn't hopping between workers (potentially
     // resulting in out-of-order packets)
     #[cfg(debug_assertions)]
-    if let Some(old_index) =
-        AGENT_PACKET_FLOW_TRACKER.insert((ingress_link_id, stream_id), worker_index)
-    {
+    if let Some(old_index) = AGENT_PACKET_FLOW_TRACKER.insert(
+        (
+            pkt.metadata().ingress_link_id,
+            pkt.metadata().ingress_stream_id,
+        ),
+        worker_index,
+    ) {
         if old_index != worker_index {
             asm.counters[CounterType::AgentPacketsOutOfOrder].increment();
         }
     }
 
-    pkt.metadata_mut().flow_id = stream_id; // TODO: is this necessary?
-
-    forward(asm, ingress_link_id, stream_id, pkt);
+    forward(asm, pkt);
 }
 
 /// Send a compressed agent packet to the agent.
@@ -590,7 +612,7 @@ pub fn agent_input<'pktbuf>(
     mut pkt: Packet<'pktbuf>,
 ) {
     // extract A2A MAC
-    let Some(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
+    let Ok(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
         drop_and_count(asm, pkt, CounterType::BadStructure);
         return;
     };
@@ -637,6 +659,8 @@ pub fn agent_input<'pktbuf>(
 /// Process uncompressed packet from the agent.
 /// The packet will be compressed, or trigger a Bind request.
 pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
+    pkt.metadata_mut().ingress_link_id = zpr::AGENT_LINK_ID;
+
     // determine five tuple
     let classification = match classifier::classify(&mut pkt) {
         Ok(cls) => cls,
@@ -702,8 +726,10 @@ pub fn agent_output_post_classify<'pktbuf>(
                 pkt.put(&a2a_mac[..a2a_mac_size]);
                 pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
 
+                pkt.metadata_mut().ingress_stream_id = pep.tether_id;
+
                 // forward packet on
-                forward(asm, zpr::AGENT_LINK_ID, pep.tether_id, pkt);
+                forward(asm, pkt);
             }
 
             AltEntry::Pending(_) => {
@@ -732,30 +758,26 @@ pub fn agent_output_post_classify<'pktbuf>(
 }
 
 /// Forward compressed packet.
-pub fn forward<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    ingress_link_id: zpr::LinkId,
-    ingress_stream_id: zpr::StreamId,
-    mut pkt: Packet<'pktbuf>,
-) {
+pub fn forward<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: Packet<'pktbuf>) {
     // TODO: node forwarding
 
     // adapter forwarding
     let egress_link =  // FIXME: this is a hack
-        if ingress_link_id == zpr::AGENT_LINK_ID {
-            0
+        if pkt.metadata().ingress_link_id == zpr::AGENT_LINK_ID {
+            1
         } else {
             match asm.ph_mode {
                 PhMode::Adapter => zpr::AGENT_LINK_ID,
-                PhMode::Node => (ingress_link_id + 1) % 2,
+                PhMode::Node => pkt.metadata().ingress_link_id % 2 + 1,
             }
         };
 
     if egress_link == zpr::AGENT_LINK_ID {
-        agent_input(asm, ingress_stream_id, pkt);
+        agent_input(asm, pkt.metadata().ingress_stream_id, pkt);
     } else {
+        let ingress_stream_id = pkt.metadata().ingress_stream_id.into();
         let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
-        per_flow_hdr.stream_id = ingress_stream_id.into();
+        per_flow_hdr.stream_id = ingress_stream_id;
 
         let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
         base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;

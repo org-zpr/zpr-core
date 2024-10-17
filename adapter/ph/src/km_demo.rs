@@ -74,32 +74,34 @@ pub fn build_zdp_km_noise_packet<'buf>(
 /// Parse a full ZDP packet as a ZDP Report Message, expecting the payload of that message
 /// to be a string which is returned.
 pub fn parse_zdp_report_pkt(pkt: &Packet) -> Result<String, String> {
-    let zpi_hdr = ZdpZpiHeader::ref_from_prefix(&pkt.body());
-    if zpi_hdr.is_none() {
+    let Ok((_zpi_hdr, _)) = ZdpZpiHeader::ref_from_prefix(&pkt.body()) else {
         return Err(String::from(
             "error parsing ZPI header from decrypted payload",
         ));
-    }
-    let zdp_hdr = ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..]);
-    if zdp_hdr.is_none() {
+    };
+
+    let Ok((zdp_hdr, _)) = ZdpBaseHeader::ref_from_prefix(&pkt.body()[ZDP_BASE_HEADER_OFFSET..])
+    else {
         return Err(String::from(
             "parse report msg - error parsing ZDP header from decrypted payload",
         ));
-    }
-    let zdp_hdr = zdp_hdr.unwrap();
+    };
+
     if zdp_hdr.packet_type != ZdpPacketType::Report {
         return Err(String::from(format!(
             "parse report msg - expected REPORT packet, got {:?}",
             zdp_hdr.packet_type
         )));
     }
-    let report_hdr = ZdpReportHeader::ref_from_prefix(&pkt.body()[ZDP_REPORT_HDR_OFFSET..]);
-    if report_hdr.is_none() {
+
+    let Ok((report_hdr, _)) =
+        ZdpReportHeader::ref_from_prefix(&pkt.body()[ZDP_REPORT_HDR_OFFSET..])
+    else {
         return Err(String::from(
             "parse report msg - error parsing REPORT header from decrypted payload",
         ));
-    }
-    let report_hdr = report_hdr.unwrap();
+    };
+
     let strlen = usize::from(report_hdr.report_data_length);
     if ZDP_REPORT_DATA_OFFSET + strlen > pkt.body().len() {
         return Err(String::from(
@@ -121,32 +123,34 @@ pub fn parse_zdp_report_pkt(pkt: &Packet) -> Result<String, String> {
 /// Parse a ZDP packet as a ZDP Key Management Message.  Return a reference to
 /// the KM payload (which can then be passed to the KM system).
 pub fn parse_km_payload<'buf>(msg_buf: &'buf [u8]) -> Result<&'buf [u8], String> {
-    let zdp_hdr = ZdpBaseHeader::ref_from_prefix(&msg_buf[ZDP_BASE_HEADER_OFFSET..]);
-    if zdp_hdr.is_none() {
+    let Ok((zdp_hdr, _)) = ZdpBaseHeader::ref_from_prefix(&msg_buf[ZDP_BASE_HEADER_OFFSET..])
+    else {
         return Err(String::from(
             "zdp/server - error parsing ZDP header from ZPI=0 message",
         ));
-    }
-    let zdp_hdr = zdp_hdr.unwrap();
+    };
+
     if zdp_hdr.packet_type != ZdpPacketType::KeyManagement {
         return Err(String::from(format!(
             "zdp/server - expected KM packet, got {:?}",
             zdp_hdr.packet_type
         )));
     }
-    let km_hdr = ZdpKeyManagementHeader::ref_from_prefix(&msg_buf[ZDP_KM_HDR_OFFSET..]);
-    if km_hdr.is_none() {
+
+    let Ok((km_hdr, _)) = ZdpKeyManagementHeader::ref_from_prefix(&msg_buf[ZDP_KM_HDR_OFFSET..])
+    else {
         return Err(String::from(
             "zdp/server - error parsing KM header from ZPI=0 message",
         ));
-    }
-    let km_hdr = km_hdr.unwrap();
+    };
+
     if !km_hdr.is_noise() {
         return Err(String::from(format!(
             "zdp/server - expected NOISE KM message, got {:?}",
             km_hdr.message_type.get()
         )));
     }
+
     let km_msg_len = usize::from(km_hdr.message_length);
     if msg_buf.len() < ZDP_KM_DATA_OFFSET + km_msg_len {
         return Err(String::from(format!(

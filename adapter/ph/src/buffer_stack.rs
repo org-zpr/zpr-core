@@ -2,6 +2,23 @@ use std::sync::Mutex;
 use tokio::sync::Notify;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 
+#[cfg(test)]
+tokio::task_local! {
+    static BARRIER: &tokio::sync::Barrier;
+}
+
+macro_rules! test_barrier_wait {
+    () => {
+        #[cfg(test)]
+        match BARRIER.try_with(|b| b.wait()) {
+            Ok(b) => {
+                b.await;
+            }
+            Err(_) => (),
+        }
+    };
+}
+
 // This is used by the ingress stage to allocate buffers for incoming
 // packets.  Buffers are reused in a LIFO manner to promote cache reuse.
 
@@ -27,12 +44,28 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
     /// Blocks until a single buffer can be returned.
     pub async fn get_buffer(&self) -> &'buf mut [u8; BUFSIZ] {
         loop {
-            match self.try_get_buffer() {
-                Some(buf) => break buf,
-                None => (),
-            }
+            test_barrier_wait!();
 
-            self.notify.notified().await;
+            let notified = {
+                let mut bufs = self.buffers.lock().unwrap();
+
+                match bufs.pop() {
+                    Some(buf) => break buf,
+                    None => (),
+                }
+
+                // register for notifications before dropping the mutex
+                // to avoid lost notification (and therefore hanging)
+                let notified = self.notify.notified();
+
+                drop(bufs);
+
+                notified
+            };
+
+            test_barrier_wait!();
+
+            notified.await;
         }
     }
 
@@ -57,12 +90,34 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
         }
 
         loop {
-            let got = self.try_get_buffers(n, bufs_out);
-            if got > 0 {
-                break got;
-            }
+            test_barrier_wait!();
 
-            self.notify.notified().await;
+            let notified = {
+                let mut bufs = self.buffers.lock().unwrap();
+
+                let to_get = std::cmp::min(n, bufs.len());
+
+                for _ in 0..to_get {
+                    // note: intentional reversing!  keep bufs on top of stack hot
+                    bufs_out.push(bufs.pop().unwrap());
+                }
+
+                if to_get > 0 {
+                    break to_get;
+                }
+
+                // register for notifications before dropping the mutex
+                // to avoid lost notification (and therefore hanging)
+                let notified = self.notify.notified();
+
+                drop(bufs);
+
+                notified
+            };
+
+            test_barrier_wait!();
+
+            notified.await;
         }
     }
 
@@ -116,5 +171,67 @@ impl<'buf, const BUFSIZ: usize> BufferStack<'buf, BUFSIZ> {
 
             None => (), // avoid taking the lock
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn get_buffer_notify_race() {
+        let buf = Box::leak(Box::new([0u8; 1]));
+        let bs = Box::leak(Box::new(BufferStack::<1>::new([])));
+        let barrier = Box::leak(Box::new(tokio::sync::Barrier::new(2)));
+        let gb_task = tokio::task::spawn(BARRIER.scope(barrier, bs.get_buffer()));
+
+        // allow gb_task to discover that there are no buffers
+        barrier.wait().await;
+
+        // add a buffer
+        bs.put_buffer(buf);
+
+        // allow gb_task to register for notifications
+        barrier.wait().await;
+
+        // allow gb_task to discover the now-present buffer
+        barrier.wait().await;
+
+        // confirm that gb_task is now ready
+        let _buf = tokio::select! {
+            biased;
+            res = gb_task => res.unwrap(),
+            () = std::future::ready(()) => panic!("deadlock"),
+        };
+    }
+
+    #[tokio::test]
+    async fn get_buffers_notify_race() {
+        let buf = Box::leak(Box::new([0u8; 1]));
+        let bs = Box::leak(Box::new(BufferStack::<1>::new([])));
+        let barrier = Box::leak(Box::new(tokio::sync::Barrier::new(2)));
+        let gb_task = tokio::task::spawn(BARRIER.scope(barrier, async {
+            let mut vec = Vec::new();
+            bs.get_buffers(1, &mut vec).await
+        }));
+
+        // allow gb_task to discover that there are no buffers
+        barrier.wait().await;
+
+        // add a buffer
+        bs.put_buffer(buf);
+
+        // allow gb_task to register for notifications
+        barrier.wait().await;
+
+        // allow gb_task to discover the now-present buffer
+        barrier.wait().await;
+
+        // confirm that gb_task is now ready
+        let _buf = tokio::select! {
+            biased;
+            res = gb_task => res.unwrap(),
+            () = std::future::ready(()) => panic!("deadlock"),
+        };
     }
 }

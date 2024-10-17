@@ -826,7 +826,7 @@ pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KmR
     {
         return Err(KmError::ShortPacket);
     }
-    let base_hdr =
+    let (base_hdr, _) =
         ZdpBaseHeader::ref_from_prefix(&message.body()[1..]).expect("too-short ZDP message");
 
     let encr_len: usize = match base_hdr.packet_type {
@@ -1214,7 +1214,7 @@ mod test {
         let mut pkt = Packet::new(&mut buf, 64);
         //let hbytes = hdr.as_bytes();
         //pkt.body_mut()[0..hbytes.len()].copy_from_slice(&hbytes);
-        hdr.write_to_buf(&mut pkt);
+        hdr.write_to_buf(&mut pkt).unwrap();
         pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 0x33;
         let orig_len = pkt.body().len();
         assert!(orig_len == 1 + std::mem::size_of::<ZdpBaseHeader>());
@@ -1232,8 +1232,9 @@ mod test {
             orig_len,
             pkt.body().len()
         );
-        let encr_hdr =
-            ZdpBaseHeader::ref_from_prefix(&pkt.body()[1..]).expect("failed to read back header");
+        let encr_hdr = ZdpBaseHeader::ref_from_prefix(&pkt.body()[1..])
+            .expect("failed to read back header")
+            .0;
 
         assert!(encr_hdr.packet_type == hdr.packet_type);
         assert!(encr_hdr.excess_length == hdr.excess_length);
@@ -1254,7 +1255,7 @@ mod test {
         };
         //let hbytes = hdr.as_bytes();
         //pkt.body_mut()[0..hbytes.len()].copy_from_slice(&hbytes);
-        hdr.write_to_buf(&mut pkt);
+        hdr.write_to_buf(&mut pkt).unwrap();
         pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 33;
         let orig_len = pkt.body().len();
         assert!(orig_len == 1 + std::mem::size_of::<ZdpBaseHeader>());
@@ -1280,8 +1281,9 @@ mod test {
             pkt.body().len()
         );
 
-        let encr_hdr =
-            ZdpBaseHeader::ref_from_prefix(&pkt.body()[1..]).expect("failed to read back header");
+        let encr_hdr = ZdpBaseHeader::ref_from_prefix(&pkt.body()[1..])
+            .expect("failed to read back header")
+            .0;
 
         assert!(encr_hdr.packet_type == hdr.packet_type);
         assert!(encr_hdr.excess_length == hdr.excess_length);

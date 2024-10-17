@@ -2,8 +2,7 @@
 
 use arrayref::array_ref;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use zerocopy::FromZeroes;
-use zerocopy::{AsBytes, FromBytes, KnownLayout, Unaligned};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 pub mod ethertype {
     //! Ethertype / IEEE 802 numbers
@@ -15,7 +14,7 @@ pub mod ethertype {
 pub const IPV6_ADDRESS_SIZE: usize = 16;
 
 #[derive(
-    AsBytes, FromZeroes, FromBytes, KnownLayout, Unaligned, Copy, Clone, Hash, Debug, PartialEq, Eq,
+    FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned, Copy, Clone, Hash, Debug, PartialEq, Eq,
 )]
 #[repr(transparent)]
 pub struct IpAddress {

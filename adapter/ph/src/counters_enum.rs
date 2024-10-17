@@ -22,9 +22,10 @@ pub enum CounterType {
 
     QueueBackpressure,
     DroppedAwaitingBind,
-    DroppedNop,       // normal, not an error drop
-    DroppedDuplicate, // some sort of duplicate detected
-    DroppedNoSA,      // no security association on link
+    DroppedNop,           // normal, not an error drop
+    DroppedDuplicate,     // some sort of duplicate detected
+    DroppedNoSA,          // no security association on link
+    InternalRoutingError, // a packet ended up somewhere it shouldn't have due to a coding error
 
     BadMgmtResponse,
     UnexpectedMgmtResponse,
@@ -69,6 +70,7 @@ impl CounterType {
             Self::DroppedDuplicate => "Dropped Duplicate",
             Self::DroppedNop => "Dropped No Operation",
             Self::DroppedNoSA => "Dropped No Security Association",
+            Self::InternalRoutingError => "Internal Routing Error",
 
             Self::BadMgmtResponse => "Bad Management Response",
             Self::UnexpectedMgmtResponse => "Unexpected Management Response",

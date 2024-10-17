@@ -256,7 +256,8 @@ impl<'pktbuf> Capture<'pktbuf> {
 }
 
 pub enum MgmtDispatchMessage<'pktbuf> {
-    Packet(zpr::LinkId, Packet<'pktbuf>), // FIXME: reserve link ID 0, store link ID in packet
+    WithLink(Packet<'pktbuf>), // Link ID stored in packet metadata
+    WithAddr(zpr::SubstrateAddr, Packet<'pktbuf>),
 }
 
 pub struct MgmtDispatch<'pktbuf> {
@@ -268,22 +269,45 @@ impl<'pktbuf> MgmtDispatch<'pktbuf> {
         Self { sender }
     }
 
-    pub fn try_dispatch_mgmt_packet(
+    pub fn try_dispatch_mgmt_packet_with_link(
         &self,
-        ingress_link_id: zpr::LinkId,
         packet: Packet<'pktbuf>,
     ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        debug_assert_ne!(packet.metadata().ingress_link_id, 0);
+        match self.sender.try_send(MgmtDispatchMessage::WithLink(packet)) {
+            Ok(()) => Ok(()),
+
+            Err(TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
+
+            Err(TrySendError::Full(msg)) => {
+                let MgmtDispatchMessage::WithLink(pkt) = msg else {
+                    unreachable!()
+                };
+                Err(TryEnqueueError::Full(pkt))
+            }
+        }
+    }
+
+    pub fn try_dispatch_mgmt_packet_with_addr(
+        &self,
+        peer_sa: &zpr::SubstrateAddr,
+        packet: Packet<'pktbuf>,
+    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        debug_assert_eq!(packet.metadata().ingress_link_id, 0);
         match self
             .sender
-            .try_send(MgmtDispatchMessage::Packet(ingress_link_id, packet))
+            .try_send(MgmtDispatchMessage::WithAddr(*peer_sa, packet))
         {
             Ok(()) => Ok(()),
 
             Err(TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
 
-            Err(TrySendError::Full(msg)) => match msg {
-                MgmtDispatchMessage::Packet(_, packet) => Err(TryEnqueueError::Full(packet)),
-            },
+            Err(TrySendError::Full(msg)) => {
+                let MgmtDispatchMessage::WithAddr(_, pkt) = msg else {
+                    unreachable!()
+                };
+                Err(TryEnqueueError::Full(pkt))
+            }
         }
     }
 }

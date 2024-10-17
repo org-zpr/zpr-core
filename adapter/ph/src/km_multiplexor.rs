@@ -357,6 +357,7 @@ mod test {
     use crate::config;
     use crate::km::KmLinkMsg;
     use crate::km_testdata::test::*;
+    use crate::link_state::LinkType;
     use crate::mgmt_processor_worker;
     use crate::peer_table;
     use base64::prelude::*;
@@ -420,7 +421,7 @@ mod test {
                         zpr::SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9000);
 
                     let peer_state =
-                        peer_table::PeerState::new(peer_table::PeerType::Adapter, fake_sa, |q| {
+                        peer_table::PeerState::new(LinkType::NodeToAdapter, fake_sa, |q| {
                             mgmt_processor_worker::launch(&worker_config, &*asm, q)
                         });
 

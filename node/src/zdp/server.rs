@@ -199,12 +199,10 @@ impl ZDPServer {
                                 continue;
                             }
 
-                            let zpi_hdr = ZdpZpiHeader::ref_from_prefix(&input_buf[0..read_len]);
-                            if zpi_hdr.is_none() {
+                            let Ok((zpi_hdr, _)) = ZdpZpiHeader::ref_from_prefix(&input_buf[0..read_len]) else {
                                 info!("zdp/server - error parsing ZPI header");
                                 continue;
-                            }
-            ;                let zpi_hdr = zpi_hdr.unwrap();
+                            };
 
                             // If ZPI is 0 then it may be a KM message. Else it's transport.
                             match zpi_hdr.zpi {

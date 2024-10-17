@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 use crate::dock_tables::DockForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
+use crate::link_state::{LinkStateMachine, LinkType};
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::sync_req;
@@ -17,11 +18,6 @@ use tokio_util::sync::CancellationToken;
 
 const PEER_TABLE_SIZE: usize = 1024;
 
-pub enum PeerType {
-    Node,
-    Adapter,
-}
-
 // FIXME TODO:
 // nodes and adapters have different state requirements.
 // rather than indirecting through an enum, we could/should
@@ -29,8 +25,8 @@ pub enum PeerType {
 // this matches the RFC model of separate docks and forwarders.
 // for now, everyone has a DFT.......
 pub struct PeerState<'pktbuf> {
-    pub peer_type: PeerType,
     pub substrate_addr: SubstrateAddr,
+    pub link_state_machine: Mutex<LinkStateMachine>,
     pub sync_req_state: sync_req::SyncReqState<'pktbuf>,
     pub dft: DockForwardingTable,
     pub mgmt_processor: queues::MgmtProcessor<'pktbuf>,
@@ -67,7 +63,7 @@ const MGMT_PROCESSOR_QUEUE_SIZE: usize = 16;
 // FIXME: can we eliminate the reliance on `'static` herein?
 impl PeerState<'static> {
     pub fn new<Worker>(
-        peer_type: PeerType,
+        link_type: LinkType,
         substrate_addr: SubstrateAddr,
         launch_mgmt_processor_worker: impl FnOnce(
             mpsc::Receiver<queues::MgmtProcessorMessage<'static>>,
@@ -82,8 +78,8 @@ impl PeerState<'static> {
         let mgmt_processor_worker = task::spawn_local(launch_mgmt_processor_worker(mp_outq));
 
         Self {
-            peer_type,
             substrate_addr,
+            link_state_machine: Mutex::new(LinkStateMachine::new(link_type)),
             dft: DockForwardingTable::new(),
             sync_req_state: sync_req::SyncReqState::new(),
             mgmt_processor,
@@ -151,11 +147,11 @@ impl<'pktbuf> PeerTable<'pktbuf> {
 
     pub fn remove(&self, link_id: LinkId) {
         let mut peer_slab = self.peer_slab.lock().unwrap();
-        let Some(peer_state) = peer_slab.get(link_id as usize) else {
+        let Some(peer_state) = peer_slab.get((link_id as usize).wrapping_sub(1)) else {
             return;
         };
         self.sa_to_link.remove(&peer_state.substrate_addr);
-        let new_reader = peer_slab.remove(link_id as usize);
+        let new_reader = peer_slab.remove((link_id as usize).wrapping_sub(1));
         std::mem::drop(peer_slab);
         self.peer_slab_reader.write(new_reader);
     }
@@ -168,7 +164,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         self.peer_slab
             .lock()
             .unwrap()
-            .get(link_id as usize)
+            .get((link_id as usize).wrapping_sub(1))
             .map(inspector)
     }
 
@@ -182,11 +178,12 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         inspector: impl FnOnce(&PeerState<'pktbuf>) -> T,
     ) -> Option<T> {
         self.peer_slab_reader
-            .inspect(|r| r.get(link_id as usize).map(inspector))
+            .inspect(|r| r.get((link_id as usize).wrapping_sub(1)).map(inspector))
     }
 
     pub fn get(&self, link_id: LinkId) -> Option<PeerTableEntryGuard<'_, 'pktbuf>> {
-        self.peer_slab_reader.get_guarded(link_id as usize)
+        self.peer_slab_reader
+            .get_guarded((link_id as usize).wrapping_sub(1))
     }
 
     /// Sets an established security association on the link.
@@ -199,6 +196,7 @@ impl<'pktbuf> PeerTable<'pktbuf> {
             .get(link_id)
             .ok_or(SecurityAssocaitionStateError::NoAssociationForLink)?;
         entry.km_state.transport_sa.write(Some(sa));
+        //entry.link_state_machine.lock().unwrap().keying_done();
         Ok(())
     }
 
@@ -274,13 +272,13 @@ pub struct VacantPeerTableEntry<'a, 'pktbuf> {
 
 impl<'pktbuf> VacantPeerTableEntry<'_, 'pktbuf> {
     pub fn key(&self) -> LinkId {
-        self.peer_slab_guard.vacant_key().unwrap() as LinkId
+        (self.peer_slab_guard.vacant_key().unwrap() + 1) as LinkId
     }
 
     pub fn insert(mut self, peer_state: PeerState<'pktbuf>) -> LinkId {
         let sa = peer_state.substrate_addr;
 
-        let link_id = self.peer_slab_guard.insert(peer_state).unwrap() as LinkId;
+        let link_id = (self.peer_slab_guard.insert(peer_state).unwrap() + 1) as LinkId;
 
         if let Some(_) = self.sa_to_link_ref.insert(sa, link_id) {
             panic!("duplicate peer substrate address");

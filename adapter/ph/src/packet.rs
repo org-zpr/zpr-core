@@ -13,7 +13,7 @@ use crate::zpr;
 use crate::zpr::L3Type;
 use bytes::buf;
 use std::mem::{size_of, size_of_val};
-use zerocopy::{AsBytes, ByteOrder, FromBytes, FromZeroes, NetworkEndian};
+use zerocopy::*;
 use zpr_ext::std::mem::DropGuard;
 
 /// Exclusive handle to an in-use packet buffer.
@@ -31,10 +31,11 @@ use zpr_ext::std::mem::DropGuard;
 /// properties must be set manually. See, for example the [crate::classifier] module
 /// which takes a [Packet] and sets various metadata fields.
 ///
-/// *Headroom* is space in the buffer which is set aside when the packet
-/// is created (see [Packet::new]). It is useful for when you need to slap headers or other
-/// front matter onto the packet.  Use the `alloc_*` series of functions to
-/// push strucutres onto the packet body by taking bytes from the headroom.
+/// *Headroom* is space in the buffer which is set aside when the packet is
+/// created (see [Packet::new]).  It is useful for when you need to slap
+/// headers or other front matter onto the packet.  Use the `alloc_*` series
+/// of functions or `push_header()` to push strucutres onto the packet body
+/// by taking bytes from the headroom.
 ///
 /// The packet *body* resides between headroom and tailroom.  It can be
 /// extended into either of these, but not beyond.  The size of these
@@ -149,14 +150,20 @@ pub struct Packet<'buf> {
     buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE],
 }
 
-#[derive(AsBytes, FromZeroes, FromBytes)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout)]
 #[repr(C)]
 pub struct PacketMetadata {
-    offset: usize,    // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
-    len: usize,       // packet length
-    pub flow_id: u32, // flow ID for load-balancing purposes; not otherwise meaningful
-    ingress_link_id: zpr::LinkId,
+    offset: usize, // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
+    len: usize,    // packet length
+
+    /// which link this packet arrived on
+    pub ingress_link_id: zpr::LinkId,
+
+    /// which stream ID this packet is associated with
+    pub ingress_stream_id: zpr::StreamId,
+
     five_tuple: FiveTuple,
+
     _padding: [u8; 2],
 }
 
@@ -171,12 +178,12 @@ impl PacketMetadata {
         self.five_tuple.dst_address = dst_addr;
     }
 
-    pub fn set_src_port(&mut self, sport: [u8; 2]) {
-        self.five_tuple.src_port = NetworkEndian::read_u16(&sport)
+    pub fn set_src_port(&mut self, sport: u16) {
+        self.five_tuple.src_port = sport;
     }
 
-    pub fn set_dst_port(&mut self, dport: [u8; 2]) {
-        self.five_tuple.dst_port = NetworkEndian::read_u16(&dport)
+    pub fn set_dst_port(&mut self, dport: u16) {
+        self.five_tuple.dst_port = dport;
     }
 
     pub fn set_l4_protocol(&mut self, proto: IpProtocol) {
@@ -185,10 +192,6 @@ impl PacketMetadata {
 
     pub fn get_l3_type(&self) -> L3Type {
         self.five_tuple.l3_type
-    }
-
-    pub fn set_ingress_link_id(&mut self, link_id: zpr::LinkId) {
-        self.ingress_link_id = link_id
     }
 
     pub fn get_src_address(&self) -> IpAddress {
@@ -214,10 +217,6 @@ impl PacketMetadata {
     pub fn five_tuple(&self) -> &FiveTuple {
         &self.five_tuple
     }
-
-    pub fn get_ingress_link_id(&self) -> zpr::LinkId {
-        self.ingress_link_id
-    }
 }
 
 impl std::fmt::Debug for PacketMetadata {
@@ -225,7 +224,7 @@ impl std::fmt::Debug for PacketMetadata {
         write!(
             f,
             "5-tuple: {}\nFlow Id: {}, arrived on: {}, length: {}\n",
-            self.five_tuple, self.flow_id, self.ingress_link_id, self.len
+            self.five_tuple, self.ingress_stream_id, self.ingress_link_id, self.len
         )
     }
 }
@@ -281,7 +280,8 @@ impl<'buf> Packet<'buf> {
         let md = pkt.metadata_mut();
         md.offset = offset;
         md.len = len;
-        md.flow_id = 0;
+        md.ingress_link_id = 0;
+        md.ingress_stream_id = 0;
         pkt
     }
 
@@ -334,7 +334,7 @@ impl<'buf> Packet<'buf> {
 
     /// Returns a reference to the packet metadata.
     pub fn metadata(&self) -> &PacketMetadata {
-        let opt = PacketMetadata::ref_from(&self.buf[..size_of::<PacketMetadata>()]);
+        let opt = PacketMetadata::ref_from_bytes(&self.buf[..size_of::<PacketMetadata>()]);
         unsafe {
             // SAFETY: we know this fits in PACKET_BUFFER_SIZE
             opt.unwrap_unchecked()
@@ -343,7 +343,7 @@ impl<'buf> Packet<'buf> {
 
     /// Returns a mutable reference to the packet metadata.
     pub fn metadata_mut(&mut self) -> &mut PacketMetadata {
-        let opt = PacketMetadata::mut_from(&mut self.buf[..size_of::<PacketMetadata>()]);
+        let opt = PacketMetadata::mut_from_bytes(&mut self.buf[..size_of::<PacketMetadata>()]);
         unsafe {
             // SAFETY: we know this fits in PACKET_BUFFER_SIZE
             opt.unwrap_unchecked()
@@ -367,7 +367,7 @@ impl<'buf> Packet<'buf> {
     /// Returns mutable references to both the packet metadata and body.
     pub fn metadata_mut_and_body_mut(&mut self) -> (&mut PacketMetadata, &mut [u8]) {
         let (md, bd) = self.buf.split_at_mut(size_of::<PacketMetadata>());
-        let opt = PacketMetadata::mut_from(md);
+        let opt = PacketMetadata::mut_from_bytes(md);
         let md = unsafe {
             // SAFETY: we know this fits in PACKET_BUFFER_SIZE
             opt.unwrap_unchecked()
@@ -397,8 +397,30 @@ impl<'buf> Packet<'buf> {
     /// Extend the start of the packet into available headroom enough to
     /// hold a structure of the given type, and return a reference to the space.
     /// The structure allocated will be zeroed.
-    pub fn alloc_zeroed_header<T: AsBytes + FromBytes + FromZeroes>(&mut self) -> &mut T {
-        T::mut_from(self.alloc_zeroed_headroom(size_of::<T>())).unwrap()
+    pub fn alloc_zeroed_header<T: FromBytes + IntoBytes + KnownLayout + Unaligned>(
+        &mut self,
+    ) -> &mut T {
+        let res = T::mut_from_bytes(self.alloc_zeroed_headroom(size_of::<T>()))
+            .map_err(Into::<SizeError<_, _>>::into);
+        unsafe {
+            // SAFETY: we know we've allocated exactly the right number of bytes
+            res.unwrap_unchecked()
+        }
+    }
+
+    /// Copy the given data as a header into the packet's headroom.
+    /// (Avoids needlessly zeroing the allocated headroom.)
+    pub fn push_header<T: IntoBytes + Immutable>(&mut self, header: &T) {
+        let cnt = size_of::<T>();
+        assert!(cnt <= self.headroom_available());
+        let md = self.metadata_mut();
+        md.offset -= cnt;
+        md.len += cnt;
+        let res = header.write_to_prefix(&mut self.body_mut()[..cnt]);
+        unsafe {
+            // SAFETY: we know we've allocated exactly the right number of bytes
+            res.unwrap_unchecked()
+        };
     }
 
     /// Shrink the packet by `cnt` bytes (removing data from the tail).
@@ -412,7 +434,7 @@ impl<'buf> Packet<'buf> {
     /// Ideally this is a high-entropy value useful for load balancing.
     /// Must be cheap to query.
     pub fn flowhash(&self) -> u32 {
-        self.metadata().flow_id
+        self.metadata().ingress_stream_id
     }
 
     pub fn dump_packet_buffer(
@@ -589,10 +611,13 @@ mod tests {
         buf[offset..offset + 8].copy_from_slice(data);
         let mut pkt =
             Packet::new_with_existing_data(&mut buf, PACKET_BUFFER_MIN_BODY_OFFSET + 123, 8);
-        pkt.metadata_mut().flow_id = 100;
+        pkt.metadata_mut().ingress_stream_id = 100;
         let mut buf2 = [0u8; config::PACKET_BUFFER_SIZE];
         let pkt2 = pkt.clone_into_with_headroom(&mut buf2, 456);
-        assert_eq!(pkt.metadata().flow_id, pkt2.metadata().flow_id);
+        assert_eq!(
+            pkt.metadata().ingress_stream_id,
+            pkt2.metadata().ingress_stream_id
+        );
         assert_eq!(*pkt.body(), *pkt2.body());
     }
 

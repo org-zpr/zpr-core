@@ -7,6 +7,8 @@ pub trait BufExt {
         &'a mut self,
         dst: &'b mut [MaybeUninit<u8>],
     ) -> &'b mut [u8];
+
+    fn get_array<const N: usize>(&mut self) -> [u8; N];
 }
 
 impl<T: Buf> BufExt for T {
@@ -18,5 +20,11 @@ impl<T: Buf> BufExt for T {
         let slice = unsafe { crate::std::mem::slice_assume_init_mut(dst) };
         self.copy_to_slice(slice);
         slice
+    }
+
+    fn get_array<const N: usize>(&mut self) -> [u8; N] {
+        let mut ret = [0u8; N];
+        self.copy_to_slice(&mut ret);
+        ret
     }
 }

@@ -24,7 +24,7 @@ use std::fs;
 use std::path::Path;
 use tracing::error;
 use zerocopy::byteorder::network_endian::*;
-use zerocopy::{AsBytes, FromBytes, FromZeroes, Unaligned};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 use crate::km_noise::NOISE_KEY_LEN;
 
@@ -61,7 +61,7 @@ impl fmt::Debug for ParseError {
     }
 }
 
-#[derive(FromZeroes, FromBytes, AsBytes, Unaligned)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 struct CertExchgHdr {
     pub cert_len: U16,
@@ -70,6 +70,7 @@ struct CertExchgHdr {
 
 /// The Certificate Exchange object holds the local certificate (which includes the noise public key)
 /// and the certificate for our trusted signing authority.
+#[derive(Clone)]
 pub struct KmCertExchange {
     local_cert: X509,
     authority_cert: X509,
@@ -159,8 +160,8 @@ impl KmCertExchange {
             return Err(CertExchangeError::ShortPayloadError);
         }
         let msg = match CertExchgHdr::ref_from_prefix(&payload) {
-            Some(k) => k,
-            None => {
+            Ok((k, _)) => k,
+            Err(_) => {
                 return Err(CertExchangeError::InvalidPayloadError);
             }
         };
