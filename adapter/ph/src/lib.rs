@@ -30,6 +30,7 @@ pub mod peer_table;
 pub mod queues;
 pub mod rcu;
 pub mod rpc_worker;
+pub mod signal_worker;
 pub mod substrate_ingress_worker;
 pub mod sync_req;
 pub mod test_packet;

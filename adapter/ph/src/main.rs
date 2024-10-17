@@ -11,7 +11,6 @@ use std::path::Path;
 use std::process::ExitCode;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
-use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio_tun::TunBuilder;
@@ -49,6 +48,7 @@ mod peer_table;
 mod queues;
 mod rcu;
 mod rpc_worker;
+mod signal_worker;
 mod substrate_ingress_worker;
 mod sync_req;
 mod test_packet;
@@ -63,7 +63,6 @@ mod km_testdata;
 use assembly::{Assembly, PhFlags, PhMode};
 use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
-use counters::*;
 use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
@@ -108,13 +107,6 @@ struct Config {
 
     #[arg(long)]
     debug: bool,
-}
-
-fn emit_counts(system_name: &String, counters: &Counters) {
-    println!("\n*** {} Counters ***", system_name);
-    for (key, ref value) in counters {
-        println!("{}: {}", key, value.get_count());
-    }
 }
 
 fn main() -> ExitCode {
@@ -422,24 +414,10 @@ fn main() -> ExitCode {
 
     let mut js = JoinSet::new();
 
-    let usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
-    let term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
-
-    js.spawn_local(async {
-        loop {
-            tokio::select! {
-                _ = usr1_stream.recv() => emit_counts(&asm.system_name, &asm.counters),
-                _ = term_stream.recv() => {
-                    emit_counts(&asm.system_name, &asm.counters);
-                    std::process::exit(128 + SignalKind::terminate().as_raw_value())
-                }
-            }
-        }
-    });
-
-    js.spawn_local(mgmt_dispatch_worker::launch(&*asm, md_outq));
+    js.spawn_local(signal_worker::launch(asm));
+    js.spawn_local(mgmt_dispatch_worker::launch(asm, md_outq));
     js.spawn_local(adapter_manager_worker::launch(&*asm, am_outq));
-    js.spawn_local(rpc_worker::launch(&*asm, &*control_socket));
+    js.spawn_local(rpc_worker::launch(asm, control_socket));
     if !config.disable_km {
         js.spawn_local(km_multiplexor::launch_signal_worker(&*asm, km_sig_outq));
         js.spawn_local(km_multiplexor::launch_message_worker(&*asm, km_outq));
