@@ -50,6 +50,7 @@ pub enum PhMode {
 pub struct Assembly<'pktbuf> {
     pub flags: PhFlags,
     pub ph_mode: PhMode,
+    pub topology_config: config::TopologyConfig,
 
     // Shared resources.  These may be accessed by any part of the system.
     pub system_name: String, // For debugging use
@@ -205,7 +206,7 @@ impl Assembly<'_> {
 pub mod test {
 
     use super::*;
-    use enum_map::{enum_map, EnumMap};
+    use crate::config::TopologyConfig;
     use tokio::net::UdpSocket;
     use tokio::sync::mpsc;
 
@@ -214,6 +215,7 @@ pub mod test {
     pub struct TestAssemblyBuilder<'a> {
         pub ph_mode: Option<PhMode>,
         pub flags: Option<PhFlags>,
+        pub topology_config: Option<TopologyConfig>,
         pub system_name: Option<String>,
         pub buffer_stack: Option<BufferStack<'a, { config::PACKET_BUFFER_SIZE }>>,
         pub agent_input: Option<AgentInput<'a>>,
@@ -247,8 +249,9 @@ pub mod test {
     }
 
     pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
-        let flags = builder.flags.unwrap_or_else(|| Default::default());
+        let flags = builder.flags.unwrap_or_default();
         let ph_mode = builder.ph_mode.unwrap_or(PhMode::Adapter);
+        let topology_config = builder.topology_config.unwrap_or_default();
         let system_name = builder.system_name.unwrap_or("test".into());
         let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
             let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 0];
@@ -270,14 +273,12 @@ pub mod test {
             .capture_worker
             .unwrap_or_else(|| CaptureWorker::new());
         let flow_control = builder.flow_control.unwrap_or_else(|| FlowControl::new());
-        let counters = builder.counters.unwrap_or_else(|| {
-            enum_map! { _ => Counter::new(), }
-        });
+        let counters = builder.counters.unwrap_or_default();
         let tun_ctl = builder.tun_ctl.unwrap_or_else(|| Box::new(DummyTunCtlImpl));
         let peer_table = builder
             .peer_table
             .unwrap_or_else(|| peer_table::PeerTable::new());
-        let peer_ids = std::sync::Mutex::new(builder.peer_ids.unwrap_or(Vec::new()));
+        let peer_ids = std::sync::Mutex::new(builder.peer_ids.unwrap_or_default());
         let alt = builder
             .alt
             .unwrap_or_else(|| adapter_tables::AgentLookupTable::new());
@@ -301,6 +302,7 @@ pub mod test {
         Assembly {
             flags,
             ph_mode,
+            topology_config,
             system_name,
             buffer_stack,
             agent_input,

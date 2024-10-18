@@ -310,6 +310,7 @@ fn main() -> ExitCode {
     let asm = Box::leak(Box::new(Assembly {
         flags,
         ph_mode,
+        topology_config,
         system_name: config.name,
         buffer_stack: BufferStack::new(buf_storage.leak::<'static>()),
         agent_input: AgentInput::new(tun_devs.iter()),
@@ -375,7 +376,7 @@ fn main() -> ExitCode {
         js.spawn(agent_output_worker::launch(
             &agent_output_worker::Config {
                 worker_index,
-                batch_size: topology_config.agent_output_batch_size,
+                batch_size: asm.topology_config.agent_output_batch_size,
             },
             &*asm,
             tun_dev,
@@ -386,7 +387,7 @@ fn main() -> ExitCode {
         js.spawn(substrate_ingress_worker::launch(
             &substrate_ingress_worker::Config {
                 worker_index,
-                batch_size: topology_config.substrate_ingress_batch_size,
+                batch_size: asm.topology_config.substrate_ingress_batch_size,
             },
             &*asm,
             socket,
@@ -395,7 +396,7 @@ fn main() -> ExitCode {
 
     js.spawn(capture_worker::launch(
         &capture_worker::Config {
-            batch_size: topology_config.capture_batch_size,
+            batch_size: asm.topology_config.capture_batch_size,
         },
         &*asm,
         cap_outq,

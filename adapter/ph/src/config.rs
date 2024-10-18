@@ -33,6 +33,7 @@ pub struct TopologyConfig {
     pub adapter_manager_queue_size: usize,
     pub km_signal_queue_size: usize,
     pub km_message_queue_size: usize,
+    pub km_link_queue_size: usize,
 }
 
 impl Default for TopologyConfig {
@@ -52,6 +53,7 @@ impl Default for TopologyConfig {
             adapter_manager_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
             km_signal_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
             km_message_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
+            km_link_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
         }
     }
 }
