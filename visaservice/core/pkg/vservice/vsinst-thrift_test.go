@@ -3,9 +3,6 @@ package vservice_test
 import (
 	"bytes"
 	"context"
-	"crypto"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/binary"
 	"net/netip"
@@ -24,6 +21,44 @@ import (
 
 	"zpr.org/vsx/snio/zds"
 )
+
+// This authority cert signed the `nodeNoiseCert` below, but
+// not the `testCert`.
+const caCert = `-----BEGIN CERTIFICATE-----
+MIIDHjCCAgagAwIBAgIUZmqseCk0yvfYsSuno6obs5J5SwAwDQYJKoZIhvcNAQEL
+BQAwGDEWMBQGA1UEAwwNYXV0aG9yaXR5LnpwcjAeFw0yNDEwMDMxODExNTVaFw0z
+MjEyMjAxODExNTVaMBgxFjAUBgNVBAMMDWF1dGhvcml0eS56cHIwggEiMA0GCSqG
+SIb3DQEBAQUAA4IBDwAwggEKAoIBAQCVUeqWTv6rAqVnTsCTez4U6oWSeWIWQIV2
+ePEYTWGMhCkA95jooowipxyvzw/s8xDvPvZVEqo2I2Y7DavgSk0djXyfWr2JNlzF
+IoZ0tx00kKJB74jDG38zQyqhC5C5Qb5jzJEF0S98qCUcFFiHtErdxa7tKi9AZRBv
+8MW0j7VRfrC0wGiaCewOJI1kzdVEtXWNBXBBRLvDmY/u40jpeQ3qrjF0ADLOdg2w
+idbxDxNK6lUbbZ/w0EA/VvFOLknl2wbx+0tAqExekpUggA/es4PbdSBqC8uo+b93
+s2Q3VSIPIsD/d2CDB9eHRayHlE0TNOVF0qgFlOlemmd0CvwOUWF5AgMBAAGjYDBe
+MB0GA1UdDgQWBBREqP/S3VYrojelr2Vea01E8+kItDAfBgNVHSMEGDAWgBREqP/S
+3VYrojelr2Vea01E8+kItDAPBgNVHRMBAf8EBTADAQH/MAsGA1UdDwQEAwIBBjAN
+BgkqhkiG9w0BAQsFAAOCAQEAWNR2Awbn2SibaoPdyGDoDbqK2A/DCiulr4Fk0599
+F74Nitt4teil5yOvplaVCrPdgyzPZlrUZXcY4ubZt7VYmL8R2Sn65/VgiOugPGoX
+bkdD2nImKhvyCg/5evQ7KgIdonslBc4+BPJidBDkzAOtstbrMZ4lp6ktL7lwKeoG
+6uo1lqJ1SoM3JkAizYrzFp6F35OXnQ8giULhYd0GOlmu4LZH1dLfCXz0jGZS8Mxu
+fmINTxbSu3f6+zSkcSmun/61Qc7VcBGYcIo1U4gXuvpx9PRrorRvpXBoDYVRe4kx
+MjsQAKGjSiTv9RSRX9mBhsg49YeS/JMXEkWZO+S/Wjuw8A==
+-----END CERTIFICATE-----`
+
+const nodeNoiseCert = `
+-----BEGIN CERTIFICATE-----
+MIICETCB+qADAgECAhRmhbwsq9blyxg3Xv5jTvvsJu9/GzANBgkqhkiG9w0BAQsF
+ADAYMRYwFAYDVQQDDA1hdXRob3JpdHkuenByMB4XDTI0MTAwMzE5NTQxN1oXDTI1
+MTAwMzE5NTQxN1owFzEVMBMGA1UEAwwMbm9kZS56cHIub3JnMCowBQYDK2VuAyEA
+GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0yjTzBNMAsGA1UdDwQEAwID
+CDAdBgNVHQ4EFgQUC/Iy9kW1XLoVaA2HYBKqeuiTWNYwHwYDVR0jBBgwFoAURKj/
+0t1WK6I3pa9lXmtNRPPpCLQwDQYJKoZIhvcNAQELBQADggEBAG8UlDbtKi6HBLxD
+CRgc9LEo80oN0xNme3f/4CMVHOIQnCSVRdgJs4ZhsAnC0rAYam114xeHScb33Irh
+nAGd5LdH+X1HpybgS68j9LLfv+waPtSu4EqITOpFKjyOOPhsU0xbHiv2jATcSaQQ
+/+n6LMti5MIJyLdiKEwwoPpCRNOBcpELtvrqZKui3sOeauXHcf4hxMcfvcwlypqj
+IbgoFcYvTXzozxPIxzpnN+sCFi1FrEI+1ficUQy1Y9q0XM5zv0IF7htI3BE8eu6z
+vyUd02GeTskiSa4qzRVh0qG2tcj/FyepN82qII6Lt7xoWEa005T3aaFOcSD2tzzn
+s5JVZ48=
+-----END CERTIFICATE-----`
 
 const testCert = `-----BEGIN CERTIFICATE-----
 MIIEWzCCA0OgAwIBAgIJAMSVUe6Pd/Z7MA0GCSqGSIb3DQEBBQUAMIGGMQswCQYD
@@ -85,6 +120,8 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 
 func initVisaservice(t *testing.T) *vservice.VSInst {
 	alog := logr.NewTestLogger()
+	authcert, err := snauth.LoadCertFromPEMBuffer([]byte(caCert))
+	require.Nil(t, err)
 	vc := &vservice.VSIConfig{
 		Log:                   alog,
 		CN:                    "vs.zpr.org",
@@ -92,6 +129,7 @@ func initVisaservice(t *testing.T) *vservice.VSInst {
 		HopCount:              99,
 		AllowInvalidPeerAddr:  true,
 		BootstrapAuthDuration: 1 * time.Hour,
+		AuthorityCert:         authcert,
 	}
 	svc, err := vservice.NewVSInst(vc)
 	require.Nil(t, err)
@@ -111,11 +149,15 @@ func TestThriftHello(t *testing.T) {
 	require.Equal(t, 32, len(resp.Challenge.ChallengeData))
 }
 
-func TestThriftRegister(t *testing.T) {
-	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
-	require.Nil(t, err)
-	rng := rand.Reader
+func createMilestone2HMAC(nonce []byte, sid int32, timestamp int64) [32]byte {
+	var msg bytes.Buffer
+	msg.Write(nonce)
+	binary.Write(&msg, binary.BigEndian, uint64(timestamp))
+	binary.Write(&msg, binary.BigEndian, sid)
+	return sha256.Sum256(msg.Bytes())
+}
 
+func TestThriftRegister(t *testing.T) {
 	svc := initVisaservice(t)
 
 	helloResp, err := svc.Hello(context.Background())
@@ -123,18 +165,9 @@ func TestThriftRegister(t *testing.T) {
 		t.Fatalf("Hello failed: %v", err)
 	}
 
-	// create HMAC(nonce + timestamp + session_id)
-
-	var buf bytes.Buffer
-
 	timestamp := time.Now().Unix()
 
-	buf.Write(helloResp.Challenge.ChallengeData)
-	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
-	binary.Write(&buf, binary.BigEndian, helloResp.SessionID)
-	hashed := sha256.Sum256(buf.Bytes())
-	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
-	require.Nil(t, err)
+	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, helloResp.SessionID, timestamp)
 
 	agnt := &vsapi.Agent{
 		AgentType:   vsapi.AgentType_NODE,
@@ -149,8 +182,8 @@ func TestThriftRegister(t *testing.T) {
 		SessionID: helloResp.SessionID,
 		Challenge: helloResp.Challenge,
 		Timestamp: timestamp,
-		NodeCert:  []byte(testCert),
-		Hmac:      sig,
+		NodeCert:  []byte(nodeNoiseCert),
+		Hmac:      sig[:],
 		NodeAgent: agnt,
 	}
 
@@ -187,7 +220,7 @@ func TestThriftRegisterNullChallenge(t *testing.T) {
 		SessionID: helloResp.SessionID,
 		Challenge: nil,
 		Timestamp: timestamp,
-		NodeCert:  []byte(testCert),
+		NodeCert:  []byte(nodeNoiseCert),
 		Hmac:      []byte("foo"),
 		NodeAgent: agnt,
 	}
@@ -197,10 +230,6 @@ func TestThriftRegisterNullChallenge(t *testing.T) {
 }
 
 func TestThriftRegisterNoFakeHello(t *testing.T) {
-	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
-	require.Nil(t, err)
-	rng := rand.Reader
-
 	svc := initVisaservice(t)
 
 	fakeHelloResp := new(vsapi.HelloResponse)
@@ -214,17 +243,8 @@ func TestThriftRegisterNoFakeHello(t *testing.T) {
 	}
 
 	// create HMAC(nonce + timestamp + session_id)
-
-	var buf bytes.Buffer
-
 	timestamp := time.Now().Unix()
-
-	buf.Write(fakeHelloResp.Challenge.ChallengeData)
-	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
-	binary.Write(&buf, binary.BigEndian, fakeHelloResp.SessionID)
-	hashed := sha256.Sum256(buf.Bytes())
-	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
-	require.Nil(t, err)
+	sig := createMilestone2HMAC(fakeHelloResp.Challenge.ChallengeData, fakeHelloResp.SessionID, timestamp)
 
 	agnt := &vsapi.Agent{
 		AgentType:   vsapi.AgentType_NODE,
@@ -239,20 +259,16 @@ func TestThriftRegisterNoFakeHello(t *testing.T) {
 		SessionID: fakeHelloResp.SessionID,
 		Challenge: fakeHelloResp.Challenge,
 		Timestamp: timestamp,
-		NodeCert:  []byte(testCert),
-		Hmac:      sig,
+		NodeCert:  []byte(nodeNoiseCert),
+		Hmac:      sig[:],
 		NodeAgent: agnt,
 	}
 
-	_, err = svc.Authenticate(context.Background(), authReq)
+	_, err := svc.Authenticate(context.Background(), authReq)
 	require.ErrorContains(t, err, "invalid session ID")
 }
 
 func TestThriftRegisterInvalidSig(t *testing.T) {
-	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
-	require.Nil(t, err)
-	rng := rand.Reader
-
 	svc := initVisaservice(t)
 
 	helloResp, err := svc.Hello(context.Background())
@@ -260,15 +276,10 @@ func TestThriftRegisterInvalidSig(t *testing.T) {
 		t.Fatalf("Hello failed: %v", err)
 	}
 
-	var buf bytes.Buffer
-
 	timestamp := time.Now().Unix()
 
-	buf.Write(helloResp.Challenge.ChallengeData)
-	// Fail to add in the other data... so sig will not match
-	hashed := sha256.Sum256(buf.Bytes())
-	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
-	require.Nil(t, err)
+	// bad session id
+	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, 1679, timestamp)
 
 	agnt := &vsapi.Agent{
 		AgentType:   vsapi.AgentType_NODE,
@@ -283,8 +294,8 @@ func TestThriftRegisterInvalidSig(t *testing.T) {
 		SessionID: helloResp.SessionID,
 		Challenge: helloResp.Challenge,
 		Timestamp: timestamp,
-		NodeCert:  []byte(testCert),
-		Hmac:      sig,
+		NodeCert:  []byte(nodeNoiseCert),
+		Hmac:      sig[:],
 		NodeAgent: agnt,
 	}
 
@@ -293,36 +304,22 @@ func TestThriftRegisterInvalidSig(t *testing.T) {
 }
 
 func TestThriftRegisterNullAgent(t *testing.T) {
-	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
-	require.Nil(t, err)
-	rng := rand.Reader
-
 	svc := initVisaservice(t)
 
 	helloResp, err := svc.Hello(context.Background())
 	if err != nil {
 		t.Fatalf("Hello failed: %v", err)
 	}
-
-	// create HMAC(nonce + timestamp + session_id)
-
-	var buf bytes.Buffer
-
 	timestamp := time.Now().Unix()
-
-	buf.Write(helloResp.Challenge.ChallengeData)
-	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
-	binary.Write(&buf, binary.BigEndian, helloResp.SessionID)
-	hashed := sha256.Sum256(buf.Bytes())
-	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
-	require.Nil(t, err)
+	// create HMAC(nonce + timestamp + session_id)
+	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, helloResp.SessionID, timestamp)
 
 	authReq := &vsapi.NodeAuthRequest{
 		SessionID: helloResp.SessionID,
 		Challenge: helloResp.Challenge,
 		Timestamp: timestamp,
-		NodeCert:  []byte(testCert),
-		Hmac:      sig,
+		NodeCert:  []byte(nodeNoiseCert),
+		Hmac:      sig[:],
 	}
 
 	_, err = svc.Authenticate(context.Background(), authReq)
@@ -338,10 +335,6 @@ func TestThriftDeRegisterNoKeyNoCrash(t *testing.T) {
 }
 
 func TestThriftPollRespectKey(t *testing.T) {
-	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
-	require.Nil(t, err)
-	rng := rand.Reader
-
 	svc := initVisaservice(t)
 
 	helloResp, err := svc.Hello(context.Background())
@@ -350,17 +343,8 @@ func TestThriftPollRespectKey(t *testing.T) {
 	}
 
 	// create HMAC(nonce + timestamp + session_id)
-
-	var buf bytes.Buffer
-
 	timestamp := time.Now().Unix()
-
-	buf.Write(helloResp.Challenge.ChallengeData)
-	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
-	binary.Write(&buf, binary.BigEndian, helloResp.SessionID)
-	hashed := sha256.Sum256(buf.Bytes())
-	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
-	require.Nil(t, err)
+	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, helloResp.SessionID, timestamp)
 
 	agnt := &vsapi.Agent{
 		AgentType:   vsapi.AgentType_NODE,
@@ -375,8 +359,8 @@ func TestThriftPollRespectKey(t *testing.T) {
 		SessionID: helloResp.SessionID,
 		Challenge: helloResp.Challenge,
 		Timestamp: timestamp,
-		NodeCert:  []byte(testCert),
-		Hmac:      sig,
+		NodeCert:  []byte(nodeNoiseCert),
+		Hmac:      sig[:],
 		NodeAgent: agnt,
 	}
 
@@ -409,10 +393,6 @@ func TestThriftPollRespectKey(t *testing.T) {
 }
 
 func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
-	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
-	require.Nil(t, err)
-	rng := rand.Reader
-
 	svc := initVisaservice(t)
 
 	helloResp, err := svc.Hello(context.Background())
@@ -421,17 +401,8 @@ func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 	}
 
 	// create HMAC(nonce + timestamp + session_id)
-
-	var buf bytes.Buffer
-
 	timestamp := time.Now().Unix()
-
-	buf.Write(helloResp.Challenge.ChallengeData)
-	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
-	binary.Write(&buf, binary.BigEndian, helloResp.SessionID)
-	hashed := sha256.Sum256(buf.Bytes())
-	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
-	require.Nil(t, err)
+	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, helloResp.SessionID, timestamp)
 
 	nodeAddr := netip.MustParseAddr("fc00:3001::8")
 	dockAddr := netip.MustParseAddr("fc00:3001::8")
@@ -449,8 +420,8 @@ func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 		SessionID: helloResp.SessionID,
 		Challenge: helloResp.Challenge,
 		Timestamp: timestamp,
-		NodeCert:  []byte(testCert),
-		Hmac:      sig,
+		NodeCert:  []byte(nodeNoiseCert),
+		Hmac:      sig[:],
 		NodeAgent: agnt,
 	}
 
@@ -489,10 +460,6 @@ func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 // there is no policy installed so the visa service does not know who
 // to ask.
 func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
-	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
-	require.Nil(t, err)
-	rng := rand.Reader
-
 	svc := initVisaservice(t)
 
 	helloResp, err := svc.Hello(context.Background())
@@ -501,17 +468,8 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	}
 
 	// create HMAC(nonce + timestamp + session_id)
-
-	var buf bytes.Buffer
-
 	timestamp := time.Now().Unix()
-
-	buf.Write(helloResp.Challenge.ChallengeData)
-	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
-	binary.Write(&buf, binary.BigEndian, helloResp.SessionID)
-	hashed := sha256.Sum256(buf.Bytes())
-	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
-	require.Nil(t, err)
+	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, helloResp.SessionID, timestamp)
 
 	nodeAddr := netip.MustParseAddr("fc00:3001::8")
 	dockAddr := netip.MustParseAddr("fc00:3001::8")
@@ -529,8 +487,8 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 		SessionID: helloResp.SessionID,
 		Challenge: helloResp.Challenge,
 		Timestamp: timestamp,
-		NodeCert:  []byte(testCert),
-		Hmac:      sig,
+		NodeCert:  []byte(nodeNoiseCert),
+		Hmac:      sig[:],
 		NodeAgent: agnt,
 	}
 
@@ -589,9 +547,6 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 
 // Obviously you can't get a visa without a policy.
 func TestThriftRequestVisaNoPolicy(t *testing.T) {
-	privateKey, err := snauth.LoadRSAKeyFromPEM([]byte(testPrivakeKey))
-	require.Nil(t, err)
-	rng := rand.Reader
 
 	svc := initVisaservice(t)
 
@@ -601,17 +556,8 @@ func TestThriftRequestVisaNoPolicy(t *testing.T) {
 	}
 
 	// create HMAC(nonce + timestamp + session_id)
-
-	var buf bytes.Buffer
-
 	timestamp := time.Now().Unix()
-
-	buf.Write(helloResp.Challenge.ChallengeData)
-	binary.Write(&buf, binary.BigEndian, uint64(timestamp))
-	binary.Write(&buf, binary.BigEndian, helloResp.SessionID)
-	hashed := sha256.Sum256(buf.Bytes())
-	sig, err := rsa.SignPKCS1v15(rng, privateKey, crypto.SHA256, hashed[:])
-	require.Nil(t, err)
+	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, helloResp.SessionID, timestamp)
 
 	nodeZprAddr := netip.MustParseAddr("fc00:3001::8")
 	nodeTetherAddr := nodeZprAddr
@@ -629,8 +575,8 @@ func TestThriftRequestVisaNoPolicy(t *testing.T) {
 		SessionID: helloResp.SessionID,
 		Challenge: helloResp.Challenge,
 		Timestamp: timestamp,
-		NodeCert:  []byte(testCert),
-		Hmac:      sig,
+		NodeCert:  []byte(nodeNoiseCert),
+		Hmac:      sig[:],
 		NodeAgent: agnt,
 	}
 

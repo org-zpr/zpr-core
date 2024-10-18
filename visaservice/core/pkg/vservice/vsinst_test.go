@@ -16,6 +16,7 @@ import (
 	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vs/pkg/vservice"
 	"zpr.org/vs/pkg/vservice/auth"
@@ -115,6 +116,8 @@ func (ts *TestAS) AddDatasourceProvider(_ string, _ netip.Addr, _ uint64) error 
 
 func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 	// Minimal config:
+	authcert, err := snauth.LoadCertFromPEMBuffer([]byte(caCert))
+	require.Nil(t, err)
 	return &vservice.VSIConfig{
 		Log:                   alog,
 		CN:                    "vs.zpr.org",
@@ -122,6 +125,7 @@ func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 		HopCount:              hopcount,
 		AllowInvalidPeerAddr:  true,
 		BootstrapAuthDuration: 1 * time.Hour,
+		AuthorityCert:         authcert,
 	}
 }
 

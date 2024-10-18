@@ -194,7 +194,10 @@ func (suite *VSRunnerSuite) TestAdminListPolicy() {
 
 	serverCreds := &tls.Config{Certificates: []tls.Certificate{cer}}
 
-	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, 1*time.Hour, alog)
+	authorityCert, err := snauth.LoadCertFromPEMBuffer([]byte(caCert))
+	require.Nil(t, err)
+
+	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, 1*time.Hour, authorityCert, alog)
 	require.Nil(t, err)
 	suite.svc = svc
 
@@ -250,7 +253,10 @@ func (suite *VSRunnerSuite) TestGetCurrentPolicy() {
 
 	serverCreds := &tls.Config{Certificates: []tls.Certificate{cer}}
 
-	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, 1*time.Hour, alog)
+	authorityCert, err := snauth.LoadCertFromPEMBuffer([]byte(caCert))
+	require.Nil(t, err)
+
+	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, 1*time.Hour, authorityCert, alog)
 	require.Nil(t, err)
 	suite.svc = svc
 
@@ -322,7 +328,10 @@ func (suite *VSRunnerSuite) TestInstallPolicy() {
 
 	serverCreds := &tls.Config{Certificates: []tls.Certificate{cer}}
 
-	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, 1*time.Hour, alog)
+	authorityCert, err := snauth.LoadCertFromPEMBuffer([]byte(caCert))
+	require.Nil(t, err)
+
+	svc, err := vservice.NewVisaService(policyFileName, "cn_missing", privateKey, serverCreds, 1*time.Hour, 1*time.Hour, authorityCert, alog)
 	require.Nil(t, err)
 	suite.svc = svc
 

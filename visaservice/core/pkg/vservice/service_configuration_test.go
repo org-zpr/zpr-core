@@ -6,41 +6,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vsx/zpl/compiler"
-	"zpr.org/vsx/zpl/fs"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
 )
-
-/*
-const ca0cert = `
------BEGIN CERTIFICATE-----
-MIIEHTCCAwWgAwIBAgIUewwSCpOmNA0WLX+ZyVL5zf18RCEwDQYJKoZIhvcNAQEL
-BQAwgZ0xCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJNQTEPMA0GA1UEBwwGQm9zdG9u
-MRAwDgYDVQQKDAdTVVJFTkVUMRUwEwYDVQQLDAxDZXJ0aWZpY2F0ZXMxJzAlBgNV
-BAMMHnRlc3RuZXQtcm9vdC1jYS5zcGFjZWxhc2VyLm5ldDEeMBwGCSqGSIb3DQEJ
-ARYPcm9vdC1jYUBzdXJlbmV0MB4XDTIwMDUwNzE5NTIyMVoXDTI1MDUwNjE5NTIy
-MVowgZ0xCzAJBgNVBAYTAlVTMQswCQYDVQQIDAJNQTEPMA0GA1UEBwwGQm9zdG9u
-MRAwDgYDVQQKDAdTVVJFTkVUMRUwEwYDVQQLDAxDZXJ0aWZpY2F0ZXMxJzAlBgNV
-BAMMHnRlc3RuZXQtcm9vdC1jYS5zcGFjZWxhc2VyLm5ldDEeMBwGCSqGSIb3DQEJ
-ARYPcm9vdC1jYUBzdXJlbmV0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKC
-AQEAx3sFKZdvvE7P37WWvUeBwGCKi/Z8szy7eX84u9kK3o7SpZ4LQB96Z9av8fb4
-g083prfVqd6IjzaM0SrC8n+QpsSsGxinMTPPDG0PBHcRhdPwUeKfRCKrpUtx9X1z
-7EKwr7Q8QA7xyPXX2UTDaEb0gM/garD1oOfmcbZpzyp0E5RLYqBBccP+1S6NWO0p
-61J9ZZUIOPy2usPT6Npo+0uTuBsN/6e8s0YKb59WKHNPsizyTYN81j0/JlA0Z262
-J8/RL/C9h9bwwMQX7OOfkDPyn4FW7CyxHmpZ3DHTNGXhNNLMs0DWbLlcAwsCIqz2
-MElbNdnbJ+v0FY9HnRVqo6DgoQIDAQABo1MwUTAdBgNVHQ4EFgQU4R/rOzDGggMg
-CK8J/uY8P+Qt0SMwHwYDVR0jBBgwFoAU4R/rOzDGggMgCK8J/uY8P+Qt0SMwDwYD
-VR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAFyiQ/Ev/IIF9Z/hkf8uN
-vVa5hv7oBfJPmiVLWp2TwFD0A/sV5DTxjTEkkBpBzCSHYh/8eQfnwipz3VfdfFhd
-+BzNzVazuMlMpp5ULSLHuOWGB0NXwDYTLjDalPCp2OAHhDDvSJZQvZUWe+Q/i7j3
-jpXLbb8PDyz54iZMxc2eC0i1FWETLYEb82dSwiOcJgwvnaQmzQrV/cs/yzqHhYNG
-VmH5KdzmEnjGOW26yuYBEEMKMHNQDyvV/l6hg4ICjFu9NDz5+4BHiK5LeYmcAKDB
-5V+MXCHvw4yhaPTFAdgQ827SFmrkWAf8lMkqFDwO1UxFRffi8Y9YaOY7GY0P5WMb
-Kw==
------END CERTIFICATE-----
-`
-*/
 
 const policySimple1 = `
 zpl_format: 2
@@ -130,7 +100,7 @@ zpr:
       interfaces:
         i0:
           netaddr: "n2.spacelaser.net:5000"
-           
+
   visaservice:
     dock: n0
     provider:
@@ -186,7 +156,7 @@ zpr:
              duration: 90s
 
   visaservice:
-    provider: 
+    provider:
       - [ca0.foo, eq, fox]
     admin_attrs:
       - [ca0.foo, eq, fee]

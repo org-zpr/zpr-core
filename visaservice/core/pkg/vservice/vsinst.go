@@ -138,6 +138,9 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	if vcf.CN == "" {
 		return nil, fmt.Errorf("visa service CN must be set")
 	}
+	if vcf.AuthorityCert == nil {
+		return nil, fmt.Errorf("authority certificate must be set")
+	}
 
 	vs := &VSInst{
 		log:                   vcf.Log,

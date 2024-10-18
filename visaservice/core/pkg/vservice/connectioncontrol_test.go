@@ -10,6 +10,7 @@ import (
 
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vsapi"
 	"zpr.org/vsx/zpl/compiler"
 	"zpr.org/vsx/zpl/fs"
@@ -81,7 +82,8 @@ const AuthAttrExtOpenID = "ext:openid"
 
 func makeVSWithPolicy(t *testing.T, pyaml string) (*vservice.VSInst, *policy.Policy) {
 	llog := logr.NewTestLogger()
-
+	authcert, err := snauth.LoadCertFromPEMBuffer([]byte(caCert))
+	require.Nil(t, err)
 	// Minimal config:
 	vc := vservice.VSIConfig{
 		CN:                    "vs.zpr.org",
@@ -89,6 +91,7 @@ func makeVSWithPolicy(t *testing.T, pyaml string) (*vservice.VSInst, *policy.Pol
 		Log:                   llog,
 		HopCount:              uint(99),
 		BootstrapAuthDuration: 1 * time.Hour,
+		AuthorityCert:         authcert,
 	}
 
 	// TODO: This initializer is insane. Too hard to test, need to refactor.
