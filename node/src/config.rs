@@ -28,7 +28,7 @@ pub struct Configuration {
 
 #[derive(Debug, Clone, Deserialize)]
 struct Creds {
-    ca_certificate: String,  // path to the CA certificate
+    ca_certificate: String,    // path to the CA certificate
     noise_certificate: String, // this nodes signed (noise) certificate file
     noise_private_key: String, // base64 noise private key for this node (not used)
 
@@ -39,7 +39,7 @@ struct Creds {
 #[derive(Debug, Clone, Deserialize)]
 struct Dock {
     enabled: bool,
-    listen_address: String,    // dock listen address, "host:port"
+    listen_address: String, // dock listen address, "host:port"
 }
 
 impl Configuration {
@@ -158,24 +158,24 @@ pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> 
     };
 
     c.node_addr = Some(node_addr);
-    c.creds.noise_private_key_bin = match BASE64_STANDARD.decode(c.creds.noise_private_key.as_bytes())
-    {
-        Ok(v) => match v.try_into() {
-            Ok(a) => a,
-            Err(_) => {
+    c.creds.noise_private_key_bin =
+        match BASE64_STANDARD.decode(c.creds.noise_private_key.as_bytes()) {
+            Ok(v) => match v.try_into() {
+                Ok(a) => a,
+                Err(_) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "noise private key length incorrect",
+                    ));
+                }
+            },
+            Err(e) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "noise private key length incorrect",
+                    format!("failed to decode noise private key from base64: {}", e),
                 ));
             }
-        },
-        Err(e) => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("failed to decode noise private key from base64: {}", e),
-            ));
-        }
-    };
+        };
 
     Ok(c)
 }
@@ -226,14 +226,12 @@ mod test {
 
             [creds]
             ca_certificate = "foo-ca-cert.pem"
-            rsa_certificate = "foo-cert.pem"
-            rsa_private_key = "rsa-key.pem"
+            noise_private_key = "AB2eP6zV7ve0A4eQgNVNXlAM2q0rYerCPXFMl+/ntUw="
+            noise_certificate = "noise-cert.pem"
 
             [dock]
             enabled = false
             listen_address = "0.0.0.0:5000"
-            noise_private_key = "AB2eP6zV7ve0A4eQgNVNXlAM2q0rYerCPXFMl+/ntUw="
-            noise_certificate = "noise-cert.pem"
 
             [claims]
             "zpr.addr" = "fc00:3001::1"
