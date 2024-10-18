@@ -3,32 +3,23 @@ use thrift::transport::{ReadHalf, WriteHalf};
 use thrift::transport::{TFramedReadTransport, TFramedWriteTransport};
 use thrift::transport::{TIoChannel, TTcpChannel};
 
-// Tried to use the rust crypt* crates, but could not figure out how to get an HMAC.
-// And its not clear how to use an RSA private key with the ring crage HMAC.
-use openssl::hash::MessageDigest;
-use openssl::pkey::PKey;
-use openssl::rsa::Rsa;
-use openssl::sign::Signer;
-
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::time::SystemTime;
 
-use crate::vsapi;
-
-use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
 use crate::traffic_parser::TrafficDesc;
+use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
+
+use libnode::m2;
+use libnode::vsapi;
 
 // ugh!!
 type VSClientT = VisaServiceSyncClient<
     TBinaryInputProtocol<TFramedReadTransport<ReadHalf<TTcpChannel>>>,
     TBinaryOutputProtocol<TFramedWriteTransport<WriteHalf<TTcpChannel>>>,
 >;
-
-
-
 
 fn newclient(service: &str) -> thrift::Result<VSClientT> {
     let mut c = TTcpChannel::new();
@@ -67,7 +58,6 @@ pub fn authenticate(
     service: &str,
     claim: Vec<String>,
     cert_file: &str,
-    private_key_file: &str,
     zpr_addr: &IpAddr,
     node_name: &str,
     vss_port: u16,
@@ -112,28 +102,10 @@ pub fn authenticate(
     let mut cert_pem_data = String::new();
     certfile.read_to_string(&mut cert_pem_data)?;
 
-    let mut keyfile = File::open(private_key_file)?;
-    let mut key_pem_data = String::new();
-    keyfile.read_to_string(&mut key_pem_data)?;
-
     let hrchal = hello_response.challenge.unwrap();
     let chal_copy = hrchal.clone(); // we send this one back
 
-    let key = Rsa::private_key_from_pem(key_pem_data.as_bytes()).unwrap();
-    let pkey = PKey::from_rsa(key).unwrap();
-
-    let mut signer = Signer::new(MessageDigest::sha256(), &pkey).unwrap();
-
-    let mut buf = Vec::new();
-    buf.write_all(&hrchal.challenge_data.unwrap()).unwrap();
-
-    signer.update(&buf).unwrap();
-    signer.update(&timestamp.to_be_bytes()).unwrap();
-    signer
-        .update(&hello_response.session_id.unwrap().to_be_bytes())
-        .unwrap();
-
-    let hmac = signer.sign_to_vec().unwrap();
+    let hmac = m2::milestone2_create_hmac(hrchal, hello_response.session_id.unwrap(), timestamp);
 
     let authreq = vsapi::NodeAuthRequest {
         session_id: hello_response.session_id,
@@ -172,8 +144,12 @@ pub fn deregister(service: &str, apikey: &str) -> thrift::Result<()> {
     Ok(())
 }
 
-
-pub fn authorize_connect(service: &str, apikey: &str, node_zpr_addr: &IpAddr, claims: Vec<String>) -> thrift::Result<()> {
+pub fn authorize_connect(
+    service: &str,
+    apikey: &str,
+    node_zpr_addr: &IpAddr,
+    claims: Vec<String>,
+) -> thrift::Result<()> {
     let node_addr_bytes = match node_zpr_addr {
         IpAddr::V4(v4) => v4.octets().to_vec(),
         IpAddr::V6(v6) => v6.octets().to_vec(),
@@ -192,7 +168,9 @@ pub fn authorize_connect(service: &str, apikey: &str, node_zpr_addr: &IpAddr, cl
     //   - "zpr.adapater.cn" set to the CN in the noise certificate presented by the adapter.
     //   - "zpr.addr" the ZPR contact address in use by the adapter.
     if !attrs.contains_key("zpr.adapter.cn") {
-        return Err(thrift::Error::from("missing required claim 'zpr.adapter.cn'"));
+        return Err(thrift::Error::from(
+            "missing required claim 'zpr.adapter.cn'",
+        ));
     }
     if !attrs.contains_key("zpr.addr") {
         return Err(thrift::Error::from("missing required claim 'zpr.addr'"));
@@ -201,7 +179,7 @@ pub fn authorize_connect(service: &str, apikey: &str, node_zpr_addr: &IpAddr, cl
     let cid = rand::random::<u16>() as i32;
 
     // In initial version of this visa service integration we are not using the challenge or challenge-response.
-    let req = vsapi::ConnectRequest{
+    let req = vsapi::ConnectRequest {
         connection_id: Some(cid),
         dock_addr: Some(node_addr_bytes),
         claims: Some(attrs),
@@ -214,7 +192,10 @@ pub fn authorize_connect(service: &str, apikey: &str, node_zpr_addr: &IpAddr, cl
         Ok(resp) => {
             let rid = resp.connection_id.unwrap();
             if rid != cid {
-                println!("authorize_connect response: connection_id mismatch (got {}, expected {})", rid, cid);
+                println!(
+                    "authorize_connect response: connection_id mismatch (got {}, expected {})",
+                    rid, cid
+                );
                 return Ok(());
             }
             println!("authorize_connect response:");
@@ -246,7 +227,6 @@ pub fn authorize_connect(service: &str, apikey: &str, node_zpr_addr: &IpAddr, cl
 
     Ok(())
 }
-
 
 pub fn agent_disconnect(service: &str, apikey: &str, addrstr: &str) -> thrift::Result<()> {
     let addr: IpAddr = addrstr.parse().unwrap();
@@ -286,12 +266,7 @@ pub fn ping(service: &str, apikey: &str) -> thrift::Result<()> {
     Ok(())
 }
 
-pub fn request_visa(
-    service: &str,
-    apikey: &str,
-    traffic: &TrafficDesc,
-) -> thrift::Result<()> {
-
+pub fn request_visa(service: &str, apikey: &str, traffic: &TrafficDesc) -> thrift::Result<()> {
     let l3_type = match traffic.source.is_ipv4() {
         true => 4,
         _ => 6,

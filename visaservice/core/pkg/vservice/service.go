@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -33,10 +34,11 @@ type VisaService struct {
 	bootstrapAuthDuration time.Duration
 
 	keys struct {
-		policyCheckingKey    *rsa.PublicKey  // for checking policy signature
-		adminServiceTLSCreds *tls.Config     // for admin HTTP service
-		visaServiceTLSCreds  *tls.Config     // thrift service TLS
-		tokenSigningKey      *rsa.PrivateKey // for signing JWT tokens
+		policyCheckingKey    *rsa.PublicKey    // for checking policy signature
+		adminServiceTLSCreds *tls.Config       // for admin HTTP service
+		visaServiceTLSCreds  *tls.Config       // thrift service TLS
+		tokenSigningKey      *rsa.PrivateKey   // for signing JWT tokens
+		authorityCert        *x509.Certificate // for checking certififactes from nodes/adapters
 	}
 
 	service struct {
@@ -54,7 +56,14 @@ type VisaService struct {
 // `bootstrapAuthDuration` is used to set the expiration of the self-authentication
 // for the visa serviec agent as well as the initial visas handed to the first
 // connecting node.  This would normally be short (~1hr).
-func NewVisaService(initialPolicyFile string, vs_cn string, privateKey *rsa.PrivateKey, vsServerCreds *tls.Config, bootstrapAuthDuration, maxAuthDuration time.Duration, log logr.Logger) (*VisaService, error) {
+func NewVisaService(initialPolicyFile string,
+	vs_cn string,
+	privateKey *rsa.PrivateKey,
+	vsServerCreds *tls.Config,
+	bootstrapAuthDuration, maxAuthDuration time.Duration,
+	authorityCert *x509.Certificate,
+	log logr.Logger) (*VisaService, error) {
+
 	if _, err := os.Stat(initialPolicyFile); err != nil {
 		return nil, fmt.Errorf("policy file stat error: %w", err)
 	}
@@ -76,6 +85,7 @@ func NewVisaService(initialPolicyFile string, vs_cn string, privateKey *rsa.Priv
 	svc.keys.visaServiceTLSCreds = vsServerCreds
 	svc.keys.policyCheckingKey = privateKey.Public().(*rsa.PublicKey)
 	svc.keys.tokenSigningKey = privateKey
+	svc.keys.authorityCert = authorityCert
 
 	return svc, nil
 }
@@ -119,6 +129,7 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16,
 		Constrainer:              NewDummyConstraintService(),
 		DisableConnectValidation: validationDisabled,
 		BootstrapAuthDuration:    s.bootstrapAuthDuration,
+		AuthorityCert:            s.keys.authorityCert,
 	}
 	vsinst, err := NewVSInst(icfg)
 	if err != nil {

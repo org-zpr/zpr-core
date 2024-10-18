@@ -2,7 +2,10 @@ package snauth
 
 import (
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 )
 
@@ -34,4 +37,12 @@ func TakeNonce(nonce []byte, offset int) ([]byte, error) {
 // NewNonce fill `b` with random bytes.
 func NewNonce(b []byte) {
 	io.ReadFull(rand.Reader, b)
+}
+
+func LoadCertFromPEMBuffer(pemdata []byte) (*x509.Certificate, error) {
+	block, _ := pem.Decode(pemdata)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block found")
+	}
+	return x509.ParseCertificate(block.Bytes)
 }

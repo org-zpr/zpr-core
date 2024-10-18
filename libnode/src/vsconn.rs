@@ -4,11 +4,7 @@
 //! generated client code to communicate with the visa service.
 //!
 
-use openssl::pkey::Private;
-use openssl::rsa::Rsa;
 use std::collections::BTreeMap;
-use std::fmt;
-use std::fmt::Formatter;
 use std::fs::File;
 use std::io::prelude::*;
 use std::net::IpAddr;
@@ -20,46 +16,15 @@ use tokio::time::{self, Duration};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
+use crate::errors::{VSClientError, VSError};
 use crate::vsapi;
-use crate::vscli::{self, VSClientError, VSClientI};
+use crate::vscli::{self, VSClientI};
 use crate::vss::DEFAULT_VSS_PORT;
+
 use ph::zpr;
 
 const PING_INTERVAL: Duration = Duration::from_millis(10000);
 const MAX_PING_ERRORS: u32 = 5;
-
-#[derive(Debug)]
-pub enum VSError {
-    ClientError(VSClientError),
-    IOError(std::io::Error),
-    CertificateError(String),
-    EnqueueError,
-    Disconnect,
-}
-
-impl From<VSClientError> for VSError {
-    fn from(e: VSClientError) -> Self {
-        VSError::ClientError(e)
-    }
-}
-
-impl From<std::io::Error> for VSError {
-    fn from(e: std::io::Error) -> Self {
-        VSError::IOError(e)
-    }
-}
-
-impl fmt::Display for VSError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            VSError::ClientError(e) => write!(f, "ClientError: {}", e),
-            VSError::IOError(e) => write!(f, "IOError: {}", e),
-            VSError::CertificateError(s) => write!(f, "CertificateError: {}", s),
-            VSError::EnqueueError => write!(f, "EnqueueError"),
-            VSError::Disconnect => write!(f, "Disconnect"),
-        }
-    }
-}
 
 #[derive(Debug)]
 pub struct VisaRequest {
@@ -130,7 +95,6 @@ struct Shared {
 
 struct State {
     service_addr: String, // visa service address, format "HOST:PORT"
-    node_private_key: Rsa<Private>,
     node_cert_pem_data: String,
     cmd_tx: Option<mpsc::Sender<VSCommand>>,
     output_tx: Option<mpsc::Sender<VSOutput>>,
@@ -142,7 +106,11 @@ struct State {
 /// Helper function to create a basic node agent. Probably only useful for early versions
 /// of the node.  In the future the node will create it's own agent datastructure and
 /// had it to [VSConn::new].
-pub fn new_node_agent(node_addr: &IpAddr, node_name: &str, claims: &BTreeMap<String, String>) -> vsapi::Agent {
+pub fn new_node_agent(
+    node_addr: &IpAddr,
+    node_name: &str,
+    claims: &BTreeMap<String, String>,
+) -> vsapi::Agent {
     let provides = vec![format!("/zpr/{}", node_name)];
 
     // In prototype, the node zpr address is the same as its tether address. May not be true going forward.
@@ -183,8 +151,7 @@ impl VSConn {
     /// - `node_agent` is the node's Agent representation.  See [new_node_agent] for a helper function to create this.
     /// - `output_tx` is the channel to send output messages to the node.
     /// - `service_addr` is ADDR:PORT of the visa service (ADDR should be a ZPR address)
-    /// - `node_cert_file` is the path to the node's signed RSA certificate file
-    /// - `node_key_file` is the path to the node's private RSA key file
+    /// - `node_cert_file` is the path to the node's signed (for now) EC certificate file
     /// - `node_zpr_addr` node ZPR address (not substrate address) as set by network admin
     /// - `vss_service_addr` optionally override the default listen address for the visa
     ///   support service. If not set, then we will advertise `<NODE_ZPR_ADDR>:<DEFAULT_VSS_PORT>`.
@@ -194,7 +161,6 @@ impl VSConn {
         output_tx: Sender<VSOutput>,
         service_addr: &str,
         node_cert_file: &Path,
-        node_key_file: &Path,
         node_zpr_addr: &IpAddr,
         vss_service_addr: Option<&str>,
     ) -> Result<VSConn, VSError> {
@@ -204,23 +170,6 @@ impl VSConn {
         };
         let mut cert_pem_data = String::new();
         certfile.read_to_string(&mut cert_pem_data)?;
-
-        let mut keyfile = match File::open(node_key_file) {
-            Ok(f) => f,
-            Err(e) => return Err(e.into()),
-        };
-        let mut key_pem_data = String::new();
-        keyfile.read_to_string(&mut key_pem_data)?;
-
-        let private_key = match Rsa::private_key_from_pem(key_pem_data.as_bytes()) {
-            Ok(k) => k,
-            Err(e) => {
-                return Err(VSError::CertificateError(format!(
-                    "failed to parse private RSA key: {:?}",
-                    e
-                )));
-            }
-        };
 
         let vss_addr = match vss_service_addr {
             Some(a) => a.to_string(),
@@ -232,7 +181,6 @@ impl VSConn {
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 service_addr: service_addr.to_string(),
-                node_private_key: private_key,
                 node_cert_pem_data: cert_pem_data,
                 cmd_tx: None,
                 output_tx: Some(output_tx),
@@ -257,18 +205,16 @@ impl VSConn {
         info!("VSConn::initialize starts");
 
         let pem_data: String;
-        let pkey: Rsa<Private>;
         let vss_svc_addr: String;
         let agnt: vsapi::Agent;
         {
             let state = self.shared.state.lock().unwrap();
             pem_data = state.node_cert_pem_data.clone();
-            pkey = state.node_private_key.clone();
             vss_svc_addr = state.vss_service_addr.clone();
             agnt = state.agent.clone();
         }
 
-        let _apikey = match client.authenticate(agnt, &pem_data, pkey, &vss_svc_addr) {
+        let _apikey = match client.authenticate(agnt, &pem_data, &vss_svc_addr) {
             Ok(k) => k,
             Err(e) => return Err(e.into()),
         };
@@ -490,62 +436,19 @@ mod test {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     const CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
-MIIEWzCCA0OgAwIBAgIJAMSVUe6Pd/Z7MA0GCSqGSIb3DQEBBQUAMIGGMQswCQYD
-VQQGEwJVUzELMAkGA1UECAwCS1kxDjAMBgNVBAcMBVZpbGxlMRAwDgYDVQQKDAdz
-dXJlbmV0MRYwFAYDVQQLDA1hdXRob3JpemF0aW9uMRcwFQYDVQQDDA5hdXRoMC5p
-bnRlcm5hbDEXMBUGCSqGSIb3DQEJARYIYXV0aEBmb28wHhcNMjQwNjE4MTQzMjI4
-WhcNMjUwNjE4MTQzMjI4WjBLMQswCQYDVQQGEwJVUzELMAkGA1UECAwCS1kxCzAJ
-BgNVBAoMAllZMQswCQYDVQQLDAJaWjEVMBMGA1UEAwwMdGVzdG5vZGUuenByMIIB
-IjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAk0x4ui48znwmmnbeVrRMXeiz
-DdR2EKbZwsoW/sfePCTa50UJHgA3vPPTGhJTTfjJrVyp2nazpaBuy66h85PQWS2x
-FqstxHVTj0+CF4t+YKUyHFZiF2rLWQonO5R43v489NF9JHKH2SgxKMjTsPpJY8sd
-yFgUTbiD6G8T/j/ZIojBIkQG2wWNpdjqUDnzeaU32MGHV8iigUrpc3xDqw+RWhKP
-kPjoyInoA4tNNrfHrddu61w3FPx6KTN1L8UV9K+BlNW/s3buluYMSi2vW24fjdTn
-F3ev2+w+QUcvWP94/pFRiLEDAO+LO3hxFC16qNU33LMvAo8BdJvPG3GbN2+fIwID
-AQABo4IBBDCCAQAwgaUGA1UdIwSBnTCBmqGBjKSBiTCBhjELMAkGA1UEBhMCVVMx
-CzAJBgNVBAgMAktZMQ4wDAYDVQQHDAVWaWxsZTEQMA4GA1UECgwHc3VyZW5ldDEW
-MBQGA1UECwwNYXV0aG9yaXphdGlvbjEXMBUGA1UEAwwOYXV0aDAuaW50ZXJuYWwx
-FzAVBgkqhkiG9w0BCQEWCGF1dGhAZm9vggkA70drsV9niiUwCQYDVR0TBAIwADAL
-BgNVHQ8EBAMCBPAwHwYDVR0RBBgwFoIUYXV0aDAuc3BhY2VsYXNlci5uZXQwHQYD
-VR0OBBYEFFdtDdU6IP12wNv4YUdyZejdx8EaMA0GCSqGSIb3DQEBBQUAA4IBAQBp
-gM2xMYgo6ntaPTV7xhLmAbwlhoKBt3I+i6KQUU9Ec/3AEiiZsyQxcPHAtmeU4han
-5JpOK3hUYVH/SaSj2BHqkXH0yfFyIkAf0V1UsfWwcD8OEZffb5yP02RzIWCqdBN7
-pdx9gtGwy4l779FNvHGQ8AI4y+cpxwiXyBiXdB3Mv1wG5gUNe4pGk7JWA5lb9XQ9
-sOwVMjkwcUsqGr489gqYRWl1mAMz1D2T+U91HavGybvUBlgb/3+dgjksa/ZWTUhD
-2CRFn7sqmwcPHLoGV/+yCjjuheyx+z7LrPqyqPfWwrr68udK4Yqz8iiqwMC1b8m0
-1Hm6nwN1sHYkYgYgk/Ey
+MIICETCB+qADAgECAhRmhbwsq9blyxg3Xv5jTvvsJu9/GzANBgkqhkiG9w0BAQsF
+ADAYMRYwFAYDVQQDDA1hdXRob3JpdHkuenByMB4XDTI0MTAwMzE5NTQxN1oXDTI1
+MTAwMzE5NTQxN1owFzEVMBMGA1UEAwwMbm9kZS56cHIub3JnMCowBQYDK2VuAyEA
+GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0yjTzBNMAsGA1UdDwQEAwID
+CDAdBgNVHQ4EFgQUC/Iy9kW1XLoVaA2HYBKqeuiTWNYwHwYDVR0jBBgwFoAURKj/
+0t1WK6I3pa9lXmtNRPPpCLQwDQYJKoZIhvcNAQELBQADggEBAG8UlDbtKi6HBLxD
+CRgc9LEo80oN0xNme3f/4CMVHOIQnCSVRdgJs4ZhsAnC0rAYam114xeHScb33Irh
+nAGd5LdH+X1HpybgS68j9LLfv+waPtSu4EqITOpFKjyOOPhsU0xbHiv2jATcSaQQ
+/+n6LMti5MIJyLdiKEwwoPpCRNOBcpELtvrqZKui3sOeauXHcf4hxMcfvcwlypqj
+IbgoFcYvTXzozxPIxzpnN+sCFi1FrEI+1ficUQy1Y9q0XM5zv0IF7htI3BE8eu6z
+vyUd02GeTskiSa4qzRVh0qG2tcj/FyepN82qII6Lt7xoWEa005T3aaFOcSD2tzzn
+s5JVZ48=
 -----END CERTIFICATE-----
-"#;
-
-    const KEY_DATA: &str = r#"
------BEGIN PRIVATE KEY-----
-MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCTTHi6LjzOfCaa
-dt5WtExd6LMN1HYQptnCyhb+x948JNrnRQkeADe889MaElNN+MmtXKnadrOloG7L
-rqHzk9BZLbEWqy3EdVOPT4IXi35gpTIcVmIXastZCic7lHje/jz00X0kcofZKDEo
-yNOw+kljyx3IWBRNuIPobxP+P9kiiMEiRAbbBY2l2OpQOfN5pTfYwYdXyKKBSulz
-fEOrD5FaEo+Q+OjIiegDi002t8et127rXDcU/HopM3UvxRX0r4GU1b+zdu6W5gxK
-La9bbh+N1OcXd6/b7D5BRy9Y/3j+kVGIsQMA74s7eHEULXqo1Tfcsy8CjwF0m88b
-cZs3b58jAgMBAAECggEAQYQ8FqPGTBmQmhfRIUOkzAhazAX6VcHBDhERVVXVFW9X
-JpLgUUXLhPH2rZwFDaNhIQkcS52MnljTrykHw+21OFVIdUrCWqXM+utkc9CJ77bK
-qSwLCVtpAzuu46NQd+8hcctUHEgNAJwN8ZQSBJ/u0MJhhuEWdtNhaJsvi2Ee1WrN
-ZvUkpn6SpCHVvEtZjJZL0elQrgk7EMzWSWz/1a8ORzbmBDw5X/0dV/VKCfx1kJ+w
-9fmIhfGU3lFT8rOpqcx3MlB+PzRVV4P3hUBirovxBu2TEqp01hvPnb5m6ZGE0U/p
-B4LBke3S23iSkYwPaHwcbLVLhF2pruYmXS1hvCZxEQKBgQC3gBWKZZeV8uT0vKN+
-FScBk5WLYSq63dUSonszWr0AxN03WsoHjkr4AqB+wtMPI2L7Kpy8whwtTXehqNpT
-W+Zz12eVQI2fuGTYZg7zjxN0+H2nRxTOWyVcpW4h1tavzzXAzTDo1jc8DYvMhgXp
-IIOMYDbOCQPCnopdE0Xd2QF7NQKBgQDNftHfeNOINkt3RTTI5NY9pTibl/alzqJf
-aW8BXEsnKM8BB6ux/sTNE4ejaK7a4xvKhgss+Z0FkM11Ycoa2D5/X9CyXT/cOmhF
-E2vt6yyQUSscMQMAaUmma8Gvu5dDF3a7/5liphjafPyFRa275JIxdbDgaCvV62kH
-EjPLMjOj9wKBgQCHhe9iwVlNA5EZN2DAM7sVLPybbe3zCPbexmWbLf683KhMw57G
-Kc8wkDAcrqLWYVovCe+scOgChV4/ZMeqHQt8rq/vyTdPqQ3BzM5qD1ddYlDbBGJX
-bXWQkRVfpJ32RmD6vhDLRbqRfaesK6ed38eIG18emAXQ7Opfh2ZoTGcNqQKBgDKN
-/53lwMyi5t/506mUuqxByHJm6VQTSNkGPDvuc8K3hG2xcGkCz3HQWy81YscQ1lZ1
-sawn4Jxs6k71dt4x0vZNIS+wRzSr3dkYlRXcJIOApIVz/VQNkwPxQJ42HVlxHVHU
-6OxfBoBB/XHgGYS/D8RBOvmKRzaCir0lmj5kJFYzAoGBAKEEaHn0LvmDpHYSUOA4
-FgJnFmtHTHcYFaFus/oqwEtylftAsM5h8o5ww2OCJDa2FSxzaayV1wpm2r1HwvDn
-p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
-+VS382WYhn8T/WeSmWHmF69D
------END PRIVATE KEY-----
 "#;
 
     struct TempFile {
@@ -662,7 +565,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             &mut self,
             _agent: vsapi::Agent,
             _cert_pem_data: &str,
-            _private_key: Rsa<Private>,
             _vss_service_addr: &str,
         ) -> Result<String, VSClientError> {
             incr(CounterT::Auth);
@@ -760,7 +662,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
         reset_state();
         let certfile = TempFile::new_pem(CERT_DATA);
-        let keyfile = TempFile::new_pem(KEY_DATA);
 
         let node_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
@@ -775,7 +676,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             tx,
             "127.0.0.1:0",
             certfile.get_path(),
-            keyfile.get_path(),
             &node_addr,
             None,
         )
@@ -805,7 +705,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
         reset_state();
         let certfile = TempFile::new_pem(CERT_DATA);
-        let keyfile = TempFile::new_pem(KEY_DATA);
 
         let node_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
@@ -820,7 +719,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             tx,
             "127.0.0.1:0",
             certfile.get_path(),
-            keyfile.get_path(),
             &node_addr,
             None,
         )
@@ -919,7 +817,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
         reset_state();
         let certfile = TempFile::new_pem(CERT_DATA);
-        let keyfile = TempFile::new_pem(KEY_DATA);
 
         let node_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
@@ -934,7 +831,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             tx,
             "127.0.0.1:0",
             certfile.get_path(),
-            keyfile.get_path(),
             &node_addr,
             None,
         )
@@ -1040,7 +936,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
         let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
         reset_state();
         let certfile = TempFile::new_pem(CERT_DATA);
-        let keyfile = TempFile::new_pem(KEY_DATA);
 
         let node_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
 
@@ -1055,7 +950,6 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
             tx,
             "127.0.0.1:0",
             certfile.get_path(),
-            keyfile.get_path(),
             &node_addr,
             None,
         )

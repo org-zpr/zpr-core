@@ -5,10 +5,6 @@
 There are some keys in here that are only needed due to reliance on some
 older protype code-
 
-- node-rsa cert and key: These are used to sign a challenge from the
-  visa service, and the cert is sent to the visa service for checking.
-  (Note: as of 10/3/2024 the visa service does not check the cert.)
-
 - zpr-rsa cert and key: The visa service expects that policies are
   signed with this key (so it is also required for compiling policies
   with the legacy compiler).  Visa service also uses this key to sign
@@ -20,7 +16,6 @@ It's possible we can remove some of these keys prior to milestone two.
 Related github issues:
 
 - https://github.com/org-zpr/zpr-core/issues/140
-- https://github.com/org-zpr/zpr-core/issues/139
 
 
 ## Manual Testing
@@ -72,8 +67,7 @@ cd /path/to/zpr-core/visaservice/cli
 ```bash
 cd /path/to/zpr-core/visaservice/cli
 ./target/debug/cli authenticate \
-    --cert ../../examples/milestone2/node-rsa-cert.pem \
-    --key ../../examples/milestone2/node-rsa-key.pem \
+    --cert ../../examples/milestone2/node-cert.pem \
     --zpr-addr fd5a:5052:90de::1 \
     --node-name n0
 ```

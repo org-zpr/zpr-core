@@ -1,10 +1,3 @@
-use openssl::hash::MessageDigest;
-use openssl::pkey::{PKey, Private};
-use openssl::rsa::Rsa;
-use openssl::sign::Signer;
-use std::fmt;
-use std::fmt::Formatter;
-use std::io::prelude::*;
 use std::net::IpAddr;
 use std::time::SystemTime;
 use thrift::protocol::{TBinaryInputProtocol, TBinaryOutputProtocol};
@@ -13,6 +6,8 @@ use thrift::transport::{TFramedReadTransport, TFramedWriteTransport};
 use thrift::transport::{TIoChannel, TTcpChannel};
 use tracing::debug;
 
+use crate::errors::VSClientError;
+use crate::m2;
 use crate::vsapi;
 use ph::zpr;
 use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
@@ -22,29 +17,6 @@ type VSClientT = VisaServiceSyncClient<
     TBinaryInputProtocol<TFramedReadTransport<ReadHalf<TTcpChannel>>>,
     TBinaryOutputProtocol<TFramedWriteTransport<WriteHalf<TTcpChannel>>>,
 >;
-
-#[derive(Debug)]
-pub enum VSClientError {
-    Thrift(thrift::Error),
-    NoAPIKey,
-    UnsupportedTrafficType,
-}
-
-impl fmt::Display for VSClientError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            VSClientError::Thrift(e) => write!(f, "Thrift error: {}", e),
-            VSClientError::NoAPIKey => write!(f, "No API key"),
-            VSClientError::UnsupportedTrafficType => write!(f, "Unsupported traffic type"),
-        }
-    }
-}
-
-impl From<thrift::Error> for VSClientError {
-    fn from(e: thrift::Error) -> Self {
-        VSClientError::Thrift(e)
-    }
-}
 
 /// Wrapper around the thrift visa service client. Single threaded.
 /// Caches the service address and API key.
@@ -62,7 +34,6 @@ pub trait VSClientI: Send {
         &mut self,
         agent: vsapi::Agent,
         cert_pem_data: &str,
-        private_key: Rsa<Private>,
         vss_service_addr: &str,
     ) -> Result<String, VSClientError>;
     fn ping_vs(&mut self) -> Result<vsapi::Pong, VSClientError>;
@@ -115,11 +86,19 @@ pub fn default_vsclient_factory(service_addr: &str) -> Result<Box<dyn VSClientI>
 
 impl VSClientI for VSClient {
     /// Authenticate with the visa service. Caches the API key internally.
+    ///
+    /// In prototype, the node would do a signature over the (challenge_data, timestamp, session_id)
+    /// using its RSA private key, and send the RSA cert back with the response. Visa service could
+    /// check the CERT to ensure blessed by authority, and then check the signature.
+    ///
+    /// For milestone 2 we do not yet have this quite sorted out and do not want to force people
+    /// to create RSA keys.  So we are using just a blake3 HMAC for now over the same 3-tuple.
+    /// The HMAC is key'd with the `shared_secret` arg.
+    ///
     fn authenticate(
         &mut self,
         agent: vsapi::Agent,
         cert_pem_data: &str,
-        private_key: Rsa<Private>,
         vss_service_addr: &str,
     ) -> Result<String, VSClientError> {
         debug!("sending HELLO to {}", self.service);
@@ -133,20 +112,8 @@ impl VSClientI for VSClient {
         let hrchal = hello_response.challenge.unwrap();
         let chal_copy = hrchal.clone(); // we send this one back
 
-        let pkey = PKey::from_rsa(private_key).unwrap();
-
-        let mut signer = Signer::new(MessageDigest::sha256(), &pkey).unwrap();
-
-        let mut buf = Vec::new();
-        buf.write_all(&hrchal.challenge_data.unwrap()).unwrap();
-
-        signer.update(&buf).unwrap();
-        signer.update(&timestamp.to_be_bytes()).unwrap();
-        signer
-            .update(&hello_response.session_id.unwrap().to_be_bytes())
-            .unwrap();
-
-        let hmac = signer.sign_to_vec().unwrap();
+        let hmac =
+            m2::milestone2_create_hmac(hrchal, hello_response.session_id.unwrap(), timestamp);
 
         let authreq = vsapi::NodeAuthRequest {
             session_id: hello_response.session_id,

@@ -29,19 +29,17 @@ pub struct Configuration {
 #[derive(Debug, Clone, Deserialize)]
 struct Creds {
     ca_certificate: String,  // path to the CA certificate
-    rsa_certificate: String, // path to the RSA certificate
-    rsa_private_key: String, // path to the RSA private key
+    noise_certificate: String, // this nodes signed (noise) certificate file
+    noise_private_key: String, // base64 noise private key for this node (not used)
+
+    #[serde(skip)]
+    noise_private_key_bin: [u8; 32], // decoded noise private key
 }
 
 #[derive(Debug, Clone, Deserialize)]
 struct Dock {
     enabled: bool,
     listen_address: String,    // dock listen address, "host:port"
-    noise_certificate: String, // this nodes signed (noise) certificate file
-    noise_private_key: String, // base64 noise private key for this node
-
-    #[serde(skip)]
-    noise_private_key_bin: [u8; 32], // decoded noise private key
 }
 
 impl Configuration {
@@ -52,21 +50,12 @@ impl Configuration {
 
     pub fn get_noise_cert_path(&self) -> PathBuf {
         let base = Path::new(&self.base_path);
-        base.join(&self.dock.noise_certificate)
+        base.join(&self.creds.noise_certificate)
     }
 
+    /// Returns the decoded (from base64) noise key
     pub fn get_noise_private_key(&self) -> &[u8; 32] {
-        &self.dock.noise_private_key_bin
-    }
-
-    pub fn get_rsa_cert_path(&self) -> PathBuf {
-        let base = Path::new(&self.base_path);
-        base.join(&self.creds.rsa_certificate)
-    }
-
-    pub fn get_rsa_private_key_path(&self) -> PathBuf {
-        let base = Path::new(&self.base_path);
-        base.join(&self.creds.rsa_private_key)
+        &self.creds.noise_private_key_bin
     }
 
     // Gets a copy of the claims
@@ -169,7 +158,7 @@ pub fn load_configuration(path: &Path) -> Result<Configuration, std::io::Error> 
     };
 
     c.node_addr = Some(node_addr);
-    c.dock.noise_private_key_bin = match BASE64_STANDARD.decode(c.dock.noise_private_key.as_bytes())
+    c.creds.noise_private_key_bin = match BASE64_STANDARD.decode(c.creds.noise_private_key.as_bytes())
     {
         Ok(v) => match v.try_into() {
             Ok(a) => a,

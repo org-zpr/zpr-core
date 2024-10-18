@@ -1,9 +1,8 @@
+use libnode::vss;
 use std::net::SocketAddr;
 use tokio::signal;
 use tokio::sync::mpsc;
-use libnode::vss;
 use tracing::info;
-
 
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -20,7 +19,6 @@ pub fn run_vss(listen_sock: SocketAddr) -> Result<(), VssError> {
 }
 
 async fn _run_vss(listen_sock: SocketAddr) -> Result<(), VssError> {
-
     let (vss_tx, mut vss_rx) = mpsc::channel(32);
     /*
     tokio::spawn(async move {

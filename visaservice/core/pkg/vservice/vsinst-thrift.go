@@ -170,7 +170,8 @@ func (vs *VSInst) validAPIKeyAndDeets(key string) (bool, time.Time, netip.Addr) 
 	return false, time.Time{}, netip.Addr{}
 }
 
-func verifyHMAC(pubKey *rsa.PublicKey, nonce []byte, sid int32, timestamp int64, sig []byte) error {
+// Older prototype HMAC verification using PKI.
+func verifyRsaHMAC(pubKey *rsa.PublicKey, nonce []byte, sid int32, timestamp int64, sig []byte) error {
 	var msg bytes.Buffer
 
 	msg.Write(nonce)
@@ -181,6 +182,19 @@ func verifyHMAC(pubKey *rsa.PublicKey, nonce []byte, sid int32, timestamp int64,
 	err := rsa.VerifyPKCS1v15(pubKey, crypto.SHA256, hashed[:], sig)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+// Milestone2 hmac value is just a HASH_SHA256(nonce + timestamp + sid)
+func verifyMilestone2HMAC(nonce []byte, sid int32, timestamp int64, sig []byte) error {
+	var msg bytes.Buffer
+	msg.Write(nonce)
+	binary.Write(&msg, binary.BigEndian, uint64(timestamp))
+	binary.Write(&msg, binary.BigEndian, sid)
+	hashed := sha256.Sum256(msg.Bytes())
+	if !bytes.Equal(hashed[:], sig) {
+		return errors.New("HMAC verification failed")
 	}
 	return nil
 }
@@ -286,8 +300,15 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		return "", fmt.Errorf("invalid session ID")
 	}
 
-	vs.log.Info("registration: authenticate for node -- skipping authority check (TODO)")
-	// TODO: check that the certificate is signed by our authority.
+	nodeCert, err := snauth.LoadCertFromPEMBuffer(req.NodeCert)
+	if err != nil {
+		vs.log.WithError(err).Warn("registration: authenticate for node -- failed to load node cert")
+		return "", fmt.Errorf("failed to parse node certificate")
+	}
+	if err := nodeCert.CheckSignatureFrom(vs.authorityCert); err != nil {
+		vs.log.WithError(err).Error("registration: authenticate for node fails cert authority check")
+		return "", fmt.Errorf("certificate authority not recognized")
+	}
 
 	if time.Since(time.Unix(req.Timestamp, 0)).Abs() > MaxClockSkew {
 		vs.log.Warn("registration: authenticate for node -- timestamp is too old", "timestamp", req.Timestamp,
@@ -311,13 +332,8 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		return "", fmt.Errorf("missing provides")
 	}
 
-	pubKey, err := snauth.LoadRSAPublicKeyFromPEMBuffer(req.NodeCert)
-	if err != nil {
-		vs.log.WithError(err).Warn("registration: failed to read public key from cert")
-		return "", fmt.Errorf("failed to load public key from cert")
-	}
-
-	if err = verifyHMAC(pubKey, req.Challenge.ChallengeData, req.SessionID, req.Timestamp, req.Hmac); err != nil {
+	// For milestone 2 this auth is just placeholder.
+	if err = verifyMilestone2HMAC(req.Challenge.ChallengeData, req.SessionID, req.Timestamp, req.Hmac); err != nil {
 		vs.log.WithError(err).Warn("registration: authenticate for node -- failed to verify HMAC")
 		return "", fmt.Errorf("failed to verify HMAC")
 	}

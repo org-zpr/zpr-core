@@ -4,6 +4,8 @@
 # must match the ZPL visaservice.provider setting.
 adapter_cert: adapter-vs-cert.pem
 
+root_ca: ca-cert.pem
+
 # For milestone2 you need connect validation turned off.
 disable_connect_validation: true
 

@@ -124,6 +124,11 @@ service using the visa service API.
 		}
 		cn := a_cert.Subject.CommonName
 
+		authorityCert, err := loadCertFromFile(config.AuthorityCert)
+		if err != nil {
+			return fmt.Errorf("failed to load authority certificate: %w", err)
+		}
+
 		pidf, err := NewPidFile("vservice")
 		if err != nil {
 			serviceLog.WithError(err).Warnm("failed to write pid file")
@@ -143,7 +148,7 @@ service using the visa service API.
 
 		maxAuthDuration := DefaultMaxAuthDuration             // TODO: from config or command line
 		bootstrapAuthDuration := DefaultBootstrapAuthDuration // TODO: from config or command line
-		service, err := vservice.NewVisaService(c.String("policy"), cn, jwtpk, tconfig, bootstrapAuthDuration, maxAuthDuration, serviceLog)
+		service, err := vservice.NewVisaService(c.String("policy"), cn, jwtpk, tconfig, bootstrapAuthDuration, maxAuthDuration, authorityCert, serviceLog)
 		if err != nil {
 			return fmt.Errorf("failed to create visa service: %w", err)
 		}

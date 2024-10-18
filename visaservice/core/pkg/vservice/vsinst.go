@@ -3,6 +3,7 @@ package vservice
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt" // not used for crypto
 	"net/netip"
@@ -70,6 +71,7 @@ type VSInst struct {
 	agentDB               *adb.AgentDB
 	validationEnabled     bool // normally yes.
 	bootstrapAuthDuration time.Duration
+	authorityCert         *x509.Certificate // for checking certififactes from nodes/adapters
 
 	cfgRemoves struct {
 		sync.Mutex
@@ -123,6 +125,7 @@ type VSIConfig struct {
 	Constrainer              ConstraintService
 	DisableConnectValidation bool // Set to TRUE to disable connect validation for adapters
 	BootstrapAuthDuration    time.Duration
+	AuthorityCert            *x509.Certificate // for checking certififactes from nodes/adapters
 }
 
 var EMPTY_ADDR = netip.Addr{}
@@ -150,6 +153,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		vsMsgC:                make(chan *VSMsg, 16),
 		validationEnabled:     !vcf.DisableConnectValidation,
 		bootstrapAuthDuration: vcf.BootstrapAuthDuration,
+		authorityCert:         vcf.AuthorityCert,
 	}
 	if vcf.ReauthBumpTimeOverride > 0 {
 		vs.reauthBumpTime = vcf.ReauthBumpTimeOverride

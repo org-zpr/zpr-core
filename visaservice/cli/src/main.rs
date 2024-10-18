@@ -1,16 +1,13 @@
 use clap::{Parser, Subcommand};
 use std::net::{IpAddr, SocketAddr};
 pub mod traffic_parser;
-pub mod vsapi;
 pub mod vsclient;
 mod vssd;
 
 use crate::traffic_parser::{parse_traffic, Protocol};
 
-
 const DEFAULT_SERVICE: &str = "[fd5a:5052::1]:5002";
 const DEFAULT_VSS_PORT: u16 = 8183;
-
 
 #[derive(Parser)]
 #[command(version, about = "Visa Service THRIFT API Client", long_about = None)]
@@ -41,11 +38,12 @@ enum Commands {
         )]
         claim: Vec<String>,
 
-        #[arg(long, value_name = "FILE", help = "path to PEM encoded certificate")]
+        #[arg(
+            long,
+            value_name = "FILE",
+            help = "path to PEM encoded (noise) certificate"
+        )]
         cert: String,
-
-        #[arg(long, value_name = "FILE", help = "path to PEM encoded private key")]
-        key: String, // private key
 
         #[arg(long, value_name = "ADDR", help = "nodes ZPR address")]
         zpr_addr: IpAddr,
@@ -80,11 +78,7 @@ enum Commands {
 
         /// Claims to send with the request. Use multiple times to set multiple claims.
         /// Required claims: "zpr.addr" and "zpr.adapter.cn"
-        #[arg(
-            short,
-            long,
-            value_name = "KEY=VALUE",
-        )]
+        #[arg(short, long, value_name = "KEY=VALUE")]
         claim: Vec<String>,
     },
     /// Call the visa service agent_disconnect function, requires an API key
@@ -138,7 +132,11 @@ enum Commands {
     /// Start a visa support service server in the foreground
     #[command()]
     Runvss {
-        #[arg(long, value_name = "ADDR", help = "nodes ZPR address (should be same as passed to authenticate)")]
+        #[arg(
+            long,
+            value_name = "ADDR",
+            help = "nodes ZPR address (should be same as passed to authenticate)"
+        )]
         zpr_addr: IpAddr,
 
         #[arg(long, value_name = "PORT", default_value_t = DEFAULT_VSS_PORT)]
@@ -165,11 +163,11 @@ fn main() {
             service,
             claim,
             cert,
-            key,
             zpr_addr,
             node_name,
             vss_port,
-        }) => match vsclient::authenticate(&service, claim, &cert, &key, &zpr_addr, &node_name, vss_port) {
+        }) => match vsclient::authenticate(&service, claim, &cert, &zpr_addr, &node_name, vss_port)
+        {
             Ok(_) => {
                 println!("Authenticate command executed successfully");
             }
@@ -192,16 +190,14 @@ fn main() {
             apikey,
             node_zpr_addr,
             claim,
-        }) => {
-            match vsclient::authorize_connect(&service, &apikey, &node_zpr_addr, claim) {
-                Ok(_) => {
-                    println!("AuthorizeConnect command executed successfully");
-                }
-                Err(e) => {
-                    println!("Error: {:?}", e);
-                }
+        }) => match vsclient::authorize_connect(&service, &apikey, &node_zpr_addr, claim) {
+            Ok(_) => {
+                println!("AuthorizeConnect command executed successfully");
             }
-        }
+            Err(e) => {
+                println!("Error: {:?}", e);
+            }
+        },
         Some(Commands::Disconnect {
             service,
             apikey,
@@ -244,43 +240,37 @@ fn main() {
             apikey,
             tcp,
             udp,
-        }) => {
-            match (tcp, udp) {
-                (Some(tcp), None) => match parse_traffic(&tcp, Protocol::TCP) {
-                    Ok(traffic) => {
-                        match vsclient::request_visa(&service, &apikey, &traffic) {
-                            Ok(_) => {
-                                println!("Requestvisa command executed successfully");
-                            }
-                            Err(e) => {
-                                println!("Error: {:?}", e);
-                            }
-                        }
+        }) => match (tcp, udp) {
+            (Some(tcp), None) => match parse_traffic(&tcp, Protocol::TCP) {
+                Ok(traffic) => match vsclient::request_visa(&service, &apikey, &traffic) {
+                    Ok(_) => {
+                        println!("Requestvisa command executed successfully");
                     }
                     Err(e) => {
                         println!("Error: {:?}", e);
                     }
                 },
-                (None, Some(udp)) => match parse_traffic(&udp, Protocol::UDP) {
-                    Ok(traffic) => {
-                        match vsclient::request_visa(&service, &apikey, &traffic) {
-                            Ok(_) => {
-                                println!("Requestvisa command executed successfully");
-                            }
-                            Err(e) => {
-                                println!("Error: {:?}", e);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!("Error: {:?}", e);
-                    }
-                },
-                _ => {
-                    println!("Either TCP or UDP traffic description must be provided");
+                Err(e) => {
+                    println!("Error: {:?}", e);
                 }
+            },
+            (None, Some(udp)) => match parse_traffic(&udp, Protocol::UDP) {
+                Ok(traffic) => match vsclient::request_visa(&service, &apikey, &traffic) {
+                    Ok(_) => {
+                        println!("Requestvisa command executed successfully");
+                    }
+                    Err(e) => {
+                        println!("Error: {:?}", e);
+                    }
+                },
+                Err(e) => {
+                    println!("Error: {:?}", e);
+                }
+            },
+            _ => {
+                println!("Either TCP or UDP traffic description must be provided");
             }
-        }
+        },
         Some(Commands::Runvss { zpr_addr, vss_port }) => {
             match vssd::run_vss(SocketAddr::new(zpr_addr, vss_port)) {
                 Ok(_) => {

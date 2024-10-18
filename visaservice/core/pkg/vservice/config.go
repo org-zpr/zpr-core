@@ -9,8 +9,12 @@ import (
 )
 
 type VSConfig struct {
+	// The (noise) certificate used by the visa service adapter.
 	// Used to obtain the correct CN for visa service bootstrap agent.
 	AdapterCert string `yaml:"adapter_cert,omitempty"`
+
+	// The authority cert is used to check (noise) certificate signatures.
+	AuthorityCert string `yaml:"root_ca,omitempty"`
 
 	// The VSCert/VSKey keypair are used for:
 	//   - The admin service gRPC TLS session.
@@ -66,6 +70,11 @@ func (c *VSConfig) check() error {
 	c.VSCert, err = c.fixPath(c.VSCert, true)
 	if err != nil {
 		return fmt.Errorf("invalid vs_cert: %w", err)
+	}
+
+	c.AuthorityCert, err = c.fixPath(c.AuthorityCert, true)
+	if err != nil {
+		return fmt.Errorf("invalid authority_cert: %w", err)
 	}
 
 	c.VSKey, err = c.fixPath(c.VSKey, true)

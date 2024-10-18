@@ -9,3 +9,8 @@ build:
 .PHONY: test
 test:
 	cargo test --verbose && cargo test --lib --verbose
+
+.PHONY: lib
+lib:
+	cargo build --lib
+

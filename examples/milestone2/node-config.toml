@@ -4,14 +4,12 @@ node_name = "n0"
 
 [creds]
 ca_certificate = "ca-cert.pem"
-rsa_certificate = "node-rsa-cert.pem"
-rsa_private_key = "node-rsa-key.pem"
+noise_certificate = "node-cert.pem"
+noise_private_key = "UFIB5WPx5eMEtn6XY55//vGn+HXRVLdcwQC0BtDZhkU="
 
 [dock]
 enabled = true
 listen_address = "0.0.0.0:5000"
-noise_certificate = "node-cert.pem"
-noise_private_key = "UFIB5WPx5eMEtn6XY55//vGn+HXRVLdcwQC0BtDZhkU="
 
 
 [claims]

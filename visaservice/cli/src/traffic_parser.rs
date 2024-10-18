@@ -1,8 +1,8 @@
+use etherparse;
 use rand::Rng;
 use regex::Captures;
 use regex::Regex;
 use std::net::IpAddr;
-use etherparse;
 
 #[derive(Debug, PartialEq)]
 pub enum Protocol {
@@ -13,7 +13,6 @@ pub enum Protocol {
 const TCP_FLAGS_SYN: u8 = 0x02;
 const TCP_FLAGS_ACK: u8 = 0x10;
 
-
 #[derive(Debug)]
 pub struct TrafficDesc {
     pub source: IpAddr,
@@ -23,9 +22,6 @@ pub struct TrafficDesc {
     pub dest_port: u16,
     pub flags: u8,
 }
-
-
-
 
 // This function parses a string from the user that describes traffic in a succinct way
 // so that we can pass a visa-request to the visa service.
@@ -183,10 +179,7 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<TrafficDesc, std::io
     Ok(traffic)
 }
 
-
-
 impl TrafficDesc {
-
     /// Convert this [TrafficDesc] into a packet bytes with a dummy payload.
     pub fn build_packet(&self) -> Vec<u8> {
         let payload = [0, 1, 2, 3, 4, 5, 6, 7];
@@ -203,12 +196,12 @@ impl TrafficDesc {
 
         let builder: etherparse::PacketBuilderStep<_>;
         if self.source.is_ipv6() {
-            let src_a:[u8; 16] = src_octets.as_slice().try_into().unwrap();
-            let dst_a:[u8; 16] = dst_octets.as_slice().try_into().unwrap();
+            let src_a: [u8; 16] = src_octets.as_slice().try_into().unwrap();
+            let dst_a: [u8; 16] = dst_octets.as_slice().try_into().unwrap();
             builder = etherparse::PacketBuilder::ipv6(src_a, dst_a, 0);
         } else {
-            let src_a:[u8; 4] = src_octets.as_slice().try_into().unwrap();
-            let dst_a:[u8; 4] = dst_octets.as_slice().try_into().unwrap();
+            let src_a: [u8; 4] = src_octets.as_slice().try_into().unwrap();
+            let dst_a: [u8; 4] = dst_octets.as_slice().try_into().unwrap();
             builder = etherparse::PacketBuilder::ipv4(src_a, dst_a, 0);
         }
 
@@ -233,9 +226,6 @@ impl TrafficDesc {
         buf
     }
 }
-
-
-
 
 #[cfg(test)]
 mod test {
