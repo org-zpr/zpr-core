@@ -1,4 +1,4 @@
-use bytes::BufMut;
+use bytes::{BufMut, Bytes};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -69,8 +69,12 @@ impl ZDPClient {
 
         let km_ctok = ctok.clone();
         let mut mgr_cc = mgr.clone();
+        let (km_payload_tx, km_payload_rx) = mpsc::channel(16);
         tokio::spawn(async move {
-            mgr_cc.start(km_ctok, km_tx, km_sig_tx).await.unwrap();
+            mgr_cc
+                .start(km_ctok, km_tx, km_sig_tx, km_payload_rx)
+                .await
+                .unwrap();
         });
 
         // Now loop -
@@ -156,7 +160,8 @@ impl ZDPClient {
                                             continue;
                                         }
                                     };
-                                    match mgr.handle_km_message(km_payload).await {
+                                    let msgbuf = Bytes::copy_from_slice(km_payload);
+                                    match km_payload_tx.send(msgbuf).await {
                                         Ok(()) => {},
                                         Err(e) => {
                                             info!("zdp/client - handle_km_message failed: {}", e);

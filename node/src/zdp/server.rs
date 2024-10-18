@@ -1,4 +1,4 @@
-use bytes::BufMut;
+use bytes::{BufMut, Bytes};
 use openssl::x509::X509;
 use ph::km_cert_exchange::KmCertExchange;
 use std::io;
@@ -93,8 +93,13 @@ impl ZDPServer {
         // In real implemntation each client gets a KM instance.
         let mgr = KeyManager::new(1, Box::new(noise));
         let mut mgr_cc = mgr.clone();
+
+        let (km_payload_tx, km_payload_rx) = mpsc::channel(16);
         tokio::spawn(async move {
-            mgr_cc.start(km_ctok, km_tx, km_sig_tx).await.unwrap();
+            mgr_cc
+                .start(km_ctok, km_tx, km_sig_tx, km_payload_rx)
+                .await
+                .unwrap();
         });
 
         // This dummy node only allows for one connection at a time.
@@ -111,160 +116,161 @@ impl ZDPServer {
 
         loop {
             tokio::select! {
-                        _ = ctok.cancelled() => {
-                            info!("ZDP Server cancelled");
-                            break;
-                        }
+                _ = ctok.cancelled() => {
+                    info!("ZDP Server cancelled");
+                    break;
+                }
 
-                        _ = interval.tick() => {
-                            if let Some(tt) = transition_time {
-                                if !sent_report && tt.elapsed() > Duration::from_secs(2) {
-                                    let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-                                    let mut pkt =km_demo::build_zdp_report_packet(&mut buf, b"hello to you my darling client adapter!");
-                                    let my_sa = mgr.get_transport_state().unwrap();
-                                    pkt.body_mut()[0] = my_sa.send_zpis.encr;
-                                    match km::encrypt_transport_zdp(&mut pkt, my_sa.codec.clone()) {
-                                        Ok(_) => {
-                                            match s_send.send_to(&pkt.body(), cur_client.unwrap()).await {
-                                                Ok(sz) => {
-                                                    info!("zdp/server - sent {} byte transport message", sz);
-                                                    sent_report = true;
-                                                },
-                                                Err(e) => {
-                                                    info!("zdp/server - error sending transport message: {:?}", e);
-                                                }
-                                            }
-                                        }
+                _ = interval.tick() => {
+                    if let Some(tt) = transition_time {
+                        if !sent_report && tt.elapsed() > Duration::from_secs(2) {
+                            let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
+                            let mut pkt =km_demo::build_zdp_report_packet(&mut buf, b"hello to you my darling client adapter!");
+                            let my_sa = mgr.get_transport_state().unwrap();
+                            pkt.body_mut()[0] = my_sa.send_zpis.encr;
+                            match km::encrypt_transport_zdp(&mut pkt, my_sa.codec.clone()) {
+                                Ok(_) => {
+                                    match s_send.send_to(&pkt.body(), cur_client.unwrap()).await {
+                                        Ok(sz) => {
+                                            info!("zdp/server - sent {} byte transport message", sz);
+                                            sent_report = true;
+                                        },
                                         Err(e) => {
-                                            info!("zdp/server - error encrypting transport message: {:?}", e);
+                                            info!("zdp/server - error sending transport message: {:?}", e);
                                         }
                                     }
                                 }
-                            }
-                        }
-
-                        Some(linkmsg) = km_sig_rx.recv() => {
-                            // This is a signal from the KM.  We need to act on it.
-                            match linkmsg.msg {
-                                KmSignal::SaIdChange { old, new } => {
-                                    if old == 0 && new > 0 {
-                                        info!("SA has been established!");
-                                        // Becuase of the way the messages work, the node will transition into
-                                        // transport after recieving the handshake, but the adapter will not
-                                        // transition until it gets my response.  We may want an ACK message
-                                        // or something with these KM exchanges.
-                                        //
-                                        // For now I just use a timer to give adapter some time to react.
-                                        sent_report = false;
-                                        transition_time = Some(time::Instant::now());
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        Some(linkmsg) = km_rx.recv() => {
-                            // This is a raw KM message to send to this client (NOTE: the KM needs to be associated with the correct client!)
-                            if cur_client.is_none() {
-                                info!("error: KM generated a message but we have no client to send to");
-                                continue;
-                            }
-
-                            // Construct a KM message packet.
-                            // [ ZPI ]
-                            // [ ZDP BASE HEADER, type=KM]
-                            // ---- KM PACKET ---
-                            //   type: noise
-                            //   len: u16
-                            //   PAYLOAD (from KM)
-                            let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
-                            let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &linkmsg.msg);
-
-                            match s_send.send_to(pkt.body(), cur_client.unwrap()).await {
-                                Ok(sz) => {
-                                    info!("zdp/server - sent {} byte KM message", sz);
-                                },
                                 Err(e) => {
-                                    info!("zdp/server - error sending KM message: {:?}", e);
+                                    info!("zdp/server - error encrypting transport message: {:?}", e);
                                 }
                             }
                         }
+                    }
+                }
 
-                        Ok((read_len, src)) = s_recv.recv_from(&mut input_buf) => {
-                            info!("Received {} bytes from {}", read_len, src);
-                            if cur_client.is_none() {
-                                cur_client = Some(src);
-                            } else if cur_client != Some(src) {
-                                info!("Ignoring message from unknown source");
-                                continue;
+                Some(linkmsg) = km_sig_rx.recv() => {
+                    // This is a signal from the KM.  We need to act on it.
+                    match linkmsg.msg {
+                        KmSignal::SaIdChange { old, new } => {
+                            if old == 0 && new > 0 {
+                                info!("SA has been established!");
+                                // Becuase of the way the messages work, the node will transition into
+                                // transport after recieving the handshake, but the adapter will not
+                                // transition until it gets my response.  We may want an ACK message
+                                // or something with these KM exchanges.
+                                //
+                                // For now I just use a timer to give adapter some time to react.
+                                sent_report = false;
+                                transition_time = Some(time::Instant::now());
                             }
+                        }
+                        _ => {}
+                    }
+                }
 
-                            let Ok((zpi_hdr, _)) = ZdpZpiHeader::ref_from_prefix(&input_buf[0..read_len]) else {
-                                info!("zdp/server - error parsing ZPI header");
-                                continue;
+                Some(linkmsg) = km_rx.recv() => {
+                    // This is a raw KM message to send to this client (NOTE: the KM needs to be associated with the correct client!)
+                    if cur_client.is_none() {
+                        info!("error: KM generated a message but we have no client to send to");
+                        continue;
+                    }
+
+                    // Construct a KM message packet.
+                    // [ ZPI ]
+                    // [ ZDP BASE HEADER, type=KM]
+                    // ---- KM PACKET ---
+                    //   type: noise
+                    //   len: u16
+                    //   PAYLOAD (from KM)
+                    let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
+                    let pkt = km_demo::build_zdp_km_noise_packet(&mut pkt_buf, &linkmsg.msg);
+
+                    match s_send.send_to(pkt.body(), cur_client.unwrap()).await {
+                        Ok(sz) => {
+                            info!("zdp/server - sent {} byte KM message", sz);
+                        },
+                        Err(e) => {
+                            info!("zdp/server - error sending KM message: {:?}", e);
+                        }
+                    }
+                }
+
+                Ok((read_len, src)) = s_recv.recv_from(&mut input_buf) => {
+                    info!("Received {} bytes from {}", read_len, src);
+                    if cur_client.is_none() {
+                        cur_client = Some(src);
+                    } else if cur_client != Some(src) {
+                        info!("Ignoring message from unknown source");
+                        continue;
+                    }
+
+                    let Ok((zpi_hdr, _)) = ZdpZpiHeader::ref_from_prefix(&input_buf[0..read_len]) else {
+                        info!("zdp/server - error parsing ZPI header");
+                        continue;
+                    };
+
+                    // If ZPI is 0 then it may be a KM message. Else it's transport.
+                    match zpi_hdr.zpi {
+                        0 => {
+                            info!("zdp/server - received ZPI=0 message");
+
+                            let km_payload = match km_demo::parse_km_payload(&input_buf[..read_len]) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    info!("zdp/server - error parsing KM payload: {:?}", e);
+                                    continue;
+                                }
                             };
-
-                            // If ZPI is 0 then it may be a KM message. Else it's transport.
-                            match zpi_hdr.zpi {
-                                0 => {
-                                    info!("zdp/server - received ZPI=0 message");
-
-                                    let km_payload = match km_demo::parse_km_payload(&input_buf[..read_len]) {
-                                        Ok(p) => p,
+                            let msgbuf = Bytes::copy_from_slice(km_payload);
+                            match km_payload_tx.send(msgbuf).await {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    info!("zdp/server - error handling KM message: {:?}", e);
+                                    // TODO: Drop client? Reset KM?
+                                }
+                            };
+                        }
+                        _ => {
+                            info!("zdp/server - received transport message");
+                            let my_sa = mgr.get_transport_state().unwrap();
+                            // Not sure the correct way to use these packet things.  But here we just create yet another buffer.
+                            let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
+                            let mut pkt = Packet::new(&mut pkt_buf, km_demo::HEADROOM);
+                            pkt.put(&input_buf[..read_len]);
+                            let zpi = pkt.body()[0];
+                            if zpi == my_sa.recv_zpis.encr {
+                                info!("zdp/server - ZPI indicates encrypted transport message");
+                            } else if zpi == my_sa.recv_zpis.hmac {
+                                info!("zdp/server - ZPI indicates agent transit transport message, discarding");
+                                continue;
+                            } else {
+                                info!("zdp/server - unexpected ZPI on message {} (expected {:?})", zpi, my_sa.recv_zpis);
+                            }
+                            match km::decrypt_transport_zdp(&mut pkt, my_sa.codec.clone()) {
+                                Ok(_) => {
+                                    // Demo code sends a ZDP message like
+                                    //     [ZPI]
+                                    //     [BASE HEADER type = report]
+                                    //     [REPORT HEADER]
+                                    //     <STRING DATA>
+                                    match km_demo::parse_zdp_report_pkt(&pkt) {
+                                        Ok(s) => {
+                                            info!("zdp/server - received report: *** {} ***", s);
+                                        }
                                         Err(e) => {
-                                            info!("zdp/server - error parsing KM payload: {:?}", e);
+                                            info!("zdp/server - error parsing ZDP report packet: {}", e);
                                             continue;
                                         }
                                     };
-                                    match mgr.handle_km_message(km_payload).await {
-                                        Ok(_) => {},
-                                        Err(e) => {
-                                            info!("zdp/server - error handling KM message: {:?}", e);
-                                            // TODO: Drop client? Reset KM?
-                                        }
-                                    };
                                 }
-                                _ => {
-                                    info!("zdp/server - received transport message");
-                                    let my_sa = mgr.get_transport_state().unwrap();
-                                    // Not sure the correct way to use these packet things.  But here we just create yet another buffer.
-                                    let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
-                                    let mut pkt = Packet::new(&mut pkt_buf, km_demo::HEADROOM);
-                                    pkt.put(&input_buf[..read_len]);
-                                    let zpi = pkt.body()[0];
-                                    if zpi == my_sa.recv_zpis.encr {
-                                        info!("zdp/server - ZPI indicates encrypted transport message");
-                                    } else if zpi == my_sa.recv_zpis.hmac {
-                                        info!("zdp/server - ZPI indicates agent transit transport message, discarding");
-                                        continue;
-                                    } else {
-                                        info!("zdp/server - unexpected ZPI on message {} (expected {:?})", zpi, my_sa.recv_zpis);
-                                    }
-                                    match km::decrypt_transport_zdp(&mut pkt, my_sa.codec.clone()) {
-                                        Ok(_) => {
-                                            // Demo code sends a ZDP message like
-                                            //     [ZPI]
-                                            //     [BASE HEADER type = report]
-                                            //     [REPORT HEADER]
-                                            //     <STRING DATA>
-                                            match km_demo::parse_zdp_report_pkt(&pkt) {
-                                                Ok(s) => {
-                                                    info!("zdp/server - received report: *** {} ***", s);
-                                                }
-                                                Err(e) => {
-                                                    info!("zdp/server - error parsing ZDP report packet: {}", e);
-                                                    continue;
-                                                }
-                                            };
-                                        }
-                                        Err(e) => {
-                                            info!("zdp/server - error decrypting transport message: {:?}", e);
-                                        }
-                                    }
+                                Err(e) => {
+                                    info!("zdp/server - error decrypting transport message: {:?}", e);
                                 }
-                            };
+                            }
                         }
-                    }
+                    };
+                }
+            }
         }
 
         Ok(())

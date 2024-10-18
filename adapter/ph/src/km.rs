@@ -295,8 +295,7 @@ struct KmState {
     statemachine: Box<dyn KeyManagerStateMachine>,
     link_id: zpr::LinkId,
     kmsettings: KmSettings,
-    sa_id: zpr::SaId,                     // current SA identifier
-    mgmt_tx: Option<mpsc::Sender<Bytes>>, // Internal queue for key management messages to be processed.
+    sa_id: zpr::SaId, // current SA identifier
     ts: KmTransportSA,
     restart_request: bool,
     error_signaled: bool,
@@ -325,7 +324,6 @@ impl KeyManager {
                     link_id,
                     kmsettings: settings,
                     sa_id: 0,
-                    mgmt_tx: None,
                     ts: Default::default(),
                     restart_request: false,
                     error_signaled: false,
@@ -353,55 +351,6 @@ impl KeyManager {
         })
     }
 
-    /// Pass in a full Key Management payload from our peer here (should not include ZDP header).
-    /// This waits until space available in our KM message queue.
-    ///
-    /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
-    #[allow(dead_code)]
-    pub async fn handle_km_message(&self, message: &[u8]) -> KmResult<()> {
-        let tx: mpsc::Sender<Bytes>;
-        {
-            let state = self.shared.state.lock().unwrap();
-            match state.mgmt_tx {
-                Some(ref t) => {
-                    tx = t.clone();
-                }
-                None => {
-                    return Err(KmError::InvalidState);
-                }
-            }
-        }
-        let km_buf = Bytes::copy_from_slice(message);
-        match tx.send(km_buf).await {
-            Ok(_) => Ok(()),
-            Err(_) => Err(KmError::EnqueueFailed),
-        }
-    }
-
-    /// Pass in a full Key Management payload from our peer here (should not include ZDP header).
-    /// This will fail if there is no space in queue.
-    ///
-    /// We copy the payload into our own buffer for processing asynchronously. Caller should free buffer.
-    pub fn try_handle_km_message(&self, message: &[u8]) -> KmResult<()> {
-        let tx: mpsc::Sender<Bytes>;
-        {
-            let state = self.shared.state.lock().unwrap();
-            match state.mgmt_tx {
-                Some(ref t) => {
-                    tx = t.clone();
-                }
-                None => {
-                    return Err(KmError::InvalidState);
-                }
-            }
-        }
-        let km_buf = Bytes::copy_from_slice(message);
-        match tx.try_send(km_buf) {
-            Ok(_) => Ok(()),
-            Err(_) => Err(KmError::EnqueueFailed),
-        }
-    }
-
     /// Indicate that the KM state machine should restart out of the error state.
     /// For an initiator type link, this will trigger generation of a new handshake message.
     ///
@@ -424,18 +373,19 @@ impl KeyManager {
     /// just the payloads.  The caller is responsible for adding the ZPI header, if required.
     ///
     /// `km_signals_out` will be recieve signals from the machine.
+    ///
+    /// `km_messages_in` for incomming key management messages (key management payloads).
     pub async fn start(
         &mut self,
         ctok: CancellationToken,
         km_buffers_out: mpsc::Sender<KmLinkMsg<Bytes>>,
         km_signals_out: mpsc::Sender<KmLinkMsg<KmSignal>>,
+        mut km_messages_in: mpsc::Receiver<Bytes>,
     ) -> KmResult<()> {
-        let (km_tx, mut km_rx) = mpsc::channel(16);
         let tick_interval: Duration;
         let link_id;
         {
-            let mut state = self.shared.state.lock().unwrap();
-            state.mgmt_tx = Some(km_tx);
+            let state = self.shared.state.lock().unwrap();
             tick_interval = state.kmsettings.tick_interval;
             link_id = state.link_id;
         }
@@ -467,7 +417,7 @@ impl KeyManager {
                     break;
                 }
 
-                Some(inmsg) = km_rx.recv() => {
+                Some(inmsg) = km_messages_in.recv() => {
                     match self.dispatch_km_message(inmsg, link_id, &km_buffers_out).await {
                         Ok(_) => {}
                         Err(e) => {
@@ -1106,9 +1056,10 @@ mod test {
         let (tx, mut _rx) = mpsc::channel(4);
         let (sig_tx, mut _sig_rx) = mpsc::channel(4);
 
+        let (_km_tx, km_rx) = mpsc::channel(16);
         let sp_ctok = ctok.clone();
         tokio::spawn(async move {
-            let _ = km.start(sp_ctok, tx, sig_tx).await;
+            let _ = km.start(sp_ctok, tx, sig_tx, km_rx).await;
         });
 
         yield_now().await;
@@ -1128,9 +1079,11 @@ mod test {
         let (tx, mut _rx) = mpsc::channel(4);
         let (sig_tx, mut _sig_rx) = mpsc::channel(4);
 
+        let (_km_tx, km_rx) = mpsc::channel(16);
+
         let sp_ctok = ctok.clone();
         tokio::spawn(async move {
-            let _ = km.start(sp_ctok, tx, sig_tx).await;
+            let _ = km.start(sp_ctok, tx, sig_tx, km_rx).await;
         });
 
         sleep(Duration::from_millis(900)).await;
@@ -1153,18 +1106,15 @@ mod test {
 
         let sp_ctok = ctok.clone();
         let mut sp_km = km.clone();
+
+        let (km_tx, km_rx) = mpsc::channel(16);
         tokio::spawn(async move {
-            let _ = sp_km.start(sp_ctok, tx, sig_tx).await;
+            let _ = sp_km.start(sp_ctok, tx, sig_tx, km_rx).await;
         });
         yield_now().await;
 
         let msg = Bytes::from_static(&[1, 2, 3, 4, 5, 6, 7, 8]);
-        match km.handle_km_message(&msg).await {
-            Ok(_) => {}
-            Err(e) => {
-                panic!("handle_km_message failed: {}", e);
-            }
-        }
+        km_tx.send(msg).await.unwrap();
         yield_now().await;
 
         assert!(kinternals.state.lock().unwrap().handle_count == 1);
@@ -1183,18 +1133,14 @@ mod test {
 
         let sp_ctok = ctok.clone();
         let mut sp_km = km.clone();
+        let (km_tx, km_rx) = mpsc::channel(16);
         tokio::spawn(async move {
-            let _ = sp_km.start(sp_ctok, tx, sig_tx).await;
+            let _ = sp_km.start(sp_ctok, tx, sig_tx, km_rx).await;
         });
         yield_now().await;
 
         let msg = Bytes::from_static(&[1, 2, 3, 4, 5, 6, 7, 8]);
-        match km.try_handle_km_message(&msg) {
-            Ok(_) => {}
-            Err(e) => {
-                panic!("handle_km_message failed: {}", e);
-            }
-        }
+        km_tx.send(msg).await.unwrap();
         yield_now().await;
 
         assert!(kinternals.state.lock().unwrap().handle_count == 1);
