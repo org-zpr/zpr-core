@@ -1,4 +1,4 @@
-use bytes::BufMut;
+use bytes::{BufMut, Bytes};
 use openssl::x509::X509;
 use ph::km_cert_exchange::KmCertExchange;
 use std::io;
@@ -93,8 +93,13 @@ impl ZDPServer {
         // In real implemntation each client gets a KM instance.
         let mgr = KeyManager::new(1, Box::new(noise));
         let mut mgr_cc = mgr.clone();
+
+        let (km_payload_tx, km_payload_rx) = mpsc::channel(16);
         tokio::spawn(async move {
-            mgr_cc.start(km_ctok, km_tx, km_sig_tx).await.unwrap();
+            mgr_cc
+                .start(km_ctok, km_tx, km_sig_tx, km_payload_rx)
+                .await
+                .unwrap();
         });
 
         // This dummy node only allows for one connection at a time.
@@ -216,7 +221,8 @@ impl ZDPServer {
                                     continue;
                                 }
                             };
-                            match mgr.handle_km_message(km_payload).await {
+                            let msgbuf = Bytes::copy_from_slice(km_payload);
+                            match km_payload_tx.send(msgbuf).await {
                                 Ok(_) => {},
                                 Err(e) => {
                                     info!("zdp/server - error handling KM message: {:?}", e);

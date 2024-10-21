@@ -6,6 +6,7 @@ use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::sync_req;
 use crate::zpr::{LinkId, SubstrateAddr};
+use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use std::future::Future;
@@ -46,6 +47,7 @@ pub struct KmHandle {
     pub join_handle: JoinHandle<()>,
     pub ctok: CancellationToken, // for this KeyManager
     pub mgr: KeyManager,
+    pub km_tx: mpsc::Sender<Bytes>, // for sending in KM payloads
 }
 
 impl PeerKmState {
@@ -245,6 +247,14 @@ impl<'pktbuf> PeerTable<'pktbuf> {
         let entry = self.get(link_id)?;
         let handle = entry.km_state.handle.lock().unwrap();
         handle.as_ref().map(|h| h.mgr.clone())
+    }
+
+    /// Clone the key message sender channel on the link if link exists, and if there is a handle set.
+    /// See [PeerTable::set_km_handle].
+    pub fn clone_km_tx_chan(&self, link_id: LinkId) -> Option<mpsc::Sender<Bytes>> {
+        let entry = self.get(link_id)?;
+        let handle = entry.km_state.handle.lock().unwrap();
+        handle.as_ref().map(|h| h.km_tx.clone())
     }
 
     /// Remove the key manager state from the link, returning the optional KmHandle that was set.
