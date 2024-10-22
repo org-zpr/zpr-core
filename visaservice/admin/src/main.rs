@@ -10,9 +10,10 @@ use std::time::Duration;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use base64::prelude::*;
+use colored::Colorize;
 
 mod apitypes;
-use apitypes::{PolicyListEntry, PolicyBundle};
+use apitypes::{PolicyListEntry, PolicyBundle, PolicyVersion};
 
 
 
@@ -65,7 +66,7 @@ fn main() {
             match list(&args.svc_url, ca_cert) {
                 Ok(_) => {},
                 Err(e) => {
-                    eprintln!("Error: {}", e);
+                    eprintln!("{} {}", "Error: ".red(), e);
                 }
             }
         }
@@ -73,12 +74,12 @@ fn main() {
             match install(&args.svc_url, ca_cert, &policy) {
                 Ok(_) => {},
                 Err(e) => {
-                    eprintln!("Error: {}", e);
+                    eprintln!("{} {}", "Error: ".red(), e);
                 }
             }
         }
         None => {
-            println!("No command specified");
+            println!("{}", "No command specified".red());
         }
     }
 }
@@ -108,11 +109,12 @@ fn list(api_url: &str, cert: Certificate)  -> Result<(), Box<dyn std::error::Err
     let entries: Vec<PolicyListEntry> = resp.json()?;
 
     let i = 0;
-    println!("found {} installed polic{}", entries.len(), if entries.len() == 1 { "y" } else { "ies" });
+    println!("{}", format!("🐎 found {} installed polic{}", entries.len(), if entries.len() == 1 { "y" } else { "ies" }).magenta());
     for pv in entries {
-        println!("slot {}:", i);
-        println!("    config_id: {}", pv.config_id);
-        println!("      version: {}", pv.version);
+        let pver = PolicyVersion::new(&pv.version);
+        println!("  {}", format!("slot {}", i+1).underline());
+        println!("     {} {}", "CONFIG ID:".bold(), pv.config_id);
+        println!("       {} {}", "VERSION:".bold(), pver);
     }
 
     Ok(())
@@ -141,7 +143,7 @@ fn install(api_url: &str, cert: Certificate, policy: &Path) -> Result<(), Box<dy
     // encode the compressed data as base64
     let container = BASE64_STANDARD.encode(&gz_bytes);
 
-    println!("sending policy: container size {} bytes (raw {} / {} compressed)", container.len(), raw_len, gz_len);
+    println!("{}", format!("🐎 sending policy: container size {} bytes (raw {} / {} compressed)", container.len(), raw_len, gz_len).magenta());
 
     let bundle = PolicyBundle {
         config_id: 0,
@@ -159,9 +161,9 @@ fn install(api_url: &str, cert: Certificate, policy: &Path) -> Result<(), Box<dy
     }
 
     let entry: PolicyListEntry = resp.json()?;
-    println!("success: ");
-    println!("    config_id: {}", entry.config_id);
-    println!("      version: {}", entry.version);
+    println!("  {}", "SUCCESS".bold().green());
+    println!("     {} {}", "CONFIG ID:".bold(), entry.config_id);
+    println!("       {} {}", "VERSION:".bold(), PolicyVersion::new(&entry.version));
     Ok(())
 }
 
