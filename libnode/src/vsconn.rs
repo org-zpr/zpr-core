@@ -70,7 +70,8 @@ struct Shared {
 struct State {
     service_addr: String, // visa service address, format "HOST:PORT"
     node_cert_pem_data: String,
-    cmd_tx: Option<mpsc::Sender<VSCommand>>,
+    cmd_tx: mpsc::Sender<VSCommand>,
+    cmd_rx: Option<mpsc::Receiver<VSCommand>>, // removed by the run loop while running
     output_tx: mpsc::Sender<VSOutput>,
     client_fac: vscli::VSClientFactory,
     vss_service_addr: SocketAddr, // visa support service listen address
@@ -148,12 +149,15 @@ impl VSConn {
         let vss_service_addr =
             vss_service_addr.unwrap_or_else(|| SocketAddr::new(node_zpr_addr, DEFAULT_VSS_PORT));
 
+        let (cmd_tx, cmd_rx) = mpsc::channel(16);
+
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 service_addr: service_addr.to_string(),
                 node_cert_pem_data: cert_pem_data,
-                cmd_tx: None,
-                output_tx: output_tx,
+                cmd_tx,
+                cmd_rx: Some(cmd_rx),
+                output_tx,
                 client_fac: vscli::default_vsclient_factory,
                 vss_service_addr,
                 agent: node_agent,
@@ -200,18 +204,39 @@ impl VSConn {
     pub async fn run(&self, ctok: CancellationToken) -> Result<(), VSError> {
         info!(target: VS_RPC, "run starts");
 
-        let (tx, mut rx) = mpsc::channel(16);
         let fac: vscli::VSClientFactory;
         let service_addr: String;
         let output_tx: mpsc::Sender<VSOutput>;
+        let mut cmd_rx: mpsc::Receiver<VSCommand>;
         {
             let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
-            state.cmd_tx = Some(tx.clone());
+            match state.cmd_rx.take() {
+                Some(rx) => cmd_rx = rx,
+                None => return Err(VSError::AlreadyRunning),
+            }
             output_tx = state.output_tx.clone();
             fac = state.client_fac.clone();
             service_addr = state.service_addr.clone();
         }
 
+        let res = self
+            .run_inner(ctok, fac, service_addr, output_tx, &mut cmd_rx)
+            .await;
+
+        let mut state = self.shared.state.lock().unwrap();
+        state.cmd_rx = Some(cmd_rx);
+
+        res
+    }
+
+    async fn run_inner(
+        &self,
+        ctok: CancellationToken,
+        fac: vscli::VSClientFactory,
+        service_addr: String,
+        output_tx: mpsc::Sender<VSOutput>,
+        cmd_rx: &mut mpsc::Receiver<VSCommand>,
+    ) -> Result<(), VSError> {
         // All use of the client is in our little loop. So we honor its non-multithreaded aspect.
         let mut client = match (fac)(&service_addr) {
             Ok(c) => c,
@@ -256,7 +281,7 @@ impl VSConn {
                 }
 
                 // Handle one of the "async" requests.
-                Some(cmd) = rx.recv() => {
+                Some(cmd) = cmd_rx.recv() => {
                     match cmd {
                         // send errors simply mean requestor ignored reply; ignore them
                         VSCommand::RequestVisa(req, resp_chan) => { let _ = resp_chan.send(self.handle_request_visa(&mut client, req)); },
@@ -318,12 +343,7 @@ impl VSConn {
         let tx_chan: mpsc::Sender<VSCommand>;
         {
             let state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
-            if let Some(tx) = &state.cmd_tx {
-                tx_chan = tx.clone();
-            } else {
-                error!(target: VS_RPC, "VSConn::send_command called but no command channel available");
-                return Err(VSClientError::ConnClosed);
-            }
+            tx_chan = state.cmd_tx.clone();
         }
 
         if let Err(e) = tx_chan.send(cmd).await {
