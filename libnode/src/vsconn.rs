@@ -97,7 +97,7 @@ struct State {
     service_addr: String, // visa service address, format "HOST:PORT"
     node_cert_pem_data: String,
     cmd_tx: Option<mpsc::Sender<VSCommand>>,
-    output_tx: Option<mpsc::Sender<VSOutput>>,
+    output_tx: mpsc::Sender<VSOutput>,
     client_fac: vscli::VSClientFactory,
     vss_service_addr: SocketAddr, // visa support service listen address
     agent: vsapi::Agent,
@@ -179,7 +179,7 @@ impl VSConn {
                 service_addr: service_addr.to_string(),
                 node_cert_pem_data: cert_pem_data,
                 cmd_tx: None,
-                output_tx: Some(output_tx),
+                output_tx: output_tx,
                 client_fac: vscli::default_vsclient_factory,
                 vss_service_addr,
                 agent: node_agent,
@@ -233,7 +233,7 @@ impl VSConn {
         {
             let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
             state.cmd_tx = Some(tx.clone());
-            output_tx = state.output_tx.clone().unwrap();
+            output_tx = state.output_tx.clone();
             fac = state.client_fac.clone();
             service_addr = state.service_addr.clone();
         }
