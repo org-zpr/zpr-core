@@ -178,7 +178,7 @@ impl VSConn {
     fn initialize(&self, client: &mut Box<dyn VSClientI>) -> Result<(), VSError> {
         debug!(target: VS_RPC, "VSConn::initialize starts");
 
-        let agnt = self.shared.agent.clone(); // FIXME: just take reference
+        let agnt = &self.shared.agent;
         let pem_data = &self.shared.node_cert_pem_data;
         let vss_svc_addr = self.shared.vss_service_addr;
 
@@ -510,7 +510,7 @@ s5JVZ48=
     impl VSClientI for TestVSCli {
         fn authenticate(
             &mut self,
-            _agent: vsapi::Agent,
+            _agent: &vsapi::Agent,
             _cert_pem_data: &str,
             _vss_service_addr: SocketAddr,
         ) -> Result<String, VSClientError> {

@@ -36,7 +36,7 @@ pub struct VSClient {
 pub trait VSClientI: Send {
     fn authenticate(
         &mut self,
-        agent: vsapi::Agent,
+        agent: &vsapi::Agent,
         cert_pem_data: &str,
         vss_service_addr: SocketAddr,
     ) -> Result<String, VSClientError>;
@@ -102,7 +102,7 @@ impl VSClientI for VSClient {
     ///
     fn authenticate(
         &mut self,
-        agent: vsapi::Agent,
+        agent: &vsapi::Agent,
         cert_pem_data: &str,
         vss_service_addr: SocketAddr,
     ) -> Result<String, VSClientError> {
@@ -127,7 +127,7 @@ impl VSClientI for VSClient {
             node_cert: Some(cert_pem_data.into()),
             hmac: Some(hmac),
             vss_service: Some(vss_service_addr.to_string()),
-            node_agent: Some(agent),
+            node_agent: Some(agent.clone()),
         };
 
         debug!(target: VS_RPC, "sending AUTHENTICATE to {}", self.service);
