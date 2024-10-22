@@ -9,7 +9,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use std::time::SystemTime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{self, Duration};
@@ -58,12 +58,7 @@ pub enum VSOutput {
     PingSuccess(u64, u64), // (CONFIG_ID, POLICY_VERSION)
 }
 
-#[derive(Clone)]
 pub struct VSConn {
-    shared: Arc<Shared>,
-}
-
-struct Shared {
     service_addr: String, // visa service address, format "HOST:PORT"
     node_cert_pem_data: String,
     cmd_tx: mpsc::Sender<VSCommand>,
@@ -151,7 +146,7 @@ impl VSConn {
 
         let (cmd_tx, cmd_rx) = mpsc::channel(16);
 
-        let shared = Arc::new(Shared {
+        let vs_conn = VSConn {
             service_addr: service_addr.to_string(),
             node_cert_pem_data: cert_pem_data,
             cmd_tx,
@@ -162,14 +157,14 @@ impl VSConn {
                 cmd_rx: Some(cmd_rx),
                 client_fac: vscli::default_vsclient_factory,
             }),
-        });
+        };
 
-        Ok(VSConn { shared })
+        Ok(vs_conn)
     }
 
     #[cfg(test)]
     fn set_client_factory(&self, fac: vscli::VSClientFactory) {
-        let mut state = self.shared.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
         state.client_fac = fac;
     }
 
@@ -178,14 +173,12 @@ impl VSConn {
     fn initialize(&self, client: &mut Box<dyn VSClientI>) -> Result<(), VSError> {
         debug!(target: VS_RPC, "VSConn::initialize starts");
 
-        let agnt = &self.shared.agent;
-        let pem_data = &self.shared.node_cert_pem_data;
-        let vss_svc_addr = self.shared.vss_service_addr;
-
-        let _apikey = match client.authenticate(agnt, pem_data, vss_svc_addr) {
-            Ok(k) => k,
-            Err(e) => return Err(e.into()),
-        };
+        let _apikey =
+            match client.authenticate(&self.agent, &self.node_cert_pem_data, self.vss_service_addr)
+            {
+                Ok(k) => k,
+                Err(e) => return Err(e.into()),
+            };
 
         Ok(())
     }
@@ -201,7 +194,7 @@ impl VSConn {
         let fac: vscli::VSClientFactory;
         let mut cmd_rx: mpsc::Receiver<VSCommand>;
         {
-            let mut state = self.shared.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
+            let mut state = self.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
             match state.cmd_rx.take() {
                 Some(rx) => cmd_rx = rx,
                 None => return Err(VSError::AlreadyRunning),
@@ -211,7 +204,7 @@ impl VSConn {
 
         let res = self.run_inner(ctok, fac, &mut cmd_rx).await;
 
-        let mut state = self.shared.state.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
         state.cmd_rx = Some(cmd_rx);
 
         res
@@ -223,10 +216,8 @@ impl VSConn {
         fac: vscli::VSClientFactory,
         cmd_rx: &mut mpsc::Receiver<VSCommand>,
     ) -> Result<(), VSError> {
-        let service_addr = &self.shared.service_addr;
-
         // All use of the client is in our little loop. So we honor its non-multithreaded aspect.
-        let mut client = match (fac)(&service_addr) {
+        let mut client = match (fac)(&self.service_addr) {
             Ok(c) => c,
             Err(e) => return Err(e.into()),
         };
@@ -242,7 +233,7 @@ impl VSConn {
                     match client.ping_vs() {
                         Ok(ping_resp) => {
                             ping_errors = 0;
-                            match self.shared.output_tx.send(VSOutput::PingSuccess(ping_resp.configuration.unwrap() as u64, ping_resp.policy_version.unwrap() as u64)).await {
+                            match self.output_tx.send(VSOutput::PingSuccess(ping_resp.configuration.unwrap() as u64, ping_resp.policy_version.unwrap() as u64)).await {
                                 Ok(_) => {}
                                 Err(e) => {
                                     error!(target: VS_RPC, "failed to send ping success message: {e}");
@@ -327,7 +318,7 @@ impl VSConn {
     /// Attempt to enqueue an async command to the runloop.
     /// Returns an error if the command could not be enqueued.
     async fn send_command(&self, cmd: VSCommand) -> Result<(), VSClientError> {
-        if let Err(e) = self.shared.cmd_tx.send(cmd).await {
+        if let Err(e) = self.cmd_tx.send(cmd).await {
             error!(target: VS_RPC, "VSConn::send_command failed to queue: {e}");
             return Err(VSClientError::ConnClosed);
         }
@@ -380,6 +371,7 @@ mod test {
     use rand::Rng;
     use std::env;
     use std::fs;
+    use std::sync::Arc;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     const CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
@@ -661,15 +653,17 @@ s5JVZ48=
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(node_addr, "n0", &claims);
 
-        let conn = VSConn::new(
-            agnt,
-            tx,
-            "127.0.0.1:0",
-            certfile.get_path(),
-            node_addr,
-            None,
-        )
-        .unwrap();
+        let conn = Arc::new(
+            VSConn::new(
+                agnt,
+                tx,
+                "127.0.0.1:0",
+                certfile.get_path(),
+                node_addr,
+                None,
+            )
+            .unwrap(),
+        );
 
         conn.set_client_factory(testvscli_factory);
 
@@ -750,15 +744,17 @@ s5JVZ48=
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(node_addr, "n0", &claims);
 
-        let conn = VSConn::new(
-            agnt,
-            tx,
-            "127.0.0.1:0",
-            certfile.get_path(),
-            node_addr,
-            None,
-        )
-        .unwrap();
+        let conn = Arc::new(
+            VSConn::new(
+                agnt,
+                tx,
+                "127.0.0.1:0",
+                certfile.get_path(),
+                node_addr,
+                None,
+            )
+            .unwrap(),
+        );
 
         conn.set_client_factory(testvscli_factory);
 
@@ -848,15 +844,17 @@ s5JVZ48=
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(node_addr, "n0", &claims);
 
-        let conn = VSConn::new(
-            agnt,
-            tx,
-            "127.0.0.1:0",
-            certfile.get_path(),
-            node_addr,
-            None,
-        )
-        .unwrap();
+        let conn = Arc::new(
+            VSConn::new(
+                agnt,
+                tx,
+                "127.0.0.1:0",
+                certfile.get_path(),
+                node_addr,
+                None,
+            )
+            .unwrap(),
+        );
 
         conn.set_client_factory(testvscli_factory);
 
