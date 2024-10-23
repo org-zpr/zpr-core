@@ -33,28 +33,9 @@ pub struct VisaRequest {
     pub packet: Vec<u8>,
 }
 
-#[derive(Debug)]
-pub struct VisaRequestResponse {
-    /// If an API error orccess error occurred, this will be set.
-    pub api_error: Option<VSClientError>,
-
-    /// Response from visa service -- Even if this is some, it may not be a successful request.
-    pub response: Option<vsapi::VisaResponse>,
-}
-
-#[derive(Debug)]
-pub struct AuthorizeConnectResponse {
-    /// If an API error orccess error occurred, this will be set.
-    pub api_error: Option<VSClientError>,
-
-    /// If we got a response from the visa service, it will be here.
-    pub response: Option<vsapi::ConnectResponse>,
-}
-
-#[derive(Debug)]
-pub struct DisconnectStatus {
-    pub api_error: Option<VSClientError>,
-}
+pub type VisaRequestResponse = Result<vsapi::VisaResponse, VSClientError>;
+pub type AuthorizeConnectResponse = Result<vsapi::ConnectResponse, VSClientError>;
+pub type DisconnectStatus = Result<(), VSClientError>;
 
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
@@ -291,16 +272,10 @@ impl VSConn {
         req: VisaRequest,
     ) -> VisaRequestResponse {
         match client.request_visa(req.source_tether_addr, req.l3_type, req.packet) {
-            Ok(vr) => VisaRequestResponse {
-                api_error: None,
-                response: Some(vr),
-            },
+            Ok(vr) => Ok(vr),
             Err(e) => {
                 error!("failed to request visa: {}", e);
-                VisaRequestResponse {
-                    api_error: Some(e),
-                    response: None,
-                }
+                Err(e)
             }
         }
     }
@@ -311,16 +286,10 @@ impl VSConn {
         cr: vsapi::ConnectRequest,
     ) -> AuthorizeConnectResponse {
         match client.authorize_connect(cr) {
-            Ok(acr) => AuthorizeConnectResponse {
-                api_error: None,
-                response: Some(acr),
-            },
+            Ok(acr) => Ok(acr),
             Err(e) => {
                 error!("failed to authorize connect: {}", e);
-                AuthorizeConnectResponse {
-                    api_error: Some(e),
-                    response: None,
-                }
+                Err(e)
             }
         }
     }
@@ -331,10 +300,10 @@ impl VSConn {
         ipa: IpAddr,
     ) -> DisconnectStatus {
         match client.agent_disconnect(ipa) {
-            Ok(_) => DisconnectStatus { api_error: None },
+            Ok(_) => Ok(()),
             Err(e) => {
                 error!("failed to call agent disconnect: {}", e);
-                DisconnectStatus { api_error: Some(e) }
+                Err(e)
             }
         }
     }
@@ -734,9 +703,7 @@ s5JVZ48=
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
                 let vrr = resp.unwrap();
-                assert!(vrr.api_error.is_none());
-                assert!(vrr.response.is_some());
-                let vr = vrr.response.unwrap();
+                let vr = vrr.unwrap();
                 assert_eq!(vr.status, Some(vsapi::StatusCode::FAIL));
                 assert!(vr.reason.is_some());
                 let reason = vr.reason.unwrap();
@@ -760,8 +727,7 @@ s5JVZ48=
             match timeout(Duration::from_millis(100), resp).await {
                 Ok(resp) => {
                     let vrr = resp.unwrap();
-                    assert!(vrr.api_error.is_some());
-                    assert!(matches!(vrr.api_error.unwrap(), VSClientError::NoAPIKey));
+                    assert!(matches!(vrr.unwrap_err(), VSClientError::NoAPIKey));
                 }
                 _ => {
                     panic!("expected visa-response message, but got nothing (timeout)");
@@ -834,9 +800,7 @@ s5JVZ48=
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
                 let cr = resp.unwrap();
-                assert!(cr.api_error.is_none());
-                assert!(cr.response.is_some());
-                let cresp = cr.response.unwrap();
+                let cresp = cr.unwrap();
                 assert!(cresp.agent.is_some());
                 let agnt = cresp.agent.unwrap();
                 let attrs = agnt.attrs.unwrap();
@@ -863,8 +827,7 @@ s5JVZ48=
             match timeout(Duration::from_millis(100), resp).await {
                 Ok(resp) => {
                     let cr = resp.unwrap();
-                    assert!(cr.api_error.is_some());
-                    assert!(matches!(cr.api_error.unwrap(), VSClientError::NoAPIKey));
+                    assert!(matches!(cr.unwrap_err(), VSClientError::NoAPIKey));
                 }
                 _ => {
                     panic!("expected connect-response message, but got nothing (timeout)");
@@ -932,7 +895,7 @@ s5JVZ48=
         match timeout(Duration::from_millis(10), resp).await {
             Ok(resp) => {
                 let dr = resp.unwrap();
-                assert!(dr.api_error.is_none());
+                assert!(dr.is_ok());
             }
             _ => {
                 panic!("expected agent-disconnect-response message, but got nothing (timeout)");
@@ -947,8 +910,7 @@ s5JVZ48=
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
                 let dr = resp.unwrap();
-                assert!(dr.api_error.is_some());
-                assert!(matches!(dr.api_error.unwrap(), VSClientError::NoAPIKey));
+                assert!(matches!(dr.unwrap_err(), VSClientError::NoAPIKey));
             }
             _ => {
                 panic!("expected agent-disconnect-response message, but got nothing (timeout)");
