@@ -9,7 +9,6 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::SystemTime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{self, Duration};
@@ -62,15 +61,11 @@ pub struct VSConn {
     service_addr: String, // visa service address, format "HOST:PORT"
     node_cert_pem_data: String,
     cmd_tx: mpsc::Sender<VSCommand>,
+    cmd_rx: mpsc::Receiver<VSCommand>,
     output_tx: mpsc::Sender<VSOutput>,
+    client_fac: vscli::VSClientFactory,
     vss_service_addr: SocketAddr, // visa support service listen address
     agent: vsapi::Agent,
-    state: Mutex<State>,
-}
-
-struct State {
-    cmd_rx: Option<mpsc::Receiver<VSCommand>>, // removed by the run loop while running
-    client_fac: vscli::VSClientFactory,
 }
 
 /// Helper function to create a basic node agent. Probably only useful for early versions
@@ -150,22 +145,19 @@ impl VSConn {
             service_addr: service_addr.to_string(),
             node_cert_pem_data: cert_pem_data,
             cmd_tx,
+            cmd_rx,
             output_tx,
+            client_fac: vscli::default_vsclient_factory,
             vss_service_addr,
             agent: node_agent,
-            state: Mutex::new(State {
-                cmd_rx: Some(cmd_rx),
-                client_fac: vscli::default_vsclient_factory,
-            }),
         };
 
         Ok(vs_conn)
     }
 
     #[cfg(test)]
-    fn set_client_factory(&self, fac: vscli::VSClientFactory) {
-        let mut state = self.state.lock().unwrap();
-        state.client_fac = fac;
+    fn set_client_factory(&mut self, fac: vscli::VSClientFactory) {
+        self.client_fac = fac;
     }
 
     /// Registers with visa service and obtains an API key.
@@ -188,36 +180,11 @@ impl VSConn {
     ///
     /// This little run loop is fairly basic: all requests of the visa service run one at a time and
     /// in order.
-    pub async fn run(&self, ctok: CancellationToken) -> Result<(), VSError> {
-        info!(target: VS_RPC, "run starts");
+    pub async fn run(&mut self, ctok: CancellationToken) -> Result<(), VSError> {
+        info!(target: VS_RPC, "VSConn::run starts");
 
-        let fac: vscli::VSClientFactory;
-        let mut cmd_rx: mpsc::Receiver<VSCommand>;
-        {
-            let mut state = self.state.lock().unwrap(); // TAKES LOCK (drops when state goes out of scope)
-            match state.cmd_rx.take() {
-                Some(rx) => cmd_rx = rx,
-                None => return Err(VSError::AlreadyRunning),
-            }
-            fac = state.client_fac.clone();
-        }
-
-        let res = self.run_inner(ctok, fac, &mut cmd_rx).await;
-
-        let mut state = self.state.lock().unwrap();
-        state.cmd_rx = Some(cmd_rx);
-
-        res
-    }
-
-    async fn run_inner(
-        &self,
-        ctok: CancellationToken,
-        fac: vscli::VSClientFactory,
-        cmd_rx: &mut mpsc::Receiver<VSCommand>,
-    ) -> Result<(), VSError> {
         // All use of the client is in our little loop. So we honor its non-multithreaded aspect.
-        let mut client = match (fac)(&self.service_addr) {
+        let mut client = match (self.client_fac)(&self.service_addr) {
             Ok(c) => c,
             Err(e) => return Err(e.into()),
         };
@@ -260,7 +227,7 @@ impl VSConn {
                 }
 
                 // Handle one of the "async" requests.
-                Some(cmd) = cmd_rx.recv() => {
+                Some(cmd) = self.cmd_rx.recv() => {
                     match cmd {
                         // send errors simply mean requestor ignored reply; ignore them
                         VSCommand::RequestVisa(req, resp_chan) => { let _ = resp_chan.send(Self::handle_request_visa(&mut client, req)); },
@@ -309,6 +276,20 @@ impl VSConn {
         }
     }
 
+    /// Creates a handle which can be used to issue commands to this connection.
+    pub fn handle(&self) -> VSConnHandle {
+        VSConnHandle {
+            cmd_tx: self.cmd_tx.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct VSConnHandle {
+    cmd_tx: mpsc::Sender<VSCommand>,
+}
+
+impl VSConnHandle {
     /// Attempt to enqueue an async command to the runloop.
     /// Returns an error if the command could not be enqueued.
     async fn send_command(&self, cmd: VSCommand) -> Result<(), VSClientError> {
@@ -365,7 +346,7 @@ mod test {
     use rand::Rng;
     use std::env;
     use std::fs;
-    use std::sync::Arc;
+    use std::sync::Mutex;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     const CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
@@ -604,7 +585,7 @@ s5JVZ48=
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(node_addr, "n0", &claims);
 
-        let conn = VSConn::new(
+        let mut conn = VSConn::new(
             agnt,
             tx,
             "127.0.0.1:0",
@@ -647,25 +628,23 @@ s5JVZ48=
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(node_addr, "n0", &claims);
 
-        let conn = Arc::new(
-            VSConn::new(
-                agnt,
-                tx,
-                "127.0.0.1:0",
-                certfile.get_path(),
-                node_addr,
-                None,
-            )
-            .unwrap(),
-        );
+        let mut conn = VSConn::new(
+            agnt,
+            tx,
+            "127.0.0.1:0",
+            certfile.get_path(),
+            node_addr,
+            None,
+        )
+        .unwrap();
 
         conn.set_client_factory(testvscli_factory);
 
         let ctoken = CancellationToken::new();
         let vs_tok = ctoken.clone();
-        let sp_conn = conn.clone();
+        let conn_handle = conn.handle();
         tokio::spawn(async move {
-            let _ = sp_conn.run(vs_tok).await;
+            let _ = conn.run(vs_tok).await;
         });
 
         // Should get a ping message
@@ -686,7 +665,7 @@ s5JVZ48=
             l3_type: zpr::L3Type::Ipv4,
             packet: vec![1, 2, 3, 4],
         };
-        let resp = conn.request_visa(req);
+        let resp = conn_handle.request_visa(req);
 
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
@@ -710,7 +689,7 @@ s5JVZ48=
                 packet: vec![1, 2, 3, 4],
             };
             set_next_error(VSClientError::NoAPIKey);
-            let resp = conn.request_visa(req);
+            let resp = conn_handle.request_visa(req);
             match timeout(Duration::from_millis(100), resp).await {
                 Ok(resp) => {
                     assert!(matches!(resp.unwrap_err(), VSClientError::NoAPIKey));
@@ -738,25 +717,23 @@ s5JVZ48=
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(node_addr, "n0", &claims);
 
-        let conn = Arc::new(
-            VSConn::new(
-                agnt,
-                tx,
-                "127.0.0.1:0",
-                certfile.get_path(),
-                node_addr,
-                None,
-            )
-            .unwrap(),
-        );
+        let mut conn = VSConn::new(
+            agnt,
+            tx,
+            "127.0.0.1:0",
+            certfile.get_path(),
+            node_addr,
+            None,
+        )
+        .unwrap();
 
         conn.set_client_factory(testvscli_factory);
 
         let ctoken = CancellationToken::new();
         let vs_tok = ctoken.clone();
-        let sp_conn = conn.clone();
+        let conn_handle = conn.handle();
         tokio::spawn(async move {
-            let _ = sp_conn.run(vs_tok).await;
+            let _ = conn.run(vs_tok).await;
         });
 
         // Should get a ping message
@@ -783,7 +760,7 @@ s5JVZ48=
             challenge: Some(vec![1, 2, 3, 4]),
             challenge_responses: Some(vec![vec![5, 6, 7, 8]]),
         };
-        let resp = conn.authorize_connect(req);
+        let resp = conn_handle.authorize_connect(req);
 
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
@@ -810,7 +787,7 @@ s5JVZ48=
                 challenge_responses: None,
             };
             set_next_error(VSClientError::NoAPIKey);
-            let resp = conn.authorize_connect(req);
+            let resp = conn_handle.authorize_connect(req);
             match timeout(Duration::from_millis(100), resp).await {
                 Ok(resp) => {
                     assert!(matches!(resp.unwrap_err(), VSClientError::NoAPIKey));
@@ -838,25 +815,23 @@ s5JVZ48=
         claims.insert(String::from("foo"), String::from("fee"));
         let agnt = new_node_agent(node_addr, "n0", &claims);
 
-        let conn = Arc::new(
-            VSConn::new(
-                agnt,
-                tx,
-                "127.0.0.1:0",
-                certfile.get_path(),
-                node_addr,
-                None,
-            )
-            .unwrap(),
-        );
+        let mut conn = VSConn::new(
+            agnt,
+            tx,
+            "127.0.0.1:0",
+            certfile.get_path(),
+            node_addr,
+            None,
+        )
+        .unwrap();
 
         conn.set_client_factory(testvscli_factory);
 
         let ctoken = CancellationToken::new();
         let vs_tok = ctoken.clone();
-        let sp_conn = conn.clone();
+        let conn_handle = conn.handle();
         tokio::spawn(async move {
-            let _ = sp_conn.run(vs_tok).await;
+            let _ = conn.run(vs_tok).await;
         });
 
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -876,7 +851,7 @@ s5JVZ48=
 
         assert_eq!(get_counter(CounterT::AgentDisconnect), 0);
 
-        let resp = conn.agent_disconnect(node_addr);
+        let resp = conn_handle.agent_disconnect(node_addr);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -892,7 +867,7 @@ s5JVZ48=
 
         // Run disconnect again check that we get the error:
         set_next_error(VSClientError::NoAPIKey);
-        let resp = conn.agent_disconnect(node_addr);
+        let resp = conn_handle.agent_disconnect(node_addr);
 
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {

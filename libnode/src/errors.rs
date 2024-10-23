@@ -15,8 +15,6 @@ pub enum VSError {
     EnqueueError,
     #[error("Disconnect")]
     Disconnect,
-    #[error("AlreadyRunning")]
-    AlreadyRunning,
 }
 
 #[derive(Debug, Error)]

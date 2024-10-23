@@ -63,7 +63,7 @@ pub struct Assembly {
     pub agent_input: AgentInput,
     pub substrate_egress: SubstrateEgress,
 
-    pub vsconn: Option<libnode::vsconn::VSConn>, // present only on nodes
+    pub vsconn: Option<libnode::vsconn::VSConnHandle>, // present only on nodes
 
     // Used to intercept packets that are unencrypted but still have ZDP headers
     pub capture_queue: Capture,
@@ -318,7 +318,7 @@ pub mod test {
         pub buffer_stack: Option<BufferStack<{ config::PACKET_BUFFER_SIZE }>>,
         pub agent_input: Option<AgentInput>,
         pub substrate_egress: Option<SubstrateEgress>,
-        pub vsconn: Option<Option<libnode::vsconn::VSConn>>,
+        pub vsconn: Option<Option<libnode::vsconn::VSConnHandle>>,
         pub capture_queue: Option<Capture>,
         pub capture_worker: Option<CaptureWorker>,
         pub flow_control: Option<FlowControl>,

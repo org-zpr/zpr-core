@@ -266,7 +266,7 @@ fn main() -> ExitCode {
     // instantiate (but don't launch yet) Visa Service connection manager if we're a node
     //
 
-    let vsconn;
+    let mut vsconn;
     let vs_outq;
 
     if ph_mode == PhMode::Node {
@@ -306,7 +306,7 @@ fn main() -> ExitCode {
         buffer_stack: BufferStack::new(buf_storage),
         agent_input: AgentInput::new(tun_devs.clone()),
         substrate_egress: SubstrateEgress::new(substrate_sockets.clone()),
-        vsconn,
+        vsconn: vsconn.as_ref().map(|c| c.handle()),
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
         flow_control: FlowControl::new(),
@@ -450,12 +450,10 @@ fn main() -> ExitCode {
         // although it is an async method, it calls blocking functions (namely Thrift functions)...
         // once we switch to async Thrift we can simplify this
         let rt_handle = runtime.handle().clone();
-        let vsconn_asm = asm.clone();
         js.spawn_blocking(move || loop {
             let res = rt_handle.block_on(
-                vsconn_asm
-                    .vsconn
-                    .clone()
+                vsconn
+                    .as_mut()
                     .unwrap()
                     .run(tokio_util::sync::CancellationToken::new()),
             );
