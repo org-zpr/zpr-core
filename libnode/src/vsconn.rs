@@ -28,7 +28,6 @@ const MAX_PING_ERRORS: u32 = 5;
 
 #[derive(Debug)]
 pub struct VisaRequest {
-    pub request_id: u32,
     pub source_tether_addr: IpAddr,
     pub l3_type: zpr::L3Type,
     pub packet: Vec<u8>,
@@ -36,9 +35,6 @@ pub struct VisaRequest {
 
 #[derive(Debug)]
 pub struct VisaRequestResponse {
-    /// Copied from `VisaRequest`
-    pub request_id: u32,
-
     /// If an API error orccess error occurred, this will be set.
     pub api_error: Option<VSClientError>,
 
@@ -48,9 +44,6 @@ pub struct VisaRequestResponse {
 
 #[derive(Debug)]
 pub struct AuthorizeConnectResponse {
-    /// Copied from the thrift ConnectRequest
-    pub connection_id: i32,
-
     /// If an API error orccess error occurred, this will be set.
     pub api_error: Option<VSClientError>,
 
@@ -60,7 +53,6 @@ pub struct AuthorizeConnectResponse {
 
 #[derive(Debug)]
 pub struct DisconnectStatus {
-    pub zpr_addr: IpAddr,
     pub api_error: Option<VSClientError>,
 }
 
@@ -300,14 +292,12 @@ impl VSConn {
     ) -> VisaRequestResponse {
         match client.request_visa(req.source_tether_addr, req.l3_type, req.packet) {
             Ok(vr) => VisaRequestResponse {
-                request_id: req.request_id,
                 api_error: None,
                 response: Some(vr),
             },
             Err(e) => {
                 error!("failed to request visa: {}", e);
                 VisaRequestResponse {
-                    request_id: req.request_id,
                     api_error: Some(e),
                     response: None,
                 }
@@ -320,20 +310,14 @@ impl VSConn {
         client: &mut Box<dyn VSClientI>,
         cr: vsapi::ConnectRequest,
     ) -> AuthorizeConnectResponse {
-        let id = match cr.connection_id {
-            Some(i) => i,
-            None => 0,
-        };
         match client.authorize_connect(cr) {
             Ok(acr) => AuthorizeConnectResponse {
-                connection_id: id,
                 api_error: None,
                 response: Some(acr),
             },
             Err(e) => {
                 error!("failed to authorize connect: {}", e);
                 AuthorizeConnectResponse {
-                    connection_id: id,
                     api_error: Some(e),
                     response: None,
                 }
@@ -347,16 +331,10 @@ impl VSConn {
         ipa: IpAddr,
     ) -> DisconnectStatus {
         match client.agent_disconnect(ipa) {
-            Ok(_) => DisconnectStatus {
-                zpr_addr: ipa,
-                api_error: None,
-            },
+            Ok(_) => DisconnectStatus { api_error: None },
             Err(e) => {
-                error!("ailed to call agent disconnect: {}", e);
-                DisconnectStatus {
-                    zpr_addr: ipa,
-                    api_error: Some(e),
-                }
+                error!("failed to call agent disconnect: {}", e);
+                DisconnectStatus { api_error: Some(e) }
             }
         }
     }
@@ -383,7 +361,7 @@ impl VSConn {
         Ok(())
     }
 
-    /// Perform an async visa request. The response will have a request_id matching the request.
+    /// Perform an async visa request.
     ///
     /// ## Errors
     /// - [VSError::EnqueueError] if the request could not be enqueued.
@@ -393,7 +371,7 @@ impl VSConn {
         rx.await.map_err(|_| VSError::Disconnect)
     }
 
-    /// Perform an async authorize_connect. The response will have a connection_id matching the request.
+    /// Perform an async authorize_connect.
     ///
     /// ## Errors
     /// - [VSError::EnqueueError] if the request could not be enqueued.
@@ -747,7 +725,6 @@ s5JVZ48=
         }
 
         let req = VisaRequest {
-            request_id: 123,
             source_tether_addr: node_addr,
             l3_type: zpr::L3Type::Ipv4,
             packet: vec![1, 2, 3, 4],
@@ -757,7 +734,6 @@ s5JVZ48=
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
                 let vrr = resp.unwrap();
-                assert_eq!(vrr.request_id, 123);
                 assert!(vrr.api_error.is_none());
                 assert!(vrr.response.is_some());
                 let vr = vrr.response.unwrap();
@@ -775,7 +751,6 @@ s5JVZ48=
         {
             // Run again check that we get the error:
             let req = VisaRequest {
-                request_id: 123,
                 source_tether_addr: node_addr,
                 l3_type: zpr::L3Type::Ipv4,
                 packet: vec![1, 2, 3, 4],
@@ -785,7 +760,6 @@ s5JVZ48=
             match timeout(Duration::from_millis(100), resp).await {
                 Ok(resp) => {
                     let vrr = resp.unwrap();
-                    assert_eq!(vrr.request_id, 123);
                     assert!(vrr.api_error.is_some());
                     assert!(matches!(vrr.api_error.unwrap(), VSClientError::NoAPIKey));
                 }
@@ -860,7 +834,6 @@ s5JVZ48=
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
                 let cr = resp.unwrap();
-                assert_eq!(cr.connection_id, 456);
                 assert!(cr.api_error.is_none());
                 assert!(cr.response.is_some());
                 let cresp = cr.response.unwrap();
@@ -890,7 +863,6 @@ s5JVZ48=
             match timeout(Duration::from_millis(100), resp).await {
                 Ok(resp) => {
                     let cr = resp.unwrap();
-                    assert_eq!(cr.connection_id, 456);
                     assert!(cr.api_error.is_some());
                     assert!(matches!(cr.api_error.unwrap(), VSClientError::NoAPIKey));
                 }
@@ -960,7 +932,6 @@ s5JVZ48=
         match timeout(Duration::from_millis(10), resp).await {
             Ok(resp) => {
                 let dr = resp.unwrap();
-                assert_eq!(dr.zpr_addr, node_addr);
                 assert!(dr.api_error.is_none());
             }
             _ => {
@@ -976,7 +947,6 @@ s5JVZ48=
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
                 let dr = resp.unwrap();
-                assert_eq!(dr.zpr_addr, node_addr);
                 assert!(dr.api_error.is_some());
                 assert!(matches!(dr.api_error.unwrap(), VSClientError::NoAPIKey));
             }
