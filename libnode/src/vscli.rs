@@ -1,4 +1,4 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::time::SystemTime;
 use thrift::protocol::{TBinaryInputProtocol, TBinaryOutputProtocol};
 use thrift::transport::{ReadHalf, WriteHalf};
@@ -34,7 +34,7 @@ pub trait VSClientI: Send {
         &mut self,
         agent: vsapi::Agent,
         cert_pem_data: &str,
-        vss_service_addr: &str,
+        vss_service_addr: SocketAddr,
     ) -> Result<String, VSClientError>;
     fn ping_vs(&mut self) -> Result<vsapi::Pong, VSClientError>;
     fn de_register(&mut self) -> Result<(), VSClientError>;
@@ -99,7 +99,7 @@ impl VSClientI for VSClient {
         &mut self,
         agent: vsapi::Agent,
         cert_pem_data: &str,
-        vss_service_addr: &str,
+        vss_service_addr: SocketAddr,
     ) -> Result<String, VSClientError> {
         debug!("sending HELLO to {}", self.service);
         let hello_response = self.cli.hello()?;
@@ -121,7 +121,7 @@ impl VSClientI for VSClient {
             timestamp: Some(timestamp as i64),
             node_cert: Some(cert_pem_data.into()),
             hmac: Some(hmac),
-            vss_service: Some(vss_service_addr.into()),
+            vss_service: Some(vss_service_addr.to_string()),
             node_agent: Some(agent),
         };
 

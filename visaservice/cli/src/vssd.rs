@@ -22,11 +22,11 @@ async fn _run_vss(listen_sock: SocketAddr) -> Result<(), VssError> {
     let (vss_tx, mut vss_rx) = mpsc::channel(32);
     /*
     tokio::spawn(async move {
-        vss::start_vss_server(vss_tx, &listen_sock.to_string());
+        vss::start_vss_server(vss_tx, listen_sock);
     });
     */
     let _handle = std::thread::spawn(move || {
-        vss::start_vss_server(vss_tx, &listen_sock.to_string());
+        vss::start_vss_server(vss_tx, listen_sock);
     });
 
     info!("VSS server started on {}", listen_sock);

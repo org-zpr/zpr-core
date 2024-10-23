@@ -4,6 +4,7 @@
 //! messages into enums on a channel.
 
 use std::fmt::{self, Formatter};
+use std::net::SocketAddr;
 use thrift::protocol::{TBinaryInputProtocolFactory, TBinaryOutputProtocolFactory};
 use thrift::protocol::{TInputProtocolFactory, TOutputProtocolFactory};
 use thrift::server::TServer;
@@ -65,11 +66,11 @@ impl VisaSupportHandlerImpl {
 /// Start the VSS (thrift) server (blocks forever). Messages from the visa service are
 /// placed on the provided channel.
 /// - `tx_chan` for arriving messages from the visa service.
-/// - `listen_addr` is the address to listen on as 'ADDR:PORT'.
+/// - `listen_addr` is the address to listen on.
 ///
 /// TODO: Need to add TLS to the thrift connection.
 #[allow(dead_code)]
-pub fn start_vss_server(tx_chan: Sender<VSSMsg>, listen_addr: &str) {
+pub fn start_vss_server(tx_chan: Sender<VSSMsg>, listen_addr: SocketAddr) {
     // Create the thrift server and run it.
     let handler = VisaSupportHandlerImpl::new(tx_chan);
     let processor = VisaSupportSyncProcessor::new(handler);

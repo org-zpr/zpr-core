@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::prelude::*;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -99,7 +99,7 @@ struct State {
     cmd_tx: Option<mpsc::Sender<VSCommand>>,
     output_tx: Option<mpsc::Sender<VSOutput>>,
     client_fac: vscli::VSClientFactory,
-    vss_service_addr: String, // visa support service listen address, format "HOST:PORT"
+    vss_service_addr: SocketAddr, // visa support service listen address
     agent: vsapi::Agent,
 }
 
@@ -161,8 +161,8 @@ impl VSConn {
         output_tx: Sender<VSOutput>,
         service_addr: &str,
         node_cert_file: &Path,
-        node_zpr_addr: &IpAddr,
-        vss_service_addr: Option<&str>,
+        node_zpr_addr: IpAddr,
+        vss_service_addr: Option<SocketAddr>,
     ) -> Result<VSConn, VSError> {
         let mut certfile = match File::open(node_cert_file) {
             Ok(f) => f,
@@ -171,12 +171,8 @@ impl VSConn {
         let mut cert_pem_data = String::new();
         certfile.read_to_string(&mut cert_pem_data)?;
 
-        let vss_addr = match vss_service_addr {
-            Some(a) => a.to_string(),
-            None => {
-                format!("{}:{}", node_zpr_addr, DEFAULT_VSS_PORT)
-            }
-        };
+        let vss_service_addr =
+            vss_service_addr.unwrap_or_else(|| SocketAddr::new(node_zpr_addr, DEFAULT_VSS_PORT));
 
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
@@ -185,7 +181,7 @@ impl VSConn {
                 cmd_tx: None,
                 output_tx: Some(output_tx),
                 client_fac: vscli::default_vsclient_factory,
-                vss_service_addr: vss_addr,
+                vss_service_addr,
                 agent: node_agent,
             }),
         });
@@ -205,16 +201,16 @@ impl VSConn {
         info!("VSConn::initialize starts");
 
         let pem_data: String;
-        let vss_svc_addr: String;
+        let vss_svc_addr;
         let agnt: vsapi::Agent;
         {
             let state = self.shared.state.lock().unwrap();
             pem_data = state.node_cert_pem_data.clone();
-            vss_svc_addr = state.vss_service_addr.clone();
+            vss_svc_addr = state.vss_service_addr;
             agnt = state.agent.clone();
         }
 
-        let _apikey = match client.authenticate(agnt, &pem_data, &vss_svc_addr) {
+        let _apikey = match client.authenticate(agnt, &pem_data, vss_svc_addr) {
             Ok(k) => k,
             Err(e) => return Err(e.into()),
         };
@@ -565,7 +561,7 @@ s5JVZ48=
             &mut self,
             _agent: vsapi::Agent,
             _cert_pem_data: &str,
-            _vss_service_addr: &str,
+            _vss_service_addr: SocketAddr,
         ) -> Result<String, VSClientError> {
             incr(CounterT::Auth);
             if let Some(e) = take_next_error() {
@@ -676,7 +672,7 @@ s5JVZ48=
             tx,
             "127.0.0.1:0",
             certfile.get_path(),
-            &node_addr,
+            node_addr,
             None,
         )
         .unwrap();
@@ -719,7 +715,7 @@ s5JVZ48=
             tx,
             "127.0.0.1:0",
             certfile.get_path(),
-            &node_addr,
+            node_addr,
             None,
         )
         .unwrap();
@@ -831,7 +827,7 @@ s5JVZ48=
             tx,
             "127.0.0.1:0",
             certfile.get_path(),
-            &node_addr,
+            node_addr,
             None,
         )
         .unwrap();
@@ -950,7 +946,7 @@ s5JVZ48=
             tx,
             "127.0.0.1:0",
             certfile.get_path(),
-            &node_addr,
+            node_addr,
             None,
         )
         .unwrap();
