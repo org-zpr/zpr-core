@@ -1,28 +1,24 @@
+use base64::prelude::*;
 use clap::{Parser, Subcommand};
-use std::path::{PathBuf, Path};
+use colored::Colorize;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use reqwest;
 use reqwest::tls::Certificate;
 use reqwest::StatusCode;
 use std::fs::File;
-use std::io::Read;
 use std::io::prelude::*;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
-use flate2::Compression;
-use flate2::write::GzEncoder;
-use base64::prelude::*;
-use colored::Colorize;
 
 mod apitypes;
-use apitypes::{PolicyListEntry, PolicyBundle, PolicyVersion};
-
-
+use apitypes::{PolicyBundle, PolicyListEntry, PolicyVersion};
 
 // Somewhat inconveniently, this must match the setting in:
 // - visaservice/mods/polio/const.go (used by the "new" visa service)
 // - zpr-prototype/pkg/snet/policy/const.go (used by the old compiler)
 const POLICY_SERIAL_VERSION: u32 = 41;
-
-
 
 #[derive(Parser)]
 #[command(version, about = "Visa Service Admin Tool", long_about = None)]
@@ -33,7 +29,6 @@ struct Cmd {
     /// The visa service base API url without any final slash, eg "https://vs.zpr.org:8182".
     #[arg(short, long, value_name = "URL")]
     svc_url: String,
-
 
     /// Path to the CA certificate file used to validate the visa service TLS credentials.
     #[arg(short, long, value_name = "PEM_CERT_FILE")]
@@ -51,10 +46,8 @@ enum SubCmd {
     Install {
         #[arg(short, long, value_name = "POLICY_FILE")]
         policy: PathBuf,
-    }
-
+    },
 }
-
 
 fn main() {
     let args = Cmd::parse();
@@ -62,22 +55,18 @@ fn main() {
     let ca_cert = load_cert(&args.ca_cert).unwrap();
 
     match args.command {
-        Some(SubCmd::List) => {
-            match list(&args.svc_url, ca_cert) {
-                Ok(_) => {},
-                Err(e) => {
-                    eprintln!("{} {}", "Error: ".red(), e);
-                }
+        Some(SubCmd::List) => match list(&args.svc_url, ca_cert) {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("{} {}", "Error: ".red(), e);
             }
-        }
-        Some(SubCmd::Install { policy }) => {
-            match install(&args.svc_url, ca_cert, &policy) {
-                Ok(_) => {},
-                Err(e) => {
-                    eprintln!("{} {}", "Error: ".red(), e);
-                }
+        },
+        Some(SubCmd::Install { policy }) => match install(&args.svc_url, ca_cert, &policy) {
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("{} {}", "Error: ".red(), e);
             }
-        }
+        },
         None => {
             println!("{}", "No command specified".red());
         }
@@ -91,9 +80,7 @@ fn load_cert(ca: &Path) -> Result<Certificate, Box<dyn std::error::Error>> {
     Ok(cert)
 }
 
-
-
-fn list(api_url: &str, cert: Certificate)  -> Result<(), Box<dyn std::error::Error>> {
+fn list(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error::Error>> {
     // TODO: Get rid of this "invalid cert".  I think the issue is that the vs cert does not include correct KeyUsage values.
     let cb = reqwest::blocking::ClientBuilder::new()
         .add_root_certificate(cert)
@@ -103,16 +90,30 @@ fn list(api_url: &str, cert: Certificate)  -> Result<(), Box<dyn std::error::Err
 
     let resp = client.get(format!("{}/admin/policies", api_url)).send()?;
     if !resp.status().is_success() {
-        return Err(format!("error (status {:?}:{}) : {}", resp.status(), reason_for(resp.status()), resp.text()?).into());
+        return Err(format!(
+            "error (status {:?}:{}) : {}",
+            resp.status(),
+            reason_for(resp.status()),
+            resp.text()?
+        )
+        .into());
     }
 
     let entries: Vec<PolicyListEntry> = resp.json()?;
 
     let i = 0;
-    println!("{}", format!("🐎 found {} installed polic{}", entries.len(), if entries.len() == 1 { "y" } else { "ies" }).magenta());
+    println!(
+        "{}",
+        format!(
+            "🐎 found {} installed polic{}",
+            entries.len(),
+            if entries.len() == 1 { "y" } else { "ies" }
+        )
+        .magenta()
+    );
     for pv in entries {
         let pver = PolicyVersion::new(&pv.version);
-        println!("  {}", format!("slot {}", i+1).underline());
+        println!("  {}", format!("slot {}", i + 1).underline());
         println!("     {} {}", "CONFIG ID:".bold(), pv.config_id);
         println!("       {} {}", "VERSION:".bold(), pver);
     }
@@ -120,8 +121,11 @@ fn list(api_url: &str, cert: Certificate)  -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
-
-fn install(api_url: &str, cert: Certificate, policy: &Path) -> Result<(), Box<dyn std::error::Error>> {
+fn install(
+    api_url: &str,
+    cert: Certificate,
+    policy: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let cb = reqwest::blocking::ClientBuilder::new()
         .add_root_certificate(cert)
         .danger_accept_invalid_certs(true)
@@ -143,7 +147,16 @@ fn install(api_url: &str, cert: Certificate, policy: &Path) -> Result<(), Box<dy
     // encode the compressed data as base64
     let container = BASE64_STANDARD.encode(&gz_bytes);
 
-    println!("{}", format!("🐎 sending policy: container size {} bytes (raw {} / {} compressed)", container.len(), raw_len, gz_len).magenta());
+    println!(
+        "{}",
+        format!(
+            "🐎 sending policy: container size {} bytes (raw {} / {} compressed)",
+            container.len(),
+            raw_len,
+            gz_len
+        )
+        .magenta()
+    );
 
     let bundle = PolicyBundle {
         config_id: 0,
@@ -152,18 +165,29 @@ fn install(api_url: &str, cert: Certificate, policy: &Path) -> Result<(), Box<dy
         container,
     };
 
-    let resp = client.post(format!("{}/admin/policy", api_url))
+    let resp = client
+        .post(format!("{}/admin/policy", api_url))
         .json(&bundle)
         .send()?;
 
     if !resp.status().is_success() {
-        return Err(format!("error (status {:?}:{}) : {}", resp.status(), reason_for(resp.status()), resp.text()?).into());
+        return Err(format!(
+            "error (status {:?}:{}) : {}",
+            resp.status(),
+            reason_for(resp.status()),
+            resp.text()?
+        )
+        .into());
     }
 
     let entry: PolicyListEntry = resp.json()?;
     println!("  {}", "SUCCESS".bold().green());
     println!("     {} {}", "CONFIG ID:".bold(), entry.config_id);
-    println!("       {} {}", "VERSION:".bold(), PolicyVersion::new(&entry.version));
+    println!(
+        "       {} {}",
+        "VERSION:".bold(),
+        PolicyVersion::new(&entry.version)
+    );
     Ok(())
 }
 
