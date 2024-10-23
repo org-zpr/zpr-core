@@ -263,9 +263,9 @@ impl VSConn {
                 Some(cmd) = cmd_rx.recv() => {
                     match cmd {
                         // send errors simply mean requestor ignored reply; ignore them
-                        VSCommand::RequestVisa(req, resp_chan) => { let _ = resp_chan.send(self.handle_request_visa(&mut client, req)); },
-                        VSCommand::AuthorizeConnect(cr, resp_chan) => { let _ = resp_chan.send(self.handle_authorize_connect(&mut client, cr)); },
-                        VSCommand::AgentDisconnect(ipa, resp_chan) => { let _ = resp_chan.send(self.handle_agent_disconnect(&mut client, ipa)); },
+                        VSCommand::RequestVisa(req, resp_chan) => { let _ = resp_chan.send(Self::handle_request_visa(&mut client, req)); },
+                        VSCommand::AuthorizeConnect(cr, resp_chan) => { let _ = resp_chan.send(Self::handle_authorize_connect(&mut client, cr)); },
+                        VSCommand::AgentDisconnect(ipa, resp_chan) => { let _ = resp_chan.send(Self::handle_agent_disconnect(&mut client, ipa)); },
                     }
                 }
             }
@@ -274,7 +274,6 @@ impl VSConn {
     }
 
     fn handle_request_visa(
-        &self,
         client: &mut Box<dyn VSClientI>,
         req: VisaRequest,
     ) -> VisaRequestResponse {
@@ -288,7 +287,6 @@ impl VSConn {
     }
 
     fn handle_authorize_connect(
-        &self,
         client: &mut Box<dyn VSClientI>,
         cr: vsapi::ConnectRequest,
     ) -> AuthorizeConnectResponse {
@@ -301,11 +299,7 @@ impl VSConn {
         }
     }
 
-    fn handle_agent_disconnect(
-        &self,
-        client: &mut Box<dyn VSClientI>,
-        ipa: IpAddr,
-    ) -> DisconnectStatus {
+    fn handle_agent_disconnect(client: &mut Box<dyn VSClientI>, ipa: IpAddr) -> DisconnectStatus {
         match client.agent_disconnect(ipa) {
             Ok(_) => Ok(()),
             Err(e) => {
