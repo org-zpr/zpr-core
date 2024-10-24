@@ -1,3 +1,4 @@
+use std::error;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -18,10 +19,16 @@ pub enum VSError {
 
 #[derive(Debug, Error)]
 pub enum VSClientError {
-    #[error("Thrift error: {0}")]
-    Thrift(#[from] thrift::Error),
+    #[error("RPC error: {0}")]
+    RpcError(#[source] Box<dyn error::Error + Sync + Send>),
     #[error("No API key")]
     NoAPIKey,
     #[error("Unsupported traffic type")]
     UnsupportedTrafficType,
+}
+
+impl From<thrift::Error> for VSClientError {
+    fn from(e: thrift::Error) -> Self {
+        VSClientError::RpcError(Box::new(e))
+    }
 }
