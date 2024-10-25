@@ -2,9 +2,9 @@
 
 use crate::net_defs;
 use crate::packet::Packet;
+use crate::sys::ZprTun;
 use crate::test_packet::*;
 use crate::zpr;
-use crate::sys::ZprTun;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::result::Result;

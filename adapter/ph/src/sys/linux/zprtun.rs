@@ -1,15 +1,12 @@
-use tokio_tun::{Tun, TunBuilder};
-use zpr_ext::tokio_tun::*;
-use zpr_ext::std::mem::slice_assume_init_mut;
-use std::io::Result;
 use bytes::buf;
-use std::os::fd::AsRawFd;
 use std::io;
-
+use std::io::Result;
+use std::os::fd::AsRawFd;
+use tokio_tun::{Tun, TunBuilder};
+use zpr_ext::std::mem::slice_assume_init_mut;
+use zpr_ext::tokio_tun::*;
 
 pub struct LinuxZprTun(Tun);
-
-
 
 impl LinuxZprTun {
     #[allow(dead_code)]
@@ -30,7 +27,6 @@ impl LinuxZprTun {
         self.0.try_send(buf)
     }
 }
-
 
 impl TunExt for LinuxZprTun {
     async fn recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> Result<usize> {

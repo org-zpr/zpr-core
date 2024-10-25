@@ -8,7 +8,6 @@ use crate::sys::ZprTun;
 use std::future::Future;
 use zpr_ext::tokio_tun::*;
 
-
 #[derive(Copy, Clone)]
 pub struct Config {
     #[allow(dead_code)]

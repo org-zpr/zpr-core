@@ -211,7 +211,6 @@ pub mod test {
     use tokio::net::UdpSocket;
     use tokio::sync::mpsc;
 
-
     #[allow(dead_code)]
     #[derive(Default)]
     pub struct TestAssemblyBuilder<'a> {

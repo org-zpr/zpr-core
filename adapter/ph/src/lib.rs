@@ -34,12 +34,12 @@ pub mod rpc_worker;
 pub mod signal_worker;
 pub mod substrate_ingress_worker;
 pub mod sync_req;
+pub mod sys;
 pub mod test_packet;
 pub mod tun_ctl;
 pub mod zdp;
 pub mod zdp_ll;
 pub mod zpr;
-pub mod sys;
 
 #[cfg(test)]
 mod km_testdata;

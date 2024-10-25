@@ -1,5 +1,5 @@
-use std::io::Result;
 use crate::sys::ZprTun;
+use std::io::Result;
 use zpr_ext::tokio_tun::TunExt;
 
 /// This interface provides shared access to the TUN device for controlling

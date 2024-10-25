@@ -49,12 +49,12 @@ mod rpc_worker;
 mod signal_worker;
 mod substrate_ingress_worker;
 mod sync_req;
+mod sys;
 mod test_packet;
 mod tun_ctl;
 mod zdp;
 mod zdp_ll;
 mod zpr;
-mod sys;
 
 #[cfg(test)]
 mod km_testdata;
@@ -247,8 +247,8 @@ fn main() -> ExitCode {
     let tun_devs = ZprTun::new_mq(
         config.tun_if.unwrap_or(String::new()).as_str(),
         topology_config.agent_output_concurrency,
-    ).leak();
-
+    )
+    .leak();
 
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(&tun_devs[0]));
 
