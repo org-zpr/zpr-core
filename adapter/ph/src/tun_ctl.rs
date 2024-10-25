@@ -1,5 +1,5 @@
 use std::io::Result;
-use tokio_tun::Tun;
+use crate::sys::ZprTun;
 use zpr_ext::tokio_tun::TunExt;
 
 /// This interface provides shared access to the TUN device for controlling
@@ -13,13 +13,13 @@ pub trait TunCtl: Sync {
 }
 
 /// Canonical implementation of the `TunCtl` interface, just a thin wrapper
-/// around a reference to a `Tun` struct.
+/// around a reference to a `ZprTun` struct.
 pub struct TunCtlImpl<'a> {
-    tun: &'a Tun,
+    tun: &'a ZprTun,
 }
 
 impl<'a> TunCtlImpl<'a> {
-    pub fn new(tun: &'a Tun) -> Self {
+    pub fn new(tun: &'a ZprTun) -> Self {
         Self { tun }
     }
 }

@@ -12,7 +12,6 @@ use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tokio_tun::TunBuilder;
 use tracing::{info, warn};
 use tracing_subscriber;
 
@@ -55,6 +54,7 @@ mod tun_ctl;
 mod zdp;
 mod zdp_ll;
 mod zpr;
+mod sys;
 
 #[cfg(test)]
 mod km_testdata;
@@ -66,6 +66,7 @@ use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
 use queues::*;
+use sys::ZprTun;
 use tun_ctl::TunCtl;
 
 #[derive(Parser)]
@@ -243,12 +244,11 @@ fn main() -> ExitCode {
     //
     // open TUN devices
     //
+    let tun_devs = ZprTun::new_mq(
+        config.tun_if.unwrap_or(String::new()).as_str(),
+        topology_config.agent_output_concurrency,
+    ).leak();
 
-    let tun_devs = TunBuilder::new()
-        .name(config.tun_if.unwrap_or(String::new()).as_str())
-        .try_build_mq(topology_config.agent_output_concurrency)
-        .expect("unable to open TUN device")
-        .leak();
 
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(&tun_devs[0]));
 
