@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use crate::net_defs::*;
 use crate::packet;
-use crate::zpr::L3Type;
+use zpr::L3Type;
 use arrayref::array_ref;
 use std::mem::size_of;
 use zerocopy::byteorder::network_endian::*;

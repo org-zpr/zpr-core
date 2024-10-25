@@ -4,7 +4,7 @@ use crate::classifier;
 use crate::defs::FiveTuple;
 use crate::net_defs;
 use crate::packet::Packet;
-use crate::zpr::{CompressionMode, L3Type};
+use zpr::{CompressionMode, L3Type};
 use bytes::Buf;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use zerocopy::*;
@@ -194,7 +194,7 @@ mod tests {
     use crate::classifier;
     use crate::config;
     use crate::packet::Packet;
-    use crate::zpr::CompressionMode;
+    use zpr::CompressionMode;
     use bytes::BufMut;
 
     #[test]

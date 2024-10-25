@@ -5,7 +5,7 @@ use crate::link_state::{LinkStateMachine, LinkType};
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::sync_req;
-use crate::zpr::{LinkId, SubstrateAddr};
+use zpr::{LinkId, SubstrateAddr};
 use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;

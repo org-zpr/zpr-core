@@ -10,7 +10,7 @@ use zerocopy::FromBytes;
 use crate::config;
 use crate::packet::*;
 use crate::zdp::*;
-use crate::zpr;
+use zpr;
 
 /// Headroom for headers when creating the ZDP packets.
 pub const HEADROOM: usize = 128;

@@ -5,7 +5,7 @@ use crate::fastpath;
 use crate::mgmt::requests;
 use crate::packet::Packet;
 use crate::queues::AdapterManagerMessage;
-use crate::zpr;
+use zpr;
 use std::future::Future;
 use tokio::sync::mpsc;
 use tracing::{debug, error};

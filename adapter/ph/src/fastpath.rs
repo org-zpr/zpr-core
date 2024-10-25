@@ -16,7 +16,7 @@ use crate::packet::Packet;
 use crate::queues::TryEnqueueError;
 use crate::zdp;
 use crate::zdp_ll;
-use crate::zpr;
+use zpr;
 use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};

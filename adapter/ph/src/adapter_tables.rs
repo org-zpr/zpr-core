@@ -7,7 +7,7 @@
 use crate::defs::FiveTuple;
 use crate::packet::Packet;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
-use crate::zpr::{CompressionMode, StreamId};
+use zpr::{CompressionMode, StreamId};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::mapref::one::Ref as DashMapRef;
 use dashmap::DashMap;

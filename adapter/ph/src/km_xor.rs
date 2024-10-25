@@ -2,7 +2,7 @@
 //! "key exchange" and then uses XOR for encryption with a hard coded key.
 
 use crate::km::*;
-use crate::zpr;
+use zpr;
 use bytes::Bytes;
 use std::sync::Arc;
 use std::time;

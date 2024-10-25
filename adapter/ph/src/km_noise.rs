@@ -34,7 +34,7 @@
 
 use crate::km::*;
 use crate::km_cert_exchange::KmCertExchange;
-use crate::zpr;
+use zpr;
 use base64::prelude::*;
 use bytes::{BufMut, Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;

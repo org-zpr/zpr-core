@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
-use crate::zpr::{LinkId, StreamId};
+use zpr::{LinkId, StreamId};
 use cslab::{RcuCslab, RcuCslabReader};
 use std::sync::Mutex;
 

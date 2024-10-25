@@ -5,7 +5,7 @@ use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
 use crate::packet::Packet;
 use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
-use crate::zpr;
+use zpr;
 use std::future::Future;
 use tokio::sync::mpsc;
 use tracing::debug;

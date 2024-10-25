@@ -1,6 +1,6 @@
 use crate::packet::Packet;
 use crate::zdp;
-use crate::zpr;
+use zpr;
 use std::future::Future;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::oneshot;

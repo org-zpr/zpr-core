@@ -9,7 +9,7 @@ use crate::counters::CounterType;
 use crate::fastpath;
 use crate::packet::Packet;
 use crate::zdp;
-use crate::zpr;
+use zpr;
 use std::time::Duration;
 use tokio::time::sleep;
 use zpr_ext::std::mem::{drop_guard, DropGuard};

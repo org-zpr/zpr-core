@@ -11,7 +11,7 @@
 use crate::config;
 use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
-use crate::zpr;
+use zpr;
 use bytes::{BufMut, Bytes};
 use openssl::x509::X509;
 use std::fmt;

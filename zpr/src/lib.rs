@@ -1,5 +1,4 @@
 //! ZPR concepts, excluding the ZDP protocol.
-#![allow(dead_code)]
 
 use open_enum::open_enum;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};

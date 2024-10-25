@@ -21,7 +21,7 @@ use crate::vsapi;
 use crate::vscli::{self, VSClientI};
 use crate::vss::DEFAULT_VSS_PORT;
 
-use ph::zpr;
+use zpr;
 
 const PING_INTERVAL: Duration = Duration::from_millis(10000);
 const MAX_PING_ERRORS: u32 = 5;

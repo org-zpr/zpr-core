@@ -4,7 +4,7 @@ use open_enum::open_enum;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
-use crate::zpr;
+use zpr;
 
 #[open_enum]
 #[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]

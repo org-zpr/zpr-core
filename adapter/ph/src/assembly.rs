@@ -15,9 +15,9 @@ use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
-use crate::zpr;
-use crate::zpr::ZPI_ENCRYPTED_HEADER_FLAG;
-use crate::zpr::{LinkId, SubstrateAddr};
+use zpr;
+use zpr::ZPI_ENCRYPTED_HEADER_FLAG;
+use zpr::{LinkId, SubstrateAddr};
 
 use enum_map::EnumMap;
 use km_noise::NoiseKeypair;

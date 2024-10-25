@@ -8,7 +8,7 @@ use crate::km_multiplexor;
 use crate::packet::Packet;
 use crate::queues;
 use crate::zdp;
-use crate::zpr;
+use zpr;
 use bytes::Buf;
 use tracing::error;
 use zerocopy::FromBytes;

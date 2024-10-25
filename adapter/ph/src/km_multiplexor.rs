@@ -4,7 +4,7 @@ use crate::km_cert_exchange::KmCertExchange;
 use crate::km_noise::{KmNoise, NoiseKeypair};
 use crate::mgmt::requests;
 use crate::peer_table::KmHandle;
-use crate::zpr;
+use zpr;
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::future::Future;

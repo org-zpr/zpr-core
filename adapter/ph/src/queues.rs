@@ -3,7 +3,7 @@
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::test_packet::*;
-use crate::zpr;
+use zpr;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::result::Result;

@@ -1,7 +1,7 @@
 //! Common definitions that have no more specific place to live.
 
 use crate::net_defs;
-use crate::zpr;
+use zpr;
 use zerocopy::*;
 
 /// Packet direction with respect to an interface.

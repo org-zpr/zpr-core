@@ -33,7 +33,7 @@ mod os_impl {
 mod os_impl {
     use super::*;
     use crate::zdp;
-    use crate::zpr;
+    use zpr;
     use cbpf_rs::bpf_code::*;
     use libc::sock_filter as sf;
     use std::io;

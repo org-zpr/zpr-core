@@ -9,7 +9,7 @@ use crate::defs::*;
 use crate::fastpath;
 use crate::packet::{self, Packet};
 use crate::zdp;
-use crate::zpr;
+use zpr;
 use bytes::{Buf, BufMut};
 use tracing::{info, warn};
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};

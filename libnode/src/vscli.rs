@@ -9,8 +9,8 @@ use tracing::debug;
 use crate::errors::VSClientError;
 use crate::m2;
 use crate::vsapi;
-use ph::zpr;
 use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
+use zpr;
 
 // ugh!!
 type VSClientT = VisaServiceSyncClient<

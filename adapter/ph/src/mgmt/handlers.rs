@@ -8,7 +8,7 @@ use crate::defs::*;
 use crate::dock_tables;
 use crate::packet::Packet;
 use crate::zdp;
-use crate::zpr;
+use zpr;
 use bytes::{Buf, BufMut};
 use tracing::info;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
