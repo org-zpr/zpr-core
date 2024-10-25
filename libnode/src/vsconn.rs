@@ -33,9 +33,9 @@ pub struct VisaRequest {
     pub packet: Vec<u8>,
 }
 
-pub type VisaRequestResponse = Result<vsapi::VisaResponse, VSClientError>;
-pub type AuthorizeConnectResponse = Result<vsapi::ConnectResponse, VSClientError>;
-pub type DisconnectStatus = Result<(), VSClientError>;
+type VisaRequestResponse = Result<vsapi::VisaResponse, VSClientError>;
+type AuthorizeConnectResponse = Result<vsapi::ConnectResponse, VSClientError>;
+type DisconnectStatus = Result<(), VSClientError>;
 
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
@@ -310,7 +310,7 @@ impl VSConn {
 
     /// Attempt to enqueue an async command to the runloop.
     /// Returns an error if the command could not be enqueued.
-    async fn send_command(&self, cmd: VSCommand) -> Result<(), VSError> {
+    async fn send_command(&self, cmd: VSCommand) -> Result<(), VSClientError> {
         // Extract the tx channel from the state, but must do so without keeping lock across the await later.
         let tx_chan: mpsc::Sender<VSCommand>;
         {
@@ -319,13 +319,13 @@ impl VSConn {
                 tx_chan = tx.clone();
             } else {
                 error!("VSConn::send_command called but no command channel available");
-                return Err(VSError::EnqueueError);
+                return Err(VSClientError::ConnClosed);
             }
         }
 
         if let Err(e) = tx_chan.send(cmd).await {
             error!("VSConn::send_command failed to queue: {}", e);
-            return Err(VSError::EnqueueError);
+            return Err(VSClientError::ConnClosed);
         }
         Ok(())
     }
@@ -334,36 +334,32 @@ impl VSConn {
     ///
     /// ## Errors
     /// - [VSError::EnqueueError] if the request could not be enqueued.
-    pub async fn request_visa(&self, req: VisaRequest) -> Result<VisaRequestResponse, VSError> {
+    pub async fn request_visa(&self, req: VisaRequest) -> VisaRequestResponse {
         let (tx, rx) = oneshot::channel();
         self.send_command(VSCommand::RequestVisa(req, tx)).await?;
-        rx.await.map_err(|_| VSError::Disconnect)
+        rx.await.map_err(|_| VSClientError::ConnClosed)?
     }
 
     /// Perform an async authorize_connect.
     ///
     /// ## Errors
     /// - [VSError::EnqueueError] if the request could not be enqueued.
-    pub async fn authorize_connect(
-        &self,
-        req: vsapi::ConnectRequest,
-    ) -> Result<AuthorizeConnectResponse, VSError> {
+    pub async fn authorize_connect(&self, req: vsapi::ConnectRequest) -> AuthorizeConnectResponse {
         let (tx, rx) = oneshot::channel();
         self.send_command(VSCommand::AuthorizeConnect(req, tx))
             .await?;
-        rx.await.map_err(|_| VSError::Disconnect)
+        rx.await.map_err(|_| VSClientError::ConnClosed)?
     }
 
-    /// Async message to visa service noting that an agent has disconnected. The response is
-    /// a [DisconnectStatus].
+    /// Async message to visa service noting that an agent has disconnected.
     ///
     /// ## Errors
     /// - [VSError::EnqueueError] if the request could not be enqueued.
-    pub async fn agent_disconnect(&self, zpr_addr: IpAddr) -> Result<DisconnectStatus, VSError> {
+    pub async fn agent_disconnect(&self, zpr_addr: IpAddr) -> DisconnectStatus {
         let (tx, rx) = oneshot::channel();
         self.send_command(VSCommand::AgentDisconnect(zpr_addr, tx))
             .await?;
-        rx.await.map_err(|_| VSError::Disconnect)
+        rx.await.map_err(|_| VSClientError::ConnClosed)?
     }
 }
 
@@ -702,8 +698,7 @@ s5JVZ48=
 
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
-                let vrr = resp.unwrap();
-                let vr = vrr.unwrap();
+                let vr = resp.unwrap();
                 assert_eq!(vr.status, Some(vsapi::StatusCode::FAIL));
                 assert!(vr.reason.is_some());
                 let reason = vr.reason.unwrap();
@@ -726,8 +721,7 @@ s5JVZ48=
             let resp = conn.request_visa(req);
             match timeout(Duration::from_millis(100), resp).await {
                 Ok(resp) => {
-                    let vrr = resp.unwrap();
-                    assert!(matches!(vrr.unwrap_err(), VSClientError::NoAPIKey));
+                    assert!(matches!(resp.unwrap_err(), VSClientError::NoAPIKey));
                 }
                 _ => {
                     panic!("expected visa-response message, but got nothing (timeout)");
@@ -799,8 +793,7 @@ s5JVZ48=
 
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
-                let cr = resp.unwrap();
-                let cresp = cr.unwrap();
+                let cresp = resp.unwrap();
                 assert!(cresp.agent.is_some());
                 let agnt = cresp.agent.unwrap();
                 let attrs = agnt.attrs.unwrap();
@@ -826,8 +819,7 @@ s5JVZ48=
             let resp = conn.authorize_connect(req);
             match timeout(Duration::from_millis(100), resp).await {
                 Ok(resp) => {
-                    let cr = resp.unwrap();
-                    assert!(matches!(cr.unwrap_err(), VSClientError::NoAPIKey));
+                    assert!(matches!(resp.unwrap_err(), VSClientError::NoAPIKey));
                 }
                 _ => {
                     panic!("expected connect-response message, but got nothing (timeout)");
@@ -894,8 +886,7 @@ s5JVZ48=
 
         match timeout(Duration::from_millis(10), resp).await {
             Ok(resp) => {
-                let dr = resp.unwrap();
-                assert!(dr.is_ok());
+                assert!(resp.is_ok());
             }
             _ => {
                 panic!("expected agent-disconnect-response message, but got nothing (timeout)");
@@ -909,8 +900,7 @@ s5JVZ48=
 
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
-                let dr = resp.unwrap();
-                assert!(matches!(dr.unwrap_err(), VSClientError::NoAPIKey));
+                assert!(matches!(resp.unwrap_err(), VSClientError::NoAPIKey));
             }
             _ => {
                 panic!("expected agent-disconnect-response message, but got nothing (timeout)");

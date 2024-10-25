@@ -21,6 +21,8 @@ pub enum VSError {
 pub enum VSClientError {
     #[error("RPC error: {0}")]
     RpcError(#[source] Box<dyn error::Error + Sync + Send>),
+    #[error("Conn closed")]
+    ConnClosed,
     #[error("No API key")]
     NoAPIKey,
     #[error("Unsupported traffic type")]
