@@ -5,9 +5,9 @@
 #![allow(dead_code)]
 
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
-use zpr::{LinkId, StreamId};
 use cslab::{RcuCslab, RcuCslabReader};
 use std::sync::Mutex;
+use zpr::{LinkId, StreamId};
 
 const DOCK_FORWARDING_TABLE_SIZE: usize = 1 << 20; // 1 million
 

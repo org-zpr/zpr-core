@@ -1,8 +1,8 @@
 //! Common definitions that have no more specific place to live.
 
 use crate::net_defs;
-use zpr;
 use zerocopy::*;
+use zpr;
 
 /// Packet direction with respect to an interface.
 /// Primary use is for constructing libpcap link-layer header.

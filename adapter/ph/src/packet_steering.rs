@@ -33,11 +33,11 @@ mod os_impl {
 mod os_impl {
     use super::*;
     use crate::zdp;
-    use zpr;
     use cbpf_rs::bpf_code::*;
     use libc::sock_filter as sf;
     use std::io;
     use std::mem::{offset_of, size_of};
+    use zpr;
     use zpr_ext::tokio::net::UdpSocketExt;
 
     pub fn set_steering(

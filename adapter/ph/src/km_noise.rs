@@ -34,7 +34,6 @@
 
 use crate::km::*;
 use crate::km_cert_exchange::KmCertExchange;
-use zpr;
 use base64::prelude::*;
 use bytes::{BufMut, Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
@@ -46,6 +45,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::{error, warn};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
+use zpr;
 
 static PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 

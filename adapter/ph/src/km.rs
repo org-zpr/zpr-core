@@ -11,7 +11,6 @@
 use crate::config;
 use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
-use zpr;
 use bytes::{BufMut, Bytes};
 use openssl::x509::X509;
 use std::fmt;
@@ -24,6 +23,7 @@ use tokio::time;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 use zerocopy::FromBytes;
+use zpr;
 
 #[derive(Debug)]
 #[allow(dead_code)]

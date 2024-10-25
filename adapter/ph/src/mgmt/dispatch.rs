@@ -8,10 +8,10 @@ use crate::km_multiplexor;
 use crate::packet::Packet;
 use crate::queues;
 use crate::zdp;
-use zpr;
 use bytes::Buf;
 use tracing::error;
 use zerocopy::FromBytes;
+use zpr;
 use zpr_ext::zerocopy::FromBytesExt;
 
 /// Dispatch a management packet for a link that hasn't been established yet

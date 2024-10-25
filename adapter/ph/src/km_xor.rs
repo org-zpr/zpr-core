@@ -2,11 +2,11 @@
 //! "key exchange" and then uses XOR for encryption with a hard coded key.
 
 use crate::km::*;
-use zpr;
 use bytes::Bytes;
 use std::sync::Arc;
 use std::time;
 use std::time::Duration;
+use zpr;
 
 pub struct XorKeyManager {
     state: KmSMState,

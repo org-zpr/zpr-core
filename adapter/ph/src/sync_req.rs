@@ -1,11 +1,11 @@
 use crate::packet::Packet;
 use crate::zdp;
-use zpr;
 use std::future::Future;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::oneshot;
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 use tracing::debug;
+use zpr;
 
 pub struct SyncReqState<'pktbuf> {
     listener_state: StdMutex<ListenerState<'pktbuf>>,
