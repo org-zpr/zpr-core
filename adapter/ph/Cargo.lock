@@ -930,6 +930,7 @@ dependencies = [
  "enum-map",
  "hdrhistogram",
  "libc",
+ "nix",
  "open-enum",
  "openssl",
  "openssl-sys",

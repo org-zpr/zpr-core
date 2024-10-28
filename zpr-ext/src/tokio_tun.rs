@@ -1,22 +1,3 @@
-use bytes::buf;
-use libc;
-use nix::ioctl_write_ptr;
-use std::io::Result;
-
-// from /usr/include/linux/if_tun.h
-ioctl_write_ptr!(tun_set_carrier, b'T', 226, libc::c_int);
-
-#[allow(async_fn_in_trait)]
-pub trait TunExt {
-    /// Like `Tun::recv()`, but reads into a `BufMut`.
-    async fn recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> Result<usize>;
-
-    /// Like `try_recv()`, but reads into a `BufMut`.
-    fn try_recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> Result<usize>;
-
-    /// Set the carrier status of the TUN link.
-    fn set_carrier(&self, carrier: bool) -> Result<()>;
-}
 
 #[cfg(target_os = "linux")]
 pub mod tun_pi {

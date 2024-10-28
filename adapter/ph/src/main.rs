@@ -244,11 +244,7 @@ fn main() -> ExitCode {
     //
     // open TUN devices
     //
-    let tun_devs = ZprTun::new_mq(
-        config.tun_if.unwrap_or(String::new()).as_str(),
-        topology_config.agent_output_concurrency,
-    )
-    .leak();
+    let tun_devs = ZprTun::new_mq(config.tun_if, topology_config.agent_output_concurrency).leak();
 
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(&tun_devs[0]));
 
