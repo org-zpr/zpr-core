@@ -5,10 +5,10 @@ use crate::fastpath;
 use crate::mgmt::requests;
 use crate::packet::Packet;
 use crate::queues::AdapterManagerMessage;
-use crate::zpr;
 use std::future::Future;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
+use zpr;
 
 async fn worker<'pktbuf>(
     asm: &Assembly<'pktbuf>,

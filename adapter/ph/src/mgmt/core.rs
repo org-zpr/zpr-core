@@ -9,9 +9,9 @@ use crate::counters::CounterType;
 use crate::fastpath;
 use crate::packet::Packet;
 use crate::zdp;
-use crate::zpr;
 use std::time::Duration;
 use tokio::time::sleep;
+use zpr;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::FromBytesExt;
 

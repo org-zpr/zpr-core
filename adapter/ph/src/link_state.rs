@@ -1,4 +1,4 @@
-use crate::zpr::{LinkId, LINK_ID_UNKNOWN};
+use zpr::{LinkId, LINK_ID_UNKNOWN};
 
 /// State machine for links and docking sessions
 

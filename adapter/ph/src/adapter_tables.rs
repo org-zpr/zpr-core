@@ -7,11 +7,11 @@
 use crate::defs::FiveTuple;
 use crate::packet::Packet;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
-use crate::zpr::{CompressionMode, StreamId};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::mapref::one::Ref as DashMapRef;
 use dashmap::DashMap;
 use std::sync::Mutex;
+use zpr::{CompressionMode, StreamId};
 
 const DOCK_LOOKUP_TABLE_SIZE: usize = 1 << 20; // 1 million
 

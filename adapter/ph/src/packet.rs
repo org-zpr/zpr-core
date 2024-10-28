@@ -9,11 +9,11 @@
 use crate::config;
 use crate::defs::*;
 use crate::net_defs::*;
-use crate::zpr;
-use crate::zpr::L3Type;
 use bytes::buf;
 use std::mem::{size_of, size_of_val};
 use zerocopy::*;
+use zpr;
+use zpr::L3Type;
 use zpr_ext::std::mem::DropGuard;
 
 /// Exclusive handle to an in-use packet buffer.

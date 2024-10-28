@@ -5,7 +5,6 @@ use crate::link_state::{LinkStateMachine, LinkType};
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::sync_req;
-use crate::zpr::{LinkId, SubstrateAddr};
 use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
@@ -16,6 +15,7 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
+use zpr::{LinkId, SubstrateAddr};
 
 const PEER_TABLE_SIZE: usize = 1024;
 

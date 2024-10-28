@@ -9,9 +9,9 @@ use crate::defs::*;
 use crate::fastpath;
 use crate::packet::{self, Packet};
 use crate::zdp;
-use crate::zpr;
 use bytes::{Buf, BufMut};
 use tracing::{info, warn};
+use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 /// send a Key Management message (RFC 6.5 § 6.2.8)

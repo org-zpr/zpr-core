@@ -4,13 +4,13 @@ use crate::km_cert_exchange::KmCertExchange;
 use crate::km_noise::{KmNoise, NoiseKeypair};
 use crate::mgmt::requests;
 use crate::peer_table::KmHandle;
-use crate::zpr;
 use bytes::Bytes;
 use std::collections::HashMap;
 use std::future::Future;
 use tokio::{sync::mpsc, time};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
+use zpr;
 
 /// How often the signal monitor worker checks the error conditions
 /// on the KeyManager state machines.  Indirectly, this controls how

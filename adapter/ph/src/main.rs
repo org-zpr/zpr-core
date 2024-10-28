@@ -54,7 +54,6 @@ mod test_packet;
 mod tun_ctl;
 mod zdp;
 mod zdp_ll;
-mod zpr;
 mod zprtun;
 
 #[cfg(test)]

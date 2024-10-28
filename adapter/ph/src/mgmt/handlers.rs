@@ -8,9 +8,9 @@ use crate::defs::*;
 use crate::dock_tables;
 use crate::packet::Packet;
 use crate::zdp;
-use crate::zpr;
 use bytes::{Buf, BufMut};
 use tracing::info;
+use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 pub enum HandleMgmtError {

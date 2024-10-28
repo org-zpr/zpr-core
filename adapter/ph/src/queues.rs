@@ -4,7 +4,6 @@ use crate::net_defs;
 use crate::packet::Packet;
 use crate::sys::ZprTun;
 use crate::test_packet::*;
-use crate::zpr;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::result::Result;
@@ -13,6 +12,7 @@ use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
+use zpr;
 use zpr_ext::std::mem::DropGuard;
 use zpr_ext::tokio_tun::tun_pi;
 
