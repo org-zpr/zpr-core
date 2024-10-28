@@ -1,9 +1,6 @@
 //! Platform specific implementations.
 //! - ZprTun - TUN device management
 
-
-
-
 #[cfg(target_os = "linux")]
 mod linux;
 

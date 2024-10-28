@@ -1,3 +1,4 @@
+use crate::zprtun::ZPRTunError;
 use bytes::buf;
 use nix::ioctl_write_ptr;
 use std::io;
@@ -5,13 +6,11 @@ use std::io::Result;
 use std::os::fd::AsRawFd;
 use tokio_tun::{Tun, TunBuilder};
 use zpr_ext::std::mem::slice_assume_init_mut;
-use crate::zprtun::ZPRTunError;
 
 // from /usr/include/linux/if_tun.h
 ioctl_write_ptr!(tun_set_carrier, b'T', 226, libc::c_int);
 
 pub struct ZprTun(Tun);
-
 
 impl From<Tun> for ZprTun {
     fn from(tun: Tun) -> Self {
@@ -22,7 +21,10 @@ impl From<Tun> for ZprTun {
 impl ZprTun {
     /// Create a new TUN device.
     /// If `ifname` is `None`, the kernel will automatically assign a name.
-    pub fn new_mq(ifname: Option<String>, concurrency: usize) -> std::result::Result<Vec<Self>, ZPRTunError> {
+    pub fn new_mq(
+        ifname: Option<String>,
+        concurrency: usize,
+    ) -> std::result::Result<Vec<Self>, ZPRTunError> {
         let mut bldr = TunBuilder::new();
         if let Some(ifname) = ifname {
             bldr = bldr.name(&ifname);
