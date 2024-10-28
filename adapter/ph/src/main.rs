@@ -55,6 +55,7 @@ mod tun_ctl;
 mod zdp;
 mod zdp_ll;
 mod zpr;
+mod zprtun;
 
 #[cfg(test)]
 mod km_testdata;
@@ -244,7 +245,12 @@ fn main() -> ExitCode {
     //
     // open TUN devices
     //
-    let tun_devs = ZprTun::new_mq(config.tun_if, topology_config.agent_output_concurrency).leak();
+    let tun_devs = match ZprTun::new_mq(config.tun_if, topology_config.agent_output_concurrency) {
+        Ok(devs) => devs.leak(),
+        Err(e) => {
+            panic!("unable to create TUN device: {:?}", e);
+        }
+    };
 
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(&tun_devs[0]));
 
