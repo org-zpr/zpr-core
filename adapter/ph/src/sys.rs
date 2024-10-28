@@ -9,10 +9,10 @@ mod macos;
 
 mod platform {
     #[cfg(target_os = "linux")]
-    pub use super::linux::LinuxZprTun as ZprTun;
+    pub use super::linux::ZprTun;
 
     #[cfg(target_os = "macos")]
-    pub use super::macos::MacosZprTun as ZprTun;
+    pub use super::macos::ZprTun;
 }
 
 /// Can be accessed in the project as `crate::sys::ZprTun`

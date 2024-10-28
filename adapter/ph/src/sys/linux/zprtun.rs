@@ -9,15 +9,15 @@ use zpr_ext::std::mem::slice_assume_init_mut;
 // from /usr/include/linux/if_tun.h
 ioctl_write_ptr!(tun_set_carrier, b'T', 226, libc::c_int);
 
-pub struct LinuxZprTun(Tun);
+pub struct ZprTun(Tun);
 
-impl From<Tun> for LinuxZprTun {
+impl From<Tun> for ZprTun {
     fn from(tun: Tun) -> Self {
-        LinuxZprTun(tun)
+        ZprTun(tun)
     }
 }
 
-impl LinuxZprTun {
+impl ZprTun {
     /// Create a new TUN device.
     /// If `ifname` is `None`, the kernel will automatically assign a name.
     pub fn new_mq(ifname: Option<String>, concurrency: usize) -> Vec<Self> {
@@ -29,7 +29,7 @@ impl LinuxZprTun {
             .try_build_mq(concurrency)
             .expect("unable to open TUN device");
 
-        tok_tun_devs.into_iter().map(LinuxZprTun).collect()
+        tok_tun_devs.into_iter().map(ZprTun).collect()
     }
 
     pub fn try_send(&self, buf: &[u8]) -> io::Result<usize> {

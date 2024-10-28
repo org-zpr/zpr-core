@@ -1,4 +1,3 @@
-
 #[cfg(target_os = "linux")]
 pub mod tun_pi {
     //! Structures and functions for working with per-packet packet info.
