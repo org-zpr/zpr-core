@@ -158,6 +158,8 @@ fn main() -> ExitCode {
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
+    info!("{} starting", config.name);
+
     //
     // read key material
     //
@@ -346,8 +348,11 @@ fn main() -> ExitCode {
 
     let dsid = match ph_mode {
         PhMode::Adapter => Some(
-            asm.initiate_tether(config.node_addr.as_ref().unwrap())
-                .unwrap(),
+            asm.start_tether(
+                config.node_addr.as_ref().unwrap(),
+                link_state::LinkType::AdapterToNode,
+            )
+            .unwrap(),
         ),
         PhMode::Node => None,
     };
@@ -401,11 +406,9 @@ fn main() -> ExitCode {
         cap_outq,
     ));
 
-    //
-    // TEMP HACK: set TUN carrier up
-    //
-
-    asm.tun_ctl.set_carrier(true).unwrap();
+    if asm.is_node() {
+        asm.tun_ctl.set_carrier(true).unwrap();
+    }
 
     //
     // TEMP HACK: bring up tether if we're an adapter
@@ -413,7 +416,9 @@ fn main() -> ExitCode {
 
     local_set.block_on(&runtime, async {
         if ph_mode == PhMode::Adapter {
-            let Some(dsid) = dsid else { panic!("we are an adapter but have no tether configured"); };
+            let Some(dsid) = dsid else {
+                panic!("we are an adapter but have no tether configured");
+            };
 
             if !config.disable_km {
                 info!(
@@ -427,12 +432,6 @@ fn main() -> ExitCode {
                     "{}: security assocaition established successfully on link {}",
                     asm.system_name, dsid
                 );
-
-                // HACK - In our tests we need to send from adapter through the node to the adapter.
-                // We do not know when the other adapter has setup its association. So lets give
-                // it a little time here.
-                info!("{}: waiting for the other adapter to (hopfully) establish its security association...", asm.system_name);
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             }
         }
     });

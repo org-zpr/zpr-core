@@ -4,9 +4,7 @@ use crate::capture_worker::CaptureWorker;
 use crate::config;
 use crate::counters::*;
 use crate::flow_control::FlowControl;
-use crate::km::ZPIPair;
 use crate::km_cert_exchange::KmCertExchange;
-use crate::km_multiplexor;
 use crate::km_multiplexor::KmState;
 use crate::km_noise;
 use crate::link_state::LinkType;
@@ -16,14 +14,13 @@ use crate::peer_table::PeerInsertError;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
 use zpr;
-use zpr::ZPI_ENCRYPTED_HEADER_FLAG;
 use zpr::{LinkId, SubstrateAddr};
 
 use enum_map::EnumMap;
 use km_noise::NoiseKeypair;
 use std::default::Default;
 use std::result::Result;
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {
@@ -107,6 +104,7 @@ impl Assembly<'_> {
         self.ph_mode == PhMode::Node
     }
 
+    #[allow(dead_code)]
     pub fn is_adapter(&self) -> bool {
         self.ph_mode == PhMode::Adapter
     }
@@ -122,74 +120,43 @@ impl Assembly<'_> {
             link_id: entry.key(),
         };
 
-        let peer_state = peer_table::PeerState::new(link_type, *peer_addr, |q| {
+        let peer_state = peer_table::PeerState::new(entry.key(), link_type, *peer_addr, |q| {
             mgmt_processor_worker::launch(&worker_config, self, q)
         });
 
         Ok(entry.insert(peer_state))
     }
 
-    /// Add an adapter to the peer table
-    pub fn accept_tether(
+    /// Add a tether to the peer table
+    pub fn start_tether(
         &'static self,
         adapter_addr: &SubstrateAddr,
+        link_type: LinkType,
     ) -> Result<LinkId, PeerInsertError> {
-        assert!(self.is_node());
+        assert!(link_type != LinkType::NodeToNode);
         info!(
-            "{}: Accepting tether from {}",
+            "{}: Starting tether with {}",
             self.system_name, adapter_addr
         );
-        let peer_id = self.add_peer(LinkType::NodeToAdapter, adapter_addr)?;
+        let peer_id = self.add_peer(link_type, adapter_addr)?;
         self.peer_ids.lock().unwrap().push(peer_id);
 
-        if !self.flags.disable_key_management {
-            km_multiplexor::add_node_link(
-                &self,
-                peer_id,
-                ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
-                self.self_noise_keypair.clone().unwrap(),
-                self.certx.clone().unwrap(),
-            )
-            .unwrap();
-        }
-
-        info!(
-            "{}: Successfully accepted tether from {}.  Assigned ID {}",
-            self.system_name, adapter_addr, peer_id
-        );
-
-        return Ok(peer_id);
-    }
-
-    /// Add a node to the peer table as an adapter
-    pub fn initiate_tether(
-        &'static self,
-        node_addr: &SubstrateAddr,
-    ) -> Result<LinkId, PeerInsertError> {
-        assert!(self.is_adapter());
-        info!(
-            "{}: Initiating tether towards {}",
-            self.system_name, node_addr
-        );
-        let peer_id = self.add_peer(LinkType::AdapterToNode, node_addr)?;
-        self.peer_ids.lock().unwrap().push(peer_id);
-
-        if !self.flags.disable_key_management {
-            km_multiplexor::add_adapter_link(
-                &self,
-                peer_id,
-                ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
-                self.self_noise_keypair.clone().unwrap(),
-                self.peer_noise_keypair.clone().unwrap().public,
-                self.certx.clone().unwrap(),
-            )
-            .unwrap();
-        }
-
-        info!(
-            "{}: Successfully initiated tether to {}.  Assigned ID {}",
-            self.system_name, node_addr, peer_id
-        );
+        self.peer_table.inspect(peer_id, |peer_state| {
+            if peer_state.link_state_machine.configure(self).is_err()
+                || peer_state.link_state_machine.start(self).is_err()
+            {
+                error!(
+                    "{}: Link {} failed to configure and start.  Resetting",
+                    self.system_name, peer_id
+                );
+                peer_state.link_state_machine.reset();
+            } else {
+                info!(
+                    "{}: Successfully started tether with {}.  Assigned ID {}",
+                    self.system_name, adapter_addr, peer_id
+                );
+            }
+        });
 
         return Ok(peer_id);
     }
@@ -207,6 +174,7 @@ pub mod test {
 
     use super::*;
     use crate::config::TopologyConfig;
+    use crate::net_defs::IpAddress;
     use tokio::net::UdpSocket;
     use tokio::sync::mpsc;
 
@@ -239,6 +207,10 @@ pub mod test {
     impl TunCtl for DummyTunCtlImpl {
         fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
             Ok(())
+        }
+
+        fn get_address(&self) -> std::io::Result<IpAddress> {
+            Ok(IpAddress::new_from_v4([1, 2, 3, 4]))
         }
     }
 

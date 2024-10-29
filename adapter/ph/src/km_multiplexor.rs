@@ -72,7 +72,7 @@ struct ErrorStatus {
 ///
 /// TODO: Handle case when SAs are torn down.
 async fn signal_worker<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+    asm: &'static Assembly<'pktbuf>,
     sig_queue: &mut mpsc::Receiver<KmLinkMsg<KmSignal>>,
 ) {
     let sp_ctok = asm.km_state.ctok.clone();
@@ -122,7 +122,7 @@ async fn signal_worker<'pktbuf>(
                         info!("{}: km_multiplexor: link {}: SA established (SEND_ZPIS: {}, RECV_ZPIS: {}",
                             asm.system_name, linkmsg.link_id, sa.send_zpis, sa.recv_zpis);
 
-                        match asm.peer_table.set_security_association(linkmsg.link_id, sa) {
+                        match asm.peer_table.set_security_association(asm, linkmsg.link_id, sa) {
                             Ok(_) => (),
                             Err(e) => {
                                 error!("{}: km_multiplexor: failed to set SA established: {:?}", asm.system_name, e);
@@ -178,13 +178,10 @@ async fn message_worker<'pktbuf>(
 }
 
 /// Start the signal watcher worker.
-pub fn launch_signal_worker<'pktbuf, AsmRef: 'pktbuf>(
-    asm: AsmRef,
+pub fn launch_signal_worker(
+    asm: &'static Assembly,
     mut sig_queue: mpsc::Receiver<KmLinkMsg<KmSignal>>,
-) -> impl Future<Output = ()> + Send + 'pktbuf
-where
-    AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
-{
+) -> impl Future<Output = ()> + Send + 'static {
     async move { signal_worker(&*asm, &mut sig_queue).await }
 }
 
@@ -423,10 +420,12 @@ mod test {
                     let fake_sa =
                         zpr::SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9000);
 
-                    let peer_state =
-                        peer_table::PeerState::new(LinkType::NodeToAdapter, fake_sa, |q| {
-                            mgmt_processor_worker::launch(&worker_config, &*asm, q)
-                        });
+                    let peer_state = peer_table::PeerState::new(
+                        entry.key(),
+                        LinkType::NodeToAdapter,
+                        fake_sa,
+                        |q| mgmt_processor_worker::launch(&worker_config, &*asm, q),
+                    );
 
                     adapter_link_id = entry.insert(peer_state);
                 }

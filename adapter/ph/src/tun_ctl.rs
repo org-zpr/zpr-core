@@ -1,3 +1,4 @@
+use crate::net_defs::IpAddress;
 use std::io::Result;
 use tokio_tun::Tun;
 use zpr_ext::tokio_tun::TunExt;
@@ -10,6 +11,9 @@ pub trait TunCtl: Sync {
     /// (I.e. whether we are passing packets.)  This is reflected on the
     /// interface itself and is used by the kernel to make routing decisions.
     fn set_carrier(&self, carrier: bool) -> Result<()>;
+
+    /// Get the address associated with the TUN
+    fn get_address(&self) -> Result<IpAddress>;
 }
 
 /// Canonical implementation of the `TunCtl` interface, just a thin wrapper
@@ -27,5 +31,12 @@ impl<'a> TunCtlImpl<'a> {
 impl TunCtl for TunCtlImpl<'_> {
     fn set_carrier(&self, carrier: bool) -> Result<()> {
         self.tun.set_carrier(carrier)
+    }
+
+    fn get_address(&self) -> Result<IpAddress> {
+        self.tun
+            .address()
+            .map(|addr| IpAddress::from(addr))
+            .map_err(|e| std::io::Error::other(e))
     }
 }

@@ -33,6 +33,7 @@ pub async fn send_key_management<'pktbuf>(
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::KeyManagement, pkt).await;
 }
 
+#[allow(dead_code)]
 /// send a Discard message (RFC 6.5 § 6.3.1)
 pub async fn send_discard(asm: &Assembly<'_>, link_id: zpr::LinkId) {
     let buf = asm.buffer_stack.get_buffer().await;
@@ -40,10 +41,9 @@ pub async fn send_discard(asm: &Assembly<'_>, link_id: zpr::LinkId) {
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
 }
 
-#[allow(dead_code)]
 /// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
 pub async fn send_hello_request<'a, 'pktbuf>(
-    asm: &'a Assembly<'pktbuf>,
+    asm: &'static Assembly<'pktbuf>,
     link_id: zpr::LinkId,
 ) -> Result<(), ()> {
     let response = core::send_sync_non_flow_req(
@@ -64,11 +64,91 @@ pub async fn send_hello_request<'a, 'pktbuf>(
             let status = hdr.status;
             info!("Received HelloResponse, status: {}", status);
             asm.buffer_stack.put_buffer(hello_res.destroy());
-            Ok(())
+
+            if let Some(Ok(_)) = asm.peer_table.inspect(link_id, |peer_state| {
+                peer_state.link_state_machine.process_hello_response(asm)
+            }) {
+                Ok(())
+            } else {
+                Err(())
+            }
         }
 
         Err(err) => {
             warn!("{} error with HelloRequest", err);
+            Err(())
+        }
+    }
+}
+
+/// send a Register Agent Address Request
+pub async fn send_register_agent_address_request<'a, 'pktbuf>(
+    asm: &'a Assembly<'pktbuf>,
+    link_id: zpr::LinkId,
+) -> Result<(), ()> {
+    let tun_addr = asm.tun_ctl.get_address();
+    // TODO: tokio_tun only supports IPv4
+    let l3_type = zpr::L3Type::Ipv4;
+
+    let Ok(tun_addr) = tun_addr else {
+        warn!("Failed to get address for tun");
+        return Err(());
+    };
+
+    let response = core::send_sync_non_flow_req(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::RegisterAgentAddressRequest,
+        zdp::ZdpPacketType::RegisterAgentAddressResponse,
+        move |mut req| {
+            zdp::ZdpRegisterAgentAddressRequestHeader {
+                ip_version: l3_type,
+            }
+            .write_to_buf(&mut req)
+            .unwrap();
+
+            match l3_type {
+                zpr::L3Type::Ipv4 => {
+                    req.put(tun_addr.read_as_v4().as_slice());
+                }
+
+                zpr::L3Type::Ipv6 => {
+                    req.put(tun_addr.v6.as_slice());
+                }
+
+                other => panic!("bad L3 type: {}", other.0),
+            }
+        },
+    )
+    .await;
+
+    match response {
+        Ok(mut register_res) => {
+            let Ok(hdr) =
+                zdp::ZdpRegisterAgentAddressResponseHeader::read_from_buf(&mut register_res)
+            else {
+                fastpath::drop_and_count(asm, register_res, CounterType::BadStructure);
+                return Err(());
+            };
+            info!(
+                "Received RegisterAgentAddressResponse, status: {}",
+                hdr.status_code
+            );
+            asm.buffer_stack.put_buffer(register_res.destroy());
+
+            if let Some(Ok(_)) = asm.peer_table.inspect(link_id, |peer_state| {
+                peer_state
+                    .link_state_machine
+                    .process_register_agent_address_response(asm)
+            }) {
+                Ok(())
+            } else {
+                Err(())
+            }
+        }
+
+        Err(err) => {
+            warn!("{} error with RegisterAgentAddressRequest", err);
             Err(())
         }
     }
@@ -174,6 +254,7 @@ pub async fn send_bind_agent_address_request<'a, 'pktbuf>(
     }
 }
 
+#[allow(dead_code)]
 /// send a Report message (RFC 6.5 § 6.3.13)
 pub async fn send_report(asm: &Assembly<'_>, link_id: zpr::LinkId, report: &str) {
     // TODO this condition will need to be adjusted when we have complete ZPR packets
