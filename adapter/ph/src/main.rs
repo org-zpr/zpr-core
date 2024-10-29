@@ -210,8 +210,8 @@ fn main() -> ExitCode {
         tun_addr,
     ) {
         Ok(devs) => devs.into_iter().map(Arc::new).collect(),
-        Err(e) => {
-            panic!("unable to create TUN device: {:?}", e);
+        Err(err) => {
+            panic!("unable to create TUN device: {err}");
         }
     };
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(tun_devs[0].clone()));
