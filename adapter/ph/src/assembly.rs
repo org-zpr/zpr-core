@@ -13,6 +13,7 @@ use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
+use std::net::IpAddr;
 use zpr;
 use zpr::{LinkId, SubstrateAddr};
 
@@ -51,6 +52,7 @@ pub struct Assembly<'pktbuf> {
 
     // Shared resources.  These may be accessed by any part of the system.
     pub system_name: String, // For debugging use
+    pub agent_address: Option<IpAddr>,
 
     pub buffer_stack: BufferStack<'pktbuf, { config::PACKET_BUFFER_SIZE }>,
 
@@ -174,7 +176,8 @@ pub mod test {
 
     use super::*;
     use crate::config::TopologyConfig;
-    use crate::net_defs::IpAddress;
+    use crate::sys::ZprTun;
+    use std::net::Ipv4Addr;
     use tokio::net::UdpSocket;
     use tokio::sync::mpsc;
 
@@ -185,6 +188,7 @@ pub mod test {
         pub flags: Option<PhFlags>,
         pub topology_config: Option<TopologyConfig>,
         pub system_name: Option<String>,
+        pub agent_address: Option<Option<IpAddr>>,
         pub buffer_stack: Option<BufferStack<'a, { config::PACKET_BUFFER_SIZE }>>,
         pub agent_input: Option<AgentInput<'a>>,
         pub substrate_egress: Option<SubstrateEgress<'a>>,
@@ -208,10 +212,6 @@ pub mod test {
         fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
             Ok(())
         }
-
-        fn get_address(&self) -> std::io::Result<IpAddress> {
-            Ok(IpAddress::new_from_v4([1, 2, 3, 4]))
-        }
     }
 
     impl TestAssemblyBuilder<'_> {
@@ -225,12 +225,15 @@ pub mod test {
         let ph_mode = builder.ph_mode.unwrap_or(PhMode::Adapter);
         let topology_config = builder.topology_config.unwrap_or_default();
         let system_name = builder.system_name.unwrap_or("test".into());
+        let agent_address = builder
+            .agent_address
+            .unwrap_or(Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
         let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
             let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 0];
             BufferStack::new(buf_storage.leak::<'static>())
         });
         let agent_input = builder.agent_input.unwrap_or_else(|| {
-            let v: Vec<&tokio_tun::Tun> = Vec::new();
+            let v: Vec<&ZprTun> = Vec::new();
             AgentInput::new(v)
         });
         let substrate_egress = builder.substrate_egress.unwrap_or_else(|| {
@@ -276,6 +279,7 @@ pub mod test {
             ph_mode,
             topology_config,
             system_name,
+            agent_address,
             buffer_stack,
             agent_input,
             substrate_egress,

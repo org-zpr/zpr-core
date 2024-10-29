@@ -1,7 +1,5 @@
-use crate::net_defs::IpAddress;
+use crate::sys::ZprTun;
 use std::io::Result;
-use tokio_tun::Tun;
-use zpr_ext::tokio_tun::TunExt;
 
 /// This interface provides shared access to the TUN device for controlling
 /// its state.  Its API is limited to restrict coupling of the full system
@@ -11,19 +9,16 @@ pub trait TunCtl: Sync {
     /// (I.e. whether we are passing packets.)  This is reflected on the
     /// interface itself and is used by the kernel to make routing decisions.
     fn set_carrier(&self, carrier: bool) -> Result<()>;
-
-    /// Get the address associated with the TUN
-    fn get_address(&self) -> Result<IpAddress>;
 }
 
 /// Canonical implementation of the `TunCtl` interface, just a thin wrapper
-/// around a reference to a `Tun` struct.
+/// around a reference to a `ZprTun` struct.
 pub struct TunCtlImpl<'a> {
-    tun: &'a Tun,
+    tun: &'a ZprTun,
 }
 
 impl<'a> TunCtlImpl<'a> {
-    pub fn new(tun: &'a Tun) -> Self {
+    pub fn new(tun: &'a ZprTun) -> Self {
         Self { tun }
     }
 }
@@ -31,12 +26,5 @@ impl<'a> TunCtlImpl<'a> {
 impl TunCtl for TunCtlImpl<'_> {
     fn set_carrier(&self, carrier: bool) -> Result<()> {
         self.tun.set_carrier(carrier)
-    }
-
-    fn get_address(&self) -> Result<IpAddress> {
-        self.tun
-            .address()
-            .map(|addr| IpAddress::from(addr))
-            .map_err(|e| std::io::Error::other(e))
     }
 }

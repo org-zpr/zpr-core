@@ -4,8 +4,8 @@ use crate::counters::*;
 use crate::fastpath;
 use crate::net_defs;
 use crate::packet::Packet;
+use crate::sys::ZprTun;
 use std::future::Future;
-use tokio_tun::Tun;
 use zpr_ext::tokio_tun::*;
 
 #[derive(Copy, Clone)]
@@ -19,7 +19,7 @@ fn is_ip(pi: tun_pi::TunPi) -> bool {
     pi.proto == net_defs::ethertype::IP || pi.proto == net_defs::ethertype::IPV6
 }
 
-async fn worker(config: &Config, asm: &Assembly<'_>, tun: &Tun) {
+async fn worker(config: &Config, asm: &Assembly<'_>, tun: &ZprTun) {
     let mut bufs = Vec::new();
 
     loop {
@@ -61,7 +61,7 @@ pub fn launch<'pktbuf, AsmRef: 'pktbuf, TunRef: 'pktbuf>(
 ) -> impl Future<Output = ()> + Send + 'pktbuf
 where
     AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
-    TunRef: std::ops::Deref<Target = Tun> + Send + Sync,
+    TunRef: std::ops::Deref<Target = ZprTun> + Send + Sync,
 {
     let cfg = *config;
     async move { worker(&cfg, &*asm, &*tun).await }

@@ -2,6 +2,7 @@
 
 use crate::net_defs;
 use crate::packet::Packet;
+use crate::sys::ZprTun;
 use crate::test_packet::*;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
@@ -75,13 +76,13 @@ impl<'pktbuf> MgmtProcessor<'pktbuf> {
 /// AgentInput is responsible for emitting decapsulated agent packets on the
 /// host's TUN interface.
 pub struct AgentInput<'a> {
-    tuns: Box<[&'a tokio_tun::Tun]>,
+    tuns: Box<[&'a ZprTun]>,
 }
 
 impl<'a> AgentInput<'a> {
     // We necessarily have multiple queues, corresponding to the multiple
     // FDs of a multiqueue-enabled TUN interface.
-    pub fn new(tuns: impl IntoIterator<Item = &'a tokio_tun::Tun>) -> Self {
+    pub fn new(tuns: impl IntoIterator<Item = &'a ZprTun>) -> Self {
         Self {
             tuns: tuns.into_iter().collect(),
         }

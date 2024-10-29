@@ -10,6 +10,7 @@ use crate::fastpath;
 use crate::packet::{self, Packet};
 use crate::zdp;
 use bytes::{Buf, BufMut};
+use std::net::IpAddr;
 use tracing::{info, warn};
 use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
@@ -86,12 +87,8 @@ pub async fn send_register_agent_address_request<'a, 'pktbuf>(
     asm: &'a Assembly<'pktbuf>,
     link_id: zpr::LinkId,
 ) -> Result<(), ()> {
-    let tun_addr = asm.tun_ctl.get_address();
-    // TODO: tokio_tun only supports IPv4
-    let l3_type = zpr::L3Type::Ipv4;
-
-    let Ok(tun_addr) = tun_addr else {
-        warn!("Failed to get address for tun");
+    let Some(agent_addr) = asm.agent_address else {
+        warn!("{}: No agent address", asm.system_name);
         return Err(());
     };
 
@@ -100,23 +97,23 @@ pub async fn send_register_agent_address_request<'a, 'pktbuf>(
         link_id,
         zdp::ZdpPacketType::RegisterAgentAddressRequest,
         zdp::ZdpPacketType::RegisterAgentAddressResponse,
-        move |mut req| {
-            zdp::ZdpRegisterAgentAddressRequestHeader {
-                ip_version: l3_type,
+        move |mut req| match agent_addr {
+            IpAddr::V4(addr) => {
+                zdp::ZdpRegisterAgentAddressRequestHeader {
+                    ip_version: zpr::L3Type::Ipv4,
+                }
+                .write_to_buf(&mut req)
+                .unwrap();
+                req.put(&addr.octets()[..]);
             }
-            .write_to_buf(&mut req)
-            .unwrap();
 
-            match l3_type {
-                zpr::L3Type::Ipv4 => {
-                    req.put(tun_addr.read_as_v4().as_slice());
+            IpAddr::V6(addr) => {
+                zdp::ZdpRegisterAgentAddressRequestHeader {
+                    ip_version: zpr::L3Type::Ipv6,
                 }
-
-                zpr::L3Type::Ipv6 => {
-                    req.put(tun_addr.v6.as_slice());
-                }
-
-                other => panic!("bad L3 type: {}", other.0),
+                .write_to_buf(&mut req)
+                .unwrap();
+                req.put(&addr.octets()[..]);
             }
         },
     )
