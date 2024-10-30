@@ -4,6 +4,7 @@ use crate::net_defs;
 use crate::packet::Packet;
 use crate::sys::ZprTun;
 use crate::test_packet::*;
+use crate::zprtun::tun_pi;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::result::Result;
@@ -14,7 +15,6 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
 use zpr;
 use zpr_ext::std::mem::DropGuard;
-use crate::zprtun::tun_pi;
 
 pub enum TryEnqueueError<T> {
     Full(T),

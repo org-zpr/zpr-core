@@ -4,7 +4,6 @@
 //! The loading code is in `sys.rs`.
 //!
 
-
 /// Error type used by some ZPRTun functions across platform implementations.
 #[derive(thiserror::Error, Debug)]
 pub enum ZPRTunError {
@@ -14,8 +13,6 @@ pub enum ZPRTunError {
     #[error("platform error from TUN device: {0}")]
     PlatformError(String),
 }
-
-
 
 pub mod tun_pi {
     //! Structures and functions for working with per-packet packet info.

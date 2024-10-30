@@ -1,10 +1,7 @@
 use crate::zprtun::ZPRTunError;
-use tun::AsyncDevice;
 use bytes::buf;
+use tun::AsyncDevice;
 use zpr_ext::std::mem::slice_assume_init_mut;
-
-
-
 
 pub struct ZprTun(tun::AsyncDevice);
 
@@ -20,9 +17,7 @@ impl From<tun::Error> for ZPRTunError {
     }
 }
 
-
 impl ZprTun {
-
     /// Create a new TUN device.
     /// If `ifname` is `None`, the kernel will automatically assign a name.
     /// On macOS if the name is specificed, it must be of the form `utun[0-9]+`.
@@ -30,20 +25,20 @@ impl ZprTun {
         ifname: Option<String>,
         concurrency: usize,
     ) -> std::result::Result<Vec<Self>, ZPRTunError> {
-
         let mut config = tun::Configuration::default();
         if let Some(name) = ifname {
             config = config.tun_name(&name).to_owned();
         }
         if concurrency <= 0 || concurrency > 1 {
-            return Err(ZPRTunError::PlatformError(String::from("on macos concurrency (queues) must be 1")));
+            return Err(ZPRTunError::PlatformError(String::from(
+                "on macos concurrency (queues) must be 1",
+            )));
         }
 
         let dev = tun::create_as_async(&config)?;
 
         Ok(vec![ZprTun::from(dev)])
     }
-
 
     pub async fn recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> std::io::Result<usize> {
         let uninit_slice = buf.chunk_mut();
@@ -57,7 +52,6 @@ impl ZprTun {
         Ok(size)
     }
 
-
     pub fn try_send(&self, _buf: &[u8]) -> std::io::Result<usize> {
         let idev = &*(self.0);
         idev.send(_buf)
@@ -67,5 +61,4 @@ impl ZprTun {
     pub fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
         Ok(())
     }
-
 }

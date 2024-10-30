@@ -8,7 +8,6 @@ use crate::sys::ZprTun;
 use crate::zprtun::tun_pi;
 use std::future::Future;
 
-
 #[derive(Copy, Clone)]
 pub struct Config {
     #[allow(dead_code)]
