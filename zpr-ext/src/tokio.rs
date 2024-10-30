@@ -2,11 +2,17 @@ pub mod net {
     use crate::std::os::unix::net::{
         uds_recv_vectored_with_ancillary, uds_send_vectored_with_ancillary, SocketAncillary,
     };
-    use nix::sys::socket;
     use std::io::{self, IoSlice, IoSliceMut};
-    use std::os::fd::{AsFd, AsRawFd};
+    use std::os::fd::AsFd;
     use tokio::io::Interest;
     use tokio::net::{UdpSocket, UnixStream};
+
+    #[cfg(target_os = "linux")]
+    use nix::sys::socket;
+
+    #[cfg(target_os = "linux")]
+    use std::os::fd::AsRawFd;
+
 
     pub trait UdpSocketExt {
         fn mtu(&self) -> io::Result<u32>;
@@ -15,13 +21,25 @@ pub mod net {
     }
 
     impl UdpSocketExt for UdpSocket {
+
+
         /// Retrieve the socket's current known path MTU.
+        #[cfg(any(target_os = "android", target_os = "linux"))]
         fn mtu(&self) -> io::Result<u32> {
             match socket::getsockopt(self, socket::sockopt::IpMtu) {
                 Ok(mtu) => Ok(mtu as u32),
                 Err(errno) => Err(io::Error::from(errno)),
             }
         }
+
+        #[cfg(target_os = "macos")]
+        fn mtu(&self) -> io::Result<u32> {
+            // TODO:
+            // For mac I need to get the interface name and then call
+            // an ioctl to get MTU.
+            return Ok(1400);
+        }
+
 
         #[cfg(any(doc, target_os = "android", target_os = "linux"))]
         fn attach_reuse_port_cbpf(&self, filter: &[libc::sock_filter]) -> io::Result<()> {
@@ -54,14 +72,14 @@ pub mod net {
 
     #[allow(async_fn_in_trait)]
     pub trait UnixStreamExt {
-        #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+        #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
         async fn send_vectored_with_ancillary(
             &self,
             bufs: &[IoSlice<'_>],
             ancillary: &mut SocketAncillary<'_>,
         ) -> io::Result<usize>;
 
-        #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+        #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
         async fn recv_vectored_with_ancillary(
             &self,
             bufs: &mut [IoSliceMut<'_>],
@@ -70,7 +88,7 @@ pub mod net {
     }
 
     impl UnixStreamExt for UnixStream {
-        #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+        #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
         async fn send_vectored_with_ancillary(
             &self,
             bufs: &[IoSlice<'_>],
@@ -87,7 +105,7 @@ pub mod net {
             }
         }
 
-        #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+        #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
         async fn recv_vectored_with_ancillary(
             &self,
             bufs: &mut [IoSliceMut<'_>],
