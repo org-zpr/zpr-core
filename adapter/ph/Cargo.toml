@@ -23,16 +23,23 @@ openssl-sys = { version = "0.9.102" }
 openssl = { version = "0.10.64" }
 snow = "0.9.6"
 socket2 = { version = "0.5.7" }
-tokio-tun = { version = "0.11.5" }
 tokio-util = { version = "0.7.11", features = ["rt"] }
 tokio = { version = "1.37.0", features = ["full"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
 zerocopy = { version = "0.8.3", features = ["derive", "std"] }
 zpr = { path = "../../zpr" }
-zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }
 nix = { version = "0.29.0", features = ["ioctl", "net"] }
 thiserror = "1.0.65"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tokio-tun = { version = "0.11.5" }
+zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+tun = { version = "0.7", features = ["async"] }
+zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "zerocopy"] }
+
 
 [dev-dependencies]
 

@@ -14,7 +14,7 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
 use zpr;
 use zpr_ext::std::mem::DropGuard;
-use zpr_ext::tokio_tun::tun_pi;
+use crate::zprtun::tun_pi;
 
 pub enum TryEnqueueError<T> {
     Full(T),
