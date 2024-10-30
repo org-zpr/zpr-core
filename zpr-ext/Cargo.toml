@@ -7,7 +7,6 @@ edition = "2021"
 bytes = { version = "1.7.1", optional = true }
 libc = { version = "0.2.155" }
 nix = { version = "0.29.0", features = ["ioctl", "net", "socket"], optional = true }
-tokio-tun = { version = "0.11.5", optional = true }
 tokio = { version = "1.37.0", features = ["net"], optional = true }
 zerocopy = { version = "0.8.3", optional = true }
 
@@ -19,5 +18,4 @@ tokio = { version = "1.37.0", features = ["macros", "time", "rt"] }
 # and would like to have "extended".
 bytes = ["dep:bytes"]
 tokio = ["dep:tokio", "dep:nix"]
-tokio-tun = ["dep:tokio-tun", "dep:bytes", "dep:nix", "dep:tokio"]
 zerocopy = ["dep:zerocopy"]

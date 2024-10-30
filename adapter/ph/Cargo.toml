@@ -31,14 +31,13 @@ zerocopy = { version = "0.8.3", features = ["derive", "std"] }
 zpr = { path = "../../zpr" }
 nix = { version = "0.29.0", features = ["ioctl", "net"] }
 thiserror = "1.0.65"
+zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "zerocopy"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-tun = { version = "0.11.5" }
-zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 tun = { version = "0.7", features = ["async"] }
-zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "zerocopy"] }
 
 
 [dev-dependencies]
