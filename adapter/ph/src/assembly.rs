@@ -143,19 +143,25 @@ impl Assembly<'_> {
             return Ok(peer_id);
         };
 
-        if peer.link_state_machine.configure(self).is_err()
-            || peer.link_state_machine.start(self).is_err()
-        {
+        if let Err(e) = peer.link_state_machine.configure(self) {
             error!(
-                "{}: Link {} failed to configure and start.  Resetting",
-                self.system_name, peer_id
+                "{}: Link {} failed to configure with error {}.  Resetting",
+                self.system_name, peer_id, e
             );
             peer.link_state_machine.reset(self);
         } else {
-            info!(
-                "{}: Successfully started tether with {}.  Assigned ID {}",
-                self.system_name, adapter_addr, peer_id
-            );
+            if let Err(e) = peer.link_state_machine.start(self) {
+                error!(
+                    "{}: Link {} failed to start with error {}.  Resetting",
+                    self.system_name, peer_id, e
+                );
+                peer.link_state_machine.reset(self);
+            } else {
+                info!(
+                    "{}: Successfully started tether with {}.  Assigned ID {}",
+                    self.system_name, adapter_addr, peer_id
+                );
+            }
         }
 
         return Ok(peer_id);
