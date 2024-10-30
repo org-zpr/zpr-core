@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use crate::assembly::Assembly;
 use crate::dock_tables::DockForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
@@ -193,7 +192,6 @@ impl<'pktbuf> PeerTable<'pktbuf> {
     /// Sets an established security association on the link.
     pub fn set_security_association(
         &self,
-        asm: &'static Assembly<'pktbuf>,
         link_id: LinkId,
         sa: KmTransportSA,
     ) -> Result<(), SecurityAssocaitionStateError> {
@@ -201,7 +199,6 @@ impl<'pktbuf> PeerTable<'pktbuf> {
             .get(link_id)
             .ok_or(SecurityAssocaitionStateError::NoAssociationForLink)?;
         entry.km_state.transport_sa.write(Some(sa));
-        let _ = entry.link_state_machine.keying_done(asm);
         Ok(())
     }
 

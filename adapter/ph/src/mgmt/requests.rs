@@ -56,6 +56,7 @@ pub async fn send_hello_request<'a, 'pktbuf>(
     )
     .await;
 
+    // TODO: Break these apart
     match response {
         Ok(mut hello_res) => {
             let Ok(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut hello_res) else {
@@ -119,6 +120,7 @@ pub async fn send_register_agent_address_request<'a, 'pktbuf>(
     )
     .await;
 
+    // TODO: Break these apart
     match response {
         Ok(mut register_res) => {
             let Ok(hdr) =

@@ -122,11 +122,22 @@ async fn signal_worker<'pktbuf>(
                         info!("{}: km_multiplexor: link {}: SA established (SEND_ZPIS: {}, RECV_ZPIS: {}",
                             asm.system_name, linkmsg.link_id, sa.send_zpis, sa.recv_zpis);
 
-                        match asm.peer_table.set_security_association(asm, linkmsg.link_id, sa) {
+                        match asm.peer_table.set_security_association(linkmsg.link_id, sa) {
                             Ok(_) => (),
                             Err(e) => {
                                 error!("{}: km_multiplexor: failed to set SA established: {:?}", asm.system_name, e);
                             }
+                        }
+                        match asm.peer_table.inspect(linkmsg.link_id, |peer_state| {
+                            peer_state.link_state_machine.keying_done(asm)
+                        }) {
+                            Some(Err(e)) => {
+                                error!("{}: Link state error: {:?}", asm.system_name, e);
+                            }
+                            None => {
+                                error!("{}: Link {} gone", asm.system_name, linkmsg.link_id);
+                            }
+                            Some(Ok(())) => (),
                         }
                         match status.get_mut(&linkmsg.link_id) {
                             Some(s) if s.error_count == 0 => {

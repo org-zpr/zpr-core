@@ -89,25 +89,25 @@ pub async fn handle_hello_request<'pktbuf>(
         asm.system_name, ingress_link_id
     );
 
-    if let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
-        peer_state.link_state_machine.process_hello_request()
-    }) {
-        let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-        let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
-        hdr.status = 0.into();
+    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
+        peer_state.link_state_machine.process_hello_request(asm)
+    }) else {
+        return Err((HandleMgmtError::LinkStateError, pkt));
+    };
 
-        super::core::send_non_flow_mgmt_response(
-            asm,
-            ingress_link_id,
-            zdp::ZdpPacketType::HelloResponse,
-            seq_num,
-            rsp_pkt,
-        )
-        .await;
-        Ok(())
-    } else {
-        Err((HandleMgmtError::LinkStateError, pkt))
-    }
+    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
+    hdr.status = 0.into();
+
+    super::core::send_non_flow_mgmt_response(
+        asm,
+        ingress_link_id,
+        zdp::ZdpPacketType::HelloResponse,
+        seq_num,
+        rsp_pkt,
+    )
+    .await;
+    Ok(())
 }
 
 /// handle a Hello Response (RFC 6.5 § 6.3.4)
@@ -127,14 +127,14 @@ pub async fn handle_hello_response<'pktbuf>(
         asm.system_name, ingress_link_id, status
     );
 
-    if let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
+    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
         peer_state.link_state_machine.process_hello_response(asm)
-    }) {
-        asm.buffer_stack.put_buffer(pkt.destroy());
-        Ok(())
-    } else {
-        Err((HandleMgmtError::LinkStateError, pkt))
-    }
+    }) else {
+        return Err((HandleMgmtError::LinkStateError, pkt));
+    };
+
+    asm.buffer_stack.put_buffer(pkt.destroy());
+    Ok(())
 }
 
 /// handle a Register Agent Address Request
@@ -175,27 +175,27 @@ pub async fn handle_register_agent_address_request<'pktbuf>(
         asm.system_name, ingress_link_id, agent_address
     );
 
-    if let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
+    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
         peer_state
             .link_state_machine
             .process_register_agent_address_request(asm, agent_address)
-    }) {
-        let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-        let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpRegisterAgentAddressResponseHeader>();
-        hdr.status_code = 0;
+    }) else {
+        return Err((HandleMgmtError::LinkStateError, pkt));
+    };
 
-        super::core::send_non_flow_mgmt_response(
-            asm,
-            ingress_link_id,
-            zdp::ZdpPacketType::RegisterAgentAddressResponse,
-            seq_num,
-            rsp_pkt,
-        )
-        .await;
-        Ok(())
-    } else {
-        Err((HandleMgmtError::LinkStateError, pkt))
-    }
+    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpRegisterAgentAddressResponseHeader>();
+    hdr.status_code = 0;
+
+    super::core::send_non_flow_mgmt_response(
+        asm,
+        ingress_link_id,
+        zdp::ZdpPacketType::RegisterAgentAddressResponse,
+        seq_num,
+        rsp_pkt,
+    )
+    .await;
+    Ok(())
 }
 
 /// handle a Register Agent Address Response

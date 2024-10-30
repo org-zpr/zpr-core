@@ -106,11 +106,6 @@ impl Assembly<'_> {
         self.ph_mode == PhMode::Node
     }
 
-    #[allow(dead_code)]
-    pub fn is_adapter(&self) -> bool {
-        self.ph_mode == PhMode::Adapter
-    }
-
     fn add_peer(
         &'static self,
         link_type: LinkType,
@@ -143,22 +138,25 @@ impl Assembly<'_> {
         let peer_id = self.add_peer(link_type, adapter_addr)?;
         self.peer_ids.lock().unwrap().push(peer_id);
 
-        self.peer_table.inspect(peer_id, |peer_state| {
-            if peer_state.link_state_machine.configure(self).is_err()
-                || peer_state.link_state_machine.start(self).is_err()
-            {
-                error!(
-                    "{}: Link {} failed to configure and start.  Resetting",
-                    self.system_name, peer_id
-                );
-                peer_state.link_state_machine.reset();
-            } else {
-                info!(
-                    "{}: Successfully started tether with {}.  Assigned ID {}",
-                    self.system_name, adapter_addr, peer_id
-                );
-            }
-        });
+        let Some(peer) = self.peer_table.get(peer_id) else {
+            // Peer is gone already
+            return Ok(peer_id);
+        };
+
+        if peer.link_state_machine.configure(self).is_err()
+            || peer.link_state_machine.start(self).is_err()
+        {
+            error!(
+                "{}: Link {} failed to configure and start.  Resetting",
+                self.system_name, peer_id
+            );
+            peer.link_state_machine.reset(self);
+        } else {
+            info!(
+                "{}: Successfully started tether with {}.  Assigned ID {}",
+                self.system_name, adapter_addr, peer_id
+            );
+        }
 
         return Ok(peer_id);
     }
