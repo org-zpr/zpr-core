@@ -3,11 +3,10 @@ use bytes::buf;
 use nix::ioctl_write_ptr;
 use std::io;
 use std::io::Result;
+use std::net::IpAddr;
 use std::os::fd::AsRawFd;
 use tokio_tun::{Tun, TunBuilder};
 use zpr_ext::std::mem::slice_assume_init_mut;
-use std::net::IpAddr;
-
 
 // from /usr/include/linux/if_tun.h
 ioctl_write_ptr!(tun_set_carrier, b'T', 226, libc::c_int);
@@ -36,7 +35,9 @@ impl ZprTun {
         if let Some(addr) = address {
             match addr {
                 IpAddr::V4(ipa) => bldr = bldr.address(ipa),
-                IpAddr::V6(_) => return Err(ZPRTunError::PlatformError("IPv6 not supported".to_string())),
+                IpAddr::V6(_) => {
+                    return Err(ZPRTunError::PlatformError("IPv6 not supported".to_string()))
+                }
             }
         }
         let tok_tun_devs = bldr
@@ -84,6 +85,8 @@ impl ZprTun {
     #[allow(dead_code)]
     pub fn set_address(&mut self, _addr: IpAddr) -> std::result::Result<(), ZPRTunError> {
         // This needs work -- the linux tun API only allows address to be set at construction time.
-        Err(ZPRTunError::PlatformError("cannot set TUN address after creation".to_string()))
+        Err(ZPRTunError::PlatformError(
+            "cannot set TUN address after creation".to_string(),
+        ))
     }
 }

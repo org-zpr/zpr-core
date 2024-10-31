@@ -238,7 +238,11 @@ fn main() -> ExitCode {
     } else {
         None
     };
-    let tun_devs = match ZprTun::new_mq(config.tun_if, topology_config.agent_output_concurrency, tun_addr) {
+    let tun_devs = match ZprTun::new_mq(
+        config.tun_if,
+        topology_config.agent_output_concurrency,
+        tun_addr,
+    ) {
         Ok(devs) => devs.leak(),
         Err(e) => {
             panic!("unable to create TUN device: {:?}", e);
