@@ -1,7 +1,6 @@
 //! Common interface for the TUN devices.
 //!
 //! The actual TUN implementation is platform specific and can be found in `sys/<platform>/zprtun.rs`.
-//! The loading code is in `sys.rs`.
 //!
 
 /// Error type used by some ZPRTun functions across platform implementations.
