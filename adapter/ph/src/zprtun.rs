@@ -2,6 +2,9 @@
 //!
 //! The actual TUN implementation is platform specific and can be found in `sys/<platform>/zprtun.rs`.
 //!
+//!
+
+pub const DEFAULT_TUN_MTU: u16 = 1400;
 
 /// Error type used by some ZPRTun functions across platform implementations.
 #[derive(thiserror::Error, Debug)]

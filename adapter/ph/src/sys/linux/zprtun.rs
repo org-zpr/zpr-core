@@ -70,4 +70,16 @@ impl ZprTun {
         unsafe { tun_set_carrier(self.0.as_raw_fd(), &carrier.into()) }?;
         Ok(())
     }
+
+    pub fn set_address(&mut self, addr: IpAddr) -> Result<(), ZPRTunError> {
+        match addr {
+            IpAddr::V4(addr) => match self.0.address(addr) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(ZPRTunError::PlatformError(e.to_string())),
+            },
+            IpAddr::V6(addr) => Err(ZPRTunError::PlatformError(
+                "IPv6 not supported on linux with tokio-tun".to_string(),
+            )),
+        }
+    }
 }

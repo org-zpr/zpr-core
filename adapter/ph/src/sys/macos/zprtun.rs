@@ -1,6 +1,8 @@
-use crate::zprtun::ZPRTunError;
+use crate::zprtun::{ZPRTunError, DEFAULT_TUN_MTU};
 use bytes::buf;
-use tun::AsyncDevice;
+use std::net::IpAddr;
+use std::result::Result;
+use tun::{AbstractDevice, AsyncDevice};
 use zpr_ext::std::mem::slice_assume_init_mut;
 
 pub struct ZprTun(tun::AsyncDevice);
@@ -27,7 +29,9 @@ impl ZprTun {
     ) -> std::result::Result<Vec<Self>, ZPRTunError> {
         let mut config = tun::Configuration::default();
         if let Some(name) = ifname {
-            config = config.tun_name(&name).to_owned();
+            config.tun_name(&name);
+        } else {
+            config.mtu(DEFAULT_TUN_MTU);
         }
         if concurrency <= 0 || concurrency > 1 {
             return Err(ZPRTunError::PlatformError(String::from(
@@ -36,7 +40,6 @@ impl ZprTun {
         }
 
         let dev = tun::create_as_async(&config)?;
-
         Ok(vec![ZprTun::from(dev)])
     }
 
@@ -60,5 +63,13 @@ impl ZprTun {
     /// A NOP on mac.
     pub fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
         Ok(())
+    }
+
+    pub fn set_address(&mut self, addr: IpAddr) -> Result<(), ZPRTunError> {
+        let idev = &mut *(self.0);
+        match idev.set_address(addr) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(ZPRTunError::PlatformError(e.to_string())),
+        }
     }
 }
