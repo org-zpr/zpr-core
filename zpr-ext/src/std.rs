@@ -265,13 +265,11 @@ pub mod os {
             use std::ptr;
             use std::vec::Vec;
 
-
             #[cfg(any(target_os = "android", target_os = "linux"))]
             type MsghdrIovlenT = libc::size_t;
 
             #[cfg(any(target_os = "macos"))]
             type MsghdrIovlenT = libc::c_int;
-
 
             #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
             pub struct SocketAncillary<'a> {
@@ -329,14 +327,14 @@ pub mod os {
             pub struct ScmCredentials<'a>(std::marker::PhantomData<&'a ()>);
 
             pub trait UnixStreamExt {
-                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os="macos"))]
+                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
                 fn send_vectored_with_ancillary(
                     &self,
                     bufs: &[IoSlice<'_>],
                     ancillary: &mut SocketAncillary<'_>,
                 ) -> Result<usize>;
 
-                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os="macos"))]
+                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
                 fn recv_vectored_with_ancillary(
                     &self,
                     bufs: &mut [IoSliceMut<'_>],
@@ -414,8 +412,8 @@ pub mod os {
                         let size_of_hdr = (2 * libc::CMSG_LEN(std::mem::size_of::<RawFd>() as _)
                             - libc::CMSG_LEN((2 * std::mem::size_of::<RawFd>()) as _))
                             as usize;
-                        let num_fds =
-                            (((*cmsghdr).cmsg_len as usize) - size_of_hdr) / std::mem::size_of::<RawFd>();
+                        let num_fds = (((*cmsghdr).cmsg_len as usize) - size_of_hdr)
+                            / std::mem::size_of::<RawFd>();
                         ancillary.fds =
                             std::slice::from_raw_parts(libc::CMSG_DATA(cmsghdr).cast(), num_fds)
                                 .into_iter()
@@ -434,7 +432,7 @@ pub mod os {
             impl UnixStreamExt for UnixStream {
                 /// This is a very silly and limited implementation of `send_vectored_with_ancillary()` as we await
                 /// stabilization of [unix_socket_ancillary_data](https://github.com/rust-lang/rust/issues/76915).
-                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os="macos"))]
+                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
                 fn send_vectored_with_ancillary(
                     &self,
                     bufs: &[IoSlice<'_>],
@@ -443,7 +441,7 @@ pub mod os {
                     uds_send_vectored_with_ancillary(self.as_fd(), bufs, ancillary)
                 }
 
-                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os="macos"))]
+                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
                 fn recv_vectored_with_ancillary(
                     &self,
                     bufs: &mut [IoSliceMut<'_>],

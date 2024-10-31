@@ -13,7 +13,6 @@ pub mod net {
     #[cfg(target_os = "linux")]
     use std::os::fd::AsRawFd;
 
-
     pub trait UdpSocketExt {
         fn mtu(&self) -> io::Result<u32>;
         #[cfg(any(doc, target_os = "android", target_os = "linux"))]
@@ -21,8 +20,6 @@ pub mod net {
     }
 
     impl UdpSocketExt for UdpSocket {
-
-
         /// Retrieve the socket's current known path MTU.
         #[cfg(any(target_os = "android", target_os = "linux"))]
         fn mtu(&self) -> io::Result<u32> {
@@ -39,7 +36,6 @@ pub mod net {
             // an ioctl to get MTU.
             return Ok(1400);
         }
-
 
         #[cfg(any(doc, target_os = "android", target_os = "linux"))]
         fn attach_reuse_port_cbpf(&self, filter: &[libc::sock_filter]) -> io::Result<()> {
