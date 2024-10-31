@@ -4,9 +4,7 @@ use crate::capture_worker::CaptureWorker;
 use crate::config;
 use crate::counters::*;
 use crate::flow_control::FlowControl;
-use crate::km::ZPIPair;
 use crate::km_cert_exchange::KmCertExchange;
-use crate::km_multiplexor;
 use crate::km_multiplexor::KmState;
 use crate::km_noise;
 use crate::link_state::LinkType;
@@ -15,15 +13,14 @@ use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
+use std::net::IpAddr;
 use zpr;
-use zpr::ZPI_ENCRYPTED_HEADER_FLAG;
 use zpr::{LinkId, SubstrateAddr};
 
 use enum_map::EnumMap;
 use km_noise::NoiseKeypair;
-use std::default::Default;
 use std::result::Result;
-use tracing::info;
+use tracing::{error, info};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {
@@ -48,12 +45,12 @@ pub enum PhMode {
 /// visible queue becoming full.
 
 pub struct Assembly<'pktbuf> {
-    pub flags: PhFlags,
     pub ph_mode: PhMode,
     pub topology_config: config::TopologyConfig,
 
     // Shared resources.  These may be accessed by any part of the system.
     pub system_name: String, // For debugging use
+    pub agent_address: Option<IpAddr>,
 
     pub buffer_stack: BufferStack<'pktbuf, { config::PACKET_BUFFER_SIZE }>,
 
@@ -86,29 +83,9 @@ pub struct Assembly<'pktbuf> {
     pub certx: Option<KmCertExchange>,
 }
 
-pub struct PhFlags {
-    /// If set TRUE this allows any messages on ZPI 0.  VERY INSECURE!!
-    pub allow_insecure_zpi_zero: bool,
-    pub disable_key_management: bool,
-}
-
-impl Default for PhFlags {
-    /// Reasonable (and secure) defaults
-    fn default() -> Self {
-        Self {
-            allow_insecure_zpi_zero: false,
-            disable_key_management: false,
-        }
-    }
-}
-
 impl Assembly<'_> {
     pub fn is_node(&self) -> bool {
         self.ph_mode == PhMode::Node
-    }
-
-    pub fn is_adapter(&self) -> bool {
-        self.ph_mode == PhMode::Adapter
     }
 
     fn add_peer(
@@ -122,74 +99,52 @@ impl Assembly<'_> {
             link_id: entry.key(),
         };
 
-        let peer_state = peer_table::PeerState::new(link_type, *peer_addr, |q| {
+        let peer_state = peer_table::PeerState::new(entry.key(), link_type, *peer_addr, |q| {
             mgmt_processor_worker::launch(&worker_config, self, q)
         });
 
         Ok(entry.insert(peer_state))
     }
 
-    /// Add an adapter to the peer table
-    pub fn accept_tether(
+    /// Add a tether to the peer table
+    pub fn start_tether(
         &'static self,
         adapter_addr: &SubstrateAddr,
+        link_type: LinkType,
     ) -> Result<LinkId, PeerInsertError> {
-        assert!(self.is_node());
+        assert!(link_type != LinkType::NodeToNode);
         info!(
-            "{}: Accepting tether from {}",
+            "{}: Starting tether with {}",
             self.system_name, adapter_addr
         );
-        let peer_id = self.add_peer(LinkType::NodeToAdapter, adapter_addr)?;
+        let peer_id = self.add_peer(link_type, adapter_addr)?;
         self.peer_ids.lock().unwrap().push(peer_id);
 
-        if !self.flags.disable_key_management {
-            km_multiplexor::add_node_link(
-                &self,
-                peer_id,
-                ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
-                self.self_noise_keypair.clone().unwrap(),
-                self.certx.clone().unwrap(),
-            )
-            .unwrap();
+        let Some(peer) = self.peer_table.get(peer_id) else {
+            // Peer is gone already
+            return Ok(peer_id);
+        };
+
+        if let Err(e) = peer.link_state_machine.configure(self) {
+            error!(
+                "{}: Link {} failed to configure with error {}.  Resetting",
+                self.system_name, peer_id, e
+            );
+            peer.link_state_machine.reset(self);
+        } else {
+            if let Err(e) = peer.link_state_machine.start(self) {
+                error!(
+                    "{}: Link {} failed to start with error {}.  Resetting",
+                    self.system_name, peer_id, e
+                );
+                peer.link_state_machine.reset(self);
+            } else {
+                info!(
+                    "{}: Successfully started tether with {}.  Assigned ID {}",
+                    self.system_name, adapter_addr, peer_id
+                );
+            }
         }
-
-        info!(
-            "{}: Successfully accepted tether from {}.  Assigned ID {}",
-            self.system_name, adapter_addr, peer_id
-        );
-
-        return Ok(peer_id);
-    }
-
-    /// Add a node to the peer table as an adapter
-    pub fn initiate_tether(
-        &'static self,
-        node_addr: &SubstrateAddr,
-    ) -> Result<LinkId, PeerInsertError> {
-        assert!(self.is_adapter());
-        info!(
-            "{}: Initiating tether towards {}",
-            self.system_name, node_addr
-        );
-        let peer_id = self.add_peer(LinkType::AdapterToNode, node_addr)?;
-        self.peer_ids.lock().unwrap().push(peer_id);
-
-        if !self.flags.disable_key_management {
-            km_multiplexor::add_adapter_link(
-                &self,
-                peer_id,
-                ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
-                self.self_noise_keypair.clone().unwrap(),
-                self.peer_noise_keypair.clone().unwrap().public,
-                self.certx.clone().unwrap(),
-            )
-            .unwrap();
-        }
-
-        info!(
-            "{}: Successfully initiated tether to {}.  Assigned ID {}",
-            self.system_name, node_addr, peer_id
-        );
 
         return Ok(peer_id);
     }
@@ -208,6 +163,7 @@ pub mod test {
     use super::*;
     use crate::config::TopologyConfig;
     use crate::sys::ZprTun;
+    use std::net::Ipv4Addr;
     use tokio::net::UdpSocket;
     use tokio::sync::mpsc;
 
@@ -215,9 +171,9 @@ pub mod test {
     #[derive(Default)]
     pub struct TestAssemblyBuilder<'a> {
         pub ph_mode: Option<PhMode>,
-        pub flags: Option<PhFlags>,
         pub topology_config: Option<TopologyConfig>,
         pub system_name: Option<String>,
+        pub agent_address: Option<Option<IpAddr>>,
         pub buffer_stack: Option<BufferStack<'a, { config::PACKET_BUFFER_SIZE }>>,
         pub agent_input: Option<AgentInput<'a>>,
         pub substrate_egress: Option<SubstrateEgress<'a>>,
@@ -250,10 +206,12 @@ pub mod test {
     }
 
     pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
-        let flags = builder.flags.unwrap_or_default();
         let ph_mode = builder.ph_mode.unwrap_or(PhMode::Adapter);
         let topology_config = builder.topology_config.unwrap_or_default();
         let system_name = builder.system_name.unwrap_or("test".into());
+        let agent_address = builder
+            .agent_address
+            .unwrap_or(Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
         let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
             let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 0];
             BufferStack::new(buf_storage.leak::<'static>())
@@ -301,10 +259,10 @@ pub mod test {
         });
 
         Assembly {
-            flags,
             ph_mode,
             topology_config,
             system_name,
+            agent_address,
             buffer_stack,
             agent_input,
             substrate_egress,

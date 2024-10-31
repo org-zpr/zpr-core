@@ -136,7 +136,7 @@ fn expand_addrs_v6(
     hdr.version_and_tc_upper = version_and_tc_upper;
     hdr.tc_lower_and_fl_upper = tc_lower_and_fl_upper;
     hdr.fl_lower = fl_lower;
-    hdr.payload_length = (body_len as u16).to_be_bytes(); // NOTE: we do not allow jumbo payloads
+    hdr.payload_length = (body_len as u16).into(); // NOTE: we do not allow jumbo payloads
     hdr.next_header = next_header;
     hdr.hop_limit = hop_limit;
     hdr.src_address = net_defs::IpAddress {

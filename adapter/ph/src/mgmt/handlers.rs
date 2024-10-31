@@ -6,6 +6,7 @@ use crate::config;
 use crate::counters;
 use crate::defs::*;
 use crate::dock_tables;
+use crate::net_defs::IpAddress;
 use crate::packet::Packet;
 use crate::zdp;
 use bytes::{Buf, BufMut};
@@ -19,6 +20,7 @@ pub enum HandleMgmtError {
     BadStructure,
     UnknownKeyManagementType(u16),
     KeyManagementError(String),
+    LinkStateError,
 }
 
 impl From<HandleMgmtError> for counters::CounterType {
@@ -29,6 +31,7 @@ impl From<HandleMgmtError> for counters::CounterType {
             HandleMgmtError::BadStructure => Self::BadStructure,
             HandleMgmtError::UnknownKeyManagementType(_type) => Self::OtherError,
             HandleMgmtError::KeyManagementError(_desc) => Self::OtherError,
+            HandleMgmtError::LinkStateError => Self::OtherError,
         }
     }
 }
@@ -80,11 +83,21 @@ pub async fn handle_hello_request<'pktbuf>(
     pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
     let ingress_link_id = pkt.metadata().ingress_link_id;
+
+    info!(
+        "{}: Received Hello Request for link {}",
+        asm.system_name, ingress_link_id
+    );
+
+    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
+        peer_state.link_state_machine.process_hello_request(asm)
+    }) else {
+        return Err((HandleMgmtError::LinkStateError, pkt));
+    };
+
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
     hdr.status = 0.into();
-
-    info!("{}: Received HelloRequest", asm.system_name);
 
     super::core::send_non_flow_mgmt_response(
         asm,
@@ -94,8 +107,118 @@ pub async fn handle_hello_request<'pktbuf>(
         rsp_pkt,
     )
     .await;
-
     Ok(())
+}
+
+/// handle a Hello Response (RFC 6.5 § 6.3.4)
+pub async fn handle_hello_response<'pktbuf>(
+    asm: &'static Assembly<'pktbuf>,
+    _seq_num: zpr::SeqNum,
+    mut pkt: Packet<'pktbuf>,
+) -> HandleMgmtResult<'pktbuf> {
+    let ingress_link_id = pkt.metadata().ingress_link_id;
+
+    let Ok(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+    let status = hdr.status;
+    info!(
+        "{}: Received Hello Response for link {}, status: {}",
+        asm.system_name, ingress_link_id, status
+    );
+
+    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
+        peer_state.link_state_machine.process_hello_response(asm)
+    }) else {
+        return Err((HandleMgmtError::LinkStateError, pkt));
+    };
+
+    asm.buffer_stack.put_buffer(pkt.destroy());
+    Ok(())
+}
+
+/// handle a Register Agent Address Request
+pub async fn handle_register_agent_address_request<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    seq_num: zpr::SeqNum,
+    mut pkt: Packet<'pktbuf>,
+) -> HandleMgmtResult<'pktbuf> {
+    let ingress_link_id = pkt.metadata().ingress_link_id;
+
+    let Ok(hdr) = zdp::ZdpRegisterAgentAddressRequestHeader::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+
+    let agent_address: IpAddress;
+    match hdr.ip_version {
+        zpr::L3Type::Ipv4 => {
+            let Ok(agent_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
+                return Err((HandleMgmtError::BadStructure, pkt));
+                // TODO: return failure response instead
+            };
+            agent_address = agent_addr.into();
+        }
+        zpr::L3Type::Ipv6 => {
+            let Ok(agent_addr) = <[u8; 16]>::read_from_buf(&mut pkt) else {
+                return Err((HandleMgmtError::BadStructure, pkt));
+            };
+            agent_address = agent_addr.into();
+        }
+
+        _ => {
+            return Err((HandleMgmtError::BadStructure, pkt));
+        }
+    }
+
+    info!(
+        "{}: Received Register Agent Address Request for link {} with address {}",
+        asm.system_name, ingress_link_id, agent_address
+    );
+
+    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
+        peer_state
+            .link_state_machine
+            .process_register_agent_address_request(asm, agent_address)
+    }) else {
+        return Err((HandleMgmtError::LinkStateError, pkt));
+    };
+
+    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpRegisterAgentAddressResponseHeader>();
+    hdr.status_code = 0;
+
+    super::core::send_non_flow_mgmt_response(
+        asm,
+        ingress_link_id,
+        zdp::ZdpPacketType::RegisterAgentAddressResponse,
+        seq_num,
+        rsp_pkt,
+    )
+    .await;
+    Ok(())
+}
+
+/// handle a Register Agent Address Response
+pub async fn handle_register_agent_address_response<'pktbuf>(
+    asm: &Assembly<'pktbuf>,
+    _seq_num: zpr::SeqNum,
+    pkt: Packet<'pktbuf>,
+) -> HandleMgmtResult<'pktbuf> {
+    let ingress_link_id = pkt.metadata().ingress_link_id;
+    info!(
+        "{}: Received Register Agent Address Response for link {}",
+        asm.system_name, ingress_link_id
+    );
+
+    if let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
+        peer_state
+            .link_state_machine
+            .process_register_agent_address_response(asm)
+    }) {
+        Ok(())
+    } else {
+        Err((HandleMgmtError::LinkStateError, pkt))
+    }
 }
 
 /// handle a Bind Agent Address Request (RFC 6.5 § 6.3.11)

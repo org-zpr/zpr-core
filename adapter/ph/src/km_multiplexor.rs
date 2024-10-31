@@ -72,7 +72,7 @@ struct ErrorStatus {
 ///
 /// TODO: Handle case when SAs are torn down.
 async fn signal_worker<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+    asm: &'static Assembly<'pktbuf>,
     sig_queue: &mut mpsc::Receiver<KmLinkMsg<KmSignal>>,
 ) {
     let sp_ctok = asm.km_state.ctok.clone();
@@ -128,6 +128,17 @@ async fn signal_worker<'pktbuf>(
                                 error!("{}: km_multiplexor: failed to set SA established: {:?}", asm.system_name, e);
                             }
                         }
+                        match asm.peer_table.inspect(linkmsg.link_id, |peer_state| {
+                            peer_state.link_state_machine.keying_done(asm)
+                        }) {
+                            Some(Err(e)) => {
+                                error!("{}: Link state error: {:?}", asm.system_name, e);
+                            }
+                            None => {
+                                error!("{}: Link {} gone", asm.system_name, linkmsg.link_id);
+                            }
+                            Some(Ok(())) => (),
+                        }
                         match status.get_mut(&linkmsg.link_id) {
                             Some(s) if s.error_count == 0 => {
                                 s.error_count = 0;
@@ -178,13 +189,10 @@ async fn message_worker<'pktbuf>(
 }
 
 /// Start the signal watcher worker.
-pub fn launch_signal_worker<'pktbuf, AsmRef: 'pktbuf>(
-    asm: AsmRef,
+pub fn launch_signal_worker(
+    asm: &'static Assembly,
     mut sig_queue: mpsc::Receiver<KmLinkMsg<KmSignal>>,
-) -> impl Future<Output = ()> + Send + 'pktbuf
-where
-    AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
-{
+) -> impl Future<Output = ()> + Send + 'static {
     async move { signal_worker(&*asm, &mut sig_queue).await }
 }
 
@@ -423,10 +431,12 @@ mod test {
                     let fake_sa =
                         zpr::SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9000);
 
-                    let peer_state =
-                        peer_table::PeerState::new(LinkType::NodeToAdapter, fake_sa, |q| {
-                            mgmt_processor_worker::launch(&worker_config, &*asm, q)
-                        });
+                    let peer_state = peer_table::PeerState::new(
+                        entry.key(),
+                        LinkType::NodeToAdapter,
+                        fake_sa,
+                        |q| mgmt_processor_worker::launch(&worker_config, &*asm, q),
+                    );
 
                     adapter_link_id = entry.insert(peer_state);
                 }

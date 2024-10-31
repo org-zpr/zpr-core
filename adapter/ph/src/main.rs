@@ -5,7 +5,7 @@ use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
 use std::io::ErrorKind;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::process::ExitCode;
 use tokio::net::UdpSocket;
@@ -59,7 +59,7 @@ mod zprtun;
 #[cfg(test)]
 mod km_testdata;
 
-use assembly::{Assembly, PhFlags, PhMode};
+use assembly::{Assembly, PhMode};
 use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
 use flow_control::FlowControl;
@@ -85,6 +85,9 @@ struct Config {
     node_addr: Option<SocketAddr>,
 
     #[arg(long)]
+    agent_addr: Option<IpAddr>,
+
+    #[arg(long)]
     ca_file: Option<String>,
 
     #[arg(long)]
@@ -98,12 +101,6 @@ struct Config {
 
     #[arg(long)]
     tun_if: Option<String>,
-
-    #[arg(long)]
-    disable_km: bool,
-
-    #[arg(long)]
-    allow_insecure_zpi_zero: bool,
 
     #[arg(long)]
     debug: bool,
@@ -126,20 +123,16 @@ fn main() -> ExitCode {
     //
     // validate configuration
     //
-
-    if !config.disable_km {
-        if config.ca_file.is_none() {
-            panic!("Authority certificate file must be specified when key management is enabled");
-        }
-        if config.certificate_file.is_none() {
-            panic!("Certificate file must be specified when key management is enabled");
-        }
-        if config.private_key_file.is_none() {
-            panic!("Private key file must be specified when key management is enabled");
-        }
+    if config.ca_file.is_none() {
+        panic!("Authority certificate file must be specified when key management is enabled");
     }
-
-    if ph_mode == PhMode::Adapter && !config.disable_km && config.node_public_key_file.is_none() {
+    if config.certificate_file.is_none() {
+        panic!("Certificate file must be specified when key management is enabled");
+    }
+    if config.private_key_file.is_none() {
+        panic!("Private key file must be specified when key management is enabled");
+    }
+    if ph_mode == PhMode::Adapter && config.node_public_key_file.is_none() {
         panic!("Node public key file must be specified when starting an adapter");
     }
 
@@ -160,6 +153,8 @@ fn main() -> ExitCode {
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
+    info!("{} starting", config.name);
+
     //
     // read key material
     //
@@ -168,37 +163,29 @@ fn main() -> ExitCode {
     let peer_noise_keypair;
     let certx;
 
-    if !config.disable_km {
-        let private_key =
-            km_cert_exchange::load_private_key(&Path::new(&config.private_key_file.unwrap()))
-                .unwrap();
-        if ph_mode == PhMode::Node {
-            peer_noise_keypair = None;
-            self_noise_keypair = Some(NoiseKeypair::new(private_key));
-        } else {
-            let public_key = km_cert_exchange::load_public_key(&Path::new(
-                &config.node_public_key_file.unwrap(),
-            ))
-            .unwrap();
-            peer_noise_keypair = Some(NoiseKeypair {
-                public: public_key,
-                private: [0u8; 32], // unknown
-            });
-            self_noise_keypair = Some(NoiseKeypair::new(private_key));
-        }
-
-        certx = Some(
-            KmCertExchange::new_from_paths(
-                &Path::new(&config.certificate_file.as_ref().unwrap()),
-                &Path::new(&config.ca_file.as_ref().unwrap()),
-            )
-            .unwrap(),
-        );
-    } else {
+    let private_key =
+        km_cert_exchange::load_private_key(&Path::new(&config.private_key_file.unwrap())).unwrap();
+    if ph_mode == PhMode::Node {
         peer_noise_keypair = None;
-        self_noise_keypair = None;
-        certx = None;
+        self_noise_keypair = Some(NoiseKeypair::new(private_key));
+    } else {
+        let public_key =
+            km_cert_exchange::load_public_key(&Path::new(&config.node_public_key_file.unwrap()))
+                .unwrap();
+        peer_noise_keypair = Some(NoiseKeypair {
+            public: public_key,
+            private: [0u8; 32], // unknown
+        });
+        self_noise_keypair = Some(NoiseKeypair::new(private_key));
     }
+
+    certx = Some(
+        KmCertExchange::new_from_paths(
+            &Path::new(&config.certificate_file.as_ref().unwrap()),
+            &Path::new(&config.ca_file.as_ref().unwrap()),
+        )
+        .unwrap(),
+    );
 
     //
     // instantiate bounded resources (queues and buffers)
@@ -295,24 +282,11 @@ fn main() -> ExitCode {
     //
     // create system assembly
     //
-
-    let flags = PhFlags {
-        allow_insecure_zpi_zero: config.disable_km || config.allow_insecure_zpi_zero,
-        disable_key_management: config.disable_km,
-        ..Default::default()
-    };
-
-    if flags.allow_insecure_zpi_zero {
-        warn!(
-            "Insecure ZPI ZERO is enabled.  This is insecure and should only be used for testing."
-        );
-    }
-
     let asm = Box::leak(Box::new(Assembly {
-        flags,
         ph_mode,
         topology_config,
         system_name: config.name,
+        agent_address: config.agent_addr,
         buffer_stack: BufferStack::new(buf_storage.leak::<'static>()),
         agent_input: AgentInput::new(tun_devs.iter()),
         substrate_egress: SubstrateEgress::new(substrate_sockets.iter()),
@@ -348,8 +322,11 @@ fn main() -> ExitCode {
 
     let dsid = match ph_mode {
         PhMode::Adapter => Some(
-            asm.initiate_tether(config.node_addr.as_ref().unwrap())
-                .unwrap(),
+            asm.start_tether(
+                config.node_addr.as_ref().unwrap(),
+                link_state::LinkType::AdapterToNode,
+            )
+            .unwrap(),
         ),
         PhMode::Node => None,
     };
@@ -364,10 +341,8 @@ fn main() -> ExitCode {
     js.spawn_local(mgmt_dispatch_worker::launch(asm, md_outq));
     js.spawn_local(adapter_manager_worker::launch(&*asm, am_outq));
     js.spawn_local(rpc_worker::launch(asm, control_socket));
-    if !config.disable_km {
-        js.spawn_local(km_multiplexor::launch_signal_worker(&*asm, km_sig_outq));
-        js.spawn_local(km_multiplexor::launch_message_worker(&*asm, km_outq));
-    }
+    js.spawn_local(km_multiplexor::launch_signal_worker(&*asm, km_sig_outq));
+    js.spawn_local(km_multiplexor::launch_message_worker(&*asm, km_outq));
 
     //
     // start data path workers
@@ -403,11 +378,9 @@ fn main() -> ExitCode {
         cap_outq,
     ));
 
-    //
-    // TEMP HACK: set TUN carrier up
-    //
-
-    asm.tun_ctl.set_carrier(true).unwrap();
+    if asm.is_node() {
+        asm.tun_ctl.set_carrier(true).unwrap();
+    }
 
     //
     // TEMP HACK: bring up tether if we're an adapter
@@ -415,27 +388,21 @@ fn main() -> ExitCode {
 
     local_set.block_on(&runtime, async {
         if ph_mode == PhMode::Adapter {
-            let Some(dsid) = dsid else { panic!("we are an adapter but have no tether configured"); };
+            let Some(dsid) = dsid else {
+                panic!("we are an adapter but have no tether configured");
+            };
 
-            if !config.disable_km {
-                info!(
-                    "{}: waiting on security assocaition establishment on link {}",
-                    asm.system_name, dsid
-                );
-                while !asm.peer_table.is_security_assocaition_established(dsid) {
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                }
-                info!(
-                    "{}: security assocaition established successfully on link {}",
-                    asm.system_name, dsid
-                );
-
-                // HACK - In our tests we need to send from adapter through the node to the adapter.
-                // We do not know when the other adapter has setup its association. So lets give
-                // it a little time here.
-                info!("{}: waiting for the other adapter to (hopfully) establish its security association...", asm.system_name);
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            info!(
+                "{}: waiting on security assocaition establishment on link {}",
+                asm.system_name, dsid
+            );
+            while !asm.peer_table.is_security_assocaition_established(dsid) {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
+            info!(
+                "{}: security assocaition established successfully on link {}",
+                asm.system_name, dsid
+            );
         }
     });
 

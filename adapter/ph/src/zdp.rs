@@ -126,6 +126,20 @@ pub struct ZdpHelloResponseHeader {
     pub status: U16,
 }
 
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpRegisterAgentAddressRequestHeader {
+    pub ip_version: zpr::L3Type,
+    // Length of address determined by IP type
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpRegisterAgentAddressResponseHeader {
+    pub status_code: u8,
+    pub info_len: u8,
+}
+
 /// Bind Agent Address request (§ 6.3.11)
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]

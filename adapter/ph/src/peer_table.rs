@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use crate::dock_tables::DockForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
-use crate::link_state::{LinkStateMachine, LinkType};
+use crate::link_state::{LinkStateWrapper, LinkType};
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::sync_req;
@@ -27,7 +27,7 @@ const PEER_TABLE_SIZE: usize = 1024;
 // for now, everyone has a DFT.......
 pub struct PeerState<'pktbuf> {
     pub substrate_addr: SubstrateAddr,
-    pub link_state_machine: Mutex<LinkStateMachine>,
+    pub link_state_machine: LinkStateWrapper,
     pub sync_req_state: sync_req::SyncReqState<'pktbuf>,
     pub dft: DockForwardingTable,
     pub mgmt_processor: queues::MgmtProcessor<'pktbuf>,
@@ -65,6 +65,7 @@ const MGMT_PROCESSOR_QUEUE_SIZE: usize = 16;
 // FIXME: can we eliminate the reliance on `'static` herein?
 impl PeerState<'static> {
     pub fn new<Worker>(
+        link_id: LinkId,
         link_type: LinkType,
         substrate_addr: SubstrateAddr,
         launch_mgmt_processor_worker: impl FnOnce(
@@ -81,7 +82,7 @@ impl PeerState<'static> {
 
         Self {
             substrate_addr,
-            link_state_machine: Mutex::new(LinkStateMachine::new(link_type)),
+            link_state_machine: LinkStateWrapper::new(link_id, link_type),
             dft: DockForwardingTable::new(),
             sync_req_state: sync_req::SyncReqState::new(),
             mgmt_processor,
@@ -198,7 +199,6 @@ impl<'pktbuf> PeerTable<'pktbuf> {
             .get(link_id)
             .ok_or(SecurityAssocaitionStateError::NoAssociationForLink)?;
         entry.km_state.transport_sa.write(Some(sa));
-        //entry.link_state_machine.lock().unwrap().keying_done();
         Ok(())
     }
 
