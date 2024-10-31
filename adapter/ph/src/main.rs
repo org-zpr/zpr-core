@@ -12,7 +12,7 @@ use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 use tracing_subscriber;
 
 mod adapter_manager_worker;
@@ -138,7 +138,6 @@ enum Command {
     Node,
 }
 
-
 // This config struct is loaded up from the command line args.
 struct Config {
     name: String,
@@ -153,7 +152,6 @@ struct Config {
     agent_addr: Option<IpAddr>,
     node_public_key_file: Option<PathBuf>,
 }
-
 
 fn main() -> ExitCode {
     //
@@ -182,7 +180,7 @@ fn main() -> ExitCode {
                 agent_addr: Some(agent_addr),
                 node_public_key_file: Some(node_public_key_file.into()),
             };
-        },
+        }
         Some(Command::Node) => {
             ph_mode = PhMode::Node;
             config = Config {
@@ -198,13 +196,12 @@ fn main() -> ExitCode {
                 agent_addr: None,
                 node_public_key_file: None,
             };
-        },
+        }
         None => {
             println!("command required: either 'adapter' or 'node'");
             return ExitCode::FAILURE;
-        },
+        }
     }
-
 
     //
     // set up logging
@@ -233,26 +230,27 @@ fn main() -> ExitCode {
     let peer_noise_keypair;
     let certx;
 
-    let private_key =
-        match km_cert_exchange::load_private_key(&Path::new(&config.private_key_file)) {
-            Ok(key) => key,
-            Err(e) => {
-                error!("failed to load private key file: {:?}", e);
-                return ExitCode::FAILURE;
-            },
-        };
+    let private_key = match km_cert_exchange::load_private_key(&Path::new(&config.private_key_file))
+    {
+        Ok(key) => key,
+        Err(e) => {
+            error!("failed to load private key file: {:?}", e);
+            return ExitCode::FAILURE;
+        }
+    };
     if ph_mode == PhMode::Node {
         peer_noise_keypair = None;
         self_noise_keypair = Some(NoiseKeypair::new(private_key));
     } else {
-        let public_key =
-            match km_cert_exchange::load_public_key(&Path::new(&config.node_public_key_file.unwrap())) {
-                Ok(key) => key,
-                Err(e) => {
-                    error!("failed to load node public key file: {:?}", e);
-                    return ExitCode::FAILURE;
-                },
-            };
+        let public_key = match km_cert_exchange::load_public_key(&Path::new(
+            &config.node_public_key_file.unwrap(),
+        )) {
+            Ok(key) => key,
+            Err(e) => {
+                error!("failed to load node public key file: {:?}", e);
+                return ExitCode::FAILURE;
+            }
+        };
         peer_noise_keypair = Some(NoiseKeypair {
             public: public_key,
             private: [0u8; 32], // unknown
@@ -260,17 +258,13 @@ fn main() -> ExitCode {
         self_noise_keypair = Some(NoiseKeypair::new(private_key));
     }
 
-    certx = match KmCertExchange::new_from_paths(
-            &config.certificate_file,
-            &config.ca_file,
-        )
-        {
-            Ok(certx) => Some(certx),
-            Err(e) => {
-                error!("failed to initialize key exchange: {:?}", e);
-                return ExitCode::FAILURE;
-            },
-        };
+    certx = match KmCertExchange::new_from_paths(&config.certificate_file, &config.ca_file) {
+        Ok(certx) => Some(certx),
+        Err(e) => {
+            error!("failed to initialize key exchange: {:?}", e);
+            return ExitCode::FAILURE;
+        }
+    };
 
     //
     // instantiate bounded resources (queues and buffers)
