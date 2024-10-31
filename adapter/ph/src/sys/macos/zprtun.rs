@@ -26,12 +26,16 @@ impl ZprTun {
     pub fn new_mq(
         ifname: Option<String>,
         concurrency: usize,
+        address: Option<IpAddr>,
     ) -> std::result::Result<Vec<Self>, ZPRTunError> {
         let mut config = tun::Configuration::default();
         if let Some(name) = ifname {
             config.tun_name(&name);
         } else {
             config.mtu(DEFAULT_TUN_MTU);
+        }
+        if let Some(addr) = address {
+            config.address(addr);
         }
         if concurrency <= 0 || concurrency > 1 {
             return Err(ZPRTunError::PlatformError(String::from(
@@ -65,6 +69,7 @@ impl ZprTun {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn set_address(&mut self, addr: IpAddr) -> Result<(), ZPRTunError> {
         let idev = &mut *(self.0);
         match idev.set_address(addr) {

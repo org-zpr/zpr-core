@@ -231,18 +231,19 @@ fn main() -> ExitCode {
     //
     // open TUN devices
     //
-    let os_pick_tun_name = config.tun_if.is_none();
-    let tun_devs = match ZprTun::new_mq(config.tun_if, topology_config.agent_output_concurrency) {
+
+    // HACK: If we are using a new TUN (requirement on MAC I think), we will set the address.
+    let tun_addr = if config.agent_addr.is_some() {
+        config.agent_addr.clone()
+    } else {
+        None
+    };
+    let tun_devs = match ZprTun::new_mq(config.tun_if, topology_config.agent_output_concurrency, tun_addr) {
         Ok(devs) => devs.leak(),
         Err(e) => {
             panic!("unable to create TUN device: {:?}", e);
         }
     };
-    if os_pick_tun_name && config.agent_addr.is_some() {
-        if let Some(&aa) = config.agent_addr.as_ref() {
-            tun_devs[0].set_address(aa).unwrap();
-        }
-    }
 
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(&tun_devs[0]));
 

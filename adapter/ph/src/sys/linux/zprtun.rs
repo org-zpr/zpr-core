@@ -6,6 +6,8 @@ use std::io::Result;
 use std::os::fd::AsRawFd;
 use tokio_tun::{Tun, TunBuilder};
 use zpr_ext::std::mem::slice_assume_init_mut;
+use std::net::IpAddr;
+
 
 // from /usr/include/linux/if_tun.h
 ioctl_write_ptr!(tun_set_carrier, b'T', 226, libc::c_int);
@@ -21,13 +23,21 @@ impl From<Tun> for ZprTun {
 impl ZprTun {
     /// Create a new TUN device.
     /// If `ifname` is `None`, the kernel will automatically assign a name.
+    /// For optional `address`, only IPv4 is supported currently.
     pub fn new_mq(
         ifname: Option<String>,
         concurrency: usize,
+        address: Option<IpAddr>,
     ) -> std::result::Result<Vec<Self>, ZPRTunError> {
         let mut bldr = TunBuilder::new();
         if let Some(ifname) = ifname {
             bldr = bldr.name(&ifname);
+        }
+        if let Some(addr) = address {
+            match addr {
+                IpAddr::V4(ipa) => bldr = bldr.address(ipa),
+                IpAddr::V6(_) => return Err(ZPRTunError::PlatformError("IPv6 not supported".to_string())),
+            }
         }
         let tok_tun_devs = bldr
             .try_build_mq(concurrency)
@@ -71,15 +81,9 @@ impl ZprTun {
         Ok(())
     }
 
-    pub fn set_address(&mut self, addr: IpAddr) -> Result<(), ZPRTunError> {
-        match addr {
-            IpAddr::V4(addr) => match self.0.address(addr) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(ZPRTunError::PlatformError(e.to_string())),
-            },
-            IpAddr::V6(addr) => Err(ZPRTunError::PlatformError(
-                "IPv6 not supported on linux with tokio-tun".to_string(),
-            )),
-        }
+    #[allow(dead_code)]
+    pub fn set_address(&mut self, _addr: IpAddr) -> std::result::Result<(), ZPRTunError> {
+        // This needs work -- the linux tun API only allows address to be set at construction time.
+        Err(ZPRTunError::PlatformError("cannot set TUN address after creation".to_string()))
     }
 }
