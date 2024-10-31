@@ -5,6 +5,7 @@ use crate::assembly::Assembly;
 use crate::counters::CounterType;
 use crate::fastpath;
 use crate::km_multiplexor;
+use crate::link_state::LinkType;
 use crate::packet::Packet;
 use crate::queues;
 use crate::zdp;
@@ -29,7 +30,8 @@ pub fn dispatch_mgmt_packet_with_addr<'pktbuf>(
 
             // TODO: once we have multi-node, how do we know whether this is a link or a
             // tether?
-            let Some(ingress_link_id) = asm.accept_tether(&peer_sa).ok() else {
+            let Some(ingress_link_id) = asm.start_tether(&peer_sa, LinkType::NodeToAdapter).ok()
+            else {
                 return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
             };
 

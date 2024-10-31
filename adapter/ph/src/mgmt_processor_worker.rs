@@ -18,8 +18,8 @@ pub struct Config {
 
 async fn worker<'pktbuf>(
     config: &Config,
-    asm: &Assembly<'pktbuf>,
-    queue: &mut mpsc::Receiver<MgmtProcessorMessage<'pktbuf>>,
+    asm: &'static Assembly<'_>,
+    queue: &mut mpsc::Receiver<MgmtProcessorMessage<'static>>,
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
@@ -42,20 +42,17 @@ async fn worker<'pktbuf>(
     }
 }
 
-pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
+pub fn launch(
     config: &Config,
-    asm: AsmRef,
-    mut queue: mpsc::Receiver<MgmtProcessorMessage<'pktbuf>>,
-) -> impl Future<Output = ()> + 'pktbuf
-where
-    AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
-{
+    asm: &'static Assembly,
+    mut queue: mpsc::Receiver<MgmtProcessorMessage<'static>>,
+) -> impl Future<Output = ()> + 'static {
     let cfg = *config;
     async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
 async fn handle_packet<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+    asm: &'static Assembly<'pktbuf>,
     mut pkt: Packet<'pktbuf>,
 ) -> HandleMgmtResult<'pktbuf> {
     let Ok(base_hdr) = ZdpBaseHeader::read_from_buf(&mut pkt) else {
@@ -68,11 +65,6 @@ async fn handle_packet<'pktbuf>(
         pkt.metadata().ingress_link_id,
         base_hdr.packet_type,
         base_hdr.sequence_number
-    );
-
-    assert!(
-        !base_hdr.packet_type.is_response(),
-        "stray mgmt response in mgmt processor"
     );
 
     let seq_num = base_hdr.sequence_number.get() as u64; // TODO: reconstitute full seq num given expected seq num state
@@ -104,6 +96,18 @@ async fn handle_packet<'pktbuf>(
             }
 
             ZdpPacketType::HelloRequest => handlers::handle_hello_request(asm, seq_num, pkt).await,
+
+            ZdpPacketType::HelloResponse => {
+                handlers::handle_hello_response(asm, seq_num, pkt).await
+            }
+
+            ZdpPacketType::RegisterAgentAddressRequest => {
+                handlers::handle_register_agent_address_request(asm, seq_num, pkt).await
+            }
+
+            ZdpPacketType::RegisterAgentAddressResponse => {
+                handlers::handle_register_agent_address_response(asm, seq_num, pkt).await
+            }
 
             packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),
         }

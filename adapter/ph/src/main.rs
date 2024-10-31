@@ -5,7 +5,7 @@ use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
 use std::io::ErrorKind;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::process::ExitCode;
 use tokio::net::UdpSocket;
@@ -85,6 +85,9 @@ struct Config {
     node_addr: Option<SocketAddr>,
 
     #[arg(long)]
+    agent_addr: Option<IpAddr>,
+
+    #[arg(long)]
     ca_file: Option<String>,
 
     #[arg(long)]
@@ -149,6 +152,8 @@ fn main() -> ExitCode {
         .finish();
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
+
+    info!("{} starting", config.name);
 
     //
     // read key material
@@ -281,6 +286,7 @@ fn main() -> ExitCode {
         ph_mode,
         topology_config,
         system_name: config.name,
+        agent_address: config.agent_addr,
         buffer_stack: BufferStack::new(buf_storage.leak::<'static>()),
         agent_input: AgentInput::new(tun_devs.iter()),
         substrate_egress: SubstrateEgress::new(substrate_sockets.iter()),
@@ -316,8 +322,11 @@ fn main() -> ExitCode {
 
     let dsid = match ph_mode {
         PhMode::Adapter => Some(
-            asm.initiate_tether(config.node_addr.as_ref().unwrap())
-                .unwrap(),
+            asm.start_tether(
+                config.node_addr.as_ref().unwrap(),
+                link_state::LinkType::AdapterToNode,
+            )
+            .unwrap(),
         ),
         PhMode::Node => None,
     };
@@ -369,11 +378,9 @@ fn main() -> ExitCode {
         cap_outq,
     ));
 
-    //
-    // TEMP HACK: set TUN carrier up
-    //
-
-    asm.tun_ctl.set_carrier(true).unwrap();
+    if asm.is_node() {
+        asm.tun_ctl.set_carrier(true).unwrap();
+    }
 
     //
     // TEMP HACK: bring up tether if we're an adapter
@@ -381,7 +388,10 @@ fn main() -> ExitCode {
 
     local_set.block_on(&runtime, async {
         if ph_mode == PhMode::Adapter {
-            let Some(dsid) = dsid else { panic!("we are an adapter but have no tether configured"); };
+            let Some(dsid) = dsid else {
+                panic!("we are an adapter but have no tether configured");
+            };
+
             info!(
                 "{}: waiting on security assocaition establishment on link {}",
                 asm.system_name, dsid
@@ -393,12 +403,6 @@ fn main() -> ExitCode {
                 "{}: security assocaition established successfully on link {}",
                 asm.system_name, dsid
             );
-
-            // HACK - In our tests we need to send from adapter through the node to the adapter.
-            // We do not know when the other adapter has setup its association. So lets give
-            // it a little time here.
-            info!("{}: waiting for the other adapter to (hopfully) establish its security association...", asm.system_name);
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
         }
     });
 
