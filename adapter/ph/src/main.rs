@@ -159,16 +159,14 @@ fn main() -> ExitCode {
     let certx;
 
     let private_key =
-        km_cert_exchange::load_private_key(&Path::new(&config.private_key_file.unwrap()))
-            .unwrap();
+        km_cert_exchange::load_private_key(&Path::new(&config.private_key_file.unwrap())).unwrap();
     if ph_mode == PhMode::Node {
         peer_noise_keypair = None;
         self_noise_keypair = Some(NoiseKeypair::new(private_key));
     } else {
-        let public_key = km_cert_exchange::load_public_key(&Path::new(
-            &config.node_public_key_file.unwrap(),
-        ))
-        .unwrap();
+        let public_key =
+            km_cert_exchange::load_public_key(&Path::new(&config.node_public_key_file.unwrap()))
+                .unwrap();
         peer_noise_keypair = Some(NoiseKeypair {
             public: public_key,
             private: [0u8; 32], // unknown
@@ -336,7 +334,6 @@ fn main() -> ExitCode {
     js.spawn_local(rpc_worker::launch(asm, control_socket));
     js.spawn_local(km_multiplexor::launch_signal_worker(&*asm, km_sig_outq));
     js.spawn_local(km_multiplexor::launch_message_worker(&*asm, km_outq));
-
 
     //
     // start data path workers

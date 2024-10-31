@@ -84,7 +84,6 @@ pub struct Assembly<'pktbuf> {
     pub certx: Option<KmCertExchange>,
 }
 
-
 impl Assembly<'_> {
     pub fn is_node(&self) -> bool {
         self.ph_mode == PhMode::Node
