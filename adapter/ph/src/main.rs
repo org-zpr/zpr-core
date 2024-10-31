@@ -1,18 +1,18 @@
 #![cfg_attr(feature = "ci", deny(warnings))]
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
 use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use tracing_subscriber;
 
 mod adapter_manager_worker;
@@ -69,72 +69,142 @@ use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
 
+/// ZPR Packet Handler
+///
+/// The handler can run in `node` mode or `adapter` mode. There are a series of command
+/// line arguments that are required in BOTH modes. These need to be specified before
+/// you set the mode.  The general usage is:
+///
+///    sudo ph [GLOBAL_OPTIONS] (node | adapter) [MODE_OPTIONS]
+///
 #[derive(Parser)]
-#[command(version, about)]
-struct Config {
-    #[arg(long)]
-    name: String,
+#[command(version)]
+struct Control {
+    /// An optional, identifying name for instance.  Will default to "adapter" or "node" depending on mode.
+    #[arg(short, long)]
+    name: Option<String>,
 
-    #[arg(long)]
+    /// The unix domain socket path for the "control" interface.
+    #[arg(long, value_name = "DOMAIN_SOCKET_PATH")]
     control_path: String,
 
-    #[arg(long)]
+    /// The local substrate IPv4 or IPv6 address and port for this node or adapter.
+    #[arg(short, long, value_name = "ADDR:PORT", default_value = "0.0.0.0:0")]
     self_addr: SocketAddr,
 
-    #[arg(long)]
-    node_addr: Option<SocketAddr>,
+    /// Certificate of the Certificate Authority
+    #[arg(long, value_name = "PATH")]
+    ca_file: String,
 
-    #[arg(long)]
-    agent_addr: Option<IpAddr>,
+    /// Certificate including the noise public key, signed by the authority.
+    #[arg(long, value_name = "PATH")]
+    certificate_file: String, // noise public key signed by authority
 
-    #[arg(long)]
-    ca_file: Option<String>,
+    /// Path to the noise private key file (PEM format)
+    #[arg(long, short = 'k', value_name = "PATH")]
+    private_key_file: String, // noise private key
 
-    #[arg(long)]
-    certificate_file: Option<String>, // noise public key signed by authority
-
-    #[arg(long)]
-    private_key_file: Option<String>, // noise private key
-
-    #[arg(long)]
-    node_public_key_file: Option<String>, // noise public key for node (only specified when starting an adapter)
-
-    #[arg(long)]
+    /// The TUN device to use, eg "tun1".  Leave blank for automatic selection.
+    #[arg(long, short = 'i', value_name = "DEVICE")]
     tun_if: Option<String>,
 
-    #[arg(long)]
+    /// Enable debug logging
+    #[arg(long, short, default_value_t = false)]
     debug: bool,
+
+    #[command(subcommand)]
+    command: Option<Command>,
 }
+
+#[derive(Subcommand)]
+enum Command {
+    /// Starts the handler in adapter mode.
+    #[command()]
+    Adapter {
+        /// The substrate address of the node.
+        #[arg(long, short = 'N', value_name = "ADDR:PORT")]
+        node_addr: SocketAddr,
+
+        /// The ZPR address (no port) of the adapter. Must match your TUN address!
+        #[arg(long, short)]
+        agent_addr: IpAddr,
+
+        /// PEM file holding the nodes noise public key.
+        #[arg(long, short, value_name = "PATH")]
+        node_public_key_file: String, // noise public key for node (only specified when starting an adapter)
+    },
+    /// Starts the handler in node mode.
+    #[command()]
+    Node,
+}
+
+
+// This config struct is loaded up from the command line args.
+struct Config {
+    name: String,
+    control_path: PathBuf,
+    self_addr: SocketAddr,
+    ca_file: PathBuf,
+    certificate_file: PathBuf,
+    private_key_file: PathBuf,
+    tun_if: Option<String>,
+    debug: bool,
+    node_addr: Option<SocketAddr>,
+    agent_addr: Option<IpAddr>,
+    node_public_key_file: Option<PathBuf>,
+}
+
 
 fn main() -> ExitCode {
     //
     // parse configuration from command line
     //
-
-    let config = Config::parse();
-
+    let config: Config;
     let ph_mode;
-    if config.node_addr.is_some() {
-        ph_mode = PhMode::Adapter;
-    } else {
-        ph_mode = PhMode::Node;
+    let control = Control::parse();
+    match control.command {
+        Some(Command::Adapter {
+            node_addr,
+            agent_addr,
+            node_public_key_file,
+        }) => {
+            ph_mode = PhMode::Adapter;
+            config = Config {
+                name: control.name.unwrap_or("adapter".to_string()),
+                control_path: control.control_path.into(),
+                self_addr: control.self_addr,
+                ca_file: control.ca_file.into(),
+                certificate_file: control.certificate_file.into(),
+                private_key_file: control.private_key_file.into(),
+                tun_if: control.tun_if,
+                debug: control.debug,
+                node_addr: Some(node_addr),
+                agent_addr: Some(agent_addr),
+                node_public_key_file: Some(node_public_key_file.into()),
+            };
+        },
+        Some(Command::Node) => {
+            ph_mode = PhMode::Node;
+            config = Config {
+                name: control.name.unwrap_or("node".to_string()),
+                control_path: control.control_path.into(),
+                self_addr: control.self_addr,
+                ca_file: control.ca_file.into(),
+                certificate_file: control.certificate_file.into(),
+                private_key_file: control.private_key_file.into(),
+                tun_if: control.tun_if,
+                debug: control.debug,
+                node_addr: None,
+                agent_addr: None,
+                node_public_key_file: None,
+            };
+        },
+        None => {
+            println!("command required: either 'adapter' or 'node'");
+            return ExitCode::FAILURE;
+        },
     }
 
-    //
-    // validate configuration
-    //
-    if config.ca_file.is_none() {
-        panic!("Authority certificate file must be specified when key management is enabled");
-    }
-    if config.certificate_file.is_none() {
-        panic!("Certificate file must be specified when key management is enabled");
-    }
-    if config.private_key_file.is_none() {
-        panic!("Private key file must be specified when key management is enabled");
-    }
-    if ph_mode == PhMode::Adapter && config.node_public_key_file.is_none() {
-        panic!("Node public key file must be specified when starting an adapter");
-    }
 
     //
     // set up logging
@@ -164,14 +234,25 @@ fn main() -> ExitCode {
     let certx;
 
     let private_key =
-        km_cert_exchange::load_private_key(&Path::new(&config.private_key_file.unwrap())).unwrap();
+        match km_cert_exchange::load_private_key(&Path::new(&config.private_key_file)) {
+            Ok(key) => key,
+            Err(e) => {
+                error!("failed to load private key file: {:?}", e);
+                return ExitCode::FAILURE;
+            },
+        };
     if ph_mode == PhMode::Node {
         peer_noise_keypair = None;
         self_noise_keypair = Some(NoiseKeypair::new(private_key));
     } else {
         let public_key =
-            km_cert_exchange::load_public_key(&Path::new(&config.node_public_key_file.unwrap()))
-                .unwrap();
+            match km_cert_exchange::load_public_key(&Path::new(&config.node_public_key_file.unwrap())) {
+                Ok(key) => key,
+                Err(e) => {
+                    error!("failed to load node public key file: {:?}", e);
+                    return ExitCode::FAILURE;
+                },
+            };
         peer_noise_keypair = Some(NoiseKeypair {
             public: public_key,
             private: [0u8; 32], // unknown
@@ -179,13 +260,17 @@ fn main() -> ExitCode {
         self_noise_keypair = Some(NoiseKeypair::new(private_key));
     }
 
-    certx = Some(
-        KmCertExchange::new_from_paths(
-            &Path::new(&config.certificate_file.as_ref().unwrap()),
-            &Path::new(&config.ca_file.as_ref().unwrap()),
+    certx = match KmCertExchange::new_from_paths(
+            &config.certificate_file,
+            &config.ca_file,
         )
-        .unwrap(),
-    );
+        {
+            Ok(certx) => Some(certx),
+            Err(e) => {
+                error!("failed to initialize key exchange: {:?}", e);
+                return ExitCode::FAILURE;
+            },
+        };
 
     //
     // instantiate bounded resources (queues and buffers)
