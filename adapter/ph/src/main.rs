@@ -233,7 +233,7 @@ fn main() -> ExitCode {
     //
 
     // HACK: If we are using a new TUN (requirement on MAC I think), we will set the address.
-    let tun_addr = if config.agent_addr.is_some() {
+    let tun_addr = if config.agent_addr.is_some() && config.tun_if.is_none() {
         config.agent_addr.clone()
     } else {
         None
