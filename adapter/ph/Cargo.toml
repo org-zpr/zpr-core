@@ -37,7 +37,9 @@ zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "zerocopy"] }
 tokio-tun = { version = "0.11.5" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tun = { version = "0.7", features = ["async"] }
+# Locked verision of rust-tun as the maintainers may be suspect.
+# This is used for its ability to manage a TUN device on mac.
+tun = { version = "=0.7.1", features = ["async"] }
 
 
 [dev-dependencies]
