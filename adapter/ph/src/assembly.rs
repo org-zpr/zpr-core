@@ -21,7 +21,6 @@ use zpr::{LinkId, SubstrateAddr};
 
 use enum_map::EnumMap;
 use km_noise::NoiseKeypair;
-use std::default::Default;
 use std::result::Result;
 use tracing::info;
 
@@ -48,7 +47,6 @@ pub enum PhMode {
 /// visible queue becoming full.
 
 pub struct Assembly<'pktbuf> {
-    pub flags: PhFlags,
     pub ph_mode: PhMode,
     pub topology_config: config::TopologyConfig,
 
@@ -86,21 +84,6 @@ pub struct Assembly<'pktbuf> {
     pub certx: Option<KmCertExchange>,
 }
 
-pub struct PhFlags {
-    /// If set TRUE this allows any messages on ZPI 0.  VERY INSECURE!!
-    pub allow_insecure_zpi_zero: bool,
-    pub disable_key_management: bool,
-}
-
-impl Default for PhFlags {
-    /// Reasonable (and secure) defaults
-    fn default() -> Self {
-        Self {
-            allow_insecure_zpi_zero: false,
-            disable_key_management: false,
-        }
-    }
-}
 
 impl Assembly<'_> {
     pub fn is_node(&self) -> bool {
@@ -142,16 +125,14 @@ impl Assembly<'_> {
         let peer_id = self.add_peer(LinkType::NodeToAdapter, adapter_addr)?;
         self.peer_ids.lock().unwrap().push(peer_id);
 
-        if !self.flags.disable_key_management {
-            km_multiplexor::add_node_link(
-                &self,
-                peer_id,
-                ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
-                self.self_noise_keypair.clone().unwrap(),
-                self.certx.clone().unwrap(),
-            )
-            .unwrap();
-        }
+        km_multiplexor::add_node_link(
+            &self,
+            peer_id,
+            ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
+            self.self_noise_keypair.clone().unwrap(),
+            self.certx.clone().unwrap(),
+        )
+        .unwrap();
 
         info!(
             "{}: Successfully accepted tether from {}.  Assigned ID {}",
@@ -174,17 +155,15 @@ impl Assembly<'_> {
         let peer_id = self.add_peer(LinkType::AdapterToNode, node_addr)?;
         self.peer_ids.lock().unwrap().push(peer_id);
 
-        if !self.flags.disable_key_management {
-            km_multiplexor::add_adapter_link(
-                &self,
-                peer_id,
-                ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
-                self.self_noise_keypair.clone().unwrap(),
-                self.peer_noise_keypair.clone().unwrap().public,
-                self.certx.clone().unwrap(),
-            )
-            .unwrap();
-        }
+        km_multiplexor::add_adapter_link(
+            &self,
+            peer_id,
+            ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
+            self.self_noise_keypair.clone().unwrap(),
+            self.peer_noise_keypair.clone().unwrap().public,
+            self.certx.clone().unwrap(),
+        )
+        .unwrap();
 
         info!(
             "{}: Successfully initiated tether to {}.  Assigned ID {}",
@@ -215,7 +194,6 @@ pub mod test {
     #[derive(Default)]
     pub struct TestAssemblyBuilder<'a> {
         pub ph_mode: Option<PhMode>,
-        pub flags: Option<PhFlags>,
         pub topology_config: Option<TopologyConfig>,
         pub system_name: Option<String>,
         pub buffer_stack: Option<BufferStack<'a, { config::PACKET_BUFFER_SIZE }>>,
@@ -250,7 +228,6 @@ pub mod test {
     }
 
     pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
-        let flags = builder.flags.unwrap_or_default();
         let ph_mode = builder.ph_mode.unwrap_or(PhMode::Adapter);
         let topology_config = builder.topology_config.unwrap_or_default();
         let system_name = builder.system_name.unwrap_or("test".into());
@@ -301,7 +278,6 @@ pub mod test {
         });
 
         Assembly {
-            flags,
             ph_mode,
             topology_config,
             system_name,

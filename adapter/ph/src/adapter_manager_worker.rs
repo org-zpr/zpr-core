@@ -62,8 +62,7 @@ async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pkt
 
     // NOPE ! not if the link is not ready.
     let link_id = asm.hack_get_adapter_docking_session_id();
-    if !asm.flags.disable_key_management
-        && !asm.peer_table.is_security_assocaition_established(link_id)
+    if !asm.peer_table.is_security_assocaition_established(link_id)
     {
         error!(
             "{}: Link {} has no security association, aborting bind request operation",
