@@ -255,6 +255,7 @@ pub mod os {
         }
     }
 
+    #[cfg(unix)]
     pub mod unix {
         pub mod net {
             use crate::std::os::fd::CowFd;
@@ -271,7 +272,6 @@ pub mod os {
             #[cfg(any(target_os = "macos"))]
             type MsghdrIovlenT = libc::c_int;
 
-            #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
             pub struct SocketAncillary<'a> {
                 buffer: &'a mut [u8],
                 fds: Vec<CowFd<'a>>,
@@ -327,14 +327,12 @@ pub mod os {
             pub struct ScmCredentials<'a>(std::marker::PhantomData<&'a ()>);
 
             pub trait UnixStreamExt {
-                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
                 fn send_vectored_with_ancillary(
                     &self,
                     bufs: &[IoSlice<'_>],
                     ancillary: &mut SocketAncillary<'_>,
                 ) -> Result<usize>;
 
-                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
                 fn recv_vectored_with_ancillary(
                     &self,
                     bufs: &mut [IoSliceMut<'_>],
@@ -342,7 +340,6 @@ pub mod os {
                 ) -> Result<usize>;
             }
 
-            #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
             pub(crate) fn uds_send_vectored_with_ancillary(
                 fd: BorrowedFd<'_>,
                 bufs: &[IoSlice<'_>],
@@ -385,7 +382,6 @@ pub mod os {
                 }
             }
 
-            #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
             pub(crate) fn uds_recv_vectored_with_ancillary(
                 fd: BorrowedFd<'_>,
                 bufs: &mut [IoSliceMut<'_>],
@@ -432,7 +428,6 @@ pub mod os {
             impl UnixStreamExt for UnixStream {
                 /// This is a very silly and limited implementation of `send_vectored_with_ancillary()` as we await
                 /// stabilization of [unix_socket_ancillary_data](https://github.com/rust-lang/rust/issues/76915).
-                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
                 fn send_vectored_with_ancillary(
                     &self,
                     bufs: &[IoSlice<'_>],
@@ -441,7 +436,6 @@ pub mod os {
                     uds_send_vectored_with_ancillary(self.as_fd(), bufs, ancillary)
                 }
 
-                #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
                 fn recv_vectored_with_ancillary(
                     &self,
                     bufs: &mut [IoSliceMut<'_>],

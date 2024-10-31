@@ -66,16 +66,15 @@ pub mod net {
         }
     }
 
+    #[cfg(unix)]
     #[allow(async_fn_in_trait)]
     pub trait UnixStreamExt {
-        #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
         async fn send_vectored_with_ancillary(
             &self,
             bufs: &[IoSlice<'_>],
             ancillary: &mut SocketAncillary<'_>,
         ) -> io::Result<usize>;
 
-        #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
         async fn recv_vectored_with_ancillary(
             &self,
             bufs: &mut [IoSliceMut<'_>],
@@ -83,8 +82,8 @@ pub mod net {
         ) -> io::Result<usize>;
     }
 
+    #[cfg(unix)]
     impl UnixStreamExt for UnixStream {
-        #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
         async fn send_vectored_with_ancillary(
             &self,
             bufs: &[IoSlice<'_>],
@@ -101,7 +100,6 @@ pub mod net {
             }
         }
 
-        #[cfg(any(doc, target_os = "android", target_os = "linux", target_os = "macos"))]
         async fn recv_vectored_with_ancillary(
             &self,
             bufs: &mut [IoSliceMut<'_>],
