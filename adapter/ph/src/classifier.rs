@@ -193,6 +193,9 @@ fn classify_next_header(
     protocol: IpProtocol,
 ) -> Result<ClassifierResult, &'static str> {
     metadata.set_l4_protocol(protocol);
+    // NOTE: this code does not make any attempt to reject packets which
+    // carry a payload which is "unsupported" for the IP version, e.g.
+    // ICMPv4 over IPv6, or IPv6 options over IPv4
     match protocol {
         0 => skip_v6_option(metadata, body),    // Hop-by-hop
         1 => classify_icmp(metadata, body),     // ICMP
