@@ -216,7 +216,7 @@ where
 ///
 /// Note that the link must already have a peer_table entry.
 pub fn add_adapter_link(
-    asm: &'static Assembly,
+    asm: &Assembly,
     link_id: zpr::LinkId,
     recv_zpis: ZPIPair,
     local_noise_key: NoiseKeypair,
@@ -247,7 +247,7 @@ pub fn add_adapter_link(
 /// Note that the link must already have a peer_table entry.
 #[allow(dead_code)]
 pub fn add_node_link(
-    asm: &'static Assembly,
+    asm: &Assembly,
     link_id: zpr::LinkId,
     recv_zpis: ZPIPair,
     local_noise_key: NoiseKeypair,
@@ -262,7 +262,7 @@ pub fn add_node_link(
 
 /// Remove all state for this link, invalidating the SA and stopping the Key Manager.
 #[allow(dead_code)]
-pub async fn drop_link<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId) {
+pub async fn drop_link(asm: &Assembly<'_>, link_id: zpr::LinkId) {
     // If present in state, turn off the SA.
     let _ = asm.peer_table.clear_security_association(link_id);
 
@@ -283,7 +283,7 @@ pub async fn drop_link<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId) {
 
 // Completes the add_*_link functions above.
 fn add_noise_link(
-    asm: &'static Assembly,
+    asm: &Assembly,
     link_id: zpr::LinkId,
     noise: KmNoise,
 ) -> Result<(), KmSetupError> {
@@ -300,6 +300,7 @@ fn add_noise_link(
     let spawn_ctok = child_ctok.clone();
     let spawn_km_tx = asm.km_state.km_tx.clone();
     let spawn_sig_tx = asm.km_state.km_sig_tx.clone();
+    let system_name = asm.system_name.clone();
 
     let (km_tx, km_rx) = mpsc::channel(asm.topology_config.km_link_queue_size);
 
@@ -312,7 +313,7 @@ fn add_noise_link(
             Err(e) => {
                 error!(
                     "{}: KeyManager failed on link {}: {:?}",
-                    asm.system_name, link_id, e
+                    system_name, link_id, e
                 );
             }
         }

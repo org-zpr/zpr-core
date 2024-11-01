@@ -220,7 +220,7 @@ impl LinkStateWrapper {
 
     /// Start an inactive link/tether
     /// Transitions from Inactive -> Keying
-    pub fn start<'pktbuf>(&self, asm: &'static Assembly<'pktbuf>) -> Result<(), LinkStateError> {
+    pub fn start(&self, asm: &Assembly) -> Result<(), LinkStateError> {
         assert!(self.id != zpr::LINK_ID_UNKNOWN);
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         if locked_fsm.state != LinkState::Inactive {
