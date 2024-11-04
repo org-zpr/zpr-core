@@ -17,8 +17,8 @@ use zpr_ext::zerocopy::FromBytesExt;
 
 /// Send a unidirectional non-flow management message on the given link.
 /// The packet should contain only the message body.
-pub async fn send_non_flow_mgmt<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn send_non_flow_mgmt(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     packet: BufferPacket,
@@ -29,8 +29,8 @@ pub async fn send_non_flow_mgmt<'pktbuf>(
 /// Send a unidirectional per-flow management message on the given link.
 /// The packet should contain only the message body.
 #[allow(dead_code)]
-pub async fn send_per_flow_mgmt<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn send_per_flow_mgmt(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
@@ -39,8 +39,8 @@ pub async fn send_per_flow_mgmt<'pktbuf>(
     send_mgmt_helper(asm, link_id, packet_type, Some(stream_id), None, packet).await
 }
 
-pub async fn send_non_flow_mgmt_response<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn send_non_flow_mgmt_response(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     sequence_number: zpr::SeqNum,
@@ -57,8 +57,8 @@ pub async fn send_non_flow_mgmt_response<'pktbuf>(
     .await
 }
 
-pub async fn send_per_flow_mgmt_response<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn send_per_flow_mgmt_response(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
@@ -76,8 +76,8 @@ pub async fn send_per_flow_mgmt_response<'pktbuf>(
     .await
 }
 
-async fn send_mgmt_helper<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+async fn send_mgmt_helper(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     stream_id: Option<zpr::StreamId>,
@@ -107,8 +107,8 @@ async fn send_mgmt_helper<'pktbuf>(
 /// expected response packet.
 /// pkt_fn allows the function to create the proper body of the ZDP packet to send
 /// Returns the received packet without any ZdpHeader (just management response body) or an error
-pub async fn send_sync_non_flow_req<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn send_sync_non_flow_req(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     zdp_request_type: zdp::ZdpPacketType,
     zdp_response_type: zdp::ZdpPacketType,
@@ -130,8 +130,8 @@ pub async fn send_sync_non_flow_req<'pktbuf>(
 /// expected response packet. Also requires stream_id of the packet.
 /// pkt_fn allows the function to create the proper body of the ZDP packet to send
 /// Returns the received packet without any ZdpHeader (just management response body) or an error
-pub async fn send_sync_per_flow_req<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn send_sync_per_flow_req(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     zdp_request_type: zdp::ZdpPacketType,
     zdp_response_type: zdp::ZdpPacketType,
@@ -180,8 +180,8 @@ impl std::fmt::Display for SyncReqError {
 /// pkt_fn allows the function to create the proper body of the ZDP packet to send
 /// Returns the received packet without the ZdpBaseHeader, but still any other Zdp header information
 /// not included in the ZdpBaseHeader, or an error
-async fn send_sync_req_helper<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+async fn send_sync_req_helper(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     zdp_request_type: zdp::ZdpPacketType,
     zdp_response_type: zdp::ZdpPacketType,
@@ -231,8 +231,8 @@ async fn send_sync_req_helper<'pktbuf>(
 /// Determines whether the message recieved in response to the request is
 /// a) a packet and not an error, and b) the expected packet type
 // TODO: rename/move this
-fn match_received<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+fn match_received(
+    asm: &Assembly,
     response: Option<(zdp::ZdpPacketType, BufferPacket)>,
     err_type: SyncReqError,
     zdp_response_type: zdp::ZdpPacketType,

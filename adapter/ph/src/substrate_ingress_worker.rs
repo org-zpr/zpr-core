@@ -2,7 +2,6 @@ use crate::assembly::Assembly;
 use crate::config;
 use crate::fastpath;
 use crate::packet::Packet;
-use std::future::Future;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,7 +13,7 @@ pub struct Config {
     pub batch_size: usize,
 }
 
-async fn worker<'a>(config: &Config, asm: &Assembly<'a>, socket: &UdpSocket) {
+pub async fn launch(config: Config, asm: Arc<Assembly>, socket: Arc<UdpSocket>) {
     let mut bufs = Vec::new();
 
     loop {
@@ -46,19 +45,7 @@ async fn worker<'a>(config: &Config, asm: &Assembly<'a>, socket: &UdpSocket) {
                 SocketAddr::V6(sender) => sender.set_flowinfo(0),
             }
 
-            fastpath::substrate_ingress(asm, config.worker_index, &sender, pkt);
+            fastpath::substrate_ingress(&asm, config.worker_index, &sender, pkt);
         }
     }
-}
-
-pub fn launch<'a, AsmRef: 'a>(
-    config: &Config,
-    asm: AsmRef,
-    socket: Arc<UdpSocket>,
-) -> impl Future<Output = ()> + Send + 'a
-where
-    AsmRef: std::ops::Deref<Target = Assembly<'a>> + Send + Sync,
-{
-    let cfg = *config;
-    async move { worker(&cfg, &*asm, &socket).await }
 }

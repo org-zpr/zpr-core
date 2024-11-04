@@ -5,36 +5,26 @@ use crate::fastpath;
 use crate::mgmt::requests;
 use crate::packet::BufferPacket;
 use crate::queues::AdapterManagerMessage;
-use std::future::Future;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
 use zpr;
 
-async fn worker<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    queue: &mut mpsc::Receiver<AdapterManagerMessage>,
-) {
+pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<AdapterManagerMessage>) {
     while let Some(msg) = queue.recv().await {
         match msg {
             AdapterManagerMessage::RequestTetherId(pkt) => {
                 // for now, perform these sequentially...
                 // ideally, we place these into a JoinSet,
                 // but let's work out how message sequencing works before doing that!!
-                do_request_tether_id(asm, pkt).await;
+                do_request_tether_id(&asm, pkt).await;
             }
         }
     }
 }
 
-pub fn launch<'pktbuf>(
-    asm: impl std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync + 'pktbuf,
-    mut queue: mpsc::Receiver<AdapterManagerMessage>,
-) -> impl Future<Output = ()> + 'pktbuf {
-    async move { worker(&*asm, &mut queue).await }
-}
-
 // RFC 6.5 § 6.3.11
-async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: BufferPacket) {
+async fn do_request_tether_id(asm: &Assembly, pkt: BufferPacket) {
     // TODO: node version... that just allocates a tether ID directly from the internal dock, no messages exchanged
     if matches!(asm.ph_mode, PhMode::Node) {
         fastpath::drop_and_count(asm, pkt, CounterType::DroppedNop);

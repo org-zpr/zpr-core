@@ -2,6 +2,7 @@
 
 use crate::assembly::Assembly;
 use crate::counters::*;
+use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
 
 fn emit_counts(system_name: &String, counters: &Counters) {
@@ -11,7 +12,7 @@ fn emit_counts(system_name: &String, counters: &Counters) {
     }
 }
 
-pub async fn launch(asm: &'static Assembly<'_>) {
+pub async fn launch(asm: Arc<Assembly>) {
     let usr1_stream = Box::leak(Box::new(signal(SignalKind::user_defined1()).unwrap()));
     let term_stream = Box::leak(Box::new(signal(SignalKind::terminate()).unwrap()));
 

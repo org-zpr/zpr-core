@@ -27,11 +27,7 @@ use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
 
 /// Drop a packet and count the drop with the given reason.
-pub fn drop_and_count<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    pkt: BufferPacket,
-    reason: impl Into<CounterType>,
-) {
+pub fn drop_and_count(asm: &Assembly, pkt: BufferPacket, reason: impl Into<CounterType>) {
     let reason = reason.into();
     debug!("{}: dropping packet because {}", asm.system_name, reason);
     asm.buffer_stack.put_buffer(pkt.destroy());
@@ -39,8 +35,8 @@ pub fn drop_and_count<'pktbuf>(
 }
 
 /// Add the ZPI header to a packet.
-pub fn encap_zpi<'pktbuf>(
-    _asm: &Assembly<'pktbuf>,
+pub fn encap_zpi(
+    _asm: &Assembly,
     _link_id: zpr::LinkId,
     zpi: zpr::Zpi,
     pkt: &mut Packet<impl PacketBuffer>,
@@ -52,17 +48,13 @@ pub fn encap_zpi<'pktbuf>(
 /// The packet must be a complete ZDP message.
 /// Despite the &mut borrow, the packet will return materially unchanged.
 /// (It will have a link-layer header temporarily added to it.)
-pub fn maybe_capture<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    dir: Direction,
-    pkt: &mut Packet<impl PacketBuffer>,
-) {
+pub fn maybe_capture(asm: &Assembly, dir: Direction, pkt: &mut Packet<impl PacketBuffer>) {
     maybe_capture_batch(asm, dir, [pkt])
 }
 
 /// Batch packet capture.
-pub fn maybe_capture_batch<'a, 'pktbuf: 'a, PktBuf: PacketBuffer + 'a>(
-    asm: &'a Assembly<'pktbuf>,
+pub fn maybe_capture_batch<'a, PktBuf: PacketBuffer + 'a>(
+    asm: &'a Assembly,
     dir: Direction,
     pkts: impl IntoIterator<Item = &'a mut Packet<PktBuf>>,
 ) {
@@ -173,8 +165,8 @@ pub fn encrypt_hmac(send_hmac_key: [u8; 32], pkt: &mut Packet<impl PacketBuffer>
     pkt.put(&link_mac[..zdp::ZDP_PACKET_MAC_SIZE]);
 }
 
-pub fn encrypt_full<'pktbuf>(
-    _asm: &Assembly<'pktbuf>,
+pub fn encrypt_full(
+    _asm: &Assembly,
     codec: &dyn Codec,
     pkt: &mut Packet<impl PacketBuffer>,
 ) -> Result<(), km::EncryptionError> {
@@ -253,8 +245,8 @@ pub fn decrypt_hmac(
 }
 
 /// Decrypt a ZDP packet according to its ZPI header (which is not removed).
-pub fn decrypt_full<'pktbuf>(
-    _asm: &Assembly<'pktbuf>,
+pub fn decrypt_full(
+    _asm: &Assembly,
     codec: &dyn Codec,
     padlen: usize,
     pkt: &mut Packet<impl PacketBuffer>,
@@ -283,8 +275,8 @@ pub fn decrypt_full<'pktbuf>(
     Ok(())
 }
 
-fn substrate_egress_common<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+fn substrate_egress_common(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     pkt: &mut BufferPacket,
 ) -> Result<Option<zpr::SubstrateAddr>, km::EncryptionError> {
@@ -363,11 +355,7 @@ fn substrate_egress_common<'pktbuf>(
 
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
 /// The ZPI header will be added to the packet.
-pub fn substrate_egress<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    link_id: zpr::LinkId,
-    mut pkt: BufferPacket,
-) {
+pub fn substrate_egress(asm: &Assembly, link_id: zpr::LinkId, mut pkt: BufferPacket) {
     let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
         Ok(Some(dest_sa)) => dest_sa,
         Ok(None) => {
@@ -394,8 +382,8 @@ pub fn substrate_egress<'pktbuf>(
 
 /// A blocking/async version of `substrate_egress()`, for management path use.
 /// Useful to ensure fairness under high load.
-pub async fn substrate_egress_blocking<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn substrate_egress_blocking(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     mut pkt: BufferPacket,
 ) {
@@ -436,8 +424,8 @@ const AGENT_PACKET_FLOW_TRACKER: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
 /// Process packets ingressing from the specified address.
-pub fn substrate_ingress<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub fn substrate_ingress(
+    asm: &Assembly,
     #[cfg_attr(not(debug_assertions), allow(unused_variables))] worker_index: usize,
     peer_sa: &zpr::SubstrateAddr,
     mut pkt: BufferPacket,
@@ -608,8 +596,8 @@ pub fn substrate_ingress<'pktbuf>(
 
 /// Send a compressed agent packet to the agent.
 /// The packet will be decompressed according to the given stream ID.
-pub fn agent_input<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub fn agent_input(
+    asm: &Assembly,
     tether_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
     mut pkt: BufferPacket,
 ) {
@@ -660,7 +648,7 @@ pub fn agent_input<'pktbuf>(
 
 /// Process uncompressed packet from the agent.
 /// The packet will be compressed, or trigger a Bind request.
-pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: BufferPacket) {
+pub fn agent_output(asm: &Assembly, mut pkt: BufferPacket) {
     pkt.metadata_mut().ingress_link_id = zpr::AGENT_LINK_ID;
 
     // determine five tuple
@@ -696,11 +684,7 @@ pub fn agent_output<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: BufferPacket) {
 /// bind.  `allow_bind_request` should be true for "real" packets; false for
 /// packets re-injected from mgmt plane after fulfilling a bind request (so
 /// as to prevent the theoretical possibility of a packet loop).
-pub fn agent_output_post_classify<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    mut pkt: BufferPacket,
-    allow_bind_request: bool,
-) {
+pub fn agent_output_post_classify(asm: &Assembly, mut pkt: BufferPacket, allow_bind_request: bool) {
     let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
 
     // lookup five tuple in ALT
@@ -760,7 +744,7 @@ pub fn agent_output_post_classify<'pktbuf>(
 }
 
 /// Forward compressed packet.
-pub fn forward<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: BufferPacket) {
+pub fn forward(asm: &Assembly, mut pkt: BufferPacket) {
     // TODO: node forwarding
 
     // adapter forwarding

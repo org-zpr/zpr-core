@@ -16,8 +16,8 @@ use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 /// send a Key Management message (RFC 6.5 § 6.2.8)
-pub async fn send_key_management<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn send_key_management(
+    asm: &Assembly,
     link_id: zpr::LinkId,
     km_id: zpr::KmId,
     payload: &[u8],
@@ -36,14 +36,14 @@ pub async fn send_key_management<'pktbuf>(
 
 #[allow(dead_code)]
 /// send a Discard message (RFC 6.5 § 6.3.1)
-pub async fn send_discard(asm: &Assembly<'_>, link_id: zpr::LinkId) {
+pub async fn send_discard(asm: &Assembly, link_id: zpr::LinkId) {
     let buf = asm.buffer_stack.get_buffer().await;
     let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
 }
 
 /// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
-pub async fn send_hello_request(asm: &Assembly<'_>, link_id: zpr::LinkId) -> Result<(), ()> {
+pub async fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<(), ()> {
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -75,7 +75,7 @@ pub async fn send_hello_request(asm: &Assembly<'_>, link_id: zpr::LinkId) -> Res
 
 /// send a Register Agent Address Request (RFC 6.5 § 6.3.10)
 pub async fn send_register_agent_address_request(
-    asm: &Assembly<'_>,
+    asm: &Assembly,
     link_id: zpr::LinkId,
 ) -> Result<(), ()> {
     let Some(agent_addr) = asm.agent_address else {
@@ -152,7 +152,7 @@ impl std::fmt::Display for BindAgentAddressError {
 
 /// send a Bind Agent Address Request and wait for the Response (RFC 6.5 § 6.3.11)
 pub async fn send_bind_agent_address_request(
-    asm: &Assembly<'_>,
+    asm: &Assembly,
     link_id: zpr::LinkId,
     compression_mode: zpr::CompressionMode,
     five_tuple: FiveTuple,
@@ -236,7 +236,7 @@ pub async fn send_bind_agent_address_request(
 
 #[allow(dead_code)]
 /// send a Report message (RFC 6.5 § 6.3.13)
-pub async fn send_report(asm: &Assembly<'_>, link_id: zpr::LinkId, report: &str) {
+pub async fn send_report(asm: &Assembly, link_id: zpr::LinkId, report: &str) {
     // TODO this condition will need to be adjusted when we have complete ZPR packets
     // with the information at the end of the packet at well
     if packet::PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < report.len() {

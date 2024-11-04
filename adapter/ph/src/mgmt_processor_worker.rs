@@ -5,7 +5,7 @@ use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
 use crate::packet::BufferPacket;
 use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
-use std::future::Future;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::debug;
 use zpr;
@@ -16,10 +16,10 @@ pub struct Config {
     pub link_id: zpr::LinkId,
 }
 
-async fn worker(
-    config: &Config,
-    asm: &'static Assembly<'_>,
-    queue: &mut mpsc::Receiver<MgmtProcessorMessage>,
+pub async fn launch(
+    config: Config,
+    asm: Arc<Assembly>,
+    mut queue: mpsc::Receiver<MgmtProcessorMessage>,
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
@@ -27,13 +27,13 @@ async fn worker(
                 // Drop packets which are intended for a link other than the one we are assigned to,
                 // since processing them here will violate concurrency assumptions.
                 if pkt.metadata().ingress_link_id != config.link_id {
-                    fastpath::drop_and_count(asm, pkt, CounterType::InternalRoutingError);
+                    fastpath::drop_and_count(&asm, pkt, CounterType::InternalRoutingError);
                     continue;
                 }
 
-                match handle_packet(asm, pkt).await {
+                match handle_packet(&asm, pkt).await {
                     Ok(()) => (),
-                    Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
+                    Err((err, pkt)) => fastpath::drop_and_count(&asm, pkt, err),
                 }
             }
 
@@ -42,16 +42,7 @@ async fn worker(
     }
 }
 
-pub fn launch(
-    config: &Config,
-    asm: &'static Assembly,
-    mut queue: mpsc::Receiver<MgmtProcessorMessage>,
-) -> impl Future<Output = ()> + 'static {
-    let cfg = *config;
-    async move { worker(&cfg, &*asm, &mut queue).await }
-}
-
-async fn handle_packet(asm: &'static Assembly<'static>, mut pkt: BufferPacket) -> HandleMgmtResult {
+async fn handle_packet(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMgmtResult {
     let Ok(base_hdr) = ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };

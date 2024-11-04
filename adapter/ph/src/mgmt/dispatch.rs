@@ -10,6 +10,7 @@ use crate::packet::BufferPacket;
 use crate::queues;
 use crate::zdp;
 use bytes::Buf;
+use std::sync::Arc;
 use tracing::error;
 use zerocopy::FromBytes;
 use zpr;
@@ -19,8 +20,8 @@ use zpr_ext::zerocopy::FromBytesExt;
 ///
 /// This function does not block, and does not perform significant processing.
 /// It merely dispatches the management packet to the correct queue.
-pub fn dispatch_mgmt_packet_with_addr<'pktbuf>(
-    asm: &'static Assembly<'pktbuf>,
+pub fn dispatch_mgmt_packet_with_addr(
+    asm: &Arc<Assembly>,
     peer_sa: zpr::SubstrateAddr,
     mut pkt: BufferPacket,
 ) {
@@ -32,18 +33,18 @@ pub fn dispatch_mgmt_packet_with_addr<'pktbuf>(
             // tether?
             let Some(ingress_link_id) = asm.start_tether(&peer_sa, LinkType::NodeToAdapter).ok()
             else {
-                return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
+                return fastpath::drop_and_count(&asm, pkt, CounterType::UnknownPeer);
             };
 
             pkt.metadata_mut().ingress_link_id = ingress_link_id;
 
             match handle_key_management(asm, pkt) {
                 Ok(()) => (),
-                Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
+                Err((err, pkt)) => fastpath::drop_and_count(&asm, pkt, err),
             }
         }
         _ => {
-            return fastpath::drop_and_count(asm, pkt, CounterType::UnknownPeer);
+            return fastpath::drop_and_count(&asm, pkt, CounterType::UnknownPeer);
         }
     }
 }
@@ -52,44 +53,41 @@ pub fn dispatch_mgmt_packet_with_addr<'pktbuf>(
 ///
 /// This function does not block, and does not perform significant processing.
 /// It merely dispatches the management packet to the correct queue.
-pub fn dispatch_mgmt_packet_with_link<'pktbuf>(
-    asm: &'static Assembly<'pktbuf>,
-    mut pkt: BufferPacket,
-) {
+pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, mut pkt: BufferPacket) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
         Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
 
             match handle_key_management(asm, pkt) {
                 Ok(()) => (),
-                Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
+                Err((err, pkt)) => fastpath::drop_and_count(&asm, pkt, err),
             }
         }
 
         Ok((base_hdr, _)) if base_hdr.packet_type.is_response() => {
             match handle_response(asm, pkt) {
                 Ok(()) => (),
-                Err((err, pkt)) => fastpath::drop_and_count(asm, pkt, err),
+                Err((err, pkt)) => fastpath::drop_and_count(&asm, pkt, err),
             }
         }
 
         _ => {
             let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
-                fastpath::drop_and_count(asm, pkt, CounterType::PeerRemoved);
+                fastpath::drop_and_count(&asm, pkt, CounterType::PeerRemoved);
                 return;
             };
 
             match peer_state.mgmt_processor.try_enqueue_packet(pkt) {
                 Ok(()) => (),
                 Err(queues::TryEnqueueError::Full(pkt)) => {
-                    fastpath::drop_and_count(asm, pkt, CounterType::QueueBackpressure);
+                    fastpath::drop_and_count(&asm, pkt, CounterType::QueueBackpressure);
                 }
             }
         }
     }
 }
 
-fn handle_response<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: BufferPacket) -> HandleMgmtResult {
+fn handle_response(asm: &Assembly, mut pkt: BufferPacket) -> HandleMgmtResult {
     let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
@@ -116,10 +114,7 @@ fn handle_response<'pktbuf>(asm: &Assembly<'pktbuf>, mut pkt: BufferPacket) -> H
 
 // ZPI and Base header is already gone by the time we get here.  So we expect
 // to parse starting from the KeyManagement header.
-fn handle_key_management<'pktbuf>(
-    asm: &'static Assembly<'pktbuf>,
-    mut pkt: BufferPacket,
-) -> HandleMgmtResult {
+fn handle_key_management(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMgmtResult {
     let Ok(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(&mut pkt) else {
         error!("KeyManagement packet arrived with unparseable header");
         return Err((HandleMgmtError::BadStructure, pkt));

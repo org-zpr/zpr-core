@@ -4,7 +4,7 @@ use crate::km_multiplexor;
 use crate::mgmt;
 use crate::net_defs::IpAddress;
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::{info, warn};
 use zpr::LinkId;
@@ -232,9 +232,9 @@ impl LinkStateWrapper {
     }
 
     // FIXME: This is a temporary hack until we get rid of the static stuff
-    pub fn process_static_event<'pktbuf>(
+    pub fn process_static_event(
         &self,
-        asm: &'static Assembly<'pktbuf>,
+        asm: &Arc<Assembly>,
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
         match event {
@@ -325,7 +325,7 @@ impl LinkStateWrapper {
     /// The Key Manager calls this when it is done initial keying
     /// Transitions from Keying -> Helloing
     /// Will trigger a Hello to be sent if this is an adapter
-    fn keying_done<'pktbuf>(&self, asm: &'static Assembly<'pktbuf>) -> Result<(), LinkStateError> {
+    fn keying_done(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         if locked_fsm.state != LinkState::Keying {
             return Err(LinkStateError::UnexpectedTransition(
@@ -345,14 +345,15 @@ impl LinkStateWrapper {
         Ok(())
     }
 
-    fn maybe_send_hello<'pktbuf>(&self, asm: &'static Assembly<'pktbuf>) {
+    fn maybe_send_hello(&self, asm: &Arc<Assembly>) {
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
             let link_id = self.id;
+            let task_asm = asm.clone();
             tokio::task::spawn_local(async move {
-                mgmt::requests::send_hello_request(asm, link_id).await?;
+                mgmt::requests::send_hello_request(&task_asm, link_id).await?;
 
-                if asm
+                if task_asm
                     .process_link_state_event_static(link_id, LinkEvent::ReceivedHelloResponse)
                     .is_err()
                 {
@@ -403,10 +404,7 @@ impl LinkStateWrapper {
     /// Update link state based on received hello response
     /// Transitions from Helloing to Registering Agent Address
     /// Sends a Register Agent Address request if this is an adapter
-    fn process_hello_response<'pktbuf>(
-        &self,
-        asm: &'static Assembly<'pktbuf>,
-    ) -> Result<(), LinkStateError> {
+    fn process_hello_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::Helloing) => {
@@ -416,10 +414,11 @@ impl LinkStateWrapper {
                     asm.system_name, self.id
                 );
                 let link_id = self.id;
+                let task_asm = asm.clone();
                 tokio::task::spawn_local(async move {
-                    mgmt::requests::send_register_agent_address_request(asm, link_id).await?;
+                    mgmt::requests::send_register_agent_address_request(&task_asm, link_id).await?;
 
-                    if asm
+                    if task_asm
                         .process_link_state_event(link_id, LinkEvent::ReceivedRegisterResponse)
                         .is_err()
                     {

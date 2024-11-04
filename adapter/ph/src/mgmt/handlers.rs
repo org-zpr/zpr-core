@@ -11,6 +11,7 @@ use crate::net_defs::IpAddress;
 use crate::packet::{BufferPacket, Packet};
 use crate::zdp;
 use bytes::{Buf, BufMut};
+use std::sync::Arc;
 use tracing::info;
 use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
@@ -40,10 +41,7 @@ impl From<HandleMgmtError> for counters::CounterType {
 pub type HandleMgmtResult = Result<(), (HandleMgmtError, BufferPacket)>;
 
 /// handle a Report message (RFC 6.5 § 6.3.13)
-pub async fn handle_report<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    mut pkt: BufferPacket,
-) -> HandleMgmtResult {
+pub async fn handle_report(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpReportHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
@@ -63,10 +61,7 @@ pub async fn handle_report<'pktbuf>(
 }
 
 /// handle a Discard message (RFC 6.5 § 6.3.1)
-pub async fn handle_discard<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
-    pkt: BufferPacket,
-) -> HandleMgmtResult {
+pub async fn handle_discard(asm: &Arc<Assembly>, pkt: BufferPacket) -> HandleMgmtResult {
     // TODO print to debug log, when implemented
     info!(
         "{}: Discard message received from {}",
@@ -78,8 +73,8 @@ pub async fn handle_discard<'pktbuf>(
 }
 
 /// handle a Hello Request (RFC 6.5 § 6.3.4)
-pub async fn handle_hello_request<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn handle_hello_request(
+    asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
     pkt: BufferPacket,
 ) -> HandleMgmtResult {
@@ -113,8 +108,8 @@ pub async fn handle_hello_request<'pktbuf>(
 }
 
 /// handle a Hello Response (RFC 6.5 § 6.3.4)
-pub async fn handle_hello_response<'pktbuf>(
-    asm: &'static Assembly<'pktbuf>,
+pub async fn handle_hello_response(
+    asm: &Arc<Assembly>,
     _seq_num: zpr::SeqNum,
     mut pkt: BufferPacket,
 ) -> HandleMgmtResult {
@@ -141,8 +136,8 @@ pub async fn handle_hello_response<'pktbuf>(
 }
 
 /// handle a Register Agent Address Request (RFC 6.5 § 6.3.10)
-pub async fn handle_register_agent_address_request<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn handle_register_agent_address_request(
+    asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
     mut pkt: BufferPacket,
 ) -> HandleMgmtResult {
@@ -204,8 +199,8 @@ pub async fn handle_register_agent_address_request<'pktbuf>(
 }
 
 /// handle a Register Agent Address Response (RFC 6.5 § 6.3.10)
-pub async fn handle_register_agent_address_response<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn handle_register_agent_address_response(
+    asm: &Arc<Assembly>,
     _seq_num: zpr::SeqNum,
     pkt: BufferPacket,
 ) -> HandleMgmtResult {
@@ -225,8 +220,8 @@ pub async fn handle_register_agent_address_response<'pktbuf>(
 }
 
 /// handle a Bind Agent Address Request (RFC 6.5 § 6.3.11)
-pub async fn handle_bind_agent_address_request<'pktbuf>(
-    asm: &Assembly<'pktbuf>,
+pub async fn handle_bind_agent_address_request(
+    asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
     mut pkt: BufferPacket,
 ) -> HandleMgmtResult {

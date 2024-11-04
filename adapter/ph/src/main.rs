@@ -308,7 +308,7 @@ fn main() -> ExitCode {
         })
         .unwrap();
 
-    let control_socket = Box::leak(Box::new(UnixListener::bind(config.control_path).unwrap()));
+    let control_socket = Arc::new(UnixListener::bind(config.control_path).unwrap());
 
     //
     // open TUN devices
@@ -363,7 +363,7 @@ fn main() -> ExitCode {
     //
     // create system assembly
     //
-    let asm = Box::leak(Box::new(Assembly {
+    let asm = Arc::new(Assembly {
         ph_mode,
         topology_config,
         system_name: config.name,
@@ -386,8 +386,7 @@ fn main() -> ExitCode {
         self_noise_keypair,
         peer_noise_keypair,
         certx,
-        _phantom: std::marker::PhantomData,
-    }));
+    });
 
     //
     // create a Tokio "local set" to schedule all our management workers on
@@ -419,12 +418,15 @@ fn main() -> ExitCode {
 
     let mut js = JoinSet::new();
 
-    js.spawn_local(signal_worker::launch(asm));
-    js.spawn_local(mgmt_dispatch_worker::launch(asm, md_outq));
-    js.spawn_local(adapter_manager_worker::launch(&*asm, am_outq));
-    js.spawn_local(rpc_worker::launch(asm, control_socket));
-    js.spawn_local(km_multiplexor::launch_signal_worker(&*asm, km_sig_outq));
-    js.spawn_local(km_multiplexor::launch_message_worker(&*asm, km_outq));
+    js.spawn_local(signal_worker::launch(asm.clone()));
+    js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq));
+    js.spawn_local(adapter_manager_worker::launch(asm.clone(), am_outq));
+    js.spawn_local(rpc_worker::launch(asm.clone(), control_socket));
+    js.spawn_local(km_multiplexor::launch_signal_worker(
+        asm.clone(),
+        km_sig_outq,
+    ));
+    js.spawn_local(km_multiplexor::launch_message_worker(asm.clone(), km_outq));
 
     //
     // start data path workers
@@ -432,31 +434,31 @@ fn main() -> ExitCode {
 
     for (worker_index, tun_dev) in tun_devs.into_iter().enumerate() {
         js.spawn(agent_output_worker::launch(
-            &agent_output_worker::Config {
+            agent_output_worker::Config {
                 worker_index,
                 batch_size: asm.topology_config.agent_output_batch_size,
             },
-            &*asm,
+            asm.clone(),
             tun_dev,
         ));
     }
 
     for (worker_index, socket) in substrate_sockets.into_iter().enumerate() {
         js.spawn(substrate_ingress_worker::launch(
-            &substrate_ingress_worker::Config {
+            substrate_ingress_worker::Config {
                 worker_index,
                 batch_size: asm.topology_config.substrate_ingress_batch_size,
             },
-            &*asm,
+            asm.clone(),
             socket,
         ));
     }
 
     js.spawn(capture_worker::launch(
-        &capture_worker::Config {
+        capture_worker::Config {
             batch_size: asm.topology_config.capture_batch_size,
         },
-        &*asm,
+        asm.clone(),
         cap_outq,
     ));
 

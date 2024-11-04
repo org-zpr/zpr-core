@@ -15,6 +15,7 @@ use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
 use std::io::IoSliceMut;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -26,7 +27,7 @@ use tracing::error;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
 
-async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
+pub async fn launch(asm: Arc<Assembly>, socket: Arc<UnixListener>) {
     let mut set = JoinSet::<Result<(), Error>>::new();
 
     // Continuously looks for a connection to the socket, allows for concurrent connections
@@ -43,7 +44,7 @@ async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
             accepted = socket.accept() =>
                 match accepted {
                     Ok((stream, _addr)) => {
-                        set.spawn(handle_connection(asm, stream));
+                        set.spawn(handle_connection(asm.clone(), stream));
                     },
                     Err(_e) => {
                         error!("Connection failed");
@@ -53,10 +54,7 @@ async fn worker(asm: &'static Assembly<'static>, socket: &UnixListener) {
     }
 }
 
-async fn handle_connection(
-    asm: &'static Assembly<'static>,
-    mut stream: UnixStream,
-) -> std::io::Result<()> {
+async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::io::Result<()> {
     let mut str_message = String::new();
 
     let split_buf = stream.split(); // split stream into read/write streams
@@ -76,16 +74,18 @@ async fn handle_connection(
         match vec_message[0] {
             "COUNTERS-RESET" => {
                 buf_writer
-                    .write_all(counters_reset(asm).await.as_bytes())
+                    .write_all(counters_reset(&asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             "COUNTERS" => {
-                buf_writer.write_all(counters(asm).await.as_bytes()).await?;
+                buf_writer
+                    .write_all(counters(&asm).await.as_bytes())
+                    .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             "ECHO" => {
-                buf_writer.write_all(echo(asm).await.as_bytes()).await?;
+                buf_writer.write_all(echo(&asm).await.as_bytes()).await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             // PERF SAMPLE <DURATION> <FREQUENCY>
@@ -93,7 +93,7 @@ async fn handle_connection(
                 3 => {
                     buf_writer
                         .write_all(
-                            perf_sample(asm, vec_message[1], vec_message[2])
+                            perf_sample(&asm, vec_message[1], vec_message[2])
                                 .await
                                 .as_bytes(),
                         )
@@ -121,32 +121,32 @@ async fn handle_connection(
 
                 // Set capture file using ancillary data
                 buf_writer
-                    .write_all(set_capture_file(asm, ancillary).await.as_bytes())
+                    .write_all(set_capture_file(&asm, ancillary).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             "FLUSH-CAPTURE-FILE" => {
                 buf_writer
-                    .write_all(flush_capture_file(asm).await.as_bytes())
+                    .write_all(flush_capture_file(&asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             "CLOSE-CAPTURE-FILE" => {
                 buf_writer
-                    .write_all(close_capture_file(asm).await.as_bytes())
+                    .write_all(close_capture_file(&asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             // SET-CAPTURE-PROGRAM <program>
             "SET-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(set_capture_program(asm, str_message).as_bytes())
+                    .write_all(set_capture_program(&asm, str_message).as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             "DELETE-CAPTURE-PROGRAM" => {
                 buf_writer
-                    .write_all(delete_capture_program(asm).as_bytes())
+                    .write_all(delete_capture_program(&asm).as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
@@ -160,24 +160,14 @@ async fn handle_connection(
     Ok(())
 }
 
-pub fn launch<'pktbuf, UnixListenerRef: 'pktbuf>(
-    asm: &'static Assembly<'static>,
-    socket: UnixListenerRef,
-) -> impl Future<Output = ()> + 'pktbuf
-where
-    UnixListenerRef: std::ops::Deref<Target = UnixListener> + Send + Sync,
-{
-    async move { worker(&*asm, &*socket).await }
-}
-
 // Management functions for RPC worker, along with helper functions for the
 // management funcs
 
-async fn echo(_asm: &Assembly<'_>) -> String {
+async fn echo(_asm: &Assembly) -> String {
     String::from("echo\n")
 }
 
-async fn counters(asm: &Assembly<'_>) -> String {
+async fn counters(asm: &Assembly) -> String {
     let mut counts: String = String::new();
     for (key, &ref value) in &asm.counters {
         let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
@@ -186,7 +176,7 @@ async fn counters(asm: &Assembly<'_>) -> String {
     counts
 }
 
-async fn counters_reset(asm: &Assembly<'_>) -> String {
+async fn counters_reset(asm: &Assembly) -> String {
     for value in asm.counters.values() {
         value.reset();
     }
@@ -197,7 +187,7 @@ async fn counters_reset(asm: &Assembly<'_>) -> String {
 /// Performs a performance sample on the PH by measuring the queue depths and the
 /// packet latencies throughout the system. Requires the duration of the
 /// sample as well as the number of samples per second.
-async fn perf_sample(_asm: &Assembly<'_>, _duration: &str, _rate: &str) -> String {
+async fn perf_sample(_asm: &Assembly, _duration: &str, _rate: &str) -> String {
     // FIXME: There are now a dynamically allocated number of mgmt_processors...
     // this needs to be restructured to account for that fact.
     Default::default()
@@ -338,7 +328,7 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
 
 // Takes in ancillary data, extracts the file descriptor, and creates a file using the
 // fd
-async fn set_capture_file(asm: &Assembly<'_>, ancillary: SocketAncillary<'_>) -> String {
+async fn set_capture_file(asm: &Assembly, ancillary: SocketAncillary<'_>) -> String {
     // Get the ancillary data
     let anc_message = ancillary.into_messages().nth(0).unwrap();
     // Get the SCM rights from the ancillary data
@@ -361,13 +351,13 @@ async fn set_capture_file(asm: &Assembly<'_>, ancillary: SocketAncillary<'_>) ->
     }
 }
 
-async fn flush_capture_file(asm: &Assembly<'_>) -> String {
+async fn flush_capture_file(asm: &Assembly) -> String {
     let _ = asm.capture_worker.flush_capture_file().await;
 
     String::from("Capture file flushed\n")
 }
 
-async fn close_capture_file(asm: &Assembly<'_>) -> String {
+async fn close_capture_file(asm: &Assembly) -> String {
     let _ = asm.capture_worker.close_capture_file().await;
     asm.flow_control.delete_program();
 
@@ -375,7 +365,7 @@ async fn close_capture_file(asm: &Assembly<'_>) -> String {
 }
 
 /// Expects the entire string message sent to RPC worker, including the command
-fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
+fn set_capture_program(asm: &Assembly, str_message: String) -> String {
     // Removes the command from the beginning of the str
     let (_command, program) = str_message.split_once(' ').unwrap();
     // Splits the rest of the string into the various instructions
@@ -404,7 +394,7 @@ fn set_capture_program(asm: &Assembly<'_>, str_message: String) -> String {
     return_message
 }
 
-fn delete_capture_program(asm: &Assembly<'_>) -> String {
+fn delete_capture_program(asm: &Assembly) -> String {
     asm.flow_control.delete_program();
 
     String::from("Program deleted\n")

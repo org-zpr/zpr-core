@@ -1,8 +1,8 @@
 use crate::assembly::Assembly;
 use crate::pcap_writer::*;
 use crate::queues::CapPacket;
-use core::future::Future;
 use std::io;
+use std::sync::Arc;
 use tokio::fs::File;
 use tokio::sync::{mpsc, Mutex};
 use tracing::error;
@@ -59,11 +59,7 @@ pub struct Config {
     pub batch_size: usize,
 }
 
-async fn worker<'pktbuf>(
-    config: &Config,
-    asm: &Assembly<'pktbuf>,
-    queue: &mut mpsc::Receiver<CapPacket>,
-) {
+pub async fn launch(config: Config, asm: Arc<Assembly>, mut queue: mpsc::Receiver<CapPacket>) {
     let mut messages = Vec::new();
 
     // Batch accepts values from capture queue and writes them to the savefile
@@ -93,18 +89,6 @@ async fn worker<'pktbuf>(
         asm.buffer_stack
             .put_buffers(messages.drain(..).map(|cap_pack| cap_pack.packet.destroy()));
     }
-}
-
-pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
-    config: &Config,
-    asm: AsmRef,
-    mut queue: mpsc::Receiver<CapPacket>,
-) -> impl Future<Output = ()> + Send + 'pktbuf
-where
-    AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
-{
-    let cfg = *config;
-    async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
 async fn savefile_write_batch<'a>(

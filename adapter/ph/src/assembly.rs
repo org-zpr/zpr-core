@@ -13,14 +13,14 @@ use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
-use std::net::IpAddr;
-use zpr;
-use zpr::{LinkId, SubstrateAddr};
 
 use enum_map::EnumMap;
 use km_noise::NoiseKeypair;
+use std::net::IpAddr;
 use std::result::Result;
+use std::sync::Arc;
 use tracing::{error, info};
+use zpr::{self, LinkId, SubstrateAddr};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {
@@ -44,7 +44,7 @@ pub enum PhMode {
 /// highly contended resulting in a bottleneck, that should result in some
 /// visible queue becoming full.
 
-pub struct Assembly<'pktbuf> {
+pub struct Assembly {
     pub ph_mode: PhMode,
     pub topology_config: config::TopologyConfig,
 
@@ -64,7 +64,7 @@ pub struct Assembly<'pktbuf> {
 
     pub counters: EnumMap<CounterType, Counter>,
 
-    pub tun_ctl: Box<dyn TunCtl>,
+    pub tun_ctl: Box<dyn TunCtl + Send>,
 
     pub peer_table: peer_table::PeerTable,
     pub peer_ids: std::sync::Mutex<Vec<zpr::LinkId>>, // HACK until peer_table is enumerable
@@ -81,18 +81,16 @@ pub struct Assembly<'pktbuf> {
     pub self_noise_keypair: Option<NoiseKeypair>,
     pub peer_noise_keypair: Option<NoiseKeypair>,
     pub certx: Option<KmCertExchange>,
-
-    pub _phantom: std::marker::PhantomData<&'pktbuf [u8]>,
 }
 
-impl Assembly<'_> {
+impl Assembly {
     pub fn is_node(&self) -> bool {
         self.ph_mode == PhMode::Node
     }
 
     // TODO: REMOVE ME
     pub fn process_link_state_event_static(
-        &'static self,
+        self: &Arc<Self>,
         id: LinkId,
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
@@ -114,7 +112,7 @@ impl Assembly<'_> {
     }
 
     fn add_peer(
-        &'static self,
+        self: &Arc<Self>,
         link_type: LinkType,
         peer_addr: &SubstrateAddr,
     ) -> Result<LinkId, PeerInsertError> {
@@ -125,7 +123,7 @@ impl Assembly<'_> {
         };
 
         let peer_state = peer_table::PeerState::new(entry.key(), link_type, *peer_addr, |q| {
-            mgmt_processor_worker::launch(&worker_config, self, q)
+            mgmt_processor_worker::launch(worker_config, self.clone(), q)
         });
 
         Ok(entry.insert(peer_state))
@@ -133,7 +131,7 @@ impl Assembly<'_> {
 
     /// Add a tether to the peer table
     pub fn start_tether(
-        &'static self,
+        self: &Arc<Self>,
         adapter_addr: &SubstrateAddr,
         link_type: LinkType,
     ) -> Result<LinkId, PeerInsertError> {
@@ -214,7 +212,7 @@ pub mod test {
         pub capture_worker: Option<CaptureWorker>,
         pub flow_control: Option<FlowControl>,
         pub counters: Option<EnumMap<CounterType, Counter>>,
-        pub tun_ctl: Option<Box<dyn TunCtl>>,
+        pub tun_ctl: Option<Box<dyn TunCtl + Send>>,
         pub peer_table: Option<peer_table::PeerTable>,
         pub peer_ids: Option<Vec<zpr::LinkId>>,
         pub alt: Option<adapter_tables::AgentLookupTable>,
@@ -238,7 +236,7 @@ pub mod test {
         }
     }
 
-    pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly<'static> {
+    pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
         let ph_mode = builder.ph_mode.unwrap_or(PhMode::Adapter);
         let topology_config = builder.topology_config.unwrap_or_default();
         let system_name = builder.system_name.unwrap_or("test".into());
@@ -312,7 +310,6 @@ pub mod test {
             self_noise_keypair: None,
             peer_noise_keypair: None,
             certx: None,
-            _phantom: std::marker::PhantomData,
         }
     }
 }
