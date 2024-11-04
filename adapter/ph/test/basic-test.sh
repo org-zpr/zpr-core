@@ -65,18 +65,20 @@ echo "Launching DUTs"
 # Launch PHs
 #
 sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
+     node \
      --name "zpr-node" \
      --control-path "$NODE_SOCK" \
      --self-addr 0.0.0.0:12345 \
      --ca-file ca.crt \
      --certificate-file node.crt \
      --private-key-file node.key \
-     --tun-if tun0 node 2>&1 |tee node.log &
+     --tun-if tun0 2>&1 |tee node.log &
 CHILDREN=(${CHILDREN[@]} "$!")
 
 sleep 2
 
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
+  adapter \
   --name "zpr-a" \
   --control-path "$ADAPTER1_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR":12345 \
@@ -84,7 +86,6 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --certificate-file adapter1.crt \
   --private-key-file adapter1.key \
   --tun-if tun0 \
-  adapter \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
   --node-public-key-file node.pubkey \
   --agent-addr "$A_ZPR_ADDR" 2>&1 |tee adapter1.log &
@@ -92,6 +93,7 @@ CHILDREN=(${CHILDREN[@]} "$!")
 
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
+  adapter \
   --name "zpr-b" \
   --control-path "$ADAPTER2_SOCK" \
   --self-addr "$B_SUBSTRATE_ADDR":12345 \
@@ -99,7 +101,6 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --certificate-file adapter2.crt \
   --private-key-file adapter2.key \
   --tun-if tun0 \
-  adapter \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
   --node-public-key-file node.pubkey \
   --agent-addr "$B_ZPR_ADDR" 2>&1 |tee adapter2.log &

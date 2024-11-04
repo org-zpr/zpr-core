@@ -1,6 +1,5 @@
 #![cfg_attr(feature = "ci", deny(warnings))]
 
-use clap::{Parser, Subcommand};
 use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
@@ -34,6 +33,7 @@ mod km_cert_exchange;
 mod km_multiplexor;
 mod km_noise;
 mod link_state;
+mod main_args;
 mod mgmt;
 mod mgmt_dispatch_worker;
 mod mgmt_processor_worker;
@@ -69,139 +69,18 @@ use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
 
-/// ZPR Packet Handler
-///
-/// The handler can run in `node` mode or `adapter` mode. There are a series of command
-/// line arguments that are required in BOTH modes. These need to be specified before
-/// you set the mode.  The general usage is:
-///
-///    sudo ph [GLOBAL_OPTIONS] (node | adapter) [MODE_OPTIONS]
-///
-#[derive(Parser)]
-#[command(version)]
-struct Control {
-    /// An optional, identifying name for instance.  Will default to "adapter" or "node" depending on mode.
-    #[arg(short, long)]
-    name: Option<String>,
-
-    /// The unix domain socket path for the "control" interface.
-    #[arg(long, value_name = "DOMAIN_SOCKET_PATH")]
-    control_path: String,
-
-    /// The local substrate IPv4 or IPv6 address and port for this node or adapter.
-    #[arg(short, long, value_name = "ADDR:PORT", default_value = "0.0.0.0:0")]
-    self_addr: SocketAddr,
-
-    /// Certificate of the Certificate Authority
-    #[arg(long, value_name = "PATH")]
-    ca_file: String,
-
-    /// Certificate including the noise public key, signed by the authority.
-    #[arg(long, value_name = "PATH")]
-    certificate_file: String, // noise public key signed by authority
-
-    /// Path to the noise private key file (PEM format)
-    #[arg(long, short = 'k', value_name = "PATH")]
-    private_key_file: String, // noise private key
-
-    /// The TUN device to use, eg "tun1".  Leave blank for automatic selection.
-    #[arg(long, short = 'i', value_name = "DEVICE")]
-    tun_if: Option<String>,
-
-    /// Enable debug logging
-    #[arg(long, short, default_value_t = false)]
-    debug: bool,
-
-    #[command(subcommand)]
-    command: Option<Command>,
-}
-
-#[derive(Subcommand)]
-enum Command {
-    /// Starts the handler in adapter mode.
-    #[command()]
-    Adapter {
-        /// The substrate address of the node.
-        #[arg(long, short = 'N', value_name = "ADDR:PORT")]
-        node_addr: SocketAddr,
-
-        /// The ZPR address (no port) of the adapter. Must match your TUN address!
-        #[arg(long, short)]
-        agent_addr: IpAddr,
-
-        /// PEM file holding the nodes noise public key.
-        #[arg(long, short, value_name = "PATH")]
-        node_public_key_file: String, // noise public key for node (only specified when starting an adapter)
-    },
-    /// Starts the handler in node mode.
-    #[command()]
-    Node,
-}
-
-// This config struct is loaded up from the command line args.
-struct Config {
-    name: String,
-    control_path: PathBuf,
-    self_addr: SocketAddr,
-    ca_file: PathBuf,
-    certificate_file: PathBuf,
-    private_key_file: PathBuf,
-    tun_if: Option<String>,
-    debug: bool,
-    node_addr: Option<SocketAddr>,
-    agent_addr: Option<IpAddr>,
-    node_public_key_file: Option<PathBuf>,
-}
-
 fn main() -> ExitCode {
     //
     // parse configuration from command line
     //
-    let config: Config;
-    let ph_mode;
-    let control = Control::parse();
-    match control.command {
-        Some(Command::Adapter {
-            node_addr,
-            agent_addr,
-            node_public_key_file,
-        }) => {
-            ph_mode = PhMode::Adapter;
-            config = Config {
-                name: control.name.unwrap_or("adapter".to_string()),
-                control_path: control.control_path.into(),
-                self_addr: control.self_addr,
-                ca_file: control.ca_file.into(),
-                certificate_file: control.certificate_file.into(),
-                private_key_file: control.private_key_file.into(),
-                tun_if: control.tun_if,
-                debug: control.debug,
-                node_addr: Some(node_addr),
-                agent_addr: Some(agent_addr),
-                node_public_key_file: Some(node_public_key_file.into()),
-            };
-        }
-        Some(Command::Node) => {
-            ph_mode = PhMode::Node;
-            config = Config {
-                name: control.name.unwrap_or("node".to_string()),
-                control_path: control.control_path.into(),
-                self_addr: control.self_addr,
-                ca_file: control.ca_file.into(),
-                certificate_file: control.certificate_file.into(),
-                private_key_file: control.private_key_file.into(),
-                tun_if: control.tun_if,
-                debug: control.debug,
-                node_addr: None,
-                agent_addr: None,
-                node_public_key_file: None,
-            };
-        }
-        None => {
-            println!("command required: either 'adapter' or 'node'");
+    let (ph_mode, config) = match main_args::argparse() {
+        Ok((ph_mode, config)) => (ph_mode, config),
+        Err(e) => {
+            eprintln!("failed to parse command line arguments: {:?}", e);
+            eprintln!("try `ph --help` for help");
             return ExitCode::FAILURE;
         }
-    }
+    };
 
     //
     // set up logging

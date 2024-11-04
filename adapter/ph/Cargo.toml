@@ -33,6 +33,8 @@ zpr = { path = "../../zpr" }
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "tokio-tun", "zerocopy"] }
 nix = { version = "0.29.0", features = ["ioctl", "net"] }
 thiserror = "1.0.65"
+serde = { version = "1.0.214", features = ["derive"] }
+toml = "0.8.19"
 
 [dev-dependencies]
 
