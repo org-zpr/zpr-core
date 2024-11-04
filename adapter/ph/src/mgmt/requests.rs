@@ -7,6 +7,7 @@ use crate::config;
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::fastpath;
+use crate::link_state::LinkEvent;
 use crate::packet::{self, Packet};
 use crate::zdp;
 use bytes::{Buf, BufMut};
@@ -67,12 +68,13 @@ pub async fn send_hello_request<'a, 'pktbuf>(
             info!("Received HelloResponse, status: {}", status);
             asm.buffer_stack.put_buffer(hello_res.destroy());
 
-            if let Some(Ok(_)) = asm.peer_table.inspect(link_id, |peer_state| {
-                peer_state.link_state_machine.process_hello_response(asm)
-            }) {
-                Ok(())
-            } else {
+            if asm
+                .process_link_state_event_static(link_id, LinkEvent::ReceivedHelloResponse)
+                .is_err()
+            {
                 Err(())
+            } else {
+                Ok(())
             }
         }
 
@@ -83,7 +85,7 @@ pub async fn send_hello_request<'a, 'pktbuf>(
     }
 }
 
-/// send a Register Agent Address Request
+/// send a Register Agent Address Request (RFC 6.5 § 6.3.10)
 pub async fn send_register_agent_address_request<'a, 'pktbuf>(
     asm: &'a Assembly<'pktbuf>,
     link_id: zpr::LinkId,
@@ -135,14 +137,13 @@ pub async fn send_register_agent_address_request<'a, 'pktbuf>(
             );
             asm.buffer_stack.put_buffer(register_res.destroy());
 
-            if let Some(Ok(_)) = asm.peer_table.inspect(link_id, |peer_state| {
-                peer_state
-                    .link_state_machine
-                    .process_register_agent_address_response(asm)
-            }) {
-                Ok(())
-            } else {
+            if asm
+                .process_link_state_event(link_id, LinkEvent::ReceivedRegisterResponse)
+                .is_err()
+            {
                 Err(())
+            } else {
+                Ok(())
             }
         }
 

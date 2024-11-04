@@ -7,7 +7,7 @@ use crate::flow_control::FlowControl;
 use crate::km_cert_exchange::KmCertExchange;
 use crate::km_multiplexor::KmState;
 use crate::km_noise;
-use crate::link_state::LinkType;
+use crate::link_state::{LinkEvent, LinkStateError, LinkType};
 use crate::mgmt_processor_worker;
 use crate::peer_table;
 use crate::peer_table::PeerInsertError;
@@ -88,6 +88,29 @@ impl Assembly<'_> {
         self.ph_mode == PhMode::Node
     }
 
+    // TODO: REMOVE ME
+    pub fn process_link_state_event_static(
+        &'static self,
+        id: LinkId,
+        event: LinkEvent,
+    ) -> Result<(), LinkStateError> {
+        let Some(peer) = self.peer_table.get(id) else {
+            return Err(LinkStateError::NotFound(id));
+        };
+        peer.link_state_machine.process_static_event(self, event)
+    }
+
+    pub fn process_link_state_event(
+        &self,
+        id: LinkId,
+        event: LinkEvent,
+    ) -> Result<(), LinkStateError> {
+        let Some(peer) = self.peer_table.get(id) else {
+            return Err(LinkStateError::NotFound(id));
+        };
+        peer.link_state_machine.process_event(self, event)
+    }
+
     fn add_peer(
         &'static self,
         link_type: LinkType,
@@ -125,19 +148,29 @@ impl Assembly<'_> {
             return Ok(peer_id);
         };
 
-        if let Err(e) = peer.link_state_machine.configure(self) {
+        if let Err(e) = peer
+            .link_state_machine
+            .process_event(self, LinkEvent::Configure)
+        {
             error!(
                 "{}: Link {} failed to configure with error {}.  Resetting",
                 self.system_name, peer_id, e
             );
-            peer.link_state_machine.reset(self);
+            let _ = peer
+                .link_state_machine
+                .process_static_event(self, LinkEvent::Reset);
         } else {
-            if let Err(e) = peer.link_state_machine.start(self) {
+            if let Err(e) = peer
+                .link_state_machine
+                .process_event(self, LinkEvent::Start)
+            {
                 error!(
                     "{}: Link {} failed to start with error {}.  Resetting",
                     self.system_name, peer_id, e
                 );
-                peer.link_state_machine.reset(self);
+                let _ = peer
+                    .link_state_machine
+                    .process_static_event(self, LinkEvent::Reset);
             } else {
                 info!(
                     "{}: Successfully started tether with {}.  Assigned ID {}",
