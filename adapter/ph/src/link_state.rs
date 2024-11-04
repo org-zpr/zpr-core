@@ -348,7 +348,19 @@ impl LinkStateWrapper {
     fn maybe_send_hello<'pktbuf>(&self, asm: &'static Assembly<'pktbuf>) {
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            tokio::task::spawn_local(mgmt::requests::send_hello_request(asm, self.id));
+            let link_id = self.id;
+            tokio::task::spawn_local(async move {
+                mgmt::requests::send_hello_request(asm, link_id).await?;
+
+                if asm
+                    .process_link_state_event_static(link_id, LinkEvent::ReceivedHelloResponse)
+                    .is_err()
+                {
+                    Err(())
+                } else {
+                    Ok(())
+                }
+            });
         }
         // Otherwise, wait for the adapter to reach out
     }
@@ -403,9 +415,19 @@ impl LinkStateWrapper {
                     "{}: Link {} finished helloing.  Sending register agent address",
                     asm.system_name, self.id
                 );
-                tokio::task::spawn_local(mgmt::requests::send_register_agent_address_request(
-                    asm, self.id,
-                ));
+                let link_id = self.id;
+                tokio::task::spawn_local(async move {
+                    mgmt::requests::send_register_agent_address_request(asm, link_id).await?;
+
+                    if asm
+                        .process_link_state_event(link_id, LinkEvent::ReceivedRegisterResponse)
+                        .is_err()
+                    {
+                        Err(())
+                    } else {
+                        Ok(())
+                    }
+                });
                 Ok(())
             }
             (LinkType::NodeToNode, LinkState::Helloing) => {
