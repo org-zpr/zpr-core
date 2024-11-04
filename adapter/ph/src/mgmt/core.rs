@@ -7,7 +7,7 @@ use crate::assembly::Assembly;
 use crate::config;
 use crate::counters::CounterType;
 use crate::fastpath;
-use crate::packet::Packet;
+use crate::packet::{BufferPacket, Packet};
 use crate::zdp;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -21,7 +21,7 @@ pub async fn send_non_flow_mgmt<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
-    packet: Packet<'pktbuf>,
+    packet: BufferPacket,
 ) {
     send_mgmt_helper(asm, link_id, packet_type, None, None, packet).await
 }
@@ -34,7 +34,7 @@ pub async fn send_per_flow_mgmt<'pktbuf>(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
-    packet: Packet<'pktbuf>,
+    packet: BufferPacket,
 ) {
     send_mgmt_helper(asm, link_id, packet_type, Some(stream_id), None, packet).await
 }
@@ -44,7 +44,7 @@ pub async fn send_non_flow_mgmt_response<'pktbuf>(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     sequence_number: zpr::SeqNum,
-    packet: Packet<'pktbuf>,
+    packet: BufferPacket,
 ) {
     send_mgmt_helper(
         asm,
@@ -63,7 +63,7 @@ pub async fn send_per_flow_mgmt_response<'pktbuf>(
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
     sequence_number: zpr::SeqNum,
-    packet: Packet<'pktbuf>,
+    packet: BufferPacket,
 ) {
     send_mgmt_helper(
         asm,
@@ -82,7 +82,7 @@ async fn send_mgmt_helper<'pktbuf>(
     packet_type: zdp::ZdpPacketType,
     stream_id: Option<zpr::StreamId>,
     sequence_number: Option<zpr::SeqNum>,
-    mut packet: Packet<'pktbuf>,
+    mut packet: BufferPacket,
 ) {
     debug_assert_eq!(stream_id.is_some(), packet_type.is_per_flow());
 
@@ -112,8 +112,8 @@ pub async fn send_sync_non_flow_req<'pktbuf>(
     link_id: zpr::LinkId,
     zdp_request_type: zdp::ZdpPacketType,
     zdp_response_type: zdp::ZdpPacketType,
-    pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
-) -> Result<Packet<'pktbuf>, SyncReqError> {
+    pkt_fn: impl Fn(&mut BufferPacket) + Send + 'static,
+) -> Result<BufferPacket, SyncReqError> {
     send_sync_req_helper(
         asm,
         link_id,
@@ -136,8 +136,8 @@ pub async fn send_sync_per_flow_req<'pktbuf>(
     zdp_request_type: zdp::ZdpPacketType,
     zdp_response_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
-    pkt_fn: impl Fn(&mut Packet<'_>) + Send + 'static,
-) -> Result<(zpr::StreamId, Packet<'pktbuf>), SyncReqError> {
+    pkt_fn: impl Fn(&mut BufferPacket /* FIXME: can relax to Packet<_> */) + Send + 'static,
+) -> Result<(zpr::StreamId, BufferPacket), SyncReqError> {
     match send_sync_req_helper(
         asm,
         link_id,
@@ -186,8 +186,8 @@ async fn send_sync_req_helper<'pktbuf>(
     zdp_request_type: zdp::ZdpPacketType,
     zdp_response_type: zdp::ZdpPacketType,
     stream_id: Option<zpr::StreamId>,
-    pkt_fn: impl Fn(&mut Packet<'_>) + 'static,
-) -> Result<Packet<'pktbuf>, SyncReqError> {
+    pkt_fn: impl Fn(&mut BufferPacket /* FIXME: relax to Packet */) + 'static,
+) -> Result<BufferPacket, SyncReqError> {
     // acquire a permit to send a manamgement message
     let Some(peer_state) = asm.peer_table.get(link_id) else {
         return Err(SyncReqError::LinkClosed);
@@ -233,10 +233,10 @@ async fn send_sync_req_helper<'pktbuf>(
 // TODO: rename/move this
 fn match_received<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    response: Option<(zdp::ZdpPacketType, Packet<'pktbuf>)>,
+    response: Option<(zdp::ZdpPacketType, BufferPacket)>,
     err_type: SyncReqError,
     zdp_response_type: zdp::ZdpPacketType,
-) -> Result<Packet<'pktbuf>, SyncReqError> {
+) -> Result<BufferPacket, SyncReqError> {
     match response {
         Some((pkt_type, pkt)) => {
             if pkt_type != zdp_response_type {

@@ -67,13 +67,13 @@ use zpr_ext::std::mem::DropGuard;
 ///
 ///     // We need a backing byte buffer for the packet.  This would tupically be allocated
 ///     // from a buffer pool.
-///     let mut pkt_buf = [0u8; config::PACKET_BUFFER_SIZE];
+///     let pkt_buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
 ///
 ///     // Create the packet. Since we are reading this packet with
 ///     // full (ZDP) headers already on it and we don't plan on pushing
 ///     // anything on to the front, we don't need any headroom so
 ///     // we set it to 0.
-///     let mut pkt = packet::Packet::new(&mut pkt_buf, 0);
+///     let mut pkt = packet::Packet::new(pkt_buf, 0);
 ///
 ///     // Write (copy) the received data into the packet.
 ///     pkt.put(&sock_buf[..read_len]);
@@ -146,9 +146,29 @@ use zpr_ext::std::mem::DropGuard;
 /// }
 /// ```
 
-pub struct Packet<'buf> {
-    buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE],
+/// A generic packet type, backed by any sort of buffer.
+///
+/// Use this type in functions which operate only on the contents of a packet,
+/// and do not interact with the buffer stack in any way.
+pub struct Packet<PktBuf> {
+    buf: PktBuf,
 }
+
+/// Blanket trait capturing all the traits needed to act as a packet backing buffer.
+pub trait PacketBuffer:
+    std::ops::DerefMut<Target = [u8; config::PACKET_BUFFER_SIZE]> + Send
+{
+}
+impl<PktBuf: std::ops::DerefMut<Target = [u8; config::PACKET_BUFFER_SIZE]> + Send> PacketBuffer
+    for PktBuf
+{
+}
+
+/// A `Packet` backed specifically by a `Buffer` from the buffer stack.
+///
+/// Use this type in any code which moves a packet through the packet processing
+/// pipeline (ultimately starting from, or ending with, the buffer stack).
+pub type BufferPacket = Packet<crate::buffer_stack::Buffer<{ config::PACKET_BUFFER_SIZE }>>;
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout)]
 #[repr(C)]
@@ -242,17 +262,17 @@ pub const PACKET_BUFFER_MAX_BODY_SIZE: usize =
     config::PACKET_BUFFER_SIZE - PACKET_BUFFER_MIN_BODY_OFFSET;
 
 #[allow(dead_code)]
-impl<'buf> Packet<'buf> {
+impl<PktBuf: PacketBuffer> Packet<PktBuf> {
     /// Initialize a buffer as a packet buffer, returning an exclusive handle to it.
     /// `headroom` indicates room to keep free at packet start for possible extension.
-    pub fn new(buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE], headroom: usize) -> Self {
+    pub fn new(buf: PktBuf, headroom: usize) -> Self {
         Self::new_with_existing_data(buf, PACKET_BUFFER_MIN_BODY_OFFSET + headroom, 0)
     }
 
     /// Same as `new()`, but accepts a `DropGuard`-protected buffer, and produces
     /// a `DropGuard`-protected packet buffer, so manually calling `destroy()`
     /// is unnecessary.
-    pub fn new_guarded<B: DropGuard<&'buf mut [u8; config::PACKET_BUFFER_SIZE]> + Send>(
+    pub fn new_guarded<B: DropGuard<PktBuf> + Send>(
         buf: B,
         headroom: usize,
     ) -> impl DropGuard<Self> + Send {
@@ -261,21 +281,17 @@ impl<'buf> Packet<'buf> {
 
     /// Consumes a packet handle, returning the underlying buffer.
     #[must_use]
-    pub fn destroy(self) -> &'buf mut [u8; config::PACKET_BUFFER_SIZE] {
+    pub fn destroy(self) -> PktBuf {
         self.buf
     }
 
     /// Initialize a buffer with existing packet data as a packet buffer.
     /// `offset` is offset of data within buffer.
     /// It must be at least equal to `PACKET_BUFFER_MIN_BODY_OFFSET`.
-    pub fn new_with_existing_data(
-        buf: &'buf mut [u8; config::PACKET_BUFFER_SIZE],
-        offset: usize,
-        len: usize,
-    ) -> Self {
+    pub fn new_with_existing_data(buf: PktBuf, offset: usize, len: usize) -> Self {
         assert!(offset >= PACKET_BUFFER_MIN_BODY_OFFSET);
-        assert!(len <= size_of_val(buf));
-        assert!(offset <= size_of_val(buf) - len);
+        assert!(len <= size_of_val(&*buf));
+        assert!(offset <= size_of_val(&*buf) - len);
         let mut pkt = Packet { buf };
         let md = pkt.metadata_mut();
         md.offset = offset;
@@ -286,42 +302,39 @@ impl<'buf> Packet<'buf> {
     }
 
     /// Copy this packet's metadata, data and layout into a new buffer, returning a handle for it.
-    pub fn clone_into<'other>(
-        &self,
-        buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
-    ) -> Packet<'other> {
+    pub fn clone_into<OtherPktBuf: PacketBuffer>(&self, buf: OtherPktBuf) -> Packet<OtherPktBuf> {
         self.clone_prefix_into_with_headroom(buf, self.headroom_available(), self.body().len())
     }
 
     /// Like `clone_into()`, but only copy a prefix of the packet's data.
-    pub fn clone_prefix_into<'other>(
+    pub fn clone_prefix_into<OtherPktBuf: PacketBuffer>(
         &self,
-        buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
+        buf: OtherPktBuf,
         len: usize,
-    ) -> Packet<'other> {
+    ) -> Packet<OtherPktBuf> {
         self.clone_prefix_into_with_headroom(buf, self.headroom_available(), len)
     }
 
     /// Copy this packet's metadata and data into a new buffer, returning a handle for it.
     /// The packet body will be positioned to leave the specified amount of headroom in the new buffer.
-    pub fn clone_into_with_headroom<'other>(
+    pub fn clone_into_with_headroom<OtherPktBuf: PacketBuffer>(
         &self,
-        buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
+        buf: OtherPktBuf,
         headroom: usize,
-    ) -> Packet<'other> {
+    ) -> Packet<OtherPktBuf> {
         self.clone_prefix_into_with_headroom(buf, headroom, self.body().len())
     }
 
     /// Like `clone_into_with_headroom()`, but only copy a prefix of the packet's data.
-    pub fn clone_prefix_into_with_headroom<'other>(
+    pub fn clone_prefix_into_with_headroom<OtherPktBuf: PacketBuffer>(
         &self,
-        buf: &'other mut [u8; config::PACKET_BUFFER_SIZE],
+        mut buf: OtherPktBuf,
         headroom: usize,
         len: usize,
-    ) -> Packet<'other> {
+    ) -> Packet<OtherPktBuf> {
         let body = self.body();
         assert!(len <= body.len());
-        assert!(headroom <= size_of_val(buf) - len - PACKET_BUFFER_MIN_BODY_OFFSET);
+        assert!(headroom <= size_of_val(&*buf) - len - PACKET_BUFFER_MIN_BODY_OFFSET);
         buf[..size_of::<PacketMetadata>()]
             .copy_from_slice(&self.buf[..size_of::<PacketMetadata>()]);
         let offset = PACKET_BUFFER_MIN_BODY_OFFSET + headroom;
@@ -454,7 +467,7 @@ impl<'buf> Packet<'buf> {
     }
 }
 
-impl<'buf> buf::Buf for Packet<'buf> {
+impl<PktBuf: PacketBuffer> buf::Buf for Packet<PktBuf> {
     //! Reading from a `Packet` using the `Buf` interface consumes data
     //! from the front of the packet.
 
@@ -479,14 +492,14 @@ impl<'buf> buf::Buf for Packet<'buf> {
     }
 }
 
-unsafe impl<'buf> buf::BufMut for Packet<'buf> {
+unsafe impl<PktBuf: PacketBuffer> buf::BufMut for Packet<PktBuf> {
     //! Writing to a `Packet` using the `BufMut` interface appends data
     //! into the tailroom and the end of the packet.
 
     /// This indicates how much tailroom is remaining.
     fn remaining_mut(&self) -> usize {
         let md = self.metadata();
-        size_of_val(self.buf) - (md.offset + md.len)
+        size_of_val(&*self.buf) - (md.offset + md.len)
     }
 
     /// Provides a reference to a portion of the remaining tailroom.
@@ -504,7 +517,7 @@ unsafe impl<'buf> buf::BufMut for Packet<'buf> {
     }
 }
 
-impl std::fmt::Debug for Packet<'_> {
+impl<PktBuf: PacketBuffer> std::fmt::Debug for Packet<PktBuf> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         writeln!(f, "\n=== Begin dumping packet info ===")?;
         self.metadata().fmt(f)?;

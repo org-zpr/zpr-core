@@ -2,7 +2,7 @@ use crate::assembly::Assembly;
 use crate::counters::CounterType;
 use crate::fastpath;
 use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
-use crate::packet::Packet;
+use crate::packet::BufferPacket;
 use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
 use std::future::Future;
@@ -16,10 +16,10 @@ pub struct Config {
     pub link_id: zpr::LinkId,
 }
 
-async fn worker<'pktbuf>(
+async fn worker(
     config: &Config,
     asm: &'static Assembly<'_>,
-    queue: &mut mpsc::Receiver<MgmtProcessorMessage<'static>>,
+    queue: &mut mpsc::Receiver<MgmtProcessorMessage>,
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
@@ -45,16 +45,13 @@ async fn worker<'pktbuf>(
 pub fn launch(
     config: &Config,
     asm: &'static Assembly,
-    mut queue: mpsc::Receiver<MgmtProcessorMessage<'static>>,
+    mut queue: mpsc::Receiver<MgmtProcessorMessage>,
 ) -> impl Future<Output = ()> + 'static {
     let cfg = *config;
     async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
-async fn handle_packet<'pktbuf>(
-    asm: &'static Assembly<'pktbuf>,
-    mut pkt: Packet<'pktbuf>,
-) -> HandleMgmtResult<'pktbuf> {
+async fn handle_packet(asm: &'static Assembly<'static>, mut pkt: BufferPacket) -> HandleMgmtResult {
     let Ok(base_hdr) = ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };

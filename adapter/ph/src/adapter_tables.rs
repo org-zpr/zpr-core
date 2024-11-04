@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 use crate::defs::FiveTuple;
-use crate::packet::Packet;
+use crate::packet::BufferPacket;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::mapref::one::Ref as DashMapRef;
@@ -21,26 +21,26 @@ pub struct AltPep {
     pub tether_id: StreamId,
 }
 
-pub enum AltEntry<'pktbuf> {
+pub enum AltEntry {
     Active(AltPep),
-    Pending(Packet<'pktbuf>),
+    Pending(BufferPacket),
 }
 
-pub struct AgentLookupTable<'pktbuf> {
-    table: DashMap<FiveTuple, AltEntry<'pktbuf>>,
+pub struct AgentLookupTable {
+    table: DashMap<FiveTuple, AltEntry>,
 }
 
-pub struct AltEntryGuard<'a, 'pktbuf>(DashMapRef<'a, FiveTuple, AltEntry<'pktbuf>>);
+pub struct AltEntryGuard<'a>(DashMapRef<'a, FiveTuple, AltEntry>);
 
-impl<'pktbuf> std::ops::Deref for AltEntryGuard<'_, 'pktbuf> {
-    type Target = AltEntry<'pktbuf>;
+impl std::ops::Deref for AltEntryGuard<'_> {
+    type Target = AltEntry;
 
     fn deref(&self) -> &Self::Target {
         self.0.deref()
     }
 }
 
-impl<'pktbuf> AgentLookupTable<'pktbuf> {
+impl AgentLookupTable {
     pub fn new() -> Self {
         Self {
             table: DashMap::new(),
@@ -51,17 +51,17 @@ impl<'pktbuf> AgentLookupTable<'pktbuf> {
     pub fn inspect<T>(
         &self,
         five_tuple: &FiveTuple,
-        inspector: impl FnOnce(&AltEntry<'pktbuf>) -> T,
+        inspector: impl FnOnce(&AltEntry) -> T,
     ) -> Option<T> {
         self.table.get(five_tuple).map(|entry| inspector(&*entry))
     }
 
-    pub fn get(&self, five_tuple: &FiveTuple) -> Option<AltEntryGuard<'_, 'pktbuf>> {
+    pub fn get(&self, five_tuple: &FiveTuple) -> Option<AltEntryGuard<'_>> {
         self.table.get(five_tuple).map(AltEntryGuard)
     }
 
     // FIXME: ideally we want `try_insert()` but dashmap doesn't support that…
-    pub fn insert(&self, five_tuple: FiveTuple, entry: AltEntry<'pktbuf>) {
+    pub fn insert(&self, five_tuple: FiveTuple, entry: AltEntry) {
         self.table.insert(five_tuple, entry);
     }
 
@@ -73,7 +73,7 @@ impl<'pktbuf> AgentLookupTable<'pktbuf> {
     pub fn alter<T>(
         &self,
         five_tuple: &FiveTuple,
-        alterer: impl FnOnce(&mut AltEntry<'pktbuf>) -> T,
+        alterer: impl FnOnce(&mut AltEntry) -> T,
     ) -> Result<T, ()> {
         match self.table.get_mut(five_tuple) {
             Some(mut ref_) => Ok(alterer(ref_.value_mut())),

@@ -399,8 +399,8 @@ mod test {
         let (km_tx, mut km_rx) = mpsc::channel(4);
         let km_state = KmState::new(km_tx, km_sig_tx);
 
-        let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 8];
-        let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
+        let buf_storage = vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]); 8];
+        let buffer_stack = BufferStack::new(buf_storage);
 
         let mut builder = TestAssemblyBuilder::new();
         builder.km_state = Some(km_state);

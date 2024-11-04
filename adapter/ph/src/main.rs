@@ -273,7 +273,8 @@ fn main() -> ExitCode {
 
     let topology_config = config::TopologyConfig::default();
 
-    let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; topology_config.buffer_count];
+    let buf_storage =
+        vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]); topology_config.buffer_count];
 
     let (cap_inq, cap_outq) = mpsc::channel(topology_config.capture_queue_size);
     let (md_inq, md_outq) = mpsc::channel(topology_config.mgmt_dispatch_queue_size);
@@ -367,7 +368,7 @@ fn main() -> ExitCode {
         topology_config,
         system_name: config.name,
         agent_address: config.agent_addr,
-        buffer_stack: BufferStack::new(buf_storage.leak::<'static>()),
+        buffer_stack: BufferStack::new(buf_storage),
         agent_input: AgentInput::new(tun_devs.iter()),
         substrate_egress: SubstrateEgress::new(substrate_sockets.iter()),
         capture_queue: Capture::new(cap_inq),

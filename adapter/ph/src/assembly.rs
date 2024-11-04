@@ -52,13 +52,13 @@ pub struct Assembly<'pktbuf> {
     pub system_name: String, // For debugging use
     pub agent_address: Option<IpAddr>,
 
-    pub buffer_stack: BufferStack<'pktbuf, { config::PACKET_BUFFER_SIZE }>,
+    pub buffer_stack: BufferStack<{ config::PACKET_BUFFER_SIZE }>,
 
     pub agent_input: AgentInput<'pktbuf>,
     pub substrate_egress: SubstrateEgress<'pktbuf>,
 
     // Used to intercept packets that are unencrypted but still have ZDP headers
-    pub capture_queue: Capture<'pktbuf>,
+    pub capture_queue: Capture,
     pub capture_worker: CaptureWorker,
     pub flow_control: FlowControl,
 
@@ -66,16 +66,16 @@ pub struct Assembly<'pktbuf> {
 
     pub tun_ctl: Box<dyn TunCtl + 'pktbuf>,
 
-    pub peer_table: peer_table::PeerTable<'pktbuf>,
+    pub peer_table: peer_table::PeerTable,
     pub peer_ids: std::sync::Mutex<Vec<zpr::LinkId>>, // HACK until peer_table is enumerable
 
     // Adapter tables
     // NOTE: only adapter_manager_worker should modify these tables!
-    pub alt: adapter_tables::AgentLookupTable<'pktbuf>,
+    pub alt: adapter_tables::AgentLookupTable,
     pub dlt: adapter_tables::DockLookupTable,
 
-    pub mgmt_dispatch: MgmtDispatch<'pktbuf>,
-    pub adapter_manager: AdapterManager<'pktbuf>,
+    pub mgmt_dispatch: MgmtDispatch,
+    pub adapter_manager: AdapterManager,
     pub km_state: KmState,
 
     pub self_noise_keypair: Option<NoiseKeypair>,
@@ -207,20 +207,20 @@ pub mod test {
         pub topology_config: Option<TopologyConfig>,
         pub system_name: Option<String>,
         pub agent_address: Option<Option<IpAddr>>,
-        pub buffer_stack: Option<BufferStack<'a, { config::PACKET_BUFFER_SIZE }>>,
+        pub buffer_stack: Option<BufferStack<{ config::PACKET_BUFFER_SIZE }>>,
         pub agent_input: Option<AgentInput<'a>>,
         pub substrate_egress: Option<SubstrateEgress<'a>>,
-        pub capture_queue: Option<Capture<'a>>,
+        pub capture_queue: Option<Capture>,
         pub capture_worker: Option<CaptureWorker>,
         pub flow_control: Option<FlowControl>,
         pub counters: Option<EnumMap<CounterType, Counter>>,
         pub tun_ctl: Option<Box<dyn TunCtl + 'a>>,
-        pub peer_table: Option<peer_table::PeerTable<'a>>,
+        pub peer_table: Option<peer_table::PeerTable>,
         pub peer_ids: Option<Vec<zpr::LinkId>>,
-        pub alt: Option<adapter_tables::AgentLookupTable<'a>>,
+        pub alt: Option<adapter_tables::AgentLookupTable>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
-        pub mgmt_dispatch: Option<MgmtDispatch<'a>>,
-        pub adapter_manager: Option<AdapterManager<'a>>,
+        pub mgmt_dispatch: Option<MgmtDispatch>,
+        pub adapter_manager: Option<AdapterManager>,
         pub km_state: Option<KmState>,
     }
 
@@ -246,8 +246,8 @@ pub mod test {
             .agent_address
             .unwrap_or(Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
         let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
-            let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 0];
-            BufferStack::new(buf_storage.leak::<'static>())
+            let buf_storage = vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]); 0];
+            BufferStack::new(buf_storage)
         });
         let agent_input = builder.agent_input.unwrap_or_else(|| {
             let v: Vec<&ZprTun> = Vec::new();
