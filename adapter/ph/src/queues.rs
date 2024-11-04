@@ -7,6 +7,7 @@ use crate::test_packet::*;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::result::Result;
+use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
@@ -75,14 +76,14 @@ impl MgmtProcessor {
 
 /// AgentInput is responsible for emitting decapsulated agent packets on the
 /// host's TUN interface.
-pub struct AgentInput<'a> {
-    tuns: Box<[&'a ZprTun]>,
+pub struct AgentInput {
+    tuns: Box<[Arc<ZprTun>]>,
 }
 
-impl<'a> AgentInput<'a> {
+impl AgentInput {
     // We necessarily have multiple queues, corresponding to the multiple
     // FDs of a multiqueue-enabled TUN interface.
-    pub fn new(tuns: impl IntoIterator<Item = &'a ZprTun>) -> Self {
+    pub fn new(tuns: impl IntoIterator<Item = Arc<ZprTun>>) -> Self {
         Self {
             tuns: tuns.into_iter().collect(),
         }
@@ -92,7 +93,7 @@ impl<'a> AgentInput<'a> {
         &self,
         mut packet: P,
     ) -> Result<(), TryEnqueueError<P>> {
-        let tun = self.tuns[packet.flowhash() as usize % self.tuns.len()];
+        let tun = &self.tuns[packet.flowhash() as usize % self.tuns.len()];
 
         let proto = net_defs::ip_ethertype(net_defs::ip_version(packet.body()));
         let mut hdr = packet.alloc_zeroed_headroom(tun_pi::PI_SIZE);
@@ -118,12 +119,12 @@ impl<'a> AgentInput<'a> {
 }
 
 /// SubstrateEgress is responsible for sending encapsulated agent packets to the dock.
-pub struct SubstrateEgress<'a> {
-    sockets: Box<[&'a UdpSocket]>,
+pub struct SubstrateEgress {
+    sockets: Box<[Arc<UdpSocket>]>,
 }
 
-impl<'a> SubstrateEgress<'a> {
-    pub fn new(sockets: impl IntoIterator<Item = &'a UdpSocket>) -> Self {
+impl SubstrateEgress {
+    pub fn new(sockets: impl IntoIterator<Item = Arc<UdpSocket>>) -> Self {
         Self {
             sockets: sockets.into_iter().collect(),
         }
@@ -186,14 +187,14 @@ impl<'a> SubstrateEgress<'a> {
         &self,
         packet: &Packet<impl PacketBuffer>,
         mut dest_sa: zpr::SubstrateAddr,
-    ) -> (&'a UdpSocket, std::net::SocketAddr) {
+    ) -> (&UdpSocket, std::net::SocketAddr) {
         match &mut dest_sa {
             SocketAddr::V4(_) => (),
             SocketAddr::V6(dest_sa) => dest_sa.set_flowinfo(packet.flowhash()),
         }
 
         (
-            self.sockets[packet.flowhash() as usize % self.sockets.len()],
+            &self.sockets[packet.flowhash() as usize % self.sockets.len()],
             dest_sa,
         )
     }

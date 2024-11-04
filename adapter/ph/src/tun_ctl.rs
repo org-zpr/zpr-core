@@ -1,5 +1,6 @@
 use crate::sys::ZprTun;
 use std::io::Result;
+use std::sync::Arc;
 
 /// This interface provides shared access to the TUN device for controlling
 /// its state.  Its API is limited to restrict coupling of the full system
@@ -13,17 +14,17 @@ pub trait TunCtl: Sync {
 
 /// Canonical implementation of the `TunCtl` interface, just a thin wrapper
 /// around a reference to a `ZprTun` struct.
-pub struct TunCtlImpl<'a> {
-    tun: &'a ZprTun,
+pub struct TunCtlImpl {
+    tun: Arc<ZprTun>,
 }
 
-impl<'a> TunCtlImpl<'a> {
-    pub fn new(tun: &'a ZprTun) -> Self {
+impl TunCtlImpl {
+    pub fn new(tun: Arc<ZprTun>) -> Self {
         Self { tun }
     }
 }
 
-impl TunCtl for TunCtlImpl<'_> {
+impl TunCtl for TunCtlImpl {
     fn set_carrier(&self, carrier: bool) -> Result<()> {
         self.tun.set_carrier(carrier)
     }

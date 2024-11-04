@@ -54,8 +54,8 @@ pub struct Assembly<'pktbuf> {
 
     pub buffer_stack: BufferStack<{ config::PACKET_BUFFER_SIZE }>,
 
-    pub agent_input: AgentInput<'pktbuf>,
-    pub substrate_egress: SubstrateEgress<'pktbuf>,
+    pub agent_input: AgentInput,
+    pub substrate_egress: SubstrateEgress,
 
     // Used to intercept packets that are unencrypted but still have ZDP headers
     pub capture_queue: Capture,
@@ -64,7 +64,7 @@ pub struct Assembly<'pktbuf> {
 
     pub counters: EnumMap<CounterType, Counter>,
 
-    pub tun_ctl: Box<dyn TunCtl + 'pktbuf>,
+    pub tun_ctl: Box<dyn TunCtl>,
 
     pub peer_table: peer_table::PeerTable,
     pub peer_ids: std::sync::Mutex<Vec<zpr::LinkId>>, // HACK until peer_table is enumerable
@@ -81,6 +81,8 @@ pub struct Assembly<'pktbuf> {
     pub self_noise_keypair: Option<NoiseKeypair>,
     pub peer_noise_keypair: Option<NoiseKeypair>,
     pub certx: Option<KmCertExchange>,
+
+    pub _phantom: std::marker::PhantomData<&'pktbuf [u8]>,
 }
 
 impl Assembly<'_> {
@@ -195,26 +197,24 @@ pub mod test {
 
     use super::*;
     use crate::config::TopologyConfig;
-    use crate::sys::ZprTun;
     use std::net::Ipv4Addr;
-    use tokio::net::UdpSocket;
     use tokio::sync::mpsc;
 
     #[allow(dead_code)]
     #[derive(Default)]
-    pub struct TestAssemblyBuilder<'a> {
+    pub struct TestAssemblyBuilder {
         pub ph_mode: Option<PhMode>,
         pub topology_config: Option<TopologyConfig>,
         pub system_name: Option<String>,
         pub agent_address: Option<Option<IpAddr>>,
         pub buffer_stack: Option<BufferStack<{ config::PACKET_BUFFER_SIZE }>>,
-        pub agent_input: Option<AgentInput<'a>>,
-        pub substrate_egress: Option<SubstrateEgress<'a>>,
+        pub agent_input: Option<AgentInput>,
+        pub substrate_egress: Option<SubstrateEgress>,
         pub capture_queue: Option<Capture>,
         pub capture_worker: Option<CaptureWorker>,
         pub flow_control: Option<FlowControl>,
         pub counters: Option<EnumMap<CounterType, Counter>>,
-        pub tun_ctl: Option<Box<dyn TunCtl + 'a>>,
+        pub tun_ctl: Option<Box<dyn TunCtl>>,
         pub peer_table: Option<peer_table::PeerTable>,
         pub peer_ids: Option<Vec<zpr::LinkId>>,
         pub alt: Option<adapter_tables::AgentLookupTable>,
@@ -232,13 +232,13 @@ pub mod test {
         }
     }
 
-    impl TestAssemblyBuilder<'_> {
+    impl TestAssemblyBuilder {
         pub fn new() -> Self {
             Self::default()
         }
     }
 
-    pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
+    pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly<'static> {
         let ph_mode = builder.ph_mode.unwrap_or(PhMode::Adapter);
         let topology_config = builder.topology_config.unwrap_or_default();
         let system_name = builder.system_name.unwrap_or("test".into());
@@ -249,14 +249,12 @@ pub mod test {
             let buf_storage = vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]); 0];
             BufferStack::new(buf_storage)
         });
-        let agent_input = builder.agent_input.unwrap_or_else(|| {
-            let v: Vec<&ZprTun> = Vec::new();
-            AgentInput::new(v)
-        });
-        let substrate_egress = builder.substrate_egress.unwrap_or_else(|| {
-            let v: Vec<&UdpSocket> = Vec::new();
-            SubstrateEgress::new(v)
-        });
+        let agent_input = builder
+            .agent_input
+            .unwrap_or_else(|| AgentInput::new(Vec::new()));
+        let substrate_egress = builder
+            .substrate_egress
+            .unwrap_or_else(|| SubstrateEgress::new(Vec::new()));
         let capture_queue = builder.capture_queue.unwrap_or_else(|| {
             let (cq_inq, _cq_outq) = mpsc::channel(1);
             Capture::new(cq_inq)
@@ -314,6 +312,7 @@ pub mod test {
             self_noise_keypair: None,
             peer_noise_keypair: None,
             certx: None,
+            _phantom: std::marker::PhantomData,
         }
     }
 }
