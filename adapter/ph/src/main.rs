@@ -320,8 +320,11 @@ fn main() -> ExitCode {
         None
     };
 
-    let tun_devs: Vec<_> =
-    match ZprTun::new_mq(config.tun_if, topology_config.agent_output_concurrency, tun_addr) {
+    let tun_devs: Vec<_> = match ZprTun::new_mq(
+        config.tun_if,
+        topology_config.agent_output_concurrency,
+        tun_addr,
+    ) {
         Ok(devs) => devs.into_iter().map(Arc::new).collect(),
         Err(e) => {
             panic!("unable to create TUN device: {:?}", e);
