@@ -88,20 +88,8 @@ impl Assembly {
         self.ph_mode == PhMode::Node
     }
 
-    // TODO: REMOVE ME
-    pub fn process_link_state_event_static(
-        self: &Arc<Self>,
-        id: LinkId,
-        event: LinkEvent,
-    ) -> Result<(), LinkStateError> {
-        let Some(peer) = self.peer_table.get(id) else {
-            return Err(LinkStateError::NotFound(id));
-        };
-        peer.link_state_machine.process_static_event(self, event)
-    }
-
     pub fn process_link_state_event(
-        &self,
+        self: &Arc<Self>,
         id: LinkId,
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
@@ -158,7 +146,7 @@ impl Assembly {
             );
             let _ = peer
                 .link_state_machine
-                .process_static_event(self, LinkEvent::Reset);
+                .process_event(self, LinkEvent::Reset);
         } else {
             if let Err(e) = peer
                 .link_state_machine
@@ -170,7 +158,7 @@ impl Assembly {
                 );
                 let _ = peer
                     .link_state_machine
-                    .process_static_event(self, LinkEvent::Reset);
+                    .process_event(self, LinkEvent::Reset);
             } else {
                 info!(
                     "{}: Successfully started tether with {}.  Assigned ID {}",

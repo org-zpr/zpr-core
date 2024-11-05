@@ -131,7 +131,7 @@ pub async fn launch_signal_worker(
                                 error!("{}: km_multiplexor: failed to set SA established: {:?}", asm.system_name, e);
                             }
                         }
-                        match asm.process_link_state_event_static(linkmsg.link_id, LinkEvent::KeyingDone) {
+                        match asm.process_link_state_event(linkmsg.link_id, LinkEvent::KeyingDone) {
                             Err(e) => {
                                 error!("{}: Link state error: {:?}", asm.system_name, e);
                             }

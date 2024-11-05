@@ -210,11 +210,17 @@ impl LinkStateWrapper {
         self.locked_fsm.lock().unwrap().status
     }
 
-    pub fn process_event(&self, asm: &Assembly, event: LinkEvent) -> Result<(), LinkStateError> {
+    pub fn process_event(
+        &self,
+        asm: &Arc<Assembly>,
+        event: LinkEvent,
+    ) -> Result<(), LinkStateError> {
         match event {
             LinkEvent::Configure => self.configure(asm),
             LinkEvent::Start => self.start(asm),
+            LinkEvent::KeyingDone => self.keying_done(asm),
             LinkEvent::ReceivedHelloRequest => self.process_hello_request(asm),
+            LinkEvent::ReceivedHelloResponse => self.process_hello_response(asm),
             LinkEvent::ReceivedRegisterRequest(addr) => {
                 self.process_register_agent_address_request(asm, addr)
             }
@@ -227,22 +233,8 @@ impl LinkStateWrapper {
             LinkEvent::ReceivedTerminationIndication => {
                 Err(LinkStateError::OperationNotSupportedYet)
             }
-            _ => panic!("Called wrong function for event {:?}", event),
-        }
-    }
-
-    // FIXME: This is a temporary hack until we get rid of the static stuff
-    pub fn process_static_event(
-        &self,
-        asm: &Arc<Assembly>,
-        event: LinkEvent,
-    ) -> Result<(), LinkStateError> {
-        match event {
-            LinkEvent::KeyingDone => self.keying_done(asm),
-            LinkEvent::ReceivedHelloResponse => self.process_hello_response(asm),
             LinkEvent::Close => Ok(self.initiate_close()),
             LinkEvent::Reset => Ok(self.reset(asm)),
-            _ => panic!("Called wrong function for event {:?}", event),
         }
     }
 
@@ -293,7 +285,7 @@ impl LinkStateWrapper {
         match self.link_type {
             LinkType::AdapterToNode => {
                 km_multiplexor::add_adapter_link(
-                    &asm,
+                    asm,
                     self.id,
                     ZPIPair::new(zpr::ZPI_ENCRYPTED_HEADER_FLAG | 5, 6),
                     asm.self_noise_keypair.clone().unwrap(),
@@ -310,7 +302,7 @@ impl LinkStateWrapper {
             }
             LinkType::NodeToAdapter => {
                 km_multiplexor::add_node_link(
-                    &asm,
+                    asm,
                     self.id,
                     ZPIPair::new(ZPI_ENCRYPTED_HEADER_FLAG | 3, 4),
                     asm.self_noise_keypair.clone().unwrap(),
@@ -354,7 +346,7 @@ impl LinkStateWrapper {
                 mgmt::requests::send_hello_request(&task_asm, link_id).await?;
 
                 if task_asm
-                    .process_link_state_event_static(link_id, LinkEvent::ReceivedHelloResponse)
+                    .process_link_state_event(link_id, LinkEvent::ReceivedHelloResponse)
                     .is_err()
                 {
                     Err(())
