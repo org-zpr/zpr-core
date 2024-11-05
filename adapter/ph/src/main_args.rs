@@ -209,6 +209,29 @@ impl Default for Config {
 }
 
 impl Config {
+    fn new_for_adapter(config_file: Option<AdapterConfig>, common: &CommonArgs) -> Self {
+        let mut config = Config::default();
+        config.name = "adapter".to_string();
+        // fold in anything from the config file:
+        if let Some(config_file) = config_file {
+            config.set_from_globals(&config_file.global);
+            config.set_from_adapter(&config_file.adapter);
+        }
+        config.set_from_common(common);
+        config
+    }
+
+    fn new_for_node(config_file: Option<NodeConfig>, common: &CommonArgs) -> Self {
+        let mut config = Config::default();
+        config.name = "node".to_string();
+        // fold in anything from the config file:
+        if let Some(config_file) = config_file {
+            config.set_from_globals(&config_file.global);
+        }
+        config.set_from_common(common);
+        config
+    }
+
     // Check that the required bits are present based on mode.
     //
     // TODO: Might be nice to check things like file existence here too.
@@ -249,7 +272,7 @@ impl Config {
     }
 
     // Overwrite our internal state with the values present in the global section.
-    fn merge_globals(&mut self, config: &GlobalConfigSection) {
+    fn set_from_globals(&mut self, config: &GlobalConfigSection) {
         if let Some(name) = &config.name {
             self.name = name.clone();
         }
@@ -276,7 +299,8 @@ impl Config {
         }
     }
 
-    fn merge_adapter(&mut self, config: &AdapterConfigSection) {
+    // Overwrite our internal state with the values present in the adapter section.
+    fn set_from_adapter(&mut self, config: &AdapterConfigSection) {
         if let Some(node_addr) = &config.node_addr {
             self.node_addr = Some(*node_addr);
         }
@@ -288,7 +312,8 @@ impl Config {
         }
     }
 
-    fn merge_common(&mut self, common: &CommonArgs) {
+    // Overwrite our internal state with the values present in the CommonArgs (from command line)
+    fn set_from_common(&mut self, common: &CommonArgs) {
         if let Some(name) = &common.name {
             self.name = name.clone();
         }
@@ -414,16 +439,10 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
                 },
                 None => None,
             };
-            config = Config::default();
-            config.name = "adapter".to_string();
-            // fold in anything from the config file:
-            if let Some(config_file) = config_file {
-                config.merge_globals(&config_file.global);
-                config.merge_adapter(&config_file.adapter);
-            }
-            // fold in anything from the command line:
-            config.merge_common(&common);
-            // fold in the adapter specific command line args:
+
+            config = Config::new_for_adapter(config_file, &common);
+
+            // fold in the optional, adapter specific command line args:
             if let Some(node_addr) = node_addr {
                 config.node_addr = Some(node_addr);
             }
@@ -449,14 +468,7 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
                 },
                 None => None,
             };
-            config = Config::default();
-            config.name = "node".to_string();
-            // fold in anything from the config file:
-            if let Some(config_file) = config_file {
-                config.merge_globals(&config_file.global);
-            }
-            // fold in anything from the command line:
-            config.merge_common(&common);
+            config = Config::new_for_node(config_file, &common);
         }
     }
     if let Err(e) = config.check_valid(ph_mode) {
