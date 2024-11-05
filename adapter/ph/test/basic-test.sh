@@ -149,8 +149,8 @@ done
 # Cleanup
 #
 
-rgid=$(($(ps -o rgid= -p "$$")))
-for ph in $(pgrep -x -G $rgid ph)
+CHILDREN=$(pstree -pT "$$" | egrep -o 'ph\([0-9]+\)' | sed -E 's/ph\(([0-9]+)\)/\1/')
+for ph in $CHILDREN
 do
 	echo
 	echo "Terminating $ph"

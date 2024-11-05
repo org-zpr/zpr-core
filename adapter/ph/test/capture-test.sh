@@ -126,6 +126,7 @@ wait_for 5 check_carrier zpr-b tun0 || {
   exit 1
 }
 echo "Carrier has arrived."
+sleep 1
 
 stty sane || true
 
@@ -134,9 +135,6 @@ stty sane || true
 #
 
 set_program "$ADAPTER2_SOCK" "$TMPDIR/cap_test2.pcap" None
-
-echo "pausing for key management exchange..."
-countdown 10
 
 echo "starting PING test..."
 
@@ -177,8 +175,8 @@ fi
 # Cleanup
 #
 
-rgid=$(($(ps -o rgid= -p "$$")))
-for ph in $(pgrep -x -G $rgid ph)
+CHILDREN=$(pstree -pT "$$" | egrep -o 'ph\([0-9]+\)' | sed -E 's/ph\(([0-9]+)\)/\1/')
+for ph in $CHILDREN
 do
 	echo
 	echo "Terminating $ph"
