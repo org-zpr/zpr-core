@@ -149,14 +149,13 @@ done
 # Cleanup
 #
 
-CHILDREN=$(pstree -pT "$$" | egrep -o 'ph\([0-9]+\)' | sed -E 's/ph\(([0-9]+)\)/\1/')
-for ph in $CHILDREN
+for pid in $(get_descendants)
 do
-	echo
-	echo "Terminating $ph"
-	sleep 1
-	sudo kill -SIGTERM "$ph"
-	sleep 1
+    echo
+    echo "Terminating $pid"
+    sleep 1
+    sudo kill -SIGTERM "$pid"
+    sleep 1
 done
 
 stty sane || true
