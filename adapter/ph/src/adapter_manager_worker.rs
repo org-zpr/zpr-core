@@ -3,7 +3,7 @@ use crate::assembly::{Assembly, PhMode};
 use crate::counters::CounterType;
 use crate::fastpath;
 use crate::mgmt::requests;
-use crate::packet::Packet;
+use crate::packet::BufferPacket;
 use crate::queues::AdapterManagerMessage;
 use std::future::Future;
 use tokio::sync::mpsc;
@@ -12,7 +12,7 @@ use zpr;
 
 async fn worker<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    queue: &mut mpsc::Receiver<AdapterManagerMessage<'pktbuf>>,
+    queue: &mut mpsc::Receiver<AdapterManagerMessage>,
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
@@ -28,13 +28,13 @@ async fn worker<'pktbuf>(
 
 pub fn launch<'pktbuf>(
     asm: impl std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync + 'pktbuf,
-    mut queue: mpsc::Receiver<AdapterManagerMessage<'pktbuf>>,
+    mut queue: mpsc::Receiver<AdapterManagerMessage>,
 ) -> impl Future<Output = ()> + 'pktbuf {
     async move { worker(&*asm, &mut queue).await }
 }
 
 // RFC 6.5 § 6.3.11
-async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: Packet<'pktbuf>) {
+async fn do_request_tether_id<'pktbuf>(asm: &Assembly<'pktbuf>, pkt: BufferPacket) {
     // TODO: node version... that just allocates a tether ID directly from the internal dock, no messages exchanged
     if matches!(asm.ph_mode, PhMode::Node) {
         fastpath::drop_and_count(asm, pkt, CounterType::DroppedNop);

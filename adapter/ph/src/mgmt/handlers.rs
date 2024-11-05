@@ -6,8 +6,9 @@ use crate::config;
 use crate::counters;
 use crate::defs::*;
 use crate::dock_tables;
+use crate::link_state::LinkEvent;
 use crate::net_defs::IpAddress;
-use crate::packet::Packet;
+use crate::packet::{BufferPacket, Packet};
 use crate::zdp;
 use bytes::{Buf, BufMut};
 use tracing::info;
@@ -36,13 +37,13 @@ impl From<HandleMgmtError> for counters::CounterType {
     }
 }
 
-pub type HandleMgmtResult<'pktbuf> = Result<(), (HandleMgmtError, Packet<'pktbuf>)>;
+pub type HandleMgmtResult = Result<(), (HandleMgmtError, BufferPacket)>;
 
 /// handle a Report message (RFC 6.5 § 6.3.13)
 pub async fn handle_report<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    mut pkt: Packet<'pktbuf>,
-) -> HandleMgmtResult<'pktbuf> {
+    mut pkt: BufferPacket,
+) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpReportHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
@@ -64,8 +65,8 @@ pub async fn handle_report<'pktbuf>(
 /// handle a Discard message (RFC 6.5 § 6.3.1)
 pub async fn handle_discard<'pktbuf>(
     asm: &Assembly<'pktbuf>,
-    pkt: Packet<'pktbuf>,
-) -> HandleMgmtResult<'pktbuf> {
+    pkt: BufferPacket,
+) -> HandleMgmtResult {
     // TODO print to debug log, when implemented
     info!(
         "{}: Discard message received from {}",
@@ -80,8 +81,8 @@ pub async fn handle_discard<'pktbuf>(
 pub async fn handle_hello_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     seq_num: zpr::SeqNum,
-    pkt: Packet<'pktbuf>,
-) -> HandleMgmtResult<'pktbuf> {
+    pkt: BufferPacket,
+) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     info!(
@@ -89,9 +90,10 @@ pub async fn handle_hello_request<'pktbuf>(
         asm.system_name, ingress_link_id
     );
 
-    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
-        peer_state.link_state_machine.process_hello_request(asm)
-    }) else {
+    if asm
+        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest)
+        .is_err()
+    {
         return Err((HandleMgmtError::LinkStateError, pkt));
     };
 
@@ -114,8 +116,8 @@ pub async fn handle_hello_request<'pktbuf>(
 pub async fn handle_hello_response<'pktbuf>(
     asm: &'static Assembly<'pktbuf>,
     _seq_num: zpr::SeqNum,
-    mut pkt: Packet<'pktbuf>,
-) -> HandleMgmtResult<'pktbuf> {
+    mut pkt: BufferPacket,
+) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     let Ok(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut pkt) else {
@@ -127,9 +129,10 @@ pub async fn handle_hello_response<'pktbuf>(
         asm.system_name, ingress_link_id, status
     );
 
-    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
-        peer_state.link_state_machine.process_hello_response(asm)
-    }) else {
+    if asm
+        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloResponse)
+        .is_err()
+    {
         return Err((HandleMgmtError::LinkStateError, pkt));
     };
 
@@ -137,12 +140,12 @@ pub async fn handle_hello_response<'pktbuf>(
     Ok(())
 }
 
-/// handle a Register Agent Address Request
+/// handle a Register Agent Address Request (RFC 6.5 § 6.3.10)
 pub async fn handle_register_agent_address_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     seq_num: zpr::SeqNum,
-    mut pkt: Packet<'pktbuf>,
-) -> HandleMgmtResult<'pktbuf> {
+    mut pkt: BufferPacket,
+) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     let Ok(hdr) = zdp::ZdpRegisterAgentAddressRequestHeader::read_from_buf(&mut pkt) else {
@@ -175,11 +178,13 @@ pub async fn handle_register_agent_address_request<'pktbuf>(
         asm.system_name, ingress_link_id, agent_address
     );
 
-    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
-        peer_state
-            .link_state_machine
-            .process_register_agent_address_request(asm, agent_address)
-    }) else {
+    if asm
+        .process_link_state_event(
+            ingress_link_id,
+            LinkEvent::ReceivedRegisterRequest(agent_address),
+        )
+        .is_err()
+    {
         return Err((HandleMgmtError::LinkStateError, pkt));
     };
 
@@ -198,35 +203,33 @@ pub async fn handle_register_agent_address_request<'pktbuf>(
     Ok(())
 }
 
-/// handle a Register Agent Address Response
+/// handle a Register Agent Address Response (RFC 6.5 § 6.3.10)
 pub async fn handle_register_agent_address_response<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     _seq_num: zpr::SeqNum,
-    pkt: Packet<'pktbuf>,
-) -> HandleMgmtResult<'pktbuf> {
+    pkt: BufferPacket,
+) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     info!(
         "{}: Received Register Agent Address Response for link {}",
         asm.system_name, ingress_link_id
     );
 
-    if let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
-        peer_state
-            .link_state_machine
-            .process_register_agent_address_response(asm)
-    }) {
-        Ok(())
-    } else {
-        Err((HandleMgmtError::LinkStateError, pkt))
-    }
+    if asm
+        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedRegisterResponse)
+        .is_err()
+    {
+        return Err((HandleMgmtError::LinkStateError, pkt));
+    };
+    Ok(())
 }
 
 /// handle a Bind Agent Address Request (RFC 6.5 § 6.3.11)
 pub async fn handle_bind_agent_address_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     seq_num: zpr::SeqNum,
-    mut pkt: Packet<'pktbuf>,
-) -> HandleMgmtResult<'pktbuf> {
+    mut pkt: BufferPacket,
+) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpBindAgentAddressRequestHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };

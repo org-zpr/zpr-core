@@ -9,7 +9,7 @@
 //! parsing key management ZDP messages.
 
 use crate::config;
-use crate::packet::Packet;
+use crate::packet::{Packet, PacketBuffer};
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
 use bytes::{BufMut, Bytes};
 use openssl::x509::X509;
@@ -770,7 +770,10 @@ impl Default for KmTransportSA {
 /// Helper function which is ZDP aware.  Does some error checking and leaves the ZPI
 /// in place.
 #[allow(dead_code)]
-pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KmResult<()> {
+pub fn encrypt_transport_zdp(
+    message: &mut Packet<impl PacketBuffer>,
+    codec: Arc<dyn Codec>,
+) -> KmResult<()> {
     if message.body().len()
         < std::mem::size_of::<ZdpZpiHeader>() + std::mem::size_of::<ZdpBaseHeader>()
     {
@@ -804,7 +807,10 @@ pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KmR
 
 /// Helper function which is ZDP aware.  Does some error checking and leaves the ZPI in place.
 #[allow(dead_code)]
-pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KmResult<()> {
+pub fn decrypt_transport_zdp(
+    message: &mut Packet<impl PacketBuffer>,
+    codec: Arc<dyn Codec>,
+) -> KmResult<()> {
     if message.body().len() < 1 {
         return Err(KmError::ShortPacket);
     }

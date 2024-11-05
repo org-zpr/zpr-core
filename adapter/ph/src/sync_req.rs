@@ -1,4 +1,4 @@
-use crate::packet::Packet;
+use crate::packet::BufferPacket;
 use crate::zdp;
 use std::future::Future;
 use std::sync::Mutex as StdMutex;
@@ -7,20 +7,20 @@ use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
 use tracing::debug;
 use zpr;
 
-pub struct SyncReqState<'pktbuf> {
-    listener_state: StdMutex<ListenerState<'pktbuf>>,
+pub struct SyncReqState {
+    listener_state: StdMutex<ListenerState>,
     window_state: TokioMutex<WindowState>,
 }
 
-struct ListenerState<'pktbuf> {
-    response_listener: Option<(zpr::SeqNum, oneshot::Sender<Response<'pktbuf>>)>,
+struct ListenerState {
+    response_listener: Option<(zpr::SeqNum, oneshot::Sender<Response>)>,
 }
 
 struct WindowState {
     next_seq_num: zpr::SeqNum,
 }
 
-pub type Response<'pktbuf> = (zdp::ZdpPacketType, Packet<'pktbuf>);
+pub type Response = (zdp::ZdpPacketType, BufferPacket);
 
 pub struct Permit<'a> {
     /// use our lock on the window state as a semaphore
@@ -39,20 +39,20 @@ impl Permit<'_> {
 
 pub struct ResponseError();
 
-pub struct ResponseFuture<'pktbuf> {
-    receiver: oneshot::Receiver<Response<'pktbuf>>,
+pub struct ResponseFuture {
+    receiver: oneshot::Receiver<Response>,
 }
 
-impl<'pktbuf> ResponseFuture<'pktbuf> {
-    pub fn hangup(&mut self) -> Option<Response<'pktbuf>> {
+impl ResponseFuture {
+    pub fn hangup(&mut self) -> Option<Response> {
         self.receiver.close();
         // catch any message which raced the close
         self.receiver.try_recv().ok()
     }
 }
 
-impl<'pktbuf> Future for ResponseFuture<'pktbuf> {
-    type Output = Result<Response<'pktbuf>, ResponseError>;
+impl Future for ResponseFuture {
+    type Output = Result<Response, ResponseError>;
 
     fn poll(
         mut self: std::pin::Pin<&mut Self>,
@@ -64,7 +64,7 @@ impl<'pktbuf> Future for ResponseFuture<'pktbuf> {
     }
 }
 
-impl<'pktbuf> SyncReqState<'pktbuf> {
+impl SyncReqState {
     pub fn new() -> Self {
         Self {
             listener_state: StdMutex::new(ListenerState {
@@ -95,7 +95,7 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
         )
     }
 
-    pub fn install_response_listener(&self, permit: &Permit) -> ResponseFuture<'pktbuf> {
+    pub fn install_response_listener(&self, permit: &Permit) -> ResponseFuture {
         assert!(self.is_associated_permit(permit));
         let (sender, receiver) = oneshot::channel();
         self.listener_state.lock().unwrap().response_listener = Some((permit.seq_num(), sender));
@@ -110,8 +110,8 @@ impl<'pktbuf> SyncReqState<'pktbuf> {
     pub fn forward_response(
         &self,
         seq_num: zpr::SeqNum,
-        response: Response<'pktbuf>,
-    ) -> Result<(), Packet<'pktbuf>> {
+        response: Response,
+    ) -> Result<(), BufferPacket> {
         let listener = &mut self.listener_state.lock().unwrap().response_listener;
         match listener {
             Some((expected_seq_num, _)) => {

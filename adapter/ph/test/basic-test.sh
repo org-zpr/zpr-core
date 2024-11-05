@@ -35,7 +35,6 @@ function counters() {
 # Set up automatic cleanup
 #
 
-CHILDREN=()
 
 trap cleanup EXIT
 
@@ -65,30 +64,42 @@ echo "Launching DUTs"
 # Launch PHs
 #
 sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
-     --name "zpr-node" --control-path "$NODE_SOCK" \
+     --name "zpr-node" \
+     --control-path "$NODE_SOCK" \
      --self-addr 0.0.0.0:12345 \
-     --ca-file ca.crt --certificate-file node.crt --private-key-file node.key \
-     --tun-if tun0 2>&1 |tee node.log &
-CHILDREN=(${CHILDREN[@]} "$!")
+     --ca-file ca.crt \
+     --certificate-file node.crt \
+     --private-key-file node.key \
+     --tun-if tun0 node 2>&1 |tee node.log &
 
 sleep 2
 
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
-  --name "zpr-a" --control-path "$ADAPTER1_SOCK" \
-  --self-addr "$A_SUBSTRATE_ADDR":12345 --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
-  --ca-file ca.crt --certificate-file adapter1.crt --private-key-file adapter1.key \
-  --node-public-key-file node.pubkey --agent-addr "$A_ZPR_ADDR" \
-  --tun-if tun0 2>&1 |tee adapter1.log &
-CHILDREN=(${CHILDREN[@]} "$!")
+  --name "zpr-a" \
+  --control-path "$ADAPTER1_SOCK" \
+  --self-addr "$A_SUBSTRATE_ADDR":12345 \
+  --ca-file ca.crt \
+  --certificate-file adapter1.crt \
+  --private-key-file adapter1.key \
+  --tun-if tun0 \
+  adapter \
+  --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
+  --node-public-key-file node.pubkey \
+  --agent-addr "$A_ZPR_ADDR" 2>&1 |tee adapter1.log &
 
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
-  --name "zpr-b" --control-path "$ADAPTER2_SOCK" \
-  --self-addr "$B_SUBSTRATE_ADDR":12345 --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
-  --ca-file ca.crt --certificate-file adapter2.crt --private-key-file adapter2.key \
-  --node-public-key-file node.pubkey --agent-addr "$B_ZPR_ADDR" \
-  --tun-if tun0 2>&1 |tee adapter2.log &
-CHILDREN=(${CHILDREN[@]} "$!")
+  --name "zpr-b" \
+  --control-path "$ADAPTER2_SOCK" \
+  --self-addr "$B_SUBSTRATE_ADDR":12345 \
+  --ca-file ca.crt \
+  --certificate-file adapter2.crt \
+  --private-key-file adapter2.key \
+  --tun-if tun0 \
+  adapter \
+  --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
+  --node-public-key-file node.pubkey \
+  --agent-addr "$B_ZPR_ADDR" 2>&1 |tee adapter2.log &
 
 
 #
@@ -100,24 +111,22 @@ wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-node tun0 || { echo "FAILURE"; exit 1; }
 echo "Carrier has arrived."
-
-stty sane || true
-
-
-echo "PAUSING FOR KEY MANAGEMENT EXCHANGE ..."
-countdown 10
-
-echo "TEST STARTING"
+# This sleep solves a display issue because magic
+sleep 1
 
 
 #
 # Run test
 #
 
+echo "TEST STARTING"
+
 PASS=0
 if ! ping_test
 then PASS=1
 fi
+
+sleep 1
 
 
 #
@@ -140,8 +149,15 @@ done
 # Cleanup
 #
 
-sudo kill -SIGUSR1 "${CHILDREN[@]}" 2> /dev/null || true
-sleep 1  # FIXME: let's do something better here
+for pid in $(get_descendants)
+do
+    echo
+    echo "Terminating $pid"
+    sleep 1
+    sudo kill -SIGTERM "$pid"
+    sleep 1
+done
+
 stty sane || true
 
 

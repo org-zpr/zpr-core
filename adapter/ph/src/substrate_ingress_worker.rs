@@ -5,6 +5,7 @@ use crate::packet::Packet;
 use std::future::Future;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::UdpSocket;
 
 #[derive(Copy, Clone)]
@@ -50,15 +51,14 @@ async fn worker<'a>(config: &Config, asm: &Assembly<'a>, socket: &UdpSocket) {
     }
 }
 
-pub fn launch<'a, AsmRef: 'a, SocketRef: 'a>(
+pub fn launch<'a, AsmRef: 'a>(
     config: &Config,
     asm: AsmRef,
-    socket: SocketRef,
+    socket: Arc<UdpSocket>,
 ) -> impl Future<Output = ()> + Send + 'a
 where
     AsmRef: std::ops::Deref<Target = Assembly<'a>> + Send + Sync,
-    SocketRef: std::ops::Deref<Target = UdpSocket> + Send + Sync,
 {
     let cfg = *config;
-    async move { worker(&cfg, &*asm, &*socket).await }
+    async move { worker(&cfg, &*asm, &socket).await }
 }

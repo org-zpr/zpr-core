@@ -2,6 +2,7 @@ use crate::assembly::Assembly;
 use crate::km::*;
 use crate::km_cert_exchange::KmCertExchange;
 use crate::km_noise::{KmNoise, NoiseKeypair};
+use crate::link_state::LinkEvent;
 use crate::mgmt::requests;
 use crate::peer_table::KmHandle;
 use bytes::Bytes;
@@ -128,16 +129,11 @@ async fn signal_worker<'pktbuf>(
                                 error!("{}: km_multiplexor: failed to set SA established: {:?}", asm.system_name, e);
                             }
                         }
-                        match asm.peer_table.inspect(linkmsg.link_id, |peer_state| {
-                            peer_state.link_state_machine.keying_done(asm)
-                        }) {
-                            Some(Err(e)) => {
+                        match asm.process_link_state_event_static(linkmsg.link_id, LinkEvent::KeyingDone) {
+                            Err(e) => {
                                 error!("{}: Link state error: {:?}", asm.system_name, e);
                             }
-                            None => {
-                                error!("{}: Link {} gone", asm.system_name, linkmsg.link_id);
-                            }
-                            Some(Ok(())) => (),
+                            Ok(_) => (),
                         }
                         match status.get_mut(&linkmsg.link_id) {
                             Some(s) if s.error_count == 0 => {
@@ -216,7 +212,7 @@ where
 ///
 /// Note that the link must already have a peer_table entry.
 pub fn add_adapter_link(
-    asm: &'static Assembly,
+    asm: &Assembly,
     link_id: zpr::LinkId,
     recv_zpis: ZPIPair,
     local_noise_key: NoiseKeypair,
@@ -247,7 +243,7 @@ pub fn add_adapter_link(
 /// Note that the link must already have a peer_table entry.
 #[allow(dead_code)]
 pub fn add_node_link(
-    asm: &'static Assembly,
+    asm: &Assembly,
     link_id: zpr::LinkId,
     recv_zpis: ZPIPair,
     local_noise_key: NoiseKeypair,
@@ -262,7 +258,7 @@ pub fn add_node_link(
 
 /// Remove all state for this link, invalidating the SA and stopping the Key Manager.
 #[allow(dead_code)]
-pub async fn drop_link<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId) {
+pub async fn drop_link(asm: &Assembly<'_>, link_id: zpr::LinkId) {
     // If present in state, turn off the SA.
     let _ = asm.peer_table.clear_security_association(link_id);
 
@@ -283,7 +279,7 @@ pub async fn drop_link<'pktbuf>(asm: &Assembly<'pktbuf>, link_id: zpr::LinkId) {
 
 // Completes the add_*_link functions above.
 fn add_noise_link(
-    asm: &'static Assembly,
+    asm: &Assembly,
     link_id: zpr::LinkId,
     noise: KmNoise,
 ) -> Result<(), KmSetupError> {
@@ -300,6 +296,7 @@ fn add_noise_link(
     let spawn_ctok = child_ctok.clone();
     let spawn_km_tx = asm.km_state.km_tx.clone();
     let spawn_sig_tx = asm.km_state.km_sig_tx.clone();
+    let system_name = asm.system_name.clone();
 
     let (km_tx, km_rx) = mpsc::channel(asm.topology_config.km_link_queue_size);
 
@@ -312,7 +309,7 @@ fn add_noise_link(
             Err(e) => {
                 error!(
                     "{}: KeyManager failed on link {}: {:?}",
-                    asm.system_name, link_id, e
+                    system_name, link_id, e
                 );
             }
         }
@@ -402,8 +399,8 @@ mod test {
         let (km_tx, mut km_rx) = mpsc::channel(4);
         let km_state = KmState::new(km_tx, km_sig_tx);
 
-        let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; 8];
-        let buffer_stack = BufferStack::new(buf_storage.leak::<'static>());
+        let buf_storage = vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]); 8];
+        let buffer_stack = BufferStack::new(buf_storage);
 
         let mut builder = TestAssemblyBuilder::new();
         builder.km_state = Some(km_state);

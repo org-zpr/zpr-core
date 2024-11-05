@@ -62,7 +62,7 @@ pub struct Config {
 async fn worker<'pktbuf>(
     config: &Config,
     asm: &Assembly<'pktbuf>,
-    queue: &mut mpsc::Receiver<CapPacket<'pktbuf>>,
+    queue: &mut mpsc::Receiver<CapPacket>,
 ) {
     let mut messages = Vec::new();
 
@@ -98,7 +98,7 @@ async fn worker<'pktbuf>(
 pub fn launch<'pktbuf, AsmRef: 'pktbuf>(
     config: &Config,
     asm: AsmRef,
-    mut queue: mpsc::Receiver<CapPacket<'pktbuf>>,
+    mut queue: mpsc::Receiver<CapPacket>,
 ) -> impl Future<Output = ()> + Send + 'pktbuf
 where
     AsmRef: std::ops::Deref<Target = Assembly<'pktbuf>> + Send + Sync,
@@ -107,9 +107,9 @@ where
     async move { worker(&cfg, &*asm, &mut queue).await }
 }
 
-async fn savefile_write_batch<'a, 'b: 'a>(
+async fn savefile_write_batch<'a>(
     savefile: &'a mut PcapWriter<File>,
-    cap_packs: impl IntoIterator<Item = &'a CapPacket<'b>>,
+    cap_packs: impl IntoIterator<Item = &'a CapPacket>,
     force_flush: bool,
 ) -> io::Result<()> {
     for cap_pack in cap_packs.into_iter() {
@@ -126,10 +126,7 @@ async fn savefile_write_batch<'a, 'b: 'a>(
     Ok(())
 }
 
-async fn savefile_write(
-    savefile: &mut PcapWriter<File>,
-    cap_pack: &CapPacket<'_>,
-) -> io::Result<()> {
+async fn savefile_write(savefile: &mut PcapWriter<File>, cap_pack: &CapPacket) -> io::Result<()> {
     let packet = PcapPacket {
         timestamp: cap_pack.timestamp,
         orig_len: cap_pack.orig_len,
