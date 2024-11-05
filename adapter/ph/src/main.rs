@@ -7,6 +7,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
+use std::process;
 use std::process::ExitCode;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
@@ -220,7 +221,7 @@ fn main() -> ExitCode {
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    info!("{} starting", config.name);
+    info!("{} starting with PID {}", config.name, process::id());
 
     //
     // read key material
