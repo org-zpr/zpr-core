@@ -66,6 +66,7 @@ use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
 use queues::*;
+use std::sync::Arc;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
 
@@ -151,7 +152,8 @@ fn main() -> ExitCode {
 
     let topology_config = config::TopologyConfig::default();
 
-    let buf_storage = vec![[0u8; config::PACKET_BUFFER_SIZE]; topology_config.buffer_count];
+    let buf_storage =
+        vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]); topology_config.buffer_count];
 
     let (cap_inq, cap_outq) = mpsc::channel(topology_config.capture_queue_size);
     let (md_inq, md_outq) = mpsc::channel(topology_config.mgmt_dispatch_queue_size);
@@ -189,15 +191,24 @@ fn main() -> ExitCode {
     //
     // open TUN devices
     //
-    let tun_devs = match ZprTun::new_mq(config.tun_if, topology_config.agent_output_concurrency) {
-        Ok(devs) => devs.leak(),
+    // HACK: If we are using a new TUN (requirement on MAC I think), we will set the address.
+    let tun_addr = if config.agent_addr.is_some() && config.tun_if.is_none() {
+        config.agent_addr.clone()
+    } else {
+        None
+    };
+
+    let tun_devs: Vec<_> = match ZprTun::new_mq(
+        config.tun_if,
+        topology_config.agent_output_concurrency,
+        tun_addr,
+    ) {
+        Ok(devs) => devs.into_iter().map(Arc::new).collect(),
         Err(e) => {
             panic!("unable to create TUN device: {:?}", e);
         }
     };
-
-    let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(&tun_devs[0]));
-
+    let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(tun_devs[0].clone()));
     tun_ctl.set_carrier(false).unwrap();
 
     //
@@ -218,10 +229,8 @@ fn main() -> ExitCode {
         socket
             .bind(&socket2::SockAddr::from(config.self_addr))
             .expect("unable to bind to self addr");
-        substrate_sockets.push(UdpSocket::from_std(socket.into()).unwrap());
+        substrate_sockets.push(Arc::new(UdpSocket::from_std(socket.into()).unwrap()));
     }
-
-    let substrate_sockets = substrate_sockets.leak();
 
     //
     // configure packet steering for better load balancing
@@ -245,9 +254,9 @@ fn main() -> ExitCode {
         topology_config,
         system_name: config.name,
         agent_address: config.agent_addr,
-        buffer_stack: BufferStack::new(buf_storage.leak::<'static>()),
-        agent_input: AgentInput::new(tun_devs.iter()),
-        substrate_egress: SubstrateEgress::new(substrate_sockets.iter()),
+        buffer_stack: BufferStack::new(buf_storage),
+        agent_input: AgentInput::new(tun_devs.clone()),
+        substrate_egress: SubstrateEgress::new(substrate_sockets.clone()),
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
         flow_control: FlowControl::new(),
@@ -263,6 +272,7 @@ fn main() -> ExitCode {
         self_noise_keypair,
         peer_noise_keypair,
         certx,
+        _phantom: std::marker::PhantomData,
     }));
 
     //
@@ -306,7 +316,7 @@ fn main() -> ExitCode {
     // start data path workers
     //
 
-    for (worker_index, tun_dev) in tun_devs.iter().enumerate() {
+    for (worker_index, tun_dev) in tun_devs.into_iter().enumerate() {
         js.spawn(agent_output_worker::launch(
             &agent_output_worker::Config {
                 worker_index,
@@ -317,7 +327,7 @@ fn main() -> ExitCode {
         ));
     }
 
-    for (worker_index, socket) in substrate_sockets.iter().enumerate() {
+    for (worker_index, socket) in substrate_sockets.into_iter().enumerate() {
         js.spawn(substrate_ingress_worker::launch(
             &substrate_ingress_worker::Config {
                 worker_index,

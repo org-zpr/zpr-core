@@ -7,7 +7,6 @@
 use bytes::BufMut;
 use zerocopy::FromBytes;
 
-use crate::config;
 use crate::packet::*;
 use crate::zdp::*;
 use zpr;
@@ -31,10 +30,10 @@ pub const ZDP_REPORT_DATA_OFFSET: usize =
 
 /// Creates a packet like: [ZdpZpiHeader][ZdpBaseHeader]|[ZdpReportHeader]|<report_data>
 /// ZPI set to zero.
-pub fn build_zdp_report_packet<'buf>(
-    pbuf: &'buf mut [u8; config::PACKET_BUFFER_SIZE],
+pub fn build_zdp_report_packet<PktBuf: PacketBuffer>(
+    pbuf: PktBuf,
     report_data: &[u8],
-) -> Packet<'buf> {
+) -> Packet<PktBuf> {
     let mut pkt = Packet::new(pbuf, HEADROOM);
 
     let mlen = report_data.len() as u16;
@@ -53,10 +52,10 @@ pub fn build_zdp_report_packet<'buf>(
 }
 
 /// Creates a packet like: [ZdpZpiHeader]|[ZdpBaseHeader]|[ZdpKeyManagementHeader]<km_payload>
-pub fn build_zdp_km_noise_packet<'buf>(
-    pbuf: &'buf mut [u8; config::PACKET_BUFFER_SIZE],
+pub fn build_zdp_km_noise_packet<PktBuf: PacketBuffer>(
+    pbuf: PktBuf,
     km_payload: &[u8],
-) -> Packet<'buf> {
+) -> Packet<PktBuf> {
     let mut pkt = Packet::new(pbuf, HEADROOM);
     pkt.put(&km_payload[..]);
 
@@ -73,7 +72,7 @@ pub fn build_zdp_km_noise_packet<'buf>(
 
 /// Parse a full ZDP packet as a ZDP Report Message, expecting the payload of that message
 /// to be a string which is returned.
-pub fn parse_zdp_report_pkt(pkt: &Packet) -> Result<String, String> {
+pub fn parse_zdp_report_pkt(pkt: &Packet<impl PacketBuffer>) -> Result<String, String> {
     let Ok((_zpi_hdr, _)) = ZdpZpiHeader::ref_from_prefix(&pkt.body()) else {
         return Err(String::from(
             "error parsing ZPI header from decrypted payload",

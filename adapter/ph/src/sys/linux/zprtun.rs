@@ -3,6 +3,7 @@ use bytes::buf;
 use nix::ioctl_write_ptr;
 use std::io;
 use std::io::Result;
+use std::net::IpAddr;
 use std::os::fd::AsRawFd;
 use tokio_tun::{Tun, TunBuilder};
 use zpr_ext::std::mem::slice_assume_init_mut;
@@ -21,13 +22,23 @@ impl From<Tun> for ZprTun {
 impl ZprTun {
     /// Create a new TUN device.
     /// If `ifname` is `None`, the kernel will automatically assign a name.
+    /// For optional `address`, only IPv4 is supported currently.
     pub fn new_mq(
         ifname: Option<String>,
         concurrency: usize,
+        address: Option<IpAddr>,
     ) -> std::result::Result<Vec<Self>, ZPRTunError> {
         let mut bldr = TunBuilder::new();
         if let Some(ifname) = ifname {
             bldr = bldr.name(&ifname);
+        }
+        if let Some(addr) = address {
+            match addr {
+                IpAddr::V4(ipa) => bldr = bldr.address(ipa),
+                IpAddr::V6(_) => {
+                    return Err(ZPRTunError::PlatformError("IPv6 not supported".to_string()))
+                }
+            }
         }
         let tok_tun_devs = bldr
             .try_build_mq(concurrency)
@@ -69,5 +80,13 @@ impl ZprTun {
         // SAFETY: the temporary pointer is valid for the lifetime of the ioctl, which is sufficient
         unsafe { tun_set_carrier(self.0.as_raw_fd(), &carrier.into()) }?;
         Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn set_address(&mut self, _addr: IpAddr) -> std::result::Result<(), ZPRTunError> {
+        // This needs work -- the linux tun API only allows address to be set at construction time.
+        Err(ZPRTunError::PlatformError(
+            "cannot set TUN address after creation".to_string(),
+        ))
     }
 }

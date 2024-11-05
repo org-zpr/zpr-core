@@ -1,12 +1,14 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
 
 use crate::net_defs;
-use crate::packet::Packet;
+use crate::packet::{BufferPacket, Packet, PacketBuffer};
 use crate::sys::ZprTun;
 use crate::test_packet::*;
+use crate::zprtun::tun_pi;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::result::Result;
+use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
@@ -14,33 +16,32 @@ use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
 use zpr;
 use zpr_ext::std::mem::DropGuard;
-use zpr_ext::tokio_tun::tun_pi;
 
 pub enum TryEnqueueError<T> {
     Full(T),
 }
 
-pub enum MgmtProcessorMessage<'pktbuf> {
-    Packet(Packet<'pktbuf>),
+pub enum MgmtProcessorMessage {
+    Packet(BufferPacket),
     TestPacket(TestPacket),
 }
 
 /// MgmtProcessor processes all inbound management requests.
 /// Unlike other queues, this doesn't live directly in the assembly,
 /// but rather in the peer table, as there is one of these per peer.
-pub struct MgmtProcessor<'pktbuf> {
-    sender: mpsc::Sender<MgmtProcessorMessage<'pktbuf>>,
+pub struct MgmtProcessor {
+    sender: mpsc::Sender<MgmtProcessorMessage>,
 }
 
-impl<'pktbuf> MgmtProcessor<'pktbuf> {
-    pub fn new(sender: mpsc::Sender<MgmtProcessorMessage<'pktbuf>>) -> Self {
+impl MgmtProcessor {
+    pub fn new(sender: mpsc::Sender<MgmtProcessorMessage>) -> Self {
         Self { sender }
     }
 
     pub fn try_enqueue_packet(
         &self,
-        packet: Packet<'pktbuf>,
-    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        packet: BufferPacket,
+    ) -> Result<(), TryEnqueueError<BufferPacket>> {
         match self.sender.try_send(MgmtProcessorMessage::Packet(packet)) {
             Ok(()) => Ok(()),
 
@@ -75,24 +76,24 @@ impl<'pktbuf> MgmtProcessor<'pktbuf> {
 
 /// AgentInput is responsible for emitting decapsulated agent packets on the
 /// host's TUN interface.
-pub struct AgentInput<'a> {
-    tuns: Box<[&'a ZprTun]>,
+pub struct AgentInput {
+    tuns: Box<[Arc<ZprTun>]>,
 }
 
-impl<'a> AgentInput<'a> {
+impl AgentInput {
     // We necessarily have multiple queues, corresponding to the multiple
     // FDs of a multiqueue-enabled TUN interface.
-    pub fn new(tuns: impl IntoIterator<Item = &'a ZprTun>) -> Self {
+    pub fn new(tuns: impl IntoIterator<Item = Arc<ZprTun>>) -> Self {
         Self {
             tuns: tuns.into_iter().collect(),
         }
     }
 
-    pub fn try_enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
+    pub fn try_enqueue_packet<P: DropGuard<BufferPacket>>(
         &self,
         mut packet: P,
     ) -> Result<(), TryEnqueueError<P>> {
-        let tun = self.tuns[packet.flowhash() as usize % self.tuns.len()];
+        let tun = &self.tuns[packet.flowhash() as usize % self.tuns.len()];
 
         let proto = net_defs::ip_ethertype(net_defs::ip_version(packet.body()));
         let mut hdr = packet.alloc_zeroed_headroom(tun_pi::PI_SIZE);
@@ -118,18 +119,18 @@ impl<'a> AgentInput<'a> {
 }
 
 /// SubstrateEgress is responsible for sending encapsulated agent packets to the dock.
-pub struct SubstrateEgress<'a> {
-    sockets: Box<[&'a UdpSocket]>,
+pub struct SubstrateEgress {
+    sockets: Box<[Arc<UdpSocket>]>,
 }
 
-impl<'a> SubstrateEgress<'a> {
-    pub fn new(sockets: impl IntoIterator<Item = &'a UdpSocket>) -> Self {
+impl SubstrateEgress {
+    pub fn new(sockets: impl IntoIterator<Item = Arc<UdpSocket>>) -> Self {
         Self {
             sockets: sockets.into_iter().collect(),
         }
     }
 
-    pub async fn enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
+    pub async fn enqueue_packet<P: DropGuard<BufferPacket>>(
         &self,
         packet: P,
         dest_sa: zpr::SubstrateAddr,
@@ -155,7 +156,7 @@ impl<'a> SubstrateEgress<'a> {
     }
 
     // TODO: batch enqueue
-    pub fn try_enqueue_packet<'pktbuf, P: DropGuard<Packet<'pktbuf>>>(
+    pub fn try_enqueue_packet<P: DropGuard<BufferPacket>>(
         &self,
         packet: P,
         dest_sa: zpr::SubstrateAddr,
@@ -184,16 +185,16 @@ impl<'a> SubstrateEgress<'a> {
 
     fn select_socket_and_set_flowinfo(
         &self,
-        packet: &Packet<'_>,
+        packet: &Packet<impl PacketBuffer>,
         mut dest_sa: zpr::SubstrateAddr,
-    ) -> (&'a UdpSocket, std::net::SocketAddr) {
+    ) -> (&UdpSocket, std::net::SocketAddr) {
         match &mut dest_sa {
             SocketAddr::V4(_) => (),
             SocketAddr::V6(dest_sa) => dest_sa.set_flowinfo(packet.flowhash()),
         }
 
         (
-            self.sockets[packet.flowhash() as usize % self.sockets.len()],
+            &self.sockets[packet.flowhash() as usize % self.sockets.len()],
             dest_sa,
         )
     }
@@ -205,18 +206,18 @@ impl<'a> SubstrateEgress<'a> {
 }
 
 /// Capture will intercept packets in the PH and dump them into a file for debugging purposes
-pub struct CapPacket<'pktbuf> {
-    pub packet: Packet<'pktbuf>,
+pub struct CapPacket {
+    pub packet: BufferPacket,
     pub timestamp: SystemTime,
     pub orig_len: usize,
 }
 
-pub struct Capture<'pktbuf> {
-    sender: mpsc::Sender<CapPacket<'pktbuf>>,
+pub struct Capture {
+    sender: mpsc::Sender<CapPacket>,
 }
 
-impl<'pktbuf> Capture<'pktbuf> {
-    pub fn new(sender: mpsc::Sender<CapPacket<'pktbuf>>) -> Self {
+impl Capture {
+    pub fn new(sender: mpsc::Sender<CapPacket>) -> Self {
         Self { sender }
     }
 
@@ -224,7 +225,7 @@ impl<'pktbuf> Capture<'pktbuf> {
     #[allow(dead_code)]
     pub async fn enqueue_packet(
         &self,
-        packet: Packet<'pktbuf>,
+        packet: BufferPacket,
         timestamp: SystemTime,
         orig_len: usize,
     ) {
@@ -239,10 +240,10 @@ impl<'pktbuf> Capture<'pktbuf> {
     /// Does not block
     pub fn try_enqueue_packet(
         &self,
-        packet: Packet<'pktbuf>,
+        packet: BufferPacket,
         timestamp: SystemTime,
         orig_len: usize,
-    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+    ) -> Result<(), TryEnqueueError<BufferPacket>> {
         let cap_pack: CapPacket = CapPacket {
             packet,
             timestamp,
@@ -256,24 +257,24 @@ impl<'pktbuf> Capture<'pktbuf> {
     }
 }
 
-pub enum MgmtDispatchMessage<'pktbuf> {
-    WithLink(Packet<'pktbuf>), // Link ID stored in packet metadata
-    WithAddr(zpr::SubstrateAddr, Packet<'pktbuf>),
+pub enum MgmtDispatchMessage {
+    WithLink(BufferPacket), // Link ID stored in packet metadata
+    WithAddr(zpr::SubstrateAddr, BufferPacket),
 }
 
-pub struct MgmtDispatch<'pktbuf> {
-    sender: mpsc::Sender<MgmtDispatchMessage<'pktbuf>>,
+pub struct MgmtDispatch {
+    sender: mpsc::Sender<MgmtDispatchMessage>,
 }
 
-impl<'pktbuf> MgmtDispatch<'pktbuf> {
-    pub fn new(sender: mpsc::Sender<MgmtDispatchMessage<'pktbuf>>) -> Self {
+impl MgmtDispatch {
+    pub fn new(sender: mpsc::Sender<MgmtDispatchMessage>) -> Self {
         Self { sender }
     }
 
     pub fn try_dispatch_mgmt_packet_with_link(
         &self,
-        packet: Packet<'pktbuf>,
-    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        packet: BufferPacket,
+    ) -> Result<(), TryEnqueueError<BufferPacket>> {
         debug_assert_ne!(packet.metadata().ingress_link_id, 0);
         match self.sender.try_send(MgmtDispatchMessage::WithLink(packet)) {
             Ok(()) => Ok(()),
@@ -292,8 +293,8 @@ impl<'pktbuf> MgmtDispatch<'pktbuf> {
     pub fn try_dispatch_mgmt_packet_with_addr(
         &self,
         peer_sa: &zpr::SubstrateAddr,
-        packet: Packet<'pktbuf>,
-    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        packet: BufferPacket,
+    ) -> Result<(), TryEnqueueError<BufferPacket>> {
         debug_assert_eq!(packet.metadata().ingress_link_id, 0);
         match self
             .sender
@@ -313,16 +314,16 @@ impl<'pktbuf> MgmtDispatch<'pktbuf> {
     }
 }
 
-pub enum AdapterManagerMessage<'pktbuf> {
-    RequestTetherId(Packet<'pktbuf>),
+pub enum AdapterManagerMessage {
+    RequestTetherId(BufferPacket),
 }
 
-pub struct AdapterManager<'pktbuf> {
-    sender: mpsc::Sender<AdapterManagerMessage<'pktbuf>>,
+pub struct AdapterManager {
+    sender: mpsc::Sender<AdapterManagerMessage>,
 }
 
-impl<'pktbuf> AdapterManager<'pktbuf> {
-    pub fn new(sender: mpsc::Sender<AdapterManagerMessage<'pktbuf>>) -> Self {
+impl AdapterManager {
+    pub fn new(sender: mpsc::Sender<AdapterManagerMessage>) -> Self {
         Self { sender }
     }
 
@@ -339,8 +340,8 @@ impl<'pktbuf> AdapterManager<'pktbuf> {
     /// The specified packet must have already been classified.
     pub fn try_request_tether_id(
         &self,
-        packet: Packet<'pktbuf>,
-    ) -> Result<(), TryEnqueueError<Packet<'pktbuf>>> {
+        packet: BufferPacket,
+    ) -> Result<(), TryEnqueueError<BufferPacket>> {
         match self
             .sender
             .try_send(AdapterManagerMessage::RequestTetherId(packet))

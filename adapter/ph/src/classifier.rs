@@ -76,7 +76,9 @@ pub fn get_ip_version(body: &[u8]) -> u8 {
     (body[0] & IP_VERSION_MASK) >> 4
 }
 
-pub fn classify(packet: &mut packet::Packet) -> Result<ClassifierResult, &'static str> {
+pub fn classify<PktBuf: packet::PacketBuffer>(
+    packet: &mut packet::Packet<PktBuf>,
+) -> Result<ClassifierResult, &'static str> {
     let (metadata, body) = packet.metadata_mut_and_body_mut();
     classify_zdp(metadata, body)
 }

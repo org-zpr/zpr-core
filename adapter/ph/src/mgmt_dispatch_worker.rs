@@ -6,10 +6,7 @@ use crate::queues::MgmtDispatchMessage;
 use std::future::Future;
 use tokio::sync::mpsc;
 
-async fn worker(
-    asm: &'static Assembly<'_>,
-    queue: &mut mpsc::Receiver<MgmtDispatchMessage<'static>>,
-) {
+async fn worker(asm: &'static Assembly<'_>, queue: &mut mpsc::Receiver<MgmtDispatchMessage>) {
     while let Some(msg) = queue.recv().await {
         match msg {
             MgmtDispatchMessage::WithLink(pkt) => {
@@ -24,7 +21,7 @@ async fn worker(
 
 pub fn launch(
     asm: &'static Assembly,
-    mut queue: mpsc::Receiver<MgmtDispatchMessage<'static>>,
+    mut queue: mpsc::Receiver<MgmtDispatchMessage>,
 ) -> impl Future<Output = ()> + 'static {
     async move { worker(&*asm, &mut queue).await }
 }

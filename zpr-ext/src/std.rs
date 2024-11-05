@@ -255,6 +255,7 @@ pub mod os {
         }
     }
 
+    #[cfg(any(doc, unix))]
     pub mod unix {
         pub mod net {
             use crate::std::os::fd::CowFd;
@@ -266,6 +267,12 @@ pub mod os {
             use std::vec::Vec;
 
             #[cfg(any(doc, target_os = "android", target_os = "linux"))]
+            type MsghdrIovlenT = libc::size_t;
+
+            #[cfg(not(doc))]
+            #[cfg(target_os = "macos")]
+            type MsghdrIovlenT = libc::c_int;
+
             pub struct SocketAncillary<'a> {
                 buffer: &'a mut [u8],
                 fds: Vec<CowFd<'a>>,
@@ -321,14 +328,12 @@ pub mod os {
             pub struct ScmCredentials<'a>(std::marker::PhantomData<&'a ()>);
 
             pub trait UnixStreamExt {
-                #[cfg(any(doc, target_os = "android", target_os = "linux"))]
                 fn send_vectored_with_ancillary(
                     &self,
                     bufs: &[IoSlice<'_>],
                     ancillary: &mut SocketAncillary<'_>,
                 ) -> Result<usize>;
 
-                #[cfg(any(doc, target_os = "android", target_os = "linux"))]
                 fn recv_vectored_with_ancillary(
                     &self,
                     bufs: &mut [IoSliceMut<'_>],
@@ -336,7 +341,6 @@ pub mod os {
                 ) -> Result<usize>;
             }
 
-            #[cfg(any(doc, target_os = "android", target_os = "linux"))]
             pub(crate) fn uds_send_vectored_with_ancillary(
                 fd: BorrowedFd<'_>,
                 bufs: &[IoSlice<'_>],
@@ -350,7 +354,7 @@ pub mod os {
                     msg_name: ptr::null_mut(),
                     msg_namelen: 0,
                     msg_iov: bufs.as_ptr() as *mut _,
-                    msg_iovlen: bufs.len(),
+                    msg_iovlen: bufs.len() as MsghdrIovlenT,
                     msg_control: ptr::null_mut(),
                     msg_controllen: 0,
                     msg_flags: 0,
@@ -379,7 +383,6 @@ pub mod os {
                 }
             }
 
-            #[cfg(any(doc, target_os = "android", target_os = "linux"))]
             pub(crate) fn uds_recv_vectored_with_ancillary(
                 fd: BorrowedFd<'_>,
                 bufs: &mut [IoSliceMut<'_>],
@@ -389,7 +392,7 @@ pub mod os {
                     msg_name: ptr::null_mut(),
                     msg_namelen: 0,
                     msg_iov: bufs.as_ptr() as *mut _,
-                    msg_iovlen: bufs.len(),
+                    msg_iovlen: bufs.len() as MsghdrIovlenT,
                     msg_control: (&mut ancillary.buffer).as_mut_ptr().cast(),
                     msg_controllen: ancillary.buffer.len() as _,
                     msg_flags: 0,
@@ -406,8 +409,8 @@ pub mod os {
                         let size_of_hdr = (2 * libc::CMSG_LEN(std::mem::size_of::<RawFd>() as _)
                             - libc::CMSG_LEN((2 * std::mem::size_of::<RawFd>()) as _))
                             as usize;
-                        let num_fds =
-                            ((*cmsghdr).cmsg_len - size_of_hdr) / std::mem::size_of::<RawFd>();
+                        let num_fds = (((*cmsghdr).cmsg_len as usize) - size_of_hdr)
+                            / std::mem::size_of::<RawFd>();
                         ancillary.fds =
                             std::slice::from_raw_parts(libc::CMSG_DATA(cmsghdr).cast(), num_fds)
                                 .into_iter()
@@ -426,7 +429,6 @@ pub mod os {
             impl UnixStreamExt for UnixStream {
                 /// This is a very silly and limited implementation of `send_vectored_with_ancillary()` as we await
                 /// stabilization of [unix_socket_ancillary_data](https://github.com/rust-lang/rust/issues/76915).
-                #[cfg(any(doc, target_os = "android", target_os = "linux"))]
                 fn send_vectored_with_ancillary(
                     &self,
                     bufs: &[IoSlice<'_>],
@@ -435,7 +437,6 @@ pub mod os {
                     uds_send_vectored_with_ancillary(self.as_fd(), bufs, ancillary)
                 }
 
-                #[cfg(any(doc, target_os = "android", target_os = "linux"))]
                 fn recv_vectored_with_ancillary(
                     &self,
                     bufs: &mut [IoSliceMut<'_>],

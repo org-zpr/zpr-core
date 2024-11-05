@@ -14,3 +14,7 @@ test:
 lib:
 	cargo build --lib
 
+.PHONY: clean
+clean:
+	cargo clean
+
