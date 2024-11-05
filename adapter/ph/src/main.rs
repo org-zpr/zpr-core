@@ -319,19 +319,15 @@ fn main() -> ExitCode {
     } else {
         None
     };
-    let tun_devs = match ZprTun::new_mq(
-        config.tun_if,
-        topology_config.agent_output_concurrency,
-        tun_addr,
-    ) {
-        Ok(devs) => devs.leak(),
+
+    let tun_devs: Vec<_> =
+    match ZprTun::new_mq(config.tun_if, topology_config.agent_output_concurrency, tun_addr) {
+        Ok(devs) => devs.into_iter().map(Arc::new).collect(),
         Err(e) => {
             panic!("unable to create TUN device: {:?}", e);
         }
     };
-
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(tun_devs[0].clone()));
-
     tun_ctl.set_carrier(false).unwrap();
 
     //
