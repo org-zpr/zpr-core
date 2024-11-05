@@ -255,7 +255,7 @@ pub mod os {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(doc, unix))]
     pub mod unix {
         pub mod net {
             use crate::std::os::fd::CowFd;
@@ -266,10 +266,11 @@ pub mod os {
             use std::ptr;
             use std::vec::Vec;
 
-            #[cfg(any(target_os = "android", target_os = "linux"))]
+            #[cfg(any(doc, target_os = "android", target_os = "linux"))]
             type MsghdrIovlenT = libc::size_t;
 
-            #[cfg(any(target_os = "macos"))]
+            #[cfg(not(doc))]
+            #[cfg(target_os = "macos")]
             type MsghdrIovlenT = libc::c_int;
 
             pub struct SocketAncillary<'a> {

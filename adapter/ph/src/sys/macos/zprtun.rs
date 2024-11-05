@@ -59,9 +59,9 @@ impl ZprTun {
         Ok(size)
     }
 
-    pub fn try_send(&self, _buf: &[u8]) -> std::io::Result<usize> {
+    pub fn try_send(&self, buf: &[u8]) -> std::io::Result<usize> {
         let idev = &*(self.0);
-        idev.send(_buf)
+        idev.send(buf)
     }
 
     /// A NOP on mac.

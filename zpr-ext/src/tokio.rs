@@ -7,10 +7,10 @@ pub mod net {
     use tokio::io::Interest;
     use tokio::net::{UdpSocket, UnixStream};
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     use nix::sys::socket;
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     use std::os::fd::AsRawFd;
 
     pub trait UdpSocketExt {
@@ -66,7 +66,7 @@ pub mod net {
         }
     }
 
-    #[cfg(unix)]
+    #[cfg(any(doc, unix))]
     #[allow(async_fn_in_trait)]
     pub trait UnixStreamExt {
         async fn send_vectored_with_ancillary(
@@ -82,7 +82,7 @@ pub mod net {
         ) -> io::Result<usize>;
     }
 
-    #[cfg(unix)]
+    #[cfg(any(doc, unix))]
     impl UnixStreamExt for UnixStream {
         async fn send_vectored_with_ancillary(
             &self,
