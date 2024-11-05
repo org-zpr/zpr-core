@@ -4,8 +4,7 @@ use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
 use std::io::ErrorKind;
-use std::net::{IpAddr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
@@ -73,7 +72,7 @@ fn main() -> ExitCode {
     //
     // parse configuration from command line
     //
-    let (ph_mode, config) = match main_args::argparse() {
+    let (ph_mode, config) = match main_args::argparse(None) {
         Ok((ph_mode, config)) => (ph_mode, config),
         Err(e) => {
             eprintln!("failed to parse command line arguments: {:?}", e);

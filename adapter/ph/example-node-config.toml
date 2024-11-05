@@ -1,0 +1,72 @@
+# Example of a node configuration file.
+
+# ============================================================================
+# GLOBAL section - Common for all PH instances (adapters and nods)
+# ============================================================================
+[global]
+
+
+    # ------------------------------------------------------------------------
+    # name
+    #
+    # [optional] - Used in log output. Defaults to "node".
+    # ------------------------------------------------------------------------
+# name = "node0"
+
+    # ------------------------------------------------------------------------
+    # control_path
+    #
+    # [optional] - Pathname of the unix domain socket used by the
+    #              debug packet capture system. Defaults to
+    #              "control.sock" in the default local files dir.
+    # ------------------------------------------------------------------------
+# control_path = "/var/run/zpr/control.sock"
+
+    # ------------------------------------------------------------------------
+    # self_addr
+    #
+    # [optional] - The source address for our UDP socket used for
+    #              communicating with the node. Defaults to
+    #              "0.0.0.0:0".
+    # ------------------------------------------------------------------------
+# self_addr = "192.168.0.1:12345"
+
+    # ------------------------------------------------------------------------
+    # ca_file
+    #
+    # [required] - Path to PEM certficate for the certificate authority.
+    # ------------------------------------------------------------------------
+ca_file = "tests/ca.pem"
+
+    # ------------------------------------------------------------------------
+    # certificate_file
+    #
+    # [required] - Path to PEM certificate holding the noise
+    #              public key signed by the certificate
+    #              authority.
+    # ------------------------------------------------------------------------
+certificate_file = "tests/certificate.pem"
+
+    # ------------------------------------------------------------------------
+    # private_key_file
+    #
+    # [required] - Path to PEM file containing the noise private
+    #              key for this node.
+    # ------------------------------------------------------------------------
+private_key_file = "tests/private_key.pem"
+
+    # ------------------------------------------------------------------------
+    # tun_if
+    #
+    # [optional] - Explicity name the TUN interface to use. If not
+    #              specified then the kernel picks a free one.
+    # ------------------------------------------------------------------------
+# tun_if = "tun23"
+
+    # ------------------------------------------------------------------------
+    # debug
+    #
+    # [optional] - Enable debug log output. Default false.
+    # ------------------------------------------------------------------------
+# debug = true
+

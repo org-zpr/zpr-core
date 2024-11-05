@@ -1,0 +1,103 @@
+# Example of an adapter configuration file.
+
+
+
+# ============================================================================
+# GLOBAL section - Common for all PH instances (adapters and nods)
+# ============================================================================
+[global]
+
+
+    # ------------------------------------------------------------------------
+    # name
+    #
+    # [optional] - Used in log output. Defaults to "adapter".
+    # ------------------------------------------------------------------------
+# name = "adapter0"
+
+    # ------------------------------------------------------------------------
+    # control_path
+    #
+    # [optional] - Pathname of the unix domain socket used by the
+    #              debug packet capture system. Defaults to
+    #              "control.sock" in the default local files dir.
+    # ------------------------------------------------------------------------
+# control_path = "/var/run/zpr/control.sock"
+
+    # ------------------------------------------------------------------------
+    # self_addr
+    #
+    # [optional] - The source address for our UDP socket used for
+    #              communicating with the node. Defaults to
+    #              "0.0.0.0:0".
+    # ------------------------------------------------------------------------
+# self_addr = "192.168.0.1:12345"
+
+    # ------------------------------------------------------------------------
+    # ca_file
+    #
+    # [required] - Path to PEM certficate for the certificate authority.
+    # ------------------------------------------------------------------------
+ca_file = "tests/ca.pem"
+
+    # ------------------------------------------------------------------------
+    # certificate_file
+    #
+    # [required] - Path to PEM certificate holding the noise
+    #              public key signed by the certificate
+    #              authority.
+    # ------------------------------------------------------------------------
+certificate_file = "tests/certificate.pem"
+
+    # ------------------------------------------------------------------------
+    # private_key_file
+    #
+    # [required] - Path to PEM file containing the noise private
+    #              key for this adapter.
+    # ------------------------------------------------------------------------
+private_key_file = "tests/private_key.pem"
+
+    # ------------------------------------------------------------------------
+    # tun_if
+    #
+    # [optional] - Explicity name the TUN interface to use. If not
+    #              specified then the kernel picks a free one.
+    # ------------------------------------------------------------------------
+# tun_if = "tun23"
+
+    # ------------------------------------------------------------------------
+    # debug
+    #
+    # [optional] - Enable debug log output. Default false.
+    # ------------------------------------------------------------------------
+# debug = true
+
+
+# ============================================================================
+# ADAPTER section - Required for adapters
+# ============================================================================
+[adapter]
+
+    # ------------------------------------------------------------------------
+    # node_addr
+    #
+    # [required] - The substrate dock address of the node to connect
+    #              to.
+    # ------------------------------------------------------------------------
+node_addr = "192.168.0.2:5000"
+
+    # ------------------------------------------------------------------------
+    # agent_addr
+    #
+    # [requried] - The ZPR address of this adapter.
+    # ------------------------------------------------------------------------
+agent_addr = "10.0.0.1"
+
+    # ------------------------------------------------------------------------
+    # node_public_key_file
+    #
+    # [required] - Path to the PEM file containing the nodes
+    #              noise public key.
+    # ------------------------------------------------------------------------
+node_public_key_file = "tests/node_public_key.pem"
+

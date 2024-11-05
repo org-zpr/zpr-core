@@ -1,5 +1,7 @@
 //! ZPR Packet Handler command line arg processing
 //!
+//! The main entry point is [argparse] which will parse the command line arguments
+//! and any config file, returning a PH configuration.
 
 use crate::assembly::PhMode;
 use clap::{Args, Parser, Subcommand};
@@ -10,20 +12,42 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
 /// This config struct is loaded up from the command line args and used by the
-/// ph system to configure itself.
+/// ph system to configure itself.  Do not create this directly, use [argparse].
 #[derive(Debug)]
 pub struct Config {
+    /// Name (for logging, etc) of the node or adapter instance.
     pub name: String,
+
+    /// Path to the unix domain socket for the control interface.
     pub control_path: PathBuf,
-    pub self_addr: SocketAddr, // should probably be left at 0.0.0.0:0
+
+    /// Source address for our UDP substrate socket. In mode cases should be `0.0.0.0:0`.
+    pub self_addr: SocketAddr,
+
+    /// Path to a PEM file containing the Certificate Authority certificate.
     pub ca_file: PathBuf,
+
+    /// Path to a PEM file containing the signed certificate listing the noise public key.
     pub certificate_file: PathBuf,
+
+    /// Path to a PEM file containing the noise private key.
     pub private_key_file: PathBuf,
+
+    /// Optionally specify the name of the TUN interface to use. In most cases this
+    /// should be left as None so that the kernal can pick a free one.
     pub tun_if: Option<String>,
+
+    /// Enable debug logging.
     pub debug: bool,
-    pub node_addr: Option<SocketAddr>, // required for adapter
-    pub agent_addr: Option<IpAddr>,    // required for adapter
-    pub node_public_key_file: Option<PathBuf>, // required for adapter
+
+    /// Required for adapter - the node dock address on substrate.
+    pub node_addr: Option<SocketAddr>,
+
+    /// Required for adapter - the adapters ZPR agent address.
+    pub agent_addr: Option<IpAddr>,
+
+    /// Required for adapter - the path to the PEM file containing the nodes (signed) noise public key.
+    pub node_public_key_file: Option<PathBuf>,
 }
 
 /// Errors you may encounter when trying to parse command line or configuration
@@ -32,9 +56,6 @@ pub struct Config {
 pub enum ArgsError {
     #[error("missing argument: {0}")]
     Missing(String),
-
-    #[error("invalid argument: {0}")]
-    Invalid(String),
 
     #[error("{0}")]
     IOError(#[from] std::io::Error),
@@ -188,6 +209,9 @@ impl Default for Config {
 }
 
 impl Config {
+    // Check that the required bits are present based on mode.
+    //
+    // TODO: Might be nice to check things like file existence here too.
     fn check_valid(&self, mode: PhMode) -> Result<(), ArgsError> {
         if self.name.is_empty() {
             // return Err(MissingArgError("name"));
@@ -305,6 +329,7 @@ struct NodeConfig {
     global: GlobalConfigSection,
 }
 
+// Global section is shared by nodes and adapters.
 #[derive(Deserialize, Debug, Clone)]
 struct GlobalConfigSection {
     name: Option<String>,
@@ -317,6 +342,7 @@ struct GlobalConfigSection {
     debug: Option<bool>,
 }
 
+// Adapter only bits.
 #[derive(Deserialize, Debug, Clone)]
 struct AdapterConfigSection {
     node_addr: Option<SocketAddr>,
@@ -324,6 +350,7 @@ struct AdapterConfigSection {
     agent_addr: Option<IpAddr>,
 }
 
+// Load a config, either adapter or node, from a TOML file.
 fn load_config<T>(path: &Path) -> Result<T, ArgsError>
 where
     T: serde::de::DeserializeOwned,
@@ -350,10 +377,25 @@ where
     Ok(ac)
 }
 
-pub fn argparse() -> std::result::Result<(PhMode, Config), ArgsError> {
+/// Parse the program arguments, may also parse a configuration file if that has been
+/// specified in the arguments.  If all goes well this returns a valid configuration
+/// and "mode" for the program.
+///
+/// The configuration returned will have the correct contents for the [PhMode], but
+/// additional checking is still necessary.  For example, file paths specified
+/// may not actually exist.
+///
+/// # Arguments
+///
+/// `args` - Optional vector of strings representing the command line arguments.
+/// If None we parse from `std::env::args_os()`.
+pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config), ArgsError> {
     let mut config: Config;
     let ph_mode: PhMode;
-    let control = Control::parse();
+    let control = match args {
+        Some(args) => Control::parse_from(args),
+        None => Control::parse(),
+    };
     match control.command {
         Command::Adapter {
             config_file,
@@ -421,4 +463,509 @@ pub fn argparse() -> std::result::Result<(PhMode, Config), ArgsError> {
         return Err(e);
     }
     Ok((ph_mode, config))
+}
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+    use rand::Rng;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempFile {
+        path: String,
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+
+    impl TempFile {
+        fn new_toml(contents: &str) -> TempFile {
+            let mut rng = rand::thread_rng();
+            let tstamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+            let dir = env::temp_dir();
+            let num: u32 = rng.gen();
+            let path = dir.join(format!("org_zpr_ph_test_main_{}_{}.toml", num, tstamp));
+            fs::write(&path, contents).expect("Unable to write file");
+            TempFile {
+                path: path.to_str().unwrap().to_string(),
+            }
+        }
+
+        fn get_path(&self) -> &Path {
+            return Path::new(&self.path);
+        }
+    }
+
+    #[test]
+    fn test_main_args_load_config_adapter() {
+        let tomltxt = r#"
+        [global]
+        name = "adapter0"
+        control_path = "/var/run/zpr/control.sock"
+        self_addr = "192.168.0.1:12345"
+        ca_file = "tests/ca.pem"
+        certificate_file = "tests/certificate.pem"
+        private_key_file = "tests/private_key.pem"
+        tun_if = "tun23"
+        debug = true
+
+        [adapter]
+        node_addr = "192.168.0.2:5000"
+        agent_addr = "10.0.0.1"
+        node_public_key_file = "tests/node_public_key.pem"
+        "#;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+
+        let config: AdapterConfig = load_config(tmpfile.get_path()).unwrap();
+
+        assert_eq!(config.global.name, Some("adapter0".to_string()));
+        assert_eq!(
+            config.global.control_path,
+            Some(PathBuf::from("/var/run/zpr/control.sock"))
+        );
+        assert_eq!(
+            config.global.self_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 1)),
+                12345
+            ))
+        );
+        assert_eq!(config.global.ca_file, Some(PathBuf::from("tests/ca.pem")));
+        assert_eq!(
+            config.global.certificate_file,
+            Some(PathBuf::from("tests/certificate.pem"))
+        );
+        assert_eq!(
+            config.global.private_key_file,
+            Some(PathBuf::from("tests/private_key.pem"))
+        );
+        assert_eq!(config.global.tun_if, Some("tun23".to_string()));
+        assert_eq!(config.global.debug, Some(true));
+
+        assert_eq!(
+            config.adapter.node_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 2)),
+                5000
+            ))
+        );
+        assert_eq!(
+            config.adapter.agent_addr,
+            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+        );
+        assert_eq!(
+            config.adapter.node_public_key_file,
+            Some(PathBuf::from("tests/node_public_key.pem"))
+        );
+    }
+
+    #[test]
+    fn test_main_args_load_config_node() {
+        let tomltxt = r#"
+        [global]
+        name = "node0"
+        control_path = "/var/run/zpr/control.sock"
+        self_addr = "192.168.0.1:12345"
+        ca_file = "tests/ca.pem"
+        certificate_file = "tests/certificate.pem"
+        private_key_file = "tests/private_key.pem"
+        tun_if = "tun23"
+        debug = true
+        "#;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+
+        let config: NodeConfig = load_config(tmpfile.get_path()).unwrap();
+
+        assert_eq!(config.global.name, Some("node0".to_string()));
+        assert_eq!(
+            config.global.control_path,
+            Some(PathBuf::from("/var/run/zpr/control.sock"))
+        );
+        assert_eq!(
+            config.global.self_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 1)),
+                12345
+            ))
+        );
+        assert_eq!(config.global.ca_file, Some(PathBuf::from("tests/ca.pem")));
+        assert_eq!(
+            config.global.certificate_file,
+            Some(PathBuf::from("tests/certificate.pem"))
+        );
+        assert_eq!(
+            config.global.private_key_file,
+            Some(PathBuf::from("tests/private_key.pem"))
+        );
+        assert_eq!(config.global.tun_if, Some("tun23".to_string()));
+        assert_eq!(config.global.debug, Some(true));
+    }
+
+    #[test]
+    fn test_main_args_argparse_adapter_config() {
+        let tomltxt = r#"
+        [global]
+        name = "adapter0"
+        control_path = "/var/run/zpr/control.sock"
+        self_addr = "192.168.0.1:12345"
+        ca_file = "tests/ca.pem"
+        certificate_file = "tests/certificate.pem"
+        private_key_file = "tests/private_key.pem"
+        tun_if = "tun23"
+        debug = true
+
+        [adapter]
+        node_addr = "192.168.0.2:5000"
+        agent_addr = "10.0.0.1"
+        node_public_key_file = "tests/node_public_key.pem"
+        "#;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+
+        let args = vec![
+            "ph",
+            "adapter",
+            "-c",
+            tmpfile.get_path().to_str().unwrap(),
+            "-n",
+            "a0",
+        ];
+
+        let (pmode, config) = argparse(Some(args)).unwrap();
+
+        assert_eq!(pmode, PhMode::Adapter);
+
+        assert_eq!(config.name, "a0".to_string());
+        assert_eq!(
+            config.control_path,
+            PathBuf::from("/var/run/zpr/control.sock")
+        );
+        assert_eq!(
+            config.self_addr,
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 1)), 12345)
+        );
+        assert_eq!(config.ca_file, PathBuf::from("tests/ca.pem"));
+        assert_eq!(
+            config.certificate_file,
+            PathBuf::from("tests/certificate.pem")
+        );
+        assert_eq!(
+            config.private_key_file,
+            PathBuf::from("tests/private_key.pem")
+        );
+        assert_eq!(config.tun_if, Some("tun23".to_string()));
+        assert_eq!(config.debug, true);
+
+        assert_eq!(
+            config.node_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 2)),
+                5000
+            ))
+        );
+        assert_eq!(
+            config.agent_addr,
+            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+        );
+        assert_eq!(
+            config.node_public_key_file,
+            Some(PathBuf::from("tests/node_public_key.pem"))
+        );
+    }
+
+    #[test]
+    fn test_main_args_adapter_config_requires_adapter_section() {
+        let tomltxt = r#"
+        [global]
+        name = "adapter0"
+        control_path = "/var/run/zpr/control.sock"
+        self_addr = "192.168.0.1:12345"
+        ca_file = "tests/ca.pem"
+        certificate_file = "tests/certificate.pem"
+        private_key_file = "tests/private_key.pem"
+        tun_if = "tun23"
+        debug = true
+        "#;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+
+        let args = vec![
+            "ph",
+            "adapter",
+            "-c",
+            tmpfile.get_path().to_str().unwrap(),
+            "-n",
+            "a0",
+        ];
+        match argparse(Some(args)) {
+            Err(ArgsError::ParseError(_)) => {}
+            _ => panic!("Expected ParseError"),
+        }
+    }
+
+    // You can leave the adapter section blank and provide the details on
+    // the command line.
+    #[test]
+    fn test_main_args_adapter_config_blank_adapter() {
+        let tomltxt = r#"
+        [global]
+        name = "adapter0"
+        control_path = "/var/run/zpr/control.sock"
+        self_addr = "192.168.0.1:12345"
+        ca_file = "tests/ca.pem"
+        certificate_file = "tests/certificate.pem"
+        private_key_file = "tests/private_key.pem"
+        tun_if = "tun23"
+        debug = true
+
+        [adapter]
+        "#;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+
+        let args = vec![
+            "ph",
+            "adapter",
+            "-c",
+            tmpfile.get_path().to_str().unwrap(),
+            "--node-addr",
+            "192.168.0.2:5000",
+            "--agent-addr",
+            "10.0.0.1",
+            "--node-public-key-file",
+            "tests/node_public_key.pem",
+        ];
+
+        let (pmode, config) = argparse(Some(args)).unwrap();
+
+        assert_eq!(pmode, PhMode::Adapter);
+
+        assert_eq!(
+            config.node_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 2)),
+                5000
+            ))
+        );
+        assert_eq!(
+            config.agent_addr,
+            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+        );
+        assert_eq!(
+            config.node_public_key_file,
+            Some(PathBuf::from("tests/node_public_key.pem"))
+        );
+    }
+
+    // Leave out some stuff in the config file, but specify on command line.
+    #[test]
+    fn test_main_args_argparse_adapter_config_override_globs() {
+        let tomltxt = r#"
+        [global]
+        control_path = "/var/run/zpr/control.sock"
+        ca_file = "tests/ca.pem"
+        certificate_file = "tests/certificate.pem"
+        private_key_file = "tests/private_key.pem"
+
+        [adapter]
+        node_addr = "192.168.0.2:5000"
+        agent_addr = "10.0.0.1"
+        node_public_key_file = "tests/node_public_key.pem"
+        "#;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+
+        let args = vec![
+            "ph",
+            "adapter",
+            "-c",
+            tmpfile.get_path().to_str().unwrap(),
+            "--self-addr",
+            "192.168.0.1:12345",
+            "--tun-if",
+            "tun23",
+            "-d",
+            "true",
+        ];
+
+        let (pmode, config) = argparse(Some(args)).unwrap();
+
+        assert_eq!(pmode, PhMode::Adapter);
+
+        assert_eq!(config.name, "adapter".to_string());
+        assert_eq!(
+            config.control_path,
+            PathBuf::from("/var/run/zpr/control.sock")
+        );
+        assert_eq!(
+            config.self_addr,
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 1)), 12345)
+        );
+        assert_eq!(config.ca_file, PathBuf::from("tests/ca.pem"));
+        assert_eq!(
+            config.certificate_file,
+            PathBuf::from("tests/certificate.pem")
+        );
+        assert_eq!(
+            config.private_key_file,
+            PathBuf::from("tests/private_key.pem")
+        );
+        assert_eq!(config.tun_if, Some("tun23".to_string()));
+        assert_eq!(config.debug, true);
+
+        assert_eq!(
+            config.node_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 2)),
+                5000
+            ))
+        );
+        assert_eq!(
+            config.agent_addr,
+            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+        );
+        assert_eq!(
+            config.node_public_key_file,
+            Some(PathBuf::from("tests/node_public_key.pem"))
+        );
+    }
+
+    #[test]
+    fn test_main_args_argparse_adapter_config_minimal() {
+        let tomltxt = r#"
+        [global]
+        ca_file = "tests/ca.pem"
+        certificate_file = "tests/certificate.pem"
+        private_key_file = "tests/private_key.pem"
+
+        [adapter]
+        node_addr = "192.168.0.2:5000"
+        agent_addr = "10.0.0.1"
+        node_public_key_file = "tests/node_public_key.pem"
+        "#;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+
+        let args = vec!["ph", "adapter", "-c", tmpfile.get_path().to_str().unwrap()];
+
+        let (pmode, config) = argparse(Some(args)).unwrap();
+
+        assert_eq!(pmode, PhMode::Adapter);
+
+        assert_eq!(config.name, "adapter".to_string());
+        assert!(!config.control_path.to_string_lossy().is_empty());
+        assert_eq!(
+            config.self_addr,
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
+        );
+        assert_eq!(config.ca_file, PathBuf::from("tests/ca.pem"));
+        assert_eq!(
+            config.certificate_file,
+            PathBuf::from("tests/certificate.pem")
+        );
+        assert_eq!(
+            config.private_key_file,
+            PathBuf::from("tests/private_key.pem")
+        );
+        assert!(config.tun_if.is_none());
+        assert_eq!(config.debug, false);
+
+        assert_eq!(
+            config.node_addr,
+            Some(SocketAddr::new(
+                IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 2)),
+                5000
+            ))
+        );
+        assert_eq!(
+            config.agent_addr,
+            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+        );
+        assert_eq!(
+            config.node_public_key_file,
+            Some(PathBuf::from("tests/node_public_key.pem"))
+        );
+    }
+
+    #[test]
+    fn test_main_args_argparse_node_config_minimal() {
+        let tomltxt = r#"
+        [global]
+        ca_file = "tests/ca.pem"
+        certificate_file = "tests/certificate.pem"
+        private_key_file = "tests/private_key.pem"
+        "#;
+
+        let tmpfile = TempFile::new_toml(&tomltxt);
+
+        let args = vec!["ph", "node", "-c", tmpfile.get_path().to_str().unwrap()];
+
+        let (pmode, config) = argparse(Some(args)).unwrap();
+
+        assert_eq!(pmode, PhMode::Node);
+
+        assert_eq!(config.name, "node".to_string());
+        assert!(!config.control_path.to_string_lossy().is_empty());
+        assert_eq!(
+            config.self_addr,
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
+        );
+        assert_eq!(config.ca_file, PathBuf::from("tests/ca.pem"));
+        assert_eq!(
+            config.certificate_file,
+            PathBuf::from("tests/certificate.pem")
+        );
+        assert_eq!(
+            config.private_key_file,
+            PathBuf::from("tests/private_key.pem")
+        );
+        assert!(config.tun_if.is_none());
+        assert_eq!(config.debug, false);
+    }
+
+    #[test]
+    fn test_main_args_argparse_node_config_no_toml() {
+        let args = vec![
+            "ph",
+            "node",
+            "--ca-file",
+            "tests/ca.pem",
+            "--certificate-file",
+            "tests/certificate.pem",
+            "--private-key-file",
+            "tests/private_key.pem",
+        ];
+
+        let (pmode, config) = argparse(Some(args)).unwrap();
+
+        assert_eq!(pmode, PhMode::Node);
+
+        assert_eq!(config.name, "node".to_string());
+        assert!(!config.control_path.to_string_lossy().is_empty());
+        assert_eq!(
+            config.self_addr,
+            SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
+        );
+        assert_eq!(config.ca_file, PathBuf::from("tests/ca.pem"));
+        assert_eq!(
+            config.certificate_file,
+            PathBuf::from("tests/certificate.pem")
+        );
+        assert_eq!(
+            config.private_key_file,
+            PathBuf::from("tests/private_key.pem")
+        );
+        assert!(config.tun_if.is_none());
+        assert_eq!(config.debug, false);
+    }
 }
