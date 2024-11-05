@@ -149,7 +149,8 @@ done
 # Cleanup
 #
 
-for ph in $(pgrep ph)
+rgid=$(($(ps -o rgid= -p "$$")))
+for ph in $(pgrep -x -G $rgid ph)
 do
 	echo
 	echo "Terminating $ph"
