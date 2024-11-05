@@ -35,7 +35,6 @@ function counters() {
 # Set up automatic cleanup
 #
 
-CHILDREN=()
 
 trap cleanup EXIT
 
@@ -73,7 +72,6 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
      --certificate-file node.crt \
      --private-key-file node.key \
      --tun-if tun0 2>&1 |tee node.log &
-CHILDREN=(${CHILDREN[@]} "$!")
 
 sleep 2
 
@@ -89,7 +87,6 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
   --node-public-key-file node.pubkey \
   --agent-addr "$A_ZPR_ADDR" 2>&1 |tee adapter1.log &
-CHILDREN=(${CHILDREN[@]} "$!")
 
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
@@ -104,7 +101,6 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
   --node-public-key-file node.pubkey \
   --agent-addr "$B_ZPR_ADDR" 2>&1 |tee adapter2.log &
-CHILDREN=(${CHILDREN[@]} "$!")
 
 
 #
@@ -116,24 +112,22 @@ wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-node tun0 || { echo "FAILURE"; exit 1; }
 echo "Carrier has arrived."
-
-stty sane || true
-
-
-echo "PAUSING FOR KEY MANAGEMENT EXCHANGE ..."
-countdown 10
-
-echo "TEST STARTING"
+# This sleep solves a display issue because magic
+sleep 1
 
 
 #
 # Run test
 #
 
+echo "TEST STARTING"
+
 PASS=0
 if ! ping_test
 then PASS=1
 fi
+
+sleep 1
 
 
 #
@@ -156,8 +150,15 @@ done
 # Cleanup
 #
 
-sudo kill -SIGUSR1 "${CHILDREN[@]}" 2> /dev/null || true
-sleep 1  # FIXME: let's do something better here
+for pid in $(get_descendants)
+do
+    echo
+    echo "Terminating $pid"
+    sleep 1
+    sudo kill -SIGTERM "$pid"
+    sleep 1
+done
+
 stty sane || true
 
 

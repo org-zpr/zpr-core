@@ -124,12 +124,32 @@ pub enum LinkState {
     Error,
 }
 
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum LinkEvent {
+    Configure,
+    Start,
+    KeyingDone,
+    ReceivedHelloRequest,
+    ReceivedHelloResponse,
+    ReceivedRegisterRequest(IpAddress),
+    ReceivedRegisterResponse,
+    ReceivedKeepAliveResponse,
+    ReceivedTerminationRequest,
+    ReceivedTerminationResponse,
+    ReceivedTerminationIndication,
+    Close,
+    Reset,
+}
+
 #[derive(Error, Debug)]
 pub enum LinkStateError {
     #[error("Got unexpected event {1} on state {0:?}")]
     UnexpectedTransition(LinkState, String),
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
+    #[error("Link {0} does not exist in peer table")]
+    NotFound(LinkId),
     #[error("This operation is not supported yet")]
     OperationNotSupportedYet,
 }
@@ -190,14 +210,46 @@ impl LinkStateWrapper {
         self.locked_fsm.lock().unwrap().status
     }
 
-    #[allow(dead_code)]
-    pub fn set_silent(&self) {
-        self.locked_fsm.lock().unwrap().silent = true
+    pub fn process_event(&self, asm: &Assembly, event: LinkEvent) -> Result<(), LinkStateError> {
+        match event {
+            LinkEvent::Configure => self.configure(asm),
+            LinkEvent::Start => self.start(asm),
+            LinkEvent::ReceivedHelloRequest => self.process_hello_request(asm),
+            LinkEvent::ReceivedRegisterRequest(addr) => {
+                self.process_register_agent_address_request(asm, addr)
+            }
+            LinkEvent::ReceivedRegisterResponse => {
+                self.process_register_agent_address_response(asm)
+            }
+            LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
+            LinkEvent::ReceivedTerminationResponse => Err(LinkStateError::OperationNotSupportedYet),
+            LinkEvent::ReceivedTerminationRequest => Err(LinkStateError::OperationNotSupportedYet),
+            LinkEvent::ReceivedTerminationIndication => {
+                Err(LinkStateError::OperationNotSupportedYet)
+            }
+            _ => panic!("Called wrong function for event {:?}", event),
+        }
+    }
+
+    // FIXME: This is a temporary hack until we get rid of the static stuff
+    pub fn process_static_event<'pktbuf>(
+        &self,
+        asm: &'static Assembly<'pktbuf>,
+        event: LinkEvent,
+    ) -> Result<(), LinkStateError> {
+        match event {
+            LinkEvent::KeyingDone => self.keying_done(asm),
+            LinkEvent::ReceivedHelloResponse => self.process_hello_response(asm),
+            LinkEvent::Close => Ok(self.initiate_close()),
+            LinkEvent::Reset => Ok(self.reset(asm)),
+            _ => panic!("Called wrong function for event {:?}", event),
+        }
     }
 
     /// Configure an uninitialized link/tether
     /// Transitions from Initial -> Inactive
-    pub fn configure(&self, asm: &Assembly) -> Result<(), LinkStateError> {
+    /// Does not generate any packets
+    fn configure(&self, asm: &Assembly) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         if locked_fsm.state != LinkState::Initial {
             return Err(LinkStateError::UnexpectedTransition(
@@ -220,7 +272,8 @@ impl LinkStateWrapper {
 
     /// Start an inactive link/tether
     /// Transitions from Inactive -> Keying
-    pub fn start(&self, asm: &Assembly) -> Result<(), LinkStateError> {
+    /// Will trigger key management messages to be sent if this is an adapter
+    fn start(&self, asm: &Assembly) -> Result<(), LinkStateError> {
         assert!(self.id != zpr::LINK_ID_UNKNOWN);
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         if locked_fsm.state != LinkState::Inactive {
@@ -271,10 +324,8 @@ impl LinkStateWrapper {
 
     /// The Key Manager calls this when it is done initial keying
     /// Transitions from Keying -> Helloing
-    pub fn keying_done<'pktbuf>(
-        &self,
-        asm: &'static Assembly<'pktbuf>,
-    ) -> Result<(), LinkStateError> {
+    /// Will trigger a Hello to be sent if this is an adapter
+    fn keying_done<'pktbuf>(&self, asm: &'static Assembly<'pktbuf>) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         if locked_fsm.state != LinkState::Keying {
             return Err(LinkStateError::UnexpectedTransition(
@@ -297,14 +348,27 @@ impl LinkStateWrapper {
     fn maybe_send_hello<'pktbuf>(&self, asm: &'static Assembly<'pktbuf>) {
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            tokio::task::spawn_local(mgmt::requests::send_hello_request(asm, self.id));
+            let link_id = self.id;
+            tokio::task::spawn_local(async move {
+                mgmt::requests::send_hello_request(asm, link_id).await?;
+
+                if asm
+                    .process_link_state_event_static(link_id, LinkEvent::ReceivedHelloResponse)
+                    .is_err()
+                {
+                    Err(())
+                } else {
+                    Ok(())
+                }
+            });
         }
         // Otherwise, wait for the adapter to reach out
     }
 
     /// Update link state based on received hello request
     /// Transitions from Helloing to Registering Agent Address
-    pub fn process_hello_request(&self, asm: &Assembly) -> Result<(), LinkStateError> {
+    /// Does not generate any packets
+    fn process_hello_request(&self, asm: &Assembly) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToNode, LinkState::Helloing) => {
@@ -338,7 +402,8 @@ impl LinkStateWrapper {
 
     /// Update link state based on received hello response
     /// Transitions from Helloing to Registering Agent Address
-    pub fn process_hello_response<'pktbuf>(
+    /// Sends a Register Agent Address request if this is an adapter
+    fn process_hello_response<'pktbuf>(
         &self,
         asm: &'static Assembly<'pktbuf>,
     ) -> Result<(), LinkStateError> {
@@ -350,9 +415,19 @@ impl LinkStateWrapper {
                     "{}: Link {} finished helloing.  Sending register agent address",
                     asm.system_name, self.id
                 );
-                tokio::task::spawn_local(mgmt::requests::send_register_agent_address_request(
-                    asm, self.id,
-                ));
+                let link_id = self.id;
+                tokio::task::spawn_local(async move {
+                    mgmt::requests::send_register_agent_address_request(asm, link_id).await?;
+
+                    if asm
+                        .process_link_state_event(link_id, LinkEvent::ReceivedRegisterResponse)
+                        .is_err()
+                    {
+                        Err(())
+                    } else {
+                        Ok(())
+                    }
+                });
                 Ok(())
             }
             (LinkType::NodeToNode, LinkState::Helloing) => {
@@ -378,7 +453,8 @@ impl LinkStateWrapper {
 
     /// Update link state based on received register agent address request
     /// Transitions from Registering Agent Address to Active
-    pub fn process_register_agent_address_request(
+    /// Does not generate any packets
+    fn process_register_agent_address_request(
         &self,
         asm: &Assembly,
         addr: IpAddress,
@@ -403,7 +479,8 @@ impl LinkStateWrapper {
 
     /// Update link state based on received register agent address response
     /// Transitions from Registering Agent Address to Active
-    pub fn process_register_agent_address_response(
+    /// Does not generate any packets
+    fn process_register_agent_address_response(
         &self,
         asm: &Assembly,
     ) -> Result<(), LinkStateError> {
@@ -428,7 +505,7 @@ impl LinkStateWrapper {
     #[allow(dead_code)]
     /// Initiate the shutdown of the link
     /// Transitions to Closed from any running state
-    pub fn shutdown(&self) {
+    pub fn initiate_close(&self) {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.state = LinkState::Closing;
         // TODO: Send stateful terminate
@@ -437,7 +514,7 @@ impl LinkStateWrapper {
     /// Complete a link shutdown, upon receiving a terminate request or response
     /// Transitions from Closed to Inactive
     #[allow(dead_code)]
-    pub fn close(&self, asm: &Assembly) -> Result<(), LinkStateError> {
+    pub fn complete_close(&self, asm: &Assembly) -> Result<(), LinkStateError> {
         info!("{}: Shutting down link {}", asm.system_name, self.id);
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.state = LinkState::Inactive;
@@ -446,6 +523,8 @@ impl LinkStateWrapper {
         Ok(())
     }
 
+    /// Reset the link, shutting it down and wiping its configuration
+    /// Transitions to Initial from any state
     pub fn reset(&self, asm: &Assembly) {
         info!("{}: Resetting link {}", asm.system_name, self.id);
         let mut locked_fsm = self.locked_fsm.lock().unwrap();

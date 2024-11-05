@@ -6,6 +6,7 @@ use crate::config;
 use crate::counters;
 use crate::defs::*;
 use crate::dock_tables;
+use crate::link_state::LinkEvent;
 use crate::net_defs::IpAddress;
 use crate::packet::Packet;
 use crate::zdp;
@@ -89,9 +90,10 @@ pub async fn handle_hello_request<'pktbuf>(
         asm.system_name, ingress_link_id
     );
 
-    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
-        peer_state.link_state_machine.process_hello_request(asm)
-    }) else {
+    if asm
+        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest)
+        .is_err()
+    {
         return Err((HandleMgmtError::LinkStateError, pkt));
     };
 
@@ -127,9 +129,10 @@ pub async fn handle_hello_response<'pktbuf>(
         asm.system_name, ingress_link_id, status
     );
 
-    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
-        peer_state.link_state_machine.process_hello_response(asm)
-    }) else {
+    if asm
+        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloResponse)
+        .is_err()
+    {
         return Err((HandleMgmtError::LinkStateError, pkt));
     };
 
@@ -137,7 +140,7 @@ pub async fn handle_hello_response<'pktbuf>(
     Ok(())
 }
 
-/// handle a Register Agent Address Request
+/// handle a Register Agent Address Request (RFC 6.5 § 6.3.10)
 pub async fn handle_register_agent_address_request<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     seq_num: zpr::SeqNum,
@@ -175,11 +178,13 @@ pub async fn handle_register_agent_address_request<'pktbuf>(
         asm.system_name, ingress_link_id, agent_address
     );
 
-    let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
-        peer_state
-            .link_state_machine
-            .process_register_agent_address_request(asm, agent_address)
-    }) else {
+    if asm
+        .process_link_state_event(
+            ingress_link_id,
+            LinkEvent::ReceivedRegisterRequest(agent_address),
+        )
+        .is_err()
+    {
         return Err((HandleMgmtError::LinkStateError, pkt));
     };
 
@@ -198,7 +203,7 @@ pub async fn handle_register_agent_address_request<'pktbuf>(
     Ok(())
 }
 
-/// handle a Register Agent Address Response
+/// handle a Register Agent Address Response (RFC 6.5 § 6.3.10)
 pub async fn handle_register_agent_address_response<'pktbuf>(
     asm: &Assembly<'pktbuf>,
     _seq_num: zpr::SeqNum,
@@ -210,15 +215,13 @@ pub async fn handle_register_agent_address_response<'pktbuf>(
         asm.system_name, ingress_link_id
     );
 
-    if let Some(Ok(_)) = asm.peer_table.inspect(ingress_link_id, |peer_state| {
-        peer_state
-            .link_state_machine
-            .process_register_agent_address_response(asm)
-    }) {
-        Ok(())
-    } else {
-        Err((HandleMgmtError::LinkStateError, pkt))
-    }
+    if asm
+        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedRegisterResponse)
+        .is_err()
+    {
+        return Err((HandleMgmtError::LinkStateError, pkt));
+    };
+    Ok(())
 }
 
 /// handle a Bind Agent Address Request (RFC 6.5 § 6.3.11)

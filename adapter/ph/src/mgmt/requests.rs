@@ -43,10 +43,7 @@ pub async fn send_discard(asm: &Assembly<'_>, link_id: zpr::LinkId) {
 }
 
 /// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
-pub async fn send_hello_request<'a, 'pktbuf>(
-    asm: &'static Assembly<'pktbuf>,
-    link_id: zpr::LinkId,
-) -> Result<(), ()> {
+pub async fn send_hello_request(asm: &Assembly<'_>, link_id: zpr::LinkId) -> Result<(), ()> {
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -66,14 +63,7 @@ pub async fn send_hello_request<'a, 'pktbuf>(
             let status = hdr.status;
             info!("Received HelloResponse, status: {}", status);
             asm.buffer_stack.put_buffer(hello_res.destroy());
-
-            if let Some(Ok(_)) = asm.peer_table.inspect(link_id, |peer_state| {
-                peer_state.link_state_machine.process_hello_response(asm)
-            }) {
-                Ok(())
-            } else {
-                Err(())
-            }
+            Ok(())
         }
 
         Err(err) => {
@@ -83,9 +73,9 @@ pub async fn send_hello_request<'a, 'pktbuf>(
     }
 }
 
-/// send a Register Agent Address Request
-pub async fn send_register_agent_address_request<'a, 'pktbuf>(
-    asm: &'a Assembly<'pktbuf>,
+/// send a Register Agent Address Request (RFC 6.5 § 6.3.10)
+pub async fn send_register_agent_address_request(
+    asm: &Assembly<'_>,
     link_id: zpr::LinkId,
 ) -> Result<(), ()> {
     let Some(agent_addr) = asm.agent_address else {
@@ -134,16 +124,7 @@ pub async fn send_register_agent_address_request<'a, 'pktbuf>(
                 hdr.status_code
             );
             asm.buffer_stack.put_buffer(register_res.destroy());
-
-            if let Some(Ok(_)) = asm.peer_table.inspect(link_id, |peer_state| {
-                peer_state
-                    .link_state_machine
-                    .process_register_agent_address_response(asm)
-            }) {
-                Ok(())
-            } else {
-                Err(())
-            }
+            Ok(())
         }
 
         Err(err) => {
@@ -170,8 +151,8 @@ impl std::fmt::Display for BindAgentAddressError {
 }
 
 /// send a Bind Agent Address Request and wait for the Response (RFC 6.5 § 6.3.11)
-pub async fn send_bind_agent_address_request<'a, 'pktbuf>(
-    asm: &'a Assembly<'pktbuf>,
+pub async fn send_bind_agent_address_request(
+    asm: &Assembly<'_>,
     link_id: zpr::LinkId,
     compression_mode: zpr::CompressionMode,
     five_tuple: FiveTuple,

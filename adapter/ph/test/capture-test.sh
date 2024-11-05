@@ -51,8 +51,6 @@ function close_program() {
 # Set up automatic cleanup
 #
 
-CHILDREN=()
-
 trap cleanup EXIT
 
 TMPDIR=$(mktemp -d)
@@ -83,7 +81,7 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --certificate-file node.crt \
   --private-key-file node.key \
   --tun-if tun0 2>&1 |tee node.log &
-CHILDREN=(${CHILDREN[@]} "$!")
+
 
 sleep 2
 
@@ -99,7 +97,6 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
   --agent-addr "$A_ZPR_ADDR" \
   --node-public-key-file node.pubkey 2>&1 |tee adapter1.log &
-CHILDREN=(${CHILDREN[@]} "$!")
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
@@ -113,7 +110,6 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
   --agent-addr "$B_ZPR_ADDR" \
   --node-public-key-file node.pubkey 2>&1 |tee adapter2.log &
-CHILDREN=(${CHILDREN[@]} "$!")
 
 sleep 1 # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well
 set_program "$ADAPTER1_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
@@ -132,6 +128,7 @@ wait_for 5 check_carrier zpr-b tun0 || {
   exit 1
 }
 echo "Carrier has arrived."
+sleep 1
 
 stty sane || true
 
@@ -140,9 +137,6 @@ stty sane || true
 #
 
 set_program "$ADAPTER2_SOCK" "$TMPDIR/cap_test2.pcap" None
-
-echo "pausing for key management exchange..."
-countdown 10
 
 echo "starting PING test..."
 
@@ -183,8 +177,14 @@ fi
 # Cleanup
 #
 
-sudo kill "${CHILDREN[@]}" 2>/dev/null || true
-sleep 1 # FIXME: let's do something better here
+for pid in $(get_descendants)
+do
+	echo
+	echo "Terminating $pid"
+	sleep 1
+	sudo kill -SIGTERM "$pid"
+	sleep 1
+done
 stty sane || true
 
 #

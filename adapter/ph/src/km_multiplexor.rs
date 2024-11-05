@@ -2,6 +2,7 @@ use crate::assembly::Assembly;
 use crate::km::*;
 use crate::km_cert_exchange::KmCertExchange;
 use crate::km_noise::{KmNoise, NoiseKeypair};
+use crate::link_state::LinkEvent;
 use crate::mgmt::requests;
 use crate::peer_table::KmHandle;
 use bytes::Bytes;
@@ -128,16 +129,11 @@ async fn signal_worker<'pktbuf>(
                                 error!("{}: km_multiplexor: failed to set SA established: {:?}", asm.system_name, e);
                             }
                         }
-                        match asm.peer_table.inspect(linkmsg.link_id, |peer_state| {
-                            peer_state.link_state_machine.keying_done(asm)
-                        }) {
-                            Some(Err(e)) => {
+                        match asm.process_link_state_event_static(linkmsg.link_id, LinkEvent::KeyingDone) {
+                            Err(e) => {
                                 error!("{}: Link state error: {:?}", asm.system_name, e);
                             }
-                            None => {
-                                error!("{}: Link {} gone", asm.system_name, linkmsg.link_id);
-                            }
-                            Some(Ok(())) => (),
+                            Ok(_) => (),
                         }
                         match status.get_mut(&linkmsg.link_id) {
                             Some(s) if s.error_count == 0 => {
