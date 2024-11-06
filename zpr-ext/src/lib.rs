@@ -13,8 +13,5 @@ pub mod bytes;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
-#[cfg(feature = "tokio-tun")]
-pub mod tokio_tun;
-
 #[cfg(feature = "zerocopy")]
 pub mod zerocopy;
