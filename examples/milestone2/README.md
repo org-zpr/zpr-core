@@ -1,6 +1,73 @@
-# Configuration files for Milestone 2
+# Configuration for Milestone 2
 
-## Legacy keys 
+
+## Network Configuration
+
+### Physical (Substrate) Network Setup
+
+The network is set up on testnet2 using four hosts and one network switch.
+The names below (n1, t0, a0, a1) are the names from the original prototype
+testnet and these are physically labelled on the hosts.
+
+```
+    runs a node       runs adapter + visa service
+    +-----+           +-----+ 
+    | n1  |           | a0  | 
+    +--+--+           +--+--+ 
+       |127.16.1.1       |127.16.1.2
+       |                 |
+    ---+--------+--------+-------+--- network 127.16.1.0/24
+                |                |    (wired ethernet)
+      127.16.1.3|      127.16.1.4|
+             +--+--+          +--+--+
+             | t0  |          | a1  |
+             +-----+          +--+--+
+             runs adapter     runs adapter + web server
+    
+```
+
+### ZPR Network Setup
+
+In the demo we will be telling the adapters their address (which they will send
+to the node with a register-address message). Some of these addresses must align
+with policy.
+
+Notes:
+- The ZPR address space is `fd5a:5052::/48`
+- The visa service (and its adapter) always get address `fd5a:5052::1`.
+- The network `fd5a:5052:90de::/48` is reserved for nodes.
+- Below we are using `fd5a:5052:1::/48` for all the non-visaservice adapters.
+
+```
+                fd5a:5052:90de::1
+                (node)
+                cn = node.zpr.org
+     +-----+        +-----+        +-----+
+     |     |        |     |        |     |
+     | a0  +--------+ n1  +--------+  a1 |
+     |     |        |     |        |     |
+     +-----+        +--+--+        +-----+
+   fd5a:5052::1        |         fd5a:5052:1::8080
+   (visa service)      |         (web server)
+   cn = vs.zpr.org     |         cn = server.zpr.org
+                       |
+                    +--+--+
+                    |     |
+                    | t0  |
+                    |     |
+                    +-----+
+                fd5a:5052:1::3133:7
+                cn = client.zpr.org
+```
+
+
+
+
+
+
+## Configuration Files
+
+### Legacy keys 
 
 There are some keys in here that are only needed due to reliance on some
 older protype code-
@@ -18,7 +85,7 @@ Related github issues:
 - https://github.com/org-zpr/zpr-core/issues/140
 
 
-## Manual Testing
+### Manual Testing
 
 You can fairly easily test some of the visa service (VS) and visa support
 service (VSS) interactions without any ZPR or ZDP using just the visa service
@@ -30,10 +97,10 @@ For this to work, you need to add some IP aliases addresses to your host.
 
 * The visa service address, `fd5a:5052::1` (is hard-coded, well known address).
 * The node address, `fd5a:5052:90de::1` (must match policy).
-* The service address, `10.1.0.8` (must match policy).
+* The service address, `fd5a:5052:1::8080` (must match policy).
 
 
-### Compile the policy
+#### Compile the policy
 
 Note the correct version of `zplc` to use is in the `zpr-prototype` repo
 in the `refimpl-m2` branch.
@@ -45,7 +112,7 @@ cd policies
 ```
 
 
-### Bring up the visa service
+#### Bring up the visa service
     
 ```bash
 cd /path/to/zpr-core/visaservice/core/build
@@ -54,7 +121,7 @@ cd /path/to/zpr-core/visaservice/core/build
     --policy ../../../examples/milestone2/policies/policy-m2.bin
 ```
 
-### Bring up a VSS in its own terminal
+#### Bring up a VSS in its own terminal
 
 ```bash
 cd /path/to/zpr-core/visaservice/cli
@@ -62,7 +129,7 @@ cd /path/to/zpr-core/visaservice/cli
 ```
 
 
-### Authenticate with the visa service
+#### Authenticate with the visa service
 
 ```bash
 cd /path/to/zpr-core/visaservice/cli
@@ -96,26 +163,26 @@ export ZAPIKEY=063bb4a7-f2b7-4ee0-83c1-57d959ea75b8
 ```
 
 
-### Issue a connect call (for the service adapter in policy)
+#### Issue a connect call (for the service adapter in policy)
 
 ```bash
-./target/debug/cli authorize-connect -a $ZAPIKEY --node-zpr-addr fd5a:5052:90de::1 -c zpr.addr=10.1.0.8 -c zpr.adapter.cn=service.zpr.org
+./target/debug/cli authorize-connect -a $ZAPIKEY --node-zpr-addr fd5a:5052:90de::1 -c zpr.addr=fd5a:5052:1::8080 -c zpr.adapter.cn=service.zpr.org
 ```
 
 
 
-### Issue a connect call (for a fake client adapter)
+#### Issue a connect call (for a fake client adapter)
 
 ```bash
-./target/debug/cli authorize-connect -a $ZAPIKEY --node-zpr-addr fd5a:5052:90de::1 -c zpr.addr=10.1.0.10 -c zpr.adapter.cn=client.zpr.org
+./target/debug/cli authorize-connect -a $ZAPIKEY --node-zpr-addr fd5a:5052:90de::1 -c zpr.addr=fd5a:5052:1::3133:7 -c zpr.adapter.cn=client.zpr.org
 ```
 
 
-### Request a visa for client to service
+#### Request a visa for client to service
 
 
 ```bash
-./target/debug/cli requestvisa -a $ZAPIKEY --tcp '10.1.0.10:31337>10.1.0.8:80[S]'
+./target/debug/cli requestvisa -a $ZAPIKEY --tcp '[fd5a:5052:1::3133:7]:12345>[fd5a:5052:1::8080]:80[S]'
 ```
 
 
