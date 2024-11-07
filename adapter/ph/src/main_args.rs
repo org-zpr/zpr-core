@@ -21,7 +21,8 @@ pub struct Config {
     /// Path to the unix domain socket for the control interface.
     pub control_path: PathBuf,
 
-    /// Source address for our UDP substrate socket. In mode cases should be `0.0.0.0:0`.
+    /// Source address for our UDP substrate socket. For an adapter this should (always?) be `0.0.0.0:0`.
+    /// For a node this is the nodes dock listening address.
     pub self_addr: SocketAddr,
 
     /// Path to a PEM file containing the Certificate Authority certificate.
@@ -105,16 +106,17 @@ struct Control {
 
 #[derive(Args, Debug)]
 pub struct CommonArgs {
-    /// An optional, identifying name for instance.  Will default to "adapter" or "node" depending on mode.
+    /// Optional, identifying name for instance (defaults to "adapter" or "node" depending on mode)
     #[arg(short = 'n', long)]
     name: Option<String>,
 
-    /// The unix domain socket path for the "control" interface. Must be absolute path.
+    /// Unix domain socket path for the "control" interface (must be absolute path)
     #[arg(long, value_name = "DOMAIN_SOCKET_PATH")]
     control_path: Option<String>,
 
-    /// The local substrate IPv4 or IPv6 address and port for this node or adapter. Best to leave this at
-    /// `0.0.0.0:0` unless you know what you are doing.
+    /// For a node this is listen substrate address for dock,
+    /// for adapter it is best to leave this at its default setting (0.0.0.0:0)
+    ///
     #[arg(short = 'a', long, value_name = "ADDR:PORT")]
     self_addr: Option<SocketAddr>,
 
@@ -122,7 +124,7 @@ pub struct CommonArgs {
     #[arg(long, value_name = "PATH")]
     ca_file: Option<String>,
 
-    /// Certificate including the noise public key, signed by the authority.
+    /// Certificate including the noise public key, signed by the authority
     #[arg(long, value_name = "PATH")]
     certificate_file: Option<String>, // noise public key signed by authority
 
@@ -130,7 +132,7 @@ pub struct CommonArgs {
     #[arg(long, short = 'k', value_name = "PATH")]
     private_key_file: Option<String>, // noise private key
 
-    /// The TUN device to use, eg "tun1".  Leave blank for automatic selection.
+    /// TUN device to use, eg "tun1" (leave blank for automatic selection -- the default)
     #[arg(long, short = 'i', value_name = "DEVICE")]
     tun_if: Option<String>,
 
@@ -141,7 +143,7 @@ pub struct CommonArgs {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Starts the handler in adapter mode.
+    /// Start the handler in adapter mode
     #[command()]
     Adapter {
         /// Path to adapter configuration file (any options specified on command line will override configuration file)
@@ -151,20 +153,20 @@ enum Command {
         #[command(flatten)]
         common: CommonArgs,
 
-        /// The substrate address of the node.
+        /// Substrate address of the node to connect to
         #[arg(long, short = 'N', value_name = "ADDR:PORT")]
         node_addr: Option<SocketAddr>,
 
-        /// The ZPR address (no port) of the adapter. Must match your TUN address!
+        /// ZPR address (no port) of the adapter (must match your TUN address)
         #[arg(long, short = 'z')]
         agent_addr: Option<IpAddr>,
 
-        /// PEM file holding the nodes noise public key.
+        /// PEM file holding the nodes noise public key
         #[arg(long, short = 'b', value_name = "PATH")]
         node_public_key_file: Option<String>, // noise public key for node (only specified when starting an adapter)
     },
-    /// Starts the handler in node mode.
-    #[command()]
+    /// Start the handler in node mode
+    #[command(verbatim_doc_comment)]
     Node {
         /// Path to node configuration file (any options specified on command line will override configuration file)
         #[arg(long, short = 'c', value_name = "PATH")]

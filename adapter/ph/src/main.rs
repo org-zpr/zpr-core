@@ -186,7 +186,16 @@ fn main() -> ExitCode {
         })
         .unwrap();
 
-    let control_socket = Arc::new(UnixListener::bind(config.control_path).unwrap());
+    // Ensure directory for control socket exists.
+    if let Some(parent) = Path::new(&config.control_path).parent() {
+        fs::create_dir_all(parent).expect("failed to create control socket directory");
+    }
+
+    fs::create_dir_all(Path::new(&config.control_path).parent().unwrap()).unwrap();
+    let control_socket = Arc::new(
+        UnixListener::bind(&config.control_path).expect("failed to bind to control socket"),
+    );
+    info!("control socket bound to {:?}", config.control_path);
 
     //
     // open TUN devices
@@ -329,6 +338,17 @@ fn main() -> ExitCode {
         ));
     }
 
+    if ph_mode == PhMode::Node {
+        if config.self_addr.port() == 0 {
+            // TODO: Should we force setting a port when configuring a node?
+            warn!("self_addr port is 0 which means dock listening port will be randomly assigned");
+        }
+        info!(
+            "node {} dock listening on {}",
+            asm.system_name,
+            substrate_sockets[0].local_addr().unwrap()
+        );
+    }
     for (worker_index, socket) in substrate_sockets.into_iter().enumerate() {
         js.spawn(substrate_ingress_worker::launch(
             substrate_ingress_worker::Config {
