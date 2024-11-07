@@ -50,7 +50,7 @@ cd policies
 ```bash
 cd /path/to/zpr-core/visaservice/core/build
 ./vservice --verbose \
-    --conf ../../../examples/milestone2/vs-config.yaml \
+    --conf ../../../examples/milestone2/vs/vs-config.yaml \
     --policy ../../../examples/milestone2/policies/policy-m2.bin
 ```
 
@@ -67,7 +67,7 @@ cd /path/to/zpr-core/visaservice/cli
 ```bash
 cd /path/to/zpr-core/visaservice/cli
 ./target/debug/cli authenticate \
-    --cert ../../examples/milestone2/node-cert.pem \
+    --cert ../../examples/milestone2/node/node-cert.pem \
     --zpr-addr fd5a:5052:90de::1 \
     --node-name n0
 ```
