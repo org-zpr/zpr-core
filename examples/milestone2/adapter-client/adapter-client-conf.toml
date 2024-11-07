@@ -12,7 +12,7 @@ private_key_file = "adapter-client-key.pem"
 tun_if = "MISSING_TUN"
 
 [adapter]
-node_addr = "127.16.1.1:5000"
+node_addr = "172.16.1.1:5000"
 agent_addr = "fd5a:5052:1::3133:7"
 node_public_key_file = "node-pubkey.pem"
 
