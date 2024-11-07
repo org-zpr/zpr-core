@@ -154,7 +154,6 @@ pub enum LinkStateError {
     OperationNotSupportedYet,
 }
 
-#[allow(dead_code)]
 #[derive(Copy, Clone, PartialEq)]
 pub enum LinkType {
     AdapterToNode,
@@ -162,14 +161,12 @@ pub enum LinkType {
     NodeToAdapter,
 }
 
-#[allow(dead_code)]
 #[derive(Copy, Clone, Debug)]
 pub enum LinkStatus {
     Up,
     Down,
 }
 
-#[allow(dead_code)]
 pub struct LinkStateMachine {
     state: LinkState,
     status: LinkStatus,
@@ -188,7 +185,6 @@ impl LinkStateMachine {
     }
 }
 
-#[allow(dead_code)]
 pub struct LinkStateWrapper {
     id: LinkId,
     link_type: LinkType,

@@ -226,7 +226,6 @@ pub fn add_adapter_link(
 /// - `local_noise_key` is the local noise key for the dock (public part of this key must be shared out of band with adapters).
 ///
 /// Note that the link must already have a peer_table entry.
-#[allow(dead_code)]
 pub fn add_node_link(
     asm: &Assembly,
     link_id: zpr::LinkId,
