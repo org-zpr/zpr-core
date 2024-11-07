@@ -11,10 +11,7 @@ use zpr::{LinkId, StreamId};
 
 const PEER_FORWARDING_TABLE_SIZE: usize = 1 << 20; // 1 million
 
-pub enum PftNextHop {
-    Tether(LinkId, StreamId),
-    Forwarder(StreamId),
-}
+pub struct PftNextHop(pub LinkId, pub StreamId);
 
 // TODO: figure out whether a more complex PEP is warranted,
 // which can map a single tether ID to possibly different visa IDs

@@ -330,9 +330,8 @@ pub async fn handle_bind_agent_address_request(
             {
                 Ok(egress_tether_id) => {
                     // form PEP
-                    // TODO: forwarding PEPs
                     let pep = forwarding_tables::PftPep {
-                        next_hop: forwarding_tables::PftNextHop::Tether(egress_link_id, egress_tether_id),
+                        next_hop: forwarding_tables::PftNextHop(egress_link_id, egress_tether_id),
                     };
 
                     match asm.peer_table.inspect(ingress_link_id, |peer_state| {
