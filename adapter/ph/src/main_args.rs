@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand};
 use serde::Deserialize;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::path::{self, Path, PathBuf};
 use std::{env, fs};
 
 /// This config struct is loaded up from the command line args and used by the
@@ -110,7 +110,7 @@ pub struct CommonArgs {
     #[arg(short = 'n', long)]
     name: Option<String>,
 
-    /// Unix domain socket path for the "control" interface (must be absolute path)
+    /// Unix domain socket path for the "control" interface
     #[arg(long, value_name = "DOMAIN_SOCKET_PATH")]
     control_path: Option<String>,
 
@@ -294,7 +294,11 @@ impl Config {
             self.name = name.clone();
         }
         if let Some(control_path) = &config.control_path {
-            self.set_control_path(control_path.clone())?
+            if control_path.is_relative() {
+                self.control_path = base_dir.join(control_path);
+            } else {
+                self.control_path = control_path.clone();
+            }
         }
         if let Some(self_addr) = &config.self_addr {
             self.self_addr = *self_addr;
@@ -357,7 +361,18 @@ impl Config {
             self.name = name.clone();
         }
         if let Some(control_path) = &common.control_path {
-            self.set_control_path(PathBuf::from(control_path))?;
+            let cp = PathBuf::from(control_path);
+            if cp.is_relative() {
+                // Do not use cacnonicalize here since that will fail if the path does not exist.
+                self.control_path = path::absolute(cp).or_else(|e| {
+                    Err(ArgsError::PathError(format!(
+                        "path error for control_path: {:?}",
+                        e
+                    )))
+                })?;
+            } else {
+                self.control_path = cp;
+            }
         }
         if let Some(self_addr) = &common.self_addr {
             self.self_addr = *self_addr;
@@ -407,17 +422,6 @@ impl Config {
         if let Some(debug) = common.debug {
             self.debug = debug;
         }
-        Ok(())
-    }
-
-    fn set_control_path(&mut self, path: PathBuf) -> Result<(), ArgsError> {
-        if !path.is_absolute() {
-            return Err(ArgsError::ParseError(format!(
-                "Control path must be an absolute path: {:?}",
-                path
-            )));
-        }
-        self.control_path = path;
         Ok(())
     }
 }
@@ -1100,25 +1104,5 @@ mod test {
         assert_eq!(config.private_key_file, PathBuf::from(&pk_file_fname));
         assert!(config.tun_if.is_none());
         assert_eq!(config.debug, false);
-    }
-
-    #[test]
-    fn test_main_args_control_path_abs() {
-        let tomltxt = r#"
-        [global]
-        ca_file = "tests/ca.pem"
-        certificate_file = "tests/certificate.pem"
-        control_path = "../foo.sock"
-        private_key_file = "tests/private_key.pem"
-        "#;
-
-        let tmpfile = TempFile::new_toml(&tomltxt);
-
-        let args = vec!["ph", "node", "-c", tmpfile.get_path().to_str().unwrap()];
-
-        match argparse(Some(args)) {
-            Err(ArgsError::ParseError(_)) => {}
-            _ => panic!("Expected ParseError"),
-        }
     }
 }

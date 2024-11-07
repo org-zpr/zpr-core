@@ -237,7 +237,7 @@ fn main() -> ExitCode {
         socket.set_reuse_port(true).unwrap();
         socket
             .bind(&socket2::SockAddr::from(config.self_addr))
-            .expect("unable to bind to self addr");
+            .expect("unable to bind to self_addr");
         substrate_sockets.push(Arc::new(UdpSocket::from_std(socket.into()).unwrap()));
     }
 
