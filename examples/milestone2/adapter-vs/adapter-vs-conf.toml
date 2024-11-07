@@ -1,0 +1,22 @@
+# Config for client adapter in front of the visa service
+
+[global]
+name = "vservice"
+ca_file = "ca-cert.pem"
+certificate_file = "adapter-vs-cert.pem"
+private_key_file = "adapter-vs-key.pem"
+
+
+[adapter]
+node_addr = "127.16.1.1:5000"
+agent_addr = "fd5a:5052::1" # visa service well known addr
+node_public_key_file = "node-pubkey.pem"
+
+
+
+
+
+
+
+
+

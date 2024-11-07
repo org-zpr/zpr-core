@@ -1,0 +1,16 @@
+# config for the client adapter in front of the "service".
+
+[global]
+name = "service"
+ca_file = "ca-cert.pem"
+certificate_file = "adapter-service-cert.pem"
+private_key_file = "adapter-service-key.pem"
+
+[adapter]
+node_addr = "127.16.1.1:5000"
+agent_addr = "fd5a:5052:1::8080"
+node_public_key_file = "node-pubkey.pem"
+
+
+
+
