@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use crate::dock_tables::DockForwardingTable;
+use crate::forwarding_tables::PeerForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
 use crate::queues;
@@ -19,17 +19,11 @@ use zpr::{LinkId, SubstrateAddr};
 
 const PEER_TABLE_SIZE: usize = 1024;
 
-// FIXME TODO:
-// nodes and adapters have different state requirements.
-// rather than indirecting through an enum, we could/should
-// break adapters/docking sessions out into a separate table.
-// this matches the RFC model of separate docks and forwarders.
-// for now, everyone has a DFT.......
 pub struct PeerState {
     pub substrate_addr: SubstrateAddr,
     pub link_state_machine: LinkStateWrapper,
     pub sync_req_state: sync_req::SyncReqState,
-    pub dft: DockForwardingTable,
+    pub pft: PeerForwardingTable,
     pub mgmt_processor: queues::MgmtProcessor,
     pub mgmt_processor_worker: task::JoinHandle<()>,
     km_state: PeerKmState,
@@ -37,7 +31,7 @@ pub struct PeerState {
 
 // Key Management state per peer.
 struct PeerKmState {
-    handle: Mutex<Option<KmHandle>>, // Once the KM state machine starts, it's join handle and related info is stashed here.
+    handle: Mutex<Option<KmHandle>>, // Once the KM state machine starts, its join handle and related info is stashed here.
     transport_sa: RcuBox<Option<KmTransportSA>>,
 }
 
@@ -62,7 +56,6 @@ impl PeerKmState {
 
 const MGMT_PROCESSOR_QUEUE_SIZE: usize = 16;
 
-// FIXME: can we eliminate the reliance on `'static` herein?
 impl PeerState {
     pub fn new<Worker>(
         link_id: LinkId,
@@ -83,7 +76,7 @@ impl PeerState {
         Self {
             substrate_addr,
             link_state_machine: LinkStateWrapper::new(link_id, link_type),
-            dft: DockForwardingTable::new(),
+            pft: PeerForwardingTable::new(),
             sync_req_state: sync_req::SyncReqState::new(),
             mgmt_processor,
             mgmt_processor_worker,
