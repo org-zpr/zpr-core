@@ -265,7 +265,7 @@ pub fn load_cert(path: &Path) -> Result<X509, ParseError> {
     }
 }
 
-/// Load a pruvate X22519 key from a PEM file
+/// Load a private X22519 key from a PEM file
 pub fn load_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
     let contents = match fs::read_to_string(path) {
         Ok(c) => c,
