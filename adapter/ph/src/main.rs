@@ -283,20 +283,26 @@ fn main() -> ExitCode {
     let _local_set_guard = local_set.enter();
 
     //
+    // instantiate the "fake" local agent link
+    //
+
+    asm.add_local_agent_peer();
+
+    //
     // instantiate tether if we're an adapter
     // NOTE: must occur before we start any other workers!
     //
 
-    let dsid = match ph_mode {
-        PhMode::Adapter => Some(
-            asm.start_tether(
+    if ph_mode == PhMode::Adapter {
+        let dsid = asm
+            .start_tether(
                 config.node_addr.as_ref().unwrap(),
                 link_state::LinkType::AdapterToNode,
             )
-            .unwrap(),
-        ),
-        PhMode::Node => None,
-    };
+            .unwrap();
+
+        assert_eq!(dsid, zpr::DOCK_LINK_ID);
+    }
 
     //
     // start mgmt workers
@@ -356,12 +362,9 @@ fn main() -> ExitCode {
     // TEMP HACK: bring up tether if we're an adapter
     //
 
-    local_set.block_on(&runtime, async {
-        if ph_mode == PhMode::Adapter {
-            let Some(dsid) = dsid else {
-                panic!("we are an adapter but have no tether configured");
-            };
-
+    if ph_mode == PhMode::Adapter {
+        local_set.block_on(&runtime, async {
+            let dsid = zpr::DOCK_LINK_ID;
             info!(
                 "{}: waiting on security assocaition establishment on link {}",
                 asm.system_name, dsid
@@ -373,8 +376,8 @@ fn main() -> ExitCode {
                 "{}: security assocaition established successfully on link {}",
                 asm.system_name, dsid
             );
-        }
-    });
+        });
+    }
 
     //
     // drive the local set, and handle worker termination

@@ -743,32 +743,44 @@ pub fn agent_output_post_classify(asm: &Assembly, mut pkt: BufferPacket, allow_b
     }
 }
 
+const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {
+    // this optimization is checked by the static asserts below
+    // this allows us to avoid an unpredictable branch on every packet
+    (ingress_link_id % 2) + 1
+}
+
+const _: () = assert!(adapter_next_hop_link(zpr::AGENT_LINK_ID) == zpr::DOCK_LINK_ID);
+const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::AGENT_LINK_ID);
+
 /// Forward compressed packet.
 pub fn forward(asm: &Assembly, mut pkt: BufferPacket) {
-    // TODO: node forwarding
+    let egress_link_id;
+    let egress_stream_id;
 
-    // adapter forwarding
-    let egress_link =  // FIXME: this is a hack
-        if pkt.metadata().ingress_link_id == zpr::AGENT_LINK_ID {
-            1
-        } else {
-            match asm.ph_mode {
-                PhMode::Adapter => zpr::AGENT_LINK_ID,
-                PhMode::Node => pkt.metadata().ingress_link_id % 2 + 1,
-            }
-        };
+    match asm.ph_mode {
+        PhMode::Adapter => {
+            egress_link_id = adapter_next_hop_link(pkt.metadata().ingress_link_id);
+            egress_stream_id = pkt.metadata().ingress_stream_id;
+        }
 
-    if egress_link == zpr::AGENT_LINK_ID {
-        agent_input(asm, pkt.metadata().ingress_stream_id, pkt);
+        PhMode::Node => {
+            // TEMP HACK
+            egress_link_id = ((pkt.metadata().ingress_link_id - (zpr::DOCK_LINK_ID - 1)) % 2)
+                + zpr::DOCK_LINK_ID;
+            egress_stream_id = pkt.metadata().ingress_stream_id;
+        }
+    }
+
+    if egress_link_id == zpr::AGENT_LINK_ID {
+        agent_input(asm, egress_stream_id, pkt);
     } else {
-        let ingress_stream_id = pkt.metadata().ingress_stream_id.into();
         let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
-        per_flow_hdr.stream_id = ingress_stream_id;
+        per_flow_hdr.stream_id = egress_stream_id.into();
 
         let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
         base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
 
-        substrate_egress(asm, egress_link, pkt);
+        substrate_egress(asm, egress_link_id, pkt);
     }
 }
 

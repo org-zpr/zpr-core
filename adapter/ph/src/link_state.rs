@@ -6,7 +6,7 @@ use crate::net_defs::IpAddress;
 
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 use zpr::LinkId;
 use zpr::ZPI_ENCRYPTED_HEADER_FLAG;
 
@@ -156,6 +156,7 @@ pub enum LinkStateError {
 
 #[derive(Copy, Clone, PartialEq)]
 pub enum LinkType {
+    Internal,
     AdapterToNode,
     NodeToNode, // Currently unsupported
     NodeToAdapter,
@@ -294,7 +295,7 @@ impl LinkStateWrapper {
             LinkType::NodeToNode => {
                 warn!("Error: Node to node not supported yet");
                 locked_fsm.state = LinkState::Error;
-                return Err(LinkStateError::OperationNotSupportedYet);
+                Err(LinkStateError::OperationNotSupportedYet)
             }
             LinkType::NodeToAdapter => {
                 km_multiplexor::add_node_link(
@@ -306,6 +307,10 @@ impl LinkStateWrapper {
                 )
                 .unwrap();
                 Ok(())
+            }
+            LinkType::Internal => {
+                error!("Coding error: internal link state machine should not be controlled");
+                Err(LinkStateError::InvalidOperation("coding error".into()))
             }
         }
     }

@@ -99,6 +99,25 @@ impl Assembly {
         peer.link_state_machine.process_event(self, event)
     }
 
+    /// Populates the Peer Table with the "fake" internal peer used to hold
+    /// state relating to the local agent / internal dock.
+    ///
+    /// Must be called prior to adding any other peers; panics otherwise.
+    pub fn add_local_agent_peer(&self) {
+        let entry = self.peer_table.vacant_entry().unwrap();
+
+        assert_eq!(entry.key(), zpr::AGENT_LINK_ID);
+
+        let peer_state = peer_table::PeerState::new(
+            entry.key(),
+            LinkType::Internal,
+            std::net::SocketAddrV6::new(std::net::Ipv6Addr::from_bits(0), 0, 0, 0).into(),
+            |_| std::future::pending(),
+        );
+
+        entry.insert(peer_state);
+    }
+
     fn add_peer(
         self: &Arc<Self>,
         link_type: LinkType,
@@ -168,13 +187,6 @@ impl Assembly {
         }
 
         return Ok(peer_id);
-    }
-
-    pub fn hack_get_adapter_docking_session_id(&self) -> zpr::LinkId {
-        assert!(matches!(self.ph_mode, PhMode::Adapter));
-        let peer_ids = self.peer_ids.lock().unwrap();
-        assert_eq!(peer_ids.len(), 1);
-        peer_ids[0]
     }
 }
 
