@@ -106,7 +106,7 @@ impl Assembly {
     pub fn add_local_agent_peer(&self) {
         let entry = self.peer_table.vacant_entry().unwrap();
 
-        assert_eq!(entry.key(), zpr::AGENT_LINK_ID);
+        assert_eq!(entry.key(), zpr::LOCAL_AGENT_LINK_ID);
 
         let peer_state = peer_table::PeerState::new(
             entry.key(),

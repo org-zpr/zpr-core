@@ -30,7 +30,7 @@ pub type LinkId = u32;
 pub const LINK_ID_UNKNOWN: LinkId = 0;
 
 /// Link ID used to refer to a node or adapter's local agent.
-pub const AGENT_LINK_ID: LinkId = 1;
+pub const LOCAL_AGENT_LINK_ID: LinkId = 1;
 
 /// Link ID used on an adapter to refer to the dock to which it's connected.
 pub const DOCK_LINK_ID: LinkId = 2;

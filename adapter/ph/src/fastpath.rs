@@ -649,7 +649,7 @@ pub fn agent_input(
 /// Process uncompressed packet from the agent.
 /// The packet will be compressed, or trigger a Bind request.
 pub fn agent_output(asm: &Assembly, mut pkt: BufferPacket) {
-    pkt.metadata_mut().ingress_link_id = zpr::AGENT_LINK_ID;
+    pkt.metadata_mut().ingress_link_id = zpr::LOCAL_AGENT_LINK_ID;
 
     // determine five tuple
     let classification = match classifier::classify(&mut pkt) {
@@ -749,8 +749,8 @@ const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {
     (ingress_link_id % 2) + 1
 }
 
-const _: () = assert!(adapter_next_hop_link(zpr::AGENT_LINK_ID) == zpr::DOCK_LINK_ID);
-const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::AGENT_LINK_ID);
+const _: () = assert!(adapter_next_hop_link(zpr::LOCAL_AGENT_LINK_ID) == zpr::DOCK_LINK_ID);
+const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::LOCAL_AGENT_LINK_ID);
 
 /// Forward compressed packet.
 pub fn forward(asm: &Assembly, mut pkt: BufferPacket) {
@@ -782,7 +782,7 @@ pub fn forward(asm: &Assembly, mut pkt: BufferPacket) {
         }
     }
 
-    if egress_link_id == zpr::AGENT_LINK_ID {
+    if egress_link_id == zpr::LOCAL_AGENT_LINK_ID {
         agent_input(asm, egress_stream_id, pkt);
     } else {
         let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
