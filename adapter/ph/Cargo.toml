@@ -58,5 +58,3 @@ rcu-mutex-arc = []
 rcu-crossbeam-epoch = ["dep:crossbeam-epoch"]
 rcu-aarc = ["dep:aarc"]
 
-[lib]
-test = false

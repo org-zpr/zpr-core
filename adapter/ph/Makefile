@@ -8,11 +8,7 @@ build:
 
 .PHONY: test
 test:
-	cargo test --verbose && cargo test --lib --verbose
-
-.PHONY: lib
-lib:
-	cargo build --lib
+	cargo test --verbose
 
 .PHONY: clean
 clean:
