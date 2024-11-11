@@ -10,9 +10,6 @@ info:
 	@echo "  make test        - run all unit tests!"
 	@echo "  make it-gone     - clean everything!"
 	@echo ""
-	@echo "  make node        - build the node"
-	@echo "  make adapter     - build the adapter"
-	@echo "  make nodeadapter - build the node and the adapter"
 	@echo "  make ph          - build the packet handler"
 	@echo "  make libnode     - build the node library"
 	@echo ""
@@ -23,17 +20,14 @@ info:
 	@echo
 
 
-it-so: deps adapter ph-debug node visaservice diagrams
+it-so: deps adapter ph-debug visaservice diagrams
 
 it-gone:
-	$(MAKE) -C adapter/cactl clean
-	cd adapter/cd && cargo clean
 	cd adapter/ph && cargo clean
 	cd adapter/ph-debug && cargo clean
 	cd cbpf-rs && cargo clean
 	cd cslab && cargo clean
 	$(MAKE) -C libnode dist-clean
-	$(MAKE) -C node dist-clean
 	$(MAKE) -C visaservice/core dist-clean
 	$(MAKE) -C visaservice clean
 	$(MAKE) -C visaservice/thrift clean
@@ -41,24 +35,17 @@ it-gone:
 
 
 test:
-	$(MAKE) -C adapter/cactl test
-	$(MAKE) -C adapter/cd test
 	$(MAKE) -C adapter/ph test
 	cd adapter/ph-debug && cargo test
 	cd cbpf-rs && cargo test
 	cd cslab && cargo test
 	$(MAKE) -C libnode test
-	$(MAKE) -C node test
 	$(MAKE) -C visaservice test
 
 
 
 deps: cbpf cslab zpr-ext thrift
 
-nodeadapter: node adapter
-
-node: ph libnode
-	$(MAKE) -C node all
 
 libnode:
 	$(MAKE) -C libnode
@@ -68,10 +55,6 @@ ph:
 
 ph-debug:
 	cd adapter/ph-debug && cargo build
-
-adapter: ph
-	$(MAKE) -C adapter/cactl all
-	$(MAKE) -C adapter/cd all
 
 diagrams:
 	$(MAKE) -C diagrams
@@ -92,6 +75,6 @@ visaservice:
 	$(MAKE) -C visaservice all
 
 
-.PHONY: it-so it-gone test deps nodeadapter node libnode ph ph-debug adapter diagrams cbpf cslab zpr-ext thrift visaservice
+.PHONY: it-so it-gone test deps libnode ph ph-debug diagrams cbpf cslab zpr-ext thrift visaservice
 
 .DEFAULT_GOAL := info

@@ -6,7 +6,6 @@ on:
   pull_request:
     paths:
       - 'adapter/ph/**'
-      - 'adapter/cd/**'
       - 'adapter/ph-debug/**'
       - 'zpr-ext/**'
       - 'cslab/**'
@@ -16,45 +15,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Tests for cd
-  cd-build:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Build + test cd
-      run: |
-        cd adapter/cd && make all && make test
-
-  cd-format:
-    needs: [cd-build]
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Check format
-      run: | 
-        cd adapter/cd
-        cargo fmt --check
-
-  cd-warnings:
-    needs: [cd-build]
-    runs-on: ubuntu-latest
-    steps: 
-    - uses: actions/checkout@v4
-    - name: Check warnings
-      run: |
-        cd adapter/cd
-        cargo rustc -- -D warnings
-
-  cd-test-warnings:
-    needs: [cd-build]
-    runs-on: ubuntu-latest
-    steps: 
-    - uses: actions/checkout@v4
-    - name: Check test warnings
-      run: |
-        cd adapter/cd
-        cargo rustc --tests -- -D warnings
-
   # Tests for ph
   ph-build:
     runs-on: ubuntu-latest

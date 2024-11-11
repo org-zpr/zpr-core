@@ -1,4 +1,0 @@
-# cd
-
-ZPR Connection Daemon
-

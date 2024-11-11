@@ -14,7 +14,6 @@ pub mod fastpath;
 pub mod flow_control;
 pub mod km;
 pub mod km_cert_exchange;
-pub mod km_demo;
 pub mod km_multiplexor;
 pub mod km_noise;
 pub mod km_xor;
