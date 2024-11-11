@@ -764,10 +764,21 @@ pub fn forward(asm: &Assembly, mut pkt: BufferPacket) {
         }
 
         PhMode::Node => {
-            // TEMP HACK
-            egress_link_id = ((pkt.metadata().ingress_link_id - (zpr::DOCK_LINK_ID - 1)) % 2)
-                + zpr::DOCK_LINK_ID;
-            egress_stream_id = pkt.metadata().ingress_stream_id;
+            let Some(ingress_peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id)
+            else {
+                drop_and_count(asm, pkt, CounterType::UnknownPeer);
+                return;
+            };
+
+            let Some(pep) = ingress_peer_state.pft.get(pkt.metadata().ingress_stream_id) else {
+                drop_and_count(asm, pkt, CounterType::UnknownStreamId);
+                return;
+            };
+
+            // TODO: policy enforcement
+
+            egress_link_id = pep.next_hop.0;
+            egress_stream_id = pep.next_hop.1;
         }
     }
 

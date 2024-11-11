@@ -188,6 +188,10 @@ impl Assembly {
 
         return Ok(peer_id);
     }
+
+    /*pub fn install_visa_service_route(&self, visa_service_adapter: zpr::LinkId) {
+        // CTP
+    }*/
 }
 
 #[cfg(test)]
