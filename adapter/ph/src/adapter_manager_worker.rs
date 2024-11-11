@@ -51,7 +51,7 @@ async fn do_request_tether_id(asm: &Assembly, pkt: BufferPacket) {
     }
 
     // NOPE ! not if the link is not ready.
-    let link_id = asm.hack_get_adapter_docking_session_id();
+    let link_id = zpr::DOCK_LINK_ID;
     if !asm.peer_table.is_security_assocaition_established(link_id) {
         error!(
             "{}: Link {} has no security association, aborting bind request operation",
@@ -75,7 +75,7 @@ async fn do_request_tether_id(asm: &Assembly, pkt: BufferPacket) {
 
     match requests::send_bind_agent_address_request(
         asm,
-        asm.hack_get_adapter_docking_session_id(),
+        zpr::DOCK_LINK_ID,
         compression_mode,
         five_tuple,
     )

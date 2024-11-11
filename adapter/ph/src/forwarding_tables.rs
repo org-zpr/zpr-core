@@ -1,6 +1,6 @@
-//! Dock lookup tables
+//! Forwarding tables
 //!
-//! RFC 6.5 § 5.1
+//! RFC 6.5 § 5.1 (but needs alignment)
 
 #![allow(dead_code)]
 
@@ -9,32 +9,29 @@ use cslab::{RcuCslab, RcuCslabReader};
 use std::sync::Mutex;
 use zpr::{LinkId, StreamId};
 
-const DOCK_FORWARDING_TABLE_SIZE: usize = 1 << 20; // 1 million
+const PEER_FORWARDING_TABLE_SIZE: usize = 1 << 20; // 1 million
 
-pub enum DftNextHop {
-    Tether(LinkId, StreamId),
-    Forwarder(StreamId),
-}
+pub struct PftNextHop(pub LinkId, pub StreamId);
 
 // TODO: figure out whether a more complex PEP is warranted,
 // which can map a single tether ID to possibly different visa IDs
 // and recompress
 // (necessary since (a) adapter can choose compression level, and (b)
 // visas may be more narrowly scoped than what can be compressed out)
-pub struct DftPep {
-    pub next_hop: DftNextHop,
+pub struct PftPep {
+    pub next_hop: PftNextHop,
 }
 
-pub struct DockForwardingTable {
-    table: Mutex<RcuCslab<DftPep>>,
-    reader: RcuBox<RcuCslabReader<DftPep>>,
+pub struct PeerForwardingTable {
+    table: Mutex<RcuCslab<PftPep>>,
+    reader: RcuBox<RcuCslabReader<PftPep>>,
 }
 
-pub type DftPepGuard<'a> = RcuCslabEntryGuard<'a, DftPep>;
+pub type PftPepGuard<'a> = RcuCslabEntryGuard<'a, PftPep>;
 
-impl DockForwardingTable {
+impl PeerForwardingTable {
     pub fn new() -> Self {
-        let table = RcuCslab::with_fixed_capacity(DOCK_FORWARDING_TABLE_SIZE);
+        let table = RcuCslab::with_fixed_capacity(PEER_FORWARDING_TABLE_SIZE);
         let reader = table.reader();
 
         Self {
@@ -46,7 +43,7 @@ impl DockForwardingTable {
     pub fn inspect<T>(
         &self,
         tether_id: StreamId,
-        inspector: impl FnOnce(&DftPep) -> T,
+        inspector: impl FnOnce(&PftPep) -> T,
     ) -> Option<T> {
         self.reader.inspect(|reader| {
             reader
@@ -55,12 +52,12 @@ impl DockForwardingTable {
         })
     }
 
-    pub fn get(&self, tether_id: StreamId) -> Option<DftPepGuard<'_>> {
+    pub fn get(&self, tether_id: StreamId) -> Option<PftPepGuard<'_>> {
         self.reader
             .get_guarded((tether_id as usize).wrapping_sub(1))
     }
 
-    pub fn insert(&self, pep: DftPep) -> Result<StreamId, ()> {
+    pub fn insert(&self, pep: PftPep) -> Result<StreamId, ()> {
         Ok((self.table.lock().unwrap().insert(pep)? + 1) as StreamId)
     }
 

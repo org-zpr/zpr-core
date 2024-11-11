@@ -5,7 +5,7 @@ use crate::assembly::{Assembly, PhMode};
 use crate::config;
 use crate::counters;
 use crate::defs::*;
-use crate::dock_tables;
+use crate::forwarding_tables;
 use crate::link_state::LinkEvent;
 use crate::net_defs::IpAddress;
 use crate::packet::{BufferPacket, Packet};
@@ -229,7 +229,7 @@ pub async fn handle_bind_agent_address_request(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
-    // TODO: handle as node: enter into DFT
+    // TODO: handle as node: enter into PFT
     // TODO: disallow bind requests between nodes
 
     // read addresses (always present)
@@ -318,7 +318,8 @@ pub async fn handle_bind_agent_address_request(
             // HACK: for now, we assume a visa which forwards through to the other adapter
             // AND ALSO we manually issue a bind request out to that adapter
 
-            let egress_link_id = ingress_link_id % 2 + 1;
+            let egress_link_id =
+                ((ingress_link_id - (zpr::DOCK_LINK_ID - 1)) % 2) + zpr::DOCK_LINK_ID;
 
             match super::requests::send_bind_agent_address_request(
                 asm,
@@ -330,13 +331,12 @@ pub async fn handle_bind_agent_address_request(
             {
                 Ok(egress_tether_id) => {
                     // form PEP
-                    // TODO: forwarding PEPs
-                    let pep = dock_tables::DftPep {
-                        next_hop: dock_tables::DftNextHop::Tether(egress_link_id, egress_tether_id),
+                    let pep = forwarding_tables::PftPep {
+                        next_hop: forwarding_tables::PftNextHop(egress_link_id, egress_tether_id),
                     };
 
                     match asm.peer_table.inspect(ingress_link_id, |peer_state| {
-                        match peer_state.dft.insert(pep) {
+                        match peer_state.pft.insert(pep) {
                             Ok(tid) => {
                                 // success; respond with tether ID
                                 // TODO: maybe tick a counter somewhere?
@@ -352,9 +352,9 @@ pub async fn handle_bind_agent_address_request(
                             }
 
                             Err(()) => {
-                                // DFT full; respond with error message
+                                // PFT full; respond with error message
                                 // TODO: maybe tick a counter somewhere?
-                                let message = "DFT full";
+                                let message = "PFT full";
 
                                 zdp::ZdpBindAgentAddressResponseHeader {
                                     status_code:
