@@ -9,6 +9,7 @@ use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use std::future::Future;
+use std::sync::atomic::{self, Ordering};
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use tokio::sync::mpsc;
@@ -163,7 +164,14 @@ impl PeerTable {
     }
 
     pub fn lookup_peer(&self, substrate_addr: &SubstrateAddr) -> Option<LinkId> {
-        self.sa_to_link.get(substrate_addr).map(|id| *id)
+        let id = self.sa_to_link.get(substrate_addr).map(|id| *id);
+
+        // synchronizes with the Release in VacantPeerTableEntry::insert();
+        // ensures anyone who reads from the slab following this sees the peer
+        // (assuming of course it hasn't been removed!)
+        atomic::fence(Ordering::Acquire);
+
+        id
     }
 
     pub fn inspect<T>(
@@ -277,12 +285,24 @@ impl VacantPeerTableEntry<'_> {
     }
 
     pub fn insert(mut self, peer_state: PeerState) -> LinkId {
-        let sa = peer_state.substrate_addr;
+        let id = self.peer_slab_guard.insert(peer_state).unwrap();
+        let peer_state_ref = self.peer_slab_guard.get(id).unwrap();
 
-        let link_id = (self.peer_slab_guard.insert(peer_state).unwrap() + 1) as LinkId;
+        let link_id = (id + 1) as LinkId;
 
-        if let Some(_) = self.sa_to_link_ref.insert(sa, link_id) {
-            panic!("duplicate peer substrate address");
+        // synchronizes with the Acquire in PeerTable::lookup_*();
+        // ensures the peer slab entry is visible to anyone who first reads from one of the
+        // below "reverse" tables with Acquire ordering
+        atomic::fence(Ordering::Release);
+
+        if let Some(other) = self
+            .sa_to_link_ref
+            .insert(peer_state_ref.substrate_addr, link_id)
+        {
+            panic!(
+                "duplicate peer substrate address: {link_id} and {other} share {}",
+                peer_state_ref.substrate_addr
+            );
         }
 
         link_id
