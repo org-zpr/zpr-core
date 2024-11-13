@@ -2,9 +2,9 @@
 
 use crate::net_defs;
 use crate::packet::{BufferPacket, Packet, PacketBuffer};
+use crate::sys::TunPi;
 use crate::sys::ZprTun;
 use crate::test_packet::*;
-use crate::zprtun::tun_pi;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::result::Result;
@@ -94,16 +94,20 @@ impl AgentInput {
         mut packet: P,
     ) -> Result<(), TryEnqueueError<P>> {
         let tun = &self.tuns[packet.flowhash() as usize % self.tuns.len()];
-
-        let proto = net_defs::ip_ethertype(net_defs::ip_version(packet.body()));
-        let mut hdr = packet.alloc_zeroed_headroom(tun_pi::PI_SIZE);
-        tun_pi::write_pi(
-            &mut hdr,
-            tun_pi::TunPi {
-                strip: false,
-                proto,
-            },
-        );
+        match TunPi::PI_SIZE {
+            0 => (),
+            sz => {
+                let proto = net_defs::ip_ethertype(net_defs::ip_version(packet.body()));
+                let mut hdr = packet.alloc_zeroed_headroom(sz);
+                TunPi::write_pi(
+                    &mut hdr,
+                    TunPi {
+                        strip: false,
+                        proto,
+                    },
+                );
+            }
+        };
 
         match tun.try_send(packet.body()) {
             Ok(_) => Ok(()),
