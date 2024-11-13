@@ -25,9 +25,9 @@
     # ------------------------------------------------------------------------
     # self_addr
     #
-    # [optional] - The source address for our UDP socket used for
-    #              communicating with the node. Defaults to
-    #              "0.0.0.0:0".
+    # [optional] - Node dock listenting address and port.
+    #              Defaults to "0.0.0.0:0" which is probably not what you 
+    #              want since OS will pick the port.
     # ------------------------------------------------------------------------
 # self_addr = "192.168.0.1:12345"
 
