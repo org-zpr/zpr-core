@@ -8,6 +8,8 @@ use crate::sync_req;
 use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
+use enum_map::{Enum, EnumMap};
+use enumset::{EnumSet, EnumSetType};
 use std::future::Future;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Mutex;
@@ -20,8 +22,16 @@ use zpr::{LinkId, SubstrateAddr};
 
 const PEER_TABLE_SIZE: usize = 1024;
 
+/// Some peers are "special", e.g. the visa service adapter attached to the initial node.
+/// These names let us identify them.
+#[derive(Debug, Enum, EnumSetType)]
+pub enum SpecialPeerName {
+    VisaServiceAdapter,
+}
+
 pub struct PeerState {
     pub substrate_addr: SubstrateAddr,
+    pub special_names: EnumSet<SpecialPeerName>,
     pub link_state_machine: LinkStateWrapper,
     pub sync_req_state: sync_req::SyncReqState,
     pub pft: PeerForwardingTable,
@@ -76,6 +86,7 @@ impl PeerState {
 
         Self {
             substrate_addr,
+            special_names: EnumSet::<SpecialPeerName>::empty(),
             link_state_machine: LinkStateWrapper::new(link_id, link_type),
             pft: PeerForwardingTable::new(),
             sync_req_state: sync_req::SyncReqState::new(),
@@ -83,6 +94,10 @@ impl PeerState {
             mgmt_processor_worker,
             km_state: PeerKmState::new(),
         }
+    }
+
+    pub fn add_special_name(&mut self, name: SpecialPeerName) {
+        self.special_names |= name;
     }
 
     /// Return a reference to the transport SA if there is an SA on the link, and if it is established.
@@ -93,10 +108,14 @@ impl PeerState {
     }
 }
 
+type AtomicLinkId = atomic::AtomicU32;
+const _: () = assert!(std::mem::size_of::<AtomicLinkId>() == std::mem::size_of::<LinkId>());
+
 pub struct PeerTable {
     peer_slab: Mutex<RcuCslab<PeerState>>,
     peer_slab_reader: RcuBox<RcuCslabReader<PeerState>>,
     sa_to_link: DashMap<SubstrateAddr, LinkId>,
+    special_peers: EnumMap<SpecialPeerName, AtomicLinkId>,
 }
 
 pub type PeerTableEntryGuard<'a> = RcuCslabEntryGuard<'a, PeerState>;
@@ -115,11 +134,11 @@ impl PeerTable {
     pub fn new() -> Self {
         let peer_slab = RcuCslab::with_fixed_capacity(PEER_TABLE_SIZE);
         let peer_slab_reader = RcuBox::new(peer_slab.reader());
-        let sa_to_link = DashMap::with_capacity(PEER_TABLE_SIZE);
         Self {
             peer_slab: Mutex::new(peer_slab),
             peer_slab_reader,
-            sa_to_link,
+            sa_to_link: DashMap::with_capacity(PEER_TABLE_SIZE),
+            special_peers: EnumMap::default(),
         }
     }
 
@@ -137,6 +156,7 @@ impl PeerTable {
         Ok(VacantPeerTableEntry {
             peer_slab_guard,
             sa_to_link_ref: &self.sa_to_link,
+            special_peers_ref: &self.special_peers,
         })
     }
 
@@ -146,6 +166,9 @@ impl PeerTable {
             return;
         };
         self.sa_to_link.remove(&peer_state.substrate_addr);
+        for name in peer_state.special_names {
+            self.special_peers[name].store(0, Ordering::Relaxed); // note; no useful ordering possible here
+        }
         let new_reader = peer_slab.remove((link_id as usize).wrapping_sub(1));
         std::mem::drop(peer_slab);
         self.peer_slab_reader.write(new_reader);
@@ -172,6 +195,19 @@ impl PeerTable {
         atomic::fence(Ordering::Acquire);
 
         id
+    }
+
+    pub fn lookup_special_peer(&self, name: SpecialPeerName) -> Option<LinkId> {
+        // synchronizes with the Release in VacantPeerTableEntry::insert();
+        // ensures anyone who reads from the slab following this sees the peer
+        // (assuming of course it hasn't been removed!)
+        let id = self.special_peers[name].load(Ordering::Acquire);
+
+        if id == 0 {
+            None
+        } else {
+            Some(id)
+        }
     }
 
     pub fn inspect<T>(
@@ -277,6 +313,7 @@ impl PeerTable {
 pub struct VacantPeerTableEntry<'a> {
     peer_slab_guard: MutexGuard<'a, RcuCslab<PeerState>>,
     sa_to_link_ref: &'a DashMap<SubstrateAddr, LinkId>,
+    special_peers_ref: &'a EnumMap<SpecialPeerName, AtomicLinkId>,
 }
 
 impl VacantPeerTableEntry<'_> {
@@ -303,6 +340,16 @@ impl VacantPeerTableEntry<'_> {
                 "duplicate peer substrate address: {link_id} and {other} share {}",
                 peer_state_ref.substrate_addr
             );
+        }
+
+        for name in peer_state_ref.special_names {
+            let other = self.special_peers_ref[name].swap(link_id, Ordering::Relaxed);
+            if other != 0 {
+                panic!(
+                    "duplicate special peer name: {link_id} and {other} share {:?}",
+                    name
+                );
+            }
         }
 
         link_id
