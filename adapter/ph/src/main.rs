@@ -114,7 +114,10 @@ fn main() -> ExitCode {
     {
         Ok(key) => key,
         Err(e) => {
-            error!("failed to load private key file: {:?}", e);
+            error!(
+                "failed to load private key file: {:?}: {:?}",
+                &config.private_key_file, e
+            );
             return ExitCode::FAILURE;
         }
     };
@@ -185,13 +188,6 @@ fn main() -> ExitCode {
             }
         })
         .unwrap();
-
-    // Ensure directory for control socket exists.
-    if let Some(parent) = Path::new(&config.control_path).parent() {
-        fs::create_dir_all(parent).expect("failed to create control socket directory");
-    }
-
-    fs::create_dir_all(Path::new(&config.control_path).parent().unwrap()).unwrap();
     let control_socket = Arc::new(
         UnixListener::bind(&config.control_path).expect("failed to bind to control socket"),
     );

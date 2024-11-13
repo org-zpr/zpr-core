@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand};
 use serde::Deserialize;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
-use std::path::{self, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::{env, fs};
 
 /// This config struct is loaded up from the command line args and used by the
@@ -213,6 +213,20 @@ impl Default for Config {
     }
 }
 
+fn check_file_exists(desc: &str, path: &Path) -> Result<(), ArgsError> {
+    match fs::exists(path) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(ArgsError::PathError(format!(
+            "{} not found: {:?}",
+            desc, path
+        ))),
+        Err(e) => Err(ArgsError::PathError(format!(
+            "{} path error: {:?}",
+            desc, e
+        ))),
+    }
+}
+
 impl Config {
     fn new_for_adapter(
         config_file: Option<AdapterConfig>,
@@ -246,8 +260,7 @@ impl Config {
     }
 
     // Check that the required bits are present based on mode.
-    //
-    // TODO: Might be nice to check things like file existence here too.
+    // Also checks that the various files exist.
     fn check_valid(&self, mode: PhMode) -> Result<(), ArgsError> {
         if self.name.is_empty() {
             // return Err(MissingArgError("name"));
@@ -256,15 +269,25 @@ impl Config {
         if self.control_path.to_str().unwrap().is_empty() {
             return Err("control_path".arg_missing());
         }
+        // For control path, the parent dir must exist or there will be an error later.
+        if let Some(parent) = self.control_path.parent() {
+            match check_file_exists("control socket parent directory", parent) {
+                Ok(_) => {}
+                Err(e) => return Err(e),
+            }
+        }
         if self.ca_file.to_str().unwrap().is_empty() {
             return Err("ca_file".arg_missing());
         }
+        check_file_exists("certificate authority file", &self.ca_file)?;
         if self.certificate_file.to_str().unwrap().is_empty() {
             return Err("certificate_file".arg_missing());
         }
+        check_file_exists("certificate file", &self.certificate_file)?;
         if self.private_key_file.to_str().unwrap().is_empty() {
             return Err("private_key_file".arg_missing());
         }
+        check_file_exists("private key file", &self.private_key_file)?;
         match mode {
             PhMode::Adapter => {
                 if self.node_addr.is_none() {
@@ -275,6 +298,11 @@ impl Config {
                 }
                 if self.node_public_key_file.is_none() {
                     return Err("node_public_key_file".arg_missing());
+                } else {
+                    check_file_exists(
+                        "node public key file",
+                        &self.node_public_key_file.as_ref().unwrap(),
+                    )?;
                 }
             }
             PhMode::Node => {
@@ -363,8 +391,7 @@ impl Config {
         if let Some(control_path) = &common.control_path {
             let cp = PathBuf::from(control_path);
             if cp.is_relative() {
-                // Do not use cacnonicalize here since that will fail if the path does not exist.
-                self.control_path = path::absolute(cp).or_else(|e| {
+                self.control_path = fs::canonicalize(cp).or_else(|e| {
                     Err(ArgsError::PathError(format!(
                         "path error for control_path: {:?}",
                         e
@@ -627,6 +654,7 @@ mod test {
             return Path::new(&self.path);
         }
 
+        #[allow(dead_code)]
         fn get_dir(&self) -> &Path {
             return Path::new(&self.path).parent().unwrap();
         }
@@ -741,22 +769,36 @@ mod test {
 
     #[test]
     fn test_main_args_argparse_adapter_config() {
-        let tomltxt = r#"
+        let mut tomltxt = r#"
         [global]
         name = "adapter0"
-        control_path = "/var/run/zpr/control.sock"
+        control_path = "$CONTROLFILE"
         self_addr = "192.168.0.1:12345"
-        ca_file = "tests/ca.pem"
-        certificate_file = "tests/certificate.pem"
-        private_key_file = "tests/private_key.pem"
+        ca_file = "$CAFILE"
+        certificate_file = "$CERTFILE"
+        private_key_file = "$PKFILE"
         tun_if = "tun23"
         debug = true
 
         [adapter]
         node_addr = "192.168.0.2:5000"
         agent_addr = "10.0.0.1"
-        node_public_key_file = "tests/node_public_key.pem"
+        node_public_key_file = "$NPKFILE"
         "#;
+
+        let ca_file = TempFile::touch();
+        let control_file = TempFile::touch();
+        let cert_file = TempFile::touch();
+        let pk_file = TempFile::touch();
+        let npk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
+            .replace("$CONTROLFILE", control_file.get_path().to_str().unwrap())
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
+            .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
 
@@ -774,26 +816,14 @@ mod test {
         assert_eq!(pmode, PhMode::Adapter);
 
         assert_eq!(config.name, "a0".to_string());
-        assert_eq!(
-            config.control_path,
-            PathBuf::from("/var/run/zpr/control.sock")
-        );
+        assert_eq!(config.control_path, control_file.get_path());
         assert_eq!(
             config.self_addr,
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 1)), 12345)
         );
-        assert_eq!(
-            config.ca_file,
-            tmpfile.get_dir().join(PathBuf::from("tests/ca.pem"))
-        );
-        assert_eq!(
-            config.certificate_file,
-            tmpfile.get_dir().join("tests/certificate.pem")
-        );
-        assert_eq!(
-            config.private_key_file,
-            tmpfile.get_dir().join("tests/private_key.pem")
-        );
+        assert_eq!(config.ca_file, ca_file.get_path());
+        assert_eq!(config.certificate_file, cert_file.get_path());
+        assert_eq!(config.private_key_file, pk_file.get_path());
         assert_eq!(config.tun_if, Some("tun23".to_string()));
         assert_eq!(config.debug, true);
 
@@ -810,7 +840,7 @@ mod test {
         );
         assert_eq!(
             config.node_public_key_file,
-            Some(tmpfile.get_dir().join("tests/node_public_key.pem"))
+            Some(npk_file.get_path().into())
         );
     }
 
@@ -848,23 +878,32 @@ mod test {
     // the command line.
     #[test]
     fn test_main_args_adapter_config_blank_adapter() {
-        let tomltxt = r#"
+        let mut tomltxt = r#"
         [global]
         name = "adapter0"
-        control_path = "/var/run/zpr/control.sock"
+        control_path = "/tmp/control.sock"
         self_addr = "192.168.0.1:12345"
-        ca_file = "tests/ca.pem"
-        certificate_file = "tests/certificate.pem"
-        private_key_file = "tests/private_key.pem"
+        ca_file = "$CAFILE"
+        certificate_file = "$CERTFILE"
+        private_key_file = "$PKFILE"
         tun_if = "tun23"
         debug = true
 
         [adapter]
         "#;
 
+        let cert_file = TempFile::touch();
+        let pk_file = TempFile::touch();
+        let ca_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
+
         let tmpfile = TempFile::new_toml(&tomltxt);
 
-        // The files references on command line need to exist.
         let node_pk_file = TempFile::touch();
         let node_pk_fname = String::from(node_pk_file.get_path().to_str().unwrap());
 
@@ -905,18 +944,32 @@ mod test {
     // Leave out some stuff in the config file, but specify on command line.
     #[test]
     fn test_main_args_argparse_adapter_config_override_globs() {
-        let tomltxt = r#"
+        let mut tomltxt = r#"
         [global]
-        control_path = "/var/run/zpr/control.sock"
-        ca_file = "tests/ca.pem"
-        certificate_file = "tests/certificate.pem"
-        private_key_file = "tests/private_key.pem"
+        control_path = "$CONTROLFILE"
+        ca_file = "$CAFILE"
+        certificate_file = "$CERTFILE"
+        private_key_file = "$PKFILE"
 
         [adapter]
         node_addr = "192.168.0.2:5000"
         agent_addr = "10.0.0.1"
-        node_public_key_file = "tests/node_public_key.pem"
+        node_public_key_file = "$NPKFILE"
         "#;
+
+        let ca_file = TempFile::touch();
+        let cert_file = TempFile::touch();
+        let control_file = TempFile::touch();
+        let pk_file = TempFile::touch();
+        let npk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
+            .replace("$CONTROLFILE", control_file.get_path().to_str().unwrap())
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
+            .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
 
@@ -938,23 +991,14 @@ mod test {
         assert_eq!(pmode, PhMode::Adapter);
 
         assert_eq!(config.name, "adapter".to_string());
-        assert_eq!(
-            config.control_path,
-            PathBuf::from("/var/run/zpr/control.sock")
-        );
+        assert_eq!(config.control_path, control_file.get_path());
         assert_eq!(
             config.self_addr,
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 1)), 12345)
         );
-        assert_eq!(config.ca_file, tmpfile.get_dir().join("tests/ca.pem"));
-        assert_eq!(
-            config.certificate_file,
-            tmpfile.get_dir().join("tests/certificate.pem")
-        );
-        assert_eq!(
-            config.private_key_file,
-            tmpfile.get_dir().join("tests/private_key.pem")
-        );
+        assert_eq!(config.ca_file, ca_file.get_path());
+        assert_eq!(config.certificate_file, cert_file.get_path());
+        assert_eq!(config.private_key_file, pk_file.get_path());
         assert_eq!(config.tun_if, Some("tun23".to_string()));
         assert_eq!(config.debug, true);
 
@@ -971,23 +1015,35 @@ mod test {
         );
         assert_eq!(
             config.node_public_key_file,
-            Some(tmpfile.get_dir().join("tests/node_public_key.pem"))
+            Some(npk_file.get_path().into())
         );
     }
 
     #[test]
     fn test_main_args_argparse_adapter_config_minimal() {
-        let tomltxt = r#"
+        let mut tomltxt = r#"
         [global]
-        ca_file = "tests/ca.pem"
-        certificate_file = "tests/certificate.pem"
-        private_key_file = "tests/private_key.pem"
+        ca_file = "$CAFILE"
+        certificate_file = "$CERTFILE"
+        private_key_file = "$PKFILE"
 
         [adapter]
         node_addr = "192.168.0.2:5000"
         agent_addr = "10.0.0.1"
-        node_public_key_file = "tests/node_public_key.pem"
+        node_public_key_file = "$NPKFILE"
         "#;
+
+        let ca_file = TempFile::touch();
+        let cert_file = TempFile::touch();
+        let pk_file = TempFile::touch();
+        let npk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$NPKFILE", npk_file.get_path().to_str().unwrap())
+            .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
 
@@ -1003,15 +1059,9 @@ mod test {
             config.self_addr,
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
         );
-        assert_eq!(config.ca_file, tmpfile.get_dir().join("tests/ca.pem"));
-        assert_eq!(
-            config.certificate_file,
-            tmpfile.get_dir().join("tests/certificate.pem")
-        );
-        assert_eq!(
-            config.private_key_file,
-            tmpfile.get_dir().join("tests/private_key.pem")
-        );
+        assert_eq!(config.ca_file, ca_file.get_path());
+        assert_eq!(config.certificate_file, cert_file.get_path());
+        assert_eq!(config.private_key_file, pk_file.get_path());
         assert!(config.tun_if.is_none());
         assert_eq!(config.debug, false);
 
@@ -1028,18 +1078,28 @@ mod test {
         );
         assert_eq!(
             config.node_public_key_file,
-            Some(tmpfile.get_dir().join("tests/node_public_key.pem"))
+            Some(npk_file.get_path().into())
         );
     }
 
     #[test]
     fn test_main_args_argparse_node_config_minimal() {
-        let tomltxt = r#"
+        let mut tomltxt = r#"
         [global]
-        ca_file = "tests/ca.pem"
-        certificate_file = "tests/certificate.pem"
-        private_key_file = "tests/private_key.pem"
+        ca_file = "$CAFILE"
+        certificate_file = "$CERTFILE"
+        private_key_file = "$PKFILE"
         "#;
+
+        let ca_file = TempFile::touch();
+        let cert_file = TempFile::touch();
+        let pk_file = TempFile::touch();
+
+        let tmp = tomltxt
+            .replace("$CERTFILE", cert_file.get_path().to_str().unwrap())
+            .replace("$PKFILE", pk_file.get_path().to_str().unwrap())
+            .replace("$CAFILE", ca_file.get_path().to_str().unwrap());
+        tomltxt = &tmp;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
 
@@ -1055,15 +1115,9 @@ mod test {
             config.self_addr,
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
         );
-        assert_eq!(config.ca_file, tmpfile.get_dir().join("tests/ca.pem"));
-        assert_eq!(
-            config.certificate_file,
-            tmpfile.get_dir().join("tests/certificate.pem")
-        );
-        assert_eq!(
-            config.private_key_file,
-            tmpfile.get_dir().join("tests/private_key.pem")
-        );
+        assert_eq!(config.ca_file, ca_file.get_path());
+        assert_eq!(config.certificate_file, cert_file.get_path());
+        assert_eq!(config.private_key_file, pk_file.get_path());
         assert!(config.tun_if.is_none());
         assert_eq!(config.debug, false);
     }
