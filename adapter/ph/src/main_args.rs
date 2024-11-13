@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand};
 use serde::Deserialize;
 use std::io::Read;
 use std::net::{IpAddr, SocketAddr};
-use std::path::{Path, PathBuf};
+use std::path::{self, Path, PathBuf};
 use std::{env, fs};
 
 /// This config struct is loaded up from the command line args and used by the
@@ -396,7 +396,7 @@ impl Config {
         if let Some(control_path) = &common.control_path {
             let cp = PathBuf::from(control_path);
             if cp.is_relative() {
-                self.control_path = fs::canonicalize(cp).or_else(|e| {
+                self.control_path = path::absolute(cp).or_else(|e| {
                     Err(ArgsError::PathError(format!(
                         "path error for control_path: {:?}",
                         e
