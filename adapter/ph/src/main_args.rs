@@ -1026,11 +1026,13 @@ mod test {
 
     #[test]
     fn test_main_args_argparse_adapter_config_minimal() {
+        // Not quite minimal since we need to set control path to make CI happy.
         let mut tomltxt = r#"
         [global]
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
+        control_path = "/tmp/control.sock"
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -1089,11 +1091,13 @@ mod test {
 
     #[test]
     fn test_main_args_argparse_node_config_minimal() {
+        // Not quite minimal since we need to set control path to make CI happy.
         let mut tomltxt = r#"
         [global]
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
+        control_path = "/tmp/control.sock"
         "#;
 
         let ca_file = TempFile::touch();
@@ -1146,6 +1150,8 @@ mod test {
             &cert_file_fname,
             "--private-key-file",
             &pk_file_fname,
+            "--control-path",
+            "/tmp/control.sock",
         ];
 
         let (pmode, config) = argparse(Some(args)).unwrap();
