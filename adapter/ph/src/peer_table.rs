@@ -8,7 +8,7 @@ use crate::sync_req;
 use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
-use enum_map::{Enum, EnumMap};
+use enum_map::{enum_map, Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use std::future::Future;
 use std::sync::atomic::{self, Ordering};
@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use zpr::{LinkId, SubstrateAddr};
+use zpr::{LinkId, SubstrateAddr, LINK_ID_UNKNOWN};
 
 const PEER_TABLE_SIZE: usize = 1024;
 
@@ -138,7 +138,7 @@ impl PeerTable {
             peer_slab: Mutex::new(peer_slab),
             peer_slab_reader,
             sa_to_link: DashMap::with_capacity(PEER_TABLE_SIZE),
-            special_peers: EnumMap::default(),
+            special_peers: enum_map! { _ => LINK_ID_UNKNOWN.into() },
         }
     }
 
@@ -167,7 +167,7 @@ impl PeerTable {
         };
         self.sa_to_link.remove(&peer_state.substrate_addr);
         for name in peer_state.special_names {
-            self.special_peers[name].store(0, Ordering::Relaxed); // note; no useful ordering possible here
+            self.special_peers[name].store(LINK_ID_UNKNOWN, Ordering::Relaxed); // note; no useful ordering possible here
         }
         let new_reader = peer_slab.remove((link_id as usize).wrapping_sub(1));
         std::mem::drop(peer_slab);
@@ -203,7 +203,7 @@ impl PeerTable {
         // (assuming of course it hasn't been removed!)
         let id = self.special_peers[name].load(Ordering::Acquire);
 
-        if id == 0 {
+        if id == LINK_ID_UNKNOWN {
             None
         } else {
             Some(id)
@@ -344,7 +344,7 @@ impl VacantPeerTableEntry<'_> {
 
         for name in peer_state_ref.special_names {
             let other = self.special_peers_ref[name].swap(link_id, Ordering::Relaxed);
-            if other != 0 {
+            if other != LINK_ID_UNKNOWN {
                 panic!(
                     "duplicate special peer name: {link_id} and {other} share {:?}",
                     name
