@@ -6,13 +6,13 @@
 ### Physical (Substrate) Network Setup
 
 The network is set up on testnet2 using four hosts and one network switch.
-The names below (n1, t0, a0, a1) are the names from the original prototype
+The names below (n0, t0, a0, a1) are the names from the original prototype
 testnet and these are physically labelled on the hosts.
 
 ```
     runs a node       runs adapter + visa service
     +-----+           +-----+ 
-    | n1  |           | a0  | 
+    | n0  |           | a0  | 
     +--+--+           +--+--+ 
        |172.16.1.1       |172.16.1.2
        |                 |
@@ -44,7 +44,7 @@ Notes:
                 cn = node.zpr.org
      +-----+        +-----+        +-----+
      |     |        |     |        |     |
-     | a0  +--------+ n1  +--------+  a1 |
+     | a0  +--------+ n0  +--------+  a1 |
      |     |        |     |        |     |
      +-----+        +--+--+        +-----+
    fd5a:5052::1        |         fd5a:5052:1::8080
