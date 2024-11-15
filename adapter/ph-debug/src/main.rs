@@ -268,7 +268,7 @@ fn handle_watch(interval: u64, socket: &str) -> std::io::Result<()> {
 
     loop {
         let stream = &mut UnixStream::connect(socket).unwrap();
-        stream.write_all(b"COUNTERS\n")?;
+        stream.write_all(format!("{}\n", RpcCommands::Counters).as_bytes())?;
         stream.flush()?;
         let mut response = String::new();
         stream.read_to_string(&mut response)?;
@@ -331,7 +331,7 @@ fn handle_set_capture_file(file_path: String, socket: &str) -> std::io::Result<(
 
     // Establish connection with RPC worker, send command
     let stream = &mut UnixStream::connect(socket).unwrap();
-    stream.write_all("SET-CAPTURE-FILE\n".as_bytes())?;
+    stream.write_all(format!("{}\n", RpcCommands::SetCaptureFile).as_bytes())?;
     stream.flush()?;
 
     // Receive response from RPC worker, ensure that it sent the correct response and

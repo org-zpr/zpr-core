@@ -35,16 +35,16 @@ function set_program() {
   SOCKET=$1
   FILE_NAME=$2
   PROGRAM=$3
-  "$PH_DEBUG_BIN" -c SET-CAPTURE-FILE -p "$SOCKET" --file-path "$FILE_NAME"
+  "$PH_DEBUG_BIN" "$SOCKET" capture set-file "$FILE_NAME"
 
   if [ "$PROGRAM" != "None" ]; then
-    "$PH_DEBUG_BIN" -c SET-CAPTURE-PROGRAM -p "$SOCKET" --program "$PROGRAM"
+    "$PH_DEBUG_BIN" "$SOCKET" capture set-program "$PROGRAM"
   fi
 }
 
 function close_program() {
   SOCKET=$1
-  "$PH_DEBUG_BIN" -c CLOSE-CAPTURE-FILE -p "$SOCKET"
+  "$PH_DEBUG_BIN" "$SOCKET" capture close-file
 }
 
 #
