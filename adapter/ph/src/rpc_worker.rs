@@ -15,6 +15,7 @@ use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
 use std::io::IoSliceMut;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::fs::File;
@@ -24,6 +25,7 @@ use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
 use tracing::error;
+use zpr::rpc_commands::RpcCommands;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
 
@@ -71,25 +73,25 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
 
         // Separate command from any other information associated with the command
         let vec_message: Vec<&str> = str_message.split_whitespace().collect();
-        match vec_message[0] {
-            "COUNTERS-RESET" => {
+        match RpcCommands::from_str(vec_message[0]) {
+            Ok(RpcCommands::CountersReset) => {
                 buf_writer
                     .write_all(counters_reset(&asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "COUNTERS" => {
+            Ok(RpcCommands::Counters) => {
                 buf_writer
                     .write_all(counters(&asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "ECHO" => {
+            Ok(RpcCommands::Echo) => {
                 buf_writer.write_all(echo(&asm).await.as_bytes()).await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             // PERF SAMPLE <DURATION> <FREQUENCY>
-            "PERF-SAMPLE" => match vec_message.len() {
+            Ok(RpcCommands::PerfSample) => match vec_message.len() {
                 3 => {
                     buf_writer
                         .write_all(
@@ -103,7 +105,7 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                 _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
             },
             // SET-CAPTURE-FILE <file_path>
-            "SET-CAPTURE-FILE" => {
+            Ok(RpcCommands::SetCaptureFile) => {
                 // Tell debug tool we're ready for the ancillary data
                 buf_writer.write_all("SEND ANCILLARY\n".as_bytes()).await?;
                 buf_writer.flush().await?;
@@ -125,26 +127,26 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "FLUSH-CAPTURE-FILE" => {
+            Ok(RpcCommands::FlushCaptureFile) => {
                 buf_writer
                     .write_all(flush_capture_file(&asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "CLOSE-CAPTURE-FILE" => {
+            Ok(RpcCommands::CloseCaptureFile) => {
                 buf_writer
                     .write_all(close_capture_file(&asm).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             // SET-CAPTURE-PROGRAM <program>
-            "SET-CAPTURE-PROGRAM" => {
+            Ok(RpcCommands::SetCaptureProgram) => {
                 buf_writer
                     .write_all(set_capture_program(&asm, str_message).as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
-            "DELETE-CAPTURE-PROGRAM" => {
+            Ok(RpcCommands::DeleteCaptureProgram) => {
                 buf_writer
                     .write_all(delete_capture_program(&asm).as_bytes())
                     .await?;

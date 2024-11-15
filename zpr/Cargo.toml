@@ -5,4 +5,5 @@ edition = "2021"
 
 [dependencies]
 open-enum = { version = "0.5" }
+strum = { version = "0.26", features = ["derive"] }
 zerocopy = { version = "0.8", features = ["derive"] }

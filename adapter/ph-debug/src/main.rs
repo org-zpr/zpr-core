@@ -4,11 +4,12 @@
 //! with a '-' on the command line
 
 use cbpf_rs;
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use ctrlc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
 use std::fs::OpenOptions;
+use std::io;
 use std::io::prelude::*;
 use std::io::{BufReader, Error, IoSlice};
 use std::net::Shutdown;
@@ -17,92 +18,236 @@ use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
+use zpr::rpc_commands::RpcCommands;
 use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
 const ANCILLARY_BUFFER_SIZE: usize = 128;
 
+macro_rules! basic_command {
+    ($comm:expr, $socket:ident) => {
+        basic_call_response_0($comm, $socket)
+    };
+    ($comm:expr, $socket:ident, $arg:tt) => {
+        basic_call_response_1(($comm), ($socket), ($arg))
+    };
+    ($comm:expr, $socket:ident, $arg1:tt, $arg2:tt) => {
+        basic_call_response_2($comm, $socket, $arg1, $arg2)
+    };
+}
+
 #[derive(Parser, Debug)]
-#[command(version, about = "This program controls the RPC calls to the ZPR Packet Handler", long_about = None)]
-/// Two help messages when running the program, -h gives succinct information, --help gives
-/// list of all the commands
-struct Args {
-    #[arg(
-        short,
-        long,
-        help = "Re-run with '--help' for list of commands",
-        long_help = "ECHO\n\
-                     COUNTERS\n\
-                     COUNTERS-RESET\n\
-                     WATCH <frequency>\n\
-                     PERF-SAMPLE <duration> <frequency>\n\
-                     SET-CAPTURE-FILE <file-path>\n\
-                     CLOSE-CAPTURE-FILE\n\
-                     DELETE-CAPTURE-PROGRAM\n\
-                     SET-CAPTURE-PROGRAM <program>\n\
-                     FLUSH-CAPTURE-FILE\n\
-                     CAPTURE-SEQUENCE <file-path> <duration> <program>"
-    )]
-    command: String,
+#[command(version, about = "This program controls the RPC calls to the ZPR Packet Handler\nRun without a command to enter CLI mode", long_about = None)]
+struct CmdlineArgs {
+    #[command(subcommand)]
+    command: Option<Commands>,
 
-    #[arg(short, long)]
-    port: String,
+    /// Path to the Packet Handler's management socket
+    socket: String,
+}
 
-    #[arg(long, default_value_t = 1)]
-    duration: u64,
+#[derive(Parser, Debug)]
+#[command(multicall = true)]
+struct CliCommand {
+    #[command(subcommand)]
+    command: Commands,
+}
 
-    #[arg(long, default_value_t = 1)]
-    frequency: u64, // TODO make another argument, I don't like that in WATCH freq is how many seconds to wait between samples, whereas in PERF-SAMPLE it's samples per second
+#[derive(Subcommand, Debug)]
+enum Commands {
+    Echo,
+    /// Display or reset counters
+    Counters {
+        #[arg(long, short = 'r')]
+        /// Reset counters
+        reset: bool,
+    },
+    #[command(arg_required_else_help = true)]
+    /// Connect to the Packet Handler for periodic counter updates
+    Watch {
+        #[arg(required = true)]
+        /// How frequently to receive updates
+        interval: u64,
+    },
+    #[command(arg_required_else_help = true)]
+    /// Start performance sampling (currently not functional)
+    PerfSample {
+        #[arg(required = true)]
+        /// How long the sampling should run
+        duration: u64,
 
-    #[arg(long, default_value = "cap_file.pcap")]
-    file_path: String,
+        #[arg(required = true)]
+        /// How frequently packets should be injected
+        frequency: u64,
+    },
+    /// Set up or tear down packet captures
+    Capture(CaptureArgs),
+    /// Change link state
+    Link(LinkArgs),
+    /// Exit the CLI
+    Quit,
+}
 
-    #[arg(
-        long,
-        help = "",
-        long_help = "This option has no default, if no program is provided for a command that \
-                            needs a program, no program will be set"
-    )]
-    program: Option<String>,
+#[derive(Debug, Args)]
+#[command(flatten_help = true)]
+struct CaptureArgs {
+    #[command(subcommand)]
+    command: CaptureCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum CaptureCommands {
+    #[command(arg_required_else_help = true)]
+    /// Set a capture file
+    SetFile { file_path: String },
+    /// Close a capture file
+    CloseFile,
+    /// Set a BPF to filter captured packets
+    SetProgram { program: Option<String> },
+    /// Delete any set BPF
+    DeleteProgram,
+    /// Flush any outstanding packets to the capture file
+    FlushFile,
+    #[command(arg_required_else_help = true)]
+    /// Create a temporary packet capture
+    Sequence {
+        file_path: String,
+        duration: u64,
+        program: Option<String>,
+    },
+}
+
+#[derive(Debug, Args)]
+#[command(flatten_help = true)]
+struct LinkArgs {
+    #[command(subcommand)]
+    command: LinkCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum LinkCommands {
+    /// Configure a link
+    Configure { id: u32 },
+    /// Start a link
+    Start { id: u32 },
+    /// Stop a link
+    Stop { id: u32 },
+    /// Reset a link.  It will require a configure before starting again
+    Reset { id: u32 },
 }
 
 fn main() -> std::io::Result<()> {
-    let args = Args::parse();
+    let args = CmdlineArgs::parse();
+    let socket = args.socket.clone();
 
-    let command = args.command + "\n";
-    let port = args.port;
+    if let Some(command) = args.command {
+        process_command(command, &socket).map(|_| {})
+    } else {
+        run_cli(&socket)
+    }
+}
 
+fn run_cli(socket: &str) -> std::io::Result<()> {
+    loop {
+        print!("> ");
+        io::stdout().flush()?;
+        let mut line = String::new();
+        io::stdin().read_line(&mut line)?;
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        match parse_and_exec(line, socket) {
+            Ok(quit) => {
+                if quit {
+                    return Ok(());
+                }
+            }
+            Err(err) => {
+                println!("Failed to parse command \"{}\".  Error: {}", line, err);
+            }
+        }
+    }
+}
+
+fn parse_and_exec(line: &str, socket: &str) -> std::io::Result<bool> {
+    let args = shlex::split(line).ok_or(Error::other("Invalid quoting"))?;
+    let cli = CliCommand::try_parse_from(args).map_err(|e| Error::other(e.to_string()))?;
+
+    process_command(cli.command, socket)
+}
+
+fn process_command(command: Commands, socket: &str) -> std::io::Result<bool> {
     // Commands that don't need any additional data can be sent right here, those
     // with extra info get sent in their handler funcs
-    match command.as_str() {
-        "ECHO\n"
-        | "COUNTERS\n"
-        | "COUNTERS-RESET\n"
-        | "FLUSH-CAPTURE-FILE\n"
-        | "CLOSE-CAPTURE-FILE\n"
-        | "DELETE-CAPTURE-PROGRAM\n" => basic_call_response(&command, &port)?,
-        "WATCH\n" => handle_watch(args.frequency, &port)?,
-        "PERF-SAMPLE\n" => handle_perf_sample(args.duration, args.frequency, &port)?,
-        "SET-CAPTURE-FILE\n" => handle_set_capture_file(args.file_path, &port)?,
-        "CAPTURE-SEQUENCE\n" => {
-            handle_capture_sequence(args.file_path, args.duration, args.program, &port)?
+    match command {
+        Commands::Echo => basic_command!(RpcCommands::Echo, socket)?,
+        Commands::Counters { reset } => {
+            if reset {
+                basic_command!(RpcCommands::CountersReset, socket)?
+            } else {
+                basic_command!(RpcCommands::Counters, socket)?
+            }
         }
-        "SET-CAPTURE-PROGRAM\n" => handle_set_capture_program(args.program, &port)?,
-        _ => {
-            eprintln!("Command '{command}' not recognized");
-        }
-    };
+        Commands::Capture(capture) => match capture.command {
+            CaptureCommands::SetFile { file_path } => handle_set_capture_file(file_path, socket)?,
+            CaptureCommands::CloseFile => basic_command!(RpcCommands::CloseCaptureFile, socket)?,
+            CaptureCommands::FlushFile => basic_command!(RpcCommands::FlushCaptureFile, socket)?,
+            CaptureCommands::SetProgram { program } => handle_set_capture_program(program, socket)?,
+            CaptureCommands::DeleteProgram => {
+                basic_command!(RpcCommands::DeleteCaptureProgram, socket)?
+            }
+            CaptureCommands::Sequence {
+                file_path,
+                duration,
+                program,
+            } => handle_capture_sequence(file_path, duration, program, &socket)?,
+        },
+        Commands::Watch { interval } => handle_watch(interval, &socket)?,
+        Commands::PerfSample {
+            duration,
+            frequency,
+        } => handle_perf_sample(duration, frequency, &socket)?,
+        Commands::Link(link) => handle_link_command(link, &socket)?,
+        Commands::Quit => return Ok(true),
+    }
 
-    Ok(())
+    Ok(false)
+}
+
+fn basic_call_response_0(comm: RpcCommands, socket: &str) -> std::io::Result<()> {
+    let command_str = format!("{}\n", comm);
+    basic_call_response_impl(&command_str, socket)
+}
+
+fn basic_call_response_1<T: std::fmt::Display>(
+    comm: RpcCommands,
+    socket: &str,
+    arg: T,
+) -> std::io::Result<()> {
+    let command_str = format!("{} {}\n", comm, arg);
+    basic_call_response_impl(&command_str, socket)
+}
+
+fn basic_call_response_2<T1: std::fmt::Display, T2: std::fmt::Display>(
+    comm: RpcCommands,
+    socket: &str,
+    arg1: T1,
+    arg2: T2,
+) -> std::io::Result<()> {
+    let command_str = format!("{} {} {}\n", comm, arg1, arg2);
+    basic_call_response_impl(&command_str, socket)
 }
 
 /// Handles basic call and response with the rpc_worker in the ph. Sends a string
-/// to the specified port, reads and prints the response
+/// to the specified socket, reads and prints the response
 /// Opens and closes UnixStream
 /// Can be used directly in main for commands that don't have to send any additional data
 /// with the command, and can be invoked in helper functions for commands that require
 /// extra information to be send once a string with all the information to be sent is created.
-fn basic_call_response(comm: &str, port: &str) -> std::io::Result<()> {
-    let stream = &mut UnixStream::connect(port).unwrap();
-    stream.write_all(comm.as_bytes())?;
+fn basic_call_response_impl(comm: &str, socket: &str) -> std::io::Result<()> {
+    let terminated_comm = comm.to_owned() + "\n";
+    let stream = &mut UnixStream::connect(socket).unwrap();
+    stream.write_all(terminated_comm.as_bytes())?;
     stream.flush()?;
     let mut response = String::new();
     stream.read_to_string(&mut response)?;
@@ -116,13 +261,13 @@ fn basic_call_response(comm: &str, port: &str) -> std::io::Result<()> {
 /// last sample
 /// Requires how many seconds to wait between samples
 // TODO should we also be handling ctrl+c in this function?
-fn handle_watch(frequency: u64, port: &str) -> std::io::Result<()> {
+fn handle_watch(interval: u64, socket: &str) -> std::io::Result<()> {
     let mut values: Vec<u64> = Vec::new();
-    let sleep_time = Duration::new(frequency, 0);
+    let sleep_time = Duration::new(interval, 0);
     let mut first_run = true;
 
     loop {
-        let stream = &mut UnixStream::connect(port).unwrap();
+        let stream = &mut UnixStream::connect(socket).unwrap();
         stream.write_all(b"COUNTERS\n")?;
         stream.flush()?;
         let mut response = String::new();
@@ -160,10 +305,8 @@ fn handle_watch(frequency: u64, port: &str) -> std::io::Result<()> {
     }
 }
 
-fn handle_perf_sample(duration: u64, frequency: u64, port: &str) -> std::io::Result<()> {
-    let command = format!("PERF-SAMPLE {} {}\n", duration, frequency);
-
-    basic_call_response(&command, port)?;
+fn handle_perf_sample(duration: u64, frequency: u64, socket: &str) -> std::io::Result<()> {
+    basic_command!(RpcCommands::PerfSample, socket, duration, frequency)?;
 
     Ok(())
 }
@@ -171,7 +314,7 @@ fn handle_perf_sample(duration: u64, frequency: u64, port: &str) -> std::io::Res
 /// Opens a capture file, sends a message to the RPC worker to prepare to receive
 /// the file descriptor, upon receiving correct response, sends the fd as
 /// ancillary data, and awaits response again.
-fn handle_set_capture_file(file_path: String, port: &str) -> std::io::Result<()> {
+fn handle_set_capture_file(file_path: String, socket: &str) -> std::io::Result<()> {
     let file = OpenOptions::new()
         .write(true)
         .create(true)
@@ -187,7 +330,7 @@ fn handle_set_capture_file(file_path: String, port: &str) -> std::io::Result<()>
     let bufs = &mut [IoSlice::new(&buf)];
 
     // Establish connection with RPC worker, send command
-    let stream = &mut UnixStream::connect(port).unwrap();
+    let stream = &mut UnixStream::connect(socket).unwrap();
     stream.write_all("SET-CAPTURE-FILE\n".as_bytes())?;
     stream.flush()?;
 
@@ -221,11 +364,11 @@ fn handle_capture_sequence(
     file_path: String,
     time: u64,
     program: Option<String>,
-    port: &str,
+    socket: &str,
 ) -> std::io::Result<()> {
     let sleep_time = Duration::new(time, 0);
-    handle_set_capture_file(file_path, port)?;
-    handle_set_capture_program(program, port)?;
+    handle_set_capture_file(file_path, socket)?;
+    handle_set_capture_program(program, socket)?;
 
     let handler = Arc::new(CtrlcHandle::new());
     let ctrlc_handler = handler.clone();
@@ -233,7 +376,7 @@ fn handle_capture_sequence(
     ctrlc::set_handler(move || ctrlc_handler.set_false()).unwrap();
     handler.timed_wait(sleep_time);
 
-    basic_call_response("CLOSE-CAPTURE-FILE\n", port)?;
+    basic_command!(RpcCommands::CloseCaptureFile, socket)?;
 
     Ok(())
 }
@@ -241,17 +384,27 @@ fn handle_capture_sequence(
 /// Converts capture program into serialized format so that the RPC worker doesn't
 /// need to use the pcap library, and can just have knowledge of the serialized
 /// format and use exclusively cbpf-rs
-fn handle_set_capture_program(program: Option<String>, port: &str) -> std::io::Result<()> {
+fn handle_set_capture_program(program: Option<String>, socket: &str) -> std::io::Result<()> {
     // Ensures that a program has properly been provided before sending message because
     // there is no default program
     match program {
         Some(program) => {
             let serialized_program = serialize(&program);
-            let command = format!("SET-CAPTURE-PROGRAM {}\n", serialized_program);
-            basic_call_response(&command, &port)?;
+            basic_call_response_1(RpcCommands::SetCaptureProgram, &socket, serialized_program)?;
         }
         None => (),
     };
+
+    Ok(())
+}
+
+fn handle_link_command(link_args: LinkArgs, socket: &str) -> std::io::Result<()> {
+    match link_args.command {
+        LinkCommands::Configure { id } => basic_command!(RpcCommands::ConfigureLink, socket, id)?,
+        LinkCommands::Start { id } => basic_command!(RpcCommands::StartLink, socket, id)?,
+        LinkCommands::Stop { id } => basic_command!(RpcCommands::StopLink, socket, id)?,
+        LinkCommands::Reset { id } => basic_command!(RpcCommands::ResetLink, socket, id)?,
+    }
 
     Ok(())
 }

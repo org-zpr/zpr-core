@@ -1,5 +1,7 @@
 //! ZPR concepts, excluding the ZDP protocol.
 
+pub mod rpc_commands;
+
 use open_enum::open_enum;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
