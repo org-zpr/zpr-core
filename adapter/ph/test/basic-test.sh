@@ -27,7 +27,7 @@ NODE_SOCK=node.sock
 
 function counters() {
   SOCKET=$1
-  "$PH_DEBUG_BIN" "$SOCKET" counters
+  "$PH_DEBUG_BIN" -p "$SOCKET" counters
 }
 
 

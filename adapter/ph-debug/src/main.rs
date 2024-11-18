@@ -27,7 +27,7 @@ macro_rules! basic_command {
         basic_call_response_0($comm, $socket)
     };
     ($comm:expr, $socket:ident, $arg:tt) => {
-        basic_call_response_1(($comm), ($socket), ($arg))
+        basic_call_response_1($comm, $socket, $arg)
     };
     ($comm:expr, $socket:ident, $arg1:tt, $arg2:tt) => {
         basic_call_response_2($comm, $socket, $arg1, $arg2)
@@ -41,6 +41,7 @@ struct CmdlineArgs {
     command: Option<Commands>,
 
     /// Path to the Packet Handler's management socket
+    #[arg(long, short = 'p', default_value = "/var/run/zpr/ph.sock")]
     socket: String,
 }
 
