@@ -19,6 +19,91 @@ pub mod net {
         fn attach_reuse_port_cbpf(&self, filter: &[libc::sock_filter]) -> io::Result<()>;
     }
 
+    #[cfg(target_os = "macos")]
+    mod os {
+        use libc::{self, c_char, ifreq, AF_INET, SOCK_DGRAM};
+        use nix::ioctl_readwrite;
+        use std::net::IpAddr;
+        use std::{mem, ptr};
+
+        ioctl_readwrite!(siocgifmtu, b'i', 51, ifreq);
+
+        // Since the raw-fd traits are not present for MacOs on the tokio UdpSocket
+        // we use a different approach to get MTU for this MacOS socket:
+        //  - figure out the interface name by looking at the IP address
+        //  - send an ioctl into the kernel to get the MTU for the interface
+        pub fn get_mtu(s: &tokio::net::UdpSocket) -> std::io::Result<u32> {
+            let saddr = s.local_addr()?;
+            let tun_ip = saddr.ip();
+
+            let ifname: String = match get_ifname(tun_ip) {
+                Some(name) => name,
+                None => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "unable to get interface name",
+                    ))
+                }
+            };
+
+            unsafe {
+                let c_fd = libc::socket(AF_INET, SOCK_DGRAM, 0);
+                if c_fd < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+
+                let mut req = request(&ifname);
+                if let Err(err) = siocgifmtu(c_fd, &mut req) {
+                    libc::close(c_fd);
+                    return Err(std::io::Error::from(err).into());
+                }
+                libc::close(c_fd);
+
+                let mtu = req.ifr_ifru.ifru_mtu as u32;
+                return Ok(mtu);
+            }
+        }
+
+        fn get_ifname(addr: IpAddr) -> Option<String> {
+            let interfaces = netdev::get_interfaces();
+            for iface in interfaces {
+                if addr.is_ipv6() {
+                    let ip6addr = match addr {
+                        IpAddr::V6(ip6addr) => ip6addr,
+                        _ => return None,
+                    };
+                    for ipnet in iface.ipv6 {
+                        if ipnet.contains(&ip6addr) {
+                            return Some(iface.name);
+                        }
+                    }
+                } else {
+                    let ip4addr = match addr {
+                        IpAddr::V4(ip4addr) => ip4addr,
+                        _ => return None,
+                    };
+                    for ipnet in iface.ipv4 {
+                        if ipnet.contains(&ip4addr) {
+                            return Some(iface.name);
+                        }
+                    }
+                }
+            }
+            None
+        }
+
+        // prepare an ifreq data structure
+        unsafe fn request(if_name: &str) -> libc::ifreq {
+            let mut req: libc::ifreq = mem::zeroed();
+            ptr::copy_nonoverlapping(
+                if_name.as_ptr() as *const c_char,
+                req.ifr_name.as_mut_ptr(),
+                if_name.len(),
+            );
+            req
+        }
+    }
+
     impl UdpSocketExt for UdpSocket {
         /// Retrieve the socket's current known path MTU.
         #[cfg(any(target_os = "android", target_os = "linux"))]
@@ -29,12 +114,11 @@ pub mod net {
             }
         }
 
+        /// Retrieve the socket's current known path MTU.
+        /// On MacOS this will not work if the socket address is `0.0.0.0`.
         #[cfg(target_os = "macos")]
         fn mtu(&self) -> io::Result<u32> {
-            // TODO:
-            // For mac I need to get the interface name and then call
-            // an ioctl to get MTU.
-            return Ok(1400);
+            return os::get_mtu(self);
         }
 
         #[cfg(any(doc, target_os = "android", target_os = "linux"))]
@@ -180,5 +264,20 @@ pub mod net {
 
             receiver.await.unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::net::UdpSocketExt;
+    use tokio::net::UdpSocket;
+
+    #[tokio::test]
+    async fn test_tokio_get_udp_socket_mtu() {
+        let sock = UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("Failed to bind socket");
+        let mtu = sock.mtu().expect("MTU call failed");
+        assert!(mtu > 0);
     }
 }
