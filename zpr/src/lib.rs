@@ -88,3 +88,24 @@ pub mod compression_mode {
     pub const SOURCE_PORT_PRESENT: CompressionMode = 0x40;
     //pub const IP_PROTOCOL_PRESENT: CompressionMode = 0x80; // FIXME: this seems unused; I have a Q out to Frank about it
 }
+
+// Well-known DNs.  Generate using `openssl asn1parse -conf dn.conf -out dn.der`
+// where `dn.conf` contains:
+//
+// ```
+// asn1 = SEQ:dn
+// [dn]
+// cn = SET:cn
+// [cn]
+// cnAtv = SEQ:cnAtv
+// [cnAtv]
+// type = OID:commonName
+// value = UTF8:vs.zpr
+// ```
+//
+// or similar.
+
+pub const VISA_SERVICE_DN: &[u8] = &[
+    0x30, 0x11, 0x31, 0x0f, 0x30, 0x0d, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0c, 0x06, 0x76, 0x73, 0x2e,
+    0x7a, 0x70, 0x72,
+];

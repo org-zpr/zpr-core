@@ -9,6 +9,7 @@ use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use enum_map::{Enum, EnumMap};
+use enumset::{enum_set, EnumSet, EnumSetType};
 use std::default::Default;
 use std::future::Future;
 use std::sync::atomic::{self, Ordering};
@@ -18,15 +19,27 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use zpr::{LinkId, SubstrateAddr, LINK_ID_UNKNOWN};
+use zpr::{self, LinkId, SubstrateAddr, LINK_ID_UNKNOWN};
 
 const PEER_TABLE_SIZE: usize = 1024;
 
 /// Some peers are "special", e.g. the visa service adapter attached to the initial node.
 /// These names let us identify them.
-#[derive(Clone, Copy, Debug, Enum)]
+#[derive(Debug, Enum, EnumSetType /* implies Clone, Copy */)]
 pub enum SpecialPeerName {
     VisaServiceAdapter,
+}
+
+pub fn special_peer_names_from_x509_subject_name(
+    subject: &openssl::x509::X509NameRef,
+) -> EnumSet<SpecialPeerName> {
+    let Ok(dn_der) = subject.to_der() else {
+        return enum_set!();
+    };
+    match dn_der.as_slice() {
+        zpr::VISA_SERVICE_DN => enum_set!(SpecialPeerName::VisaServiceAdapter),
+        _ => enum_set!(),
+    }
 }
 
 pub struct PeerState {
@@ -315,7 +328,7 @@ impl PeerTable {
         // `special_peers` and `peer_slab_reader` in the same RcuBox
         self.special_peers
             .update(|sp_ref| {
-                if sp_ref[name] != LINK_ID_UNKNOWN {
+                if sp_ref[name] == LINK_ID_UNKNOWN {
                     let mut new_sp = *sp_ref;
                     new_sp[name] = link_id;
                     Some(new_sp)

@@ -3,6 +3,7 @@ use crate::km::ZPIPair;
 use crate::km_multiplexor;
 use crate::mgmt;
 use crate::net_defs::IpAddress;
+use crate::peer_table;
 
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -325,6 +326,41 @@ impl LinkStateWrapper {
                 locked_fsm.state,
                 "keying done".to_string(),
             ));
+        }
+
+        let Some(peer_state) = asm.peer_table.get(self.id) else {
+            return Err(LinkStateError::NotFound(self.id));
+        };
+
+        let Some(sa) = peer_state.get_established_transport_association() else {
+            return Err(LinkStateError::UnexpectedTransition(
+                locked_fsm.state,
+                "keying done when SA not established".to_owned(),
+            ));
+        };
+
+        if let Some(ref peer_cert) = sa.peer_cert {
+            info!(
+                "{}: Link {} has name {:?}",
+                asm.system_name,
+                self.id,
+                peer_cert.subject_name()
+            );
+
+            for name in
+                peer_table::special_peer_names_from_x509_subject_name(peer_cert.subject_name())
+            {
+                match asm.peer_table.assign_special_name(name, self.id) {
+                    Ok(()) => info!(
+                        "{}: Link {} assigned special name {:?}",
+                        asm.system_name, self.id, name
+                    ),
+                    Err(_) => warn!(
+                        "{}: Unable to assign link {} special name {:?}",
+                        asm.system_name, self.id, name
+                    ),
+                }
+            }
         }
 
         info!(
