@@ -11,7 +11,7 @@ pub struct TunPi {
 
 impl TunPi {
     /// The size of a per-packet packet info structure.
-    /// On macos this is `0` and informs the system that there is no 
+    /// On macos this is `0` and informs the system that there is no
     /// PI information on the front of the packet.
     ///
     /// TODO: Needs more exploration-- the rust-tun code indiciates that
