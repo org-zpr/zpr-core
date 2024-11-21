@@ -63,11 +63,26 @@ impl IpAddress {
             && self.v6[10] == 0xff
             && self.v6[11] == 0xff
     }
+
+    pub const fn new_from_std_v4(addr: &Ipv4Addr) -> Self {
+        Self::new_from_v4(addr.octets())
+    }
+
+    pub const fn new_from_std_v6(addr: &Ipv6Addr) -> Self {
+        Self { v6: addr.octets() }
+    }
+
+    pub const fn new_from_std(addr: &IpAddr) -> Self {
+        match addr {
+            IpAddr::V4(v4) => Self::new_from_std_v4(v4),
+            IpAddr::V6(v6) => Self::new_from_std_v6(v6),
+        }
+    }
 }
 
 impl From<Ipv4Addr> for IpAddress {
     fn from(addr: Ipv4Addr) -> Self {
-        addr.octets().into()
+        Self::new_from_std_v4(&addr)
     }
 }
 
@@ -79,7 +94,7 @@ impl From<[u8; 4]> for IpAddress {
 
 impl From<Ipv6Addr> for IpAddress {
     fn from(addr: Ipv6Addr) -> Self {
-        addr.octets().into()
+        Self::new_from_std_v6(&addr)
     }
 }
 
@@ -91,10 +106,7 @@ impl From<[u8; 16]> for IpAddress {
 
 impl From<IpAddr> for IpAddress {
     fn from(addr: IpAddr) -> Self {
-        match addr {
-            IpAddr::V4(v4) => v4.into(),
-            IpAddr::V6(v6) => v6.into(),
-        }
+        Self::new_from_std(&addr)
     }
 }
 
