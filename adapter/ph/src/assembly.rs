@@ -22,6 +22,7 @@ use std::result::Result;
 use std::sync::Arc;
 use tracing::{error, info};
 use zpr::{self, LinkId, SubstrateAddr};
+use zpr_ext::std::num::NonZeroExt;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {
@@ -191,12 +192,28 @@ impl Assembly {
     }
 
     pub fn hack_default_policy(&self, ingress_link_id: LinkId) -> Option<NonZero<LinkId>> {
-        if ingress_link_id == zpr::LOCAL_AGENT_LINK_ID {
+        if ingress_link_id == zpr::LINK_ID_UNKNOWN {
+            None
+        } else if ingress_link_id == zpr::LOCAL_AGENT_LINK_ID {
             None
         } else {
-            std::num::NonZero::new(
-                ((ingress_link_id - (zpr::DOCK_LINK_ID - 1)) % 2) + zpr::DOCK_LINK_ID,
-            )
+            let peer_ids = self.peer_ids.lock().unwrap();
+
+            let peer_id_idx = peer_ids.iter().position(|id| *id == ingress_link_id)?;
+
+            let visa_server_id = self
+                .peer_table
+                .lookup_special_peer(crate::special_peers::SpecialPeerName::VisaServiceAdapter)
+                .unwrap_or_zero();
+
+            for i in 1..peer_ids.len() {
+                let peer_id = peer_ids[(peer_id_idx + i) % peer_ids.len()];
+                if peer_id != visa_server_id {
+                    return std::num::NonZero::new(peer_id);
+                }
+            }
+
+            None
         }
     }
 }
