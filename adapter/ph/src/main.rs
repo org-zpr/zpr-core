@@ -307,7 +307,7 @@ fn main() -> ExitCode {
             )
             .unwrap();
 
-        assert_eq!(dsid, zpr::DOCK_LINK_ID);
+        assert_eq!(dsid.get(), zpr::DOCK_LINK_ID);
     }
 
     //

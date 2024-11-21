@@ -13,7 +13,7 @@ use zpr_ext::zerocopy::*;
 
 #[derive(Clone, Copy)]
 pub struct Config {
-    pub link_id: zpr::LinkId,
+    pub link_id: std::num::NonZero<zpr::LinkId>,
 }
 
 pub async fn launch(
@@ -26,7 +26,7 @@ pub async fn launch(
             MgmtProcessorMessage::Packet(pkt) => {
                 // Drop packets which are intended for a link other than the one we are assigned to,
                 // since processing them here will violate concurrency assumptions.
-                if pkt.metadata().ingress_link_id != config.link_id {
+                if pkt.metadata().ingress_link_id != config.link_id.get() {
                     fastpath::drop_and_count(&asm, pkt, CounterType::InternalRoutingError);
                     continue;
                 }

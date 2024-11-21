@@ -36,7 +36,7 @@ pub fn dispatch_mgmt_packet_with_addr(
                 return fastpath::drop_and_count(&asm, pkt, CounterType::UnknownPeer);
             };
 
-            pkt.metadata_mut().ingress_link_id = ingress_link_id;
+            pkt.metadata_mut().ingress_link_id = ingress_link_id.get();
 
             match handle_key_management(asm, pkt) {
                 Ok(()) => (),

@@ -419,7 +419,7 @@ mod test {
                         |q| mgmt_processor_worker::launch(worker_config, asm.clone(), q),
                     );
 
-                    adapter_link_id = entry.insert(peer_state);
+                    adapter_link_id = entry.insert(peer_state).get();
                 }
 
                 // Adding a link starts a KM
