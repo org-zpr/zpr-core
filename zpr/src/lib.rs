@@ -3,6 +3,7 @@
 pub mod rpc_commands;
 
 use open_enum::open_enum;
+use std::net::{IpAddr, Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 /// Substrate Address
@@ -130,3 +131,12 @@ macro_rules! dn_cn_der {
 }
 
 pub const VISA_SERVICE_DN: &[u8] = &dn_cn_der!("vs.zpr");
+
+// Well-known addresses.
+
+pub const ZPR_INTERNAL_NETWORK: Ipv6Addr = Ipv6Addr::new(0xfd5a, 0x5052, 0, 0, 0, 0, 0, 0);
+
+pub const VISA_SERVICE_ADDR: IpAddr =
+    IpAddr::V6(Ipv6Addr::from_bits(ZPR_INTERNAL_NETWORK.to_bits() | 1));
+pub const VISA_SERVICE_PROTO: u8 = 6 /* TCP */;
+pub const VISA_SERVICE_PORT: u16 = 5002;

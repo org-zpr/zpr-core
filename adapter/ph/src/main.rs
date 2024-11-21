@@ -47,6 +47,7 @@ mod queues;
 mod rcu;
 mod rpc_worker;
 mod signal_worker;
+mod special_peers;
 mod substrate_ingress_worker;
 mod sync_req;
 mod sys;

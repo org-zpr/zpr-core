@@ -9,6 +9,7 @@ use crate::forwarding_tables;
 use crate::link_state::LinkEvent;
 use crate::net_defs::IpAddress;
 use crate::packet::{BufferPacket, Packet};
+use crate::special_peers;
 use crate::zdp;
 use bytes::{Buf, BufMut};
 use std::sync::Arc;
@@ -313,13 +314,20 @@ pub async fn handle_bind_agent_address_request(
 
     match asm.ph_mode {
         PhMode::Node => {
-            // TODO: request visa
+            let egress_link_id = special_peers::default_policy_lookup(ingress_link_id, &five_tuple)
+                .and_then(|id| asm.peer_table.lookup_special_peer(id))
+                .unwrap_or_else(|| {
+                    // HACK: for now, we assume a visa which forwards through to the other adapter
+                    // AND ALSO we manually issue a bind request out to that adapter
 
-            // HACK: for now, we assume a visa which forwards through to the other adapter
-            // AND ALSO we manually issue a bind request out to that adapter
+                    // TODO: request visa
 
-            let egress_link_id =
-                ((ingress_link_id - (zpr::DOCK_LINK_ID - 1)) % 2) + zpr::DOCK_LINK_ID;
+                    if ingress_link_id == zpr::LOCAL_AGENT_LINK_ID {
+                        zpr::LINK_ID_UNKNOWN
+                    } else {
+                        ((ingress_link_id - (zpr::DOCK_LINK_ID - 1)) % 2) + zpr::DOCK_LINK_ID
+                    }
+                });
 
             match super::requests::send_bind_agent_address_request(
                 asm,

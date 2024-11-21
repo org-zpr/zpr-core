@@ -3,7 +3,7 @@ use crate::km::ZPIPair;
 use crate::km_multiplexor;
 use crate::mgmt;
 use crate::net_defs::IpAddress;
-use crate::peer_table;
+use crate::special_peers;
 
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -348,7 +348,7 @@ impl LinkStateWrapper {
             );
 
             for name in
-                peer_table::special_peer_names_from_x509_subject_name(peer_cert.subject_name())
+                special_peers::special_peer_names_from_x509_subject_name(peer_cert.subject_name())
             {
                 match asm.peer_table.assign_special_name(name, self.id) {
                     Ok(()) => info!(

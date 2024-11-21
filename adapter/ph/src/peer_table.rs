@@ -4,12 +4,12 @@ use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
+use crate::special_peers::*;
 use crate::sync_req;
 use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
-use enum_map::{Enum, EnumMap};
-use enumset::{enum_set, EnumSet, EnumSetType};
+use enum_map::EnumMap;
 use std::default::Default;
 use std::future::Future;
 use std::sync::atomic::{self, Ordering};
@@ -22,25 +22,6 @@ use tokio_util::sync::CancellationToken;
 use zpr::{self, LinkId, SubstrateAddr, LINK_ID_UNKNOWN};
 
 const PEER_TABLE_SIZE: usize = 1024;
-
-/// Some peers are "special", e.g. the visa service adapter attached to the initial node.
-/// These names let us identify them.
-#[derive(Debug, Enum, EnumSetType /* implies Clone, Copy */)]
-pub enum SpecialPeerName {
-    VisaServiceAdapter,
-}
-
-pub fn special_peer_names_from_x509_subject_name(
-    subject: &openssl::x509::X509NameRef,
-) -> EnumSet<SpecialPeerName> {
-    let Ok(dn_der) = subject.to_der() else {
-        return enum_set!();
-    };
-    match dn_der.as_slice() {
-        zpr::VISA_SERVICE_DN => enum_set!(SpecialPeerName::VisaServiceAdapter),
-        _ => enum_set!(),
-    }
-}
 
 pub struct PeerState {
     pub substrate_addr: SubstrateAddr,
