@@ -31,6 +31,16 @@ const (
 	AcceptValidAuth
 )
 
+type runner func(*TestState, *TestRun) error
+
+var runners = map[ConformanceTest]runner{
+	HelloReps:         RunHelloReps,
+	GetCurrentPolicy:  RunGetCurrentPolicy,
+	CheckChallenge:    RunCheckChallenge,
+	RejectInvalidAuth: RunRejectInvalidAuth,
+	AcceptValidAuth:   RunAcceptValidAuth,
+}
+
 func (ct ConformanceTest) String() string {
 	switch ct {
 	case HelloReps:

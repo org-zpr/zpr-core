@@ -11,25 +11,13 @@ const MinChallengeNonceSize = 32
 const HelloRepsCount = 100
 
 func RunTest(test ConformanceTest, state *TestState, card *Scorecard) error {
-	runf := func() func(*TestState, *TestRun) error {
-		switch test {
-		case HelloReps:
-			return RunHelloReps
-		case GetCurrentPolicy:
-			return RunGetCurrentPolicy
-		case CheckChallenge:
-			return RunCheckChallenge
-		case RejectInvalidAuth:
-			return RunRejectInvalidAuth
-		case AcceptValidAuth:
-			return RunAcceptValidAuth
-		default:
-			panic(fmt.Sprintf("test %s not implemented", test))
-		}
+	runf, ok := runners[test]
+	if !ok {
+		panic(fmt.Sprintf("undefined test: %v", test))
 	}
 
 	ctest := card.Start(test)
-	if err := runf()(state, ctest); err != nil {
+	if err := runf(state, ctest); err != nil {
 		// Automatically fail if error returned, but we do not automatically pass if nil returned.
 		ctest.Failed(err)
 		return err
