@@ -49,7 +49,7 @@ Notes:
      +-----+        +--+--+        +-----+
    fd5a:5052::1        |         fd5a:5052:1::8080
    (visa service)      |         (web server)
-   cn = vs.zpr.org     |         cn = server.zpr.org
+   cn = vs.zpr         |         cn = server.zpr.org
                        |
                     +--+--+
                     |     |
