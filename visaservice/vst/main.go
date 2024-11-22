@@ -53,6 +53,11 @@ func main() {
 				Usage:   "visa service port (THRIFT)",
 				Value:   5002,
 			},
+			&cli.BoolFlag{
+				Name:  "verbose",
+				Usage: "verbose run with more verbosity and displays log on stderr",
+				Value: false,
+			},
 		},
 		Action: func(c *cli.Context) error {
 			if c.Args().Len() < 1 {
@@ -61,7 +66,7 @@ func main() {
 			}
 			adminAddr := netip.AddrPortFrom(netip.MustParseAddr(c.Args().Get(0)), uint16(c.Uint("admin_port")))
 			vsAddr := netip.AddrPortFrom(netip.MustParseAddr(c.Args().Get(0)), uint16(c.Uint("vs_port")))
-			return start(adminAddr, vsAddr)
+			return start(adminAddr, vsAddr, c.Bool("verbose"))
 		},
 	}
 
@@ -72,9 +77,9 @@ func main() {
 	}
 }
 
-func start(adminAddr, vsAddr netip.AddrPort) error {
+func start(adminAddr, vsAddr netip.AddrPort, verbose bool) error {
 	zlog := func() *zap.SugaredLogger {
-		zl, err := initLogging(true, true)
+		zl, err := initLogging(verbose, false)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "failed to initialize log system: %v\n", err)
 			os.Exit(1)
@@ -85,7 +90,7 @@ func start(adminAddr, vsAddr netip.AddrPort) error {
 	zlog.Info("visaservice test starting")
 	defer zlog.Info("visaservice test finished")
 
-	card, err := conform.RunTests(vsAddr, adminAddr, zlog.Desugar())
+	card, err := conform.RunTests(conform.TestsToRun, vsAddr, adminAddr, zlog.Desugar())
 	if card != nil {
 		fmt.Println()
 		card.Print()
@@ -95,6 +100,12 @@ func start(adminAddr, vsAddr netip.AddrPort) error {
 }
 
 func initLogging(verbose bool, devMode bool) (*zap.Logger, error) {
+	lev := zapcore.InfoLevel
+	if verbose {
+		lev = zapcore.DebugLevel
+		devMode = true
+	}
+
 	zapEnc := zapcore.EncoderConfig{
 		TimeKey:        "ts",
 		LevelKey:       "level",
@@ -109,23 +120,23 @@ func initLogging(verbose bool, devMode bool) (*zap.Logger, error) {
 		EncodeCaller:   zapcore.ShortCallerEncoder,
 	}
 
-	lev := zapcore.InfoLevel
-	if verbose {
-		lev = zapcore.DebugLevel
-	}
 	zapC := zap.Config{
 		Level:             zap.NewAtomicLevelAt(lev),
 		Development:       devMode,
 		DisableCaller:     true,
 		DisableStacktrace: false, // no stack traces
 		EncoderConfig:     zapEnc,
-		OutputPaths:       []string{"stderr"},
 		ErrorOutputPaths:  []string{"stderr"},
 	}
 	if devMode {
 		zapC.Encoding = "console"
 	} else {
 		zapC.Encoding = "json"
+	}
+	if verbose {
+		zapC.OutputPaths = []string{"stderr"}
+	} else {
+		zapC.OutputPaths = []string{"vst.log"}
 	}
 	logger, err := zapC.Build()
 	if err != nil {

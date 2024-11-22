@@ -16,6 +16,7 @@ import (
 type Node struct {
 	zlog   *zap.SugaredLogger
 	vsAddr netip.AddrPort
+	apiKey string
 }
 
 func NewNode(vsAddr netip.AddrPort, lgr *zap.Logger) (*Node, error) {
@@ -25,47 +26,60 @@ func NewNode(vsAddr netip.AddrPort, lgr *zap.Logger) (*Node, error) {
 	}, nil
 }
 
-func (n *Node) ConnectToVisaService() error {
+func (n *Node) Hello() (*vsapi.HelloResponse, error) {
 	cli, err := newClient(n.vsAddr)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer cli.Close()
+	n.zlog.Info("node->vs: HELLO")
 	resp, err := cli.Hello()
 	if err != nil {
-		return fmt.Errorf("hello failed: %w", err)
+		return nil, fmt.Errorf("hello failed: %w", err)
 	}
 	n.zlog.Infow("hello succeeds", "sid", resp.SessionID)
-	return nil
+	return resp, nil
 }
 
-func (n *Node) TestRepeatHello(reps int) error {
+// If we get an API key, we keep it in our state.
+func (n *Node) Authenticate(chalresp *vsapi.NodeAuthRequest) (string, error) {
+	cli, err := newClient(n.vsAddr)
+	if err != nil {
+		return "", err
+	}
+	defer cli.Close()
+	n.zlog.Info("node->vs: AUTHENTICATE")
+	apiKey, err := cli.client.Authenticate(defaultCtx, chalresp)
+	if err != nil {
+		n.zlog.Infow("authenticate failed", "error", err)
+		return "", fmt.Errorf("authenticate failed: %w", err)
+	} else {
+		n.apiKey = apiKey
+		n.zlog.Infow("authenticate succeeds", "sid", apiKey)
+	}
+	return apiKey, nil
+}
+
+// may be empty string.
+func (n *Node) GetAPIKey() string {
+	return n.apiKey
+}
+
+// Deregister the passed apikey, or pass empty string to de-register the one in our state.
+func (n *Node) DeRegister(apikey string) error {
 	cli, err := newClient(n.vsAddr)
 	if err != nil {
 		return err
 	}
-	defer cli.Close()
-
-	sids := make(map[int32]bool)
-	dupeCount := 0
-
-	n.zlog.Infow("testing hello from node", "reps", reps)
-	for i := 0; i < reps; i++ {
-		resp, err := cli.Hello()
-		if err != nil {
-			return fmt.Errorf("hello failed at rep %d: %w", i, err)
-		}
-		if sids[resp.SessionID] {
-			dupeCount++
-		} else {
-			sids[resp.SessionID] = true
-		}
+	n.zlog.Info("node->vs: DE-REGISTER")
+	if apikey == "" {
+		apikey = n.apiKey
+		n.apiKey = ""
 	}
-	if dupeCount > 0 {
-		n.zlog.Warnw("repeat hello test complete", "reps", reps, "duplicate_session_ids", dupeCount)
-	} else {
-		n.zlog.Infow("repeat hello test complete", "reps", reps, "duplicate_session_ids", dupeCount)
+	if apikey == "" {
+		return fmt.Errorf("invalid empty apikey passed")
 	}
+	cli.client.DeRegister(defaultCtx, apikey)
 	return nil
 }
 
@@ -74,6 +88,10 @@ func (n *Node) TestRepeatHello(reps int) error {
 func (n *Node) Close() {
 	// TODO: disconnect from visa service
 	// TODO: shutdown our own vss
+	if n.apiKey != "" {
+		_ = n.DeRegister(n.apiKey)
+		n.apiKey = ""
+	}
 }
 
 var defaultCtx = context.Background()

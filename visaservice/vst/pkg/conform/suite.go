@@ -4,43 +4,113 @@ import (
 	"fmt"
 	"net/netip"
 
-	"go.uber.org/zap"
 	"zpr.org/vst/pkg/mocks"
 	"zpr.org/vst/pkg/vsadmin"
+
+	"zpr.org/vsx/polio"
+
+	"go.uber.org/zap"
 )
 
-func RunTests(vsAddr, adminAddr netip.AddrPort, log *zap.Logger) (*Scorecard, error) {
+var TestsToRun = []ConformanceTest{
+	HelloReps,
+	GetCurrentPolicy,
+	CheckChallenge,
+	RejectInvalidAuth,
+	AcceptValidAuth,
+}
 
+type ConformanceTest int
+
+const (
+	HelloReps ConformanceTest = iota
+	GetCurrentPolicy
+	CheckChallenge
+	RejectInvalidAuth
+	AcceptValidAuth
+)
+
+func (ct ConformanceTest) String() string {
+	switch ct {
+	case HelloReps:
+		return "HELLO repeats"
+	case GetCurrentPolicy:
+		return "GetCurrentPolicy"
+	case CheckChallenge:
+		return "CheckChallenge"
+	case RejectInvalidAuth:
+		return "RejectInvalidAuth"
+	case AcceptValidAuth:
+		return "AcceptValidAuth"
+	default:
+		return fmt.Sprintf("ConformanceTest<%d>", ct)
+	}
+}
+
+func RunTests(tests []ConformanceTest, vsAddr, adminAddr netip.AddrPort, log *zap.Logger) (*Scorecard, error) {
 	zlog := log.Sugar()
-
-	card := NewScorecard()
-
-	vsadmin, err := vsadmin.NewVSAdminClient(adminAddr, zlog.Desugar())
-	if err != nil {
-		return card, fmt.Errorf("failed to create visa service admin client: %v", err)
+	card := NewScorecard(len(tests))
+	state := NewTestState(vsAddr, adminAddr, zlog)
+	defer state.Close()
+	for _, test := range tests {
+		if err := RunTest(test, state, card); err != nil {
+			return card, fmt.Errorf("test %s failed: %w", test, err)
+		}
 	}
-
-	ctest := card.Start(GetCurrentPolicy)
-	pol, err := vsadmin.GetCurrentPolicy()
-	if err != nil {
-		ctest.Failed(err)
-		return card, fmt.Errorf("failed to get current policy using admin interface: %v", err)
-	}
-	ctest.Passed()
-
-	zlog.Infow("policy extracted from container", "serial", pol.GetSerialVersion())
-	mockNode, err := mocks.NewNode(vsAddr, log)
-	if err != nil {
-		return card, fmt.Errorf("failed to create mock node: %v", err)
-	}
-	defer mockNode.Close()
-
-	ctest = card.Start(HelloReps)
-	if err := mockNode.TestRepeatHello(100); err != nil {
-		ctest.Failed(err)
-		return card, fmt.Errorf("repeat hello test failed: %v", err)
-	}
-	ctest.Passed()
-
 	return card, nil
+}
+
+type TestState struct {
+	vsAddr      netip.AddrPort // visa service address for thrift api
+	adminAddr   netip.AddrPort // visa service admin HTTPS api
+	log         *zap.SugaredLogger
+	policy      *polio.Policy   // policy extracted from GetCurrentPolicy, may be nil
+	adminClient *vsadmin.Client // use GetAdminClient
+	node        *mocks.Node     // use GetNode
+}
+
+func NewTestState(vsAddr, adminAddr netip.AddrPort, log *zap.SugaredLogger) *TestState {
+	return &TestState{
+		vsAddr:    vsAddr,
+		adminAddr: adminAddr,
+		log:       log,
+	}
+}
+
+func (ts *TestState) GetAdminClient() (*vsadmin.Client, error) {
+	if ts.adminClient == nil {
+		vsadmin, err := vsadmin.NewVSAdminClient(ts.adminAddr, ts.log.Desugar())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create visa service admin client: %v", err)
+		}
+		ts.adminClient = vsadmin
+	}
+	return ts.adminClient, nil
+}
+
+func (ts *TestState) GetNode() (*mocks.Node, error) {
+	if ts.node == nil {
+		mockNode, err := mocks.NewNode(ts.vsAddr, ts.log.Desugar())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create mock node: %v", err)
+		}
+		ts.node = mockNode
+	}
+	return ts.node, nil
+}
+
+// May be empty string.
+// This is set when authenticate is called on node and it succeeds.
+func (ts *TestState) GetAPIKey() string {
+	if ts.node != nil {
+		return ts.node.GetAPIKey()
+	}
+	return ""
+}
+
+func (ts *TestState) Close() {
+	if ts.node != nil {
+		ts.node.Close()
+		ts.node = nil
+	}
 }

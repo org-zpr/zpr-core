@@ -3,27 +3,12 @@ package conform
 import (
 	"fmt"
 	"time"
+
+	"github.com/fatih/color"
 )
-
-type ConformanceTest int
-
-const (
-	HelloReps ConformanceTest = iota
-	GetCurrentPolicy
-)
-
-func (ct ConformanceTest) String() string {
-	switch ct {
-	case HelloReps:
-		return "node: HELLO repeats"
-	case GetCurrentPolicy:
-		return "admin: GetCurrentPolicy"
-	default:
-		return fmt.Sprintf("ConformanceTest<%d>", ct)
-	}
-}
 
 type Scorecard struct {
+	count int // total number of tests expected to run
 	Tests []TestResult
 }
 
@@ -40,11 +25,14 @@ type TestRun struct {
 	Card  *Scorecard
 }
 
-func NewScorecard() *Scorecard {
-	return &Scorecard{}
+func NewScorecard(testCount int) *Scorecard {
+	return &Scorecard{
+		count: testCount,
+	}
 }
 
 func (s *Scorecard) Start(t ConformanceTest) *TestRun {
+	fmt.Printf("running test %d of %d: %s\n", len(s.Tests)+1, s.count, t.String())
 	tr := TestRun{
 		Test:  t,
 		Start: time.Now(),
@@ -62,11 +50,15 @@ func (tr *TestRun) Passed() {
 }
 
 func (tr *TestRun) Failed(err error) {
+	tr.Failedm(err.Error())
+}
+
+func (tr *TestRun) Failedm(msg string) {
 	tr.Card.AddTestResult(TestResult{
 		Test:       tr.Test,
 		Pass:       false,
 		Elapsed:    time.Since(tr.Start),
-		FailReason: err.Error(),
+		FailReason: msg,
 	})
 }
 
@@ -75,15 +67,22 @@ func (s *Scorecard) AddTestResult(tr TestResult) {
 }
 
 func (s *Scorecard) Print() {
+	red := color.New(color.FgRed).PrintfFunc()
+	green := color.New(color.FgGreen).PrintfFunc()
+
 	fmt.Printf("Conformance Test Results (%d test%s)\n", len(s.Tests), pluralize(len(s.Tests)))
 	fmt.Printf("--------------------------------------------------------\n")
 	failCount := 0
 	for _, tr := range s.Tests {
 		fmt.Printf("%-30v", tr.Test)
 		if tr.Pass {
-			fmt.Printf("  PASS (%s)\n", tr.Elapsed)
+			green("  PASS")
+			fmt.Printf(" (%s)\n", tr.Elapsed)
 		} else {
-			fmt.Printf("  FAIL %s\n", tr.FailReason)
+			red("  FAIL")
+			fmt.Println()
+			red("     **  ")
+			fmt.Println(tr.FailReason)
 			failCount++
 		}
 	}
