@@ -1,6 +1,7 @@
 package conform
 
 import (
+	"crypto/x509"
 	"fmt"
 	"net/netip"
 
@@ -47,10 +48,10 @@ func (ct ConformanceTest) String() string {
 	}
 }
 
-func RunTests(tests []ConformanceTest, vsAddr, adminAddr netip.AddrPort, log *zap.Logger) (*Scorecard, error) {
+func RunTests(tests []ConformanceTest, vsAddr, adminAddr netip.AddrPort, nodeCert *x509.Certificate, log *zap.Logger) (*Scorecard, error) {
 	zlog := log.Sugar()
 	card := NewScorecard(len(tests))
-	state := NewTestState(vsAddr, adminAddr, zlog)
+	state := NewTestState(vsAddr, adminAddr, nodeCert, zlog)
 	defer state.Close()
 	for _, test := range tests {
 		if err := RunTest(test, state, card); err != nil {
@@ -63,16 +64,18 @@ func RunTests(tests []ConformanceTest, vsAddr, adminAddr netip.AddrPort, log *za
 type TestState struct {
 	vsAddr      netip.AddrPort // visa service address for thrift api
 	adminAddr   netip.AddrPort // visa service admin HTTPS api
+	nodeCert    *x509.Certificate
 	log         *zap.SugaredLogger
 	policy      *polio.Policy   // policy extracted from GetCurrentPolicy, may be nil
 	adminClient *vsadmin.Client // use GetAdminClient
 	node        *mocks.Node     // use GetNode
 }
 
-func NewTestState(vsAddr, adminAddr netip.AddrPort, log *zap.SugaredLogger) *TestState {
+func NewTestState(vsAddr, adminAddr netip.AddrPort, nodeCert *x509.Certificate, log *zap.SugaredLogger) *TestState {
 	return &TestState{
 		vsAddr:    vsAddr,
 		adminAddr: adminAddr,
+		nodeCert:  nodeCert,
 		log:       log,
 	}
 }

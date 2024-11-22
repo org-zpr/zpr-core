@@ -187,39 +187,60 @@ func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
 		return nil
 	}
 
+	nodeCR := GetNodeConnect(state.policy)
+	if nodeCR == nil {
+		ctest.Failedm("no node connect information found in policy")
+		return nil
+	}
+
+	timestamp := time.Now().Unix()
+
 	// What claims do I need -- these are in policy?
 	claims := make(map[string]string)
+	if nodeCR.CN != "" {
+		claims["zpr.adapter.cn"] = nodeCR.CN
+	}
 
-	nodeName := "node-name-from-policy"
-	provides := []string{fmt.Sprintf("/zpr/%s", nodeName)}
+	// These come from policy I believe
+	nodeAddr := nodeCR.Addr
+	tetherAddr := nodeAddr
+
+	// Node name is last section of the provides path.
+	nodeName := nodeCR.GetNodeName()
+	if nodeName == "" {
+		// This is a policy error.
+		ctest.Failedm("node name not found node service list")
+		return nil
+	}
+
+	var provides []string
+	for sname := range nodeCR.Provides {
+		provides = append(provides, sname)
+	}
 
 	nodeAgent := vsapi.Agent{
 		AgentType:   vsapi.AgentType_NODE,
 		Attrs:       claims,
-		AuthExpires: time.Now().Unix() + 3600,
-		ZprAddr:     []byte{},              // zpr address
-		TetherAddr:  []byte{},              // tether address
+		AuthExpires: timestamp + 3600,
+		ZprAddr:     nodeAddr.AsSlice(),    // zpr address
+		TetherAddr:  tetherAddr.AsSlice(),  // tether address
 		Ident:       "ident-not-generated", // identity
 		Provides:    provides,              // []string
 	}
 
-	// TODO: I need access to a node certificate.
-	certPemData := []byte{}
-
-	// TODO: need to create hmac from (challenge, sessionid, timestamp)
-	// For milestone 2 this is just a HASH of (challenge-data + timestamp.bigEndian + sessionid.bigEndian)
-	m2HMAC := []byte{}
+	m2HMAC := newM2HMAC(resp.Challenge.ChallengeData, resp.SessionID, timestamp)
 
 	// NODE->VS : Authenticate
 	authReq := vsapi.NodeAuthRequest{
 		SessionID:  resp.SessionID,
 		Challenge:  resp.Challenge,
-		Timestamp:  time.Now().Unix(),
-		NodeCert:   certPemData,
+		Timestamp:  timestamp,
+		NodeCert:   certToPEM(state.nodeCert),
 		Hmac:       m2HMAC,
 		VssService: "127.0.0.1:31337", // HMM normally this would need to be a ZPR address
 		NodeAgent:  &nodeAgent,
 	}
+	state.log.Infow("attempting authenticate for node", "node_name", nodeName, "CN", nodeCR.CN)
 	apiKey, err := mockNode.Authenticate(&authReq)
 	if err != nil {
 		ctest.Failed(err)

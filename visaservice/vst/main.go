@@ -26,6 +26,8 @@
 package main
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/netip"
 	"os"
@@ -38,8 +40,9 @@ import (
 
 func main() {
 	app := &cli.App{
-		Name:  "vst",
-		Usage: "ZPR visa service test tool",
+		Name:      "vst",
+		Usage:     "ZPR visa service test tool",
+		UsageText: "vst [options] <visa-service-address> <node-certificate-file>",
 		Flags: []cli.Flag{
 			&cli.UintFlag{
 				Name:    "admin_port",
@@ -60,13 +63,17 @@ func main() {
 			},
 		},
 		Action: func(c *cli.Context) error {
-			if c.Args().Len() < 1 {
-				fmt.Fprintf(os.Stderr, "usage: vst <visa-service-address>\n")
+			if c.Args().Len() < 2 {
+				fmt.Fprintf(os.Stderr, "usage: %s\n", c.App.UsageText)
 				return fmt.Errorf("argument error")
 			}
 			adminAddr := netip.AddrPortFrom(netip.MustParseAddr(c.Args().Get(0)), uint16(c.Uint("admin_port")))
 			vsAddr := netip.AddrPortFrom(netip.MustParseAddr(c.Args().Get(0)), uint16(c.Uint("vs_port")))
-			return start(adminAddr, vsAddr, c.Bool("verbose"))
+			nodeCert, err := loadCertFromPEMFile(c.Args().Get(1))
+			if err != nil {
+				return err
+			}
+			return start(adminAddr, vsAddr, nodeCert, c.Bool("verbose"))
 		},
 	}
 
@@ -77,7 +84,7 @@ func main() {
 	}
 }
 
-func start(adminAddr, vsAddr netip.AddrPort, verbose bool) error {
+func start(adminAddr, vsAddr netip.AddrPort, nodeCert *x509.Certificate, verbose bool) error {
 	zlog := func() *zap.SugaredLogger {
 		zl, err := initLogging(verbose, false)
 		if err != nil {
@@ -90,13 +97,25 @@ func start(adminAddr, vsAddr netip.AddrPort, verbose bool) error {
 	zlog.Info("visaservice test starting")
 	defer zlog.Info("visaservice test finished")
 
-	card, err := conform.RunTests(conform.TestsToRun, vsAddr, adminAddr, zlog.Desugar())
+	card, err := conform.RunTests(conform.TestsToRun, vsAddr, adminAddr, nodeCert, zlog.Desugar())
 	if card != nil {
 		fmt.Println()
 		card.Print()
 		fmt.Println()
 	}
 	return err
+}
+
+func loadCertFromPEMFile(path string) (*x509.Certificate, error) {
+	pemdata, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read node certificate file: %v", err)
+	}
+	block, _ := pem.Decode(pemdata)
+	if block == nil {
+		return nil, fmt.Errorf("failed to parse node certificate file: no PEM block found")
+	}
+	return x509.ParseCertificate(block.Bytes)
 }
 
 func initLogging(verbose bool, devMode bool) (*zap.Logger, error) {

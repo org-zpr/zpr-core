@@ -55,7 +55,7 @@ func (n *Node) Authenticate(chalresp *vsapi.NodeAuthRequest) (string, error) {
 		return "", fmt.Errorf("authenticate failed: %w", err)
 	} else {
 		n.apiKey = apiKey
-		n.zlog.Infow("authenticate succeeds", "sid", apiKey)
+		n.zlog.Infow("authenticate succeeds", "api_key", apiKey)
 	}
 	return apiKey, nil
 }

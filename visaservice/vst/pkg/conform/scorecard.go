@@ -71,13 +71,13 @@ func (s *Scorecard) Print() {
 	green := color.New(color.FgGreen).PrintfFunc()
 
 	fmt.Printf("Conformance Test Results (%d test%s)\n", len(s.Tests), pluralize(len(s.Tests)))
-	fmt.Printf("--------------------------------------------------------\n")
+	fmt.Printf("-----------------------------------------------------\n")
 	failCount := 0
 	for _, tr := range s.Tests {
 		fmt.Printf("%-30v", tr.Test)
 		if tr.Pass {
 			green("  PASS")
-			fmt.Printf(" (%s)\n", tr.Elapsed)
+			fmt.Printf("     (%8.3fms)\n", (float64(tr.Elapsed.Microseconds()) / 1000.0))
 		} else {
 			red("  FAIL")
 			fmt.Println()
