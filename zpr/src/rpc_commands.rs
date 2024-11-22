@@ -1,6 +1,6 @@
 //! RPC commands that can be sent to a packet handler
 
-use strum::{EnumString, Display};
+use strum::{Display, EnumString};
 
 #[derive(Debug, Eq, PartialEq, EnumString, Display)]
 #[strum(serialize_all = "kebab-case")]
