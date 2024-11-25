@@ -10,6 +10,7 @@ on:
       - 'zpr-ext/**'
       - 'cslab/**'
       - 'cbpf-rs/**'
+      - '.github/workflows/rust-adapter.yml'
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,6 +22,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build + test ph
+      timeout-minutes: 5
       run: |
         cd adapter/ph
         make build 
@@ -32,6 +34,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Check format
+      timeout-minutes: 5
       run: |
         cd adapter/ph
         cargo fmt --check
@@ -42,6 +45,7 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check warnings 
+      timeout-minutes: 5
       run: |
         cd adapter/ph 
         cargo rustc --bin ph -- -D warnings
@@ -52,6 +56,7 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
+      timeout-minutes: 5
       run: | 
         cd adapter/ph
         cargo rustc --tests -- -D warnings
@@ -62,6 +67,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build + test ph
+      timeout-minutes: 5
       run: |
         sudo apt update
         sudo apt install libpcap-dev
@@ -74,6 +80,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Check format
+      timeout-minutes: 5
       run: |
         cd adapter/ph-debug
         cargo fmt --check
@@ -84,6 +91,7 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check warnings 
+      timeout-minutes: 5
       run: |
         sudo apt update
         sudo apt install libpcap-dev
@@ -95,6 +103,7 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
+      timeout-minutes: 5
       run: |
         sudo apt update
         sudo apt install libpcap-dev
@@ -107,6 +116,7 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
+      timeout-minutes: 5
       run: |
         cd adapter/ph
         cargo build
@@ -121,6 +131,7 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
+      timeout-minutes: 5
       run: |
         cd adapter/ph
         cargo build
