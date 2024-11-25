@@ -12,6 +12,10 @@ on:
       - 'cbpf-rs/**'
       - '.github/workflows/rust-adapter.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
