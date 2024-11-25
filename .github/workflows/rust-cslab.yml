@@ -6,6 +6,11 @@ on:
   pull_request:
     paths:
       - 'cslab/**'
+      - '.github/workflows/rust-cslab.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,6 +21,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build + test cbpf
+      timeout-minutes: 5
       run: |
         cd cslab
         cargo build --verbose
@@ -27,6 +33,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Check format
+      timeout-minutes: 5
       run: |
         cd cslab
         cargo fmt --check
@@ -37,6 +44,7 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check warnings
+      timeout-minutes: 5
       run: |
         cd cslab
         cargo rustc -- -D warnings
@@ -47,6 +55,7 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
+      timeout-minutes: 5
       run: |
         cd cslab
         cargo rustc --tests -- -D warnings

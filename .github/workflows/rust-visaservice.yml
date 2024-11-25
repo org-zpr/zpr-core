@@ -7,6 +7,11 @@ on:
     paths:
       - 'visaservice/cli/**'
       - 'visaservice/thrift/**'
+      - '.github/workflows/rust-visaservice.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -20,14 +25,17 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Prepare Rust
+      timeout-minutes: 5
       run: rustup default stable
 
     - name: Build
+      timeout-minutes: 5
       run: |
         cd visaservice
         make all-rs
 
     - name: Test
+      timeout-minutes: 5
       run: |
         cd visaservice
         make test-rs

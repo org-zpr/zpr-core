@@ -11,6 +11,11 @@ on:
       - 'visaservice/mods/**'
       - 'visaservice/core/**'
       - 'visaservice/thrift/**'
+      - '.github/workflows/go-visaservice.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
 
@@ -22,11 +27,13 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Build
+      timeout-minutes: 5
       run: |
         cd visaservice
         make all-go
 
     - name: Test
+      timeout-minutes: 5
       run: |
         cd visaservice
         make test-go
