@@ -3,11 +3,14 @@ use crate::buffer_stack::BufferStack;
 use crate::capture_worker::CaptureWorker;
 use crate::config;
 use crate::counters::*;
+use crate::defs;
 use crate::flow_control::FlowControl;
+use crate::forwarding_tables;
 use crate::km_cert_exchange::KmCertExchange;
 use crate::km_multiplexor::KmState;
 use crate::km_noise;
 use crate::link_state::{LinkEvent, LinkStateError, LinkType};
+use crate::mgmt;
 use crate::mgmt_processor_worker;
 use crate::peer_table;
 use crate::peer_table::PeerInsertError;
@@ -83,6 +86,12 @@ pub struct Assembly {
     pub self_noise_keypair: Option<NoiseKeypair>,
     pub peer_noise_keypair: Option<NoiseKeypair>,
     pub certx: Option<KmCertExchange>,
+}
+
+pub enum AddRouteError {
+    BindFailed(mgmt::requests::BindAgentAddressError),
+    PeerGone,
+    PftFull,
 }
 
 impl Assembly {
@@ -189,6 +198,39 @@ impl Assembly {
         }
 
         return Ok(peer_id);
+    }
+
+    pub async fn add_route(
+        &self,
+        ingress_link_id: LinkId,
+        five_tuple: defs::FiveTuple,
+        egress_link_id: NonZero<LinkId>,
+        compression_mode: zpr::CompressionMode,
+    ) -> Result<zpr::StreamId, AddRouteError> {
+        let egress_tether_id = mgmt::requests::send_bind_agent_address_request(
+            self,
+            egress_link_id.get(),
+            compression_mode,
+            five_tuple,
+        )
+        .await
+        .map_err(|e| AddRouteError::BindFailed(e))?;
+
+        // form PEP
+        let pep = forwarding_tables::PftPep {
+            next_hop: forwarding_tables::PftNextHop(egress_link_id.get(), egress_tether_id),
+        };
+
+        let Some(ingress_peer_state) = self.peer_table.get(ingress_link_id) else {
+            return Err(AddRouteError::PeerGone);
+        };
+
+        let ingress_tether_id = ingress_peer_state
+            .pft
+            .insert(pep)
+            .map_err(|()| AddRouteError::PftFull)?;
+
+        Ok(ingress_tether_id)
     }
 
     pub fn hack_default_policy(&self, ingress_link_id: LinkId) -> Option<NonZero<LinkId>> {

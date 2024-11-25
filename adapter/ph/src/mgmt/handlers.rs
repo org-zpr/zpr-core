@@ -1,11 +1,10 @@
 //! Handlers for management requests.
 
 use crate::adapter_tables;
-use crate::assembly::{Assembly, PhMode};
+use crate::assembly::{self, Assembly, PhMode};
 use crate::config;
 use crate::counters;
 use crate::defs::*;
-use crate::forwarding_tables;
 use crate::link_state::LinkEvent;
 use crate::net_defs::IpAddress;
 use crate::packet::{BufferPacket, Packet};
@@ -340,71 +339,53 @@ pub async fn handle_bind_agent_address_request(
                 return Ok(());
             };
 
-            match super::requests::send_bind_agent_address_request(
-                asm,
-                egress_link_id.get(),
-                compression_mode,
-                five_tuple,
-            )
-            .await
+            // TODO: errors need more consideration here
+            match asm
+                .add_route(
+                    ingress_link_id,
+                    five_tuple,
+                    egress_link_id,
+                    compression_mode,
+                )
+                .await
             {
-                Ok(egress_tether_id) => {
-                    // form PEP
-                    let pep = forwarding_tables::PftPep {
-                        next_hop: forwarding_tables::PftNextHop(
-                            egress_link_id.get(),
-                            egress_tether_id,
-                        ),
-                    };
-
-                    match asm.peer_table.inspect(ingress_link_id, |peer_state| {
-                        match peer_state.pft.insert(pep) {
-                            Ok(tid) => {
-                                // success; respond with tether ID
-                                // TODO: maybe tick a counter somewhere?
-                                zdp::ZdpBindAgentAddressResponseHeader {
-                                    status_code:
-                                        zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS,
-                                    info_len: 0,
-                                }
-                                .write_to_buf(&mut rsp_pkt)
-                                .unwrap();
-
-                                tid
-                            }
-
-                            Err(()) => {
-                                // PFT full; respond with error message
-                                // TODO: maybe tick a counter somewhere?
-                                let message = "PFT full";
-
-                                zdp::ZdpBindAgentAddressResponseHeader {
-                                    status_code:
-                                        zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER,
-                                    info_len: message.len() as u8,
-                                }
-                                .write_to_buf(&mut rsp_pkt)
-                                .unwrap();
-
-                                rsp_pkt.put(message.as_bytes());
-
-                                0
-                            }
-                        }
-                    }) {
-                        Some(tid) => ingress_tether_id = tid,
-
-                        None => {
-                            // peer went away; don't bother responding
-                            asm.buffer_stack.put_buffer(rsp_pkt.destroy());
-                            return Ok(());
-                        }
+                Ok(ingress_tid) => {
+                    // success; respond with ingress tether ID
+                    // TODO: maybe tick a counter somewhere?
+                    zdp::ZdpBindAgentAddressResponseHeader {
+                        status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS,
+                        info_len: 0,
                     }
+                    .write_to_buf(&mut rsp_pkt)
+                    .unwrap();
 
-                    // TODO: factor out message generation using Result<StreamId, Box<str>>
+                    ingress_tether_id = ingress_tid;
                 }
 
-                Err(err) => {
+                Err(assembly::AddRouteError::PftFull) => {
+                    // PFT full; respond with error message
+                    // TODO: maybe tick a counter somewhere?
+                    let message = "PFT full";
+
+                    zdp::ZdpBindAgentAddressResponseHeader {
+                        status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER,
+                        info_len: message.len() as u8,
+                    }
+                    .write_to_buf(&mut rsp_pkt)
+                    .unwrap();
+
+                    rsp_pkt.put(message.as_bytes());
+
+                    ingress_tether_id = 0;
+                }
+
+                Err(assembly::AddRouteError::PeerGone) => {
+                    // peer went away; don't bother responding
+                    asm.buffer_stack.put_buffer(rsp_pkt.destroy());
+                    return Ok(());
+                }
+
+                Err(assembly::AddRouteError::BindFailed(err)) => {
                     // unable to bind next-hop; respond with error message
                     // TODO: maybe tick a counter somewhere?
                     let message = format!("unable to bind next-hop: {}", err);
@@ -429,6 +410,8 @@ pub async fn handle_bind_agent_address_request(
                 compression_mode,
                 five_tuple,
             };
+
+            // TODO: reverse path
 
             // attempt to insert into DLT
             match asm.dlt.insert(pep) {
