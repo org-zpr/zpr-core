@@ -219,7 +219,9 @@ func (v *NodeValidator) SelfAuthenticate(reqAddr netip.Addr, claims map[string]s
 			continue
 		}
 	}
-	aok.Claims[agent.KAttrEPID] = &agent.ClaimV{V: reqAddr.String(), Exp: aok.Expire}
+	if reqAddr.IsValid() && reqAddr != agent.ZeroAddr {
+		aok.Claims[agent.KAttrEPID] = &agent.ClaimV{V: reqAddr.String(), Exp: aok.Expire}
+	}
 	return aok, nil
 }
 
