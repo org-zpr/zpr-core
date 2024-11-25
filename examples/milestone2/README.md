@@ -118,7 +118,7 @@ cd policies
 cd /path/to/zpr-core/visaservice/core/build
 ./vservice --verbose \
     --conf ../../../examples/milestone2/vs/vs-config.yaml \
-    --policy ../../../examples/milestone2/policies/policy-m2.bin
+    --policy ../../../examples/milestone2/policies/policy-m2-ping-and-http.bin
 ```
 
 #### Bring up a VSS in its own terminal

@@ -23,7 +23,7 @@ zpr:
   visaservice:
     dock: n0
     provider:
-      - [zpr.adapter.cn, eq, vs.zpr]
+      - [zpr.adapter.cn, eq, vs.zpr.org]
     admin_attrs:
       - [zpr.adapter.cn, eq, client.zpr.org]
 
@@ -32,7 +32,7 @@ zpr:
       api: validation/1
       authority:
         encoding: pem
-        cert_data: $import[../ca-cert.pem]
+        cert_data: $import[../vs/ca-cert.pem]
 
 services:
   http:
@@ -54,7 +54,6 @@ communications:
         service_one:
           desc: example service
           services:
-            - http
             - perf
             - ping
           provider:
