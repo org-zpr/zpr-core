@@ -19,6 +19,7 @@ var TestsToRun = []ConformanceTest{
 	CheckChallenge,
 	RejectInvalidAuth,
 	AcceptValidAuth,
+	AuthorizeConnect,
 }
 
 type ConformanceTest int
@@ -29,6 +30,7 @@ const (
 	CheckChallenge
 	RejectInvalidAuth
 	AcceptValidAuth
+	AuthorizeConnect
 )
 
 type runner func(*TestState, *TestRun) error
@@ -39,6 +41,7 @@ var runners = map[ConformanceTest]runner{
 	CheckChallenge:    RunCheckChallenge,
 	RejectInvalidAuth: RunRejectInvalidAuth,
 	AcceptValidAuth:   RunAcceptValidAuth,
+	AuthorizeConnect:  RunAuthorizeConnect,
 }
 
 func (ct ConformanceTest) String() string {
@@ -53,6 +56,8 @@ func (ct ConformanceTest) String() string {
 		return "RejectInvalidAuth"
 	case AcceptValidAuth:
 		return "AcceptValidAuth"
+	case AuthorizeConnect:
+		return "AuthorizeConnect"
 	default:
 		return fmt.Sprintf("ConformanceTest<%d>", ct)
 	}

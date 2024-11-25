@@ -26,6 +26,14 @@ func NewNode(vsAddr netip.AddrPort, lgr *zap.Logger) (*Node, error) {
 	}, nil
 }
 
+func (n *Node) HasApiKey() bool {
+	return n.apiKey != ""
+}
+
+func (n *Node) GetApiKey() string {
+	return n.apiKey
+}
+
 func (n *Node) Hello() (*vsapi.HelloResponse, error) {
 	cli, err := newClient(n.vsAddr)
 	if err != nil {
@@ -81,6 +89,21 @@ func (n *Node) DeRegister(apikey string) error {
 	}
 	cli.client.DeRegister(defaultCtx, apikey)
 	return nil
+}
+
+func (n *Node) AuthorizeConnect(apikey string, req *vsapi.ConnectRequest) (*vsapi.ConnectResponse, error) {
+	cli, err := newClient(n.vsAddr)
+	if err != nil {
+		return nil, err
+	}
+	n.zlog.Infow("node->vs: AUTHORIZE CONNECT")
+	resp, err := cli.client.AuthorizeConnect(defaultCtx, apikey, req)
+	if err != nil {
+		n.zlog.Infow("authorize connect failed", "error", err)
+		return nil, fmt.Errorf("authorize-connect failed: %w", err)
+	}
+	n.zlog.Info("authorize connect succeeeds")
+	return resp, nil
 }
 
 // Close anything that needs to be closed.  This prepares for a clean

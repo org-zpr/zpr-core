@@ -32,7 +32,7 @@ zpr:
       api: validation/1
       authority:
         encoding: pem
-        cert_data: $import[../ca-cert.pem]
+        cert_data: $import[../vs/ca-cert.pem]
 
 services:
   http:

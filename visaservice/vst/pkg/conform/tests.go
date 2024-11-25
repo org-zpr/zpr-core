@@ -2,8 +2,11 @@ package conform
 
 import (
 	"fmt"
+	"math/rand"
+	"net/netip"
 	"time"
 
+	"zpr.org/vst/pkg/mocks"
 	"zpr.org/vst/pkg/vsapi"
 )
 
@@ -25,19 +28,17 @@ func RunTest(test ConformanceTest, state *TestState, card *Scorecard) error {
 	return nil
 }
 
+func pause() {
+	time.Sleep(2 * time.Second)
+}
+
 // If this works, it stores the current policy in the state.
 func RunGetCurrentPolicy(state *TestState, ctest *TestRun) error {
-	cli, err := state.GetAdminClient()
-	if err != nil {
-		return err
-	}
-	pol, err := cli.GetCurrentPolicy()
-	if err != nil {
-		return fmt.Errorf("failed to get current policy using admin interface: %v", err)
+	if err := loadPolicy(state); err != nil {
+		ctest.Failed(err)
+		return nil
 	}
 	ctest.Passed()
-	state.policy = pol
-	state.log.Infow("policy extracted from container", "serial", pol.GetSerialVersion())
 	return nil
 }
 
@@ -135,6 +136,7 @@ func RunRejectInvalidAuth(state *TestState, ctest *TestRun) error {
 		ctest.Failedm("challenge is nil")
 		return nil
 	}
+	pause()
 
 	// NODE->VS : Authenticate
 	authReq := vsapi.NodeAuthRequest{
@@ -165,7 +167,6 @@ func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
 		return err
 	}
 
-	// NODE->VS : Hello
 	resp, err := mockNode.Hello()
 	if err != nil {
 		return err
@@ -174,6 +175,18 @@ func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
 		ctest.Failedm("challenge is nil")
 		return nil
 	}
+	pause()
+
+	timestamp := time.Now().Unix()
+
+	if state.policy == nil {
+		err := loadPolicy(state)
+		if err != nil {
+			ctest.Failed(err)
+			return nil
+		}
+		pause()
+	}
 
 	nodeCR := GetNodeConnect(state.policy)
 	if nodeCR == nil {
@@ -181,19 +194,6 @@ func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
 		return nil
 	}
 
-	timestamp := time.Now().Unix()
-
-	// What claims do I need -- these are in policy?
-	claims := make(map[string]string)
-	if nodeCR.CN != "" {
-		claims["zpr.adapter.cn"] = nodeCR.CN
-	}
-
-	// These come from policy I believe
-	nodeAddr := nodeCR.Addr
-	tetherAddr := nodeAddr
-
-	// Node name is last section of the provides path.
 	nodeName := nodeCR.GetNodeName()
 	if nodeName == "" {
 		// This is a policy error.
@@ -201,19 +201,10 @@ func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
 		return nil
 	}
 
-	var provides []string
-	for sname := range nodeCR.Provides {
-		provides = append(provides, sname)
-	}
-
-	nodeAgent := vsapi.Agent{
-		AgentType:   vsapi.AgentType_NODE,
-		Attrs:       claims,
-		AuthExpires: timestamp + 3600,
-		ZprAddr:     nodeAddr.AsSlice(),    // zpr address
-		TetherAddr:  tetherAddr.AsSlice(),  // tether address
-		Ident:       "ident-not-generated", // identity
-		Provides:    provides,              // []string
+	nodeAgent, err := CreateNodeAgent(state.policy, 3600)
+	if err != nil {
+		ctest.Failed(err)
+		return nil
 	}
 
 	m2HMAC := newM2HMAC(resp.Challenge.ChallengeData, resp.SessionID, timestamp)
@@ -226,7 +217,7 @@ func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
 		NodeCert:   certToPEM(state.nodeCert),
 		Hmac:       m2HMAC,
 		VssService: "127.0.0.1:31337", // HMM normally this would need to be a ZPR address
-		NodeAgent:  &nodeAgent,
+		NodeAgent:  nodeAgent,
 	}
 	state.log.Infow("attempting authenticate for node", "node_name", nodeName, "CN", nodeCR.CN)
 	apiKey, err := mockNode.Authenticate(&authReq)
@@ -239,5 +230,275 @@ func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
 		return nil
 	}
 	ctest.Passed()
+	return nil
+}
+
+func RunAuthorizeConnect(state *TestState, ctest *TestRun) error {
+	// If we don't have an API key in state, run the accept-valid-auth test.
+	node, err := state.GetNode()
+	if err != nil {
+		return err
+	}
+	if !node.HasApiKey() {
+		_, err := connectNodeAndGetApiKey(state)
+		if err != nil {
+			ctest.Failed(err)
+			return nil
+		}
+		pause()
+	}
+	if !node.HasApiKey() {
+		ctest.Failedm("unable to get an API key from node")
+		return nil
+	}
+
+	if state.policy == nil {
+		err := loadPolicy(state)
+		if err != nil {
+			ctest.Failed(err)
+			return nil
+		}
+		pause()
+	}
+
+	// Pick a non-node, non-provider to connect as.
+	connects := GetConnects(state.policy)
+	if connects == nil {
+		ctest.Failedm("cannot find any authorized connectors in policy")
+		return nil
+	}
+
+	var candidate *ConnectRec
+	var nodeCR *ConnectRec
+	for _, connect := range connects {
+		if connect.IsNode() {
+			if nodeCR != nil {
+				panic("expecting only one node in policy")
+			}
+			nodeCR = connect
+			continue
+		}
+		if len(connect.Provides) > 0 {
+			continue
+		}
+		if candidate == nil {
+			candidate = connect
+		}
+	}
+	if nodeCR == nil {
+		panic("expecting a node in policy")
+	}
+	if candidate == nil {
+		ctest.Failedm("cannot find any non-node, non-provider in policy")
+		return nil
+	}
+
+	agent, err := connectAdapter(node, candidate, nodeCR.Addr)
+	if err != nil {
+		ctest.Failed(err)
+		return nil
+	}
+
+	// TODO: Check the agent.
+	if agent == nil {
+		ctest.Failedm("authorize-connect did not return an agent")
+		return nil
+	}
+
+	ctest.Passed()
+	return nil
+}
+
+// Connect node, then a client and a service and send in a visa request which should then be granted.
+func RunVisaRequest(state *TestState, ctest *TestRun) error {
+	node, err := state.GetNode()
+	if err != nil {
+		return err
+	}
+	if !node.HasApiKey() {
+		_, err := connectNodeAndGetApiKey(state)
+		if err != nil {
+			ctest.Failed(err)
+			return nil
+		}
+		if !node.HasApiKey() {
+			ctest.Failedm("unable to get an API key from node")
+			return nil
+		}
+		pause()
+	}
+
+	if state.policy == nil {
+		err := loadPolicy(state)
+		if err != nil {
+			ctest.Failed(err)
+			return nil
+		}
+		pause()
+	}
+
+	// Pick a non-node, non-provider to connect as.
+	connects := GetConnects(state.policy)
+	if connects == nil {
+		ctest.Failedm("cannot find any authorized connectors in policy")
+		return nil
+	}
+
+	var candidate *ConnectRec
+	var nodeCR *ConnectRec
+	var service *ConnectRec
+	for _, connect := range connects {
+		if connect.IsNode() {
+			if nodeCR != nil {
+				panic("expecting only one node in policy")
+			}
+			nodeCR = connect
+			continue
+		}
+		if connect.IsVisaService() {
+			continue
+		}
+		if len(connect.Provides) > 0 {
+			if service == nil {
+				service = connect
+				continue
+			}
+		} else if candidate == nil {
+			candidate = connect
+		}
+	}
+	if nodeCR == nil {
+		panic("expecting a node in policy")
+	}
+	if candidate == nil {
+		ctest.Failedm("cannot find any non-node, non-provider in policy")
+		return nil
+	}
+	if service == nil {
+		ctest.Failedm("cannot find a suitable service for visa request testing")
+		return nil
+	}
+
+	// TODO: Figure out what attributes our client needs in order to talk to service.
+	//       Then ensure those attributes are present.
+
+	// Connect the service:
+
+	// Connect the client:
+
+	// Requesrt a visa:
+
+	ctest.Passed()
+	return nil
+}
+
+func connectAdapter(node *mocks.Node, crec *ConnectRec, dockAddr netip.Addr) (*vsapi.Agent, error) {
+	claims := make(map[string]string)
+	claims["zpr.adapter.cn"] = crec.CN
+	if crec.HasAddr() {
+		claims["zpr.addr"] = crec.Addr.String()
+	} else {
+		// Hmm, just make one up?
+		claims["zpr.addr"] = "fd5a:5052:1::2"
+	}
+
+	cid := rand.Int31()
+	creq := vsapi.ConnectRequest{
+		ConnectionID:       cid,
+		DockAddr:           dockAddr.AsSlice(),
+		Claims:             claims,
+		Challenge:          nil,
+		ChallengeResponses: nil,
+	}
+
+	// NODE->VS : AuthorizeConnect
+	cresp, err := node.AuthorizeConnect(node.GetAPIKey(), &creq)
+	if err != nil {
+		return nil, err
+	}
+
+	if cresp.ConnectionID != cid {
+		return nil, fmt.Errorf("connection id mismatch: expected %d, got %d", cid, cresp.ConnectionID)
+	}
+	if cresp.Status != vsapi.StatusCode_SUCCESS {
+		return nil, fmt.Errorf("status not success: %d (%s): %v", cresp.Status, cresp.Status, cresp.Reason)
+	}
+
+	// TODO: Check the agent.
+
+	return cresp.Agent, nil
+}
+
+func connectNodeAndGetApiKey(state *TestState) (string, error) {
+	mockNode, err := state.GetNode()
+	if err != nil {
+		return "", err
+	}
+
+	if state.policy == nil {
+		if err := loadPolicy(state); err != nil {
+			return "", err
+		}
+		pause()
+	}
+
+	resp, err := mockNode.Hello()
+	if err != nil {
+		return "", err
+	}
+	if resp.Challenge == nil {
+		return "", fmt.Errorf("challenge from VS is nil")
+	}
+	timestamp := time.Now().Unix()
+	nodeCR := GetNodeConnect(state.policy)
+	if nodeCR == nil {
+		return "", fmt.Errorf("no node connect information found in policy")
+	}
+
+	nodeName := nodeCR.GetNodeName()
+	if nodeName == "" {
+		// This is a policy error.
+		return "", fmt.Errorf("node name not found node service list")
+	}
+
+	nodeAgent, err := CreateNodeAgent(state.policy, 3600)
+	if err != nil {
+		return "", err
+	}
+
+	m2HMAC := newM2HMAC(resp.Challenge.ChallengeData, resp.SessionID, timestamp)
+
+	authReq := vsapi.NodeAuthRequest{
+		SessionID:  resp.SessionID,
+		Challenge:  resp.Challenge,
+		Timestamp:  timestamp,
+		NodeCert:   certToPEM(state.nodeCert),
+		Hmac:       m2HMAC,
+		VssService: "127.0.0.1:31337", // HMM normally this would need to be a ZPR address
+		NodeAgent:  nodeAgent,
+	}
+	state.log.Infow("attempting authenticate for node", "node_name", nodeName, "CN", nodeCR.CN)
+	apiKey, err := mockNode.Authenticate(&authReq)
+	if err != nil {
+		return "", err
+	}
+	if apiKey == "" {
+		return "", fmt.Errorf("authenticate failed to return an API key")
+	}
+	return apiKey, nil
+}
+
+// sets state.policy if all goes well.
+func loadPolicy(state *TestState) error {
+	cli, err := state.GetAdminClient()
+	if err != nil {
+		return err
+	}
+	pol, err := cli.GetCurrentPolicy()
+	if err != nil {
+		return fmt.Errorf("failed to get current policy using admin interface: %v", err)
+	}
+	state.policy = pol
+	state.log.Infow("policy extracted from container", "serial", pol.GetSerialVersion())
 	return nil
 }
