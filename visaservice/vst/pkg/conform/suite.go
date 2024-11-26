@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/netip"
+	"strings"
 
 	"zpr.org/vst/pkg/mocks"
 	"zpr.org/vst/pkg/vsadmin"
@@ -20,6 +21,7 @@ var TestsToRun = []ConformanceTest{
 	RejectInvalidAuth,
 	AcceptValidAuth,
 	AuthorizeConnect,
+	VisaRequest,
 }
 
 type ConformanceTest int
@@ -31,17 +33,19 @@ const (
 	RejectInvalidAuth
 	AcceptValidAuth
 	AuthorizeConnect
+	VisaRequest
 )
 
 type runner func(*TestState, *TestRun) error
 
-var runners = map[ConformanceTest]runner{
+var Runners = map[ConformanceTest]runner{
 	HelloReps:         RunHelloReps,
 	GetCurrentPolicy:  RunGetCurrentPolicy,
 	CheckChallenge:    RunCheckChallenge,
 	RejectInvalidAuth: RunRejectInvalidAuth,
 	AcceptValidAuth:   RunAcceptValidAuth,
 	AuthorizeConnect:  RunAuthorizeConnect,
+	VisaRequest:       RunVisaRequest,
 }
 
 func (ct ConformanceTest) String() string {
@@ -58,9 +62,21 @@ func (ct ConformanceTest) String() string {
 		return "AcceptValidAuth"
 	case AuthorizeConnect:
 		return "AuthorizeConnect"
+	case VisaRequest:
+		return "VisaRequest"
 	default:
 		return fmt.Sprintf("ConformanceTest<%d>", ct)
 	}
+}
+
+func ParseTestName(name string) (ConformanceTest, bool) {
+	name = strings.ToLower(name)
+	for k := range Runners {
+		if strings.ToLower(k.String()) == name {
+			return k, true
+		}
+	}
+	return 0, false
 }
 
 func RunTests(tests []ConformanceTest, vsAddr, adminAddr netip.AddrPort, nodeCert *x509.Certificate, log *zap.Logger) (*Scorecard, error) {
@@ -84,15 +100,22 @@ type TestState struct {
 	policy      *polio.Policy   // policy extracted from GetCurrentPolicy, may be nil
 	adminClient *vsadmin.Client // use GetAdminClient
 	node        *mocks.Node     // use GetNode
+	lastOctect  uint32          // last octect of the IP address of the node
 }
 
 func NewTestState(vsAddr, adminAddr netip.AddrPort, nodeCert *x509.Certificate, log *zap.SugaredLogger) *TestState {
 	return &TestState{
-		vsAddr:    vsAddr,
-		adminAddr: adminAddr,
-		nodeCert:  nodeCert,
-		log:       log,
+		vsAddr:     vsAddr,
+		adminAddr:  adminAddr,
+		nodeCert:   nodeCert,
+		log:        log,
+		lastOctect: 2,
 	}
+}
+
+func (ts *TestState) GetNextOctect() uint32 {
+	ts.lastOctect++
+	return ts.lastOctect
 }
 
 func (ts *TestState) GetAdminClient() (*vsadmin.Client, error) {

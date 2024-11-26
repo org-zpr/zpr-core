@@ -172,6 +172,26 @@ func GetConnects(policy *polio.Policy) []*ConnectRec {
 	return results
 }
 
+func GetCommPoliciesForService(policy *polio.Policy, service string) []*polio.CPolicy {
+	var pols []*polio.CPolicy
+	for _, cp := range policy.Policies {
+		if cp.ServiceId == service {
+			pols = append(pols, cp)
+		}
+	}
+	return pols
+}
+
+func FilterTCPScope(scopes []*polio.Scope) []*polio.Scope {
+	var results []*polio.Scope
+	for _, scope := range scopes {
+		if scope.Protocol == ProtocolTCP {
+			results = append(results, scope)
+		}
+	}
+	return results
+}
+
 func CreateNodeAgent(pol *polio.Policy, expires time.Duration) (*vsapi.Agent, error) {
 	nodeCR := GetNodeConnect(pol)
 	if nodeCR == nil {

@@ -106,6 +106,21 @@ func (n *Node) AuthorizeConnect(apikey string, req *vsapi.ConnectRequest) (*vsap
 	return resp, nil
 }
 
+func (n *Node) RequestVisa(apikey string, srcTether netip.Addr, l3Type int, pkt []byte) (*vsapi.VisaResponse, error) {
+	cli, err := newClient(n.vsAddr)
+	if err != nil {
+		return nil, err
+	}
+	n.zlog.Info("node->vs: REQUEST VISA")
+	resp, err := cli.client.RequestVisa(defaultCtx, apikey, srcTether.AsSlice(), int8(l3Type), pkt)
+	if err != nil {
+		n.zlog.Infow("request visa failed", "error", err)
+		return nil, fmt.Errorf("request-visa failed: %w", err)
+	}
+	n.zlog.Infow("request visa succeeds", "visa_id", resp.Visa.IssuerID)
+	return resp, nil
+}
+
 // Close anything that needs to be closed.  This prepares for a clean
 // exit.
 func (n *Node) Close() {

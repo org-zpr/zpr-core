@@ -14,7 +14,7 @@ const MinChallengeNonceSize = 32
 const HelloRepsCount = 100
 
 func RunTest(test ConformanceTest, state *TestState, card *Scorecard) error {
-	runf, ok := runners[test]
+	runf, ok := Runners[test]
 	if !ok {
 		panic(fmt.Sprintf("undefined test: %v", test))
 	}
@@ -293,7 +293,7 @@ func RunAuthorizeConnect(state *TestState, ctest *TestRun) error {
 		return nil
 	}
 
-	agent, err := connectAdapter(node, candidate, nodeCR.Addr)
+	agent, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextOctect())
 	if err != nil {
 		ctest.Failed(err)
 		return nil
@@ -383,23 +383,90 @@ func RunVisaRequest(state *TestState, ctest *TestRun) error {
 	//       Then ensure those attributes are present.
 
 	// Connect the service:
+	var svcID string
+	for sid := range service.Provides {
+		svcID = sid
+		break
+	}
+
+	commPols := GetCommPoliciesForService(state.policy, svcID)
+	if len(commPols) == 0 {
+		ctest.Failedm(fmt.Sprintf("no communication policies found for service %s", svcID))
+		return nil
+	}
+	commPol := commPols[0]
+
+	// Right now this tool only knows how to make a TCP connect.
+	endpoints := FilterTCPScope(commPol.Scope)
+	if endpoints == nil {
+		ctest.Failedm(fmt.Sprintf("cannot find TCP scope from communication policy for %v", svcID))
+		return nil
+	}
+	commEndpoint := endpoints[0]
+
+	state.log.Infow("connecting a service", "service_id", svcID)
+	svcAgnt, err := connectAdapter(node, service, nodeCR.Addr, state.GetNextOctect())
+	if err != nil {
+		ctest.Failed(fmt.Errorf("failed to connect service: %w", err))
+		return nil
+	}
+	pause()
 
 	// Connect the client:
+	state.log.Infow("connecting a client", "CN", candidate.CN)
+	cliAgnt, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextOctect())
+	if err != nil {
+		ctest.Failed(fmt.Errorf("failed to connect client: %w", err))
+		return nil
+	}
+	pause()
 
-	// Requesrt a visa:
+	// Request a visa:
+	sourceAddr, _ := netip.AddrFromSlice(cliAgnt.ZprAddr)
+	destAddr, _ := netip.AddrFromSlice(svcAgnt.ZprAddr)
 
+	state.log.Infow("preparing visa request", "source", sourceAddr, "dest", destAddr, "comm_endpoint", commEndpoint)
+
+	pkt, l3t, err := GeneratePacket(sourceAddr, destAddr, commEndpoint)
+	if err != nil {
+		ctest.Failed(err)
+		return nil
+	}
+
+	vresp, err := node.RequestVisa(node.GetAPIKey(), sourceAddr, l3t, pkt)
+	if err != nil {
+		ctest.Failed(err)
+		return nil
+	}
+
+	if vresp.Status != vsapi.StatusCode_SUCCESS {
+		ctest.Failed(fmt.Errorf("visa request failed: %v", vresp.Reason))
+		return nil
+	}
+
+	if vresp.Visa == nil {
+		ctest.Failedm("visa service returns nil visa")
+		return nil
+	}
+
+	if vresp.Visa.IssuerID <= 0 {
+		ctest.Failedm(fmt.Sprintf("visa service returns invalid issuer id: %d", vresp.Visa.IssuerID))
+		return nil
+	}
+
+	// TODO: check other visa aspects.
 	ctest.Passed()
 	return nil
 }
 
-func connectAdapter(node *mocks.Node, crec *ConnectRec, dockAddr netip.Addr) (*vsapi.Agent, error) {
+func connectAdapter(node *mocks.Node, crec *ConnectRec, dockAddr netip.Addr, octect uint32) (*vsapi.Agent, error) {
 	claims := make(map[string]string)
 	claims["zpr.adapter.cn"] = crec.CN
 	if crec.HasAddr() {
 		claims["zpr.addr"] = crec.Addr.String()
 	} else {
 		// Hmm, just make one up?
-		claims["zpr.addr"] = "fd5a:5052:1::2"
+		claims["zpr.addr"] = fmt.Sprintf("fd5a:5052:1::%d", octect)
 	}
 
 	cid := rand.Int31()

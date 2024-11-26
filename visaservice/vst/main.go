@@ -61,6 +61,11 @@ func main() {
 				Usage: "verbose run with more verbosity and displays log on stderr",
 				Value: false,
 			},
+			&cli.StringFlag{
+				Name:    "test",
+				Usage:   "run a specific test",
+				Aliases: []string{"t"},
+			},
 		},
 		Action: func(c *cli.Context) error {
 			if c.Args().Len() < 2 {
@@ -73,7 +78,7 @@ func main() {
 			if err != nil {
 				return err
 			}
-			return start(adminAddr, vsAddr, nodeCert, c.Bool("verbose"))
+			return start(adminAddr, vsAddr, nodeCert, c.Bool("verbose"), c.String("test"))
 		},
 	}
 
@@ -84,7 +89,7 @@ func main() {
 	}
 }
 
-func start(adminAddr, vsAddr netip.AddrPort, nodeCert *x509.Certificate, verbose bool) error {
+func start(adminAddr, vsAddr netip.AddrPort, nodeCert *x509.Certificate, verbose bool, testName string) error {
 	zlog := func() *zap.SugaredLogger {
 		zl, err := initLogging(verbose, false)
 		if err != nil {
@@ -94,10 +99,25 @@ func start(adminAddr, vsAddr netip.AddrPort, nodeCert *x509.Certificate, verbose
 		return zl.Sugar()
 	}()
 
-	zlog.Info("visaservice test starting")
-	defer zlog.Info("visaservice test finished")
+	var tests []conform.ConformanceTest
+	if testName != "" {
+		test, ok := conform.ParseTestName(testName)
+		if !ok {
+			zlog.Errorw("unknown test", "test", testName)
+			fmt.Fprintf(os.Stderr, "known tests:\n")
+			for k := range conform.Runners {
+				fmt.Fprintf(os.Stderr, "  - %s\n", k)
+			}
+			return fmt.Errorf("unknown test: %s", testName)
+		}
+		tests = append(tests, test)
+	} else {
+		tests = conform.TestsToRun
+	}
 
-	card, err := conform.RunTests(conform.TestsToRun, vsAddr, adminAddr, nodeCert, zlog.Desugar())
+	zlog.Infow("visaservice test starting", "test_count", len(tests))
+	defer zlog.Info("visaservice test finished")
+	card, err := conform.RunTests(tests, vsAddr, adminAddr, nodeCert, zlog.Desugar())
 	if card != nil {
 		fmt.Println()
 		card.Print()
