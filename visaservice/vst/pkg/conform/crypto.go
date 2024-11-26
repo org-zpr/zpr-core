@@ -16,7 +16,7 @@ func certToPEM(cert *x509.Certificate) []byte {
 	return pem.EncodeToMemory(&blk)
 }
 
-// Milestone two no-crypto hmac value.
+// Milestone2 no-crypto hmac value.
 // See libnode/src/m2.rs
 func newM2HMAC(challengeData []byte, sessionID int32, timestamp int64) []byte {
 	var buf bytes.Buffer

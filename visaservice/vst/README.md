@@ -1,10 +1,33 @@
 # VST: The Visa Service Tester
 
-To run pass in the address and port of a running visa service.
-The default admin port is 8182, so for example:
+
+
+First start up a local visa service:
 
 ```bash
- ./vst -a 8182 -v 12345 127.0.0.1
+./core/build/vservice \
+    -c ../examples/milestone2/vs/vs-config.yaml \
+    -p ../examples/milestone2/policies/policy-m2.bin \
+    --listen_addr 127.0.0.1:12345
+```
 
-``
+Then you run the tester by telling it the visa service port, address and the
+node certificate.
 
+```bash
+ ./vst -v 12345 127.0.0.1 ../../examples/milestone2/node/node-cert.pem
+
+```
+
+The visa service and tester use port TCP/8182 for the HTTPS admin interface by
+default.
+
+By default the tester will run through its complete (but small) set of tests.
+To run a specific test, use the `-t` arg:
+
+```bash
+ ./vst -t helloreps -v 12345 127.0.0.1 ../../examples/milestone2/node/node-cert.pem
+
+```
+
+The tester writes log messages to `vst.log`.

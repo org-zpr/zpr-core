@@ -2,6 +2,7 @@ package conform
 
 import (
 	"fmt"
+	"math/rand"
 	"net/netip"
 	"strings"
 	"time"
@@ -108,6 +109,7 @@ func (rec *ConnectRec) GetNodeName() string {
 	return ""
 }
 
+// Parse the policy attribute expression structure and rework into a map based one.
 func attrExprToMap(attrExprs []*polio.AttrExpr, policy *polio.Policy) map[string]*AExp {
 	attrs := make(map[string]*AExp)
 	for _, expr := range attrExprs {
@@ -121,8 +123,9 @@ func attrExprToMap(attrExprs []*polio.AttrExpr, policy *polio.Policy) map[string
 	return attrs
 }
 
-// The node has a procedure that sets the F_NODE flag.
+// Find the connect record corresponding to the node.
 func GetNodeConnect(policy *polio.Policy) *ConnectRec {
+	// The node has a procedure that sets the F_NODE flag.
 	connects := policy.GetConnects()
 	if connects == nil {
 		return nil
@@ -146,6 +149,7 @@ func GetNodeConnect(policy *polio.Policy) *ConnectRec {
 	return nil
 }
 
+// Lightly parse the policy Connect records and return.
 func GetConnects(policy *polio.Policy) []*ConnectRec {
 	var results []*ConnectRec
 	connects := policy.GetConnects()
@@ -172,6 +176,7 @@ func GetConnects(policy *polio.Policy) []*ConnectRec {
 	return results
 }
 
+// Extract the the communication policies for the given service from the policy.
 func GetCommPoliciesForService(policy *polio.Policy, service string) []*polio.CPolicy {
 	var pols []*polio.CPolicy
 	for _, cp := range policy.Policies {
@@ -182,16 +187,86 @@ func GetCommPoliciesForService(policy *polio.Policy, service string) []*polio.CP
 	return pols
 }
 
+// Generate a single endpoint of given protocol that is not in the provided scope.
+func GenEndpointNotInScope(protocol uint32, scopes []*polio.Scope) *polio.Scope {
+	existing := FilterScopeForProtocol(protocol, scopes)
+	if existing == nil {
+		return ScopeForProtocolPort(protocol, 1234)
+	}
+	// Else we need to pick a port not already allowed.
+	candidatePort := uint32(1024 + rand.Intn(65535-1024))
+	inScope := make(map[uint16]bool)
+	for _, scope := range existing {
+		switch pa := scope.Protarg.(type) {
+		case *polio.Scope_Pspec:
+			for _, ps := range pa.Pspec.Spec {
+				switch parg := ps.Parg.(type) {
+				case *polio.PortSpec_Port:
+					inScope[uint16(parg.Port)] = true
+				case *polio.PortSpec_Pr:
+					for p := parg.Pr.Low; p <= parg.Pr.High; p++ {
+						inScope[uint16(p)] = true
+					}
+					if candidatePort >= parg.Pr.Low && candidatePort <= parg.Pr.High {
+						// candidate port is in the range of an existing scope.
+						candidatePort = parg.Pr.High + 1
+						if candidatePort >= 65535 {
+							candidatePort = 1024
+						}
+					}
+				}
+			}
+		}
+	}
+	if inScope[uint16(candidatePort)] {
+		attempts := 0
+		for inScope[uint16(candidatePort)] && attempts < 65535 {
+			candidatePort++
+			if candidatePort >= 65535 {
+				candidatePort = 1024
+			}
+			attempts++
+		}
+	}
+	if inScope[uint16(candidatePort)] {
+		panic("all endpoints in use")
+	}
+	return ScopeForProtocolPort(protocol, uint16(candidatePort))
+}
+
+// Create a new scope data structure that specifies the given protocol and port.
+func ScopeForProtocolPort(protocol uint32, port uint16) *polio.Scope {
+	return &polio.Scope{
+		Protocol: protocol,
+		Protarg: &polio.Scope_Pspec{
+			Pspec: &polio.PortSpecList{
+				Spec: []*polio.PortSpec{
+					{
+						Parg: &polio.PortSpec_Port{Port: uint32(port)},
+					},
+				},
+			},
+		},
+	}
+}
+
+// Return scopes in the list that use the TCP protocol.
 func FilterTCPScope(scopes []*polio.Scope) []*polio.Scope {
+	return FilterScopeForProtocol(ProtocolTCP, scopes)
+}
+
+// Return scopes in the list that use the given protocol.
+func FilterScopeForProtocol(protocol uint32, scopes []*polio.Scope) []*polio.Scope {
 	var results []*polio.Scope
 	for _, scope := range scopes {
-		if scope.Protocol == ProtocolTCP {
+		if scope.Protocol == protocol {
 			results = append(results, scope)
 		}
 	}
 	return results
 }
 
+// Create a node agent data structure based on info in the policy.
 func CreateNodeAgent(pol *polio.Policy, expires time.Duration) (*vsapi.Agent, error) {
 	nodeCR := GetNodeConnect(pol)
 	if nodeCR == nil {
@@ -223,6 +298,7 @@ func CreateNodeAgent(pol *polio.Policy, expires time.Duration) (*vsapi.Agent, er
 	return &nodeAgent, nil
 }
 
+// Return TRUE if args contains the given flag.
 func argsContains(args []*polio.Argument, arg polio.FlagT) bool {
 	for _, a := range args {
 		switch av := a.Arg.(type) {

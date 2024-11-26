@@ -14,16 +14,37 @@ import (
 
 // Node is a mockup node for testing visa service.
 type Node struct {
-	zlog   *zap.SugaredLogger
-	vsAddr netip.AddrPort
-	apiKey string
+	zlog    *zap.SugaredLogger
+	plog    *PLogger
+	vsAddr  netip.AddrPort
+	vssAddr netip.AddrPort
+	vss     *Vss
+	apiKey  string
 }
 
 func NewNode(vsAddr netip.AddrPort, lgr *zap.Logger) (*Node, error) {
 	return &Node{
 		zlog:   lgr.Sugar(),
+		plog:   NewPLogger("node", "vs"),
 		vsAddr: vsAddr,
 	}, nil
+}
+
+func (n *Node) EnableVSS(vssAddr netip.AddrPort) error {
+	if n.vss != nil {
+		return fmt.Errorf("call to enable VSS but VSS already enabled")
+	}
+	n.vssAddr = vssAddr
+	vss, err := NewVss(vssAddr, n.zlog.Desugar())
+	if err != nil {
+		return err
+	}
+	n.vss = vss
+	return nil
+}
+
+func (n *Node) SetPlogEnabled(enabled bool) {
+	n.plog.enabled = enabled
 }
 
 func (n *Node) HasApiKey() bool {
@@ -41,27 +62,35 @@ func (n *Node) Hello() (*vsapi.HelloResponse, error) {
 	}
 	defer cli.Close()
 	n.zlog.Info("node->vs: HELLO")
+	n.plog.Log(Fwd, "hello")
 	resp, err := cli.Hello()
 	if err != nil {
 		return nil, fmt.Errorf("hello failed: %w", err)
 	}
+	n.plog.Log(Rev, "hello_response")
 	n.zlog.Infow("hello succeeds", "sid", resp.SessionID)
 	return resp, nil
 }
 
 // If we get an API key, we keep it in our state.
+// If VSS is enabled we set the VSS addr in the request if it is blank.
 func (n *Node) Authenticate(chalresp *vsapi.NodeAuthRequest) (string, error) {
 	cli, err := newClient(n.vsAddr)
 	if err != nil {
 		return "", err
 	}
 	defer cli.Close()
+	if n.vss != nil && chalresp.VssService == "" {
+		chalresp.VssService = n.vssAddr.String()
+	}
+	n.plog.Log(Fwd, "authenticate")
 	n.zlog.Info("node->vs: AUTHENTICATE")
 	apiKey, err := cli.client.Authenticate(defaultCtx, chalresp)
 	if err != nil {
 		n.zlog.Infow("authenticate failed", "error", err)
 		return "", fmt.Errorf("authenticate failed: %w", err)
 	} else {
+		n.plog.Log(Rev, "node_auth_request")
 		n.apiKey = apiKey
 		n.zlog.Infow("authenticate succeeds", "api_key", apiKey)
 	}
@@ -79,6 +108,8 @@ func (n *Node) DeRegister(apikey string) error {
 	if err != nil {
 		return err
 	}
+	defer cli.Close()
+	n.plog.Log(Fwd, "de-register")
 	n.zlog.Info("node->vs: DE-REGISTER")
 	if apikey == "" {
 		apikey = n.apiKey
@@ -96,12 +127,15 @@ func (n *Node) AuthorizeConnect(apikey string, req *vsapi.ConnectRequest) (*vsap
 	if err != nil {
 		return nil, err
 	}
+	defer cli.Close()
+	n.plog.Log(Fwd, "authorize_connect")
 	n.zlog.Infow("node->vs: AUTHORIZE CONNECT")
 	resp, err := cli.client.AuthorizeConnect(defaultCtx, apikey, req)
 	if err != nil {
 		n.zlog.Infow("authorize connect failed", "error", err)
 		return nil, fmt.Errorf("authorize-connect failed: %w", err)
 	}
+	n.plog.Log(Rev, "connect_response")
 	n.zlog.Info("authorize connect succeeeds")
 	return resp, nil
 }
@@ -111,12 +145,15 @@ func (n *Node) RequestVisa(apikey string, srcTether netip.Addr, l3Type int, pkt 
 	if err != nil {
 		return nil, err
 	}
+	defer cli.Close()
+	n.plog.Log(Fwd, "request_visa")
 	n.zlog.Info("node->vs: REQUEST VISA")
 	resp, err := cli.client.RequestVisa(defaultCtx, apikey, srcTether.AsSlice(), int8(l3Type), pkt)
 	if err != nil {
 		n.zlog.Infow("request visa failed", "error", err)
 		return nil, fmt.Errorf("request-visa failed: %w", err)
 	}
+	n.plog.Log(Rev, "visa_response")
 	n.zlog.Infow("request visa succeeds", "visa_id", resp.Visa.IssuerID)
 	return resp, nil
 }
@@ -124,11 +161,57 @@ func (n *Node) RequestVisa(apikey string, srcTether netip.Addr, l3Type int, pkt 
 // Close anything that needs to be closed.  This prepares for a clean
 // exit.
 func (n *Node) Close() {
-	// TODO: disconnect from visa service
-	// TODO: shutdown our own vss
 	if n.apiKey != "" {
 		_ = n.DeRegister(n.apiKey)
 		n.apiKey = ""
+	}
+	if n.vss != nil {
+		n.vss.Close()
+		n.vss = nil
+	}
+}
+
+// Clear any transient state (for use in-between tests).
+func (n *Node) Reset() {
+	if n.vss != nil {
+		n.vss.Reset()
+	}
+	n.SetPlogEnabled(true)
+}
+
+func (n *Node) PopPolicyInfo() *vsapi.PolicyInfo {
+	if n.vss == nil {
+		return nil
+	}
+	select {
+	case pi := <-n.vss.Policies:
+		return pi
+	default:
+		return nil
+	}
+}
+
+func (n *Node) PopVisa() *vsapi.VisaHop {
+	if n.vss == nil {
+		return nil
+	}
+	select {
+	case vsa := <-n.vss.Visas:
+		return vsa
+	default:
+		return nil
+	}
+}
+
+func (n *Node) PopRevocation() *vsapi.VisaRevocation {
+	if n.vss == nil {
+		return nil
+	}
+	select {
+	case vr := <-n.vss.Revokes:
+		return vr
+	default:
+		return nil
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 
 const MinChallengeNonceSize = 32
 const HelloRepsCount = 100
+const PauseTime = 2 * time.Second
 
 func RunTest(test ConformanceTest, state *TestState, card *Scorecard) error {
 	runf, ok := Runners[test]
@@ -19,6 +20,7 @@ func RunTest(test ConformanceTest, state *TestState, card *Scorecard) error {
 		panic(fmt.Sprintf("undefined test: %v", test))
 	}
 
+	state.Reset()
 	ctest := card.Start(test)
 	if err := runf(state, ctest); err != nil {
 		// Automatically fail if error returned, but we do not automatically pass if nil returned.
@@ -29,7 +31,7 @@ func RunTest(test ConformanceTest, state *TestState, card *Scorecard) error {
 }
 
 func pause() {
-	time.Sleep(2 * time.Second)
+	time.Sleep(PauseTime)
 }
 
 // If this works, it stores the current policy in the state.
@@ -42,19 +44,21 @@ func RunGetCurrentPolicy(state *TestState, ctest *TestRun) error {
 	return nil
 }
 
+// Send a bunch of hello messages in
 func RunHelloReps(state *TestState, ctest *TestRun) error {
 	reps := HelloRepsCount
 	mockNode, err := state.GetNode()
 	if err != nil {
 		return err
 	}
+	mockNode.SetPlogEnabled(false) // too chatty
 	sids := make(map[int32]bool)
 	dupeCount := 0
 	state.log.Infow("testing hello from node", "reps", reps)
 	for i := 0; i < reps; i++ {
 		resp, err := mockNode.Hello()
 		if err != nil {
-			ctest.Failedm(fmt.Sprintf("hello failed at rep %d: %w", i, err))
+			ctest.Failedm(fmt.Sprintf("hello failed at rep %d: %v", i, err))
 			return nil
 		}
 		if sids[resp.SessionID] {
@@ -79,8 +83,6 @@ func RunCheckChallenge(state *TestState, ctest *TestRun) error {
 	if err != nil {
 		return err
 	}
-
-	// NODE->VS : Hello
 	resp, err := mockNode.Hello()
 	if err != nil {
 		return err
@@ -158,7 +160,6 @@ func RunRejectInvalidAuth(state *TestState, ctest *TestRun) error {
 }
 
 // Run a valid auth.
-// TODO: Needs to kick off a VSS on the mock node.
 //
 // Note that node state will keep track of the API key.
 func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
@@ -166,6 +167,8 @@ func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
 	if err != nil {
 		return err
 	}
+
+	mockNode.DeRegister("") // ignore error
 
 	resp, err := mockNode.Hello()
 	if err != nil {
@@ -216,7 +219,7 @@ func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
 		Timestamp:  timestamp,
 		NodeCert:   certToPEM(state.nodeCert),
 		Hmac:       m2HMAC,
-		VssService: "127.0.0.1:31337", // HMM normally this would need to be a ZPR address
+		VssService: "", // HMM normally this would need to be a ZPR address
 		NodeAgent:  nodeAgent,
 	}
 	state.log.Infow("attempting authenticate for node", "node_name", nodeName, "CN", nodeCR.CN)
@@ -229,6 +232,29 @@ func RunAcceptValidAuth(state *TestState, ctest *TestRun) error {
 		ctest.Failedm("authenticate failed to return an API key")
 		return nil
 	}
+	pause()
+
+	// We should also have a policy message
+	pi := mockNode.PopPolicyInfo()
+	if pi == nil {
+		ctest.Failedm("did not get a policy info message over VSS")
+		return nil
+	}
+	pi = mockNode.PopPolicyInfo()
+	if pi != nil {
+		ctest.Failedm("got >1 info message over VSS")
+		return nil
+	}
+
+	// We should get a visa
+	// TODO: Actually we should get two visas- one for NODE-VS and one for VSS-VS.
+	//       But we won't get the vss visa unless we spoof the real node ZPR address.
+	vsa := mockNode.PopVisa()
+	if vsa == nil {
+		ctest.Failedm("did not get a visa message over VSS")
+		return nil
+	}
+
 	ctest.Passed()
 	return nil
 }
@@ -427,31 +453,55 @@ func RunVisaRequest(state *TestState, ctest *TestRun) error {
 
 	state.log.Infow("preparing visa request", "source", sourceAddr, "dest", destAddr, "comm_endpoint", commEndpoint)
 
-	pkt, l3t, err := GeneratePacket(sourceAddr, destAddr, commEndpoint)
-	if err != nil {
-		ctest.Failed(err)
-		return nil
+	{
+		pkt, l3t, err := GeneratePacket(sourceAddr, destAddr, commEndpoint)
+		if err != nil {
+			ctest.Failed(err)
+			return nil
+		}
+
+		vresp, err := node.RequestVisa(node.GetAPIKey(), sourceAddr, l3t, pkt)
+		if err != nil {
+			ctest.Failed(err)
+			return nil
+		}
+
+		if vresp.Status != vsapi.StatusCode_SUCCESS {
+			ctest.Failed(fmt.Errorf("visa request failed: %v", vresp.Reason))
+			return nil
+		}
+
+		if vresp.Visa == nil {
+			ctest.Failedm("visa service returns nil visa")
+			return nil
+		}
+
+		if vresp.Visa.IssuerID <= 0 {
+			ctest.Failedm(fmt.Sprintf("visa service returns invalid issuer id: %d", vresp.Visa.IssuerID))
+			return nil
+		}
 	}
 
-	vresp, err := node.RequestVisa(node.GetAPIKey(), sourceAddr, l3t, pkt)
-	if err != nil {
-		ctest.Failed(err)
-		return nil
-	}
+	// Now generate a packet between the valid hosts but use incorrect port.
+	{
+		badEp := GenEndpointNotInScope(ProtocolTCP, commPol.Scope)
+		state.log.Infow("preparing visa request with invalid port", "source", sourceAddr, "dest", destAddr, "comm_endpoint", badEp)
+		pkt, l3t, err := GeneratePacket(sourceAddr, destAddr, badEp)
+		if err != nil {
+			ctest.Failed(err)
+			return nil
+		}
 
-	if vresp.Status != vsapi.StatusCode_SUCCESS {
-		ctest.Failed(fmt.Errorf("visa request failed: %v", vresp.Reason))
-		return nil
-	}
+		vresp, err := node.RequestVisa(node.GetAPIKey(), sourceAddr, l3t, pkt)
+		if err != nil {
+			ctest.Failed(err)
+			return nil
+		}
 
-	if vresp.Visa == nil {
-		ctest.Failedm("visa service returns nil visa")
-		return nil
-	}
-
-	if vresp.Visa.IssuerID <= 0 {
-		ctest.Failedm(fmt.Sprintf("visa service returns invalid issuer id: %d", vresp.Visa.IssuerID))
-		return nil
+		if vresp.Status == vsapi.StatusCode_SUCCESS {
+			ctest.Failed(fmt.Errorf("visa request for invalid port succeeded"))
+			return nil
+		}
 	}
 
 	// TODO: check other visa aspects.
@@ -541,7 +591,7 @@ func connectNodeAndGetApiKey(state *TestState) (string, error) {
 		Timestamp:  timestamp,
 		NodeCert:   certToPEM(state.nodeCert),
 		Hmac:       m2HMAC,
-		VssService: "127.0.0.1:31337", // HMM normally this would need to be a ZPR address
+		VssService: "", // node code will set this
 		NodeAgent:  nodeAgent,
 	}
 	state.log.Infow("attempting authenticate for node", "node_name", nodeName, "CN", nodeCR.CN)

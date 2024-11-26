@@ -7,11 +7,13 @@ import (
 	"github.com/fatih/color"
 )
 
+// Scorecard keeps track of a number of test results.
 type Scorecard struct {
 	count int // total number of tests expected to run
 	Tests []TestResult
 }
 
+// TestResult tracks a single test.
 type TestResult struct {
 	Test       ConformanceTest
 	Pass       bool
@@ -19,6 +21,7 @@ type TestResult struct {
 	FailReason string
 }
 
+// TestRun exists while a test is running.
 type TestRun struct {
 	Test  ConformanceTest
 	Start time.Time
@@ -31,6 +34,8 @@ func NewScorecard(testCount int) *Scorecard {
 	}
 }
 
+// Note that a test is starting. Should be followed later by a call to
+// Passed or Failed.
 func (s *Scorecard) Start(t ConformanceTest) *TestRun {
 	fmt.Printf("running test %d of %d: %s\n", len(s.Tests)+1, s.count, t.String())
 	tr := TestRun{
@@ -41,20 +46,23 @@ func (s *Scorecard) Start(t ConformanceTest) *TestRun {
 	return &tr
 }
 
+// Note that a test has passed.
 func (tr *TestRun) Passed() {
-	tr.Card.AddTestResult(TestResult{
+	tr.Card.addTestResult(TestResult{
 		Test:    tr.Test,
 		Pass:    true,
 		Elapsed: time.Since(tr.Start),
 	})
 }
 
+// Note that a test has failed.
 func (tr *TestRun) Failed(err error) {
 	tr.Failedm(err.Error())
 }
 
+// Note that a test has failed.
 func (tr *TestRun) Failedm(msg string) {
-	tr.Card.AddTestResult(TestResult{
+	tr.Card.addTestResult(TestResult{
 		Test:       tr.Test,
 		Pass:       false,
 		Elapsed:    time.Since(tr.Start),
@@ -62,7 +70,7 @@ func (tr *TestRun) Failedm(msg string) {
 	})
 }
 
-func (s *Scorecard) AddTestResult(tr TestResult) {
+func (s *Scorecard) addTestResult(tr TestResult) {
 	s.Tests = append(s.Tests, tr)
 }
 

@@ -51,7 +51,7 @@ var Runners = map[ConformanceTest]runner{
 func (ct ConformanceTest) String() string {
 	switch ct {
 	case HelloReps:
-		return "HELLO repeats"
+		return "HelloReps"
 	case GetCurrentPolicy:
 		return "GetCurrentPolicy"
 	case CheckChallenge:
@@ -113,6 +113,14 @@ func NewTestState(vsAddr, adminAddr netip.AddrPort, nodeCert *x509.Certificate, 
 	}
 }
 
+// Do whatever is needed to "reset" state before each test.
+// We keep many things hanging around, but we do clear any message in the VSS queues.
+func (ts *TestState) Reset() {
+	if ts.node != nil {
+		ts.node.Reset()
+	}
+}
+
 func (ts *TestState) GetNextOctect() uint32 {
 	ts.lastOctect++
 	return ts.lastOctect
@@ -129,11 +137,15 @@ func (ts *TestState) GetAdminClient() (*vsadmin.Client, error) {
 	return ts.adminClient, nil
 }
 
+// Get node with VSS running
 func (ts *TestState) GetNode() (*mocks.Node, error) {
 	if ts.node == nil {
 		mockNode, err := mocks.NewNode(ts.vsAddr, ts.log.Desugar())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create mock node: %v", err)
+		}
+		if err := mockNode.EnableVSS(netip.MustParseAddrPort("0.0.0.0:8183")); err != nil {
+			return nil, fmt.Errorf("failed to start VSS: %w", err)
 		}
 		ts.node = mockNode
 	}
