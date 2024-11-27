@@ -1,4 +1,4 @@
-package conform
+package plc
 
 import (
 	"fmt"
@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"zpr.org/vst/pkg/packets"
 	"zpr.org/vst/pkg/vsapi"
 	"zpr.org/vsx/polio"
 )
@@ -252,7 +253,7 @@ func ScopeForProtocolPort(protocol uint32, port uint16) *polio.Scope {
 
 // Return scopes in the list that use the TCP protocol.
 func FilterTCPScope(scopes []*polio.Scope) []*polio.Scope {
-	return FilterScopeForProtocol(ProtocolTCP, scopes)
+	return FilterScopeForProtocol(packets.ProtocolTCP, scopes)
 }
 
 // Return scopes in the list that use the given protocol.

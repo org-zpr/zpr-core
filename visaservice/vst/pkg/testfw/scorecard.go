@@ -1,4 +1,4 @@
-package conform
+package testfw
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ type Scorecard struct {
 
 // TestResult tracks a single test.
 type TestResult struct {
-	Test       ConformanceTest
+	Test       string
 	Pass       bool
 	Elapsed    time.Duration
 	FailReason string
@@ -23,7 +23,7 @@ type TestResult struct {
 
 // TestRun exists while a test is running.
 type TestRun struct {
-	Test  ConformanceTest
+	Test  string
 	Start time.Time
 	Card  *Scorecard
 }
@@ -36,10 +36,10 @@ func NewScorecard(testCount int) *Scorecard {
 
 // Note that a test is starting. Should be followed later by a call to
 // Passed or Failed.
-func (s *Scorecard) Start(t ConformanceTest) *TestRun {
-	fmt.Printf("running test %d of %d: %s\n", len(s.Tests)+1, s.count, t.String())
+func (s *Scorecard) Start(t Tester) *TestRun {
+	fmt.Printf("running test %d of %d: %s\n", len(s.Tests)+1, s.count, t.Name())
 	tr := TestRun{
-		Test:  t,
+		Test:  t.Name(),
 		Start: time.Now(),
 		Card:  s,
 	}

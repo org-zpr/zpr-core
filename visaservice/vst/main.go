@@ -35,7 +35,9 @@ import (
 	"github.com/urfave/cli/v2"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"zpr.org/vst/pkg/conform"
+
+	"zpr.org/vst/pkg/testfw"
+	_ "zpr.org/vst/pkg/tests" // adds tests to register via init()
 )
 
 func main() {
@@ -99,25 +101,25 @@ func start(adminAddr, vsAddr netip.AddrPort, nodeCert *x509.Certificate, verbose
 		return zl.Sugar()
 	}()
 
-	var tests []conform.ConformanceTest
+	var tests []testfw.Tester
 	if testName != "" {
-		test, ok := conform.ParseTestName(testName)
+		test, ok := testfw.ParseTestName(testName)
 		if !ok {
 			zlog.Errorw("unknown test", "test", testName)
 			fmt.Fprintf(os.Stderr, "known tests:\n")
-			for k := range conform.Runners {
-				fmt.Fprintf(os.Stderr, "  - %s\n", k)
+			for _, n := range testfw.TestNames() {
+				fmt.Fprintf(os.Stderr, "  - %s\n", n)
 			}
 			return fmt.Errorf("unknown test: %s", testName)
 		}
 		tests = append(tests, test)
 	} else {
-		tests = conform.TestsToRun
+		tests = testfw.AllTests()
 	}
 
 	zlog.Infow("visaservice test starting", "test_count", len(tests))
 	defer zlog.Info("visaservice test finished")
-	card, err := conform.RunTests(tests, vsAddr, adminAddr, nodeCert, zlog.Desugar())
+	card, err := testfw.RunTests(tests, vsAddr, adminAddr, nodeCert, zlog.Desugar())
 	if card != nil {
 		fmt.Println()
 		card.Print()
