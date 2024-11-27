@@ -7,7 +7,7 @@ First start up a local visa service:
 ```bash
 ./core/build/vservice \
     -c ../examples/milestone2/vs/vs-config.yaml \
-    -p ../examples/milestone2/policies/policy-m2.bin \
+    -p ../examples/milestone2/policies/policy-m2-ping-and-http.bin \
     --listen_addr 127.0.0.1:12345
 ```
 
