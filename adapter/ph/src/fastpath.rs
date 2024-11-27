@@ -24,6 +24,7 @@ use tracing::{debug, error, info, warn};
 use zerocopy::FromBytes;
 use zpr;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
+use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
 
 /// Drop a packet and count the drop with the given reason.
@@ -432,10 +433,7 @@ pub fn substrate_ingress(
 ) {
     asm.counters[CounterType::InPacksRec].increment();
 
-    pkt.metadata_mut().ingress_link_id = asm
-        .peer_table
-        .lookup_peer(peer_sa)
-        .unwrap_or(zpr::LINK_ID_UNKNOWN);
+    pkt.metadata_mut().ingress_link_id = asm.peer_table.lookup_peer(peer_sa).unwrap_or_zero();
 
     // Read, but do not remove the ZPI header
     let Ok((zpi_hdr, _)) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {

@@ -11,7 +11,13 @@ pub struct TunPi {
 
 impl TunPi {
     /// The size of a per-packet packet info structure.
-    /// On macos this is `0`.
+    /// On macos this is `0` and informs the system that there is no
+    /// PI information on the front of the packet.
+    ///
+    /// TODO: Needs more exploration-- the rust-tun code indiciates that
+    /// there is PI on the mac utun interface, but our tests reading
+    /// packets do not show it. (See #541)
+    ///
     pub const PI_SIZE: usize = 0;
 
     /// Since macos does not provide packet info, we just return a

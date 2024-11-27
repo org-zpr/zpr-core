@@ -26,7 +26,7 @@ struct Cmd {
     #[command(subcommand)]
     command: Option<SubCmd>,
 
-    /// The visa service base API url without any final slash, eg "https://vs.zpr.org:8182".
+    /// The visa service base API url without any final slash, eg "https://[fd5a:5052::1]:8182".
     #[arg(short, long, value_name = "URL")]
     svc_url: String,
 

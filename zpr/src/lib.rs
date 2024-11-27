@@ -3,6 +3,7 @@
 pub mod rpc_commands;
 
 use open_enum::open_enum;
+use std::net::{IpAddr, Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 /// Substrate Address
@@ -88,3 +89,54 @@ pub mod compression_mode {
     pub const SOURCE_PORT_PRESENT: CompressionMode = 0x40;
     //pub const IP_PROTOCOL_PRESENT: CompressionMode = 0x80; // FIXME: this seems unused; I have a Q out to Frank about it
 }
+
+// Well-known DNs.
+
+const DN_CN_DER_PREFIX_LEN: usize = 13;
+
+const fn encode_dn_cn_as_der<const DER_LEN: usize>(cn: &str) -> [u8; DER_LEN] {
+    let mut der = [0u8; DER_LEN];
+
+    der[0] = 0x30; // SEQUENCE
+    der[1] = (cn.len() + 11) as u8; // length
+
+    der[2] = 0x31; // SET
+    der[3] = (cn.len() + 9) as u8; // length
+
+    der[4] = 0x30; // SEQUENCE
+    der[5] = (cn.len() + 7) as u8; // length
+
+    der[6] = 0x06; // OBJECT IDENTIFIER
+    der[7] = 3; // length = 3
+    der[8] = 2 * 40 + 5; // 2.5
+    der[9] = 4; // .4
+    der[10] = 3; // .3 -> commonName
+
+    der[11] = 0x0C; // UTF8STRING
+    der[12] = cn.len() as u8; // length
+
+    let mut i = 0;
+    while i < cn.len() {
+        der[13 + i] = cn.as_bytes()[i];
+        i += 1;
+    }
+
+    der
+}
+
+macro_rules! dn_cn_der {
+    ($cn:literal) => {
+        encode_dn_cn_as_der::<{ DN_CN_DER_PREFIX_LEN + $cn.len() }>($cn)
+    };
+}
+
+pub const VISA_SERVICE_DN: &[u8] = &dn_cn_der!("vs.zpr");
+
+// Well-known addresses.
+
+pub const ZPR_INTERNAL_NETWORK: Ipv6Addr = Ipv6Addr::new(0xfd5a, 0x5052, 0, 0, 0, 0, 0, 0);
+
+pub const VISA_SERVICE_ADDR: IpAddr =
+    IpAddr::V6(Ipv6Addr::from_bits(ZPR_INTERNAL_NETWORK.to_bits() | 1));
+pub const VISA_SERVICE_PROTO: u8 = 6 /* TCP */;
+pub const VISA_SERVICE_PORT: u16 = 5002;

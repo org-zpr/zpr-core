@@ -8,6 +8,11 @@ on:
       - 'libnode/**'
       - 'visaservice/thrift/**'
       - 'adapter/ph/**'
+      - '.github/workflows/rust-libnode.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,13 +26,16 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Prepare Rust
+      timeout-minutes: 5
       run: rustup default stable
 
     - name: Build libnode
+      timeout-minutes: 5
       run: |
         cd libnode && make all
 
     - name: Run tests
+      timeout-minutes: 5
       run: |
         cd libnode && make test
 

@@ -17,10 +17,12 @@ use crate::tun_ctl::TunCtl;
 use enum_map::EnumMap;
 use km_noise::NoiseKeypair;
 use std::net::IpAddr;
+use std::num::NonZero;
 use std::result::Result;
 use std::sync::Arc;
 use tracing::{error, info};
 use zpr::{self, LinkId, SubstrateAddr};
+use zpr_ext::std::num::NonZeroExt;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {
@@ -106,7 +108,7 @@ impl Assembly {
     pub fn add_local_agent_peer(&self) {
         let entry = self.peer_table.vacant_entry().unwrap();
 
-        assert_eq!(entry.key(), zpr::LOCAL_AGENT_LINK_ID);
+        assert_eq!(entry.key().get(), zpr::LOCAL_AGENT_LINK_ID);
 
         let peer_state = peer_table::PeerState::new(
             entry.key(),
@@ -122,7 +124,7 @@ impl Assembly {
         self: &Arc<Self>,
         link_type: LinkType,
         peer_addr: &SubstrateAddr,
-    ) -> Result<LinkId, PeerInsertError> {
+    ) -> Result<NonZero<LinkId>, PeerInsertError> {
         let entry = self.peer_table.vacant_entry()?;
 
         let worker_config = mgmt_processor_worker::Config {
@@ -141,16 +143,16 @@ impl Assembly {
         self: &Arc<Self>,
         adapter_addr: &SubstrateAddr,
         link_type: LinkType,
-    ) -> Result<LinkId, PeerInsertError> {
+    ) -> Result<NonZero<LinkId>, PeerInsertError> {
         assert!(link_type != LinkType::NodeToNode);
         info!(
             "{}: Starting tether with {}",
             self.system_name, adapter_addr
         );
         let peer_id = self.add_peer(link_type, adapter_addr)?;
-        self.peer_ids.lock().unwrap().push(peer_id);
+        self.peer_ids.lock().unwrap().push(peer_id.get());
 
-        let Some(peer) = self.peer_table.get(peer_id) else {
+        let Some(peer) = self.peer_table.get(peer_id.get()) else {
             // Peer is gone already
             return Ok(peer_id);
         };
@@ -187,6 +189,32 @@ impl Assembly {
         }
 
         return Ok(peer_id);
+    }
+
+    pub fn hack_default_policy(&self, ingress_link_id: LinkId) -> Option<NonZero<LinkId>> {
+        if ingress_link_id == zpr::LINK_ID_UNKNOWN {
+            None
+        } else if ingress_link_id == zpr::LOCAL_AGENT_LINK_ID {
+            None
+        } else {
+            let peer_ids = self.peer_ids.lock().unwrap();
+
+            let peer_id_idx = peer_ids.iter().position(|id| *id == ingress_link_id)?;
+
+            let visa_server_id = self
+                .peer_table
+                .lookup_special_peer(crate::special_peers::SpecialPeerName::VisaServiceAdapter)
+                .unwrap_or_zero();
+
+            for i in 1..peer_ids.len() {
+                let peer_id = peer_ids[(peer_id_idx + i) % peer_ids.len()];
+                if peer_id != visa_server_id {
+                    return std::num::NonZero::new(peer_id);
+                }
+            }
+
+            None
+        }
     }
 }
 

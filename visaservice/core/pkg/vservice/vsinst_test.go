@@ -120,7 +120,7 @@ func minVSI(t *testing.T, hopcount uint, alog logr.Logger) *vservice.VSIConfig {
 	require.Nil(t, err)
 	return &vservice.VSIConfig{
 		Log:                   alog,
-		CN:                    "vs.zpr.org",
+		CN:                    "vs.zpr",
 		VSAddr:                netip.MustParseAddr(vservice.VisaServiceAddress),
 		HopCount:              hopcount,
 		AllowInvalidPeerAddr:  true,

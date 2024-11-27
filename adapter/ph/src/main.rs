@@ -47,6 +47,7 @@ mod queues;
 mod rcu;
 mod rpc_worker;
 mod signal_worker;
+mod special_peers;
 mod substrate_ingress_worker;
 mod sync_req;
 mod sys;
@@ -306,7 +307,7 @@ fn main() -> ExitCode {
             )
             .unwrap();
 
-        assert_eq!(dsid, zpr::DOCK_LINK_ID);
+        assert_eq!(dsid.get(), zpr::DOCK_LINK_ID);
     }
 
     //

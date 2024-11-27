@@ -76,6 +76,26 @@ mod rcu_impl {
             std::mem::drop(lock);
             std::mem::drop(old);
         }
+
+        /// Replace the boxed value with a new value, which
+        /// may be derived from the old value.  Calls to `update()`
+        /// are totally ordered.  That is, behaves as `self.write(self.inspect(f))`
+        /// but without the possibility of a lost update.
+        ///
+        /// If the update function returns `None`, no update is made, and an
+        /// error is returned.  Otherwise, this method succeeds.
+        ///
+        /// Note also that unlike `inspect()`, `f` may be called repeatedly.
+        pub fn update(&self, f: impl Fn(&T) -> Option<T>) -> Result<(), ()> {
+            let mut lock = self.0.write().unwrap();
+            let Some(new_value) = f(&*lock) else {
+                return Err(());
+            };
+            let old = std::mem::replace(&mut *lock, new_value);
+            std::mem::drop(lock);
+            std::mem::drop(old);
+            Ok(())
+        }
     }
 }
 
@@ -123,6 +143,17 @@ mod rcu_impl {
             let old = std::mem::replace(&mut *lock, Arc::new(new_value));
             std::mem::drop(lock);
             std::mem::drop(old);
+        }
+
+        pub fn update(&self, f: impl Fn(&T) -> Option<T>) -> Result<(), ()> {
+            let mut lock = self.0.lock().unwrap();
+            let Some(new_value) = f(&*lock) else {
+                return Err(());
+            };
+            let old = std::mem::replace(&mut *lock, Arc::new(new_value));
+            std::mem::drop(lock);
+            std::mem::drop(old);
+            Ok(())
         }
     }
 }
@@ -173,11 +204,28 @@ mod rcu_impl {
             let guard = epoch::pin();
             let old_value = self
                 .0
-                .swap(epoch::Owned::from(new_value), Ordering::AcqRel, &guard);
+                .swap(epoch::Owned::new(new_value), Ordering::AcqRel, &guard);
             // SAFETY: `old_value` is now unreachable
             unsafe {
                 guard.defer_destroy(old_value);
             }
+        }
+
+        pub fn update(&self, f: impl Fn(&T) -> Option<T>) -> Result<(), ()> {
+            let guard = epoch::pin();
+            let Ok(old_value) =
+                self.0
+                    .fetch_update(Ordering::AcqRel, Ordering::Acquire, &guard, |ptr| {
+                        f(unsafe { ptr.deref() }).map(|x| epoch::Owned::new(x).into_shared(&guard))
+                    })
+            else {
+                return Err(());
+            };
+            // SAFETY: `old_value` is now unreachable
+            unsafe {
+                guard.defer_destroy(old_value);
+            }
+            Ok(())
         }
     }
 }
@@ -188,7 +236,9 @@ mod rcu_impl {
 // in some places, so I'm keeping it around for now.
 #[cfg(all(feature = "rcu-aarc", not(doc)))]
 mod rcu_impl {
-    pub struct RcuBox<T: 'static>(aarc::AtomicArc<T>);
+    use std::sync::Mutex;
+
+    pub struct RcuBox<T: 'static>(aarc::AtomicArc<T>, Mutex<()>);
 
     pub struct RcuGuard<'a, T> {
         phantom: std::marker::PhantomData<&'a T>,
@@ -205,7 +255,7 @@ mod rcu_impl {
 
     impl<T> RcuBox<T> {
         pub fn new(value: T) -> Self {
-            Self(aarc::AtomicArc::new(Some(value)))
+            Self(aarc::AtomicArc::new(Some(value)), Mutex::new(()))
         }
 
         pub fn inspect<U>(&self, f: impl FnOnce(&T) -> U) -> U {
@@ -223,6 +273,15 @@ mod rcu_impl {
             // NOTE: it's not clear from aarc docs in which threads GC is allowed;
             // if in `load()` threads, this would be a deal-breaker
             self.0.store(Some(&std::sync::Arc::new(new_value)))
+        }
+
+        pub fn update(&self, f: impl Fn(&T) -> Option<T>) -> Result<(), ()> {
+            let guard = self.1.lock().unwrap();
+            let Some(new_value) = self.inspect(f) else {
+                return Err(());
+            };
+            self.write(new_value);
+            Ok(())
         }
     }
 }

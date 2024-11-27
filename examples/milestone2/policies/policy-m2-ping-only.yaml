@@ -11,6 +11,14 @@ zpr:
       interfaces:
         n0i0:
           netaddr: "192.168.0.55:5000" # POE
+      services:
+        - ping
+      policies:
+        - desc: any cert based agent can ping node
+          conditions:
+            - desc: match on authority
+              attrs:
+                - [zpr.authority, eq, zpr.adapter]
 
   visaservice:
     dock: n0
@@ -24,7 +32,7 @@ zpr:
       api: validation/1
       authority:
         encoding: pem
-        cert_data: $import[../ca-cert.pem]
+        cert_data: $import[../vs/ca-cert.pem]
 
 services:
   http:
@@ -33,6 +41,10 @@ services:
     tcp: 22
   perf:
     tcp: 5056
+  ping:
+    icmp:
+      type: request-response
+      type_codes: 128, 129
 
 communications:
   systems:
@@ -42,8 +54,8 @@ communications:
         service_one:
           desc: example service
           services:
-            - http
             - perf
+            - ping
           provider:
             - [zpr.adapter.cn, eq, service.zpr.org]
           address: "fd5a:5052:1::8080" # ZPR contact addr

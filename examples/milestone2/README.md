@@ -49,7 +49,7 @@ Notes:
      +-----+        +--+--+        +-----+
    fd5a:5052::1        |         fd5a:5052:1::8080
    (visa service)      |         (web server)
-   cn = vs.zpr.org     |         cn = server.zpr.org
+   cn = vs.zpr         |         cn = server.zpr.org
                        |
                     +--+--+
                     |     |
@@ -118,7 +118,7 @@ cd policies
 cd /path/to/zpr-core/visaservice/core/build
 ./vservice --verbose \
     --conf ../../../examples/milestone2/vs/vs-config.yaml \
-    --policy ../../../examples/milestone2/policies/policy-m2.bin
+    --policy ../../../examples/milestone2/policies/policy-m2-ping-and-http.bin
 ```
 
 #### Bring up a VSS in its own terminal

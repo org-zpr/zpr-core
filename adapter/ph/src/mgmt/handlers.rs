@@ -9,6 +9,7 @@ use crate::forwarding_tables;
 use crate::link_state::LinkEvent;
 use crate::net_defs::IpAddress;
 use crate::packet::{BufferPacket, Packet};
+use crate::special_peers;
 use crate::zdp;
 use bytes::{Buf, BufMut};
 use std::sync::Arc;
@@ -313,17 +314,35 @@ pub async fn handle_bind_agent_address_request(
 
     match asm.ph_mode {
         PhMode::Node => {
-            // TODO: request visa
+            let Some(egress_link_id) =
+                special_peers::default_policy_lookup(ingress_link_id, &five_tuple)
+                    .and_then(|id| asm.peer_table.lookup_special_peer(id))
+                    .or_else(|| {
+                        // HACK: for now, we assume a visa which forwards through to the other adapter
+                        // AND ALSO we manually issue a bind request out to that adapter
 
-            // HACK: for now, we assume a visa which forwards through to the other adapter
-            // AND ALSO we manually issue a bind request out to that adapter
+                        // TODO: request visa
 
-            let egress_link_id =
-                ((ingress_link_id - (zpr::DOCK_LINK_ID - 1)) % 2) + zpr::DOCK_LINK_ID;
+                        asm.hack_default_policy(ingress_link_id)
+                    })
+            else {
+                // send error to requestor
+                super::core::send_per_flow_mgmt_response(
+                    asm,
+                    ingress_link_id,
+                    zdp::ZdpPacketType::BindAgentAddressResponse,
+                    0,
+                    seq_num,
+                    rsp_pkt,
+                )
+                .await;
+
+                return Ok(());
+            };
 
             match super::requests::send_bind_agent_address_request(
                 asm,
-                egress_link_id,
+                egress_link_id.get(),
                 compression_mode,
                 five_tuple,
             )
@@ -332,7 +351,10 @@ pub async fn handle_bind_agent_address_request(
                 Ok(egress_tether_id) => {
                     // form PEP
                     let pep = forwarding_tables::PftPep {
-                        next_hop: forwarding_tables::PftNextHop(egress_link_id, egress_tether_id),
+                        next_hop: forwarding_tables::PftNextHop(
+                            egress_link_id.get(),
+                            egress_tether_id,
+                        ),
                     };
 
                     match asm.peer_table.inspect(ingress_link_id, |peer_state| {
@@ -379,7 +401,7 @@ pub async fn handle_bind_agent_address_request(
                         }
                     }
 
-                    // WORKING: factor out message generation using Result<StreamId, Box<str>>
+                    // TODO: factor out message generation using Result<StreamId, Box<str>>
                 }
 
                 Err(err) => {

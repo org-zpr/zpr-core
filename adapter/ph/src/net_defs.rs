@@ -1,8 +1,7 @@
 //! Standard network constants.
 
-use arrayref::array_ref;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, KnownLayout, Unaligned};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 pub mod ethertype {
     //! Ethertype / IEEE 802 numbers
@@ -22,27 +21,68 @@ pub struct IpAddress {
 }
 
 impl IpAddress {
-    pub fn new_from_v4(v4_address: [u8; 4]) -> Self {
+    pub const fn new_from_v4(v4_address: [u8; 4]) -> Self {
         // Uses standard v4 to v6 conversion
-        let mut addr = Self::new_zeroed();
-        addr.v6[12..16].copy_from_slice(&v4_address);
-        addr.v6[10] = 0xff;
-        addr.v6[11] = 0xff;
-        addr
+        Self {
+            v6: [
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0xff,
+                0xff,
+                v4_address[0],
+                v4_address[1],
+                v4_address[2],
+                v4_address[3],
+            ],
+        }
     }
 
-    pub fn read_as_v4(&self) -> [u8; 4] {
-        *array_ref!(self.v6, 12, 4)
+    pub const fn read_as_v4(&self) -> [u8; 4] {
+        [self.v6[12], self.v6[13], self.v6[14], self.v6[15]]
     }
 
-    pub fn is_v4(&self) -> bool {
-        self.v6[..12] == [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff]
+    pub const fn is_v4(&self) -> bool {
+        self.v6[0] == 0
+            && self.v6[1] == 0
+            && self.v6[2] == 0
+            && self.v6[3] == 0
+            && self.v6[4] == 0
+            && self.v6[5] == 0
+            && self.v6[6] == 0
+            && self.v6[7] == 0
+            && self.v6[8] == 0
+            && self.v6[9] == 0
+            && self.v6[10] == 0xff
+            && self.v6[11] == 0xff
+    }
+
+    pub const fn new_from_std_v4(addr: &Ipv4Addr) -> Self {
+        Self::new_from_v4(addr.octets())
+    }
+
+    pub const fn new_from_std_v6(addr: &Ipv6Addr) -> Self {
+        Self { v6: addr.octets() }
+    }
+
+    pub const fn new_from_std(addr: &IpAddr) -> Self {
+        match addr {
+            IpAddr::V4(v4) => Self::new_from_std_v4(v4),
+            IpAddr::V6(v6) => Self::new_from_std_v6(v6),
+        }
     }
 }
 
 impl From<Ipv4Addr> for IpAddress {
     fn from(addr: Ipv4Addr) -> Self {
-        addr.octets().into()
+        Self::new_from_std_v4(&addr)
     }
 }
 
@@ -54,7 +94,7 @@ impl From<[u8; 4]> for IpAddress {
 
 impl From<Ipv6Addr> for IpAddress {
     fn from(addr: Ipv6Addr) -> Self {
-        addr.octets().into()
+        Self::new_from_std_v6(&addr)
     }
 }
 
@@ -66,10 +106,7 @@ impl From<[u8; 16]> for IpAddress {
 
 impl From<IpAddr> for IpAddress {
     fn from(addr: IpAddr) -> Self {
-        match addr {
-            IpAddr::V4(v4) => v4.into(),
-            IpAddr::V6(v6) => v6.into(),
-        }
+        Self::new_from_std(&addr)
     }
 }
 
