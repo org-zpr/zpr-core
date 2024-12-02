@@ -136,6 +136,10 @@ pub struct CommonArgs {
     #[arg(long, short = 'i', value_name = "DEVICE")]
     tun_if: Option<String>,
 
+    /// ZPR address (no port) of the adapter (must match your TUN address)
+    #[arg(long, short = 'z')]
+    agent_addr: Option<IpAddr>,
+
     /// Enable debug logging
     #[arg(long, short = 'd')]
     debug: Option<bool>,
@@ -156,10 +160,6 @@ enum Command {
         /// Substrate address of the node to connect to
         #[arg(long, short = 'N', value_name = "ADDR:PORT")]
         node_addr: Option<SocketAddr>,
-
-        /// ZPR address (no port) of the adapter (must match your TUN address)
-        #[arg(long, short = 'z')]
-        agent_addr: Option<IpAddr>,
 
         /// PEM file holding the nodes noise public key
         #[arg(long, short = 'b', value_name = "PATH")]
@@ -293,13 +293,13 @@ impl Config {
             return Err("private_key_file".arg_missing());
         }
         check_file_exists("private key file", &self.private_key_file)?;
+        if self.agent_addr.is_none() {
+            return Err("agent_addr".arg_missing());
+        }
         match mode {
             PhMode::Adapter => {
                 if self.node_addr.is_none() {
                     return Err("node_addr".arg_missing());
-                }
-                if self.agent_addr.is_none() {
-                    return Err("agent_addr".arg_missing());
                 }
                 if self.node_public_key_file.is_none() {
                     return Err("node_public_key_file".arg_missing());
@@ -360,6 +360,9 @@ impl Config {
         if let Some(tun_if) = &config.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
+        if let Some(agent_addr) = &config.agent_addr {
+            self.agent_addr = Some(*agent_addr);
+        }
         if let Some(debug) = config.debug {
             self.debug = debug;
         }
@@ -374,9 +377,6 @@ impl Config {
     ) -> Result<(), ArgsError> {
         if let Some(node_addr) = &config.node_addr {
             self.node_addr = Some(*node_addr);
-        }
-        if let Some(agent_addr) = &config.agent_addr {
-            self.agent_addr = Some(*agent_addr);
         }
         if let Some(node_public_key_file) = &config.node_public_key_file {
             if node_public_key_file.is_relative() {
@@ -451,6 +451,9 @@ impl Config {
         if let Some(tun_if) = &common.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
+        if let Some(agent_addr) = &common.agent_addr {
+            self.agent_addr = Some(*agent_addr);
+        }
         if let Some(debug) = common.debug {
             self.debug = debug;
         }
@@ -487,6 +490,7 @@ struct GlobalConfigSection {
     certificate_file: Option<PathBuf>,
     private_key_file: Option<PathBuf>,
     tun_if: Option<String>,
+    agent_addr: Option<IpAddr>,
     debug: Option<bool>,
 }
 
@@ -495,7 +499,6 @@ struct GlobalConfigSection {
 struct AdapterConfigSection {
     node_addr: Option<SocketAddr>,
     node_public_key_file: Option<PathBuf>,
-    agent_addr: Option<IpAddr>,
 }
 
 // Load a config, either adapter or node, from a TOML file.
@@ -549,7 +552,6 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
             config_file,
             common,
             node_addr,
-            agent_addr,
             node_public_key_file,
         } => {
             ph_mode = PhMode::Adapter;
@@ -571,9 +573,6 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
             // fold in the optional, adapter specific command line args:
             if let Some(node_addr) = node_addr {
                 config.node_addr = Some(node_addr);
-            }
-            if let Some(agent_addr) = agent_addr {
-                config.agent_addr = Some(agent_addr);
             }
             if let Some(node_public_key_file) = node_public_key_file {
                 let npkf = PathBuf::from(node_public_key_file);
@@ -676,11 +675,11 @@ mod test {
         certificate_file = "tests/certificate.pem"
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
+        agent_addr = "10.0.0.1"
         debug = true
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        agent_addr = "10.0.0.1"
         node_public_key_file = "tests/node_public_key.pem"
         "#;
 
@@ -720,7 +719,7 @@ mod test {
             ))
         );
         assert_eq!(
-            config.adapter.agent_addr,
+            config.global.agent_addr,
             Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
         );
         assert_eq!(
@@ -783,11 +782,11 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         tun_if = "tun23"
+        agent_addr = "10.0.0.1"
         debug = true
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        agent_addr = "10.0.0.1"
         node_public_key_file = "$NPKFILE"
         "#;
 
@@ -955,10 +954,10 @@ mod test {
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
+        agent_addr = "10.0.0.1"
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        agent_addr = "10.0.0.1"
         node_public_key_file = "$NPKFILE"
         "#;
 
@@ -1033,10 +1032,10 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
+        agent_addr = "10.0.0.1"
 
         [adapter]
         node_addr = "192.168.0.2:5000"
-        agent_addr = "10.0.0.1"
         node_public_key_file = "$NPKFILE"
         "#;
 
@@ -1098,6 +1097,7 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
+        agent_addr = "10.0.0.1"
         "#;
 
         let ca_file = TempFile::touch();
@@ -1152,6 +1152,8 @@ mod test {
             &pk_file_fname,
             "--control-path",
             "/tmp/control.sock",
+            "--agent-addr",
+            "10.0.0.1",
         ];
 
         let (pmode, config) = argparse(Some(args)).unwrap();

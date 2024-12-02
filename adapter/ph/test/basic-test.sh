@@ -76,7 +76,8 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
      --ca-file ca.crt \
      --certificate-file node.crt \
      --private-key-file node.key \
-     --tun-if tun0 2>&1 |tee node.log &
+     --tun-if tun0 \
+     --agent-addr "$NODE_ZPR_ADDR6" 2>&1 |tee node.log &
 
 sleep 2  # TODO: remove?
 

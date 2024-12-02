@@ -15,6 +15,7 @@ const DEFAULT_BUFFER_COUNT: usize = 256;
 const DEFAULT_BATCH_SIZE: usize = 8;
 const DEFAULT_DATAPATH_QUEUE_SIZE: usize = 16;
 const DEFAULT_MGMT_QUEUE_SIZE: usize = 16;
+const DEFAULT_SERVICE_QUEUE_SIZE: usize = 16;
 
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_WORKER_CONCURRENCY: usize = 4;
@@ -39,6 +40,8 @@ pub struct TopologyConfig {
     pub km_signal_queue_size: usize,
     pub km_message_queue_size: usize,
     pub km_link_queue_size: usize,
+
+    pub vss_queue_size: usize,
 }
 
 impl Default for TopologyConfig {
@@ -59,6 +62,8 @@ impl Default for TopologyConfig {
             km_signal_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
             km_message_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
             km_link_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
+
+            vss_queue_size: DEFAULT_SERVICE_QUEUE_SIZE,
         }
     }
 }

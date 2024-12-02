@@ -397,6 +397,22 @@ fn main() -> ExitCode {
     }
 
     //
+    // start Visa Support Service if we're a node
+    //
+
+    if ph_mode == PhMode::Node {
+        let (vss_inq, _vss_outq) = mpsc::channel(asm.topology_config.vss_queue_size);
+
+        let vss_addr = std::net::SocketAddr::new(
+            asm.agent_address
+                .expect("Node must have agent address assigned"),
+            libnode::vss::DEFAULT_VSS_PORT,
+        );
+
+        js.spawn_blocking(move || libnode::vss::start_vss_server(vss_inq, vss_addr));
+    }
+
+    //
     // drive the local set, and handle worker termination
     //
 
