@@ -72,7 +72,7 @@ func (t *AuthorizeConnect) Run(state *testfw.TestState, ctest *testfw.TestRun) e
 		return nil
 	}
 
-	agent, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextOctect())
+	agent, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextAdapterAddr())
 	if err != nil {
 		ctest.Failed(err)
 		return nil

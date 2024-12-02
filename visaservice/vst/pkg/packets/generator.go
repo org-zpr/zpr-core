@@ -14,6 +14,9 @@ import (
 const L3IPv4 = 4 // used for RequestVisa call
 const L3IPv6 = 6 // used for RequestVisa call
 
+const MaxPort = 65535
+const MinSrcPort = 1024
+
 const ProtocolTCP = uint32(6)
 
 // For TCP, generates a SYN packet.
@@ -23,7 +26,7 @@ func GeneratePacket(srcAddr, dstAddr netip.Addr, endpoint *polio.Scope) ([]byte,
 		return nil, 0, fmt.Errorf("only TCP is supported")
 	}
 
-	sport := 1024 + rand.Intn(65535-1024)
+	sport := RandPort()
 
 	var dport int
 	ps := endpoint.GetPspec().Spec[0]
@@ -46,7 +49,12 @@ func GeneratePacket(srcAddr, dstAddr netip.Addr, endpoint *polio.Scope) ([]byte,
 	return pkt, l3Type, nil
 }
 
-func GenerateTCPPacket(srcAddr netip.Addr, sport int, dstAddr netip.Addr, dport int) ([]byte, error) {
+// RandPort return a TCP/UDP port between 1024 and 65535.
+func RandPort() uint16 {
+	return uint16(MinSrcPort + rand.Intn(MaxPort-MinSrcPort))
+}
+
+func GenerateTCPPacket(srcAddr netip.Addr, sport uint16, dstAddr netip.Addr, dport int) ([]byte, error) {
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
 		FixLengths:       true,

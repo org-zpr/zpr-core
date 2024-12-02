@@ -2,6 +2,7 @@ package testfw
 
 import (
 	"crypto/x509"
+	"encoding/binary"
 	"fmt"
 	"net/netip"
 	"time"
@@ -22,18 +23,18 @@ type TestState struct {
 	policy      *polio.Policy   // policy extracted from GetCurrentPolicy, may be nil
 	adminClient *vsadmin.Client // use GetAdminClient
 	node        *mocks.Node     // use GetNode
-	lastOctect  uint32          // last octect of the IP address of the node
+	nextIP      uint64          // last 8 bytes of the next adapter IP address generated
 	pauseTime   time.Duration
 }
 
 func NewTestState(vsAddr, adminAddr netip.AddrPort, nodeCert *x509.Certificate, log *zap.SugaredLogger) *TestState {
 	return &TestState{
-		vsAddr:     vsAddr,
-		adminAddr:  adminAddr,
-		NodeCert:   nodeCert,
-		Log:        log,
-		lastOctect: 2,
-		pauseTime:  2 * time.Second,
+		vsAddr:    vsAddr,
+		adminAddr: adminAddr,
+		NodeCert:  nodeCert,
+		Log:       log,
+		nextIP:    2,
+		pauseTime: 2 * time.Second,
 	}
 }
 
@@ -49,9 +50,19 @@ func (ts *TestState) Reset() {
 	}
 }
 
-func (ts *TestState) GetNextOctect() uint32 {
-	ts.lastOctect++
-	return ts.lastOctect
+// GetNextAdapterAddr returns a new adapter address.
+// Always starts with "fd5a:5051:0001:0000:".
+func (ts *TestState) GetNextAdapterAddr() netip.Addr {
+	// All addresses start with: fd5a:5052:0001
+	var ip6 = [16]byte{
+		0xfd, 0x5a, 0x50, 0x52,
+		0x0, 0x1, 0x0, 0x0,
+		0x0, 0x0, 0x0, 0x0,
+		0x0, 0x0, 0x0, 0x0,
+	}
+	binary.Encode(ip6[8:], binary.BigEndian, ts.nextIP)
+	ts.nextIP++
+	return netip.AddrFrom16(ip6)
 }
 
 func (ts *TestState) GetAdminClient() (*vsadmin.Client, error) {

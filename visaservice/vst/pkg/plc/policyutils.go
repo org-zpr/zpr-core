@@ -2,7 +2,6 @@ package plc
 
 import (
 	"fmt"
-	"math/rand"
 	"net/netip"
 	"strings"
 	"time"
@@ -195,7 +194,7 @@ func GenEndpointNotInScope(protocol uint32, scopes []*polio.Scope) *polio.Scope 
 		return ScopeForProtocolPort(protocol, 1234)
 	}
 	// Else we need to pick a port not already allowed.
-	candidatePort := uint32(1024 + rand.Intn(65535-1024))
+	candidatePort := uint32(packets.RandPort())
 	inScope := make(map[uint16]bool)
 	for _, scope := range existing {
 		switch pa := scope.Protarg.(type) {
@@ -211,8 +210,8 @@ func GenEndpointNotInScope(protocol uint32, scopes []*polio.Scope) *polio.Scope 
 					if candidatePort >= parg.Pr.Low && candidatePort <= parg.Pr.High {
 						// candidate port is in the range of an existing scope.
 						candidatePort = parg.Pr.High + 1
-						if candidatePort >= 65535 {
-							candidatePort = 1024
+						if candidatePort >= packets.MaxPort {
+							candidatePort = packets.MinSrcPort
 						}
 					}
 				}
@@ -221,10 +220,10 @@ func GenEndpointNotInScope(protocol uint32, scopes []*polio.Scope) *polio.Scope 
 	}
 	if inScope[uint16(candidatePort)] {
 		attempts := 0
-		for inScope[uint16(candidatePort)] && attempts < 65535 {
+		for inScope[uint16(candidatePort)] && attempts < packets.MaxPort {
 			candidatePort++
-			if candidatePort >= 65535 {
-				candidatePort = 1024
+			if candidatePort >= packets.MaxPort {
+				candidatePort = packets.MinSrcPort
 			}
 			attempts++
 		}

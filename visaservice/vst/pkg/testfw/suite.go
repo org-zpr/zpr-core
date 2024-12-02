@@ -8,6 +8,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// RunTests runs all the tests in the given list of tests, and returns a scorecard with the results.
+// If any test returns an explicit error, the whole suite aborts.
+// A test may fail during its run by calling one of the fail functions on the TestRun struct
+// passed to each test.
 func RunTests(tests []Tester, vsAddr, adminAddr netip.AddrPort, nodeCert *x509.Certificate, log *zap.Logger) (*Scorecard, error) {
 	zlog := log.Sugar()
 	card := NewScorecard(len(tests))
@@ -25,7 +29,8 @@ func RunTest(test Tester, state *TestState, card *Scorecard) error {
 	state.Reset()
 	ctest := card.Start(test)
 	if err := test.Run(state, ctest); err != nil {
-		// Automatically fail if error returned, but we do not automatically pass if nil returned.
+		// Automatically fail the test and return the error if test returns an error.
+		// Note that we do not automtically pass the test if no error is returned.
 		ctest.Failed(err)
 		return err
 	}

@@ -70,14 +70,16 @@ func connectNodeAndGetApiKey(state *testfw.TestState) (string, error) {
 	return apiKey, nil
 }
 
-func connectAdapter(node *mocks.Node, crec *plc.ConnectRec, dockAddr netip.Addr, octect uint32) (*vsapi.Agent, error) {
+// Note that `zprAddr` is only used if the connect record from policy does not
+// include the `zpr.addr` attribute.
+func connectAdapter(node *mocks.Node, crec *plc.ConnectRec, dockAddr, zprAddr netip.Addr) (*vsapi.Agent, error) {
 	claims := make(map[string]string)
 	claims["zpr.adapter.cn"] = crec.CN
 	if crec.HasAddr() {
 		claims["zpr.addr"] = crec.Addr.String()
 	} else {
 		// Hmm, just make one up?
-		claims["zpr.addr"] = fmt.Sprintf("fd5a:5052:1::%d", octect)
+		claims["zpr.addr"] = zprAddr.String()
 	}
 
 	cid := rand.Int31()

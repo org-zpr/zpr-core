@@ -113,7 +113,7 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 	commEndpoint := endpoints[0]
 
 	state.Log.Infow("connecting a service", "service_id", svcID)
-	svcAgnt, err := connectAdapter(node, service, nodeCR.Addr, state.GetNextOctect())
+	svcAgnt, err := connectAdapter(node, service, nodeCR.Addr, state.GetNextAdapterAddr())
 	if err != nil {
 		ctest.Failed(fmt.Errorf("failed to connect service: %w", err))
 		return nil
@@ -122,7 +122,7 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 
 	// Connect the client:
 	state.Log.Infow("connecting a client", "CN", candidate.CN)
-	cliAgnt, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextOctect())
+	cliAgnt, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextAdapterAddr())
 	if err != nil {
 		ctest.Failed(fmt.Errorf("failed to connect client: %w", err))
 		return nil
