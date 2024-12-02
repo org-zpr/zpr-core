@@ -689,6 +689,7 @@ pub fn agent_output_post_classify(asm: &Assembly, mut pkt: BufferPacket, allow_b
     match asm.alt.get(&five_tuple) {
         Some(entry) => match &*entry {
             AltEntry::Active(pep) => {
+                info!("{}: found PEP for {}", asm.system_name, five_tuple);
                 // compute A2A MAC
                 // TODO: use actual A2A SAID & keyed hash
                 let a2a_said: zpr::A2aSaid = 0;
@@ -731,6 +732,10 @@ pub fn agent_output_post_classify(asm: &Assembly, mut pkt: BufferPacket, allow_b
             }
 
             // issue bind request
+            info!(
+                "{}: issuing bind request for {}",
+                asm.system_name, five_tuple
+            );
             match asm.adapter_manager.try_request_tether_id(pkt) {
                 Ok(()) => (),
                 Err(TryEnqueueError::Full(pkt)) => {

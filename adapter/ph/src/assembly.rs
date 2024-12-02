@@ -23,6 +23,7 @@ use std::net::IpAddr;
 use std::num::NonZero;
 use std::result::Result;
 use std::sync::Arc;
+use thiserror::Error;
 use tracing::{error, info};
 use zpr::{self, LinkId, SubstrateAddr};
 use zpr_ext::std::num::NonZeroExt;
@@ -75,7 +76,6 @@ pub struct Assembly {
     pub peer_ids: std::sync::Mutex<Vec<zpr::LinkId>>, // HACK until peer_table is enumerable
 
     // Adapter tables
-    // NOTE: only adapter_manager_worker should modify these tables!
     pub alt: adapter_tables::AgentLookupTable,
     pub dlt: adapter_tables::DockLookupTable,
 
@@ -88,9 +88,13 @@ pub struct Assembly {
     pub certx: Option<KmCertExchange>,
 }
 
+#[derive(Debug, Error)]
 pub enum AddRouteError {
+    #[error("bind failed: {0}")]
     BindFailed(mgmt::requests::BindAgentAddressError),
+    #[error("peer gone")]
     PeerGone,
+    #[error("PFT full")]
     PftFull,
 }
 
@@ -202,26 +206,43 @@ impl Assembly {
 
     pub async fn add_route(
         &self,
-        ingress_link_id: LinkId,
+        ingress_link_id: NonZero<LinkId>,
         five_tuple: defs::FiveTuple,
         egress_link_id: NonZero<LinkId>,
         compression_mode: zpr::CompressionMode,
     ) -> Result<zpr::StreamId, AddRouteError> {
-        let egress_tether_id = mgmt::requests::send_bind_agent_address_request(
-            self,
-            egress_link_id.get(),
-            compression_mode,
-            five_tuple,
-        )
-        .await
-        .map_err(|e| AddRouteError::BindFailed(e))?;
+        let egress_tether_id;
+        if egress_link_id.get() == zpr::LOCAL_AGENT_LINK_ID {
+            egress_tether_id = self
+                .dlt
+                .insert(adapter_tables::DltPep {
+                    compression_mode,
+                    five_tuple,
+                })
+                .map_err(|()| {
+                    AddRouteError::BindFailed(
+                        mgmt::requests::BindAgentAddressError::BindAgentAddressError(
+                            "DLT full".into(),
+                        ),
+                    )
+                })?;
+        } else {
+            egress_tether_id = mgmt::requests::send_bind_agent_address_request(
+                self,
+                egress_link_id.get(),
+                compression_mode,
+                five_tuple,
+            )
+            .await
+            .map_err(|e| AddRouteError::BindFailed(e))?;
+        }
 
         // form PEP
         let pep = forwarding_tables::PftPep {
             next_hop: forwarding_tables::PftNextHop(egress_link_id.get(), egress_tether_id),
         };
 
-        let Some(ingress_peer_state) = self.peer_table.get(ingress_link_id) else {
+        let Some(ingress_peer_state) = self.peer_table.get(ingress_link_id.get()) else {
             return Err(AddRouteError::PeerGone);
         };
 
@@ -247,6 +268,10 @@ impl Assembly {
                 .peer_table
                 .lookup_special_peer(crate::special_peers::SpecialPeerName::VisaServiceAdapter)
                 .unwrap_or_zero();
+
+            if ingress_link_id == visa_server_id {
+                return std::num::NonZero::new(zpr::LOCAL_AGENT_LINK_ID);
+            }
 
             for i in 1..peer_ids.len() {
                 let peer_id = peer_ids[(peer_id_idx + i) % peer_ids.len()];

@@ -8,22 +8,25 @@ source "$(dirname $0)/common_funcs.sh"
 
 ZPR_USER=$USER
 
-NODE_SUBSTRATE_ADDR_A=10.0.0.1
-NODE_SUBSTRATE_ADDR_B=10.0.1.1
-A_SUBSTRATE_ADDR=10.0.0.2
-B_SUBSTRATE_ADDR=10.0.1.2
+NODE_SUBSTRATE_ADDR_VS=10.0.0.1
+NODE_SUBSTRATE_ADDR_A=10.0.1.1
+NODE_SUBSTRATE_ADDR_B=10.0.2.1
+VS_SUBSTRATE_ADDR=10.0.0.2
+A_SUBSTRATE_ADDR=10.0.1.2
+B_SUBSTRATE_ADDR=10.0.2.2
 
 A_ZPR_ADDR=192.168.1.1
 B_ZPR_ADDR=192.168.1.2
-NODE_ZPR_ADDR=192.168.2.1
 
+NODE_ZPR_ADDR6=fd00:1:0::1
+VS_ZPR_ADDR6=fd5a:5052::1
 A_ZPR_ADDR6=fd00:1:1::1
 B_ZPR_ADDR6=fd00:1:2::1
-NODE_ZPR_ADDR6=fd00:1:1::2
 
+NODE_SOCK=node.sock
+VS_SOCK=vs.sock
 ADAPTER1_SOCK=adapter1.sock
 ADAPTER2_SOCK=adapter2.sock
-NODE_SOCK=node.sock
 
 SHOW_CAPTURE="${ZPR_TEST_VERBOSE:-no}"
 
@@ -65,9 +68,10 @@ destroy_network
 create_network
 
 create_ca_key_and_cert ca
+create_agent_key_and_cert ca vs.zpr
+create_agent_key_and_cert ca node
 create_agent_key_and_cert ca adapter1
 create_agent_key_and_cert ca adapter2
-create_agent_key_and_cert ca node
 
 #
 # Launch PHs
@@ -82,6 +86,18 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --private-key-file node.key \
   --tun-if tun0 2>&1 |tee node.log &
 
+sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
+  adapter \
+  --name "zpr-vs" \
+  --control-path "$VS_SOCK" \
+  --self-addr "$VS_SUBSTRATE_ADDR":12345 \
+  --ca-file ca.crt \
+  --certificate-file vs.zpr.crt \
+  --private-key-file vs.zpr.key \
+  --tun-if tun0 \
+  --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
+  --node-public-key-file node.pubkey \
+  --agent-addr "$VS_ZPR_ADDR6" 2>&1 |tee vs.log &
 
 sleep 2
 
@@ -119,14 +135,10 @@ set_program "$ADAPTER1_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
 #
 
 echo "Wait for TUN carrier..."
-wait_for 5 check_carrier zpr-a tun0 || {
-  echo "FAILURE"
-  exit 1
-}
-wait_for 5 check_carrier zpr-b tun0 || {
-  echo "FAILURE"
-  exit 1
-}
+wait_for 5 check_carrier zpr-node tun0 || { echo "FAILURE"; exit 1; }
+wait_for 5 check_carrier zpr-vs tun0 || { echo "FAILURE"; exit 1; }
+wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
+wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
 echo "Carrier has arrived."
 sleep 1
 

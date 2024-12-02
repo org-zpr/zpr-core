@@ -8,9 +8,9 @@ use crate::defs::*;
 use crate::link_state::LinkEvent;
 use crate::net_defs::IpAddress;
 use crate::packet::{BufferPacket, Packet};
-use crate::special_peers;
 use crate::zdp;
 use bytes::{Buf, BufMut};
+use std::num::NonZero;
 use std::sync::Arc;
 use tracing::info;
 use zpr;
@@ -304,7 +304,10 @@ pub async fn handle_bind_agent_address_request(
         dst_port,
     );
 
-    let ingress_link_id = pkt.metadata().ingress_link_id;
+    let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
+        // who sent this??
+        return Ok(());
+    };
 
     // recycle request buffer for response
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
@@ -313,41 +316,14 @@ pub async fn handle_bind_agent_address_request(
 
     match asm.ph_mode {
         PhMode::Node => {
-            let Some(egress_link_id) =
-                special_peers::default_policy_lookup(ingress_link_id, &five_tuple)
-                    .and_then(|id| asm.peer_table.lookup_special_peer(id))
-                    .or_else(|| {
-                        // HACK: for now, we assume a visa which forwards through to the other adapter
-                        // AND ALSO we manually issue a bind request out to that adapter
-
-                        // TODO: request visa
-
-                        asm.hack_default_policy(ingress_link_id)
-                    })
-            else {
-                // send error to requestor
-                super::core::send_per_flow_mgmt_response(
-                    asm,
-                    ingress_link_id,
-                    zdp::ZdpPacketType::BindAgentAddressResponse,
-                    0,
-                    seq_num,
-                    rsp_pkt,
-                )
-                .await;
-
-                return Ok(());
-            };
-
             // TODO: errors need more consideration here
-            match asm
-                .add_route(
-                    ingress_link_id,
-                    five_tuple,
-                    egress_link_id,
-                    compression_mode,
-                )
-                .await
+            match super::dock::bind_agent_address(
+                asm,
+                ingress_link_id,
+                compression_mode,
+                five_tuple,
+            )
+            .await
             {
                 Ok(ingress_tid) => {
                     // success; respond with ingress tether ID
@@ -362,7 +338,24 @@ pub async fn handle_bind_agent_address_request(
                     ingress_tether_id = ingress_tid;
                 }
 
-                Err(assembly::AddRouteError::PftFull) => {
+                Err(super::dock::BindAgentAddressError::PolicyError) => {
+                    // send error to requestor
+                    super::core::send_per_flow_mgmt_response(
+                        asm,
+                        ingress_link_id.get(),
+                        zdp::ZdpPacketType::BindAgentAddressResponse,
+                        0,
+                        seq_num,
+                        rsp_pkt,
+                    )
+                    .await;
+
+                    return Ok(());
+                }
+
+                Err(super::dock::BindAgentAddressError::AddRouteError(
+                    assembly::AddRouteError::PftFull,
+                )) => {
                     // PFT full; respond with error message
                     // TODO: maybe tick a counter somewhere?
                     let message = "PFT full";
@@ -379,13 +372,17 @@ pub async fn handle_bind_agent_address_request(
                     ingress_tether_id = 0;
                 }
 
-                Err(assembly::AddRouteError::PeerGone) => {
+                Err(super::dock::BindAgentAddressError::AddRouteError(
+                    assembly::AddRouteError::PeerGone,
+                )) => {
                     // peer went away; don't bother responding
                     asm.buffer_stack.put_buffer(rsp_pkt.destroy());
                     return Ok(());
                 }
 
-                Err(assembly::AddRouteError::BindFailed(err)) => {
+                Err(super::dock::BindAgentAddressError::AddRouteError(
+                    assembly::AddRouteError::BindFailed(err),
+                )) => {
                     // unable to bind next-hop; respond with error message
                     // TODO: maybe tick a counter somewhere?
                     let message = format!("unable to bind next-hop: {}", err);
@@ -451,7 +448,7 @@ pub async fn handle_bind_agent_address_request(
     // respond to requestor
     super::core::send_per_flow_mgmt_response(
         asm,
-        ingress_link_id,
+        ingress_link_id.get(),
         zdp::ZdpPacketType::BindAgentAddressResponse,
         ingress_tether_id,
         seq_num,

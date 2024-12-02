@@ -10,6 +10,7 @@ use crate::fastpath;
 use crate::packet::{BufferPacket, Packet};
 use crate::zdp;
 use std::time::Duration;
+use thiserror::Error;
 use tokio::time::sleep;
 use zpr;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
@@ -157,20 +158,14 @@ pub async fn send_sync_per_flow_req(
     }
 }
 
+#[derive(Debug, Error)]
 pub enum SyncReqError {
+    #[error("link closed")]
     LinkClosed,
+    #[error("protocol error")]
     ProtocolError,
+    #[error("timeout")]
     Timeout,
-}
-
-impl std::fmt::Display for SyncReqError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        f.write_str(match self {
-            Self::LinkClosed => "link closed",
-            Self::ProtocolError => "protocol error",
-            Self::Timeout => "timeout",
-        })
-    }
 }
 
 /// Helper for send management request function

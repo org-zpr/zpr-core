@@ -8,22 +8,26 @@ source "$(dirname $0)/common_funcs.sh"
 
 ZPR_USER=$USER
 
-NODE_SUBSTRATE_ADDR_A=10.0.0.1
-NODE_SUBSTRATE_ADDR_B=10.0.1.1
-A_SUBSTRATE_ADDR=10.0.0.2
-B_SUBSTRATE_ADDR=10.0.1.2
+# TODO: IPv6 link-local??
+NODE_SUBSTRATE_ADDR_VS=10.0.0.1
+NODE_SUBSTRATE_ADDR_A=10.0.1.1
+NODE_SUBSTRATE_ADDR_B=10.0.2.1
+VS_SUBSTRATE_ADDR=10.0.0.2
+A_SUBSTRATE_ADDR=10.0.1.2
+B_SUBSTRATE_ADDR=10.0.2.2
 
 A_ZPR_ADDR=192.168.1.1
 B_ZPR_ADDR=192.168.1.2
-NODE_ZPR_ADDR=192.168.2.1
 
+NODE_ZPR_ADDR6=fd00:1:0::1
+VS_ZPR_ADDR6=fd5a:5052::1
 A_ZPR_ADDR6=fd00:1:1::1
 B_ZPR_ADDR6=fd00:1:2::1
-NODE_ZPR_ADDR6=fd00:1:1::2
 
+NODE_SOCK=node.sock
+VS_SOCK=vs.sock
 ADAPTER1_SOCK=adapter1.sock
 ADAPTER2_SOCK=adapter2.sock
-NODE_SOCK=node.sock
 
 function counters() {
   SOCKET=$1
@@ -53,9 +57,10 @@ destroy_network
 create_network
 
 create_ca_key_and_cert ca
+create_agent_key_and_cert ca vs.zpr
+create_agent_key_and_cert ca node
 create_agent_key_and_cert ca adapter1
 create_agent_key_and_cert ca adapter2
-create_agent_key_and_cert ca node
 
 echo "Launching DUTs"
 
@@ -73,7 +78,22 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
      --private-key-file node.key \
      --tun-if tun0 2>&1 |tee node.log &
 
-sleep 2
+sleep 2  # TODO: remove?
+
+sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
+  adapter \
+  --name "zpr-vs" \
+  --control-path "$VS_SOCK" \
+  --self-addr "$VS_SUBSTRATE_ADDR":12345 \
+  --ca-file ca.crt \
+  --certificate-file vs.zpr.crt \
+  --private-key-file vs.zpr.key \
+  --tun-if tun0 \
+  --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
+  --node-public-key-file node.pubkey \
+  --agent-addr "$VS_ZPR_ADDR6" 2>&1 |tee vs.log &
+
+sleep 2  # TODO: remove?
 
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
@@ -87,6 +107,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
   --node-public-key-file node.pubkey \
   --agent-addr "$A_ZPR_ADDR" 2>&1 |tee adapter1.log &
+# FIXME: IPv6 agent address
 
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
@@ -101,6 +122,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
   --node-public-key-file node.pubkey \
   --agent-addr "$B_ZPR_ADDR" 2>&1 |tee adapter2.log &
+# FIXME: IPv6 agent address
 
 
 #
@@ -108,9 +130,10 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
 #
 
 echo "Wait for TUN carrier..."
+wait_for 5 check_carrier zpr-node tun0 || { echo "FAILURE"; exit 1; }
+wait_for 5 check_carrier zpr-vs tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
-wait_for 5 check_carrier zpr-node tun0 || { echo "FAILURE"; exit 1; }
 echo "Carrier has arrived."
 # This sleep solves a display issue because magic
 sleep 1
@@ -134,7 +157,7 @@ sleep 1
 # Check stats
 #
 
-for SOCK in "$ADAPTER1_SOCK" "$ADAPTER2_SOCK" "$NODE_SOCK"
+for SOCK in "$NODE_SOCK" "$VS_SOCK" "$ADAPTER1_SOCK" "$ADAPTER2_SOCK"
 do
 	# TODO: test also with encrypted agent traffic
 	APOOO=$(counters "$SOCK" | awk -F': ' '$1 == "Agent Packets Out-Of-Order" { print $2 }')

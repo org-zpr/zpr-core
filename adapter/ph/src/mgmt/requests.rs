@@ -11,6 +11,7 @@ use crate::packet::{self, Packet};
 use crate::zdp;
 use bytes::{Buf, BufMut};
 use std::net::IpAddr;
+use thiserror::Error;
 use tracing::{info, warn};
 use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
@@ -134,20 +135,14 @@ pub async fn send_register_agent_address_request(
     }
 }
 
+#[derive(Debug, Error)]
 pub enum BindAgentAddressError {
+    #[error("{0}")]
     SyncReqError(core::SyncReqError),
+    #[error("bad structure")]
     BadStructure,
+    #[error("{0}")]
     BindAgentAddressError(Box<str>),
-}
-
-impl std::fmt::Display for BindAgentAddressError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Self::SyncReqError(err) => err.fmt(f),
-            Self::BadStructure => write!(f, "bad structure"),
-            Self::BindAgentAddressError(msg) => f.write_str(&*msg),
-        }
-    }
 }
 
 /// send a Bind Agent Address Request and wait for the Response (RFC 6.5 § 6.3.11)
