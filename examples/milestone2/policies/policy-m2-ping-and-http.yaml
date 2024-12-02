@@ -23,7 +23,7 @@ zpr:
   visaservice:
     dock: n0
     provider:
-      - [zpr.adapter.cn, eq, vs.zpr.org]
+      - [zpr.adapter.cn, eq, vs.zpr]
     admin_attrs:
       - [zpr.adapter.cn, eq, client.zpr.org]
 
