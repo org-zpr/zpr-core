@@ -4,9 +4,11 @@ use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
 use std::io::ErrorKind;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::process;
 use std::process::ExitCode;
+use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -67,7 +69,6 @@ use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
 use queues::*;
-use std::sync::Arc;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
 
@@ -253,8 +254,39 @@ fn main() -> ExitCode {
     }
 
     //
+    // instantiate (but don't launch yet) Visa Service connection manager if we're a node
+    //
+
+    let vsconn;
+
+    if ph_mode == PhMode::Node {
+        let node_agent = libnode::vsconn::new_node_agent(
+            config.agent_addr.expect("node requires agent address"),
+            &config.name,
+            &Default::default(),
+        );
+
+        let (vs_inq, _vs_outq) = mpsc::channel(topology_config.vs_queue_size);
+
+        vsconn = Some(
+            libnode::vsconn::VSConn::new(
+                node_agent,
+                vs_inq,
+                &SocketAddr::new(zpr::VISA_SERVICE_ADDR, zpr::VISA_SERVICE_PORT).to_string(),
+                &config.certificate_file,
+                config.agent_addr.expect("node requires agent address"),
+                None,
+            )
+            .expect("error launching Visa Service connection manager"),
+        );
+    } else {
+        vsconn = None;
+    }
+
+    //
     // create system assembly
     //
+
     let asm = Arc::new(Assembly {
         ph_mode,
         topology_config,
@@ -263,6 +295,7 @@ fn main() -> ExitCode {
         buffer_stack: BufferStack::new(buf_storage),
         agent_input: AgentInput::new(tun_devs.clone()),
         substrate_egress: SubstrateEgress::new(substrate_sockets.clone()),
+        vsconn,
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
         flow_control: FlowControl::new(),
@@ -397,7 +430,7 @@ fn main() -> ExitCode {
     }
 
     //
-    // start Visa Support Service if we're a node
+    // start Visa Support Service and Visa Service connection manager if we're a node
     //
 
     if ph_mode == PhMode::Node {
@@ -410,6 +443,26 @@ fn main() -> ExitCode {
         );
 
         js.spawn_blocking(move || libnode::vss::start_vss_server(vss_inq, vss_addr));
+
+        // launch the VS conn mgr... this weird dance is necessary because
+        // although it is an async method, it calls blocking functions (namely Thrift functions)...
+        // once we switch to async Thrift we can simplify this
+        let rt_handle = runtime.handle().clone();
+        let vsconn_asm = asm.clone();
+        js.spawn_blocking(move || loop {
+            let res = rt_handle.block_on(
+                vsconn_asm
+                    .vsconn
+                    .clone()
+                    .unwrap()
+                    .run(tokio_util::sync::CancellationToken::new()),
+            );
+            error!(
+                "{}: visa service connection manager terminated: {res:?}",
+                vsconn_asm.system_name
+            );
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        });
     }
 
     //
@@ -421,6 +474,8 @@ fn main() -> ExitCode {
             res.unwrap();
         }
     });
+
+    info!("{}: exiting", asm.system_name);
 
     ExitCode::SUCCESS
 }

@@ -41,6 +41,7 @@ pub struct TopologyConfig {
     pub km_message_queue_size: usize,
     pub km_link_queue_size: usize,
 
+    pub vs_queue_size: usize,
     pub vss_queue_size: usize,
 }
 
@@ -63,6 +64,7 @@ impl Default for TopologyConfig {
             km_message_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
             km_link_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
 
+            vs_queue_size: DEFAULT_SERVICE_QUEUE_SIZE,
             vss_queue_size: DEFAULT_SERVICE_QUEUE_SIZE,
         }
     }
