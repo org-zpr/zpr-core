@@ -107,7 +107,7 @@ struct State {
 /// of the node.  In the future the node will create it's own agent datastructure and
 /// had it to [VSConn::new].
 pub fn new_node_agent(
-    node_addr: &IpAddr,
+    node_addr: IpAddr,
     node_name: &str,
     claims: &BTreeMap<String, String>,
 ) -> vsapi::Agent {
@@ -665,7 +665,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(&node_addr, "n0", &claims);
+        let agnt = new_node_agent(node_addr, "n0", &claims);
 
         let conn = VSConn::new(
             agnt,
@@ -708,7 +708,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(&node_addr, "n0", &claims);
+        let agnt = new_node_agent(node_addr, "n0", &claims);
 
         let conn = VSConn::new(
             agnt,
@@ -820,7 +820,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(&node_addr, "n0", &claims);
+        let agnt = new_node_agent(node_addr, "n0", &claims);
 
         let conn = VSConn::new(
             agnt,
@@ -939,7 +939,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(&node_addr, "n0", &claims);
+        let agnt = new_node_agent(node_addr, "n0", &claims);
 
         let conn = VSConn::new(
             agnt,
