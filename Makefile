@@ -50,7 +50,7 @@ deps: cbpf cslab zpr-ext thrift
 libnode:
 	$(MAKE) -C libnode
 
-ph:
+ph: libnode
 	$(MAKE) -C adapter/ph
 
 ph-debug:

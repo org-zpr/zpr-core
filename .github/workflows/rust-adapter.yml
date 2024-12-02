@@ -28,8 +28,10 @@ jobs:
     - name: Build + test ph
       timeout-minutes: 5
       run: |
+        sudo apt update
+        sudo apt install thrift-compiler
+        make ph
         cd adapter/ph
-        make build 
         make test
 
   ph-format:
