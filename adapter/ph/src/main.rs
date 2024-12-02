@@ -55,6 +55,8 @@ mod sync_req;
 mod sys;
 mod test_packet;
 mod tun_ctl;
+mod vs_worker;
+mod vss_worker;
 mod zdp;
 mod zdp_ll;
 mod zprtun;
@@ -258,6 +260,7 @@ fn main() -> ExitCode {
     //
 
     let vsconn;
+    let vs_outq;
 
     if ph_mode == PhMode::Node {
         let node_agent = libnode::vsconn::new_node_agent(
@@ -266,7 +269,8 @@ fn main() -> ExitCode {
             &Default::default(),
         );
 
-        let (vs_inq, _vs_outq) = mpsc::channel(topology_config.vs_queue_size);
+        let (vs_inq, vs_outq_inner) = mpsc::channel(topology_config.vs_queue_size);
+        vs_outq = Some(vs_outq_inner);
 
         vsconn = Some(
             libnode::vsconn::VSConn::new(
@@ -281,6 +285,7 @@ fn main() -> ExitCode {
         );
     } else {
         vsconn = None;
+        vs_outq = None;
     }
 
     //
@@ -430,11 +435,11 @@ fn main() -> ExitCode {
     }
 
     //
-    // start Visa Support Service and Visa Service connection manager if we're a node
+    // start Visa Support Service, Visa Service connection manager, and their workers, if we're a node
     //
 
     if ph_mode == PhMode::Node {
-        let (vss_inq, _vss_outq) = mpsc::channel(asm.topology_config.vss_queue_size);
+        let (vss_inq, vss_outq) = mpsc::channel(asm.topology_config.vss_queue_size);
 
         let vss_addr = std::net::SocketAddr::new(
             asm.agent_address
@@ -457,12 +462,17 @@ fn main() -> ExitCode {
                     .unwrap()
                     .run(tokio_util::sync::CancellationToken::new()),
             );
+
             error!(
                 "{}: visa service connection manager terminated: {res:?}",
                 vsconn_asm.system_name
             );
+
             std::thread::sleep(std::time::Duration::from_secs(1));
         });
+
+        js.spawn_local(vss_worker::launch(asm.clone(), vss_outq));
+        js.spawn_local(vs_worker::launch(asm.clone(), vs_outq.unwrap()));
     }
 
     //
