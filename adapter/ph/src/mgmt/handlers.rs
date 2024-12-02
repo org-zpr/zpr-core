@@ -12,7 +12,7 @@ use crate::zdp;
 use bytes::{Buf, BufMut};
 use std::num::NonZero;
 use std::sync::Arc;
-use tracing::info;
+use tracing::*;
 use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
@@ -306,6 +306,10 @@ pub async fn handle_bind_agent_address_request(
 
     let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
         // who sent this??
+        error!(
+            "{}: coding error: stray packet from unknown source; dropping",
+            asm.system_name
+        );
         return Ok(());
     };
 

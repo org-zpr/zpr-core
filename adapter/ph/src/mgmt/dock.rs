@@ -23,17 +23,16 @@ pub async fn bind_agent_address(
     compression_mode: zpr::CompressionMode,
     five_tuple: FiveTuple,
 ) -> Result<StreamId, BindAgentAddressError> {
-    let Some(egress_link_id) =
-        special_peers::default_policy_lookup(ingress_link_id.get(), &five_tuple)
-            .and_then(|id| asm.peer_table.lookup_special_peer(id))
-            .or_else(|| {
-                // HACK: for now, we assume a visa which forwards through to the other adapter
-                // AND ALSO we manually issue a bind request out to that adapter
+    let Some(egress_link_id) = special_peers::default_policy_lookup(ingress_link_id, &five_tuple)
+        .and_then(|id| asm.peer_table.lookup_special_peer(id))
+        .or_else(|| {
+            // HACK: for now, we assume a visa which forwards through to the other adapter
+            // AND ALSO we manually issue a bind request out to that adapter
 
-                // TODO: request visa
+            // TODO: request visa
 
-                asm.hack_default_policy(ingress_link_id.get())
-            })
+            asm.hack_default_policy(ingress_link_id)
+        })
     else {
         return Err(BindAgentAddressError::PolicyError);
     };

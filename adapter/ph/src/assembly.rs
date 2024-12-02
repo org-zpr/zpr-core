@@ -254,25 +254,34 @@ impl Assembly {
         Ok(ingress_tether_id)
     }
 
-    pub fn hack_default_policy(&self, ingress_link_id: LinkId) -> Option<NonZero<LinkId>> {
-        if ingress_link_id == zpr::LINK_ID_UNKNOWN {
-            None
-        } else if ingress_link_id == zpr::LOCAL_AGENT_LINK_ID {
+    /// "Default" policy used by the node, in lieu of obtaining forwarding instructions
+    /// from the Visa Service.  Consulted after resolving special-peer policy.
+    pub fn hack_default_policy(&self, ingress_link_id: NonZero<LinkId>) -> Option<NonZero<LinkId>> {
+        if ingress_link_id.get() == zpr::LOCAL_AGENT_LINK_ID {
+            // Reject packets from the local agent.
+            // (Packets destined to the Visa Service Adapter fall under special-peer policy.)
             None
         } else {
-            let peer_ids = self.peer_ids.lock().unwrap();
-
-            let peer_id_idx = peer_ids.iter().position(|id| *id == ingress_link_id)?;
-
             let visa_server_id = self
                 .peer_table
                 .lookup_special_peer(crate::special_peers::SpecialPeerName::VisaServiceAdapter)
                 .unwrap_or_zero();
 
-            if ingress_link_id == visa_server_id {
+            // Unconditionally accept traffic from the Visa Service Adapter;
+            // forward it to our local agent.
+            if ingress_link_id.get() == visa_server_id {
                 return std::num::NonZero::new(zpr::LOCAL_AGENT_LINK_ID);
             }
 
+            let peer_ids = self.peer_ids.lock().unwrap();
+
+            let peer_id_idx = peer_ids
+                .iter()
+                .position(|id| *id == ingress_link_id.get())?;
+
+            // Unconditionally accept traffice from non-special adapters;
+            // forward to the "next" such adapter in a cycle.  (So e.g.
+            // two adapters forward between each other.)
             for i in 1..peer_ids.len() {
                 let peer_id = peer_ids[(peer_id_idx + i) % peer_ids.len()];
                 if peer_id != visa_server_id {
