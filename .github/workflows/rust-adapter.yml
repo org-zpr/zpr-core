@@ -25,48 +25,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - name: Build + test ph
-      timeout-minutes: 5
+
+    - name: Install Deps
+      timeout-minutes: 2
       run: |
         sudo apt update
         sudo apt install thrift-compiler
+
+    - name: Build + test ph
+      timeout-minutes: 5
+      run: |
         make ph
         cd adapter/ph
         make test
 
-  ph-format:
-    needs: [ph-build]
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
     - name: Check format
       timeout-minutes: 5
       run: |
         cd adapter/ph
         cargo fmt --check
 
-  ph-warnings:
-    needs: [ph-build]
-    runs-on: ubuntu-latest
-    steps: 
-    - uses: actions/checkout@v4
     - name: Check warnings 
       timeout-minutes: 5
       run: |
         cd adapter/ph 
         cargo rustc --bin ph -- -D warnings
 
-  ph-test-warnings:
-    needs: [ph-build]
-    runs-on: ubuntu-latest
-    steps: 
-    - uses: actions/checkout@v4
     - name: Check test warnings
       timeout-minutes: 5
       run: | 
         cd adapter/ph
         cargo rustc --tests -- -D warnings
-  
+
   # Tests for ph-debug
   ph-debug-build:
     runs-on: ubuntu-latest
@@ -124,10 +114,11 @@ jobs:
     - name: Check test warnings
       timeout-minutes: 5
       run: |
-        cd adapter/ph
-        cargo build
         sudo apt update
+        sudo apt install thrift-compiler
         sudo apt install libpcap-dev
+        make ph
+        cd adapter/ph
         cargo build --manifest-path ../ph-debug/Cargo.toml
         ZPR_TEST_VERBOSE=1 test/basic-test.sh
 
@@ -139,9 +130,10 @@ jobs:
     - name: Check test warnings
       timeout-minutes: 5
       run: |
-        cd adapter/ph
-        cargo build
         sudo apt update
+        sudo apt install thrift-compiler
         sudo apt install libpcap-dev
+        make ph
+        cd adapter/ph
         cargo build --manifest-path ../ph-debug/Cargo.toml
         ZPR_TEST_VERBOSE=1 test/capture-test.sh
