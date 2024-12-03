@@ -1,4 +1,4 @@
-use std::error;
+use std::{error, net::AddrParseError};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -27,10 +27,20 @@ pub enum VSClientError {
     NoAPIKey,
     #[error("Unsupported traffic type")]
     UnsupportedTrafficType,
+    #[error("Address error: {0}")]
+    AddressError(String),
+    #[error("IOError: {0}")]
+    IOError(#[from] std::io::Error),
 }
 
 impl From<thrift::Error> for VSClientError {
     fn from(e: thrift::Error) -> Self {
         VSClientError::RpcError(Box::new(e))
+    }
+}
+
+impl From<AddrParseError> for VSClientError {
+    fn from(e: AddrParseError) -> Self {
+        VSClientError::AddressError(format!("AddrParseError: {}", e))
     }
 }

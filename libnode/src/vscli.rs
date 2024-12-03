@@ -1,5 +1,5 @@
-use std::net::{IpAddr, SocketAddr};
-use std::time::SystemTime;
+use std::net::{IpAddr, SocketAddr, TcpStream};
+use std::time::{SystemTime, Duration};
 use thrift::protocol::{TBinaryInputProtocol, TBinaryOutputProtocol};
 use thrift::transport::{ReadHalf, WriteHalf};
 use thrift::transport::{TFramedReadTransport, TFramedWriteTransport};
@@ -11,6 +11,9 @@ use crate::m2;
 use crate::vsapi;
 use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
 use zpr;
+
+/// Timeout for connecting to the visa service.
+const VS_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
 // ugh!!
 type VSClientT = VisaServiceSyncClient<
@@ -55,15 +58,16 @@ pub trait VSClientI: Send {
 impl VSClient {
     // Not public; use the factory.
     fn new(service: &str) -> Result<VSClient, VSClientError> {
-        // create thrift client:
-        let mut c = TTcpChannel::new();
-        c.open(service.to_string())?;
+        let saddr = service.parse::<SocketAddr>()?;
+        let stream = TcpStream::connect_timeout(&saddr, VS_CONNECT_TIMEOUT)?;
+        let c = TTcpChannel::with_stream(stream);
 
         let (i_chan, o_chan) = c.split()?;
 
         let i_prot = TBinaryInputProtocol::new(TFramedReadTransport::new(i_chan), true);
         let o_prot = TBinaryOutputProtocol::new(TFramedWriteTransport::new(o_chan), true);
 
+        debug!("XXX VSClient.new creating VisaServiceSyncClient");
         let tcli = vsapi::VisaServiceSyncClient::new(i_prot, o_prot);
 
         Ok(VSClient {
