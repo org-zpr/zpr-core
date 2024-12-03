@@ -511,8 +511,11 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 		vs.log.Debug("poll called with invalid key", "key", key)
 		return nil, vsapi.NewUnauthorizedError()
 	}
-
-	vs.log.Info("request visa", "peer", zprAddr)
+	tetherAddr, ok := netip.AddrFromSlice(srcTetherAddr)
+	if !ok {
+		return nil, errors.New("invalid tether address on visa request")
+	}
+	vs.log.Info("request visa", "peer", zprAddr, "src_tether_addr", tetherAddr, "pkt_len", len(traffic))
 	vs.agentDB.IncrNodeVisaReq(zprAddr)
 
 	trafficDesc, err := snip.DescribePacket(snip.L3Type(l3_type), traffic)
@@ -525,10 +528,6 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 	pver := uint64(0)
 	if pp != nil {
 		pver = pp.VersionNumber()
-	}
-	tetherAddr, ok := netip.AddrFromSlice(srcTetherAddr)
-	if !ok {
-		return nil, errors.New("invalid tether address on visa request")
 	}
 	vs.log.Debug("invoking request-visa for visa service API", "requesting_node", zprAddr)
 	vsResp, err := vs.doRequestVisa(ctx, tetherAddr, trafficDesc, 0, pver)
