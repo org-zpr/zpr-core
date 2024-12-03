@@ -121,6 +121,18 @@ function create_agent_key_and_cert() {
   #openssl x509 -req -CA "$CA_NAME.crt" -CAkey "$CA_NAME.key" -copy_extensions copyall -days 1 -in "$AGENT_NAME.csr" -out "$AGENT_NAME.crt" 2> /dev/null
 }
 
+function emit_vs_config() {
+  CA_NAME=$1
+  VS_AGENT_NAME=$2
+  cat <<EOF
+adapter_cert: $(realpath "$2.crt")
+root_ca: $(realpath "$1.crt")
+disable_connect_validation: true
+vs_cert: "$EXAMPLES_PATH/vs/zpr-rsa-cert.pem"
+vs_key: "$EXAMPLES_PATH/vs/zpr-rsa-key.pem"
+EOF
+}
+
 function ping_test() {
   sudo ip netns exec zpr-node ping -q -c 5 -w 5 "$VS_ZPR_ADDR6" & wait -f $!
   sudo ip netns exec zpr-vs ping -q -c 5 -w 5 "$NODE_ZPR_ADDR6" & wait -f $!

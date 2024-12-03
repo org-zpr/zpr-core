@@ -229,7 +229,6 @@ pub async fn handle_bind_agent_address_request(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
-    // TODO: handle as node: enter into PFT
     // TODO: disallow bind requests between nodes
 
     // read addresses (always present)
@@ -313,6 +312,9 @@ pub async fn handle_bind_agent_address_request(
         return Ok(());
     };
 
+    // read triggering-packet body
+    let packet_body: Vec<u8> = pkt.body().into();
+
     // recycle request buffer for response
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
 
@@ -326,6 +328,7 @@ pub async fn handle_bind_agent_address_request(
                 ingress_link_id,
                 compression_mode,
                 five_tuple,
+                packet_body,
             )
             .await
             {

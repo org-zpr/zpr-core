@@ -2,7 +2,6 @@ use crate::assembly::{AddRouteError, Assembly};
 use crate::defs::FiveTuple;
 use crate::special_peers;
 use libnode::{vsapi, vsconn};
-use std::default::Default;
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
@@ -24,6 +23,7 @@ pub async fn bind_agent_address(
     ingress_link_id: NonZero<LinkId>,
     compression_mode: zpr::CompressionMode,
     five_tuple: FiveTuple,
+    packet_body: Vec<u8>,
 ) -> Result<StreamId, BindAgentAddressError> {
     let egress_link_id;
 
@@ -49,7 +49,7 @@ pub async fn bind_agent_address(
             let visa_req = vsconn::VisaRequest {
                 source_tether_addr: five_tuple.src_address.into(),
                 l3_type: five_tuple.l3_type,
-                packet: Default::default(),
+                packet: packet_body.clone(),
             };
 
             match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
@@ -84,6 +84,7 @@ pub async fn bind_agent_address(
             five_tuple,
             egress_link_id,
             compression_mode,
+            packet_body,
         )
         .await;
 

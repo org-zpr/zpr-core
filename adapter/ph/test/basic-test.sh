@@ -64,6 +64,8 @@ create_agent_key_and_cert ca node
 create_agent_key_and_cert ca adapter1
 create_agent_key_and_cert ca adapter2
 
+emit_vs_config ca vs.zpr > vs-config.yaml
+
 echo "Launching DUTs"
 
 #
@@ -71,15 +73,16 @@ echo "Launching DUTs"
 #
 
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
-    -c "$EXAMPLES_PATH/vs/vs-config.yaml" \
+    -c vs-config.yaml \
     -p "$EXAMPLES_PATH/policies/policy-m2-ping-and-http.bin" \
-    --listen_addr ["$VS_ZPR_ADDR6"]:5002 &
+    --listen_addr "[$VS_ZPR_ADDR6]":5002 2>&1 | tee vs.log &
 
 sleep 2
 
 #
 # Launch PHs
 #
+
 sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
      node \
      --name "zpr-node" \
@@ -104,7 +107,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$VS_ZPR_ADDR6" 2>&1 |tee vs.log &
+  --agent-addr "$VS_ZPR_ADDR6" 2>&1 |tee adapter-vs.log &
 
 sleep 2  # TODO: remove?
 

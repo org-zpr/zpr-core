@@ -212,6 +212,7 @@ impl Assembly {
         five_tuple: defs::FiveTuple,
         egress_link_id: NonZero<LinkId>,
         compression_mode: zpr::CompressionMode,
+        packet_body: Vec<u8>,
     ) -> Result<zpr::StreamId, AddRouteError> {
         let egress_tether_id;
         if egress_link_id.get() == zpr::LOCAL_AGENT_LINK_ID {
@@ -234,6 +235,7 @@ impl Assembly {
                 egress_link_id.get(),
                 compression_mode,
                 five_tuple,
+                packet_body,
             )
             .await
             .map_err(|e| AddRouteError::BindFailed(e))?;
