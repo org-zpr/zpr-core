@@ -7,7 +7,7 @@ use crate::special_peers;
 
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-use tracing::{error, info, warn};
+use tracing::*;
 use zpr::LinkId;
 use zpr::ZPI_ENCRYPTED_HEADER_FLAG;
 
@@ -253,7 +253,7 @@ impl LinkStateWrapper {
         locked_fsm.status = LinkStatus::Up;
         locked_fsm.state = LinkState::Inactive;
 
-        info!(
+        debug!(
             "{}: Configured link {}.  State: {:?}, status: {:?}",
             asm.system_name, self.id, locked_fsm.state, locked_fsm.status
         );
@@ -275,7 +275,7 @@ impl LinkStateWrapper {
 
         locked_fsm.state = LinkState::Keying;
 
-        info!(
+        debug!(
             "{}: Link {} started.  Keying in progress",
             asm.system_name, self.id
         );
@@ -363,7 +363,7 @@ impl LinkStateWrapper {
             }
         }
 
-        info!(
+        debug!(
             "{}: Link {} finished keying.  Starting hello",
             asm.system_name, self.id
         );
@@ -403,7 +403,7 @@ impl LinkStateWrapper {
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToNode, LinkState::Helloing) => {
                 locked_fsm.state = LinkState::Active;
-                info!(
+                debug!(
                     "{}: Link {} finished helloing.  Becoming active",
                     asm.system_name, self.id
                 );
@@ -411,7 +411,7 @@ impl LinkStateWrapper {
             }
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
                 locked_fsm.state = LinkState::RegisterAA;
-                info!(
+                debug!(
                     "{}: Link {} finished helloing.  Waiting on register agent address",
                     asm.system_name, self.id
                 );
@@ -438,7 +438,7 @@ impl LinkStateWrapper {
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::Helloing) => {
                 locked_fsm.state = LinkState::RegisterAA;
-                info!(
+                debug!(
                     "{}: Link {} finished helloing.  Sending register agent address",
                     asm.system_name, self.id
                 );
@@ -460,7 +460,7 @@ impl LinkStateWrapper {
             }
             (LinkType::NodeToNode, LinkState::Helloing) => {
                 locked_fsm.state = LinkState::Active;
-                info!(
+                debug!(
                     "{}: Link {} finished helloing.  Becoming active",
                     asm.system_name, self.id
                 );
@@ -492,7 +492,7 @@ impl LinkStateWrapper {
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
                 locked_fsm.agent_addresses.push(addr);
                 locked_fsm.state = LinkState::Active;
-                info!(
+                debug!(
                     "{}: Link {} received agent address.  Becoming active",
                     asm.system_name, self.id
                 );
@@ -517,7 +517,7 @@ impl LinkStateWrapper {
             (LinkType::AdapterToNode, LinkState::RegisterAA) => {
                 locked_fsm.state = LinkState::Active;
                 asm.tun_ctl.set_carrier(true).unwrap();
-                info!(
+                debug!(
                     "{}: Link {} finished registering agent address.  Becoming active",
                     asm.system_name, self.id
                 );
@@ -564,7 +564,7 @@ impl LinkStateWrapper {
     }
 
     pub fn run_active(&self, asm: &Assembly) -> Result<(), LinkStateError> {
-        info!(
+        debug!(
             "{}: Link {} entering active state",
             asm.system_name, self.id
         );

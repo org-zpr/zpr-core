@@ -49,7 +49,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
             .peer_table
             .is_security_assocaition_established(dock_link_id)
     {
-        error!(
+        warn!(
             "{}: Link {} has no security association, aborting bind request operation",
             asm.system_name, dock_link_id
         );
@@ -131,7 +131,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
 
         Err(err) => {
             // Bind failed; remove pending entry from ALT.
-            info!(
+            error!(
                 "{}: Bind of {} failed: {}",
                 asm.system_name, five_tuple, err
             );

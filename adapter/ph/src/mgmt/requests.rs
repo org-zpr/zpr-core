@@ -12,7 +12,7 @@ use crate::zdp;
 use bytes::{Buf, BufMut};
 use std::net::IpAddr;
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::*;
 use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
@@ -62,7 +62,7 @@ pub async fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<
                 return Err(());
             };
             let status = hdr.status;
-            info!("Received HelloResponse, status: {}", status);
+            debug!("Received HelloResponse, status: {}", status);
             asm.buffer_stack.put_buffer(hello_res.destroy());
             Ok(())
         }
@@ -120,7 +120,7 @@ pub async fn send_register_agent_address_request(
                 fastpath::drop_and_count(asm, register_res, CounterType::BadStructure);
                 return Err(());
             };
-            info!(
+            debug!(
                 "Received RegisterAgentAddressResponse, status: {}",
                 hdr.status_code
             );

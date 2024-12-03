@@ -37,7 +37,7 @@ pub async fn bind_agent_address(
         return Err(BindAgentAddressError::PolicyError);
     };
 
-    info!(
+    debug!(
         "{}: routing {} from {} to {}",
         asm.system_name, five_tuple, ingress_link_id, egress_link_id
     );

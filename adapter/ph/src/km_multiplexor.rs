@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::{sync::mpsc, time};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::*;
 use zpr;
 
 /// How often the signal monitor worker checks the error conditions
@@ -86,7 +86,7 @@ pub async fn launch_signal_worker(
     loop {
         tokio::select! {
             _ = sp_ctok.cancelled() => {
-                info!("{}: KM Multiplexor shutting down", asm.system_name);
+                debug!("{}: KM Multiplexor shutting down", asm.system_name);
                 break;
             }
 
@@ -97,7 +97,7 @@ pub async fn launch_signal_worker(
                         if let Some(km) = asm.peer_table.clone_km_manager(*link_id) {
                             match km.restart() {
                                 Ok(_) => {
-                                    info!("{}: km_multiplexor: restarted key manager on link {} (error_count = {})", asm.system_name, link_id, stat.error_count);
+                                    debug!("{}: km_multiplexor: restarted key manager on link {} (error_count = {})", asm.system_name, link_id, stat.error_count);
                                     stat.restart_t = now;
                                 }
                                 Err(e) => {
@@ -113,16 +113,16 @@ pub async fn launch_signal_worker(
             }
 
             Some(linkmsg) = sig_queue.recv() => {
-                info!("{}: km_multiplexor: link: {}, signal {:?}", asm.system_name, linkmsg.link_id, linkmsg.msg);
+                debug!("{}: km_multiplexor: link: {}, signal {:?}", asm.system_name, linkmsg.link_id, linkmsg.msg);
                 match linkmsg.msg {
                     KmSignal::SaIdChange { old, new } => {
-                        info!("{}: km_multiplexor: SA ID change on link {}: {} -> {}", asm.system_name, linkmsg.link_id, old, new);
+                        debug!("{}: km_multiplexor: SA ID change on link {}: {} -> {}", asm.system_name, linkmsg.link_id, old, new);
                         if old == 0 {
                             let _ = status.remove(&linkmsg.link_id);
                         }
                     }
                     KmSignal::SaEstablished(sa) => {
-                        info!("{}: km_multiplexor: link {}: SA established (SEND_ZPIS: {}, RECV_ZPIS: {}",
+                        debug!("{}: km_multiplexor: link {}: SA established (SEND_ZPIS: {}, RECV_ZPIS: {}",
                             asm.system_name, linkmsg.link_id, sa.send_zpis, sa.recv_zpis);
 
                         match asm.peer_table.set_security_association(linkmsg.link_id, sa) {
@@ -166,7 +166,7 @@ pub async fn launch_signal_worker(
                     }
                     KmSignal::Termination => {
                         let _ = status.remove(&linkmsg.link_id);
-                        info!("{}: km_multiplexor: termination signal on link {}", asm.system_name, linkmsg.link_id);
+                        debug!("{}: km_multiplexor: termination signal on link {}", asm.system_name, linkmsg.link_id);
                     }
                 }
             }

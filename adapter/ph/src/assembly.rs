@@ -24,7 +24,7 @@ use std::num::NonZero;
 use std::result::Result;
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{error, info};
+use tracing::*;
 use zpr::{self, LinkId, SubstrateAddr};
 use zpr_ext::std::num::NonZeroExt;
 
@@ -160,7 +160,7 @@ impl Assembly {
         link_type: LinkType,
     ) -> Result<NonZero<LinkId>, PeerInsertError> {
         assert!(link_type != LinkType::NodeToNode);
-        info!(
+        debug!(
             "{}: Starting tether with {}",
             self.system_name, adapter_addr
         );

@@ -13,7 +13,7 @@ use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
-use tracing::{error, info, warn};
+use tracing::*;
 use tracing_subscriber;
 
 mod adapter_manager_worker;
@@ -420,14 +420,14 @@ fn main() -> ExitCode {
     if ph_mode == PhMode::Adapter {
         local_set.block_on(&runtime, async {
             let dsid = zpr::DOCK_LINK_ID;
-            info!(
+            debug!(
                 "{}: waiting on security assocaition establishment on link {}",
                 asm.system_name, dsid
             );
             while !asm.peer_table.is_security_assocaition_established(dsid) {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
-            info!(
+            debug!(
                 "{}: security assocaition established successfully on link {}",
                 asm.system_name, dsid
             );

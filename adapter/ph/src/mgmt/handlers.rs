@@ -80,7 +80,7 @@ pub async fn handle_hello_request(
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
-    info!(
+    debug!(
         "{}: Received Hello Request for link {}",
         asm.system_name, ingress_link_id
     );
@@ -119,7 +119,7 @@ pub async fn handle_hello_response(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
     let status = hdr.status;
-    info!(
+    debug!(
         "{}: Received Hello Response for link {}, status: {}",
         asm.system_name, ingress_link_id, status
     );
@@ -168,7 +168,7 @@ pub async fn handle_register_agent_address_request(
         }
     }
 
-    info!(
+    debug!(
         "{}: Received Register Agent Address Request for link {} with address {}",
         asm.system_name, ingress_link_id, agent_address
     );
@@ -205,7 +205,7 @@ pub async fn handle_register_agent_address_response(
     pkt: BufferPacket,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
-    info!(
+    debug!(
         "{}: Received Register Agent Address Response for link {}",
         asm.system_name, ingress_link_id
     );
