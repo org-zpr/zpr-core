@@ -6,6 +6,7 @@ ca_file = "ca-cert.pem"
 certificate_file = "node-cert.pem"
 private_key_file = "node-key.pem"
 self_addr = "172.16.1.1:5000"
+agent_addr = "fd5a:5052:90de::1"
 
 # Currently tokio TUN on linux will not set an IPv6 address on a TUN interface.
 # So the running of the node needs to first create and then pass in the TUN
@@ -17,5 +18,4 @@ tun_if = "MISSING_TUN"
 #
 #          "zpr.addr" = "fd5a:5052:90de::1"
 #
-#       Also, how does node set its internal adapter address?
 

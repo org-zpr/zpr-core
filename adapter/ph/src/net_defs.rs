@@ -128,6 +128,16 @@ impl From<IpAddress> for Ipv6Addr {
     }
 }
 
+impl From<IpAddress> for IpAddr {
+    fn from(addr: IpAddress) -> Self {
+        if addr.is_v4() {
+            IpAddr::V4(addr.read_as_v4().into())
+        } else {
+            IpAddr::V6(addr.v6.into())
+        }
+    }
+}
+
 impl std::fmt::Display for IpAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         Ipv6Addr::from(*self).fmt(f)

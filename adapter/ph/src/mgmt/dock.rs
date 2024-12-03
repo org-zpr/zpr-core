@@ -1,6 +1,8 @@
 use crate::assembly::{AddRouteError, Assembly};
 use crate::defs::FiveTuple;
 use crate::special_peers;
+use libnode::{vsapi, vsconn};
+use std::default::Default;
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
@@ -23,19 +25,44 @@ pub async fn bind_agent_address(
     compression_mode: zpr::CompressionMode,
     five_tuple: FiveTuple,
 ) -> Result<StreamId, BindAgentAddressError> {
-    let Some(egress_link_id) = special_peers::default_policy_lookup(ingress_link_id, &five_tuple)
-        .and_then(|id| asm.peer_table.lookup_special_peer(id))
-        .or_else(|| {
-            // HACK: for now, we assume a visa which forwards through to the other adapter
-            // AND ALSO we manually issue a bind request out to that adapter
+    let egress_link_id;
 
-            // TODO: request visa
+    if let Some(id) = special_peers::default_policy_lookup(ingress_link_id, &five_tuple)
+        .and_then(|spname| asm.peer_table.lookup_special_peer(spname))
+    {
+        egress_link_id = id;
+    } else {
+        let visa_req = vsconn::VisaRequest {
+            source_tether_addr: five_tuple.src_address.into(),
+            l3_type: five_tuple.l3_type,
+            packet: Default::default(),
+        };
 
-            asm.hack_default_policy(ingress_link_id)
-        })
-    else {
-        return Err(BindAgentAddressError::PolicyError);
-    };
+        match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
+            Ok(vsapi::VisaResponse {
+                status: Some(vsapi::StatusCode::SUCCESS),
+                ..
+            }) => {
+                // HACK: for now, we assume a visa which forwards through to the other adapter
+                // AND ALSO we manually issue a bind request out to that adapter
+                if let Some(id) = asm.hack_default_policy(ingress_link_id) {
+                    egress_link_id = id;
+                } else {
+                    return Err(BindAgentAddressError::PolicyError);
+                }
+            }
+
+            Ok(resp) => {
+                info!("{}: visa request rejected: {resp:?}", asm.system_name);
+                return Err(BindAgentAddressError::PolicyError);
+            }
+
+            Err(err) => {
+                error!("{}: visa request error: {err}", asm.system_name);
+                return Err(BindAgentAddressError::PolicyError);
+            }
+        }
+    }
 
     info!(
         "{}: routing {} from {} to {}",
