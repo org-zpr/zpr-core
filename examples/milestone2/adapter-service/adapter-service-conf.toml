@@ -7,10 +7,8 @@ certificate_file = "adapter-service-cert.pem"
 private_key_file = "adapter-service-key.pem"
 agent_addr = "fd5a:5052:1::8080"
 
-# Currently tokio TUN on linux will not set an IPv6 address on a TUN interface.
-# So the running of the node needs to first create and then pass in the TUN
-# interface name using `--tun-if` on the command line.
-tun_if = "MISSING_TUN"
+# use `sudo ./mktun.sh` to set this up
+tun_if = "tun9"
 
 
 [adapter]
