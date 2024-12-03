@@ -14,7 +14,7 @@ use std::time::SystemTime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{self, Duration};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, debug};
 
 use crate::errors::{VSClientError, VSError};
 use crate::vsapi;
@@ -197,7 +197,7 @@ impl VSConn {
     /// This little run loop is fairly basic: all requests of the visa service run one at a time and
     /// in order.
     pub async fn run(&self, ctok: CancellationToken) -> Result<(), VSError> {
-        info!("VSConn::run starts");
+        info!("run starts");
 
         let (tx, mut rx) = mpsc::channel(16);
         let fac: vscli::VSClientFactory;
@@ -216,7 +216,9 @@ impl VSConn {
             Ok(c) => c,
             Err(e) => return Err(e.into()),
         };
+        debug!("client created successfully");
         self.initialize(&mut client)?;
+        debug!("initialize completed successfully");
 
         let mut interval = time::interval(PING_INTERVAL);
         let mut ping_errors = 0;
