@@ -468,7 +468,7 @@ pub fn substrate_ingress(
                     }
                 } else {
                     // We have an SA and ZPI does not match.
-                    info!(
+                    warn!(
                         "{}: ingress: link {}: unexpected ZPI value {} (expected {:?})",
                         asm.system_name,
                         pkt.metadata().ingress_link_id,
@@ -493,7 +493,7 @@ pub fn substrate_ingress(
     if !secure {
         // Not under a security assocation, which means only ZPI 0 is allowed.
         if zpi_hdr.zpi != zpr::ZPI_0 && pkt.metadata().ingress_link_id != zpr::LINK_ID_UNKNOWN {
-            info!(
+            warn!(
                 "{}: ingress: {}: ZPI {} not allowed on unestablished SA",
                 asm.system_name,
                 pkt.metadata().ingress_link_id,
@@ -689,7 +689,6 @@ pub fn agent_output_post_classify(asm: &Assembly, mut pkt: BufferPacket, allow_b
     match asm.alt.get(&five_tuple) {
         Some(entry) => match &*entry {
             AltEntry::Active(pep) => {
-                info!("{}: found PEP for {}", asm.system_name, five_tuple);
                 // compute A2A MAC
                 // TODO: use actual A2A SAID & keyed hash
                 let a2a_said: zpr::A2aSaid = 0;

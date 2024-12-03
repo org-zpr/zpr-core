@@ -27,44 +27,53 @@ pub async fn bind_agent_address(
 ) -> Result<StreamId, BindAgentAddressError> {
     let egress_link_id;
 
-    if let Some(id) = special_peers::default_policy_lookup(ingress_link_id, &five_tuple)
-        .and_then(|spname| asm.peer_table.lookup_special_peer(spname))
-    {
-        egress_link_id = id;
+    if let Some(spname) = special_peers::default_policy_lookup(ingress_link_id, &five_tuple) {
+        if let Some(id) = asm.peer_table.lookup_special_peer(spname) {
+            egress_link_id = id;
+        } else {
+            error!("{}: visa request error: special peer routing applies, but special peer ({spname:?}) not connected",
+                asm.system_name);
+            return Err(BindAgentAddressError::PolicyError);
+        }
     } else {
-        let visa_req = vsconn::VisaRequest {
-            source_tether_addr: five_tuple.src_address.into(),
-            l3_type: five_tuple.l3_type,
-            packet: Default::default(),
+        // HACK: for now, we assume a visa which forwards through to the other adapter
+        // AND ALSO we manually issue a bind request out to that adapter
+        let Some(proposed_egress_link_id) = asm.hack_default_policy(ingress_link_id) else {
+            return Err(BindAgentAddressError::PolicyError);
         };
 
-        match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
-            Ok(vsapi::VisaResponse {
-                status: Some(vsapi::StatusCode::SUCCESS),
-                ..
-            }) => {
-                // HACK: for now, we assume a visa which forwards through to the other adapter
-                // AND ALSO we manually issue a bind request out to that adapter
-                if let Some(id) = asm.hack_default_policy(ingress_link_id) {
-                    egress_link_id = id;
-                } else {
+        if proposed_egress_link_id.get() == zpr::LOCAL_AGENT_LINK_ID {
+            // VERY HACK
+            egress_link_id = proposed_egress_link_id;
+        } else {
+            let visa_req = vsconn::VisaRequest {
+                source_tether_addr: five_tuple.src_address.into(),
+                l3_type: five_tuple.l3_type,
+                packet: Default::default(),
+            };
+
+            match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
+                Ok(vsapi::VisaResponse {
+                    status: Some(vsapi::StatusCode::SUCCESS),
+                    ..
+                }) => {
+                    egress_link_id = proposed_egress_link_id;
+                }
+
+                Ok(resp) => {
+                    info!("{}: visa request rejected: {resp:?}", asm.system_name);
                     return Err(BindAgentAddressError::PolicyError);
                 }
-            }
 
-            Ok(resp) => {
-                info!("{}: visa request rejected: {resp:?}", asm.system_name);
-                return Err(BindAgentAddressError::PolicyError);
-            }
-
-            Err(err) => {
-                error!("{}: visa request error: {err}", asm.system_name);
-                return Err(BindAgentAddressError::PolicyError);
+                Err(err) => {
+                    error!("{}: visa request error: {err}", asm.system_name);
+                    return Err(BindAgentAddressError::PolicyError);
+                }
             }
         }
     }
 
-    info!(
+    debug!(
         "{}: routing {} from {} to {}",
         asm.system_name, five_tuple, ingress_link_id, egress_link_id
     );

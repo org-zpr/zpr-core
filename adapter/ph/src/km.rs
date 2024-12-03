@@ -21,7 +21,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
+use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
 
@@ -592,7 +592,7 @@ impl KeyManager {
         link_id: zpr::LinkId,
         km_signals_out: &mpsc::Sender<KmLinkMsg<KmSignal>>,
     ) -> KmResult<()> {
-        info!("KM state transition {:?} -> {:?}", prev_state, next_state);
+        debug!("KM state transition {:?} -> {:?}", prev_state, next_state);
         if matches!(prev_state, KmSMState::Error) {
             // We transitioned out of error state -- clear error related settings.
             let mut state = self.shared.state.lock().unwrap();
@@ -616,7 +616,7 @@ impl KeyManager {
                     my_sa.sa_id = cur_id;
                     state.ts = my_sa.clone();
                 }
-                info!("KM: New SA_ID: {}", cur_id);
+                debug!("KM: New SA_ID: {}", cur_id);
                 match self
                     .send_signal(
                         &km_signals_out,
