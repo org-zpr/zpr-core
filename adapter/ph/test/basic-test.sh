@@ -3,6 +3,8 @@ set -euo pipefail
 
 PH_BIN=$(realpath "$(dirname $0)/../target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../../ph-debug/target/debug/ph-debug")
+VS_BIN=$(realpath "$(dirname $0)/../../../visaservice/core/build/vservice")
+EXAMPLES_PATH=$(realpath "$(dirname $0)/../../../examples/milestone2/")
 
 source "$(dirname $0)/common_funcs.sh"
 
@@ -64,6 +66,16 @@ create_agent_key_and_cert ca adapter2
 
 echo "Launching DUTs"
 
+#
+# Launch Visa Service
+#
+
+sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
+    -c "$EXAMPLES_PATH/vs/vs-config.yaml" \
+    -p "$EXAMPLES_PATH/policies/policy-m2-ping-and-http.bin" \
+    --listen_addr ["$VS_ZPR_ADDR6"]:12345 &
+
+sleep 2
 
 #
 # Launch PHs
