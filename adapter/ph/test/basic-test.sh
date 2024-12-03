@@ -73,7 +73,7 @@ echo "Launching DUTs"
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
     -c "$EXAMPLES_PATH/vs/vs-config.yaml" \
     -p "$EXAMPLES_PATH/policies/policy-m2-ping-and-http.bin" \
-    --listen_addr ["$VS_ZPR_ADDR6"]:12345 &
+    --listen_addr ["$VS_ZPR_ADDR6"]:8183 &
 
 sleep 2
 
