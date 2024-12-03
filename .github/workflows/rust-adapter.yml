@@ -129,12 +129,13 @@ jobs:
     steps: 
     - uses: actions/checkout@v4
     - name: Check test warnings
-      timeout-minutes: 5
+      timeout-minutes: 10
       run: |
         sudo apt update
         sudo apt install thrift-compiler
         sudo apt install libpcap-dev
         make ph
+        make visaservice
         cd adapter/ph
         cargo build --manifest-path ../ph-debug/Cargo.toml
         ZPR_TEST_VERBOSE=1 test/capture-test.sh

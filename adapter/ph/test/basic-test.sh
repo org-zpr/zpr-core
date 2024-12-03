@@ -64,7 +64,7 @@ create_agent_key_and_cert ca node
 create_agent_key_and_cert ca adapter1
 create_agent_key_and_cert ca adapter2
 
-echo "Launching DUTs"
+echo "Launching Visa Service"
 
 #
 # Launch Visa Service
@@ -76,6 +76,8 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
     --listen_addr ["$VS_ZPR_ADDR6"]:5002 &
 
 sleep 2
+
+echo "Launching Node"
 
 #
 # Launch PHs
@@ -92,6 +94,8 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
      --agent-addr "$NODE_ZPR_ADDR6" 2>&1 |tee node.log &
 
 sleep 2  # TODO: remove?
+
+echo "Launching Adapters"
 
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
