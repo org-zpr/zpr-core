@@ -71,9 +71,14 @@ create_network
 
 create_ca_key_and_cert ca
 create_agent_key_and_cert ca vs.zpr
-create_agent_key_and_cert ca node
+#create_agent_key_and_cert ca node
 create_agent_key_and_cert ca adapter1
 create_agent_key_and_cert ca adapter2
+
+# Temporary hack until our policy compiler is in-repo
+cp "$EXAMPLES_PATH/node/basic-test-node.key" node.key
+cp "$EXAMPLES_PATH/node/basic-test-node-cert.pem" node.crt
+cp "$EXAMPLES_PATH/node/basic-test-node-pubkey.pem" node.pubkey
 
 #
 # Launch Visa Service
@@ -81,7 +86,7 @@ create_agent_key_and_cert ca adapter2
 
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
     -c "$EXAMPLES_PATH/vs/vs-config.yaml" \
-    -p "$EXAMPLES_PATH/policies/policy-m2-ping-and-http.bin" \
+    -p "$EXAMPLES_PATH/policies/basic-test.bin" \
     --listen_addr ["$VS_ZPR_ADDR6"]:5002 &
 
 sleep 2

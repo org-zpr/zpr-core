@@ -103,8 +103,12 @@ function destroy_network() {
 
 function create_ca_key_and_cert() {
   CA_NAME=$1
-  "$ZPR_PKI_BIN" gencakey >"$CA_NAME.key"
-  "$ZPR_PKI_BIN" gencacert /CN="$CA_NAME" 1 <"$CA_NAME.key" >"$CA_NAME.crt"
+  # We can't do this properly until we pull in the policy compiler
+  # So just use the pair set up in the examples directory for now
+  cp "$EXAMPLES_PATH/keys/ca-key.pem" "$CA_NAME.key"
+  cp "$EXAMPLES_PATH/node/ca-cert.pem" "$CA_NAME.crt"
+  #"$ZPR_PKI_BIN" gencakey >"$CA_NAME.key"
+  #"$ZPR_PKI_BIN" gencacert /CN="$CA_NAME" 1 <"$CA_NAME.key" >"$CA_NAME.crt"
   #openssl genrsa -out "$CA_NAME.key"
   #openssl x509 -new -subj /CN="$CA_NAME" -key "$CA_NAME.key" -extfile /etc/ssl/openssl.cnf -extensions v3_ca -days 1 -out "$CA_NAME.crt"
 }

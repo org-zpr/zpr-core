@@ -1,0 +1,84 @@
+zpl_format: 2
+
+zpr:
+  nodes:
+    n0:
+      # Dock public key
+      key: b9oiUhEcvRAhtzqOrl0yY59j/R3mUCxcLiMjdr/d7g0=
+      provider:
+        - [zpr.adapter.cn, eq, node.zpr.org]
+      address: "fd00:1:0::1" # ZPR contact addr
+      interfaces:
+        n0i0:
+          netaddr: "10.0.0.1:5002" # POE
+      services:
+        - ping
+      policies:
+        - desc: any cert based agent can ping node
+          conditions:
+            - desc: match on authority
+              attrs:
+                - [zpr.authority, eq, zpr.adapter]
+
+  visaservice:
+    dock: n0
+    provider:
+      - [zpr.adapter.cn, eq, vs.zpr]
+    admin_attrs:
+      - [zpr.adapter.cn, eq, client.zpr.org]
+
+  datasources:
+    zpr.adapter:
+      api: validation/1
+      authority:
+        encoding: pem
+        cert_data: $import[../vs/ca-cert.pem]
+
+services:
+  http:
+    tcp: 80
+  ssh:
+    tcp: 22
+  perf:
+    tcp: 5056
+  ping:
+    icmp:
+      type: request-response
+      type_codes: 128, 129
+
+communications:
+  systems:
+    basictest:
+      desc: ZPR's basic integration test
+      components:
+        zpr_a:
+          desc: Allows pinging the agent at zpr-a
+          services:
+            - ping
+          provider:
+            - [zpr.adapter.cn, eq, service.zpr.org]
+          address: "10.0.1.2" # ZPR contact addr
+          address: "fd00:1:1::1"
+          policies:
+            - desc: specific client can access
+              conditions:
+                - desc: one specific agent has access
+                  attrs:
+                    - [zpr.addr, eq, zpr_b.address]
+                    - [zpr.adapter.cn, eq, client.zpr.org]
+        zpr_b:
+          desc: Allows pinging the agent at zpr-b
+          desc: zpr-b-ping
+          services:
+            - ping
+          provider:
+            - [zpr.adapter.cn, eq, service.zpr.org]
+          address: "10.0.2.2" # ZPR contact addr
+          address: "fd00:1:2::1"
+          policies:
+            - desc: specific client can access
+              conditions:
+                - desc: one specific agent has access
+                  attrs:
+                    - [zpr.addr, eq, zpr_a.address]
+                    - [zpr.adapter.cn, eq, client.zpr.org]
