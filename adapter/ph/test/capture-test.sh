@@ -104,7 +104,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --name "zpr-vs" \
   --control-path "$VS_SOCK" \
-  --self-addr "$VS_SUBSTRATE_ADDR":12345 \
+  --self-addr "$VS_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
   --certificate-file vs.zpr.crt \
   --private-key-file vs.zpr.key \
@@ -119,7 +119,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --name "zpr-a" \
   --control-path "$ADAPTER1_SOCK" \
-  --self-addr "$A_SUBSTRATE_ADDR":12345 \
+  --self-addr "$A_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
   --certificate-file adapter1.crt \
   --private-key-file adapter1.key \
@@ -132,7 +132,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --name "zpr-b" \
   --control-path "$ADAPTER2_SOCK" \
-  --self-addr "$B_SUBSTRATE_ADDR":12345 \
+  --self-addr "$B_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
   --certificate-file adapter2.crt \
   --private-key-file adapter2.key \

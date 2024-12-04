@@ -1,5 +1,8 @@
 //! Static system configuration.
 
+use std::net::{IpAddr, SocketAddr};
+use std::path::PathBuf;
+
 /// Size of a packet buffer.
 pub const PACKET_BUFFER_SIZE: usize = 4096 * 3;
 
@@ -22,6 +25,46 @@ const DEFAULT_WORKER_CONCURRENCY: usize = 4;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_WORKER_CONCURRENCY: usize = 1;
+
+/// This config struct is loaded up from the command line args and used by the
+/// ph system to configure itself.  Do not create this directly, use [argparse].
+#[derive(Debug)]
+pub struct Config {
+    /// Name (for logging, etc) of the node or adapter instance.
+    pub name: String,
+
+    /// Path to the unix domain socket for the control interface.
+    pub control_path: PathBuf,
+
+    /// Source address for our UDP substrate socket. For an adapter this should (always?) be `0.0.0.0:0`.
+    /// For a node this is the nodes dock listening address.
+    pub self_addr: SocketAddr,
+
+    /// Path to a PEM file containing the Certificate Authority certificate.
+    pub ca_file: PathBuf,
+
+    /// Path to a PEM file containing the signed certificate listing the noise public key.
+    pub certificate_file: PathBuf,
+
+    /// Path to a PEM file containing the noise private key.
+    pub private_key_file: PathBuf,
+
+    /// Optionally specify the name of the TUN interface to use. In most cases this
+    /// should be left as None so that the kernal can pick a free one.
+    pub tun_if: Option<String>,
+
+    /// Enable debug logging.
+    pub debug: bool,
+
+    /// Required for adapter - the node dock address on substrate.
+    pub node_addr: Option<SocketAddr>,
+
+    /// Required for adapter - the adapters ZPR agent address.
+    pub agent_addr: Option<IpAddr>,
+
+    /// Required for adapter - the path to the PEM file containing the nodes noise public key (not a certificate).
+    pub node_public_key_file: Option<PathBuf>,
+}
 
 /// Configuration of data path & control plane topology.
 pub struct TopologyConfig {
