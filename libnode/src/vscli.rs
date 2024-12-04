@@ -4,7 +4,7 @@ use thrift::protocol::{TBinaryInputProtocol, TBinaryOutputProtocol};
 use thrift::transport::{ReadHalf, WriteHalf};
 use thrift::transport::{TFramedReadTransport, TFramedWriteTransport};
 use thrift::transport::{TIoChannel, TTcpChannel};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::errors::VSClientError;
 use crate::m2;
@@ -13,7 +13,7 @@ use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
 use zpr;
 
 /// Timeout for connecting to the visa service.
-const VS_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+const VS_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 // ugh!!
 type VSClientT = VisaServiceSyncClient<
@@ -185,7 +185,7 @@ impl VSClientI for VSClient {
             _ => return Err(VSClientError::UnsupportedTrafficType),
         };
 
-        debug!("sending VISA_REQUEST to {}", self.service);
+        info!("sending VISA_REQUEST to {}", self.service); // raising from debug to info for M/2
         match self.cli.request_visa(key.clone(), addr_bytes, l3t, packet) {
             Ok(result) => Ok(result),
             Err(e) => Err(e.into()),

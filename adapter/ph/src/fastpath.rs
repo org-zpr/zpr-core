@@ -197,6 +197,7 @@ pub enum DecryptError {
     UnknownZpi,
     DecryptionFailure,
     MicvFailure,
+    BadChecksum,
 }
 
 impl From<DecryptError> for CounterType {
@@ -206,6 +207,7 @@ impl From<DecryptError> for CounterType {
             DecryptError::UnknownZpi => Self::UnknownZpi,
             DecryptError::DecryptionFailure => Self::DecryptionFailure,
             DecryptError::MicvFailure => Self::MicvFailure,
+            DecryptError::BadChecksum => Self::BadChecksum,
         }
     }
 }
@@ -214,7 +216,7 @@ impl From<DecryptError> for CounterType {
 pub fn decrypt_null(pkt: &mut Packet<impl PacketBuffer>) -> Result<(), DecryptError> {
     // RFC 6.5 § 5.25.2
     if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
-        return Err(DecryptError::MicvFailure);
+        return Err(DecryptError::BadChecksum);
     }
 
     pkt.shrink_by(2); // remove checksum

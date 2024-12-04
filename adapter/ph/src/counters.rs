@@ -91,6 +91,7 @@ pub enum CounterType {
     UnknownZpi,
     SequenceError,
     MicvFailure,
+    BadChecksum, // internet checksum used in null encrypt/decrypt
     DecryptionFailure,
     EncryptionFailure,
     UnknownType,
@@ -136,6 +137,7 @@ impl CounterType {
             Self::UnknownZpi => "Unknown ZPI",
             Self::SequenceError => "Sequence Error",
             Self::MicvFailure => "MICV Failure",
+            Self::BadChecksum => "Bad Checksum",
             Self::DecryptionFailure => "Decryption Failure",
             Self::EncryptionFailure => "Encryption Failure",
             Self::UnknownType => "Unknown Type",

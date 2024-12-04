@@ -57,6 +57,7 @@ pub async fn bind_agent_address(
                     status: Some(vsapi::StatusCode::SUCCESS),
                     ..
                 }) => {
+                    info!("visa request succeeds, egress_link_id = {}", proposed_egress_link_id);
                     egress_link_id = proposed_egress_link_id;
                 }
 
@@ -73,8 +74,8 @@ pub async fn bind_agent_address(
         }
     }
 
-    debug!(
-        "{}: routing {} from {} to {}",
+    info!(
+        "{}: now routing {} from {} to {}",
         asm.system_name, five_tuple, ingress_link_id, egress_link_id
     );
 

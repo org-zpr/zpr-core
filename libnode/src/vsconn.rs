@@ -171,7 +171,7 @@ impl VSConn {
     /// Registers with visa service and obtains an API key.
     /// Blocking network call.
     fn initialize(&self, client: &mut Box<dyn VSClientI>) -> Result<(), VSError> {
-        info!("VSConn::initialize starts");
+        debug!("VSConn::initialize starts");
 
         let pem_data: String;
         let vss_svc_addr;
