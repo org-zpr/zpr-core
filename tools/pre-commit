@@ -8,10 +8,10 @@ GIT_PH_DIR="$GIT_BASE_DIR/adapter/ph"
 GIT_LIBNODE_DIR="$GIT_BASE_DIR/libnode"
 
 # Check if there are any files in PH that are changed by this commit (not counting deletes)
-if [ ! `git diff HEAD --cached --quiet --diff-filter=d --relative=$GIT_PH_DIR` ]
+if [ ! git diff HEAD --cached --quiet --diff-filter=d --relative="$GIT_PH_DIR" ]
 then
     # Checks to make sure cargo fmt has been run on ph
-    cargo fmt --manifest-path $GIT_PH_DIR/Cargo.toml --check --quiet
+    cargo fmt --manifest-path "$GIT_PH_DIR/Cargo.toml" --check --quiet
 
     if [ $? -ne 0 ]
     then
@@ -20,7 +20,7 @@ then
     fi
 
     # Checks warnings in ph before committing
-    cargo rustc --manifest-path $GIT_PH_DIR/Cargo.toml --bin ph -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
+    cargo rustc --manifest-path "$GIT_PH_DIR/Cargo.toml" --bin ph -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
 
     if [ $? -ne 0 ]
     then
@@ -29,7 +29,7 @@ then
     fi
 
     # Checks warnings with cargo test in ph before committing
-    cargo rustc --tests --manifest-path $GIT_PH_DIR/Cargo.toml -- -D warnings > /dev/null 2>&1
+    cargo rustc --tests --manifest-path "$GIT_PH_DIR/Cargo.toml" -- -D warnings > /dev/null 2>&1
 
     if [ $? -ne 0 ]
     then
@@ -39,10 +39,10 @@ then
 fi
 
 # Check if there are any files in libnode that are changed by this commit (not counting deletes)
-if [ ! `git diff HEAD --cached --quiet --diff-filter=d --relative=$GIT_LIBNODE_DIR` ]
+if [ ! git diff HEAD --cached --quiet --diff-filter=d --relative="$GIT_LIBNODE_DIR" ]
 then
     # Checks warnings in libnode before committing
-    cargo rustc --manifest-path $GIT_LIBNODE_DIR/Cargo.toml --lib -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
+    cargo rustc --manifest-path "$GIT_LIBNODE_DIR/Cargo.toml" --lib -- -D warnings > /dev/null 2>&1 #could remove this in order to make warnings show on terminal
 
     if [ $? -ne 0 ]
     then
@@ -51,7 +51,7 @@ then
     fi
 
     # Checks warnings with cargo test in libnode before committing
-    cargo rustc --tests --manifest-path $GIT_LIBNODE_DIR/Cargo.toml -- -D warnings > /dev/null 2>&1
+    cargo rustc --tests --manifest-path "$GIT_LIBNODE_DIR/Cargo.toml" -- -D warnings > /dev/null 2>&1
 
     if [ $? -ne 0 ]
     then
