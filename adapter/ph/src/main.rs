@@ -77,7 +77,7 @@ fn main() -> ExitCode {
     //
     // parse configuration from command line
     //
-    let (ph_mode, config) = match main_args::argparse(None) {
+    let (ph_mode, mut config) = match main_args::argparse(None) {
         Ok((ph_mode, config)) => (ph_mode, config),
         Err(e) => {
             eprintln!("failed to parse command line arguments: {:?}", e);
@@ -237,6 +237,11 @@ fn main() -> ExitCode {
         socket
             .bind(&socket2::SockAddr::from(config.self_addr))
             .expect("unable to bind to self_addr");
+        if config.self_addr.port() == 0 {
+            let port = socket.local_addr().unwrap().as_socket().unwrap().port();
+            config.self_addr.set_port(port);
+            info!("assigned substrate UDP port {port}");
+        }
         substrate_sockets.push(Arc::new(UdpSocket::from_std(socket.into()).unwrap()));
     }
 

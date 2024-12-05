@@ -33,7 +33,7 @@ to the node with a register-address message). Some of these addresses must align
 with policy.
 
 Notes:
-- The ZPR address space is `fd5a:5052::/48`
+- The ZPR address space is `fd5a:5052::/32`
 - The visa service (and its adapter) always get address `fd5a:5052::1`.
 - The network `fd5a:5052:90de::/48` is reserved for nodes.
 - Below we are using `fd5a:5052:1::/48` for all the non-visaservice adapters.

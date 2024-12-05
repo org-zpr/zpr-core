@@ -61,12 +61,12 @@ create_agent_key_and_cert ca vs.zpr
 create_agent_key_and_cert ca adapter1
 create_agent_key_and_cert ca adapter2
 
-emit_vs_config ca vs.zpr > vs-config.yaml
-
 # Temporary hack until our policy compiler is in-repo
 cp "$PREGEN/node.key" node.key
 cp "$PREGEN/node-cert.pem" node.crt
 cp "$PREGEN/node-pubkey.pem" node.pubkey
+
+emit_vs_config ca vs.zpr > vs-config.yaml
 
 #
 # Launch Visa Service
@@ -80,6 +80,8 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
     --listen_addr "[$VS_ZPR_ADDR6]":5002 2>&1 | tee vs.log &
 
 sleep 2
+
+echo "Launching Node"
 
 #
 # Launch PHs
@@ -100,11 +102,13 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
 
 sleep 2  # TODO: remove?
 
+echo "Launching Adapters"
+
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --name "zpr-vs" \
   --control-path "$VS_SOCK" \
-  --self-addr "$VS_SUBSTRATE_ADDR":12345 \
+  --self-addr "$VS_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
   --certificate-file vs.zpr.crt \
   --private-key-file vs.zpr.key \
@@ -119,7 +123,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --name "zpr-a" \
   --control-path "$ADAPTER1_SOCK" \
-  --self-addr "$A_SUBSTRATE_ADDR":12345 \
+  --self-addr "$A_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
   --certificate-file adapter1.crt \
   --private-key-file adapter1.key \
@@ -132,7 +136,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --name "zpr-b" \
   --control-path "$ADAPTER2_SOCK" \
-  --self-addr "$B_SUBSTRATE_ADDR":12345 \
+  --self-addr "$B_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
   --certificate-file adapter2.crt \
   --private-key-file adapter2.key \
