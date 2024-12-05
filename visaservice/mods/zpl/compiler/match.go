@@ -26,13 +26,13 @@ func assertScopesDistinct(news, exist []*doc.Scoping) error {
 			continue
 		}
 		for _, xscope := range exist {
-			if xscope.TCP.Value() != nil && portsOverlap(xscope.TCP, nscope.TCP) {
+			if xscope.TCP.Value() != nil && portsOverlap(xscope.TCP, nscope.TCP, doc.RangeTcpUdp) {
 				return doc.ZplScalarErrorf(nscope.TCP, "service on same host with overlapping scope: %v", nscope.String())
 			}
-			if xscope.UDP.Value() != nil && portsOverlap(xscope.UDP, nscope.UDP) {
+			if xscope.UDP.Value() != nil && portsOverlap(xscope.UDP, nscope.UDP, doc.RangeTcpUdp) {
 				return doc.ZplScalarErrorf(nscope.UDP, "service on same host with overlapping scope: %v", nscope.String())
 			}
-			if xscope.ICMP != nil && nscope.ICMP != nil && portsOverlap(xscope.ICMP.TypeCodes, nscope.ICMP.TypeCodes) {
+			if xscope.ICMP != nil && nscope.ICMP != nil && portsOverlap(xscope.ICMP.TypeCodes, nscope.ICMP.TypeCodes, doc.RangeICMP) {
 				return doc.ZplScalarErrorf(nscope.ICMP.TypeCodes, "service on same host with overlapping scope: %v", nscope.String())
 			}
 		}
@@ -40,9 +40,9 @@ func assertScopesDistinct(news, exist []*doc.Scoping) error {
 	return nil
 }
 
-func portsOverlap(a, b doc.ZplString) bool {
-	aports, _ := explodePorts(a.String())
-	bports, _ := explodePorts(b.String())
+func portsOverlap(a, b doc.ZplString, pr doc.PortRange) bool {
+	aports, _ := explodePorts(a.String(), pr)
+	bports, _ := explodePorts(b.String(), pr)
 	for _, portNum := range bports {
 		for _, apn := range aports {
 			if portNum == apn {
@@ -199,7 +199,7 @@ func docScopeToPolicyScope(ds []*doc.Scoping) ([]*polio.Scope, error) {
 	var scopes []*polio.Scope
 	for _, s := range ds {
 		if s.ICMP != nil {
-			specs, err := portTypeToPortSpec(s.ICMP.TypeCodes.String())
+			specs, err := portTypeToPortSpec(s.ICMP.TypeCodes.String(), doc.RangeICMP)
 			if err != nil {
 				return nil, doc.ZplScalarErrorf(s.ICMP.TypeCodes, "%w", err)
 			}
@@ -230,7 +230,7 @@ func docScopeToPolicyScope(ds []*doc.Scoping) ([]*polio.Scope, error) {
 			scopes = append(scopes, scope)
 		}
 		if s.TCP.Value() != nil {
-			specs, err := portTypeToPortSpec(s.TCP.String())
+			specs, err := portTypeToPortSpec(s.TCP.String(), doc.RangeTcpUdp)
 			if err != nil {
 				return nil, doc.ZplScalarErrorf(s.TCP, "%w", err)
 			}
@@ -245,7 +245,7 @@ func docScopeToPolicyScope(ds []*doc.Scoping) ([]*polio.Scope, error) {
 			scopes = append(scopes, scope)
 		}
 		if s.UDP.Value() != nil {
-			specs, err := portTypeToPortSpec(s.UDP.String())
+			specs, err := portTypeToPortSpec(s.UDP.String(), doc.RangeTcpUdp)
 			if err != nil {
 				return nil, doc.ZplScalarErrorf(s.UDP, "%w", err)
 			}
@@ -423,7 +423,7 @@ func (c *Compilation) splitGroup(consval string) (stripped string, group string,
 	return
 }
 
-func portTypeToPortSpec(pt string) ([]*polio.PortSpec, error) {
+func portTypeToPortSpec(pt string, pr doc.PortRange) ([]*polio.PortSpec, error) {
 	var specs []*polio.PortSpec
 	for _, ps := range strings.Split(pt, ",") {
 		if strings.Index(ps, "-") > 0 {
@@ -431,11 +431,11 @@ func portTypeToPortSpec(pt string) ([]*polio.PortSpec, error) {
 			if len(abs) != 2 {
 				return nil, fmt.Errorf("expected port range 'N-M' not: '%v'", ps)
 			}
-			low, err := portFromString(abs[0])
+			low, err := portFromString(abs[0], pr)
 			if err != nil {
 				return nil, fmt.Errorf("invalid port range: '%v': %v", ps, err)
 			}
-			high, err := portFromString(abs[1])
+			high, err := portFromString(abs[1], pr)
 			if err != nil {
 				return nil, fmt.Errorf("invalid port range: '%v': %v", ps, err)
 			}
@@ -450,7 +450,7 @@ func portTypeToPortSpec(pt string) ([]*polio.PortSpec, error) {
 				Parg: &polio.PortSpec_Pr{pr},
 			})
 		} else {
-			p, err := portFromString(ps)
+			p, err := portFromString(ps, pr)
 			if err != nil {
 				return nil, err
 			}

@@ -2232,13 +2232,13 @@ func parseScoping(scopePath []yt.Node, fussy ErrMode) (*doc.Scoping, error) {
 		case "tcp":
 			if scoping.TCP, err = doc.NewZplString(childPath); err != nil {
 				return nil, err
-			} else if err = doc.AssertValidPortType(scoping.TCP.String()); err != nil {
+			} else if err = doc.AssertValidTcpUdpPortType(scoping.TCP.String()); err != nil {
 				return nil, doc.ZplScalarErrorf(scoping.TCP, "invalid TCP port specification: %w", err)
 			}
 		case "udp":
 			if scoping.UDP, err = doc.NewZplString(childPath); err != nil {
 				return nil, err
-			} else if err = doc.AssertValidPortType(scoping.UDP.String()); err != nil {
+			} else if err = doc.AssertValidTcpUdpPortType(scoping.UDP.String()); err != nil {
 				return nil, doc.ZplScalarErrorf(scoping.UDP, "invalid UDP port specification: %w", err)
 			}
 		case "icmp":
@@ -2261,7 +2261,7 @@ func parseScoping(scopePath []yt.Node, fussy ErrMode) (*doc.Scoping, error) {
 				case "type_codes":
 					if scoping.ICMP.TypeCodes, err = doc.NewZplString(icmpValPath); err != nil {
 						return nil, err
-					} else if err := doc.AssertValidPortType(scoping.ICMP.TypeCodes.String()); err != nil {
+					} else if err := doc.AssertValidIcmpType(scoping.ICMP.TypeCodes.String()); err != nil {
 						return nil, doc.ZplScalarErrorf(scoping.ICMP.TypeCodes, "invalid ICMP type codes: %w", err)
 					}
 				default:
