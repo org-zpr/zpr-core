@@ -79,60 +79,62 @@ pub async fn send_register_agent_address_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
 ) -> Result<(), ()> {
-    let Some(agent_addr) = asm.agent_address else {
+    if asm.agent_addresses.is_empty() {
         warn!("{}: No agent address", asm.system_name);
         return Err(());
     };
 
-    let response = core::send_sync_non_flow_req(
-        asm,
-        link_id,
-        zdp::ZdpPacketType::RegisterAgentAddressRequest,
-        zdp::ZdpPacketType::RegisterAgentAddressResponse,
-        move |mut req| match agent_addr {
-            IpAddr::V4(addr) => {
-                zdp::ZdpRegisterAgentAddressRequestHeader {
-                    ip_version: zpr::L3Type::Ipv4,
+    for &agent_addr in asm.agent_addresses.iter() {
+        let response = core::send_sync_non_flow_req(
+            asm,
+            link_id,
+            zdp::ZdpPacketType::RegisterAgentAddressRequest,
+            zdp::ZdpPacketType::RegisterAgentAddressResponse,
+            move |mut req| match agent_addr {
+                IpAddr::V4(addr) => {
+                    zdp::ZdpRegisterAgentAddressRequestHeader {
+                        ip_version: zpr::L3Type::Ipv4,
+                    }
+                    .write_to_buf(&mut req)
+                    .unwrap();
+                    req.put(&addr.octets()[..]);
                 }
-                .write_to_buf(&mut req)
-                .unwrap();
-                req.put(&addr.octets()[..]);
+
+                IpAddr::V6(addr) => {
+                    zdp::ZdpRegisterAgentAddressRequestHeader {
+                        ip_version: zpr::L3Type::Ipv6,
+                    }
+                    .write_to_buf(&mut req)
+                    .unwrap();
+                    req.put(&addr.octets()[..]);
+                }
+            },
+        )
+        .await;
+
+        // TODO: Break these apart
+        match response {
+            Ok(mut register_res) => {
+                let Ok(hdr) =
+                    zdp::ZdpRegisterAgentAddressResponseHeader::read_from_buf(&mut register_res)
+                else {
+                    fastpath::drop_and_count(asm, register_res, CounterType::BadStructure);
+                    return Err(());
+                };
+                debug!(
+                    "Received RegisterAgentAddressResponse, status: {}",
+                    hdr.status_code
+                );
+                asm.buffer_stack.put_buffer(register_res.destroy());
             }
 
-            IpAddr::V6(addr) => {
-                zdp::ZdpRegisterAgentAddressRequestHeader {
-                    ip_version: zpr::L3Type::Ipv6,
-                }
-                .write_to_buf(&mut req)
-                .unwrap();
-                req.put(&addr.octets()[..]);
+            Err(err) => {
+                warn!("{} error with RegisterAgentAddressRequest", err);
+                return Err(())
             }
-        },
-    )
-    .await;
-
-    // TODO: Break these apart
-    match response {
-        Ok(mut register_res) => {
-            let Ok(hdr) =
-                zdp::ZdpRegisterAgentAddressResponseHeader::read_from_buf(&mut register_res)
-            else {
-                fastpath::drop_and_count(asm, register_res, CounterType::BadStructure);
-                return Err(());
-            };
-            debug!(
-                "Received RegisterAgentAddressResponse, status: {}",
-                hdr.status_code
-            );
-            asm.buffer_stack.put_buffer(register_res.destroy());
-            Ok(())
-        }
-
-        Err(err) => {
-            warn!("{} error with RegisterAgentAddressRequest", err);
-            Err(())
         }
     }
+    Ok(())
 }
 
 #[derive(Debug, Error)]

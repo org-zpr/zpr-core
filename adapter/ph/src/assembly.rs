@@ -56,7 +56,7 @@ pub struct Assembly {
 
     // Shared resources.  These may be accessed by any part of the system.
     pub system_name: String, // For debugging use
-    pub agent_address: Option<IpAddr>,
+    pub agent_addresses: Vec<IpAddr>,
 
     pub buffer_stack: BufferStack<{ config::PACKET_BUFFER_SIZE }>,
 

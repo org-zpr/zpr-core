@@ -60,7 +60,7 @@ pub struct Config {
     pub node_addr: Option<SocketAddr>,
 
     /// Required for adapter - the adapters ZPR agent address.
-    pub agent_addr: Option<IpAddr>,
+    pub agent_addr: Vec<IpAddr>,
 
     /// Required for adapter - the path to the PEM file containing the nodes noise public key (not a certificate).
     pub node_public_key_file: Option<PathBuf>,

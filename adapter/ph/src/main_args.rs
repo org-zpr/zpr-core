@@ -99,7 +99,7 @@ pub struct CommonArgs {
 
     /// ZPR address (no port) of the adapter (must match your TUN address)
     #[arg(long, short = 'z')]
-    agent_addr: Option<IpAddr>,
+    agent_addr: Vec<IpAddr>,
 
     /// Enable debug logging
     #[arg(long, short = 'd')]
@@ -173,7 +173,7 @@ impl Default for Config {
             tun_if: None,
             debug: false,
             node_addr: None,
-            agent_addr: None,
+            agent_addr: Vec::new(),
             node_public_key_file: None,
         }
     }
@@ -254,7 +254,7 @@ impl Config {
             return Err("private_key_file".arg_missing());
         }
         check_file_exists("private key file", &self.private_key_file)?;
-        if self.agent_addr.is_none() {
+        if self.agent_addr.is_empty() {
             return Err("agent_addr".arg_missing());
         }
         match mode {
@@ -321,8 +321,8 @@ impl Config {
         if let Some(tun_if) = &config.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
-        if let Some(agent_addr) = &config.agent_addr {
-            self.agent_addr = Some(*agent_addr);
+        if !config.agent_addr.is_empty() {
+            self.agent_addr = config.agent_addr.clone();
         }
         if let Some(debug) = config.debug {
             self.debug = debug;
@@ -412,8 +412,8 @@ impl Config {
         if let Some(tun_if) = &common.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
-        if let Some(agent_addr) = &common.agent_addr {
-            self.agent_addr = Some(*agent_addr);
+        if !common.agent_addr.is_empty() {
+            self.agent_addr = common.agent_addr.clone();
         }
         if let Some(debug) = common.debug {
             self.debug = debug;
@@ -451,7 +451,7 @@ struct GlobalConfigSection {
     certificate_file: Option<PathBuf>,
     private_key_file: Option<PathBuf>,
     tun_if: Option<String>,
-    agent_addr: Option<IpAddr>,
+    agent_addr: Vec<IpAddr>,
     debug: Option<bool>,
 }
 
@@ -681,7 +681,7 @@ mod test {
         );
         assert_eq!(
             config.global.agent_addr,
-            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+            Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
             config.adapter.node_public_key_file,
@@ -801,7 +801,7 @@ mod test {
         );
         assert_eq!(
             config.agent_addr,
-            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+            Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
             config.node_public_key_file,
@@ -898,7 +898,7 @@ mod test {
         );
         assert_eq!(
             config.agent_addr,
-            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+            Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
             config.node_public_key_file,
@@ -976,7 +976,7 @@ mod test {
         );
         assert_eq!(
             config.agent_addr,
-            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+            Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
             config.node_public_key_file,
@@ -1041,7 +1041,7 @@ mod test {
         );
         assert_eq!(
             config.agent_addr,
-            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+            Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
             config.node_public_key_file,
