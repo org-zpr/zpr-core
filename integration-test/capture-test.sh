@@ -1,8 +1,10 @@
 #!/usr/bin/bash
 set -euo pipefail
 
-PH_BIN=$(realpath "$(dirname $0)/../target/debug/ph")
-PH_DEBUG_BIN=$(realpath "$(dirname $0)/../../ph-debug/target/debug/ph-debug")
+PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
+PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/ph-debug/target/debug/ph-debug")
+VS_BIN=$(realpath "$(dirname $0)/../visaservice/core/build/vservice")
+PREGEN=$(realpath "$(dirname $0)/pregen")
 
 source "$(dirname $0)/common_funcs.sh"
 
@@ -69,9 +71,27 @@ create_network
 
 create_ca_key_and_cert ca
 create_agent_key_and_cert ca vs.zpr
-create_agent_key_and_cert ca node
+#create_agent_key_and_cert ca node
 create_agent_key_and_cert ca adapter1
 create_agent_key_and_cert ca adapter2
+
+# Temporary hack until our policy compiler is in-repo
+cp "$PREGEN/node.key" node.key
+cp "$PREGEN/node-cert.pem" node.crt
+cp "$PREGEN/node-pubkey.pem" node.pubkey
+
+emit_vs_config ca vs.zpr > vs-config.yaml
+
+#
+# Launch Visa Service
+#
+
+sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
+    -c vs-config.yaml \
+    -p "$PREGEN/v6-1node-2agent-ping.bin" \
+    --listen_addr ["$VS_ZPR_ADDR6"]:5002 &
+
+sleep 2
 
 #
 # Launch PHs
@@ -112,7 +132,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --private-key-file adapter1.key \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
-  --agent-addr "$A_ZPR_ADDR" \
+  --agent-addr "$A_ZPR_ADDR6" \
   --node-public-key-file node.pubkey 2>&1 |tee adapter1.log &
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
@@ -125,7 +145,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --private-key-file adapter2.key \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
-  --agent-addr "$B_ZPR_ADDR" \
+  --agent-addr "$B_ZPR_ADDR6" \
   --node-public-key-file node.pubkey 2>&1 |tee adapter2.log &
 
 sleep 1 # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well

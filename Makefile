@@ -20,7 +20,7 @@ info:
 	@echo
 
 
-it-so: deps adapter ph-debug visaservice diagrams
+it-so: deps adapter ph ph-debug visaservice diagrams
 
 it-gone:
 	cd adapter/ph && cargo clean
