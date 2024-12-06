@@ -19,7 +19,6 @@
 
 use openssl::pkey::PKey;
 use openssl::x509::X509;
-use std::fmt;
 use std::fs;
 use std::path::Path;
 use tracing::error;
@@ -43,22 +42,12 @@ pub enum CertExchangeError {
     KeyMismatchError,
 }
 
+#[derive(Debug)]
 pub enum ParseError {
     PEMCertNotFound,
     PEMFormatError,
     KeyError,
-    IOError(std::io::Error),
-}
-
-impl fmt::Debug for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParseError::PEMCertNotFound => write!(f, "PEMCertNotFound"),
-            ParseError::PEMFormatError => write!(f, "PEMFormatError"),
-            ParseError::KeyError => write!(f, "KeyError"),
-            ParseError::IOError(e) => write!(f, "IO Error: {}", e),
-        }
-    }
+    IOError(#[allow(dead_code)] std::io::Error),
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]

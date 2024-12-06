@@ -18,6 +18,7 @@ use std::fmt::Debug;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
@@ -25,133 +26,68 @@ use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 #[allow(dead_code)]
 pub enum KmError {
+    #[error("ConfigurationError")]
     ConfigurationError,
+    #[error("InvalidState")]
     InvalidState,
+    #[error("InvalidPacketType")]
     InvalidPacketType,
+    #[error("HandshakeError")]
     HandshakeError,
+    #[error("CertExchangeError")]
     CertExchangeError,
+    #[error("NoHeadroom")]
     NoHeadroom,
+    #[error("ShortPacket")]
     ShortPacket,
+    #[error("SaIdZero")]
     SaIdZero,
+    #[error("SaIdMismatch")]
     SaIdMismatch,
+    #[error("EnqueueFailued")]
     EnqueueFailed,
+    #[error("MachineError: {0}")]
     MachineError(String),
-    IoError(std::io::Error),
+    #[error("IoError: {0}")]
+    IoError(#[from] std::io::Error),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum EncryptionError {
     /// Unspecified error occurred in the encryption implementation.  The string arg is an error description.
+    #[error("InternalError: {0}")]
     InternalError(String),
 
     /// Message is too large for the encryption implementation to handle.
+    #[error("MessageTooLarge")]
     MessageTooLarge,
 
     /// Message is malformed in some way.
+    #[error("ParseError")]
     ParseError,
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum DecryptionError {
     /// Unspecified error occurred in the decryption implementation.  The string arg is an error description.
+    #[error("InternalError: {0}")]
     InternalError(String),
 
     /// Message is too short to be decrypted.
+    #[error("MessageTooShort")]
     MessageTooShort,
 
     /// Message is malformed in some way.
+    #[error("ParseError")]
     ParseError,
 
     /// Unable to decrypt the message due to wrong key or some other cipher issue.
+    #[error("DecryptFailed")]
     DecryptFailed,
-}
-
-impl fmt::Display for DecryptionError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            DecryptionError::InternalError(ref s) => {
-                write!(f, "InternalError: {}", s)
-            }
-            DecryptionError::MessageTooShort => {
-                write!(f, "MessageTooShort")
-            }
-            DecryptionError::ParseError => {
-                write!(f, "ParseError")
-            }
-            DecryptionError::DecryptFailed => {
-                write!(f, "DecryptFailed")
-            }
-        }
-    }
-}
-
-impl fmt::Display for EncryptionError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            EncryptionError::InternalError(ref s) => {
-                write!(f, "InternalError: {}", s)
-            }
-            EncryptionError::MessageTooLarge => {
-                write!(f, "MessageTooLarge")
-            }
-            EncryptionError::ParseError => {
-                write!(f, "ParseError")
-            }
-        }
-    }
-}
-
-impl fmt::Display for KmError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            KmError::InvalidState => {
-                write!(f, "InvalidState")
-            }
-            KmError::HandshakeError => {
-                write!(f, "HandshakeError")
-            }
-            KmError::CertExchangeError => {
-                write!(f, "CertExchangeError")
-            }
-            KmError::ConfigurationError => {
-                write!(f, "ConfigurationError")
-            }
-            KmError::MachineError(ref s) => {
-                write!(f, "MachineError: {}", s)
-            }
-            KmError::IoError(ref e) => {
-                write!(f, "IoError: {}", e)
-            }
-            KmError::InvalidPacketType => {
-                write!(f, "InvalidPacketType")
-            }
-            KmError::NoHeadroom => {
-                write!(f, "NoHeadroom")
-            }
-            KmError::ShortPacket => {
-                write!(f, "ShortPacket")
-            }
-            KmError::SaIdZero => {
-                write!(f, "SaIdZero")
-            }
-            KmError::SaIdMismatch => {
-                write!(f, "SaIdMismatch")
-            }
-            KmError::EnqueueFailed => {
-                write!(f, "EnqueueFailed")
-            }
-        }
-    }
-}
-
-impl From<std::io::Error> for KmError {
-    fn from(e: std::io::Error) -> KmError {
-        KmError::IoError(e)
-    }
 }
 
 // Copying of off std::io::Result
