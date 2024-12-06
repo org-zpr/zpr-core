@@ -64,8 +64,7 @@ pub async fn handle_report(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> Handle
 pub async fn handle_discard(asm: &Arc<Assembly>, pkt: BufferPacket) -> HandleMgmtResult {
     // TODO print to debug log, when implemented
     info!(
-        "{}: Discard message received from {}",
-        asm.system_name,
+        "Discard message received from {}",
         pkt.metadata().ingress_link_id
     );
     asm.buffer_stack.put_buffer(pkt.destroy());
@@ -80,10 +79,7 @@ pub async fn handle_hello_request(
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
-    debug!(
-        "{}: Received Hello Request for link {}",
-        asm.system_name, ingress_link_id
-    );
+    debug!("Received Hello Request for link {ingress_link_id}");
 
     if asm
         .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest)
@@ -119,10 +115,7 @@ pub async fn handle_hello_response(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
     let status = hdr.status;
-    debug!(
-        "{}: Received Hello Response for link {}, status: {}",
-        asm.system_name, ingress_link_id, status
-    );
+    debug!("Received Hello Response for link {ingress_link_id}, status: {status}");
 
     if asm
         .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloResponse)
@@ -168,10 +161,7 @@ pub async fn handle_register_agent_address_request(
         }
     }
 
-    debug!(
-        "{}: Received Register Agent Address Request for link {} with address {}",
-        asm.system_name, ingress_link_id, agent_address
-    );
+    debug!("Received Register Agent Address Request for link {ingress_link_id} with address {agent_address}");
 
     if asm
         .process_link_state_event(
@@ -205,10 +195,7 @@ pub async fn handle_register_agent_address_response(
     pkt: BufferPacket,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
-    debug!(
-        "{}: Received Register Agent Address Response for link {}",
-        asm.system_name, ingress_link_id
-    );
+    debug!("Received Register Agent Address Response for link {ingress_link_id}");
 
     if asm
         .process_link_state_event(ingress_link_id, LinkEvent::ReceivedRegisterResponse)
@@ -305,10 +292,7 @@ pub async fn handle_bind_agent_address_request(
 
     let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
         // who sent this??
-        error!(
-            "{}: coding error: stray packet from unknown source; dropping",
-            asm.system_name
-        );
+        error!("coding error: stray packet from unknown source; dropping");
         return Ok(());
     };
 

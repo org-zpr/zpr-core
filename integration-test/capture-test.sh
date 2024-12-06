@@ -89,7 +89,7 @@ emit_vs_config ca vs.zpr > vs-config.yaml
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
     -c vs-config.yaml \
     -p "$PREGEN/v6-1node-2agent-ping.bin" \
-    --listen_addr ["$VS_ZPR_ADDR6"]:5002 &
+    --listen_addr ["$VS_ZPR_ADDR6"]:5002 2>&1 | tee vs.log | prefix_log vs &
 
 sleep 2
 
@@ -105,7 +105,7 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --certificate-file node.crt \
   --private-key-file node.key \
   --tun-if tun0 \
-  --agent-addr "$NODE_ZPR_ADDR6" 2>&1 |tee node.log &
+  --agent-addr "$NODE_ZPR_ADDR6" 2>&1 | tee node.log | prefix_log zpr-node &
 
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
@@ -118,7 +118,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$VS_ZPR_ADDR6" 2>&1 |tee vs.log &
+  --agent-addr "$VS_ZPR_ADDR6" 2>&1 | tee adapter-vs.log | prefix_log zpr-vs &
 
 sleep 2
 
@@ -133,7 +133,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
   --agent-addr "$A_ZPR_ADDR6" \
-  --node-public-key-file node.pubkey 2>&1 |tee adapter1.log &
+  --node-public-key-file node.pubkey 2>&1 | tee adapter1.log | prefix_log zpr-a &
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
@@ -146,7 +146,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
   --agent-addr "$B_ZPR_ADDR6" \
-  --node-public-key-file node.pubkey 2>&1 |tee adapter2.log &
+  --node-public-key-file node.pubkey 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
 sleep 1 # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well
 set_program "$ADAPTER1_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'

@@ -4,11 +4,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::*;
 
-pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMsg>) {
+pub async fn launch(_asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMsg>) {
     while let Some(msg) = queue.recv().await {
-        info!(
-            "{}: received VSS message {msg:?}; ignoring! (unimplemented)",
-            asm.system_name
-        );
+        info!("received VSS message {msg:?}; ignoring! (unimplemented)");
     }
 }

@@ -48,8 +48,7 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMgmt
     };
 
     debug!(
-        "{}: handling mgmt message from {} type {:?} seq_num {}",
-        asm.system_name,
+        "handling mgmt message from {} type {:?} seq_num {}",
         pkt.metadata().ingress_link_id,
         base_hdr.packet_type,
         base_hdr.sequence_number

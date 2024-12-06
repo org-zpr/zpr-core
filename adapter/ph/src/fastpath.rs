@@ -30,7 +30,7 @@ use zpr_ext::zerocopy::*;
 /// Drop a packet and count the drop with the given reason.
 pub fn drop_and_count(asm: &Assembly, pkt: BufferPacket, reason: impl Into<CounterType>) {
     let reason = reason.into();
-    debug!("{}: dropping packet because {}", asm.system_name, reason);
+    debug!("dropping packet because {reason}");
     asm.buffer_stack.put_buffer(pkt.destroy());
     asm.counters[reason.into()].increment();
 }
@@ -310,10 +310,7 @@ fn substrate_egress_common(
     //       See https://github.com/org-zpr/zpr-core/issues/444
     let transport_sa;
     if zdp_hdr.packet_type == zdp::ZdpPacketType::KeyManagement {
-        debug!(
-            "{}: link {}: KM message detected, using ZPI=0 ignoring security association",
-            asm.system_name, link_id
-        );
+        debug!("link {link_id}: KM message detected, using ZPI=0 ignoring security association");
         transport_sa = None;
     } else {
         transport_sa = peer_state.get_established_transport_association();
@@ -438,10 +435,7 @@ pub fn substrate_ingress(
     pkt.metadata_mut().ingress_link_id = asm.peer_table.lookup_peer(peer_sa).unwrap_or_zero();
 
     if pkt.metadata().ingress_link_id == 0 {
-        warn!(
-            "{}: got packet from {peer_sa} which isn't in the peer table; peer table contains:",
-            asm.system_name
-        );
+        warn!("got packet from {peer_sa} which isn't in the peer table; peer table contains:");
         let ids = asm.peer_ids.lock().unwrap().clone();
         for id in ids {
             if let Some(peer) = asm.peer_table.get(id) {
@@ -485,8 +479,7 @@ pub fn substrate_ingress(
                 } else {
                     // We have an SA and ZPI does not match.
                     warn!(
-                        "{}: ingress: link {}: unexpected ZPI value {} (expected {:?})",
-                        asm.system_name,
+                        "ingress: link {}: unexpected ZPI value {} (expected {:?})",
                         pkt.metadata().ingress_link_id,
                         zpi_hdr.zpi,
                         transport_sa.recv_zpis
@@ -497,19 +490,14 @@ pub fn substrate_ingress(
             }
             None => {
                 // Either no security association on link, or it is not yet established.
-                warn!(
-                    "{}: INSECURE, no SA on link {}",
-                    asm.system_name,
-                    pkt.metadata().ingress_link_id
-                );
+                warn!("INSECURE, no SA on link {}", pkt.metadata().ingress_link_id);
                 secure = false;
             }
         },
         None => {
             // No link in peer table
             warn!(
-                "{}: INSECURE, no link in peer table for {}",
-                asm.system_name,
+                "INSECURE, no link in peer table for {}",
                 pkt.metadata().ingress_link_id
             );
             secure = false;
@@ -520,8 +508,7 @@ pub fn substrate_ingress(
         // Not under a security assocation, which means only ZPI 0 is allowed.
         if zpi_hdr.zpi != zpr::ZPI_0 && pkt.metadata().ingress_link_id != zpr::LINK_ID_UNKNOWN {
             warn!(
-                "{}: ingress: {}: ZPI {} not allowed on unestablished SA",
-                asm.system_name,
+                "ingress: {}: ZPI {} not allowed on unestablished SA",
                 pkt.metadata().ingress_link_id,
                 zpi_hdr.zpi
             );
@@ -529,8 +516,7 @@ pub fn substrate_ingress(
             return;
         }
         warn!(
-            "{}: INSECURE, decrypting null packet from {}",
-            asm.system_name,
+            "INSECURE, decrypting null packet from {}",
             pkt.metadata().ingress_link_id
         );
         match decrypt_null(&mut pkt) {
@@ -574,8 +560,7 @@ pub fn substrate_ingress(
     // Can be overridden (FOR TESTING ONLY) in the flags.
     if !secure && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
         warn!(
-            "{}: ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
-            asm.system_name,
+            "ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
             pkt.metadata().ingress_link_id,
             base_hdr.packet_type
         );
@@ -762,10 +747,7 @@ pub fn agent_output_post_classify(asm: &Assembly, mut pkt: BufferPacket, allow_b
             }
 
             // issue bind request
-            info!(
-                "{}: issuing bind request for {}",
-                asm.system_name, five_tuple
-            );
+            info!("issuing bind request for {five_tuple}");
             match asm.adapter_manager.try_request_tether_id(pkt) {
                 Ok(()) => (),
                 Err(TryEnqueueError::Full(pkt)) => {

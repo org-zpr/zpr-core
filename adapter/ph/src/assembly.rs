@@ -55,7 +55,6 @@ pub struct Assembly {
     pub topology_config: config::TopologyConfig,
 
     // Shared resources.  These may be accessed by any part of the system.
-    pub system_name: String, // For debugging use
     pub agent_address: Option<IpAddr>,
 
     pub buffer_stack: BufferStack<{ config::PACKET_BUFFER_SIZE }>,
@@ -156,10 +155,7 @@ impl Assembly {
         link_type: LinkType,
     ) -> Result<NonZero<LinkId>, PeerInsertError> {
         assert!(link_type != LinkType::NodeToNode);
-        debug!(
-            "{}: Starting tether with {}",
-            self.system_name, adapter_addr
-        );
+        debug!("Starting tether with {adapter_addr}");
         let peer_id = self.add_peer(link_type, adapter_addr)?;
         self.peer_ids.lock().unwrap().push(peer_id.get());
 
@@ -172,10 +168,7 @@ impl Assembly {
             .link_state_machine
             .process_event(self, LinkEvent::Configure)
         {
-            error!(
-                "{}: Link {} failed to configure with error {}.  Resetting",
-                self.system_name, peer_id, e
-            );
+            error!("Link {peer_id} failed to configure with error {e}.  Resetting");
             let _ = peer
                 .link_state_machine
                 .process_event(self, LinkEvent::Reset);
@@ -184,18 +177,12 @@ impl Assembly {
                 .link_state_machine
                 .process_event(self, LinkEvent::Start)
             {
-                error!(
-                    "{}: Link {} failed to start with error {}.  Resetting",
-                    self.system_name, peer_id, e
-                );
+                error!("Link {peer_id} failed to start with error {e}.  Resetting");
                 let _ = peer
                     .link_state_machine
                     .process_event(self, LinkEvent::Reset);
             } else {
-                info!(
-                    "{}: Successfully started tether with {}.  Assigned ID {}",
-                    self.system_name, adapter_addr, peer_id
-                );
+                info!("Successfully started tether with {adapter_addr}.  Assigned ID {peer_id}");
             }
         }
 
@@ -307,7 +294,6 @@ pub mod test {
     pub struct TestAssemblyBuilder {
         pub ph_mode: Option<PhMode>,
         pub topology_config: Option<TopologyConfig>,
-        pub system_name: Option<String>,
         pub agent_address: Option<Option<IpAddr>>,
         pub buffer_stack: Option<BufferStack<{ config::PACKET_BUFFER_SIZE }>>,
         pub agent_input: Option<AgentInput>,
@@ -344,7 +330,6 @@ pub mod test {
     pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
         let ph_mode = builder.ph_mode.unwrap_or(PhMode::Adapter);
         let topology_config = builder.topology_config.unwrap_or_default();
-        let system_name = builder.system_name.unwrap_or("test".into());
         let agent_address = builder
             .agent_address
             .unwrap_or(Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
@@ -396,7 +381,6 @@ pub mod test {
         Assembly {
             ph_mode,
             topology_config,
-            system_name,
             agent_address,
             buffer_stack,
             agent_input,

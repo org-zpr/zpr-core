@@ -62,13 +62,13 @@ pub async fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<
                 return Err(());
             };
             let status = hdr.status;
-            debug!("Received HelloResponse, status: {}", status);
+            debug!("Received HelloResponse, status: {status}");
             asm.buffer_stack.put_buffer(hello_res.destroy());
             Ok(())
         }
 
         Err(err) => {
-            warn!("{} error with HelloRequest", err);
+            warn!("{err} error with HelloRequest");
             Err(())
         }
     }
@@ -80,7 +80,7 @@ pub async fn send_register_agent_address_request(
     link_id: zpr::LinkId,
 ) -> Result<(), ()> {
     let Some(agent_addr) = asm.agent_address else {
-        warn!("{}: No agent address", asm.system_name);
+        warn!("No agent address");
         return Err(());
     };
 

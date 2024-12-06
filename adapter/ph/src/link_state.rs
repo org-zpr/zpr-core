@@ -241,7 +241,7 @@ impl LinkStateWrapper {
     /// Configure an uninitialized link/tether
     /// Transitions from Initial -> Inactive
     /// Does not generate any packets
-    fn configure(&self, asm: &Assembly) -> Result<(), LinkStateError> {
+    fn configure(&self, _asm: &Assembly) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         if locked_fsm.state != LinkState::Initial {
             return Err(LinkStateError::UnexpectedTransition(
@@ -256,8 +256,8 @@ impl LinkStateWrapper {
         locked_fsm.state = LinkState::Inactive;
 
         debug!(
-            "{}: Configured link {}.  State: {:?}, status: {:?}",
-            asm.system_name, self.id, locked_fsm.state, locked_fsm.status
+            "Configured link {}.  State: {:?}, status: {:?}",
+            self.id, locked_fsm.state, locked_fsm.status
         );
         Ok(())
     }
@@ -277,10 +277,7 @@ impl LinkStateWrapper {
 
         locked_fsm.state = LinkState::Keying;
 
-        debug!(
-            "{}: Link {} started.  Keying in progress",
-            asm.system_name, self.id
-        );
+        debug!("Link {} started.  Keying in progress", self.id);
 
         match self.link_type {
             LinkType::AdapterToNode => {
@@ -342,34 +339,20 @@ impl LinkStateWrapper {
         };
 
         if let Some(ref peer_cert) = sa.peer_cert {
-            info!(
-                "{}: Link {} has name {:?}",
-                asm.system_name,
-                self.id,
-                peer_cert.subject_name()
-            );
+            info!("Link {} has name {:?}", self.id, peer_cert.subject_name());
 
             // assign special-peer name if this peer is special
             for name in
                 special_peers::special_peer_names_from_x509_subject_name(peer_cert.subject_name())
             {
                 match asm.peer_table.assign_special_name(name, self.id) {
-                    Ok(()) => info!(
-                        "{}: Link {} assigned special name {:?}",
-                        asm.system_name, self.id, name
-                    ),
-                    Err(_) => warn!(
-                        "{}: Unable to assign link {} special name {:?}",
-                        asm.system_name, self.id, name
-                    ),
+                    Ok(()) => info!("Link {} assigned special name {:?}", self.id, name),
+                    Err(_) => warn!("Unable to assign link {} special name {:?}", self.id, name),
                 }
             }
         }
 
-        debug!(
-            "{}: Link {} finished keying.  Starting hello",
-            asm.system_name, self.id
-        );
+        debug!("Link {} finished keying.  Starting hello", self.id);
 
         locked_fsm.state = LinkState::Helloing;
         drop(locked_fsm);
@@ -401,22 +384,19 @@ impl LinkStateWrapper {
     /// Update link state based on received hello request
     /// Transitions from Helloing to Registering Agent Address
     /// Does not generate any packets
-    fn process_hello_request(&self, asm: &Assembly) -> Result<(), LinkStateError> {
+    fn process_hello_request(&self, _asm: &Assembly) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToNode, LinkState::Helloing) => {
                 locked_fsm.state = LinkState::Active;
-                debug!(
-                    "{}: Link {} finished helloing.  Becoming active",
-                    asm.system_name, self.id
-                );
+                debug!("Link {} finished helloing.  Becoming active", self.id);
                 Ok(())
             }
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
                 locked_fsm.state = LinkState::RegisterAA;
                 debug!(
-                    "{}: Link {} finished helloing.  Waiting on register agent address",
-                    asm.system_name, self.id
+                    "Link {} finished helloing.  Waiting on register agent address",
+                    self.id
                 );
                 Ok(())
             }
@@ -442,8 +422,8 @@ impl LinkStateWrapper {
             (LinkType::AdapterToNode, LinkState::Helloing) => {
                 locked_fsm.state = LinkState::RegisterAA;
                 debug!(
-                    "{}: Link {} finished helloing.  Sending register agent address",
-                    asm.system_name, self.id
+                    "Link {} finished helloing.  Sending register agent address",
+                    self.id
                 );
                 let link_id = self.id;
                 let task_asm = asm.clone();
@@ -463,10 +443,7 @@ impl LinkStateWrapper {
             }
             (LinkType::NodeToNode, LinkState::Helloing) => {
                 locked_fsm.state = LinkState::Active;
-                debug!(
-                    "{}: Link {} finished helloing.  Becoming active",
-                    asm.system_name, self.id
-                );
+                debug!("Link {} finished helloing.  Becoming active", self.id);
                 Ok(())
             }
             (LinkType::NodeToAdapter, _) => {
@@ -495,8 +472,8 @@ impl LinkStateWrapper {
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
                 locked_fsm.agent_addresses.push(addr);
                 debug!(
-                    "{}: Link {} received agent address ({addr}).  Authorizing with visa service",
-                    asm.system_name, self.id
+                    "Link {} received agent address ({addr}).  Authorizing with visa service",
+                    self.id
                 );
 
                 let Some(peer_state) = asm.peer_table.get(self.id) else {
@@ -526,13 +503,13 @@ impl LinkStateWrapper {
                     cn = String::new();
                 }
 
-                info!("{}: Link {} CN is {cn}", asm.system_name, self.id);
+                info!("Link {} CN is {cn}", self.id);
 
                 if cn == zpr::VISA_SERVICE_CN {
                     locked_fsm.state = LinkState::Active;
                     debug!(
-                        "{}: Link {} (Visa Service) received agent address.  Becoming active, no authorization required",
-                        asm.system_name, self.id
+                        "Link {} (Visa Service) received agent address.  Becoming active, no authorization required",
+                        self.id
                     );
                     drop(locked_fsm);
                     self.run_active(asm)
@@ -571,7 +548,7 @@ impl LinkStateWrapper {
                                 status: Some(libnode::vsapi::StatusCode::SUCCESS),
                                 ..
                             }) => {
-                                info!("{}: link {link_id} authorized", task_asm.system_name);
+                                info!("link {link_id} authorized");
 
                                 if task_asm
                                     .process_link_state_event(
@@ -588,8 +565,7 @@ impl LinkStateWrapper {
 
                             Ok(cr) => {
                                 warn!(
-                                    "{}: link {link_id} authorization rejected: {}",
-                                    task_asm.system_name,
+                                    "link {link_id} authorization rejected: {}",
                                     cr.reason.unwrap_or("(no reason given)".to_owned())
                                 );
 
@@ -604,10 +580,7 @@ impl LinkStateWrapper {
                             }
 
                             Err(err) => {
-                                warn!(
-                                    "{}: link {link_id} authorization failed: {err}",
-                                    task_asm.system_name
-                                );
+                                warn!("link {link_id} authorization failed: {err}");
 
                                 if task_asm
                                     .process_link_state_event(link_id, LinkEvent::Reset)
@@ -635,10 +608,7 @@ impl LinkStateWrapper {
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
                 locked_fsm.state = LinkState::Active;
-                debug!(
-                    "{}: Link {} authorized.  Becoming active",
-                    asm.system_name, self.id
-                );
+                debug!("Link {} authorized.  Becoming active", self.id);
                 drop(locked_fsm);
                 self.run_active(asm)
             }
@@ -661,8 +631,8 @@ impl LinkStateWrapper {
                 locked_fsm.state = LinkState::Active;
                 asm.tun_ctl.set_carrier(true).unwrap();
                 debug!(
-                    "{}: Link {} finished registering agent address.  Becoming active",
-                    asm.system_name, self.id
+                    "Link {} finished registering agent address.  Becoming active",
+                    self.id
                 );
                 drop(locked_fsm);
                 self.run_active(asm)
@@ -686,7 +656,7 @@ impl LinkStateWrapper {
     /// Transitions from Closed to Inactive
     #[allow(dead_code)]
     pub fn complete_close(&self, asm: &Assembly) -> Result<(), LinkStateError> {
-        info!("{}: Shutting down link {}", asm.system_name, self.id);
+        info!("Shutting down link {}", self.id);
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.state = LinkState::Inactive;
         if asm.ph_mode != PhMode::Node {
@@ -699,7 +669,7 @@ impl LinkStateWrapper {
     /// Reset the link, shutting it down and wiping its configuration
     /// Transitions to Initial from any state
     pub fn reset(&self, asm: &Assembly) {
-        info!("{}: Resetting link {}", asm.system_name, self.id);
+        info!("Resetting link {}", self.id);
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.state = LinkState::Initial;
         locked_fsm.silent = false;
@@ -710,11 +680,8 @@ impl LinkStateWrapper {
         // TODO: Bring down KM
     }
 
-    pub fn run_active(&self, asm: &Assembly) -> Result<(), LinkStateError> {
-        debug!(
-            "{}: Link {} entering active state",
-            asm.system_name, self.id
-        );
+    pub fn run_active(&self, _asm: &Assembly) -> Result<(), LinkStateError> {
+        debug!("Link {} entering active state", self.id);
         // TODO send echoes
         Ok(())
     }

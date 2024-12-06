@@ -5,8 +5,8 @@ use crate::counters::*;
 use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
 
-fn emit_counts(system_name: &String, counters: &Counters) {
-    println!("\n*** {} Counters ***", system_name);
+fn emit_counts(counters: &Counters) {
+    println!("\n*** Counters ***");
     for (key, ref value) in counters {
         println!("{}: {}", key, value.get_count());
     }
@@ -18,9 +18,9 @@ pub async fn launch(asm: Arc<Assembly>) {
 
     loop {
         tokio::select! {
-            _ = usr1_stream.recv() => emit_counts(&asm.system_name, &asm.counters),
+            _ = usr1_stream.recv() => emit_counts(&asm.counters),
             _ = term_stream.recv() => {
-                emit_counts(&asm.system_name, &asm.counters);
+                emit_counts(&asm.counters);
                 std::process::exit(128 + SignalKind::terminate().as_raw_value())
             }
         }

@@ -49,10 +49,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
             .peer_table
             .is_security_assocaition_established(dock_link_id)
     {
-        warn!(
-            "{}: Link {} has no security association, aborting bind request operation",
-            asm.system_name, dock_link_id
-        );
+        warn!("Link {dock_link_id} has no security association, aborting bind request operation");
         fastpath::drop_and_count(asm, pkt, CounterType::DroppedNoSA);
         return;
     }
@@ -66,10 +63,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
     // compress only IP addresses for now
     let compression_mode: zpr::CompressionMode = 0;
 
-    info!(
-        "{}: link {}: Issuing bind request for {} (is now set PENDING)",
-        asm.system_name, dock_link_id, five_tuple
-    );
+    info!("link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
 
     let bind_result = match asm.ph_mode {
         PhMode::Adapter => {
@@ -99,10 +93,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
     match bind_result {
         Ok(tether_id) => {
             // Bind succeeded; add to ALT.
-            info!(
-                "{}: Bind of {} succeeded: {}",
-                asm.system_name, five_tuple, tether_id
-            );
+            info!("Bind of {five_tuple} succeeded: {tether_id}");
 
             let AltEntry::Pending(initial_packet) = asm
                 .alt
@@ -135,10 +126,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
 
         Err(err) => {
             // Bind failed; remove pending entry from ALT.
-            error!(
-                "{}: Bind of {} failed: {}",
-                asm.system_name, five_tuple, err
-            );
+            error!("Bind of {five_tuple} failed: {err}");
             asm.alt.remove(&five_tuple);
         }
     }

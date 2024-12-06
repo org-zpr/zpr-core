@@ -9,6 +9,12 @@ ZPR_PKI_BIN=$(realpath "$(dirname $0)/../tools/zpr-pki")
 # Functions used in multiple integration tests
 #
 
+function prefix_log() {
+  SYSNAME=$1
+  printf -v PREFIX '%10s' "[$SYSNAME]"
+  sed "s/^/$PREFIX /"
+}
+
 function wait_for() {
   RETRIES=$1
   shift

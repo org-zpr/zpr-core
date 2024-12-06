@@ -31,8 +31,7 @@ pub async fn bind_agent_address(
         if let Some(id) = asm.peer_table.lookup_special_peer(spname) {
             egress_link_id = id;
         } else {
-            error!("{}: visa request error: special peer routing applies, but special peer ({spname:?}) not connected",
-                asm.system_name);
+            error!("visa request error: special peer routing applies, but special peer ({spname:?}) not connected");
             return Err(BindAgentAddressError::PolicyError);
         }
     } else {
@@ -65,22 +64,19 @@ pub async fn bind_agent_address(
                 }
 
                 Ok(resp) => {
-                    info!("{}: visa request rejected: {resp:?}", asm.system_name);
+                    info!("visa request rejected: {resp:?}");
                     return Err(BindAgentAddressError::PolicyError);
                 }
 
                 Err(err) => {
-                    error!("{}: visa request error: {err}", asm.system_name);
+                    error!("visa request error: {err}");
                     return Err(BindAgentAddressError::PolicyError);
                 }
             }
         }
     }
 
-    debug!(
-        "{}: now routing {} from {} to {}",
-        asm.system_name, five_tuple, ingress_link_id, egress_link_id
-    );
+    debug!("now routing {five_tuple} from {ingress_link_id} to {egress_link_id}");
 
     let route_result = asm
         .add_route(
@@ -92,7 +88,7 @@ pub async fn bind_agent_address(
         )
         .await;
 
-    debug!("{}: route result {:?}", asm.system_name, route_result);
+    debug!("route result {route_result:?}");
 
     // TODO: reverse ingress TID needs to be sent to next-hop;
     // this is blocked on switching to new-style bind requests

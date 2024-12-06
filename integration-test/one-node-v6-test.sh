@@ -77,7 +77,7 @@ echo "Launching Visa Service"
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
     -c vs-config.yaml \
     -p "$PREGEN/v6-1node-2agent-ping.bin" \
-    --listen_addr "[$VS_ZPR_ADDR6]":5002 2>&1 | tee vs.log &
+    --listen_addr "[$VS_ZPR_ADDR6]":5002 2>&1 | tee vs.log | prefix_log vs &
 
 sleep 2
 
@@ -98,7 +98,7 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
      --certificate-file node.crt \
      --private-key-file node.key \
      --tun-if tun0 \
-     --agent-addr "$NODE_ZPR_ADDR6" 2>&1 |tee node.log &
+     --agent-addr "$NODE_ZPR_ADDR6" 2>&1 | tee node.log | prefix_log zpr-node &
 
 sleep 2  # TODO: remove?
 
@@ -115,7 +115,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$VS_ZPR_ADDR6" 2>&1 |tee adapter-vs.log &
+  --agent-addr "$VS_ZPR_ADDR6" 2>&1 | tee adapter-vs.log | prefix_log zpr-vs &
 
 sleep 5
 
@@ -130,7 +130,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$A_ZPR_ADDR6" 2>&1 |tee adapter1.log &
+  --agent-addr "$A_ZPR_ADDR6" 2>&1 | tee adapter1.log | prefix_log zpr-a &
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
@@ -143,7 +143,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$B_ZPR_ADDR6" 2>&1 |tee adapter2.log &
+  --agent-addr "$B_ZPR_ADDR6" 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
 #
 # Wait for connectivity

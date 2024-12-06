@@ -103,7 +103,7 @@ fn main() -> ExitCode {
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    info!("{} starting with PID {}", config.name, process::id());
+    info!("starting with PID {}", process::id());
 
     //
     // read key material
@@ -299,7 +299,6 @@ fn main() -> ExitCode {
     let asm = Arc::new(Assembly {
         ph_mode,
         topology_config,
-        system_name: config.name,
         agent_address: config.agent_addr,
         buffer_stack: BufferStack::new(buf_storage),
         agent_input: AgentInput::new(tun_devs.clone()),
@@ -389,8 +388,7 @@ fn main() -> ExitCode {
             warn!("self_addr port is 0 which means dock listening port will be randomly assigned");
         }
         info!(
-            "node {} dock listening on {}",
-            asm.system_name,
+            "dock listening on {}",
             substrate_sockets[0].local_addr().unwrap()
         );
     }
@@ -424,17 +422,11 @@ fn main() -> ExitCode {
     if ph_mode == PhMode::Adapter {
         local_set.block_on(&runtime, async {
             let dsid = zpr::DOCK_LINK_ID;
-            debug!(
-                "{}: waiting on security assocaition establishment on link {}",
-                asm.system_name, dsid
-            );
+            debug!("waiting on security assocaition establishment on link {dsid}");
             while !asm.peer_table.is_security_assocaition_established(dsid) {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
-            debug!(
-                "{}: security assocaition established successfully on link {}",
-                asm.system_name, dsid
-            );
+            debug!("security assocaition established successfully on link {dsid}");
         });
     }
 
@@ -467,10 +459,7 @@ fn main() -> ExitCode {
                     .run(tokio_util::sync::CancellationToken::new()),
             );
 
-            error!(
-                "{}: visa service connection manager terminated: {res:?}",
-                vsconn_asm.system_name
-            );
+            error!("visa service connection manager terminated: {res:?}");
 
             std::thread::sleep(std::time::Duration::from_secs(1));
         });
@@ -489,7 +478,7 @@ fn main() -> ExitCode {
         }
     });
 
-    info!("{}: exiting", asm.system_name);
+    info!("exiting");
 
     ExitCode::SUCCESS
 }
