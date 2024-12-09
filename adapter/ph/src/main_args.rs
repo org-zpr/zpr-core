@@ -99,7 +99,7 @@ pub struct CommonArgs {
 
     /// ZPR address (no port) of the adapter (must match your TUN address)
     #[arg(long, short = 'z')]
-    agent_addr: Option<IpAddr>,
+    agent_addr: Vec<IpAddr>,
 
     /// Enable debug logging
     #[arg(long, short = 'd')]
@@ -173,7 +173,7 @@ impl Default for Config {
             tun_if: None,
             debug: false,
             node_addr: None,
-            agent_addr: None,
+            agent_addr: Vec::new(),
             node_public_key_file: None,
         }
     }
@@ -254,7 +254,7 @@ impl Config {
             return Err("private_key_file".arg_missing());
         }
         check_file_exists("private key file", &self.private_key_file)?;
-        if self.agent_addr.is_none() {
+        if self.agent_addr.is_empty() {
             return Err("agent_addr".arg_missing());
         }
         match mode {
@@ -322,7 +322,7 @@ impl Config {
             self.tun_if = Some(tun_if.clone());
         }
         if let Some(agent_addr) = &config.agent_addr {
-            self.agent_addr = Some(*agent_addr);
+            self.agent_addr.extend(&*agent_addr);
         }
         if let Some(debug) = config.debug {
             self.debug = debug;
@@ -412,9 +412,8 @@ impl Config {
         if let Some(tun_if) = &common.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
-        if let Some(agent_addr) = &common.agent_addr {
-            self.agent_addr = Some(*agent_addr);
-        }
+        self.agent_addr.extend(&common.agent_addr);
+
         if let Some(debug) = common.debug {
             self.debug = debug;
         }
@@ -451,7 +450,7 @@ struct GlobalConfigSection {
     certificate_file: Option<PathBuf>,
     private_key_file: Option<PathBuf>,
     tun_if: Option<String>,
-    agent_addr: Option<IpAddr>,
+    agent_addr: Option<Vec<IpAddr>>,
     debug: Option<bool>,
 }
 
@@ -636,7 +635,7 @@ mod test {
         certificate_file = "tests/certificate.pem"
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
-        agent_addr = "10.0.0.1"
+        agent_addr = [ "10.0.0.1" ]
         debug = true
 
         [adapter]
@@ -681,7 +680,9 @@ mod test {
         );
         assert_eq!(
             config.global.agent_addr,
-            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+            Some(Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(
+                10, 0, 0, 1
+            ))]))
         );
         assert_eq!(
             config.adapter.node_public_key_file,
@@ -743,7 +744,7 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         tun_if = "tun23"
-        agent_addr = "10.0.0.1"
+        agent_addr = [ "10.0.0.1" ]
         debug = true
 
         [adapter]
@@ -801,7 +802,7 @@ mod test {
         );
         assert_eq!(
             config.agent_addr,
-            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+            Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
             config.node_public_key_file,
@@ -898,7 +899,7 @@ mod test {
         );
         assert_eq!(
             config.agent_addr,
-            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+            Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
             config.node_public_key_file,
@@ -915,7 +916,7 @@ mod test {
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
-        agent_addr = "10.0.0.1"
+        agent_addr = [ "10.0.0.1" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -976,7 +977,7 @@ mod test {
         );
         assert_eq!(
             config.agent_addr,
-            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+            Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
             config.node_public_key_file,
@@ -993,7 +994,7 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        agent_addr = "10.0.0.1"
+        agent_addr = [ "10.0.0.1" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -1041,7 +1042,7 @@ mod test {
         );
         assert_eq!(
             config.agent_addr,
-            Some(IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1)))
+            Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
             config.node_public_key_file,
@@ -1058,7 +1059,7 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        agent_addr = "10.0.0.1"
+        agent_addr = [ "10.0.0.1" ]
         "#;
 
         let ca_file = TempFile::touch();

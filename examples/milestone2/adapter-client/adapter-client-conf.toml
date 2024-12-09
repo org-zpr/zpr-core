@@ -5,7 +5,7 @@ name = "client"
 ca_file = "ca-cert.pem"
 certificate_file = "adapter-client-cert.pem"
 private_key_file = "adapter-client-key.pem"
-agent_addr = "fd5a:5052:1::3133:7"
+agent_addr = [ "fd5a:5052:1::3133:7" ]
 self_addr = "0.0.0.0:5000"
 
 # use `sudo mktun.sh` to set this up

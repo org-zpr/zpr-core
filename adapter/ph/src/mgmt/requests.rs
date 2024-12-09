@@ -78,12 +78,8 @@ pub async fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<
 pub async fn send_register_agent_address_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
+    agent_addr: IpAddr,
 ) -> Result<(), ()> {
-    let Some(agent_addr) = asm.agent_address else {
-        warn!("No agent address");
-        return Err(());
-    };
-
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -125,14 +121,14 @@ pub async fn send_register_agent_address_request(
                 hdr.status_code
             );
             asm.buffer_stack.put_buffer(register_res.destroy());
-            Ok(())
         }
 
         Err(err) => {
             warn!("{} error with RegisterAgentAddressRequest", err);
-            Err(())
+            return Err(());
         }
     }
+    Ok(())
 }
 
 #[derive(Debug, Error)]

@@ -55,7 +55,7 @@ pub struct Assembly {
     pub topology_config: config::TopologyConfig,
 
     // Shared resources.  These may be accessed by any part of the system.
-    pub agent_address: Option<IpAddr>,
+    pub agent_addresses: Vec<IpAddr>,
 
     pub buffer_stack: BufferStack<{ config::PACKET_BUFFER_SIZE }>,
 
@@ -294,7 +294,7 @@ pub mod test {
     pub struct TestAssemblyBuilder {
         pub ph_mode: Option<PhMode>,
         pub topology_config: Option<TopologyConfig>,
-        pub agent_address: Option<Option<IpAddr>>,
+        pub agent_addresses: Option<Vec<IpAddr>>,
         pub buffer_stack: Option<BufferStack<{ config::PACKET_BUFFER_SIZE }>>,
         pub agent_input: Option<AgentInput>,
         pub substrate_egress: Option<SubstrateEgress>,
@@ -330,9 +330,9 @@ pub mod test {
     pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
         let ph_mode = builder.ph_mode.unwrap_or(PhMode::Adapter);
         let topology_config = builder.topology_config.unwrap_or_default();
-        let agent_address = builder
-            .agent_address
-            .unwrap_or(Some(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))));
+        let agent_addresses = builder
+            .agent_addresses
+            .unwrap_or(Vec::from([IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]));
         let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
             let buf_storage = vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]); 0];
             BufferStack::new(buf_storage)
@@ -381,7 +381,7 @@ pub mod test {
         Assembly {
             ph_mode,
             topology_config,
-            agent_address,
+            agent_addresses,
             buffer_stack,
             agent_input,
             substrate_egress,

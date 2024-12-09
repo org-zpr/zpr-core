@@ -428,7 +428,14 @@ impl LinkStateWrapper {
                 let link_id = self.id;
                 let task_asm = asm.clone();
                 tokio::task::spawn_local(async move {
-                    mgmt::requests::send_register_agent_address_request(&task_asm, link_id).await?;
+                    for agent_addr in &task_asm.agent_addresses {
+                        mgmt::requests::send_register_agent_address_request(
+                            &task_asm,
+                            link_id,
+                            *agent_addr,
+                        )
+                        .await?;
+                    }
 
                     if task_asm
                         .process_link_state_event(link_id, LinkEvent::ReceivedRegisterResponse)
@@ -520,8 +527,7 @@ impl LinkStateWrapper {
                     let connect_req = libnode::vsapi::ConnectRequest {
                         connection_id: Some(123), // unused
                         dock_addr: Some(
-                            IpAddress::new_from_std(&asm.agent_address.unwrap())
-                                .into_v4_or_v6_octets(),
+                            IpAddress::new_from_std(&asm.agent_addresses[0]).into_v4_or_v6_octets(),
                         ),
                         claims: Some(
                             [
