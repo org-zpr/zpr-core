@@ -80,11 +80,6 @@ pub async fn send_register_agent_address_request(
     link_id: zpr::LinkId,
     agent_addr: IpAddr,
 ) -> Result<(), ()> {
-    if asm.agent_addresses.is_empty() {
-        warn!("{}: No agent address", asm.system_name);
-        return Err(());
-    };
-
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
