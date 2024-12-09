@@ -6,6 +6,7 @@ use crate::config;
 use crate::counters;
 use crate::defs::*;
 use crate::link_state::LinkEvent;
+use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::IpAddress;
 use crate::packet::{BufferPacket, Packet};
 use crate::zdp;
@@ -51,6 +52,7 @@ pub async fn handle_report(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> Handle
     pkt.advance(std::mem::size_of::<zdp::ZdpReportHeader>());
     if pkt.body().len() >= report_data_length {
         info!(
+            target: REPORTING,
             "{}: {}",
             pkt.metadata().ingress_link_id,
             std::str::from_utf8(&pkt.body()[..report_data_length]).unwrap()
@@ -64,6 +66,7 @@ pub async fn handle_report(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> Handle
 pub async fn handle_discard(asm: &Arc<Assembly>, pkt: BufferPacket) -> HandleMgmtResult {
     // TODO print to debug log, when implemented
     info!(
+        target: REPORTING,
         "Discard message received from {}",
         pkt.metadata().ingress_link_id
     );
@@ -79,7 +82,7 @@ pub async fn handle_hello_request(
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
-    debug!("Received Hello Request for link {ingress_link_id}");
+    debug!(target: ZDP, "Received Hello Request for link {ingress_link_id}");
 
     if asm
         .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest)
@@ -115,7 +118,7 @@ pub async fn handle_hello_response(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
     let status = hdr.status;
-    debug!("Received Hello Response for link {ingress_link_id}, status: {status}");
+    debug!(target: ZDP, "Received Hello Response for link {ingress_link_id}, status: {status}");
 
     if asm
         .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloResponse)
@@ -161,7 +164,7 @@ pub async fn handle_register_agent_address_request(
         }
     }
 
-    debug!("Received Register Agent Address Request for link {ingress_link_id} with address {agent_address}");
+    debug!(target: ZDP, "Received Register Agent Address Request for link {ingress_link_id} with address {agent_address}");
 
     if asm
         .process_link_state_event(
@@ -195,7 +198,7 @@ pub async fn handle_register_agent_address_response(
     pkt: BufferPacket,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
-    debug!("Received Register Agent Address Response for link {ingress_link_id}");
+    debug!(target: ZDP, "Received Register Agent Address Response for link {ingress_link_id}");
 
     if asm
         .process_link_state_event(ingress_link_id, LinkEvent::ReceivedRegisterResponse)
@@ -292,7 +295,7 @@ pub async fn handle_bind_agent_address_request(
 
     let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
         // who sent this??
-        error!("coding error: stray packet from unknown source; dropping");
+        error!(target: FLOW_MGMT, "coding error: stray packet from unknown source; dropping");
         return Ok(());
     };
 

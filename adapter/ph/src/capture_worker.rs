@@ -1,4 +1,5 @@
 use crate::assembly::Assembly;
+use crate::logging::targets::CAPTURE;
 use crate::pcap_writer::*;
 use crate::queues::CapPacket;
 use std::io;
@@ -74,10 +75,12 @@ pub async fn launch(config: Config, asm: Arc<Assembly>, mut queue: mpsc::Receive
                     Ok(()) => (),
 
                     Err(err) => {
-                        error!("Error writing to capture file, ending capture: {}", err);
+                        error!(target: CAPTURE, "Error writing to capture file, ending capture: {}", err);
                         match state.savefile.take().unwrap().close().await {
                             Ok(_file) => (),
-                            Err(err) => error!("Error closing capture file: {}", err),
+                            Err(err) => {
+                                error!(target: CAPTURE, "Error closing capture file: {}", err)
+                            }
                         }
                     }
                 }

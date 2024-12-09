@@ -26,6 +26,7 @@ use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
 use crate::km_noise::NOISE_KEY_LEN;
+use crate::logging::targets::KEY_MGMT;
 
 const PEM_BEGIN_CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END_CERTIFICATE: &str = "-----END CERTIFICATE-----";
@@ -91,14 +92,14 @@ impl KmCertExchange {
         let cert = match X509::from_pem(cert_pem.as_bytes()) {
             Ok(c) => c,
             Err(e) => {
-                error!("error constructing cert from PEM data: {}", e);
+                error!(target: KEY_MGMT, "error constructing cert from PEM data: {e}");
                 return Err(ParseError::PEMFormatError);
             }
         };
         let authority_cert = match X509::from_pem(authority_cert_pem.as_bytes()) {
             Ok(c) => c,
             Err(e) => {
-                error!("error constructing cert from PEM data: {}", e);
+                error!(target: KEY_MGMT, "error constructing cert from PEM data: {e}");
                 return Err(ParseError::PEMFormatError);
             }
         };
@@ -165,7 +166,7 @@ impl KmCertExchange {
         let initiator_cert = match X509::from_der(&payload[cert_offset..]) {
             Ok(c) => c,
             Err(e) => {
-                error!("error constructing cert from DER data: {}", e);
+                error!(target: KEY_MGMT, "error constructing cert from DER data: {e}");
                 return Err(CertExchangeError::CertificateParseError);
             }
         };
@@ -176,7 +177,7 @@ impl KmCertExchange {
             match initiator_cert.verify(&authority_pkey) {
                 Ok(_) => (),
                 Err(e) => {
-                    error!("cert verification failed: {}", e);
+                    error!(target: KEY_MGMT, "cert verification failed: {e}");
                     return Err(CertExchangeError::CertificateVerificationError);
                 }
             }
@@ -186,7 +187,7 @@ impl KmCertExchange {
         let initiator_public_key = match initiator_cert.public_key() {
             Ok(p) => p,
             Err(e) => {
-                error!("error extracting public key from cert: {}", e);
+                error!(target: KEY_MGMT, "error extracting public key from cert: {e}");
                 return Err(CertExchangeError::CertificateFormatError);
             }
         };
@@ -198,7 +199,7 @@ impl KmCertExchange {
                 }
             }
             Err(e) => {
-                error!("unable to get raw public key: {}", e);
+                error!(target: KEY_MGMT, "unable to get raw public key: {e}");
                 return Err(CertExchangeError::KeyError);
             }
         }
@@ -248,7 +249,7 @@ pub fn load_cert(path: &Path) -> Result<X509, ParseError> {
     match X509::from_pem(cert_pem_data.as_bytes()) {
         Ok(cert) => Ok(cert),
         Err(e) => {
-            error!("error constructing cert from PEM data: {}", e);
+            error!(target: KEY_MGMT, "error constructing cert from PEM data: {e}");
             Err(ParseError::PEMFormatError)
         }
     }
@@ -264,7 +265,7 @@ pub fn load_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> 
     let pk = match PKey::private_key_from_pem(&contents.as_bytes()) {
         Ok(k) => k,
         Err(e) => {
-            error!("error reading key from PEM data: {}", e);
+            error!(target: KEY_MGMT, "error reading key from PEM data: {e}");
             return Err(ParseError::PEMFormatError);
         }
     };
@@ -276,7 +277,7 @@ pub fn load_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> 
             Ok(key)
         }
         Err(e) => {
-            error!("error extracting raw key: {}", e);
+            error!(target: KEY_MGMT, "error extracting raw key: {e}");
             Err(ParseError::KeyError)
         }
     }
@@ -291,7 +292,7 @@ pub fn load_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
     let pk = match PKey::public_key_from_pem(&contents.as_bytes()) {
         Ok(k) => k,
         Err(e) => {
-            error!("error reading key from PEM data: {}", e);
+            error!(target: KEY_MGMT, "error reading key from PEM data: {e}");
             return Err(ParseError::PEMFormatError);
         }
     };
@@ -300,9 +301,9 @@ pub fn load_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
         Ok(k) => {
             if k.len() != NOISE_KEY_LEN {
                 error!(
-                    "public key in cert is incorrect length (got {} bytes, expected {})",
+                    target: KEY_MGMT,
+                    "public key in cert is incorrect length (got {} bytes, expected {NOISE_KEY_LEN})",
                     k.len(),
-                    NOISE_KEY_LEN
                 );
                 return Err(ParseError::KeyError);
             }
@@ -310,7 +311,7 @@ pub fn load_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
             Ok(key)
         }
         Err(e) => {
-            error!("error extracting raw key: {}", e);
+            error!(target: KEY_MGMT, "error extracting raw key: {e}");
             Err(ParseError::KeyError)
         }
     }

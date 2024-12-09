@@ -11,6 +11,7 @@ use crate::counters::CounterType;
 use crate::defs::Direction;
 use crate::km::Codec;
 use crate::km_noise::NOISE_PADLEN;
+use crate::logging::targets::DATAPATH;
 use crate::net_defs;
 use crate::packet::{BufferPacket, Packet, PacketBuffer};
 use crate::queues::TryEnqueueError;
@@ -30,7 +31,7 @@ use zpr_ext::zerocopy::*;
 /// Drop a packet and count the drop with the given reason.
 pub fn drop_and_count(asm: &Assembly, pkt: BufferPacket, reason: impl Into<CounterType>) {
     let reason = reason.into();
-    debug!("dropping packet because {reason}");
+    debug!(target: DATAPATH, "dropping packet because {reason}");
     asm.buffer_stack.put_buffer(pkt.destroy());
     asm.counters[reason.into()].increment();
 }
@@ -271,7 +272,7 @@ pub fn decrypt_full(
             pkt.put(&decr_buf[0..len]); // copy over cleartext body
         }
         Err(e) => {
-            error!("decryption failed: {}", e);
+            error!(target: DATAPATH, "decryption failed: {}", e);
             return Err(DecryptError::DecryptionFailure);
         }
     }
@@ -288,7 +289,7 @@ fn substrate_egress_common(
     let zdp_hdr = match zdp::ZdpBaseHeader::ref_from_prefix(&pkt.body()) {
         Ok((zdp_hdr, _)) => zdp_hdr,
         Err(_) => {
-            error!("egress: link {}: failed to parse the ZDP header", link_id);
+            error!(target: DATAPATH, "egress: link {}: failed to parse the ZDP header", link_id);
             return Err(km::EncryptionError::ParseError);
         }
     };
@@ -310,7 +311,7 @@ fn substrate_egress_common(
     //       See https://github.com/org-zpr/zpr-core/issues/444
     let transport_sa;
     if zdp_hdr.packet_type == zdp::ZdpPacketType::KeyManagement {
-        debug!("link {link_id}: KM message detected, using ZPI=0 ignoring security association");
+        debug!(target: DATAPATH, "link {link_id}: KM message detected, using ZPI=0 ignoring security association");
         transport_sa = None;
     } else {
         transport_sa = peer_state.get_established_transport_association();
@@ -363,7 +364,7 @@ pub fn substrate_egress(asm: &Assembly, link_id: zpr::LinkId, mut pkt: BufferPac
             return;
         }
         Err(err) => {
-            error!("egress: link {}: encryption error: {}", link_id, err);
+            error!(target: DATAPATH, "egress: link {}: encryption error: {}", link_id, err);
             drop_and_count(asm, pkt, CounterType::EncryptionFailure);
             return;
         }
@@ -394,7 +395,7 @@ pub async fn substrate_egress_blocking(
             return;
         }
         Err(err) => {
-            error!("egress: link {}: encryption error: {}", link_id, err);
+            error!(target: DATAPATH, "egress: link {}: encryption error: {}", link_id, err);
             drop_and_count(asm, pkt, CounterType::EncryptionFailure);
             return;
         }
@@ -434,17 +435,6 @@ pub fn substrate_ingress(
 
     pkt.metadata_mut().ingress_link_id = asm.peer_table.lookup_peer(peer_sa).unwrap_or_zero();
 
-    if pkt.metadata().ingress_link_id == 0 {
-        warn!("got packet from {peer_sa} which isn't in the peer table; peer table contains:");
-        let ids = asm.peer_ids.lock().unwrap().clone();
-        for id in ids {
-            if let Some(peer) = asm.peer_table.get(id) {
-                warn!("{id}: {}", peer.substrate_addr);
-            }
-        }
-        warn!("[end of peer table]");
-    }
-
     // Read, but do not remove the ZPI header
     let Ok((zpi_hdr, _)) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
         drop_and_count(asm, pkt, CounterType::BadStructure);
@@ -479,6 +469,7 @@ pub fn substrate_ingress(
                 } else {
                     // We have an SA and ZPI does not match.
                     warn!(
+                        target: DATAPATH,
                         "ingress: link {}: unexpected ZPI value {} (expected {:?})",
                         pkt.metadata().ingress_link_id,
                         zpi_hdr.zpi,
@@ -490,13 +481,14 @@ pub fn substrate_ingress(
             }
             None => {
                 // Either no security association on link, or it is not yet established.
-                warn!("INSECURE, no SA on link {}", pkt.metadata().ingress_link_id);
+                warn!(target: DATAPATH, "INSECURE, no SA on link {}", pkt.metadata().ingress_link_id);
                 secure = false;
             }
         },
         None => {
             // No link in peer table
             warn!(
+                target: DATAPATH,
                 "INSECURE, no link in peer table for {}",
                 pkt.metadata().ingress_link_id
             );
@@ -508,6 +500,7 @@ pub fn substrate_ingress(
         // Not under a security assocation, which means only ZPI 0 is allowed.
         if zpi_hdr.zpi != zpr::ZPI_0 && pkt.metadata().ingress_link_id != zpr::LINK_ID_UNKNOWN {
             warn!(
+                target: DATAPATH,
                 "ingress: {}: ZPI {} not allowed on unestablished SA",
                 pkt.metadata().ingress_link_id,
                 zpi_hdr.zpi
@@ -516,6 +509,7 @@ pub fn substrate_ingress(
             return;
         }
         warn!(
+            target: DATAPATH,
             "INSECURE, decrypting null packet from {}",
             pkt.metadata().ingress_link_id
         );
@@ -560,6 +554,7 @@ pub fn substrate_ingress(
     // Can be overridden (FOR TESTING ONLY) in the flags.
     if !secure && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
         warn!(
+            target: DATAPATH,
             "ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
             pkt.metadata().ingress_link_id,
             base_hdr.packet_type
@@ -747,7 +742,7 @@ pub fn agent_output_post_classify(asm: &Assembly, mut pkt: BufferPacket, allow_b
             }
 
             // issue bind request
-            info!("issuing bind request for {five_tuple}");
+            info!(target: DATAPATH, "issuing bind request for {five_tuple}");
             match asm.adapter_manager.try_request_tether_id(pkt) {
                 Ok(()) => (),
                 Err(TryEnqueueError::Full(pkt)) => {

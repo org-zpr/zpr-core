@@ -7,6 +7,7 @@ use crate::config;
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::fastpath;
+use crate::logging::targets::ZDP;
 use crate::packet::{self, Packet};
 use crate::zdp;
 use bytes::{Buf, BufMut};
@@ -62,13 +63,13 @@ pub async fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<
                 return Err(());
             };
             let status = hdr.status;
-            debug!("Received HelloResponse, status: {status}");
+            debug!(target: ZDP, "Received HelloResponse, status: {status}");
             asm.buffer_stack.put_buffer(hello_res.destroy());
             Ok(())
         }
 
         Err(err) => {
-            warn!("{err} error with HelloRequest");
+            warn!(target: ZDP, "{err} error with HelloRequest");
             Err(())
         }
     }
@@ -117,6 +118,7 @@ pub async fn send_register_agent_address_request(
                 return Err(());
             };
             debug!(
+                target: ZDP,
                 "Received RegisterAgentAddressResponse, status: {}",
                 hdr.status_code
             );
@@ -124,7 +126,7 @@ pub async fn send_register_agent_address_request(
         }
 
         Err(err) => {
-            warn!("{} error with RegisterAgentAddressRequest", err);
+            warn!(target: ZDP, "{err} error with RegisterAgentAddressRequest");
             return Err(());
         }
     }

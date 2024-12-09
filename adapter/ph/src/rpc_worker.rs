@@ -7,6 +7,7 @@
 
 use crate::assembly::Assembly;
 use crate::config;
+use crate::logging::targets::RPC;
 use crate::test_packet::TestPacketMetrics;
 use cbpf_rs;
 use core::future::Future;
@@ -40,8 +41,8 @@ pub async fn launch(asm: Arc<Assembly>, socket: Arc<UnixListener>) {
             Some(ret) = set.join_next() =>
                 match ret {
                     Ok(Ok(())) => (),
-                    Ok(Err(err)) => error!("Handle Connection Failed: {err}"),
-                    Err(err) => error!("join_next panicked: {err}")
+                    Ok(Err(err)) => error!(target: RPC, "Handle Connection Failed: {err}"),
+                    Err(err) => error!(target: RPC, "join_next panicked: {err}")
                 },
             accepted = socket.accept() =>
                 match accepted {
@@ -49,7 +50,7 @@ pub async fn launch(asm: Arc<Assembly>, socket: Arc<UnixListener>) {
                         set.spawn(handle_connection(asm.clone(), stream));
                     },
                     Err(_e) => {
-                        error!("Connection failed");
+                        error!(target: RPC, "Connection failed");
                     }
             }
         }

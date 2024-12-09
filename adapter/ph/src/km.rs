@@ -9,6 +9,7 @@
 //! parsing key management ZDP messages.
 
 use crate::config;
+use crate::logging::targets::KEY_MGMT;
 use crate::packet::{Packet, PacketBuffer};
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
 use bytes::{BufMut, Bytes};
@@ -331,7 +332,7 @@ impl KeyManager {
         self.start_state_machine_internal(link_id, &km_signals_out, &km_buffers_out)
             .await
             .or_else(|e| {
-                error!("failed to start state machine: {}", e);
+                error!(target: KEY_MGMT, "failed to start state machine: {}", e);
                 Err(e)
             })?;
 
@@ -418,7 +419,7 @@ impl KeyManager {
         {
             Ok(_) => {}
             Err(_) => {
-                error!("failed to enqueue reset signal")
+                error!(target: KEY_MGMT, "failed to enqueue reset signal")
             }
         };
 
@@ -476,7 +477,7 @@ impl KeyManager {
                 match km_buffers_out.send(KmLinkMsg::new(link_id, r)).await {
                     Ok(_) => {}
                     Err(_) => {
-                        error!("failed to enqueue outbound KM message");
+                        error!(target: KEY_MGMT, "failed to enqueue outbound KM message");
                         return Err(KmError::EnqueueFailed);
                     }
                 }
@@ -488,7 +489,7 @@ impl KeyManager {
                 {
                     Ok(_) => {}
                     Err(_) => {
-                        error!("failed to enqueue reset signal, aborting");
+                        error!(target: KEY_MGMT, "failed to enqueue reset signal, aborting");
                         return Err(KmError::EnqueueFailed);
                     }
                 }
@@ -503,7 +504,7 @@ impl KeyManager {
                 resp = match state.statemachine.tick() {
                     Ok(h) => h,
                     Err(e) => {
-                        warn!("error during tick processing: {}", e);
+                        warn!(target: KEY_MGMT, "error during tick processing: {}", e);
                         None
                     }
                 };
@@ -512,7 +513,7 @@ impl KeyManager {
                 match km_buffers_out.send(KmLinkMsg::new(link_id, r)).await {
                     Ok(_) => {}
                     Err(_) => {
-                        error!("failed to enqueue oubound KM message");
+                        error!(target: KEY_MGMT, "failed to enqueue oubound KM message");
                         return Err(KmError::EnqueueFailed);
                     }
                 }
@@ -528,7 +529,7 @@ impl KeyManager {
         link_id: zpr::LinkId,
         km_signals_out: &mpsc::Sender<KmLinkMsg<KmSignal>>,
     ) -> KmResult<()> {
-        debug!("KM state transition {:?} -> {:?}", prev_state, next_state);
+        debug!(target: KEY_MGMT, "state transition {:?} -> {:?}", prev_state, next_state);
         if matches!(prev_state, KmSMState::Error) {
             // We transitioned out of error state -- clear error related settings.
             let mut state = self.shared.state.lock().unwrap();
@@ -552,7 +553,7 @@ impl KeyManager {
                     my_sa.sa_id = cur_id;
                     state.ts = my_sa.clone();
                 }
-                debug!("KM: New SA_ID: {}", cur_id);
+                debug!(target: KEY_MGMT, "New SA_ID: {}", cur_id);
                 match self
                     .send_signal(
                         &km_signals_out,
@@ -566,7 +567,7 @@ impl KeyManager {
                 {
                     Ok(_) => {}
                     Err(_) => {
-                        error!("failed to enqueue SaIdChange signal");
+                        error!(target: KEY_MGMT, "failed to enqueue SaIdChange signal");
                         return Err(KmError::EnqueueFailed);
                     }
                 }
@@ -576,7 +577,7 @@ impl KeyManager {
                 {
                     Ok(_) => {}
                     Err(_) => {
-                        error!("failed to enqueue SaIdEstablished signal");
+                        error!(target: KEY_MGMT, "failed to enqueue SaIdEstablished signal");
                         return Err(KmError::EnqueueFailed);
                     }
                 }
@@ -594,7 +595,7 @@ impl KeyManager {
                     {
                         Ok(_) => {}
                         Err(_) => {
-                            error!("failed to enqueue error signal, aborting");
+                            error!(target: KEY_MGMT, "failed to enqueue error signal, aborting");
                             return Err(KmError::EnqueueFailed);
                         }
                     }
@@ -623,7 +624,7 @@ impl KeyManager {
             resp = match state.statemachine.handle_message(&inmsg) {
                 Ok(h) => h,
                 Err(e) => {
-                    error!("failed to handle key manager message: {}", e);
+                    error!(target: KEY_MGMT, "failed to handle key manager message: {e}");
                     None
                 }
             };
@@ -632,7 +633,7 @@ impl KeyManager {
             match km_buffers_out.send(KmLinkMsg::new(link_id, r)).await {
                 Ok(_) => {}
                 Err(_) => {
-                    error!("failed to enqueue outbound KM message");
+                    error!(target: KEY_MGMT, "failed to enqueue outbound KM message");
                     return Err(KmError::EnqueueFailed);
                 }
             }

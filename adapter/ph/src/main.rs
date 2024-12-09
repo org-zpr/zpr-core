@@ -35,6 +35,7 @@ mod km_cert_exchange;
 mod km_multiplexor;
 mod km_noise;
 mod link_state;
+mod logging;
 mod main_args;
 mod mgmt;
 mod mgmt_dispatch_worker;
@@ -69,6 +70,7 @@ use capture_worker::CaptureWorker;
 use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
+use logging::targets::STARTUP;
 use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
@@ -103,7 +105,7 @@ fn main() -> ExitCode {
 
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    info!("starting with PID {}", process::id());
+    info!(target: STARTUP, "starting with PID {}", process::id());
 
     //
     // read key material
@@ -118,8 +120,9 @@ fn main() -> ExitCode {
         Ok(key) => key,
         Err(e) => {
             error!(
-                "failed to load private key file: {:?}: {:?}",
-                &config.private_key_file, e
+                target: STARTUP,
+                "failed to load private key file: {:?}: {e:?}",
+                &config.private_key_file,
             );
             return ExitCode::FAILURE;
         }
@@ -133,7 +136,7 @@ fn main() -> ExitCode {
         )) {
             Ok(key) => key,
             Err(e) => {
-                error!("failed to load node public key file: {:?}", e);
+                error!(target: STARTUP, "failed to load node public key file: {e:?}");
                 return ExitCode::FAILURE;
             }
         };
@@ -147,7 +150,7 @@ fn main() -> ExitCode {
     certx = match KmCertExchange::new_from_paths(&config.certificate_file, &config.ca_file) {
         Ok(certx) => Some(certx),
         Err(e) => {
-            error!("failed to initialize key exchange: {:?}", e);
+            error!(target: STARTUP, "failed to initialize key exchange: {e:?}");
             return ExitCode::FAILURE;
         }
     };
@@ -194,7 +197,7 @@ fn main() -> ExitCode {
     let control_socket = Arc::new(
         UnixListener::bind(&config.control_path).expect("failed to bind to control socket"),
     );
-    info!("control socket bound to {:?}", config.control_path);
+    info!(target: STARTUP, "control socket bound to {:?}", config.control_path);
 
     //
     // open TUN devices
@@ -240,7 +243,7 @@ fn main() -> ExitCode {
         if config.self_addr.port() == 0 {
             let port = socket.local_addr().unwrap().as_socket().unwrap().port();
             config.self_addr.set_port(port);
-            info!("assigned substrate UDP port {port}");
+            info!(target: STARTUP, "assigned substrate UDP port {port}");
         }
         substrate_sockets.push(Arc::new(UdpSocket::from_std(socket.into()).unwrap()));
     }
@@ -256,7 +259,7 @@ fn main() -> ExitCode {
     ) {
         // It's OK if this fails; flows will still be pinned to a queue;
         // they'll just be pinned there with all other flows from the same link.
-        warn!("Unable to enable ingress packet steering: {err}");
+        warn!(target: STARTUP, "Unable to enable ingress packet steering: {err}");
     }
 
     //
@@ -385,9 +388,10 @@ fn main() -> ExitCode {
     if ph_mode == PhMode::Node {
         if config.self_addr.port() == 0 {
             // TODO: Should we force setting a port when configuring a node?
-            warn!("self_addr port is 0 which means dock listening port will be randomly assigned");
+            warn!(target: STARTUP, "self_addr port is 0 which means dock listening port will be randomly assigned");
         }
         info!(
+            target: STARTUP,
             "dock listening on {}",
             substrate_sockets[0].local_addr().unwrap()
         );
@@ -422,11 +426,11 @@ fn main() -> ExitCode {
     if ph_mode == PhMode::Adapter {
         local_set.block_on(&runtime, async {
             let dsid = zpr::DOCK_LINK_ID;
-            debug!("waiting on security assocaition establishment on link {dsid}");
+            debug!(target: STARTUP, "waiting on security assocaition establishment on link {dsid}");
             while !asm.peer_table.is_security_assocaition_established(dsid) {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
-            debug!("security assocaition established successfully on link {dsid}");
+            debug!(target: STARTUP, "security assocaition established successfully on link {dsid}");
         });
     }
 
@@ -456,7 +460,7 @@ fn main() -> ExitCode {
                     .run(tokio_util::sync::CancellationToken::new()),
             );
 
-            error!("visa service connection manager terminated: {res:?}");
+            error!(target: STARTUP, "visa service connection manager terminated: {res:?}");
 
             std::thread::sleep(std::time::Duration::from_secs(1));
         });
@@ -475,7 +479,7 @@ fn main() -> ExitCode {
         }
     });
 
-    info!("exiting");
+    info!(target: STARTUP, "exiting");
 
     ExitCode::SUCCESS
 }
