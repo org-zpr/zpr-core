@@ -445,10 +445,8 @@ fn main() -> ExitCode {
     if ph_mode == PhMode::Node {
         let (vss_inq, vss_outq) = mpsc::channel(asm.topology_config.vss_queue_size);
 
-        let vss_addr = std::net::SocketAddr::new(
-            asm.agent_addresses[0],
-            libnode::vss::DEFAULT_VSS_PORT,
-        );
+        let vss_addr =
+            std::net::SocketAddr::new(asm.agent_addresses[0], libnode::vss::DEFAULT_VSS_PORT);
 
         js.spawn_blocking(move || libnode::vss::start_vss_server(vss_inq, vss_addr));
 

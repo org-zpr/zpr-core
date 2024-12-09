@@ -543,8 +543,7 @@ impl LinkStateWrapper {
                     let connect_req = libnode::vsapi::ConnectRequest {
                         connection_id: Some(123), // unused
                         dock_addr: Some(
-                            IpAddress::new_from_std(&asm.agent_addresses[0])
-                                .into_v4_or_v6_octets(),
+                            IpAddress::new_from_std(&asm.agent_addresses[0]).into_v4_or_v6_octets(),
                         ),
                         claims: Some(
                             [

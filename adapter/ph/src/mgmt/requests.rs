@@ -130,7 +130,7 @@ pub async fn send_register_agent_address_request(
 
             Err(err) => {
                 warn!("{} error with RegisterAgentAddressRequest", err);
-                return Err(())
+                return Err(());
             }
         }
     }
