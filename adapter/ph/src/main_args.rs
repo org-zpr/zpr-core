@@ -321,9 +321,8 @@ impl Config {
         if let Some(tun_if) = &config.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
-        if !config.agent_addr.is_empty() {
-            self.agent_addr = config.agent_addr.clone();
-        }
+        self.agent_addr.extend(&config.agent_addr);
+
         if let Some(debug) = config.debug {
             self.debug = debug;
         }
@@ -412,9 +411,8 @@ impl Config {
         if let Some(tun_if) = &common.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
-        if !common.agent_addr.is_empty() {
-            self.agent_addr = common.agent_addr.clone();
-        }
+        self.agent_addr.extend(&common.agent_addr);
+
         if let Some(debug) = common.debug {
             self.debug = debug;
         }
