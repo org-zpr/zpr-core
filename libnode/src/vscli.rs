@@ -7,6 +7,7 @@ use thrift::transport::{TIoChannel, TTcpChannel};
 use tracing::{debug, info};
 
 use crate::errors::VSClientError;
+use crate::logging::targets::VS_RPC;
 use crate::m2;
 use crate::vsapi;
 use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
@@ -67,7 +68,7 @@ impl VSClient {
         let i_prot = TBinaryInputProtocol::new(TFramedReadTransport::new(i_chan), true);
         let o_prot = TBinaryOutputProtocol::new(TFramedWriteTransport::new(o_chan), true);
 
-        debug!("XXX VSClient.new creating VisaServiceSyncClient");
+        debug!(target: VS_RPC, "XXX VSClient.new creating VisaServiceSyncClient");
         let tcli = vsapi::VisaServiceSyncClient::new(i_prot, o_prot);
 
         Ok(VSClient {
@@ -105,7 +106,7 @@ impl VSClientI for VSClient {
         cert_pem_data: &str,
         vss_service_addr: SocketAddr,
     ) -> Result<String, VSClientError> {
-        debug!("sending HELLO to {}", self.service);
+        debug!(target: VS_RPC, "sending HELLO to {}", self.service);
         let hello_response = self.cli.hello()?;
 
         let timestamp = SystemTime::now()
@@ -129,7 +130,7 @@ impl VSClientI for VSClient {
             node_agent: Some(agent),
         };
 
-        debug!("sending AUTHENTICATE to {}", self.service);
+        debug!(target: VS_RPC, "sending AUTHENTICATE to {}", self.service);
         let apikey = match self.cli.authenticate(authreq) {
             Ok(result) => result,
             Err(e) => return Err(e.into()),
@@ -144,7 +145,7 @@ impl VSClientI for VSClient {
             return Err(VSClientError::NoAPIKey);
         }
         let key = self.key.as_ref().unwrap();
-        debug!("sending DE-REGISTER to {}", self.service);
+        debug!(target: VS_RPC, "sending DE-REGISTER to {}", self.service);
         self.cli.de_register(key.clone())?;
         Ok(())
     }
@@ -155,7 +156,7 @@ impl VSClientI for VSClient {
             return Err(VSClientError::NoAPIKey);
         }
         let key = self.key.as_ref().unwrap();
-        debug!("sending PING to {}", self.service);
+        debug!(target: VS_RPC, "sending PING to {}", self.service);
         match self.cli.ping(key.clone()) {
             Ok(result) => Ok(result),
             Err(e) => Err(e.into()),
@@ -185,7 +186,7 @@ impl VSClientI for VSClient {
             _ => return Err(VSClientError::UnsupportedTrafficType),
         };
 
-        info!("sending VISA_REQUEST to {}", self.service); // raising from debug to info for M/2
+        info!(target: VS_RPC, "sending VISA_REQUEST to {}", self.service); // raising from debug to info for M/2
         match self.cli.request_visa(key.clone(), addr_bytes, l3t, packet) {
             Ok(result) => Ok(result),
             Err(e) => Err(e.into()),
@@ -201,7 +202,7 @@ impl VSClientI for VSClient {
             return Err(VSClientError::NoAPIKey);
         }
         let key = self.key.as_ref().unwrap();
-        debug!("sending AUTHORIZE_CONNECT to {}", self.service);
+        debug!(target: VS_RPC, "sending AUTHORIZE_CONNECT to {}", self.service);
         match self.cli.authorize_connect(key.clone(), req) {
             Ok(result) => Ok(result),
             Err(e) => Err(e.into()),
@@ -218,7 +219,7 @@ impl VSClientI for VSClient {
             IpAddr::V4(v4) => v4.octets().to_vec(),
             IpAddr::V6(v6) => v6.octets().to_vec(),
         };
-        debug!("sending AGENT_DISCONNECT to {}", self.service);
+        debug!(target: VS_RPC, "sending AGENT_DISCONNECT to {}", self.service);
         match self.cli.agent_disconnect(key.clone(), addr_bytes) {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),

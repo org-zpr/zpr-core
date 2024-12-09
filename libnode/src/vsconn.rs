@@ -17,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, debug};
 
 use crate::errors::{VSClientError, VSError};
+use crate::logging::targets::VS_RPC;
 use crate::vsapi;
 use crate::vscli::{self, VSClientI};
 use crate::vss::DEFAULT_VSS_PORT;
@@ -171,7 +172,7 @@ impl VSConn {
     /// Registers with visa service and obtains an API key.
     /// Blocking network call.
     fn initialize(&self, client: &mut Box<dyn VSClientI>) -> Result<(), VSError> {
-        debug!("VSConn::initialize starts");
+        debug!(target: VS_RPC, "VSConn::initialize starts");
 
         let pem_data: String;
         let vss_svc_addr;
@@ -197,7 +198,7 @@ impl VSConn {
     /// This little run loop is fairly basic: all requests of the visa service run one at a time and
     /// in order.
     pub async fn run(&self, ctok: CancellationToken) -> Result<(), VSError> {
-        info!("run starts");
+        info!(target: VS_RPC, "run starts");
 
         let (tx, mut rx) = mpsc::channel(16);
         let fac: vscli::VSClientFactory;
@@ -216,9 +217,9 @@ impl VSConn {
             Ok(c) => c,
             Err(e) => return Err(e.into()),
         };
-        debug!("client created successfully");
+        debug!(target: VS_RPC, "client created successfully");
         self.initialize(&mut client)?;
-        debug!("initialize completed successfully");
+        debug!(target: VS_RPC, "initialize completed successfully");
 
         let mut interval = time::interval(PING_INTERVAL);
         let mut ping_errors = 0;
@@ -231,25 +232,25 @@ impl VSConn {
                             match output_tx.send(VSOutput::PingSuccess(ping_resp.configuration.unwrap() as u64, ping_resp.policy_version.unwrap() as u64)).await {
                                 Ok(_) => {}
                                 Err(e) => {
-                                    error!("failed to send ping success message: {}", e);
+                                    error!(target: VS_RPC, "failed to send ping success message: {e}");
                                     return Err(VSError::EnqueueError);
                                 }
                             }
                         }
                         Err(e) => {
-                            error!("VSConn::run ping failed: {}", e);
+                            error!(target: VS_RPC, "VSConn::run ping failed: {e}");
                             ping_errors += 1;
                             if ping_errors > MAX_PING_ERRORS {
-                                error!("too many ping errors, assuming we are disconnected");
+                                error!(target: VS_RPC, "too many ping errors, assuming we are disconnected");
                                 return Err(VSError::Disconnect);
                             }
                         }
                     }
                 }
                 _ = ctok.cancelled() => {
-                    info!("VSConn::run cancelled");
+                    info!(target: VS_RPC, "VSConn::run cancelled");
                     if let Err(e) = client.de_register() {
-                        error!("failed to de-register: {}", e);
+                        error!(target: VS_RPC, "failed to de-register: {e}");
                     }
                     break;
                 }
@@ -276,7 +277,7 @@ impl VSConn {
         match client.request_visa(req.source_tether_addr, req.l3_type, req.packet) {
             Ok(vr) => Ok(vr),
             Err(e) => {
-                error!("failed to request visa: {}", e);
+                error!(target: VS_RPC, "failed to request visa: {e}");
                 Err(e)
             }
         }
@@ -290,7 +291,7 @@ impl VSConn {
         match client.authorize_connect(cr) {
             Ok(acr) => Ok(acr),
             Err(e) => {
-                error!("failed to authorize connect: {}", e);
+                error!(target: VS_RPC, "failed to authorize connect: {e}");
                 Err(e)
             }
         }
@@ -304,7 +305,7 @@ impl VSConn {
         match client.agent_disconnect(ipa) {
             Ok(_) => Ok(()),
             Err(e) => {
-                error!("failed to call agent disconnect: {}", e);
+                error!(target: VS_RPC, "failed to call agent disconnect: {e}");
                 Err(e)
             }
         }
@@ -320,13 +321,13 @@ impl VSConn {
             if let Some(tx) = &state.cmd_tx {
                 tx_chan = tx.clone();
             } else {
-                error!("VSConn::send_command called but no command channel available");
+                error!(target: VS_RPC, "VSConn::send_command called but no command channel available");
                 return Err(VSClientError::ConnClosed);
             }
         }
 
         if let Err(e) = tx_chan.send(cmd).await {
-            error!("VSConn::send_command failed to queue: {}", e);
+            error!(target: VS_RPC, "VSConn::send_command failed to queue: {e}");
             return Err(VSClientError::ConnClosed);
         }
         Ok(())

@@ -13,9 +13,9 @@ use thrift::transport::{TFramedWriteTransportFactory, TWriteTransportFactory};
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info};
 
-use crate::vsapi;
+use crate::logging::targets::VSS_RPC;
 use crate::vsapi::{
-    PolicyInfo, VisaHop, VisaRevocation, VisaSupportSyncHandler, VisaSupportSyncProcessor,
+    self, PolicyInfo, VisaHop, VisaRevocation, VisaSupportSyncHandler, VisaSupportSyncProcessor,
 };
 
 /// Default port for the visa support service. Note that the visa support service
@@ -84,33 +84,33 @@ pub fn start_vss_server(tx_chan: Sender<VSSMsg>, listen_addr: SocketAddr) {
 
     // TODO: super annoying that thrift gives us no way to run non-blocking or
     //       even a way to stop the server.
-    info!("starting visa support service on {}", listen_addr);
+    info!(target: VSS_RPC, "starting visa support service on {listen_addr}");
     match vss_server.listen(listen_addr) {
-        Ok(_) => info!("VSS server completed OK"),
-        Err(e) => error!("VSS server failed with error: {}", e),
+        Ok(_) => info!(target: VSS_RPC, "VSS server completed OK"),
+        Err(e) => error!(target: VSS_RPC, "VSS server failed with error: {e}"),
     };
 }
 
 impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
     /// Accept the visa service message and put in on the message channel.
     fn handle_network_policy_installed(&self, pi: vsapi::PolicyInfo) -> thrift::Result<()> {
-        debug!("handle_network_policy_installed: {:?}", pi);
+        debug!(target: VSS_RPC, "handle_network_policy_installed: {pi:?}");
         self.msg_chan_out
             .blocking_send(VSSMsg::PolicyInstall(pi))
             .or_else(|e| {
-                error!("failed to enque policy message to node: {}", e);
+                error!(target: VSS_RPC, "failed to enque policy message to node: {e}");
                 Err(thrift::Error::from("enqueue failed"))
             })
     }
 
     /// Accept the pushed visa(s) and put on to the message channel.
     fn handle_install_visas(&self, vh: Vec<vsapi::VisaHop>) -> thrift::Result<()> {
-        debug!("handle_install_visas, count={}", vh.len());
+        debug!(target: VSS_RPC, "handle_install_visas, count={}", vh.len());
         for v in vh {
             self.msg_chan_out
                 .blocking_send(VSSMsg::PushedVisa(v))
                 .or_else(|e| {
-                    error!("failed to enqueue visa message to node: {}", e);
+                    error!(target: VSS_RPC, "failed to enqueue visa message to node: {e}");
                     Err(thrift::Error::from("enqueue failed"))
                 })?;
         }
@@ -119,12 +119,12 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
 
     /// Accept the visa revocation(s) and put on to the message channel.
     fn handle_revoke_visas(&self, vr: Vec<vsapi::VisaRevocation>) -> thrift::Result<()> {
-        debug!("handle_revoke_visas, count={}", vr.len());
+        debug!(target: VSS_RPC, "handle_revoke_visas, count={}", vr.len());
         for r in vr {
             self.msg_chan_out
                 .blocking_send(VSSMsg::PushedRevocation(r))
                 .or_else(|e| {
-                    error!("failed to enque visa revocation to node: {}", e);
+                    error!(target: VSS_RPC, "failed to enque visa revocation to node: {}", e);
                     Err(thrift::Error::from("enqueue failed"))
                 })?;
         }
