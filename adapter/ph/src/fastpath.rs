@@ -197,6 +197,7 @@ pub enum DecryptError {
     UnknownZpi,
     DecryptionFailure,
     MicvFailure,
+    BadChecksum,
 }
 
 impl From<DecryptError> for CounterType {
@@ -206,6 +207,7 @@ impl From<DecryptError> for CounterType {
             DecryptError::UnknownZpi => Self::UnknownZpi,
             DecryptError::DecryptionFailure => Self::DecryptionFailure,
             DecryptError::MicvFailure => Self::MicvFailure,
+            DecryptError::BadChecksum => Self::BadChecksum,
         }
     }
 }
@@ -214,7 +216,7 @@ impl From<DecryptError> for CounterType {
 pub fn decrypt_null(pkt: &mut Packet<impl PacketBuffer>) -> Result<(), DecryptError> {
     // RFC 6.5 § 5.25.2
     if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
-        return Err(DecryptError::MicvFailure);
+        return Err(DecryptError::BadChecksum);
     }
 
     pkt.shrink_by(2); // remove checksum
@@ -435,6 +437,20 @@ pub fn substrate_ingress(
 
     pkt.metadata_mut().ingress_link_id = asm.peer_table.lookup_peer(peer_sa).unwrap_or_zero();
 
+    if pkt.metadata().ingress_link_id == 0 {
+        warn!(
+            "{}: got packet from {peer_sa} which isn't in the peer table; peer table contains:",
+            asm.system_name
+        );
+        let ids = asm.peer_ids.lock().unwrap().clone();
+        for id in ids {
+            if let Some(peer) = asm.peer_table.get(id) {
+                warn!("{id}: {}", peer.substrate_addr);
+            }
+        }
+        warn!("[end of peer table]");
+    }
+
     // Read, but do not remove the ZPI header
     let Ok((zpi_hdr, _)) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
         drop_and_count(asm, pkt, CounterType::BadStructure);
@@ -481,11 +497,21 @@ pub fn substrate_ingress(
             }
             None => {
                 // Either no security association on link, or it is not yet established.
+                warn!(
+                    "{}: INSECURE, no SA on link {}",
+                    asm.system_name,
+                    pkt.metadata().ingress_link_id
+                );
                 secure = false;
             }
         },
         None => {
             // No link in peer table
+            warn!(
+                "{}: INSECURE, no link in peer table for {}",
+                asm.system_name,
+                pkt.metadata().ingress_link_id
+            );
             secure = false;
         }
     };
@@ -502,6 +528,11 @@ pub fn substrate_ingress(
             drop_and_count(asm, pkt, CounterType::UnknownZpi);
             return;
         }
+        warn!(
+            "{}: INSECURE, decrypting null packet from {}",
+            asm.system_name,
+            pkt.metadata().ingress_link_id
+        );
         match decrypt_null(&mut pkt) {
             Ok(()) => (),
             Err(err) => {

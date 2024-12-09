@@ -493,13 +493,23 @@ POLICYLOOP:
 func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentInfo) []*polio.MatchedPolicy {
 	var pset []*polio.MatchedPolicy
 
+	// HACK - The prototype compiler will allow for ICMPv4 and ICMPv6, but it always writes
+	//        the scope protocol as ICMPv6 since the prototype ZPL does not differentiate.
+	//        Therefore the matcher index always uses ICMP6.  If we are getting IPv4 traffic and
+	//        the protocol is ICMP4 we pretend it is ICMP6.
+	tdProtoNum := td.Proto.Num()
+	if td.SrcAddr.Is4() && td.Proto == snip.ProtocolICMP4 {
+		tdProtoNum = snip.ProtocolICMP6.Num()
+	}
+
 	// In all cases, either the source or destination must have a service to offer. Possibly they both do.
 	m.log.Debug("[MX] matcher - running policiesForScope")
 	for _, svcID := range dstAgent.AgentProvides {
 		m.log.Debug("[MX] found dest agent provides", "provides", svcID)
 		if protIdx, match := m.trafficIdx[svcID]; match {
 			m.log.Debug("[MX]  -- found service in match table", "protocolCount", len(protIdx))
-			if portIdx, match := protIdx[td.Proto.Num()]; match {
+			m.log.Debug("[MX]  -- XXX ", "wanted_proto_num", tdProtoNum, "protIdx", protIdx)
+			if portIdx, match := protIdx[tdProtoNum]; match {
 				m.log.Debug("[MX]  -- found protocol in match table", "portCount", len(portIdx))
 				if set, merr := m.matchy(td, true, portIdx, dstAgent); len(set) > 0 { // FORWARD !
 					m.log.Debugf("[MX]  -- -- matched %d policies on FWD", len(set))
@@ -519,7 +529,7 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 	for _, svcID := range srcAgent.AgentProvides {
 		m.log.Debug("[MX]  checking source agent provides", "provides", svcID)
 		if protIdx, match := m.trafficIdx[svcID]; match {
-			if portIdx, match := protIdx[td.Proto.Num()]; match {
+			if portIdx, match := protIdx[tdProtoNum]; match {
 				if set, merr := m.matchy(td, false, portIdx, dstAgent); len(set) > 0 { // REVERSE !
 					m.log.Debugf("[MX]  -- -- matched %d policies on REV", len(set))
 					pset = append(pset, set...)
@@ -546,7 +556,7 @@ func (m *Matcher) matchy(td *snip.Traffic, isFWD bool, portIdx map[uint32][]int,
 			qPortVal = uint32(td.SrcPort)
 		}
 
-	case snip.ProtocolICMP6:
+	case snip.ProtocolICMP6, snip.ProtocolICMP4:
 		// This is not quite right for ICMP. PING, for example, expects one typecode as a request
 		// and the other as a response.  This index will match either typecode in either direction.  So more
 		// detailed checking is required for ICMP.
@@ -563,7 +573,7 @@ func (m *Matcher) matchy(td *snip.Traffic, isFWD bool, portIdx map[uint32][]int,
 	for _, px := range policies {
 		cpol := m.policy.Policies[px]
 		switch td.Proto {
-		case snip.ProtocolICMP6:
+		case snip.ProtocolICMP6, snip.ProtocolICMP4:
 			// Eg policy says REQ-REP to 128, 129
 			// so,
 			//     128 must match client to service
@@ -605,7 +615,7 @@ func (m *Matcher) icmpSpecialHandling(cpol *polio.CPolicy, qPortVal uint32, isFW
 	// must only match on a request, and a reverse must match on a response.
 	keep := false
 	for _, sc := range cpol.Scope {
-		if sc.Protocol == snip.ProtocolICMP6.Num() {
+		if (sc.Protocol == snip.ProtocolICMP6.Num()) || (sc.Protocol == snip.ProtocolICMP4.Num()) {
 			icmpScope := sc.GetIcmp()
 			if len(icmpScope.Codes) == 1 {
 				if icmpScope.Codes[0] == qPortVal {

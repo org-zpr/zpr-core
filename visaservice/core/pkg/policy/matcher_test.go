@@ -86,6 +86,76 @@ zpr:
                     -----END CERTIFICATE-----
 `
 
+// IPv4 version
+const mtpreambleIP4 = `
+zpl_format: 2
+main:
+  policy_version: 1
+  policy_date: "2020-10-22T12:23:00Z"
+
+services:
+  http:
+    tcp: 80
+  ping:
+    icmp:
+      type: request-response
+      type_codes: 8, 0
+`
+
+// IPv4 version
+const networkIP4 = `
+zpr:
+  globals:
+    max_connections: 100
+    max_connections_per_dock: 10
+    max_connections_per_agent: 3
+  visaservice:
+    provider:
+      - [intern.foo, fox]
+    admin_attrs:
+      - [intern.foo, fee]
+  nodes:
+    n0:
+      key: "cffa793530e6d63e560e8b314b5035db34aaae324f63cb76b204d3e4c00d5a1a"
+      provider:
+        - [intern.cn, eq, nodus]
+      address: "10.0.0.88"
+      interfaces:
+        i0:
+          netaddr: "n0.spacelaser.net:5000"
+  addresses:
+    node_net: "10.0.0.0/24"
+    zpr_net: "10.1.0.0/24"
+  datasources:
+    intern:
+      api: validation/1
+      authority:
+        encoding: pem
+        cert_data: |
+                    -----BEGIN CERTIFICATE-----
+                    MIIDlDCCAnwCCQC8eSseeO7eyzANBgkqhkiG9w0BAQsFADCBizELMAkGA1UEBhMC
+                    VVMxCzAJBgNVBAgMAktZMRMwEQYDVQQHDApMb3Vpc3ZpbGxlMQswCQYDVQQKDAJB
+                    STEQMA4GA1UECwwHc3VyZW5ldDEdMBsGA1UEAwwUYXV0aDAuc3BhY2VsYXNlci5u
+                    ZXQxHDAaBgkqhkiG9w0BCQEWDW1hdGhpYXNAYWkuY28wHhcNMTkwMzE5MTUxNTE3
+                    WhcNMjAwMzE4MTUxNTE3WjCBizELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAktZMRMw
+                    EQYDVQQHDApMb3Vpc3ZpbGxlMQswCQYDVQQKDAJBSTEQMA4GA1UECwwHc3VyZW5l
+                    dDEdMBsGA1UEAwwUYXV0aDAuc3BhY2VsYXNlci5uZXQxHDAaBgkqhkiG9w0BCQEW
+                    DW1hdGhpYXNAYWkuY28wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDh
+                    FIpG5LpTIrhaM2vsccVRJjLbOTZvXf2kBlNDX+HeK59KLUoS/TSV7AR4Yj56uOO6
+                    6iUl17r6ukxlPhqyH0+26DfKCuAsAO72nFSLEAgEqoJBxhuKZB25Qr7ZSnVu6S4J
+                    sOCmW4z87jZmAZ6kSRw+ReVrqzDj67mihHCasOfYsGnZAp+1/5nqBvW+7CQlxJt4
+                    im4IKDb21kIRtn4EjYzf/ecysD3Hqcb8qY6Cq7AWibajhZWmkQVkWfOc0hfixUck
+                    2Szjm+uzZb1ZwCCZFIXEnUvQ5lOiswOkuy2+t/mEiWvhLtRrXms/dhKUtqtyhtGO
+                    dkPuT2zDmOtB92gb2ttxAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAMGvqGBGTVUd
+                    6tpyhcm6J9o1P7pnOjc4HlDpOebqPMnwkuWmOOODshbFD/biDDNtpPt9DikAiSqZ
+                    iVZ/RC6r42dVH0G4tiiQJDPLsLJ0pj/cdJnmmYXwUUqE4IXxsqbKMkhToZlp9Yw1
+                    N+wBxdue8Nix5LhI7YYfut1JlMqtho6hxX712uMlZqUJUFsPUPErxKQIcuwuDJmP
+                    RQiwkwIEZOEvrIQjkFUy+wOxsJI9cqtpVE1hSSc1dwAL0tjLqO5LtQhBMFORXUuK
+                    R+E8nfJH0YhY9AIiRjJM6Gujxa9lMofSlHK0LtS7jaDnbFVsKa4fK8iIAlqGDSnc
+                    roROWU/mSb0=
+                    -----END CERTIFICATE-----
+`
+
 // MatchTrafficAgents helper to call matcher.MatchTraffic
 func MatchTrafficAgents(m *policy.Matcher, td *snip.Traffic, src, dst *agent.Agent) ([]*polio.MatchedPolicy, error) {
 	mtSrc, mtDst := &policy.AgentInfo{src.GetAuthedClaims(), src.GetProvides()}, &policy.AgentInfo{dst.GetAuthedClaims(), dst.GetProvides()}
@@ -1046,4 +1116,62 @@ func TestWithNilPolicy(t *testing.T) {
 	m, err := policy.NewMatcher(nil, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 	require.NotNil(t, m)
+}
+
+func TestICMP4EchoRequest(t *testing.T) {
+	pyml := mtpreambleIP4 + networkIP4 + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http, ping]
+          provider:
+            - [zpr.addr, eq, 10.1.0.8]
+          address: "10.1.0.8"
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [intern.foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t04",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
+
+	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server.SetAuthenticated(mkClaims("zpr.addr", "10.1.0.8", time.Hour), time.Time{}, nil, nil, 1)
+	server.SetProvides([]string{"/zpr/testnet/webserver"})
+
+	td := &snip.Traffic{
+		Proto:    snip.ProtocolICMP4,
+		SrcAddr:  netip.MustParseAddr("10.1.0.20"),
+		DstAddr:  netip.MustParseAddr("10.1.0.8"),
+		ICMPType: 0x8,
+		ICMPCode: 0,
+	}
+
+	matches, err := MatchTrafficAgents(m, td, client, server)
+	require.Nil(t, err)
+	require.Len(t, matches, 1)
+	match := matches[0]
+	require.True(t, match.FWD)
+	require.Equal(t, "access", match.CPol.Id)
+	require.Equal(t, "/zpr/testnet/webserver", match.CPol.ServiceId)
 }

@@ -125,12 +125,13 @@ const fn encode_dn_cn_as_der<const DER_LEN: usize>(cn: &str) -> [u8; DER_LEN] {
 }
 
 macro_rules! dn_cn_der {
-    ($cn:literal) => {
+    ($cn:expr) => {
         encode_dn_cn_as_der::<{ DN_CN_DER_PREFIX_LEN + $cn.len() }>($cn)
     };
 }
 
-pub const VISA_SERVICE_DN: &[u8] = &dn_cn_der!("vs.zpr");
+pub const VISA_SERVICE_CN: &str = "vs.zpr";
+pub const VISA_SERVICE_DN: &[u8] = &dn_cn_der!(VISA_SERVICE_CN);
 
 // Well-known addresses.
 

@@ -113,7 +113,7 @@ func TestValidNetAddr(t *testing.T) {
 }
 
 func TestValidPortType(t *testing.T) {
-	testPasses(t, doc.AssertValidPortType, []string{
+	testPasses(t, doc.AssertValidTcpUdpPortType, []string{
 		"123",
 		"1",
 		"1,2,3",
@@ -122,10 +122,35 @@ func TestValidPortType(t *testing.T) {
 		"1-1",
 		"1-10, 11, 12, 20, 100-200, 65534",
 	})
-	testFails(t, doc.AssertValidPortType, []string{
+	testFails(t, doc.AssertValidTcpUdpPortType, []string{
 		"5-1",
 		"-1",
 		"0",
+		"ha ho",
+		"1, 2, 3, a, b, c",
+		"1--10",
+		"1,,,,4",
+		"1,",
+		",1",
+	})
+}
+
+func TestValidIcmpType(t *testing.T) {
+	testPasses(t, doc.AssertValidIcmpType, []string{
+		"0",
+		"123",
+		"255",
+		"1",
+		"0,1,2,3",
+		"1,  2,     3",
+		"10-20",
+		"1-1",
+		"1-10, 11, 12, 20, 100-200",
+	})
+	testFails(t, doc.AssertValidIcmpType, []string{
+		"256",
+		"-1",
+		"5-1",
 		"ha ho",
 		"1, 2, 3, a, b, c",
 		"1--10",

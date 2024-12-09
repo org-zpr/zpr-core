@@ -816,27 +816,28 @@ func extractSubmatchText(input string, re *regexp.Regexp, submatches []int, subm
 // expression struct on success, nil and an error on failure.
 //
 // Grammar:
-//     expr := posexpr | negexpr
-//     posexpr := svcexpr? "allowed" ("with" conspred)? ("for" <countpred>)? ("if" condpred)?
-//     negexpr := svcexpr ? "not' "allowed" ("with" conspred)? ("if" condpred)?
-//     svcexpr := "any"? svcspec ("and" svcspec)*
-//     svcspec := "(" svcid ")" | "tcp" ports? | "udp" ports? | "icmp" types?)
-//     conspred := (bwpred | durpred) ("and" (bwpred | durpred))*
-//     condpred := attrkey attrop attrval ("and" attrkey attrop attrval)*
-//     countpred := "count" "(" countitem ")" relop countval ("and" "count" "(" countitem ")" relop countval)*
-//     countitem := "users"
-//     bwpred := "max(bandwidth)" relop bwval
-//     durpred := "max(duration)" relop durval
-//     relop := "=" | "==" | "!=" | "<" | "<=" | ">" | ">="
-//     attrop := "=" | "==" | "!=" | "eq" | "ne" | "has" | "excludes"
-//     svcid := [a ZPL service ID]
-//     ports := [a ZPL PORTS_TYPE value]
-//     types := [a ZPL PORTS_TYPE value with <= 2 numbers]
-//     bwval := [a ZPL BANDWIDTH_TYPE value]
-//     durval := [a ZPL DURATION_TYPE value]
-//     countval := [a nonnegative integer]
-//     attrkey := [a string of the form datasource.attrname]
-//     attrval := [a string]
+//
+//	expr := posexpr | negexpr
+//	posexpr := svcexpr? "allowed" ("with" conspred)? ("for" <countpred>)? ("if" condpred)?
+//	negexpr := svcexpr ? "not' "allowed" ("with" conspred)? ("if" condpred)?
+//	svcexpr := "any"? svcspec ("and" svcspec)*
+//	svcspec := "(" svcid ")" | "tcp" ports? | "udp" ports? | "icmp" types?)
+//	conspred := (bwpred | durpred) ("and" (bwpred | durpred))*
+//	condpred := attrkey attrop attrval ("and" attrkey attrop attrval)*
+//	countpred := "count" "(" countitem ")" relop countval ("and" "count" "(" countitem ")" relop countval)*
+//	countitem := "users"
+//	bwpred := "max(bandwidth)" relop bwval
+//	durpred := "max(duration)" relop durval
+//	relop := "=" | "==" | "!=" | "<" | "<=" | ">" | ">="
+//	attrop := "=" | "==" | "!=" | "eq" | "ne" | "has" | "excludes"
+//	svcid := [a ZPL service ID]
+//	ports := [a ZPL PORTS_TYPE value]
+//	types := [a ZPL PORTS_TYPE value with <= 2 numbers]
+//	bwval := [a ZPL BANDWIDTH_TYPE value]
+//	durval := [a ZPL DURATION_TYPE value]
+//	countval := [a nonnegative integer]
+//	attrkey := [a string of the form datasource.attrname]
+//	attrval := [a string]
 //
 // Although "=[=]" and "!=" operators are allowed in attribute predicates for
 // convenience, they are translated to "eq" and "ne" in the returned structure.
@@ -920,7 +921,7 @@ func parseServiceExpression(svcExpr string) ([]serviceSpec, error) {
 				switch proto {
 				case "tcp", "udp":
 					if params != "" {
-						if err := doc.AssertValidPortType(params); err != nil {
+						if err := doc.AssertValidTcpUdpPortType(params); err != nil {
 							return nil, fmt.Errorf("invalid %s parameter string %q: %w", proto, params, err)
 						}
 					}

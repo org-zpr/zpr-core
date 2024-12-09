@@ -28,9 +28,17 @@ var (
 )
 
 var (
-	ErrPortNumOutOfRange = errors.New("port number out of range")
-	ErrInvalidPortRange  = errors.New("invalid port range")
+	ErrPortSpecNumOutOfRange = errors.New("port-spec value out of range")
+	ErrInvalidPortRange      = errors.New("invalid port-spec range")
 )
+
+type PortRange struct {
+	Min int // exclusive
+	Max int // inclusive
+}
+
+var RangeTcpUdp = PortRange{0, 65535}
+var RangeICMP = PortRange{-1, 255}
 
 func AssertValidID(id string) error {
 	if !IDTypeRegex.MatchString(id) {
@@ -143,7 +151,15 @@ func AssertValidHostRef(h string) error {
 
 // AssertValidPortType checks for the ZPL port type which is:
 // a port number, a range of port numbers N-M, or a comma separated list of either.
-func AssertValidPortType(p string) error {
+func AssertValidTcpUdpPortType(p string) error {
+	return assertValidPortSpecType(p, RangeTcpUdp)
+}
+
+func AssertValidIcmpType(p string) error {
+	return assertValidPortSpecType(p, RangeICMP)
+}
+
+func assertValidPortSpecType(p string, r PortRange) error {
 	if p == "" {
 		return fmt.Errorf("port spec cannot be empty")
 	}
@@ -160,8 +176,8 @@ func AssertValidPortType(p string) error {
 				return err
 			}
 			for _, pn := range []int{low, high} {
-				if pn <= 0 || pn > 65535 {
-					return ErrPortNumOutOfRange
+				if pn <= r.Min || pn > r.Max {
+					return ErrPortSpecNumOutOfRange
 				}
 			}
 			if high < low {
@@ -173,8 +189,8 @@ func AssertValidPortType(p string) error {
 			if pn, err := strconv.Atoi(atom); err != nil {
 				return err
 			} else {
-				if pn <= 0 || pn > 65535 {
-					return ErrPortNumOutOfRange
+				if pn <= r.Min || pn > r.Max {
+					return ErrPortSpecNumOutOfRange
 				}
 			}
 			continue

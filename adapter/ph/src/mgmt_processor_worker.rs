@@ -7,7 +7,7 @@ use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tracing::debug;
+use tracing::*;
 use zpr;
 use zpr_ext::zerocopy::*;
 

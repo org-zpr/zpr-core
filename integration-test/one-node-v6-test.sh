@@ -1,10 +1,10 @@
 #!/usr/bin/bash
 set -euo pipefail
 
-PH_BIN=$(realpath "$(dirname $0)/../target/debug/ph")
-PH_DEBUG_BIN=$(realpath "$(dirname $0)/../../ph-debug/target/debug/ph-debug")
-VS_BIN=$(realpath "$(dirname $0)/../../../visaservice/core/build/vservice")
-EXAMPLES_PATH=$(realpath "$(dirname $0)/../../../examples/milestone2/")
+PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
+PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/ph-debug/target/debug/ph-debug")
+VS_BIN=$(realpath "$(dirname $0)/../visaservice/core/build/vservice")
+PREGEN=$(realpath "$(dirname $0)/pregen")
 
 source "$(dirname $0)/common_funcs.sh"
 
@@ -18,10 +18,7 @@ VS_SUBSTRATE_ADDR=10.0.0.2
 A_SUBSTRATE_ADDR=10.0.1.2
 B_SUBSTRATE_ADDR=10.0.2.2
 
-A_ZPR_ADDR=192.168.1.1
-B_ZPR_ADDR=192.168.1.2
-
-NODE_ZPR_ADDR6=fd00:1:0::1
+NODE_ZPR_ADDR6=fd5a:5052::2
 VS_ZPR_ADDR6=fd5a:5052::1
 A_ZPR_ADDR6=fd00:1:1::1
 B_ZPR_ADDR6=fd00:1:2::1
@@ -60,20 +57,27 @@ create_network
 
 create_ca_key_and_cert ca
 create_agent_key_and_cert ca vs.zpr
-create_agent_key_and_cert ca node
+#create_agent_key_and_cert ca node
 create_agent_key_and_cert ca adapter1
 create_agent_key_and_cert ca adapter2
 
-echo "Launching Visa Service"
+# Temporary hack until our policy compiler is in-repo
+cp "$PREGEN/node.key" node.key
+cp "$PREGEN/node-cert.pem" node.crt
+cp "$PREGEN/node-pubkey.pem" node.pubkey
+
+emit_vs_config ca vs.zpr > vs-config.yaml
 
 #
 # Launch Visa Service
 #
 
+echo "Launching Visa Service"
+
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
-    -c "$EXAMPLES_PATH/vs/vs-config.yaml" \
-    -p "$EXAMPLES_PATH/policies/policy-m2-ping-and-http.bin" \
-    --listen_addr ["$VS_ZPR_ADDR6"]:5002 &
+    -c vs-config.yaml \
+    -p "$PREGEN/v6-1node-2agent-ping.bin" \
+    --listen_addr "[$VS_ZPR_ADDR6]":5002 2>&1 | tee vs.log &
 
 sleep 2
 
@@ -82,9 +86,12 @@ echo "Launching Node"
 #
 # Launch PHs
 #
+
+echo "Launching Node"
+
 sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
      node \
-     --name "zpr-node" \
+     --name "n0" \
      --control-path "$NODE_SOCK" \
      --self-addr 0.0.0.0:12345 \
      --ca-file ca.crt \
@@ -108,9 +115,9 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$VS_ZPR_ADDR6" 2>&1 |tee vs.log &
+  --agent-addr "$VS_ZPR_ADDR6" 2>&1 |tee adapter-vs.log &
 
-sleep 2  # TODO: remove?
+sleep 5
 
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
@@ -123,9 +130,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$A_ZPR_ADDR" 2>&1 |tee adapter1.log &
-# FIXME: IPv6 agent address
-
+  --agent-addr "$A_ZPR_ADDR6" 2>&1 |tee adapter1.log &
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
@@ -138,9 +143,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$B_ZPR_ADDR" 2>&1 |tee adapter2.log &
-# FIXME: IPv6 agent address
-
+  --agent-addr "$B_ZPR_ADDR6" 2>&1 |tee adapter2.log &
 
 #
 # Wait for connectivity

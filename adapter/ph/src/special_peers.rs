@@ -37,14 +37,8 @@ pub fn default_policy_lookup(
         (
             zpr::LOCAL_AGENT_LINK_ID,
             FiveTuple {
+                // FIXME: total hack
                 dst_address: VISA_SERVICE_IP_ADDRESS,
-                l4_protocol: zpr::VISA_SERVICE_PROTO,
-                dst_port: zpr::VISA_SERVICE_PORT,
-                ..
-            } |
-            FiveTuple {
-                dst_address: VISA_SERVICE_IP_ADDRESS,
-                l4_protocol: 1 /* ICMP */ | 58 /* ICMPv6 */,
                 ..
             },
         ) => Some(SpecialPeerName::VisaServiceAdapter),

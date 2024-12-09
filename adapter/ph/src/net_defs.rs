@@ -78,6 +78,14 @@ impl IpAddress {
             IpAddr::V6(v6) => Self::new_from_std_v6(v6),
         }
     }
+
+    pub fn into_v4_or_v6_octets(&self) -> Vec<u8> {
+        if self.is_v4() {
+            self.read_as_v4().into()
+        } else {
+            self.v6.into()
+        }
+    }
 }
 
 impl From<Ipv4Addr> for IpAddress {
@@ -125,6 +133,16 @@ impl TryFrom<IpAddress> for Ipv4Addr {
 impl From<IpAddress> for Ipv6Addr {
     fn from(addr: IpAddress) -> Self {
         addr.v6.into()
+    }
+}
+
+impl From<IpAddress> for IpAddr {
+    fn from(addr: IpAddress) -> Self {
+        if addr.is_v4() {
+            IpAddr::V4(addr.read_as_v4().into())
+        } else {
+            IpAddr::V6(addr.v6.into())
+        }
     }
 }
 

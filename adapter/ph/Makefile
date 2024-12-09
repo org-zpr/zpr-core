@@ -6,6 +6,10 @@ all: build
 build:
 	cargo build --verbose
 
+.PHONY: release
+release:
+	cargo build -r
+
 .PHONY: test
 test:
 	cargo test --verbose

@@ -119,9 +119,8 @@ jobs:
         sudo apt install libpcap-dev
         make ph
         make visaservice
-        cd adapter/ph
-        cargo build --manifest-path ../ph-debug/Cargo.toml
-        ZPR_TEST_VERBOSE=1 test/basic-test.sh
+        cargo build --manifest-path adapter/ph-debug/Cargo.toml
+        ZPR_TEST_VERBOSE=1 integration-test/one-node-v6-test.sh
 
   capture-integration-test:
     needs: [ph-build, ph-debug-build]
@@ -136,6 +135,5 @@ jobs:
         sudo apt install libpcap-dev
         make ph
         make visaservice
-        cd adapter/ph
-        cargo build --manifest-path ../ph-debug/Cargo.toml
-        ZPR_TEST_VERBOSE=1 test/capture-test.sh
+        cargo build --manifest-path adapter/ph-debug/Cargo.toml
+        ZPR_TEST_VERBOSE=1 integration-test/capture-test.sh

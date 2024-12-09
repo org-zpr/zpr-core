@@ -444,8 +444,8 @@ func (c *Compilation) getAttrExprSetForComponent(sID string, comp *doc.Component
 			epidSet = true // EPID is set already
 			if attrExpr.Op.String() == doc.AttrExprOpEq {
 				// Preprocessor should catch this.
-				if ipa, err := netip.ParseAddr(attrExpr.Value.String()); err != nil || !ipa.Is6() {
-					return nil, doc.ZplScalarErrorf(attrExpr.Value, "service %v with invalid zpr.addr, expect IPv6 found: %v", sID, attrExpr.Value)
+				if ipa, err := netip.ParseAddr(attrExpr.Value.String()); err != nil {
+					return nil, doc.ZplScalarErrorf(attrExpr.Value, "service %v with invalid zpr.addr: %v (%v)", sID, attrExpr.Value, err)
 				} else {
 					// Warn if the zpr.addr is different from the svcEPID.
 					if !(svcEPID == ipa) {
@@ -555,21 +555,21 @@ func explodeScope(s []*doc.Scoping, ploded map[uint8][]uint16) error {
 		var ports []uint16
 		if scope.TCP.Value() != nil {
 			proto = defs.ProtocolTCP
-			ports, err = explodePorts(scope.TCP.String())
+			ports, err = explodePorts(scope.TCP.String(), doc.RangeTcpUdp)
 			if err != nil {
 				return doc.ZplScalarErrorf(scope.TCP, "%w", err)
 			}
 		}
 		if scope.UDP.Value() != nil {
 			proto = defs.ProtocolUDP
-			ports, err = explodePorts(scope.UDP.String())
+			ports, err = explodePorts(scope.UDP.String(), doc.RangeTcpUdp)
 			if err != nil {
 				return doc.ZplScalarErrorf(scope.UDP, "%w", err)
 			}
 		}
 		if scope.ICMP != nil {
 			proto = defs.ProtocolICMP6
-			ports, err = explodePorts(scope.ICMP.TypeCodes.String()) // Not sure about this
+			ports, err = explodePorts(scope.ICMP.TypeCodes.String(), doc.RangeICMP) // Not sure about this
 		}
 
 		if proto > 0 {
@@ -596,7 +596,7 @@ func explodeScope(s []*doc.Scoping, ploded map[uint8][]uint16) error {
 }
 
 // explodePorts given a ports string, returns the list of (unique) ports described.
-func explodePorts(portstr string) ([]uint16, error) {
+func explodePorts(portstr string, pr doc.PortRange) ([]uint16, error) {
 	uniqports := make(map[uint16]bool)
 	for _, ps := range strings.Split(portstr, ",") {
 		if strings.Index(ps, "-") > 0 {
@@ -604,11 +604,11 @@ func explodePorts(portstr string) ([]uint16, error) {
 			if len(abs) != 2 {
 				return nil, fmt.Errorf("expected port range 'N-M' not: '%v'", ps)
 			}
-			low, err := portFromString(abs[0])
+			low, err := portFromString(abs[0], pr)
 			if err != nil {
 				return nil, fmt.Errorf("invalid port range: '%v': %v", ps, err)
 			}
-			high, err := portFromString(abs[1])
+			high, err := portFromString(abs[1], pr)
 			if err != nil {
 				return nil, fmt.Errorf("invalid port range: '%v': %v", ps, err)
 			}
@@ -619,7 +619,7 @@ func explodePorts(portstr string) ([]uint16, error) {
 				uniqports[i] = true
 			}
 		} else {
-			p, err := portFromString(ps)
+			p, err := portFromString(ps, pr)
 			if err != nil {
 				return nil, err
 			}
@@ -633,13 +633,13 @@ func explodePorts(portstr string) ([]uint16, error) {
 	return ports, nil
 }
 
-func portFromString(s string) (uint16, error) {
+func portFromString(s string, pr doc.PortRange) (uint16, error) {
 	p, err := strconv.Atoi(strings.TrimSpace(s))
 	if err != nil {
-		return 0, fmt.Errorf("invalid port value '%v': %v", s, err)
+		return 0, fmt.Errorf("invalid port-spec value '%v': %v", s, err)
 	}
-	if p <= 0 || p > 65535 {
-		return 0, fmt.Errorf("invalid port value: '%v': %v", p, err)
+	if p <= pr.Min || p > pr.Max {
+		return 0, fmt.Errorf("invalid port-spec value: '%v': %v", p, err)
 	}
 	return uint16(p), nil
 }

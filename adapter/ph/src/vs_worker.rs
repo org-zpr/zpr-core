@@ -6,7 +6,7 @@ use tracing::*;
 
 pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSOutput>) {
     while let Some(msg) = queue.recv().await {
-        info!(
+        debug!(
             "{}: received VS message {msg:?}; ignoring! (unimplemented)",
             asm.system_name
         );

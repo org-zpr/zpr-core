@@ -1,4 +1,4 @@
-use crate::assembly::Assembly;
+use crate::assembly::{Assembly, PhMode};
 use crate::km::ZPIPair;
 use crate::km_multiplexor;
 use crate::mgmt;
@@ -135,6 +135,7 @@ pub enum LinkEvent {
     ReceivedHelloResponse,
     ReceivedRegisterRequest(IpAddress),
     ReceivedRegisterResponse,
+    ReceivedAuthorizeResponse,
     ReceivedKeepAliveResponse,
     ReceivedTerminationRequest,
     ReceivedTerminationResponse,
@@ -225,6 +226,7 @@ impl LinkStateWrapper {
             LinkEvent::ReceivedRegisterResponse => {
                 self.process_register_agent_address_response(asm)
             }
+            LinkEvent::ReceivedAuthorizeResponse => self.process_authorize_repsonse(asm),
             LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
             LinkEvent::ReceivedTerminationResponse => Err(LinkStateError::OperationNotSupportedYet),
             LinkEvent::ReceivedTerminationRequest => Err(LinkStateError::OperationNotSupportedYet),
@@ -347,6 +349,7 @@ impl LinkStateWrapper {
                 peer_cert.subject_name()
             );
 
+            // assign special-peer name if this peer is special
             for name in
                 special_peers::special_peer_names_from_x509_subject_name(peer_cert.subject_name())
             {
@@ -484,23 +487,163 @@ impl LinkStateWrapper {
     /// Does not generate any packets
     fn process_register_agent_address_request(
         &self,
-        asm: &Assembly,
+        asm: &Arc<Assembly>,
         addr: IpAddress,
     ) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
                 locked_fsm.agent_addresses.push(addr);
+                debug!(
+                    "{}: Link {} received agent address ({addr}).  Authorizing with visa service",
+                    asm.system_name, self.id
+                );
+
+                let Some(peer_state) = asm.peer_table.get(self.id) else {
+                    return Err(LinkStateError::NotFound(self.id));
+                };
+
+                let Some(sa) = peer_state.get_established_transport_association() else {
+                    return Err(LinkStateError::UnexpectedTransition(
+                        locked_fsm.state,
+                        "register agent address when SA not established".to_owned(),
+                    ));
+                };
+
+                // TODO: validate that DN *only* has CN, since this is what VS expects
+                // (or, teach VS about DNs)
+
+                let cn: String;
+
+                if let Some(ref peer_cert) = sa.peer_cert {
+                    cn = peer_cert
+                        .subject_name()
+                        .entries_by_nid(openssl::nid::Nid::COMMONNAME)
+                        .next()
+                        .and_then(|entry| Some(entry.data().as_utf8().ok()?.to_owned()))
+                        .unwrap_or_default();
+                } else {
+                    cn = String::new();
+                }
+
+                info!("{}: Link {} CN is {cn}", asm.system_name, self.id);
+
+                if cn == zpr::VISA_SERVICE_CN {
+                    locked_fsm.state = LinkState::Active;
+                    debug!(
+                        "{}: Link {} (Visa Service) received agent address.  Becoming active, no authorization required",
+                        asm.system_name, self.id
+                    );
+                    drop(locked_fsm);
+                    self.run_active(asm)
+                } else {
+                    drop(locked_fsm);
+
+                    // issue an Authorize Connect Request to the visa service for this adapter
+                    let connect_req = libnode::vsapi::ConnectRequest {
+                        connection_id: Some(123), // unused
+                        dock_addr: Some(
+                            IpAddress::new_from_std(&asm.agent_address.unwrap())
+                                .into_v4_or_v6_octets(),
+                        ),
+                        claims: Some(
+                            [
+                                ("zpr.addr".to_owned(), addr.to_string()),
+                                ("zpr.adapter.cn".to_owned(), cn),
+                            ]
+                            .into(),
+                        ),
+                        challenge: None,           // unused
+                        challenge_responses: None, // unused
+                    };
+
+                    let link_id = self.id;
+                    let task_asm = asm.clone();
+                    tokio::task::spawn_local(async move {
+                        match task_asm
+                            .vsconn
+                            .as_ref()
+                            .unwrap()
+                            .authorize_connect(connect_req)
+                            .await
+                        {
+                            Ok(libnode::vsapi::ConnectResponse {
+                                status: Some(libnode::vsapi::StatusCode::SUCCESS),
+                                ..
+                            }) => {
+                                info!("{}: link {link_id} authorized", task_asm.system_name);
+
+                                if task_asm
+                                    .process_link_state_event(
+                                        link_id,
+                                        LinkEvent::ReceivedAuthorizeResponse,
+                                    )
+                                    .is_err()
+                                {
+                                    Err(())
+                                } else {
+                                    Ok(())
+                                }
+                            }
+
+                            Ok(cr) => {
+                                warn!(
+                                    "{}: link {link_id} authorization rejected: {}",
+                                    task_asm.system_name,
+                                    cr.reason.unwrap_or("(no reason given)".to_owned())
+                                );
+
+                                if task_asm
+                                    .process_link_state_event(link_id, LinkEvent::Reset)
+                                    .is_err()
+                                {
+                                    Err(())
+                                } else {
+                                    Ok(())
+                                }
+                            }
+
+                            Err(err) => {
+                                warn!(
+                                    "{}: link {link_id} authorization failed: {err}",
+                                    task_asm.system_name
+                                );
+
+                                if task_asm
+                                    .process_link_state_event(link_id, LinkEvent::Reset)
+                                    .is_err()
+                                {
+                                    Err(())
+                                } else {
+                                    Ok(())
+                                }
+                            }
+                        }
+                    });
+
+                    Ok(())
+                }
+            }
+            (_, _) => Err(LinkStateError::InvalidOperation(
+                "Discarded unsolicited register address request".to_string(),
+            )),
+        }
+    }
+
+    fn process_authorize_repsonse(&self, asm: &Assembly) -> Result<(), LinkStateError> {
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        match (self.link_type, locked_fsm.state) {
+            (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
                 locked_fsm.state = LinkState::Active;
                 debug!(
-                    "{}: Link {} received agent address.  Becoming active",
+                    "{}: Link {} authorized.  Becoming active",
                     asm.system_name, self.id
                 );
                 drop(locked_fsm);
                 self.run_active(asm)
             }
             (_, _) => Err(LinkStateError::InvalidOperation(
-                "Discarded unsolicited register address request".to_string(),
+                "Discarded unsolicited authorize response".to_string(),
             )),
         }
     }
@@ -546,7 +689,9 @@ impl LinkStateWrapper {
         info!("{}: Shutting down link {}", asm.system_name, self.id);
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.state = LinkState::Inactive;
-        asm.tun_ctl.set_carrier(false).unwrap();
+        if asm.ph_mode != PhMode::Node {
+            asm.tun_ctl.set_carrier(false).unwrap();
+        }
         // TODO: Bring down KM
         Ok(())
     }
@@ -558,7 +703,9 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.state = LinkState::Initial;
         locked_fsm.silent = false;
-        asm.tun_ctl.set_carrier(false).unwrap();
+        if asm.ph_mode != PhMode::Node {
+            asm.tun_ctl.set_carrier(false).unwrap();
+        }
         // TODO: Send stateless terminate
         // TODO: Bring down KM
     }

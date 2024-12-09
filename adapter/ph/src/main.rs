@@ -40,7 +40,6 @@ mod mgmt;
 mod mgmt_dispatch_worker;
 mod mgmt_processor_worker;
 mod net_defs;
-mod options;
 mod packet;
 mod packet_steering;
 mod pcap_writer;
@@ -414,7 +413,7 @@ fn main() -> ExitCode {
         cap_outq,
     ));
 
-    if asm.is_node() {
+    if ph_mode == PhMode::Node {
         asm.tun_ctl.set_carrier(true).unwrap();
     }
 

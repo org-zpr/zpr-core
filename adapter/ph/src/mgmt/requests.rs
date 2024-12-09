@@ -153,6 +153,7 @@ pub async fn send_bind_agent_address_request(
     link_id: zpr::LinkId,
     compression_mode: zpr::CompressionMode,
     five_tuple: FiveTuple,
+    packet_body: Vec<u8>,
 ) -> Result<zpr::StreamId, BindAgentAddressError> {
     let response = core::send_sync_per_flow_req(
         asm,
@@ -187,6 +188,8 @@ pub async fn send_bind_agent_address_request(
             if compression_mode != 0 {
                 todo!("L4 compression");
             }
+
+            req.put_slice(&packet_body);
         },
     )
     .await;

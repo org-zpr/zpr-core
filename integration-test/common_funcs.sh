@@ -2,7 +2,7 @@
 
 
 # Our PKI helper tool
-ZPR_PKI_BIN=$(realpath "$(dirname $0)/../../../tools/zpr-pki")
+ZPR_PKI_BIN=$(realpath "$(dirname $0)/../tools/zpr-pki")
 
 
 #
@@ -77,8 +77,8 @@ function create_network() {
   sudo ip -n zpr-b tuntap add name tun0 mode tun user "$ZPR_USER" multi_queue
 
   # (no IPv4 ZPR address for the VS)
-  sudo ip -n zpr-a addr add "$A_ZPR_ADDR" peer "$B_ZPR_ADDR" dev tun0
-  sudo ip -n zpr-b addr add "$B_ZPR_ADDR" peer "$A_ZPR_ADDR" dev tun0
+  #sudo ip -n zpr-a addr add "$A_ZPR_ADDR" peer "$B_ZPR_ADDR" dev tun0
+  #sudo ip -n zpr-b addr add "$B_ZPR_ADDR" peer "$A_ZPR_ADDR" dev tun0
 
   sudo ip -n zpr-node link set tun0 up
   sudo ip -n zpr-vs link set tun0 up
@@ -103,8 +103,12 @@ function destroy_network() {
 
 function create_ca_key_and_cert() {
   CA_NAME=$1
-  "$ZPR_PKI_BIN" gencakey >"$CA_NAME.key"
-  "$ZPR_PKI_BIN" gencacert /CN="$CA_NAME" 1 <"$CA_NAME.key" >"$CA_NAME.crt"
+  # We can't do this properly until we pull in the policy compiler
+  # So just use the pair set up in the examples directory for now
+  cp "$PREGEN/ca-key.pem" "$CA_NAME.key"
+  cp "$PREGEN/ca-cert.pem" "$CA_NAME.crt"
+  #"$ZPR_PKI_BIN" gencakey >"$CA_NAME.key"
+  #"$ZPR_PKI_BIN" gencacert /CN="$CA_NAME" 1 <"$CA_NAME.key" >"$CA_NAME.crt"
   #openssl genrsa -out "$CA_NAME.key"
   #openssl x509 -new -subj /CN="$CA_NAME" -key "$CA_NAME.key" -extfile /etc/ssl/openssl.cnf -extensions v3_ca -days 1 -out "$CA_NAME.crt"
 }
@@ -121,12 +125,25 @@ function create_agent_key_and_cert() {
   #openssl x509 -req -CA "$CA_NAME.crt" -CAkey "$CA_NAME.key" -copy_extensions copyall -days 1 -in "$AGENT_NAME.csr" -out "$AGENT_NAME.crt" 2> /dev/null
 }
 
+function emit_vs_config() {
+  CA_NAME=$1
+  VS_AGENT_NAME=$2
+  cat <<EOF
+adapter_cert: $(realpath "$2.crt")
+root_ca: $(realpath "$1.crt")
+disable_connect_validation: true
+vs_cert: "$PREGEN/zpr-rsa-cert.pem"
+vs_key: "$PREGEN/zpr-rsa-key.pem"
+EOF
+}
+
 function ping_test() {
   sudo ip netns exec zpr-node ping -q -c 5 -w 5 "$VS_ZPR_ADDR6" & wait -f $!
   sudo ip netns exec zpr-vs ping -q -c 5 -w 5 "$NODE_ZPR_ADDR6" & wait -f $!
 
-  sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!
-  sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!
+  # V4 currently does not work
+  #sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR" & wait -f $!
+  #sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!
 
   sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$B_ZPR_ADDR6" & wait -f $!
   sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$A_ZPR_ADDR6" & wait -f $!

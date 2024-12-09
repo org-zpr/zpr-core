@@ -57,6 +57,8 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
         return;
     }
 
+    let packet_body: Vec<u8> = pkt.body().into();
+
     // mark ALT entry as pending to attempt to (i.e. racily) prevent
     // fastpath from issuing multiple requests
     asm.alt.insert(five_tuple, AltEntry::Pending(pkt));
@@ -76,6 +78,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
                 dock_link_id,
                 compression_mode,
                 five_tuple,
+                packet_body,
             )
             .await
         }
@@ -85,6 +88,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
             NonZero::new(zpr::LOCAL_AGENT_LINK_ID).unwrap(),
             compression_mode,
             five_tuple,
+            packet_body,
         )
         .await
         .map_err(|err| {

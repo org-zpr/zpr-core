@@ -14,7 +14,7 @@ import (
 )
 
 const (
-  VisaServiceAddress = "fd5a:5052::1"
+	VisaServiceAddress = "fd5a:5052::1"
 )
 
 const ca0cert = `
@@ -1897,7 +1897,7 @@ func TestAllowRestrictsServicesInComponents(t *testing.T) {
             cert_data: $import[ca0-cert.pem]
       visaservice:
         provider:
-          - [ca0.fox, eq, foh]          
+          - [ca0.fox, eq, foh]
         admin_attrs:
           - [ca0.foo, eq, fee]
 
@@ -2674,7 +2674,7 @@ func TestNestedDatasource(t *testing.T) {
       visaservice:
         provider:
           - [ca0.fox, eq, foh]
-        admin_attrs:        
+        admin_attrs:
           - [ca0.foo, eq, fee]
 
     communications:
@@ -3644,4 +3644,66 @@ func TestWillNotPermitNonDefaultAPISpecForInternalDS(t *testing.T) {
 	}
 	_, err := compiler.Compile("/pol.yaml", fst, opts)
 	require.ErrorContains(t, err, "validation/1")
+}
+
+func TestCompilesICMPv4(t *testing.T) {
+	pyaml := `
+    zpl_format: 2
+    main:
+      name: foo
+    services:
+      http:
+        tcp: 80
+      ping:
+        icmp:
+          type: request-response
+          type_codes: 8, 0
+    zpr:
+      nodes:
+        n0:
+          key: "13024a188fddbc76db8ee98eeef91ad81a80846e99f6f9b988184a2173950052"
+          provider:
+            - [ca0.x509.cn, eq, n0.internal]
+          address: "10.0.0.7"
+          interfaces:
+            n0i0:
+              netaddr: "n0.spacelaser.net:5000"
+          services:
+            - ping
+          policies:
+            - desc: allow ping
+              conditions:
+                - desc: match on authority
+                  attrs:
+                    - [zpr.authority, eq, ca0]
+      datasources:
+        ca0:
+          api: validation/1
+          authority:
+            encoding: pem
+            cert_data: $import[ca0-cert.pem]
+      visaservice:
+        provider:
+          - [ca0.fox, eq, foh]
+        admin_attrs:
+          - [ca0.foo, eq, fee]
+
+    communications:
+      systems:
+        mathiasland:
+          desc: mathiasland system
+          components:
+`
+
+	fst, _ := fs.NewMemoryFileStore()
+	fst.AddFile("/pol.yaml", []byte(pyaml))
+	fst.AddFile("/ca0-cert.pem", []byte(ca0cert))
+
+	opts := &compiler.CompileOpts{
+		Revision: "t01",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("/pol.yaml", fst, opts)
+	require.Nil(t, err)
+	require.NotNil(t, p)
 }
