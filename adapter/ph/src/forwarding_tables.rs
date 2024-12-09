@@ -67,4 +67,8 @@ impl PeerForwardingTable {
         std::mem::drop(table);
         self.reader.write(new_reader);
     }
+
+    pub fn clear(&self) {
+        // TODO
+    }
 }

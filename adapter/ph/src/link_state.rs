@@ -4,6 +4,7 @@ use crate::km_multiplexor;
 use crate::mgmt;
 use crate::net_defs::IpAddress;
 use crate::special_peers;
+use crate::zdp::{TerminateReason, TerminateResponse};
 
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -120,6 +121,7 @@ pub enum LinkState {
     Keying,
     Helloing,
     Closing,
+    Resetting,
     Active,
     RegisterAA,
     Error,
@@ -137,10 +139,12 @@ pub enum LinkEvent {
     ReceivedRegisterResponse,
     ReceivedAuthorizeResponse,
     ReceivedKeepAliveResponse,
-    ReceivedTerminationRequest,
-    ReceivedTerminationResponse,
-    ReceivedTerminationIndication,
-    Close,
+    ReceivedTerminateRequest(TerminateReason),
+    ReceivedTerminateResponse(TerminateResponse),
+    ReceivedTerminateIndication(TerminateReason),
+    SentTerminate,
+    Close(TerminateReason),
+    CloseDone,
     Reset,
 }
 
@@ -164,7 +168,7 @@ pub enum LinkType {
     NodeToAdapter,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum LinkStatus {
     Up,
     Down,
@@ -203,10 +207,19 @@ impl LinkStateWrapper {
         }
     }
 
-    #[allow(dead_code)]
     /// Query whether the link is up
     pub fn get_status(&self) -> LinkStatus {
         self.locked_fsm.lock().unwrap().status
+    }
+
+    /// Get the link's current state
+    pub fn get_state(&self) -> LinkState {
+        self.locked_fsm.lock().unwrap().state
+    }
+
+    pub fn is_ready(&self) -> bool {
+        let locked_fsm = self.locked_fsm.lock().unwrap();
+        locked_fsm.status == LinkStatus::Up && locked_fsm.state == LinkState::Active
     }
 
     pub fn process_event(
@@ -227,14 +240,16 @@ impl LinkStateWrapper {
                 self.process_register_agent_address_response(asm)
             }
             LinkEvent::ReceivedAuthorizeResponse => self.process_authorize_repsonse(asm),
-            LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
-            LinkEvent::ReceivedTerminationResponse => Err(LinkStateError::OperationNotSupportedYet),
-            LinkEvent::ReceivedTerminationRequest => Err(LinkStateError::OperationNotSupportedYet),
-            LinkEvent::ReceivedTerminationIndication => {
-                Err(LinkStateError::OperationNotSupportedYet)
+            LinkEvent::ReceivedTerminateRequest(code) => self.process_terminate_request(asm, code),
+            LinkEvent::ReceivedTerminateResponse(_) => self.process_terminate_response(asm),
+            LinkEvent::ReceivedTerminateIndication(code) => {
+                self.process_terminate_indication(asm, code)
             }
-            LinkEvent::Close => Ok(self.initiate_close()),
+            LinkEvent::SentTerminate => Ok(self.clean_up_link_state(asm)),
+            LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
+            LinkEvent::Close(code) => self.initiate_close(asm, code),
             LinkEvent::Reset => Ok(self.reset(asm)),
+            LinkEvent::CloseDone => Ok(self.complete_close(asm)),
         }
     }
 
@@ -277,7 +292,7 @@ impl LinkStateWrapper {
 
         locked_fsm.state = LinkState::Keying;
 
-        debug!("Link {} started.  Keying in progress", self.id);
+        info!("Link {} started.  Keying in progress", self.id);
 
         match self.link_type {
             LinkType::AdapterToNode => {
@@ -649,46 +664,217 @@ impl LinkStateWrapper {
         }
     }
 
-    #[allow(dead_code)]
+    /// Validate a received shutdown request
+    /// Does not transition
+    /// Generates no packets
+    fn process_terminate_request<'pktbuf>(
+        &self,
+        _asm: &Assembly,
+        reason: TerminateReason,
+    ) -> Result<(), LinkStateError> {
+        info!(
+            "Received shutdown request on link {} for reason {:?}",
+            self.id, reason
+        );
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        if locked_fsm.state == LinkState::Initial || locked_fsm.state == LinkState::Inactive {
+            Err(LinkStateError::UnexpectedTransition(
+                locked_fsm.state,
+                "terminate".to_string(),
+            ))
+        } else {
+            locked_fsm.state = LinkState::Closing;
+            Ok(())
+        }
+    }
+
     /// Initiate the shutdown of the link
-    /// Transitions to Closed from any running state
-    pub fn initiate_close(&self) {
+    /// Transitions to Closing from any running state
+    /// Generates a Terminate Request packet
+    fn initiate_close<'pktbuf>(
+        &self,
+        asm: &Arc<Assembly>,
+        reason: TerminateReason,
+    ) -> Result<(), LinkStateError> {
+        info!("Initiating shutdown on link {}", self.id);
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.state = LinkState::Closing;
-        // TODO: Send stateful terminate
+        let link_id = self.id;
+        let task_asm = asm.clone();
+        tokio::task::spawn_local(async move {
+            let _ = send_terminate_request(&task_asm, link_id, reason).await;
+        });
+        Ok(())
     }
 
     /// Complete a link shutdown, upon receiving a terminate request or response
-    /// Transitions from Closed to Inactive
-    #[allow(dead_code)]
-    pub fn complete_close(&self, asm: &Assembly) -> Result<(), LinkStateError> {
+    /// Transitions from Closing to Inactive
+    /// Generates no packets
+    fn complete_close(&self, asm: &Arc<Assembly>) {
         info!("Shutting down link {}", self.id);
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        locked_fsm.state = LinkState::Inactive;
-        if asm.ph_mode != PhMode::Node {
-            asm.tun_ctl.set_carrier(false).unwrap();
+
+        match locked_fsm.state {
+            LinkState::Closing => {
+                if asm.ph_mode != PhMode::Node {
+                    asm.tun_ctl.set_carrier(false).unwrap();
+                }
+                locked_fsm.agent_addresses.clear();
+                locked_fsm.silent = false;
+                locked_fsm.state = LinkState::Inactive;
+                info!("Link {} has fully shut down", self.id);
+            }
+            LinkState::Resetting => {
+                if asm.ph_mode != PhMode::Node {
+                    asm.tun_ctl.set_carrier(false).unwrap();
+                }
+                *locked_fsm = LinkStateMachine::new();
+                info!("Link {} has fully reset", self.id);
+            }
+            _ => {
+                error!(
+                    "Link {} tried to close from state {:?}",
+                    self.id, locked_fsm.state
+                );
+            }
         }
-        // TODO: Bring down KM
-        Ok(())
+    }
+
+    /// Handle a terminate response packet
+    fn process_terminate_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+        info!("Received terminate response for link {}", self.id);
+        let state = self.locked_fsm.lock().unwrap().state;
+        match state {
+            LinkState::Closing => Ok(self.clean_up_link_state(asm)),
+            LinkState::Resetting => Ok(self.clean_up_link_state(asm)),
+            _ => Err(LinkStateError::UnexpectedTransition(
+                state,
+                "terminate response".to_string(),
+            )),
+        }
+    }
+
+    fn process_terminate_indication(
+        &self,
+        asm: &Arc<Assembly>,
+        reason: TerminateReason,
+    ) -> Result<(), LinkStateError> {
+        info!(
+            "Received terminate indication for link {} with reason {:?}",
+            self.id, reason
+        );
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        match (locked_fsm.state, reason) {
+            (LinkState::Initial, _) => Err(LinkStateError::UnexpectedTransition(
+                locked_fsm.state,
+                "terminate indication".to_string(),
+            )),
+            (LinkState::Inactive, TerminateReason::Reset) => {
+                locked_fsm.state = LinkState::Closing;
+                Ok(self.clean_up_link_state(asm))
+            }
+            (LinkState::Inactive, _) => Err(LinkStateError::UnexpectedTransition(
+                locked_fsm.state,
+                "terminate indication".to_string(),
+            )),
+            (_, _) => {
+                locked_fsm.state = LinkState::Closing;
+                Ok(self.clean_up_link_state(asm))
+            }
+        }
+    }
+
+    /// Tear down link state
+    fn clean_up_link_state(&self, asm: &Arc<Assembly>) {
+        let link_id = self.id;
+        let link_type = self.link_type;
+        let task_asm = asm.clone();
+        tokio::task::spawn_local(async move {
+            info!("Link {} is clearing its state", link_id);
+
+            task_asm.peer_table.clear_peer_state(link_id);
+
+            if link_type == LinkType::AdapterToNode {
+                task_asm.tun_ctl.set_carrier(false).unwrap();
+            }
+
+            // NOTE: Any mgmt messages MUST have been sent before this is called
+            km_multiplexor::drop_link(&task_asm, link_id).await;
+
+            if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::CloseDone) {
+                error!("Error shutting down link {}: {:?}", link_id, e);
+            }
+        });
     }
 
     /// Reset the link, shutting it down and wiping its configuration
     /// Transitions to Initial from any state
-    pub fn reset(&self, asm: &Assembly) {
-        info!("Resetting link {}", self.id);
+    /// Sends a Terminate Indication
+    pub fn reset(&self, asm: &Arc<Assembly>) {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        locked_fsm.state = LinkState::Initial;
-        locked_fsm.silent = false;
-        if asm.ph_mode != PhMode::Node {
-            asm.tun_ctl.set_carrier(false).unwrap();
-        }
-        // TODO: Send stateless terminate
-        // TODO: Bring down KM
+        info!(
+            "Resetting link {} from state {:?}",
+            self.id, locked_fsm.state
+        );
+        locked_fsm.state = LinkState::Resetting;
+
+        let link_id = self.id;
+        let task_asm = asm.clone();
+        tokio::task::spawn_local(async move {
+            let _ = send_terminate_indication(&task_asm, link_id, TerminateReason::Reset).await;
+        });
     }
 
-    pub fn run_active(&self, _asm: &Assembly) -> Result<(), LinkStateError> {
-        debug!("Link {} entering active state", self.id);
+    /// Reset the link, shutting it down and wiping its configuration
+    /// Transitions to Initial from any state
+    /// Sends a Terminate Indication
+    pub async fn reset_blocking(&self, asm: &Arc<Assembly>) {
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        if locked_fsm.state != LinkState::Initial && locked_fsm.state != LinkState::Inactive {
+            info!(
+                "Resetting link {} from state {:?}",
+                self.id, locked_fsm.state
+            );
+            locked_fsm.state = LinkState::Resetting;
+            let _ = send_terminate_indication(&asm, self.id, TerminateReason::Reset).await;
+        }
+    }
+
+    fn run_active(&self, _asm: &Assembly) -> Result<(), LinkStateError> {
+        info!("Link {} entering active state", self.id);
         // TODO send echoes
         Ok(())
+    }
+}
+
+async fn send_terminate_indication(
+    asm: &Arc<Assembly>,
+    link_id: LinkId,
+    reason: TerminateReason,
+) -> Result<(), LinkStateError> {
+    mgmt::requests::send_terminate_indication(asm, link_id, reason).await;
+    asm.process_link_state_event(link_id, LinkEvent::SentTerminate)?;
+    Ok(())
+}
+
+async fn send_terminate_request(
+    asm: &Arc<Assembly>,
+    link_id: LinkId,
+    reason: TerminateReason,
+) -> Result<(), LinkStateError> {
+    match mgmt::requests::send_terminate_request(&asm, link_id, reason).await {
+        Err(e) => {
+            warn!(
+                "Link {} got error '{:?}' when trying to shut down.  Shutting down anyway",
+                link_id, e
+            );
+            mgmt::requests::send_terminate_indication(asm, link_id, reason).await;
+            asm.process_link_state_event(link_id, LinkEvent::SentTerminate)?;
+            Ok(())
+        }
+        Ok(response) => {
+            asm.process_link_state_event(link_id, LinkEvent::ReceivedTerminateResponse(response))?;
+            Ok(())
+        }
     }
 }

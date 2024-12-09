@@ -20,6 +20,7 @@ pub async fn launch(asm: Arc<Assembly>) {
         tokio::select! {
             _ = usr1_stream.recv() => emit_counts(&asm.counters),
             _ = term_stream.recv() => {
+                asm.shutdown().await;
                 emit_counts(&asm.counters);
                 std::process::exit(128 + SignalKind::terminate().as_raw_value())
             }

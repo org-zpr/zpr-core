@@ -100,6 +100,29 @@ pub enum AddRouteError {
 }
 
 impl Assembly {
+    // Graceful shutdown routine.  Not guaranteed to be called
+    pub async fn shutdown(self: &Arc<Self>) {
+        // Probably not worth blocking for this
+        let Ok(locked_ids) = self.peer_ids.try_lock() else {
+            warn!("Unable to shutdown gracefully");
+            return;
+        };
+        for peer_id in locked_ids.iter() {
+            if let Some(peer) = self.peer_table.get(*peer_id) {
+                // This should be a short block and must be blocked on,
+                // otherwise the messages won't get sent
+                peer.link_state_machine.reset_blocking(self).await;
+            }
+        }
+    }
+
+    pub fn is_link_ready(&self, id: LinkId) -> bool {
+        match self.peer_table.get(id) {
+            Some(peer) => peer.link_state_machine.is_ready(),
+            None => false,
+        }
+    }
+
     pub fn process_link_state_event(
         self: &Arc<Self>,
         id: LinkId,
@@ -169,18 +192,14 @@ impl Assembly {
             .process_event(self, LinkEvent::Configure)
         {
             error!("Link {peer_id} failed to configure with error {e}.  Resetting");
-            let _ = peer
-                .link_state_machine
-                .process_event(self, LinkEvent::Reset);
+            peer.link_state_machine.reset(self);
         } else {
             if let Err(e) = peer
                 .link_state_machine
                 .process_event(self, LinkEvent::Start)
             {
                 error!("Link {peer_id} failed to start with error {e}.  Resetting");
-                let _ = peer
-                    .link_state_machine
-                    .process_event(self, LinkEvent::Reset);
+                peer.link_state_machine.reset(self);
             } else {
                 info!("Successfully started tether with {adapter_addr}.  Assigned ID {peer_id}");
             }

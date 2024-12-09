@@ -7,7 +7,9 @@
 
 use crate::assembly::Assembly;
 use crate::config;
+use crate::link_state::LinkEvent;
 use crate::test_packet::TestPacketMetrics;
+use crate::zdp::TerminateReason;
 use cbpf_rs;
 use core::future::Future;
 use hdrhistogram::Histogram;
@@ -26,6 +28,7 @@ use tokio::task::JoinSet;
 use tokio::time::interval;
 use tracing::error;
 use zpr::rpc_commands::RpcCommands;
+use zpr::LinkId;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
 
@@ -46,7 +49,7 @@ pub async fn launch(asm: Arc<Assembly>, socket: Arc<UnixListener>) {
             accepted = socket.accept() =>
                 match accepted {
                     Ok((stream, _addr)) => {
-                        set.spawn(handle_connection(asm.clone(), stream));
+                        set.spawn_local(handle_connection(asm.clone(), stream));
                     },
                     Err(_e) => {
                         error!("Connection failed");
@@ -152,6 +155,66 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
+            Ok(RpcCommands::ShowLink) => match vec_message.len() {
+                2 => match vec_message[1].parse::<u32>() {
+                    Ok(link_id) => {
+                        buf_writer
+                            .write_all(show_link(&asm.clone(), link_id).as_bytes())
+                            .await?;
+                        buf_writer.write_all("OK\n".as_bytes()).await?
+                    }
+                    Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
+                },
+                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
+            },
+            Ok(RpcCommands::ConfigureLink) => match vec_message.len() {
+                2 => match vec_message[1].parse::<u32>() {
+                    Ok(link_id) => {
+                        buf_writer
+                            .write_all(configure_link(&asm.clone(), link_id).as_bytes())
+                            .await?;
+                        buf_writer.write_all("OK\n".as_bytes()).await?
+                    }
+                    Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
+                },
+                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
+            },
+            Ok(RpcCommands::StartLink) => match vec_message.len() {
+                2 => match vec_message[1].parse::<u32>() {
+                    Ok(link_id) => {
+                        buf_writer
+                            .write_all(start_link(&asm.clone(), link_id).as_bytes())
+                            .await?;
+                        buf_writer.write_all("OK\n".as_bytes()).await?
+                    }
+                    Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
+                },
+                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
+            },
+            Ok(RpcCommands::StopLink) => match vec_message.len() {
+                2 => match vec_message[1].parse::<u32>() {
+                    Ok(link_id) => {
+                        buf_writer
+                            .write_all(stop_link(&asm.clone(), link_id).as_bytes())
+                            .await?;
+                        buf_writer.write_all("OK\n".as_bytes()).await?
+                    }
+                    Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
+                },
+                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
+            },
+            Ok(RpcCommands::ResetLink) => match vec_message.len() {
+                2 => match vec_message[1].parse::<u32>() {
+                    Ok(link_id) => {
+                        buf_writer
+                            .write_all(reset_link(&asm.clone(), link_id).as_bytes())
+                            .await?;
+                        buf_writer.write_all("OK\n".as_bytes()).await?
+                    }
+                    Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
+                },
+                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
+            },
             _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
         };
 
@@ -400,4 +463,45 @@ fn delete_capture_program(asm: &Assembly) -> String {
     asm.flow_control.delete_program();
 
     String::from("Program deleted\n")
+}
+
+fn show_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
+    match asm.peer_table.get(link_id) {
+        Some(peer) => {
+            let lsm = &peer.link_state_machine;
+            format!("Link {link_id} info:
+  SubstrateAddr: {}
+  State: {:?}
+  Status {:?}\n", peer.substrate_addr, lsm.get_state(), lsm.get_status())
+        },
+        None => format!("No suck link {link_id}\n"),
+    }
+}
+
+fn configure_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
+    match asm.process_link_state_event(link_id, LinkEvent::Configure) {
+        Ok(_) => format!("Link {} configured\n", link_id),
+        Err(e) => format!("Failed to configure link {}: {:?}\n", link_id, e),
+    }
+}
+
+fn start_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
+    match asm.process_link_state_event(link_id, LinkEvent::Start) {
+        Ok(_) => format!("Link {} started\n", link_id),
+        Err(e) => format!("Failed to start link {}: {:?}\n", link_id, e),
+    }
+}
+
+fn stop_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
+    match asm.process_link_state_event(link_id, LinkEvent::Close(TerminateReason::Other)) {
+        Ok(_) => format!("Link {} stopped\n", link_id),
+        Err(e) => format!("Failed to stop link {}: {:?}\n", link_id, e),
+    }
+}
+
+fn reset_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
+    match asm.process_link_state_event(link_id, LinkEvent::Reset) {
+        Ok(_) => format!("Link {} reset\n", link_id),
+        Err(e) => format!("Failed to reset link {}: {:?}\n", link_id, e),
+    }
 }

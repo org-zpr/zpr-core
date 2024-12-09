@@ -71,6 +71,68 @@ pub async fn handle_discard(asm: &Arc<Assembly>, pkt: BufferPacket) -> HandleMgm
     Ok(())
 }
 
+/// handle a Terminate Request (RFC 6.5 § 6.3.3)
+pub async fn handle_terminate_request(
+    asm: &Arc<Assembly>,
+    seq_num: zpr::SeqNum,
+    mut pkt: BufferPacket,
+) -> HandleMgmtResult {
+    let ingress_link_id = pkt.metadata().ingress_link_id;
+    let Ok(hdr) = zdp::ZdpTerminateLinkRequestHeader::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+
+    info!("Received Terminate Request for link {}", ingress_link_id);
+
+    let result = asm.process_link_state_event(
+        ingress_link_id,
+        LinkEvent::ReceivedTerminateRequest(hdr.reason_code),
+    );
+    let response_code = if result.is_ok() {
+        zdp::TerminateResponse::Success
+    } else {
+        zdp::TerminateResponse::Other
+    };
+
+    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpTerminateLinkResponseHeader>();
+    hdr.response_code = response_code;
+
+    super::core::send_non_flow_mgmt_response(
+        asm,
+        ingress_link_id,
+        zdp::ZdpPacketType::TerminateLinkResponse,
+        seq_num,
+        rsp_pkt,
+    )
+    .await;
+
+    if result.is_ok() {
+        let _ = asm.process_link_state_event(ingress_link_id, LinkEvent::SentTerminate);
+    }
+    Ok(())
+}
+
+/// handle a Terminate Indication (RFC 6.5 § 6.3.3)
+pub async fn handle_terminate_indication(
+    asm: &Arc<Assembly>,
+    _seq_num: zpr::SeqNum,
+    mut pkt: BufferPacket,
+) -> HandleMgmtResult {
+    let ingress_link_id = pkt.metadata().ingress_link_id;
+    let Ok(hdr) = zdp::ZdpTerminateLinkIndicationHeader::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+
+    info!("Received Terminate Indication for link {}", ingress_link_id);
+
+    let _ = asm.process_link_state_event(
+        ingress_link_id,
+        LinkEvent::ReceivedTerminateIndication(hdr.reason_code),
+    );
+    Ok(())
+}
+
 /// handle a Hello Request (RFC 6.5 § 6.3.4)
 pub async fn handle_hello_request(
     asm: &Arc<Assembly>,

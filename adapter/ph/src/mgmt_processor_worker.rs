@@ -82,6 +82,14 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMgmt
                 panic!("unexpected Key Management message in mgmt processor")
             }
 
+            ZdpPacketType::TerminateLinkRequest => {
+                handlers::handle_terminate_request(asm, seq_num, pkt).await
+            }
+
+            ZdpPacketType::TerminateLinkIndication => {
+                handlers::handle_terminate_indication(asm, seq_num, pkt).await
+            }
+
             ZdpPacketType::HelloRequest => handlers::handle_hello_request(asm, seq_num, pkt).await,
 
             ZdpPacketType::HelloResponse => {

@@ -15,6 +15,7 @@ pub enum RpcCommands {
     CloseCaptureFile,
     SetCaptureProgram,
     DeleteCaptureProgram,
+    ShowLink,
     ConfigureLink,
     StartLink,
     StopLink,

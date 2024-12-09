@@ -140,6 +140,48 @@ pub struct ZdpRegisterAgentAddressResponseHeader {
     pub info_len: u8,
 }
 
+#[open_enum]
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(u8)]
+pub enum TerminateReason {
+    Other = 0,
+    BadSequenceNumber = 1,
+    RequestTimedOut = 2,
+    Reset = 3,
+}
+
+/// Terminate Link Indication (§ 6.3.3)
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpTerminateLinkIndicationHeader {
+    pub reason_code: TerminateReason,
+    pub data_len: u8,
+}
+
+/// Terminate Link Request (§ 6.3.3)
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpTerminateLinkRequestHeader {
+    pub reason_code: TerminateReason,
+    pub data_len: u8,
+}
+
+#[open_enum]
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(u8)]
+pub enum TerminateResponse {
+    Success = 0,
+    Other = 1,
+}
+
+/// Terminate Link Response (§ 6.3.3)
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpTerminateLinkResponseHeader {
+    pub response_code: TerminateResponse,
+    pub data_len: u8,
+}
+
 /// Bind Agent Address request (§ 6.3.11)
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]

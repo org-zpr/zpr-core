@@ -81,8 +81,6 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
 
 sleep 2
 
-echo "Launching Node"
-
 #
 # Launch PHs
 #

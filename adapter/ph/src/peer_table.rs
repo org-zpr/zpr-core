@@ -314,6 +314,16 @@ impl PeerTable {
             })
             .map_err(|()| PeerUpdateError::NoAssociationForLink)
     }
+
+    /// Clear out peer state upon link close/reset
+    /// This does not remove the peer, but it clears any relevant tables
+    pub fn clear_peer_state(&self, link_id: LinkId) {
+        let Some(entry) = self.get(link_id) else {
+            // If the entry being cleared is gone, who cares?
+            return;
+        };
+        entry.pft.clear();
+    }
 }
 
 pub struct VacantPeerTableEntry<'a> {

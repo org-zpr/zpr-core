@@ -241,8 +241,7 @@ pub fn add_node_link(
 }
 
 /// Remove all state for this link, invalidating the SA and stopping the Key Manager.
-#[allow(dead_code)]
-pub async fn drop_link(asm: &Assembly, link_id: zpr::LinkId) {
+pub async fn drop_link(asm: &Arc<Assembly>, link_id: zpr::LinkId) {
     // If present in state, turn off the SA.
     let _ = asm.peer_table.clear_security_association(link_id);
 

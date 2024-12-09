@@ -43,13 +43,8 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
         PhMode::Node => zpr::LINK_ID_UNKNOWN,
     };
 
-    // if link is not ready, we cannot proceed
-    if dock_link_id != zpr::LINK_ID_UNKNOWN
-        && !asm
-            .peer_table
-            .is_security_assocaition_established(dock_link_id)
-    {
-        warn!("Link {dock_link_id} has no security association, aborting bind request operation");
+    if dock_link_id != zpr::LINK_ID_UNKNOWN && !asm.is_link_ready(dock_link_id) {
+        debug!("Link {} is not ready to receive traffic yet", dock_link_id);
         fastpath::drop_and_count(asm, pkt, CounterType::DroppedNoSA);
         return;
     }
