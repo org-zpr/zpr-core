@@ -53,8 +53,11 @@ pub struct Config {
     /// should be left as None so that the kernal can pick a free one.
     pub tun_if: Option<String>,
 
-    /// Enable debug logging.
-    pub debug: bool,
+    /// Enable debug logging for specified targets, or ALL
+    pub debug: Vec<String>,
+
+    /// Disable info & warnings for specified targets, or ALL
+    pub quiet: Vec<String>,
 
     /// Required for adapter - the node dock address on substrate.
     pub node_addr: Option<SocketAddr>,

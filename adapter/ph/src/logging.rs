@@ -1,5 +1,10 @@
 //! Logging-related stuff.
 
+use crate::config;
+use tracing::Level;
+use tracing_subscriber::filter::targets::Targets;
+use tracing_subscriber::{fmt, prelude::*};
+
 /// Target of a log message, for filtering.
 pub mod targets {
     // Design note: my intent is for targets to indicate, to which
@@ -29,4 +34,42 @@ pub mod targets {
     pub const STARTUP: &str = "startup";
     pub const VISA_MGMT: &str = "visa_mgmt";
     pub const ZDP: &str = "zdp";
+}
+
+fn create_target_filter<T>(
+    debug: impl IntoIterator<Item = T>,
+    quiet: impl IntoIterator<Item = T>,
+) -> Targets
+where
+    String: From<T>,
+    T: for<'a> std::cmp::PartialEq<&'a str>,
+{
+    let mut targets = Targets::new();
+
+    targets = targets.with_default(Level::INFO);
+
+    for target in debug.into_iter() {
+        if target == "ALL" {
+            targets = targets.with_default(Level::DEBUG);
+        } else {
+            targets = targets.with_target(target, Level::DEBUG);
+        }
+    }
+
+    for target in quiet.into_iter() {
+        if target == "ALL" {
+            targets = targets.with_default(Level::ERROR);
+        } else {
+            targets = targets.with_target(target, Level::ERROR);
+        }
+    }
+
+    targets
+}
+
+pub fn initialize(config: &config::Config) {
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(create_target_filter(&config.debug, &config.quiet))
+        .init();
 }

@@ -101,9 +101,13 @@ pub struct CommonArgs {
     #[arg(long, short = 'z')]
     agent_addr: Vec<IpAddr>,
 
-    /// Enable debug logging
+    /// Enable debug logging for specified targets, or ALL
     #[arg(long, short = 'd')]
-    debug: Option<bool>,
+    debug: Vec<String>,
+
+    /// Disable info & warnings for specified targets, or ALL
+    #[arg(long, short = 'q')]
+    quiet: Vec<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -171,7 +175,8 @@ impl Default for Config {
             certificate_file: PathBuf::from(""),
             private_key_file: PathBuf::from(""),
             tun_if: None,
-            debug: false,
+            debug: Vec::new(),
+            quiet: Vec::new(),
             node_addr: None,
             agent_addr: Vec::new(),
             node_public_key_file: None,
@@ -324,8 +329,11 @@ impl Config {
         if let Some(agent_addr) = &config.agent_addr {
             self.agent_addr.extend(&*agent_addr);
         }
-        if let Some(debug) = config.debug {
-            self.debug = debug;
+        if let Some(debug) = &config.debug {
+            self.debug.extend(debug.into_iter().cloned());
+        }
+        if let Some(quiet) = &config.quiet {
+            self.quiet.extend(quiet.into_iter().cloned());
         }
         Ok(())
     }
@@ -414,9 +422,9 @@ impl Config {
         }
         self.agent_addr.extend(&common.agent_addr);
 
-        if let Some(debug) = common.debug {
-            self.debug = debug;
-        }
+        self.debug.extend(common.debug.iter().cloned());
+        self.quiet.extend(common.quiet.iter().cloned());
+
         Ok(())
     }
 }
@@ -451,7 +459,8 @@ struct GlobalConfigSection {
     private_key_file: Option<PathBuf>,
     tun_if: Option<String>,
     agent_addr: Option<Vec<IpAddr>>,
-    debug: Option<bool>,
+    debug: Option<Vec<String>>,
+    quiet: Option<Vec<String>>,
 }
 
 // Adapter only bits.
@@ -636,7 +645,8 @@ mod test {
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
         agent_addr = [ "10.0.0.1" ]
-        debug = true
+        debug = [ "FOO" ]
+        quiet = [ "BAR" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -669,7 +679,8 @@ mod test {
             Some(PathBuf::from("tests/private_key.pem"))
         );
         assert_eq!(config.global.tun_if, Some("tun23".to_string()));
-        assert_eq!(config.global.debug, Some(true));
+        assert_eq!(config.global.debug, Some(Vec::from(["FOO".to_string()])));
+        assert_eq!(config.global.quiet, Some(Vec::from(["BAR".to_string()])));
 
         assert_eq!(
             config.adapter.node_addr,
@@ -701,7 +712,8 @@ mod test {
         certificate_file = "tests/certificate.pem"
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
-        debug = true
+        debug = [ "FOO" ]
+        quiet = [ "BAR" ]
         "#;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -730,7 +742,8 @@ mod test {
             Some(PathBuf::from("tests/private_key.pem"))
         );
         assert_eq!(config.global.tun_if, Some("tun23".to_string()));
-        assert_eq!(config.global.debug, Some(true));
+        assert_eq!(config.global.debug, Some(Vec::from(["FOO".to_string()])));
+        assert_eq!(config.global.quiet, Some(Vec::from(["BAR".to_string()])));
     }
 
     #[test]
@@ -745,7 +758,8 @@ mod test {
         private_key_file = "$PKFILE"
         tun_if = "tun23"
         agent_addr = [ "10.0.0.1" ]
-        debug = true
+        debug = [ "FOO" ]
+        quiet = [ "BAR" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -791,7 +805,8 @@ mod test {
         assert_eq!(config.certificate_file, cert_file.get_path());
         assert_eq!(config.private_key_file, pk_file.get_path());
         assert_eq!(config.tun_if, Some("tun23".to_string()));
-        assert_eq!(config.debug, true);
+        assert_eq!(config.debug, Vec::from(["FOO".to_string()]));
+        assert_eq!(config.quiet, Vec::from(["BAR".to_string()]));
 
         assert_eq!(
             config.node_addr,
@@ -821,7 +836,6 @@ mod test {
         certificate_file = "tests/certificate.pem"
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
-        debug = true
         "#;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -853,7 +867,6 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         tun_if = "tun23"
-        debug = true
 
         [adapter]
         "#;
@@ -949,7 +962,9 @@ mod test {
             "--tun-if",
             "tun23",
             "-d",
-            "true",
+            "FOO",
+            "-q",
+            "BAR",
         ];
 
         let (pmode, config) = argparse(Some(args)).unwrap();
@@ -966,7 +981,8 @@ mod test {
         assert_eq!(config.certificate_file, cert_file.get_path());
         assert_eq!(config.private_key_file, pk_file.get_path());
         assert_eq!(config.tun_if, Some("tun23".to_string()));
-        assert_eq!(config.debug, true);
+        assert_eq!(config.debug, Vec::from(["FOO".to_string()]));
+        assert_eq!(config.quiet, Vec::from(["BAR".to_string()]));
 
         assert_eq!(
             config.node_addr,
@@ -1031,7 +1047,8 @@ mod test {
         assert_eq!(config.certificate_file, cert_file.get_path());
         assert_eq!(config.private_key_file, pk_file.get_path());
         assert!(config.tun_if.is_none());
-        assert_eq!(config.debug, false);
+        assert!(config.debug.is_empty());
+        assert!(config.quiet.is_empty());
 
         assert_eq!(
             config.node_addr,
@@ -1090,7 +1107,8 @@ mod test {
         assert_eq!(config.certificate_file, cert_file.get_path());
         assert_eq!(config.private_key_file, pk_file.get_path());
         assert!(config.tun_if.is_none());
-        assert_eq!(config.debug, false);
+        assert!(config.debug.is_empty());
+        assert!(config.quiet.is_empty());
     }
 
     #[test]
@@ -1132,6 +1150,7 @@ mod test {
         assert_eq!(config.certificate_file, PathBuf::from(&cert_file_fname));
         assert_eq!(config.private_key_file, PathBuf::from(&pk_file_fname));
         assert!(config.tun_if.is_none());
-        assert_eq!(config.debug, false);
+        assert!(config.debug.is_empty());
+        assert!(config.quiet.is_empty());
     }
 }

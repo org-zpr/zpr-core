@@ -14,7 +14,6 @@ use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tracing::*;
-use tracing_subscriber;
 
 mod adapter_manager_worker;
 mod adapter_tables;
@@ -92,18 +91,7 @@ fn main() -> ExitCode {
     // set up logging
     //
 
-    let tracing_max_level;
-    if config.debug {
-        tracing_max_level = tracing::Level::DEBUG;
-    } else {
-        tracing_max_level = tracing::Level::INFO;
-    }
-
-    let subscriber = tracing_subscriber::fmt::fmt()
-        .with_max_level(tracing_max_level)
-        .finish();
-
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+    logging::initialize(&config);
 
     info!(target: STARTUP, "starting with PID {}", process::id());
 
