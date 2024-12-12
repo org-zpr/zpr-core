@@ -1,5 +1,5 @@
 use std::net::{IpAddr, SocketAddr, TcpStream};
-use std::time::{SystemTime, Duration};
+use std::time::{Duration, SystemTime};
 use thrift::protocol::{TBinaryInputProtocol, TBinaryOutputProtocol};
 use thrift::transport::{ReadHalf, WriteHalf};
 use thrift::transport::{TFramedReadTransport, TFramedWriteTransport};

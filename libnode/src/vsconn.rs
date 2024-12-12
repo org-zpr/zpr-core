@@ -14,7 +14,7 @@ use std::time::SystemTime;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{self, Duration};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, debug};
+use tracing::{debug, error, info};
 
 use crate::errors::{VSClientError, VSError};
 use crate::logging::targets::VS_RPC;
@@ -379,6 +379,7 @@ mod test {
     use rand::Rng;
     use std::env;
     use std::fs;
+    use std::sync::Mutex;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     const CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
@@ -451,56 +452,51 @@ s5JVZ48=
         AgentDisconnect,
     }
 
-    static mut RUN_LOCK: Mutex<u32> = Mutex::new(0); // Each test holds this while running.
+    static RUN_LOCK: Mutex<u32> = Mutex::new(0); // Each test holds this while running.
 
-    static mut TEST_STATE: TestState = TestState {
+    static TEST_STATE: Mutex<TestState> = Mutex::new(TestState {
         auth_count: 0,
         ping_count: 0,
         de_register_count: 0,
         disconnect_count: 0,
         next_error: None,
-    };
+    });
 
     fn reset_state() {
-        unsafe {
-            TEST_STATE.auth_count = 0;
-            TEST_STATE.ping_count = 0;
-            TEST_STATE.de_register_count = 0;
-            TEST_STATE.disconnect_count = 0;
-            TEST_STATE.next_error = None;
-        }
+        let mut test_state = TEST_STATE.lock().unwrap();
+        test_state.auth_count = 0;
+        test_state.ping_count = 0;
+        test_state.de_register_count = 0;
+        test_state.disconnect_count = 0;
+        test_state.next_error = None;
     }
 
     fn get_counter(c: CounterT) -> u32 {
-        unsafe {
-            match c {
-                CounterT::Auth => TEST_STATE.auth_count,
-                CounterT::Ping => TEST_STATE.ping_count,
-                CounterT::DeRegister => TEST_STATE.de_register_count,
-                CounterT::AgentDisconnect => TEST_STATE.disconnect_count,
-            }
+        let test_state = TEST_STATE.lock().unwrap();
+        match c {
+            CounterT::Auth => test_state.auth_count,
+            CounterT::Ping => test_state.ping_count,
+            CounterT::DeRegister => test_state.de_register_count,
+            CounterT::AgentDisconnect => test_state.disconnect_count,
         }
     }
 
     fn incr(c: CounterT) {
-        unsafe {
-            match c {
-                CounterT::Auth => TEST_STATE.auth_count += 1,
-                CounterT::Ping => TEST_STATE.ping_count += 1,
-                CounterT::DeRegister => TEST_STATE.de_register_count += 1,
-                CounterT::AgentDisconnect => TEST_STATE.disconnect_count += 1,
-            }
+        let mut test_state = TEST_STATE.lock().unwrap();
+        match c {
+            CounterT::Auth => test_state.auth_count += 1,
+            CounterT::Ping => test_state.ping_count += 1,
+            CounterT::DeRegister => test_state.de_register_count += 1,
+            CounterT::AgentDisconnect => test_state.disconnect_count += 1,
         }
     }
 
     fn set_next_error(e: VSClientError) {
-        unsafe {
-            TEST_STATE.next_error = Some(e);
-        }
+        TEST_STATE.lock().unwrap().next_error = Some(e);
     }
 
     fn take_next_error() -> Option<VSClientError> {
-        unsafe { TEST_STATE.next_error.take() }
+        TEST_STATE.lock().unwrap().next_error.take()
     }
 
     #[derive(Debug)]
@@ -605,7 +601,7 @@ s5JVZ48=
 
     #[tokio::test]
     async fn test_start_and_stop_and_ping() {
-        let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
+        let _lockval = RUN_LOCK.lock().unwrap();
         reset_state();
         let certfile = TempFile::new_pem(CERT_DATA);
 
@@ -648,7 +644,7 @@ s5JVZ48=
 
     #[tokio::test]
     async fn test_visa_req_resp() {
-        let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
+        let _lockval = RUN_LOCK.lock().unwrap();
         reset_state();
         let certfile = TempFile::new_pem(CERT_DATA);
 
@@ -737,7 +733,7 @@ s5JVZ48=
 
     #[tokio::test]
     async fn test_connect_request() {
-        let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
+        let _lockval = RUN_LOCK.lock().unwrap();
         reset_state();
         let certfile = TempFile::new_pem(CERT_DATA);
 
@@ -835,7 +831,7 @@ s5JVZ48=
 
     #[tokio::test]
     async fn test_agent_disconnect() {
-        let _lockval = unsafe { RUN_LOCK.lock().unwrap() };
+        let _lockval = RUN_LOCK.lock().unwrap();
         reset_state();
         let certfile = TempFile::new_pem(CERT_DATA);
 
