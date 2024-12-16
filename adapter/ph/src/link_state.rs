@@ -667,7 +667,7 @@ impl LinkStateWrapper {
     /// Validate a received shutdown request
     /// Does not transition
     /// Generates no packets
-    fn process_terminate_request<'pktbuf>(
+    fn process_terminate_request(
         &self,
         _asm: &Assembly,
         reason: TerminateReason,
@@ -691,7 +691,7 @@ impl LinkStateWrapper {
     /// Initiate the shutdown of the link
     /// Transitions to Closing from any running state
     /// Generates a Terminate Request packet
-    fn initiate_close<'pktbuf>(
+    fn initiate_close(
         &self,
         asm: &Arc<Assembly>,
         reason: TerminateReason,
@@ -787,17 +787,16 @@ impl LinkStateWrapper {
     /// Tear down link state
     fn clean_up_link_state(&self, asm: &Arc<Assembly>) {
         let link_id = self.id;
-        let link_type = self.link_type;
+        info!("Link {link_id} is clearing its state");
+
+        asm.peer_table.clear_peer_state(link_id);
+
+        if self.link_type == LinkType::AdapterToNode {
+            asm.tun_ctl.set_carrier(false).unwrap();
+        }
+
         let task_asm = asm.clone();
         tokio::task::spawn_local(async move {
-            info!("Link {} is clearing its state", link_id);
-
-            task_asm.peer_table.clear_peer_state(link_id);
-
-            if link_type == LinkType::AdapterToNode {
-                task_asm.tun_ctl.set_carrier(false).unwrap();
-            }
-
             // NOTE: Any mgmt messages MUST have been sent before this is called
             km_multiplexor::drop_link(&task_asm, link_id).await;
 

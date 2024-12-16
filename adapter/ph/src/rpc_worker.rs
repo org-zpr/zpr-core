@@ -469,11 +469,16 @@ fn show_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
     match asm.peer_table.get(link_id) {
         Some(peer) => {
             let lsm = &peer.link_state_machine;
-            format!("Link {link_id} info:
+            format!(
+                "Link {link_id} info:
   SubstrateAddr: {}
   State: {:?}
-  Status {:?}\n", peer.substrate_addr, lsm.get_state(), lsm.get_status())
-        },
+  Status {:?}\n",
+                peer.substrate_addr,
+                lsm.get_state(),
+                lsm.get_status()
+            )
+        }
         None => format!("No suck link {link_id}\n"),
     }
 }
