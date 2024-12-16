@@ -3,6 +3,7 @@ use crate::km::*;
 use crate::km_cert_exchange::KmCertExchange;
 use crate::km_noise::{KmNoise, NoiseKeypair};
 use crate::link_state::LinkEvent;
+use crate::logging::targets::{KEY_MGMT, LINK_STATE};
 use crate::mgmt::requests;
 use crate::peer_table::KmHandle;
 use bytes::Bytes;
@@ -86,7 +87,7 @@ pub async fn launch_signal_worker(
     loop {
         tokio::select! {
             _ = sp_ctok.cancelled() => {
-                debug!("KM Multiplexor shutting down");
+                debug!(target: KEY_MGMT, "Multiplexor shutting down");
                 break;
             }
 
@@ -97,43 +98,43 @@ pub async fn launch_signal_worker(
                         if let Some(km) = asm.peer_table.clone_km_manager(*link_id) {
                             match km.restart() {
                                 Ok(_) => {
-                                    debug!("km_multiplexor: restarted key manager on link {link_id} (error_count = {})", stat.error_count);
+                                    debug!(target: KEY_MGMT, "multiplexor: restarted key manager on link {link_id} (error_count = {})", stat.error_count);
                                     stat.restart_t = now;
                                 }
                                 Err(e) => {
-                                    error!("km_multiplexor: failed to restart KM on link {link_id}: {e:?}");
+                                    error!(target: KEY_MGMT, "multiplexor: failed to restart KM on link {link_id}: {e:?}");
                                     stat.error_count += 1;
                                 }
                             }
                         } else {
-                            error!("km_multiplexor: unable to restart key manager on link {link_id}: not found in peer table");
+                            error!(target: KEY_MGMT, "multiplexor: unable to restart key manager on link {link_id}: not found in peer table");
                         }
                     }
                 }
             }
 
             Some(linkmsg) = sig_queue.recv() => {
-                debug!("km_multiplexor: link: {}, signal {:?}", linkmsg.link_id, linkmsg.msg);
+                debug!(target: KEY_MGMT, "multiplexor: link: {}, signal {:?}", linkmsg.link_id, linkmsg.msg);
                 match linkmsg.msg {
                     KmSignal::SaIdChange { old, new } => {
-                        debug!("km_multiplexor: SA ID change on link {}: {} -> {}", linkmsg.link_id, old, new);
+                        debug!(target: KEY_MGMT, "multiplexor: SA ID change on link {}: {} -> {}", linkmsg.link_id, old, new);
                         if old == 0 {
                             let _ = status.remove(&linkmsg.link_id);
                         }
                     }
                     KmSignal::SaEstablished(sa) => {
-                        debug!("km_multiplexor: link {}: SA established (SEND_ZPIS: {}, RECV_ZPIS: {}",
+                        debug!(target: KEY_MGMT, "multiplexor: link {}: SA established (SEND_ZPIS: {}, RECV_ZPIS: {}",
                             linkmsg.link_id, sa.send_zpis, sa.recv_zpis);
 
                         match asm.peer_table.set_security_association(linkmsg.link_id, sa) {
                             Ok(_) => (),
                             Err(e) => {
-                                error!("km_multiplexor: failed to set SA established: {e:?}");
+                                error!(target: KEY_MGMT, "multiplexor: failed to set SA established: {e:?}");
                             }
                         }
                         match asm.process_link_state_event(linkmsg.link_id, LinkEvent::KeyingDone) {
                             Err(e) => {
-                                error!("Link state error: {e:?}");
+                                error!(target: LINK_STATE, "error: {e:?}");
                             }
                             Ok(_) => (),
                         }
@@ -162,11 +163,11 @@ pub async fn launch_signal_worker(
                         };
                         stat.error_count += 1;
                         stat.last_error_t = time::Instant::now();
-                        warn!("km_multiplexor: Error signal on link {}", linkmsg.link_id);
+                        warn!(target: KEY_MGMT, "multiplexor: Error signal on link {}", linkmsg.link_id);
                     }
                     KmSignal::Termination => {
                         let _ = status.remove(&linkmsg.link_id);
-                        debug!("km_multiplexor: termination signal on link {}", linkmsg.link_id);
+                        debug!(target: KEY_MGMT, "multiplexor: termination signal on link {}", linkmsg.link_id);
                     }
                 }
             }
@@ -251,7 +252,7 @@ pub async fn drop_link(asm: &Arc<Assembly>, link_id: zpr::LinkId) {
         match kmh.join_handle.await {
             Ok(_) => (),
             Err(e) => {
-                error!("KeyManager statemachine shutdown join failed on link {link_id}: {e:?}");
+                error!(target: KEY_MGMT, "statemachine shutdown join failed on link {link_id}: {e:?}");
             }
         }
     }
@@ -286,7 +287,7 @@ fn add_noise_link(
         {
             Ok(_) => (),
             Err(e) => {
-                error!("KeyManager failed on link {link_id}: {e:?}");
+                error!(target: KEY_MGMT, "failed on link {link_id}: {e:?}");
             }
         }
     });

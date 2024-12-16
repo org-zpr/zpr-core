@@ -1,5 +1,6 @@
 use crate::assembly::{AddRouteError, Assembly};
 use crate::defs::FiveTuple;
+use crate::logging::targets::FLOW_MGMT;
 use crate::special_peers;
 use libnode::{vsapi, vsconn};
 use std::num::NonZero;
@@ -31,7 +32,7 @@ pub async fn bind_agent_address(
         if let Some(id) = asm.peer_table.lookup_special_peer(spname) {
             egress_link_id = id;
         } else {
-            error!("visa request error: special peer routing applies, but special peer ({spname:?}) not connected");
+            error!(target: FLOW_MGMT, "visa request error: special peer routing applies, but special peer ({spname:?}) not connected");
             return Err(BindAgentAddressError::PolicyError);
         }
     } else {
@@ -57,6 +58,7 @@ pub async fn bind_agent_address(
                     ..
                 }) => {
                     info!(
+                        target: FLOW_MGMT,
                         "visa request succeeds, egress_link_id = {}",
                         proposed_egress_link_id
                     );
@@ -64,19 +66,19 @@ pub async fn bind_agent_address(
                 }
 
                 Ok(resp) => {
-                    info!("visa request rejected: {resp:?}");
+                    info!(target: FLOW_MGMT, "visa request rejected: {resp:?}");
                     return Err(BindAgentAddressError::PolicyError);
                 }
 
                 Err(err) => {
-                    error!("visa request error: {err}");
+                    error!(target: FLOW_MGMT, "visa request error: {err}");
                     return Err(BindAgentAddressError::PolicyError);
                 }
             }
         }
     }
 
-    debug!("now routing {five_tuple} from {ingress_link_id} to {egress_link_id}");
+    debug!(target: FLOW_MGMT, "now routing {five_tuple} from {ingress_link_id} to {egress_link_id}");
 
     let route_result = asm
         .add_route(
@@ -87,8 +89,6 @@ pub async fn bind_agent_address(
             packet_body,
         )
         .await;
-
-    debug!("route result {route_result:?}");
 
     // TODO: reverse ingress TID needs to be sent to next-hop;
     // this is blocked on switching to new-style bind requests

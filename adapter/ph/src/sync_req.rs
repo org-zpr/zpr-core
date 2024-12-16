@@ -1,3 +1,4 @@
+use crate::logging::targets::ZDP;
 use crate::packet::BufferPacket;
 use crate::zdp;
 use std::future::Future;
@@ -116,7 +117,7 @@ impl SyncReqState {
         match listener {
             Some((expected_seq_num, _)) => {
                 if seq_num != *expected_seq_num {
-                    debug!("expected seq num {} got {}", expected_seq_num, seq_num);
+                    debug!(target: ZDP, "expected seq num {} got {}", expected_seq_num, seq_num);
                     return Err(response.1);
                 }
 

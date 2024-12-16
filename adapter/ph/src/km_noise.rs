@@ -34,6 +34,7 @@
 
 use crate::km::*;
 use crate::km_cert_exchange::KmCertExchange;
+use crate::logging::targets::KEY_MGMT;
 use base64::prelude::*;
 use bytes::{BufMut, Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
@@ -187,7 +188,7 @@ impl KmNoise {
         certx: KmCertExchange,
     ) -> Result<Self, KmError> {
         if initiate && peer_pub_key.is_none() {
-            error!("noise: peer public key required for initiator");
+            error!(target: KEY_MGMT, "noise: peer public key required for initiator");
             return Err(KmError::ConfigurationError);
         }
 
@@ -235,7 +236,7 @@ impl KmNoise {
         match self.certx.write_payload(&mut payload_buf) {
             Ok(_) => {}
             Err(e) => {
-                error!("noise: error writing certificate exchange payload: {:?}", e);
+                error!(target: KEY_MGMT, "noise: error writing certificate exchange payload: {e:?}");
                 return Err(KmError::CertExchangeError);
             }
         };
@@ -246,7 +247,7 @@ impl KmNoise {
                 Ok(buf.freeze())
             }
             Err(e) => {
-                error!("noise: error creating handshake message: {:?}", e);
+                error!(target: KEY_MGMT, "noise: error creating handshake message: {e:?}");
                 Err(KmError::HandshakeError)
             }
         }
@@ -254,12 +255,12 @@ impl KmNoise {
 
     fn parse_km_payload(&mut self, payload: &[u8], peer_public_key: &[u8]) -> KmResult<()> {
         if payload.len() < std::mem::size_of::<KeyMsg>() {
-            error!("noise: handshake payload is too short: {}", payload.len());
+            error!(target: KEY_MGMT, "noise: handshake payload is too short: {}", payload.len());
             return Err(KmError::HandshakeError);
         }
 
         let Ok((km, _)) = KeyMsg::ref_from_prefix(&payload) else {
-            error!("noise: error parsing KeyMsg handshake payload");
+            error!(target: KEY_MGMT, "noise: error parsing KeyMsg handshake payload");
             return Err(KmError::HandshakeError);
         };
 
@@ -277,8 +278,8 @@ impl KmNoise {
             Ok(c) => c,
             Err(e) => {
                 error!(
-                    "noise: error processing certificate exchange payload: {:?}",
-                    e
+                    target: KEY_MGMT,
+                    "noise: error processing certificate exchange payload: {e:?}",
                 );
                 return Err(KmError::CertExchangeError);
             }
@@ -339,7 +340,7 @@ impl Codec for NoiseCodec {
         // nonce is first 8 bytes of the message.
         let plen = payload.len();
         if plen < NOISE_NONCE_LEN {
-            error!("noise: message too short");
+            error!(target: KEY_MGMT, "noise: message too short");
             return Err(DecryptionError::MessageTooShort);
         }
         let nonce: u64 = u64::from_be_bytes(payload[0..NOISE_NONCE_LEN].try_into().unwrap()); // pretty sure this cannot fail
@@ -373,7 +374,7 @@ impl KeyManagerStateMachine for KmNoise {
         let np: snow::params::NoiseParams = match PATTERN.parse() {
             Ok(p) => p,
             Err(e) => {
-                error!("noise: error parsing pattern: {:?}", e);
+                error!(target: KEY_MGMT, "noise: error parsing pattern: {e:?}");
                 self.state = KmSMState::Error;
                 return Err(KmError::ConfigurationError);
             }
@@ -389,7 +390,7 @@ impl KeyManagerStateMachine for KmNoise {
             {
                 Ok(i) => i,
                 Err(e) => {
-                    error!("noise: error building initiator: {:?}", e);
+                    error!(target: KEY_MGMT, "noise: error building initiator: {e:?}");
                     self.state = KmSMState::Error;
                     return Err(KmError::MachineError(format!(
                         "failed to build initiator: {}",
@@ -414,7 +415,7 @@ impl KeyManagerStateMachine for KmNoise {
             {
                 Ok(r) => r,
                 Err(e) => {
-                    error!("noise: error building responder: {:?}", e);
+                    error!(target: KEY_MGMT, "noise: error building responder: {e:?}");
                     self.state = KmSMState::Error;
                     return Err(KmError::MachineError(format!(
                         "failed to build responder: {}",
@@ -434,6 +435,7 @@ impl KeyManagerStateMachine for KmNoise {
     fn handle_message(&mut self, message: &[u8]) -> Result<Option<Bytes>, KmError> {
         if self.state != KmSMState::Configuring {
             error!(
+                target: KEY_MGMT,
                 "noise: handle_message called but not in configuring state: in {:?}",
                 self.state
             );
@@ -449,7 +451,7 @@ impl KeyManagerStateMachine for KmNoise {
                 let peer_pubkey = match hs.get_remote_static() {
                     Some(p) => p,
                     None => {
-                        error!("noise: no remote public key - cannot do cert exchange");
+                        error!(target: KEY_MGMT, "noise: no remote public key - cannot do cert exchange");
                         self.state = KmSMState::Error;
                         self.hs_state = Some(hs);
                         return Err(KmError::CertExchangeError);
@@ -465,7 +467,7 @@ impl KeyManagerStateMachine for KmNoise {
                 }
             }
             Err(e) => {
-                error!("noise: error handling handhsake message: {:?}", e);
+                error!(target: KEY_MGMT, "noise: error handling handhsake message: {e:?}");
                 self.state = KmSMState::Error;
                 self.hs_state = Some(hs);
                 return Err(KmError::HandshakeError);
@@ -491,7 +493,7 @@ impl KeyManagerStateMachine for KmNoise {
             let send_zpis = match self.send_zpis {
                 Some(z) => z,
                 None => {
-                    error!("noise: handshake finished by no ZPIs received");
+                    error!(target: KEY_MGMT, "noise: handshake finished by no ZPIs received");
                     self.state = KmSMState::Error;
                     return Err(KmError::HandshakeError);
                 }
@@ -499,7 +501,7 @@ impl KeyManagerStateMachine for KmNoise {
             let send_key = match self.send_hmac_key {
                 Some(h) => h,
                 None => {
-                    error!("noise: handshake finished by no HMAC key received");
+                    error!(target: KEY_MGMT, "noise: handshake finished by no HMAC key received");
                     self.state = KmSMState::Error;
                     return Err(KmError::HandshakeError);
                 }
@@ -507,7 +509,7 @@ impl KeyManagerStateMachine for KmNoise {
             let peer_cert = match &self.peer_cert {
                 Some(c) => Some(c.clone()),
                 None => {
-                    warn!("noise: handshake finished but no peer cert received");
+                    warn!(target: KEY_MGMT, "noise: handshake finished but no peer cert received");
                     None
                 }
             };
@@ -524,7 +526,7 @@ impl KeyManagerStateMachine for KmNoise {
                     ));
                 }
                 Err(e) => {
-                    error!("noise: error switching to transport mode: {:?}", e);
+                    error!(target: KEY_MGMT, "noise: error switching to transport mode: {e:?}");
                     self.state = KmSMState::Error;
                     return Err(KmError::HandshakeError);
                 }
@@ -540,7 +542,7 @@ impl KeyManagerStateMachine for KmNoise {
             && self.hs_sent_t.is_some()
             && Instant::now().duration_since(self.hs_sent_t.unwrap()) > HANDSHAKE_TIMEOUT
         {
-            error!("noise: handhsake timeout");
+            error!(target: KEY_MGMT, "noise: handhsake timeout");
             self.hs_state = None;
             self.hs_sent_t = None;
             self.state = KmSMState::Error;

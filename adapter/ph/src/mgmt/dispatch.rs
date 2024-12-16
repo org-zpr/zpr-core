@@ -6,6 +6,7 @@ use crate::counters::CounterType;
 use crate::fastpath;
 use crate::km_multiplexor;
 use crate::link_state::LinkType;
+use crate::logging::targets::{KEY_MGMT, ZDP};
 use crate::packet::BufferPacket;
 use crate::queues;
 use crate::zdp;
@@ -116,12 +117,13 @@ fn handle_response(asm: &Assembly, mut pkt: BufferPacket) -> HandleMgmtResult {
 // to parse starting from the KeyManagement header.
 fn handle_key_management(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMgmtResult {
     let Ok(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(&mut pkt) else {
-        error!("KeyManagement packet arrived with unparseable header");
+        error!(target: ZDP, "KeyManagement packet arrived with unparseable header");
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
     if !km_hdr.is_noise() {
         error!(
+            target: KEY_MGMT,
             "KeyManagement packet not using NOISE - type is {}",
             km_hdr.message_type
         );
@@ -133,7 +135,7 @@ fn handle_key_management(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMg
 
     let km_msg_len = usize::from(km_hdr.message_length);
     if pkt.remaining() < km_msg_len {
-        error!("KeyManagement packet arrived with truncated payload");
+        error!(target: KEY_MGMT, "KeyManagement packet arrived with truncated payload");
         return Err((HandleMgmtError::BadStructure, pkt));
     }
 
@@ -145,11 +147,11 @@ fn handle_key_management(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMg
         Ok(()) => (),
         Err(e) => {
             error!(
-                "key management handling failed on link {}: {:?}",
+                target: KEY_MGMT,
+                "key management handling failed on link {}: {e:?}",
                 pkt.metadata().ingress_link_id,
-                e
             );
-            return Err((HandleMgmtError::KeyManagementError(format!("{:?}", e)), pkt));
+            return Err((HandleMgmtError::KeyManagementError(format!("{e:?}")), pkt));
         }
     };
     asm.buffer_stack.put_buffer(pkt.destroy());

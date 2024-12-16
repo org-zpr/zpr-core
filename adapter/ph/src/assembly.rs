@@ -10,6 +10,7 @@ use crate::km_cert_exchange::KmCertExchange;
 use crate::km_multiplexor::KmState;
 use crate::km_noise;
 use crate::link_state::{LinkEvent, LinkStateError, LinkType};
+use crate::logging::targets::PEER_MGMT;
 use crate::mgmt;
 use crate::mgmt_processor_worker;
 use crate::peer_table;
@@ -104,7 +105,7 @@ impl Assembly {
     pub async fn shutdown(self: &Arc<Self>) {
         // Probably not worth blocking for this
         let Ok(locked_ids) = self.peer_ids.try_lock() else {
-            warn!("Unable to shutdown gracefully");
+            warn!(target: PEER_MGMT, "Unable to shutdown gracefully");
             return;
         };
         for peer_id in locked_ids.iter() {
@@ -178,7 +179,7 @@ impl Assembly {
         link_type: LinkType,
     ) -> Result<NonZero<LinkId>, PeerInsertError> {
         assert!(link_type != LinkType::NodeToNode);
-        debug!("Starting tether with {adapter_addr}");
+        debug!(target: PEER_MGMT, "Starting tether with {adapter_addr}");
         let peer_id = self.add_peer(link_type, adapter_addr)?;
         self.peer_ids.lock().unwrap().push(peer_id.get());
 
@@ -191,17 +192,17 @@ impl Assembly {
             .link_state_machine
             .process_event(self, LinkEvent::Configure)
         {
-            error!("Link {peer_id} failed to configure with error {e}.  Resetting");
+            error!(target: PEER_MGMT, "Link {peer_id} failed to configure with error {e}.  Resetting");
             peer.link_state_machine.reset(self);
         } else {
             if let Err(e) = peer
                 .link_state_machine
                 .process_event(self, LinkEvent::Start)
             {
-                error!("Link {peer_id} failed to start with error {e}.  Resetting");
+                error!(target: PEER_MGMT, "Link {peer_id} failed to start with error {e}.  Resetting");
                 peer.link_state_machine.reset(self);
             } else {
-                info!("Successfully started tether with {adapter_addr}.  Assigned ID {peer_id}");
+                info!(target: PEER_MGMT, "Successfully started tether with {adapter_addr}.  Assigned ID {peer_id}");
             }
         }
 

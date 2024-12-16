@@ -1,6 +1,7 @@
 use crate::assembly::Assembly;
 use crate::counters::CounterType;
 use crate::fastpath;
+use crate::logging::targets::ZDP;
 use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
 use crate::packet::BufferPacket;
 use crate::queues::MgmtProcessorMessage;
@@ -48,6 +49,7 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMgmt
     };
 
     debug!(
+        target: ZDP,
         "handling mgmt message from {} type {:?} seq_num {}",
         pkt.metadata().ingress_link_id,
         base_hdr.packet_type,

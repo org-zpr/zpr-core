@@ -2,6 +2,7 @@ use crate::adapter_tables::{AltEntry, AltPep};
 use crate::assembly::{Assembly, PhMode};
 use crate::counters::CounterType;
 use crate::fastpath;
+use crate::logging::targets::FLOW_MGMT;
 use crate::mgmt;
 use crate::packet::BufferPacket;
 use crate::queues::AdapterManagerMessage;
@@ -44,7 +45,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
     };
 
     if dock_link_id != zpr::LINK_ID_UNKNOWN && !asm.is_link_ready(dock_link_id) {
-        debug!("Link {} is not ready to receive traffic yet", dock_link_id);
+        debug!(target: FLOW_MGMT, "Link {dock_link_id} is not ready to receive traffic yet");
         fastpath::drop_and_count(asm, pkt, CounterType::DroppedNoSA);
         return;
     }
@@ -58,7 +59,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
     // compress only IP addresses for now
     let compression_mode: zpr::CompressionMode = 0;
 
-    info!("link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
+    info!(target: FLOW_MGMT, "link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
 
     let bind_result = match asm.ph_mode {
         PhMode::Adapter => {
@@ -88,7 +89,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
     match bind_result {
         Ok(tether_id) => {
             // Bind succeeded; add to ALT.
-            info!("Bind of {five_tuple} succeeded: {tether_id}");
+            info!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id}");
 
             let AltEntry::Pending(initial_packet) = asm
                 .alt
@@ -121,7 +122,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
 
         Err(err) => {
             // Bind failed; remove pending entry from ALT.
-            error!("Bind of {five_tuple} failed: {err}");
+            error!(target: FLOW_MGMT, "Bind of {five_tuple} failed: {err}");
             asm.alt.remove(&five_tuple);
         }
     }
