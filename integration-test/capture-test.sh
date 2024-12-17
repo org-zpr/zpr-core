@@ -98,7 +98,6 @@ sleep 2
 #
 sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   node \
-  --name "zpr-node" \
   --control-path "$NODE_SOCK" \
   --self-addr 0.0.0.0:12345 \
   --ca-file ca.crt \
@@ -109,7 +108,6 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
 
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
-  --name "zpr-vs" \
   --control-path "$VS_SOCK" \
   --self-addr "$VS_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
@@ -124,7 +122,6 @@ sleep 2
 
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
-  --name "zpr-a" \
   --control-path "$ADAPTER1_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
@@ -137,7 +134,6 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
-  --name "zpr-b" \
   --control-path "$ADAPTER2_SOCK" \
   --self-addr "$B_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \

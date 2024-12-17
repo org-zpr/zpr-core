@@ -270,11 +270,21 @@ fn main() -> ExitCode {
     let vs_outq;
 
     if ph_mode == PhMode::Node {
-        let node_agent = libnode::vsconn::new_node_agent(
-            config.agent_addr[0],
-            &config.name,
-            &Default::default(),
-        );
+        let node_cert = km_cert_exchange::load_cert(&config.certificate_file)
+            .expect("unable to read certificate");
+
+        let node_name = node_cert
+            .subject_name()
+            .entries_by_nid(openssl::nid::Nid::COMMONNAME)
+            .next()
+            .expect("unable to locate CN in certificate subject name")
+            .data()
+            .as_utf8()
+            .expect("CN must be UTF-8 string");
+        info!(target: STARTUP, "node name is \"{node_name}\"");
+
+        let node_agent =
+            libnode::vsconn::new_node_agent(config.agent_addr[0], &node_name, &Default::default());
 
         let (vs_inq, vs_outq_inner) = mpsc::channel(topology_config.vs_queue_size);
         vs_outq = Some(vs_outq_inner);

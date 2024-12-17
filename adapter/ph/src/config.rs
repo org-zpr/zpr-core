@@ -30,9 +30,6 @@ const DEFAULT_WORKER_CONCURRENCY: usize = 1;
 /// ph system to configure itself.  Do not create this directly, use [argparse].
 #[derive(Debug)]
 pub struct Config {
-    /// Name (for logging, etc) of the node or adapter instance.
-    pub name: String,
-
     /// Path to the unix domain socket for the control interface.
     pub control_path: PathBuf,
 
