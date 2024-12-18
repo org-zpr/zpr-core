@@ -11,7 +11,7 @@ all: build
 build: vstbin
 
 vstbin: pkg/vsapi
-	go build -o $(OUT_DIR)/vst
+	go build -o $(OUT_DIR)/vs-conform
 
 
 thrift-go:

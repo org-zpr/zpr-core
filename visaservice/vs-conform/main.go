@@ -42,9 +42,9 @@ import (
 
 func main() {
 	app := &cli.App{
-		Name:      "vst",
+		Name:      "vs-conform",
 		Usage:     "ZPR visa service test tool",
-		UsageText: "vst [options] <visa-service-address> <node-certificate-file>",
+		UsageText: "vs-conform [options] <visa-service-address> <node-certificate-file>",
 		Flags: []cli.Flag{
 			&cli.UintFlag{
 				Name:    "admin_port",
@@ -177,7 +177,7 @@ func initLogging(verbose bool, devMode bool) (*zap.Logger, error) {
 	if verbose {
 		zapC.OutputPaths = []string{"stderr"}
 	} else {
-		zapC.OutputPaths = []string{"vst.log"}
+		zapC.OutputPaths = []string{"conform.log"}
 	}
 	logger, err := zapC.Build()
 	if err != nil {

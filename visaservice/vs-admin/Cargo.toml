@@ -1,5 +1,5 @@
 [package]
-name = "admin"
+name = "vs-admin"
 version = "0.1.0"
 edition = "2021"
 

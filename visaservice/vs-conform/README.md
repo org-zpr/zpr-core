@@ -1,8 +1,8 @@
-# VST: The Visa Service Tester
+# vs-conform: The Visa Service Conformance Tester
 
+## Usage 
 
-
-First start up a local visa service:
+First start up a local visa service (without ZPR):
 
 ```bash
 ./core/build/vservice \
@@ -15,7 +15,7 @@ Then you run the tester by telling it the visa service port, address and the
 node certificate.
 
 ```bash
- ./vst -v 12345 127.0.0.1 ../../examples/milestone2/node/node-cert.pem
+ ./vs-conform -v 12345 127.0.0.1 ../../examples/milestone2/node/node-cert.pem
 
 ```
 
@@ -26,8 +26,8 @@ By default the tester will run through its complete (but small) set of tests.
 To run a specific test, use the `-t` arg:
 
 ```bash
- ./vst -t helloreps -v 12345 127.0.0.1 ../../examples/milestone2/node/node-cert.pem
+ ./vs-conform -t helloreps -v 12345 127.0.0.1 ../../examples/milestone2/node/node-cert.pem
 
 ```
 
-The tester writes log messages to `vst.log`.
+The tester writes log messages to `conform.log`.

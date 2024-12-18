@@ -24,6 +24,9 @@ The API code is in `core/pkg/vservice/admin.go`.
 
 API returns `application/json`, unless there is an error.
 
+The separate binary `vs-admin` (in the `vs-admin` subdirectory) is a command
+line tool which uses the admin interface.
+
 
 ### List policies `GET /admin/policies`
 
