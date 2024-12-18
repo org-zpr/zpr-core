@@ -1,0 +1,4 @@
+# This file is documented at https://git-scm.com/docs/gitattributes.
+# Linguist-specific attributes are documented at https://github.com/github-linguist/linguist.
+
+src/vsapi/** linguist-generated
