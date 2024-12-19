@@ -38,3 +38,9 @@ jobs:
         cd visaservice
         make test-go
 
+    - name: Conform
+      timeout-minutes: 5
+      run: |
+        ZPR_TEST_VERBOSE=1 integration-test/vs-conform-test.sh
+
+
