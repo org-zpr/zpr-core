@@ -1,6 +1,14 @@
+mod lex;
+mod compilation;
+mod parser;
+
 
 use clap::Parser;
 use std::path::PathBuf;
+
+
+use compilation::Compilation;
+
 
 
 
@@ -33,8 +41,14 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
-    if cli.verbose {
-        println!("verbose!");
-    }
+
+    let comp = Compilation::builder(cli.zpl)
+        .verbose(cli.verbose)
+        .build();
+
+    comp.compile();
+
+
+
     println!("ready");
 }
