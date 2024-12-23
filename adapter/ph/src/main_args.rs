@@ -5,6 +5,7 @@
 
 use crate::assembly::PhMode;
 use crate::config::Config;
+use crate::logging::targets::*;
 use clap::{Args, Parser, Subcommand};
 use serde::Deserialize;
 use std::io::Read;
@@ -97,12 +98,12 @@ pub struct CommonArgs {
     #[arg(long, short = 'z')]
     agent_addr: Vec<IpAddr>,
 
-    /// Enable debug logging for specified targets, or ALL
-    #[arg(long, short = 'd')]
+    /// Enable debug logging for specified targets
+    #[arg(long, short = 'd', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
     debug: Vec<String>,
 
-    /// Disable info & warnings for specified targets, or ALL
-    #[arg(long, short = 'q')]
+    /// Disable info & warnings for specified targets
+    #[arg(long, short = 'q', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
     quiet: Vec<String>,
 }
 
@@ -626,8 +627,8 @@ mod test {
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
         agent_addr = [ "10.0.0.1" ]
-        debug = [ "FOO" ]
-        quiet = [ "BAR" ]
+        debug = [ "capture" ]
+        quiet = [ "all" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -659,8 +660,11 @@ mod test {
             Some(PathBuf::from("tests/private_key.pem"))
         );
         assert_eq!(config.global.tun_if, Some("tun23".to_string()));
-        assert_eq!(config.global.debug, Some(Vec::from(["FOO".to_string()])));
-        assert_eq!(config.global.quiet, Some(Vec::from(["BAR".to_string()])));
+        assert_eq!(
+            config.global.debug,
+            Some(Vec::from(["capture".to_string()]))
+        );
+        assert_eq!(config.global.quiet, Some(Vec::from(["all".to_string()])));
 
         assert_eq!(
             config.adapter.node_addr,
@@ -691,8 +695,8 @@ mod test {
         certificate_file = "tests/certificate.pem"
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
-        debug = [ "FOO" ]
-        quiet = [ "BAR" ]
+        debug = [ "flow_mgmt" ]
+        quiet = [ "rpc" ]
         "#;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -720,8 +724,11 @@ mod test {
             Some(PathBuf::from("tests/private_key.pem"))
         );
         assert_eq!(config.global.tun_if, Some("tun23".to_string()));
-        assert_eq!(config.global.debug, Some(Vec::from(["FOO".to_string()])));
-        assert_eq!(config.global.quiet, Some(Vec::from(["BAR".to_string()])));
+        assert_eq!(
+            config.global.debug,
+            Some(Vec::from(["flow_mgmt".to_string()]))
+        );
+        assert_eq!(config.global.quiet, Some(Vec::from(["rpc".to_string()])));
     }
 
     #[test]
@@ -735,8 +742,8 @@ mod test {
         private_key_file = "$PKFILE"
         tun_if = "tun23"
         agent_addr = [ "10.0.0.1" ]
-        debug = [ "FOO" ]
-        quiet = [ "BAR" ]
+        debug = [ "link_state" ]
+        quiet = [ "startup" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -774,8 +781,8 @@ mod test {
         assert_eq!(config.certificate_file, cert_file.get_path());
         assert_eq!(config.private_key_file, pk_file.get_path());
         assert_eq!(config.tun_if, Some("tun23".to_string()));
-        assert_eq!(config.debug, Vec::from(["FOO".to_string()]));
-        assert_eq!(config.quiet, Vec::from(["BAR".to_string()]));
+        assert_eq!(config.debug, Vec::from(["link_state".to_string()]));
+        assert_eq!(config.quiet, Vec::from(["startup".to_string()]));
 
         assert_eq!(
             config.node_addr,
@@ -922,9 +929,9 @@ mod test {
             "--tun-if",
             "tun23",
             "-d",
-            "FOO",
+            "peer_mgmt",
             "-q",
-            "BAR",
+            "reporting",
         ];
 
         let (pmode, config) = argparse(Some(args)).unwrap();
@@ -940,8 +947,8 @@ mod test {
         assert_eq!(config.certificate_file, cert_file.get_path());
         assert_eq!(config.private_key_file, pk_file.get_path());
         assert_eq!(config.tun_if, Some("tun23".to_string()));
-        assert_eq!(config.debug, Vec::from(["FOO".to_string()]));
-        assert_eq!(config.quiet, Vec::from(["BAR".to_string()]));
+        assert_eq!(config.debug, Vec::from(["peer_mgmt".to_string()]));
+        assert_eq!(config.quiet, Vec::from(["reporting".to_string()]));
 
         assert_eq!(
             config.node_addr,

@@ -23,6 +23,7 @@ pub mod targets {
     // understanding of why X is acting the way it is (even if the bug
     // ultimately lies with a dependency of X).
 
+    pub const ALL: &str = "all";
     pub const CAPTURE: &str = "capture";
     pub const DATAPATH: &str = "datapath";
     pub const FLOW_MGMT: &str = "flow_mgmt";
@@ -34,6 +35,11 @@ pub mod targets {
     pub const STARTUP: &str = "startup";
     pub const VISA_MGMT: &str = "visa_mgmt";
     pub const ZDP: &str = "zdp";
+
+    pub const ALL_TARGETS: &[&str] = &[
+        ALL, CAPTURE, DATAPATH, FLOW_MGMT, KEY_MGMT, LINK_STATE, PEER_MGMT, REPORTING, RPC,
+        STARTUP, VISA_MGMT, ZDP,
+    ];
 }
 
 fn create_target_filter<T>(
@@ -49,7 +55,7 @@ where
     targets = targets.with_default(Level::INFO);
 
     for target in debug.into_iter() {
-        if target == "ALL" {
+        if target == targets::ALL {
             targets = targets.with_default(Level::DEBUG);
         } else {
             targets = targets.with_target(target, Level::DEBUG);
@@ -57,7 +63,7 @@ where
     }
 
     for target in quiet.into_iter() {
-        if target == "ALL" {
+        if target == targets::ALL {
             targets = targets.with_default(Level::ERROR);
         } else {
             targets = targets.with_target(target, Level::ERROR);
