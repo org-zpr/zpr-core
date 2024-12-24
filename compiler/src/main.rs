@@ -1,6 +1,7 @@
 mod lex;
 mod compilation;
 mod parser;
+mod zplstr;
 
 
 use clap::Parser;
