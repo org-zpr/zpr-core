@@ -4,8 +4,6 @@ use thiserror::Error;
 use crate::lex::tokenize;
 use crate::parser::parse;
 
-
-
 #[derive(Debug, Error)]
 #[allow(dead_code)]
 pub enum CompilationError {
@@ -40,14 +38,11 @@ pub enum CompilationError {
     Io(#[from] std::io::Error),
 }
 
-
-
 pub struct Compilation {
     pub verbose: bool,
     pub source_zpl: PathBuf,
     pub source_config: PathBuf,
 }
-
 
 impl Compilation {
     pub fn builder(source: PathBuf) -> CompilationBuilder {
@@ -56,7 +51,10 @@ impl Compilation {
 
     pub fn compile(&self) {
         if self.verbose {
-            println!("compiling {:?} with config {:?}", self.source_zpl, self.source_config);
+            println!(
+                "compiling {:?} with config {:?}",
+                self.source_zpl, self.source_config
+            );
         }
         match tokenize(&self.source_zpl) {
             Ok(tokens) => {
@@ -80,7 +78,6 @@ impl Compilation {
         }
     }
 }
-
 
 #[derive(Default)]
 pub struct CompilationBuilder {

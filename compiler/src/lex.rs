@@ -1,31 +1,8 @@
-use std::path::Path;
 use std::fs;
+use std::path::Path;
 
 use crate::compilation::CompilationError;
 use crate::zplstr::{ZPLStr, ZPLStrBuilder};
-
-
-// TODO:
-//
-// See test6.yaml
-//
-// This lex step needs to create two kinds of literals: atomic and tuple.
-// Since it removes all the quotes we cannot tell later on the difference
-// between:
-//
-//     color:purple:boink  -> atomic (or an error)
-//     color:`purple:boink`  -> tuple
-//
-// Maybe best to have two token types:
-//
-//  Literal(String)
-//  Tuple(String, String)
-//
-// Note that this is valid tuple:
-//
-//     color:
-//
-// meaning that the value is not specified.
 
 #[derive(Debug, PartialEq)]
 pub enum TokenType {
@@ -60,8 +37,6 @@ pub struct Token {
     pub col: usize,
 }
 
-
-
 impl Token {
     pub fn new_from_str(s: &ZPLStr, line: usize, col: usize) -> Token {
         if s.is_tuple() {
@@ -90,16 +65,9 @@ impl Token {
     }
 
     pub fn new(tt: TokenType, line: usize, col: usize) -> Token {
-        Token {
-            tt,
-            line,
-            col,
-        }
+        Token { tt, line, col }
     }
 }
-
-
-
 
 pub fn tokenize(zpl_in: &Path) -> Result<Vec<Token>, CompilationError> {
     let zpl = fs::read_to_string(zpl_in)?;
@@ -117,17 +85,24 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
     let mut quoting = false;
     let mut quote_char = ' ';
 
-
     while let Some(c) = chars.next() {
         match c {
             '\n' => {
                 if quoting {
                     // quoted strings should not span lines.
-                    return Err(CompilationError::UnterminatedQuote(current_start.0, current_start.1));
+                    return Err(CompilationError::UnterminatedQuote(
+                        current_start.0,
+                        current_start.1,
+                    ));
                 }
                 if current_word.len() > 0 {
-                    if !current_word.is_sugar() { // TODO: is_sugar can be function on builder
-                        tokens.push(Token::new_from_str(&current_word.build(), current_start.0, current_start.1));
+                    if !current_word.is_sugar() {
+                        // TODO: is_sugar can be function on builder
+                        tokens.push(Token::new_from_str(
+                            &current_word.build(),
+                            current_start.0,
+                            current_start.1,
+                        ));
                     }
                     current_word.clear();
                 }
@@ -139,20 +114,28 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                 if current_word.len() > 0 {
                     // Then treat as a delimiter
                     if !current_word.is_sugar() {
-                        tokens.push(Token::new_from_str(&current_word.build(), current_start.0, current_start.1));
+                        tokens.push(Token::new_from_str(
+                            &current_word.build(),
+                            current_start.0,
+                            current_start.1,
+                        ));
                     }
                     current_word.clear();
                 }
                 col += 1;
             }
-            ' '  => {
+            ' ' => {
                 // if we are quoting the literal, keep space, otherwise this is a delimiter
                 if current_word.len() > 0 {
                     if quoting {
                         current_word.push(c);
                     } else {
                         if !current_word.is_sugar() {
-                            tokens.push(Token::new_from_str(&current_word.build(), current_start.0, current_start.1));
+                            tokens.push(Token::new_from_str(
+                                &current_word.build(),
+                                current_start.0,
+                                current_start.1,
+                            ));
                         }
                         current_word.clear();
                     }
@@ -166,7 +149,11 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                         current_word.push(c);
                     } else {
                         if !current_word.is_sugar() {
-                            tokens.push(Token::new_from_str(&current_word.build(), current_start.0, current_start.1));
+                            tokens.push(Token::new_from_str(
+                                &current_word.build(),
+                                current_start.0,
+                                current_start.1,
+                            ));
                         }
                         current_word.clear();
                         col += 1;
@@ -222,7 +209,11 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                                 }
                             }
                             if !current_word.is_sugar() {
-                                tokens.push(Token::new_from_str(&current_word.build(), current_start.0, current_start.1));
+                                tokens.push(Token::new_from_str(
+                                    &current_word.build(),
+                                    current_start.0,
+                                    current_start.1,
+                                ));
                             }
                             current_word.clear();
                             quoting = false;
@@ -270,7 +261,6 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
     Ok(tokens)
 }
 
-
 #[cfg(test)]
 mod test {
 
@@ -287,7 +277,4 @@ mod test {
         let officefrisco = &tokens[8];
         assert_eq!(officefrisco.tt, super::tuple_from_strs("office", "fris:co"));
     }
-
-
-
 }

@@ -1,17 +1,12 @@
-mod lex;
 mod compilation;
+mod lex;
 mod parser;
 mod zplstr;
-
 
 use clap::Parser;
 use std::path::PathBuf;
 
-
 use compilation::Compilation;
-
-
-
 
 /// ZPL Policy Compiler
 ///
@@ -38,18 +33,12 @@ struct Cli {
     verbose: bool,
 }
 
-
-
 fn main() {
     let cli = Cli::parse();
 
-    let comp = Compilation::builder(cli.zpl)
-        .verbose(cli.verbose)
-        .build();
+    let comp = Compilation::builder(cli.zpl).verbose(cli.verbose).build();
 
     comp.compile();
-
-
 
     println!("ready");
 }

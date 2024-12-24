@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::lex::{Token, TokenType};
 use crate::compilation::CompilationError;
-
+use crate::lex::{Token, TokenType};
 
 #[derive(Default)]
 pub struct Policy {
@@ -35,7 +34,6 @@ impl From<&Token> for FPos {
     }
 }
 
-
 pub struct AllowClause {
     pub endpoint: Clause,
     pub user: Clause,
@@ -55,7 +53,6 @@ pub enum ClassFlavor {
     User,
     Service,
 }
-
 
 pub struct Class {
     pub flavor: ClassFlavor,
@@ -84,7 +81,6 @@ impl fmt::Display for Attribute {
         }
     }
 }
-
 
 pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     // Convert the tokens into statements, which are just sub-lists of the tokens.
@@ -121,7 +117,11 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
 
             // It is an error to redefine a class.
             if classes.contains_key(&class.name) {
-                return Err(CompilationError::Redefinition(class.name, statement[0].line, statement[0].col));
+                return Err(CompilationError::Redefinition(
+                    class.name,
+                    statement[0].line,
+                    statement[0].col,
+                ));
             }
             classes.insert(class.name.clone(), class);
         }
@@ -131,7 +131,6 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     // compute the correct flavors.
     resolve_class_flavors(&mut classes)?;
 
-
     // Next parse all the allows.
     for statement in &mut statements {
         if statement[0].tt == TokenType::Allow {
@@ -139,7 +138,6 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
             policy.allows.push(allow);
         }
     }
-
 
     // move all the classes in the policy
     for (_, class) in classes.into_iter() {
@@ -150,10 +148,8 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
         policy.defines.push(class);
     }
 
-
     Ok(policy)
 }
-
 
 // First token exists and is a DEFINE which is checked by the caller.
 fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
@@ -168,7 +164,6 @@ fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
     let _define = tokens.next().unwrap();
 
     let root_tok = &define_statement[0];
-
 
     // define class_name
     //        ^^^^^^^^^^
@@ -211,8 +206,8 @@ fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
         "user" | "users " => {
             parent_class_name = String::from("user");
             ClassFlavor::User
-        },
-        "service" | "services"  => {
+        }
+        "service" | "services" => {
             parent_class_name = String::from("service");
             ClassFlavor::Service
         }
@@ -231,7 +226,6 @@ fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
     // If we get a TAGS token, then everything after that is a tag until we hit an AND WITH.
     // The MULTIPLE keyword just applies to the next attribute (cannot be a tag).
 
-
     let mut class = Class {
         flavor: flavor,
         parent: parent_class_name.clone(),
@@ -240,7 +234,6 @@ fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
         pos: root_tok.into(),
         with_attrs: Vec::new(),
     };
-
 
     let mut multiple = false;
     let mut tags = false;
@@ -251,32 +244,52 @@ fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
         match &tok.tt {
             TokenType::Tags => {
                 if tags {
-                    return Err(CompilationError::ParseError("multiple TAGS statements".to_string(), tok.line, tok.col));
+                    return Err(CompilationError::ParseError(
+                        "multiple TAGS statements".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
                 }
                 tags = true;
             }
             TokenType::Optional => {
                 if optional {
-                    return Err(CompilationError::ParseError("multiple OPTIONAL statements".to_string(), tok.line, tok.col));
+                    return Err(CompilationError::ParseError(
+                        "multiple OPTIONAL statements".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
                 }
                 optional = true;
             }
             TokenType::Multiple => {
                 if multiple {
-                    return Err(CompilationError::ParseError("multiple MULTIPLE statements".to_string(), tok.line, tok.col));
+                    return Err(CompilationError::ParseError(
+                        "multiple MULTIPLE statements".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
                 }
                 multiple = true;
             }
             TokenType::And => {
                 if and {
-                    return Err(CompilationError::ParseError("multiple AND statements".to_string(), tok.line, tok.col));
+                    return Err(CompilationError::ParseError(
+                        "multiple AND statements".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
                 }
                 and = true;
             }
             TokenType::With => {
                 // Only valid after an and.
                 if !and {
-                    return Err(CompilationError::ParseError("WITH must follow AND".to_string(), tok.line, tok.col));
+                    return Err(CompilationError::ParseError(
+                        "WITH must follow AND".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
                 }
                 // Got AND WITH so that turns off modifier flags.
                 tags = false;
@@ -284,10 +297,14 @@ fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
                 multiple = false;
                 and = false;
             }
-            TokenType::Comma => { }
+            TokenType::Comma => {}
             TokenType::Tuple((name, value)) => {
                 if tags {
-                    return Err(CompilationError::ParseError("attributes not allowed in tags".to_string(), tok.line, tok.col));
+                    return Err(CompilationError::ParseError(
+                        "attributes not allowed in tags".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
                 }
                 let attr = Attribute {
                     name: name.clone(),
@@ -313,67 +330,94 @@ fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
                 and = false;
             }
             _ => {
-                return Err(CompilationError::ParseError(format!("syntax error ({:?})", tok.tt), tok.line, tok.col));
+                return Err(CompilationError::ParseError(
+                    format!("syntax error ({:?})", tok.tt),
+                    tok.line,
+                    tok.col,
+                ));
             }
         }
     }
     Ok(class)
-
 }
 
-
-fn parse_allow(_allow_statement: &[Token], _classes: &HashMap<String, Class>) -> Result<AllowClause, CompilationError> {
+fn parse_allow(
+    _allow_statement: &[Token],
+    _classes: &HashMap<String, Class>,
+) -> Result<AllowClause, CompilationError> {
     // parse endpoint bits
     // parse user bits
     // parse service bits
 
     // we need access to the defines in order to differentiate between class names and attribute names.
 
-    Err(CompilationError::Io(std::io::Error::new(std::io::ErrorKind::Other, "not implemented")))
+    Err(CompilationError::Io(std::io::Error::new(
+        std::io::ErrorKind::Other,
+        "not implemented",
+    )))
 }
 
 // Given the next token in the list, we error out if that token is not of the expected type.
-fn require_tt(parent_tok: &Token, next_tok: Option<&Token>, expect: &str, statement_type: &str, expect_tt: TokenType) -> Result<(), CompilationError> {
+fn require_tt(
+    parent_tok: &Token,
+    next_tok: Option<&Token>,
+    expect: &str,
+    statement_type: &str,
+    expect_tt: TokenType,
+) -> Result<(), CompilationError> {
     match next_tok {
         Some(tok) => {
             if tok.tt == expect_tt {
                 Ok(())
             } else {
-                Err(CompilationError::ParseError(format!("expected {}", expect), tok.line, tok.col))
+                Err(CompilationError::ParseError(
+                    format!("expected {}", expect),
+                    tok.line,
+                    tok.col,
+                ))
             }
         }
-        None => {
-            Err(CompilationError::ParseError(format!("malformed {} (expected {})", statement_type, expect),
-                parent_tok.line, parent_tok.col))
-        }
+        None => Err(CompilationError::ParseError(
+            format!("malformed {} (expected {})", statement_type, expect),
+            parent_tok.line,
+            parent_tok.col,
+        )),
     }
 }
 
 // Expect the next token in the list to be a literal, and if so we return a copy of the value.
-fn return_literal(parent_tok: &Token, next_tok: Option<&Token>, expect_desc: &str, statement_type: &str) -> Result<String, CompilationError> {
+fn return_literal(
+    parent_tok: &Token,
+    next_tok: Option<&Token>,
+    expect_desc: &str,
+    statement_type: &str,
+) -> Result<String, CompilationError> {
     let value = match next_tok {
-        Some(tok) => {
-            match &tok.tt {
-                TokenType::Literal(s) => s,
-                _ => {
-                    return Err(CompilationError::ParseError(format!("expected {} to follow {}", expect_desc, statement_type),
-                        tok.line, tok.col));
-                }
+        Some(tok) => match &tok.tt {
+            TokenType::Literal(s) => s,
+            _ => {
+                return Err(CompilationError::ParseError(
+                    format!("expected {} to follow {}", expect_desc, statement_type),
+                    tok.line,
+                    tok.col,
+                ));
             }
-        }
+        },
         None => {
-            return Err(CompilationError::ParseError(format!("malformed {}", statement_type), parent_tok.line, parent_tok.col));
+            return Err(CompilationError::ParseError(
+                format!("malformed {}", statement_type),
+                parent_tok.line,
+                parent_tok.col,
+            ));
         }
     };
     Ok(value.clone())
 }
 
-
 // Could be more sophisticated.
 fn pluralize(s: &str) -> String {
     return format!("{}s", s);
 }
-
 
 // Fill in any classes with undefined flavor by walking backwards to their parent classes.
 fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(), CompilationError> {
@@ -397,8 +441,14 @@ fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(), Com
                 Some(parent) => parent.flavor.clone(),
                 None => {
                     // This is an error, the parent class does not exist.
-                    return Err(CompilationError::ParseError(format!("parent class {} of {} does not exist", parentless_ref.parent, name),
-                        parentless_ref.pos.line, parentless_ref.pos.col));
+                    return Err(CompilationError::ParseError(
+                        format!(
+                            "parent class {} of {} does not exist",
+                            parentless_ref.parent, name
+                        ),
+                        parentless_ref.pos.line,
+                        parentless_ref.pos.col,
+                    ));
                 }
             };
             if parent_flavor != ClassFlavor::Undefined {
@@ -415,7 +465,11 @@ fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(), Com
                     undefined.push(name.clone());
                 }
             }
-            return Err(CompilationError::ParseError(format!("could not resolve classes: {:?}", undefined), 0, 0));
+            return Err(CompilationError::ParseError(
+                format!("could not resolve classes: {:?}", undefined),
+                0,
+                0,
+            ));
         }
     }
     Ok(())

@@ -71,7 +71,6 @@ impl fmt::Display for ZPLStr {
     }
 }
 
-
 pub struct ZPLStrBuilder {
     name: String,
     value: String,
@@ -137,11 +136,10 @@ impl ZPLStrBuilder {
             return false;
         }
         match self.name.as_str() {
-            "a" | "an"  => true,
+            "a" | "an" => true,
             _ => false,
         }
     }
-
 
     pub fn build(&self) -> ZPLStr {
         if self.tuple {
@@ -150,4 +148,3 @@ impl ZPLStrBuilder {
         return ZPLStr::new_atom(&self.name);
     }
 }
-
