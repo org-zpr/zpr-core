@@ -9,27 +9,27 @@ This is container id `38f3bb925e5e`
 ## To install into github
 
 1. You need to generate a "classic" access token with permissions to write to the
-   package repository.
+   package repository, via <https://github.com/settings/tokens/new>.
 
-2. Build image as usual with docker.
+2. Build image as usual with docker (`docker build .` in this directory).
 
 3. Login to the github package repository:
 
 ```bash
 # First put your token into env var (eg) $GH_TOK
-echo $GH_TOK | sudo docker login ghcr.io -u <YOUR_GITHUB_EMAIL> --password-stdin
+echo $GH_TOK | docker login ghcr.io -u <YOUR_GITHUB_EMAIL> --password-stdin
 ```
 
 4. Tag the image with the ghcr name:
 
 ```bash
-sudo docker tag <THE_IMAGE_ID> ghcr.io/org-zpr/38f3bb925e5e
+docker tag <THE_IMAGE_ID> ghcr.io/org-zpr/38f3bb925e5e
 ```
 
 5. Push
 
 ```bash
-sudo docker tag 6b3fb097c915 ghcr.io/org-zpr/38f3bb925e5e
+docker image push ghcr.io/org-zpr/38f3bb925e5e
 ```
 
 ## Odditites

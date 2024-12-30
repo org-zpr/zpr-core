@@ -7,7 +7,7 @@ LABEL org.opencontainers.image.version="0.0.3"
 WORKDIR /opt
 
 RUN apt-get -y update \
-&& apt-get install -y wget curl build-essential \
+&& apt-get install -y wget curl build-essential git \
 && apt autoremove
 
 

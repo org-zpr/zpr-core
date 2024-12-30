@@ -1,6 +1,6 @@
-use crate::vsapi;
 use openssl::hash::{Hasher, MessageDigest};
 use std::io::prelude::*;
+use vsapi;
 
 /// Create the milestone 2 version of the auth HMAC used in the node challenge response.
 ///
