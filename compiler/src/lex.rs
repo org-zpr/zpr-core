@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::Path;
 
-use crate::compilation::CompilationError;
+use crate::errors::CompilationError;
 use crate::zplstr::{ZPLStr, ZPLStrBuilder};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum TokenType {
     Allow,
     Define,
@@ -30,7 +30,7 @@ pub fn tuple_from_strs(name: &str, value: &str) -> TokenType {
     TokenType::Tuple((String::from(name), String::from(value)))
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Token {
     pub tt: TokenType,
     pub line: usize,

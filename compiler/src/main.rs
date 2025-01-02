@@ -1,7 +1,12 @@
+mod errors;
 mod compilation;
 mod lex;
 mod parser;
 mod zplstr;
+mod ptypes;
+mod putil;
+mod define;
+mod allow;
 
 use clap::Parser;
 use std::path::PathBuf;

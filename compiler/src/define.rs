@@ -1,0 +1,329 @@
+//! define.rs - parser for define statements
+
+use std::collections::HashMap;
+
+use crate::errors::CompilationError;
+use crate::lex::{Token, TokenType};
+use crate::ptypes::{Attribute, Class, ClassFlavor};
+use crate::putil;
+
+// First token exists and is a DEFINE which is checked by the caller.
+pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
+    if define_statement.len() < 1 {
+        panic!("parse_define called with empty statement");
+    }
+    if define_statement[0].tt != TokenType::Define {
+        panic!("parse_define called with non-DEFINE statement");
+    }
+
+    let mut tokens = define_statement.into_iter().peekable();
+    let _define = tokens.next().unwrap();
+
+    let root_tok = &define_statement[0];
+
+    // define class_name
+    //        ^^^^^^^^^^
+    let class_name = putil::return_literal(root_tok, tokens.next(), "class name", "define")?;
+
+    // define class_name AKA plural
+    //                   ^^^ ^^^^^^
+    let aka_name: String;
+
+    if let Some(next_tok) = tokens.peek() {
+        match next_tok.tt {
+            TokenType::AkA => {
+                let aka = tokens.next().unwrap(); // consume the AKA
+                aka_name = putil::return_literal(aka, tokens.next(), "aka name", "aka")?;
+            }
+            _ => {
+                // No AKA, so aka_name is just plural.
+                aka_name = putil::pluralize(&class_name);
+            }
+        }
+    } else {
+        aka_name = putil::pluralize(&class_name);
+    }
+
+    // define class_name [ aka foo ] as a parent-class-name with
+    //                               ^^
+    // 'a' will have been discarded by the lex step.
+    putil::require_tt(root_tok, tokens.next(), "AS", "define", TokenType::As)?;
+
+    // define class_name [ aka foo ] as a parent-class-name with
+    //                                    ^^^^^^^^^^^^^^^^^
+    //
+    // baked in classes are: user, service, endpoint (and their plurals)
+    let mut parent_class_name = putil::return_literal(root_tok, tokens.next(), "parent class name", "as")?;
+
+    // The flavor of the parent class really cannot be figured out until all
+    // the classes are defined. To give meaning full error may need to track
+    // the define token or something.
+    let flavor = match parent_class_name.as_str() {
+        "user" | "users " => {
+            parent_class_name = String::from("user");
+            ClassFlavor::User
+        }
+        "service" | "services" => {
+            parent_class_name = String::from("service");
+            ClassFlavor::Service
+        }
+        "endpoint" | "endpoints" => {
+            parent_class_name = String::from("endpoint");
+            ClassFlavor::Endpoint
+        }
+        _ => ClassFlavor::Undefined,
+    };
+
+    // define class_name [ aka foo ] as a parent-class-name with
+    //                                                      ^^^^
+    putil::require_tt(root_tok, tokens.next(), "WITH", "define", TokenType::With)?;
+
+    // At this point we need to parse attributes. Each token is some attribute for the class.
+    // If we get a TAGS token, then everything after that is a tag until we hit an AND WITH.
+    // The MULTIPLE keyword just applies to the next attribute (cannot be a tag).
+
+    let mut class = Class {
+        flavor: flavor,
+        parent: parent_class_name.clone(),
+        name: class_name.clone(),
+        aka: aka_name.clone(),
+        pos: root_tok.into(),
+        with_attrs: Vec::new(),
+    };
+
+    let mut multiple = false;
+    let mut tags = false;
+    let mut tag = false;
+    let mut optional: bool = false;
+    let mut and = false;
+
+    for tok in tokens {
+        match &tok.tt {
+            TokenType::Tags => {
+                if tags {
+                    return Err(CompilationError::ParseError(
+                        "multiple TAGS statements".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                if tag {
+                    return Err(CompilationError::ParseError(
+                        "TAGS following TAG".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                tags = true;
+            }
+            TokenType::Tag => { // tag is the non-greedy version of tags. Next token is the tag name.
+                if tags {
+                    return Err(CompilationError::ParseError(
+                        "TAG following TAGS".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                tag = true;
+            }
+            TokenType::Optional => {
+                if tags || tag {
+                    return Err(CompilationError::ParseError(
+                        "OPTIONAL not allowed after tag/tags".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                if optional {
+                    return Err(CompilationError::ParseError(
+                        "multiple OPTIONAL statements".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                optional = true;
+            }
+            TokenType::Multiple => {
+                if tags || tag {
+                    return Err(CompilationError::ParseError(
+                        "MULTIPLE not allowed after tag/tags".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                if multiple {
+                    return Err(CompilationError::ParseError(
+                        "multiple MULTIPLE statements".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                multiple = true;
+            }
+            TokenType::And => {
+                if and {
+                    return Err(CompilationError::ParseError(
+                        "multiple AND statements".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                if tag {
+                    return Err(CompilationError::ParseError(
+                        "TAG requires a tag name, not AND".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                and = true;
+            }
+            TokenType::With => {
+                // Only valid after an and.
+                if !and {
+                    return Err(CompilationError::ParseError(
+                        "WITH must follow AND".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                // Got AND WITH so that turns off modifier flags.
+                tags = false;
+                tag = false;
+                optional = false;
+                multiple = false;
+                and = false;
+            }
+            TokenType::Comma => {}
+            TokenType::Tuple((name, value)) => {
+                if tags || tag{
+                    return Err(CompilationError::ParseError(
+                        "attributes not allowed in tag/tags".to_string(),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+                let attr = Attribute {
+                    name: name.clone(),
+                    value: Some(value.clone()),
+                    multi_valued: multiple,
+                    tag: false,
+                    optional: optional,
+                };
+                class.with_attrs.push(attr);
+                multiple = false;
+                and = false;
+            }
+            TokenType::Literal(s) => {
+                let attr = Attribute {
+                    name: s.clone(),
+                    value: None,
+                    multi_valued: multiple,
+                    tag: tags || tags,
+                    optional: optional,
+                };
+                class.with_attrs.push(attr);
+                multiple = false;
+                and = false;
+                tag = false; // not greedy
+            }
+            _ => {
+                return Err(CompilationError::ParseError(
+                    format!("syntax error ({:?})", tok.tt),
+                    tok.line,
+                    tok.col,
+                ));
+            }
+        }
+    }
+    Ok(class)
+}
+
+
+
+// Fill in any classes with undefined flavor by walking backwards to their parent classes.
+pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(), CompilationError> {
+    let mut undef_count = 0;
+    for (_name, class) in &mut *classes {
+        if class.flavor == ClassFlavor::Undefined {
+            undef_count += 1;
+        }
+    }
+    while undef_count > 0 {
+        let prev_undef_count = undef_count;
+        let mut needs_parent = Vec::new();
+        for (name, class) in classes.iter_mut() {
+            if class.flavor == ClassFlavor::Undefined {
+                needs_parent.push(name.clone());
+            }
+        }
+        for name in needs_parent {
+            let parentless_ref = classes.get(&name).unwrap();
+            let parent_flavor = match classes.get(parentless_ref.parent.as_str()) {
+                Some(parent) => parent.flavor.clone(),
+                None => {
+                    // This is an error, the parent class does not exist.
+                    return Err(CompilationError::ParseError(
+                        format!(
+                            "parent class {} of {} does not exist",
+                            parentless_ref.parent, name
+                        ),
+                        parentless_ref.pos.line,
+                        parentless_ref.pos.col,
+                    ));
+                }
+            };
+            if parent_flavor != ClassFlavor::Undefined {
+                let parentless = classes.get_mut(&name).unwrap();
+                parentless.flavor = parent_flavor;
+                undef_count -= 1;
+            }
+        }
+        if undef_count > 0 && prev_undef_count == undef_count {
+            // We did not make any progress, so we have an impass.
+            let mut undefined = Vec::new();
+            for (name, class) in classes.iter_mut() {
+                if class.flavor == ClassFlavor::Undefined {
+                    undefined.push(name.clone());
+                }
+            }
+            return Err(CompilationError::ParseError(
+                format!("could not resolve classes: {:?}", undefined),
+                0,
+                0,
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+    use crate::lex::tokenize_str;
+
+    #[test]
+    fn test_required_tag() {
+        let statement = "define marketing-emp as a user with tag full-time";
+        let tokens = tokenize_str(statement).unwrap();
+        let class = parse_define(&tokens).unwrap();
+        assert_eq!(class.name, "marketing-emp");
+    }
+
+    // Test stuff that passes tokenizer but should fail parser.
+    #[test]
+    fn test_reject_nonesense() {
+        let invalids = vec![
+            "define marketing-emp as a user with tag multiple foo",
+            "define marketing-emp as a user with tags multiple foo",
+            "define marketing-emp as a user with tag and foo",
+        ];
+        for statement in invalids {
+            let tokens = tokenize_str(statement).unwrap();
+            match parse_define(&tokens) {
+                Ok(_) => panic!("should have failed on: '{}'", statement),
+                Err(_) => {}
+            }
+        }
+    }
+}
