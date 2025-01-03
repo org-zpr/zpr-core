@@ -72,7 +72,7 @@ impl Token {
 
 pub fn tokenize(zpl_in: &Path) -> Result<Vec<Token>, CompilationError> {
     let zpl = fs::read_to_string(zpl_in)?;
-    return tokenize_str(&zpl);
+    tokenize_str(&zpl)
 }
 
 pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
@@ -170,11 +170,10 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                 }
                 if quoting {
                     current_word.push(c);
-                } else {
-                    if !current_word.accept_value() {
-                        return Err(CompilationError::IllegalColon(line, col));
-                    }
+                } else if !current_word.accept_value() {
+                    return Err(CompilationError::IllegalColon(line, col));
                 }
+
                 col += 1;
             }
             '\'' | '`' => {

@@ -13,13 +13,13 @@ pub fn parse_allow(
     allow_statement: &[Token],
     classes_idx: &HashMap<String, String>,
 ) -> Result<AllowClause, CompilationError> {
-    if allow_statement.len() < 1 {
+    if allow_statement.is_empty() {
         panic!("parse_allow called with empty statement");
     }
     if allow_statement[0].tt != TokenType::Allow {
         panic!("parse_allow called with non-ALLOW statement");
     }
-    let mut tokens = allow_statement.into_iter().peekable();
+    let mut tokens = allow_statement.iter().peekable();
     let _allow = tokens.next().unwrap(); // consume the ALLOW token
 
     let root_tok = &allow_statement[0];
@@ -122,66 +122,62 @@ impl PState {
     where
         I: Iterator<Item = &'a Token>,
     {
-        loop {
-            if let Some(tokref) = tokens.peek() {
-                if break_at == tokref.tt {
-                    break;
+        while let Some(tokref) = tokens.peek() {
+            if break_at == tokref.tt {
+                break;
+            }
+            match &tokref.tt {
+                TokenType::And | TokenType::Comma => {
+                    // These are delimiter tokens.
+                    tokens.next();
                 }
-                match &tokref.tt {
-                    TokenType::And | TokenType::Comma => {
-                        // These are delimiter tokens.
-                        tokens.next();
-                    }
-                    TokenType::Tuple((name, value)) => {
-                        // This is an attribute.
-                        let attr = Attribute::attr(&name, &value);
-                        self.attrs.push(attr);
-                        tokens.next();
-                    }
-                    TokenType::Literal(s) => {
-                        // This could be a class name or a tag name.
-                        if let Some(class) = classes.get(s) {
-                            // We already have a class name.
-                            if self.class_name.is_some() {
-                                let tok = tokens.next().unwrap();
-                                return Err(CompilationError::ParseError(
-                                    format!("multiple class names in {}", context),
-                                    tok.line,
-                                    tok.col,
-                                ));
-                            }
-                            self.class_name = Some(class.clone());
-                            let tok = tokens.next().unwrap();
-                            self.class_name_token = Some(tok.clone());
-                        } else {
-                            self.attrs.push(Attribute::tag(&s));
-                            tokens.next();
-                        }
-                    }
-                    TokenType::With => {
-                        // We must have already parsed a class name.
-                        if self.class_name.is_none() {
+                TokenType::Tuple((name, value)) => {
+                    // This is an attribute.
+                    let attr = Attribute::attr(name, value);
+                    self.attrs.push(attr);
+                    tokens.next();
+                }
+                TokenType::Literal(s) => {
+                    // This could be a class name or a tag name.
+                    if let Some(class) = classes.get(s) {
+                        // We already have a class name.
+                        if self.class_name.is_some() {
                             let tok = tokens.next().unwrap();
                             return Err(CompilationError::ParseError(
-                                format!("expected class name before WITH in {}", context),
+                                format!("multiple class names in {}", context),
                                 tok.line,
                                 tok.col,
                             ));
                         }
+                        self.class_name = Some(class.clone());
+                        let tok = tokens.next().unwrap();
+                        self.class_name_token = Some(tok.clone());
+                    } else {
+                        self.attrs.push(Attribute::tag(s));
                         tokens.next();
                     }
-                    _ => {
+                }
+                TokenType::With => {
+                    // We must have already parsed a class name.
+                    if self.class_name.is_none() {
                         let tok = tokens.next().unwrap();
                         return Err(CompilationError::ParseError(
-                            format!("syntax error in {} ({:?})", context, tok.tt),
+                            format!("expected class name before WITH in {}", context),
                             tok.line,
                             tok.col,
                         ));
                     }
-                };
-            } else {
-                break; // iterator is empty
-            }
+                    tokens.next();
+                }
+                _ => {
+                    let tok = tokens.next().unwrap();
+                    return Err(CompilationError::ParseError(
+                        format!("syntax error in {} ({:?})", context, tok.tt),
+                        tok.line,
+                        tok.col,
+                    ));
+                }
+            };
         }
 
         if self.class_name.is_none() {

@@ -1,9 +1,9 @@
-use std::fmt;
+//! The ZPLStr type can hold either a plain string (atom) or a ZPL tuple.
+//! Note that a tuple may have an empty value.
+//!
+//! This has functionality that is specifically helpful to the lexer step.
 
-/// The ZPLStr type can hold either a plain string (atom) or a ZPL tuple.
-/// Note that a tuple may have an empty value.
-///
-/// This has functionality that is specifically helpful to the lexer step.
+use std::fmt;
 
 pub struct ZPLStr {
     name: String,
@@ -57,20 +57,16 @@ impl ZPLStr {
         }
         self.name.clone()
     }
-
-    pub fn to_string(&self) -> String {
-        if self.tuple {
-            let tup = self.as_tuple();
-            format!("{}:{}", tup.0, tup.1)
-        } else {
-            self.name.clone()
-        }
-    }
 }
 
 impl fmt::Display for ZPLStr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.to_string())
+        if self.tuple {
+            let tup = self.as_tuple();
+            write!(f, "{}:{}", tup.0, tup.1)
+        } else {
+            write!(f, "{}", self.name)
+        }
     }
 }
 
@@ -134,17 +130,14 @@ impl ZPLStrBuilder {
         if self.tuple {
             return false;
         }
-        match self.name.as_str() {
-            "a" | "an" => true,
-            _ => false,
-        }
+        matches!(self.name.as_str(), "a" | "an")
     }
 
     pub fn build(&self) -> ZPLStr {
         if self.tuple {
             return ZPLStr::new_tuple(&self.name, &self.value);
         }
-        return ZPLStr::new_atom(&self.name);
+        ZPLStr::new_atom(&self.name)
     }
 }
 

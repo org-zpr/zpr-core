@@ -9,14 +9,14 @@ use crate::putil;
 
 // First token exists and is a DEFINE which is checked by the caller.
 pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
-    if define_statement.len() < 1 {
+    if define_statement.is_empty() {
         panic!("parse_define called with empty statement");
     }
     if define_statement[0].tt != TokenType::Define {
         panic!("parse_define called with non-DEFINE statement");
     }
 
-    let mut tokens = define_statement.into_iter().peekable();
+    let mut tokens = define_statement.iter().peekable();
     let _define = tokens.next().unwrap();
 
     let root_tok = &define_statement[0];
@@ -84,7 +84,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
     // The MULTIPLE keyword just applies to the next attribute (cannot be a tag).
 
     let mut class = Class {
-        flavor: flavor,
+        flavor,
         parent: parent_class_name.clone(),
         name: class_name.clone(),
         aka: aka_name.clone(),
@@ -209,7 +209,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
                     value: Some(value.clone()),
                     multi_valued: multiple,
                     tag: false,
-                    optional: optional,
+                    optional,
                 };
                 class.with_attrs.push(attr);
                 multiple = false;
@@ -221,7 +221,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
                     value: None,
                     multi_valued: multiple,
                     tag: tags || tag,
-                    optional: optional,
+                    optional,
                 };
                 class.with_attrs.push(attr);
                 multiple = false;
@@ -243,7 +243,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
 // Fill in any classes with undefined flavor by walking backwards to their parent classes.
 pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(), CompilationError> {
     let mut undef_count = 0;
-    for (_name, class) in &mut *classes {
+    for class in (*classes).values() {
         if class.flavor == ClassFlavor::Undefined {
             undef_count += 1;
         }

@@ -15,7 +15,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     for tok in tokens {
         match tok.tt {
             TokenType::Allow | TokenType::Define => {
-                if current_statement.len() > 0 {
+                if !current_statement.is_empty() {
                     statements.push(current_statement);
                     current_statement = Vec::new();
                 }
@@ -26,7 +26,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
             }
         }
     }
-    if current_statement.len() > 0 {
+    if !current_statement.is_empty() {
         statements.push(current_statement);
     }
 
@@ -49,7 +49,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     // Define statements create classes.
     for statement in &mut statements {
         if statement[0].tt == TokenType::Define {
-            let class = parse_define(&statement)?;
+            let class = parse_define(statement)?;
 
             // It is an error to redefine a class.
             if classes.contains_key(&class.name) || class_index.contains_key(&class.name) {
@@ -73,7 +73,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     // Next parse all the allows.
     for statement in &mut statements {
         if statement[0].tt == TokenType::Allow {
-            let allow = parse_allow(&statement, &class_index)?;
+            let allow = parse_allow(statement, &class_index)?;
 
             // The allow parser does not check the class flavors.
             assert_class_flavor(&classes, &allow.endpoint, ClassFlavor::Endpoint)?;

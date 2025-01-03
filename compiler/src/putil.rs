@@ -60,5 +60,5 @@ pub fn return_literal(
 
 // Could be more sophisticated.
 pub fn pluralize(s: &str) -> String {
-    return format!("{}s", s);
+    format!("{}s", s)
 }
