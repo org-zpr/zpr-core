@@ -127,10 +127,6 @@ impl ZPLStrBuilder {
         self.tuple
     }
 
-    pub fn to_string(&self) -> String {
-        self.build().to_string()
-    }
-
     pub fn is_sugar(&self) -> bool {
         if self.tuple {
             return false;
@@ -146,5 +142,11 @@ impl ZPLStrBuilder {
             return ZPLStr::new_tuple(&self.name, &self.value);
         }
         return ZPLStr::new_atom(&self.name);
+    }
+}
+
+impl fmt::Display for ZPLStrBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.build())
     }
 }

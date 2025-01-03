@@ -66,6 +66,7 @@ impl CompilationBuilder {
         self
     }
 
+    #[allow(dead_code)]
     pub fn config(mut self, config: PathBuf) -> Self {
         self.source_config = Some(config);
         self

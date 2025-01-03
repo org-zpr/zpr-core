@@ -23,6 +23,7 @@ pub enum TokenType {
     Multiple,
     Literal(String),
     Tuple((String, String)),
+    EOS, // means "end of statement" but is never actually created
 }
 
 #[allow(dead_code)]

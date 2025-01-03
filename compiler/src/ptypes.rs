@@ -34,17 +34,35 @@ impl From<&Token> for FPos {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct AllowClause {
     pub endpoint: Clause,
     pub user: Clause,
     pub service: Clause,
 }
 
-#[derive(Default)]
+impl fmt::Display for AllowClause {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ALLOW {}\n   WITH {}\n      TO ACCESS {}", self.endpoint, self.user, self.service)
+    }
+}
+
+#[derive(Default, Clone, Debug)]
 pub struct Clause {
     pub class: String,
+    pub class_tok: Option<Token>,
     pub with: Vec<Attribute>,
-    pub without: Vec<Attribute>,
+    // TODO: pub without: Vec<Attribute>,
+}
+
+impl fmt::Display for Clause {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} with [", self.class)?;
+        for attr in &self.with {
+            write!(f, " {},", attr)?;
+        }
+        write!(f, "]")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,6 +123,7 @@ impl Class {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct Attribute {
     pub name: String,
     pub value: Option<String>,
@@ -116,12 +135,19 @@ pub struct Attribute {
 impl fmt::Display for Attribute {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(v) = &self.value {
-            write!(f, "{}:{}", self.name, v)
+            write!(f, "{}:{}", self.name, v)?
         } else if self.tag {
-            write!(f, "#{}", self.name)
+            write!(f, "#{}", self.name)?
         } else {
-            write!(f, "{}", self.name)
+            write!(f, "{}", self.name)?
         }
+        if self.multi_valued {
+            write!(f, "+")?
+        }
+        if self.optional {
+            return write!(f, "?")
+        }
+        Ok(())
     }
 }
 

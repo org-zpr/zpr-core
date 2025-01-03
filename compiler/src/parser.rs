@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{Class, Policy};
+use crate::ptypes::{Class, ClassFlavor, Policy, Clause};
 use crate::define::{parse_define, resolve_class_flavors};
 use crate::allow::parse_allow;
 
@@ -72,17 +72,28 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     // compute the correct flavors.
     resolve_class_flavors(&mut classes)?;
 
-
     // Next parse all the allows.
     for statement in &mut statements {
         if statement[0].tt == TokenType::Allow {
             let allow = parse_allow(&statement, &class_index)?;
+
+            // The allow parser does not check the class flavors.
+            assert_class_flavor(&classes, &allow.endpoint, ClassFlavor::Endpoint)?;
+            assert_class_flavor(&classes, &allow.user, ClassFlavor::User)?;
+            assert_class_flavor(&classes, &allow.service, ClassFlavor::Service)?;
+
+            println!("{}", allow);
+
             policy.allows.push(allow);
         }
     }
 
     // move all the classes in the policy
     for (_, class) in classes.into_iter() {
+        // Not sure i need the built in ones?
+        if class.name == "user" || class.name == "service" || class.name == "endpoint" {
+            continue;
+        }
         println!("defined class: {} (is a {:?})", class.name, class.flavor);
         for attr in &class.with_attrs {
             println!("  with: {}", attr);
@@ -91,6 +102,32 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     }
 
     Ok(policy)
+}
+
+fn assert_class_flavor(
+    classes: &HashMap<String, Class>,
+    clause: &Clause,
+    expected_flavor: ClassFlavor,
+) -> Result<(), CompilationError> {
+    let ctok = clause.class_tok.as_ref().unwrap();
+    let class = classes.get(&clause.class).ok_or_else(|| {
+        CompilationError::ParseError(
+            format!("class '{}' not found", clause.class),
+            ctok.line,
+            ctok.col,
+        )
+    })?;
+    if class.flavor != expected_flavor {
+        return Err(CompilationError::ParseError(
+            format!(
+                "expected class '{}' to be a {:?}, but it is a {:?}",
+                clause.class, expected_flavor, class.flavor
+            ),
+            ctok.line,
+            ctok.col,
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -119,6 +156,68 @@ mod test {
                     panic!("failed to parse '{}': {:?}", valid, e);
                 }
             };
+        }
+    }
+
+    #[test]
+    fn test_short_policy() {
+        let pp  = r#"
+define employee as a user with an ID-number, multiple roles and
+optional tags full-time, part-time, and intern
+
+define marketing-emp as an employee with rule:marketing and tag full-time
+
+allow endpoints with marketing-emp to access services with role:marketing
+"#;
+        let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(pp).or_else(|e| {
+            panic!("failed to tokenize '{}': {:?}", pp, e);
+        });
+        let pol = match parse(tokens.unwrap()) {
+            Ok(policy) => { policy}
+            Err(e) => {
+                panic!("failed to parse '{}': {:?}", pp, e);
+            }
+        };
+        assert_eq!(pol.defines.len(), 2);
+        assert_eq!(pol.allows.len(), 1);
+
+        let emp = match pol.defines[0].name.as_str() {
+            "employee" => &pol.defines[0],
+            "marketing-emp" => &pol.defines[1],
+            _ => panic!("unexpected class name: {}", pol.defines[0].name)
+        };
+        assert_eq!(emp.name, "employee");
+        assert_eq!(emp.flavor, ClassFlavor::User);
+        assert_eq!(emp.with_attrs.len(), 5);
+        for attr in &emp.with_attrs {
+            match attr.name.as_str() {
+                "ID-number" => {
+                    assert_eq!(attr.multi_valued, false);
+                    assert_eq!(attr.tag, false);
+                    assert_eq!(attr.optional, false);
+                }
+                "roles" => {
+                    assert_eq!(attr.multi_valued, true);
+                    assert_eq!(attr.tag, false);
+                    assert_eq!(attr.optional, false);
+                }
+                "full-time" => {
+                    assert_eq!(attr.multi_valued, false);
+                    assert_eq!(attr.tag, true);
+                    assert_eq!(attr.optional, true);
+                }
+                "part-time" => {
+                    assert_eq!(attr.multi_valued, false);
+                    assert_eq!(attr.tag, true);
+                    assert_eq!(attr.optional, true);
+                }
+                "intern" => {
+                    assert_eq!(attr.multi_valued, false);
+                    assert_eq!(attr.tag, true);
+                    assert_eq!(attr.optional, true);
+                }
+                _ => panic!("unexpected attribute name: {}", attr.name)
+            }
         }
     }
 

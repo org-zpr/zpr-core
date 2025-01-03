@@ -1,10 +1,11 @@
 //! allow.rs - parser for allow statements
 
 use std::collections::HashMap;
+use std::iter::Peekable;
 
 use crate::errors::CompilationError;
 use crate::lex::{TokenType, Token};
-use crate::ptypes::{Attribute, AllowClause, Class, Clause};
+use crate::ptypes::{Attribute, AllowClause, Clause};
 use crate::putil;
 
 
@@ -27,209 +28,176 @@ pub fn parse_allow(
 
 
     // Our simplified grammer:
-    // allow <endpoint-clause> WITH <user-clause> TO ACCESS <service-clause>
+    //
+    //   allow <endpoint-clause> WITH <user-clause> TO ACCESS <service-clause>
+    //
+    // In real ZPL you could omit one of the endpoint or user classes. But not in this parser.
+    // For example, you must rewrite-
+    //     allow user to access service foo
+    //   as
+    //     allow endpoints with user to access service foo
 
-    let mut endpoint_clause = Clause::default();
-    let mut remaining_tokens = parse_allow_endpoint_clause(
-        root_tok,
-        tokens,
-        classes_idx,
-        &mut endpoint_clause)?;
 
-    let mut rtokens = remaining_tokens.iter().peekable();
+    let mut ps = PState::new(root_tok);
 
-    // The endpoint parser will break on the WITH token. So now we need to parse the
-    // user clause.
-    let mut user_clause = Clause::default();
-    remaining_tokens = parse_allow_user_clause(
-        root_tok,
-        rtokens,
-        classes_idx,
-        &mut user_clause)?;
-    rtokens = remaining_tokens.iter().peekable();
+    // Parse the endpoint clause. This clause is delimited by the WITH token (unlike a user clause)
 
-    // The user clause parse will break on the TO token.
-    // "access" is next
-    putil::require_tt(root_tok, rtokens.next(), "ACCESS", "allow", TokenType::Access)?;
+    ps = parse_tags_attrs_and_classname(&ps, &mut tokens, classes_idx, TokenType::With, "endpoint clause")?;
 
-    // parse service bits
+    // The class we just parsed needs to be a defined endpoint type.
+    // But we only have the index here, not the actual class with the flavor. So we will leave that to
+    // caller to check.  We keep track of token location of the class name.
 
-    // we need access to the defines in order to differentiate between class names and attribute names.
+    let endpoint_clause = ps.to_clause("endpoint")?;
 
-    Err(CompilationError::Io(std::io::Error::new(
-        std::io::ErrorKind::Other,
-        "not implemented",
-    )))
+    // Next parse a user clause
+    putil::require_tt(root_tok, tokens.next(), "WITH", "allow", TokenType::With)?;
+
+    ps = PState::new(root_tok);
+    ps = parse_tags_attrs_and_classname(&ps, &mut tokens, classes_idx, TokenType::To, "user clause")?;
+    let user_clause = ps.to_clause("user")?;
+
+    // Next token sequence better be TO ACCESS.
+    putil::require_tt(root_tok, tokens.next(), "TO", "allow", TokenType::To)?;
+    putil::require_tt(root_tok, tokens.next(), "ACCESS", "allow", TokenType::Access)?;
+
+    // Need a service clause now -- parse to end of statement.
+    ps = PState::new(root_tok);
+    ps = parse_tags_attrs_and_classname(&ps, &mut tokens, classes_idx, TokenType::EOS, "service clause")?;
+    let service_clause = ps.to_clause("service")?;
+
+    Ok(AllowClause {
+        endpoint: endpoint_clause,
+        user: user_clause,
+        service: service_clause,
+    })
+}
+
+struct PState {
+    root_tok: Token,
+    allow_clause: Option<AllowClause>,
+    class_name: Option<String>,
+    class_name_token: Option<Token>,
+    attrs: Vec<Attribute>,
 }
 
 
-// allow <endpoint-clause> to access
-//       ^^^^^^^^^^^^^^^^^
-//
-// The endpoint must be either a built in class (user, service, endpoint) or a defined class.
-//
-//     tag tag CLASS with FOO
-//     name:val tag etc CLASS with FOO
-//     CLASS with blah
-//
-// Process each token expecting either a tag or tuple or classname.
-// Once we get a classname we expect an optional WITH section which ends with the "to access" tokens.
-fn parse_allow_endpoint_clause<'a, I>(root_tok: &Token, tokens: I, classes: &HashMap<String, String>, endpoint_clause: &mut Clause) -> Result<Vec<Token>, CompilationError>
+impl PState {
+    fn new(root_tok: &Token) -> PState {
+        PState {
+            root_tok: root_tok.clone(),
+            allow_clause: None,
+            class_name: None,
+            class_name_token: None,
+            attrs: Vec::new(),
+        }
+    }
+    fn new_from(state: &PState) -> PState {
+        let mut ps = PState{
+            root_tok: state.root_tok.clone(),
+            allow_clause: state.allow_clause.clone(),
+            class_name: state.class_name.clone(),
+            class_name_token: state.class_name_token.clone(),
+            attrs: Vec::new(),
+        };
+        for attr in state.attrs.iter() {
+            ps.attrs.push(attr.clone());
+        }
+        ps
+    }
+    fn to_clause(&self, kind: &str) -> Result<Clause, CompilationError> {
+        if self.class_name.is_none() {
+            return Err(CompilationError::ParseError(
+                format!("expected a class name in a {} clause", kind),
+                self.root_tok.line,
+                self.root_tok.col,
+            ));
+        }
+        Ok(Clause {
+            class: self.class_name.clone().unwrap(), // flavor is not checked
+            class_tok: self.class_name_token.clone(),
+            with: self.attrs.clone(),
+        })
+    }
+}
+
+fn parse_tags_attrs_and_classname<'a, I>(state: &PState, tokens: &mut Peekable<I>, classes: &HashMap<String, String>, break_at: TokenType, context: &str) -> Result<PState, CompilationError>
 where
     I: Iterator<Item = &'a Token>,
 {
-    let mut remaining_tokens: Vec<Token> = Vec::new();
-    let mut finish = false;
-    let mut parent_class: Option<String> = None;
+    let mut next_state = PState::new_from(state);
 
-    for tok in tokens {
-        if !finish {
-            match &tok.tt {
-                TokenType::To => {
-                    return Err(CompilationError::ParseError(
-                        "expected WITH before TO".to_string(),
-                        tok.line,
-                        tok.col,
-                    ));
-                }
+    loop {
+        if let Some(tokref) = tokens.peek() {
+            if break_at == tokref.tt {
+                break;
+            }
+            match &tokref.tt {
                 TokenType::And | TokenType::Comma => {
                     // These are delimiter tokens.
-                    // ...
+                    tokens.next();
                 }
                 TokenType::Tuple((name, value)) => {
-                    endpoint_clause.with.push(Attribute::attr(name, value));
+                    // This is an attribute.
+                    let attr = Attribute::attr(&name, &value);
+                    next_state.attrs.push(attr);
+                    tokens.next();
                 }
                 TokenType::Literal(s) => {
                     // This could be a class name or a tag name.
                     if let Some(class) = classes.get(s) {
-                        // We have a class name.
-                        if parent_class.is_some() {
-                            return Err(CompilationError::ParseError(
-                                "multiple endpoint class names".to_string(),
-                                tok.line,
-                                tok.col,
-                            ));
+                        // We already have a class name.
+                        if next_state.class_name.is_some() {
+                            let tok = tokens.next().unwrap();
+                             return Err(CompilationError::ParseError(
+                                 format!("multiple class names in {}", context),
+                                 tok.line,
+                                 tok.col,
+                             ));
                         }
-                        parent_class = Some(class.clone());
-                        endpoint_clause.class = class.clone();
+                        next_state.class_name = Some(class.clone());
+                        let tok = tokens.next().unwrap();
+                        next_state.class_name_token = Some(tok.clone());
                     } else {
-                        endpoint_clause.with.push(Attribute::tag(s));
+                        next_state.attrs.push(Attribute::tag(&s));
+                        tokens.next();
                     }
                 }
                 TokenType::With => {
                     // We must have already parsed a class name.
-                    if parent_class.is_none() {
+                    if next_state.class_name.is_none() {
+                        let tok = tokens.next().unwrap();
                         return Err(CompilationError::ParseError(
-                            "expected class name before WITH".to_string(),
+                            format!("expected class name before WITH in {}", context),
                             tok.line,
                             tok.col,
                         ));
                     }
-                    // This indicates end of this clause, I beleive.
-                    finish = true;
+                    tokens.next();
                 }
                 _ => {
+                    let tok = tokens.next().unwrap();
                     return Err(CompilationError::ParseError(
-                        format!("syntax error ({:?})", tok.tt),
+                        format!("syntax error in {} ({:?})", context, tok.tt),
                         tok.line,
                         tok.col,
                     ));
                 }
-            }
+            };
         } else {
-            // Just copy over all the remaining tokens out of the iterator.
-            remaining_tokens.push(tok.clone());
+            break; // iterator is empty
         }
     }
 
-    if parent_class.is_none() {
+    if next_state.class_name.is_none() {
         return Err(CompilationError::ParseError(
-            "expected endpoint class name".to_string(),
-            root_tok.line,
-            root_tok.col,
+            format!("expected a class name in {}", context),
+            state.root_tok.line,
+            state.root_tok.col,
         ));
     }
 
-    Ok(remaining_tokens)
+    Ok(next_state)
 }
 
 
-
-
-fn parse_allow_user_clause<'a, I>(root_tok: &Token, tokens: I, classes: &HashMap<String, String>, user_clause: &mut Clause) -> Result<Vec<Token>, CompilationError>
-where
-    I: Iterator<Item = &'a Token>,
-{
-    let mut remaining_tokens: Vec<Token> = Vec::new();
-    let mut finish = false;
-    let mut parent_class: Option<String> = None;
-
-    for tok in tokens {
-        if !finish {
-            match &tok.tt {
-                TokenType::To => {
-                    if parent_class.is_none() {
-                        return Err(CompilationError::ParseError(
-                            "expected user class name before TO".to_string(),
-                            tok.line,
-                            tok.col,
-                        ));
-                    }
-                    // Assume ACCESS will be coming next.
-                    finish = true;
-                }
-                TokenType::And | TokenType::Comma => {
-                    // These are delimiter tokens.
-                    // ...
-                }
-                TokenType::Tuple((name, value)) => {
-                    user_clause.with.push(Attribute::attr(name, value));
-                }
-                TokenType::Literal(s) => {
-                    // This could be a class name or a tag name.
-                    if let Some(class) = classes.get(s) {
-                        // We have a class name.
-                        if parent_class.is_some() {
-                            return Err(CompilationError::ParseError(
-                                "multiple user class names".to_string(),
-                                tok.line,
-                                tok.col,
-                            ));
-                        }
-                        parent_class = Some(class.clone());
-                        user_clause.class = class.clone();
-                    } else {
-                        user_clause.with.push(Attribute::tag(s));
-                    }
-                }
-                TokenType::With => {
-                    return Err(CompilationError::ParseError(
-                        "unexpected WITH in user clause".to_string(),
-                        tok.line,
-                        tok.col,
-                    ));
-                }
-                _ => {
-                    return Err(CompilationError::ParseError(
-                        format!("syntax error ({:?})", tok.tt),
-                        tok.line,
-                        tok.col,
-                    ));
-                }
-            }
-        } else {
-            // Just copy over all the remaining tokens out of the iterator.
-            remaining_tokens.push(tok.clone());
-        }
-    }
-
-    if parent_class.is_none() {
-        return Err(CompilationError::ParseError(
-            "expected endpoint class name".to_string(),
-            root_tok.line,
-            root_tok.col,
-        ));
-    }
-
-    Ok(remaining_tokens)
-}

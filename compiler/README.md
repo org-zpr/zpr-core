@@ -8,12 +8,12 @@ Work in progress.
 
 Note that this is just enough grammer to meet current compiler needs.
 
-endpoint, user, service
+### Known oddities
 
-comma = and, but 
-", and" means and too
+- The allow statements here need all three clauses to parse successfully. So you 
+  cannot omit endpoint or user as you might sometimes want to.
 
-Is space sometimes interpreted as "and"?
+
 
 ```
 

@@ -218,7 +218,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
                     name: s.clone(),
                     value: None,
                     multi_valued: multiple,
-                    tag: tags || tags,
+                    tag: tags || tag,
                     optional: optional,
                 };
                 class.with_attrs.push(attr);
