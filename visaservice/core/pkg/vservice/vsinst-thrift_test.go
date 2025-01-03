@@ -16,7 +16,7 @@ import (
 
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice"
 
 	"zpr.org/vsx/snio/zds"

@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"google.golang.org/protobuf/proto"
-	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vsapi"
 	"zpr.org/vsx/snio/vsio"
 )
 

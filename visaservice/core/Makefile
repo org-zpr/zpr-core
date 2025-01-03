@@ -22,10 +22,7 @@ else
 endif
 
 
-pkg/vsapi: thrift-go
-
-
-.PHONY: all build vservice test clean dist-clean thrift-go
+.PHONY: all build vservice test clean dist-clean
 
 all: build
 
@@ -33,14 +30,8 @@ all: build
 build: vservice
 
 
-vservice: pkg/vsapi
+vservice:
 	go build $(GFLAGS) -o $(OUT_DIR)/vservice -v $(PKG_VSERVICE)
-
-
-thrift-go:
-	$(MAKE) -C ../thrift go
-	rm -rf pkg/vsapi && mkdir pkg/vsapi
-	cp ../thrift/gen-go/vsapi/*.go pkg/vsapi
 
 
 test:
@@ -51,7 +42,6 @@ clean:
 	rm -rf $(OUT_DIR)
 
 dist-clean: clean
-	rm -rf pkg/vsapi
 
 
 .DEFAULT_GOAL := all

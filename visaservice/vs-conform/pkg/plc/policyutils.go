@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"zpr.org/vst/pkg/packets"
-	"zpr.org/vst/pkg/vsapi"
+	"zpr.org/vsapi"
 	"zpr.org/vsx/polio"
 )
 

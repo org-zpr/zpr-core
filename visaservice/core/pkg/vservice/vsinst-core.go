@@ -15,7 +15,7 @@ import (
 	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"

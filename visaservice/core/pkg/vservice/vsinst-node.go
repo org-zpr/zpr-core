@@ -7,7 +7,7 @@ import (
 	"golang.org/x/net/context"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice/adb"
 )
 

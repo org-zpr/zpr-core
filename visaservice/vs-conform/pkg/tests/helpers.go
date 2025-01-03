@@ -9,7 +9,7 @@ import (
 	"zpr.org/vst/pkg/mocks"
 	"zpr.org/vst/pkg/plc"
 	"zpr.org/vst/pkg/testfw"
-	"zpr.org/vst/pkg/vsapi"
+	"zpr.org/vsapi"
 	"zpr.org/vst/pkg/zcrypt"
 )
 

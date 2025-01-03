@@ -3,7 +3,7 @@ package adb
 import (
 	"net/netip"
 
-	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vsapi"
 )
 
 type PushItem struct {

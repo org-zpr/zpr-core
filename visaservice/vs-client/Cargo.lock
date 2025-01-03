@@ -325,6 +325,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "vsapi",
  "zpr",
 ]
 
@@ -919,6 +920,14 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "vsapi"
+version = "0.1.0"
+source = "git+ssh://git@github.com/org-zpr/zpr-vsapi-rs.git#81a49b2766b9dbd87c9391d7a85651c421d6338b"
+dependencies = [
+ "thrift",
 ]
 
 [[package]]

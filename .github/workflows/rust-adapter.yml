@@ -147,11 +147,24 @@ jobs:
           cslab
           cbpf-rs
 
+    # see <https://github.com/docker-library/golang/issues/452>
+    - name: Set workspace as safe
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+    - name: Setup Git credentials
+      timeout-minutes: 1
+      run: |
+        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+        chmod +x "$HOME/.git-askpass"
+        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
+        go env -w GOPRIVATE="github.com/org-zpr/*"
+
     - name: Build
       timeout-minutes: 10
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
       run: |
         sudo apt update
-        sudo apt install thrift-compiler
         sudo apt install libpcap-dev
         make ph
         make visaservice
@@ -176,11 +189,24 @@ jobs:
           cslab
           cbpf-rs
 
+    # see <https://github.com/docker-library/golang/issues/452>
+    - name: Set workspace as safe
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+    - name: Setup Git credentials
+      timeout-minutes: 1
+      run: |
+        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+        chmod +x "$HOME/.git-askpass"
+        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
+        go env -w GOPRIVATE="github.com/org-zpr/*"
+
     - name: Build
       timeout-minutes: 10
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
       run: |
         sudo apt update
-        sudo apt install thrift-compiler
         sudo apt install libpcap-dev
         make ph
         make visaservice
