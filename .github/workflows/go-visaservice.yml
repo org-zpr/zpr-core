@@ -10,7 +10,6 @@ on:
     paths:
       - 'visaservice/mods/**'
       - 'visaservice/core/**'
-      - 'visaservice/thrift/**'
       - '.github/workflows/go-visaservice.yml'
 
 concurrency:

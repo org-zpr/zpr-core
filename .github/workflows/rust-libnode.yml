@@ -6,7 +6,6 @@ on:
   pull_request:
     paths: 
       - 'libnode/**'
-      - 'visaservice/thrift/**'
       - 'adapter/ph/**'
       - '.github/workflows/rust-libnode.yml'
 

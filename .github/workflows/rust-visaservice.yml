@@ -6,7 +6,6 @@ on:
   pull_request:
     paths:
       - 'visaservice/cli/**'
-      - 'visaservice/thrift/**'
       - '.github/workflows/rust-visaservice.yml'
 
 concurrency:

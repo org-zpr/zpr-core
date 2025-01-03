@@ -96,8 +96,8 @@ Returns the config ID and version:
 ## Visa Service API
 
 The main visa service api (for requesting visas and connection control) is a
-THRIFT API. This runs on TCP/5002 by default. See `thrift/vs.thrift` for
-documentation.
+THRIFT API. This runs on TCP/5002 by default. See `vs.thrift` in the
+zpr-vsapi repo for documentation.
 
 
 
@@ -111,17 +111,3 @@ them you must install:
 go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
 go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 ```
-
-
-## Thrift
-
-The compiled thrift files are included in the source, but if you need to rebuild
-them then you will need the thrift compiler.
-
-```
-cd thrift
-THRIFTCC=/path/to/thrift/compiler make
-make install-go
-make install-rs
-```
-

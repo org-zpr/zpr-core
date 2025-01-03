@@ -30,7 +30,6 @@ it-gone:
 	$(MAKE) -C libnode dist-clean
 	$(MAKE) -C visaservice/core dist-clean
 	$(MAKE) -C visaservice clean
-	$(MAKE) -C visaservice/thrift clean
 	rm -rf diagrams/output
 
 
@@ -44,7 +43,7 @@ test:
 
 
 
-deps: cbpf cslab zpr-ext thrift
+deps: cbpf cslab zpr-ext
 
 
 libnode:
@@ -68,13 +67,10 @@ cslab:
 zpr-ext:
 	cd zpr-ext && cargo build
 
-thrift:
-	$(MAKE) -C visaservice/thrift
-
 visaservice:
 	$(MAKE) -C visaservice all
 
 
-.PHONY: it-so it-gone test deps libnode ph ph-debug diagrams cbpf cslab zpr-ext thrift visaservice
+.PHONY: it-so it-gone test deps libnode ph ph-debug diagrams cbpf cslab zpr-ext visaservice
 
 .DEFAULT_GOAL := info
