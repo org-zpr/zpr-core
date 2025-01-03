@@ -12,5 +12,5 @@ thrift = "0.17.0"
 tokio = { version = "1.40.0", features = ["full"] }
 tokio-util = { version = "0.7.12", features = ["rt"] }
 tracing = "0.1.40"
-vsapi = { git = "https://github.com/org-zpr/zpr-vsapi-rs.git" }
+vsapi = { git = "https://github.com/org-zpr/zpr-vsapi-rs.git", tag = "v0.1.0" }
 zpr = { path = "../zpr" }
