@@ -53,7 +53,8 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
     //                                    ^^^^^^^^^^^^^^^^^
     //
     // baked in classes are: user, service, endpoint (and their plurals)
-    let mut parent_class_name = putil::return_literal(root_tok, tokens.next(), "parent class name", "as")?;
+    let mut parent_class_name =
+        putil::return_literal(root_tok, tokens.next(), "parent class name", "as")?;
 
     // The flavor of the parent class really cannot be figured out until all
     // the classes are defined. To give meaning full error may need to track
@@ -116,7 +117,8 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
                 }
                 tags = true;
             }
-            TokenType::Tag => { // tag is the non-greedy version of tags. Next token is the tag name.
+            TokenType::Tag => {
+                // tag is the non-greedy version of tags. Next token is the tag name.
                 if tags {
                     return Err(CompilationError::ParseError(
                         "TAG following TAGS".to_string(),
@@ -195,7 +197,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
             }
             TokenType::Comma => {}
             TokenType::Tuple((name, value)) => {
-                if tags || tag{
+                if tags || tag {
                     return Err(CompilationError::ParseError(
                         "attributes not allowed in tag/tags".to_string(),
                         tok.line,
@@ -237,8 +239,6 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
     }
     Ok(class)
 }
-
-
 
 // Fill in any classes with undefined flavor by walking backwards to their parent classes.
 pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(), CompilationError> {

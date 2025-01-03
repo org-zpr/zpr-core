@@ -4,11 +4,9 @@ use std::collections::HashMap;
 use std::iter::Peekable;
 
 use crate::errors::CompilationError;
-use crate::lex::{TokenType, Token};
-use crate::ptypes::{Attribute, AllowClause, Clause};
+use crate::lex::{Token, TokenType};
+use crate::ptypes::{AllowClause, Attribute, Clause};
 use crate::putil;
-
-
 
 // First token is an ALLOW which is checked by caller.
 pub fn parse_allow(
@@ -26,7 +24,6 @@ pub fn parse_allow(
 
     let root_tok = &allow_statement[0];
 
-
     // Our simplified grammer:
     //
     //   allow <endpoint-clause> WITH <user-clause> TO ACCESS <service-clause>
@@ -37,16 +34,19 @@ pub fn parse_allow(
     //   as
     //     allow endpoints with user to access service foo
 
-
     let mut ps = PState::new(root_tok);
 
     // Parse the endpoint clause. This clause is delimited by the WITH token (unlike a user clause)
-
-    ps = parse_tags_attrs_and_classname(&ps, &mut tokens, classes_idx, TokenType::With, "endpoint clause")?;
+    ps.parse_tags_attrs_and_classname(
+        &mut tokens,
+        classes_idx,
+        TokenType::With,
+        "endpoint clause",
+    )?;
 
     // The class we just parsed needs to be a defined endpoint type.
     // But we only have the index here, not the actual class with the flavor. So we will leave that to
-    // caller to check.  We keep track of token location of the class name.
+    // caller to check.
 
     let endpoint_clause = ps.to_clause("endpoint")?;
 
@@ -54,16 +54,23 @@ pub fn parse_allow(
     putil::require_tt(root_tok, tokens.next(), "WITH", "allow", TokenType::With)?;
 
     ps = PState::new(root_tok);
-    ps = parse_tags_attrs_and_classname(&ps, &mut tokens, classes_idx, TokenType::To, "user clause")?;
+    ps.parse_tags_attrs_and_classname(&mut tokens, classes_idx, TokenType::To, "user clause")?;
     let user_clause = ps.to_clause("user")?;
 
     // Next token sequence better be TO ACCESS.
+    // TODO: Maybe better to have single token TO_ACCESS ?
     putil::require_tt(root_tok, tokens.next(), "TO", "allow", TokenType::To)?;
-    putil::require_tt(root_tok, tokens.next(), "ACCESS", "allow", TokenType::Access)?;
+    putil::require_tt(
+        root_tok,
+        tokens.next(),
+        "ACCESS",
+        "allow",
+        TokenType::Access,
+    )?;
 
     // Need a service clause now -- parse to end of statement.
     ps = PState::new(root_tok);
-    ps = parse_tags_attrs_and_classname(&ps, &mut tokens, classes_idx, TokenType::EOS, "service clause")?;
+    ps.parse_tags_attrs_and_classname(&mut tokens, classes_idx, TokenType::EOS, "service clause")?;
     let service_clause = ps.to_clause("service")?;
 
     Ok(AllowClause {
@@ -75,36 +82,21 @@ pub fn parse_allow(
 
 struct PState {
     root_tok: Token,
-    allow_clause: Option<AllowClause>,
     class_name: Option<String>,
     class_name_token: Option<Token>,
     attrs: Vec<Attribute>,
 }
 
-
 impl PState {
     fn new(root_tok: &Token) -> PState {
         PState {
             root_tok: root_tok.clone(),
-            allow_clause: None,
             class_name: None,
             class_name_token: None,
             attrs: Vec::new(),
         }
     }
-    fn new_from(state: &PState) -> PState {
-        let mut ps = PState{
-            root_tok: state.root_tok.clone(),
-            allow_clause: state.allow_clause.clone(),
-            class_name: state.class_name.clone(),
-            class_name_token: state.class_name_token.clone(),
-            attrs: Vec::new(),
-        };
-        for attr in state.attrs.iter() {
-            ps.attrs.push(attr.clone());
-        }
-        ps
-    }
+
     fn to_clause(&self, kind: &str) -> Result<Clause, CompilationError> {
         if self.class_name.is_none() {
             return Err(CompilationError::ParseError(
@@ -119,85 +111,87 @@ impl PState {
             with: self.attrs.clone(),
         })
     }
-}
 
-fn parse_tags_attrs_and_classname<'a, I>(state: &PState, tokens: &mut Peekable<I>, classes: &HashMap<String, String>, break_at: TokenType, context: &str) -> Result<PState, CompilationError>
-where
-    I: Iterator<Item = &'a Token>,
-{
-    let mut next_state = PState::new_from(state);
-
-    loop {
-        if let Some(tokref) = tokens.peek() {
-            if break_at == tokref.tt {
-                break;
-            }
-            match &tokref.tt {
-                TokenType::And | TokenType::Comma => {
-                    // These are delimiter tokens.
-                    tokens.next();
+    fn parse_tags_attrs_and_classname<'a, I>(
+        &mut self,
+        tokens: &mut Peekable<I>,
+        classes: &HashMap<String, String>,
+        break_at: TokenType,
+        context: &str,
+    ) -> Result<(), CompilationError>
+    where
+        I: Iterator<Item = &'a Token>,
+    {
+        loop {
+            if let Some(tokref) = tokens.peek() {
+                if break_at == tokref.tt {
+                    break;
                 }
-                TokenType::Tuple((name, value)) => {
-                    // This is an attribute.
-                    let attr = Attribute::attr(&name, &value);
-                    next_state.attrs.push(attr);
-                    tokens.next();
-                }
-                TokenType::Literal(s) => {
-                    // This could be a class name or a tag name.
-                    if let Some(class) = classes.get(s) {
-                        // We already have a class name.
-                        if next_state.class_name.is_some() {
-                            let tok = tokens.next().unwrap();
-                             return Err(CompilationError::ParseError(
-                                 format!("multiple class names in {}", context),
-                                 tok.line,
-                                 tok.col,
-                             ));
-                        }
-                        next_state.class_name = Some(class.clone());
-                        let tok = tokens.next().unwrap();
-                        next_state.class_name_token = Some(tok.clone());
-                    } else {
-                        next_state.attrs.push(Attribute::tag(&s));
+                match &tokref.tt {
+                    TokenType::And | TokenType::Comma => {
+                        // These are delimiter tokens.
                         tokens.next();
                     }
-                }
-                TokenType::With => {
-                    // We must have already parsed a class name.
-                    if next_state.class_name.is_none() {
+                    TokenType::Tuple((name, value)) => {
+                        // This is an attribute.
+                        let attr = Attribute::attr(&name, &value);
+                        self.attrs.push(attr);
+                        tokens.next();
+                    }
+                    TokenType::Literal(s) => {
+                        // This could be a class name or a tag name.
+                        if let Some(class) = classes.get(s) {
+                            // We already have a class name.
+                            if self.class_name.is_some() {
+                                let tok = tokens.next().unwrap();
+                                return Err(CompilationError::ParseError(
+                                    format!("multiple class names in {}", context),
+                                    tok.line,
+                                    tok.col,
+                                ));
+                            }
+                            self.class_name = Some(class.clone());
+                            let tok = tokens.next().unwrap();
+                            self.class_name_token = Some(tok.clone());
+                        } else {
+                            self.attrs.push(Attribute::tag(&s));
+                            tokens.next();
+                        }
+                    }
+                    TokenType::With => {
+                        // We must have already parsed a class name.
+                        if self.class_name.is_none() {
+                            let tok = tokens.next().unwrap();
+                            return Err(CompilationError::ParseError(
+                                format!("expected class name before WITH in {}", context),
+                                tok.line,
+                                tok.col,
+                            ));
+                        }
+                        tokens.next();
+                    }
+                    _ => {
                         let tok = tokens.next().unwrap();
                         return Err(CompilationError::ParseError(
-                            format!("expected class name before WITH in {}", context),
+                            format!("syntax error in {} ({:?})", context, tok.tt),
                             tok.line,
                             tok.col,
                         ));
                     }
-                    tokens.next();
-                }
-                _ => {
-                    let tok = tokens.next().unwrap();
-                    return Err(CompilationError::ParseError(
-                        format!("syntax error in {} ({:?})", context, tok.tt),
-                        tok.line,
-                        tok.col,
-                    ));
-                }
-            };
-        } else {
-            break; // iterator is empty
+                };
+            } else {
+                break; // iterator is empty
+            }
         }
-    }
 
-    if next_state.class_name.is_none() {
-        return Err(CompilationError::ParseError(
-            format!("expected a class name in {}", context),
-            state.root_tok.line,
-            state.root_tok.col,
-        ));
-    }
+        if self.class_name.is_none() {
+            return Err(CompilationError::ParseError(
+                format!("expected a class name in {}", context),
+                self.root_tok.line,
+                self.root_tok.col,
+            ));
+        }
 
-    Ok(next_state)
+        Ok(())
+    }
 }
-
-

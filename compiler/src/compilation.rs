@@ -1,9 +1,7 @@
 use std::path::PathBuf;
 
-
 use crate::lex::tokenize;
 use crate::parser::parse;
-
 
 pub struct Compilation {
     pub verbose: bool,

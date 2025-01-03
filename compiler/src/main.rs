@@ -1,12 +1,12 @@
-mod errors;
+mod allow;
 mod compilation;
+mod define;
+mod errors;
 mod lex;
 mod parser;
-mod zplstr;
 mod ptypes;
 mod putil;
-mod define;
-mod allow;
+mod zplstr;
 
 use clap::Parser;
 use std::path::PathBuf;
@@ -40,10 +40,7 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
-
     let comp = Compilation::builder(cli.zpl).verbose(cli.verbose).build();
-
     comp.compile();
-
     println!("ready");
 }

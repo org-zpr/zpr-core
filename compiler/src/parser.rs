@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
+use crate::allow::parse_allow;
+use crate::define::{parse_define, resolve_class_flavors};
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{Class, ClassFlavor, Policy, Clause};
-use crate::define::{parse_define, resolve_class_flavors};
-use crate::allow::parse_allow;
-
-
+use crate::ptypes::{Class, ClassFlavor, Clause, Policy};
 
 pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     // Convert the tokens into statements, which are just sub-lists of the tokens.
@@ -151,7 +149,7 @@ mod test {
                 panic!("failed to tokenize '{}': {:?}", valid, e);
             });
             let _pol = match parse(tokens.unwrap()) {
-                Ok(policy) => { policy}
+                Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
                 }
@@ -161,7 +159,7 @@ mod test {
 
     #[test]
     fn test_short_policy() {
-        let pp  = r#"
+        let pp = r#"
 define employee as a user with an ID-number, multiple roles and
 optional tags full-time, part-time, and intern
 
@@ -173,7 +171,7 @@ allow endpoints with marketing-emp to access services with role:marketing
             panic!("failed to tokenize '{}': {:?}", pp, e);
         });
         let pol = match parse(tokens.unwrap()) {
-            Ok(policy) => { policy}
+            Ok(policy) => policy,
             Err(e) => {
                 panic!("failed to parse '{}': {:?}", pp, e);
             }
@@ -184,7 +182,7 @@ allow endpoints with marketing-emp to access services with role:marketing
         let emp = match pol.defines[0].name.as_str() {
             "employee" => &pol.defines[0],
             "marketing-emp" => &pol.defines[1],
-            _ => panic!("unexpected class name: {}", pol.defines[0].name)
+            _ => panic!("unexpected class name: {}", pol.defines[0].name),
         };
         assert_eq!(emp.name, "employee");
         assert_eq!(emp.flavor, ClassFlavor::User);
@@ -216,9 +214,8 @@ allow endpoints with marketing-emp to access services with role:marketing
                     assert_eq!(attr.tag, true);
                     assert_eq!(attr.optional, true);
                 }
-                _ => panic!("unexpected attribute name: {}", attr.name)
+                _ => panic!("unexpected attribute name: {}", attr.name),
             }
         }
     }
-
 }

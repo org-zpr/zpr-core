@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+/// The various errors that may occur during parsing and compilation.
 #[derive(Debug, Error)]
 #[allow(dead_code)]
 pub enum CompilationError {

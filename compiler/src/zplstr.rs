@@ -1,7 +1,10 @@
 use std::fmt;
 
-/// The ZPLStr type can hold either a plain string or a ZPL tuple.
+/// The ZPLStr type can hold either a plain string (atom) or a ZPL tuple.
 /// Note that a tuple may have an empty value.
+///
+/// This has functionality that is specifically helpful to the lexer step.
+
 pub struct ZPLStr {
     name: String,
     value: Option<String>,

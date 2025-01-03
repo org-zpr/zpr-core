@@ -1,5 +1,5 @@
-use crate::lex::{Token, TokenType};
 use crate::errors::CompilationError;
+use crate::lex::{Token, TokenType};
 
 // Given the next token in the list, we error out if that token is not of the expected type.
 pub fn require_tt(
