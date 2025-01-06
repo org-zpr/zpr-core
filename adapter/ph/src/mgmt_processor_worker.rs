@@ -56,7 +56,8 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
         base_hdr.sequence_number
     );
 
-    let seq_num = base_hdr.sequence_number.get() as u64; // TODO: reconstitute full seq num given expected seq num state
+    // TODO: reconstitute full seq num given expected seq num state
+    let seq_num = base_hdr.sequence_number.get() as u64;
 
     if base_hdr.packet_type.is_per_flow() {
         let Ok(per_flow_hdr) = ZdpPerFlowHeader::read_from_buf(&mut pkt) else {

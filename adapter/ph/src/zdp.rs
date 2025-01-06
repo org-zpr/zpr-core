@@ -79,6 +79,14 @@ impl ZdpPacketType {
     }
 }
 
+#[open_enum]
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(u8)]
+pub enum ResponseCode {
+    Success = 0,
+    Other = 1,
+}
+
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpZpiHeader {
@@ -123,7 +131,11 @@ pub struct ZdpReportHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpHelloResponseHeader {
-    pub status: U16,
+    pub status: ResponseCode,
+    pub policy_id_len: u8,
+    // Policy ID
+    // Version info len
+    // Version info
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
@@ -136,7 +148,7 @@ pub struct ZdpRegisterAgentAddressRequestHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpRegisterAgentAddressResponseHeader {
-    pub status_code: u8,
+    pub status_code: ResponseCode,
     pub info_len: u8,
 }
 
@@ -166,19 +178,11 @@ pub struct ZdpTerminateLinkRequestHeader {
     pub data_len: u8,
 }
 
-#[open_enum]
-#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(u8)]
-pub enum TerminateResponse {
-    Success = 0,
-    Other = 1,
-}
-
 /// Terminate Link Response (§ 6.3.3)
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpTerminateLinkResponseHeader {
-    pub response_code: TerminateResponse,
+    pub response_code: ResponseCode,
     pub data_len: u8,
 }
 
@@ -194,13 +198,8 @@ pub struct ZdpBindAgentAddressRequestHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBindAgentAddressResponseHeader {
-    pub status_code: u8,
+    pub status_code: ResponseCode,
     pub info_len: u8,
-}
-
-impl ZdpBindAgentAddressResponseHeader {
-    pub const STATUS_CODE_SUCCESS: u8 = 0;
-    pub const STATUS_CODE_OTHER: u8 = 1;
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
