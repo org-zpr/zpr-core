@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
 
@@ -14,33 +15,21 @@ impl Compilation {
         CompilationBuilder::new(source)
     }
 
-    pub fn compile(&self) {
+    pub fn compile(&self) -> Result<(), CompilationError>{
         if self.verbose {
             println!(
                 "compiling {:?} with config {:?}",
                 self.source_zpl, self.source_config
             );
         }
-        match tokenize(&self.source_zpl) {
-            Ok(tokens) => {
-                for t in &tokens {
-                    println!("   {:?}", t);
-                }
-                println!();
-
-                match parse(tokens) {
-                    Ok(_policy) => {
-                        println!("OK!");
-                    }
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("Error: {}", e);
-            }
+        let tokens = tokenize(&self.source_zpl)?;
+        for t in &tokens {
+            println!("   {:?}", t);
         }
+        println!();
+
+        let _policy = parse(tokens)?;
+        Ok(())
     }
 }
 
