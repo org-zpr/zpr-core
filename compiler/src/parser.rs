@@ -47,7 +47,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     }
 
     // Define statements create classes.
-    for statement in &mut statements {
+    for statement in &statements {
         if statement[0].tt == TokenType::Define {
             let class = parse_define(statement)?;
 
@@ -71,7 +71,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     resolve_class_flavors(&mut classes)?;
 
     // Next parse all the allows.
-    for statement in &mut statements {
+    for statement in &statements {
         if statement[0].tt == TokenType::Allow {
             let allow = parse_allow(statement, &class_index)?;
 
