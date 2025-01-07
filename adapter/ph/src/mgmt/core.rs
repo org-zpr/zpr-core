@@ -7,7 +7,7 @@ use crate::assembly::Assembly;
 use crate::config;
 use crate::counters::CounterType;
 use crate::fastpath;
-use crate::packet::{BufferPacket, Packet};
+use crate::packet::{Packet, PacketBuffer};
 use crate::zdp;
 use std::time::Duration;
 use thiserror::Error;
@@ -22,7 +22,7 @@ pub async fn send_non_flow_mgmt(
     asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
-    packet: BufferPacket,
+    packet: Packet,
 ) {
     send_mgmt_helper(asm, link_id, packet_type, None, None, packet).await
 }
@@ -35,7 +35,7 @@ pub async fn send_per_flow_mgmt(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
-    packet: BufferPacket,
+    packet: Packet,
 ) {
     send_mgmt_helper(asm, link_id, packet_type, Some(stream_id), None, packet).await
 }
@@ -45,7 +45,7 @@ pub async fn send_non_flow_mgmt_response(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     sequence_number: zpr::SeqNum,
-    packet: BufferPacket,
+    packet: Packet,
 ) {
     send_mgmt_helper(
         asm,
@@ -64,7 +64,7 @@ pub async fn send_per_flow_mgmt_response(
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
     sequence_number: zpr::SeqNum,
-    packet: BufferPacket,
+    packet: Packet,
 ) {
     send_mgmt_helper(
         asm,
@@ -83,7 +83,7 @@ async fn send_mgmt_helper(
     packet_type: zdp::ZdpPacketType,
     stream_id: Option<zpr::StreamId>,
     sequence_number: Option<zpr::SeqNum>,
-    mut packet: BufferPacket,
+    mut packet: Packet,
 ) {
     debug_assert_eq!(stream_id.is_some(), packet_type.is_per_flow());
 
@@ -113,8 +113,8 @@ pub async fn send_sync_non_flow_req(
     link_id: zpr::LinkId,
     zdp_request_type: zdp::ZdpPacketType,
     zdp_response_type: zdp::ZdpPacketType,
-    pkt_fn: impl Fn(&mut BufferPacket) + Send + 'static,
-) -> Result<BufferPacket, SyncReqError> {
+    pkt_fn: impl Fn(&mut Packet) + Send + 'static,
+) -> Result<Packet, SyncReqError> {
     send_sync_req_helper(
         asm,
         link_id,
@@ -137,8 +137,8 @@ pub async fn send_sync_per_flow_req(
     zdp_request_type: zdp::ZdpPacketType,
     zdp_response_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
-    pkt_fn: impl Fn(&mut BufferPacket /* FIXME: can relax to Packet<_> */) + Send + 'static,
-) -> Result<(zpr::StreamId, BufferPacket), SyncReqError> {
+    pkt_fn: impl Fn(&mut Packet) + Send + 'static,
+) -> Result<(zpr::StreamId, Packet), SyncReqError> {
     match send_sync_req_helper(
         asm,
         link_id,
@@ -181,8 +181,8 @@ async fn send_sync_req_helper(
     zdp_request_type: zdp::ZdpPacketType,
     zdp_response_type: zdp::ZdpPacketType,
     stream_id: Option<zpr::StreamId>,
-    pkt_fn: impl Fn(&mut BufferPacket /* FIXME: relax to Packet */) + 'static,
-) -> Result<BufferPacket, SyncReqError> {
+    pkt_fn: impl Fn(&mut Packet) + 'static,
+) -> Result<Packet, SyncReqError> {
     // acquire a permit to send a manamgement message
     let Some(peer_state) = asm.peer_table.get(link_id) else {
         return Err(SyncReqError::LinkClosed);
@@ -191,8 +191,8 @@ async fn send_sync_req_helper(
     let mut response_future = peer_state.sync_req_state.install_response_listener(&permit);
 
     for _i in 0..=config::DEFAULT_REQUEST_RETRY_COUNT {
-        let buf = drop_guard(asm.buffer_stack.get_buffer().await, |buf| {
-            asm.buffer_stack.put_buffer(buf)
+        let buf = drop_guard(asm.buffer_stack.get_buffer().await as PacketBuffer, |buf| {
+            asm.buffer_stack.put_buffer(buf.try_into().unwrap())
         });
         let mut packet = Packet::new_guarded(buf, config::DEFAULT_MESSAGE_HEADROOM);
         pkt_fn(&mut packet);
@@ -228,10 +228,10 @@ async fn send_sync_req_helper(
 // TODO: rename/move this
 fn match_received(
     asm: &Assembly,
-    response: Option<(zdp::ZdpPacketType, BufferPacket)>,
+    response: Option<(zdp::ZdpPacketType, Packet)>,
     err_type: SyncReqError,
     zdp_response_type: zdp::ZdpPacketType,
-) -> Result<BufferPacket, SyncReqError> {
+) -> Result<Packet, SyncReqError> {
     match response {
         Some((pkt_type, pkt)) => {
             if pkt_type != zdp_response_type {

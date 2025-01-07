@@ -3,7 +3,7 @@ use crate::counters::CounterType;
 use crate::fastpath;
 use crate::logging::targets::ZDP;
 use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
-use crate::packet::BufferPacket;
+use crate::packet::Packet;
 use crate::queues::MgmtProcessorMessage;
 use crate::zdp::*;
 use std::sync::Arc;
@@ -43,7 +43,7 @@ pub async fn launch(
     }
 }
 
-async fn handle_packet(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMgmtResult {
+async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let Ok(base_hdr) = ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };

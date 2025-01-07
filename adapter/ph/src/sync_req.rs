@@ -1,5 +1,5 @@
 use crate::logging::targets::ZDP;
-use crate::packet::BufferPacket;
+use crate::packet::Packet;
 use crate::zdp;
 use std::future::Future;
 use std::sync::Mutex as StdMutex;
@@ -21,7 +21,7 @@ struct WindowState {
     next_seq_num: zpr::SeqNum,
 }
 
-pub type Response = (zdp::ZdpPacketType, BufferPacket);
+pub type Response = (zdp::ZdpPacketType, Packet);
 
 pub struct Permit<'a> {
     /// use our lock on the window state as a semaphore
@@ -108,11 +108,7 @@ impl SyncReqState {
         self.listener_state.lock().unwrap().response_listener = None;
     }
 
-    pub fn forward_response(
-        &self,
-        seq_num: zpr::SeqNum,
-        response: Response,
-    ) -> Result<(), BufferPacket> {
+    pub fn forward_response(&self, seq_num: zpr::SeqNum, response: Response) -> Result<(), Packet> {
         let listener = &mut self.listener_state.lock().unwrap().response_listener;
         match listener {
             Some((expected_seq_num, _)) => {

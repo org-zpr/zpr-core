@@ -3,7 +3,7 @@
 use crate::classifier;
 use crate::defs::FiveTuple;
 use crate::net_defs;
-use crate::packet::{Packet, PacketBuffer};
+use crate::packet::Packet;
 use bytes::Buf;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use zerocopy::*;
@@ -21,7 +21,7 @@ struct CompressedIPv6Header {
     pub hop_limit: u8,
 }
 
-fn compress_addrs_v4(pkt: &mut Packet<impl PacketBuffer>) {
+fn compress_addrs_v4(pkt: &mut Packet) {
     let hdr = classifier::IPv4Header::ref_from_prefix(pkt.body())
         .unwrap()
         .0;
@@ -55,12 +55,7 @@ fn compress_addrs_v4(pkt: &mut Packet<impl PacketBuffer>) {
     pkt.push_header(&[hl_zdpflags, dscp]);
 }
 
-fn expand_addrs_v4(
-    pkt: &mut Packet<impl PacketBuffer>,
-    proto: u8,
-    src_address: Ipv4Addr,
-    dst_address: Ipv4Addr,
-) {
+fn expand_addrs_v4(pkt: &mut Packet, proto: u8, src_address: Ipv4Addr, dst_address: Ipv4Addr) {
     let hl_zdpflags_tos = pkt.get_array::<2>();
     let hl_zdpflags = hl_zdpflags_tos[0];
     let tos = hl_zdpflags_tos[1];
@@ -103,7 +98,7 @@ fn expand_addrs_v4(
         .header_checksum = csum;
 }
 
-fn compress_addrs_v6(pkt: &mut Packet<impl PacketBuffer>) {
+fn compress_addrs_v6(pkt: &mut Packet) {
     let hdr = classifier::IPv6Header::ref_from_prefix(pkt.body())
         .unwrap()
         .0;
@@ -122,7 +117,7 @@ fn compress_addrs_v6(pkt: &mut Packet<impl PacketBuffer>) {
 }
 
 fn expand_addrs_v6(
-    pkt: &mut Packet<impl PacketBuffer>,
+    pkt: &mut Packet,
     next_header: u8,
     src_address: Ipv6Addr,
     dst_address: Ipv6Addr,
@@ -157,7 +152,7 @@ pub fn compress(
     compression_mode: CompressionMode,
     l3_type: L3Type,
     _l4_protocol: net_defs::IpProtocol,
-    pkt: &mut Packet<impl PacketBuffer>,
+    pkt: &mut Packet,
 ) {
     match l3_type {
         L3Type::Ipv4 => compress_addrs_v4(pkt),
@@ -171,11 +166,7 @@ pub fn compress(
 }
 
 /// Expand a packet.  Fills payload length from body length, so trailers (e.g. A2A MAC) must not be present.
-pub fn expand(
-    compression_mode: CompressionMode,
-    five_tuple: &FiveTuple,
-    pkt: &mut Packet<impl PacketBuffer>,
-) {
+pub fn expand(compression_mode: CompressionMode, five_tuple: &FiveTuple, pkt: &mut Packet) {
     match five_tuple.l3_type {
         L3Type::Ipv4 => expand_addrs_v4(
             pkt,
@@ -208,10 +199,9 @@ mod tests {
 
     #[test]
     fn test_round_trip() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-
         for &body in TEST_CASES {
-            let mut pkt = Packet::new(&mut buf, 256);
+            let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+            let mut pkt = Packet::new(buf, 256);
             pkt.put(body);
 
             let cls_res = classifier::classify(&mut pkt).unwrap();

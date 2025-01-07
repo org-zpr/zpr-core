@@ -41,14 +41,14 @@ pub async fn launch(config: Config, asm: Arc<Assembly>, tun: Arc<ZprTun>) {
                         // packet was too large or non-IP; drop
                         asm.counters[CounterType::OutPacksDrop].increment();
                         // reuse `buf`
-                        buf = pkt.destroy();
+                        buf = pkt.destroy().try_into().unwrap();
                         continue;
                     }
                 } else {
                     // No packet info, permit IP and IPv6 only (for now?)
                     if pkt.body()[0] >> 4 != 4 && pkt.body()[0] >> 4 != 6 {
                         asm.counters[CounterType::OutPacksDrop].increment();
-                        buf = pkt.destroy();
+                        buf = pkt.destroy().try_into().unwrap();
                         continue;
                     }
                 }

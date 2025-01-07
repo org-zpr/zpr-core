@@ -8,7 +8,7 @@ use crate::counters::CounterType;
 use crate::defs::*;
 use crate::fastpath;
 use crate::logging::targets::ZDP;
-use crate::packet::{self, Packet};
+use crate::packet::Packet;
 use crate::zdp;
 use bytes::{Buf, BufMut};
 use std::net::IpAddr;
@@ -64,7 +64,8 @@ pub async fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<
             };
             let status = hdr.status;
             debug!(target: ZDP, "Received HelloResponse, status: {status}");
-            asm.buffer_stack.put_buffer(hello_res.destroy());
+            asm.buffer_stack
+                .put_buffer(hello_res.destroy().try_into().unwrap());
             Ok(())
         }
 
@@ -122,7 +123,8 @@ pub async fn send_register_agent_address_request(
                 "Received RegisterAgentAddressResponse, status: {}",
                 hdr.status_code
             );
-            asm.buffer_stack.put_buffer(register_res.destroy());
+            asm.buffer_stack
+                .put_buffer(register_res.destroy().try_into().unwrap());
         }
 
         Err(err) => {
@@ -165,7 +167,8 @@ pub async fn send_terminate_request<'a, 'pktbuf>(
             };
             let resp_code = hdr.response_code;
             info!("Received TerminateLinkResponse, status: {:?}", resp_code);
-            asm.buffer_stack.put_buffer(terminate_res.destroy());
+            asm.buffer_stack
+                .put_buffer(terminate_res.destroy().try_into().unwrap());
             Ok(resp_code)
         }
 
@@ -261,7 +264,8 @@ pub async fn send_bind_agent_address_request(
 
             match hdr.status_code {
                 zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS => {
-                    asm.buffer_stack.put_buffer(resp.destroy());
+                    asm.buffer_stack
+                        .put_buffer(resp.destroy().try_into().unwrap());
                     Ok(tether_id)
                 }
 
@@ -277,7 +281,8 @@ pub async fn send_bind_agent_address_request(
                     };
                     let msg: Box<str> = msg.into();
 
-                    asm.buffer_stack.put_buffer(resp.destroy());
+                    asm.buffer_stack
+                        .put_buffer(resp.destroy().try_into().unwrap());
                     Err(BindAgentAddressError::BindAgentAddressError(msg))
                 }
 
@@ -297,9 +302,9 @@ pub async fn send_bind_agent_address_request(
 pub async fn send_report(asm: &Assembly, link_id: zpr::LinkId, report: &str) {
     // TODO this condition will need to be adjusted when we have complete ZPR packets
     // with the information at the end of the packet at well
-    if packet::PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < report.len() {
+    /*if packet::PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < report.len() {
         return;
-    }
+    }*/  // CTP FIXME
     let buf = asm.buffer_stack.get_buffer().await;
     let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = pkt.alloc_zeroed_header::<zdp::ZdpReportHeader>();
