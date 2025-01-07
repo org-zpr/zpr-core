@@ -130,8 +130,17 @@ impl ZPLStrBuilder {
         if self.tuple {
             return false;
         }
-        matches!(self.name.as_str(), "a" | "an")
+        matches!(self.name.to_lowercase().as_str(), "a" | "an")
     }
+
+    /// True if the atom collected so far is "note" or "comment".
+    pub fn is_comment_start(&self) -> bool {
+        if self.tuple {
+            return false;
+        }
+        matches!(self.name.to_lowercase().as_str(), "note" | "comment")
+    }
+
 
     pub fn build(&self) -> ZPLStr {
         if self.tuple {
