@@ -98,7 +98,6 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                 }
                 if current_word.len() > 0 {
                     if !current_word.is_sugar() {
-                        // TODO: is_sugar can be function on builder
                         tokens.push(Token::new_from_str(
                             &current_word.build(),
                             current_start.0,
@@ -270,6 +269,22 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
             }
         }
     }
+    if quoting {
+        return Err(CompilationError::UnterminatedQuote(
+            current_start.0,
+            current_start.1,
+        ));
+    }
+    if current_word.len() > 0 {
+        if !current_word.is_sugar() {
+            tokens.push(Token::new_from_str(
+                &current_word.build(),
+                current_start.0,
+                current_start.1,
+            ));
+        }
+    }
+
     Ok(tokens)
 }
 
