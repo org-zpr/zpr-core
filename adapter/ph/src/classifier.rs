@@ -76,9 +76,7 @@ pub fn get_ip_version(body: &[u8]) -> u8 {
     (body[0] & IP_VERSION_MASK) >> 4
 }
 
-pub fn classify<PktBuf: packet::PacketBuffer>(
-    packet: &mut packet::Packet<PktBuf>,
-) -> Result<ClassifierResult, &'static str> {
+pub fn classify(packet: &mut packet::Packet) -> Result<ClassifierResult, &'static str> {
     let (metadata, body) = packet.metadata_mut_and_body_mut();
     classify_zdp(metadata, body)
 }
@@ -347,13 +345,14 @@ fn classify_unclassified(
 mod tests {
     use super::*;
     use crate::config;
+    use crate::packet::Packet;
     use bytes::BufMut;
     use zerocopy::FromZeros;
 
     #[test]
     fn test_non_ip() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         let packet_data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
@@ -372,8 +371,8 @@ mod tests {
 
     #[test]
     fn test_v4_tcp_success() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -404,8 +403,8 @@ mod tests {
 
     #[test]
     fn test_v4_tcp_first_frag() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -440,8 +439,8 @@ mod tests {
 
     #[test]
     fn test_v4_tcp_subsequent_frag() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -476,8 +475,8 @@ mod tests {
 
     #[test]
     fn test_v4_truncated_l3() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -499,8 +498,8 @@ mod tests {
 
     #[test]
     fn test_v4_ihl_too_small() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -526,8 +525,8 @@ mod tests {
 
     #[test]
     fn test_v4_ihl_too_big() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -555,8 +554,8 @@ mod tests {
 
     #[test]
     fn test_v6_tcp_success() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x28, 0x06, 0x40,
@@ -602,8 +601,8 @@ mod tests {
 
     #[test]
     fn test_v6_first_fragment() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 128);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x02, 0x12, 0x89, 0x00, 0x50, 0x2c, 0x40,
@@ -657,8 +656,8 @@ mod tests {
 
     #[test]
     fn test_v6_subsequent_fragment() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 128);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x02, 0x12, 0x89, 0x00, 0x18, 0x2c, 0x40,
@@ -706,8 +705,8 @@ mod tests {
     #[test]
     fn test_v6_with_routing_option() {
         // This packet presents an interesting problem of the inner IP being the "correct" one
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 128);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0f, 0xbb, 0x74, 0x00, 0x60, 0x2b, 0x3f,
@@ -764,8 +763,8 @@ mod tests {
     #[test]
     fn test_option_length_error_v6() {
         // This packet presents an interesting problem of the inner IP being the "correct" one
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 128);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0f, 0xbb, 0x74, 0x00, 0x38, 0x2b, 0x3f,
@@ -813,8 +812,8 @@ mod tests {
 
     #[test]
     fn test_header_length_error_v6() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         let packet_data = [0x60u8, 5u8, 4u8, 3u8, 2u8, 1u8, 0u8];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
@@ -832,8 +831,8 @@ mod tests {
 
     #[test]
     fn test_ipv4_mapped_src_error_v6() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x28, 0x06, 0x40,
@@ -855,8 +854,8 @@ mod tests {
 
     #[test]
     fn test_ipv4_mapped_dst_error_v6() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x28, 0x06, 0x40,
@@ -878,8 +877,8 @@ mod tests {
 
     #[test]
     fn test_payload_length_error_v6() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x01, 0x28, 0x06, 0x40,
@@ -924,8 +923,8 @@ mod tests {
 
     #[test]
     fn test_jumbo_reject_v6() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x00, 0x00, 0x40,
@@ -966,8 +965,8 @@ mod tests {
 
     #[test]
     fn test_smalljumbo_reject_v6() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x00, 0x00, 0x40,
@@ -1009,8 +1008,8 @@ mod tests {
 
     #[test]
     fn test_empty_packet_v6() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x00, 0xFE, 0x40,
@@ -1053,8 +1052,8 @@ mod tests {
 
     #[test]
     fn test_tcp_truncated() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
                 0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
@@ -1084,8 +1083,8 @@ mod tests {
 
     #[test]
     fn test_tcp_data_offset_too_small() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
                 0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00,
@@ -1116,8 +1115,8 @@ mod tests {
 
     #[test]
     fn test_tcp_data_offset_too_big() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
                 0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00,
@@ -1150,8 +1149,8 @@ mod tests {
 
     #[test]
     fn test_udp_truncated() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET + 64);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
                 0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
@@ -1183,8 +1182,8 @@ mod tests {
 
     #[test]
     fn test_icmp() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x45, 0x00, 0x00, 0x54, 0x22, 0x7C, 0x40, 0x00,
@@ -1217,8 +1216,8 @@ mod tests {
 
     #[test]
     fn test_icmpv6() {
-        let mut buf: [u8; config::PACKET_BUFFER_SIZE] = [0; config::PACKET_BUFFER_SIZE];
-        let mut packet = packet::Packet::new(&mut buf, packet::PACKET_BUFFER_MIN_BODY_OFFSET);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x00, 0x00, 0x00, 0x00, 0x20, 0x3A, 0xFF,

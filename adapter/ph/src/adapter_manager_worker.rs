@@ -4,7 +4,7 @@ use crate::counters::CounterType;
 use crate::fastpath;
 use crate::logging::targets::FLOW_MGMT;
 use crate::mgmt;
-use crate::packet::BufferPacket;
+use crate::packet::Packet;
 use crate::queues::AdapterManagerMessage;
 use std::num::NonZero;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<AdapterManager
 }
 
 // RFC 6.5 § 6.3.11
-async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: BufferPacket) {
+async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
     let five_tuple = pkt.metadata().five_tuple();
 
     // if there's already an entry, this is a duplicate request

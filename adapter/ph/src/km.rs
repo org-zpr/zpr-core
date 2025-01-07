@@ -10,7 +10,7 @@
 
 use crate::config;
 use crate::logging::targets::KEY_MGMT;
-use crate::packet::{Packet, PacketBuffer};
+use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
 use bytes::{BufMut, Bytes};
 use openssl::x509::X509;
@@ -707,10 +707,7 @@ impl Default for KmTransportSA {
 /// Helper function which is ZDP aware.  Does some error checking and leaves the ZPI
 /// in place.
 #[allow(dead_code)]
-pub fn encrypt_transport_zdp(
-    message: &mut Packet<impl PacketBuffer>,
-    codec: Arc<dyn Codec>,
-) -> KmResult<()> {
+pub fn encrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KmResult<()> {
     if message.body().len()
         < std::mem::size_of::<ZdpZpiHeader>() + std::mem::size_of::<ZdpBaseHeader>()
     {
@@ -744,10 +741,7 @@ pub fn encrypt_transport_zdp(
 
 /// Helper function which is ZDP aware.  Does some error checking and leaves the ZPI in place.
 #[allow(dead_code)]
-pub fn decrypt_transport_zdp(
-    message: &mut Packet<impl PacketBuffer>,
-    codec: Arc<dyn Codec>,
-) -> KmResult<()> {
+pub fn decrypt_transport_zdp(message: &mut Packet, codec: Arc<dyn Codec>) -> KmResult<()> {
     if message.body().len() < 1 {
         return Err(KmError::ShortPacket);
     }
@@ -1099,8 +1093,8 @@ mod test {
             excess_length: 0u8,
             sequence_number: 0u16.into(),
         };
-        let mut buf = [0u8; PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 64);
+        let buf = Box::new([0u8; PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 64);
         //let hbytes = hdr.as_bytes();
         //pkt.body_mut()[0..hbytes.len()].copy_from_slice(&hbytes);
         hdr.write_to_buf(&mut pkt).unwrap();
@@ -1134,8 +1128,8 @@ mod test {
     async fn test_km_decrypt_transport_non_transit() {
         let codec = Arc::new(CopyCodec {});
 
-        let mut buf = [0u8; PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 64);
+        let buf = Box::new([0u8; PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 64);
 
         let hdr = ZdpBaseHeader {
             packet_type: ZdpPacketType::EchoRequest,

@@ -1,4 +1,3 @@
-use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
 use tokio::sync::Notify;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
@@ -28,21 +27,7 @@ pub struct BufferStack<const BUFSIZ: usize> {
 }
 
 /// Owning reference to a buffer allocated from the stack.
-pub struct Buffer<const BUFSIZ: usize>(Box<[u8; BUFSIZ]>);
-
-impl<const BUFSIZ: usize> Deref for Buffer<BUFSIZ> {
-    type Target = [u8; BUFSIZ];
-
-    fn deref(&self) -> &Self::Target {
-        self.0.deref()
-    }
-}
-
-impl<const BUFSIZ: usize> DerefMut for Buffer<BUFSIZ> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.0.deref_mut()
-    }
-}
+pub type Buffer<const BUFSIZ: usize> = Box<[u8; BUFSIZ]>;
 
 #[allow(dead_code)]
 impl<const BUFSIZ: usize> BufferStack<BUFSIZ> {
@@ -67,7 +52,7 @@ impl<const BUFSIZ: usize> BufferStack<BUFSIZ> {
                 let mut bufs = self.buffers.lock().unwrap();
 
                 match bufs.pop() {
-                    Some(buf) => break Buffer(buf),
+                    Some(buf) => break buf,
                     None => (),
                 }
 
@@ -95,7 +80,7 @@ impl<const BUFSIZ: usize> BufferStack<BUFSIZ> {
 
     /// Attempts to acquire a single buffer.  Does not block.
     pub fn try_get_buffer(&self) -> Option<Buffer<BUFSIZ>> {
-        self.buffers.lock().unwrap().pop().map(|b| Buffer(b))
+        self.buffers.lock().unwrap().pop()
     }
 
     /// Blocks until at least 1 buffer can be returned.
@@ -116,7 +101,7 @@ impl<const BUFSIZ: usize> BufferStack<BUFSIZ> {
 
                 for _ in 0..to_get {
                     // note: intentional reversing!  keep bufs on top of stack hot
-                    bufs_out.push(Buffer(bufs.pop().unwrap()));
+                    bufs_out.push(bufs.pop().unwrap());
                 }
 
                 if to_get > 0 {
@@ -151,7 +136,7 @@ impl<const BUFSIZ: usize> BufferStack<BUFSIZ> {
 
         for _ in 0..to_get {
             // note: intentional reversing!  keep bufs on top of stack hot
-            bufs_out.push(Buffer(bufs.pop().unwrap()));
+            bufs_out.push(bufs.pop().unwrap());
         }
 
         to_get
@@ -161,7 +146,7 @@ impl<const BUFSIZ: usize> BufferStack<BUFSIZ> {
     pub fn put_buffer(&self, buf: Buffer<BUFSIZ>) {
         let mut bufs = self.buffers.lock().unwrap();
         let was_empty = bufs.is_empty();
-        bufs.push(buf.0);
+        bufs.push(buf);
         drop(bufs);
         if was_empty {
             self.notify.notify_waiters();
@@ -178,9 +163,9 @@ impl<const BUFSIZ: usize> BufferStack<BUFSIZ> {
             Some(first_buf) => {
                 let mut bufs = self.buffers.lock().unwrap();
                 let was_empty = bufs.is_empty();
-                bufs.push(first_buf.0);
+                bufs.push(first_buf);
                 for buf in it {
-                    bufs.push(buf.0);
+                    bufs.push(buf);
                 }
                 drop(bufs);
                 if was_empty {
@@ -208,7 +193,7 @@ mod tests {
         barrier.wait().await;
 
         // add a buffer
-        bs.put_buffer(Buffer(buf));
+        bs.put_buffer(buf);
 
         // allow gb_task to register for notifications
         barrier.wait().await;
@@ -238,7 +223,7 @@ mod tests {
         barrier.wait().await;
 
         // add a buffer
-        bs.put_buffer(Buffer(buf));
+        bs.put_buffer(buf);
 
         // allow gb_task to register for notifications
         barrier.wait().await;

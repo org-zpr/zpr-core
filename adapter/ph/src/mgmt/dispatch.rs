@@ -7,7 +7,7 @@ use crate::fastpath;
 use crate::km_multiplexor;
 use crate::link_state::LinkType;
 use crate::logging::targets::{KEY_MGMT, ZDP};
-use crate::packet::BufferPacket;
+use crate::packet::Packet;
 use crate::queues;
 use crate::zdp;
 use bytes::Buf;
@@ -24,7 +24,7 @@ use zpr_ext::zerocopy::FromBytesExt;
 pub fn dispatch_mgmt_packet_with_addr(
     asm: &Arc<Assembly>,
     peer_sa: zpr::SubstrateAddr,
-    mut pkt: BufferPacket,
+    mut pkt: Packet,
 ) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
         Ok(base_hdr) if base_hdr.0.packet_type == zdp::ZdpPacketType::KeyManagement => {
@@ -54,7 +54,7 @@ pub fn dispatch_mgmt_packet_with_addr(
 ///
 /// This function does not block, and does not perform significant processing.
 /// It merely dispatches the management packet to the correct queue.
-pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, mut pkt: BufferPacket) {
+pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, mut pkt: Packet) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
         Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
@@ -88,7 +88,7 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, mut pkt: BufferPacket
     }
 }
 
-fn handle_response(asm: &Assembly, mut pkt: BufferPacket) -> HandleMgmtResult {
+fn handle_response(asm: &Assembly, mut pkt: Packet) -> HandleMgmtResult {
     let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
@@ -115,7 +115,7 @@ fn handle_response(asm: &Assembly, mut pkt: BufferPacket) -> HandleMgmtResult {
 
 // ZPI and Base header is already gone by the time we get here.  So we expect
 // to parse starting from the KeyManagement header.
-fn handle_key_management(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMgmtResult {
+fn handle_key_management(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let Ok(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(&mut pkt) else {
         error!(target: ZDP, "KeyManagement packet arrived with unparseable header");
         return Err((HandleMgmtError::BadStructure, pkt));
@@ -154,7 +154,8 @@ fn handle_key_management(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMg
             return Err((HandleMgmtError::KeyManagementError(format!("{e:?}")), pkt));
         }
     };
-    asm.buffer_stack.put_buffer(pkt.destroy());
+    asm.buffer_stack
+        .put_buffer(pkt.destroy().try_into().unwrap());
 
     Ok(())
 }

@@ -1,7 +1,7 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
 
 use crate::net_defs;
-use crate::packet::{BufferPacket, Packet, PacketBuffer};
+use crate::packet::Packet;
 use crate::sys::TunPi;
 use crate::sys::ZprTun;
 use crate::test_packet::*;
@@ -22,7 +22,7 @@ pub enum TryEnqueueError<T> {
 }
 
 pub enum MgmtProcessorMessage {
-    Packet(BufferPacket),
+    Packet(Packet),
     TestPacket(TestPacket),
 }
 
@@ -38,10 +38,7 @@ impl MgmtProcessor {
         Self { sender }
     }
 
-    pub fn try_enqueue_packet(
-        &self,
-        packet: BufferPacket,
-    ) -> Result<(), TryEnqueueError<BufferPacket>> {
+    pub fn try_enqueue_packet(&self, packet: Packet) -> Result<(), TryEnqueueError<Packet>> {
         match self.sender.try_send(MgmtProcessorMessage::Packet(packet)) {
             Ok(()) => Ok(()),
 
@@ -89,7 +86,7 @@ impl AgentInput {
         }
     }
 
-    pub fn try_enqueue_packet<P: DropGuard<BufferPacket>>(
+    pub fn try_enqueue_packet<P: DropGuard<Packet>>(
         &self,
         mut packet: P,
     ) -> Result<(), TryEnqueueError<P>> {
@@ -134,7 +131,7 @@ impl SubstrateEgress {
         }
     }
 
-    pub async fn enqueue_packet<P: DropGuard<BufferPacket>>(
+    pub async fn enqueue_packet<P: DropGuard<Packet>>(
         &self,
         packet: P,
         dest_sa: zpr::SubstrateAddr,
@@ -160,7 +157,7 @@ impl SubstrateEgress {
     }
 
     // TODO: batch enqueue
-    pub fn try_enqueue_packet<P: DropGuard<BufferPacket>>(
+    pub fn try_enqueue_packet<P: DropGuard<Packet>>(
         &self,
         packet: P,
         dest_sa: zpr::SubstrateAddr,
@@ -189,7 +186,7 @@ impl SubstrateEgress {
 
     fn select_socket_and_set_flowinfo(
         &self,
-        packet: &Packet<impl PacketBuffer>,
+        packet: &Packet,
         mut dest_sa: zpr::SubstrateAddr,
     ) -> (&UdpSocket, std::net::SocketAddr) {
         match &mut dest_sa {
@@ -211,7 +208,7 @@ impl SubstrateEgress {
 
 /// Capture will intercept packets in the PH and dump them into a file for debugging purposes
 pub struct CapPacket {
-    pub packet: BufferPacket,
+    pub packet: Packet,
     pub timestamp: SystemTime,
     pub orig_len: usize,
 }
@@ -227,12 +224,7 @@ impl Capture {
 
     /// Blocks until packet is enqueued
     #[allow(dead_code)]
-    pub async fn enqueue_packet(
-        &self,
-        packet: BufferPacket,
-        timestamp: SystemTime,
-        orig_len: usize,
-    ) {
+    pub async fn enqueue_packet(&self, packet: Packet, timestamp: SystemTime, orig_len: usize) {
         let cap_pack: CapPacket = CapPacket {
             packet,
             timestamp,
@@ -244,10 +236,10 @@ impl Capture {
     /// Does not block
     pub fn try_enqueue_packet(
         &self,
-        packet: BufferPacket,
+        packet: Packet,
         timestamp: SystemTime,
         orig_len: usize,
-    ) -> Result<(), TryEnqueueError<BufferPacket>> {
+    ) -> Result<(), TryEnqueueError<Packet>> {
         let cap_pack: CapPacket = CapPacket {
             packet,
             timestamp,
@@ -262,8 +254,8 @@ impl Capture {
 }
 
 pub enum MgmtDispatchMessage {
-    WithLink(BufferPacket), // Link ID stored in packet metadata
-    WithAddr(zpr::SubstrateAddr, BufferPacket),
+    WithLink(Packet), // Link ID stored in packet metadata
+    WithAddr(zpr::SubstrateAddr, Packet),
 }
 
 pub struct MgmtDispatch {
@@ -277,8 +269,8 @@ impl MgmtDispatch {
 
     pub fn try_dispatch_mgmt_packet_with_link(
         &self,
-        packet: BufferPacket,
-    ) -> Result<(), TryEnqueueError<BufferPacket>> {
+        packet: Packet,
+    ) -> Result<(), TryEnqueueError<Packet>> {
         debug_assert_ne!(packet.metadata().ingress_link_id, 0);
         match self.sender.try_send(MgmtDispatchMessage::WithLink(packet)) {
             Ok(()) => Ok(()),
@@ -297,8 +289,8 @@ impl MgmtDispatch {
     pub fn try_dispatch_mgmt_packet_with_addr(
         &self,
         peer_sa: &zpr::SubstrateAddr,
-        packet: BufferPacket,
-    ) -> Result<(), TryEnqueueError<BufferPacket>> {
+        packet: Packet,
+    ) -> Result<(), TryEnqueueError<Packet>> {
         debug_assert_eq!(packet.metadata().ingress_link_id, 0);
         match self
             .sender
@@ -319,7 +311,7 @@ impl MgmtDispatch {
 }
 
 pub enum AdapterManagerMessage {
-    RequestTetherId(BufferPacket),
+    RequestTetherId(Packet),
 }
 
 pub struct AdapterManager {
@@ -342,10 +334,7 @@ impl AdapterManager {
     /// the ALT, and an attempt will be made to send the specified packet.
     ///
     /// The specified packet must have already been classified.
-    pub fn try_request_tether_id(
-        &self,
-        packet: BufferPacket,
-    ) -> Result<(), TryEnqueueError<BufferPacket>> {
+    pub fn try_request_tether_id(&self, packet: Packet) -> Result<(), TryEnqueueError<Packet>> {
         match self
             .sender
             .try_send(AdapterManagerMessage::RequestTetherId(packet))

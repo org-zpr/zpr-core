@@ -8,7 +8,7 @@ use crate::defs::*;
 use crate::link_state::LinkEvent;
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::IpAddress;
-use crate::packet::{BufferPacket, Packet};
+use crate::packet::Packet;
 use crate::zdp;
 use bytes::{Buf, BufMut};
 use std::num::NonZero;
@@ -39,10 +39,10 @@ impl From<HandleMgmtError> for counters::CounterType {
     }
 }
 
-pub type HandleMgmtResult = Result<(), (HandleMgmtError, BufferPacket)>;
+pub type HandleMgmtResult = Result<(), (HandleMgmtError, Packet)>;
 
 /// handle a Report message (RFC 6.5 § 6.3.13)
-pub async fn handle_report(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> HandleMgmtResult {
+pub async fn handle_report(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpReportHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
@@ -58,19 +58,21 @@ pub async fn handle_report(asm: &Arc<Assembly>, mut pkt: BufferPacket) -> Handle
             std::str::from_utf8(&pkt.body()[..report_data_length]).unwrap()
         );
     }
-    asm.buffer_stack.put_buffer(pkt.destroy());
+    asm.buffer_stack
+        .put_buffer(pkt.destroy().try_into().unwrap());
     Ok(())
 }
 
 /// handle a Discard message (RFC 6.5 § 6.3.1)
-pub async fn handle_discard(asm: &Arc<Assembly>, pkt: BufferPacket) -> HandleMgmtResult {
+pub async fn handle_discard(asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResult {
     // TODO print to debug log, when implemented
     info!(
         target: REPORTING,
         "Discard message received from {}",
         pkt.metadata().ingress_link_id
     );
-    asm.buffer_stack.put_buffer(pkt.destroy());
+    asm.buffer_stack
+        .put_buffer(pkt.destroy().try_into().unwrap());
     Ok(())
 }
 
@@ -78,7 +80,7 @@ pub async fn handle_discard(asm: &Arc<Assembly>, pkt: BufferPacket) -> HandleMgm
 pub async fn handle_terminate_request(
     asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
-    mut pkt: BufferPacket,
+    mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     let Ok(hdr) = zdp::ZdpTerminateLinkRequestHeader::read_from_buf(&mut pkt) else {
@@ -120,7 +122,7 @@ pub async fn handle_terminate_request(
 pub async fn handle_terminate_indication(
     asm: &Arc<Assembly>,
     _seq_num: zpr::SeqNum,
-    mut pkt: BufferPacket,
+    mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     let Ok(hdr) = zdp::ZdpTerminateLinkIndicationHeader::read_from_buf(&mut pkt) else {
@@ -140,7 +142,7 @@ pub async fn handle_terminate_indication(
 pub async fn handle_hello_request(
     asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
-    pkt: BufferPacket,
+    pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
@@ -172,7 +174,7 @@ pub async fn handle_hello_request(
 pub async fn handle_hello_response(
     asm: &Arc<Assembly>,
     _seq_num: zpr::SeqNum,
-    mut pkt: BufferPacket,
+    mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
@@ -189,7 +191,8 @@ pub async fn handle_hello_response(
         return Err((HandleMgmtError::LinkStateError, pkt));
     };
 
-    asm.buffer_stack.put_buffer(pkt.destroy());
+    asm.buffer_stack
+        .put_buffer(pkt.destroy().try_into().unwrap());
     Ok(())
 }
 
@@ -197,7 +200,7 @@ pub async fn handle_hello_response(
 pub async fn handle_register_agent_address_request(
     asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
-    mut pkt: BufferPacket,
+    mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
@@ -257,7 +260,7 @@ pub async fn handle_register_agent_address_request(
 pub async fn handle_register_agent_address_response(
     asm: &Arc<Assembly>,
     _seq_num: zpr::SeqNum,
-    pkt: BufferPacket,
+    pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     debug!(target: ZDP, "Received Register Agent Address Response for link {ingress_link_id}");
@@ -275,7 +278,7 @@ pub async fn handle_register_agent_address_response(
 pub async fn handle_bind_agent_address_request(
     asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
-    mut pkt: BufferPacket,
+    mut pkt: Packet,
 ) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpBindAgentAddressRequestHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
@@ -433,7 +436,8 @@ pub async fn handle_bind_agent_address_request(
                     assembly::AddRouteError::PeerGone,
                 )) => {
                     // peer went away; don't bother responding
-                    asm.buffer_stack.put_buffer(rsp_pkt.destroy());
+                    asm.buffer_stack
+                        .put_buffer(rsp_pkt.destroy().try_into().unwrap());
                     return Ok(());
                 }
 

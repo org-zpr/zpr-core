@@ -6,11 +6,10 @@
 //!
 //! For usage examples see the [Packet] documentation.
 
-use crate::config;
 use crate::defs::*;
 use crate::net_defs::*;
 use bytes::buf;
-use std::mem::{size_of, size_of_val};
+use std::mem::size_of;
 use zerocopy::*;
 use zpr;
 use zpr::L3Type;
@@ -146,29 +145,13 @@ use zpr_ext::std::mem::DropGuard;
 /// }
 /// ```
 
-/// A generic packet type, backed by any sort of buffer.
-///
-/// Use this type in functions which operate only on the contents of a packet,
-/// and do not interact with the buffer stack in any way.
-pub struct Packet<PktBuf> {
-    buf: PktBuf,
-}
+/// Packet backing buffers are heap-allocated slices.
+pub type PacketBuffer = Box<[u8]>;
 
-/// Blanket trait capturing all the traits needed to act as a packet backing buffer.
-pub trait PacketBuffer:
-    std::ops::DerefMut<Target = [u8; config::PACKET_BUFFER_SIZE]> + Send
-{
+/// A generic packet type, backed by a heap-allocated buffer.
+pub struct Packet {
+    buf: PacketBuffer,
 }
-impl<PktBuf: std::ops::DerefMut<Target = [u8; config::PACKET_BUFFER_SIZE]> + Send> PacketBuffer
-    for PktBuf
-{
-}
-
-/// A `Packet` backed specifically by a `Buffer` from the buffer stack.
-///
-/// Use this type in any code which moves a packet through the packet processing
-/// pipeline (ultimately starting from, or ending with, the buffer stack).
-pub type BufferPacket = Packet<crate::buffer_stack::Buffer<{ config::PACKET_BUFFER_SIZE }>>;
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout)]
 #[repr(C)]
@@ -249,31 +232,36 @@ impl std::fmt::Debug for PacketMetadata {
     }
 }
 
-const _: () = assert!(
-    size_of::<PacketMetadata>() <= config::PACKET_BUFFER_SIZE,
-    "Metadata must be shorter than the packet buffer"
-);
-
-pub const PACKET_BUFFER_MIN_BODY_OFFSET: usize = size_of::<PacketMetadata>();
-
-/// The maximum size packet body which can be referenced by a `Packet`.
 #[allow(dead_code)]
-pub const PACKET_BUFFER_MAX_BODY_SIZE: usize =
-    config::PACKET_BUFFER_SIZE - PACKET_BUFFER_MIN_BODY_OFFSET;
+impl Packet {
+    pub const MIN_BODY_OFFSET: usize = size_of::<PacketMetadata>();
 
-#[allow(dead_code)]
-impl<PktBuf: PacketBuffer> Packet<PktBuf> {
+    /// The maximum size packet body which can be referenced by this `Packet`.
+    pub const fn max_body_size(&self) -> usize {
+        Self::max_body_size_for(self.buf.len())
+    }
+
+    /// The maximum size packet body which can be referenced by a `Packet`
+    /// whose backing buffer is the given length.
+    pub const fn max_body_size_for(buf_size: usize) -> usize {
+        buf_size - Self::MIN_BODY_OFFSET
+    }
+
     /// Initialize a buffer as a packet buffer, returning an exclusive handle to it.
     /// `headroom` indicates room to keep free at packet start for possible extension.
-    pub fn new(buf: PktBuf, headroom: usize) -> Self {
-        Self::new_with_existing_data(buf, PACKET_BUFFER_MIN_BODY_OFFSET + headroom, 0)
+    pub fn new(buf: PacketBuffer, headroom: usize) -> Self {
+        assert!(
+            buf.len() >= size_of::<PacketMetadata>(),
+            "packet buffer must be large enough to contain metadata"
+        );
+        Self::new_with_existing_data(buf, Self::MIN_BODY_OFFSET + headroom, 0)
     }
 
     /// Same as `new()`, but accepts a `DropGuard`-protected buffer, and produces
     /// a `DropGuard`-protected packet buffer, so manually calling `destroy()`
     /// is unnecessary.
-    pub fn new_guarded<B: DropGuard<PktBuf> + Send>(
-        buf: B,
+    pub fn new_guarded(
+        buf: impl DropGuard<PacketBuffer> + Send,
         headroom: usize,
     ) -> impl DropGuard<Self> + Send {
         buf.map(move |b| Self::new(b, headroom), |p| p.destroy())
@@ -281,17 +269,17 @@ impl<PktBuf: PacketBuffer> Packet<PktBuf> {
 
     /// Consumes a packet handle, returning the underlying buffer.
     #[must_use]
-    pub fn destroy(self) -> PktBuf {
+    pub fn destroy(self) -> PacketBuffer {
         self.buf
     }
 
     /// Initialize a buffer with existing packet data as a packet buffer.
     /// `offset` is offset of data within buffer.
-    /// It must be at least equal to `PACKET_BUFFER_MIN_BODY_OFFSET`.
-    pub fn new_with_existing_data(buf: PktBuf, offset: usize, len: usize) -> Self {
-        assert!(offset >= PACKET_BUFFER_MIN_BODY_OFFSET);
-        assert!(len <= size_of_val(&*buf));
-        assert!(offset <= size_of_val(&*buf) - len);
+    /// It must be at least equal to `Self::MIN_BODY_OFFSET`.
+    pub fn new_with_existing_data(buf: PacketBuffer, offset: usize, len: usize) -> Self {
+        assert!(offset >= Self::MIN_BODY_OFFSET);
+        assert!(len <= buf.len());
+        assert!(offset <= buf.len() - len);
         let mut pkt = Packet { buf };
         let md = pkt.metadata_mut();
         md.offset = offset;
@@ -302,42 +290,34 @@ impl<PktBuf: PacketBuffer> Packet<PktBuf> {
     }
 
     /// Copy this packet's metadata, data and layout into a new buffer, returning a handle for it.
-    pub fn clone_into<OtherPktBuf: PacketBuffer>(&self, buf: OtherPktBuf) -> Packet<OtherPktBuf> {
+    pub fn clone_into(&self, buf: PacketBuffer) -> Packet {
         self.clone_prefix_into_with_headroom(buf, self.headroom_available(), self.body().len())
     }
 
     /// Like `clone_into()`, but only copy a prefix of the packet's data.
-    pub fn clone_prefix_into<OtherPktBuf: PacketBuffer>(
-        &self,
-        buf: OtherPktBuf,
-        len: usize,
-    ) -> Packet<OtherPktBuf> {
+    pub fn clone_prefix_into(&self, buf: PacketBuffer, len: usize) -> Packet {
         self.clone_prefix_into_with_headroom(buf, self.headroom_available(), len)
     }
 
     /// Copy this packet's metadata and data into a new buffer, returning a handle for it.
     /// The packet body will be positioned to leave the specified amount of headroom in the new buffer.
-    pub fn clone_into_with_headroom<OtherPktBuf: PacketBuffer>(
-        &self,
-        buf: OtherPktBuf,
-        headroom: usize,
-    ) -> Packet<OtherPktBuf> {
+    pub fn clone_into_with_headroom(&self, buf: PacketBuffer, headroom: usize) -> Packet {
         self.clone_prefix_into_with_headroom(buf, headroom, self.body().len())
     }
 
     /// Like `clone_into_with_headroom()`, but only copy a prefix of the packet's data.
-    pub fn clone_prefix_into_with_headroom<OtherPktBuf: PacketBuffer>(
+    pub fn clone_prefix_into_with_headroom(
         &self,
-        mut buf: OtherPktBuf,
+        mut buf: PacketBuffer,
         headroom: usize,
         len: usize,
-    ) -> Packet<OtherPktBuf> {
+    ) -> Packet {
         let body = self.body();
         assert!(len <= body.len());
-        assert!(headroom <= size_of_val(&*buf) - len - PACKET_BUFFER_MIN_BODY_OFFSET);
+        assert!(headroom <= buf.len() - len - Self::MIN_BODY_OFFSET);
         buf[..size_of::<PacketMetadata>()]
             .copy_from_slice(&self.buf[..size_of::<PacketMetadata>()]);
-        let offset = PACKET_BUFFER_MIN_BODY_OFFSET + headroom;
+        let offset = Self::MIN_BODY_OFFSET + headroom;
         buf[offset..offset + len].copy_from_slice(body);
         let mut pkt = Packet { buf };
         pkt.metadata_mut().offset = offset;
@@ -349,7 +329,7 @@ impl<PktBuf: PacketBuffer> Packet<PktBuf> {
     pub fn metadata(&self) -> &PacketMetadata {
         let opt = PacketMetadata::ref_from_bytes(&self.buf[..size_of::<PacketMetadata>()]);
         unsafe {
-            // SAFETY: we know this fits in PACKET_BUFFER_SIZE
+            // SAFETY: we know this fits in our buffer
             opt.unwrap_unchecked()
         }
     }
@@ -358,7 +338,7 @@ impl<PktBuf: PacketBuffer> Packet<PktBuf> {
     pub fn metadata_mut(&mut self) -> &mut PacketMetadata {
         let opt = PacketMetadata::mut_from_bytes(&mut self.buf[..size_of::<PacketMetadata>()]);
         unsafe {
-            // SAFETY: we know this fits in PACKET_BUFFER_SIZE
+            // SAFETY: we know this fits in our buffer
             opt.unwrap_unchecked()
         }
     }
@@ -382,7 +362,7 @@ impl<PktBuf: PacketBuffer> Packet<PktBuf> {
         let (md, bd) = self.buf.split_at_mut(size_of::<PacketMetadata>());
         let opt = PacketMetadata::mut_from_bytes(md);
         let md = unsafe {
-            // SAFETY: we know this fits in PACKET_BUFFER_SIZE
+            // SAFETY: we know this fits in our buffer
             opt.unwrap_unchecked()
         };
         let offset = md.offset - size_of::<PacketMetadata>();
@@ -392,7 +372,7 @@ impl<PktBuf: PacketBuffer> Packet<PktBuf> {
 
     /// Returns the amount of space available for extension of the start of the packet.
     pub fn headroom_available(&self) -> usize {
-        self.metadata().offset - PACKET_BUFFER_MIN_BODY_OFFSET
+        self.metadata().offset - Self::MIN_BODY_OFFSET
     }
 
     /// Extend the start of the packet into available headroom by the given amount,
@@ -467,7 +447,7 @@ impl<PktBuf: PacketBuffer> Packet<PktBuf> {
     }
 }
 
-impl<PktBuf: PacketBuffer> buf::Buf for Packet<PktBuf> {
+impl buf::Buf for Packet {
     //! Reading from a `Packet` using the `Buf` interface consumes data
     //! from the front of the packet.
 
@@ -492,14 +472,14 @@ impl<PktBuf: PacketBuffer> buf::Buf for Packet<PktBuf> {
     }
 }
 
-unsafe impl<PktBuf: PacketBuffer> buf::BufMut for Packet<PktBuf> {
+unsafe impl buf::BufMut for Packet {
     //! Writing to a `Packet` using the `BufMut` interface appends data
     //! into the tailroom and the end of the packet.
 
     /// This indicates how much tailroom is remaining.
     fn remaining_mut(&self) -> usize {
         let md = self.metadata();
-        size_of_val(&*self.buf) - (md.offset + md.len)
+        self.buf.len() - (md.offset + md.len)
     }
 
     /// Provides a reference to a portion of the remaining tailroom.
@@ -517,7 +497,7 @@ unsafe impl<PktBuf: PacketBuffer> buf::BufMut for Packet<PktBuf> {
     }
 }
 
-impl<PktBuf: PacketBuffer> std::fmt::Debug for Packet<PktBuf> {
+impl std::fmt::Debug for Packet {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         writeln!(f, "\n=== Begin dumping packet info ===")?;
         self.metadata().fmt(f)?;
@@ -529,104 +509,108 @@ impl<PktBuf: PacketBuffer> std::fmt::Debug for Packet<PktBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config;
     use bytes::{Buf, BufMut};
 
     #[test]
     fn lifetime_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let pkt = Packet::new(&mut buf, 0);
-        let ptr_buf = pkt.destroy().as_ptr();
-        assert_eq!(ptr_buf, (&buf).as_ptr());
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let ptr_buf = buf.as_ptr();
+        let pkt = Packet::new(buf, 0);
+        let ptr_buf2 = pkt.destroy().as_ptr();
+        assert_eq!(ptr_buf2, ptr_buf);
     }
 
     #[test]
     fn basic_headroom_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let pkt = Packet::new(&mut buf, 123);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let pkt = Packet::new(buf, 123);
         assert_eq!(pkt.headroom_available(), 123);
     }
 
     #[test]
     fn max_headroom_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let new_coke = Packet::new(&mut buf, PACKET_BUFFER_MAX_BODY_SIZE);
-        assert_eq!(new_coke.headroom_available(), PACKET_BUFFER_MAX_BODY_SIZE);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let new_coke = Packet::new(buf, Packet::max_body_size_for(config::PACKET_BUFFER_SIZE));
+        assert_eq!(new_coke.headroom_available(), new_coke.max_body_size());
     }
 
     #[test]
     #[should_panic]
     fn too_much_headroom_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        Packet::new(&mut buf, PACKET_BUFFER_MAX_BODY_SIZE + 1);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        Packet::new(
+            buf,
+            Packet::max_body_size_for(config::PACKET_BUFFER_SIZE) + 1,
+        );
     }
 
     #[test]
     #[should_panic]
     fn way_too_much_headroom_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        Packet::new(&mut buf, usize::MAX);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        Packet::new(buf, usize::MAX);
     }
 
     #[test]
     #[should_panic]
     fn existing_data_way_too_large_offset() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        Packet::new_with_existing_data(&mut buf, usize::MAX, 0);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        Packet::new_with_existing_data(buf, usize::MAX, 0);
     }
 
     #[test]
     #[should_panic]
     fn existing_data_way_too_large_len() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        Packet::new_with_existing_data(&mut buf, PACKET_BUFFER_MIN_BODY_OFFSET, usize::MAX);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET, usize::MAX);
     }
 
     #[test]
     #[should_panic]
     fn existing_data_too_small_offset() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        Packet::new_with_existing_data(&mut buf, std::mem::size_of::<PacketMetadata>() - 1, 0);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        Packet::new_with_existing_data(buf, std::mem::size_of::<PacketMetadata>() - 1, 0);
     }
 
     #[test]
     fn existing_data() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let offset = PACKET_BUFFER_MIN_BODY_OFFSET + 123;
+        let mut buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let offset = Packet::MIN_BODY_OFFSET + 123;
         let data = [1, 2, 3, 4, 5, 6, 7, 8].as_slice();
         buf[offset..offset + 8].copy_from_slice(data);
-        let pkt = Packet::new_with_existing_data(&mut buf, PACKET_BUFFER_MIN_BODY_OFFSET + 123, 8);
+        let pkt = Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET + 123, 8);
         assert_eq!(pkt.body(), data);
     }
 
     #[test]
     fn clone_headroom_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let pkt = Packet::new(&mut buf, 123);
-        let mut buf2 = [0u8; config::PACKET_BUFFER_SIZE];
-        let pkt2 = pkt.clone_into(&mut buf2);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let pkt = Packet::new(buf, 123);
+        let buf2 = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let pkt2 = pkt.clone_into(buf2);
         assert_eq!(pkt2.headroom_available(), 123);
     }
 
     #[test]
     fn clone_adjusted_headroom_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let pkt = Packet::new(&mut buf, 123);
-        let mut buf2 = [0u8; config::PACKET_BUFFER_SIZE];
-        let pkt2 = pkt.clone_into_with_headroom(&mut buf2, 456);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let pkt = Packet::new(buf, 123);
+        let buf2 = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let pkt2 = pkt.clone_into_with_headroom(buf2, 456);
         assert_eq!(pkt2.headroom_available(), 456);
     }
 
     #[test]
     fn clone_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let offset = PACKET_BUFFER_MIN_BODY_OFFSET + 123;
+        let mut buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let offset = Packet::MIN_BODY_OFFSET + 123;
         let data = [1, 2, 3, 4, 5, 6, 7, 8].as_slice();
         buf[offset..offset + 8].copy_from_slice(data);
-        let mut pkt =
-            Packet::new_with_existing_data(&mut buf, PACKET_BUFFER_MIN_BODY_OFFSET + 123, 8);
+        let mut pkt = Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET + 123, 8);
         pkt.metadata_mut().ingress_stream_id = 100;
-        let mut buf2 = [0u8; config::PACKET_BUFFER_SIZE];
-        let pkt2 = pkt.clone_into_with_headroom(&mut buf2, 456);
+        let buf2 = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let pkt2 = pkt.clone_into_with_headroom(buf2, 456);
         assert_eq!(
             pkt.metadata().ingress_stream_id,
             pkt2.metadata().ingress_stream_id
@@ -636,8 +620,8 @@ mod tests {
 
     #[test]
     fn alloc_headroom_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 123);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 123);
         let hdr = pkt.alloc_zeroed_headroom(123);
         for &mut x in hdr {
             assert_eq!(x, 0);
@@ -647,23 +631,23 @@ mod tests {
     #[test]
     #[should_panic]
     fn alloc_too_much_headroom_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 123);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 123);
         pkt.alloc_zeroed_headroom(124);
     }
 
     #[test]
     #[should_panic]
     fn alloc_way_too_much_headroom_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 0);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 0);
         pkt.alloc_zeroed_headroom(usize::MAX);
     }
 
     #[test]
     fn write_header_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 4);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 4);
         let data: [u8; 4] = [1, 2, 3, 4];
         *pkt.alloc_zeroed_header() = data;
         assert_eq!(pkt.body()[..4], data);
@@ -671,23 +655,21 @@ mod tests {
 
     #[test]
     fn buf_read_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let offset = PACKET_BUFFER_MIN_BODY_OFFSET + 123;
+        let mut buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let offset = Packet::MIN_BODY_OFFSET + 123;
         let data = [1, 2, 3, 4, 5, 6, 7, 8].as_slice();
         buf[offset..offset + 8].copy_from_slice(data);
-        let mut pkt =
-            Packet::new_with_existing_data(&mut buf, PACKET_BUFFER_MIN_BODY_OFFSET + 123, 8);
+        let mut pkt = Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET + 123, 8);
         assert_eq!(pkt.get_u64(), 0x0102030405060708u64);
     }
 
     #[test]
     fn buf_read_twice_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let offset = PACKET_BUFFER_MIN_BODY_OFFSET + 123;
+        let mut buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let offset = Packet::MIN_BODY_OFFSET + 123;
         let data = [1, 2, 3, 4, 5, 6, 7, 8].as_slice();
         buf[offset..offset + 8].copy_from_slice(data);
-        let mut pkt =
-            Packet::new_with_existing_data(&mut buf, PACKET_BUFFER_MIN_BODY_OFFSET + 123, 8);
+        let mut pkt = Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET + 123, 8);
         assert_eq!(pkt.get_u32(), 0x01020304u32);
         assert_eq!(pkt.get_u32(), 0x05060708u32);
     }
@@ -695,27 +677,26 @@ mod tests {
     #[test]
     #[should_panic]
     fn buf_read_too_much_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let offset = PACKET_BUFFER_MIN_BODY_OFFSET + 123;
+        let mut buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let offset = Packet::MIN_BODY_OFFSET + 123;
         let data = [1, 2, 3, 4, 5, 6, 7].as_slice();
         buf[offset..offset + 8].copy_from_slice(data);
-        let mut pkt =
-            Packet::new_with_existing_data(&mut buf, PACKET_BUFFER_MIN_BODY_OFFSET + 123, 8);
+        let mut pkt = Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET + 123, 8);
         let _ = pkt.get_u64();
     }
 
     #[test]
     fn buf_write_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 0);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 0);
         pkt.put_u64(0x0102030405060708u64);
         assert_eq!(pkt.body(), [1, 2, 3, 4, 5, 6, 7, 8]);
     }
 
     #[test]
     fn buf_write_twice_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 0);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 0);
         pkt.put_u32(0x01020304u32);
         pkt.put_u32(0x05060708u32);
         assert_eq!(pkt.body(), [1, 2, 3, 4, 5, 6, 7, 8]);
@@ -724,15 +705,15 @@ mod tests {
     #[test]
     #[should_panic]
     fn buf_write_no_tail_room_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, PACKET_BUFFER_MAX_BODY_SIZE);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, Packet::max_body_size_for(config::PACKET_BUFFER_SIZE));
         pkt.put_u8(1);
     }
 
     #[test]
     fn shrink_by_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 0);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 0);
         pkt.put_u64(0x0102030405060708u64);
         pkt.shrink_by(2);
         assert_eq!(pkt.body(), [1, 2, 3, 4, 5, 6]);
@@ -741,8 +722,8 @@ mod tests {
     #[test]
     #[should_panic]
     fn shrink_by_too_much_test() {
-        let mut buf = [0u8; config::PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 0);
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 0);
         pkt.put_u64(0x0102030405060708u64);
         pkt.shrink_by(10);
     }

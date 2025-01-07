@@ -89,8 +89,11 @@ pub async fn launch(config: Config, asm: Arc<Assembly>, mut queue: mpsc::Receive
             None => (),
         }
 
-        asm.buffer_stack
-            .put_buffers(messages.drain(..).map(|cap_pack| cap_pack.packet.destroy()));
+        asm.buffer_stack.put_buffers(
+            messages
+                .drain(..)
+                .map(|cap_pack| cap_pack.packet.destroy().try_into().unwrap()),
+        );
     }
 }
 
