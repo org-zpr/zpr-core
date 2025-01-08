@@ -8,6 +8,35 @@ use crate::lex::{Token, TokenType};
 use crate::ptypes::{AllowClause, Attribute, Class, ClassFlavor, Clause};
 use crate::putil;
 
+#[derive(Debug, Default)]
+struct ParseAllowState {
+    root_tok: Token,
+    endpoint_clause: Option<Clause>,
+    user_clause: Option<Clause>,
+    service_clause: Option<Clause>,
+}
+
+impl ParseAllowState {
+    fn new(root_tok: Token) -> ParseAllowState {
+        ParseAllowState {
+            root_tok,
+            ..Default::default()
+        }
+    }
+
+    /// This consumes all the clauses or panics.
+    fn to_allow_clause(&mut self) -> AllowClause {
+        AllowClause {
+            endpoint: self
+                .endpoint_clause
+                .take()
+                .expect("endpoint clause not set"),
+            user: self.user_clause.take().expect("user clause not set"),
+            service: self.service_clause.take().expect("service clause not set"),
+        }
+    }
+}
+
 // First token is an ALLOW which is checked by caller.
 pub fn parse_allow(
     allow_statement: &[Token],
@@ -22,34 +51,63 @@ pub fn parse_allow(
     }
 
     let root_tok = &allow_statement[0];
+    let mut parse_state = ParseAllowState::new(root_tok.clone());
 
-    // The full syntax with three clauses looks like this:
-    //
-    //   allow <endpoint-clause> WITH <user-clause> TO ACCESS <service-clause>
-    //
-    // But it is possible to omit with the endpoint or user clause which we interpret as
-    // all endpoints or all users.
-    //
-    // First we assume endpoint clause is omitted, and just try to parse a user clause
-    // up to a TO ACCESS.
-    //
-    // This fails if first clause type is not USER.  When that happens we assume that
-    // user clause is omitted so try to parse an endpoint clause up to a TO ACCESS.
-    //
-    // This fails if we find a WITH followed by a USER clause.  In that case we parse
-    // all three clauses.
-    //
-
-    let mut endpoint_clause: Option<Clause> = None;
-    let mut user_clause: Option<Clause> = None;
-
-    // Assume there is no endpoint clause and attempt to parse a user clause that terminates with TO ACCESS.
+    // A place to stash tokens -- used if we end up having to parse the
+    // full two clauses of endpint and user.
+    let tokens_remain: Vec<Token>;
 
     let mut tokens = allow_statement[1..].iter().peekable();
-    let mut ps = PState::new(root_tok);
+    if !try_parse_allow_no_endpoint_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?
+    {
+        // Attempt 1 did not parse, so try again this time assuming no user clause.
+        tokens = allow_statement[1..].iter().peekable();
+        if !try_parse_allow_no_user_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?
+        {
+            // Attempt 2 did not parse, so now we try to parse both a user and endpoint clause.
+            // This must succeed or it is compilation fail.
+            tokens_remain = parse_allow_endpoint_and_user_clauses(
+                &mut parse_state,
+                allow_statement,
+                classes_idx,
+                classes_map,
+            )?;
+            tokens = tokens_remain.iter().peekable();
+        }
+    }
+
+    // At this point we have a valid endpoint and user clause.  Just need to parse the final service clause.
+    if parse_state.endpoint_clause.is_none() {
+        panic!("assertion fails - no endpoint clause");
+    }
+    if parse_state.user_clause.is_none() {
+        panic!("assertion fails - no user clause");
+    }
+
+    // The remaining tokens should start with "to access ..." which we pass to the service class parser.
+    parse_allow_service_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
+
+    Ok(parse_state.to_allow_clause())
+}
+
+/// Assume there is only a user clause (no endpoint clause).
+///
+/// Attempt to parse the allow statement user and endpoint clauses while assuming
+/// there is no endpoint clause (so will be default).  If this succeeds, it sets the
+/// user and endpoint clauses in the [ParseAllowState].
+fn try_parse_allow_no_endpoint_clause<'a, I>(
+    pa_state: &mut ParseAllowState,
+    tokens: &mut Peekable<I>,
+    classes_idx: &HashMap<String, String>,
+    classes_map: &HashMap<String, Class>,
+) -> Result<bool, CompilationError>
+where
+    I: Iterator<Item = &'a Token>,
+{
+    let mut ps = PState::new(&pa_state.root_tok);
 
     match ps.parse_tags_attrs_and_classname(
-        &mut tokens,
+        tokens,
         classes_idx,
         &ParseOpts::stop_at(TokenType::To),
         "possible user clause",
@@ -59,127 +117,179 @@ pub fn parse_allow(
             let cn = ps.class_name.as_ref().unwrap();
             if classes_map.get(cn).unwrap().flavor == ClassFlavor::User {
                 // We guessed correctly. Endpoint clause is missing.
-                endpoint_clause = Some(Clause::new("endpoint", root_tok.clone()));
+                pa_state.endpoint_clause = Some(Clause::new("endpoint", pa_state.root_tok.clone()));
                 let uc = ps.to_clause("user")?;
-                user_clause = Some(uc);
+                pa_state.user_clause = Some(uc);
+                Ok(true)
+            } else {
+                Ok(false)
             }
         }
         Err(_) => {
             // Parse did not work but may be just because there is actually an endpoint clause present.
+            Ok(false)
+        }
+    }
+}
+
+/// Assume there is only an endpoint clause (no user clause).
+///
+/// Attempt to parse the allow statement user and endpoint clauses while assuming
+/// there is no user clause (so will be default).  If this succeeds, it sets the
+/// user and endpoint clauses in the [ParseAllowState].
+fn try_parse_allow_no_user_clause<'a, I>(
+    pa_state: &mut ParseAllowState,
+    tokens: &mut Peekable<I>,
+    classes_idx: &HashMap<String, String>,
+    classes_map: &HashMap<String, Class>,
+) -> Result<bool, CompilationError>
+where
+    I: Iterator<Item = &'a Token>,
+{
+    let mut ps = PState::new(&pa_state.root_tok);
+
+    match ps.parse_tags_attrs_and_classname(
+        tokens,
+        classes_idx,
+        &ParseOpts::stop_at(TokenType::To),
+        "possible endpoint clause",
+    ) {
+        Ok(_) => {
+            // This is a good parse if we actually got an endpoint flavor class.
+            let cn = ps.class_name.as_ref().unwrap();
+            if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
+                // We guessed correctly. User clause is missing.
+                pa_state.user_clause = Some(Clause::new("user", pa_state.root_tok.clone()));
+                let ec = ps.to_clause("endpoint")?;
+                pa_state.endpoint_clause = Some(ec);
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        }
+        Err(_) => {
+            // Parse failed, so we will need to try to parse all three clauses.
+            Ok(false)
+        }
+    }
+}
+
+/// Will parse case when both an endpoint and user clause is specified in the
+/// allow statement.
+///
+/// Is a little tricky since the endpoint clause may have its own WITH clause
+/// otherwise/and the WITH clause is what separates the endpoint and user clauses so
+/// when we get to the first WITH we don't know if this is a seperator or not.
+///
+/// Do to this complexity, unlike the other parse helper functions, this one takes
+/// in the full allow statement and then returns the tokens remaining.
+fn parse_allow_endpoint_and_user_clauses(
+    pa_state: &mut ParseAllowState,
+    allow_statement: &[Token],
+    classes_idx: &HashMap<String, String>,
+    classes_map: &HashMap<String, Class>,
+) -> Result<Vec<Token>, CompilationError> {
+    // Third and final try, try to parse endpoint and user clauses.
+
+    // Parse an endpoint clause. This MAY be terminated by a WITH token, or it may use with
+    // to add attributes and then have a WITH token later.
+    //
+    // We try the probably less common case first: the endpoint clause has its own WITH.
+
+    let mut tokens = allow_statement[1..].iter().peekable();
+    let mut ps = PState::new(&pa_state.root_tok);
+
+    match ps.parse_tags_attrs_and_classname(
+        &mut tokens,
+        classes_idx,
+        &ParseOpts::stop_at_after_times(TokenType::With, 2),
+        "endpoint clause",
+    ) {
+        Ok(_) => {
+            // great!
+        }
+        Err(ref e) if matches!(e, CompilationError::MultipleClassNames(_, _, _)) => {
+            // Pretty sure this is only error that indicates we attempted wrong parse.
+            tokens = allow_statement[1..].iter().peekable();
+            let mut ps = PState::new(&pa_state.root_tok);
+            ps.parse_tags_attrs_and_classname(
+                &mut tokens,
+                classes_idx,
+                &ParseOpts::stop_at(TokenType::With),
+                "endpoint clause",
+            )?;
+        }
+        Err(e) => {
+            return Err(e);
         }
     }
 
-    if user_clause.is_none() {
-        // Second try - Assume there is no user clause and attempt to parse an endpoint clause up to TO ACCESS.
-
-        tokens = allow_statement[1..].iter().peekable();
-        let mut ps = PState::new(root_tok);
-
-        match ps.parse_tags_attrs_and_classname(
-            &mut tokens,
-            classes_idx,
-            &ParseOpts::stop_at(TokenType::To),
-            "possible endpoint clause",
-        ) {
-            Ok(_) => {
-                // This is a good parse if we actually got an endpoint flavor class.
-                let cn = ps.class_name.as_ref().unwrap();
-                if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
-                    // We guessed correctly. User clause is missing.
-                    user_clause = Some(Clause::new("user", root_tok.clone()));
-                    let ec = ps.to_clause("endpoint")?;
-                    endpoint_clause = Some(ec);
-                }
-            }
-            Err(_) => {
-                // Parse failed, so we will need to try to parse all three clauses.
-            }
-        }
+    // The class we just parsed needs to be a defined endpoint type.
+    let cn = ps.class_name.as_ref().unwrap();
+    if classes_map.get(cn).unwrap().flavor != ClassFlavor::Endpoint {
+        return Err(CompilationError::ParseError(
+            format!("not an endpoint class: '{}'", cn),
+            pa_state.root_tok.line,
+            pa_state.root_tok.col,
+        ));
     }
+    let ec = ps.to_clause("endpoint")?;
+    pa_state.endpoint_clause = Some(ec);
 
-    if user_clause.is_none() {
-        // Third and final try, try to parse endpoint and user clauses.
+    // Previous parse stopped at WITH.
+    putil::require_tt(
+        &pa_state.root_tok,
+        tokens.next(),
+        "WITH",
+        "allow",
+        TokenType::With,
+    )?;
 
-        // Parse an endpoint clause. This MAY be terminated by a WITH token, or it may use with
-        // to add attributes and then have a WITH token later.
-        //
-        // We try the probably less common case first: the endpoint clause has its own WITH.
-        tokens = allow_statement[1..].iter().peekable();
-        let mut ps = PState::new(root_tok);
+    ps = PState::new(&pa_state.root_tok);
+    ps.parse_tags_attrs_and_classname(
+        &mut tokens,
+        classes_idx,
+        &ParseOpts::stop_at(TokenType::To),
+        "user clause",
+    )?;
 
-        match ps.parse_tags_attrs_and_classname(
-            &mut tokens,
-            classes_idx,
-            &ParseOpts::stop_at_after_times(TokenType::With, 2),
-            "endpoint clause",
-        ) {
-            Ok(_) => {
-                // great!
-            }
-            Err(ref e) if matches!(e, CompilationError::MultipleClassNames(_, _, _)) => {
-                // Pretty sure this is only error that indicates we attempted wrong parse.
-                tokens = allow_statement[1..].iter().peekable();
-                let mut ps = PState::new(root_tok);
-                ps.parse_tags_attrs_and_classname(
-                    &mut tokens,
-                    classes_idx,
-                    &ParseOpts::stop_at(TokenType::With),
-                    "endpoint clause",
-                )?;
-            }
-            Err(e) => {
-                return Err(e);
-            }
-        }
-
-        // The class we just parsed needs to be a defined endpoint type.
-        let cn = ps.class_name.as_ref().unwrap();
-        if classes_map.get(cn).unwrap().flavor != ClassFlavor::Endpoint {
-            return Err(CompilationError::ParseError(
-                format!("not an endpoint class: '{}'", cn),
-                root_tok.line,
-                root_tok.col,
-            ));
-        }
-        let ec = ps.to_clause("endpoint")?;
-        endpoint_clause = Some(ec);
-
-        // Previous parse stopped at WITH.
-        putil::require_tt(root_tok, tokens.next(), "WITH", "allow", TokenType::With)?;
-
-        ps = PState::new(root_tok);
-        ps.parse_tags_attrs_and_classname(
-            &mut tokens,
-            classes_idx,
-            &ParseOpts::stop_at(TokenType::To),
-            "user clause",
-        )?;
-
-        let cn = ps.class_name.as_ref().unwrap();
-        if classes_map.get(cn).unwrap().flavor != ClassFlavor::User {
-            return Err(CompilationError::ParseError(
-                format!("not a user class: '{}'", cn),
-                root_tok.line,
-                root_tok.col,
-            ));
-        }
-        let uc = ps.to_clause("user")?;
-        user_clause = Some(uc);
+    let cn = ps.class_name.as_ref().unwrap();
+    if classes_map.get(cn).unwrap().flavor != ClassFlavor::User {
+        return Err(CompilationError::ParseError(
+            format!("not a user class: '{}'", cn),
+            pa_state.root_tok.line,
+            pa_state.root_tok.col,
+        ));
     }
+    let uc = ps.to_clause("user")?;
+    pa_state.user_clause = Some(uc);
 
-    // At this point we have a valid endpoint and user clause.  Just need to parse the final service clause.
-    if endpoint_clause.is_none() {
-        panic!("program error - no endpoint clause");
-    }
-    if user_clause.is_none() {
-        panic!("program error - no user clause");
-    }
+    // Gather up (and copy) remaining tokens and return them.
+    Ok(tokens.cloned().collect())
+}
 
+/// Parse the final bit of the allow statement which is the service clause.
+/// The passed tokens MUST start with "TO ACCESS".
+fn parse_allow_service_clause<'a, I>(
+    pa_state: &mut ParseAllowState,
+    tokens: &mut Peekable<I>,
+    classes_idx: &HashMap<String, String>,
+    classes_map: &HashMap<String, Class>,
+) -> Result<(), CompilationError>
+where
+    I: Iterator<Item = &'a Token>,
+{
     // Next token sequence better be TO ACCESS.
     // TODO: Maybe better to have single token TO_ACCESS ?
-    putil::require_tt(root_tok, tokens.next(), "TO", "allow", TokenType::To)?;
     putil::require_tt(
-        root_tok,
+        &pa_state.root_tok,
+        tokens.next(),
+        "TO",
+        "allow",
+        TokenType::To,
+    )?;
+    putil::require_tt(
+        &pa_state.root_tok,
         tokens.next(),
         "ACCESS",
         "allow",
@@ -187,9 +297,9 @@ pub fn parse_allow(
     )?;
 
     // Need a service clause now -- parse to end of statement.
-    ps = PState::new(root_tok);
+    let mut ps = PState::new(&pa_state.root_tok);
     ps.parse_tags_attrs_and_classname(
-        &mut tokens,
+        tokens,
         classes_idx,
         &ParseOpts::default(),
         "service clause",
@@ -199,17 +309,14 @@ pub fn parse_allow(
     if classes_map.get(cn).unwrap().flavor != ClassFlavor::Service {
         return Err(CompilationError::ParseError(
             format!("not a service class: '{}'", cn),
-            root_tok.line,
-            root_tok.col,
+            pa_state.root_tok.line,
+            pa_state.root_tok.col,
         ));
     }
     let service_clause = ps.to_clause("service")?;
+    pa_state.service_clause = Some(service_clause);
 
-    Ok(AllowClause {
-        endpoint: endpoint_clause.unwrap(),
-        user: user_clause.unwrap(),
-        service: service_clause,
-    })
+    Ok(())
 }
 
 struct PState {
@@ -351,8 +458,8 @@ impl PState {
                 }
                 _ => {
                     let tok = tokens.next().unwrap();
-                    return Err(CompilationError::ParseError(
-                        format!("syntax error in {} ({:?})", context, tok.tt),
+                    return Err(CompilationError::SyntaxError(
+                        format!("{} ({:?})", context, tok.tt),
                         tok.line,
                         tok.col,
                     ));
