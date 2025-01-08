@@ -6,6 +6,7 @@ use crate::zplstr::{ZPLStr, ZPLStrBuilder};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenType {
+    Undefined, // default value, never parsed
     Allow,
     Define,
     With,
@@ -67,6 +68,16 @@ impl Token {
 
     pub fn new(tt: TokenType, line: usize, col: usize) -> Token {
         Token { tt, line, col }
+    }
+}
+
+impl Default for Token {
+    fn default() -> Self {
+        Token {
+            tt: TokenType::Undefined,
+            line: 0,
+            col: 0,
+        }
     }
 }
 

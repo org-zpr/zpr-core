@@ -59,11 +59,7 @@ pub fn parse_allow(
             let cn = ps.class_name.as_ref().unwrap();
             if classes_map.get(cn).unwrap().flavor == ClassFlavor::User {
                 // We guessed correctly. Endpoint clause is missing.
-                endpoint_clause = Some(Clause {
-                    class: "endpoint".to_string(),
-                    class_tok: Some(root_tok.clone()),
-                    with: Vec::new(),
-                });
+                endpoint_clause = Some(Clause::new("endpoint", root_tok.clone()));
                 let uc = ps.to_clause("user")?;
                 user_clause = Some(uc);
             }
@@ -90,11 +86,7 @@ pub fn parse_allow(
                 let cn = ps.class_name.as_ref().unwrap();
                 if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
                     // We guessed correctly. User clause is missing.
-                    user_clause = Some(Clause {
-                        class: "user".to_string(),
-                        class_tok: Some(root_tok.clone()),
-                        with: Vec::new(),
-                    });
+                    user_clause = Some(Clause::new("user", root_tok.clone()));
                     let ec = ps.to_clause("endpoint")?;
                     endpoint_clause = Some(ec);
                 }
@@ -194,8 +186,6 @@ pub fn parse_allow(
         TokenType::Access,
     )?;
 
-    println!("XXX == parse_allow - got endpoint & service cluases, and got TO ALLOW...");
-
     // Need a service clause now -- parse to end of statement.
     ps = PState::new(root_tok);
     ps.parse_tags_attrs_and_classname(
@@ -281,7 +271,7 @@ impl PState {
         }
         Ok(Clause {
             class: self.class_name.clone().unwrap(), // flavor is not checked
-            class_tok: self.class_name_token.clone(),
+            class_tok: self.class_name_token.as_ref().unwrap().clone(), // always set if class_name is set
             with: self.attrs.clone(),
         })
     }

@@ -60,9 +60,23 @@ impl fmt::Display for AllowClause {
 #[derive(Default, Clone, Debug)]
 pub struct Clause {
     pub class: String,
-    pub class_tok: Option<Token>,
+    pub class_tok: Token,
     pub with: Vec<Attribute>,
     // TODO: pub without: Vec<Attribute>,
+}
+
+impl Clause {
+    pub fn new(class: &str, class_tok: Token) -> Self {
+        Clause {
+            class: class.to_string(),
+            class_tok,
+            with: vec![],
+        }
+    }
+    #[allow(dead_code)]
+    pub fn add_attr(&mut self, attr: Attribute) {
+        self.with.push(attr);
+    }
 }
 
 impl fmt::Display for Clause {

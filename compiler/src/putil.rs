@@ -70,12 +70,11 @@ pub fn assert_class_flavor(
     clause: &Clause,
     expected_flavor: ClassFlavor,
 ) -> Result<(), CompilationError> {
-    let ctok = clause.class_tok.as_ref().unwrap();
     let class = classes.get(&clause.class).ok_or_else(|| {
         CompilationError::ParseError(
             format!("class '{}' not found", clause.class),
-            ctok.line,
-            ctok.col,
+            clause.class_tok.line,
+            clause.class_tok.col,
         )
     })?;
     if class.flavor != expected_flavor {
@@ -84,8 +83,8 @@ pub fn assert_class_flavor(
                 "expected class '{}' to be a {:?}, but it is a {:?}",
                 clause.class, expected_flavor, class.flavor
             ),
-            ctok.line,
-            ctok.col,
+            clause.class_tok.line,
+            clause.class_tok.col,
         ));
     }
     Ok(())
