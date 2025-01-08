@@ -104,7 +104,6 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     Ok(policy)
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -198,9 +197,7 @@ allow endpoints with marketing-emp to access services with role:marketing
 
     #[test]
     fn test_base_allow() {
-        let valids = vec![
-            "allow endpoints with users to access services",
-        ];
+        let valids = vec!["allow endpoints with users to access services"];
         for valid in valids {
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
                 panic!("failed to tokenize '{}': {:?}", valid, e);
@@ -215,7 +212,6 @@ allow endpoints with marketing-emp to access services with role:marketing
             };
         }
     }
-
 
     #[test]
     fn test_omit_endpoint() {
@@ -278,5 +274,4 @@ allow endpoints with marketing-emp to access services with role:marketing
             };
         }
     }
-
 }

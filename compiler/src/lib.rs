@@ -1,8 +1,8 @@
 // This lib.rs is here to allow the integration tests
 // to use the modules in the src directory.
 
-pub mod compilation;
 mod allow;
+pub mod compilation;
 mod define;
 mod errors;
 mod lex;

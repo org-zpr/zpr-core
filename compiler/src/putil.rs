@@ -65,7 +65,6 @@ pub fn pluralize(s: &str) -> String {
     format!("{}s", s)
 }
 
-
 pub fn assert_class_flavor(
     classes: &HashMap<String, Class>,
     clause: &Clause,

@@ -5,7 +5,7 @@ use std::iter::Peekable;
 
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{AllowClause, Attribute, Clause, Class, ClassFlavor};
+use crate::ptypes::{AllowClause, Attribute, Class, ClassFlavor, Clause};
 use crate::putil;
 
 // First token is an ALLOW which is checked by caller.
@@ -43,8 +43,6 @@ pub fn parse_allow(
     let mut endpoint_clause: Option<Clause> = None;
     let mut user_clause: Option<Clause> = None;
 
-
-
     // Assume there is no endpoint clause and attempt to parse a user clause that terminates with TO ACCESS.
 
     let mut tokens = allow_statement[1..].iter().peekable();
@@ -74,7 +72,6 @@ pub fn parse_allow(
             // Parse did not work but may be just because there is actually an endpoint clause present.
         }
     }
-
 
     if user_clause.is_none() {
         // Second try - Assume there is no user clause and attempt to parse an endpoint clause up to TO ACCESS.
@@ -147,22 +144,32 @@ pub fn parse_allow(
         let cn = ps.class_name.as_ref().unwrap();
         if classes_map.get(cn).unwrap().flavor != ClassFlavor::Endpoint {
             return Err(CompilationError::ParseError(
-                format!("not an endpoint class: '{}'", cn), root_tok.line, root_tok.col));
+                format!("not an endpoint class: '{}'", cn),
+                root_tok.line,
+                root_tok.col,
+            ));
         }
         let ec = ps.to_clause("endpoint")?;
         endpoint_clause = Some(ec);
-
 
         // Previous parse stopped at WITH.
         putil::require_tt(root_tok, tokens.next(), "WITH", "allow", TokenType::With)?;
 
         ps = PState::new(root_tok);
-        ps.parse_tags_attrs_and_classname(&mut tokens, classes_idx, &ParseOpts::stop_at(TokenType::To), "user clause")?;
+        ps.parse_tags_attrs_and_classname(
+            &mut tokens,
+            classes_idx,
+            &ParseOpts::stop_at(TokenType::To),
+            "user clause",
+        )?;
 
         let cn = ps.class_name.as_ref().unwrap();
         if classes_map.get(cn).unwrap().flavor != ClassFlavor::User {
             return Err(CompilationError::ParseError(
-                format!("not a user class: '{}'", cn), root_tok.line, root_tok.col));
+                format!("not a user class: '{}'", cn),
+                root_tok.line,
+                root_tok.col,
+            ));
         }
         let uc = ps.to_clause("user")?;
         user_clause = Some(uc);
@@ -175,7 +182,6 @@ pub fn parse_allow(
     if user_clause.is_none() {
         panic!("program error - no user clause");
     }
-
 
     // Next token sequence better be TO ACCESS.
     // TODO: Maybe better to have single token TO_ACCESS ?
@@ -192,12 +198,20 @@ pub fn parse_allow(
 
     // Need a service clause now -- parse to end of statement.
     ps = PState::new(root_tok);
-    ps.parse_tags_attrs_and_classname(&mut tokens, classes_idx, &ParseOpts::default(), "service clause")?;
+    ps.parse_tags_attrs_and_classname(
+        &mut tokens,
+        classes_idx,
+        &ParseOpts::default(),
+        "service clause",
+    )?;
 
     let cn = ps.class_name.as_ref().unwrap();
     if classes_map.get(cn).unwrap().flavor != ClassFlavor::Service {
         return Err(CompilationError::ParseError(
-            format!("not a service class: '{}'", cn), root_tok.line, root_tok.col));
+            format!("not a service class: '{}'", cn),
+            root_tok.line,
+            root_tok.col,
+        ));
     }
     let service_clause = ps.to_clause("service")?;
 
@@ -246,7 +260,6 @@ impl Default for ParseOpts {
         }
     }
 }
-
 
 impl PState {
     fn new(root_tok: &Token) -> PState {

@@ -141,7 +141,6 @@ impl ZPLStrBuilder {
         matches!(self.name.to_lowercase().as_str(), "note" | "comment")
     }
 
-
     pub fn build(&self) -> ZPLStr {
         if self.tuple {
             return ZPLStr::new_tuple(&self.name, &self.value);

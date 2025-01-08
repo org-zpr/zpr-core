@@ -15,7 +15,7 @@ impl Compilation {
         CompilationBuilder::new(source)
     }
 
-    pub fn compile(&self) -> Result<(), CompilationError>{
+    pub fn compile(&self) -> Result<(), CompilationError> {
         if self.verbose {
             println!(
                 "compiling {:?} with config {:?}",
