@@ -58,6 +58,7 @@ impl fmt::Display for AllowClause {
 /// the user component of the allow.  The other two are endpoint-clause and service-clause.
 /// Each clause may have a set of attributes on it.
 #[derive(Default, Clone, Debug)]
+#[allow(dead_code)]
 pub struct Clause {
     pub class: String,
     pub class_tok: Token,

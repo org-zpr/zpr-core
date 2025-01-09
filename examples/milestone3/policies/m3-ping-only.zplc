@@ -1,2 +1,54 @@
-# TODO!
+# -*- mode: toml -*-
+
+
+[resolver]
+order = ["hosts", "dns"]
+
+[resolver.hosts]
+"node0.zpr" = "fd5a:5052:90de::1"
+"node0.overlay" = "192.168.0.55"
+"my.service" = "fd5a:5052:1::8080"
+
+[nodes]
+
+[node.n0]
+key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
+provider = [ ["zpr.adapter.cn", "node.zpr.org"]]
+zpr_address = "node0.zpr"
+interfaces = ["in1"]
+interfaces.in1.netaddr = "node0.overlay:5000"
+# netaddr is really only needed for topology I think, can we remove for M3?
+
+[trusted_services]
+
+[trusted_services.default]
+type = "ca"
+api = "validation/1" # should not be needed for built in CA based auth
+cert_path = "ca-cert.pem"
+prefix = "zpr.adapter"  # hmm.  What for?
+returns_attributes = [ "cn" ]
+returns_identity_attributes = [ "cn" ]
+# There is only one trusted service so attribute "cn" in ZPL is unambiguous
+
+
+[visa_service] # Only one visa service support at the moment.
+dock_node = "n0"
+# provider is hardcoded with zpr.adapter.cn:vs.zpr
+
+[protocols]
+
+[protocols.ping]
+protocol = "iana.ICMP6"
+icmp_type = "request-response"
+icmp_codes = [ 128, 129 ]
+
+[services]
+
+[services.ZServicePingable]
+protocol = "ping"
+
+
+
+
+
 

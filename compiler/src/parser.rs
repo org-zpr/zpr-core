@@ -4,8 +4,7 @@ use crate::allow::parse_allow;
 use crate::define::{parse_define, resolve_class_flavors};
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{Class, ClassFlavor, Policy};
-use crate::putil;
+use crate::ptypes::{Class, Policy};
 
 pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     // Convert the tokens into statements, which are just sub-lists of the tokens.
@@ -75,15 +74,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     for statement in &statements {
         if statement[0].tt == TokenType::Allow {
             let allow = parse_allow(statement, &class_index, &classes)?;
-
-            // The allow parser does not check the class flavors.
-            // XXX actually it does now, remove this.
-            putil::assert_class_flavor(&classes, &allow.endpoint, ClassFlavor::Endpoint)?;
-            putil::assert_class_flavor(&classes, &allow.user, ClassFlavor::User)?;
-            putil::assert_class_flavor(&classes, &allow.service, ClassFlavor::Service)?;
-
             println!("{}", allow);
-
             policy.allows.push(allow);
         }
     }
@@ -108,6 +99,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
 mod test {
     use super::*;
     use crate::lex::tokenize_str;
+    use crate::ptypes::ClassFlavor;
 
     #[test]
     fn test_parse_define() {

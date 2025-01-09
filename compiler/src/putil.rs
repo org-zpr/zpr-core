@@ -1,7 +1,5 @@
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{Class, ClassFlavor, Clause};
-use std::collections::HashMap;
 
 // Given the next token in the list, we error out if that token is not of the expected type.
 pub fn require_tt(
@@ -63,29 +61,4 @@ pub fn return_literal(
 // Could be more sophisticated.
 pub fn pluralize(s: &str) -> String {
     format!("{}s", s)
-}
-
-pub fn assert_class_flavor(
-    classes: &HashMap<String, Class>,
-    clause: &Clause,
-    expected_flavor: ClassFlavor,
-) -> Result<(), CompilationError> {
-    let class = classes.get(&clause.class).ok_or_else(|| {
-        CompilationError::ParseError(
-            format!("class '{}' not found", clause.class),
-            clause.class_tok.line,
-            clause.class_tok.col,
-        )
-    })?;
-    if class.flavor != expected_flavor {
-        return Err(CompilationError::ParseError(
-            format!(
-                "expected class '{}' to be a {:?}, but it is a {:?}",
-                clause.class, expected_flavor, class.flavor
-            ),
-            clause.class_tok.line,
-            clause.class_tok.col,
-        ));
-    }
-    Ok(())
 }
