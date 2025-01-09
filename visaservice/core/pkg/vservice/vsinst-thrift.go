@@ -17,7 +17,7 @@ import (
 	"zpr.org/vs/pkg/agent"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice/adb"
 
 	"github.com/apache/thrift/lib/go/thrift"

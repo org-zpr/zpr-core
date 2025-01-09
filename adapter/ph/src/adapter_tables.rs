@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 use crate::defs::FiveTuple;
-use crate::packet::BufferPacket;
+use crate::packet::Packet;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::mapref::one::Ref as DashMapRef;
@@ -23,7 +23,7 @@ pub struct AltPep {
 
 pub enum AltEntry {
     Active(AltPep),
-    Pending(BufferPacket),
+    Pending(Packet),
 }
 
 pub struct AgentLookupTable {

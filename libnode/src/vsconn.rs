@@ -17,10 +17,10 @@ use tracing::{debug, error, info};
 
 use crate::errors::{VSClientError, VSError};
 use crate::logging::targets::VS_RPC;
-use crate::vsapi;
 use crate::vscli::{self, VSClientI};
 use crate::vss::DEFAULT_VSS_PORT;
 
+use vsapi;
 use zpr;
 
 const PING_INTERVAL: Duration = Duration::from_millis(10000);

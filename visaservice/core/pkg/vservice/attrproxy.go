@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vsx/snio/zds"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsx/snio/zds"
 )
 
 type AttrProxy struct {

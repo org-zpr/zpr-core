@@ -16,7 +16,7 @@ import (
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsx/polio"

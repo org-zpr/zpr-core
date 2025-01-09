@@ -6,7 +6,6 @@ on:
   pull_request:
     paths: 
       - 'libnode/**'
-      - 'visaservice/thrift/**'
       - 'adapter/ph/**'
       - '.github/workflows/rust-libnode.yml'
 
@@ -16,6 +15,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
 
 jobs:
   build:
@@ -29,13 +29,24 @@ jobs:
       timeout-minutes: 5
       run: rustup default stable
 
+    - name: Setup Git credentials
+      timeout-minutes: 1
+      run: |
+        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+        chmod +x "$HOME/.git-askpass"
+        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
+
     - name: Build libnode
       timeout-minutes: 5
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
       run: |
         cd libnode && make all
 
     - name: Run tests
       timeout-minutes: 5
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
       run: |
         cd libnode && make test
 

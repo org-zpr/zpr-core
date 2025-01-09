@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/libvisa"
-	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vsapi"
 	"zpr.org/vsx/polio"
 	"zpr.org/vsx/snio/vsio"
 )

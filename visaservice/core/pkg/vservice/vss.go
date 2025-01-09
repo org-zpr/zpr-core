@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/apache/thrift/lib/go/thrift"
-	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vsapi"
 )
 
 type VSSCli struct {

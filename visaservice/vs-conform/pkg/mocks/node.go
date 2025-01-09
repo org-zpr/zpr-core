@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"time"
 
-	"zpr.org/vst/pkg/vsapi"
+	"zpr.org/vsapi"
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"go.uber.org/zap"

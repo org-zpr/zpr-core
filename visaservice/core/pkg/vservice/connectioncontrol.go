@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vs/pkg/vsapi"
+	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice/auth"
 
 	"zpr.org/vsx/polio"

@@ -9,8 +9,7 @@ use tracing::{debug, info};
 use crate::errors::VSClientError;
 use crate::logging::targets::VS_RPC;
 use crate::m2;
-use crate::vsapi;
-use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
+use vsapi::{self, TVisaServiceSyncClient, VisaServiceSyncClient};
 use zpr;
 
 /// Timeout for connecting to the visa service.

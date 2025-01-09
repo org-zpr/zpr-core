@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"zpr.org/vst/pkg/testfw"
-	"zpr.org/vst/pkg/vsapi"
+	"zpr.org/vsapi"
 )
 
 type RejectInvalidAuth struct{}

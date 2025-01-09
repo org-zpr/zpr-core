@@ -14,7 +14,7 @@ use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info};
 
 use crate::logging::targets::VSS_RPC;
-use crate::vsapi::{
+use vsapi::{
     self, PolicyInfo, VisaHop, VisaRevocation, VisaSupportSyncHandler, VisaSupportSyncProcessor,
 };
 

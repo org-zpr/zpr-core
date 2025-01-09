@@ -13,7 +13,7 @@ use crate::km::Codec;
 use crate::km_noise::NOISE_PADLEN;
 use crate::logging::targets::DATAPATH;
 use crate::net_defs;
-use crate::packet::{BufferPacket, Packet, PacketBuffer};
+use crate::packet::Packet;
 use crate::queues::TryEnqueueError;
 use crate::zdp;
 use crate::zdp_ll;
@@ -29,20 +29,16 @@ use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
 
 /// Drop a packet and count the drop with the given reason.
-pub fn drop_and_count(asm: &Assembly, pkt: BufferPacket, reason: impl Into<CounterType>) {
+pub fn drop_and_count(asm: &Assembly, pkt: Packet, reason: impl Into<CounterType>) {
     let reason = reason.into();
     debug!(target: DATAPATH, "dropping packet because {reason}");
-    asm.buffer_stack.put_buffer(pkt.destroy());
+    asm.buffer_stack
+        .put_buffer(pkt.destroy().try_into().unwrap());
     asm.counters[reason.into()].increment();
 }
 
 /// Add the ZPI header to a packet.
-pub fn encap_zpi(
-    _asm: &Assembly,
-    _link_id: zpr::LinkId,
-    zpi: zpr::Zpi,
-    pkt: &mut Packet<impl PacketBuffer>,
-) {
+pub fn encap_zpi(_asm: &Assembly, _link_id: zpr::LinkId, zpi: zpr::Zpi, pkt: &mut Packet) {
     pkt.alloc_zeroed_header::<zdp::ZdpZpiHeader>().zpi = zpi;
 }
 
@@ -50,15 +46,15 @@ pub fn encap_zpi(
 /// The packet must be a complete ZDP message.
 /// Despite the &mut borrow, the packet will return materially unchanged.
 /// (It will have a link-layer header temporarily added to it.)
-pub fn maybe_capture(asm: &Assembly, dir: Direction, pkt: &mut Packet<impl PacketBuffer>) {
+pub fn maybe_capture(asm: &Assembly, dir: Direction, pkt: &mut Packet) {
     maybe_capture_batch(asm, dir, [pkt])
 }
 
 /// Batch packet capture.
-pub fn maybe_capture_batch<'a, PktBuf: PacketBuffer + 'a>(
+pub fn maybe_capture_batch<'a>(
     asm: &'a Assembly,
     dir: Direction,
-    pkts: impl IntoIterator<Item = &'a mut Packet<PktBuf>>,
+    pkts: impl IntoIterator<Item = &'a mut Packet>,
 ) {
     if !asm.flow_control.program_exists() {
         return;
@@ -95,7 +91,7 @@ pub fn maybe_capture_batch<'a, PktBuf: PacketBuffer + 'a>(
             }) {
                 Some(buf) => {
                     let orig_len = pkt.body().len();
-                    let pkt_clone: BufferPacket =
+                    let pkt_clone: Packet =
                         pkt.clone_prefix_into(buf, std::cmp::min(caplen, orig_len));
                     // remove direction indicator from beginning of packet
                     pkt.advance(std::mem::size_of::<zdp_ll::ZdpLinkP2P>());
@@ -108,7 +104,8 @@ pub fn maybe_capture_batch<'a, PktBuf: PacketBuffer + 'a>(
                         Ok(()) => num_captured += 1,
 
                         Err(TryEnqueueError::Full(ret_packet)) => {
-                            asm.buffer_stack.put_buffer(ret_packet.destroy());
+                            asm.buffer_stack
+                                .put_buffer(ret_packet.destroy().try_into().unwrap());
                             // No sense to try enqueuing more packets; exit the loop early.
                             break;
                         }
@@ -133,7 +130,8 @@ pub fn maybe_capture_batch<'a, PktBuf: PacketBuffer + 'a>(
     let num_dropped = pkts_iter.count();
 
     // Return any remaining buffers.
-    asm.buffer_stack.put_buffers(bufs.into_iter());
+    asm.buffer_stack
+        .put_buffers(bufs.into_iter().map(|buf| buf.try_into().unwrap()));
 
     match dir {
         Direction::Inbound => {
@@ -151,7 +149,7 @@ pub fn maybe_capture_batch<'a, PktBuf: PacketBuffer + 'a>(
 }
 
 /// Encrypt a ZDP packet according to its ZPI header (which is not encrypted).
-pub fn encrypt_null(pkt: &mut Packet<impl PacketBuffer>) {
+pub fn encrypt_null(pkt: &mut Packet) {
     // RFC 6.5 § 5.25.2
     pkt.put(
         net_defs::inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]).as_slice(),
@@ -159,7 +157,7 @@ pub fn encrypt_null(pkt: &mut Packet<impl PacketBuffer>) {
 }
 
 /// Slap an HMAC onto the end of the packet.
-pub fn encrypt_hmac(send_hmac_key: [u8; 32], pkt: &mut Packet<impl PacketBuffer>) {
+pub fn encrypt_hmac(send_hmac_key: [u8; 32], pkt: &mut Packet) {
     let mut link_mac = [0u8; zdp::ZDP_PACKET_MAC_SIZE];
     link_mac[..zdp::ZDP_PACKET_MAC_SIZE].copy_from_slice(
         &blake3::keyed_hash(&send_hmac_key, pkt.body()).as_bytes()[..zdp::ZDP_PACKET_MAC_SIZE],
@@ -170,7 +168,7 @@ pub fn encrypt_hmac(send_hmac_key: [u8; 32], pkt: &mut Packet<impl PacketBuffer>
 pub fn encrypt_full(
     _asm: &Assembly,
     codec: &dyn Codec,
-    pkt: &mut Packet<impl PacketBuffer>,
+    pkt: &mut Packet,
 ) -> Result<(), km::EncryptionError> {
     // TODO: Could do some length checks here on the packet body.  Is it too short? Too long? Etc.
 
@@ -214,7 +212,7 @@ impl From<DecryptError> for CounterType {
 }
 
 /// Decrypt a ZDP packet according to its ZPI header (which is not removed).
-pub fn decrypt_null(pkt: &mut Packet<impl PacketBuffer>) -> Result<(), DecryptError> {
+pub fn decrypt_null(pkt: &mut Packet) -> Result<(), DecryptError> {
     // RFC 6.5 § 5.25.2
     if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
         return Err(DecryptError::BadChecksum);
@@ -226,10 +224,7 @@ pub fn decrypt_null(pkt: &mut Packet<impl PacketBuffer>) -> Result<(), DecryptEr
 }
 
 /// Check and remove the link-2-link HMAC on the (presumed) transit packet.
-pub fn decrypt_hmac(
-    recv_hmac_key: [u8; 32],
-    pkt: &mut Packet<impl PacketBuffer>,
-) -> Result<(), DecryptError> {
+pub fn decrypt_hmac(recv_hmac_key: [u8; 32], pkt: &mut Packet) -> Result<(), DecryptError> {
     if pkt.body().len() < zdp::ZDP_PACKET_MAC_SIZE {
         return Err(DecryptError::BadStructure);
     }
@@ -253,7 +248,7 @@ pub fn decrypt_full(
     _asm: &Assembly,
     codec: &dyn Codec,
     padlen: usize,
-    pkt: &mut Packet<impl PacketBuffer>,
+    pkt: &mut Packet,
 ) -> Result<(), DecryptError> {
     if pkt.body().len() < 1 {
         return Err(DecryptError::BadStructure);
@@ -282,7 +277,7 @@ pub fn decrypt_full(
 fn substrate_egress_common(
     asm: &Assembly,
     link_id: zpr::LinkId,
-    pkt: &mut BufferPacket,
+    pkt: &mut Packet,
 ) -> Result<Option<zpr::SubstrateAddr>, km::EncryptionError> {
     // TODO: should we add ZDP header here also??
 
@@ -356,7 +351,7 @@ fn substrate_egress_common(
 
 /// Egress a ZDP packet on the given link ID, according to the given ZPI.
 /// The ZPI header will be added to the packet.
-pub fn substrate_egress(asm: &Assembly, link_id: zpr::LinkId, mut pkt: BufferPacket) {
+pub fn substrate_egress(asm: &Assembly, link_id: zpr::LinkId, mut pkt: Packet) {
     let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
         Ok(Some(dest_sa)) => dest_sa,
         Ok(None) => {
@@ -383,11 +378,7 @@ pub fn substrate_egress(asm: &Assembly, link_id: zpr::LinkId, mut pkt: BufferPac
 
 /// A blocking/async version of `substrate_egress()`, for management path use.
 /// Useful to ensure fairness under high load.
-pub async fn substrate_egress_blocking(
-    asm: &Assembly,
-    link_id: zpr::LinkId,
-    mut pkt: BufferPacket,
-) {
+pub async fn substrate_egress_blocking(asm: &Assembly, link_id: zpr::LinkId, mut pkt: Packet) {
     let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
         Ok(Some(dest_sa)) => dest_sa,
         Ok(None) => {
@@ -429,7 +420,7 @@ pub fn substrate_ingress(
     asm: &Assembly,
     #[cfg_attr(not(debug_assertions), allow(unused_variables))] worker_index: usize,
     peer_sa: &zpr::SubstrateAddr,
-    mut pkt: BufferPacket,
+    mut pkt: Packet,
 ) {
     asm.counters[CounterType::InPacksRec].increment();
 
@@ -608,7 +599,7 @@ pub fn substrate_ingress(
 pub fn agent_input(
     asm: &Assembly,
     tether_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
-    mut pkt: BufferPacket,
+    mut pkt: Packet,
 ) {
     // extract A2A MAC
     let Ok(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
@@ -657,7 +648,7 @@ pub fn agent_input(
 
 /// Process uncompressed packet from the agent.
 /// The packet will be compressed, or trigger a Bind request.
-pub fn agent_output(asm: &Assembly, mut pkt: BufferPacket) {
+pub fn agent_output(asm: &Assembly, mut pkt: Packet) {
     pkt.metadata_mut().ingress_link_id = zpr::LOCAL_AGENT_LINK_ID;
 
     // determine five tuple
@@ -693,7 +684,7 @@ pub fn agent_output(asm: &Assembly, mut pkt: BufferPacket) {
 /// bind.  `allow_bind_request` should be true for "real" packets; false for
 /// packets re-injected from mgmt plane after fulfilling a bind request (so
 /// as to prevent the theoretical possibility of a packet loop).
-pub fn agent_output_post_classify(asm: &Assembly, mut pkt: BufferPacket, allow_bind_request: bool) {
+pub fn agent_output_post_classify(asm: &Assembly, mut pkt: Packet, allow_bind_request: bool) {
     let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
 
     // lookup five tuple in ALT
@@ -763,7 +754,7 @@ const _: () = assert!(adapter_next_hop_link(zpr::LOCAL_AGENT_LINK_ID) == zpr::DO
 const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::LOCAL_AGENT_LINK_ID);
 
 /// Forward compressed packet.
-pub fn forward(asm: &Assembly, mut pkt: BufferPacket) {
+pub fn forward(asm: &Assembly, mut pkt: Packet) {
     let egress_link_id;
     let egress_stream_id;
 
@@ -813,8 +804,8 @@ mod test {
 
     #[test]
     fn test_encrypt_decrypt_null() {
-        let mut buf = [0u8; PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 64);
+        let buf = Box::new([0u8; PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 64);
 
         pkt.put(&b"this is a test of encrypt zero"[..]);
 
@@ -832,8 +823,8 @@ mod test {
 
     #[test]
     fn test_add_and_check_hmac() {
-        let mut buf = [0u8; PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 64);
+        let buf = Box::new([0u8; PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 64);
 
         pkt.put(&b"this is a test of hmac"[..]);
         let key: [u8; 32] = [6u8; 32];
@@ -852,8 +843,8 @@ mod test {
 
     #[test]
     fn test_add_and_check_hmac_fail() {
-        let mut buf = [0u8; PACKET_BUFFER_SIZE];
-        let mut pkt = Packet::new(&mut buf, 64);
+        let buf = Box::new([0u8; PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 64);
 
         pkt.put(&b"this is a test of hmac"[..]);
         let key: [u8; 32] = [6u8; 32];

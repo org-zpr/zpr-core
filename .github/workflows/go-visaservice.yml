@@ -10,7 +10,6 @@ on:
     paths:
       - 'visaservice/mods/**'
       - 'visaservice/core/**'
-      - 'visaservice/thrift/**'
       - '.github/workflows/go-visaservice.yml'
 
 concurrency:
@@ -26,14 +25,30 @@ jobs:
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
+    # see <https://github.com/docker-library/golang/issues/452>
+    - name: Set workspace as safe
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+    - name: Setup Git credentials
+      timeout-minutes: 1
+      run: |
+        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+        chmod +x "$HOME/.git-askpass"
+        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
+        go env -w GOPRIVATE="github.com/org-zpr/*"
+
     - name: Build
       timeout-minutes: 5
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
       run: |
         cd visaservice
         make all-go
 
     - name: Test
       timeout-minutes: 5
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
       run: |
         cd visaservice
         make test-go

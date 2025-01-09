@@ -8,7 +8,7 @@ import (
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"go.uber.org/zap"
-	"zpr.org/vst/pkg/vsapi"
+	"zpr.org/vsapi"
 )
 
 // Mock up of visa support service
