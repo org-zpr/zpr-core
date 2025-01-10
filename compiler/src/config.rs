@@ -16,7 +16,7 @@ const ICMP_INTERACION_REQUEST_RESPONSE: &str = "request-response";
 const ICMP_INTERACTION_ONESHOT: &str = "oneshot";
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
-/// (really anything that has a to_string function), or with a format string and arguments.
+/// (really anything that has a to_string function), or with two args: a format string and arguments.
 ///
 // TODO: Figure out how to put this in errors.rs
 #[macro_export]
@@ -199,7 +199,7 @@ fn parse_resolver(ctoml: &Table) -> Result<Resolver, CompilationError> {
     })
 }
 
-/// Parse all the ndoes.<ID> sections. There must be at least one.
+/// Parse all the nodes.<ID> sections. There must be at least one.
 fn parse_nodes(ctoml: &Table) -> Result<HashMap<String, Node>, CompilationError> {
     if !ctoml.contains_key("nodes") {
         return Err(err_config!("missing section: nodes"));
@@ -230,8 +230,6 @@ fn parse_node(node_id: &str, node: &Table) -> Result<Node, CompilationError> {
         .as_str()
         .ok_or(err_config!("node {} missing zpr_address", node_id))?
         .to_string();
-    //let interfaces = parse_interfaces(node["interfaces"].as_array().ok_or(err_config!("node {} missing interfaces", node_id))?)?;
-    //let provider = parse_provider(node["provider"].as_array().ok_or(err_config!("node {} missing provider", node_id))?)?;
 
     let mut interfaces = Vec::new();
 
