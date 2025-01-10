@@ -39,4 +39,10 @@ pub enum CompilationError {
 
     #[error("IoError: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("TomlError: {0}")]
+    TomlError(#[from] toml::de::Error),
+
+    #[error("configuration error: {0}")]
+    ConfigError(String),
 }

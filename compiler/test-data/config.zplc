@@ -1,0 +1,11 @@
+# minimal config so that we can test parsing the RFC zpl
+
+[nodes.n0]
+key = "none"
+provider = [["foo", "fee"]]
+zpr_address = "node0.zpr"
+interfaces = [ "in1" ]
+in1.netaddr = "overlay.addr"
+
+[visa_service]
+dock_node = "n0"

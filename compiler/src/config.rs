@@ -1,0 +1,861 @@
+//! config.rs - load/parse a ZPL configuration TOML file
+
+use std::collections::HashMap;
+use std::path::Path;
+use std::path::PathBuf;
+
+use toml::Table;
+
+use crate::errors::CompilationError;
+use crate::protocols::{self, IanaProtocol};
+
+const DEFAULT_TRUSTED_SERVICE_ID: &str = "default";
+const DEFAULT_TRUSTED_SERVICE_API: &str = "validation/1";
+
+const ICMP_INTERACION_REQUEST_RESPONSE: &str = "request-response";
+const ICMP_INTERACTION_ONESHOT: &str = "oneshot";
+
+/// Helper to create a ConfigError. Works with a single string (or &str) argument
+/// (really anything that has a to_string function), or with a format string and arguments.
+///
+// TODO: Figure out how to put this in errors.rs
+#[macro_export]
+macro_rules! err_config {
+    ($s:expr) => {
+        CompilationError::ConfigError($s.to_string())
+    };
+    ($s:expr, $($arg:tt)*) => {
+        CompilationError::ConfigError(format!($s, $($arg)*))
+    };
+}
+
+/// Configuration structure which is parsed from the TOML.
+#[allow(dead_code)]
+pub struct Config {
+    pub resolver: Resolver,
+    pub nodes: HashMap<String, Node>,
+    pub visa_service: VisaService,
+    pub trusted_services: Vec<TrustedService>,
+    pub protocols: HashMap<String, Protocol>,
+    pub services: Vec<Service>,
+}
+
+/// Resolver table.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct Resolver {
+    pub order: Vec<String>,
+    pub hosts: Option<HashMap<String, String>>,
+}
+
+impl Default for Resolver {
+    fn default() -> Self {
+        Resolver {
+            order: vec!["hosts".to_string(), "dns".to_string()],
+            hosts: None,
+        }
+    }
+}
+
+/// Node table.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct Node {
+    pub id: String,
+    pub key: String,
+    pub provider: Vec<(String, String)>,
+    pub zpr_address: String,
+    pub interfaces: Vec<Interface>,
+}
+
+/// Interface is part of a node.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct Interface {
+    pub name: String,
+    pub netaddr: String,
+}
+
+/// Visa Service table ("visa_service")
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct VisaService {
+    pub dock_node_id: String,
+}
+
+/// Trusted Service table ("trusted_services")
+// TODO: Will these attribute descriptions need to be made more expressive so we can tell if they are optional, multi-valued, etc?
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct TrustedService {
+    pub id: String,
+    pub api: String,
+    pub cert_path: Option<PathBuf>,
+    pub prefix: String,
+    pub returns_attrs: Vec<String>,
+    pub identity_attrs: Vec<String>,
+}
+
+/// Protocol table
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct Protocol {
+    pub id: String,
+    pub protocol: IanaProtocol,
+    pub port: Option<String>, // TODO: using string for now but needs to be a "port spec"
+    pub icmp: Option<IcmpFlowType>,
+}
+
+/// Part of a Protocol description.
+#[derive(Debug, Clone, PartialEq)]
+pub enum IcmpFlowType {
+    RequestResponse(u8, u8),
+    OneShot(u8),
+}
+
+/// Service table
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct Service {
+    pub id: String,
+    pub protocol_id: String, // TODO: Could consider using a list here
+}
+
+/// Parse and do some (light) error checking on the ZPL TOML configuration.
+pub fn load_config(path: &Path) -> Result<Config, CompilationError> {
+    let cstr = std::fs::read_to_string(path).map_err(|e| CompilationError::Io(e))?;
+    let ctoml = cstr
+        .parse::<Table>()
+        .map_err(|e| CompilationError::TomlError(e))?;
+
+    // println!("parsed something:\n{:#?}", ctoml);
+    // println!("=====================");
+
+    let config = Config {
+        resolver: parse_resolver(&ctoml)?,
+        nodes: parse_nodes(&ctoml)?,
+        visa_service: parse_visa_service(&ctoml)?,
+        trusted_services: parse_trusted_services(&ctoml)?,
+        protocols: parse_protocols(&ctoml)?,
+        services: parse_services(&ctoml)?,
+    };
+    Ok(config)
+}
+
+/// Parse the resolver section which is optional.  The defualt is just
+/// to have an `resolver.order` set to [hosts, dns].  The hosts section is optional, but
+/// if present is mapping of hostnames to IP addresses.
+fn parse_resolver(ctoml: &Table) -> Result<Resolver, CompilationError> {
+    if !ctoml.contains_key("resolver") {
+        return Ok(Resolver::default());
+    }
+    let r = ctoml["resolver"]
+        .as_table()
+        .ok_or(err_config!("error reading resolver section"))?;
+    let mut order_vec = Vec::new();
+    if !r.contains_key("order") {
+        // Default order is hosts, dns
+        order_vec.push("hosts".to_string());
+        order_vec.push("dns".to_string());
+    } else {
+        let order = r["order"]
+            .as_array()
+            .ok_or(err_config!("resolver.order must be an array"))?;
+        for o in order {
+            order_vec.push(
+                o.as_str()
+                    .ok_or(err_config!("problem with order array"))?
+                    .to_string(),
+            );
+        }
+    }
+
+    let hosts = if r.contains_key("hosts") {
+        match r["hosts"].as_table() {
+            Some(h) => {
+                let mut hosts_map = HashMap::new();
+                for (k, v) in h {
+                    hosts_map.insert(
+                        k.to_string(),
+                        v.as_str()
+                            .ok_or(CompilationError::ConfigError(format!(
+                                "invalid hosts entry {}",
+                                k
+                            )))?
+                            .to_string(),
+                    );
+                }
+                Some(hosts_map)
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+
+    Ok(Resolver {
+        order: order_vec,
+        hosts: hosts,
+    })
+}
+
+/// Parse all the ndoes.<ID> sections. There must be at least one.
+fn parse_nodes(ctoml: &Table) -> Result<HashMap<String, Node>, CompilationError> {
+    if !ctoml.contains_key("nodes") {
+        return Err(err_config!("missing section: nodes"));
+    }
+    let nodes = ctoml["nodes"]
+        .as_table()
+        .ok_or(err_config!("error reading nodes section"))?;
+    // Within "nodes" each KEY is a node ID that is a table.
+    let mut node_map = HashMap::new();
+    for (node_id, v) in nodes {
+        let n = parse_node(
+            node_id,
+            v.as_table()
+                .ok_or(err_config!("node {} is not a table", node_id))?,
+        )?;
+        node_map.insert(node_id.to_string(), n);
+    }
+    Ok(node_map)
+}
+
+/// Parse a single node table.
+fn parse_node(node_id: &str, node: &Table) -> Result<Node, CompilationError> {
+    let key = node["key"]
+        .as_str()
+        .ok_or(err_config!("node {} missing key", node_id))?
+        .to_string();
+    let zpr_address = node["zpr_address"]
+        .as_str()
+        .ok_or(err_config!("node {} missing zpr_address", node_id))?
+        .to_string();
+    //let interfaces = parse_interfaces(node["interfaces"].as_array().ok_or(err_config!("node {} missing interfaces", node_id))?)?;
+    //let provider = parse_provider(node["provider"].as_array().ok_or(err_config!("node {} missing provider", node_id))?)?;
+
+    let mut interfaces = Vec::new();
+
+    // In order to parse the interfaces, we need the interface names.
+    let ifnames = node["interfaces"]
+        .as_array()
+        .ok_or(err_config!("node {} missing interfaces", node_id))?;
+    for ifname in ifnames {
+        let ifname = ifname.as_str().ok_or(err_config!(
+            "node {} interface name is not a string",
+            node_id
+        ))?;
+
+        // The node contains a table entry for each interface name.
+        if !node.contains_key(ifname) {
+            return Err(err_config!(
+                "node {} missing entry for interface {}",
+                node_id,
+                ifname
+            ));
+        }
+        let iface = parse_interface(
+            ifname,
+            node[ifname].as_table().ok_or(err_config!(
+                "node {} interface {} is not a table",
+                node_id,
+                ifname
+            ))?,
+        )?;
+        interfaces.push(iface);
+    }
+
+    let mut provider = Vec::new();
+
+    // The provider is an array of tuples (array of arrays).
+    if !node.contains_key("provider") {
+        return Err(err_config!("node {} missing provider", node_id));
+    }
+    let provider_tuples = node["provider"]
+        .as_array()
+        .ok_or(err_config!("node {} provider is not an array", node_id))?;
+    for pt in provider_tuples {
+        let pt = pt.as_array().ok_or(err_config!(
+            "node {} has provider entry that is not an array",
+            node_id
+        ))?;
+        if pt.len() != 2 {
+            return Err(err_config!(
+                "node {} has provider entry is not a 2-tuple",
+                node_id
+            ));
+        }
+        // TOML has other valid types but we just convert the provider attributes to strings.
+        // Maybe later we will introduce a richer attribute type since we are probably going to have to parse this again later.
+        let p0 = if pt[0].is_str() {
+            pt[0].as_str().unwrap().to_string()
+        } else {
+            pt[0].to_string()
+        };
+        let p1 = if pt[1].is_str() {
+            pt[1].as_str().unwrap().to_string()
+        } else {
+            pt[1].to_string()
+        };
+        provider.push((p0, p1));
+    }
+
+    Ok(Node {
+        id: node_id.to_string(),
+        key,
+        zpr_address,
+        interfaces,
+        provider,
+    })
+}
+
+/// Parse the nodes interface entry.
+fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, CompilationError> {
+    let netaddr = iface["netaddr"]
+        .as_str()
+        .ok_or(err_config!("interface {} missing netaddr", ifname))?
+        .to_string();
+    Ok(Interface {
+        name: ifname.to_string(),
+        netaddr,
+    })
+}
+
+/// Parse the very basic visa_service section.
+fn parse_visa_service(ctoml: &Table) -> Result<VisaService, CompilationError> {
+    if !ctoml.contains_key("visa_service") {
+        return Err(err_config!("missing section: visa_service"));
+    }
+    let vs = ctoml["visa_service"]
+        .as_table()
+        .ok_or(err_config!("error reading visa_service section"))?;
+    if !vs.contains_key("dock_node") {
+        return Err(err_config!("visa_service missing dock_node"));
+    }
+    let dock_node_id = vs["dock_node"]
+        .as_str()
+        .ok_or(err_config!("visa_service missing dock_node"))?
+        .to_string();
+    Ok(VisaService { dock_node_id })
+}
+
+/// Parse the trusted_services.<ID> tables.  Currently I am reserving the ID of "default" for the
+/// sort of built-in certificate authority based authentication mechanism.
+fn parse_trusted_services(ctoml: &Table) -> Result<Vec<TrustedService>, CompilationError> {
+    if !ctoml.contains_key("trusted_services") {
+        println!("warning: no trusted services in configuration");
+        return Ok(Vec::new());
+    }
+    let ts = ctoml["trusted_services"]
+        .as_table()
+        .ok_or(err_config!("error reading trusted_services section"))?;
+    let mut trusted_services = Vec::new();
+    for (ts_id, v) in ts {
+        let ts = parse_trusted_service(
+            ts_id,
+            v.as_table()
+                .ok_or(err_config!("trusted_service {} is not a table", ts_id))?,
+        )?;
+        trusted_services.push(ts);
+    }
+    Ok(trusted_services)
+}
+
+// Parse an individual trusted_service table.
+fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, CompilationError> {
+    // The "api" value is optional for the default trusted service.
+    let api = if ts.contains_key("api") {
+        ts["api"]
+            .as_str()
+            .ok_or(err_config!("trusted_service {} missing api", ts_id))?
+            .to_string()
+    } else if ts_id == DEFAULT_TRUSTED_SERVICE_ID {
+        DEFAULT_TRUSTED_SERVICE_API.to_string()
+    } else {
+        return Err(err_config!("trusted_service {} missing api", ts_id));
+    };
+    let cert_path = if ts.contains_key("cert_path") {
+        Some(PathBuf::from(ts["cert_path"].as_str().ok_or(
+            err_config!("trusted_service {} cert_path is not a string", ts_id),
+        )?))
+    } else {
+        None
+    };
+    let prefix = ts["prefix"]
+        .as_str()
+        .ok_or(err_config!("trusted_service {} missing prefix", ts_id))?
+        .to_string();
+    let returns_attrs = parse_string_array(ts, "returns_attributes", "trusted_service")?;
+    let identity_attrs = parse_string_array(ts, "identity_attributes", "trusted_service")?;
+
+    // Identity attributes (if any) must be listed in returns attributes
+    for ia in &identity_attrs {
+        if !returns_attrs.contains(ia) {
+            return Err(err_config!(
+                "trusted_service {} identity attribute '{}' not in returns_attributes",
+                ts_id,
+                ia
+            ));
+        }
+    }
+    Ok(TrustedService {
+        id: ts_id.to_string(),
+        api,
+        cert_path,
+        prefix,
+        returns_attrs,
+        identity_attrs,
+    })
+}
+
+/// Parse table entry `key` as a string array.  If key is not found returns empty vector.
+fn parse_string_array(ts: &Table, key: &str, ctx: &str) -> Result<Vec<String>, CompilationError> {
+    if !ts.contains_key(key) {
+        return Ok(Vec::new());
+    }
+    let arr = ts[key]
+        .as_array()
+        .ok_or(err_config!("{} {} is not an array", ctx, key))?;
+    let mut ret = Vec::new();
+    for a in arr {
+        ret.push(
+            a.as_str()
+                .ok_or(err_config!("{} {} array entry is not a string", ctx, key))?
+                .to_string(),
+        );
+    }
+    Ok(ret)
+}
+
+/// Parse the protocols.<ID> tables.
+fn parse_protocols(ctoml: &Table) -> Result<HashMap<String, Protocol>, CompilationError> {
+    if !ctoml.contains_key("protocols") {
+        println!("warning: no protocols in configuration");
+        return Ok(HashMap::new());
+    }
+    let prots = ctoml["protocols"]
+        .as_table()
+        .ok_or(err_config!("error reading protocols section"))?;
+    let mut protocols = HashMap::new();
+    for (prot_id, v) in prots {
+        if protocols.contains_key(prot_id) {
+            return Err(err_config!("duplicate protocol id: {}", prot_id));
+        }
+        let prot = parse_protocol(
+            prot_id,
+            v.as_table()
+                .ok_or(err_config!("protocol {} is not a table", prot_id))?,
+        )?;
+        protocols.insert(prot_id.to_string(), prot);
+    }
+    Ok(protocols)
+}
+
+/// Parse an individual protocol table.
+fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationError> {
+    let protocol_name = prot["protocol"]
+        .as_str()
+        .ok_or(err_config!("protocol {} missing protocol", prot_id))?
+        .to_string();
+
+    let protocol: IanaProtocol;
+
+    if protocol_name.starts_with("iana.") {
+        let iana_name = protocol_name.split(".").nth(1).ok_or(err_config!(
+            "protocol {} invalid IANA protocol name: {}",
+            prot_id,
+            protocol_name
+        ))?;
+        protocol = protocols::parse(iana_name).ok_or(err_config!(
+            "protocol {} unknown IANA protocol name: {}",
+            prot_id,
+            protocol_name
+        ))?;
+    } else {
+        // TODO: Not sure what it means to have non-iana protocol yet.
+        return Err(err_config!(
+            "protocol {} non-IANA protocols not yet supported: {}",
+            prot_id,
+            protocol_name
+        ));
+    }
+
+    if protocol.takes_port_arg() && !prot.contains_key("port") {
+        return Err(err_config!("protocol {} missing port", prot_id));
+    }
+    if !protocol.takes_port_arg() && prot.contains_key("port") {
+        return Err(err_config!(
+            "protocol {} has port but does not take one",
+            prot_id
+        ));
+    }
+
+    // For now we treat the port value as a string. But is really going to be a port spec so could
+    // be a range of ports or a sequence of ports, etc.  In TOML this may come through as a number.
+    let port = if prot.contains_key("port") {
+        if prot["port"].is_str() {
+            Some(prot["port"].as_str().unwrap().to_string())
+        } else {
+            Some(prot["port"].to_string())
+        }
+    } else {
+        None
+    };
+
+    let icmp = if protocol.is_icmp() {
+        Some(parse_icmp_details(prot_id, prot)?)
+    } else {
+        if prot.contains_key("icmp_type") {
+            return Err(err_config!(
+                "protocol {} has icmp_type but is not an ICMP protocol",
+                prot_id
+            ));
+        }
+        if prot.contains_key("icmp_codes") {
+            return Err(err_config!(
+                "protocol {} has icmp_codes but is not an ICMP protocol",
+                prot_id
+            ));
+        }
+        None
+    };
+
+    Ok(Protocol {
+        id: prot_id.to_string(),
+        protocol,
+        port,
+        icmp,
+    })
+}
+
+/// Parse the services.<ID> tables
+fn parse_services(ctoml: &Table) -> Result<Vec<Service>, CompilationError> {
+    if !ctoml.contains_key("services") {
+        println!("warning: no services in configuration");
+        return Ok(Vec::new());
+    }
+    let services = ctoml["services"]
+        .as_table()
+        .ok_or(err_config!("error reading services section"))?;
+    let mut ret = Vec::new();
+    for (sid, v) in services {
+        let s = parse_service(
+            sid,
+            v.as_table()
+                .ok_or(err_config!("service {} is not a table", sid))?,
+        )?;
+        ret.push(s);
+    }
+    Ok(ret)
+}
+
+/// Parse the very bare bones individual service table.
+fn parse_service(sid: &str, s: &Table) -> Result<Service, CompilationError> {
+    let protocol_id = s["protocol"]
+        .as_str()
+        .ok_or(err_config!("service {} missing protocol", sid))?
+        .to_string();
+    Ok(Service {
+        id: sid.to_string(),
+        protocol_id,
+    })
+}
+
+/// Parse and do light error checking on the ICMP details (the icmp_type and icmp_codes).
+fn parse_icmp_details(prot_id: &str, prot: &Table) -> Result<IcmpFlowType, CompilationError> {
+    if !prot.contains_key("icmp_type") {
+        return Err(err_config!("protocol {} missing icmp_type", prot_id));
+    }
+    if !prot.contains_key("icmp_codes") {
+        return Err(err_config!("protocol {} missing icmp_codes", prot_id));
+    }
+
+    let codes = prot["icmp_codes"].as_array().ok_or(err_config!(
+        "protocol {} icmp_codes is not an array",
+        prot_id
+    ))?;
+    if codes.is_empty() {
+        return Err(err_config!("protocol {} icmp_codes is empty", prot_id));
+    }
+
+    let ft = prot["icmp_type"]
+        .as_str()
+        .ok_or(err_config!("protocol {} icmp missing interaction", prot_id))?
+        .to_string();
+    let interaction = match ft.as_str().to_lowercase().as_str() {
+        ICMP_INTERACION_REQUEST_RESPONSE => {
+            if codes.len() != 2 {
+                return Err(err_config!(
+                    "protocol {} icmp request-response requires exactly two type codes",
+                    prot_id
+                ));
+            }
+            let code0 = toml_as_u8(&codes[0])
+                .ok_or(err_config!("protocol {} icmp code[0] invalid", prot_id))?;
+            let code1 = toml_as_u8(&codes[1])
+                .ok_or(err_config!("protocol {} icmp code[1] invalid", prot_id))?;
+            IcmpFlowType::RequestResponse(code0, code1)
+        }
+        ICMP_INTERACTION_ONESHOT => {
+            if codes.len() > 1 {
+                return Err(err_config!(
+                    "protocol {} icmp onshot requires exactly one type code",
+                    prot_id
+                ));
+            }
+            let code = toml_as_u8(&codes[0])
+                .ok_or(err_config!("protocol {} icmp code is invalid", prot_id))?;
+            IcmpFlowType::OneShot(code)
+        }
+        _ => {
+            return Err(err_config!(
+                "protocol {} invalid icmp interaction type: {}",
+                prot_id,
+                ft
+            ))
+        }
+    };
+    Ok(interaction)
+}
+
+/// Convert a TOML integer to a u8.  Returns None if the integer is out of range.
+fn toml_as_u8(v: &toml::Value) -> Option<u8> {
+    match v {
+        toml::Value::Integer(i) => {
+            if *i < 0 || *i > 255 {
+                return None;
+            }
+            Some(*i as u8)
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn parse_toml(tstr: &str) -> toml::map::Map<String, toml::Value> {
+        tstr.parse::<Table>()
+            .map_err(|e| CompilationError::TomlError(e))
+            .unwrap()
+    }
+
+    #[test]
+    fn test_parse_resolver_empty() {
+        let tstr = r#"
+        [resolver]
+        "#;
+        let ctoml = parse_toml(tstr);
+        let r = parse_resolver(&ctoml);
+        assert!(r.is_ok());
+        let r = r.unwrap();
+        assert_eq!(r.order.len(), 2);
+        assert!(r.order.contains(&"hosts".to_string()));
+        assert!(r.order.contains(&"dns".to_string()));
+        assert!(r.hosts.is_none());
+    }
+
+    #[test]
+    fn test_parse_resolver_data() {
+        let tstr = r#"
+        [resolver]
+        order = ["dns", "hosts", "foo"]
+        [resolver.hosts]
+        "n0" = "1.2.3.4"
+        "n1.foo" = "5.6.7.8"
+        "#;
+        let ctoml = parse_toml(tstr);
+        let r = parse_resolver(&ctoml);
+        assert!(r.is_ok());
+        let r = r.unwrap();
+        assert_eq!(r.order.len(), 3);
+        assert!(r.order.contains(&"dns".to_string()));
+        assert!(r.order.contains(&"hosts".to_string()));
+        assert!(r.order.contains(&"foo".to_string()));
+        assert!(r.hosts.is_some());
+        let hosts = r.hosts.unwrap();
+        assert_eq!(hosts.len(), 2);
+        assert_eq!(hosts.get("n0").unwrap(), "1.2.3.4");
+        assert_eq!(hosts.get("n1.foo").unwrap(), "5.6.7.8");
+    }
+
+    #[test]
+    fn test_parse_node() {
+        let tstr = r#"
+        [nodes]
+        [nodes.n0]
+        key = "somekey"
+        zpr_address = "foo.zpr"
+        provider = [["zpr.foo", "bar"], ["baz", 99]]
+        interfaces = ["eth0", "eth1"]
+        eth0.netaddr = "1.2.3.4:2000"
+        eth1.netaddr = "5.6.7.8:9000"
+        "#;
+        let ctoml = parse_toml(tstr);
+        let nodes = parse_nodes(&ctoml);
+        assert!(nodes.is_ok());
+        let nodes = nodes.unwrap();
+        assert_eq!(nodes.len(), 1);
+        let n0 = nodes.get("n0").unwrap();
+        assert_eq!(n0.id, "n0");
+        assert_eq!(n0.key, "somekey");
+        assert_eq!(n0.zpr_address, "foo.zpr");
+        assert_eq!(n0.interfaces.len(), 2);
+        for iface in &n0.interfaces {
+            match iface.name.as_str() {
+                "eth0" => assert_eq!(iface.netaddr, "1.2.3.4:2000"),
+                "eth1" => assert_eq!(iface.netaddr, "5.6.7.8:9000"),
+                _ => panic!("unexpected interface name"),
+            }
+        }
+        assert_eq!(n0.provider.len(), 2);
+        assert!(n0
+            .provider
+            .contains(&("zpr.foo".to_string(), "bar".to_string())));
+        assert!(n0.provider.contains(&("baz".to_string(), "99".to_string())));
+    }
+
+    #[test]
+    fn test_parse_visa_service() {
+        let tstr = r#"
+        [visa_service]
+        dock_node = "n0"
+        "#;
+        let ctoml = parse_toml(tstr);
+        let vs = parse_visa_service(&ctoml);
+        assert!(vs.is_ok());
+        let vs = vs.unwrap();
+        assert_eq!(vs.dock_node_id, "n0");
+    }
+
+    #[test]
+    fn test_parse_trusted_service_default() {
+        let tstr = r#"
+        [trusted_services.default]
+        cert_path = "foo.pem"
+        prefix = "bar.hop"
+        returns_attributes = ["a", "c"]
+        identity_attributes = ["c"]
+        "#;
+        let ctoml = parse_toml(tstr);
+        let services = parse_trusted_services(&ctoml);
+        assert!(services.is_ok());
+        let services = services.unwrap();
+        assert_eq!(services.len(), 1);
+        let ts = services.get(0).unwrap();
+        assert_eq!(ts.id, "default");
+        assert_eq!(ts.api, DEFAULT_TRUSTED_SERVICE_API);
+        assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
+        assert_eq!(ts.prefix, "bar.hop");
+        assert_eq!(ts.returns_attrs.len(), 2);
+        assert!(ts.returns_attrs.contains(&"a".to_string()));
+        assert!(ts.returns_attrs.contains(&"c".to_string()));
+        assert_eq!(ts.identity_attrs.len(), 1);
+        assert!(ts.identity_attrs.contains(&"c".to_string()));
+    }
+
+    #[test]
+    fn test_parse_trusted_service_other() {
+        // missing api fails
+        let tstr = r#"
+        [trusted_services.other]
+        cert_path = "foo.pem"
+        prefix = "bar.hop"
+        returns_attributes = ["a", "c"]
+        identity_attributes = ["c"]
+        "#;
+        let ctoml = parse_toml(tstr);
+        let services = parse_trusted_services(&ctoml);
+        assert!(services.is_err());
+
+        // and with api succeeds
+        let tstr = r#"
+        [trusted_services.other]
+        api = "validation/1"
+        cert_path = "foo.pem"
+        prefix = "bar.hop"
+        returns_attributes = ["a", "c"]
+        identity_attributes = ["c"]
+        "#;
+        let ctoml = parse_toml(tstr);
+        let services = parse_trusted_services(&ctoml);
+        assert!(services.is_ok());
+        let services = services.unwrap();
+        assert_eq!(services.len(), 1);
+        let ts = services.get(0).unwrap();
+        assert_eq!(ts.id, "other");
+        assert_eq!(ts.api, "validation/1");
+        assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
+        assert_eq!(ts.prefix, "bar.hop");
+        assert_eq!(ts.returns_attrs.len(), 2);
+        assert!(ts.returns_attrs.contains(&"a".to_string()));
+        assert!(ts.returns_attrs.contains(&"c".to_string()));
+        assert_eq!(ts.identity_attrs.len(), 1);
+        assert!(ts.identity_attrs.contains(&"c".to_string()));
+    }
+
+    #[test]
+    fn test_parse_protocols() {
+        let tstr = r#"
+        [protocols.http]
+        protocol = "iana.Tcp"
+        port = "80"
+
+        [protocols.ping]
+        protocol = "iana.ICMP6"
+        icmp_type = "request-response"
+        icmp_codes = [128, 129]
+        "#;
+        let ctoml = parse_toml(tstr);
+        let prots = parse_protocols(&ctoml);
+        assert!(prots.is_ok());
+        let prots = prots.unwrap();
+        assert_eq!(prots.len(), 2);
+        let http = prots.get("http").unwrap();
+        assert_eq!(http.protocol, IanaProtocol::TCP);
+        assert_eq!(http.port, Some("80".to_string()));
+        assert!(http.icmp.is_none());
+        let ping = prots.get("ping").unwrap();
+        assert_eq!(ping.protocol, IanaProtocol::ICMPv6);
+        assert!(ping.port.is_none());
+        let icmp = ping.icmp.as_ref().unwrap();
+        match icmp {
+            IcmpFlowType::RequestResponse(c0, c1) => {
+                assert_eq!(*c0, 128);
+                assert_eq!(*c1, 129);
+            }
+            _ => panic!("unexpected icmp type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_services() {
+        let tstr = r#"
+        [services.MyService]
+        protocol = "ping"
+
+        [services.MyOtherService]
+        protocol = "pong"
+        "#;
+        let ctoml = parse_toml(tstr);
+        let services = parse_services(&ctoml);
+        assert!(services.is_ok());
+        let services = services.unwrap();
+        assert_eq!(services.len(), 2);
+        let mut hits: u8 = 0;
+        for s in services {
+            match s.id.as_str() {
+                "MyService" => {
+                    assert_eq!(s.protocol_id, "ping");
+                    hits |= 0x1;
+                }
+                "MyOtherService" => {
+                    assert_eq!(s.protocol_id, "pong");
+                    hits |= 0x2;
+                }
+                _ => panic!("unexpected service id"),
+            }
+        }
+        assert_eq!(hits, 0x3); // or did not hit both services.
+    }
+}

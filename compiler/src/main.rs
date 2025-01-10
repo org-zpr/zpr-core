@@ -1,9 +1,11 @@
 mod allow;
 mod compilation;
+mod config;
 mod define;
 mod errors;
 mod lex;
 mod parser;
+mod protocols;
 mod ptypes;
 mod putil;
 mod zplstr;
@@ -41,7 +43,11 @@ struct Cli {
 fn main() {
     let mut exit_code = 0;
     let cli = Cli::parse();
-    let comp = Compilation::builder(cli.zpl).verbose(cli.verbose).build();
+    let mut cb = Compilation::builder(cli.zpl).verbose(cli.verbose);
+    if let Some(cfg) = cli.zplc {
+        cb = cb.config(&cfg);
+    }
+    let comp = cb.build();
     match comp.compile() {
         Ok(_) => println!("compiled ok"),
         Err(e) => {

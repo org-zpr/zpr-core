@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use crate::config::load_config;
 use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
@@ -26,6 +27,7 @@ impl Compilation {
                 self.source_zpl, self.source_config
             );
         }
+        let _cfg = load_config(&self.source_config)?;
         let tokens = tokenize(&self.source_zpl)?;
         for t in &tokens {
             println!("   {:?}", t);
@@ -66,8 +68,8 @@ impl CompilationBuilder {
     /// This is optional. If not set, the configuration file is assumed to have
     /// the same base name as the source file but with a `.zplc` extension.
     #[allow(dead_code)]
-    pub fn config(mut self, config: PathBuf) -> Self {
-        self.source_config = Some(config);
+    pub fn config(mut self, config: &Path) -> Self {
+        self.source_config = Some(config.into());
         self
     }
 

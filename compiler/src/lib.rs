@@ -11,10 +11,12 @@
 
 mod allow;
 pub mod compilation;
+mod config;
 mod define;
 pub mod errors;
 mod lex;
 mod parser;
+mod protocols;
 mod ptypes;
 mod putil;
 mod zplstr;
