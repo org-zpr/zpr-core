@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::config::load_config;
 use crate::crypto::sha256_of_file;
@@ -6,6 +7,7 @@ use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
 use crate::fabric::weave;
+use crate::policybuilder::PolicyBuilder;
 
 /// Create one of these with the [CompilationBuilder].
 pub struct Compilation {
@@ -48,6 +50,16 @@ impl Compilation {
 
         let fabric = weave(&self, &cfg, &policy)?;
         println!("FABRIC:\n{}", fabric);
+
+        let mut builder = PolicyBuilder::new();
+        builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
+
+        builder.with_fabric(&fabric)?;
+
+        let _pol = builder.build()?;
+
+        println!("build successful -- now what?");
+        // TODO: put into signed container.
 
         Ok(())
     }

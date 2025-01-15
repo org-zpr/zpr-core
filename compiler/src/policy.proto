@@ -1,0 +1,229 @@
+syntax="proto3";
+package polio;
+
+option go_package = "spacelaser.net/zpr/pkg/snet/polio";
+
+
+
+
+// PolicyContainer is what is sent to a node (produced by the compiler)
+message PolicyContainer {
+    uint32 container_version = 1;
+    string policy_date       = 2; // copied out of policy as a convenience
+    uint64 policy_version    = 3; // copied out of policy as a convenience
+    string policy_revision   = 4; // copied out of policy as a convenience
+    string policy_metadata   = 5; // copied out of policy as a convenience
+    bytes policy             = 6; // serialized policy
+    bytes signature          = 7; // signature of serialized policy
+    // TODO: May want create and expire timestamps on here.
+}
+
+
+message Policy {
+    uint32 serial_version          = 1; // Increments when we alter this schema
+    string policy_date             = 2; // set in file or by compiler
+    uint64 policy_version          = 3; // set in file or by compiler arg (defaults to a timestamp)
+    string policy_revision         = 4; // set in file or by compiler arg (but is required)
+    string policy_metadata         = 5;
+    repeated Connect connects      = 6;
+    repeated CPolicy policies      = 7;
+    repeated Service services      = 8; // auth services (excludes "internal" cert-type auth services for some reason)
+    repeated Proc procs            = 9; // list of procedures, indexed by ID
+    repeated Link links            = 10;
+    repeated Cert certificates     = 11; // For datasources, including "internal".
+    repeated string attr_key_index = 12; // Attribute keys, in order
+    repeated string attr_val_index = 13; // Attribute values, in order
+    repeated ConfigSetting config  = 14; // Global settings
+}
+
+
+// Configuration settings (usually embodiment specific)
+message ConfigSetting {
+    uint32 key       = 1; // keys < 1024 reserved for ZPR
+    oneof val {  // TODO: Why not use Argument?
+        string sv    = 2;
+        uint32 u32v  = 3;
+        uint64 u64v  = 4;
+        bool bv      = 5;
+    }
+}
+
+// Connect enforces connection policy
+message Connect {
+    repeated AttrExpr attrExprs = 1;
+    uint32 proc                 = 2;
+}
+
+// CPolicy is a Communications Policy
+message CPolicy {
+    string service_id               = 1;  // required to match the service (which may get dynamic addr)
+    string id                       = 2;
+    repeated Scope scope            = 3;
+    repeated Condition conditions   = 4;
+    repeated Constraint constraints = 5;
+    // We used to have a proc on the policy too, but not anymore. Setting up the PEPs is now
+    // part of what the visa service does.
+}
+
+enum SvcT {
+    SVCT_UNUSED    = 0;
+    SVCT_DEF       = 1;
+    SVCT_AUTH      = 2;
+    SVCT_DECORATOR = 3;
+}
+
+
+
+message Service {
+    SvcT   type                 = 1; // only "auth" is known at the moment.
+    string name                 = 2; // service "provides" value
+    string prefix               = 3; // datasource prefix
+    string domain               = 4; // TLS domain
+    int32  query_api_version    = 5; // 0 means not support
+    int32  validate_api_version = 6; // 0 means not support
+    string addr                 = 7; // HOST:PORT (TCP is assumed and enforced by compiler)
+}
+
+message Condition {
+    string id                   = 1;
+    repeated AttrExpr attrExprs = 2;
+}
+
+message Constraint {
+    oneof carg {
+        BWConstraint bw       = 1;
+        DurConstraint dur     = 2;
+        DataCapConstraint cap = 3;
+    }
+    string group              = 4; // optional group tag
+}
+
+message BWConstraint {
+    uint64 bits_per_sec = 1;
+}
+
+message DurConstraint {
+    uint64 seconds = 1;
+}
+
+message DataCapConstraint {
+    uint64 cap_bytes      = 1;  // This much data
+    uint64 period_seconds = 2;  // Over this period (in seconds)
+}
+
+message Scope {
+    uint32 protocol        = 1;
+    oneof protarg {
+        PortSpecList pspec = 2;
+        ICMP icmp          = 3;
+    }
+}
+
+enum ICMPT {
+    ICMPT_UNUSED = 0;
+    ICMPT_REQREP = 1;
+    ICMPT_ONCE   = 2;
+}
+
+
+// ICMP is either a single TYPECODE or a pair for request-response.
+// In that case, the response type is only allowed after a request.
+message ICMP {
+    ICMPT type              = 1;
+    repeated uint32 codes   = 2; // single code, or REQUEST_CODE, RESPONSE_CODE.
+}
+
+
+message PortSpecList {
+    repeated PortSpec spec = 1;
+}
+
+message PortSpec {
+    oneof parg {
+        uint32 port  = 1;
+        PortRange pr = 2;
+    }
+}
+
+
+message PortRange {
+    uint32 low  = 1;
+    uint32 high = 2;
+}
+
+enum AttrOpT {
+    UNUSED   = 0;
+    EQ       = 1;
+    NE       = 2;
+    HAS      = 7;
+    EXCLUDES = 8;
+}
+
+
+message AttrExpr {
+    uint32 key = 1;
+    AttrOpT op = 2;
+    uint32 val = 3;
+}
+
+message Cert {
+    uint32 ID      = 1; // TODO: What is this?
+    bytes asn1data = 2;
+    string name    = 3; // = auth "prefix"
+}
+
+message Proc {
+    repeated Instruction proc = 1;
+}
+
+enum OpCodeT {
+    OP_Nop              = 0;
+    OP_Register         = 1; // args are (NAME, TYPE, ENDPOINTS) type (STRING, SvcT, STRING)
+    OP_SetFlag          = 2;
+    OP_SetCfg           = 3;
+}
+
+message Instruction {
+    OpCodeT opcode         = 1;
+    repeated Argument args = 2;
+}
+
+message StringPair {
+    string a = 1;
+    string b = 2;
+}
+
+enum FlagT {
+    F_UNUSED      = 0;
+    F_NODE        = 1;
+    F_VISASERVICE = 2; // set by adapter hosting a visa service instance
+    F_VS_DOCK     = 3; // set by a node a visa service can dock to
+}
+
+message Argument {
+    oneof arg {
+        int64 ival         = 1;
+        uint64 uival       = 2;
+        string strval      = 3;
+        bool bval          = 4;
+        FlagT flagval      = 5;
+        SvcT svcval        = 6;
+        Instruction insval = 7;
+        StringPair spval   = 8;
+    }
+}
+
+// NodeAddr is the end of a link
+message NodeAddr {
+    bytes zpr_id         = 1;
+    string host          = 2; // IP or Hostname
+    uint32 port          = 3; // for node-node IPv4 connection
+    bool ext_auth        = 4; // true if node requires auth service
+    uint32 cost          = 5; // link cost
+    bytes key            = 6; // Noise PK (32 bytes)
+}
+
+message Link {
+    bytes source_id         = 1; // zpr id value for link originator
+    repeated NodeAddr terms = 2; // link terminators
+  }

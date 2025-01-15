@@ -212,4 +212,23 @@ impl Attribute {
             optional: false,
         }
     }
+
+    /// The the ZPL name for the key of this attribute. The key is just the attribute name
+    /// unless this is a tag, in which case the key is "zpr.tag".
+    pub fn zpl_key(&self) -> String {
+        if self.tag {
+            "zpr.tag".to_string()
+        } else {
+            self.name.clone()
+        }
+    }
+
+    /// The ZPL value for this attribute. If there is no value an empty string is returned.
+    pub fn zpl_value(&self) -> String {
+        if let Some(v) = &self.value {
+            v.clone()
+        } else {
+            "".to_string()
+        }
+    }
 }

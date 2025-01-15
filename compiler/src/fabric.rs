@@ -4,12 +4,10 @@
 
 use core::fmt;
 use std::collections::HashMap;
-use std::env;
 use std::net::Ipv6Addr;
 
 use ring::digest::Digest;
 
-use crate::binp::BinpBuilder;
 use crate::compilation::Compilation;
 use crate::config::{Config, Node, Service, Protocol};
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
@@ -40,7 +38,7 @@ pub struct FabricService {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum ServiceType {
     Undefined,
     Trusted,
@@ -118,6 +116,55 @@ impl fmt::Display for Fabric {
         write!(f, "\n")
     }
 }
+
+
+
+pub fn weave(
+    _comp: &Compilation,
+    config: &Config,
+    policy: &Policy,
+) -> Result<Fabric, CompilationError> {
+    let mut weaver = Weaver::new();
+
+    weaver.compute_revision(policy.digest, &config.digest)?;
+
+    // Create a class index which maps class name -> class struct.
+    let defaults = Class::defaults();
+    let mut class_idx = HashMap::new();
+    // Add default classes:
+    for defclass in &defaults {
+        class_idx.insert(defclass.name.clone(), defclass);
+    }
+    for cl in &policy.defines {
+        class_idx.insert(cl.name.clone(), cl);
+    }
+
+    // Create a service index maps service ID -> service struct.
+    let mut service_idx = HashMap::new();
+    for svc in &config.services {
+        service_idx.insert(svc.id.clone(), svc);
+    }
+
+    for ts in &config.trusted_services {
+        if ts.id != zpl::DEFAULT_TRUSTED_SERVICE_ID {
+            return Err(CompilationError::ConfigError(format!(
+                "non-default trusted services not yet supported: {}",
+                ts.id
+            )));
+        }
+    }
+
+    weaver.init_services(&class_idx, &service_idx, policy, config)?;
+    weaver.init_nodes(config)?;
+    weaver.add_client_policies(&class_idx, policy)?;
+
+    println!("   certificates: *TODO*");
+
+
+    Ok(weaver.fabric)
+}
+
+
 
 impl Fabric {
     /// Add the service and the attributes that are required to provide it.
@@ -309,7 +356,6 @@ impl FabricService {
 }
 
 struct Weaver {
-    builder: BinpBuilder,
     fabric: Fabric,
 
     // Map the allow clause ID to the fabric service ID.
@@ -320,7 +366,6 @@ struct Weaver {
 impl Weaver {
     fn new() -> Self {
         Self {
-            builder: BinpBuilder::new(),
             fabric: Fabric::default(),
             allowid_to_fab_svc: HashMap::new(),
         }
@@ -343,16 +388,6 @@ impl Weaver {
         Ok(())
     }
 
-    fn update_metadata(&mut self) -> Result<(), CompilationError> {
-        let username = env::var("USER").unwrap_or_else(|_| "(anonymous)".to_string());
-        self.fabric.metadata = format!(
-            "compiled {} on {} by {}",
-            self.builder.get_policy_date(),
-            platform::gethostname(),
-            username
-        );
-        Ok(())
-    }
 
     /// Figure out the set of services in the fabric.  There may be a bunch of services in
     /// the configuration but we only want the ones that are refefenced in the ZPL.
@@ -555,51 +590,6 @@ impl Weaver {
     }
 }
 
-pub fn weave(
-    _comp: &Compilation,
-    config: &Config,
-    policy: &Policy,
-) -> Result<Fabric, CompilationError> {
-    let mut weaver = Weaver::new();
-
-    weaver.compute_revision(policy.digest, &config.digest)?;
-    weaver.update_metadata()?;
-
-    // Create a class index which maps class name -> class struct.
-    let defaults = Class::defaults();
-    let mut class_idx = HashMap::new();
-    // Add default classes:
-    for defclass in &defaults {
-        class_idx.insert(defclass.name.clone(), defclass);
-    }
-    for cl in &policy.defines {
-        class_idx.insert(cl.name.clone(), cl);
-    }
-
-    // Create a service index maps service ID -> service struct.
-    let mut service_idx = HashMap::new();
-    for svc in &config.services {
-        service_idx.insert(svc.id.clone(), svc);
-    }
-
-    for ts in &config.trusted_services {
-        if ts.id != zpl::DEFAULT_TRUSTED_SERVICE_ID {
-            return Err(CompilationError::ConfigError(format!(
-                "non-default trusted services not yet supported: {}",
-                ts.id
-            )));
-        }
-    }
-
-    weaver.init_services(&class_idx, &service_idx, policy, config)?;
-    weaver.init_nodes(config)?;
-    weaver.add_client_policies(&class_idx, policy)?;
-
-    println!("   certificates: *TODO*");
-    println!("         config: *TODO*");
-
-    Ok(weaver.fabric)
-}
 
 /// Convert the list of (key, value) pairs into a list of attributes.
 ///
@@ -698,24 +688,5 @@ fn find_defined_service(
     match matched_service {
         Some(s) => Some(s.id.clone()),
         None => None,
-    }
-}
-
-mod platform {
-
-    #[cfg(target_family = "unix")]
-    use nix::unistd;
-
-    #[cfg(target_family = "unix")]
-    pub fn gethostname() -> String {
-        match unistd::gethostname() {
-            Ok(h) => h.to_string_lossy().to_string(),
-            Err(_) => "(unknown)".to_string(),
-        }
-    }
-
-    #[cfg(not(target_family = "unix"))]
-    pub fn gethostname() -> String {
-        return "(unknown)".to_string();
     }
 }

@@ -9,8 +9,13 @@
 // This lib.rs is here to allow the integration tests
 // to use the modules in the src directory.
 
+pub mod polio {
+    include!(concat!(env!("OUT_DIR"), "/polio.rs"));
+}
+
+
 mod allow;
-mod binp;
+mod policybuilder;
 pub mod compilation;
 mod config;
 mod crypto;

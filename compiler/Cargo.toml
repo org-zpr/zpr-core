@@ -7,6 +7,7 @@ edition = "2021"
 chrono = "0.4.39"
 clap = { version = "4.5.23", features = ["derive"] }
 nix = { version = "0.29.0", features = ["hostname"] }
+prost = "0.13.4"
 ring = "0.17.8"
 serde = { version = "1.0.217", features = ["derive"] }
 thiserror = "2.0.8"
@@ -14,4 +15,7 @@ toml = "0.8.19"
 
 [lib]
 test = false
+
+[build-dependencies]
+prost-build = "0.13.4"
 

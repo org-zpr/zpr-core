@@ -1,5 +1,11 @@
+
+pub mod polio {
+    include!(concat!(env!("OUT_DIR"), "/polio.rs"));
+}
+
+
+mod policybuilder;
 mod allow;
-mod binp;
 mod compilation;
 mod config;
 mod crypto;
