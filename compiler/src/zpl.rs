@@ -20,3 +20,15 @@ pub const ADAPTER_CN_ATTR: &str = "zpr.adapter.cn";
 
 // TODO: Check this is ok. I think in prototype is it '/zpr/$$zpr/visaservice'.  But that seems odd.
 pub const VS_SERVICE_NAME: &str = "/zpr/visaservice";
+
+pub const KATTR_ROLE: &str = "role";
+
+// For nodes to talk to VS
+pub const VISA_SERVICE_PORT: u16 = 5002; // TCP
+
+// For VS to talk to nodes
+pub const VISA_SUPPORT_SEVICE_PORT: u16 = 8183; // TCP
+
+// For admin to control the visa service (eg, install a policy)
+#[allow(dead_code)]
+pub const VISA_SERVICE_ADMIN_PORT: u16 = 8182; // TCP

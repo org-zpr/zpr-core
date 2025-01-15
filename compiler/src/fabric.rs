@@ -11,25 +11,29 @@ use ring::digest::Digest;
 
 use crate::binp::BinpBuilder;
 use crate::compilation::Compilation;
-use crate::config::{Config, Node, Service};
+use crate::config::{Config, Node, Service, Protocol};
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
 use crate::lex::Token;
 use crate::ptypes::{Attribute, Class, Policy};
 use crate::zpl;
+use crate::protocols::IanaProtocol;
 
+/// A service oriented view of the network.
 #[derive(Debug, Clone, Default)]
 pub struct Fabric {
-    pub services: Vec<FabricService>,
-    pub nodes: Vec<FabricNode>,
     pub revision: String,
     pub metadata: String,
+    pub services: Vec<FabricService>,
+    pub nodes: Vec<FabricNode>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub struct FabricService {
     pub config_id: String, // Service name as specified in configuration and ZPL.
     pub fabric_id: String, // Service name assigned in the fabric
+    pub protocol: Protocol,
     pub provider_attrs: Vec<Attribute>, // Set of provider attributes required to offer the service
     pub client_policies: Vec<ClientPolicy>, // List of consumer policies
     pub service_type: ServiceType,
@@ -42,6 +46,7 @@ pub enum ServiceType {
     Trusted,
     Visa,
     Regular,
+    BuiltIn, // eg, noode access to VS, o VS access to VSS
 }
 
 impl Default for ServiceType {
@@ -53,7 +58,7 @@ impl Default for ServiceType {
 #[derive(Debug, Clone)]
 pub struct FabricNode {
     pub config_node: Node,
-    pub provider_attrs: Vec<Attribute>, // parsed out of config::Node
+    pub provider_attrs: Vec<Attribute>, // parsed out of config::Node.provider
 }
 
 #[derive(Debug, Clone, Default)]
@@ -63,6 +68,9 @@ pub struct ClientPolicy {
                                    //       Actually, withouts are just attributes, eg (role, ne, marketing)
 }
 
+
+
+/// Debugging output
 impl fmt::Display for Fabric {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "revision: {}\n", self.revision)?;
@@ -91,7 +99,7 @@ impl fmt::Display for Fabric {
                 write!(
                     f,
                     "      {})  {}\n",
-                    i,
+                    i+1,
                     cp.condition
                         .iter()
                         .map(|a| a.to_string())
@@ -120,10 +128,20 @@ impl Fabric {
     pub fn add_service(
         &mut self,
         id: &str,
+        protocol: &Protocol,
         attrs: &[Attribute],
         stype: ServiceType,
     ) -> Result<String, CompilationError> {
         assert!(stype != ServiceType::Undefined); // programming error
+        if stype == ServiceType::BuiltIn {
+            panic!("not allowed to explicity add a BUILTIN service: {}", id);
+        }
+        if stype == ServiceType::Regular && id.starts_with("/zpr") {
+            return Err(CompilationError::ConfigError(format!(
+                "service {} cannot start with reserved prefix '/zpr'",
+                id
+            )));
+        }
         let mut svc_instance = 0;
         for s in &self.services {
             if s.config_id == id {
@@ -148,6 +166,7 @@ impl Fabric {
         let fs = FabricService {
             config_id: id.to_string(),
             fabric_id: fabric_id.clone(),
+            protocol: protocol.clone(),
             provider_attrs: attrs.to_vec(),
             client_policies: Vec::new(),
             service_type: stype,
@@ -156,7 +175,18 @@ impl Fabric {
         Ok(fabric_id)
     }
 
-    /// Add a node to the fabric.
+    pub fn get_visa_service(&self) -> Option<&FabricService> {
+        self.services.iter().find(|s| s.service_type == ServiceType::Visa)
+    }
+
+    /// Return TRUE if the service with given fabric_id is in our fabric.
+    pub fn has_service(&self, fabric_id: &str) -> bool {
+        self.services.iter().any(|s| s.fabric_id == fabric_id)
+    }
+
+    /// Add a node to the fabric.  Must add visa service before calling this.
+    ///
+    /// This also adds visa service access to the nodes visa support service.
     pub fn add_node(&mut self, node: &Node, config: &Config) -> Result<(), CompilationError> {
         let mut node_attrs = vec_to_attributes(&node.provider)?;
         if !node.zpr_address.is_empty() {
@@ -185,12 +215,43 @@ impl Fabric {
 
         // Note that we do not have line/col info from the config file.
         let attr_map = squash_attributes(&node_attrs, &Token::default())?;
+        let provider_attrs = attr_map.into_values().collect::<Vec<Attribute>>();
 
         let fabn = FabricNode {
             config_node: node.clone(),
-            provider_attrs: attr_map.into_values().collect::<Vec<Attribute>>(),
+            provider_attrs: provider_attrs.clone(),
         };
         self.nodes.push(fabn);
+
+        // Now create the visa support service for this node and an access rule.
+        let vs = self.get_visa_service().expect("visa service must be added before add_node is called");
+        let svc_name = format!("/zpr/node/{}/vss", node.id);
+
+        // There cannot be a service with this id already.
+        if self.has_service(&svc_name) {
+            return Err(CompilationError::ConfigError(format!(
+                "unabled to configure node VSS because service {} already exists in fabric",
+                &svc_name
+            )));
+        }
+
+        let access_policy = ClientPolicy {
+            condition: vs.provider_attrs.clone(), // The VSS is accessed by the visa service
+        };
+        let vss_svc = FabricService {
+            config_id: svc_name.clone(),
+            fabric_id: svc_name.clone(),
+            protocol: Protocol {
+                id: "zpr_vsup".to_string(),
+                protocol: IanaProtocol::TCP,
+                port: Some(format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT)),
+                icmp: None,
+            },
+            provider_attrs: provider_attrs, // The VSS is provided by the node
+            client_policies: vec![access_policy],
+            service_type: ServiceType::BuiltIn,
+        };
+        self.services.push(vss_svc);
         Ok(())
     }
 
@@ -233,6 +294,7 @@ impl Fabric {
 }
 
 impl FabricService {
+    /// True if this services attributes overlap with `other_attrs` exactly.
     pub fn matches_attributes(&self, other_attrs: &[Attribute]) -> bool {
         if other_attrs.len() != self.provider_attrs.len() {
             return false;
@@ -249,6 +311,8 @@ impl FabricService {
 struct Weaver {
     builder: BinpBuilder,
     fabric: Fabric,
+
+    // Map the allow clause ID to the fabric service ID.
     allowid_to_fab_svc: HashMap<usize, String>,
 }
 
@@ -297,6 +361,7 @@ impl Weaver {
         class_idx: &HashMap<String, &Class>,
         service_idx: &HashMap<String, &Service>,
         policy: &Policy,
+        config: &Config,
     ) -> Result<(), CompilationError> {
         for ac in &policy.allows {
             if ac.service.class == zpl::DEF_CLASS_SERVICE_NAME {
@@ -339,10 +404,21 @@ impl Weaver {
                 }
             }
 
+            let prot = match config.protocols.get(&svc.protocol_id) {
+                Some(p) => p,
+                None => {
+                    return Err(CompilationError::ConfigError(format!(
+                        "protocol {} for {} not found in configuration",
+                        svc.protocol_id, svc.id
+                    )))
+                }
+            };
+
             let attr_map = squash_attributes(&attrs, &ac.service.class_tok)?;
 
             let fabric_svc_id = self.fabric.add_service(
                 &svc.id,
+                prot,
                 attr_map
                     .into_values()
                     .collect::<Vec<Attribute>>()
@@ -353,14 +429,34 @@ impl Weaver {
         }
 
         // Visa service
+        let vs_protocol = Protocol {
+            id: "zpr_vsvc".to_string(),
+            protocol: IanaProtocol::TCP,
+            port: Some(format!("{}", zpl::VISA_SERVICE_PORT)),
+            icmp: None,
+        };
         let mut vs_attrs = Vec::new();
         vs_attrs.push(Attribute::attr(zpl::ADAPTER_CN_ATTR, zpl::VISA_SERVICE_CN));
-        let _fab_svc_id =
+        let fab_svc_id =
             self.fabric
-                .add_service(zpl::VS_SERVICE_NAME, &vs_attrs, ServiceType::Visa)?; // ignore the fab service id here
+                .add_service(zpl::VS_SERVICE_NAME, &vs_protocol, &vs_attrs, ServiceType::Visa)?;
+
+        // Visa service has policy that allows nodes to access it.  We use a role attribute so
+        // we don't care about individual node names.
+        let vs_access_attrs = vec![Attribute::attr(zpl::KATTR_ROLE, "node")];
+        self.fabric.add_condition_to_service(&fab_svc_id, &vs_access_attrs)?;
+
+        // TODO: We need to add access to the visa service by the administrator.
+        //       The admin attrs is not yet supported in policy.
+
+        // TODO: When we get around to trusted services, we need to add builtin rules
+        //       that grant VS access to the trusted services.
+
         Ok(())
+
     }
 
+    /// Must init_services before init_nodes.
     fn init_nodes(&mut self, config: &Config) -> Result<(), CompilationError> {
         if config.nodes.is_empty() {
             return Err(CompilationError::ConfigError(
@@ -495,7 +591,7 @@ pub fn weave(
         }
     }
 
-    weaver.init_services(&class_idx, &service_idx, policy)?;
+    weaver.init_services(&class_idx, &service_idx, policy, config)?;
     weaver.init_nodes(config)?;
     weaver.add_client_policies(&class_idx, policy)?;
 

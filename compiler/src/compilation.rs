@@ -5,7 +5,7 @@ use crate::crypto::sha256_of_file;
 use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
-use crate::weaver::weave;
+use crate::fabric::weave;
 
 /// Create one of these with the [CompilationBuilder].
 pub struct Compilation {

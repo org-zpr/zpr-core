@@ -10,7 +10,7 @@ mod parser;
 mod protocols;
 mod ptypes;
 mod putil;
-mod weaver;
+mod fabric;
 mod zpl;
 mod zplstr;
 
