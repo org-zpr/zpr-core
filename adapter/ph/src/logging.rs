@@ -29,6 +29,7 @@ pub mod targets {
     pub const FLOW_MGMT: &str = "flow_mgmt";
     pub const KEY_MGMT: &str = "key_mgmt";
     pub const LINK_STATE: &str = "link_state";
+    pub const MGMT_EVENTS: &str = "mgmt_events";
     pub const PEER_MGMT: &str = "peer_mgmt";
     pub const REPORTING: &str = "reporting";
     pub const RPC: &str = "rpc";
@@ -37,8 +38,19 @@ pub mod targets {
     pub const ZDP: &str = "zdp";
 
     pub const ALL_TARGETS: &[&str] = &[
-        ALL, CAPTURE, DATAPATH, FLOW_MGMT, KEY_MGMT, LINK_STATE, PEER_MGMT, REPORTING, RPC,
-        STARTUP, VISA_MGMT, ZDP,
+        ALL,
+        CAPTURE,
+        DATAPATH,
+        FLOW_MGMT,
+        KEY_MGMT,
+        LINK_STATE,
+        MGMT_EVENTS,
+        PEER_MGMT,
+        REPORTING,
+        RPC,
+        STARTUP,
+        VISA_MGMT,
+        ZDP,
     ];
 }
 

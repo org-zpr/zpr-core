@@ -34,7 +34,7 @@ pub fn drop_and_count(asm: &Assembly, pkt: Packet, reason: impl Into<CounterType
     debug!(target: DATAPATH, "dropping packet because {reason}");
     asm.buffer_stack
         .put_buffer(pkt.destroy().try_into().unwrap());
-    asm.counters[reason.into()].increment();
+    asm.counters[reason].increment();
 }
 
 /// Add the ZPI header to a packet.

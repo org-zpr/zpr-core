@@ -1,7 +1,7 @@
 use crate::assembly::Assembly;
 use crate::counters::CounterType;
-use crate::fastpath;
 use crate::logging::targets::ZDP;
+use crate::mgmt;
 use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
 use crate::packet::Packet;
 use crate::queues::MgmtProcessorMessage;
@@ -24,17 +24,17 @@ pub async fn launch(
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
-            MgmtProcessorMessage::Packet(pkt) => {
+            MgmtProcessorMessage::Packet(mut pkt) => {
                 // Drop packets which are intended for a link other than the one we are assigned to,
                 // since processing them here will violate concurrency assumptions.
                 if pkt.metadata().ingress_link_id != config.link_id.get() {
-                    fastpath::drop_and_count(&asm, pkt, CounterType::InternalRoutingError);
+                    mgmt::core::count_event(&asm, &mut pkt, CounterType::InternalRoutingError);
                     continue;
                 }
 
                 match handle_packet(&asm, pkt).await {
                     Ok(()) => (),
-                    Err((err, pkt)) => fastpath::drop_and_count(&asm, pkt, err),
+                    Err((err, mut pkt)) => mgmt::core::count_event(&asm, &mut pkt, err.into()),
                 }
             }
 

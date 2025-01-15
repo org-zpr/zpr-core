@@ -19,10 +19,7 @@ use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 pub enum HandleMgmtError {
     UnknownType(u8),
-    UnexpectedMgmtResponse,
     BadStructure,
-    UnknownKeyManagementType(u16),
-    KeyManagementError(String),
     LinkStateError,
 }
 
@@ -30,10 +27,7 @@ impl From<HandleMgmtError> for counters::CounterType {
     fn from(err: HandleMgmtError) -> Self {
         match err {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,
-            HandleMgmtError::UnexpectedMgmtResponse => Self::UnexpectedMgmtResponse,
             HandleMgmtError::BadStructure => Self::BadStructure,
-            HandleMgmtError::UnknownKeyManagementType(_type) => Self::OtherError,
-            HandleMgmtError::KeyManagementError(_desc) => Self::OtherError,
             HandleMgmtError::LinkStateError => Self::OtherError,
         }
     }
@@ -42,7 +36,7 @@ impl From<HandleMgmtError> for counters::CounterType {
 pub type HandleMgmtResult = Result<(), (HandleMgmtError, Packet)>;
 
 /// handle a Report message (RFC 6.5 § 6.3.13)
-pub async fn handle_report(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
+pub async fn handle_report(_asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpReportHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
@@ -58,21 +52,17 @@ pub async fn handle_report(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtRe
             std::str::from_utf8(&pkt.body()[..report_data_length]).unwrap()
         );
     }
-    asm.buffer_stack
-        .put_buffer(pkt.destroy().try_into().unwrap());
     Ok(())
 }
 
 /// handle a Discard message (RFC 6.5 § 6.3.1)
-pub async fn handle_discard(asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResult {
+pub async fn handle_discard(_asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResult {
     // TODO print to debug log, when implemented
     info!(
         target: REPORTING,
         "Discard message received from {}",
         pkt.metadata().ingress_link_id
     );
-    asm.buffer_stack
-        .put_buffer(pkt.destroy().try_into().unwrap());
     Ok(())
 }
 
@@ -191,8 +181,6 @@ pub async fn handle_hello_response(
         return Err((HandleMgmtError::LinkStateError, pkt));
     };
 
-    asm.buffer_stack
-        .put_buffer(pkt.destroy().try_into().unwrap());
     Ok(())
 }
 
@@ -436,8 +424,6 @@ pub async fn handle_bind_agent_address_request(
                     assembly::AddRouteError::PeerGone,
                 )) => {
                     // peer went away; don't bother responding
-                    asm.buffer_stack
-                        .put_buffer(rsp_pkt.destroy().try_into().unwrap());
                     return Ok(());
                 }
 

@@ -7,14 +7,31 @@ use crate::assembly::Assembly;
 use crate::config;
 use crate::counters::CounterType;
 use crate::fastpath;
-use crate::packet::{Packet, PacketBuffer};
+use crate::packet::Packet;
 use crate::zdp;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
+use tracing::*;
 use zpr;
-use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::FromBytesExt;
+
+/// Helper to allocate a new Packet with default parameters from the heap.
+pub fn new_heap_packet() -> Packet {
+    Packet::new(
+        Box::new([0u8; config::PACKET_BUFFER_SIZE]),
+        config::DEFAULT_MESSAGE_HEADROOM,
+    )
+}
+
+pub fn count_event(
+    asm: &Assembly,
+    _pkt: &mut Packet, // for later support of per-packet event recording
+    event: CounterType,
+) {
+    debug!(target: crate::logging::targets::MGMT_EVENTS, "packet event {event}");
+    asm.counters[event].increment();
+}
 
 /// Send a unidirectional non-flow management message on the given link.
 /// The packet should contain only the message body.
@@ -191,10 +208,7 @@ async fn send_sync_req_helper(
     let mut response_future = peer_state.sync_req_state.install_response_listener(&permit);
 
     for _i in 0..=config::DEFAULT_REQUEST_RETRY_COUNT {
-        let buf = drop_guard(asm.buffer_stack.get_buffer().await as PacketBuffer, |buf| {
-            asm.buffer_stack.put_buffer(buf.try_into().unwrap())
-        });
-        let mut packet = Packet::new_guarded(buf, config::DEFAULT_MESSAGE_HEADROOM);
+        let mut packet = new_heap_packet();
         pkt_fn(&mut packet);
 
         send_mgmt_helper(
@@ -203,7 +217,7 @@ async fn send_sync_req_helper(
             zdp_request_type,
             stream_id,
             Some(permit.seq_num()),
-            packet.into_inner(),
+            packet,
         )
         .await;
 
@@ -233,9 +247,9 @@ fn match_received(
     zdp_response_type: zdp::ZdpPacketType,
 ) -> Result<Packet, SyncReqError> {
     match response {
-        Some((pkt_type, pkt)) => {
+        Some((pkt_type, mut pkt)) => {
             if pkt_type != zdp_response_type {
-                fastpath::drop_and_count(asm, pkt, CounterType::BadMgmtResponse);
+                count_event(asm, &mut pkt, CounterType::BadMgmtResponse);
                 return Err(SyncReqError::ProtocolError);
             }
             return Ok(pkt);
