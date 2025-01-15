@@ -1,21 +1,19 @@
 //! binp - Binary policy bundle.
 
 use chrono::prelude::*;
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
-use std::env;
 use std::collections::HashMap;
+use std::env;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::errors::CompilationError;
-use crate::zpl;
-use crate::polio;
 use crate::fabric::{Fabric, ServiceType};
+use crate::polio;
 use crate::ptypes::Attribute;
-
+use crate::zpl;
 
 pub const SERIAL_VERSION: u32 = 1121;
 
-const NO_PROC:u32 = 0xffffffff;
-
+const NO_PROC: u32 = 0xffffffff;
 
 #[allow(dead_code)]
 #[derive(Default)]
@@ -23,7 +21,6 @@ pub struct PolicyBuilder {
     policy_date: String,
     policy: polio::Policy,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 struct PFlags {
@@ -48,7 +45,6 @@ impl PFlags {
         }
     }
 }
-
 
 #[allow(dead_code)]
 impl PolicyBuilder {
@@ -87,7 +83,6 @@ impl PolicyBuilder {
         self.policy.config.push(cs);
     }
 
-
     // fabric can add in
     //   - connects [done]
     //   - policies
@@ -116,7 +111,6 @@ impl PolicyBuilder {
     }
 
     fn set_connects(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
-
         for svc in &fabric.services {
             // Any agent that can access a service can connect
             for clipol in &svc.client_policies {
@@ -145,7 +139,9 @@ impl PolicyBuilder {
                     self.policy.connects.push(pconnect);
                 }
                 ServiceType::Trusted => {
-                    return Err(CompilationError::ConfigError("trusted service not yet implemented".to_string()))
+                    return Err(CompilationError::ConfigError(
+                        "trusted service not yet implemented".to_string(),
+                    ))
                 }
                 ServiceType::Undefined => {
                     panic!("undefined service type in fabric{}", svc.config_id);
@@ -154,7 +150,11 @@ impl PolicyBuilder {
         }
         // Any agent that provides a node can connect
         for node in &fabric.nodes {
-            let proc = self.create_service_proc(&node.config_node.id, ServiceType::Regular, Some(PFlags::node()));
+            let proc = self.create_service_proc(
+                &node.config_node.id,
+                ServiceType::Regular,
+                Some(PFlags::node()),
+            );
             self.policy.procs.push(proc);
             let proc_idx = self.policy.procs.len() as u32 - 1;
             let pconnect = polio::Connect {
@@ -167,8 +167,13 @@ impl PolicyBuilder {
         Ok(())
     }
 
-    // fn create_service_proc(&self, svc: &FabricService, flags: Option<PFlags>) -> polio::Proc {
-    fn create_service_proc(&self, svc_id: &str, svc_type: ServiceType, flags: Option<PFlags>) -> polio::Proc {
+    /// Create a PROC for the polich binary to register a service and optionally set flags.
+    fn create_service_proc(
+        &self,
+        svc_id: &str,
+        svc_type: ServiceType,
+        flags: Option<PFlags>,
+    ) -> polio::Proc {
         // In the prototype compiler we include endpoint information in the
         // proc, but that is not used anymore so am leaving it out for
         // now.  We will just use REGISTER but leave endpoints empty.  We
@@ -214,7 +219,9 @@ impl PolicyBuilder {
                 let set_flag = polio::Instruction {
                     opcode: polio::OpCodeT::OpSetFlag as i32,
                     args: vec![polio::Argument {
-                        arg: Some(polio::argument::Arg::Flagval(polio::FlagT::FVisaservice as i32)),
+                        arg: Some(polio::argument::Arg::Flagval(
+                            polio::FlagT::FVisaservice as i32,
+                        )),
                     }],
                 };
                 proc.push(set_flag);
@@ -230,18 +237,27 @@ impl PolicyBuilder {
             }
         }
 
-        polio::Proc {
-            proc,
-        }
+        polio::Proc { proc }
     }
 
+    /// Convert a list of our Attributes structs into a list of the protocol buffer AttrExprs.
     fn attr_list_to_attrexpr(&self, attrs: &Vec<Attribute>) -> Vec<polio::AttrExpr> {
         let mut attrexpr = Vec::new();
         for a in attrs {
             let key = a.zpl_key();
             let val = a.zpl_value();
-            let key_idx = self.policy.attr_key_index.iter().position(|x| *x == key).unwrap();
-            let val_idx = self.policy.attr_val_index.iter().position(|x| *x == val).unwrap();
+            let key_idx = self
+                .policy
+                .attr_key_index
+                .iter()
+                .position(|x| *x == key)
+                .unwrap();
+            let val_idx = self
+                .policy
+                .attr_val_index
+                .iter()
+                .position(|x| *x == val)
+                .unwrap();
             attrexpr.push(polio::AttrExpr {
                 key: key_idx as u32,
                 op: polio::AttrOpT::Eq as i32,
@@ -251,7 +267,8 @@ impl PolicyBuilder {
         attrexpr
     }
 
-
+    /// Given the map table that has Entry->Index, convert into a vector
+    /// such that vec[index] = entry.
     fn index_from_table(&self, table: &HashMap<String, usize>) -> Vec<String> {
         let mut idx = Vec::new();
         idx.resize(table.len() + 1, "".to_string());
@@ -261,20 +278,20 @@ impl PolicyBuilder {
         idx
     }
 
-
+    /// Create a table of all unique attribute keys.
     fn populate_key_table(&self, fabric: &Fabric, table: &mut HashMap<String, usize>) {
         for s in &fabric.services {
             for a in &s.provider_attrs {
                 let key = a.zpl_key();
                 if !table.contains_key(&key) {
-                    table.insert(key, table.len()+1);
+                    table.insert(key, table.len() + 1);
                 }
             }
             for policy in &s.client_policies {
                 for a in &policy.condition {
                     let key = a.zpl_key();
                     if !table.contains_key(&key) {
-                        table.insert(key, table.len()+1);
+                        table.insert(key, table.len() + 1);
                     }
                 }
             }
@@ -283,26 +300,26 @@ impl PolicyBuilder {
             for a in &n.provider_attrs {
                 let key = a.zpl_key();
                 if !table.contains_key(&key) {
-                    table.insert(key, table.len()+1);
+                    table.insert(key, table.len() + 1);
                 }
             }
         }
     }
 
-
+    /// Create a table of all unique attribute values.
     fn populate_value_table(&self, fabric: &Fabric, table: &mut HashMap<String, usize>) {
         for s in &fabric.services {
             for a in &s.provider_attrs {
                 let key = a.zpl_value();
                 if !table.contains_key(&key) {
-                    table.insert(key, table.len()+1);
+                    table.insert(key, table.len() + 1);
                 }
             }
             for policy in &s.client_policies {
                 for a in &policy.condition {
                     let key = a.zpl_value();
                     if !table.contains_key(&key) {
-                        table.insert(key, table.len()+1);
+                        table.insert(key, table.len() + 1);
                     }
                 }
             }
@@ -311,25 +328,14 @@ impl PolicyBuilder {
             for a in &n.provider_attrs {
                 let key = a.zpl_value();
                 if !table.contains_key(&key) {
-                    table.insert(key, table.len()+1);
+                    table.insert(key, table.len() + 1);
                 }
             }
         }
-
     }
-
-
-
-
-
-
 }
 
-
-
-
-
-
+/// Generate some generic metadata.
 fn metadata(pdate: &str) -> String {
     let username = env::var("USER").unwrap_or_else(|_| "(anonymous)".to_string());
     format!(
@@ -339,8 +345,6 @@ fn metadata(pdate: &str) -> String {
         username
     )
 }
-
-
 
 mod platform {
 

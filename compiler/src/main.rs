@@ -1,22 +1,20 @@
-
 pub mod polio {
     include!(concat!(env!("OUT_DIR"), "/polio.rs"));
 }
 
-
-mod policybuilder;
 mod allow;
 mod compilation;
 mod config;
 mod crypto;
 mod define;
 mod errors;
+mod fabric;
 mod lex;
 mod parser;
+mod policybuilder;
 mod protocols;
 mod ptypes;
 mod putil;
-mod fabric;
 mod zpl;
 mod zplstr;
 

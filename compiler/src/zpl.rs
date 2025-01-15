@@ -33,6 +33,5 @@ pub const VISA_SUPPORT_SEVICE_PORT: u16 = 8183; // TCP
 #[allow(dead_code)]
 pub const VISA_SERVICE_ADMIN_PORT: u16 = 8182; // TCP
 
-
 // Only known config setting (see policy.proto)
 pub const CONFIG_KEY_MAX_VISA_LIFETIME: u32 = 1; // value is time in seconds

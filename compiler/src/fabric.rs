@@ -9,13 +9,13 @@ use std::net::Ipv6Addr;
 use ring::digest::Digest;
 
 use crate::compilation::Compilation;
-use crate::config::{Config, Node, Service, Protocol};
+use crate::config::{Config, Node, Protocol, Service};
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
 use crate::lex::Token;
+use crate::protocols::IanaProtocol;
 use crate::ptypes::{Attribute, Class, Policy};
 use crate::zpl;
-use crate::protocols::IanaProtocol;
 
 /// A service oriented view of the network.
 #[derive(Debug, Clone, Default)]
@@ -66,8 +66,6 @@ pub struct ClientPolicy {
                                    //       Actually, withouts are just attributes, eg (role, ne, marketing)
 }
 
-
-
 /// Debugging output
 impl fmt::Display for Fabric {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -97,7 +95,7 @@ impl fmt::Display for Fabric {
                 write!(
                     f,
                     "      {})  {}\n",
-                    i+1,
+                    i + 1,
                     cp.condition
                         .iter()
                         .map(|a| a.to_string())
@@ -116,8 +114,6 @@ impl fmt::Display for Fabric {
         write!(f, "\n")
     }
 }
-
-
 
 pub fn weave(
     _comp: &Compilation,
@@ -160,11 +156,8 @@ pub fn weave(
 
     println!("   certificates: *TODO*");
 
-
     Ok(weaver.fabric)
 }
-
-
 
 impl Fabric {
     /// Add the service and the attributes that are required to provide it.
@@ -223,7 +216,9 @@ impl Fabric {
     }
 
     pub fn get_visa_service(&self) -> Option<&FabricService> {
-        self.services.iter().find(|s| s.service_type == ServiceType::Visa)
+        self.services
+            .iter()
+            .find(|s| s.service_type == ServiceType::Visa)
     }
 
     /// Return TRUE if the service with given fabric_id is in our fabric.
@@ -271,7 +266,9 @@ impl Fabric {
         self.nodes.push(fabn);
 
         // Now create the visa support service for this node and an access rule.
-        let vs = self.get_visa_service().expect("visa service must be added before add_node is called");
+        let vs = self
+            .get_visa_service()
+            .expect("visa service must be added before add_node is called");
         let svc_name = format!("/zpr/node/{}/vss", node.id);
 
         // There cannot be a service with this id already.
@@ -388,7 +385,6 @@ impl Weaver {
         Ok(())
     }
 
-
     /// Figure out the set of services in the fabric.  There may be a bunch of services in
     /// the configuration but we only want the ones that are refefenced in the ZPL.
     fn init_services(
@@ -472,14 +468,18 @@ impl Weaver {
         };
         let mut vs_attrs = Vec::new();
         vs_attrs.push(Attribute::attr(zpl::ADAPTER_CN_ATTR, zpl::VISA_SERVICE_CN));
-        let fab_svc_id =
-            self.fabric
-                .add_service(zpl::VS_SERVICE_NAME, &vs_protocol, &vs_attrs, ServiceType::Visa)?;
+        let fab_svc_id = self.fabric.add_service(
+            zpl::VS_SERVICE_NAME,
+            &vs_protocol,
+            &vs_attrs,
+            ServiceType::Visa,
+        )?;
 
         // Visa service has policy that allows nodes to access it.  We use a role attribute so
         // we don't care about individual node names.
         let vs_access_attrs = vec![Attribute::attr(zpl::KATTR_ROLE, "node")];
-        self.fabric.add_condition_to_service(&fab_svc_id, &vs_access_attrs)?;
+        self.fabric
+            .add_condition_to_service(&fab_svc_id, &vs_access_attrs)?;
 
         // TODO: We need to add access to the visa service by the administrator.
         //       The admin attrs is not yet supported in policy.
@@ -488,7 +488,6 @@ impl Weaver {
         //       that grant VS access to the trusted services.
 
         Ok(())
-
     }
 
     /// Must init_services before init_nodes.
@@ -589,7 +588,6 @@ impl Weaver {
         Ok(())
     }
 }
-
 
 /// Convert the list of (key, value) pairs into a list of attributes.
 ///

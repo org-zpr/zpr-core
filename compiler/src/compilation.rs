@@ -4,9 +4,9 @@ use std::time::Duration;
 use crate::config::load_config;
 use crate::crypto::sha256_of_file;
 use crate::errors::CompilationError;
+use crate::fabric::weave;
 use crate::lex::tokenize;
 use crate::parser::parse;
-use crate::fabric::weave;
 use crate::policybuilder::PolicyBuilder;
 
 /// Create one of these with the [CompilationBuilder].
