@@ -37,8 +37,17 @@ pub enum CompilationError {
     #[error("[ line {1}, column {2} ]  multiple class names in {0}")]
     MultipleClassNames(String, usize, usize),
 
+    #[error("[ line {1}, column {2} ]  conflicting values for attribute {0}")]
+    AttributeValueConflict(String, usize, usize),
+
+    #[error("[ line {1}, column {2} ] {0}")]
+    ZPLError(String, usize, usize),
+
     #[error("IoError: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("FileError: {0}")]
+    FileError(String),
 
     #[error("TomlError: {0}")]
     TomlError(#[from] toml::de::Error),

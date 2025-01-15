@@ -21,13 +21,8 @@ in1.netaddr = "node0.overlay:5000"
 
 # [trusted_services]
 
-[trusted_services.default]
-api = "validation/1" # should not be needed for "default" which uses CA based auth
+[trusted_services.default] # note that "default" is special
 cert_path = "ca-cert.pem"
-prefix = "zpr.adapter"  # hmm.  What for?
-returns_attributes = [ "cn" ]
-identity_attributes = [ "cn" ]
-# There is only one trusted service so attribute "cn" in ZPL is unambiguous
 
 
 [visa_service] # Only one visa service support at the moment.
@@ -45,7 +40,7 @@ icmp_codes = [ 128, 129 ]
 
 [services.ZServicePingable]
 protocol = "ping"
-
+# Could have a provider here too I think
 
 
 

@@ -1,19 +1,17 @@
 //! config.rs - load/parse a ZPL configuration TOML file
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 
+use ring::digest::Digest;
 use toml::Table;
 
+use crate::crypto::sha256;
 use crate::errors::CompilationError;
 use crate::protocols::{self, IanaProtocol};
-
-const DEFAULT_TRUSTED_SERVICE_ID: &str = "default";
-const DEFAULT_TRUSTED_SERVICE_API: &str = "validation/1";
-
-const ICMP_INTERACION_REQUEST_RESPONSE: &str = "request-response";
-const ICMP_INTERACTION_ONESHOT: &str = "oneshot";
+use crate::zpl;
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
 /// (really anything that has a to_string function), or with two args: a format string and arguments.
@@ -32,6 +30,7 @@ macro_rules! err_config {
 /// Configuration structure which is parsed from the TOML.
 #[allow(dead_code)]
 pub struct Config {
+    pub digest: Digest,
     pub resolver: Resolver,
     pub nodes: HashMap<String, Node>,
     pub visa_service: VisaService,
@@ -59,7 +58,7 @@ impl Default for Resolver {
 
 /// Node table.
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node {
     pub id: String,
     pub key: String,
@@ -70,7 +69,7 @@ pub struct Node {
 
 /// Interface is part of a node.
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Interface {
     pub name: String,
     pub netaddr: String,
@@ -85,6 +84,7 @@ pub struct VisaService {
 
 /// Trusted Service table ("trusted_services")
 // TODO: Will these attribute descriptions need to be made more expressive so we can tell if they are optional, multi-valued, etc?
+// TODO: Ports? Protocols?
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct TrustedService {
@@ -98,7 +98,7 @@ pub struct TrustedService {
 
 /// Protocol table
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Protocol {
     pub id: String,
     pub protocol: IanaProtocol,
@@ -119,11 +119,36 @@ pub enum IcmpFlowType {
 pub struct Service {
     pub id: String,
     pub protocol_id: String, // TODO: Could consider using a list here
+    pub provider: Option<Vec<(String, String)>>, // optional provider attributes
+}
+
+impl Config {
+    /// Attempt to lookup the given hostname in the configurations resolver table.
+    /// If the passed name does not map to an IP address, or if the name is not
+    /// found in the table, then None is returned.
+    pub fn resolve(&self, hostname: &str) -> Option<IpAddr> {
+        if let Some(hosts) = &self.resolver.hosts {
+            if let Some(ip) = hosts.get(hostname) {
+                let addr: IpAddr;
+                // TODO: I suppose the resolver table could map a name to another name.
+                //       For now that is not supported.
+                addr = match ip.parse() {
+                    Ok(a) => a,
+                    Err(_) => return None,
+                };
+                return Some(addr);
+            }
+        }
+        None
+    }
 }
 
 /// Parse and do some (light) error checking on the ZPL TOML configuration.
 pub fn load_config(path: &Path) -> Result<Config, CompilationError> {
     let cstr = std::fs::read_to_string(path).map_err(|e| CompilationError::Io(e))?;
+
+    let digest = sha256(&cstr);
+
     let ctoml = cstr
         .parse::<Table>()
         .map_err(|e| CompilationError::TomlError(e))?;
@@ -132,6 +157,7 @@ pub fn load_config(path: &Path) -> Result<Config, CompilationError> {
     // println!("=====================");
 
     let config = Config {
+        digest,
         resolver: parse_resolver(&ctoml)?,
         nodes: parse_nodes(&ctoml)?,
         visa_service: parse_visa_service(&ctoml)?,
@@ -262,25 +288,34 @@ fn parse_node(node_id: &str, node: &Table) -> Result<Node, CompilationError> {
         interfaces.push(iface);
     }
 
+    let provider = parse_provider(&format!("node {}", node_id), node)?;
+
+    Ok(Node {
+        id: node_id.to_string(),
+        key,
+        zpr_address,
+        interfaces,
+        provider,
+    })
+}
+
+fn parse_provider(ctx: &str, table: &Table) -> Result<Vec<(String, String)>, CompilationError> {
     let mut provider = Vec::new();
 
     // The provider is an array of tuples (array of arrays).
-    if !node.contains_key("provider") {
-        return Err(err_config!("node {} missing provider", node_id));
+    if !table.contains_key("provider") {
+        return Err(err_config!("{} missing provider", ctx));
     }
-    let provider_tuples = node["provider"]
+    let provider_tuples = table["provider"]
         .as_array()
-        .ok_or(err_config!("node {} provider is not an array", node_id))?;
+        .ok_or(err_config!("{} provider is not an array", ctx))?;
     for pt in provider_tuples {
         let pt = pt.as_array().ok_or(err_config!(
-            "node {} has provider entry that is not an array",
-            node_id
+            "{} has provider entry that is not an array",
+            ctx
         ))?;
         if pt.len() != 2 {
-            return Err(err_config!(
-                "node {} has provider entry is not a 2-tuple",
-                node_id
-            ));
+            return Err(err_config!("{} has provider entry is not a 2-tuple", ctx));
         }
         // TOML has other valid types but we just convert the provider attributes to strings.
         // Maybe later we will introduce a richer attribute type since we are probably going to have to parse this again later.
@@ -296,14 +331,7 @@ fn parse_node(node_id: &str, node: &Table) -> Result<Node, CompilationError> {
         };
         provider.push((p0, p1));
     }
-
-    Ok(Node {
-        id: node_id.to_string(),
-        key,
-        zpr_address,
-        interfaces,
-        provider,
-    })
+    Ok(provider)
 }
 
 /// Parse the nodes interface entry.
@@ -361,13 +389,15 @@ fn parse_trusted_services(ctoml: &Table) -> Result<Vec<TrustedService>, Compilat
 // Parse an individual trusted_service table.
 fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, CompilationError> {
     // The "api" value is optional for the default trusted service.
+    let mut is_default = false;
     let api = if ts.contains_key("api") {
         ts["api"]
             .as_str()
             .ok_or(err_config!("trusted_service {} missing api", ts_id))?
             .to_string()
-    } else if ts_id == DEFAULT_TRUSTED_SERVICE_ID {
-        DEFAULT_TRUSTED_SERVICE_API.to_string()
+    } else if ts_id == zpl::DEFAULT_TRUSTED_SERVICE_ID {
+        is_default = true;
+        zpl::DEFAULT_TRUSTED_SERVICE_API.to_string()
     } else {
         return Err(err_config!("trusted_service {} missing api", ts_id));
     };
@@ -375,25 +405,52 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
         Some(PathBuf::from(ts["cert_path"].as_str().ok_or(
             err_config!("trusted_service {} cert_path is not a string", ts_id),
         )?))
+    } else if is_default {
+        // The path is the only thing required for the default section.
+        return Err(err_config!("default trusted_service requires cert_path"));
     } else {
         None
     };
-    let prefix = ts["prefix"]
-        .as_str()
-        .ok_or(err_config!("trusted_service {} missing prefix", ts_id))?
-        .to_string();
-    let returns_attrs = parse_string_array(ts, "returns_attributes", "trusted_service")?;
-    let identity_attrs = parse_string_array(ts, "identity_attributes", "trusted_service")?;
+    let prefix: String;
+    let returns_attrs: Vec<String>;
+    let identity_attrs: Vec<String>;
+    if !is_default {
+        prefix = ts["prefix"]
+            .as_str()
+            .ok_or(err_config!("trusted_service {} missing prefix", ts_id))?
+            .to_string();
+        returns_attrs = parse_string_array(ts, "returns_attributes", "trusted_service")?;
+        identity_attrs = parse_string_array(ts, "identity_attributes", "trusted_service")?;
 
-    // Identity attributes (if any) must be listed in returns attributes
-    for ia in &identity_attrs {
-        if !returns_attrs.contains(ia) {
+        // Identity attributes (if any) must be listed in returns attributes
+        for ia in &identity_attrs {
+            if !returns_attrs.contains(ia) {
+                return Err(err_config!(
+                    "trusted_service {} identity attribute '{}' not in returns_attributes",
+                    ts_id,
+                    ia
+                ));
+            }
+        }
+    } else {
+        if ts.contains_key("prefix") {
             return Err(err_config!(
-                "trusted_service {} identity attribute '{}' not in returns_attributes",
-                ts_id,
-                ia
+                "default trusted_service does not allow custom prefix"
             ));
         }
+        if ts.contains_key("returns_attributes") {
+            return Err(err_config!(
+                "default trusted_service does not allow custom returns_attributes"
+            ));
+        }
+        if ts.contains_key("identity_attributes") {
+            return Err(err_config!(
+                "default trusted_service does not allow custom identity_attributes"
+            ));
+        }
+        prefix = zpl::DEFAULT_TS_PREFIX.to_string();
+        returns_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
+        identity_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
     }
     Ok(TrustedService {
         id: ts_id.to_string(),
@@ -548,13 +605,22 @@ fn parse_services(ctoml: &Table) -> Result<Vec<Service>, CompilationError> {
 
 /// Parse the very bare bones individual service table.
 fn parse_service(sid: &str, s: &Table) -> Result<Service, CompilationError> {
+    if !s.contains_key("protocol") {
+        return Err(err_config!("service {} missing protocol", sid));
+    }
     let protocol_id = s["protocol"]
         .as_str()
         .ok_or(err_config!("service {} missing protocol", sid))?
         .to_string();
+    let provider = if s.contains_key("provider") {
+        Some(parse_provider(&format!("service {}", sid), s)?)
+    } else {
+        None
+    };
     Ok(Service {
         id: sid.to_string(),
         protocol_id,
+        provider,
     })
 }
 
@@ -578,40 +644,41 @@ fn parse_icmp_details(prot_id: &str, prot: &Table) -> Result<IcmpFlowType, Compi
     let ft = prot["icmp_type"]
         .as_str()
         .ok_or(err_config!("protocol {} icmp missing interaction", prot_id))?
-        .to_string();
-    let interaction = match ft.as_str().to_lowercase().as_str() {
-        ICMP_INTERACION_REQUEST_RESPONSE => {
-            if codes.len() != 2 {
-                return Err(err_config!(
-                    "protocol {} icmp request-response requires exactly two type codes",
-                    prot_id
-                ));
-            }
-            let code0 = toml_as_u8(&codes[0])
-                .ok_or(err_config!("protocol {} icmp code[0] invalid", prot_id))?;
-            let code1 = toml_as_u8(&codes[1])
-                .ok_or(err_config!("protocol {} icmp code[1] invalid", prot_id))?;
-            IcmpFlowType::RequestResponse(code0, code1)
-        }
-        ICMP_INTERACTION_ONESHOT => {
-            if codes.len() > 1 {
-                return Err(err_config!(
-                    "protocol {} icmp onshot requires exactly one type code",
-                    prot_id
-                ));
-            }
-            let code = toml_as_u8(&codes[0])
-                .ok_or(err_config!("protocol {} icmp code is invalid", prot_id))?;
-            IcmpFlowType::OneShot(code)
-        }
-        _ => {
+        .to_string()
+        .to_lowercase();
+
+    let interaction: IcmpFlowType;
+
+    if ft == zpl::ICMP_INTERACION_REQUEST_RESPONSE {
+        if codes.len() != 2 {
             return Err(err_config!(
-                "protocol {} invalid icmp interaction type: {}",
-                prot_id,
-                ft
-            ))
+                "protocol {} icmp request-response requires exactly two type codes",
+                prot_id
+            ));
         }
-    };
+        let code0 = toml_as_u8(&codes[0])
+            .ok_or(err_config!("protocol {} icmp code[0] invalid", prot_id))?;
+        let code1 = toml_as_u8(&codes[1])
+            .ok_or(err_config!("protocol {} icmp code[1] invalid", prot_id))?;
+        interaction = IcmpFlowType::RequestResponse(code0, code1);
+    } else if ft == zpl::ICMP_INTERACTION_ONESHOT {
+        if codes.len() > 1 {
+            return Err(err_config!(
+                "protocol {} icmp onshot requires exactly one type code",
+                prot_id
+            ));
+        }
+        let code = toml_as_u8(&codes[0])
+            .ok_or(err_config!("protocol {} icmp code is invalid", prot_id))?;
+        interaction = IcmpFlowType::OneShot(code);
+    } else {
+        return Err(err_config!(
+            "protocol {} invalid icmp interaction type: {}",
+            prot_id,
+            ft
+        ));
+    }
+
     Ok(interaction)
 }
 
@@ -731,9 +798,6 @@ mod test {
         let tstr = r#"
         [trusted_services.default]
         cert_path = "foo.pem"
-        prefix = "bar.hop"
-        returns_attributes = ["a", "c"]
-        identity_attributes = ["c"]
         "#;
         let ctoml = parse_toml(tstr);
         let services = parse_trusted_services(&ctoml);
@@ -742,14 +806,13 @@ mod test {
         assert_eq!(services.len(), 1);
         let ts = services.get(0).unwrap();
         assert_eq!(ts.id, "default");
-        assert_eq!(ts.api, DEFAULT_TRUSTED_SERVICE_API);
+        assert_eq!(ts.api, zpl::DEFAULT_TRUSTED_SERVICE_API);
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
-        assert_eq!(ts.prefix, "bar.hop");
-        assert_eq!(ts.returns_attrs.len(), 2);
-        assert!(ts.returns_attrs.contains(&"a".to_string()));
-        assert!(ts.returns_attrs.contains(&"c".to_string()));
+        assert_eq!(ts.prefix, zpl::DEFAULT_TS_PREFIX);
+        assert_eq!(ts.returns_attrs.len(), 1);
+        assert!(ts.returns_attrs.contains(&"cn".to_string()));
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs.contains(&"c".to_string()));
+        assert!(ts.identity_attrs.contains(&"cn".to_string()));
     }
 
     #[test]
@@ -834,6 +897,7 @@ mod test {
 
         [services.MyOtherService]
         protocol = "pong"
+        provider = [["foo", "bar"]]
         "#;
         let ctoml = parse_toml(tstr);
         let services = parse_services(&ctoml);
@@ -846,10 +910,15 @@ mod test {
                 "MyService" => {
                     assert_eq!(s.protocol_id, "ping");
                     hits |= 0x1;
+                    assert!(s.provider.is_none());
                 }
                 "MyOtherService" => {
                     assert_eq!(s.protocol_id, "pong");
                     hits |= 0x2;
+                    assert!(s.provider.is_some());
+                    let provider = s.provider.unwrap();
+                    assert_eq!(provider.len(), 1);
+                    assert!(provider.contains(&("foo".to_string(), "bar".to_string())));
                 }
                 _ => panic!("unexpected service id"),
             }

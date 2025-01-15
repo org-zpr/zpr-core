@@ -10,8 +10,10 @@
 // to use the modules in the src directory.
 
 mod allow;
+mod binp;
 pub mod compilation;
 mod config;
+mod crypto;
 mod define;
 pub mod errors;
 mod lex;
@@ -19,4 +21,6 @@ mod parser;
 mod protocols;
 mod ptypes;
 mod putil;
+mod weaver;
+mod zpl;
 mod zplstr;

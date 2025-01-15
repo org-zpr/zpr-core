@@ -1,6 +1,8 @@
 mod allow;
+mod binp;
 mod compilation;
 mod config;
+mod crypto;
 mod define;
 mod errors;
 mod lex;
@@ -8,6 +10,8 @@ mod parser;
 mod protocols;
 mod ptypes;
 mod putil;
+mod weaver;
+mod zpl;
 mod zplstr;
 
 use clap::Parser;

@@ -1,9 +1,11 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::load_config;
+use crate::crypto::sha256_of_file;
 use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
+use crate::weaver::weave;
 
 /// Create one of these with the [CompilationBuilder].
 pub struct Compilation {
@@ -27,14 +29,26 @@ impl Compilation {
                 self.source_zpl, self.source_config
             );
         }
-        let _cfg = load_config(&self.source_config)?;
+        let cfg = load_config(&self.source_config).map_err(|e| {
+            CompilationError::ConfigError(format!(
+                "failed to load configuration from {:?}: {}",
+                self.source_config, e
+            ))
+        })?;
+
         let tokens = tokenize(&self.source_zpl)?;
         for t in &tokens {
             println!("   {:?}", t);
         }
         println!();
 
-        let _policy = parse(tokens)?;
+        let mut policy = parse(tokens)?;
+        let policy_digest = sha256_of_file(&self.source_zpl)?;
+        policy.digest = Some(policy_digest);
+
+        let fabric = weave(&self, &cfg, &policy)?;
+        println!("FABRIC:\n{}", fabric);
+
         Ok(())
     }
 }

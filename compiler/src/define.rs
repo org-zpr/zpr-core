@@ -7,6 +7,7 @@ use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
 use crate::ptypes::{Attribute, Class, ClassFlavor};
 use crate::putil;
+use crate::zpl;
 
 // First token exists and is a DEFINE which is checked by the caller.
 pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationError> {
@@ -61,16 +62,16 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
     // the classes are defined. To give meaning full error may need to track
     // the define token or something.
     let flavor = match parent_class_name.as_str() {
-        "user" | "users " => {
-            parent_class_name = String::from("user");
+        zpl::DEF_CLASS_USER_NAME | zpl::DEF_CLASS_USER_AKA => {
+            parent_class_name = String::from(zpl::DEF_CLASS_USER_NAME);
             ClassFlavor::User
         }
-        "service" | "services" => {
-            parent_class_name = String::from("service");
+        zpl::DEF_CLASS_SERVICE_NAME | zpl::DEF_CLASS_SERVICE_AKA => {
+            parent_class_name = String::from(zpl::DEF_CLASS_SERVICE_NAME);
             ClassFlavor::Service
         }
-        "endpoint" | "endpoints" => {
-            parent_class_name = String::from("endpoint");
+        zpl::DEF_CLASS_ENDPOINT_NAME | zpl::DEF_CLASS_ENDPOINT_AKA => {
+            parent_class_name = String::from(zpl::DEF_CLASS_ENDPOINT_NAME);
             ClassFlavor::Endpoint
         }
         _ => ClassFlavor::Undefined,

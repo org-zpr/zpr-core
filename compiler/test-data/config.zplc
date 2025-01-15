@@ -3,9 +3,20 @@
 [nodes.n0]
 key = "none"
 provider = [["foo", "fee"]]
-zpr_address = "node0.zpr"
+zpr_address = "fd5a:5052:90de::1"
 interfaces = [ "in1" ]
 in1.netaddr = "overlay.addr"
 
 [visa_service]
 dock_node = "n0"
+
+[protocols.http]
+protocol = "iana.TCP"
+port = 80
+
+[services.server]
+protocol = "http"
+
+[services.Image-database]
+protocol = "http"
+

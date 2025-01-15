@@ -7,6 +7,7 @@ use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
 use crate::ptypes::{AllowClause, Attribute, Class, ClassFlavor, Clause};
 use crate::putil;
+use crate::zpl;
 
 #[derive(Debug, Default)]
 struct ParseAllowState {
@@ -25,8 +26,9 @@ impl ParseAllowState {
     }
 
     /// This consumes all the clauses or panics.
-    fn to_allow_clause(&mut self) -> AllowClause {
+    fn to_allow_clause(&mut self, id: usize) -> AllowClause {
         AllowClause {
+            id,
             endpoint: self
                 .endpoint_clause
                 .take()
@@ -40,6 +42,7 @@ impl ParseAllowState {
 // First token is an ALLOW which is checked by caller.
 pub fn parse_allow(
     allow_statement: &[Token],
+    statement_id: usize,
     classes_idx: &HashMap<String, String>,
     classes_map: &HashMap<String, Class>,
 ) -> Result<AllowClause, CompilationError> {
@@ -87,7 +90,7 @@ pub fn parse_allow(
     // The remaining tokens should start with "to access ..." which we pass to the service class parser.
     parse_allow_service_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
 
-    Ok(parse_state.to_allow_clause())
+    Ok(parse_state.to_allow_clause(statement_id))
 }
 
 /// Assume there is only a user clause (no endpoint clause).
@@ -117,7 +120,10 @@ where
             let cn = ps.class_name.as_ref().unwrap();
             if classes_map.get(cn).unwrap().flavor == ClassFlavor::User {
                 // We guessed correctly. Endpoint clause is missing.
-                pa_state.endpoint_clause = Some(Clause::new("endpoint", pa_state.root_tok.clone()));
+                pa_state.endpoint_clause = Some(Clause::new(
+                    zpl::DEF_CLASS_ENDPOINT_NAME,
+                    pa_state.root_tok.clone(),
+                ));
                 let uc = ps.to_clause("user")?;
                 pa_state.user_clause = Some(uc);
                 Ok(true)
@@ -159,7 +165,10 @@ where
             let cn = ps.class_name.as_ref().unwrap();
             if classes_map.get(cn).unwrap().flavor == ClassFlavor::Endpoint {
                 // We guessed correctly. User clause is missing.
-                pa_state.user_clause = Some(Clause::new("user", pa_state.root_tok.clone()));
+                pa_state.user_clause = Some(Clause::new(
+                    zpl::DEF_CLASS_USER_NAME,
+                    pa_state.root_tok.clone(),
+                ));
                 let ec = ps.to_clause("endpoint")?;
                 pa_state.endpoint_clause = Some(ec);
                 Ok(true)
