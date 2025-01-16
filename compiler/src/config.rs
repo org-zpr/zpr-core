@@ -86,7 +86,7 @@ pub struct VisaService {
 // TODO: Will these attribute descriptions need to be made more expressive so we can tell if they are optional, multi-valued, etc?
 // TODO: Ports? Protocols?
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TrustedService {
     pub id: String,
     pub api: String,
@@ -110,7 +110,7 @@ pub struct Protocol {
 #[derive(Debug, Clone, PartialEq)]
 pub enum IcmpFlowType {
     RequestResponse(u8, u8),
-    OneShot(u8),
+    OneShot(Vec::<u8>),
 }
 
 /// Service table
@@ -662,15 +662,13 @@ fn parse_icmp_details(prot_id: &str, prot: &Table) -> Result<IcmpFlowType, Compi
             .ok_or(err_config!("protocol {} icmp code[1] invalid", prot_id))?;
         interaction = IcmpFlowType::RequestResponse(code0, code1);
     } else if ft == zpl::ICMP_INTERACTION_ONESHOT {
-        if codes.len() > 1 {
-            return Err(err_config!(
-                "protocol {} icmp onshot requires exactly one type code",
-                prot_id
-            ));
+        let mut parsed_codes = Vec::new();
+        for tcode in codes {
+            let code = toml_as_u8(tcode)
+                .ok_or(err_config!("protocol {} icmp code '{}' is invalid", prot_id, tcode))?;
+            parsed_codes.push(code);
         }
-        let code = toml_as_u8(&codes[0])
-            .ok_or(err_config!("protocol {} icmp code is invalid", prot_id))?;
-        interaction = IcmpFlowType::OneShot(code);
+        interaction = IcmpFlowType::OneShot(parsed_codes);
     } else {
         return Err(err_config!(
             "protocol {} invalid icmp interaction type: {}",

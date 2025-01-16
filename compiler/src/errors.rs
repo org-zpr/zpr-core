@@ -54,4 +54,10 @@ pub enum CompilationError {
 
     #[error("configuration error: {0}")]
     ConfigError(String),
+
+    #[error("encoding error: {0}")]
+    EncodingError(String),
+
+    #[error("crypto error: {0}")]
+    CryptoError(String),
 }

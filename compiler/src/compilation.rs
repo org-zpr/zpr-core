@@ -1,19 +1,32 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use prost::Message;
+use openssl::rsa::Rsa;
+use openssl::pkey::Private;
+
+
 use crate::config::load_config;
-use crate::crypto::sha256_of_file;
+use crate::crypto::{sha256_of_file, sign_pkcs1v15_sha256};
 use crate::errors::CompilationError;
 use crate::fabric::weave;
 use crate::lex::tokenize;
 use crate::parser::parse;
 use crate::policybuilder::PolicyBuilder;
+use crate::polio;
+
+
+/// Updeate this if we change the container format. This is checked by visa service during deserialization.
+pub const CONTAINER_VERSION: u32 = 1121;
+
 
 /// Create one of these with the [CompilationBuilder].
 pub struct Compilation {
     pub verbose: bool,
     pub source_zpl: PathBuf,
     pub source_config: PathBuf,
+    pub output_file: PathBuf,
+    private_key: Option<Rsa<Private>>,
 }
 
 impl Compilation {
@@ -56,12 +69,60 @@ impl Compilation {
 
         builder.with_fabric(&fabric)?;
 
-        let _pol = builder.build()?;
+        let pol = builder.build()?;
+        println!("build successful");
 
-        println!("build successful -- now what?");
+        let pcontainer = self.contain_policy(&pol)?;
+        self.write_container(&pcontainer, &self.output_file)?;
+
         // TODO: put into signed container.
 
         Ok(())
+    }
+
+    fn write_container(&self, container: &polio::PolicyContainer, file: &Path) -> Result<(), CompilationError> {
+        let mut buf = Vec::new();
+        buf.reserve(container.encoded_len());
+        container.encode(&mut buf).map_err(|e| {
+            CompilationError::EncodingError(format!("failed to encode policy container: {}", e))
+        })?;
+        std::fs::write(file, &buf).map_err(|e| {
+            CompilationError::FileError(format!("failed to write policy container to {:?}: {}", file, e))
+        })?;
+        println!("wrote {}", &file.display());
+        Ok(())
+    }
+
+    fn contain_policy(&self, pol: &polio::Policy) -> Result<polio::PolicyContainer, CompilationError> {
+        let mut buf = Vec::new();
+        buf.reserve(pol.encoded_len());
+        pol.encode(&mut buf).map_err(|e| {
+            CompilationError::EncodingError(format!("failed to encode policy: {}", e))
+        })?;
+
+        let signature: Vec<u8>;
+
+        match self.private_key {
+            Some(ref key) => {
+                signature = sign_pkcs1v15_sha256(key, &buf)?;
+            }
+            None => {
+                println!("warning: policy not signed, use `--key <pemfile>` to specify a private key for signing");
+                signature = Vec::new();
+            }
+        }
+
+        let container = polio::PolicyContainer {
+            container_version: CONTAINER_VERSION,
+            policy_date: pol.policy_date.clone(),
+            policy_version: pol.policy_version,
+            policy_revision: pol.policy_revision.clone(),
+            policy_metadata: pol.policy_metadata.clone(),
+            policy: buf,
+            signature,
+        };
+
+        Ok(container)
     }
 }
 
@@ -72,6 +133,7 @@ pub struct CompilationBuilder {
     source_zpl: PathBuf,
     source_config: Option<PathBuf>,
     verbose: bool,
+    private_key: Option<Rsa<Private>>,
 }
 
 impl CompilationBuilder {
@@ -93,9 +155,13 @@ impl CompilationBuilder {
     /// Set the path to the configuration to use with the compilation.
     /// This is optional. If not set, the configuration file is assumed to have
     /// the same base name as the source file but with a `.zplc` extension.
-    #[allow(dead_code)]
     pub fn config(mut self, config: &Path) -> Self {
         self.source_config = Some(config.into());
+        self
+    }
+
+    pub fn sign_with_key(mut self, key: Rsa<Private>) -> Self {
+        self.private_key = Some(key);
         self
     }
 
@@ -110,10 +176,13 @@ impl CompilationBuilder {
                 config
             }
         };
+        let output_file = self.source_zpl.with_extension("bin");
         Compilation {
             verbose: self.verbose,
             source_zpl: self.source_zpl,
             source_config: config,
+            output_file,
+            private_key: self.private_key,
         }
     }
 }

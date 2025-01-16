@@ -1,9 +1,16 @@
-#[derive(Debug, Clone, PartialEq)]
+
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum IanaProtocol {
     ICMP = 1,
     TCP = 6,
     UDP = 17,
     ICMPv6 = 58,
+}
+
+impl Into<u32> for IanaProtocol {
+    fn into(self) -> u32 {
+        self as u32
+    }
 }
 
 /// Convert a ZPL string (without leading 'iana') to an IANA protocol number enum.

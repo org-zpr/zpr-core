@@ -5,11 +5,12 @@
 use core::fmt;
 use std::collections::HashMap;
 use std::net::Ipv6Addr;
+use std::path::PathBuf;
 
 use ring::digest::Digest;
 
 use crate::compilation::Compilation;
-use crate::config::{Config, Node, Protocol, Service};
+use crate::config::{Config, Node, Protocol, Service, TrustedService};
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
 use crate::lex::Token;
@@ -24,6 +25,7 @@ pub struct Fabric {
     pub metadata: String,
     pub services: Vec<FabricService>,
     pub nodes: Vec<FabricNode>,
+    pub default_auth_cert: PathBuf, // CA cert for default/builtin trusted auth
 }
 
 #[allow(dead_code)]
@@ -71,6 +73,7 @@ impl fmt::Display for Fabric {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "revision: {}\n", self.revision)?;
         write!(f, "metadata: {}\n", self.metadata)?;
+        write!(f, "default auth cert: {}\n", self.default_auth_cert.display())?;
         write!(
             f,
             "{} services - {} nodes\n",
@@ -153,8 +156,7 @@ pub fn weave(
     weaver.init_services(&class_idx, &service_idx, policy, config)?;
     weaver.init_nodes(config)?;
     weaver.add_client_policies(&class_idx, policy)?;
-
-    println!("   certificates: *TODO*");
+    weaver.add_default_auth(config)?;
 
     Ok(weaver.fabric)
 }
@@ -585,6 +587,42 @@ impl Weaver {
                     .add_condition_to_service(svc_id, &required_attrs)?;
             }
         }
+        Ok(())
+    }
+
+    /// For now we only accept the DEFAULT (builtin) trusted service.
+    fn add_default_auth(&mut self, config: &Config) -> Result<(), CompilationError> {
+        let mut def_ts: Option<&TrustedService> = None;
+
+        for ts in &config.trusted_services {
+            if ts.id != zpl::DEFAULT_TRUSTED_SERVICE_ID {
+                return Err(CompilationError::ConfigError(format!(
+                    "non-default trusted services not yet supported: {}",
+                    ts.id
+                )));
+            } else {
+                if def_ts.is_some() {
+                    return Err(CompilationError::ConfigError(
+                        "only one default trusted service is supported".to_string(),
+                    ));
+                }
+                def_ts = Some(ts);
+            }
+        }
+        if def_ts.is_none() {
+            return Err(CompilationError::ConfigError(
+                "no default trusted service found in configuration".to_string(),
+            ));
+        }
+        let def_ts = def_ts.unwrap();
+
+        // The only thing we care about is cert path.
+        if def_ts.cert_path.is_none() {
+            return Err(CompilationError::ConfigError(
+                "default trusted service must have a cert path".to_string(),
+            ));
+        }
+        self.fabric.default_auth_cert = def_ts.cert_path.clone().unwrap();
         Ok(())
     }
 }

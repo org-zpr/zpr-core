@@ -22,6 +22,7 @@ use clap::Parser;
 use std::path::PathBuf;
 
 use compilation::Compilation;
+use crypto::load_rsa_private_key;
 
 /// ZPL Policy Compiler
 ///
@@ -54,6 +55,16 @@ fn main() {
     let mut cb = Compilation::builder(cli.zpl).verbose(cli.verbose);
     if let Some(cfg) = cli.zplc {
         cb = cb.config(&cfg);
+    }
+    if let Some(key) = cli.key {
+        let key = match load_rsa_private_key(&key) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("error loading private key: {}", e);
+                std::process::exit(1);
+            }
+        };
+        cb = cb.sign_with_key(key);
     }
     let comp = cb.build();
     match comp.compile() {
