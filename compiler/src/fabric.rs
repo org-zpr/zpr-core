@@ -63,6 +63,7 @@ pub struct FabricNode {
 
 #[derive(Debug, Clone, Default)]
 pub struct ClientPolicy {
+    pub access_only: bool, // If true, this policy is only for access, not for setting up a connection
     pub condition: Vec<Attribute>, // List of attributes that must be met for the policy to apply
                                    // TODO: withouts, constraints, etc.
                                    //       Actually, withouts are just attributes, eg (role, ne, marketing)
@@ -155,7 +156,7 @@ pub fn weave(
 
     weaver.init_services(&class_idx, &service_idx, policy, config)?;
     weaver.init_nodes(config)?;
-    weaver.add_client_policies(&class_idx, policy)?;
+    weaver.add_client_policies(&class_idx, policy, config)?;
     weaver.add_default_auth(config)?;
 
     Ok(weaver.fabric)
@@ -201,7 +202,7 @@ impl Fabric {
             }
         }
         let fabric_id = if svc_instance > 0 {
-            format!("{}/{}", id, svc_instance)
+            format!("{}#{}", id, svc_instance)
         } else {
             id.to_string()
         };
@@ -271,7 +272,7 @@ impl Fabric {
         let vs = self
             .get_visa_service()
             .expect("visa service must be added before add_node is called");
-        let svc_name = format!("/zpr/node/{}/vss", node.id);
+        let svc_name = format!("/zpr/{}/vss", node.id);
 
         // There cannot be a service with this id already.
         if self.has_service(&svc_name) {
@@ -282,6 +283,7 @@ impl Fabric {
         }
 
         let access_policy = ClientPolicy {
+            access_only: false,
             condition: vs.provider_attrs.clone(), // The VSS is accessed by the visa service
         };
         let vss_svc = FabricService {
@@ -307,18 +309,17 @@ impl Fabric {
         &mut self,
         service_id: &str,
         attrs: &[Attribute],
+        access_only: bool,
     ) -> Result<(), CompilationError> {
         let svc = self.services.iter_mut().find(|s| s.fabric_id == service_id);
         if svc.is_none() {
-            // TODO: Probably this is a proramming error and should panic
-            return Err(CompilationError::ConfigError(format!(
-                "service {} not found in fabric",
-                service_id
-            )));
+            // programming error
+            panic!("call add_condition_to_service but service {} not found", service_id);
         }
         let svc = svc.unwrap();
         svc.client_policies.push(ClientPolicy {
             condition: attrs.to_vec(),
+            access_only,
         });
         Ok(())
     }
@@ -331,6 +332,7 @@ impl Fabric {
         for svc in &mut self.services {
             if svc.service_type == ServiceType::Regular {
                 svc.client_policies.push(ClientPolicy {
+                    access_only: false, // TODO: this is a guess
                     condition: attrs.to_vec(),
                 });
             }
@@ -449,13 +451,17 @@ impl Weaver {
 
             let attr_map = squash_attributes(&attrs, &ac.service.class_tok)?;
 
-            let fabric_svc_id = self.fabric.add_service(
-                &svc.id,
-                prot,
+            let resolved_attrs = self.resolve_attributes(
                 attr_map
                     .into_values()
                     .collect::<Vec<Attribute>>()
                     .as_slice(),
+                config)?;
+
+            let fabric_svc_id = self.fabric.add_service(
+                &svc.id,
+                prot,
+                &resolved_attrs,
                 ServiceType::Regular,
             )?;
             self.allowid_to_fab_svc.insert(ac.id, fabric_svc_id);
@@ -481,7 +487,7 @@ impl Weaver {
         // we don't care about individual node names.
         let vs_access_attrs = vec![Attribute::attr(zpl::KATTR_ROLE, "node")];
         self.fabric
-            .add_condition_to_service(&fab_svc_id, &vs_access_attrs)?;
+            .add_condition_to_service(&fab_svc_id, &vs_access_attrs, true)?;
 
         // TODO: We need to add access to the visa service by the administrator.
         //       The admin attrs is not yet supported in policy.
@@ -490,6 +496,28 @@ impl Weaver {
         //       that grant VS access to the trusted services.
 
         Ok(())
+    }
+
+
+    // Every attribute needs to come from a trusted service. Since right now (TODO) the
+    // only service is the default one, the only attribute we accept is "cn" or the full
+    // expansion of that "zpr.adapter.cn".
+    //
+    fn resolve_attributes(&self, attrs: &[Attribute], _config: &Config) -> Result<Vec<Attribute>, CompilationError> {
+        let mut resolved_attrs = Vec::new();
+        for a in attrs {
+            if a.name == zpl::ADAPTER_CN_ATTR {
+                resolved_attrs.push(a.clone());
+            } if a.name == zpl::DEFAULT_ATTR {
+                resolved_attrs.push(a.set_name(zpl::ADAPTER_CN_ATTR));
+            } else {
+                return Err(CompilationError::AttributeError(format!(
+                    "attribute {} not known",
+                    a.name
+                )));
+            }
+        }
+        Ok(resolved_attrs)
     }
 
     /// Must init_services before init_nodes.
@@ -526,6 +554,7 @@ impl Weaver {
         &mut self,
         class_idx: &HashMap<String, &Class>,
         policy: &Policy,
+        config: &Config,
     ) -> Result<(), CompilationError> {
         // Every allow is an access condition (aka rule, aka policy).
         // We need the attributes from the user and endpoints clauses.
@@ -560,7 +589,9 @@ impl Weaver {
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
             let attr_map = squash_attributes(&attrs, &ac.endpoint.class_tok)?;
 
-            let required_attrs = attr_map.into_values().collect::<Vec<Attribute>>();
+            let required_attrs = self.resolve_attributes(
+                &attr_map.into_values().collect::<Vec<Attribute>>(),
+                config)?;
 
             // Now figure out what service we are talking about.
             // The service may be:
@@ -584,7 +615,7 @@ impl Weaver {
                     }
                 };
                 self.fabric
-                    .add_condition_to_service(svc_id, &required_attrs)?;
+                    .add_condition_to_service(svc_id, &required_attrs, false)?;
             }
         }
         Ok(())

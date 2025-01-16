@@ -18,10 +18,10 @@ pub const DEFAULT_TS_PREFIX: &str = "zpr.adapter";
 pub const DEFAULT_ATTR: &str = "cn";
 pub const ADAPTER_CN_ATTR: &str = "zpr.adapter.cn";
 
-// TODO: Check this is ok. I think in prototype is it '/zpr/$$zpr/visaservice'.  But that seems odd.
-pub const VS_SERVICE_NAME: &str = "/zpr/visaservice";
+// TODO: What is up with this odd name? Why not '/zpr/visaservice'?
+pub const VS_SERVICE_NAME: &str = "/zpr/$$zpr/visaservice";
 
-pub const KATTR_ROLE: &str = "role";
+pub const KATTR_ROLE: &str = "zpr.role";
 
 // For nodes to talk to VS
 pub const VISA_SERVICE_PORT: u16 = 5002; // TCP

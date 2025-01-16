@@ -40,6 +40,9 @@ pub enum CompilationError {
     #[error("[ line {1}, column {2} ]  conflicting values for attribute {0}")]
     AttributeValueConflict(String, usize, usize),
 
+    #[error("attribute error: {0}")]
+    AttributeError(String),
+
     #[error("[ line {1}, column {2} ] {0}")]
     ZPLError(String, usize, usize),
 

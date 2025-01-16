@@ -250,12 +250,13 @@ impl PolicyBuilder {
         for svc in &fabric.services {
             // Any agent that can access a service can connect
             for clipol in &svc.client_policies {
-                // No proc for these guys
-                let pconnect = polio::Connect {
-                    attr_exprs: self.attr_list_to_attrexpr(&clipol.condition),
-                    proc: NO_PROC,
-                };
-                self.policy.connects.push(pconnect);
+                if !clipol.access_only {
+                    let pconnect = polio::Connect {
+                        attr_exprs: self.attr_list_to_attrexpr(&clipol.condition),
+                        proc: NO_PROC,
+                    };
+                    self.policy.connects.push(pconnect);
+                }
             }
             // Any agent that provides a service can connect
             match svc.service_type {
@@ -287,7 +288,7 @@ impl PolicyBuilder {
         // Any agent that provides a node can connect
         for node in &fabric.nodes {
             let proc = self.create_service_proc(
-                &node.config_node.id,
+                format!("/zpr/{}", &node.config_node.id).as_str(),
                 ServiceType::Regular,
                 Some(PFlags::node()),
             );
@@ -297,13 +298,16 @@ impl PolicyBuilder {
                 attr_exprs: self.attr_list_to_attrexpr(&node.provider_attrs),
                 proc: proc_idx,
             };
+            // Prototype comiler also adss a SetCfg OP to the proc for configuring the CIDR.
+            // Presumably this is info for the node to use to hand out addresses, but it is
+            // no longer used in prototype.
             self.policy.connects.push(pconnect);
         }
 
         Ok(())
     }
 
-    /// Create a PROC for the polich binary to register a service and optionally set flags.
+    /// Create a PROC for the policy binary to register a service and optionally set flags.
     fn create_service_proc(
         &self,
         svc_id: &str,
@@ -362,7 +366,7 @@ impl PolicyBuilder {
                 };
                 proc.push(set_flag);
             }
-            if pf.vs {
+            if pf.vs_dock {
                 let set_flag = polio::Instruction {
                     opcode: polio::OpCodeT::OpSetFlag as i32,
                     args: vec![polio::Argument {

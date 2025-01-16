@@ -213,6 +213,13 @@ impl Attribute {
         }
     }
 
+    /// Create and return a new attribute with the same characteristics of this one but with the new name provided.
+    pub fn set_name(&self, new_name: &str) -> Self {
+        let mut new_a = self.clone();
+        new_a.name = new_name.to_string();
+        new_a
+    }
+
     /// The the ZPL name for the key of this attribute. The key is just the attribute name
     /// unless this is a tag, in which case the key is "zpr.tag".
     pub fn zpl_key(&self) -> String {
