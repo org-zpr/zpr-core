@@ -3,12 +3,9 @@
 
 use super::core;
 use crate::assembly::Assembly;
-use crate::config;
 use crate::counters::CounterType;
 use crate::defs::*;
-use crate::fastpath;
 use crate::logging::targets::ZDP;
-use crate::packet::Packet;
 use crate::zdp;
 use bytes::{Buf, BufMut};
 use std::net::IpAddr;
@@ -24,8 +21,7 @@ pub async fn send_key_management(
     km_id: zpr::KmId,
     payload: &[u8],
 ) {
-    let buf = asm.buffer_stack.get_buffer().await;
-    let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+    let mut pkt = core::new_heap_packet();
 
     let km_hdr = pkt.alloc_zeroed_header::<zdp::ZdpKeyManagementHeader>();
     km_hdr.message_type = km_id.into();
@@ -39,13 +35,15 @@ pub async fn send_key_management(
 #[allow(dead_code)]
 /// send a Discard message (RFC 6.5 § 6.3.1)
 pub async fn send_discard(asm: &Assembly, link_id: zpr::LinkId) {
-    let buf = asm.buffer_stack.get_buffer().await;
-    let pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+    let pkt = core::new_heap_packet();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
 }
 
 /// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
-pub async fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<(), ()> {
+pub async fn send_hello_request(
+    asm: &Assembly,
+    link_id: zpr::LinkId,
+) -> Result<zdp::ResponseCode, ()> {
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -59,14 +57,12 @@ pub async fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<
     match response {
         Ok(mut hello_res) => {
             let Ok(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut hello_res) else {
-                fastpath::drop_and_count(asm, hello_res, CounterType::BadStructure);
+                core::count_event(asm, &mut hello_res, CounterType::BadStructure);
                 return Err(());
             };
             let status = hdr.status;
-            debug!(target: ZDP, "Received HelloResponse, status: {status}");
-            asm.buffer_stack
-                .put_buffer(hello_res.destroy().try_into().unwrap());
-            Ok(())
+            debug!(target: ZDP, "Received HelloResponse, status: {status:?}");
+            Ok(status)
         }
 
         Err(err) => {
@@ -81,7 +77,7 @@ pub async fn send_register_agent_address_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
     agent_addr: IpAddr,
-) -> Result<(), ()> {
+) -> Result<zdp::ResponseCode, ()> {
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -115,16 +111,15 @@ pub async fn send_register_agent_address_request(
             let Ok(hdr) =
                 zdp::ZdpRegisterAgentAddressResponseHeader::read_from_buf(&mut register_res)
             else {
-                fastpath::drop_and_count(asm, register_res, CounterType::BadStructure);
+                core::count_event(asm, &mut register_res, CounterType::BadStructure);
                 return Err(());
             };
             debug!(
                 target: ZDP,
-                "Received RegisterAgentAddressResponse, status: {}",
+                "Received RegisterAgentAddressResponse, status: {:?}",
                 hdr.status_code
             );
-            asm.buffer_stack
-                .put_buffer(register_res.destroy().try_into().unwrap());
+            return Ok(hdr.status_code);
         }
 
         Err(err) => {
@@ -132,7 +127,6 @@ pub async fn send_register_agent_address_request(
             return Err(());
         }
     }
-    Ok(())
 }
 
 /// send a Terminate Request (RFC 6.5 § 6.3.3)
@@ -140,7 +134,7 @@ pub async fn send_terminate_request<'a, 'pktbuf>(
     asm: &Assembly,
     link_id: zpr::LinkId,
     reason: zdp::TerminateReason,
-) -> Result<zdp::TerminateResponse, ()> {
+) -> Result<zdp::ResponseCode, ()> {
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -162,13 +156,11 @@ pub async fn send_terminate_request<'a, 'pktbuf>(
         Ok(mut terminate_res) => {
             let Ok(hdr) = zdp::ZdpTerminateLinkResponseHeader::read_from_buf(&mut terminate_res)
             else {
-                fastpath::drop_and_count(asm, terminate_res, CounterType::BadStructure);
+                core::count_event(asm, &mut terminate_res, CounterType::BadStructure);
                 return Err(());
             };
             let resp_code = hdr.response_code;
             info!("Received TerminateLinkResponse, status: {:?}", resp_code);
-            asm.buffer_stack
-                .put_buffer(terminate_res.destroy().try_into().unwrap());
             Ok(resp_code)
         }
 
@@ -185,8 +177,7 @@ pub async fn send_terminate_indication<'a, 'pktbuf>(
     link_id: zpr::LinkId,
     reason: zdp::TerminateReason,
 ) {
-    let buf = asm.buffer_stack.get_buffer().await;
-    let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+    let mut pkt = core::new_heap_packet();
     let hdr = pkt.alloc_zeroed_header::<zdp::ZdpTerminateLinkIndicationHeader>();
     hdr.reason_code = reason;
     core::send_non_flow_mgmt(
@@ -258,36 +249,30 @@ pub async fn send_bind_agent_address_request(
     match response {
         Ok((tether_id, mut resp)) => {
             let Ok(hdr) = zdp::ZdpBindAgentAddressResponseHeader::read_from_buf(&mut resp) else {
-                fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                core::count_event(asm, &mut resp, CounterType::BadStructure);
                 return Err(BindAgentAddressError::BadStructure);
             };
 
             match hdr.status_code {
-                zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS => {
-                    asm.buffer_stack
-                        .put_buffer(resp.destroy().try_into().unwrap());
-                    Ok(tether_id)
-                }
+                zdp::ResponseCode::Success => Ok(tether_id),
 
-                zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER => {
+                zdp::ResponseCode::Other => {
                     if hdr.info_len as usize > resp.remaining() {
-                        fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                        core::count_event(asm, &mut resp, CounterType::BadStructure);
                         return Err(BindAgentAddressError::BadStructure);
                     }
 
                     let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
-                        fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                        core::count_event(asm, &mut resp, CounterType::BadStructure);
                         return Err(BindAgentAddressError::BadStructure);
                     };
                     let msg: Box<str> = msg.into();
 
-                    asm.buffer_stack
-                        .put_buffer(resp.destroy().try_into().unwrap());
                     Err(BindAgentAddressError::BindAgentAddressError(msg))
                 }
 
                 _ => {
-                    fastpath::drop_and_count(asm, resp, CounterType::BadStructure);
+                    core::count_event(asm, &mut resp, CounterType::BadStructure);
                     Err(BindAgentAddressError::BadStructure)
                 }
             }
@@ -305,8 +290,7 @@ pub async fn send_report(asm: &Assembly, link_id: zpr::LinkId, report: &str) {
     /*if packet::PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < report.len() {
         return;
     }*/  // CTP FIXME
-    let buf = asm.buffer_stack.get_buffer().await;
-    let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
+    let mut pkt = core::new_heap_packet();
     let hdr = pkt.alloc_zeroed_header::<zdp::ZdpReportHeader>();
     hdr.report_data_length = (report.len() as u16).into();
     pkt.put(report.as_bytes());

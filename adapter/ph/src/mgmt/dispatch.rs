@@ -1,9 +1,8 @@
 //! Code which handles dispatching management packets from fastpath.
 
-use super::handlers::{HandleMgmtError, HandleMgmtResult}; // TODO: make our own error type
+use super::core;
 use crate::assembly::Assembly;
 use crate::counters::CounterType;
-use crate::fastpath;
 use crate::km_multiplexor;
 use crate::link_state::LinkType;
 use crate::logging::targets::{KEY_MGMT, ZDP};
@@ -24,7 +23,7 @@ use zpr_ext::zerocopy::FromBytesExt;
 pub fn dispatch_mgmt_packet_with_addr(
     asm: &Arc<Assembly>,
     peer_sa: zpr::SubstrateAddr,
-    mut pkt: Packet,
+    pkt: &mut Packet,
 ) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
         Ok(base_hdr) if base_hdr.0.packet_type == zdp::ZdpPacketType::KeyManagement => {
@@ -34,18 +33,17 @@ pub fn dispatch_mgmt_packet_with_addr(
             // tether?
             let Some(ingress_link_id) = asm.start_tether(&peer_sa, LinkType::NodeToAdapter).ok()
             else {
-                return fastpath::drop_and_count(&asm, pkt, CounterType::UnknownPeer);
+                core::count_event(asm, pkt, CounterType::UnknownPeer);
+                return;
             };
 
             pkt.metadata_mut().ingress_link_id = ingress_link_id.get();
 
-            match handle_key_management(asm, pkt) {
-                Ok(()) => (),
-                Err((err, pkt)) => fastpath::drop_and_count(&asm, pkt, err),
-            }
+            handle_key_management(asm, pkt);
         }
         _ => {
-            return fastpath::drop_and_count(&asm, pkt, CounterType::UnknownPeer);
+            core::count_event(asm, pkt, CounterType::UnknownPeer);
+            return;
         }
     }
 }
@@ -54,43 +52,37 @@ pub fn dispatch_mgmt_packet_with_addr(
 ///
 /// This function does not block, and does not perform significant processing.
 /// It merely dispatches the management packet to the correct queue.
-pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, mut pkt: Packet) {
+pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
         Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::KeyManagement => {
             pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
-
-            match handle_key_management(asm, pkt) {
-                Ok(()) => (),
-                Err((err, pkt)) => fastpath::drop_and_count(&asm, pkt, err),
-            }
+            handle_key_management(asm, pkt);
         }
 
-        Ok((base_hdr, _)) if base_hdr.packet_type.is_response() => {
-            match handle_response(asm, pkt) {
-                Ok(()) => (),
-                Err((err, pkt)) => fastpath::drop_and_count(&asm, pkt, err),
-            }
-        }
+        Ok((base_hdr, _)) if base_hdr.packet_type.is_response() => handle_response(asm, pkt),
 
         _ => {
             let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
-                fastpath::drop_and_count(&asm, pkt, CounterType::PeerRemoved);
+                core::count_event(asm, pkt, CounterType::PeerRemoved);
                 return;
             };
 
-            match peer_state.mgmt_processor.try_enqueue_packet(pkt) {
+            let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
+            match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
                 Ok(()) => (),
-                Err(queues::TryEnqueueError::Full(pkt)) => {
-                    fastpath::drop_and_count(&asm, pkt, CounterType::QueueBackpressure);
+                Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {
+                    core::count_event(asm, pkt, CounterType::QueueBackpressure);
+                    return;
                 }
             }
         }
     }
 }
 
-fn handle_response(asm: &Assembly, mut pkt: Packet) -> HandleMgmtResult {
-    let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+fn handle_response(asm: &Assembly, pkt: &mut Packet) {
+    let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(pkt) else {
+        core::count_event(asm, pkt, CounterType::BadStructure);
+        return;
     };
 
     let packet_type = base_hdr.packet_type;
@@ -104,21 +96,30 @@ fn handle_response(asm: &Assembly, mut pkt: Packet) -> HandleMgmtResult {
     // Gets the designated sender, attempts to send the response, if not drops
     // the packet and increments corresponding counter
     let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
-        return Err((HandleMgmtError::UnexpectedMgmtResponse, pkt));
+        core::count_event(asm, pkt, CounterType::UnexpectedMgmtResponse);
+        return;
     };
 
-    peer_state
+    let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
+    match peer_state
         .sync_req_state
-        .forward_response(seq_num, (packet_type, pkt))
-        .map_err(|pkt| (HandleMgmtError::UnexpectedMgmtResponse, pkt))
+        .forward_response(seq_num, (packet_type, mgmt_pkt))
+    {
+        Ok(()) => (),
+        Err(_mgmt_pkt) => {
+            core::count_event(asm, pkt, CounterType::UnexpectedMgmtResponse);
+            return;
+        }
+    }
 }
 
 // ZPI and Base header is already gone by the time we get here.  So we expect
 // to parse starting from the KeyManagement header.
-fn handle_key_management(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
-    let Ok(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(&mut pkt) else {
+fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
+    let Ok(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(pkt) else {
         error!(target: ZDP, "KeyManagement packet arrived with unparseable header");
-        return Err((HandleMgmtError::BadStructure, pkt));
+        core::count_event(asm, pkt, CounterType::BadStructure);
+        return;
     };
 
     if !km_hdr.is_noise() {
@@ -127,16 +128,15 @@ fn handle_key_management(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResu
             "KeyManagement packet not using NOISE - type is {}",
             km_hdr.message_type
         );
-        return Err((
-            HandleMgmtError::UnknownKeyManagementType(km_hdr.message_type.into()),
-            pkt,
-        ));
+        core::count_event(asm, pkt, CounterType::OtherError);
+        return;
     }
 
     let km_msg_len = usize::from(km_hdr.message_length);
     if pkt.remaining() < km_msg_len {
         error!(target: KEY_MGMT, "KeyManagement packet arrived with truncated payload");
-        return Err((HandleMgmtError::BadStructure, pkt));
+        core::count_event(asm, pkt, CounterType::BadStructure);
+        return;
     }
 
     match km_multiplexor::handle_inbound_km_msg(
@@ -151,11 +151,8 @@ fn handle_key_management(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResu
                 "key management handling failed on link {}: {e:?}",
                 pkt.metadata().ingress_link_id,
             );
-            return Err((HandleMgmtError::KeyManagementError(format!("{e:?}")), pkt));
+            core::count_event(asm, pkt, CounterType::OtherError);
+            return;
         }
     };
-    asm.buffer_stack
-        .put_buffer(pkt.destroy().try_into().unwrap());
-
-    Ok(())
 }

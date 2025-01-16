@@ -1,7 +1,7 @@
 use crate::assembly::Assembly;
 use crate::counters::CounterType;
-use crate::fastpath;
 use crate::logging::targets::ZDP;
+use crate::mgmt;
 use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
 use crate::packet::Packet;
 use crate::queues::MgmtProcessorMessage;
@@ -24,17 +24,17 @@ pub async fn launch(
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
-            MgmtProcessorMessage::Packet(pkt) => {
+            MgmtProcessorMessage::Packet(mut pkt) => {
                 // Drop packets which are intended for a link other than the one we are assigned to,
                 // since processing them here will violate concurrency assumptions.
                 if pkt.metadata().ingress_link_id != config.link_id.get() {
-                    fastpath::drop_and_count(&asm, pkt, CounterType::InternalRoutingError);
+                    mgmt::core::count_event(&asm, &mut pkt, CounterType::InternalRoutingError);
                     continue;
                 }
 
                 match handle_packet(&asm, pkt).await {
                     Ok(()) => (),
-                    Err((err, pkt)) => fastpath::drop_and_count(&asm, pkt, err),
+                    Err((err, mut pkt)) => mgmt::core::count_event(&asm, &mut pkt, err.into()),
                 }
             }
 
@@ -56,7 +56,8 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
         base_hdr.sequence_number
     );
 
-    let seq_num = base_hdr.sequence_number.get() as u64; // TODO: reconstitute full seq num given expected seq num state
+    // TODO: reconstitute full seq num given expected seq num state
+    let seq_num = base_hdr.sequence_number.get() as u64;
 
     if base_hdr.packet_type.is_per_flow() {
         let Ok(per_flow_hdr) = ZdpPerFlowHeader::read_from_buf(&mut pkt) else {

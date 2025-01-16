@@ -273,6 +273,11 @@ impl Packet {
         self.buf
     }
 
+    /// Return a reference to the underlying buffer.
+    pub fn buffer(&self) -> &PacketBuffer {
+        &self.buf
+    }
+
     /// Initialize a buffer with existing packet data as a packet buffer.
     /// `offset` is offset of data within buffer.
     /// It must be at least equal to `Self::MIN_BODY_OFFSET`.
@@ -286,6 +291,16 @@ impl Packet {
         md.len = len;
         md.ingress_link_id = 0;
         md.ingress_stream_id = 0;
+        pkt
+    }
+
+    /// Initialize a buffer with existing packet data and metadata as a packet buffer.
+    pub fn new_with_existing_metadata(buf: PacketBuffer) -> Self {
+        let pkt = Packet { buf };
+        let md = pkt.metadata();
+        assert!(md.offset >= Self::MIN_BODY_OFFSET);
+        assert!(md.len <= pkt.buf.len());
+        assert!(md.offset <= pkt.buf.len() - md.len);
         pkt
     }
 

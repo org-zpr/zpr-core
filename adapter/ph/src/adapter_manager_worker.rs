@@ -16,23 +16,26 @@ pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<AdapterManager
     while let Some(msg) = queue.recv().await {
         match msg {
             AdapterManagerMessage::RequestTetherId(pkt) => {
+                let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
+                fastpath::drop_and_count(&asm, pkt, CounterType::DispatchedToMgmt);
+
                 // for now, perform these sequentially...
                 // ideally, we place these into a JoinSet,
                 // but let's work out how message sequencing works before doing that!!
-                do_request_tether_id(&asm, pkt).await;
+                do_request_tether_id(&asm, mgmt_pkt).await;
             }
         }
     }
 }
 
 // RFC 6.5 § 6.3.11
-async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
+async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
     let five_tuple = pkt.metadata().five_tuple();
 
     // if there's already an entry, this is a duplicate request
     // (NOTE: we should be the only ones modifying this table!)
     if asm.alt.get(five_tuple).is_some() {
-        fastpath::drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
+        mgmt::core::count_event(asm, &mut pkt, CounterType::DroppedAwaitingBind);
         return;
     }
 
@@ -46,7 +49,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
 
     if dock_link_id != zpr::LINK_ID_UNKNOWN && !asm.is_link_ready(dock_link_id) {
         debug!(target: FLOW_MGMT, "Link {dock_link_id} is not ready to receive traffic yet");
-        fastpath::drop_and_count(asm, pkt, CounterType::DroppedNoSA);
+        mgmt::core::count_event(asm, &mut pkt, CounterType::DroppedNoSA);
         return;
     }
 
