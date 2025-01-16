@@ -11,6 +11,7 @@ use toml::Table;
 use crate::crypto::sha256;
 use crate::errors::CompilationError;
 use crate::protocols::{self, IanaProtocol};
+use crate::ptypes::Attribute;
 use crate::zpl;
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
@@ -140,6 +141,37 @@ impl Config {
             }
         }
         None
+    }
+
+    /// Given an attribute from ZPL (or config) ensure that it is provided by one
+    /// of the trusted services.  At the same time, return it in its full (with prefix) form.
+    ///
+    /// TODO: This could do more like check if the attribute is using the correct from (tag) or
+    /// if it is multi-value, is it using a valid value.  (TODO).
+    ///
+    /// Note that this config struct doesn't really fully parse the attributes anyway so maybe
+    /// in the future this logic should move into fabric.  For now this is just a match
+    /// against the string attributes in each trusted service.
+    ///
+    /// Do not pass the DEFAULT attributes in here (eg, "cn" or "zpr.adapter.cn") -- this
+    /// does not check for them.
+    pub fn resolve_attribute(&self, attr: &Attribute) -> Result<String, CompilationError> {
+        for ts in &self.trusted_services {
+            if ts.returns_attrs.contains(&attr.name) {
+                return Ok(format!("{}{}", ts.prefix, attr.name));
+            }
+            // Possibly the name is already prefixed...
+            if attr.name.starts_with(&ts.prefix) {
+                let name = String::from(&attr.name[ts.prefix.len()..]);
+                if ts.returns_attrs.contains(&name) {
+                    return Ok(attr.name.clone());
+                }
+            }
+        }
+        Err(err_config!(
+            "attribute not provided by any trusted service: {}",
+            attr.name
+        ))
     }
 }
 
@@ -415,9 +447,12 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     let returns_attrs: Vec<String>;
     let identity_attrs: Vec<String>;
     if !is_default {
+        if !ts.contains_key("prefix") {
+            return Err(err_config!("trusted_service {} missing prefix", ts_id));
+        }
         prefix = ts["prefix"]
             .as_str()
-            .ok_or(err_config!("trusted_service {} missing prefix", ts_id))?
+            .ok_or(err_config!("trusted_service {} prefix parse error", ts_id))?
             .to_string();
         returns_attrs = parse_string_array(ts, "returns_attributes", "trusted_service")?;
         identity_attrs = parse_string_array(ts, "identity_attributes", "trusted_service")?;

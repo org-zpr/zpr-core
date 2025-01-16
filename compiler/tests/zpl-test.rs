@@ -25,6 +25,7 @@ fn can_parse_rfc_examples() {
             }
             let cb = CompilationBuilder::new(path)
                 .verbose(true)
+                .parse_only(true)
                 .config(&config_file);
             let comp = cb.build();
             match comp.compile() {

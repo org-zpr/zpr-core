@@ -149,12 +149,17 @@ pub fn weave(
         service_idx.insert(svc.id.clone(), svc);
     }
 
+    // We do not yet support non-default trusted services though we will parse them and
+    // we do grab their attributes so that we can parse ZPL that uses them.
+    //
+    // But since we don't put this into the binary policy yet, the resulting policy
+    // will not be readable by visa service.
     for ts in &config.trusted_services {
         if ts.id != zpl::DEFAULT_TRUSTED_SERVICE_ID {
-            return Err(CompilationError::ConfigError(format!(
-                "non-default trusted services not yet supported: {}",
+            println!(
+                "warning: trusted_service '{}': non-default trusted services not supported",
                 ts.id
-            )));
+            );
         }
     }
 
@@ -510,8 +515,11 @@ impl Weaver {
     fn resolve_attributes(
         &self,
         attrs: &[Attribute],
-        _config: &Config,
+        config: &Config,
     ) -> Result<Vec<Attribute>, CompilationError> {
+        // TODO: The trusted service support is no yet real, this is a hack to permit compilation of
+        //       ZPL files that use more than just the "cn" (default) attribute.
+
         let mut resolved_attrs = Vec::new();
         for a in attrs {
             if a.name == zpl::ADAPTER_CN_ATTR {
@@ -520,10 +528,8 @@ impl Weaver {
             if a.name == zpl::DEFAULT_ATTR {
                 resolved_attrs.push(a.set_name(zpl::ADAPTER_CN_ATTR));
             } else {
-                return Err(CompilationError::AttributeError(format!(
-                    "attribute {} not known",
-                    a.name
-                )));
+                let new_name = config.resolve_attribute(a)?;
+                resolved_attrs.push(a.set_name(&new_name));
             }
         }
         Ok(resolved_attrs)
@@ -635,18 +641,14 @@ impl Weaver {
 
         for ts in &config.trusted_services {
             if ts.id != zpl::DEFAULT_TRUSTED_SERVICE_ID {
-                return Err(CompilationError::ConfigError(format!(
-                    "non-default trusted services not yet supported: {}",
-                    ts.id
-                )));
-            } else {
-                if def_ts.is_some() {
-                    return Err(CompilationError::ConfigError(
-                        "only one default trusted service is supported".to_string(),
-                    ));
-                }
-                def_ts = Some(ts);
+                continue;
             }
+            if def_ts.is_some() {
+                return Err(CompilationError::ConfigError(
+                    "only one default trusted service is supported".to_string(),
+                ));
+            }
+            def_ts = Some(ts);
         }
         if def_ts.is_none() {
             return Err(CompilationError::ConfigError(

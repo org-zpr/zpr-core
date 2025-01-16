@@ -47,12 +47,19 @@ struct Cli {
     /// Sets extra verbosity.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Only perform parsing step. Does not produce a binary policy.
+    #[arg(short, long)]
+    parse_only: bool,
 }
 
 fn main() {
     let mut exit_code = 0;
     let cli = Cli::parse();
     let mut cb = Compilation::builder(cli.zpl).verbose(cli.verbose);
+    if cli.parse_only {
+        cb = cb.parse_only(true);
+    }
     if let Some(cfg) = cli.zplc {
         cb = cb.config(&cfg);
     }
@@ -68,7 +75,7 @@ fn main() {
     }
     let comp = cb.build();
     match comp.compile() {
-        Ok(_) => println!("compiled ok"),
+        Ok(_) => println!("success"),
         Err(e) => {
             eprintln!("error: {}", e);
             exit_code = 1;

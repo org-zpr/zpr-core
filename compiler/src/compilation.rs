@@ -23,6 +23,7 @@ pub struct Compilation {
     pub source_zpl: PathBuf,
     pub source_config: PathBuf,
     pub output_file: PathBuf,
+    pub parse_only: bool,
     private_key: Option<Rsa<Private>>,
 }
 
@@ -61,6 +62,11 @@ impl Compilation {
         let fabric = weave(&self, &cfg, &policy)?;
         println!("FABRIC:\n{}", fabric);
 
+        println!("parsed OK");
+        if self.parse_only {
+            return Ok(());
+        }
+
         let mut builder = PolicyBuilder::new();
         builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
 
@@ -71,8 +77,6 @@ impl Compilation {
 
         let pcontainer = self.contain_policy(&pol)?;
         self.write_container(&pcontainer, &self.output_file)?;
-
-        // TODO: put into signed container.
 
         Ok(())
     }
@@ -141,6 +145,7 @@ pub struct CompilationBuilder {
     source_config: Option<PathBuf>,
     verbose: bool,
     private_key: Option<Rsa<Private>>,
+    parse_only: bool,
 }
 
 impl CompilationBuilder {
@@ -156,6 +161,12 @@ impl CompilationBuilder {
     /// Enable verbose console output from the compilation process.
     pub fn verbose(mut self, verbose: bool) -> Self {
         self.verbose = verbose;
+        self
+    }
+
+    /// Just builds the fabric in memory, does not try to create the policy protobuf binary.
+    pub fn parse_only(mut self, parse_only: bool) -> Self {
+        self.parse_only = parse_only;
         self
     }
 
@@ -190,6 +201,7 @@ impl CompilationBuilder {
             source_config: config,
             output_file,
             private_key: self.private_key,
+            parse_only: self.parse_only,
         }
     }
 }

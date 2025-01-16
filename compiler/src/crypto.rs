@@ -61,6 +61,7 @@ pub fn load_asn1data_from_pem(pem_file: &Path) -> Result<Vec<u8>, CompilationErr
 /// Load a private key from a PEM file.
 /// This should be an RSA private key suitable for signing (NOT just a noise key).
 /// File must begin with `-----BEGIN PRIVATE KEY-----`.
+#[allow(dead_code)]
 pub fn load_rsa_private_key(pem_file: &Path) -> Result<Rsa<Private>, CompilationError> {
     let pdata = std::fs::read(pem_file).map_err(|e| {
         CompilationError::FileError(format!(
