@@ -8,11 +8,11 @@ use prost::Message;
 use crate::config::load_config;
 use crate::crypto::{sha256_of_file, sign_pkcs1v15_sha256};
 use crate::errors::CompilationError;
-use crate::fabric::weave;
 use crate::lex::tokenize;
 use crate::parser::parse;
 use crate::policybuilder::PolicyBuilder;
 use crate::polio;
+use crate::weaver::weave;
 
 /// Updeate this if we change the container format. This is checked by visa service during deserialization.
 pub const CONTAINER_VERSION: u32 = 1121;
@@ -81,6 +81,7 @@ impl Compilation {
         Ok(())
     }
 
+    /// Write the policy container to the output file, serializing with protocol buffers.
     fn write_container(
         &self,
         container: &polio::PolicyContainer,
@@ -101,6 +102,7 @@ impl Compilation {
         Ok(())
     }
 
+    /// Create the container struct and optionally sign the policy with the private key.
     fn contain_policy(
         &self,
         pol: &polio::Policy,

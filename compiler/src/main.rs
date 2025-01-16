@@ -9,12 +9,14 @@ mod crypto;
 mod define;
 mod errors;
 mod fabric;
+mod fabric_util;
 mod lex;
 mod parser;
 mod policybuilder;
 mod protocols;
 mod ptypes;
 mod putil;
+mod weaver;
 mod zpl;
 mod zplstr;
 

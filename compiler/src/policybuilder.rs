@@ -1,4 +1,4 @@
-//! binp - Binary policy bundle.
+//! policybuilder.rs - Build a protocol buffer policy from the fabric.
 
 use chrono::prelude::*;
 use std::collections::HashMap;
@@ -26,6 +26,8 @@ pub struct PolicyBuilder {
     policy: polio::Policy,
 }
 
+/// These flags are used to set the type of service in the PROC.
+/// TODO: Maybe switch to using the protocol buffer type directly?
 #[derive(Debug, Clone, PartialEq, Copy)]
 struct PFlags {
     pub node: bool,
@@ -34,6 +36,7 @@ struct PFlags {
 }
 
 impl PFlags {
+    /// Create the set of flags for a node.
     pub fn node() -> PFlags {
         PFlags {
             node: true,
@@ -41,6 +44,8 @@ impl PFlags {
             vs_dock: true,
         }
     }
+
+    /// Create the set of flags for a visa service.
     pub fn vs() -> PFlags {
         PFlags {
             node: false,
@@ -52,6 +57,7 @@ impl PFlags {
 
 #[allow(dead_code)]
 impl PolicyBuilder {
+    /// Create the builder. This sets some topical info in the policy.
     pub fn new() -> PolicyBuilder {
         let utc: DateTime<Utc> = Utc::now();
         let policy_date = utc.to_rfc3339();
@@ -70,11 +76,13 @@ impl PolicyBuilder {
         }
     }
 
-    // TODO: trying this with 'self' instead of '&self'...
+    /// Returns the built policy. This doesn't actually do anything,
+    /// you must call [PolicyBuilder::with_fabric] before calling this.
     pub fn build(self) -> Result<polio::Policy, CompilationError> {
         Ok(self.policy)
     }
 
+    /// Gets the date as set in [PolicyBuilder::new].
     pub fn get_policy_date(&self) -> &str {
         &self.policy_date
     }
@@ -98,6 +106,8 @@ impl PolicyBuilder {
     ///   - The links which are empty for now as only a single node is supported (TODO).
     ///   - The services which is only used for AUTH services. TODO: empty for now.
     ///   - The certificates used for trusted services (TODO) and for the default/internal auth service.
+    ///
+    /// This does most of the work in building the policy.
     pub fn with_fabric(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
         self.policy.policy_revision = fabric.revision.clone();
 
