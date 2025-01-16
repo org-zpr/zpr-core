@@ -1,10 +1,10 @@
 use ring::digest::{self, Digest};
 
-use openssl::x509::X509;
-use openssl::rsa::Rsa;
-use openssl::pkey::{PKey, Private};
-use openssl::sign::Signer;
 use openssl::hash::MessageDigest;
+use openssl::pkey::{PKey, Private};
+use openssl::rsa::Rsa;
+use openssl::sign::Signer;
+use openssl::x509::X509;
 
 use std::path::Path;
 
@@ -34,17 +34,23 @@ pub fn digest_as_hex(digest: &Digest) -> String {
     s
 }
 
-
 /// Load a PEM certifiate file and return the ASN.1 data in DER encoding.
 /// Passed file should start with `-----BEGIN CERTIFICATE-----`.
 pub fn load_asn1data_from_pem(pem_file: &Path) -> Result<Vec<u8>, CompilationError> {
     let pdata = std::fs::read(pem_file).map_err(|e| {
-        CompilationError::FileError(format!("failed to read certificate file {:?}: {}", pem_file, e))
+        CompilationError::FileError(format!(
+            "failed to read certificate file {:?}: {}",
+            pem_file, e
+        ))
     })?;
     let cert = match X509::from_pem(&pdata) {
         Ok(c) => c,
         Err(e) => {
-            return Err(CompilationError::FileError(format!("error constructing cert from PEM data {}: {}", pem_file.display(), e)));
+            return Err(CompilationError::FileError(format!(
+                "error constructing cert from PEM data {}: {}",
+                pem_file.display(),
+                e
+            )));
         }
     };
     Ok(cert.to_der().map_err(|e| {
@@ -57,12 +63,19 @@ pub fn load_asn1data_from_pem(pem_file: &Path) -> Result<Vec<u8>, CompilationErr
 /// File must begin with `-----BEGIN PRIVATE KEY-----`.
 pub fn load_rsa_private_key(pem_file: &Path) -> Result<Rsa<Private>, CompilationError> {
     let pdata = std::fs::read(pem_file).map_err(|e| {
-        CompilationError::FileError(format!("failed to read private key file {:?}: {}", pem_file, e))
+        CompilationError::FileError(format!(
+            "failed to read private key file {:?}: {}",
+            pem_file, e
+        ))
     })?;
     let key = match Rsa::private_key_from_pem(&pdata) {
         Ok(k) => k,
         Err(e) => {
-            return Err(CompilationError::FileError(format!("error constructing private key from PEM data {}: {}", pem_file.display(), e)));
+            return Err(CompilationError::FileError(format!(
+                "error constructing private key from PEM data {}: {}",
+                pem_file.display(),
+                e
+            )));
         }
     };
     Ok(key)
@@ -72,13 +85,12 @@ pub fn sign_pkcs1v15_sha256(key: &Rsa<Private>, data: &[u8]) -> Result<Vec<u8>, 
     let private_key = PKey::from_rsa(key.clone()).map_err(|e| {
         CompilationError::CryptoError(format!("error converting RSA key to PKey: {}", e))
     })?;
-    let mut signer = Signer::new(MessageDigest::sha256(), &private_key).map_err(|e| {
-        CompilationError::CryptoError(format!("error creating signer: {}", e))
-    })?;
-    signer.update(data).map_err(|e| {
-        CompilationError::CryptoError(format!("error updating signer: {}", e))
-    })?;
-    signer.sign_to_vec().map_err(|e| {
-        CompilationError::CryptoError(format!("error signing data: {}", e))
-    })
+    let mut signer = Signer::new(MessageDigest::sha256(), &private_key)
+        .map_err(|e| CompilationError::CryptoError(format!("error creating signer: {}", e)))?;
+    signer
+        .update(data)
+        .map_err(|e| CompilationError::CryptoError(format!("error updating signer: {}", e)))?;
+    signer
+        .sign_to_vec()
+        .map_err(|e| CompilationError::CryptoError(format!("error signing data: {}", e)))
 }

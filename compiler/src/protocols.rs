@@ -1,4 +1,3 @@
-
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum IanaProtocol {
     ICMP = 1,

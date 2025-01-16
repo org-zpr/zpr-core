@@ -1,10 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use prost::Message;
-use openssl::rsa::Rsa;
 use openssl::pkey::Private;
-
+use openssl::rsa::Rsa;
+use prost::Message;
 
 use crate::config::load_config;
 use crate::crypto::{sha256_of_file, sign_pkcs1v15_sha256};
@@ -15,10 +14,8 @@ use crate::parser::parse;
 use crate::policybuilder::PolicyBuilder;
 use crate::polio;
 
-
 /// Updeate this if we change the container format. This is checked by visa service during deserialization.
 pub const CONTAINER_VERSION: u32 = 1121;
-
 
 /// Create one of these with the [CompilationBuilder].
 pub struct Compilation {
@@ -80,20 +77,30 @@ impl Compilation {
         Ok(())
     }
 
-    fn write_container(&self, container: &polio::PolicyContainer, file: &Path) -> Result<(), CompilationError> {
+    fn write_container(
+        &self,
+        container: &polio::PolicyContainer,
+        file: &Path,
+    ) -> Result<(), CompilationError> {
         let mut buf = Vec::new();
         buf.reserve(container.encoded_len());
         container.encode(&mut buf).map_err(|e| {
             CompilationError::EncodingError(format!("failed to encode policy container: {}", e))
         })?;
         std::fs::write(file, &buf).map_err(|e| {
-            CompilationError::FileError(format!("failed to write policy container to {:?}: {}", file, e))
+            CompilationError::FileError(format!(
+                "failed to write policy container to {:?}: {}",
+                file, e
+            ))
         })?;
         println!("wrote {}", &file.display());
         Ok(())
     }
 
-    fn contain_policy(&self, pol: &polio::Policy) -> Result<polio::PolicyContainer, CompilationError> {
+    fn contain_policy(
+        &self,
+        pol: &polio::Policy,
+    ) -> Result<polio::PolicyContainer, CompilationError> {
         let mut buf = Vec::new();
         buf.reserve(pol.encoded_len());
         pol.encode(&mut buf).map_err(|e| {

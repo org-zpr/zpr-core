@@ -5,11 +5,11 @@ use std::collections::HashMap;
 use std::env;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::errors::CompilationError;
-use crate::fabric::{Fabric, ServiceType, FabricService};
 use crate::config::IcmpFlowType;
-use crate::polio;
 use crate::crypto::load_asn1data_from_pem;
+use crate::errors::CompilationError;
+use crate::fabric::{Fabric, FabricService, ServiceType};
+use crate::polio;
 use crate::ptypes::Attribute;
 use crate::zpl;
 
@@ -18,7 +18,6 @@ pub const SERIAL_VERSION: u32 = 41;
 
 /// This value for a PROC in a connect record means NO PROC.
 const NO_PROC: u32 = 0xffffffff;
-
 
 #[allow(dead_code)]
 #[derive(Default)]
@@ -71,17 +70,14 @@ impl PolicyBuilder {
         }
     }
 
-
     // TODO: trying this with 'self' instead of '&self'...
     pub fn build(self) -> Result<polio::Policy, CompilationError> {
         Ok(self.policy)
     }
 
-
     pub fn get_policy_date(&self) -> &str {
         &self.policy_date
     }
-
 
     /// The binary policy has a place for global settings, the only valid
     /// one in the prototype is "max visa lifetime".  Set that here.
@@ -103,7 +99,6 @@ impl PolicyBuilder {
     ///   - The services which is only used for AUTH services. TODO: empty for now.
     ///   - The certificates used for trusted services (TODO) and for the default/internal auth service.
     pub fn with_fabric(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
-
         self.policy.policy_revision = fabric.revision.clone();
 
         // The policy refers to attribute keys and values using a lookup table.
@@ -123,7 +118,6 @@ impl PolicyBuilder {
         Ok(())
     }
 
-
     /// Configure the default (internal) authentication service in the policy. This is
     /// essentially just storing a CA certificate along with the expected prefix.
     fn set_default_auth(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
@@ -136,7 +130,6 @@ impl PolicyBuilder {
         Ok(())
     }
 
-
     // Each policy (called a CPolicy for "Communication Policy" in the protobuf)
     // lists a service, a scope (which is a protocol/port) and a collection
     // of attributes.  For a policy to be satisfied at the visa service ALL
@@ -145,7 +138,6 @@ impl PolicyBuilder {
     // As an aside, i'm not exactly sure why the protobuf format has a list of
     // lists of conditions rather than just a list.
     fn set_policies(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
-
         // Each service has a set of client policies.
         // Each policy is a list of conditions that permit access to the service.
         // We convert each policy to its own CPolicy.
@@ -178,7 +170,10 @@ impl PolicyBuilder {
     }
 
     /// Create a polio::Scope from a FabricService.protocol.
-    fn scope_for_service(&self, svc: &FabricService) -> Result<Vec<polio::Scope>, CompilationError> {
+    fn scope_for_service(
+        &self,
+        svc: &FabricService,
+    ) -> Result<Vec<polio::Scope>, CompilationError> {
         let mut scopes = Vec::new();
 
         // The visa service and policy protobuf support a much richer protcol description than
@@ -199,7 +194,7 @@ impl PolicyBuilder {
                     }
                     IcmpFlowType::RequestResponse(req, resp) => {
                         let pcodes = vec![*req as u32, *resp as u32];
-                        polio::Icmp{
+                        polio::Icmp {
                             r#type: polio::Icmpt::Reqrep as i32,
                             codes: pcodes,
                         }
@@ -213,25 +208,25 @@ impl PolicyBuilder {
                         let port_num: u16 = match port_str.parse() {
                             Ok(n) => n,
                             Err(_) => {
-                                return Err(
-                                    CompilationError::ConfigError(
-                                        format!("service {} port '{}' is invalid or out of range", svc.config_id, &port_str)
-                                    )
-                                );
+                                return Err(CompilationError::ConfigError(format!(
+                                    "service {} port '{}' is invalid or out of range",
+                                    svc.config_id, &port_str
+                                )));
                             }
                         };
-                        let pspec = polio::PortSpecList{
-                            spec: vec![polio::PortSpec{
+                        let pspec = polio::PortSpecList {
+                            spec: vec![polio::PortSpec {
                                 parg: Some(polio::port_spec::Parg::Port(port_num as u32)),
-                            }]
+                            }],
                         };
                         parg = polio::scope::Protarg::Pspec(pspec);
                     }
                     None => {
                         // TODO: Catch this earlier when we revamp port parsing.
-                        return Err(CompilationError::ConfigError(
-                            format!("service {} protcol must be ICMP or have a valid port", svc.config_id)
-                        ));
+                        return Err(CompilationError::ConfigError(format!(
+                            "service {} protcol must be ICMP or have a valid port",
+                            svc.config_id
+                        )));
                     }
                 }
             }

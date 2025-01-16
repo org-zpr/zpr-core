@@ -110,7 +110,7 @@ pub struct Protocol {
 #[derive(Debug, Clone, PartialEq)]
 pub enum IcmpFlowType {
     RequestResponse(u8, u8),
-    OneShot(Vec::<u8>),
+    OneShot(Vec<u8>),
 }
 
 /// Service table
@@ -664,8 +664,11 @@ fn parse_icmp_details(prot_id: &str, prot: &Table) -> Result<IcmpFlowType, Compi
     } else if ft == zpl::ICMP_INTERACTION_ONESHOT {
         let mut parsed_codes = Vec::new();
         for tcode in codes {
-            let code = toml_as_u8(tcode)
-                .ok_or(err_config!("protocol {} icmp code '{}' is invalid", prot_id, tcode))?;
+            let code = toml_as_u8(tcode).ok_or(err_config!(
+                "protocol {} icmp code '{}' is invalid",
+                prot_id,
+                tcode
+            ))?;
             parsed_codes.push(code);
         }
         interaction = IcmpFlowType::OneShot(parsed_codes);

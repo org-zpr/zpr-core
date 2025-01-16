@@ -65,8 +65,8 @@ pub struct FabricNode {
 pub struct ClientPolicy {
     pub access_only: bool, // If true, this policy is only for access, not for setting up a connection
     pub condition: Vec<Attribute>, // List of attributes that must be met for the policy to apply
-                                   // TODO: withouts, constraints, etc.
-                                   //       Actually, withouts are just attributes, eg (role, ne, marketing)
+                           // TODO: withouts, constraints, etc.
+                           //       Actually, withouts are just attributes, eg (role, ne, marketing)
 }
 
 /// Debugging output
@@ -74,7 +74,11 @@ impl fmt::Display for Fabric {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "revision: {}\n", self.revision)?;
         write!(f, "metadata: {}\n", self.metadata)?;
-        write!(f, "default auth cert: {}\n", self.default_auth_cert.display())?;
+        write!(
+            f,
+            "default auth cert: {}\n",
+            self.default_auth_cert.display()
+        )?;
         write!(
             f,
             "{} services - {} nodes\n",
@@ -314,7 +318,10 @@ impl Fabric {
         let svc = self.services.iter_mut().find(|s| s.fabric_id == service_id);
         if svc.is_none() {
             // programming error
-            panic!("call add_condition_to_service but service {} not found", service_id);
+            panic!(
+                "call add_condition_to_service but service {} not found",
+                service_id
+            );
         }
         let svc = svc.unwrap();
         svc.client_policies.push(ClientPolicy {
@@ -456,14 +463,12 @@ impl Weaver {
                     .into_values()
                     .collect::<Vec<Attribute>>()
                     .as_slice(),
-                config)?;
-
-            let fabric_svc_id = self.fabric.add_service(
-                &svc.id,
-                prot,
-                &resolved_attrs,
-                ServiceType::Regular,
+                config,
             )?;
+
+            let fabric_svc_id =
+                self.fabric
+                    .add_service(&svc.id, prot, &resolved_attrs, ServiceType::Regular)?;
             self.allowid_to_fab_svc.insert(ac.id, fabric_svc_id);
         }
 
@@ -498,17 +503,21 @@ impl Weaver {
         Ok(())
     }
 
-
     // Every attribute needs to come from a trusted service. Since right now (TODO) the
     // only service is the default one, the only attribute we accept is "cn" or the full
     // expansion of that "zpr.adapter.cn".
     //
-    fn resolve_attributes(&self, attrs: &[Attribute], _config: &Config) -> Result<Vec<Attribute>, CompilationError> {
+    fn resolve_attributes(
+        &self,
+        attrs: &[Attribute],
+        _config: &Config,
+    ) -> Result<Vec<Attribute>, CompilationError> {
         let mut resolved_attrs = Vec::new();
         for a in attrs {
             if a.name == zpl::ADAPTER_CN_ATTR {
                 resolved_attrs.push(a.clone());
-            } if a.name == zpl::DEFAULT_ATTR {
+            }
+            if a.name == zpl::DEFAULT_ATTR {
                 resolved_attrs.push(a.set_name(zpl::ADAPTER_CN_ATTR));
             } else {
                 return Err(CompilationError::AttributeError(format!(
@@ -589,9 +598,8 @@ impl Weaver {
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
             let attr_map = squash_attributes(&attrs, &ac.endpoint.class_tok)?;
 
-            let required_attrs = self.resolve_attributes(
-                &attr_map.into_values().collect::<Vec<Attribute>>(),
-                config)?;
+            let required_attrs = self
+                .resolve_attributes(&attr_map.into_values().collect::<Vec<Attribute>>(), config)?;
 
             // Now figure out what service we are talking about.
             // The service may be:
