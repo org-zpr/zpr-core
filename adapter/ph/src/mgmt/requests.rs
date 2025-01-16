@@ -40,7 +40,10 @@ pub async fn send_discard(asm: &Assembly, link_id: zpr::LinkId) {
 }
 
 /// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
-pub async fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<(), ()> {
+pub async fn send_hello_request(
+    asm: &Assembly,
+    link_id: zpr::LinkId,
+) -> Result<zdp::ResponseCode, ()> {
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -58,8 +61,8 @@ pub async fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<
                 return Err(());
             };
             let status = hdr.status;
-            debug!(target: ZDP, "Received HelloResponse, status: {status}");
-            Ok(())
+            debug!(target: ZDP, "Received HelloResponse, status: {status:?}");
+            Ok(status)
         }
 
         Err(err) => {
@@ -74,7 +77,7 @@ pub async fn send_register_agent_address_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
     agent_addr: IpAddr,
-) -> Result<(), ()> {
+) -> Result<zdp::ResponseCode, ()> {
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -113,9 +116,10 @@ pub async fn send_register_agent_address_request(
             };
             debug!(
                 target: ZDP,
-                "Received RegisterAgentAddressResponse, status: {}",
+                "Received RegisterAgentAddressResponse, status: {:?}",
                 hdr.status_code
             );
+            return Ok(hdr.status_code);
         }
 
         Err(err) => {
@@ -123,7 +127,6 @@ pub async fn send_register_agent_address_request(
             return Err(());
         }
     }
-    Ok(())
 }
 
 /// send a Terminate Request (RFC 6.5 § 6.3.3)
@@ -131,7 +134,7 @@ pub async fn send_terminate_request<'a, 'pktbuf>(
     asm: &Assembly,
     link_id: zpr::LinkId,
     reason: zdp::TerminateReason,
-) -> Result<zdp::TerminateResponse, ()> {
+) -> Result<zdp::ResponseCode, ()> {
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -251,9 +254,11 @@ pub async fn send_bind_agent_address_request(
             };
 
             match hdr.status_code {
-                zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS => Ok(tether_id),
+                zdp::ResponseCode::Success => {
+                    Ok(tether_id)
+                }
 
-                zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER => {
+                zdp::ResponseCode::Other => {
                     if hdr.info_len as usize > resp.remaining() {
                         core::count_event(asm, &mut resp, CounterType::BadStructure);
                         return Err(BindAgentAddressError::BadStructure);

@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
+use crate::errors::CompilationError;
 use crate::lex::tokenize;
 use crate::parser::parse;
 
+/// Create one of these with the [CompilationBuilder].
 pub struct Compilation {
     pub verbose: bool,
     pub source_zpl: PathBuf,
@@ -10,40 +12,33 @@ pub struct Compilation {
 }
 
 impl Compilation {
+    /// Returns a new [CompilationBuilder] using the passed ZPL source file and
+    /// reasonable defaults.
     pub fn builder(source: PathBuf) -> CompilationBuilder {
         CompilationBuilder::new(source)
     }
 
-    pub fn compile(&self) {
+    /// Create a policy from the ZPL source and configuration.
+    pub fn compile(&self) -> Result<(), CompilationError> {
         if self.verbose {
             println!(
                 "compiling {:?} with config {:?}",
                 self.source_zpl, self.source_config
             );
         }
-        match tokenize(&self.source_zpl) {
-            Ok(tokens) => {
-                for t in &tokens {
-                    println!("   {:?}", t);
-                }
-                println!();
-
-                match parse(tokens) {
-                    Ok(_policy) => {
-                        println!("OK!");
-                    }
-                    Err(e) => {
-                        eprintln!("Error: {}", e);
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("Error: {}", e);
-            }
+        let tokens = tokenize(&self.source_zpl)?;
+        for t in &tokens {
+            println!("   {:?}", t);
         }
+        println!();
+
+        let _policy = parse(tokens)?;
+        Ok(())
     }
 }
 
+/// The entry point for the compilation process, this builder is used to configure
+/// the various settings for the compiler.
 #[derive(Default)]
 pub struct CompilationBuilder {
     source_zpl: PathBuf,
@@ -52,6 +47,8 @@ pub struct CompilationBuilder {
 }
 
 impl CompilationBuilder {
+    /// Takes the ZPL source file. By default the configuration file is assumed
+    /// to have the same base name but with a `.zplc` extension instead of `.zpl`.
     pub fn new(source: PathBuf) -> Self {
         Self {
             source_zpl: source,
@@ -59,17 +56,22 @@ impl CompilationBuilder {
         }
     }
 
+    /// Enable verbose console output from the compilation process.
     pub fn verbose(mut self, verbose: bool) -> Self {
         self.verbose = verbose;
         self
     }
 
+    /// Set the path to the configuration to use with the compilation.
+    /// This is optional. If not set, the configuration file is assumed to have
+    /// the same base name as the source file but with a `.zplc` extension.
     #[allow(dead_code)]
     pub fn config(mut self, config: PathBuf) -> Self {
         self.source_config = Some(config);
         self
     }
 
+    /// Create the [Compilation] object with the settings configured.
     pub fn build(self) -> Compilation {
         // Default config is same name as source replace .zpl extension with .zplc extension
         let config = match self.source_config {

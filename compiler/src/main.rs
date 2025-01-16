@@ -39,8 +39,15 @@ struct Cli {
 }
 
 fn main() {
+    let mut exit_code = 0;
     let cli = Cli::parse();
     let comp = Compilation::builder(cli.zpl).verbose(cli.verbose).build();
-    comp.compile();
-    println!("ready");
+    match comp.compile() {
+        Ok(_) => println!("compiled ok"),
+        Err(e) => {
+            eprintln!("error: {}", e);
+            exit_code = 1;
+        }
+    }
+    std::process::exit(exit_code);
 }

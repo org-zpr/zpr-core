@@ -58,11 +58,26 @@ impl fmt::Display for AllowClause {
 /// the user component of the allow.  The other two are endpoint-clause and service-clause.
 /// Each clause may have a set of attributes on it.
 #[derive(Default, Clone, Debug)]
+#[allow(dead_code)]
 pub struct Clause {
     pub class: String,
-    pub class_tok: Option<Token>,
+    pub class_tok: Token,
     pub with: Vec<Attribute>,
     // TODO: pub without: Vec<Attribute>,
+}
+
+impl Clause {
+    pub fn new(class: &str, class_tok: Token) -> Self {
+        Clause {
+            class: class.to_string(),
+            class_tok,
+            with: vec![],
+        }
+    }
+    #[allow(dead_code)]
+    pub fn add_attr(&mut self, attr: Attribute) {
+        self.with.push(attr);
+    }
 }
 
 impl fmt::Display for Clause {

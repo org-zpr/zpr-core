@@ -77,16 +77,14 @@ pub async fn handle_terminate_request(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
-    info!("Received Terminate Request for link {}", ingress_link_id);
+    info!(target: ZDP, "Received Terminate Request for link {ingress_link_id}");
 
-    let result = asm.process_link_state_event(
+    let response_code = match asm.process_link_state_event(
         ingress_link_id,
         LinkEvent::ReceivedTerminateRequest(hdr.reason_code),
-    );
-    let response_code = if result.is_ok() {
-        zdp::TerminateResponse::Success
-    } else {
-        zdp::TerminateResponse::Other
+    ) {
+        Ok(_) => zdp::ResponseCode::Success,
+        Err(_) => zdp::ResponseCode::Other,
     };
 
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
@@ -102,7 +100,7 @@ pub async fn handle_terminate_request(
     )
     .await;
 
-    if result.is_ok() {
+    if response_code == zdp::ResponseCode::Success {
         let _ = asm.process_link_state_event(ingress_link_id, LinkEvent::SentTerminate);
     }
     Ok(())
@@ -119,7 +117,7 @@ pub async fn handle_terminate_indication(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
-    info!("Received Terminate Indication for link {}", ingress_link_id);
+    debug!(target: ZDP, "Received Terminate Indication for link {ingress_link_id}");
 
     let _ = asm.process_link_state_event(
         ingress_link_id,
@@ -138,16 +136,14 @@ pub async fn handle_hello_request(
 
     debug!(target: ZDP, "Received Hello Request for link {ingress_link_id}");
 
-    if asm
-        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest)
-        .is_err()
-    {
-        return Err((HandleMgmtError::LinkStateError, pkt));
-    };
-
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
-    hdr.status = 0.into();
+
+    hdr.status =
+        match asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest) {
+            Err(_) => zdp::ResponseCode::Other,
+            Ok(()) => zdp::ResponseCode::Success,
+        };
 
     super::core::send_non_flow_mgmt_response(
         asm,
@@ -172,10 +168,10 @@ pub async fn handle_hello_response(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
     let status = hdr.status;
-    debug!(target: ZDP, "Received Hello Response for link {ingress_link_id}, status: {status}");
+    debug!(target: ZDP, "Received Hello Response for link {ingress_link_id}, status: {status:?}");
 
     if asm
-        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloResponse)
+        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloResponse(status))
         .is_err()
     {
         return Err((HandleMgmtError::LinkStateError, pkt));
@@ -192,46 +188,24 @@ pub async fn handle_register_agent_address_request(
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
-    let Ok(hdr) = zdp::ZdpRegisterAgentAddressRequestHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
-    };
+    let mut status_code = zdp::ResponseCode::Other;
+    if let Ok(agent_address) = parse_register_agent_address_request(&mut pkt) {
+        debug!(target: ZDP, "Received Register Agent Address Request for link {ingress_link_id} with address {agent_address}");
 
-    let agent_address: IpAddress;
-    match hdr.ip_version {
-        zpr::L3Type::Ipv4 => {
-            let Ok(agent_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
-                return Err((HandleMgmtError::BadStructure, pkt));
-                // TODO: return failure response instead
-            };
-            agent_address = agent_addr.into();
-        }
-        zpr::L3Type::Ipv6 => {
-            let Ok(agent_addr) = <[u8; 16]>::read_from_buf(&mut pkt) else {
-                return Err((HandleMgmtError::BadStructure, pkt));
-            };
-            agent_address = agent_addr.into();
-        }
-
-        _ => {
-            return Err((HandleMgmtError::BadStructure, pkt));
+        if asm
+            .process_link_state_event(
+                ingress_link_id,
+                LinkEvent::ReceivedRegisterRequest(agent_address),
+            )
+            .is_ok()
+        {
+            status_code = zdp::ResponseCode::Success;
         }
     }
 
-    debug!(target: ZDP, "Received Register Agent Address Request for link {ingress_link_id} with address {agent_address}");
-
-    if asm
-        .process_link_state_event(
-            ingress_link_id,
-            LinkEvent::ReceivedRegisterRequest(agent_address),
-        )
-        .is_err()
-    {
-        return Err((HandleMgmtError::LinkStateError, pkt));
-    };
-
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpRegisterAgentAddressResponseHeader>();
-    hdr.status_code = 0;
+    hdr.status_code = status_code;
 
     super::core::send_non_flow_mgmt_response(
         asm,
@@ -244,17 +218,49 @@ pub async fn handle_register_agent_address_request(
     Ok(())
 }
 
+fn parse_register_agent_address_request(pkt: &mut Packet) -> Result<IpAddress, HandleMgmtError> {
+    let Ok(hdr) = zdp::ZdpRegisterAgentAddressRequestHeader::read_from_buf(pkt) else {
+        return Err(HandleMgmtError::BadStructure);
+    };
+
+    let agent_address: IpAddress;
+    match hdr.ip_version {
+        zpr::L3Type::Ipv4 => {
+            let Ok(agent_addr) = <[u8; 4]>::read_from_buf(pkt) else {
+                return Err(HandleMgmtError::BadStructure);
+            };
+            agent_address = agent_addr.into();
+        }
+        zpr::L3Type::Ipv6 => {
+            let Ok(agent_addr) = <[u8; 16]>::read_from_buf(pkt) else {
+                return Err(HandleMgmtError::BadStructure);
+            };
+            agent_address = agent_addr.into();
+        }
+
+        _ => {
+            return Err(HandleMgmtError::BadStructure);
+        }
+    }
+    Ok(agent_address)
+}
+
 /// handle a Register Agent Address Response (RFC 6.5 § 6.3.10)
 pub async fn handle_register_agent_address_response(
     asm: &Arc<Assembly>,
     _seq_num: zpr::SeqNum,
-    pkt: Packet,
+    mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
-    debug!(target: ZDP, "Received Register Agent Address Response for link {ingress_link_id}");
+    let Ok(hdr) = zdp::ZdpRegisterAgentAddressResponseHeader::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+    let status = hdr.status_code;
+
+    debug!(target: ZDP, "Received Register Agent Address Response for link {ingress_link_id} with status {status:?}");
 
     if asm
-        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedRegisterResponse)
+        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedRegisterResponse(status))
         .is_err()
     {
         return Err((HandleMgmtError::LinkStateError, pkt));
@@ -376,7 +382,7 @@ pub async fn handle_bind_agent_address_request(
                     // success; respond with ingress tether ID
                     // TODO: maybe tick a counter somewhere?
                     zdp::ZdpBindAgentAddressResponseHeader {
-                        status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS,
+                        status_code: zdp::ResponseCode::Success,
                         info_len: 0,
                     }
                     .write_to_buf(&mut rsp_pkt)
@@ -390,7 +396,7 @@ pub async fn handle_bind_agent_address_request(
                     let message = "policy error";
 
                     zdp::ZdpBindAgentAddressResponseHeader {
-                        status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER,
+                        status_code: zdp::ResponseCode::Other,
                         info_len: message.len() as u8,
                     }
                     .write_to_buf(&mut rsp_pkt)
@@ -409,7 +415,7 @@ pub async fn handle_bind_agent_address_request(
                     let message = "PFT full";
 
                     zdp::ZdpBindAgentAddressResponseHeader {
-                        status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER,
+                        status_code: zdp::ResponseCode::Other,
                         info_len: message.len() as u8,
                     }
                     .write_to_buf(&mut rsp_pkt)
@@ -435,7 +441,7 @@ pub async fn handle_bind_agent_address_request(
                     let message = format!("unable to bind next-hop: {}", err);
 
                     zdp::ZdpBindAgentAddressResponseHeader {
-                        status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER,
+                        status_code: zdp::ResponseCode::Other,
                         info_len: message.len() as u8,
                     }
                     .write_to_buf(&mut rsp_pkt)
@@ -463,7 +469,7 @@ pub async fn handle_bind_agent_address_request(
                     // success; respond with tether ID
                     // TODO: maybe tick a counter somewhere?
                     zdp::ZdpBindAgentAddressResponseHeader {
-                        status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_SUCCESS,
+                        status_code: zdp::ResponseCode::Success,
                         info_len: 0,
                     }
                     .write_to_buf(&mut rsp_pkt)
@@ -478,7 +484,7 @@ pub async fn handle_bind_agent_address_request(
                     let message = "DLT full";
 
                     zdp::ZdpBindAgentAddressResponseHeader {
-                        status_code: zdp::ZdpBindAgentAddressResponseHeader::STATUS_CODE_OTHER,
+                        status_code: zdp::ResponseCode::Other,
                         info_len: message.len() as u8,
                     }
                     .write_to_buf(&mut rsp_pkt)

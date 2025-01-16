@@ -4,7 +4,7 @@ use crate::allow::parse_allow;
 use crate::define::{parse_define, resolve_class_flavors};
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
-use crate::ptypes::{Class, ClassFlavor, Clause, Policy};
+use crate::ptypes::{Class, Policy};
 
 pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     // Convert the tokens into statements, which are just sub-lists of the tokens.
@@ -47,7 +47,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     }
 
     // Define statements create classes.
-    for statement in &mut statements {
+    for statement in &statements {
         if statement[0].tt == TokenType::Define {
             let class = parse_define(statement)?;
 
@@ -71,17 +71,10 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     resolve_class_flavors(&mut classes)?;
 
     // Next parse all the allows.
-    for statement in &mut statements {
+    for statement in &statements {
         if statement[0].tt == TokenType::Allow {
-            let allow = parse_allow(statement, &class_index)?;
-
-            // The allow parser does not check the class flavors.
-            assert_class_flavor(&classes, &allow.endpoint, ClassFlavor::Endpoint)?;
-            assert_class_flavor(&classes, &allow.user, ClassFlavor::User)?;
-            assert_class_flavor(&classes, &allow.service, ClassFlavor::Service)?;
-
+            let allow = parse_allow(statement, &class_index, &classes)?;
             println!("{}", allow);
-
             policy.allows.push(allow);
         }
     }
@@ -102,36 +95,11 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     Ok(policy)
 }
 
-fn assert_class_flavor(
-    classes: &HashMap<String, Class>,
-    clause: &Clause,
-    expected_flavor: ClassFlavor,
-) -> Result<(), CompilationError> {
-    let ctok = clause.class_tok.as_ref().unwrap();
-    let class = classes.get(&clause.class).ok_or_else(|| {
-        CompilationError::ParseError(
-            format!("class '{}' not found", clause.class),
-            ctok.line,
-            ctok.col,
-        )
-    })?;
-    if class.flavor != expected_flavor {
-        return Err(CompilationError::ParseError(
-            format!(
-                "expected class '{}' to be a {:?}, but it is a {:?}",
-                clause.class, expected_flavor, class.flavor
-            ),
-            ctok.line,
-            ctok.col,
-        ));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::lex::tokenize_str;
+    use crate::ptypes::ClassFlavor;
 
     #[test]
     fn test_parse_define() {
@@ -216,6 +184,86 @@ allow endpoints with marketing-emp to access services with role:marketing
                 }
                 _ => panic!("unexpected attribute name: {}", attr.name),
             }
+        }
+    }
+
+    #[test]
+    fn test_base_allow() {
+        let valids = vec!["allow endpoints with users to access services"];
+        for valid in valids {
+            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
+                panic!("failed to tokenize '{}': {:?}", valid, e);
+            });
+            let toks = tokens.unwrap();
+            assert_eq!(7, toks.len());
+            let _pol = match parse(toks) {
+                Ok(policy) => policy,
+                Err(e) => {
+                    panic!("failed to parse '{}': {:?}", valid, e);
+                }
+            };
+        }
+    }
+
+    #[test]
+    fn test_omit_endpoint() {
+        let valids = vec![
+            "allow users to access services",
+            "allow managed users to access services",
+            "allow color:red users to access services",
+            "allow users with color:red to access services",
+            "allow managed users with color:red to access services",
+        ];
+        for valid in valids {
+            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
+                panic!("failed to tokenize '{}': {:?}", valid, e);
+            });
+            let _pol = match parse(tokens.unwrap()) {
+                Ok(policy) => policy,
+                Err(e) => {
+                    panic!("failed to parse '{}': {:?}", valid, e);
+                }
+            };
+        }
+    }
+
+    #[test]
+    fn test_omit_user() {
+        let valids = vec![
+            "allow endpoints to access services",
+            "allow managed endpoints to access services",
+            "allow endpoints with color:red to access services",
+            "allow managed endpoints with color:red to access services",
+        ];
+        for valid in valids {
+            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
+                panic!("failed to tokenize '{}': {:?}", valid, e);
+            });
+            let _pol = match parse(tokens.unwrap()) {
+                Ok(policy) => policy,
+                Err(e) => {
+                    panic!("failed to parse '{}': {:?}", valid, e);
+                }
+            };
+        }
+    }
+
+    #[test]
+    fn test_verbose_endpoint() {
+        let valids = vec![
+            "allow endpoints with color:green with managed users with color:red to access services",
+            "allow color:green endpoints with managed users with color:red to access services",
+        ];
+        for valid in valids {
+            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
+                panic!("failed to tokenize '{}': {:?}", valid, e);
+            });
+            let _pol = match parse(tokens.unwrap()) {
+                Ok(policy) => policy,
+                Err(e) => {
+                    panic!("failed to parse '{}': {:?}", valid, e);
+                }
+            };
         }
     }
 }

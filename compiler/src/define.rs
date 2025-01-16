@@ -1,6 +1,7 @@
 //! define.rs - parser for define statements
 
 use std::collections::HashMap;
+use std::iter::Peekable;
 
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
@@ -79,9 +80,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
     //                                                      ^^^^
     putil::require_tt(root_tok, tokens.next(), "WITH", "define", TokenType::With)?;
 
-    // At this point we need to parse attributes. Each token is some attribute for the class.
-    // If we get a TAGS token, then everything after that is a tag until we hit an AND WITH.
-    // The MULTIPLE keyword just applies to the next attribute (cannot be a tag).
+    // Now just parse attributes
 
     let mut class = Class {
         flavor,
@@ -92,6 +91,23 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
         with_attrs: Vec::new(),
     };
 
+    parse_attributes(&mut class, &mut tokens)?;
+
+    Ok(class)
+}
+
+// Parse attributes (tail end of the define). Each token is some attribute for the class.
+// If we get a TAGS token, then everything after that is a tag until we hit an AND WITH.
+// The MULTIPLE keyword just applies to the next attribute (cannot be a tag).
+//
+// This consumes all the remaining tokens (or errors out) and updates `class` in place.
+fn parse_attributes<'a, I>(
+    class: &mut Class,
+    tokens: &mut Peekable<I>,
+) -> Result<(), CompilationError>
+where
+    I: Iterator<Item = &'a Token>,
+{
     let mut multiple = false;
     let mut tags = false;
     let mut tag = false;
@@ -237,7 +253,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
             }
         }
     }
-    Ok(class)
+    Ok(())
 }
 
 // Fill in any classes with undefined flavor by walking backwards to their parent classes.

@@ -6,6 +6,7 @@ use crate::zplstr::{ZPLStr, ZPLStrBuilder};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenType {
+    Undefined, // default value, never parsed
     Allow,
     Define,
     With,
@@ -70,6 +71,16 @@ impl Token {
     }
 }
 
+impl Default for Token {
+    fn default() -> Self {
+        Token {
+            tt: TokenType::Undefined,
+            line: 0,
+            col: 0,
+        }
+    }
+}
+
 pub fn tokenize(zpl_in: &Path) -> Result<Vec<Token>, CompilationError> {
     let zpl = fs::read_to_string(zpl_in)?;
     tokenize_str(&zpl)
@@ -98,7 +109,6 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                 }
                 if current_word.len() > 0 {
                     if !current_word.is_sugar() {
-                        // TODO: is_sugar can be function on builder
                         tokens.push(Token::new_from_str(
                             &current_word.build(),
                             current_start.0,
@@ -164,12 +174,24 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                 }
             }
             ':' => {
-                // If we are quoting, then this is just a normal colon. Otherwise we treat this as an attribute signifier.
+                // If we are quoting, then this is just a normal colon.
+                // If proceeded by "note" or "comment" this indicates rest of line is a comment.
+                // Otherwise we treat this as an attribute signifier.
                 if current_word.len() == 0 {
                     return Err(CompilationError::IllegalColon(line, col));
                 }
                 if quoting {
                     current_word.push(c);
+                } else if current_word.is_comment_start() {
+                    // consume the rest of the line
+                    while let Some(c) = chars.next() {
+                        if c == '\n' {
+                            break;
+                        }
+                    }
+                    current_word.clear();
+                    line += 1;
+                    col = 1;
                 } else if !current_word.accept_value() {
                     return Err(CompilationError::IllegalColon(line, col));
                 }
@@ -258,6 +280,22 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
             }
         }
     }
+    if quoting {
+        return Err(CompilationError::UnterminatedQuote(
+            current_start.0,
+            current_start.1,
+        ));
+    }
+    if current_word.len() > 0 {
+        if !current_word.is_sugar() {
+            tokens.push(Token::new_from_str(
+                &current_word.build(),
+                current_start.0,
+                current_start.1,
+            ));
+        }
+    }
+
     Ok(tokens)
 }
 

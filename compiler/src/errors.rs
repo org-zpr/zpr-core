@@ -31,6 +31,12 @@ pub enum CompilationError {
     #[error("[ line {1}, column {2} ]  {0}")]
     ParseError(String, usize, usize),
 
+    #[error("[ line {1}, column {2} ]  syntax error in {0}")]
+    SyntaxError(String, usize, usize),
+
+    #[error("[ line {1}, column {2} ]  multiple class names in {0}")]
+    MultipleClassNames(String, usize, usize),
+
     #[error("IoError: {0}")]
     Io(#[from] std::io::Error),
 }
