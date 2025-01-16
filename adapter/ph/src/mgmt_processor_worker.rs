@@ -81,6 +81,8 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
 
             ZdpPacketType::Discard => handlers::handle_discard(asm, pkt).await,
 
+            ZdpPacketType::EchoRequest => handlers::handle_echo_request(asm, seq_num, pkt).await,
+
             ZdpPacketType::KeyManagement => {
                 panic!("unexpected Key Management message in mgmt processor")
             }

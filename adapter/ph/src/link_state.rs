@@ -3,13 +3,18 @@ use crate::km::ZPIPair;
 use crate::km_multiplexor;
 use crate::logging::targets::LINK_STATE;
 use crate::mgmt;
+use crate::mgmt::core::SyncReqError;
 use crate::net_defs::IpAddress;
+use crate::sample_ring::SampleRing;
 use crate::special_peers;
 use crate::vs_worker;
 use crate::zdp::{ResponseCode, TerminateReason};
 
+use std::fmt::{Display, Formatter};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::time::MissedTickBehavior;
 use tracing::*;
 use zpr::LinkId;
 use zpr::ZPI_ENCRYPTED_HEADER_FLAG;
@@ -177,11 +182,33 @@ pub enum LinkStatus {
     Down,
 }
 
+pub struct LinkData {
+    echo_success: u64, // Echo requests received response
+    echo_timeout: u64, // Echo requests timed out
+    echo_failure: u64, // Echo requests failed for other reasons
+    // TODO: configurable keep-alive period
+    // For now, keep-alives are attempted every 3 seconds
+    // Assuming no loss, 100 samples will store 5 minutes of latency data
+    latency_data: SampleRing<Duration, 100>,
+}
+
+impl LinkData {
+    pub fn new() -> Self {
+        Self {
+            echo_success: 0,
+            echo_timeout: 0,
+            echo_failure: 0,
+            latency_data: SampleRing::new(Duration::ZERO),
+        }
+    }
+}
+
 pub struct LinkStateMachine {
     state: LinkState,
     status: LinkStatus,
     silent: bool,
     agent_addresses: Vec<IpAddress>,
+    last_state_change: std::time::Instant,
 }
 
 impl LinkStateMachine {
@@ -191,7 +218,13 @@ impl LinkStateMachine {
             status: LinkStatus::Down,
             silent: false,
             agent_addresses: Default::default(),
+            last_state_change: std::time::Instant::now(),
         }
+    }
+
+    pub fn set_state(&mut self, new_state: LinkState) {
+        self.state = new_state;
+        self.last_state_change = std::time::Instant::now();
     }
 }
 
@@ -199,6 +232,7 @@ pub struct LinkStateWrapper {
     id: LinkId,
     link_type: LinkType,
     locked_fsm: Mutex<LinkStateMachine>,
+    pub locked_data: Mutex<LinkData>,
 }
 
 impl LinkStateWrapper {
@@ -207,12 +241,8 @@ impl LinkStateWrapper {
             id: new_id,
             link_type: new_link_type,
             locked_fsm: Mutex::new(LinkStateMachine::new()),
+            locked_data: Mutex::new(LinkData::new()),
         }
-    }
-
-    /// Query whether the link is up
-    pub fn get_status(&self) -> LinkStatus {
-        self.locked_fsm.lock().unwrap().status
     }
 
     /// Get the link's current state
@@ -272,7 +302,7 @@ impl LinkStateWrapper {
         // TODO: What configuration goes here?
         // For now, just set the link up and transition it to the inactive state
         locked_fsm.status = LinkStatus::Up;
-        locked_fsm.state = LinkState::Inactive;
+        locked_fsm.set_state(LinkState::Inactive);
 
         debug!(
             target: LINK_STATE,
@@ -296,7 +326,7 @@ impl LinkStateWrapper {
             ));
         }
 
-        locked_fsm.state = LinkState::Keying;
+        locked_fsm.set_state(LinkState::Keying);
 
         info!(target: LINK_STATE, "Link {link_id} started.  Keying in progress");
 
@@ -315,7 +345,7 @@ impl LinkStateWrapper {
             }
             LinkType::NodeToNode => {
                 error!(target: LINK_STATE, "Error: Node to node not supported yet");
-                locked_fsm.state = LinkState::Error;
+                locked_fsm.set_state(LinkState::Error);
                 Err(LinkStateError::OperationNotSupportedYet)
             }
             LinkType::NodeToAdapter => {
@@ -380,7 +410,7 @@ impl LinkStateWrapper {
 
         debug!(target: LINK_STATE, "Link {link_id} finished keying.  Starting hello");
 
-        locked_fsm.state = LinkState::Helloing;
+        locked_fsm.set_state(LinkState::Helloing);
         drop(locked_fsm);
         self.maybe_send_hello(asm);
         Ok(())
@@ -410,12 +440,12 @@ impl LinkStateWrapper {
         let link_id = self.id;
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToNode, LinkState::Helloing) => {
-                locked_fsm.state = LinkState::Active;
+                locked_fsm.set_state(LinkState::Active);
                 debug!(target: LINK_STATE, "Link {link_id} finished helloing.  Becoming active");
                 Ok(())
             }
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
-                locked_fsm.state = LinkState::RegisterAA;
+                locked_fsm.set_state(LinkState::RegisterAA);
                 debug!(
                     target: LINK_STATE,
                     "Link {link_id} finished helloing.  Waiting on register agent address"
@@ -453,7 +483,7 @@ impl LinkStateWrapper {
 
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::Helloing) => {
-                locked_fsm.state = LinkState::RegisterAA;
+                locked_fsm.set_state(LinkState::RegisterAA);
                 debug!(
                     target: LINK_STATE,
                     "Link {link_id} finished helloing.  Sending register agent address"
@@ -463,7 +493,7 @@ impl LinkStateWrapper {
                 Ok(())
             }
             (LinkType::NodeToNode, LinkState::Helloing) => {
-                locked_fsm.state = LinkState::Active;
+                locked_fsm.set_state(LinkState::Active);
                 debug!(target: LINK_STATE, "Link {link_id} finished helloing.  Becoming active");
                 Ok(())
             }
@@ -525,7 +555,7 @@ impl LinkStateWrapper {
                 match vs_worker::build_connect_request(asm, link_id, addr) {
                     Ok(Some(conn_req)) => Ok(vs_worker::authorize_connect(asm, link_id, conn_req)),
                     Ok(None) => {
-                        locked_fsm.state = LinkState::Active;
+                        locked_fsm.set_state(LinkState::Active);
                         debug!(
                             target: LINK_STATE,
                             "Link {link_id} (Visa Service) received agent address.  Becoming active, no authorization required"
@@ -547,7 +577,7 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
-                locked_fsm.state = LinkState::Active;
+                locked_fsm.set_state(LinkState::Active);
                 debug!(target: LINK_STATE, "Link {link_id} authorized.  Becoming active");
                 drop(locked_fsm);
                 self.run_active(&asm)
@@ -570,7 +600,7 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::RegisterAA) => {
-                locked_fsm.state = LinkState::Active;
+                locked_fsm.set_state(LinkState::Active);
                 asm.tun_ctl.set_carrier(true).unwrap();
                 debug!(
                     target: LINK_STATE,
@@ -612,7 +642,7 @@ impl LinkStateWrapper {
                 "terminate".to_string(),
             ))
         } else {
-            locked_fsm.state = LinkState::Closing;
+            locked_fsm.set_state(LinkState::Closing);
             Ok(())
         }
     }
@@ -629,7 +659,7 @@ impl LinkStateWrapper {
         info!(target: LINK_STATE,"Initiating shutdown on link {link_id}");
 
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        locked_fsm.state = LinkState::Closing;
+        locked_fsm.set_state(LinkState::Closing);
         let task_asm = asm.clone();
         tokio::task::spawn_local(async move {
             let _ = send_terminate_request(&task_asm, link_id, reason).await;
@@ -655,7 +685,7 @@ impl LinkStateWrapper {
                 }
                 locked_fsm.agent_addresses.clear();
                 locked_fsm.silent = false;
-                locked_fsm.state = LinkState::Inactive;
+                locked_fsm.set_state(LinkState::Inactive);
                 info!("Link {link_id} has fully shut down");
             }
             LinkState::Resetting => {
@@ -705,7 +735,7 @@ impl LinkStateWrapper {
                 "terminate indication".to_string(),
             )),
             (LinkState::Inactive, TerminateReason::Reset) => {
-                locked_fsm.state = LinkState::Closing;
+                locked_fsm.set_state(LinkState::Closing);
                 Ok(self.clean_up_link_state(asm))
             }
             (LinkState::Inactive, _) => Err(LinkStateError::UnexpectedTransition(
@@ -713,7 +743,7 @@ impl LinkStateWrapper {
                 "terminate indication".to_string(),
             )),
             (_, _) => {
-                locked_fsm.state = LinkState::Closing;
+                locked_fsm.set_state(LinkState::Closing);
                 Ok(self.clean_up_link_state(asm))
             }
         }
@@ -751,7 +781,7 @@ impl LinkStateWrapper {
             "Resetting link {link_id} from state {:?}",
             locked_fsm.state
         );
-        locked_fsm.state = LinkState::Resetting;
+        locked_fsm.set_state(LinkState::Resetting);
 
         let task_asm = asm.clone();
         tokio::task::spawn_local(async move {
@@ -770,14 +800,50 @@ impl LinkStateWrapper {
                 "Resetting link {link_id} from state {:?}",
                 locked_fsm.state
             );
-            locked_fsm.state = LinkState::Resetting;
+            locked_fsm.set_state(LinkState::Resetting);
             let _ = send_terminate_indication(&asm, link_id, TerminateReason::Reset).await;
         }
     }
 
-    pub fn run_active(&self, _asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
-        debug!(target: LINK_STATE, "Link {} entering active state", self.id);
-        // TODO send echoes
+    pub fn run_active(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+        let link_id = self.id;
+        let task_asm = asm.clone();
+        debug!(target: LINK_STATE, "Link {link_id} entering active state");
+        tokio::task::spawn_local(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            while task_asm.is_link_ready(link_id) {
+                interval.tick().await;
+                let start_time = Instant::now();
+                let response = mgmt::requests::send_echo_request(&task_asm, link_id).await;
+                let Some(peer) = task_asm.peer_table.get(link_id) else {
+                    return;
+                };
+                match response {
+                    Ok(()) => {
+                        let mut link_data = peer.link_state_machine.locked_data.lock().unwrap();
+                        link_data.echo_success += 1;
+                        link_data
+                            .latency_data
+                            .add(Instant::now().duration_since(start_time));
+                    }
+                    Err(SyncReqError::Timeout) => {
+                        peer.link_state_machine
+                            .locked_data
+                            .lock()
+                            .unwrap()
+                            .echo_timeout += 1
+                    }
+                    Err(_) => {
+                        peer.link_state_machine
+                            .locked_data
+                            .lock()
+                            .unwrap()
+                            .echo_failure += 1
+                    }
+                }
+            }
+        });
         Ok(())
     }
 }
@@ -810,5 +876,62 @@ async fn send_terminate_request(
             asm.process_link_state_event(link_id, LinkEvent::ReceivedTerminateResponse(response))?;
             Ok(())
         }
+    }
+}
+
+impl Display for LinkStateWrapper {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // FIXME: This doesn't print link ID because the caller is printing link ID
+        // followed by substrate addr, which is out of scope for this display function
+        write!(f, "{}", self.locked_fsm.lock().unwrap())?;
+        if self.get_state() == LinkState::Active {
+            write!(f, "{}", self.locked_data.lock().unwrap())?;
+        }
+        Ok(())
+    }
+}
+
+impl Display for LinkStateMachine {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if self.agent_addresses.is_empty() {
+            write!(f, "  Agent Addresses: None\n")?;
+        } else {
+            write!(f, "  Agent Addresses: [ {}", self.agent_addresses[0])?;
+            for addr in &self.agent_addresses[1..self.agent_addresses.len()] {
+                write!(f, ", {}", addr)?;
+            }
+            write!(f, " ]\n")?;
+        }
+
+        // TODO: Format time since last state change better
+        write!(
+            f,
+            "  State: {:?} (for {:?})\n",
+            self.state,
+            Instant::now().duration_since(self.last_state_change)
+        )?;
+        write!(f, "  Status: {:?}\n", self.status)
+    }
+}
+
+impl Display for LinkData {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let (total, count) = self.latency_data.get_total_and_count();
+        let average = if count > 0 {
+            total.div_f64(count as f64)
+        } else {
+            Duration::ZERO
+        };
+
+        write!(f, "  Echo stats:\n")?;
+        write!(f, "    Successes: {}\n", self.echo_success)?;
+        write!(f, "    Timeouts: {}\n", self.echo_timeout)?;
+        write!(f, "    Other failures: {}\n", self.echo_failure)?;
+        write!(
+            f,
+            "    Latency: Min {:?}, Max {:?}, Avg {average:?}\n",
+            self.latency_data.get_min(),
+            self.latency_data.get_max(),
+        )
     }
 }

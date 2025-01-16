@@ -66,6 +66,28 @@ pub async fn handle_discard(_asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResu
     Ok(())
 }
 
+/// handle an Echo Request message (RFC 6.5 § 6.3.2)
+pub async fn handle_echo_request(
+    asm: &Arc<Assembly>,
+    seq_num: zpr::SeqNum,
+    pkt: Packet,
+) -> HandleMgmtResult {
+    let ingress_link_id = pkt.metadata().ingress_link_id;
+    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+    let _hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
+
+    super::core::send_non_flow_mgmt_response(
+        asm,
+        ingress_link_id,
+        zdp::ZdpPacketType::EchoResponse,
+        seq_num,
+        rsp_pkt,
+    )
+    .await;
+
+    Ok(())
+}
+
 /// handle a Terminate Request (RFC 6.5 § 6.3.3)
 pub async fn handle_terminate_request(
     asm: &Arc<Assembly>,

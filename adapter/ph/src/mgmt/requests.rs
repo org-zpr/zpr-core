@@ -6,6 +6,7 @@ use crate::assembly::Assembly;
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
+use crate::mgmt::core::SyncReqError;
 use crate::zdp;
 use bytes::{Buf, BufMut};
 use std::net::IpAddr;
@@ -37,6 +38,27 @@ pub async fn send_key_management(
 pub async fn send_discard(asm: &Assembly, link_id: zpr::LinkId) {
     let pkt = core::new_heap_packet();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
+}
+
+/// send an Echo Request and wait for the Response (RFC 6.5 § 6.3.2)
+pub async fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<(), SyncReqError> {
+    let mut echo = core::send_sync_non_flow_req(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::EchoRequest,
+        zdp::ZdpPacketType::EchoResponse,
+        move |_packet| {},
+    )
+    .await?;
+
+    // TODO: Break these apart
+    let Ok(_) = zdp::ZdpEchoHeader::read_from_buf(&mut echo) else {
+        core::count_event(asm, &mut echo, CounterType::BadStructure);
+        return Err(SyncReqError::ProtocolError);
+    };
+    asm.buffer_stack
+        .put_buffer(echo.destroy().try_into().unwrap());
+    Ok(())
 }
 
 /// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)

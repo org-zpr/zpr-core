@@ -7,7 +7,7 @@
 
 use crate::assembly::Assembly;
 use crate::config;
-use crate::link_state::LinkEvent;
+use crate::link_state::{LinkEvent, LinkState};
 use crate::logging::targets::RPC;
 use crate::test_packet::TestPacketMetrics;
 use crate::zdp::TerminateReason;
@@ -470,17 +470,14 @@ fn show_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
     match asm.peer_table.get(link_id) {
         Some(peer) => {
             let lsm = &peer.link_state_machine;
+
             format!(
                 "Link {link_id} info:
-  SubstrateAddr: {}
-  State: {:?}
-  Status {:?}\n",
-                peer.substrate_addr,
-                lsm.get_state(),
-                lsm.get_status()
+  Substrate Address: {}\n{}",
+                peer.substrate_addr, lsm,
             )
         }
-        None => format!("No suck link {link_id}\n"),
+        None => format!("No such link {link_id}\n"),
     }
 }
 

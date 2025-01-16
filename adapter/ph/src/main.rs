@@ -47,6 +47,7 @@ mod peer_table;
 mod queues;
 mod rcu;
 mod rpc_worker;
+mod sample_ring;
 mod signal_worker;
 mod special_peers;
 mod substrate_ingress_worker;
