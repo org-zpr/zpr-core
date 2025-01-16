@@ -55,9 +55,13 @@ impl PFlags {
     }
 }
 
-#[allow(dead_code)]
+/// That which can create a policy, requires a [Fabric] to do so.
 impl PolicyBuilder {
     /// Create the builder. This sets some topical info in the policy.
+    ///
+    /// Once created, you should call [PolicyBuilder::with_max_visa_lifetime], then
+    /// [PolicyBuilder::with_fabric] (which does the real work), and finally
+    /// [PolicyBuilder::build] to get the compiled policy.
     pub fn new() -> PolicyBuilder {
         let utc: DateTime<Utc> = Utc::now();
         let policy_date = utc.to_rfc3339();
@@ -76,15 +80,10 @@ impl PolicyBuilder {
         }
     }
 
-    /// Returns the built policy. This doesn't actually do anything,
-    /// you must call [PolicyBuilder::with_fabric] before calling this.
+    /// Returns the built policy. This doesn't actually do anything except return the already built policy.
+    /// you must call [PolicyBuilder::with_fabric] to do the real work before calling this.
     pub fn build(self) -> Result<polio::Policy, CompilationError> {
         Ok(self.policy)
-    }
-
-    /// Gets the date as set in [PolicyBuilder::new].
-    pub fn get_policy_date(&self) -> &str {
-        &self.policy_date
     }
 
     /// The binary policy has a place for global settings, the only valid

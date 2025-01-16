@@ -1,3 +1,5 @@
+//! Various and sundry crypto utilities that the compiler needs.
+
 use ring::digest::{self, Digest};
 
 use openssl::hash::MessageDigest;
@@ -10,10 +12,12 @@ use std::path::Path;
 
 use crate::errors::CompilationError;
 
+/// Create SHA256 digest of given string.
 pub fn sha256(data: &str) -> Digest {
     digest::digest(&digest::SHA256, data.as_bytes())
 }
 
+/// Create SHA256 digest of contents of given file.
 pub fn sha256_of_file(file: &Path) -> Result<Digest, CompilationError> {
     // read file into memory
     let data = std::fs::read(file).map_err(|e| {
@@ -22,10 +26,12 @@ pub fn sha256_of_file(file: &Path) -> Result<Digest, CompilationError> {
     Ok(digest::digest(&digest::SHA256, &data))
 }
 
+/// Create SHA256 digest of given byte array.
 pub fn sha256_of_bytes(data: &[u8]) -> Digest {
     digest::digest(&digest::SHA256, data)
 }
 
+/// Convert a `ring::digest::Digest` to a hex string.
 pub fn digest_as_hex(digest: &Digest) -> String {
     let mut s = String::new();
     for b in digest.as_ref() {
@@ -82,6 +88,7 @@ pub fn load_rsa_private_key(pem_file: &Path) -> Result<Rsa<Private>, Compilation
     Ok(key)
 }
 
+/// Sign a byte array using PKCS1v15 with SHA256.
 pub fn sign_pkcs1v15_sha256(key: &Rsa<Private>, data: &[u8]) -> Result<Vec<u8>, CompilationError> {
     let private_key = PKey::from_rsa(key.clone()).map_err(|e| {
         CompilationError::CryptoError(format!("error converting RSA key to PKey: {}", e))
