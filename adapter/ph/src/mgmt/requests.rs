@@ -254,9 +254,7 @@ pub async fn send_bind_agent_address_request(
             };
 
             match hdr.status_code {
-                zdp::ResponseCode::Success => {
-                    Ok(tether_id)
-                }
+                zdp::ResponseCode::Success => Ok(tether_id),
 
                 zdp::ResponseCode::Other => {
                     if hdr.info_len as usize > resp.remaining() {
