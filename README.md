@@ -1,4 +1,4 @@
-:# zpr-core
+# zpr-core
 Core ZPR components
 
 We are currently working towards Milestone 3.  
