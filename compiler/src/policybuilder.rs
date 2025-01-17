@@ -422,18 +422,26 @@ impl PolicyBuilder {
         idx
     }
 
-    /// Create a table of all unique attribute keys.
-    fn populate_key_table(&self, fabric: &Fabric, table: &mut HashMap<String, usize>) {
+    // Helper function that can create our lookup table that maps
+    // keys or attributes to indexes.
+    //
+    // See [PolicyBuilder::populate_key_table] and [PolicyBuilder::populate_value_table].
+    fn populate_lookup_table(
+        &self,
+        fabric: &Fabric,
+        table: &mut HashMap<String, usize>,
+        extraction_f: fn(&Attribute) -> String,
+    ) {
         for s in &fabric.services {
             for a in &s.provider_attrs {
-                let key = a.zpl_key();
+                let key = extraction_f(a);
                 if !table.contains_key(&key) {
                     table.insert(key, table.len() + 1);
                 }
             }
             for policy in &s.client_policies {
                 for a in &policy.condition {
-                    let key = a.zpl_key();
+                    let key = extraction_f(a);
                     if !table.contains_key(&key) {
                         table.insert(key, table.len() + 1);
                     }
@@ -442,7 +450,7 @@ impl PolicyBuilder {
         }
         for n in &fabric.nodes {
             for a in &n.provider_attrs {
-                let key = a.zpl_key();
+                let key = extraction_f(a);
                 if !table.contains_key(&key) {
                     table.insert(key, table.len() + 1);
                 }
@@ -450,32 +458,14 @@ impl PolicyBuilder {
         }
     }
 
+    /// Create a table of all unique attribute keys.
+    fn populate_key_table(&self, fabric: &Fabric, table: &mut HashMap<String, usize>) {
+        self.populate_lookup_table(fabric, table, |a| a.zpl_key());
+    }
+
     /// Create a table of all unique attribute values.
     fn populate_value_table(&self, fabric: &Fabric, table: &mut HashMap<String, usize>) {
-        for s in &fabric.services {
-            for a in &s.provider_attrs {
-                let key = a.zpl_value();
-                if !table.contains_key(&key) {
-                    table.insert(key, table.len() + 1);
-                }
-            }
-            for policy in &s.client_policies {
-                for a in &policy.condition {
-                    let key = a.zpl_value();
-                    if !table.contains_key(&key) {
-                        table.insert(key, table.len() + 1);
-                    }
-                }
-            }
-        }
-        for n in &fabric.nodes {
-            for a in &n.provider_attrs {
-                let key = a.zpl_value();
-                if !table.contains_key(&key) {
-                    table.insert(key, table.len() + 1);
-                }
-            }
-        }
+        self.populate_lookup_table(fabric, table, |a| a.zpl_value());
     }
 }
 
