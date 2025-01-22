@@ -5,12 +5,10 @@
 
 use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
-use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters::CounterType;
 use crate::defs::Direction;
 use crate::km::Codec;
-use crate::km_noise::NOISE_PADLEN;
 use crate::logging::targets::DATAPATH;
 use crate::net_defs;
 use crate::packet::Packet;
@@ -21,11 +19,10 @@ use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
 use std::time::SystemTime;
-use tracing::{debug, error, info, warn};
+use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
-use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
 
 /// Drop a packet and count the drop with the given reason.
@@ -407,193 +404,6 @@ pub async fn substrate_egress_blocking(asm: &Assembly, link_id: zpr::LinkId, mut
     }
 }
 
-#[cfg(debug_assertions)]
-/// This table is used to track whether a flow ever switches from one worker
-/// to another (indicating potential for out-of-order packets) -- meaning
-/// our packet steerer isn't steering correctly.  This is used only in debug mode.
-const AGENT_PACKET_FLOW_TRACKER: std::sync::LazyLock<
-    dashmap::DashMap<(zpr::LinkId, zpr::StreamId), usize>,
-> = std::sync::LazyLock::new(|| dashmap::DashMap::new());
-
-/// Process packets ingressing from the specified address.
-pub fn substrate_ingress(
-    asm: &Assembly,
-    #[cfg_attr(not(debug_assertions), allow(unused_variables))] worker_index: usize,
-    peer_sa: &zpr::SubstrateAddr,
-    mut pkt: Packet,
-) {
-    asm.counters[CounterType::InPacksRec].increment();
-
-    pkt.metadata_mut().ingress_link_id = asm.peer_table.lookup_peer(peer_sa).unwrap_or_zero();
-
-    // Read, but do not remove the ZPI header
-    let Ok((zpi_hdr, _)) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
-        drop_and_count(asm, pkt, CounterType::BadStructure);
-        return;
-    };
-
-    let peer_state = asm.peer_table.get(pkt.metadata().ingress_link_id);
-
-    // If a ZPI is setup on this link, then we expect the message to use one of the valid
-    // ZPI values.
-    let secure;
-    match peer_state {
-        Some(state) => match state.get_established_transport_association() {
-            Some(ref transport_sa) => {
-                if zpi_hdr.zpi == transport_sa.recv_zpis.hmac {
-                    match decrypt_hmac(transport_sa.recv_hmac_key, &mut pkt) {
-                        Ok(()) => secure = true,
-                        Err(err) => {
-                            drop_and_count(asm, pkt, err);
-                            return;
-                        }
-                    }
-                } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
-                    // TODO: Put padlen in state somewhere too
-                    match decrypt_full(asm, &*transport_sa.codec, NOISE_PADLEN, &mut pkt) {
-                        Ok(()) => secure = true,
-                        Err(err) => {
-                            drop_and_count(asm, pkt, err);
-                            return;
-                        }
-                    }
-                } else {
-                    // We have an SA and ZPI does not match.
-                    warn!(
-                        target: DATAPATH,
-                        "ingress: link {}: unexpected ZPI value {} (expected {:?})",
-                        pkt.metadata().ingress_link_id,
-                        zpi_hdr.zpi,
-                        transport_sa.recv_zpis
-                    );
-                    drop_and_count(asm, pkt, CounterType::UnknownZpi);
-                    return;
-                }
-            }
-            None => {
-                // Either no security association on link, or it is not yet established.
-                warn!(target: DATAPATH, "INSECURE, no SA on link {}", pkt.metadata().ingress_link_id);
-                secure = false;
-            }
-        },
-        None => {
-            // No link in peer table
-            warn!(
-                target: DATAPATH,
-                "INSECURE, no link in peer table for {}",
-                pkt.metadata().ingress_link_id
-            );
-            secure = false;
-        }
-    };
-
-    if !secure {
-        // Not under a security assocation, which means only ZPI 0 is allowed.
-        if zpi_hdr.zpi != zpr::ZPI_0 && pkt.metadata().ingress_link_id != zpr::LINK_ID_UNKNOWN {
-            warn!(
-                target: DATAPATH,
-                "ingress: {}: ZPI {} not allowed on unestablished SA",
-                pkt.metadata().ingress_link_id,
-                zpi_hdr.zpi
-            );
-            drop_and_count(asm, pkt, CounterType::UnknownZpi);
-            return;
-        }
-        warn!(
-            target: DATAPATH,
-            "INSECURE, decrypting null packet from {}",
-            pkt.metadata().ingress_link_id
-        );
-        match decrypt_null(&mut pkt) {
-            Ok(()) => (),
-            Err(err) => {
-                drop_and_count(asm, pkt, err);
-                return;
-            }
-        }
-    }
-
-    // Watch out -- may not be secure
-    maybe_capture(asm, Direction::Inbound, &mut pkt);
-
-    // now pop the ZPI off the packet. We've already checked it.
-    if zdp::ZdpZpiHeader::read_from_buf(&mut pkt).is_err() {
-        drop_and_count(asm, pkt, CounterType::BadStructure);
-        return;
-    }
-
-    // If we weren't able to match this packet to an existing link,
-    // send it off to be processed as a potential new link.
-    if pkt.metadata().ingress_link_id == zpr::LINK_ID_UNKNOWN {
-        match asm
-            .mgmt_dispatch
-            .try_dispatch_mgmt_packet_with_addr(peer_sa, pkt)
-        {
-            Ok(()) => (),
-            Err(TryEnqueueError::Full(pkt)) => {
-                drop_and_count(asm, pkt, CounterType::QueueBackpressure)
-            }
-        }
-        return;
-    }
-
-    let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
-        return drop_and_count(asm, pkt, CounterType::BadStructure);
-    };
-
-    // In ZPI zero only KM messages are allowed (well, and APR ARP which we don't support yet)
-    // Can be overridden (FOR TESTING ONLY) in the flags.
-    if !secure && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
-        warn!(
-            target: DATAPATH,
-            "ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
-            pkt.metadata().ingress_link_id,
-            base_hdr.packet_type
-        );
-        drop_and_count(asm, pkt, CounterType::OtherError);
-        return;
-    }
-
-    // enqueue non-transit packets with the management processor
-    if base_hdr.packet_type != zdp::ZdpPacketType::TransitPacket {
-        // TODO: should we peel off the ZDP header here??
-        // (instead of this silly code to restore it?)
-        *pkt.alloc_zeroed_header() = base_hdr;
-        match asm.mgmt_dispatch.try_dispatch_mgmt_packet_with_link(pkt) {
-            Ok(()) => (),
-            Err(TryEnqueueError::Full(pkt)) => {
-                drop_and_count(asm, pkt, CounterType::QueueBackpressure)
-            }
-        }
-        return;
-    }
-
-    let Ok(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
-        return drop_and_count(asm, pkt, CounterType::BadStructure);
-    };
-
-    let ingress_stream_id: zpr::StreamId = per_flow_hdr.stream_id.into();
-    pkt.metadata_mut().ingress_stream_id = ingress_stream_id;
-
-    // in debug builds, track which worker this agent traffic came in on
-    // ensure a given flow isn't hopping between workers (potentially
-    // resulting in out-of-order packets)
-    #[cfg(debug_assertions)]
-    if let Some(old_index) = AGENT_PACKET_FLOW_TRACKER.insert(
-        (
-            pkt.metadata().ingress_link_id,
-            pkt.metadata().ingress_stream_id,
-        ),
-        worker_index,
-    ) {
-        if old_index != worker_index {
-            asm.counters[CounterType::AgentPacketsOutOfOrder].increment();
-        }
-    }
-
-    forward(asm, pkt);
-}
-
 /// Send a compressed agent packet to the agent.
 /// The packet will be decompressed according to the given stream ID.
 pub fn agent_input(
@@ -644,39 +454,6 @@ pub fn agent_input(
             drop_and_count(asm, pkt.into_inner(), CounterType::InPacksDrop)
         }
     }
-}
-
-/// Process uncompressed packet from the agent.
-/// The packet will be compressed, or trigger a Bind request.
-pub fn agent_output(asm: &Assembly, mut pkt: Packet) {
-    pkt.metadata_mut().ingress_link_id = zpr::LOCAL_AGENT_LINK_ID;
-
-    // determine five tuple
-    let classification = match classifier::classify(&mut pkt) {
-        Ok(cls) => cls,
-        Err(_why) => {
-            drop_and_count(asm, pkt, CounterType::InPacksDrop);
-            return;
-        }
-    };
-
-    match classification {
-        ClassifierResult::OK | ClassifierResult::UnclassifiedL4 => (),
-
-        ClassifierResult::FirstFragment | ClassifierResult::SubsequentFragment => {
-            // TODO: handle fragments!
-            drop_and_count(asm, pkt, CounterType::InPacksDrop);
-            return;
-        }
-
-        ClassifierResult::NonIP => {
-            // should never happen; TUN doesn't deal in non-IP
-            drop_and_count(asm, pkt, CounterType::InPacksDrop);
-            return;
-        }
-    }
-
-    agent_output_post_classify(asm, pkt, /* allow_bind_request */ true);
 }
 
 /// Post-classification portion of `agent_output` function.  Used for

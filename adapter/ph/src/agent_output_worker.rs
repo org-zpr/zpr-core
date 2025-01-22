@@ -1,4 +1,5 @@
 use crate::assembly::Assembly;
+use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters::*;
 use crate::fastpath;
@@ -21,6 +22,11 @@ fn is_ip(pi: TunPi) -> bool {
 }
 
 pub async fn launch(config: Config, asm: Arc<Assembly>, tun: Arc<ZprTun>) {
+    let worker = Worker {
+        config,
+        asm: asm.clone(),
+    };
+
     let mut bufs = Vec::new();
 
     loop {
@@ -58,7 +64,48 @@ pub async fn launch(config: Config, asm: Arc<Assembly>, tun: Arc<ZprTun>) {
 
             asm.counters[CounterType::OutPacksRec].increment();
 
-            fastpath::agent_output(&asm, pkt);
+            worker.process(pkt);
         }
+    }
+}
+
+struct Worker {
+    #[allow(dead_code)]
+    config: Config,
+    asm: Arc<Assembly>,
+}
+
+impl Worker {
+    /// Process uncompressed packet from the agent.
+    /// The packet will be compressed, or trigger a Bind request.
+    pub fn process(&self, mut pkt: Packet) {
+        pkt.metadata_mut().ingress_link_id = zpr::LOCAL_AGENT_LINK_ID;
+
+        // determine five tuple
+        let classification = match classifier::classify(&mut pkt) {
+            Ok(cls) => cls,
+            Err(_why) => {
+                fastpath::drop_and_count(&self.asm, pkt, CounterType::InPacksDrop);
+                return;
+            }
+        };
+
+        match classification {
+            ClassifierResult::OK | ClassifierResult::UnclassifiedL4 => (),
+
+            ClassifierResult::FirstFragment | ClassifierResult::SubsequentFragment => {
+                // TODO: handle fragments!
+                fastpath::drop_and_count(&self.asm, pkt, CounterType::InPacksDrop);
+                return;
+            }
+
+            ClassifierResult::NonIP => {
+                // should never happen; TUN doesn't deal in non-IP
+                fastpath::drop_and_count(&self.asm, pkt, CounterType::InPacksDrop);
+                return;
+            }
+        }
+
+        fastpath::agent_output_post_classify(&self.asm, pkt, /* allow_bind_request */ true);
     }
 }
