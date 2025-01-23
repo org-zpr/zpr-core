@@ -344,20 +344,18 @@ impl Weaver {
             }
             def_ts = Some(ts);
         }
-        if def_ts.is_none() {
+        let Some(def_ts) = def_ts else {
             return Err(CompilationError::ConfigError(
                 "no default trusted service found in configuration".to_string(),
             ));
-        }
-        let def_ts = def_ts.unwrap();
-
+        };
         // The only thing we care about is cert path.
-        if def_ts.cert_path.is_none() {
+        let Some(ref cert_path) = def_ts.cert_path else {
             return Err(CompilationError::ConfigError(
                 "default trusted service must have a cert path".to_string(),
             ));
-        }
-        self.fabric.default_auth_cert = def_ts.cert_path.clone().unwrap();
+        };
+        self.fabric.default_auth_cert = cert_path.clone();
         Ok(())
     }
 }

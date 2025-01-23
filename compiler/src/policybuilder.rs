@@ -17,7 +17,7 @@ use crate::zpl;
 pub const SERIAL_VERSION: u32 = 41;
 
 /// This value for a PROC in a connect record means NO PROC.
-const NO_PROC: u32 = 0xffffffff;
+const NO_PROC: u32 = u32::MAX; // 0xffffffff
 
 #[allow(dead_code)]
 #[derive(Default)]
@@ -64,7 +64,7 @@ impl PolicyBuilder {
     /// [PolicyBuilder::build] to get the compiled policy.
     pub fn new() -> PolicyBuilder {
         let utc: DateTime<Utc> = Utc::now();
-        let policy_date = utc.to_rfc3339();
+        let policy_date = utc.to_rfc3339_opts(SecondsFormat::Secs, true);
         let tsnow = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
         let policy_version = tsnow.as_secs();
 

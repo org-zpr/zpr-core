@@ -128,19 +128,9 @@ impl Config {
     /// If the passed name does not map to an IP address, or if the name is not
     /// found in the table, then None is returned.
     pub fn resolve(&self, hostname: &str) -> Option<IpAddr> {
-        if let Some(hosts) = &self.resolver.hosts {
-            if let Some(ip) = hosts.get(hostname) {
-                let addr: IpAddr;
-                // TODO: I suppose the resolver table could map a name to another name.
-                //       For now that is not supported.
-                addr = match ip.parse() {
-                    Ok(a) => a,
-                    Err(_) => return None,
-                };
-                return Some(addr);
-            }
-        }
-        None
+        // TODO: I suppose the resolver table could map a name to another name.
+        //       For now that is not supported.
+        self.resolver.hosts.as_ref()?.get(hostname)?.parse().ok()
     }
 
     /// Given an attribute from ZPL (or config) ensure that it is provided by one
@@ -721,12 +711,7 @@ fn parse_icmp_details(prot_id: &str, prot: &Table) -> Result<IcmpFlowType, Compi
 /// Convert a TOML integer to a u8.  Returns None if the integer is out of range.
 fn toml_as_u8(v: &toml::Value) -> Option<u8> {
     match v {
-        toml::Value::Integer(i) => {
-            if *i < 0 || *i > 255 {
-                return None;
-            }
-            Some(*i as u8)
-        }
+        toml::Value::Integer(i) if *i >= 0 && *i <= 255 => Some(*i as u8),
         _ => None,
     }
 }
