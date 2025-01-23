@@ -32,7 +32,7 @@ pub async fn bind_agent_address(
         if let Some(id) = asm.peer_table.lookup_special_peer(spname) {
             egress_link_id = id;
         } else {
-            error!(target: FLOW_MGMT, "visa request error: special peer routing applies, but special peer ({spname:?}) not connected");
+            debug!(target: FLOW_MGMT, "visa request error: special peer routing applies, but special peer ({spname:?}) not connected");
             return Err(BindAgentAddressError::PolicyError);
         }
     } else {
@@ -57,16 +57,15 @@ pub async fn bind_agent_address(
                     status: Some(vsapi::StatusCode::SUCCESS),
                     ..
                 }) => {
-                    info!(
+                    debug!(
                         target: FLOW_MGMT,
-                        "visa request succeeds, egress_link_id = {}",
-                        proposed_egress_link_id
+                        "visa request succeeds, egress_link_id = {proposed_egress_link_id}"
                     );
                     egress_link_id = proposed_egress_link_id;
                 }
 
                 Ok(resp) => {
-                    info!(target: FLOW_MGMT, "visa request rejected: {resp:?}");
+                    debug!(target: FLOW_MGMT, "visa request rejected: {resp:?}");
                     return Err(BindAgentAddressError::PolicyError);
                 }
 
