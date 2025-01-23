@@ -21,7 +21,7 @@ use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
 use std::time::SystemTime;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 use zerocopy::FromBytes;
 use zpr;
 use zpr_ext::std::mem::{drop_guard, DropGuard};
@@ -733,7 +733,6 @@ pub fn agent_output_post_classify(asm: &Assembly, mut pkt: Packet, allow_bind_re
             }
 
             // issue bind request
-            info!(target: DATAPATH, "issuing bind request for {five_tuple}");
             match asm.adapter_manager.try_request_tether_id(pkt) {
                 Ok(()) => (),
                 Err(TryEnqueueError::Full(pkt)) => {

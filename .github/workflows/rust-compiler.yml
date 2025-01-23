@@ -23,6 +23,8 @@ jobs:
     - name: check warnings etc
       timeout-minutes: 5
       run: |
+        sudo apt update
+        sudo apt install -y protobuf-compiler
         cd compiler
         make check
 
@@ -33,6 +35,8 @@ jobs:
     - name: run tests
       timeout-minutes: 5
       run: |
+        sudo apt update
+        sudo apt install -y protobuf-compiler
         cd compiler
         make test
 
@@ -43,5 +47,7 @@ jobs:
     - name: Build 
       timeout-minutes: 5
       run: |
+        sudo apt update
+        sudo apt install -y protobuf-compiler
         cd compiler
         make

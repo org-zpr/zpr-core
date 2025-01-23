@@ -53,6 +53,13 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
         return;
     }
 
+    if five_tuple.dst_address.is_v6_unicast_link_local()
+        || five_tuple.src_address.is_v6_unicast_link_local()
+    {
+        // Link local traffic can't issue binds
+        return;
+    }
+
     let packet_body: Vec<u8> = pkt.body().into();
 
     // mark ALT entry as pending to attempt to (i.e. racily) prevent
@@ -62,7 +69,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
     // compress only IP addresses for now
     let compression_mode: zpr::CompressionMode = 0;
 
-    info!(target: FLOW_MGMT, "link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
+    debug!(target: FLOW_MGMT, "link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
 
     let bind_result = match asm.ph_mode {
         PhMode::Adapter => {
@@ -92,7 +99,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
     match bind_result {
         Ok(tether_id) => {
             // Bind succeeded; add to ALT.
-            info!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id}");
+            debug!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id}");
 
             let AltEntry::Pending(initial_packet) = asm
                 .alt
@@ -125,7 +132,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
 
         Err(err) => {
             // Bind failed; remove pending entry from ALT.
-            error!(target: FLOW_MGMT, "Bind of {five_tuple} failed: {err}");
+            debug!(target: FLOW_MGMT, "Bind of {five_tuple} failed: {err}");
             asm.alt.remove(&five_tuple);
         }
     }

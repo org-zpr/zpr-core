@@ -1,17 +1,30 @@
+pub mod polio {
+    include!(concat!(env!("OUT_DIR"), "/polio.rs"));
+}
+
 mod allow;
 mod compilation;
+mod config;
+mod crypto;
 mod define;
 mod errors;
+mod fabric;
+mod fabric_util;
 mod lex;
 mod parser;
+mod policybuilder;
+mod protocols;
 mod ptypes;
 mod putil;
+mod weaver;
+mod zpl;
 mod zplstr;
 
 use clap::Parser;
 use std::path::PathBuf;
 
 use compilation::Compilation;
+use crypto::load_rsa_private_key;
 
 /// ZPL Policy Compiler
 ///
@@ -36,14 +49,35 @@ struct Cli {
     /// Sets extra verbosity.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Only perform parsing step. Does not produce a binary policy.
+    #[arg(short, long)]
+    parse_only: bool,
 }
 
 fn main() {
     let mut exit_code = 0;
     let cli = Cli::parse();
-    let comp = Compilation::builder(cli.zpl).verbose(cli.verbose).build();
+    let mut cb = Compilation::builder(cli.zpl).verbose(cli.verbose);
+    if cli.parse_only {
+        cb = cb.parse_only(true);
+    }
+    if let Some(cfg) = cli.zplc {
+        cb = cb.config(&cfg);
+    }
+    if let Some(key) = cli.key {
+        let key = match load_rsa_private_key(&key) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("error loading private key: {}", e);
+                std::process::exit(1);
+            }
+        };
+        cb = cb.sign_with_key(key);
+    }
+    let comp = cb.build();
     match comp.compile() {
-        Ok(_) => println!("compiled ok"),
+        Ok(_) => println!("success"),
         Err(e) => {
             eprintln!("error: {}", e);
             exit_code = 1;
