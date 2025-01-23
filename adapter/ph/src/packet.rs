@@ -532,7 +532,8 @@ mod tests {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
         let ptr_buf = buf.as_ptr();
         let pkt = Packet::new(buf, 0);
-        let ptr_buf2 = pkt.destroy().as_ptr();
+        let buf2 = pkt.destroy();
+        let ptr_buf2 = buf2.as_ptr();
         assert_eq!(ptr_buf2, ptr_buf);
     }
 
