@@ -428,6 +428,20 @@ pub async fn handle_bind_agent_address_request(
                     ingress_tether_id = 0;
                 }
 
+                Err(super::dock::BindAgentAddressError::ParseError(error)) => {
+                    // send error to requestor
+                    zdp::ZdpBindAgentAddressResponseHeader {
+                        status_code: zdp::ResponseCode::Other,
+                        info_len: error.len() as u8,
+                    }
+                    .write_to_buf(&mut rsp_pkt)
+                    .unwrap();
+
+                    rsp_pkt.put(error.as_bytes());
+
+                    ingress_tether_id = 0;
+                }
+
                 Err(super::dock::BindAgentAddressError::AddRouteError(
                     assembly::AddRouteError::PftFull,
                 )) => {

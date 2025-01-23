@@ -4,16 +4,20 @@ use crate::defs::FiveTuple;
 use crate::logging::targets::FLOW_MGMT;
 use crate::special_peers;
 use libnode::{vsapi, vsconn};
+use std::net::IpAddr;
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::*;
 use zpr::{self, LinkId, StreamId};
+use zpr_ext::std::num::NonZeroExt;
 
 #[derive(Debug, Error)]
 pub enum BindAgentAddressError {
     #[error("policy error")]
     PolicyError,
+    #[error("parse error: {0}")]
+    ParseError(String),
     #[error("adding route failed: {0}")]
     AddRouteError(AddRouteError),
 }
@@ -37,15 +41,21 @@ pub async fn bind_agent_address(
             return Err(BindAgentAddressError::PolicyError);
         }
     } else {
-        // HACK: for now, we assume a visa which forwards through to the other adapter
-        // AND ALSO we manually issue a bind request out to that adapter
-        let Some(proposed_egress_link_id) = asm.hack_default_policy(ingress_link_id) else {
+        if ingress_link_id.get() == zpr::LOCAL_AGENT_LINK_ID {
+            // Reject packets from the local agent.
+            // (Packets destined to the Visa Service Adapter fall under special-peer policy.)
             return Err(BindAgentAddressError::PolicyError);
-        };
+        }
 
-        if proposed_egress_link_id.get() == zpr::LOCAL_AGENT_LINK_ID {
+        let visa_server_id = asm
+            .peer_table
+            .lookup_special_peer(crate::special_peers::SpecialPeerName::VisaServiceAdapter)
+            .unwrap_or_zero();
+        if ingress_link_id.get() == visa_server_id {
             // VERY HACK
-            egress_link_id = proposed_egress_link_id;
+            // Unconditionally accept traffic from the Visa Service Adapter;
+            // forward it to our local agent.
+            egress_link_id = NonZero::new(zpr::LOCAL_AGENT_LINK_ID).unwrap();
         } else {
             let visa_req = vsconn::VisaRequest {
                 source_tether_addr: five_tuple.src_address.into(),
@@ -57,13 +67,45 @@ pub async fn bind_agent_address(
             match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
                 Ok(vsapi::VisaResponse {
                     status: Some(vsapi::StatusCode::SUCCESS),
+                    visa,
                     ..
                 }) => {
+                    asm.counters[CounterType::VisaRequestSuccess].increment();
+                    // for now, just pull the destination address tether to set up forwarding
+                    let Some(octets) = visa.unwrap().visa.unwrap().dest else {
+                        asm.counters[CounterType::VisaRequestError].increment();
+                        error!(target: FLOW_MGMT, "visa request error: Could not parse visa");
+                        return Err(BindAgentAddressError::ParseError(
+                            "Could not parse visa".into(),
+                        ));
+                    };
+                    let addr = match octets.len() {
+                        4 => IpAddr::from(
+                            <[u8; 4]>::try_from(octets.as_slice()).expect("Bad IP length"),
+                        ),
+                        16 => IpAddr::from(
+                            <[u8; 16]>::try_from(octets.as_slice()).expect("Bad IP length"),
+                        ),
+                        _ => {
+                            asm.counters[CounterType::VisaRequestError].increment();
+                            return Err(BindAgentAddressError::ParseError(
+                                "Could not parse visa dest address".into(),
+                            ));
+                        }
+                    };
+                    match asm.find_egress_link(addr.into()) {
+                        Ok(link_id) => egress_link_id = link_id,
+                        Err(_) => {
+                            asm.counters[CounterType::VisaRequestError].increment();
+                            return Err(BindAgentAddressError::ParseError(
+                                "Could not parse visa dest address".into(),
+                            ));
+                        }
+                    }
                     debug!(
                         target: FLOW_MGMT,
-                        "visa request succeeds, egress_link_id = {proposed_egress_link_id}"
+                        "visa request succeeds, egress_link_id = {egress_link_id}"
                     );
-                    egress_link_id = proposed_egress_link_id;
                 }
 
                 Ok(resp) => {

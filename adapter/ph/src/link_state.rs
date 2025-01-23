@@ -256,6 +256,11 @@ impl LinkStateWrapper {
         locked_fsm.status == LinkStatus::Up && locked_fsm.state == LinkState::Active
     }
 
+    pub fn get_agent_addresses(&self) -> Vec<IpAddress> {
+        let locked_fsm = self.locked_fsm.lock().unwrap();
+        locked_fsm.agent_addresses.clone()
+    }
+
     pub fn process_event(
         &self,
         asm: &Arc<Assembly>,

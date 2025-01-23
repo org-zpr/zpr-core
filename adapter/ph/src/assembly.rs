@@ -13,6 +13,7 @@ use crate::link_state::{LinkEvent, LinkStateError, LinkType};
 use crate::logging::targets::PEER_MGMT;
 use crate::mgmt;
 use crate::mgmt_processor_worker;
+use crate::net_defs::IpAddress;
 use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
@@ -27,7 +28,6 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::*;
 use zpr::{self, LinkId, SubstrateAddr};
-use zpr_ext::std::num::NonZeroExt;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {
@@ -214,6 +214,26 @@ impl Assembly {
         return Ok(peer_id);
     }
 
+    /// Temporary? function to find a link based on the agent address
+    pub fn find_egress_link(&self, agent_addr: IpAddress) -> Result<NonZero<LinkId>, ()> {
+        let Ok(locked_ids) = self.peer_ids.lock() else {
+            return Err(());
+        };
+
+        for id in locked_ids.iter() {
+            let peer = self
+                .peer_table
+                .get(*id)
+                .expect("Peer IDs out of sync with peer table");
+            for addr in peer.link_state_machine.get_agent_addresses() {
+                if addr == agent_addr {
+                    return Ok(NonZero::new(*id).unwrap());
+                }
+            }
+        }
+        return Err(());
+    }
+
     pub async fn add_route(
         &self,
         ingress_link_id: NonZero<LinkId>,
@@ -264,45 +284,6 @@ impl Assembly {
             .map_err(|()| AddRouteError::PftFull)?;
 
         Ok(ingress_tether_id)
-    }
-
-    /// "Default" policy used by the node, in lieu of obtaining forwarding instructions
-    /// from the Visa Service.  Consulted after resolving special-peer policy.
-    pub fn hack_default_policy(&self, ingress_link_id: NonZero<LinkId>) -> Option<NonZero<LinkId>> {
-        if ingress_link_id.get() == zpr::LOCAL_AGENT_LINK_ID {
-            // Reject packets from the local agent.
-            // (Packets destined to the Visa Service Adapter fall under special-peer policy.)
-            None
-        } else {
-            let visa_server_id = self
-                .peer_table
-                .lookup_special_peer(crate::special_peers::SpecialPeerName::VisaServiceAdapter)
-                .unwrap_or_zero();
-
-            // Unconditionally accept traffic from the Visa Service Adapter;
-            // forward it to our local agent.
-            if ingress_link_id.get() == visa_server_id {
-                return std::num::NonZero::new(zpr::LOCAL_AGENT_LINK_ID);
-            }
-
-            let peer_ids = self.peer_ids.lock().unwrap();
-
-            let peer_id_idx = peer_ids
-                .iter()
-                .position(|id| *id == ingress_link_id.get())?;
-
-            // Unconditionally accept traffice from non-special adapters;
-            // forward to the "next" such adapter in a cycle.  (So e.g.
-            // two adapters forward between each other.)
-            for i in 1..peer_ids.len() {
-                let peer_id = peer_ids[(peer_id_idx + i) % peer_ids.len()];
-                if peer_id != visa_server_id {
-                    return std::num::NonZero::new(peer_id);
-                }
-            }
-
-            None
-        }
     }
 }
 
