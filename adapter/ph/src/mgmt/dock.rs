@@ -1,4 +1,5 @@
 use crate::assembly::{AddRouteError, Assembly};
+use crate::counters::CounterType;
 use crate::defs::FiveTuple;
 use crate::logging::targets::FLOW_MGMT;
 use crate::special_peers;
@@ -52,6 +53,7 @@ pub async fn bind_agent_address(
                 packet: packet_body.clone(),
             };
 
+            asm.counters[CounterType::VisaRequested].increment();
             match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
                 Ok(vsapi::VisaResponse {
                     status: Some(vsapi::StatusCode::SUCCESS),
@@ -66,11 +68,13 @@ pub async fn bind_agent_address(
                 }
 
                 Ok(resp) => {
+                    asm.counters[CounterType::VisaRequestDenied].increment();
                     info!(target: FLOW_MGMT, "visa request rejected: {resp:?}");
                     return Err(BindAgentAddressError::PolicyError);
                 }
 
                 Err(err) => {
+                    asm.counters[CounterType::VisaRequestError].increment();
                     error!(target: FLOW_MGMT, "visa request error: {err}");
                     return Err(BindAgentAddressError::PolicyError);
                 }

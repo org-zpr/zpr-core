@@ -76,6 +76,7 @@ use sys::ZprTun;
 use tun_ctl::TunCtl;
 
 fn main() -> ExitCode {
+    let system_start_time = std::time::Instant::now();
     //
     // parse configuration from command line
     //
@@ -321,6 +322,7 @@ fn main() -> ExitCode {
         self_noise_keypair,
         peer_noise_keypair,
         certx,
+        system_start_time,
     });
 
     //
