@@ -87,7 +87,7 @@ impl Weaver {
 
         match policy_digest {
             Some(d) => revhash.extend_from_slice(d.as_ref()),
-            None => panic!("error - call to new Binp but ZPL digest is not set"), // programming error
+            None => panic!("error - call to weaver::compute_revision but ZPL digest is not set"), // programming error
         }
         revhash.extend_from_slice(config_digest.as_ref());
         let policy_revision_dig = sha256_of_bytes(&revhash);
