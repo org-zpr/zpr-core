@@ -1,9 +1,23 @@
+use core::fmt;
+
+
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum IanaProtocol {
     ICMP = 1,
     TCP = 6,
     UDP = 17,
     ICMPv6 = 58,
+}
+
+impl fmt::Display for IanaProtocol {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            IanaProtocol::ICMP => write!(f, "icmp"),
+            IanaProtocol::TCP => write!(f, "tcp"),
+            IanaProtocol::UDP => write!(f, "udp"),
+            IanaProtocol::ICMPv6 => write!(f, "icmp6"),
+        }
+    }
 }
 
 impl Into<u32> for IanaProtocol {

@@ -115,6 +115,38 @@ pub enum IcmpFlowType {
     OneShot(Vec<u8>),
 }
 
+impl Protocol {
+    pub fn to_endpoint_str(&self) -> String {
+        let mut s = String::new();
+        let protname = self.protocol.to_string().to_uppercase();
+        if self.protocol.is_icmp() {
+            if let Some(ref icmp) = self.icmp {
+                match icmp {
+                    IcmpFlowType::RequestResponse(req, resp) => {
+                        s.push_str(&format!("{}/{}", protname, req));
+                        s.push_str(&format!(",{}/{}", protname, resp));
+                    }
+                    IcmpFlowType::OneShot(ref codes) => {
+                        for c in codes {
+                            s.push_str(&format!("{}/{}", protname, c));
+                        }
+                    }
+                }
+            } else {
+                s.push_str(&format!("{}/0", protname));
+            }
+        } else {
+            s.push_str(&format!("{}/", protname));
+            if let Some(ref port) = self.port {
+                s.push_str(port);
+            } else {
+                s.push_str("0");
+            }
+        }
+        s
+    }
+}
+
 /// Service table
 #[allow(dead_code)]
 #[derive(Debug)]

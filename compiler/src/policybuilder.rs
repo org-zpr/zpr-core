@@ -270,7 +270,7 @@ impl PolicyBuilder {
                     } else {
                         None
                     };
-                    let proc = self.create_service_proc(&svc.fabric_id, svc.service_type, flags);
+                    let proc = self.create_service_proc(&svc.fabric_id, svc.service_type, &svc.protocol.to_endpoint_str(), flags);
                     self.policy.procs.push(proc);
                     let proc_idx = self.policy.procs.len() as u32 - 1;
                     let pconnect = polio::Connect {
@@ -294,6 +294,7 @@ impl PolicyBuilder {
             let proc = self.create_service_proc(
                 format!("/zpr/{}", &node.config_node.id).as_str(),
                 ServiceType::Regular,
+                &format!("TCP/{}", zpl::VISA_SUPPORT_SEVICE_PORT),
                 Some(PFlags::node()),
             );
             self.policy.procs.push(proc);
@@ -312,20 +313,14 @@ impl PolicyBuilder {
     }
 
     /// Create a PROC for the policy binary to register a service and optionally set flags.
+    /// `endpoint_str` is comma separated list of endpoint values.
     fn create_service_proc(
         &self,
         svc_id: &str,
         svc_type: ServiceType,
+        endpoint_str: &str,
         flags: Option<PFlags>,
     ) -> polio::Proc {
-        // In the prototype compiler we include endpoint information in the
-        // proc, but that is only used by the visa service "servicemesh" code which
-        // is used to detect configuration changes which does not seem essential at
-        // the moment.  However, the visa service needs something valid looking in
-        // the ENDPOINTS field so we put in "TCP/1" there.
-        //
-        // We will also set relevant flags.
-
         let mut proc = Vec::new();
 
         // Args for register are (NAME:String, Type:SvcT, ENDPOINTS:String)
@@ -344,7 +339,7 @@ impl PolicyBuilder {
             arg: Some(polio::argument::Arg::Svcval(svc_t as i32)),
         });
         args.push(polio::Argument {
-            arg: Some(polio::argument::Arg::Strval("TCP/1".to_string())), // Bogus endpoint
+            arg: Some(polio::argument::Arg::Strval(endpoint_str.to_string())),
         });
 
         let register = polio::Instruction {

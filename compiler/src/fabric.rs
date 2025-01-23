@@ -42,7 +42,7 @@ pub enum ServiceType {
     Trusted,
     Visa,
     Regular,
-    BuiltIn, // eg, noode access to VS, o VS access to VSS
+    BuiltIn, // eg, noode access to VS, or VS access to VSS
 }
 
 impl Default for ServiceType {
