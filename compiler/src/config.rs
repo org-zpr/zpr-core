@@ -31,6 +31,7 @@ macro_rules! err_config {
 /// Configuration structure which is parsed from the TOML.
 #[allow(dead_code)]
 pub struct Config {
+    pub base_path: PathBuf,
     pub digest: Digest,
     pub resolver: Resolver,
     pub nodes: HashMap<String, Node>,
@@ -178,7 +179,17 @@ pub fn load_config(path: &Path) -> Result<Config, CompilationError> {
     // println!("parsed something:\n{:#?}", ctoml);
     // println!("=====================");
 
+
+    let abs_path = path
+        .canonicalize()
+        .map_err(|e| CompilationError::Io(e))?;
+    let base_path = match abs_path.parent() {
+        Some(p) => p.to_path_buf(),
+        None => PathBuf::new(),
+    };
+
     let config = Config {
+        base_path,
         digest,
         resolver: parse_resolver(&ctoml)?,
         nodes: parse_nodes(&ctoml)?,

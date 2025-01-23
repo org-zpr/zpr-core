@@ -319,13 +319,17 @@ impl PolicyBuilder {
         flags: Option<PFlags>,
     ) -> polio::Proc {
         // In the prototype compiler we include endpoint information in the
-        // proc, but that is not used anymore so am leaving it out for
-        // now.  We will just use REGISTER but leave endpoints empty.  We
-        // will also set relevant flags.
+        // proc, but that is only used by the visa service "servicemesh" code which
+        // is used to detect configuration changes which does not seem essential at
+        // the moment.  However, the visa service needs something valid looking in
+        // the ENDPOINTS field so we put in "TCP/1" there.
+        //
+        // We will also set relevant flags.
 
         let mut proc = Vec::new();
 
         // Args for register are (NAME:String, Type:SvcT, ENDPOINTS:String)
+        //
         let mut args = Vec::new();
 
         args.push(polio::Argument {
@@ -340,7 +344,7 @@ impl PolicyBuilder {
             arg: Some(polio::argument::Arg::Svcval(svc_t as i32)),
         });
         args.push(polio::Argument {
-            arg: Some(polio::argument::Arg::Strval("".to_string())), // Empty endpoints
+            arg: Some(polio::argument::Arg::Strval("TCP/1".to_string())), // Bogus endpoint
         });
 
         let register = polio::Instruction {

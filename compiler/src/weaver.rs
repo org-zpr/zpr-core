@@ -1,6 +1,7 @@
 //! weaver.rs - Poetically named module that can "weave" a "fabric" from a ZPL policy and configuration.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use ring::digest::Digest;
 
@@ -19,6 +20,7 @@ pub struct Weaver {
 
     // Map the allow clause ID to the fabric service ID.
     allowid_to_fab_svc: HashMap<usize, String>,
+    base_path: PathBuf,
 }
 
 /// Weave produces the fabric from the ZPL and Configuration data structures,
@@ -27,7 +29,7 @@ pub fn weave(
     config: &Config,
     policy: &Policy,
 ) -> Result<Fabric, CompilationError> {
-    let mut weaver = Weaver::new();
+    let mut weaver = Weaver::new(&config.base_path);
 
     weaver.compute_revision(policy.digest, &config.digest)?;
 
@@ -71,10 +73,11 @@ pub fn weave(
 }
 
 impl Weaver {
-    fn new() -> Self {
+    fn new(base_path: &Path) -> Self {
         Self {
             fabric: Fabric::default(),
             allowid_to_fab_svc: HashMap::new(),
+            base_path: base_path.to_path_buf(),
         }
     }
 
@@ -355,8 +358,18 @@ impl Weaver {
                 "default trusted service must have a cert path".to_string(),
             ));
         };
-        self.fabric.default_auth_cert = cert_path.clone();
+        self.fabric.default_auth_cert = self.abs_path(cert_path);
         Ok(())
+    }
+
+
+    /// Given a path, return the possibly adjusted absolute path.
+    /// If the passed path `p` is not absolute it is assumed to be relative to the base path.
+    fn abs_path(&self, p: &Path) -> PathBuf {
+        if p.is_absolute() {
+            return p.to_path_buf();
+        }
+        self.base_path.join(p)
     }
 }
 
