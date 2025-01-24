@@ -24,6 +24,7 @@ const NO_PROC: u32 = u32::MAX; // 0xffffffff
 pub struct PolicyBuilder {
     policy_date: String,
     policy: polio::Policy,
+    connects_table: HashMap<String, usize>, // connect hash string -> connect index
 }
 
 /// These flags are used to set the type of service in the PROC.
@@ -77,6 +78,7 @@ impl PolicyBuilder {
         PolicyBuilder {
             policy_date,
             policy: pp,
+            connects_table: HashMap::new(),
         }
     }
 
@@ -259,7 +261,8 @@ impl PolicyBuilder {
                         attr_exprs: self.attr_list_to_attrexpr(&clipol.condition),
                         proc: NO_PROC,
                     };
-                    self.policy.connects.push(pconnect);
+                    // self.policy.connects.push(pconnect);
+                    self.add_connect(pconnect);
                 }
             }
             // Any agent that provides a service can connect
@@ -270,14 +273,20 @@ impl PolicyBuilder {
                     } else {
                         None
                     };
-                    let proc = self.create_service_proc(&svc.fabric_id, svc.service_type, &svc.protocol.to_endpoint_str(), flags);
+                    let proc = self.create_service_proc(
+                        &svc.fabric_id,
+                        svc.service_type,
+                        &svc.protocol.to_endpoint_str(),
+                        flags,
+                    );
                     self.policy.procs.push(proc);
                     let proc_idx = self.policy.procs.len() as u32 - 1;
                     let pconnect = polio::Connect {
                         attr_exprs: self.attr_list_to_attrexpr(&svc.provider_attrs),
                         proc: proc_idx,
                     };
-                    self.policy.connects.push(pconnect);
+                    //self.policy.connects.push(pconnect);
+                    self.add_connect(pconnect);
                 }
                 ServiceType::Trusted => {
                     return Err(CompilationError::ConfigError(
@@ -291,10 +300,15 @@ impl PolicyBuilder {
         }
         // Any agent that provides a node can connect
         for node in &fabric.nodes {
+            // The visa service needs the node to register as a service, but the
+            // only service on a node is really the visa support service, but we
+            // create that as a separate service elsewhere.
+            //
+            // So this registers as node service but uses a bogus endpoint.
             let proc = self.create_service_proc(
                 format!("/zpr/{}", &node.config_node.id).as_str(),
                 ServiceType::Regular,
-                &format!("TCP/{}", zpl::VISA_SUPPORT_SEVICE_PORT),
+                "TCP/1",
                 Some(PFlags::node()),
             );
             self.policy.procs.push(proc);
@@ -306,7 +320,8 @@ impl PolicyBuilder {
             // Prototype comiler also adss a SetCfg OP to the proc for configuring the CIDR.
             // Presumably this is info for the node to use to hand out addresses, but it is
             // no longer used in prototype.
-            self.policy.connects.push(pconnect);
+            //self.policy.connects.push(pconnect);
+            self.add_connect(pconnect);
         }
 
         Ok(())
@@ -466,6 +481,34 @@ impl PolicyBuilder {
     fn populate_value_table(&self, fabric: &Fabric, table: &mut HashMap<String, usize>) {
         self.populate_lookup_table(fabric, table, |a| a.zpl_value());
     }
+
+    /// Helper function that adds to the [polio::Policy::connects] list only if the
+    /// `connect` is not already in the list.
+    ///
+    /// If connect is already there but does not have a PROC set, and the passed `connect`
+    /// does, then we update the proc in the policy.
+    fn add_connect(&mut self, connect: polio::Connect) {
+        let attrs_hash = connect_to_hash(&connect);
+        if self.connects_table.contains_key(&attrs_hash) {
+            let idx = self.connects_table[&attrs_hash];
+            if self.policy.connects[idx].proc == connect.proc {
+                return; // dupe
+            }
+            if self.policy.connects[idx].proc == NO_PROC {
+                // just update the proc (was blank)
+                self.policy.connects[idx].proc = connect.proc;
+                return;
+            }
+            if connect.proc == NO_PROC {
+                // just keep the existing proc, no need for an addition line.
+                return;
+            }
+            // else we need to insert
+        }
+        self.connects_table
+            .insert(attrs_hash, self.policy.connects.len());
+        self.policy.connects.push(connect);
+    }
 }
 
 /// Generate some generic metadata.
@@ -477,6 +520,33 @@ fn metadata(pdate: &str) -> String {
         platform::gethostname(),
         username
     )
+}
+
+/// Given the policy connects vec which is a list of attributes, convert that into
+/// a string that represents the attributes such that same set of attributs always
+/// returns the same string.  We use this to prevent adding duplicates to the connects
+/// list.
+fn connect_to_hash(connect: &polio::Connect) -> String {
+    // First convert the attr list into a list of u64 numbers
+    let mut attrs: Vec<u64> = Vec::new();
+    for ae in &connect.attr_exprs {
+        let mut combined = match ae.op() {
+            polio::AttrOpT::Eq | polio::AttrOpT::Unused => 0,
+            polio::AttrOpT::Ne => 0x80 << 56,       // 10..
+            polio::AttrOpT::Has => 0x40 << 56,      // 01..
+            polio::AttrOpT::Excludes => 0xc0 << 56, // 11..
+        };
+        combined = combined | (((ae.key & 0x3FFFFFFF) as u64) << 32 | (ae.val as u64));
+        attrs.push(combined);
+    }
+
+    // Then sort the numbers and convert to string.
+    attrs.sort();
+    let mut hash = String::new();
+    for a in attrs {
+        hash.push_str(&format!("{:x}", a));
+    }
+    hash
 }
 
 mod platform {

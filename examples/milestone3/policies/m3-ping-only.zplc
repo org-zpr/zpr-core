@@ -27,6 +27,7 @@ cert_path = "ca-cert.pem"
 
 [visa_service] # Only one visa service support at the moment.
 dock_node = "n0"
+admin_attrs = [ [ "zpr.adapter.cn", "client.zpr.org" ] ]
 # provider is hardcoded with zpr.adapter.cn:vs.zpr
 
 # [protocols]

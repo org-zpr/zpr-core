@@ -175,6 +175,45 @@ impl Fabric {
         Ok(fabric_id)
     }
 
+    pub fn add_builtin_service(
+        &mut self,
+        id: &str,
+        protocol: &Protocol,
+        attrs: &[Attribute],
+    ) -> Result<String, CompilationError> {
+        let mut svc_instance = 0;
+        for s in &self.services {
+            if s.config_id == id {
+                if s.matches_attributes(attrs) {
+                    // Sanity check:
+                    if s.service_type != ServiceType::BuiltIn {
+                        return Err(CompilationError::ConfigError(format!(
+                            "service {} has conflicting types: {:?} and BuiltIn",
+                            id, s.service_type
+                        )));
+                    }
+                    return Ok(s.fabric_id.clone()); // already have this service
+                }
+                svc_instance += 1;
+            }
+        }
+        let fabric_id = if svc_instance > 0 {
+            format!("{}#{}", id, svc_instance)
+        } else {
+            id.to_string()
+        };
+        let fs = FabricService {
+            config_id: id.to_string(),
+            fabric_id: fabric_id.clone(),
+            protocol: protocol.clone(),
+            provider_attrs: attrs.to_vec(),
+            client_policies: Vec::new(),
+            service_type: ServiceType::BuiltIn,
+        };
+        self.services.push(fs);
+        Ok(fabric_id)
+    }
+
     pub fn get_visa_service(&self) -> Option<&FabricService> {
         self.services
             .iter()
@@ -229,6 +268,7 @@ impl Fabric {
         let vs = self
             .get_visa_service()
             .expect("visa service must be added before add_node is called");
+        let vs_provider_attrs = vs.provider_attrs.clone();
         let svc_name = format!("/zpr/{}/vss", node.id);
 
         // There cannot be a service with this id already.
@@ -239,24 +279,14 @@ impl Fabric {
             )));
         }
 
-        let access_policy = ClientPolicy {
-            access_only: false,
-            condition: vs.provider_attrs.clone(), // The VSS is accessed by the visa service
+        let vss_prot = Protocol {
+            id: "zpr_vsup".to_string(),
+            protocol: IanaProtocol::TCP,
+            port: Some(format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT)),
+            icmp: None,
         };
-        let vss_svc = FabricService {
-            config_id: svc_name.clone(),
-            fabric_id: svc_name.clone(),
-            protocol: Protocol {
-                id: "zpr_vsup".to_string(),
-                protocol: IanaProtocol::TCP,
-                port: Some(format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT)),
-                icmp: None,
-            },
-            provider_attrs: provider_attrs, // The VSS is provided by the node
-            client_policies: vec![access_policy],
-            service_type: ServiceType::BuiltIn,
-        };
-        self.services.push(vss_svc);
+        let vss_id = self.add_builtin_service(&svc_name, &vss_prot, &provider_attrs)?;
+        self.add_condition_to_service(&vss_id, &vs_provider_attrs, false)?;
         Ok(())
     }
 

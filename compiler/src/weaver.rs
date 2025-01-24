@@ -107,6 +107,70 @@ impl Weaver {
         policy: &Policy,
         config: &Config,
     ) -> Result<(), CompilationError> {
+        self.allow_clauses_to_services(class_idx, service_idx, policy, config)?;
+        self.visa_services_to_services(config)?;
+
+        Ok(())
+    }
+
+    /// Set up the visa service(s) in the fabric.
+    /// Most visa service related functionality is built in. However user can set
+    /// the attributes of the administrator who is able to access the visa service
+    /// admin HTTPS API.
+    fn visa_services_to_services(&mut self, config: &Config) -> Result<(), CompilationError> {
+        let vs_protocol = Protocol {
+            id: "zpr_vsvc".to_string(),
+            protocol: IanaProtocol::TCP,
+            port: Some(zpl::VISA_SERVICE_PORT.to_string()),
+            icmp: None,
+        };
+
+        // The provider of the visa service is a hardcoded CN value.
+        let mut vs_attrs = Vec::new();
+        vs_attrs.push(Attribute::attr(zpl::ADAPTER_CN_ATTR, zpl::VISA_SERVICE_CN));
+        let fab_svc_id = self.fabric.add_service(
+            zpl::VS_SERVICE_NAME,
+            &vs_protocol,
+            &vs_attrs,
+            ServiceType::Visa,
+        )?;
+
+        // Visa service has policy that allows nodes to access it.  We use a node role attribute so
+        // we don't care about individual node names.
+        let vs_access_attrs = vec![Attribute::attr(zpl::KATTR_ROLE, "node")];
+        self.fabric
+            .add_condition_to_service(&fab_svc_id, &vs_access_attrs, true)?;
+
+        // Now add a service for the admin HTTPS API.
+        let admin_api_protocol = Protocol {
+            id: "zpr_admin".to_string(),
+            protocol: IanaProtocol::TCP,
+            port: Some(zpl::VISA_SERVICE_ADMIN_PORT.to_string()),
+            icmp: None,
+        };
+
+        // This AMIN service is provided by the visa service too.
+        let fab_admin_svc_id = self.fabric.add_builtin_service(
+            &format!("{}/admin", zpl::VS_SERVICE_NAME),
+            &admin_api_protocol,
+            &vs_attrs,
+        )?;
+        let admin_access_attrs = vec_to_attributes(config.visa_service.admin_attrs.as_slice())?;
+        self.fabric
+            .add_condition_to_service(&fab_admin_svc_id, &admin_access_attrs, false)?; // also allow admin to connect
+
+        // TODO: When we get around to trusted services, we need to add builtin rules
+        //       that grant VS access to the trusted services.
+        Ok(())
+    }
+
+    fn allow_clauses_to_services(
+        &mut self,
+        class_idx: &HashMap<String, &Class>,
+        service_idx: &HashMap<String, &Service>,
+        policy: &Policy,
+        config: &Config,
+    ) -> Result<(), CompilationError> {
         for ac in &policy.allows {
             if ac.service.class == zpl::DEF_CLASS_SERVICE_NAME {
                 // ZPL that applies to ALL services does not generate additional
@@ -173,35 +237,6 @@ impl Weaver {
                     .add_service(&svc.id, prot, &resolved_attrs, ServiceType::Regular)?;
             self.allowid_to_fab_svc.insert(ac.id, fabric_svc_id);
         }
-
-        // Visa service
-        let vs_protocol = Protocol {
-            id: "zpr_vsvc".to_string(),
-            protocol: IanaProtocol::TCP,
-            port: Some(format!("{}", zpl::VISA_SERVICE_PORT)),
-            icmp: None,
-        };
-        let mut vs_attrs = Vec::new();
-        vs_attrs.push(Attribute::attr(zpl::ADAPTER_CN_ATTR, zpl::VISA_SERVICE_CN));
-        let fab_svc_id = self.fabric.add_service(
-            zpl::VS_SERVICE_NAME,
-            &vs_protocol,
-            &vs_attrs,
-            ServiceType::Visa,
-        )?;
-
-        // Visa service has policy that allows nodes to access it.  We use a role attribute so
-        // we don't care about individual node names.
-        let vs_access_attrs = vec![Attribute::attr(zpl::KATTR_ROLE, "node")];
-        self.fabric
-            .add_condition_to_service(&fab_svc_id, &vs_access_attrs, true)?;
-
-        // TODO: We need to add access to the visa service by the administrator.
-        //       The admin attrs is not yet supported in policy.
-
-        // TODO: When we get around to trusted services, we need to add builtin rules
-        //       that grant VS access to the trusted services.
-
         Ok(())
     }
 
@@ -361,7 +396,6 @@ impl Weaver {
         self.fabric.default_auth_cert = self.abs_path(cert_path);
         Ok(())
     }
-
 
     /// Given a path, return the possibly adjusted absolute path.
     /// If the passed path `p` is not absolute it is assumed to be relative to the base path.
