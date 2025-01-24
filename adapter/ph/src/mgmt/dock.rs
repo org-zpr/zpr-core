@@ -1,4 +1,5 @@
 use crate::assembly::{AddRouteError, Assembly};
+use crate::counters::CounterType;
 use crate::defs::FiveTuple;
 use crate::logging::targets::FLOW_MGMT;
 use crate::special_peers;
@@ -32,7 +33,7 @@ pub async fn bind_agent_address(
         if let Some(id) = asm.peer_table.lookup_special_peer(spname) {
             egress_link_id = id;
         } else {
-            error!(target: FLOW_MGMT, "visa request error: special peer routing applies, but special peer ({spname:?}) not connected");
+            debug!(target: FLOW_MGMT, "visa request error: special peer routing applies, but special peer ({spname:?}) not connected");
             return Err(BindAgentAddressError::PolicyError);
         }
     } else {
@@ -52,25 +53,27 @@ pub async fn bind_agent_address(
                 packet: packet_body.clone(),
             };
 
+            asm.counters[CounterType::VisaRequested].increment();
             match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
                 Ok(vsapi::VisaResponse {
                     status: Some(vsapi::StatusCode::SUCCESS),
                     ..
                 }) => {
-                    info!(
+                    debug!(
                         target: FLOW_MGMT,
-                        "visa request succeeds, egress_link_id = {}",
-                        proposed_egress_link_id
+                        "visa request succeeds, egress_link_id = {proposed_egress_link_id}"
                     );
                     egress_link_id = proposed_egress_link_id;
                 }
 
                 Ok(resp) => {
-                    info!(target: FLOW_MGMT, "visa request rejected: {resp:?}");
+                    asm.counters[CounterType::VisaRequestDenied].increment();
+                    debug!(target: FLOW_MGMT, "visa request rejected: {resp:?}");
                     return Err(BindAgentAddressError::PolicyError);
                 }
 
                 Err(err) => {
+                    asm.counters[CounterType::VisaRequestError].increment();
                     error!(target: FLOW_MGMT, "visa request error: {err}");
                     return Err(BindAgentAddressError::PolicyError);
                 }

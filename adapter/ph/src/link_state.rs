@@ -1,4 +1,5 @@
 use crate::assembly::{Assembly, PhMode};
+use crate::counters::CounterType;
 use crate::km::ZPIPair;
 use crate::km_multiplexor;
 use crate::logging::targets::LINK_STATE;
@@ -617,6 +618,7 @@ impl LinkStateWrapper {
 
     fn process_error_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
+        asm.counters[CounterType::PeerHandshakeFailure].increment();
         warn!(target: LINK_STATE, "Link {link_id} bringup failed at state {:?}",
             self.locked_fsm.lock().unwrap().state);
 
@@ -808,6 +810,7 @@ impl LinkStateWrapper {
     pub fn run_active(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
         let task_asm = asm.clone();
+        asm.counters[CounterType::PeerHandshakeSuccess].increment();
         debug!(target: LINK_STATE, "Link {link_id} entering active state");
         tokio::task::spawn_local(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));

@@ -87,6 +87,8 @@ pub enum CounterType {
 
     UnknownPeer,
     PeerRemoved,
+    PeerHandshakeSuccess,
+    PeerHandshakeFailure,
 
     // RFC 6.5 § 8.2.1
     UnknownZpi,
@@ -100,6 +102,11 @@ pub enum CounterType {
     BadStructure,
     OtherError,
 
+    VisaRequested,
+    VisaRequestSuccess,
+    VisaRequestDenied,
+    VisaRequestError,
+
     #[cfg(debug_assertions)]
     AgentPacketsOutOfOrder,
 }
@@ -107,6 +114,7 @@ pub enum CounterType {
 impl CounterType {
     pub fn name(&self) -> &'static str {
         match *self {
+            // Basic RX/TX
             Self::InPacksRec => "Inbound Packets Received",
             Self::InPacksDrop => "Inbound Packets Dropped",
             Self::InPacksSent => "Inbound Packets Sent",
@@ -121,6 +129,7 @@ impl CounterType {
             Self::InCapPacksFilt => "Inbound Capture Packets Filtered",
             Self::OutCapPacksFilt => "Outbound Capture Packets Filtered",
 
+            // Packet drops
             Self::QueueBackpressure => "QueueBackpressure",
             Self::DroppedAwaitingBind => "Dropped Awaiting Bind",
             Self::DroppedDuplicate => "Dropped Duplicate",
@@ -128,14 +137,18 @@ impl CounterType {
             Self::DroppedNoSA => "Dropped No Security Association",
             Self::InternalRoutingError => "Internal Routing Error",
 
+            // Management packets
             Self::DispatchedToMgmt => "Dispatched to Management",
             Self::BadMgmtResponse => "Bad Management Response",
             Self::UnexpectedMgmtResponse => "Unexpected Management Response",
 
+            // Peer operation failures
             Self::UnknownPeer => "Unknown Peer",
             Self::PeerRemoved => "Peer Removed",
+            Self::PeerHandshakeSuccess => "Peer Handshake Success",
+            Self::PeerHandshakeFailure => "Peer Handshake Failure",
 
-            // § 8.2.1
+            // § 8.2.1 ZDP errors
             Self::UnknownZpi => "Unknown ZPI",
             Self::SequenceError => "Sequence Error",
             Self::MicvFailure => "MICV Failure",
@@ -146,6 +159,12 @@ impl CounterType {
             Self::UnknownStreamId => "Unknown Stream ID",
             Self::BadStructure => "Bad Structure",
             Self::OtherError => "Other Error",
+
+            // Visa counters (Node only)
+            Self::VisaRequested => "Visa Requested",
+            Self::VisaRequestSuccess => "Visa Request Success",
+            Self::VisaRequestDenied => "Visa Request Denied",
+            Self::VisaRequestError => "Visa Request Error",
 
             #[cfg(debug_assertions)]
             Self::AgentPacketsOutOfOrder => "Agent Packets Out-Of-Order",

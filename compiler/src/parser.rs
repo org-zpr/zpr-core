@@ -71,9 +71,9 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     resolve_class_flavors(&mut classes)?;
 
     // Next parse all the allows.
-    for statement in &statements {
+    for (i, statement) in statements.iter().enumerate() {
         if statement[0].tt == TokenType::Allow {
-            let allow = parse_allow(statement, &class_index, &classes)?;
+            let allow = parse_allow(statement, i + 1, &class_index, &classes)?;
             println!("{}", allow);
             policy.allows.push(allow);
         }
@@ -82,7 +82,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     // move all the classes in the policy
     for (_, class) in classes.into_iter() {
         // Not sure i need the built in ones?
-        if class.name == "user" || class.name == "service" || class.name == "endpoint" {
+        if class.is_builtin() {
             continue;
         }
         println!("defined class: {} (is a {:?})", class.name, class.flavor);

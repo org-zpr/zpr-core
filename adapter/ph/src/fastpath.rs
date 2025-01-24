@@ -510,7 +510,6 @@ pub fn agent_output_post_classify(asm: &Assembly, mut pkt: Packet, allow_bind_re
             }
 
             // issue bind request
-            info!(target: DATAPATH, "issuing bind request for {five_tuple}");
             match asm.adapter_manager.try_request_tether_id(pkt) {
                 Ok(()) => (),
                 Err(TryEnqueueError::Full(pkt)) => {

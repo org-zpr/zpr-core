@@ -78,6 +78,10 @@ impl IpAddress {
             IpAddr::V6(v6) => Self::new_from_std_v6(v6),
         }
     }
+
+    pub const fn is_v6_unicast_link_local(&self) -> bool {
+        self.v6[0] == 0xfe && self.v6[1] & 0xC0 == 0x80
+    }
 }
 
 impl From<Ipv4Addr> for IpAddress {

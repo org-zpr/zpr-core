@@ -8,10 +8,6 @@ Work in progress.
 
 Note that this is just enough grammer to meet current compiler needs.
 
-### Known oddities
-
-- The allow statements here need all three clauses to parse successfully. So you 
-  cannot omit endpoint or user as you might sometimes want to.
 
 
 

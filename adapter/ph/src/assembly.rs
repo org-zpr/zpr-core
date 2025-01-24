@@ -88,6 +88,7 @@ pub struct Assembly {
     pub self_noise_keypair: Option<NoiseKeypair>,
     pub peer_noise_keypair: Option<NoiseKeypair>,
     pub certx: Option<KmCertExchange>,
+    pub system_start_time: std::time::Instant,
 }
 
 #[derive(Debug, Error)]
@@ -101,6 +102,10 @@ pub enum AddRouteError {
 }
 
 impl Assembly {
+    pub fn get_uptime(&self) -> std::time::Duration {
+        std::time::Instant::now().duration_since(self.system_start_time)
+    }
+
     // Graceful shutdown routine.  Not guaranteed to be called
     pub async fn shutdown(self: &Arc<Self>) {
         // Probably not worth blocking for this
@@ -331,6 +336,7 @@ pub mod test {
         pub mgmt_dispatch: Option<MgmtDispatch>,
         pub adapter_manager: Option<AdapterManager>,
         pub km_state: Option<KmState>,
+        pub system_start_time: Option<std::time::Instant>,
     }
 
     #[allow(dead_code)]
@@ -421,6 +427,7 @@ pub mod test {
             self_noise_keypair: None,
             peer_noise_keypair: None,
             certx: None,
+            system_start_time: std::time::Instant::now(),
         }
     }
 }

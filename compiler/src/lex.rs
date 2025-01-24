@@ -82,7 +82,9 @@ impl Default for Token {
 }
 
 pub fn tokenize(zpl_in: &Path) -> Result<Vec<Token>, CompilationError> {
-    let zpl = fs::read_to_string(zpl_in)?;
+    let zpl = fs::read_to_string(zpl_in).map_err(|e| {
+        CompilationError::FileError(format!("failed to read ZPL file {:?}: {}", zpl_in, e))
+    })?;
     tokenize_str(&zpl)
 }
 

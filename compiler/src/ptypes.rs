@@ -1,12 +1,14 @@
 //! ptypes - Parser types
-
 use crate::lex::Token;
+use crate::zpl;
+use ring::digest::Digest;
 use std::fmt;
 
 /// The datastructure version of the ZPL policy after parsing.
 /// Just a bunch of defines and allows.
 #[derive(Default)]
 pub struct Policy {
+    pub digest: Option<Digest>,
     pub defines: Vec<Class>,
     pub allows: Vec<AllowClause>,
 }
@@ -39,6 +41,7 @@ impl From<&Token> for FPos {
 /// A parsed "allow" statement.
 #[derive(Clone, Debug)]
 pub struct AllowClause {
+    pub id: usize, // Within a given zpl policy, each allow clause gets a unique id.
     pub endpoint: Clause,
     pub user: Clause,
     pub service: Clause,
@@ -48,8 +51,8 @@ impl fmt::Display for AllowClause {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "ALLOW {}\n   WITH {}\n      TO ACCESS {}",
-            self.endpoint, self.user, self.service
+            "[{}] ALLOW {}\n   WITH {}\n      TO ACCESS {}",
+            self.id, self.endpoint, self.user, self.service
         )
     }
 }
@@ -123,9 +126,9 @@ impl Class {
     pub fn default_user() -> Class {
         Class {
             flavor: ClassFlavor::User,
-            parent: "user".to_string(),
-            name: "user".to_string(),
-            aka: "users".to_string(),
+            parent: zpl::DEF_CLASS_USER_NAME.to_string(),
+            name: zpl::DEF_CLASS_USER_NAME.to_string(),
+            aka: zpl::DEF_CLASS_USER_AKA.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
         }
@@ -133,9 +136,9 @@ impl Class {
     pub fn default_service() -> Class {
         Class {
             flavor: ClassFlavor::Service,
-            parent: "service".to_string(),
-            name: "service".to_string(),
-            aka: "services".to_string(),
+            parent: zpl::DEF_CLASS_SERVICE_NAME.to_string(),
+            name: zpl::DEF_CLASS_SERVICE_NAME.to_string(),
+            aka: zpl::DEF_CLASS_SERVICE_AKA.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
         }
@@ -143,19 +146,24 @@ impl Class {
     pub fn default_endpoint() -> Class {
         Class {
             flavor: ClassFlavor::Endpoint,
-            parent: "endpoint".to_string(),
-            name: "endpoint".to_string(),
-            aka: "endpoints".to_string(),
+            parent: zpl::DEF_CLASS_ENDPOINT_NAME.to_string(),
+            name: zpl::DEF_CLASS_ENDPOINT_NAME.to_string(),
+            aka: zpl::DEF_CLASS_ENDPOINT_AKA.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
         }
+    }
+    pub fn is_builtin(&self) -> bool {
+        self.name == zpl::DEF_CLASS_USER_NAME
+            || self.name == zpl::DEF_CLASS_SERVICE_NAME
+            || self.name == zpl::DEF_CLASS_ENDPOINT_NAME
     }
 }
 
 /// A ZPL attribute. Could be a tule type attibute, eg "role:marketing" or a
 /// tag type.  An attribute may be optional or required, and may be multi-valued
 /// or single-valued.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Attribute {
     pub name: String,
     pub value: Option<String>,
@@ -202,6 +210,32 @@ impl Attribute {
             multi_valued: false,
             tag: false,
             optional: false,
+        }
+    }
+
+    /// Create and return a new attribute with the same characteristics of this one but with the new name provided.
+    pub fn set_name(&self, new_name: &str) -> Self {
+        let mut new_a = self.clone();
+        new_a.name = new_name.to_string();
+        new_a
+    }
+
+    /// The the ZPL name for the key of this attribute. The key is just the attribute name
+    /// unless this is a tag, in which case the key is "zpr.tag".
+    pub fn zpl_key(&self) -> String {
+        if self.tag {
+            "zpr.tag".to_string()
+        } else {
+            self.name.clone()
+        }
+    }
+
+    /// The ZPL value for this attribute. If there is no value an empty string is returned.
+    pub fn zpl_value(&self) -> String {
+        if let Some(v) = &self.value {
+            v.clone()
+        } else {
+            "".to_string()
         }
     }
 }

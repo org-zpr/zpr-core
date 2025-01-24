@@ -402,7 +402,6 @@ pub async fn handle_bind_agent_address_request(
             {
                 Ok(ingress_tid) => {
                     // success; respond with ingress tether ID
-                    // TODO: maybe tick a counter somewhere?
                     zdp::ZdpBindAgentAddressResponseHeader {
                         status_code: zdp::ResponseCode::Success,
                         info_len: 0,
