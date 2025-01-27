@@ -504,7 +504,7 @@ pub fn agent_output_post_classify(asm: &Assembly, mut pkt: Packet, allow_bind_re
         None => {
             if !allow_bind_request {
                 // avoid the (all-but purely theoretical) chance of a packet loop,
-                // when this is called from bind setup code
+                // when this is initiated due to a requeue from bind setup code
                 drop_and_count(asm, pkt, CounterType::OtherError);
                 return;
             }

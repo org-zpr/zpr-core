@@ -165,9 +165,12 @@ pub struct PacketMetadata {
     /// which stream ID this packet is associated with
     pub ingress_stream_id: zpr::StreamId,
 
-    five_tuple: FiveTuple,
+    /// which fastpath lane this packet arrived on
+    pub ingress_lane_id: u8,
 
-    _padding: [u8; 2],
+    _padding: [u8; 1],
+
+    five_tuple: FiveTuple,
 }
 
 #[allow(dead_code)]

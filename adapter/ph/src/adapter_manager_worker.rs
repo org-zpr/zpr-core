@@ -5,7 +5,7 @@ use crate::fastpath;
 use crate::logging::targets::FLOW_MGMT;
 use crate::mgmt;
 use crate::packet::Packet;
-use crate::queues::AdapterManagerMessage;
+use crate::queues::{AdapterManagerMessage, TryEnqueueError};
 use std::num::NonZero;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -123,11 +123,13 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
             };
 
             // now send out initial packet
-            fastpath::agent_output_post_classify(
-                asm,
-                initial_packet,
-                /* allow_bind_request */ false,
-            );
+            match asm.agent_output_requeue.try_enqueue_packet(initial_packet) {
+                Ok(()) => (),
+                Err(TryEnqueueError::Full(_pkt)) => {
+                    debug!(target: FLOW_MGMT, "Requeue backpressure on bind of {five_tuple}, dropping initial packet");
+                    asm.counters[CounterType::QueueBackpressure].increment();
+                }
+            }
         }
 
         Err(err) => {

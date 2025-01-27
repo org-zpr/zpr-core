@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 use std::result::Result;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::net::UdpSocket;
+use tokio::net::{UdpSocket, UnixDatagram};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
@@ -203,6 +203,36 @@ impl SubstrateEgress {
     #[allow(dead_code)]
     pub fn fanout(&self) -> usize {
         self.sockets.len()
+    }
+}
+
+/// Used for requeueing agent output packets from mgmt.
+pub struct AgentOutputRequeue {
+    sockets: Box<[UnixDatagram]>,
+}
+
+impl AgentOutputRequeue {
+    pub fn new(sockets: impl IntoIterator<Item = UnixDatagram>) -> Self {
+        Self {
+            sockets: sockets.into_iter().collect(),
+        }
+    }
+
+    pub fn try_enqueue_packet(&self, packet: Packet) -> Result<(), TryEnqueueError<Packet>> {
+        let socket = self.select_socket(&packet);
+
+        match socket.try_send(packet.buffer()) {
+            Ok(_) => Ok(()),
+
+            Err(err) => match err.kind() {
+                ErrorKind::WouldBlock => Err(TryEnqueueError::Full(packet)),
+                _ => panic!("unrecoverable I/O error: {}", err),
+            },
+        }
+    }
+
+    fn select_socket(&self, packet: &Packet) -> &UnixDatagram {
+        &self.sockets[packet.metadata().ingress_lane_id as usize]
     }
 }
 

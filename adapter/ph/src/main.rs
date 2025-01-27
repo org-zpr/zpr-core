@@ -190,8 +190,9 @@ fn main() -> ExitCode {
     info!(target: STARTUP, "control socket bound to {:?}", config.control_path);
 
     //
-    // open TUN devices
+    // open TUN devices and agent requeue sockets
     //
+
     // HACK: If we are using a new TUN (requirement on MAC I think), we will set the address.
     let tun_addr = if !config.agent_addr.is_empty() && config.tun_if.is_none() {
         Some(config.agent_addr[0].clone())
@@ -211,6 +212,15 @@ fn main() -> ExitCode {
     };
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(tun_devs[0].clone()));
     tun_ctl.set_carrier(false).unwrap();
+
+    let mut agent_requeue_inqs = Vec::new();
+    let mut agent_requeue_outqs = Vec::new();
+    for _i in 0..topology_config.agent_output_concurrency {
+        let (inq, outq) = tokio::net::UnixDatagram::pair().unwrap();
+        // TODO: use get/setsockopt(SO_SNDBUF) to ensure we can transfer packets of PACKET_BUFFER_SIZE
+        agent_requeue_inqs.push(inq);
+        agent_requeue_outqs.push(outq);
+    }
 
     //
     // open substrate sockets
@@ -306,6 +316,7 @@ fn main() -> ExitCode {
         buffer_stack: BufferStack::new(buf_storage),
         agent_input: AgentInput::new(tun_devs.clone()),
         substrate_egress: SubstrateEgress::new(substrate_sockets.clone()),
+        agent_output_requeue: AgentOutputRequeue::new(agent_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
@@ -375,7 +386,9 @@ fn main() -> ExitCode {
     // start data path workers
     //
 
-    for (worker_index, tun_dev) in tun_devs.into_iter().enumerate() {
+    for (worker_index, (tun_dev, requeue)) in
+        tun_devs.into_iter().zip(agent_requeue_outqs).enumerate()
+    {
         js.spawn(agent_output_worker::launch(
             agent_output_worker::Config {
                 worker_index,
@@ -383,6 +396,7 @@ fn main() -> ExitCode {
             },
             asm.clone(),
             tun_dev,
+            requeue,
         ));
     }
 
