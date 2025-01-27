@@ -6,7 +6,8 @@ use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
 use crate::ptypes::{Class, Policy};
 
-pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
+
+pub fn parse(tokens: Vec<Token>, verbose: bool) -> Result<Policy, CompilationError> {
     // Convert the tokens into statements, which are just sub-lists of the tokens.
     // Currently the compiler only accepts ALLOW statements and DEFINE statements.
     let mut statements = Vec::new();
@@ -74,10 +75,14 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
     for (i, statement) in statements.iter().enumerate() {
         if statement[0].tt == TokenType::Allow {
             let allow = parse_allow(statement, i + 1, &class_index, &classes)?;
-            println!("{}", allow);
+            if verbose {
+                println!("{}", allow);
+            }
             policy.allows.push(allow);
         }
     }
+
+    if verbose { println!() }
 
     // move all the classes in the policy
     for (_, class) in classes.into_iter() {
@@ -85,9 +90,11 @@ pub fn parse(tokens: Vec<Token>) -> Result<Policy, CompilationError> {
         if class.is_builtin() {
             continue;
         }
-        println!("defined class: {} (is a {:?})", class.name, class.flavor);
-        for attr in &class.with_attrs {
-            println!("  with: {}", attr);
+        if verbose {
+            println!("defined class: {} (is a {:?})", class.name, class.flavor);
+            for attr in &class.with_attrs {
+                println!("  with: {}", attr);
+            }
         }
         policy.defines.push(class);
     }
@@ -116,7 +123,7 @@ mod test {
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
                 panic!("failed to tokenize '{}': {:?}", valid, e);
             });
-            let _pol = match parse(tokens.unwrap()) {
+            let _pol = match parse(tokens.unwrap(), true) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
@@ -138,7 +145,7 @@ allow endpoints with marketing-emp to access services with role:marketing
         let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(pp).or_else(|e| {
             panic!("failed to tokenize '{}': {:?}", pp, e);
         });
-        let pol = match parse(tokens.unwrap()) {
+        let pol = match parse(tokens.unwrap(), true) {
             Ok(policy) => policy,
             Err(e) => {
                 panic!("failed to parse '{}': {:?}", pp, e);
@@ -196,7 +203,7 @@ allow endpoints with marketing-emp to access services with role:marketing
             });
             let toks = tokens.unwrap();
             assert_eq!(7, toks.len());
-            let _pol = match parse(toks) {
+            let _pol = match parse(toks, true) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
@@ -218,7 +225,7 @@ allow endpoints with marketing-emp to access services with role:marketing
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
                 panic!("failed to tokenize '{}': {:?}", valid, e);
             });
-            let _pol = match parse(tokens.unwrap()) {
+            let _pol = match parse(tokens.unwrap(), true) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
@@ -239,7 +246,7 @@ allow endpoints with marketing-emp to access services with role:marketing
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
                 panic!("failed to tokenize '{}': {:?}", valid, e);
             });
-            let _pol = match parse(tokens.unwrap()) {
+            let _pol = match parse(tokens.unwrap(), true) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
@@ -258,7 +265,7 @@ allow endpoints with marketing-emp to access services with role:marketing
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
                 panic!("failed to tokenize '{}': {:?}", valid, e);
             });
-            let _pol = match parse(tokens.unwrap()) {
+            let _pol = match parse(tokens.unwrap(), true) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);

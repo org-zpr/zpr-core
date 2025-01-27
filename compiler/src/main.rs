@@ -46,6 +46,10 @@ struct Cli {
     #[arg(short = 'c', long = "config", value_name = "ZPLC_FILE")]
     zplc: Option<PathBuf>,
 
+    /// Write output binary to existing directory DIR instead of default.
+    #[arg(short = 'd', long = "outdir", value_name = "DIR")]
+    outdir: Option<PathBuf>,
+
     /// Sets extra verbosity.
     #[arg(short, long)]
     verbose: bool,
@@ -65,6 +69,9 @@ fn main() {
     if let Some(cfg) = cli.zplc {
         cb = cb.config(&cfg);
     }
+    if let Some(outdir) = cli.outdir {
+        cb = cb.output_directory(&outdir);
+    }
     if let Some(key) = cli.key {
         let key = match load_rsa_private_key(&key) {
             Ok(k) => k,
@@ -77,7 +84,7 @@ fn main() {
     }
     let comp = cb.build();
     match comp.compile() {
-        Ok(_) => println!("success"),
+        Ok(_) => println!("ℤ done!"),
         Err(e) => {
             eprintln!("error: {}", e);
             exit_code = 1;

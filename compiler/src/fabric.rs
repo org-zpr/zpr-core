@@ -18,7 +18,6 @@ use crate::zpl;
 #[derive(Debug, Clone, Default)]
 pub struct Fabric {
     pub revision: String,
-    pub metadata: String,
     pub services: Vec<FabricService>,
     pub nodes: Vec<FabricNode>,
     pub default_auth_cert: PathBuf, // CA cert for default/builtin trusted auth
@@ -69,7 +68,6 @@ pub struct ClientPolicy {
 impl fmt::Display for Fabric {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "revision: {}\n", self.revision)?;
-        write!(f, "metadata: {}\n", self.metadata)?;
         write!(
             f,
             "default auth cert: {}\n",

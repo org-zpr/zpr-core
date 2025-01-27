@@ -49,31 +49,38 @@ impl Compilation {
             ))
         })?;
 
-        let tokens = tokenize(&self.source_zpl)?;
-        for t in &tokens {
-            println!("   {:?}", t);
-        }
-        println!();
 
-        let mut policy = parse(tokens)?;
+        let tokens = tokenize(&self.source_zpl)?;
+        if self.verbose {
+            println!("parsed {} tokens:", tokens.len());
+            for t in &tokens {
+                println!("   {:?}", t);
+            }
+            println!();
+        }
+
+        let mut policy = parse(tokens, self.verbose)?;
         let policy_digest = sha256_of_file(&self.source_zpl)?;
         policy.digest = Some(policy_digest);
 
         let fabric = weave(&self, &cfg, &policy)?;
-        println!("FABRIC:\n{}", fabric);
+        if self.verbose {
+            println!();
+            println!("fabric production:\n{}", fabric);
+        }
 
-        println!("parsed OK");
+        println!("ℤ parse successful");
         if self.parse_only {
             return Ok(());
         }
 
-        let mut builder = PolicyBuilder::new();
+        let mut builder = PolicyBuilder::new(self.verbose);
         builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
 
         builder.with_fabric(&fabric)?;
 
         let pol = builder.build()?;
-        println!("build successful");
+        println!("ℤ build successful");
 
         let pcontainer = self.contain_policy(&pol)?;
         self.write_container(&pcontainer, &self.output_file)?;
@@ -98,7 +105,7 @@ impl Compilation {
                 file, e
             ))
         })?;
-        println!("wrote {}", &file.display());
+        println!("ℤ wrote {}", &file.display());
         Ok(())
     }
 
@@ -148,6 +155,7 @@ pub struct CompilationBuilder {
     verbose: bool,
     private_key: Option<Rsa<Private>>,
     parse_only: bool,
+    output_directory: Option<PathBuf>,
 }
 
 impl CompilationBuilder {
@@ -185,6 +193,11 @@ impl CompilationBuilder {
         self
     }
 
+    pub fn output_directory(mut self, output_directory: &Path) -> Self {
+        self.output_directory = Some(output_directory.into());
+        self
+    }
+
     /// Create the [Compilation] object with the settings configured.
     pub fn build(self) -> Compilation {
         // Default config is same name as source replace .zpl extension with .zplc extension
@@ -196,7 +209,20 @@ impl CompilationBuilder {
                 config
             }
         };
-        let output_file = self.source_zpl.with_extension("bin");
+
+        let output_file = match self.output_directory {
+            Some(outdir) => {
+                if !outdir.is_dir() {
+                    panic!("output directory {:?} does not exist or is not a directory", outdir);
+                }
+                let ofile = self.source_zpl.with_extension("bin");
+                outdir.join(ofile.file_name().unwrap())
+            }
+            None => {
+                self.source_zpl.with_extension("bin")
+            }
+        };
+
         Compilation {
             verbose: self.verbose,
             source_zpl: self.source_zpl,

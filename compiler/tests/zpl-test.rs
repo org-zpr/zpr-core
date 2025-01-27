@@ -1,12 +1,48 @@
 use std::env;
 use std::path::PathBuf;
 use zpc::compilation::CompilationBuilder;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+
+fn get_zpl_dir() -> PathBuf {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    // let zpl_dir = PathBuf::from(manifest_dir).join("test-data");
+    PathBuf::from(manifest_dir).join("test-data")
+}
+
+fn get_m3_policy_dir() -> PathBuf {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let mut pb = PathBuf::from(manifest_dir);
+    pb.pop();
+    pb.push("examples");
+    pb.push("milestone3");
+    pb.push("policies");
+    pb
+}
+
+struct TempDir {
+    path: PathBuf
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.path).expect("failed to remove zpc temp dir");
+    }
+}
+
+impl TempDir {
+    fn new() -> Self {
+        let mut temp_dir = env::temp_dir();
+        temp_dir.push(format!("zpl-test-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()));
+        std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir for zpc output");
+        TempDir { path: temp_dir }
+    }
+}
+
 
 #[test]
 fn can_parse_rfc_examples() {
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let zpl_dir = PathBuf::from(manifest_dir).join("test-data");
-
+    let zpl_dir = get_zpl_dir();
     let config_file = zpl_dir.join("config.zplc");
 
     for fent in zpl_dir
@@ -15,6 +51,7 @@ fn can_parse_rfc_examples() {
     {
         if let Ok(fent) = fent {
             let path = fent.path();
+            // Must end with ".zpl"
             match path.extension() {
                 Some(ext) => {
                     if ext != "zpl" {
@@ -22,6 +59,14 @@ fn can_parse_rfc_examples() {
                     }
                 }
                 None => continue,
+            }
+            // And must start with "rfc"
+            if let Some(fstem) = path.file_stem() {
+                if let Some(fstem_str) = fstem.to_str() {
+                    if !fstem_str.starts_with("rfc") {
+                        continue;
+                    }
+                }
             }
             let cb = CompilationBuilder::new(path)
                 .verbose(true)
@@ -38,3 +83,43 @@ fn can_parse_rfc_examples() {
         }
     }
 }
+
+
+#[test]
+fn can_compile_m3_policies() {
+    let zpl_dir = get_m3_policy_dir();
+    let temp_dir = TempDir::new();
+
+    for fent in zpl_dir
+        .read_dir()
+        .expect("failed to list M3 policy directory")
+    {
+        if let Ok(fent) = fent {
+            let path = fent.path();
+            // Must end with ".zpl"
+            match path.extension() {
+                Some(ext) => {
+                    if ext != "zpl" {
+                        continue;
+                    }
+                }
+                None => continue,
+            }
+            let cb = CompilationBuilder::new(path)
+                .verbose(true)
+                .output_directory(&temp_dir.path);
+            let comp = cb.build();
+            match comp.compile() {
+                Ok(_) => println!("{:?}: compiled ok", fent.path()),
+                Err(e) => {
+                    println!("error: {}", e);
+                    panic!("failed to compile {:?}", fent.path());
+                }
+            }
+        }
+    }
+}
+
+
+
+

@@ -22,6 +22,7 @@ const NO_PROC: u32 = u32::MAX; // 0xffffffff
 #[allow(dead_code)]
 #[derive(Default)]
 pub struct PolicyBuilder {
+    verbose: bool,
     policy_date: String,
     policy: polio::Policy,
     connects_table: HashMap<String, usize>, // connect hash string -> connect index
@@ -63,7 +64,7 @@ impl PolicyBuilder {
     /// Once created, you should call [PolicyBuilder::with_max_visa_lifetime], then
     /// [PolicyBuilder::with_fabric] (which does the real work), and finally
     /// [PolicyBuilder::build] to get the compiled policy.
-    pub fn new() -> PolicyBuilder {
+    pub fn new(verbose: bool) -> PolicyBuilder {
         let utc: DateTime<Utc> = Utc::now();
         let policy_date = utc.to_rfc3339_opts(SecondsFormat::Secs, true);
         let tsnow = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
@@ -75,7 +76,13 @@ impl PolicyBuilder {
         pp.policy_version = policy_version;
         pp.policy_metadata = metadata(&policy_date);
 
+        if verbose {
+            println!("creating binary policy");
+            println!("metadata: {}", pp.policy_metadata);
+        }
+
         PolicyBuilder {
+            verbose,
             policy_date,
             policy: pp,
             connects_table: HashMap::new(),
@@ -126,6 +133,12 @@ impl PolicyBuilder {
         self.set_policies(&fabric)?;
         self.set_default_auth(&fabric)?;
 
+        if self.verbose {
+            println!("  {} connect rules", self.policy.connects.len());
+            println!("  {} trusted services", self.policy.services.len());
+            println!("  {} communication policies", self.policy.policies.len());
+            println!("  {} attr keys / {} attr values", self.policy.attr_key_index.len() - 1, self.policy.attr_val_index.len() - 1);
+        }
         Ok(())
     }
 
