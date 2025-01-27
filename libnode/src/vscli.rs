@@ -4,7 +4,7 @@ use thrift::protocol::{TBinaryInputProtocol, TBinaryOutputProtocol};
 use thrift::transport::{ReadHalf, WriteHalf};
 use thrift::transport::{TFramedReadTransport, TFramedWriteTransport};
 use thrift::transport::{TIoChannel, TTcpChannel};
-use tracing::{debug, info};
+use tracing::*;
 
 use crate::errors::VSClientError;
 use crate::logging::targets::VS_RPC;
@@ -185,7 +185,7 @@ impl VSClientI for VSClient {
             _ => return Err(VSClientError::UnsupportedTrafficType),
         };
 
-        info!(target: VS_RPC, "sending VISA_REQUEST to {}", self.service); // raising from debug to info for M/2
+        debug!(target: VS_RPC, "sending VISA_REQUEST to {}", self.service);
         match self.cli.request_visa(key.clone(), addr_bytes, l3t, packet) {
             Ok(result) => Ok(result),
             Err(e) => Err(e.into()),

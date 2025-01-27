@@ -3,7 +3,7 @@
 # Usage message
 usage() {
     echo "Usage:"
-	echo "    $0 [--agent_protocol <IPv4|IPv6>]"
+	echo "    $0 [--agent_protocol <IPv4|IPv6>] [--num_agents <number of agents>"
     exit 1
 }
 
@@ -19,6 +19,15 @@ while [[ "$#" -gt 0 ]]; do
                 usage
             fi
             ;;
+	--num_agents)
+            if [[ -n $2 && ! $2 == --* && $2 -ge 2 && $2 -le 3 ]]; then
+	        NUM_AGENTS=$2
+	        shift 2
+	    else
+	        echo "Error: Only 2 or 3 agents currently supported." >&2
+		usage
+	    fi
+	    ;;
         --help)
             usage
             ;;
@@ -48,8 +57,10 @@ case "$AGENT_PROTOCOL" in
 
 		A_ZPR_ADDR=10.253.1.1
 		B_ZPR_ADDR=10.253.2.1
+		C_ZPR_ADDR=10.253.3.1
+		ZPR_SUBNET=10.253.0.0/16
 
-		POLICY_BIN=v4-1node-2agent-ping.bin
+		POLICY_BIN="v4-1node-${NUM_AGENTS}agent-ping.bin"
         ;;
     ipv6)
         echo "Running test in IPv6 mode"
@@ -59,8 +70,10 @@ case "$AGENT_PROTOCOL" in
 
 		A_ZPR_ADDR=fd00:1:1::1
 		B_ZPR_ADDR=fd00:1:2::1
+		C_ZPR_ADDR=fd00:1:3::1
+		ZPR_SUBNET=fd00:1::0/32
 
-		POLICY_BIN=v6-1node-2agent-ping.bin
+		POLICY_BIN="v6-1node-${NUM_AGENTS}agent-ping.bin"
         ;;
     *)
         echo "Protocol '$AGENT_PROTOCOL' not supported."

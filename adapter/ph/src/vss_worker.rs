@@ -7,6 +7,6 @@ use tracing::*;
 
 pub async fn launch(_asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMsg>) {
     while let Some(msg) = queue.recv().await {
-        info!(target: VISA_MGMT, "received VSS message {msg:?}; ignoring! (unimplemented)");
+        debug!(target: VISA_MGMT, "received VSS message {msg:?}; ignoring! (unimplemented)");
     }
 }

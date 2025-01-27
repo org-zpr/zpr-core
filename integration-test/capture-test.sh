@@ -12,12 +12,15 @@ ZPR_USER=$USER
 NODE_SUBSTRATE_ADDR_VS=10.0.0.1
 NODE_SUBSTRATE_ADDR_A=10.0.1.1
 NODE_SUBSTRATE_ADDR_B=10.0.2.1
+NODE_SUBSTRATE_ADDR_C=10.0.3.1
 VS_SUBSTRATE_ADDR=10.0.0.2
 A_SUBSTRATE_ADDR=10.0.1.2
 B_SUBSTRATE_ADDR=10.0.2.2
+C_SUBSTRATE_ADDR=10.0.3.2
 
 # Default protocol is ipv6.
 AGENT_PROTOCOL="ipv6"
+NUM_AGENTS=2
 # Note: POLICY_BIN, NODE_ZPR_ADDR, VS_ZPR_ADDR, A_ZPR_ADDR, and B_ZPR_ADDR are defined by parsing the input arguments.
 source "$(dirname $0)/parse_arguments.sh"
 
@@ -25,6 +28,7 @@ NODE_SOCK=node.sock
 VS_SOCK=vs.sock
 ADAPTER1_SOCK=adapter1.sock
 ADAPTER2_SOCK=adapter2.sock
+ADAPTER3_SOCK=adapter3.sock
 
 SHOW_CAPTURE="${ZPR_TEST_VERBOSE:-no}"
 
@@ -70,6 +74,7 @@ create_agent_key_and_cert ca vs.zpr
 #create_agent_key_and_cert ca node
 create_agent_key_and_cert ca adapter1
 create_agent_key_and_cert ca adapter2
+create_agent_key_and_cert ca adapter3
 
 # Temporary hack until our policy compiler is in-repo
 cp "$PREGEN/node.key" node.key
@@ -140,6 +145,20 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --agent-addr "$B_ZPR_ADDR" \
   --node-public-key-file node.pubkey 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
+if [[ "$NUM_AGENTS" -ge 3 ]]; then
+  sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
+    adapter \
+    --control-path "$ADAPTER3_SOCK" \
+    --self-addr "$C_SUBSTRATE_ADDR":0 \
+    --ca-file ca.crt \
+    --certificate-file adapter3.crt \
+    --private-key-file adapter3.key \
+    --tun-if tun0 \
+    --node-addr "$NODE_SUBSTRATE_ADDR_C":12345 \
+    --node-public-key-file node.pubkey \
+    --agent-addr "$C_ZPR_ADDR" 2>&1 | tee adapter3.log | prefix_log zpr-c &
+fi
+
 sleep 1 # FIXME: I think we need this b/c DTLS doesn't deal with dropped initial packet well
 set_program "$ADAPTER1_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
 
@@ -152,6 +171,9 @@ wait_for 5 check_carrier zpr-node tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-vs tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
+if [[ "$NUM_AGENTS" -ge 3 ]]; then
+  wait_for 5 check_carrier zpr-c tun0 || { echo "FAILURE"; exit 1; }
+fi
 echo "Carrier has arrived."
 sleep 1
 
