@@ -215,23 +215,21 @@ impl Assembly {
     }
 
     /// Temporary? function to find a link based on the agent address
-    pub fn find_egress_link(&self, agent_addr: IpAddress) -> Result<NonZero<LinkId>, ()> {
-        let Ok(locked_ids) = self.peer_ids.lock() else {
-            return Err(());
-        };
+    pub fn find_egress_link(&self, agent_addr: IpAddress) -> Option<NonZero<LinkId>> {
+        let ids = self.peer_ids.lock().unwrap().clone();
 
-        for id in locked_ids.iter() {
+        for id in ids.iter() {
             let peer = self
                 .peer_table
                 .get(*id)
                 .expect("Peer IDs out of sync with peer table");
             for addr in peer.link_state_machine.get_agent_addresses() {
                 if addr == agent_addr {
-                    return Ok(NonZero::new(*id).unwrap());
+                    return Some(NonZero::new(*id).unwrap());
                 }
             }
         }
-        return Err(());
+        None
     }
 
     pub async fn add_route(

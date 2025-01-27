@@ -2,9 +2,9 @@ use crate::assembly::{AddRouteError, Assembly};
 use crate::counters::CounterType;
 use crate::defs::FiveTuple;
 use crate::logging::targets::FLOW_MGMT;
+use crate::net_defs::IpAddress;
 use crate::special_peers;
 use libnode::{vsapi, vsconn};
-use std::net::IpAddr;
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
@@ -70,7 +70,6 @@ pub async fn bind_agent_address(
                     visa,
                     ..
                 }) => {
-                    asm.counters[CounterType::VisaRequestSuccess].increment();
                     // for now, just pull the destination address tether to set up forwarding
                     let Some(octets) = visa.unwrap().visa.unwrap().dest else {
                         asm.counters[CounterType::VisaRequestError].increment();
@@ -79,29 +78,22 @@ pub async fn bind_agent_address(
                             "Could not parse visa".into(),
                         ));
                     };
-                    let addr = match octets.len() {
-                        4 => IpAddr::from(
-                            <[u8; 4]>::try_from(octets.as_slice()).expect("Bad IP length"),
-                        ),
-                        16 => IpAddr::from(
-                            <[u8; 16]>::try_from(octets.as_slice()).expect("Bad IP length"),
-                        ),
-                        _ => {
-                            asm.counters[CounterType::VisaRequestError].increment();
-                            return Err(BindAgentAddressError::ParseError(
-                                "Could not parse visa dest address".into(),
-                            ));
-                        }
+                    let Ok(addr) = IpAddress::try_from(octets) else {
+                        asm.counters[CounterType::VisaRequestError].increment();
+                        return Err(BindAgentAddressError::ParseError(
+                            "Could not parse visa dest address".into(),
+                        ));
                     };
-                    match asm.find_egress_link(addr.into()) {
-                        Ok(link_id) => egress_link_id = link_id,
-                        Err(_) => {
+                    match asm.find_egress_link(addr) {
+                        Some(link_id) => egress_link_id = link_id,
+                        None => {
                             asm.counters[CounterType::VisaRequestError].increment();
                             return Err(BindAgentAddressError::ParseError(
                                 "Could not parse visa dest address".into(),
                             ));
                         }
                     }
+                    asm.counters[CounterType::VisaRequestSuccess].increment();
                     debug!(
                         target: FLOW_MGMT,
                         "visa request succeeds, egress_link_id = {egress_link_id}"

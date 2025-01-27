@@ -114,6 +114,22 @@ impl From<IpAddr> for IpAddress {
     }
 }
 
+impl TryFrom<Vec<u8>> for IpAddress {
+    type Error = ();
+
+    fn try_from(octets: Vec<u8>) -> Result<Self, Self::Error> {
+        match octets.len() {
+            4 => Ok(IpAddress::from(
+                <[u8; 4]>::try_from(octets.as_slice()).expect("Bad IP length"),
+            )),
+            16 => Ok(IpAddress::from(
+                <[u8; 16]>::try_from(octets.as_slice()).expect("Bad IP length"),
+            )),
+            _ => Err(()),
+        }
+    }
+}
+
 impl TryFrom<IpAddress> for Ipv4Addr {
     type Error = ();
 
@@ -233,6 +249,38 @@ pub fn validate_inet_checksum(data: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_vec_to_ip_address_v4() {
+        let v4_octets = [0x01, 0x02, 0x03, 0x04];
+        let vec_octets = Vec::from(v4_octets);
+        assert_eq!(
+            IpAddress::from(v4_octets),
+            IpAddress::try_from(vec_octets)
+                .expect("IpAddress::try_from(Vec<u8>) did not work as expected")
+        );
+    }
+
+    #[test]
+    fn test_vec_to_ip_address_v6() {
+        let v6_octets = [
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+            0x0f, 0x10,
+        ];
+        let vec_octets = Vec::from(v6_octets);
+        assert_eq!(
+            IpAddress::from(v6_octets),
+            IpAddress::try_from(vec_octets)
+                .expect("IpAddress::try_from(Vec<u8>) did not work as expected")
+        );
+    }
+
+    #[test]
+    fn test_vec_to_ip_address_invalid() {
+        let invalid_octets = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09];
+        let vec_octets = Vec::from(invalid_octets);
+        assert_eq!(true, IpAddress::try_from(vec_octets).is_err());
+    }
 
     #[test]
     fn test_checksum_empty() {
