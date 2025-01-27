@@ -1,8 +1,7 @@
 use std::env;
 use std::path::PathBuf;
-use zpc::compilation::CompilationBuilder;
 use std::time::{SystemTime, UNIX_EPOCH};
-
+use zpc::compilation::CompilationBuilder;
 
 fn get_zpl_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -21,7 +20,7 @@ fn get_m3_policy_dir() -> PathBuf {
 }
 
 struct TempDir {
-    path: PathBuf
+    path: PathBuf,
 }
 
 impl Drop for TempDir {
@@ -33,12 +32,18 @@ impl Drop for TempDir {
 impl TempDir {
     fn new() -> Self {
         let mut temp_dir = env::temp_dir();
-        temp_dir.push(format!("zpl-test-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()));
+        temp_dir.push(format!(
+            "zpl-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        ));
         std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir for zpc output");
         TempDir { path: temp_dir }
     }
 }
-
 
 #[test]
 fn can_parse_rfc_examples() {
@@ -84,7 +89,6 @@ fn can_parse_rfc_examples() {
     }
 }
 
-
 #[test]
 fn can_compile_m3_policies() {
     let zpl_dir = get_m3_policy_dir();
@@ -119,7 +123,3 @@ fn can_compile_m3_policies() {
         }
     }
 }
-
-
-
-

@@ -49,7 +49,6 @@ impl Compilation {
             ))
         })?;
 
-
         let tokens = tokenize(&self.source_zpl)?;
         if self.verbose {
             println!("parsed {} tokens:", tokens.len());
@@ -213,14 +212,15 @@ impl CompilationBuilder {
         let output_file = match self.output_directory {
             Some(outdir) => {
                 if !outdir.is_dir() {
-                    panic!("output directory {:?} does not exist or is not a directory", outdir);
+                    panic!(
+                        "output directory {:?} does not exist or is not a directory",
+                        outdir
+                    );
                 }
                 let ofile = self.source_zpl.with_extension("bin");
                 outdir.join(ofile.file_name().unwrap())
             }
-            None => {
-                self.source_zpl.with_extension("bin")
-            }
+            None => self.source_zpl.with_extension("bin"),
         };
 
         Compilation {

@@ -149,7 +149,6 @@ impl Protocol {
 }
 
 /// Service table
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct Service {
     pub id: String,
@@ -203,23 +202,25 @@ impl Config {
 pub fn load_config(path: &Path) -> Result<Config, CompilationError> {
     let cstr = std::fs::read_to_string(path).map_err(|e| CompilationError::Io(e))?;
 
-    let digest = sha256(&cstr);
-
-    let ctoml = cstr
-        .parse::<Table>()
-        .map_err(|e| CompilationError::TomlError(e))?;
-
-    // println!("parsed something:\n{:#?}", ctoml);
-    // println!("=====================");
-
     let abs_path = path.canonicalize().map_err(|e| CompilationError::Io(e))?;
     let base_path = match abs_path.parent() {
         Some(p) => p.to_path_buf(),
         None => PathBuf::new(),
     };
 
+    parse_config(&cstr, &base_path)
+}
+
+/// Parse config from the toml string `cstr`. The `base_path` is used to resolve relative paths.
+pub fn parse_config(cstr: &str, base_path: &Path) -> Result<Config, CompilationError> {
+    let digest = sha256(&cstr);
+
+    let ctoml = cstr
+        .parse::<Table>()
+        .map_err(|e| CompilationError::TomlError(e))?;
+
     let config = Config {
-        base_path,
+        base_path: base_path.to_path_buf(),
         digest,
         resolver: parse_resolver(&ctoml)?,
         nodes: parse_nodes(&ctoml)?,
@@ -309,20 +310,30 @@ fn parse_nodes(ctoml: &Table) -> Result<HashMap<String, Node>, CompilationError>
     Ok(node_map)
 }
 
+fn require_key(ctx: &str, table: &Table, key: &str) -> Result<(), CompilationError> {
+    if !table.contains_key(key) {
+        return Err(err_config!("error in {}: missing entry for {}", ctx, key));
+    }
+    Ok(())
+}
+
 /// Parse a single node table.
 fn parse_node(node_id: &str, node: &Table) -> Result<Node, CompilationError> {
+    require_key(&format!("nodes.{}", node_id), node, "key")?;
     let key = node["key"]
         .as_str()
         .ok_or(err_config!("node {} missing key", node_id))?
         .to_string();
+    require_key(&format!("nodes.{}", node_id), node, "zpr_address")?;
     let zpr_address = node["zpr_address"]
         .as_str()
-        .ok_or(err_config!("node {} missing zpr_address", node_id))?
+        .ok_or(err_config!("node {} invalid zpr_address", node_id))?
         .to_string();
 
     let mut interfaces = Vec::new();
 
     // In order to parse the interfaces, we need the interface names.
+    require_key(&format!("node {}", node_id), node, "interfaces")?;
     let ifnames = node["interfaces"]
         .as_array()
         .ok_or(err_config!("node {} missing interfaces", node_id))?;

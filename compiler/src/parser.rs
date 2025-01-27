@@ -6,7 +6,6 @@ use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
 use crate::ptypes::{Class, Policy};
 
-
 pub fn parse(tokens: Vec<Token>, verbose: bool) -> Result<Policy, CompilationError> {
     // Convert the tokens into statements, which are just sub-lists of the tokens.
     // Currently the compiler only accepts ALLOW statements and DEFINE statements.
@@ -82,7 +81,9 @@ pub fn parse(tokens: Vec<Token>, verbose: bool) -> Result<Policy, CompilationErr
         }
     }
 
-    if verbose { println!() }
+    if verbose {
+        println!()
+    }
 
     // move all the classes in the policy
     for (_, class) in classes.into_iter() {

@@ -137,7 +137,11 @@ impl PolicyBuilder {
             println!("  {} connect rules", self.policy.connects.len());
             println!("  {} trusted services", self.policy.services.len());
             println!("  {} communication policies", self.policy.policies.len());
-            println!("  {} attr keys / {} attr values", self.policy.attr_key_index.len() - 1, self.policy.attr_val_index.len() - 1);
+            println!(
+                "  {} attr keys / {} attr values",
+                self.policy.attr_key_index.len() - 1,
+                self.policy.attr_val_index.len() - 1
+            );
         }
         Ok(())
     }

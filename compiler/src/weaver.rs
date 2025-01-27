@@ -31,7 +31,10 @@ pub fn weave(
 ) -> Result<Fabric, CompilationError> {
     let mut weaver = Weaver::new(&config.base_path);
 
-    weaver.compute_revision(policy.digest, &config.digest)?;
+    weaver.compute_revision(
+        &policy.digest.expect("policy.digest must be set"),
+        &config.digest,
+    )?;
 
     // Create a class index which maps class name -> class struct.
     let defaults = Class::defaults();
@@ -83,15 +86,11 @@ impl Weaver {
 
     fn compute_revision(
         &mut self,
-        policy_digest: Option<Digest>,
+        policy_digest: &Digest,
         config_digest: &Digest,
     ) -> Result<(), CompilationError> {
         let mut revhash = Vec::new();
-
-        match policy_digest {
-            Some(d) => revhash.extend_from_slice(d.as_ref()),
-            None => panic!("error - call to weaver::compute_revision but ZPL digest is not set"), // programming error
-        }
+        revhash.extend_from_slice(policy_digest.as_ref());
         revhash.extend_from_slice(config_digest.as_ref());
         let policy_revision_dig = sha256_of_bytes(&revhash);
         self.fabric.revision = digest_as_hex(&policy_revision_dig);
@@ -435,7 +434,9 @@ fn find_defined_service(
 /// the parent classes.  We ignore optional attributes.
 fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec<Attribute> {
     let mut attrs = Vec::new();
-    let mut cl = class_idx.get(class_name).unwrap();
+    let mut cl = class_idx
+        .get(class_name)
+        .expect(&format!("class {} not found in class index", class_name));
 
     // If my parent name is not my name... grab all my attributes.
     while cl.parent != cl.name {
@@ -458,4 +459,152 @@ fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec
         attrs.push(a.clone());
     }
     attrs
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::config::parse_config;
+    use crate::lex::Token;
+    use crate::ptypes::{AllowClause, ClassFlavor, Clause, FPos};
+    use std::env;
+
+    #[test]
+    fn test_init_services_minimal() {
+        let cfg = r#"
+        [nodes.n0]
+        key = "none"
+        zpr_address = "fd5a:5052:90de::1"
+        interfaces = [ "in1" ]
+        in1.netaddr = "127.0.0.1"
+        provider = [["foo", "fee"]]
+
+        [visa_service]
+        dock_node = "n0"
+        "#;
+
+        let mut w = Weaver::new(&env::temp_dir());
+        let class_idx = HashMap::new();
+        let service_idx = HashMap::new();
+        let policy = Policy::default();
+        let config = parse_config(&cfg, &env::temp_dir()).expect("failed to parse config");
+
+        let res = w.init_services(&class_idx, &service_idx, &policy, &config);
+        assert!(res.is_ok());
+
+        // Should create two services: visa-service and visa-service-admin
+        assert_eq!(w.fabric.services.len(), 2);
+
+        let vs = w
+            .fabric
+            .services
+            .iter()
+            .find(|s| s.fabric_id == zpl::VS_SERVICE_NAME);
+        assert!(vs.is_some());
+
+        let vs = w
+            .fabric
+            .services
+            .iter()
+            .find(|s| s.fabric_id == format!("{}/admin", zpl::VS_SERVICE_NAME));
+        assert!(vs.is_some());
+    }
+
+    #[test]
+    fn test_init_services_must_be_in_zpl() {
+        let cfg = r#"
+        [nodes.n0]
+        key = "none"
+        zpr_address = "fd5a:5052:90de::1"
+        interfaces = [ "in1" ]
+        in1.netaddr = "127.0.0.1"
+        provider = [["foo", "fee"]]
+
+        [visa_service]
+        dock_node = "n0"
+
+        [protocols.fee]
+        protocol = "iana.TCP"
+        port = 80
+
+        [services.foo]
+        protocol = "fee"
+
+        [services.bar]
+        protocol = "boo"
+        "#;
+
+        let mut class_idx = HashMap::new();
+        let mut service_idx = HashMap::new();
+        let mut policy = Policy::default();
+        let config = parse_config(&cfg, &env::temp_dir()).expect("failed to parse config");
+
+        {
+            let mut w = Weaver::new(&env::temp_dir());
+            let res = w.init_services(&class_idx, &service_idx, &policy, &config);
+            assert!(res.is_ok());
+
+            // Should create two services: visa-service and visa-service-admin.
+            // Does not create services just because they are in the config.
+            assert_eq!(w.fabric.services.len(), 2);
+            let vs = w
+                .fabric
+                .services
+                .iter()
+                .find(|s| s.fabric_id == zpl::VS_SERVICE_NAME);
+            assert!(vs.is_some());
+            let vs = w
+                .fabric
+                .services
+                .iter()
+                .find(|s| s.fabric_id == format!("{}/admin", zpl::VS_SERVICE_NAME));
+            assert!(vs.is_some());
+        }
+
+        // But will create services if they are in the ZPL.
+
+        // Assert that any endpoint, any user can access some service named "foo".
+        // We are only calling init_services which does not create policies anyway.
+        // Will only notice that the 'foo' service is referenced.
+        let a_foo = AllowClause {
+            id: 1,
+            endpoint: Clause::new("endpoint", Token::default()),
+            user: Clause::new("user", Token::default()),
+            service: Clause::new("foo", Token::default()),
+        };
+        policy.allows.push(a_foo);
+
+        // Class named "foo" must have been parsed.
+        let defaults = Class::defaults();
+        for def_cl in &defaults {
+            class_idx.insert(def_cl.name.clone(), def_cl);
+        }
+        let foo_cls = Class {
+            flavor: ClassFlavor::Service,
+            parent: zpl::DEF_CLASS_SERVICE_NAME.to_string(),
+            name: "foo".to_string(),
+            aka: "foos".to_string(),
+            pos: FPos { line: 0, col: 0 },
+            with_attrs: vec![],
+        };
+        class_idx.insert("foo".to_string(), &foo_cls);
+
+        // Service named "foo" must exist too.
+        let foo_svc = Service {
+            id: "foo".to_string(),
+            protocol_id: "fee".to_string(),
+            provider: None,
+        };
+        service_idx.insert("foo".to_string(), &foo_svc);
+
+        {
+            let mut w = Weaver::new(&env::temp_dir());
+            let res = w.init_services(&class_idx, &service_idx, &policy, &config);
+            println!("{:?}", res);
+            assert!(res.is_ok());
+            assert_eq!(w.fabric.services.len(), 3);
+            let vs = w.fabric.services.iter().find(|s| s.fabric_id == "foo");
+            assert!(vs.is_some());
+        }
+    }
 }
