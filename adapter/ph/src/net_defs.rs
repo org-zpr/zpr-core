@@ -115,7 +115,7 @@ impl From<IpAddr> for IpAddress {
 }
 
 impl TryFrom<Vec<u8>> for IpAddress {
-    type Error = ();
+    type Error = Vec<u8>;
 
     fn try_from(octets: Vec<u8>) -> Result<Self, Self::Error> {
         match octets.len() {
@@ -125,7 +125,7 @@ impl TryFrom<Vec<u8>> for IpAddress {
             16 => Ok(IpAddress::from(
                 <[u8; 16]>::try_from(octets.as_slice()).expect("Bad IP length"),
             )),
-            _ => Err(()),
+            _ => Err(octets),
         }
     }
 }

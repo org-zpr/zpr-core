@@ -3,7 +3,7 @@
 # Usage message
 usage() {
     echo "Usage:"
-	echo "    $0 [--agent_protocol <IPv4|IPv6>] [--num_agents <number of agents>"
+	echo "    $0 [--agent_protocol <IPv4|IPv6>] [--num_agents <number of agents>]"
     exit 1
 }
 
