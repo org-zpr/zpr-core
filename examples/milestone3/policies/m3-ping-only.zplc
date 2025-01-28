@@ -11,7 +11,7 @@ order = ["hosts", "dns"]
 
 # [nodes]
 
-[nodes.n0]
+[nodes."node.zpr.org"]
 key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
 provider = [ ["zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "node0.zpr"
@@ -26,7 +26,7 @@ cert_path = "ca-cert.pem"
 
 
 [visa_service] # Only one visa service support at the moment.
-dock_node = "n0"
+dock_node = "node.zpr.org"
 admin_attrs = [ [ "zpr.adapter.cn", "client.zpr.org" ] ]
 # provider is hardcoded with zpr.adapter.cn:vs.zpr
 

@@ -6,12 +6,12 @@ order = ["hosts", "dns"]
 
 [resolver.hosts]
 "node0.zpr" = "fd5a:5052:90de::1"
-"node0.overlay" = "192.168.0.55"
+"node0.overlay" = "192.168.4.69"
 "my.service" = "fd5a:5052:1::8080"
 
 # [nodes]
 
-[nodes.n0]
+[nodes."node.zpr.org"]
 key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
 provider = [ ["zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "node0.zpr"
@@ -26,7 +26,7 @@ cert_path = "ca-cert.pem"
 
 
 [visa_service] # Only one visa service support at the moment.
-dock_node = "n0"
+dock_node = "node.zpr.org"
 admin_attrs = [ [ "zpr.adapter.cn", "client.zpr.org" ] ]
 # provider is hardcoded with zpr.adapter.cn:vs.zpr
 
