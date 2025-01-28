@@ -365,7 +365,7 @@ func (c *Compilation) checkAttrExprPrefixes(d *doc.Doc, sets []*AttrExprSet) err
 				// While we are here, ensure only known zpr attributes are used.
 				attr := strings.ToLower(parts[1])
 				switch attr {
-				case "addr", "authority", "connect_via", "role", "visa_service_adapter": // ok!
+				case "addr", "authority", "connect_via", "role", "visa_service_adapter", "adapter": // ok!
 				default:
 					return doc.ZplScalarErrorf(ex.Key, "unknown zpr attribute: %q", attr)
 				}
