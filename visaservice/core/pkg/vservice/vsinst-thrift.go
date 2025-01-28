@@ -17,8 +17,8 @@ import (
 	"zpr.org/vs/pkg/agent"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice/adb"
+	"zpr.org/vsapi"
 
 	"github.com/apache/thrift/lib/go/thrift"
 	"github.com/google/uuid"
@@ -213,7 +213,21 @@ func (vs *VSInst) BackDoorInstallAPIKeyForUnitTest(node_addr netip.Addr, node_na
 
 // returns API key
 func (vs *VSInst) BackDoorInstallAPIKeyForUnitTestExp(node_addr netip.Addr, node_name string, expiration time.Time, vssAddr string) (string, error) {
-	apiKey, err := vs.finishAuthenticate(node_addr, expiration, []string{fmt.Sprintf("/zpr/%s", node_name)}, vssAddr)
+
+	_, _, cid := vs.getPolicyMatcherConfig()
+
+	claims := make(map[string]*agent.ClaimV)
+	claims[agent.KAttrEPID] = agent.NewClaimV(node_addr.String(), expiration)
+	claims[agent.KAttrRole] = agent.NewClaimV("node", expiration)
+
+	provides := []string{fmt.Sprintf("/zpr/%s", node_name)}
+
+	nodeAgent := agent.EmptyAgent()
+	nodeAgent.SetProvides(provides)
+	nodeAgent.SetTetherAddr(node_addr)
+	nodeAgent.SetAuthenticated(claims, expiration, nil, nil, cid)
+
+	apiKey, err := vs.finishAuthenticate(node_addr, nodeAgent, vssAddr)
 	if err != nil {
 		return "", err
 	}
@@ -338,10 +352,42 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		return "", fmt.Errorf("failed to verify HMAC")
 	}
 
-	//    Now we can consider the details in the nodeAgnet.
-	//    Do we know of this node?  The node must be in our policy, right?
-	//    Need to add a "record" that this node has connected.
-	vs.log.Info("registration: TODO - check that we want this node, etc")
+	naddr, ok := netip.AddrFromSlice(req.NodeAgent.ZprAddr)
+	if !ok {
+		vs.log.Warn("registration: node passes invalid ZPR address", "addr", req.NodeAgent.ZprAddr)
+		return "", fmt.Errorf("invalid agent ZPR address")
+	}
+
+	// In prototype, the node calls authorize_connect for ITSELF after registration.
+	// That is important as it sets up other services and such that may be on the
+	// node.  So let's try invoking that here.  Note that we do not have challenge
+	// or challenge response to do real agent auth. So if you were to enable challenge
+	// validation in the visa service config, this call would always fail.
+	var realNodeAgent *agent.Agent = nil
+
+	vs.log.Debug("registration: running ApproveConnection for node")
+	{
+		claims := make(map[string]string)
+		claims[agent.KAttrEPID] = naddr.String()
+		claims["zpr.adapter.cn"] = nodeCert.Subject.CommonName
+		claims[agent.KAttrRole] = "node" // does ApproveConnection set this?
+
+		// Now this ought to to create a real agent... so if this "works" we need to patch up the finishAuthentication function
+		// so we don't overwrite the good agent with a fake one.
+		creq := vsapi.ConnectRequest{
+			ConnectionID:       1,
+			DockAddr:           netip.MustParseAddr("0.0.0.0").AsSlice(),
+			Claims:             claims,
+			Challenge:          nil,
+			ChallengeResponses: nil,
+		}
+		if realNodeAgent, err = vs.ApproveConnection(&creq, nil); err != nil {
+			vs.log.WithError(err).Warn("registration: ApproveConnection failed")
+			return "", fmt.Errorf("connection denied by policy")
+		} else {
+			vs.log.Info("registration: ApproveConnection successful", "agent", realNodeAgent)
+		}
+	}
 
 	// TODO: Need to fix this a bit. We used to rely on the nodes to keep the RAFT
 	//       database of connected entities.  But we are moving that function (probably
@@ -351,12 +397,7 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 	// For now I am fabricating a node-agent here.  Eventually the node will reun through
 	// the ZDP authentication steps to establish proper credentials.
 
-	expiration := time.Now().Add(vs.bootstrapAuthDuration)
-	naddr, ok := netip.AddrFromSlice(req.NodeAgent.ZprAddr)
-	if !ok {
-		vs.log.Warn("registration: node passes invalid ZPR address", "addr", req.NodeAgent.ZprAddr)
-		return "", fmt.Errorf("invalid agent ZPR address")
-	}
+	// expiration := time.Now().Add(vs.bootstrapAuthDuration)
 
 	var vssServiceAddr string
 
@@ -373,7 +414,8 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		vs.log.Info("registration: got VSS service address", "vss_addr", vssServiceAddr)
 	}
 
-	apiKey, err := vs.finishAuthenticate(naddr, expiration, req.NodeAgent.Provides, vssServiceAddr)
+	// apiKey, err := vs.finishAuthenticate(naddr, expiration, req.NodeAgent.Provides, vssServiceAddr)
+	apiKey, err := vs.finishAuthenticate(naddr, realNodeAgent, vssServiceAddr)
 	if err != nil {
 		vs.log.WithError(err).Warn("registration: failed to write to agent DB")
 		return "", fmt.Errorf("internal error")
@@ -387,20 +429,11 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 	return apiKey, nil
 }
 
-func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, provides []string, vssServiceAddr string) (string, error) {
-	_, _, cid := vs.getPolicyMatcherConfig()
-
-	claims := make(map[string]*agent.ClaimV)
-	claims[agent.KAttrEPID] = agent.NewClaimV(naddr.String(), expiration)
-	claims[agent.KAttrRole] = agent.NewClaimV("node", expiration)
-
-	nodeAgent := agent.EmptyAgent()
-	nodeAgent.SetProvides(provides)
-	nodeAgent.SetTetherAddr(naddr)
-	nodeAgent.SetAuthenticated(claims, expiration, nil, nil, cid)
-
+// func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, provides []string, vssServiceAddr string) (string, error) {
+func (vs *VSInst) finishAuthenticate(naddr netip.Addr, nodeAgent *agent.Agent, vssServiceAddr string) (string, error) {
 	apiKey := uuid.New().String()
 
+	// Becuase ApproveConnection does not add nodes to the database... (TODO: FIXME)
 	if err := vs.agentDB.AddNode(naddr, naddr, nodeAgent, apiKey, vssServiceAddr); err != nil {
 		return "", err
 	}
@@ -439,7 +472,8 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 	// and in that case we pass it in to approve connection which ends up just accepting the nodes
 	// credentials without checking.  I don't think we need or want that for ref-impl, but the arg is still
 	// there on the ApproveConnection function but we set it nil below.
-	resp, err := vs.ApproveConnection(request, nil)
+	var resp *vsapi.ConnectResponse
+	agnt, err := vs.ApproveConnection(request, nil)
 	if err != nil {
 		strerr := err.Error()
 		resp = &vsapi.ConnectResponse{
@@ -448,10 +482,13 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 			Reason:       &strerr,
 		}
 		vs.log.WithError(err).Info("authorize connect fails")
-	} else if resp.Status != vsapi.StatusCode_SUCCESS {
-		vs.log.Info("authorize connect fails", "reason", resp.Reason)
 	} else {
-		vs.log.Info("authorize connect succeeds", "agent_ident", resp.Agent.Ident)
+		vs.log.Info("authorize connect succeeds", "agent_ident", agnt.GetIdentity())
+		resp = &vsapi.ConnectResponse{
+			ConnectionID: request.ConnectionID,
+			Status:       vsapi.StatusCode_SUCCESS,
+			Agent:        agentToVsapiAgent(agnt, nil), // TODO: Tether address?
+		}
 	}
 	return resp, nil
 }

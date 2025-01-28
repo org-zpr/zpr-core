@@ -248,7 +248,7 @@ func initLogging(verbose bool, devMode bool) (logr.Logger, error) {
 	}
 	zapC := zap.Config{
 		Level:             zap.NewAtomicLevelAt(lev),
-		Development:       devMode,
+		Development:       false,
 		DisableCaller:     true,
 		DisableStacktrace: false, // no stack traces
 		EncoderConfig:     zapEnc,

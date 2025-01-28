@@ -9,8 +9,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsapi"
 
 	"zpr.org/vsx/polio"
 	"zpr.org/vsx/snio/zds"
@@ -46,16 +46,13 @@ import (
 // Passing an `authedAgent` is a hack to deal with implementation decision to have a tunnel address on
 // each node. This tunnel address acts like a connection (with id of -1). So traffic can flow over
 // it. Here we "authenticate" it (in a manner of speaking).
-func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest, authedAgent *agent.Agent) (*vsapi.ConnectResponse, error) {
+func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest, authedAgent *agent.Agent) (*agent.Agent, error) {
 	// The policy in use for this approval. Maybe pass in? But the VS should have it, right?
 	// Note that the auth-service has a policy which is going to be the one used.
 	curpol, curmatcher, configID := vs.getPolicyMatcherConfig()
 
 	var err error
 	var validatedAgent *agent.Agent
-	resp := &vsapi.ConnectResponse{
-		ConnectionID: cr.ConnectionID,
-	}
 
 	if authedAgent == nil {
 		// First validate credentials with authorities, which will yied an authenticated Agent.
@@ -99,16 +96,12 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest, authedAgent *agent
 		vs.log.Error("auth'd agent configID should match current policy configID", "got", validatedAgent.GetConfigID(), "expected", configID)
 	}
 
-	// Convert the agent.Agent into an snio.Agent for sending back
-	resp.Agent = agentToVsapiAgent(validatedAgent, nil) // we don't know the tether address.
-	resp.Status = vsapi.StatusCode_SUCCESS
-
 	// presumably nodes get added when they HELLO. But they may also need updating here.
 	if validatedAgent.IsAdapter() {
 		vs.agentDB.AddAdapter(zprAddr, zprAddr, validatedAgent)
 	}
 
-	return resp, nil
+	return validatedAgent, nil
 }
 
 // applyConnectPolicy runs the old connect "procedures" from policy, creating the flowstate.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"net/netip"
 	"testing"
 	"time"
@@ -15,11 +16,15 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"zpr.org/vs/pkg/logr"
+	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice"
+	"zpr.org/vsapi"
 
+	"zpr.org/vsx/polio"
 	"zpr.org/vsx/snio/zds"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
 )
 
 // This authority cert signed the `nodeNoiseCert` below, but
@@ -118,20 +123,71 @@ p/oYQcQrtBHsdvdZ/8IRR7/9HJNanbhTuKdkdmVjt4rPoUDc2zqzEZUEG33E2Glh
 -----END PRIVATE KEY-----
 `
 
+const testPolicyYaml = `
+        zpl_format: 2
+        services:
+          http:
+            tcp: 80
+        zpr:
+          visaservice:
+            provider:
+              - ["zpr.adapter.cn", eq, vs.zpr]
+            admin_attrs:
+              - ["zpr.adapter.cn", eq, admin.zpr]
+          nodes:
+            n0:
+              key: "cffa793530e6d63e560e8b314b5035db34aaae324f63cb76b204d3e4c00d5a1a"
+              provider:
+                - [zpr.adapter.cn, eq, node.zpr.org]
+              address: "fc00:3001::8"
+              interfaces:
+                i0:
+                  netaddr: "n0.spacelaser.net:5000"
+              services: [http]
+              policies: # ERROR - not that this policy applies to all services on the node.
+                - desc: web access
+                  conditions:
+                     - desc: cn is set to fee
+                       attrs:
+                          - [zpr.adapter.cn, eq, fee]
+                  constraints:
+                    duration: 90s
+
+          datasources:
+            zpr.adapter:
+              api: validation/1
+              authority:
+                encoding: pem
+                cert_data: $import[ca0-cert.pem]
+
+        communications:
+          systems:
+            mathiasland:
+              desc: mathiasland
+`
+
+// No connect validation.
 func initVisaservice(t *testing.T) *vservice.VSInst {
-	alog := logr.NewTestLogger()
+	return initVisaserviceWithOpts(t, newDefaultVSConfig(t))
+}
+
+func newDefaultVSConfig(t *testing.T) *vservice.VSIConfig {
 	authcert, err := snauth.LoadCertFromPEMBuffer([]byte(caCert))
 	require.Nil(t, err)
-	vc := &vservice.VSIConfig{
-		Log:                   alog,
-		CN:                    "vs.zpr",
-		VSAddr:                netip.MustParseAddr(vservice.VisaServiceAddress),
-		HopCount:              99,
-		AllowInvalidPeerAddr:  true,
-		BootstrapAuthDuration: 1 * time.Hour,
-		AuthorityCert:         authcert,
+	return &vservice.VSIConfig{
+		Log:                      logr.NewTestLogger(),
+		CN:                       "vs.zpr",
+		VSAddr:                   netip.MustParseAddr(vservice.VisaServiceAddress),
+		HopCount:                 99,
+		AllowInvalidPeerAddr:     true,
+		BootstrapAuthDuration:    1 * time.Hour,
+		AuthorityCert:            authcert,
+		DisableConnectValidation: true, // does not check challenges or challenge-responses
 	}
-	svc, err := vservice.NewVSInst(vc)
+}
+
+func initVisaserviceWithOpts(t *testing.T, vcfg *vservice.VSIConfig) *vservice.VSInst {
+	svc, err := vservice.NewVSInst(vcfg)
 	require.Nil(t, err)
 	require.NotNil(t, svc)
 	svc.SetAuthSvc(&TestAS{})
@@ -157,8 +213,38 @@ func createMilestone2HMAC(nonce []byte, sid int32, timestamp int64) [32]byte {
 	return sha256.Sum256(msg.Bytes())
 }
 
+// Debug func to print connect rules to stdout.
+func printPolicyConnects(plcy *polio.Policy) {
+	fmt.Printf("DUMPING POLICY CONNECT RULES:\n")
+	for i, cp := range plcy.Connects {
+		fmt.Printf("connect rule %d\n", i)
+		for _, ae := range cp.AttrExprs {
+			fmt.Printf("  %v %v %v\n", plcy.AttrKeyIndex[ae.Key], ae.Op, plcy.AttrValIndex[ae.Val])
+		}
+	}
+	fmt.Printf("DUMPED %v POLICY CONNECT RULES\n", len(plcy.Connects))
+}
+
 func TestThriftRegister(t *testing.T) {
 	svc := initVisaservice(t)
+
+	{
+		// Compile and install the policy
+		fst, _ := fs.NewMemoryFileStore()
+		fst.AddFile("/pol.yaml", []byte(testPolicyYaml))
+		fst.AddFile("/ca0-cert.pem", []byte(caCert))
+
+		opts := &compiler.CompileOpts{
+			Revision: "foo1",
+			Verbose:  true,
+		}
+		plcy, err := compiler.Compile("/pol.yaml", fst, opts)
+		require.Nil(t, err)
+		require.NotNil(t, plcy)
+		alog := logr.NewTestLogger()
+		pp := policy.NewPolicyFromPol(plcy, alog)
+		svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
+	}
 
 	helloResp, err := svc.Hello(context.Background())
 	if err != nil {
@@ -337,6 +423,24 @@ func TestThriftDeRegisterNoKeyNoCrash(t *testing.T) {
 func TestThriftPollRespectKey(t *testing.T) {
 	svc := initVisaservice(t)
 
+	{
+		// Compile and install the policy
+		fst, _ := fs.NewMemoryFileStore()
+		fst.AddFile("/pol.yaml", []byte(testPolicyYaml))
+		fst.AddFile("/ca0-cert.pem", []byte(caCert))
+
+		opts := &compiler.CompileOpts{
+			Revision: "foo1",
+			Verbose:  true,
+		}
+		plcy, err := compiler.Compile("/pol.yaml", fst, opts)
+		require.Nil(t, err)
+		require.NotNil(t, plcy)
+		alog := logr.NewTestLogger()
+		pp := policy.NewPolicyFromPol(plcy, alog)
+		svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
+	}
+
 	helloResp, err := svc.Hello(context.Background())
 	if err != nil {
 		t.Fatalf("Hello failed: %v", err)
@@ -395,6 +499,24 @@ func TestThriftPollRespectKey(t *testing.T) {
 func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 	svc := initVisaservice(t)
 
+	{
+		// Compile and install the policy
+		fst, _ := fs.NewMemoryFileStore()
+		fst.AddFile("/pol.yaml", []byte(testPolicyYaml))
+		fst.AddFile("/ca0-cert.pem", []byte(caCert))
+
+		opts := &compiler.CompileOpts{
+			Revision: "foo1",
+			Verbose:  true,
+		}
+		plcy, err := compiler.Compile("/pol.yaml", fst, opts)
+		require.Nil(t, err)
+		require.NotNil(t, plcy)
+		alog := logr.NewTestLogger()
+		pp := policy.NewPolicyFromPol(plcy, alog)
+		svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
+	}
+
 	helloResp, err := svc.Hello(context.Background())
 	if err != nil {
 		t.Fatalf("Hello failed: %v", err)
@@ -430,8 +552,8 @@ func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 	require.NotEmpty(t, apiKey)
 
 	agentClaims := map[string]string{
-		"zpr.addr":    vservice.VisaServiceAddress,
-		"ca0.x509.cn": "some.agent",
+		"zpr.addr":       vservice.VisaServiceAddress,
+		"zpr.adapter.cn": "some.agent",
 	}
 
 	req := vsapi.ConnectRequest{
@@ -439,14 +561,14 @@ func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 		DockAddr:           dockAddr.AsSlice(),
 		Claims:             agentClaims,
 		Challenge:          nil,
-		ChallengeResponses: nil, // will fail anyway because this is empty (and there is no policy loaded)
+		ChallengeResponses: nil, // will fail anyway
 	}
 	cr, err := svc.AuthorizeConnect(context.Background(), apiKey, &req)
 	require.Nil(t, err)
 	require.Equal(t, req.ConnectionID, cr.ConnectionID)
 	require.Equal(t, vsapi.StatusCode_FAIL, cr.Status)
 	require.NotNil(t, cr.Reason)
-	require.Contains(t, *cr.Reason, "no challenge responses")
+	require.Contains(t, *cr.Reason, "no matching rule/policy")
 
 	svc.DeRegister(context.Background(), apiKey)
 	{
@@ -456,11 +578,31 @@ func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 	}
 }
 
-// This time prepare a "real" connection request. Should fail because
-// there is no policy installed so the visa service does not know who
-// to ask.
+// This time prepare a "real" connection request. Will not fail
+// because we can not yet enable acutal agent challenge validation.
+// So this will succeed.
+//
+// See `initVisaservice` where we turn off connect validation.
 func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	svc := initVisaservice(t)
+
+	{
+		// Compile and install the policy
+		fst, _ := fs.NewMemoryFileStore()
+		fst.AddFile("/pol.yaml", []byte(testPolicyYaml))
+		fst.AddFile("/ca0-cert.pem", []byte(caCert))
+
+		opts := &compiler.CompileOpts{
+			Revision: "foo1",
+			Verbose:  true,
+		}
+		plcy, err := compiler.Compile("/pol.yaml", fst, opts)
+		require.Nil(t, err)
+		require.NotNil(t, plcy)
+		alog := logr.NewTestLogger()
+		pp := policy.NewPolicyFromPol(plcy, alog)
+		svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
+	}
 
 	helloResp, err := svc.Hello(context.Background())
 	if err != nil {
@@ -497,8 +639,8 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	require.NotEmpty(t, apiKey)
 
 	agentClaims := map[string]string{
-		"zpr.addr":    vservice.VisaServiceAddress,
-		"ca0.x509.cn": "some.agent",
+		"zpr.addr":       vservice.VisaServiceAddress,
+		"zpr.adapter.cn": "vs.zpr",
 	}
 
 	nonce := make([]byte, snauth.ChallengeNonceSize)
@@ -540,15 +682,31 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	cr, err := svc.AuthorizeConnect(context.Background(), apiKey, &req)
 	require.Nil(t, err)
 	require.Equal(t, req.ConnectionID, cr.ConnectionID)
-	require.Equal(t, vsapi.StatusCode_FAIL, cr.Status)
-	require.NotNil(t, cr.Reason)
-	require.Contains(t, *cr.Reason, "failed to guess authority")
+	require.Equal(t, vsapi.StatusCode_SUCCESS, cr.Status)
+	require.NotNil(t, cr.Agent)
 }
 
-// Obviously you can't get a visa without a policy.
-func TestThriftRequestVisaNoPolicy(t *testing.T) {
+func TestThriftRequestVisaNoRouteToHost(t *testing.T) {
 
 	svc := initVisaservice(t)
+
+	{
+		// Compile and install the policy
+		fst, _ := fs.NewMemoryFileStore()
+		fst.AddFile("/pol.yaml", []byte(testPolicyYaml))
+		fst.AddFile("/ca0-cert.pem", []byte(caCert))
+
+		opts := &compiler.CompileOpts{
+			Revision: "foo1",
+			Verbose:  true,
+		}
+		plcy, err := compiler.Compile("/pol.yaml", fst, opts)
+		require.Nil(t, err)
+		require.NotNil(t, plcy)
+		alog := logr.NewTestLogger()
+		pp := policy.NewPolicyFromPol(plcy, alog)
+		svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
+	}
 
 	helloResp, err := svc.Hello(context.Background())
 	if err != nil {
@@ -595,7 +753,7 @@ func TestThriftRequestVisaNoPolicy(t *testing.T) {
 	require.Nil(t, err)
 	require.NotNil(t, vr)
 	require.Equal(t, vsapi.StatusCode_FAIL, vr.Status)
-	require.Contains(t, *vr.Reason, "denied by policy")
+	require.Contains(t, *vr.Reason, "no route to host")
 
 	// And as usual, wrong key -- no dice
 	{

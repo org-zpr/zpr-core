@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	errNoMatch           = errors.New("no matching rule")
+	errNoMatch           = errors.New("no matching rule/policy")
 	errNoMatchScope      = errors.New("no matching rule on scope")
 	errNoMatchConditions = errors.New("no matching rule on conditions")
 	errExecFail          = errors.New("no procs ran successfully")

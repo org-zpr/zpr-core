@@ -17,9 +17,9 @@ import (
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsapi"
 	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"
 	"zpr.org/vsx/zpl/compiler"
@@ -94,9 +94,26 @@ func (tas *TestAS) Authenticate(domain string, epID netip.Addr,
 	chal *zds.Challenge, chalResp []*zds.ChallengeResponse, claims map[string]string) (*auth.AuthenticateOK, error) {
 	return nil, fmt.Errorf("Authenticate not implemented")
 }
-func (tas *TestAS) SelfAuthenticate(_ netip.Addr, _ map[string]string) (*auth.AuthenticateOK, error) {
-	return nil, fmt.Errorf("SelfAuthenticate not implemented")
+
+func (tas *TestAS) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string) (*auth.AuthenticateOK, error) {
+	expiration := time.Now().Add(time.Hour)
+
+	authedClaims := make(map[string]*agent.ClaimV)
+	for k, v := range claims {
+		authedClaims[k] = &agent.ClaimV{V: v, Exp: expiration}
+	}
+	authedClaims[agent.KAttrEPID] = &agent.ClaimV{V: reqAddr.String(), Exp: expiration}
+	authedClaims[agent.KAttrAgentAuthority] = &agent.ClaimV{V: "zpr.adapter.cn", Exp: expiration} // policy must match this!
+
+	resp := auth.AuthenticateOK{
+		Identities:  nil,
+		Expire:      time.Now().Add(time.Hour),
+		Credentials: nil,
+		Claims:      authedClaims,
+	}
+	return &resp, nil
 }
+
 func (tas *TestAS) Query(*zds.QueryRequest) (*zds.QueryResponse, error) {
 	return nil, fmt.Errorf("Query not implemented")
 }
