@@ -1,23 +1,25 @@
 use crate::adapter_tables::{AltEntry, AltPep};
 use crate::assembly::{Assembly, PhMode};
 use crate::counters::CounterType;
-use crate::fastpath;
 use crate::logging::targets::FLOW_MGMT;
 use crate::mgmt;
-use crate::packet::Packet;
+use crate::packet::{Packet, PacketBuffer};
 use crate::queues::{AdapterManagerMessage, TryEnqueueError};
+use crate::two_way_queue;
 use std::num::NonZero;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tracing::*;
 use zpr;
 
-pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<AdapterManagerMessage>) {
-    while let Some(msg) = queue.recv().await {
-        match msg {
+pub async fn launch(
+    asm: Arc<Assembly>,
+    mut queue: two_way_queue::Receiver<AdapterManagerMessage, PacketBuffer>,
+) {
+    while let Some(mut msg) = queue.recv().await {
+        match &mut *msg {
             AdapterManagerMessage::RequestTetherId(pkt) => {
                 let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
-                fastpath::drop_and_count(&asm, pkt, CounterType::DispatchedToMgmt);
+                drop(msg);
 
                 // for now, perform these sequentially...
                 // ideally, we place these into a JoinSet,

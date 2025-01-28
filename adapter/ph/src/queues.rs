@@ -1,10 +1,11 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
 
 use crate::net_defs;
-use crate::packet::Packet;
+use crate::packet::{Packet, PacketBuffer};
 use crate::sys::TunPi;
 use crate::sys::ZprTun;
 use crate::test_packet::*;
+use crate::two_way_queue;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::result::Result;
@@ -288,26 +289,36 @@ pub enum MgmtDispatchMessage {
     WithAddr(zpr::SubstrateAddr, Packet),
 }
 
+impl two_way_queue::TwoWayReturnable<MgmtDispatchMessage> for PacketBuffer {
+    fn convert(value: MgmtDispatchMessage) -> Self {
+        match value {
+            MgmtDispatchMessage::WithLink(pkt) => pkt.destroy(),
+            MgmtDispatchMessage::WithAddr(_, pkt) => pkt.destroy(),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct MgmtDispatch {
-    sender: mpsc::Sender<MgmtDispatchMessage>,
+    sender: two_way_queue::Sender<MgmtDispatchMessage, PacketBuffer>,
 }
 
 impl MgmtDispatch {
-    pub fn new(sender: mpsc::Sender<MgmtDispatchMessage>) -> Self {
+    pub fn new(sender: two_way_queue::Sender<MgmtDispatchMessage, PacketBuffer>) -> Self {
         Self { sender }
     }
 
     pub fn try_dispatch_mgmt_packet_with_link(
-        &self,
+        &mut self,
         packet: Packet,
     ) -> Result<(), TryEnqueueError<Packet>> {
         debug_assert_ne!(packet.metadata().ingress_link_id, 0);
         match self.sender.try_send(MgmtDispatchMessage::WithLink(packet)) {
             Ok(()) => Ok(()),
 
-            Err(TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
+            Err(two_way_queue::TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
 
-            Err(TrySendError::Full(msg)) => {
+            Err(two_way_queue::TrySendError::Full(msg)) => {
                 let MgmtDispatchMessage::WithLink(pkt) = msg else {
                     unreachable!()
                 };
@@ -317,7 +328,7 @@ impl MgmtDispatch {
     }
 
     pub fn try_dispatch_mgmt_packet_with_addr(
-        &self,
+        &mut self,
         peer_sa: &zpr::SubstrateAddr,
         packet: Packet,
     ) -> Result<(), TryEnqueueError<Packet>> {
@@ -328,9 +339,9 @@ impl MgmtDispatch {
         {
             Ok(()) => Ok(()),
 
-            Err(TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
+            Err(two_way_queue::TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
 
-            Err(TrySendError::Full(msg)) => {
+            Err(two_way_queue::TrySendError::Full(msg)) => {
                 let MgmtDispatchMessage::WithAddr(_, pkt) = msg else {
                     unreachable!()
                 };
@@ -338,18 +349,54 @@ impl MgmtDispatch {
             }
         }
     }
+
+    #[allow(dead_code)]
+    pub fn recv_return_buffers(&mut self, returns: &mut Vec<PacketBuffer>, limit: usize) -> usize {
+        self.sender.blocking_recv_many_returns(returns, limit)
+    }
+
+    #[allow(dead_code)]
+    pub fn try_recv_return_buffers(
+        &mut self,
+        returns: &mut Vec<PacketBuffer>,
+        limit: usize,
+    ) -> usize {
+        self.sender.try_recv_many_returns(returns, limit)
+    }
+
+    #[allow(dead_code)]
+    pub async fn async_recv_return_buffers(
+        &mut self,
+        returns: &mut Vec<PacketBuffer>,
+        limit: usize,
+    ) -> usize {
+        self.sender.recv_many_returns(returns, limit).await
+    }
+
+    pub async fn async_recv_return_buffer(&mut self) -> PacketBuffer {
+        self.sender.recv_return().await
+    }
 }
 
 pub enum AdapterManagerMessage {
     RequestTetherId(Packet),
 }
 
+impl two_way_queue::TwoWayReturnable<AdapterManagerMessage> for PacketBuffer {
+    fn convert(value: AdapterManagerMessage) -> Self {
+        match value {
+            AdapterManagerMessage::RequestTetherId(pkt) => pkt.destroy(),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct AdapterManager {
-    sender: mpsc::Sender<AdapterManagerMessage>,
+    sender: two_way_queue::Sender<AdapterManagerMessage, PacketBuffer>,
 }
 
 impl AdapterManager {
-    pub fn new(sender: mpsc::Sender<AdapterManagerMessage>) -> Self {
+    pub fn new(sender: two_way_queue::Sender<AdapterManagerMessage, PacketBuffer>) -> Self {
         Self { sender }
     }
 
@@ -364,20 +411,47 @@ impl AdapterManager {
     /// the ALT, and an attempt will be made to send the specified packet.
     ///
     /// The specified packet must have already been classified.
-    pub fn try_request_tether_id(&self, packet: Packet) -> Result<(), TryEnqueueError<Packet>> {
+    pub fn try_request_tether_id(&mut self, packet: Packet) -> Result<(), TryEnqueueError<Packet>> {
         match self
             .sender
             .try_send(AdapterManagerMessage::RequestTetherId(packet))
         {
             Ok(()) => Ok(()),
 
-            Err(TrySendError::Closed(_)) => panic!("adapter manager channel closed"),
+            Err(two_way_queue::TrySendError::Closed(_)) => panic!("adapter manager channel closed"),
 
-            Err(TrySendError::Full(msg)) => match msg {
+            Err(two_way_queue::TrySendError::Full(msg)) => match msg {
                 AdapterManagerMessage::RequestTetherId(packet) => {
                     Err(TryEnqueueError::Full(packet))
                 }
             },
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn recv_return_buffers(&mut self, returns: &mut Vec<PacketBuffer>, limit: usize) -> usize {
+        self.sender.blocking_recv_many_returns(returns, limit)
+    }
+
+    #[allow(dead_code)]
+    pub fn try_recv_return_buffers(
+        &mut self,
+        returns: &mut Vec<PacketBuffer>,
+        limit: usize,
+    ) -> usize {
+        self.sender.try_recv_many_returns(returns, limit)
+    }
+
+    #[allow(dead_code)]
+    pub async fn async_recv_return_buffers(
+        &mut self,
+        returns: &mut Vec<PacketBuffer>,
+        limit: usize,
+    ) -> usize {
+        self.sender.recv_many_returns(returns, limit).await
+    }
+
+    pub async fn async_recv_return_buffer(&mut self) -> PacketBuffer {
+        self.sender.recv_return().await
     }
 }

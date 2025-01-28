@@ -68,6 +68,7 @@ pub struct Config {
 
 /// Configuration of data path & control plane topology.
 pub struct TopologyConfig {
+    /// Number of packet buffers to allocate per fastpath worker.
     pub buffer_count: usize,
 
     pub substrate_ingress_concurrency: usize,

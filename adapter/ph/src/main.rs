@@ -55,6 +55,7 @@ mod sync_req;
 mod sys;
 mod test_packet;
 mod tun_ctl;
+mod two_way_queue;
 mod vs_worker;
 mod vss_worker;
 mod zdp;
@@ -152,11 +153,12 @@ fn main() -> ExitCode {
     let topology_config = config::TopologyConfig::default();
 
     let buf_storage =
-        vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]); topology_config.buffer_count];
+        vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; topology_config.buffer_count];
 
     let (cap_inq, cap_outq) = mpsc::channel(topology_config.capture_queue_size);
-    let (md_inq, md_outq) = mpsc::channel(topology_config.mgmt_dispatch_queue_size);
-    let (am_inq, am_outq) = mpsc::channel(topology_config.adapter_manager_queue_size);
+    let (md_inq, md_outq) = two_way_queue::two_way_queue(topology_config.mgmt_dispatch_queue_size);
+    let (am_inq, am_outq) =
+        two_way_queue::two_way_queue(topology_config.adapter_manager_queue_size);
     let (km_sig_inq, km_sig_outq) = mpsc::channel(topology_config.km_signal_queue_size);
     let (km_inq, km_outq) = mpsc::channel(topology_config.km_message_queue_size);
 
@@ -392,6 +394,7 @@ fn main() -> ExitCode {
         js.spawn(agent_output_worker::launch(
             agent_output_worker::Config {
                 worker_index,
+                buffer_count: asm.topology_config.buffer_count,
                 batch_size: asm.topology_config.agent_output_batch_size,
             },
             asm.clone(),
@@ -415,6 +418,7 @@ fn main() -> ExitCode {
         js.spawn(substrate_ingress_worker::launch(
             substrate_ingress_worker::Config {
                 worker_index,
+                buffer_count: asm.topology_config.buffer_count,
                 batch_size: asm.topology_config.substrate_ingress_batch_size,
             },
             asm.clone(),

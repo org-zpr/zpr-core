@@ -3,7 +3,6 @@
 //! General rule: no fastpath operation may block.
 //! This implies that all functions here must be non-async.
 
-use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
 use crate::config;
 use crate::counters::CounterType;
@@ -31,6 +30,14 @@ pub fn drop_and_count(asm: &Assembly, pkt: Packet, reason: impl Into<CounterType
     debug!(target: DATAPATH, "dropping packet because {reason}");
     asm.buffer_stack
         .put_buffer(pkt.destroy().try_into().unwrap());
+    asm.counters[reason].increment();
+}
+
+/// Drop a heap-allocated packet and count the drop with the given reason.
+pub fn drop_and_count_heap(asm: &Assembly, pkt: Packet, reason: impl Into<CounterType>) {
+    let reason = reason.into();
+    debug!(target: DATAPATH, "dropping packet because {reason}");
+    drop(pkt);
     asm.counters[reason].increment();
 }
 
@@ -379,12 +386,12 @@ pub async fn substrate_egress_blocking(asm: &Assembly, link_id: zpr::LinkId, mut
     let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
         Ok(Some(dest_sa)) => dest_sa,
         Ok(None) => {
-            drop_and_count(asm, pkt, CounterType::PeerRemoved);
+            drop_and_count_heap(asm, pkt, CounterType::PeerRemoved);
             return;
         }
         Err(err) => {
             error!(target: DATAPATH, "egress: link {}: encryption error: {}", link_id, err);
-            drop_and_count(asm, pkt, CounterType::EncryptionFailure);
+            drop_and_count_heap(asm, pkt, CounterType::EncryptionFailure);
             return;
         }
     };
@@ -392,14 +399,16 @@ pub async fn substrate_egress_blocking(asm: &Assembly, link_id: zpr::LinkId, mut
     match asm
         .substrate_egress
         .enqueue_packet(
-            drop_guard(pkt, |p| drop_and_count(asm, p, CounterType::OutPacksSent)),
+            drop_guard(pkt, |p| {
+                drop_and_count_heap(asm, p, CounterType::OutPacksSent)
+            }),
             dest_sa,
         )
         .await
     {
         Ok(()) => (),
         Err(pkt) => {
-            drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr);
+            drop_and_count_heap(asm, pkt.into_inner(), CounterType::OutPacksErr);
         }
     }
 }
@@ -452,70 +461,6 @@ pub fn agent_input(
         Ok(()) => (),
         Err(TryEnqueueError::Full(pkt)) => {
             drop_and_count(asm, pkt.into_inner(), CounterType::InPacksDrop)
-        }
-    }
-}
-
-/// Post-classification portion of `agent_output` function.  Used for
-/// re-injecting already-classified packets e.g.  which were held awaiting
-/// bind.  `allow_bind_request` should be true for "real" packets; false for
-/// packets re-injected from mgmt plane after fulfilling a bind request (so
-/// as to prevent the theoretical possibility of a packet loop).
-pub fn agent_output_post_classify(asm: &Assembly, mut pkt: Packet, allow_bind_request: bool) {
-    let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
-
-    // lookup five tuple in ALT
-    match asm.alt.get(&five_tuple) {
-        Some(entry) => match &*entry {
-            AltEntry::Active(pep) => {
-                // compute A2A MAC
-                // TODO: use actual A2A SAID & keyed hash
-                let a2a_said: zpr::A2aSaid = 0;
-                let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
-                let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
-                // SECURITY: truncating BLAKE3 is safe
-                a2a_mac[..a2a_mac_size]
-                    .copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
-
-                // compress packet
-                compress::compress(
-                    pep.compression_mode,
-                    five_tuple.l3_type,
-                    five_tuple.l4_protocol,
-                    &mut pkt,
-                );
-
-                // append A2A MAC
-                pkt.put(&a2a_mac[..a2a_mac_size]);
-                pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
-
-                pkt.metadata_mut().ingress_stream_id = pep.tether_id;
-
-                // forward packet on
-                forward(asm, pkt);
-            }
-
-            AltEntry::Pending(_) => {
-                // Bind request pending; drop this packet
-                drop_and_count(asm, pkt, CounterType::DroppedAwaitingBind);
-            }
-        },
-
-        None => {
-            if !allow_bind_request {
-                // avoid the (all-but purely theoretical) chance of a packet loop,
-                // when this is initiated due to a requeue from bind setup code
-                drop_and_count(asm, pkt, CounterType::OtherError);
-                return;
-            }
-
-            // issue bind request
-            match asm.adapter_manager.try_request_tether_id(pkt) {
-                Ok(()) => (),
-                Err(TryEnqueueError::Full(pkt)) => {
-                    drop_and_count(asm, pkt, CounterType::QueueBackpressure)
-                }
-            }
         }
     }
 }

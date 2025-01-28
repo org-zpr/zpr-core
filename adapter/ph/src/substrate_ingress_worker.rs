@@ -6,12 +6,13 @@ use crate::fastpath;
 use crate::km_noise::NOISE_PADLEN;
 use crate::logging::targets::DATAPATH;
 use crate::packet::Packet;
-use crate::queues::TryEnqueueError;
+use crate::queues::{MgmtDispatch, TryEnqueueError};
 use crate::zdp;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
+use tokio::select;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr_ext::std::num::NonZeroExt;
@@ -20,22 +21,41 @@ use zpr_ext::zerocopy::*;
 #[derive(Copy, Clone)]
 pub struct Config {
     pub worker_index: usize,
+    pub buffer_count: usize,
+    #[allow(dead_code)]
     pub batch_size: usize,
 }
 
 pub async fn launch(config: Config, asm: Arc<Assembly>, socket: Arc<UdpSocket>) {
-    let worker = Worker {
+    let mut worker = Worker {
         config,
         asm: asm.clone(),
+        mgmt_dispatch: asm.mgmt_dispatch.clone(),
     };
 
     let mut bufs = Vec::new();
 
     loop {
-        // grab some buffers from the pool
-        asm.buffer_stack
-            .get_buffers(config.batch_size, &mut bufs)
-            .await;
+        // process the return buffer queue
+        worker
+            .mgmt_dispatch
+            .try_recv_return_buffers(&mut bufs, config.buffer_count);
+        asm.buffer_stack.put_buffers(bufs.drain(..));
+
+        // grab some buffers from the pool;
+        // if none are available immediately, also wait on the return buffer queue
+        select! {
+            biased;
+
+            _ = asm.buffer_stack
+                .get_buffers(config.batch_size - bufs.len(), &mut bufs) => (),
+
+            buf = worker.mgmt_dispatch.async_recv_return_buffer() => {
+                // weird two-step approach necessitated by bufs ownership issue with select
+                bufs.push(buf);
+                let _ = worker.mgmt_dispatch.try_recv_return_buffers(&mut bufs, config.batch_size - 1);
+            }
+        }
 
         // TODO: batch receive
         for buf in bufs.drain(..) {
@@ -76,11 +96,12 @@ const AGENT_PACKET_FLOW_TRACKER: std::sync::LazyLock<
 struct Worker {
     config: Config,
     asm: Arc<Assembly>,
+    mgmt_dispatch: MgmtDispatch,
 }
 
 impl Worker {
     /// Process packets ingressing from the specified address.
-    pub fn process_packet(&self, peer_sa: &zpr::SubstrateAddr, mut pkt: Packet) {
+    pub fn process_packet(&mut self, peer_sa: &zpr::SubstrateAddr, mut pkt: Packet) {
         self.asm.counters[CounterType::InPacksRec].increment();
 
         pkt.metadata_mut().ingress_link_id =
@@ -191,11 +212,10 @@ impl Worker {
         // send it off to be processed as a potential new link.
         if pkt.metadata().ingress_link_id == zpr::LINK_ID_UNKNOWN {
             match self
-                .asm
                 .mgmt_dispatch
                 .try_dispatch_mgmt_packet_with_addr(peer_sa, pkt)
             {
-                Ok(()) => (),
+                Ok(()) => self.asm.counters[CounterType::DispatchedToMgmt].increment(),
                 Err(TryEnqueueError::Full(pkt)) => {
                     fastpath::drop_and_count(&self.asm, pkt, CounterType::QueueBackpressure)
                 }
@@ -225,12 +245,8 @@ impl Worker {
             // TODO: should we peel off the ZDP header here??
             // (instead of this silly code to restore it?)
             *pkt.alloc_zeroed_header() = base_hdr;
-            match self
-                .asm
-                .mgmt_dispatch
-                .try_dispatch_mgmt_packet_with_link(pkt)
-            {
-                Ok(()) => (),
+            match self.mgmt_dispatch.try_dispatch_mgmt_packet_with_link(pkt) {
+                Ok(()) => self.asm.counters[CounterType::DispatchedToMgmt].increment(),
                 Err(TryEnqueueError::Full(pkt)) => {
                     fastpath::drop_and_count(&self.asm, pkt, CounterType::QueueBackpressure)
                 }

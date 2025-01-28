@@ -58,7 +58,7 @@ pub struct Assembly {
     // Shared resources.  These may be accessed by any part of the system.
     pub agent_addresses: Vec<IpAddr>,
 
-    pub buffer_stack: BufferStack<{ config::PACKET_BUFFER_SIZE }>,
+    pub buffer_stack: BufferStack,
 
     pub agent_input: AgentInput,
     pub substrate_egress: SubstrateEgress,
@@ -291,6 +291,7 @@ pub mod test {
 
     use super::*;
     use crate::config::TopologyConfig;
+    use crate::two_way_queue;
     use std::net::Ipv4Addr;
     use tokio::sync::mpsc;
 
@@ -300,7 +301,7 @@ pub mod test {
         pub ph_mode: Option<PhMode>,
         pub topology_config: Option<TopologyConfig>,
         pub agent_addresses: Option<Vec<IpAddr>>,
-        pub buffer_stack: Option<BufferStack<{ config::PACKET_BUFFER_SIZE }>>,
+        pub buffer_stack: Option<BufferStack>,
         pub agent_input: Option<AgentInput>,
         pub substrate_egress: Option<SubstrateEgress>,
         pub agent_output_requeue: Option<AgentOutputRequeue>,
@@ -341,7 +342,7 @@ pub mod test {
             .agent_addresses
             .unwrap_or(Vec::from([IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]));
         let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
-            let buf_storage = vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]); 0];
+            let buf_storage = vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; 0];
             BufferStack::new(buf_storage)
         });
         let agent_input = builder
@@ -375,11 +376,11 @@ pub mod test {
             .dlt
             .unwrap_or_else(|| adapter_tables::DockLookupTable::new());
         let mgmt_dispatch = builder.mgmt_dispatch.unwrap_or_else(|| {
-            let (md_inq, _md_outq) = mpsc::channel(1);
+            let (md_inq, _md_outq) = two_way_queue::two_way_queue(1);
             MgmtDispatch::new(md_inq)
         });
         let adapter_manager = builder.adapter_manager.unwrap_or_else(|| {
-            let (am_inq, _am_outq) = mpsc::channel(1);
+            let (am_inq, _am_outq) = two_way_queue::two_way_queue(1);
             AdapterManager::new(am_inq)
         });
         let km_state = builder.km_state.unwrap_or_else(|| {

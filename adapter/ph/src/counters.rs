@@ -81,7 +81,8 @@ pub enum CounterType {
     DroppedNoSA,          // no security association on link
     InternalRoutingError, // a packet ended up somewhere it shouldn't have due to a coding error
 
-    DispatchedToMgmt, // exited fastpath, sent to mgmt
+    DispatchedToMgmt, // exited fastpath from substrate ingress, sent to mgmt
+    AgentSlowpath,    // exited fastpath from agent output, sent to mgmt
     BadMgmtResponse,
     UnexpectedMgmtResponse,
 
@@ -139,6 +140,7 @@ impl CounterType {
 
             // Management packets
             Self::DispatchedToMgmt => "Dispatched to Management",
+            Self::AgentSlowpath => "Agent Slowpath",
             Self::BadMgmtResponse => "Bad Management Response",
             Self::UnexpectedMgmtResponse => "Unexpected Management Response",
 
