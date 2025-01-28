@@ -228,7 +228,10 @@ fn main() -> ExitCode {
         socket.set_reuse_port(true).unwrap();
         socket
             .bind(&socket2::SockAddr::from(config.self_addr))
-            .expect(&format!("unable to bind to self_addr ({})", config.self_addr));
+            .expect(&format!(
+                "unable to bind to self_addr ({})",
+                config.self_addr
+            ));
         if config.self_addr.port() == 0 {
             let port = socket.local_addr().unwrap().as_socket().unwrap().port();
             config.self_addr.set_port(port);
