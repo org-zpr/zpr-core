@@ -3,9 +3,7 @@
 //! Really doesn't do very much except for translate incoming visa service
 //! messages into enums on a channel.
 
-
-use std::fmt::{self, Formatter};
-use std::net::{SocketAddr, IpAddr};
+use std::net::SocketAddr;
 use thrift::protocol::{TBinaryInputProtocolFactory, TBinaryOutputProtocolFactory};
 use thrift::protocol::{TInputProtocolFactory, TOutputProtocolFactory};
 use thrift::server::TServer;
@@ -36,7 +34,6 @@ pub enum VSSMsg {
     /// Pushed visa revokcations from the visa service.
     PushedRevocation(VisaRevocation),
 }
-
 
 /// The VisaSupportHandlerImpl is a light wrapper around the thrift
 /// VisaSupportService client code which takes the messages from the
