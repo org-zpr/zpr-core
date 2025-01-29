@@ -37,17 +37,7 @@ async fn _run_vss(listen_sock: SocketAddr) -> Result<(), VssError> {
                 break;
             }
             Some(vss_msg) = vss_rx.recv() => {
-                match vss_msg {
-                    vss::VSSMsg::PolicyInstall(pi) => {
-                        info!("VSS policy install: {:?}", pi);
-                    }
-                    vss::VSSMsg::PushedVisa(v) => {
-                        info!("VSS pushed visa: issuer_id={:?}", v.issuer_id);
-                    }
-                    _ => {
-                        info!("VSConn::run received VSS message: {:?}", vss_msg);
-                    }
-                }
+                info!("VSConn::run received VSS message: {vss_msg}");
             }
         }
     }

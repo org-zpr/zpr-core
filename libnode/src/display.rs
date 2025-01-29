@@ -9,97 +9,101 @@ impl fmt::Display for VSSMsg {
         match self {
             VSSMsg::PolicyInstall(pi) => write!(f, "PolicyInstall(policy_id: {:?})", pi.policy_id),
             VSSMsg::PushedRevocation(r) => write!(f, "Revocation(issuer_id: {:?})", r.issuer_id),
-            VSSMsg::PushedVisa(v) => {
-                write!(
-                    f,
-                    "PushedVisa(issuer_id: {}, hop_count: {}, visa: ",
-                    to_string_or(&v.issuer_id, "(none)"),
-                    to_string_or(&v.hop_count, "(none)")
-                )?;
-                summarize_visa(f, &v.visa)?;
+            VSSMsg::PushedVisa(vh) => {
+                write!(f, "PushedVisa(")?;
+                summarize_visa_hop(f, vh)?;
                 write!(f, ")")
             }
         }
     }
 }
 
+/// Human readable version of the MSSMsg which includes some interior details of the visa.
+fn summarize_visa_hop(f: &mut Formatter<'_>, vh: &vsapi::VisaHop) -> fmt::Result {
+    write!(
+        f,
+        "VisaHop(issuer_id: {}, hop_count: {}, visa: ",
+        to_string_or(&vh.issuer_id, "(none)"),
+        to_string_or(&vh.hop_count, "(none)")
+    )?;
+    match vh.visa {
+        Some(ref v) => summarize_visa(f, v),
+        None => write!(f, "(none)"),
+    }
+}
+
 /// Attempt to surface the most critical bits of a visa.
-fn summarize_visa(f: &mut Formatter<'_>, visa: &Option<vsapi::Visa>) -> fmt::Result {
-    match visa {
-        Some(v) => {
-            let mut icmp = false;
-            let proto: String;
-            let sport: String;
-            let dport: String;
+fn summarize_visa(f: &mut Formatter<'_>, v: &vsapi::Visa) -> fmt::Result {
+    let mut icmp = false;
+    let proto: String;
+    let sport: String;
+    let dport: String;
 
-            match v.dock_pep {
-                Some(pep) => match pep {
-                    vsapi::PEPIndex::UDP | vsapi::PEPIndex::TCP => {
-                        match &v.tcpudp_pep_args {
-                            Some(args) => {
-                                sport = to_string_or(&args.source_port, "(?)");
-                                dport = to_string_or(&args.dest_port, "(?)");
-                            }
-                            None => {
-                                sport = "(none)".to_string();
-                                dport = "(none)".to_string();
-                            }
-                        }
-                        if pep == vsapi::PEPIndex::UDP {
-                            proto = "UDP".to_string();
-                        } else {
-                            proto = "TCP".to_string();
-                        }
+    match v.dock_pep {
+        Some(pep) => match pep {
+            vsapi::PEPIndex::UDP | vsapi::PEPIndex::TCP => {
+                match &v.tcpudp_pep_args {
+                    Some(args) => {
+                        sport = to_string_or(&args.source_port, "(?)");
+                        dport = to_string_or(&args.dest_port, "(?)");
                     }
-                    vsapi::PEPIndex::ICMP => {
-                        icmp = true;
-                        proto = "ICMP".to_string();
-                        match &v.icmp_pep_args {
-                            Some(args) => {
-                                sport = to_string_or(&args.icmp_type_code, "(?)");
-                                dport = "".to_string();
-                            }
-                            None => {
-                                sport = "(none)".to_string();
-                                dport = "(none)".to_string();
-                            }
-                        }
+                    None => {
+                        sport = "(none)".to_string();
+                        dport = "(none)".to_string();
                     }
-                    _ => {
-                        proto = "(invalid)".to_string();
-                        sport = "(?)".to_string();
-                        dport = "(?)".to_string();
-                    }
-                },
-                None => {
-                    proto = "(none)".to_string();
-                    sport = "(?)".to_string();
-                    dport = "(?)".to_string();
                 }
-            };
-
-            if icmp {
-                write!(
-                    f,
-                    "{} / [{}] -> [{}] type {}",
-                    proto,
-                    opt_ip_to_str(&v.source),
-                    opt_ip_to_str(&v.dest),
-                    sport
-                )
-            } else {
-                write!(
-                    f,
-                    "{} / [{}]:{} -> [{}]:{}",
-                    proto,
-                    opt_ip_to_str(&v.source),
-                    sport,
-                    opt_ip_to_str(&v.dest),
-                    dport
-                )
+                if pep == vsapi::PEPIndex::UDP {
+                    proto = "UDP".to_string();
+                } else {
+                    proto = "TCP".to_string();
+                }
             }
+            vsapi::PEPIndex::ICMP => {
+                icmp = true;
+                proto = "ICMP".to_string();
+                match &v.icmp_pep_args {
+                    Some(args) => {
+                        sport = to_string_or(&args.icmp_type_code, "(?)");
+                        dport = "".to_string();
+                    }
+                    None => {
+                        sport = "(none)".to_string();
+                        dport = "(none)".to_string();
+                    }
+                }
+            }
+            _ => {
+                proto = "(invalid)".to_string();
+                sport = "(?)".to_string();
+                dport = "(?)".to_string();
+            }
+        },
+        None => {
+            proto = "(none)".to_string();
+            sport = "(?)".to_string();
+            dport = "(?)".to_string();
         }
-        None => write!(f, "(None)"),
+    };
+
+    if icmp {
+        write!(
+            f,
+            "{}<{}>/[{}]->[{}]",
+            proto,
+            sport,
+            opt_ip_to_str(&v.source),
+            opt_ip_to_str(&v.dest)
+        )
+    } else {
+        write!(
+            f,
+            "{}/[{}]:{}->[{}]:{}",
+            proto,
+            opt_ip_to_str(&v.source),
+            sport,
+            opt_ip_to_str(&v.dest),
+            dport
+        )
     }
 }
 
