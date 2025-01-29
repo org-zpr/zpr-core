@@ -50,18 +50,20 @@ type PeerRecord struct {
 	}
 }
 
+type Ipv6Addr [16]byte
+
 type AgentDB struct {
 	sync.RWMutex
-	agents  map[netip.Addr]*HostRecord
-	watcher Watcher
+	agentsV6toHr map[Ipv6Addr]*HostRecord // Note we keep address in IPv6 format.
+	watcher      Watcher
 }
 
 func (db *AgentDB) Dump(out logr.Logger) {
 	db.RLock()
 	defer db.RUnlock()
 
-	out.Infof("===== dumping of agent database of size %d =====", len(db.agents))
-	for addr, rec := range db.agents {
+	out.Infof("===== dumping of agent database of size %d =====", len(db.agentsV6toHr))
+	for addr, rec := range db.agentsV6toHr {
 		atype := "adapter"
 		if rec.node {
 			atype = "node"
@@ -73,8 +75,8 @@ func (db *AgentDB) Dump(out logr.Logger) {
 
 func NewAgentDB(watcher Watcher) *AgentDB {
 	return &AgentDB{
-		agents:  make(map[netip.Addr]*HostRecord),
-		watcher: watcher,
+		agentsV6toHr: make(map[Ipv6Addr]*HostRecord),
+		watcher:      watcher,
 	}
 }
 
@@ -93,7 +95,7 @@ func (pr *PeerRecord) IsInSync() bool {
 func (db *AgentDB) Contains(addr netip.Addr) bool {
 	db.RLock()
 	defer db.RUnlock()
-	_, found := db.agents[addr]
+	_, found := db.agentsV6toHr[addr.As16()]
 	return found
 }
 
@@ -113,7 +115,7 @@ func (db *AgentDB) AddNode(zprAddr, tetherAddr netip.Addr, agent *agent.Agent, a
 	rec.Peer.VSSAddr = vssAddr
 
 	db.Lock()
-	db.agents[zprAddr] = &rec
+	db.agentsV6toHr[zprAddr.As16()] = &rec
 	db.Unlock()
 	db.watcher.HandleDBAgentAdded(agent)
 	return nil
@@ -132,7 +134,7 @@ func (db *AgentDB) AddAdapter(zprAddr, tetherAddr netip.Addr, agent *agent.Agent
 	}
 
 	db.Lock()
-	db.agents[zprAddr] = &rec
+	db.agentsV6toHr[zprAddr.As16()] = &rec
 	db.Unlock()
 
 	db.watcher.HandleDBAgentAdded(agent)
@@ -144,7 +146,7 @@ func (db *AgentDB) AddOrUpdateAdapter(addr, tetherAddr netip.Addr, agnt *agent.A
 		return db.AddAdapter(addr, tetherAddr, agnt)
 	}
 	db.Lock()
-	if rec, found := db.agents[addr]; found {
+	if rec, found := db.agentsV6toHr[addr.As16()]; found {
 		rec.Agent = agnt
 		rec.TetherAddr = tetherAddr
 	}
@@ -155,7 +157,8 @@ func (db *AgentDB) AddOrUpdateAdapter(addr, tetherAddr netip.Addr, agnt *agent.A
 // return true if found and deleted
 func (db *AgentDB) RemoveNode(addr netip.Addr) bool {
 	db.Lock()
-	rec, ok := db.agents[addr]
+	ipKey := addr.As16()
+	rec, ok := db.agentsV6toHr[ipKey]
 	if !ok {
 		db.Unlock()
 		return false
@@ -164,7 +167,7 @@ func (db *AgentDB) RemoveNode(addr netip.Addr) bool {
 		db.Unlock()
 		return false
 	}
-	delete(db.agents, addr)
+	delete(db.agentsV6toHr, ipKey)
 	db.Unlock()
 
 	db.watcher.HandleDBAgentRemoved(rec.Agent)
@@ -176,7 +179,8 @@ func (db *AgentDB) RemoveAdapter(addr netip.Addr) bool {
 	db.Lock()
 	db.Unlock()
 
-	rec, ok := db.agents[addr]
+	ipKey := addr.As16()
+	rec, ok := db.agentsV6toHr[ipKey]
 	if !ok {
 		db.Unlock()
 		return false
@@ -186,20 +190,21 @@ func (db *AgentDB) RemoveAdapter(addr netip.Addr) bool {
 		return false
 	}
 
-	delete(db.agents, addr)
+	delete(db.agentsV6toHr, ipKey)
 	db.Unlock()
 
 	db.watcher.HandleDBAgentRemoved(rec.Agent)
 	return true
 }
 
+// Note that any nodes that registered with IPv4 address have address returned here as Ipv4-in-IPv6.
 func (db *AgentDB) GetNodeList() []netip.Addr {
 	db.RLock()
 	defer db.RUnlock()
 	var list []netip.Addr
-	for addr, rec := range db.agents {
+	for addr, rec := range db.agentsV6toHr {
 		if rec.node {
-			list = append(list, addr)
+			list = append(list, netip.AddrFrom16(addr))
 		}
 	}
 	return list
@@ -214,7 +219,7 @@ func (db *AgentDB) AgentAtContactAddr(addr netip.Addr) (*agent.Agent, error) {
 		addr = netip.AddrFrom16(addr.As16())
 	}
 
-	rec, ok := db.agents[addr]
+	rec, ok := db.agentsV6toHr[addr.As16()]
 	if !ok {
 		return nil, fmt.Errorf("agent %s not found", addr)
 	}
@@ -225,7 +230,7 @@ func (db *AgentDB) DisableAPIKey(addr netip.Addr) {
 	db.Lock()
 	defer db.Unlock()
 
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.Peer != nil {
 			rec.Peer.APIKey = ""
 		}
@@ -236,7 +241,7 @@ func (db *AgentDB) GetPeerRecord(addr netip.Addr) *PeerRecord {
 	db.RLock()
 	defer db.RUnlock()
 
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node {
 			return rec.Peer
 		}
@@ -247,7 +252,7 @@ func (db *AgentDB) GetPeerRecord(addr netip.Addr) *PeerRecord {
 func (db *AgentDB) SetNodeContactTime(addr netip.Addr, t time.Time) {
 	db.Lock()
 	defer db.Unlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			rec.Peer.LastContactTime = t
 		}
@@ -257,7 +262,7 @@ func (db *AgentDB) SetNodeContactTime(addr netip.Addr, t time.Time) {
 func (db *AgentDB) GetNodeLastContact(addr netip.Addr) (time.Time, bool) {
 	db.RLock()
 	defer db.RUnlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			return rec.Peer.LastContactTime, true
 		}
@@ -268,7 +273,7 @@ func (db *AgentDB) GetNodeLastContact(addr netip.Addr) (time.Time, bool) {
 func (db *AgentDB) DrainPending(addr netip.Addr) []*PushItem {
 	db.Lock()
 	defer db.Unlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			return rec.Peer.pending.Drain()
 		}
@@ -280,7 +285,7 @@ func (db *AgentDB) DrainPending(addr netip.Addr) []*PushItem {
 func (db *AgentDB) IncrNodeConnectReq(addr netip.Addr) {
 	db.Lock()
 	defer db.Unlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			rec.Peer.ConnectRequestsCount++
 			rec.Peer.LastContactTime = time.Now()
@@ -292,7 +297,7 @@ func (db *AgentDB) IncrNodeConnectReq(addr netip.Addr) {
 func (db *AgentDB) IncrNodeVisaReq(addr netip.Addr) {
 	db.Lock()
 	defer db.Unlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			rec.Peer.VisaRequestsCount++
 			rec.Peer.LastContactTime = time.Now()
@@ -303,7 +308,7 @@ func (db *AgentDB) IncrNodeVisaReq(addr netip.Addr) {
 func (db *AgentDB) IsNode(addr netip.Addr) bool {
 	db.RLock()
 	defer db.RUnlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		return rec.node
 	}
 	return false
@@ -312,7 +317,7 @@ func (db *AgentDB) IsNode(addr netip.Addr) bool {
 func (db *AgentDB) GetNodeVSSAddr(addr netip.Addr) string {
 	db.RLock()
 	defer db.RUnlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			return rec.Peer.VSSAddr
 		}
@@ -323,7 +328,7 @@ func (db *AgentDB) GetNodeVSSAddr(addr netip.Addr) string {
 func (db *AgentDB) BufferItemsForNode(addr netip.Addr, items []*PushItem) {
 	db.Lock()
 	defer db.Unlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			for _, item := range items {
 				rec.Peer.pending.Push(item)
@@ -337,7 +342,7 @@ func (db *AgentDB) BufferItemsForNode(addr netip.Addr, items []*PushItem) {
 func (db *AgentDB) TestAndSetUpdating(addr netip.Addr, expected, newValue bool) (bool, bool) {
 	db.Lock()
 	defer db.Unlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			if rec.Peer.State.Updating == expected {
 				rec.Peer.State.Updating = newValue
@@ -350,25 +355,27 @@ func (db *AgentDB) TestAndSetUpdating(addr netip.Addr, expected, newValue bool) 
 	return false, false // not node or not found
 }
 
+// Note that node returned addresses here will have all been converted to IPv6.
 func (db *AgentDB) GetOutOfSyncNonUpdatingNodes() []netip.Addr {
 	db.RLock()
 	defer db.RUnlock()
 	var nodes []netip.Addr
-	for addr, rec := range db.agents {
+	for addrv6, rec := range db.agentsV6toHr {
 		if rec.node && rec.Peer != nil && !rec.Peer.State.Updating && !rec.Peer.IsInSync() {
-			nodes = append(nodes, addr)
+			nodes = append(nodes, netip.AddrFrom16(addrv6))
 		}
 	}
 	return nodes
 }
 
+// Note that node returned addresses here will have all been converted to IPv6.
 func (db *AgentDB) GetNodesWithPending() []netip.Addr {
 	db.RLock()
 	defer db.RUnlock()
 	var nodes []netip.Addr
-	for addr, rec := range db.agents {
+	for addrv6, rec := range db.agentsV6toHr {
 		if rec.node && rec.Peer != nil && rec.Peer.pending.Size() > 0 {
-			nodes = append(nodes, addr)
+			nodes = append(nodes, netip.AddrFrom16(addrv6))
 		}
 	}
 	return nodes
@@ -377,7 +384,7 @@ func (db *AgentDB) GetNodesWithPending() []netip.Addr {
 func (db *AgentDB) IsNodeUpdating(naddr netip.Addr) bool {
 	db.RLock()
 	defer db.RUnlock()
-	if rec, ok := db.agents[naddr]; ok {
+	if rec, ok := db.agentsV6toHr[naddr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			return rec.Peer.State.Updating
 		}
@@ -388,7 +395,7 @@ func (db *AgentDB) IsNodeUpdating(naddr netip.Addr) bool {
 func (db *AgentDB) IsNodeInSync(naddr netip.Addr) bool {
 	db.RLock()
 	defer db.RUnlock()
-	if rec, ok := db.agents[naddr]; ok {
+	if rec, ok := db.agentsV6toHr[naddr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			return rec.Peer.IsInSync()
 		}
@@ -399,7 +406,7 @@ func (db *AgentDB) IsNodeInSync(naddr netip.Addr) bool {
 func (db *AgentDB) SetPeerDesiredPolicyState(addr netip.Addr, policyVer, configID uint64) bool {
 	db.Lock()
 	defer db.Unlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			rec.Peer.State.WantConfigID = configID
 			rec.Peer.State.WantPolicyVer = policyVer
@@ -412,7 +419,7 @@ func (db *AgentDB) SetPeerDesiredPolicyState(addr netip.Addr, policyVer, configI
 func (db *AgentDB) SetPeerLastPolicyState(addr netip.Addr, policyVer, configID uint64) bool {
 	db.Lock()
 	defer db.Unlock()
-	if rec, ok := db.agents[addr]; ok {
+	if rec, ok := db.agentsV6toHr[addr.As16()]; ok {
 		if rec.node && rec.Peer != nil {
 			rec.Peer.State.LastPushConfigID = configID
 			rec.Peer.State.LastPushPolicyVer = policyVer
