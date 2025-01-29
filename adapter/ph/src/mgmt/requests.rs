@@ -56,8 +56,6 @@ pub async fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<(
         core::count_event(asm, &mut echo, CounterType::BadStructure);
         return Err(SyncReqError::ProtocolError);
     };
-    asm.buffer_stack
-        .put_buffer(echo.destroy().try_into().unwrap());
     Ok(())
 }
 
