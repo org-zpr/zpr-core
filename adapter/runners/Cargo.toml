@@ -1,0 +1,10 @@
+[package]
+name = "runners"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.27", features = ["derive"] }
+nix = { version = "0.29.0", features = ["user"] }
+thiserror = "2.0.11"
+toml = "0.8.19"
