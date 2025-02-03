@@ -356,7 +356,6 @@ impl PolicyBuilder {
         let mut proc = Vec::new();
 
         // Args for register are (NAME:String, Type:SvcT, ENDPOINTS:String)
-        //
         let mut args = Vec::new();
 
         args.push(polio::Argument {
