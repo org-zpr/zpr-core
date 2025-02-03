@@ -2,9 +2,11 @@
 
 Wrapper programs to make it easy to launch a node or adapter.
 
-The only benfit to using these over the `ph` binary is that these set up
-the local TUN inteface for you.
+These take care of setting up the TUN interface (but do not tear it down), as
+well as ensuring that the path for the control socket is created.
 
+Although you need to run these as root, they drop root before starting
+the packet handler. 
 
 
 ## Usage
@@ -23,5 +25,6 @@ where the binary is:
 sudo ./node -c mynode.toml /path/to/ph
 ```
 
-Usage is the same for the `adapter` wrapper.
+Usage is the same for the `adapter` wrapper.  Pass `--help` for help.
+
 
