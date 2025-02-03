@@ -1,4 +1,7 @@
-use nix::unistd::Uid;
+use nix::sys::stat;
+use nix::unistd::{self, Gid, Uid};
+use users::get_user_by_name;
+
 use std::net::IpAddr;
 use std::os::unix::process::CommandExt;
 use std::process::Command;
@@ -17,6 +20,91 @@ impl Platform for LinuxPlatform {
     // TODO: in future could have code to find an unused tun
     fn get_tun_ifname(&self) -> String {
         DEFAULT_TUN_NAME.to_string()
+    }
+
+    fn set_control_dir_owner_and_perms(
+        &self,
+        ctrl_path: &std::path::PathBuf,
+        username: &str,
+        dry_run: bool,
+    ) -> Result<(), PlatformErr> {
+        match get_user_by_name(username) {
+            None => {
+                return Err(PlatformErr::OsError(format!("user {} not found", username)));
+            }
+            Some(user) => {
+                if dry_run {
+                    println!(
+                        "chown {}:{} {}",
+                        user.uid(),
+                        user.primary_group_id(),
+                        ctrl_path.display()
+                    );
+                } else {
+                    unistd::chown(
+                        ctrl_path,
+                        Some(Uid::from_raw(user.uid())),
+                        Some(Gid::from_raw(user.primary_group_id())),
+                    )
+                    .map_err(|e| PlatformErr::OsError(format!("chown failed: {}", e)))?;
+                }
+            }
+        };
+
+        // Now set perm to 775
+        if dry_run {
+            println!("chmod 775 {}", ctrl_path.display());
+            return Ok(());
+        }
+
+        let dirfd = nix::fcntl::open(
+            ctrl_path,
+            nix::fcntl::OFlag::O_DIRECTORY,
+            nix::sys::stat::Mode::S_IRWXU,
+        )
+        .map_err(|e| PlatformErr::OsError(format!("open failed on {:?}: {}", ctrl_path, e)))?;
+
+        stat::fchmod(
+            dirfd,
+            stat::Mode::S_IRWXU | stat::Mode::S_IRWXG | stat::Mode::S_IROTH | stat::Mode::S_IXOTH,
+        )
+        .map_err(|e| PlatformErr::OsError(format!("fchmod failed: {}", e)))?;
+        Ok(())
+    }
+
+    fn drop_privledges(&self, username: &str, dry_run: bool) -> Result<(), PlatformErr> {
+        let user = get_user_by_name(username)
+            .ok_or(PlatformErr::OsError(format!("user {} not found", username)))?;
+        if dry_run {
+            println!("setgid {} setuid {}", user.primary_group_id(), user.uid());
+            for grp in user.groups().unwrap() {
+                if grp.gid() == user.primary_group_id() {
+                    continue;
+                }
+                println!(
+                    "  supplimentary group {} ({})",
+                    grp.name().to_str().unwrap(),
+                    grp.gid()
+                );
+            }
+            return Ok(());
+        }
+        // In virtual box (at least) it is critical to set the supplimentary groups
+        // since the whole filesystem may require membership in special `vboxsf` group.
+        unistd::setgroups(
+            &user
+                .groups()
+                .unwrap()
+                .iter()
+                .map(|g| Gid::from_raw(g.gid()))
+                .collect::<Vec<Gid>>(),
+        )
+        .map_err(|e| PlatformErr::OsError(format!("setgroups failed: {}", e)))?;
+        unistd::setgid(Gid::from_raw(user.primary_group_id()))
+            .map_err(|e| PlatformErr::OsError(format!("setgid failed: {}", e)))?;
+        unistd::setuid(Uid::from_raw(user.uid()))
+            .map_err(|e| PlatformErr::OsError(format!("setuid failed: {}", e)))?;
+        Ok(())
     }
 
     fn is_tun_exist(&self, tun_name: &str) -> bool {

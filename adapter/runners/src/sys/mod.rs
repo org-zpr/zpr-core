@@ -33,6 +33,18 @@ pub trait Platform {
     /// Check if a TUN interface with the given name exists.
     fn is_tun_exist(&self, tun_name: &str) -> bool;
 
+    /// The control directory holds the control socket for the ph.
+    /// This function sets the owner and permissions on the control directory.
+    fn set_control_dir_owner_and_perms(
+        &self,
+        ctrl_path: &PathBuf,
+        username: &str,
+        dry_run: bool,
+    ) -> Result<(), PlatformErr>;
+
+    /// Drop root privledges by switching to the given OS user.
+    fn drop_privledges(&self, username: &str, dry_run: bool) -> Result<(), PlatformErr>;
+
     /// Create a TUN interface with the given name, IP address, mask, and MTU.
     fn create_tun(
         &self,

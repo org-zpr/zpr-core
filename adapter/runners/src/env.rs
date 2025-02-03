@@ -13,6 +13,17 @@ use crate::zpr;
 pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
     let rdr = ConfigRdr::new(config)?;
 
+    // Maybe in the future we will have user and group info in the
+    // config file.  Here we assume we are operating under sudo.
+    let run_as_user = match std::env::var("SUDO_USER") {
+        Ok(user) => user,
+        Err(_) => {
+            return Err(LaunchErr::PCError(PCErr::KeyError(
+                "unable to determine run-as user: SUDO_USER not set".to_string(),
+            )))
+        }
+    };
+
     // The control_path parent directories must exist. This can be set in the
     // config, or there is a default.
     let ctrl_path =
@@ -26,6 +37,7 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
     } else {
         fs::create_dir_all(&ctrl_path)?;
     }
+    sys::get_platform().set_control_dir_owner_and_perms(&ctrl_path, &run_as_user, dry_run)?;
 
     let node_addr_str = rdr.must_get_config_str_value_for_key(zpr::AGENT_ADDR_KEY)?;
     let node_addr = node_addr_str.parse::<IpAddr>().or(Err(PCErr::KeyError(
@@ -56,6 +68,13 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
         // Create the tun interface, assign addresses etc.
         sys::get_platform().create_tun(&tun_name, node_addr, mask, zpr::TUN_MTU, dry_run)?;
     }
+
+    // Now drop root permissions.
+    println!(
+        "dropping root permissions, switching to user {}",
+        run_as_user
+    );
+    sys::get_platform().drop_privledges(&run_as_user, dry_run)?;
 
     Ok(())
 }
