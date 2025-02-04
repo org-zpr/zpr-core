@@ -6,7 +6,7 @@
 use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncWrite, AsyncWriteExt, BufWriter};
-use zerocopy::{Immutable, IntoBytes, KnownLayout};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 /// Represents an open PCAP writer.
 pub struct PcapWriter<W: AsyncWrite> {
@@ -34,16 +34,30 @@ struct PcapHdr {
     network: u32,
 }
 
-#[derive(IntoBytes, Immutable, KnownLayout)]
+#[derive(Clone, Copy, FromBytes, IntoBytes, Immutable, KnownLayout)]
 #[repr(C)]
-struct PcaprecHdr {
+pub struct PcaprecHdr {
     ts_sec: u32,
     ts_usec: u32,
     incl_len: u32,
     orig_len: u32,
 }
 
+impl PcaprecHdr {
+    pub fn new(timestamp: SystemTime, incl_len: usize, orig_len: usize) -> Self {
+        let ts = timestamp.duration_since(UNIX_EPOCH).unwrap_or_default();
+
+        Self {
+            ts_sec: ts.as_secs() as u32,
+            ts_usec: ts.subsec_micros() as u32,
+            incl_len: std::cmp::min(incl_len, u32::MAX as usize) as u32,
+            orig_len: std::cmp::min(orig_len, u32::MAX as usize) as u32,
+        }
+    }
+}
+
 /// A packet to be written out.
+#[allow(dead_code)]
 pub struct PcapPacket<'a> {
     pub timestamp: SystemTime,
     pub orig_len: usize,
@@ -107,30 +121,44 @@ impl<W: AsyncWrite + Unpin> PcapWriter<W> {
     }
 
     /// Write a packet to the PCAP writer.
+    #[allow(dead_code)]
     pub async fn write(&mut self, packet: &PcapPacket<'_>) -> io::Result<()> {
-        if packet.data.len() > MAX_SNAPLEN {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "packet too large",
-            ));
-        }
+        self.write_preformatted(
+            &PcaprecHdr::new(packet.timestamp, packet.data.len(), packet.orig_len),
+            &packet.data,
+        )
+        .await
+    }
 
-        let ts = packet
-            .timestamp
-            .duration_since(UNIX_EPOCH)
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+    /// Write a packet to the PCAP writer, with preformatted header.
+    ///
+    /// If `data` is longer than `hdr.incl_len`, it will be truncated.
+    /// If `data` is shorter than `hdr.incl_len`, `incl_len` will be adjusted to match.
+    pub async fn write_preformatted(&mut self, hdr: &PcaprecHdr, data: &[u8]) -> io::Result<()> {
+        let data_len_u32 = std::cmp::min(data.len(), u32::MAX as usize) as u32;
 
         let hdr = PcaprecHdr {
-            ts_sec: ts.as_secs() as u32,
-            ts_usec: ts.subsec_micros() as u32,
-            incl_len: packet.data.len() as u32,
-            orig_len: packet.orig_len as u32,
+            incl_len: std::cmp::min(hdr.incl_len, data_len_u32),
+            ..*hdr
         };
 
         self.writer.write_all(hdr.as_bytes()).await?;
-        self.writer.write_all(packet.data).await?;
+        self.writer.write_all(&data[..hdr.incl_len as usize]).await
+    }
 
-        Ok(())
+    /// Write a raw PCAP packet to the PCAP writer.
+    ///
+    /// The first 16 bytes of `pcap_data` should be a `PcaprecHdr`.
+    /// The remainder should be the packet to be recorded.
+    ///
+    /// `incl_len` and the packet data length are adjusted as per
+    /// `write_preformatted()`.
+    pub async fn write_raw(&mut self, pcap_data: &[u8]) -> io::Result<()> {
+        let Ok((hdr, data)) = PcaprecHdr::ref_from_prefix(pcap_data) else {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "bad pcap data"));
+        };
+
+        self.write_preformatted(hdr, data).await
     }
 
     pub async fn flush(&mut self) -> io::Result<()> {

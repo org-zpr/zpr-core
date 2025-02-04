@@ -78,6 +78,7 @@ pub struct TopologyConfig {
     pub agent_output_batch_size: usize,
     pub capture_batch_size: usize,
 
+    #[allow(dead_code)] // see TODO in main
     pub capture_queue_size: usize,
     pub mgmt_dispatch_queue_size: usize,
     pub adapter_manager_queue_size: usize,

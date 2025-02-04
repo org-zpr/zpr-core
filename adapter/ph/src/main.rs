@@ -155,7 +155,8 @@ fn main() -> ExitCode {
     let buf_storage =
         vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; topology_config.buffer_count];
 
-    let (cap_inq, cap_outq) = mpsc::channel(topology_config.capture_queue_size);
+    // TODO: use get/setsockopt(SO_SNDBUF) to ensure we can buffer `capture_queue_size` packets
+    let (cap_inq, cap_outq) = std::os::unix::net::UnixDatagram::pair().unwrap();
     let (md_inq, md_outq) = two_way_queue::two_way_queue(topology_config.mgmt_dispatch_queue_size);
     let (am_inq, am_outq) =
         two_way_queue::two_way_queue(topology_config.adapter_manager_queue_size);
@@ -426,12 +427,13 @@ fn main() -> ExitCode {
         ));
     }
 
+    cap_outq.set_nonblocking(true).unwrap();
     js.spawn(capture_worker::launch(
         capture_worker::Config {
             batch_size: asm.topology_config.capture_batch_size,
         },
         asm.clone(),
-        cap_outq,
+        tokio::net::UnixDatagram::from_std(cap_outq).unwrap(),
     ));
 
     if ph_mode == PhMode::Node {

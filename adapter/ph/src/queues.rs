@@ -6,6 +6,7 @@ use crate::sys::TunPi;
 use crate::sys::ZprTun;
 use crate::test_packet::*;
 use crate::two_way_queue;
+use bytes::Buf;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::result::Result;
@@ -18,7 +19,7 @@ use tokio::sync::oneshot::error::RecvError;
 use zpr;
 use zpr_ext::std::mem::DropGuard;
 
-pub enum TryEnqueueError<T> {
+pub enum TryEnqueueError<T = ()> {
     Full(T),
 }
 
@@ -238,48 +239,58 @@ impl AgentOutputRequeue {
 }
 
 /// Capture will intercept packets in the PH and dump them into a file for debugging purposes
-pub struct CapPacket {
-    pub packet: Packet,
-    pub timestamp: SystemTime,
-    pub orig_len: usize,
-}
-
 pub struct Capture {
-    sender: mpsc::Sender<CapPacket>,
+    sender: std::os::unix::net::UnixDatagram,
 }
 
 impl Capture {
-    pub fn new(sender: mpsc::Sender<CapPacket>) -> Self {
+    pub fn new(sender: std::os::unix::net::UnixDatagram) -> Self {
+        sender.set_nonblocking(true).unwrap();
         Self { sender }
     }
 
-    /// Blocks until packet is enqueued
-    #[allow(dead_code)]
-    pub async fn enqueue_packet(&self, packet: Packet, timestamp: SystemTime, orig_len: usize) {
-        let cap_pack: CapPacket = CapPacket {
-            packet,
-            timestamp,
-            orig_len,
-        };
-        self.sender.send(cap_pack).await.unwrap();
-    }
-
-    /// Does not block
+    /// Try to send a packet to the capture system.
+    /// Only `incl_len` bytes will be captured.  (If this is larger than the
+    /// actual packet length, it is reduced accordingly.)
+    /// Does not block.
+    ///
+    /// NOTE: requires mut reference to the packet, but the packet is
+    /// materially unchanged.  Simply, a 16-byte header is briefly added to
+    /// and then removed from it.
     pub fn try_enqueue_packet(
         &self,
-        packet: Packet,
+        packet: &mut Packet,
         timestamp: SystemTime,
-        orig_len: usize,
-    ) -> Result<(), TryEnqueueError<Packet>> {
-        let cap_pack: CapPacket = CapPacket {
-            packet,
-            timestamp,
-            orig_len,
-        };
-        match self.sender.try_send(cap_pack) {
-            Ok(()) => Ok(()),
-            Err(TrySendError::Closed(_)) => panic!("capture channel closed"),
-            Err(TrySendError::Full(cap_pack)) => Err(TryEnqueueError::Full(cap_pack.packet)),
+        incl_len: usize,
+    ) -> Result<(), TryEnqueueError> {
+        let incl_len = std::cmp::min(incl_len, packet.remaining());
+
+        let hdr = crate::pcap_writer::PcaprecHdr::new(timestamp, incl_len, packet.remaining());
+
+        // temporarily add header
+        // TODO: instead of requiring a &mut Packet,
+        // we can instead accept any &[u8] and use vectored send
+        // once we it becomes stable
+        packet.push_header(&hdr);
+
+        // does not block, as we've set O_NONBLOCK in `new()`
+        let res = self.sender.send(
+            &packet.body()[..std::mem::size_of::<crate::pcap_writer::PcaprecHdr>() + incl_len],
+        );
+
+        // remove temporary header
+        packet.advance(std::mem::size_of::<crate::pcap_writer::PcaprecHdr>());
+
+        match res {
+            Ok(_) => Ok(()),
+
+            Err(err) => match err.kind() {
+                ErrorKind::WouldBlock => Err(TryEnqueueError::Full(())),
+                ErrorKind::ConnectionRefused | ErrorKind::BrokenPipe => {
+                    panic!("capture channel closed")
+                }
+                _ => panic!("unrecoverable I/O error: {}", err),
+            },
         }
     }
 }

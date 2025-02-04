@@ -71,57 +71,27 @@ pub fn maybe_capture_batch<'a>(
 
     let mut pkts_iter = pkts.into_iter();
 
-    // Preallocate buffers according to size hint.
-    let desired_bufs = pkts_iter.size_hint().0;
-    let mut bufs = Vec::new();
-    let acquired_bufs = asm.buffer_stack.try_get_buffers(desired_bufs, &mut bufs);
-    // If we got shortchanged, don't bother later checking again.
-    let out_of_bufs = acquired_bufs < desired_bufs;
-
     for pkt in &mut pkts_iter {
-        // Clones packet into capture queue after adding direction to beginning of packet
+        // Copies packet body into capture queue after adding direction to beginning of packet
         let ll_hdr = pkt.alloc_zeroed_header::<zdp_ll::ZdpLinkP2P>();
         ll_hdr.direction = zdp_ll::encode_direction(dir);
 
         // FIXME: ideally, take an RCU reference to the program once on function entry
         let caplen = asm.flow_control.check_packet(pkt.body()) as usize;
         if caplen > 0 {
-            match bufs.pop().or_else(|| {
-                if out_of_bufs {
-                    None
-                } else {
-                    asm.buffer_stack.try_get_buffer()
-                }
-            }) {
-                Some(buf) => {
-                    let orig_len = pkt.body().len();
-                    let pkt_clone: Packet =
-                        pkt.clone_prefix_into(buf, std::cmp::min(caplen, orig_len));
-                    // remove direction indicator from beginning of packet
-                    pkt.advance(std::mem::size_of::<zdp_ll::ZdpLinkP2P>());
+            let res = asm
+                .capture_queue
+                .try_enqueue_packet(pkt, capture_time, caplen);
 
-                    // Checks to see if the packet enqueue was successful
-                    match asm
-                        .capture_queue
-                        .try_enqueue_packet(pkt_clone, capture_time, orig_len)
-                    {
-                        Ok(()) => num_captured += 1,
+            // remove direction indicator from beginning of packet
+            pkt.advance(std::mem::size_of::<zdp_ll::ZdpLinkP2P>());
 
-                        Err(TryEnqueueError::Full(ret_packet)) => {
-                            asm.buffer_stack
-                                .put_buffer(ret_packet.destroy().try_into().unwrap());
-                            // No sense to try enqueuing more packets; exit the loop early.
-                            break;
-                        }
-                    };
-                }
+            // Checks to see if the packet enqueue was successful
+            match res {
+                Ok(()) => num_captured += 1,
 
-                None => {
-                    // remove direction indicator from beginning of packet
-                    pkt.advance(std::mem::size_of::<zdp_ll::ZdpLinkP2P>());
-                    // No sense to try acquiring more buffers; exit the loop early.
-                    break;
-                }
+                // No sense to try enqueuing more packets; exit the loop early.
+                Err(TryEnqueueError::Full(())) => break,
             }
         } else {
             num_filtered += 1;
@@ -132,10 +102,6 @@ pub fn maybe_capture_batch<'a>(
 
     // If we exited early, there are remaining packets we won't be capturing.
     let num_dropped = pkts_iter.count();
-
-    // Return any remaining buffers.
-    asm.buffer_stack
-        .put_buffers(bufs.into_iter().map(|buf| buf.try_into().unwrap()));
 
     match dir {
         Direction::Inbound => {

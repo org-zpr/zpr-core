@@ -356,7 +356,7 @@ pub mod test {
             .unwrap_or_else(|| AgentOutputRequeue::new(Vec::new()));
         let vsconn = builder.vsconn.unwrap_or(None);
         let capture_queue = builder.capture_queue.unwrap_or_else(|| {
-            let (cq_inq, _cq_outq) = mpsc::channel(1);
+            let (cq_inq, _cq_outq) = std::os::unix::net::UnixDatagram::pair().unwrap();
             Capture::new(cq_inq)
         });
         let capture_worker = builder
