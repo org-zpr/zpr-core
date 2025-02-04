@@ -16,6 +16,7 @@ import (
 	"zpr.org/vs/pkg/logr"
 
 	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
 
 	"zpr.org/vsx/polio"
@@ -233,7 +234,32 @@ func (s *VisaService) installPolicyFromFile(fname string, pubkey *rsa.PublicKey)
 	return s.doInstallPolicy(cp)
 }
 
+// Implements an interface needed by the admin service.
+func (s *VisaService) ListVisas() []*VisaDescriptor {
+	// Reach into the vsinst and rifle through the visas creating visa descriptors.
+	var descriptors []*VisaDescriptor
+	s.service.inst.vtable.mtx.RLock()
+	defer s.service.inst.vtable.mtx.RUnlock()
+	for issuerID, vtEnt := range s.service.inst.vtable.table {
+		srcAddr, _ := netip.AddrFromSlice(vtEnt.v.Source)
+		dstAddr, _ := netip.AddrFromSlice(vtEnt.v.Dest)
+		descriptors = append(descriptors, &VisaDescriptor{
+			ID:      uint64(issuerID),
+			Expires: uint64(vtEnt.v.Expires),
+			Source:  srcAddr.String(),
+			Dest:    dstAddr.String(),
+		})
+	}
+	return descriptors
+}
+
+// Implements an interface needed by the admin service.
+func (s *VisaService) ListAdapters() []*adb.HostRecordBrief {
+	return s.service.inst.agentDB.CloneToBrief()
+}
+
 // InstallPolicy is for installing a policy supplied by an admin through our admin-service.
+// Implements an interface needed by the admin service
 //
 // Returns (version, config_id, error)
 func (s *VisaService) InstallPolicy(cp *polio.ContainedPolicy) (string, uint64, error) {

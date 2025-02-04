@@ -17,6 +17,7 @@ import (
 	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/vservice/adb"
 
 	"zpr.org/vsx/polio"
 )
@@ -36,10 +37,20 @@ type PolicyBundle struct {
 	Container string `json:"container"` // base-64 encoded, zlib compressed PolicyContainer
 }
 
+type VisaDescriptor struct {
+	// TODO: Might be nice to have a create time here.
+	ID      uint64 `json:"id"`
+	Expires uint64 `json:"expires"`
+	Source  string `json:"source"`
+	Dest    string `json:"dest"`
+}
+
 // Visa Service API that admin service needs to do its job.
 type VSApi interface {
 	GetPolicyAndConfig() (*policy.Policy, uint64)
 	InstallPolicy(*polio.ContainedPolicy) (string, uint64, error) // returns (version, config_id, error)
+	ListVisas() []*VisaDescriptor
+	ListAdapters() []*adb.HostRecordBrief
 }
 
 type AdminService struct {
@@ -74,6 +85,10 @@ func (svc *AdminService) StartAdminService(listenAddr netip.Addr, port int) erro
 	router.HandleFunc("/admin/policies", svc.handleListPolicies).Methods("GET")
 	router.HandleFunc("/admin/policy/{config_id}/current", svc.handleGetCurrentPolicy).Methods("GET")
 	router.HandleFunc("/admin/policy", svc.handleInstallPolicy).Methods("POST")
+	router.HandleFunc("/admin/visas", svc.handleListVisas).Methods("GET")
+	router.HandleFunc("/admin/visas/{ID}", svc.handleRevokeVisaByID).Methods("DELETE")
+	router.HandleFunc("/admin/agents", svc.handleListAgents).Methods("GET")
+	router.HandleFunc("/admin/agents/{CN}", svc.handleRevokeAgentByCN).Methods("DELETE")
 
 	addrPort := netip.AddrPortFrom(listenAddr, uint16(port))
 	server := http.Server{
@@ -218,4 +233,48 @@ func (svc *AdminService) handleInstallPolicy(w http.ResponseWriter, r *http.Requ
 	}
 	w.Header().Add("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(entry)
+}
+
+func (svc *AdminService) handleListVisas(w http.ResponseWriter, r *http.Request) {
+	// TODO: Possibly can add more info to each visa record. Like when created, when expires, agents involved?
+	visaIDList := svc.vsi.ListVisas()
+	if visaIDList == nil {
+		visaIDList = []*VisaDescriptor{} // return an empty array, not an empty body.
+	}
+	w.Header().Add("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(visaIDList)
+}
+
+func (svc *AdminService) handleListAgents(w http.ResponseWriter, r *http.Request) {
+	adapterList := svc.vsi.ListAdapters()
+	if adapterList == nil {
+		adapterList = []*adb.HostRecordBrief{} // return an empty array, not an empty body.
+	}
+	w.Header().Add("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(adapterList)
+}
+
+func (svc *AdminService) handleRevokeVisaByID(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	visaIDStr := params["ID"]
+	visaID := uint64(0)
+	if n, err := fmt.Sscanf(visaIDStr, "%d", &visaID); err != nil || n != 1 {
+		http.Error(w, "invalid visa ID", http.StatusBadRequest)
+		return
+	}
+	revokeResp := "not implemented"
+	w.Header().Add("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(revokeResp)
+}
+
+func (svc *AdminService) handleRevokeAgentByCN(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	cn := params["CN"]
+	if cn == "" {
+		http.Error(w, "invalid adapter CN", http.StatusBadRequest)
+		return
+	}
+	revokeResp := "not implemented"
+	w.Header().Add("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(revokeResp)
 }

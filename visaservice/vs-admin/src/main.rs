@@ -1,5 +1,6 @@
+use apitypes::HostRecordBrief;
 use base64::prelude::*;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use colored::Colorize;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -13,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod apitypes;
-use apitypes::{PolicyBundle, PolicyListEntry, PolicyVersion};
+use apitypes::{PolicyBundle, PolicyListEntry, PolicyVersion, VisaDescriptor};
 
 // Somewhat inconveniently, this must match the setting in:
 // - visaservice/mods/polio/const.go (used by the "new" visa service)
@@ -47,6 +48,33 @@ enum SubCmd {
         #[arg(short, long, value_name = "POLICY_FILE")]
         policy: PathBuf,
     },
+
+    /// Revoke a visa by ID or an adapter's access by CN.
+    #[command()]
+    Revoke {
+        #[command(flatten)]
+        arg: RevokeArg,
+    },
+
+    /// List visas
+    #[command()]
+    Visas,
+
+    /// List agents
+    #[command()]
+    Agents,
+}
+
+#[derive(Args)]
+#[group(required = true, multiple = false)]
+struct RevokeArg {
+    /// Revoke a visa ID
+    #[arg(long)]
+    visa_id: Option<u64>,
+
+    /// Revoke access to a given adapter CN
+    #[arg(long)]
+    agent_cn: Option<String>,
 }
 
 fn main() {
@@ -67,6 +95,33 @@ fn main() {
                 eprintln!("{} {}", "Error: ".red(), e);
             }
         },
+        Some(SubCmd::Revoke { arg }) if arg.agent_cn.is_some() => {
+            revoke_cn(&args.svc_url, ca_cert, arg.agent_cn.unwrap()).unwrap_or_else(|e| {
+                eprintln!("{} {}", "Error: ".red(), e);
+            });
+        }
+        Some(SubCmd::Revoke { arg }) if arg.visa_id.is_some() => {
+            revoke_visa_id(&args.svc_url, ca_cert, arg.visa_id.unwrap()).unwrap_or_else(|e| {
+                eprintln!("{} {}", "Error: ".red(), e);
+            });
+        }
+        Some(SubCmd::Revoke { arg: _ }) => {
+            eprintln!(
+                "{} {}",
+                "Error: ".red(),
+                "No adapter CN or visa ID specified"
+            );
+        }
+        Some(SubCmd::Visas) => {
+            list_visas(&args.svc_url, ca_cert).unwrap_or_else(|e| {
+                eprintln!("{} {}", "Error: ".red(), e);
+            });
+        }
+        Some(SubCmd::Agents) => {
+            list_agents(&args.svc_url, ca_cert).unwrap_or_else(|e| {
+                eprintln!("{} {}", "Error: ".red(), e);
+            });
+        }
         None => {
             println!("{}", "No command specified".red());
         }
@@ -188,6 +243,92 @@ fn install(
         "VERSION:".bold(),
         PolicyVersion::new(&entry.version)
     );
+    Ok(())
+}
+
+fn revoke_cn(
+    _api_url: &str,
+    _cert: Certificate,
+    _adapter_cn: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    Err("Not implemented".into())
+}
+
+fn revoke_visa_id(
+    _api_url: &str,
+    _cert: Certificate,
+    _visa_id: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    Err("Not implemented".into())
+}
+
+fn list_visas(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error::Error>> {
+    let cb = reqwest::blocking::ClientBuilder::new()
+        .add_root_certificate(cert)
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_secs(10));
+    let client = cb.build()?;
+
+    let resp = client.get(format!("{}/admin/visas", api_url)).send()?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "error (status {:?}:{}) : {}",
+            resp.status(),
+            reason_for(resp.status()),
+            resp.text()?
+        )
+        .into());
+    }
+
+    let entries: Vec<VisaDescriptor> = resp.json()?;
+
+    println!(
+        "{}",
+        format!(
+            "🐎 found {} installed visa{}",
+            entries.len(),
+            if entries.len() == 1 { "" } else { "s" }
+        )
+        .magenta()
+    );
+    for vd in entries {
+        println!("  - {}", vd);
+    }
+    Ok(())
+}
+
+fn list_agents(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error::Error>> {
+    let cb = reqwest::blocking::ClientBuilder::new()
+        .add_root_certificate(cert)
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_secs(10));
+    let client = cb.build()?;
+
+    let resp = client.get(format!("{}/admin/agents", api_url)).send()?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "error (status {:?}:{}) : {}",
+            resp.status(),
+            reason_for(resp.status()),
+            resp.text()?
+        )
+        .into());
+    }
+
+    let entries: Vec<HostRecordBrief> = resp.json()?;
+
+    println!(
+        "{}",
+        format!(
+            "🐎 found {} agent{}",
+            entries.len(),
+            if entries.len() == 1 { "" } else { "s" }
+        )
+        .magenta()
+    );
+    for hr in entries {
+        println!("  - {}", hr);
+    }
     Ok(())
 }
 
