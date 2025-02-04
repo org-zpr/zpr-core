@@ -33,7 +33,7 @@ macro_rules! err_config {
 pub struct Config {
     pub base_path: PathBuf,
     pub digest: Digest,
-    pub resolver: Resolver,
+    resolver: Resolver,
     pub nodes: HashMap<String, Node>,
     pub visa_service: VisaService,
     pub trusted_services: Vec<TrustedService>,
@@ -92,11 +92,11 @@ pub struct VisaService {
 #[derive(Debug, Clone)]
 pub struct TrustedService {
     pub id: String,
-    pub api: String,
+    api: String,
     pub cert_path: Option<PathBuf>,
-    pub prefix: String,
-    pub returns_attrs: Vec<String>,
-    pub identity_attrs: Vec<String>,
+    prefix: String,
+    returns_attrs: Vec<String>,
+    identity_attrs: Vec<String>,
 }
 
 /// Protocol table

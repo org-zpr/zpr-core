@@ -398,6 +398,8 @@ impl Weaver {
 
     /// Given a path, return the possibly adjusted absolute path.
     /// If the passed path `p` is not absolute it is assumed to be relative to the base path.
+    ///
+    // TODO: This should happen in config - weaver doesn't need to do path stuff.
     fn abs_path(&self, p: &Path) -> PathBuf {
         if p.is_absolute() {
             return p.to_path_buf();
