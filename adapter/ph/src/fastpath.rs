@@ -3,34 +3,30 @@
 //! General rule: no fastpath operation may block.
 //! This implies that all functions here must be non-async.
 
+use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
+use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters::CounterType;
 use crate::defs::Direction;
 use crate::km::Codec;
+use crate::km_noise::NOISE_PADLEN;
 use crate::logging::targets::DATAPATH;
 use crate::net_defs;
 use crate::packet::Packet;
-use crate::queues::TryEnqueueError;
+use crate::queues::{AdapterManager, MgmtDispatch, TryEnqueueError};
 use crate::zdp;
 use crate::zdp_ll;
 use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
+use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
+use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
-
-/// Drop a packet and count the drop with the given reason.
-pub fn drop_and_count(asm: &Assembly, pkt: Packet, reason: impl Into<CounterType>) {
-    let reason = reason.into();
-    debug!(target: DATAPATH, "dropping packet because {reason}");
-    asm.buffer_stack
-        .put_buffer(pkt.destroy().try_into().unwrap());
-    asm.counters[reason].increment();
-}
 
 /// Drop a heap-allocated packet and count the drop with the given reason.
 pub fn drop_and_count_heap(asm: &Assembly, pkt: Packet, reason: impl Into<CounterType>) {
@@ -38,6 +34,452 @@ pub fn drop_and_count_heap(asm: &Assembly, pkt: Packet, reason: impl Into<Counte
     debug!(target: DATAPATH, "dropping packet because {reason}");
     drop(pkt);
     asm.counters[reason].increment();
+}
+
+const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {
+    // this optimization is checked by the static asserts below
+    // this allows us to avoid an unpredictable branch on every packet
+    (ingress_link_id % 2) + 1
+}
+
+const _: () = assert!(adapter_next_hop_link(zpr::LOCAL_AGENT_LINK_ID) == zpr::DOCK_LINK_ID);
+const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::LOCAL_AGENT_LINK_ID);
+
+#[cfg(debug_assertions)]
+/// This table is used to track whether a flow ever switches from one worker
+/// to another (indicating potential for out-of-order packets) -- meaning
+/// our packet steerer isn't steering correctly.  This is used only in debug mode.
+const AGENT_PACKET_FLOW_TRACKER: std::sync::LazyLock<
+    dashmap::DashMap<(zpr::LinkId, zpr::StreamId), usize>,
+> = std::sync::LazyLock::new(|| dashmap::DashMap::new());
+
+pub struct FastpathWorker {
+    pub worker_index: usize,
+    pub asm: Arc<Assembly>,
+    pub adapter_manager: AdapterManager,
+    pub mgmt_dispatch: MgmtDispatch,
+}
+
+impl FastpathWorker {
+    pub fn new(worker_index: usize, asm: Arc<Assembly>) -> Self {
+        let adapter_manager = asm.adapter_manager.clone();
+        let mgmt_dispatch = asm.mgmt_dispatch.clone();
+
+        Self {
+            worker_index,
+            asm,
+            adapter_manager,
+            mgmt_dispatch,
+        }
+    }
+
+    /// Drop a packet and count the drop with the given reason.
+    pub fn drop_and_count(&mut self, pkt: Packet, reason: impl Into<CounterType>) {
+        let reason = reason.into();
+        debug!(target: DATAPATH, "dropping packet because {reason}");
+        self.asm
+            .buffer_stack
+            .put_buffer(pkt.destroy().try_into().unwrap());
+        self.asm.counters[reason].increment();
+    }
+
+    /// Process packets ingressing from the specified address.
+    pub fn substrate_ingress(&mut self, peer_sa: &zpr::SubstrateAddr, mut pkt: Packet) {
+        self.asm.counters[CounterType::InPacksRec].increment();
+
+        pkt.metadata_mut().ingress_link_id =
+            self.asm.peer_table.lookup_peer(peer_sa).unwrap_or_zero();
+
+        // Read, but do not remove the ZPI header
+        let Ok((zpi_hdr, _)) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
+            self.drop_and_count(pkt, CounterType::BadStructure);
+            return;
+        };
+
+        let peer_state = self.asm.peer_table.get(pkt.metadata().ingress_link_id);
+
+        // If a ZPI is setup on this link, then we expect the message to use one of the valid
+        // ZPI values.
+        let secure;
+        match peer_state {
+            Some(state) => match state.get_established_transport_association() {
+                Some(ref transport_sa) => {
+                    if zpi_hdr.zpi == transport_sa.recv_zpis.hmac {
+                        match decrypt_hmac(transport_sa.recv_hmac_key, &mut pkt) {
+                            Ok(()) => secure = true,
+                            Err(err) => {
+                                self.drop_and_count(pkt, err);
+                                return;
+                            }
+                        }
+                    } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
+                        // TODO: Put padlen in state somewhere too
+                        match decrypt_full(&self.asm, &*transport_sa.codec, NOISE_PADLEN, &mut pkt)
+                        {
+                            Ok(()) => secure = true,
+                            Err(err) => {
+                                self.drop_and_count(pkt, err);
+                                return;
+                            }
+                        }
+                    } else {
+                        // We have an SA and ZPI does not match.
+                        warn!(
+                            target: DATAPATH,
+                            "ingress: link {}: unexpected ZPI value {} (expected {:?})",
+                            pkt.metadata().ingress_link_id,
+                            zpi_hdr.zpi,
+                            transport_sa.recv_zpis
+                        );
+                        self.drop_and_count(pkt, CounterType::UnknownZpi);
+                        return;
+                    }
+                }
+                None => {
+                    // Either no security association on link, or it is not yet established.
+                    warn!(target: DATAPATH, "INSECURE, no SA on link {}", pkt.metadata().ingress_link_id);
+                    secure = false;
+                }
+            },
+            None => {
+                // No link in peer table
+                warn!(
+                    target: DATAPATH,
+                    "INSECURE, no link in peer table for {}",
+                    pkt.metadata().ingress_link_id
+                );
+                secure = false;
+            }
+        };
+
+        if !secure {
+            // Not under a security assocation, which means only ZPI 0 is allowed.
+            if zpi_hdr.zpi != zpr::ZPI_0 && pkt.metadata().ingress_link_id != zpr::LINK_ID_UNKNOWN {
+                warn!(
+                    target: DATAPATH,
+                    "ingress: {}: ZPI {} not allowed on unestablished SA",
+                    pkt.metadata().ingress_link_id,
+                    zpi_hdr.zpi
+                );
+                self.drop_and_count(pkt, CounterType::UnknownZpi);
+                return;
+            }
+            warn!(
+                target: DATAPATH,
+                "INSECURE, decrypting null packet from {}",
+                pkt.metadata().ingress_link_id
+            );
+            match decrypt_null(&mut pkt) {
+                Ok(()) => (),
+                Err(err) => {
+                    self.drop_and_count(pkt, err);
+                    return;
+                }
+            }
+        }
+
+        // Watch out -- may not be secure
+        maybe_capture(&self.asm, Direction::Inbound, &mut pkt);
+
+        // now pop the ZPI off the packet. We've already checked it.
+        if zdp::ZdpZpiHeader::read_from_buf(&mut pkt).is_err() {
+            self.drop_and_count(pkt, CounterType::BadStructure);
+            return;
+        }
+
+        // If we weren't able to match this packet to an existing link,
+        // send it off to be processed as a potential new link.
+        if pkt.metadata().ingress_link_id == zpr::LINK_ID_UNKNOWN {
+            match self
+                .mgmt_dispatch
+                .try_dispatch_mgmt_packet_with_addr(peer_sa, pkt)
+            {
+                Ok(()) => self.asm.counters[CounterType::DispatchedToMgmt].increment(),
+                Err(TryEnqueueError::Full(pkt)) => {
+                    self.drop_and_count(pkt, CounterType::QueueBackpressure)
+                }
+            }
+            return;
+        }
+
+        let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
+            return self.drop_and_count(pkt, CounterType::BadStructure);
+        };
+
+        // In ZPI zero only KM messages are allowed (well, and APR ARP which we don't support yet)
+        // Can be overridden (FOR TESTING ONLY) in the flags.
+        if !secure && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
+            warn!(
+                target: DATAPATH,
+                "ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
+                pkt.metadata().ingress_link_id,
+                base_hdr.packet_type
+            );
+            self.drop_and_count(pkt, CounterType::OtherError);
+            return;
+        }
+
+        // enqueue non-transit packets with the management processor
+        if base_hdr.packet_type != zdp::ZdpPacketType::TransitPacket {
+            // TODO: should we peel off the ZDP header here??
+            // (instead of this silly code to restore it?)
+            *pkt.alloc_zeroed_header() = base_hdr;
+            match self.mgmt_dispatch.try_dispatch_mgmt_packet_with_link(pkt) {
+                Ok(()) => self.asm.counters[CounterType::DispatchedToMgmt].increment(),
+                Err(TryEnqueueError::Full(pkt)) => {
+                    self.drop_and_count(pkt, CounterType::QueueBackpressure)
+                }
+            }
+            return;
+        }
+
+        let Ok(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
+            return self.drop_and_count(pkt, CounterType::BadStructure);
+        };
+
+        let ingress_stream_id: zpr::StreamId = per_flow_hdr.stream_id.into();
+        pkt.metadata_mut().ingress_stream_id = ingress_stream_id;
+
+        // in debug builds, track which worker this agent traffic came in on
+        // ensure a given flow isn't hopping between workers (potentially
+        // resulting in out-of-order packets)
+        #[cfg(debug_assertions)]
+        if let Some(old_index) = AGENT_PACKET_FLOW_TRACKER.insert(
+            (
+                pkt.metadata().ingress_link_id,
+                pkt.metadata().ingress_stream_id,
+            ),
+            self.worker_index,
+        ) {
+            if old_index != self.worker_index {
+                self.asm.counters[CounterType::AgentPacketsOutOfOrder].increment();
+            }
+        }
+
+        self.forward(pkt);
+    }
+
+    /// Process uncompressed packet from the agent.
+    /// The packet will be compressed, or trigger a Bind request.
+    pub fn agent_output(&mut self, mut pkt: Packet) {
+        pkt.metadata_mut().ingress_link_id = zpr::LOCAL_AGENT_LINK_ID;
+        pkt.metadata_mut().ingress_lane_id = self.worker_index as u8;
+
+        // determine five tuple
+        let classification = match classifier::classify(&mut pkt) {
+            Ok(cls) => cls,
+            Err(_why) => {
+                self.drop_and_count(pkt, CounterType::InPacksDrop);
+                return;
+            }
+        };
+
+        match classification {
+            ClassifierResult::OK | ClassifierResult::UnclassifiedL4 => (),
+
+            ClassifierResult::FirstFragment | ClassifierResult::SubsequentFragment => {
+                // TODO: handle fragments!
+                self.drop_and_count(pkt, CounterType::InPacksDrop);
+                return;
+            }
+
+            ClassifierResult::NonIP => {
+                // should never happen; TUN doesn't deal in non-IP
+                self.drop_and_count(pkt, CounterType::InPacksDrop);
+                return;
+            }
+        }
+
+        self.agent_output_post_classify(pkt, /* allow_bind_request */ true);
+    }
+
+    /// Post-classification portion of `agent_output` function.  Used for
+    /// re-injecting already-classified packets e.g.  which were held
+    /// awaiting bind.  `allow_bind_request` should be `true` for "real"
+    /// packets; `false` for packets re-injected from mgmt plane after
+    /// fulfilling a bind request (so as to prevent the theoretical
+    /// possibility of a packet loop).
+    pub fn agent_output_post_classify(&mut self, mut pkt: Packet, allow_bind_request: bool) {
+        // note: this weird two-phase structure is needed to appease the borrow checker
+        let forward = {
+            // lookup five tuple in ALT
+            let five_tuple = *pkt.metadata().five_tuple(); // TODO: convince borrow checker we don't need to copy this out
+            let Some(entry) = self.asm.alt.get(&five_tuple) else {
+                if !allow_bind_request {
+                    // avoid the (all-but purely theoretical) chance of a packet loop,
+                    // when this is initiated due to a requeue from bind setup code
+                    self.drop_and_count(pkt, CounterType::OtherError);
+                    return;
+                }
+
+                // issue bind request
+                match self.adapter_manager.try_request_tether_id(pkt) {
+                    Ok(()) => self.asm.counters[CounterType::AgentSlowpath].increment(),
+                    Err(TryEnqueueError::Full(pkt)) => {
+                        self.drop_and_count(pkt, CounterType::QueueBackpressure)
+                    }
+                }
+
+                return;
+            };
+
+            match &*entry {
+                AltEntry::Active(pep) => {
+                    // compute A2A MAC
+                    // TODO: use actual A2A SAID & keyed hash
+                    let a2a_said: zpr::A2aSaid = 0;
+                    let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: may be smaller depending on A2A SAID
+                    let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+                    // SECURITY: truncating BLAKE3 is safe
+                    a2a_mac[..a2a_mac_size]
+                        .copy_from_slice(&blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size]);
+
+                    // compress packet
+                    compress::compress(
+                        pep.compression_mode,
+                        five_tuple.l3_type,
+                        five_tuple.l4_protocol,
+                        &mut pkt,
+                    );
+
+                    // append A2A MAC
+                    pkt.put(&a2a_mac[..a2a_mac_size]);
+                    pkt.alloc_zeroed_header::<zdp::ZdpA2aHeader>().a2a_said = a2a_said;
+
+                    pkt.metadata_mut().ingress_stream_id = pep.tether_id;
+
+                    // forward packet on
+                    true
+                }
+
+                AltEntry::Pending(_) => {
+                    // do not forward
+                    false
+                }
+            }
+        };
+
+        if forward {
+            self.forward(pkt);
+        } else {
+            // Bind request pending; drop this packet
+            self.drop_and_count(pkt, CounterType::DroppedAwaitingBind);
+        }
+    }
+
+    /// Forward compressed packet.
+    pub fn forward(&mut self, mut pkt: Packet) {
+        let egress_link_id;
+        let egress_stream_id;
+
+        match self.asm.ph_mode {
+            PhMode::Adapter => {
+                egress_link_id = adapter_next_hop_link(pkt.metadata().ingress_link_id);
+                egress_stream_id = pkt.metadata().ingress_stream_id;
+            }
+
+            PhMode::Node => {
+                let Some(ingress_peer_state) =
+                    self.asm.peer_table.get(pkt.metadata().ingress_link_id)
+                else {
+                    self.drop_and_count(pkt, CounterType::UnknownPeer);
+                    return;
+                };
+
+                let Some(pep) = ingress_peer_state.pft.get(pkt.metadata().ingress_stream_id) else {
+                    self.drop_and_count(pkt, CounterType::UnknownStreamId);
+                    return;
+                };
+
+                // TODO: policy enforcement
+
+                egress_link_id = pep.next_hop.0;
+                egress_stream_id = pep.next_hop.1;
+            }
+        }
+
+        if egress_link_id == zpr::LOCAL_AGENT_LINK_ID {
+            self.agent_input(egress_stream_id, pkt);
+        } else {
+            let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
+            per_flow_hdr.stream_id = egress_stream_id.into();
+
+            let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+            base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
+
+            self.substrate_egress(egress_link_id, pkt);
+        }
+    }
+
+    /// Send a compressed agent packet to the agent.
+    /// The packet will be decompressed according to the given stream ID.
+    pub fn agent_input(
+        &mut self,
+        tether_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
+        mut pkt: Packet,
+    ) {
+        // extract A2A MAC
+        let Ok(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
+            self.drop_and_count(pkt, CounterType::BadStructure);
+            return;
+        };
+
+        if a2a_hdr.a2a_said != 0 {
+            todo!("A2A SAID");
+        }
+
+        let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: checksum may be shorter depending on A2A SA
+
+        if pkt.body().len() < a2a_mac_size {
+            self.drop_and_count(pkt, CounterType::BadStructure);
+            return;
+        }
+        let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
+        a2a_mac[..a2a_mac_size].copy_from_slice(&pkt.body()[pkt.body().len() - a2a_mac_size..]);
+        pkt.shrink_by(a2a_mac_size);
+
+        // lookup PEP in DLT and expand compressed packet
+        let Some(pep) = self.asm.dlt.get(tether_id) else {
+            self.drop_and_count(pkt, CounterType::UnknownStreamId);
+            return;
+        };
+
+        compress::expand(pep.compression_mode, &pep.five_tuple, &mut pkt);
+
+        // check A2A MAC
+        // TODO: use actual A2A SAID & keyed hash
+        if blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size] != a2a_mac[..a2a_mac_size] {
+            return self.drop_and_count(pkt, CounterType::MicvFailure);
+        }
+
+        // send out decapsulated packet & drop
+        match self.asm.agent_input.try_enqueue_packet(&mut pkt) {
+            Ok(()) => self.drop_and_count(pkt, CounterType::InPacksSent),
+            Err(TryEnqueueError::Full(())) => self.drop_and_count(pkt, CounterType::InPacksDrop),
+        }
+    }
+
+    /// Egress a ZDP packet on the given link ID, according to the given ZPI.
+    /// The ZPI header will be added to the packet.
+    pub fn substrate_egress(&mut self, link_id: zpr::LinkId, mut pkt: Packet) {
+        let dest_sa = match substrate_egress_common(&self.asm, link_id, &mut pkt) {
+            Ok(Some(dest_sa)) => dest_sa,
+            Ok(None) => {
+                self.drop_and_count(pkt, CounterType::PeerRemoved);
+                return;
+            }
+            Err(err) => {
+                error!(target: DATAPATH, "egress: link {}: encryption error: {}", link_id, err);
+                self.drop_and_count(pkt, CounterType::EncryptionFailure);
+                return;
+            }
+        };
+
+        match self.asm.substrate_egress.try_enqueue_packet(&pkt, dest_sa) {
+            Ok(()) => self.drop_and_count(pkt, CounterType::OutPacksSent),
+            Err(TryEnqueueError::Full(())) => self.drop_and_count(pkt, CounterType::OutPacksErr),
+        }
+    }
 }
 
 /// Add the ZPI header to a packet.
@@ -318,28 +760,6 @@ fn substrate_egress_common(
     Ok(Some(peer_state.substrate_addr))
 }
 
-/// Egress a ZDP packet on the given link ID, according to the given ZPI.
-/// The ZPI header will be added to the packet.
-pub fn substrate_egress(asm: &Assembly, link_id: zpr::LinkId, mut pkt: Packet) {
-    let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
-        Ok(Some(dest_sa)) => dest_sa,
-        Ok(None) => {
-            drop_and_count(asm, pkt, CounterType::PeerRemoved);
-            return;
-        }
-        Err(err) => {
-            error!(target: DATAPATH, "egress: link {}: encryption error: {}", link_id, err);
-            drop_and_count(asm, pkt, CounterType::EncryptionFailure);
-            return;
-        }
-    };
-
-    match asm.substrate_egress.try_enqueue_packet(&pkt, dest_sa) {
-        Ok(()) => drop_and_count(asm, pkt, CounterType::InPacksSent),
-        Err(TryEnqueueError::Full(())) => drop_and_count(asm, pkt, CounterType::OutPacksErr),
-    }
-}
-
 /// A blocking/async version of `substrate_egress()`, for management path use.
 /// Useful to ensure fairness under high load.
 pub async fn substrate_egress_blocking(asm: &Assembly, link_id: zpr::LinkId, mut pkt: Packet) {
@@ -359,106 +779,6 @@ pub async fn substrate_egress_blocking(asm: &Assembly, link_id: zpr::LinkId, mut
     match asm.substrate_egress.enqueue_packet(&pkt, dest_sa).await {
         Ok(()) => drop_and_count_heap(asm, pkt, CounterType::OutPacksSent),
         Err(()) => drop_and_count_heap(asm, pkt, CounterType::OutPacksErr),
-    }
-}
-
-/// Send a compressed agent packet to the agent.
-/// The packet will be decompressed according to the given stream ID.
-pub fn agent_input(
-    asm: &Assembly,
-    tether_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
-    mut pkt: Packet,
-) {
-    // extract A2A MAC
-    let Ok(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
-        drop_and_count(asm, pkt, CounterType::BadStructure);
-        return;
-    };
-
-    if a2a_hdr.a2a_said != 0 {
-        todo!("A2A SAID");
-    }
-
-    let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: checksum may be shorter depending on A2A SA
-
-    if pkt.body().len() < a2a_mac_size {
-        drop_and_count(asm, pkt, CounterType::BadStructure);
-        return;
-    }
-    let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
-    a2a_mac[..a2a_mac_size].copy_from_slice(&pkt.body()[pkt.body().len() - a2a_mac_size..]);
-    pkt.shrink_by(a2a_mac_size);
-
-    // lookup PEP in DLT and expand compressed packet
-    let Some(pep) = asm.dlt.get(tether_id) else {
-        drop_and_count(asm, pkt, CounterType::UnknownStreamId);
-        return;
-    };
-
-    compress::expand(pep.compression_mode, &pep.five_tuple, &mut pkt);
-
-    // check A2A MAC
-    // TODO: use actual A2A SAID & keyed hash
-    if blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size] != a2a_mac[..a2a_mac_size] {
-        return drop_and_count(asm, pkt, CounterType::MicvFailure);
-    }
-
-    // send out decapsulated packet
-    match asm.agent_input.try_enqueue_packet(&mut pkt) {
-        Ok(()) => drop_and_count(asm, pkt, CounterType::OutPacksSent),
-        Err(TryEnqueueError::Full(())) => drop_and_count(asm, pkt, CounterType::InPacksDrop),
-    }
-}
-
-const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {
-    // this optimization is checked by the static asserts below
-    // this allows us to avoid an unpredictable branch on every packet
-    (ingress_link_id % 2) + 1
-}
-
-const _: () = assert!(adapter_next_hop_link(zpr::LOCAL_AGENT_LINK_ID) == zpr::DOCK_LINK_ID);
-const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::LOCAL_AGENT_LINK_ID);
-
-/// Forward compressed packet.
-pub fn forward(asm: &Assembly, mut pkt: Packet) {
-    let egress_link_id;
-    let egress_stream_id;
-
-    match asm.ph_mode {
-        PhMode::Adapter => {
-            egress_link_id = adapter_next_hop_link(pkt.metadata().ingress_link_id);
-            egress_stream_id = pkt.metadata().ingress_stream_id;
-        }
-
-        PhMode::Node => {
-            let Some(ingress_peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id)
-            else {
-                drop_and_count(asm, pkt, CounterType::UnknownPeer);
-                return;
-            };
-
-            let Some(pep) = ingress_peer_state.pft.get(pkt.metadata().ingress_stream_id) else {
-                drop_and_count(asm, pkt, CounterType::UnknownStreamId);
-                return;
-            };
-
-            // TODO: policy enforcement
-
-            egress_link_id = pep.next_hop.0;
-            egress_stream_id = pep.next_hop.1;
-        }
-    }
-
-    if egress_link_id == zpr::LOCAL_AGENT_LINK_ID {
-        agent_input(asm, egress_stream_id, pkt);
-    } else {
-        let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
-        per_flow_hdr.stream_id = egress_stream_id.into();
-
-        let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
-        base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
-
-        substrate_egress(asm, egress_link_id, pkt);
     }
 }
 
