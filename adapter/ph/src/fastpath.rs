@@ -21,7 +21,6 @@ use std::time::SystemTime;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
-use zpr_ext::std::mem::{drop_guard, DropGuard};
 use zpr_ext::zerocopy::*;
 
 /// Drop a packet and count the drop with the given reason.
@@ -335,14 +334,9 @@ pub fn substrate_egress(asm: &Assembly, link_id: zpr::LinkId, mut pkt: Packet) {
         }
     };
 
-    match asm.substrate_egress.try_enqueue_packet(
-        drop_guard(pkt, |p| drop_and_count(asm, p, CounterType::OutPacksSent)),
-        dest_sa,
-    ) {
-        Ok(()) => (),
-        Err(TryEnqueueError::Full(pkt)) => {
-            drop_and_count(asm, pkt.into_inner(), CounterType::OutPacksErr)
-        }
+    match asm.substrate_egress.try_enqueue_packet(&pkt, dest_sa) {
+        Ok(()) => drop_and_count(asm, pkt, CounterType::InPacksSent),
+        Err(TryEnqueueError::Full(())) => drop_and_count(asm, pkt, CounterType::OutPacksErr),
     }
 }
 
@@ -362,20 +356,9 @@ pub async fn substrate_egress_blocking(asm: &Assembly, link_id: zpr::LinkId, mut
         }
     };
 
-    match asm
-        .substrate_egress
-        .enqueue_packet(
-            drop_guard(pkt, |p| {
-                drop_and_count_heap(asm, p, CounterType::OutPacksSent)
-            }),
-            dest_sa,
-        )
-        .await
-    {
-        Ok(()) => (),
-        Err(pkt) => {
-            drop_and_count_heap(asm, pkt.into_inner(), CounterType::OutPacksErr);
-        }
+    match asm.substrate_egress.enqueue_packet(&pkt, dest_sa).await {
+        Ok(()) => drop_and_count_heap(asm, pkt, CounterType::OutPacksSent),
+        Err(()) => drop_and_count_heap(asm, pkt, CounterType::OutPacksErr),
     }
 }
 
@@ -421,13 +404,9 @@ pub fn agent_input(
     }
 
     // send out decapsulated packet
-    match asm.agent_input.try_enqueue_packet(drop_guard(pkt, |p| {
-        drop_and_count(asm, p, CounterType::InPacksSent)
-    })) {
-        Ok(()) => (),
-        Err(TryEnqueueError::Full(pkt)) => {
-            drop_and_count(asm, pkt.into_inner(), CounterType::InPacksDrop)
-        }
+    match asm.agent_input.try_enqueue_packet(&mut pkt) {
+        Ok(()) => drop_and_count(asm, pkt, CounterType::OutPacksSent),
+        Err(TryEnqueueError::Full(())) => drop_and_count(asm, pkt, CounterType::InPacksDrop),
     }
 }
 

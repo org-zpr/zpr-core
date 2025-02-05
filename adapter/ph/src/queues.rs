@@ -17,7 +17,6 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
 use zpr;
-use zpr_ext::std::mem::DropGuard;
 
 pub enum TryEnqueueError<T = ()> {
     Full(T),
@@ -88,10 +87,7 @@ impl AgentInput {
         }
     }
 
-    pub fn try_enqueue_packet<P: DropGuard<Packet>>(
-        &self,
-        mut packet: P,
-    ) -> Result<(), TryEnqueueError<P>> {
+    pub fn try_enqueue_packet(&self, packet: &mut Packet) -> Result<(), TryEnqueueError> {
         let tun = &self.tuns[packet.flowhash() as usize % self.tuns.len()];
         match TunPi::PI_SIZE {
             0 => (),
@@ -108,9 +104,13 @@ impl AgentInput {
             }
         };
 
-        match tun.try_send(packet.body()) {
+        let ret = tun.try_send(packet.body());
+
+        packet.advance(std::mem::size_of::<TunPi>());
+
+        match ret {
             Ok(_) => Ok(()),
-            Err(err) if err.kind() == ErrorKind::WouldBlock => Err(TryEnqueueError::Full(packet)),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => Err(TryEnqueueError::Full(())),
             Err(err) => panic!("unrecoverable TUN error: {}", err),
         }
     }
@@ -133,12 +133,12 @@ impl SubstrateEgress {
         }
     }
 
-    pub async fn enqueue_packet<P: DropGuard<Packet>>(
+    pub async fn enqueue_packet(
         &self,
-        packet: P,
+        packet: &Packet,
         dest_sa: zpr::SubstrateAddr,
-    ) -> Result<(), P> {
-        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(&*packet, dest_sa);
+    ) -> Result<(), ()> {
+        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(packet, dest_sa);
 
         match socket.send_to(packet.body(), dest_sockaddr).await {
             Ok(_) => Ok(()),
@@ -152,19 +152,19 @@ impl SubstrateEgress {
                     // most other network errors are temporary; return packet to caller
                     // TODO: it would be nice to report to the user _why_ packets aren't moving;
                     // this depends on <https://github.com/rust-lang/rust/issues/86442> though
-                    _ => Err(packet),
+                    _ => Err(()),
                 }
             }
         }
     }
 
     // TODO: batch enqueue
-    pub fn try_enqueue_packet<P: DropGuard<Packet>>(
+    pub fn try_enqueue_packet(
         &self,
-        packet: P,
+        packet: &Packet,
         dest_sa: zpr::SubstrateAddr,
-    ) -> Result<(), TryEnqueueError<P>> {
-        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(&*packet, dest_sa);
+    ) -> Result<(), TryEnqueueError> {
+        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(packet, dest_sa);
 
         match socket.try_send_to(packet.body(), dest_sockaddr) {
             Ok(_) => Ok(()),
@@ -175,12 +175,12 @@ impl SubstrateEgress {
                         panic!("unrecoverable I/O error: {}", err)
                     }
 
-                    ErrorKind::WouldBlock => Err(TryEnqueueError::Full(packet)),
+                    ErrorKind::WouldBlock => Err(TryEnqueueError::Full(())),
 
                     // most other network errors are temporary; return packet to caller
                     // TODO: it would be nice to report to the user _why_ packets aren't moving;
                     // this depends on <https://github.com/rust-lang/rust/issues/86442> though
-                    _ => Err(TryEnqueueError::Full(packet)),
+                    _ => Err(TryEnqueueError::Full(())),
                 }
             }
         }
