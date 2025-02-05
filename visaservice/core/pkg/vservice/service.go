@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/logr"
 
 	"zpr.org/vs/pkg/policy"
@@ -267,6 +268,55 @@ func (s *VisaService) RevokeVisa(vid uint64) error {
 	// notifies network, I don't bother writing it to the in-memory
 	// revocation database.
 	return s.service.inst.revokeVisaByID(vid)
+}
+
+func (s *VisaService) RevokeCN(cn string) uint32 {
+	// First update our memory so that if the CN shows up later it will fail.
+	s.log.Info("revoke CN", "cn", cn)
+	if err := s.authService.RevokeCN(cn); err != nil {
+		// Hmm, store to memory failed? Log but continue.
+		s.log.WithError(err).Warn("auth service failed to store CN revocation", "cn", cn)
+	}
+
+	// Then get rid of any visas involved with the CN.
+	// The visa service keeps a table of visas, but to find ones for a specific agent we need
+	// the ZPR addr of the agent.
+
+	var count uint32
+	agentList := s.service.inst.agentDB.GetAgentsWithClaim(agent.KAttrCN, cn)
+	if len(agentList) > 0 {
+		count = s.service.inst.revokeVisasForAgents(agentList)
+		if count > 0 {
+			s.log.Info("active visas removed due to revoked CN", "cn", cn, "visa_count", count)
+		} else {
+			s.log.Info("no active visas found for revoked CN", "cn", cn)
+		}
+		for _, agnt := range agentList {
+			s.removeAgent(agnt)
+		}
+	} else {
+		s.log.Info("no active visas found for revoked CN", "cn", cn)
+	}
+
+	// Ideally we would tell the docking node that we are booting this agent
+	// out of our system.
+	return count
+}
+
+// Remove an agent from the agent DB.
+// Should behave just as if de-register or disconnect were called over the vs-api.
+func (s *VisaService) removeAgent(agnt *agent.Agent) {
+	zprAddr := agnt.GetZPRIDIfSet()
+	if agnt.IsNode() {
+		if prec := s.service.inst.agentDB.GetPeerRecord(zprAddr); prec != nil {
+			s.service.inst.takePeerRecord(prec.APIKey)
+		}
+		s.service.inst.agentDB.RemoveNode(zprAddr)
+		s.log.Info("node-agent has been removed", "zpr_addr", zprAddr)
+	} else {
+		s.service.inst.agentDB.RemoveAdapter(zprAddr)
+		s.log.Info("adapter-agent has been removed", "zpr_addr", zprAddr)
+	}
 }
 
 // InstallPolicy is for installing a policy supplied by an admin through our admin-service.

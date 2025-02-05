@@ -459,3 +459,16 @@ func (db *AgentDB) SetPeerLastPolicyState(addr netip.Addr, policyVer, configID u
 	}
 	return false
 }
+
+// Does full search of database.
+func (db *AgentDB) GetAgentsWithClaim(key, val string) []*agent.Agent {
+	db.RLock()
+	defer db.RUnlock()
+	var agents []*agent.Agent
+	for _, rec := range db.agentsV6toHr {
+		if rec.Agent.HasAuthedClaim(key, val) {
+			agents = append(agents, rec.Agent)
+		}
+	}
+	return agents
+}

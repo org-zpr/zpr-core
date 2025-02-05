@@ -49,6 +49,7 @@ type RevokeAdminResponse struct {
 
 type RevokeResponse struct {
 	Revoked string `json:"revoked"`
+	Count   uint32 `json:"count"`
 }
 
 type VisaDescriptor struct {
@@ -67,6 +68,7 @@ type VSApi interface {
 	ListAdapters() []*adb.HostRecordBrief
 	ClearAllRevokes() uint32
 	RevokeVisa(uint64) error
+	RevokeCN(string) uint32
 }
 
 type AdminService struct {
@@ -292,6 +294,7 @@ func (svc *AdminService) handleRevokeVisaByID(w http.ResponseWriter, r *http.Req
 
 	resp := &RevokeResponse{
 		Revoked: visaIDStr,
+		Count:   1,
 	}
 	w.Header().Add("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
@@ -301,11 +304,14 @@ func (svc *AdminService) handleRevokeAgentByCN(w http.ResponseWriter, r *http.Re
 	params := mux.Vars(r)
 	cn := params["CN"]
 	if cn == "" {
-		http.Error(w, "invalid adapter CN", http.StatusBadRequest)
+		http.Error(w, "invalid CN", http.StatusBadRequest)
 		return
 	}
+	count := svc.vsi.RevokeCN(cn)
+
 	resp := &RevokeResponse{
-		Revoked: "",
+		Revoked: cn,
+		Count:   count,
 	}
 	w.Header().Add("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)

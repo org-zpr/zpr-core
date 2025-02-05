@@ -1,12 +1,11 @@
+mod apitypes;
+
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-
-
-use apitypes::RevokeResponse;
 use base64::prelude::*;
 use clap::{Args, Parser, Subcommand};
 use colored::Colorize;
@@ -16,8 +15,10 @@ use reqwest;
 use reqwest::tls::Certificate;
 use reqwest::StatusCode;
 
-mod apitypes;
-use apitypes::{PolicyBundle, PolicyListEntry, PolicyVersion, VisaDescriptor, HostRecordBrief};
+use apitypes::RevokeResponse;
+use apitypes::{HostRecordBrief, VisaDescriptor};
+use apitypes::{PolicyBundle, PolicyListEntry, PolicyVersion};
+use apitypes::{RevokeAdminRequest, RevokeAdminResponse};
 
 // Somewhat inconveniently, this must match the setting in:
 // - visaservice/mods/polio/const.go (used by the "new" visa service)
@@ -58,6 +59,10 @@ enum SubCmd {
         #[command(flatten)]
         arg: RevokeArg,
     },
+
+    /// Clear revocation state in visa service
+    #[command()]
+    ClearRevokes,
 
     /// List visas
     #[command()]
@@ -122,6 +127,11 @@ fn main() {
         }
         Some(SubCmd::Agents) => {
             list_agents(&args.svc_url, ca_cert).unwrap_or_else(|e| {
+                eprintln!("{} {}", "Error: ".red(), e);
+            });
+        }
+        Some(SubCmd::ClearRevokes) => {
+            clear_revokes(&args.svc_url, ca_cert).unwrap_or_else(|e| {
                 eprintln!("{} {}", "Error: ".red(), e);
             });
         }
@@ -250,11 +260,38 @@ fn install(
 }
 
 fn revoke_cn(
-    _api_url: &str,
-    _cert: Certificate,
-    _adapter_cn: String,
+    api_url: &str,
+    cert: Certificate,
+    agent_cn: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    Err("Not implemented".into())
+    let cb = reqwest::blocking::ClientBuilder::new()
+        .add_root_certificate(cert)
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_secs(10));
+    let client = cb.build()?;
+
+    let resp = client
+        .delete(format!("{}/admin/agents/{}", api_url, agent_cn))
+        .send()?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "error (status {:?}:{}) : {}",
+            resp.status(),
+            reason_for(resp.status()),
+            resp.text()?
+        )
+        .into());
+    }
+
+    let rr: RevokeResponse = resp.json()?;
+    if rr.revoked.is_empty() {
+        println!("  {}", "ERROR".bold().red());
+    } else {
+        println!("  {}", "SUCCESS".bold().green());
+        println!("     {} {}", "REVOKED:".bold(), rr.revoked);
+        println!("     {} {}", "  COUNT:".bold(), rr.count);
+    }
+    Ok(())
 }
 
 fn revoke_visa_id(
@@ -268,7 +305,9 @@ fn revoke_visa_id(
         .timeout(Duration::from_secs(10));
     let client = cb.build()?;
 
-    let resp = client.delete(format!("{}/admin/visas/{}", api_url, visa_id)).send()?;
+    let resp = client
+        .delete(format!("{}/admin/visas/{}", api_url, visa_id))
+        .send()?;
     if !resp.status().is_success() {
         return Err(format!(
             "error (status {:?}:{}) : {}",
@@ -309,7 +348,6 @@ fn list_visas(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error
 
     let mut entries: Vec<VisaDescriptor> = resp.json()?;
     entries.sort_by(|a, b| a.id.cmp(&b.id));
-
 
     println!(
         "{}",
@@ -358,6 +396,36 @@ fn list_agents(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::erro
     for hr in entries {
         println!("{hr}");
     }
+    Ok(())
+}
+
+fn clear_revokes(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error::Error>> {
+    let cb = reqwest::blocking::ClientBuilder::new()
+        .add_root_certificate(cert)
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_secs(10));
+    let client = cb.build()?;
+
+    let req = RevokeAdminRequest { clear_all: true };
+
+    let resp = client
+        .post(format!("{}/admin/revokes", api_url))
+        .json(&req)
+        .send()?;
+
+    if !resp.status().is_success() {
+        return Err(format!(
+            "error (status {:?}:{}) : {}",
+            resp.status(),
+            reason_for(resp.status()),
+            resp.text()?
+        )
+        .into());
+    }
+
+    let rr: RevokeAdminResponse = resp.json()?;
+    println!("  {}", "SUCCESS".bold().green());
+    println!("     {} {}", "COUNT:".bold(), rr.clear_count);
     Ok(())
 }
 

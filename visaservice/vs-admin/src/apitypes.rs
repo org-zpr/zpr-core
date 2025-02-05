@@ -37,7 +37,18 @@ pub struct HostRecordBrief {
 
 #[derive(Deserialize)]
 pub struct RevokeResponse {
-    pub revoked: String
+    pub revoked: String,
+    pub count: u32,
+}
+
+#[derive(Serialize)]
+pub struct RevokeAdminRequest {
+    pub clear_all: bool,
+}
+
+#[derive(Deserialize)]
+pub struct RevokeAdminResponse {
+    pub clear_count: u32,
 }
 
 impl fmt::Display for VisaDescriptor {
@@ -79,7 +90,11 @@ impl fmt::Display for HostRecordBrief {
             ts.to_rfc3339_opts(SecondsFormat::Secs, true).cyan(),
             ")".dimmed(),
             self.zpr_addr.yellow(),
-            if self.node { "[node]".green() } else {"".normal()},
+            if self.node {
+                "[node]".green()
+            } else {
+                "".normal()
+            },
         )
     }
 }

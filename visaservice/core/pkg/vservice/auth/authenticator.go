@@ -530,16 +530,13 @@ func (a *Authenticator) loadRevocationData() []*snauth.CredID {
 	if rs == nil {
 		return nil
 	}
-
 	var revokes []*snauth.CredID
 	for _, rk := range rs.ListRevocationKeysFor(fmt.Sprintf("%d%s", a.policy.configID, a.policy.version)) {
 		if revRec := rs.GetRevoke(rk); revRec != nil {
-			if ctv := raftRevokeTypeToSnauthCredIDType(revRec.GetRType()); ctv != snauth.CredIDTypeNil {
-				revokes = append(revokes, &snauth.CredID{
-					CType: ctv,
-					ID:    revRec.GetCredId(),
-				})
-			}
+			revokes = append(revokes, &snauth.CredID{
+				CType: raftRevokeTypeToSnauthCredIDType(revRec.GetRType()),
+				ID:    revRec.GetCredId(),
+			})
 		}
 	}
 	return revokes

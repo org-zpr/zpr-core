@@ -31,21 +31,24 @@ func NewRevokeDB() *RevokeDB {
 func (db *RevokeDB) insert(pver string, rvk *Revoke) {
 	db.Lock()
 	defer db.Unlock()
-	rkey := fmt.Sprintf("%d/%v", db.nextKeyNum, pver)
+	rkey := fmt.Sprintf("%v/%d", pver, db.nextKeyNum)
 	db.nextKeyNum++
 	if prdb, ok := db.revokes[pver]; ok {
 		prdb.revokes[rkey] = rvk
 	} else {
+		rdb := make(map[string]*Revoke)
+		rdb[rkey] = rvk
 		db.revokes[pver] = &PverRevokeDB{
 			pver:    pver,
 			ctime:   time.Now(),
-			revokes: map[string]*Revoke{rkey: rvk},
+			revokes: rdb,
 		}
 	}
 }
 
 // `pver` is "<policy.config_id><policy.version>".
 func (a *Authenticator) ProposeClearAllRevokes(pver string) uint32 {
+	a.log.Debug("Authenticator: ProposeClearAllRevokes", "pver", pver)
 	a.rvkSvc.rdb.Lock()
 	defer a.rvkSvc.rdb.Unlock()
 	var count uint32
@@ -69,6 +72,7 @@ func (a *Authenticator) ProposeClearAllRevokes(pver string) uint32 {
 // This returns a set of keys for all revocations under the given configuration.
 // Note that the keys are unique over all configurations.
 func (a *Authenticator) ListRevocationKeysFor(pver string) []string {
+	a.log.Debug("Authenticator: ListRevocationKeysFor", "pver", pver)
 	var keys []string
 	a.rvkSvc.rdb.RLock()
 	defer a.rvkSvc.rdb.RUnlock()
@@ -83,6 +87,7 @@ func (a *Authenticator) ListRevocationKeysFor(pver string) []string {
 // Using the keys returned by `ListRevocationKeysFor“, this returns the actual
 // revocation object.
 func (a *Authenticator) GetRevoke(rkey string) *Revoke {
+	a.log.Debug("Authenticator: GetRevoke", "rkey", rkey)
 	parts := strings.Split(rkey, "/")
 	if len(parts) != 2 {
 		panic(fmt.Sprintf("GetRevoke: invalid key: %s", rkey))
@@ -90,7 +95,7 @@ func (a *Authenticator) GetRevoke(rkey string) *Revoke {
 	a.rvkSvc.rdb.RLock()
 	defer a.rvkSvc.rdb.RUnlock()
 	if prdb, ok := a.rvkSvc.rdb.revokes[parts[0]]; ok {
-		if rvk, ok := prdb.revokes[parts[1]]; ok {
+		if rvk, ok := prdb.revokes[rkey]; ok {
 			return rvk
 		}
 	}
@@ -100,6 +105,7 @@ func (a *Authenticator) GetRevoke(rkey string) *Revoke {
 // Submit a revocation to the store.
 // `pver` is "<policy.config_id><policy.version>".
 func (a *Authenticator) ProposeRevokeCredential(pver, cred string) {
+	a.log.Debug("Authenticator: ProposeRevokeCredential", "pver", pver, "cred", cred)
 	rvk := &Revoke{
 		t:   RevokeType_RT_CRED,
 		cid: strings.ToLower(cred),
@@ -110,6 +116,7 @@ func (a *Authenticator) ProposeRevokeCredential(pver, cred string) {
 // Submit a revocation to the store.
 // `pver` is "<policy.config_id><policy.version>".
 func (a *Authenticator) ProposeRevokeAuthority(pver, credIdent string) {
+	a.log.Debug("Authenticator: ProposeRevokeAuthority", "pver", pver, "credIdent", credIdent)
 	rvk := &Revoke{
 		t:   RevokeType_RT_AUTH,
 		cid: strings.ToLower(credIdent),
@@ -120,6 +127,7 @@ func (a *Authenticator) ProposeRevokeAuthority(pver, credIdent string) {
 // Submit a revocation to the store.
 // `pver` is "<policy.config_id><policy.version>".
 func (a *Authenticator) ProposeRevokeCN(pver, cn string) {
+	a.log.Debug("Authenticator: ProposeRevokeCN", "pver", pver, "cn", cn)
 	rvk := &Revoke{
 		t:   RevokeType_RT_CN,
 		cid: strings.ToLower(cn),
