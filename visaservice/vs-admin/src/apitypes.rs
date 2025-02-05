@@ -35,6 +35,11 @@ pub struct HostRecordBrief {
     node: bool,
 }
 
+#[derive(Deserialize)]
+pub struct RevokeResponse {
+    pub revoked: String
+}
+
 impl fmt::Display for VisaDescriptor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let now = Utc::now();
@@ -46,15 +51,19 @@ impl fmt::Display for VisaDescriptor {
         let remain = dt.signed_duration_since(now);
         write!(
             f,
-            "visa id {} [{}]->[{}] expires {} ({}d:{}h:{}m:{}s remaining)",
+            "{} {}  {} {} {}  {} {} {}{}:{:02}:{:02} {}",
+            format!("{}", "id".dimmed()),
             self.id,
-            self.source,
-            self.dest,
-            dt.to_rfc3339_opts(SecondsFormat::Millis, true),
-            remain.num_days(),
-            remain.num_hours() % 24,
+            format!("{}", self.source).yellow(),
+            "->".bold().green(),
+            format!("{}", self.dest).yellow(),
+            format!("{}", "exp".dimmed()),
+            dt.to_rfc3339_opts(SecondsFormat::Secs, true).cyan(),
+            "(".dimmed(),
+            remain.num_hours(),
             remain.num_minutes() % 60,
             remain.num_seconds() % 60,
+            format!("{}", "remain)".dimmed()),
         )
     }
 }
@@ -64,11 +73,13 @@ impl fmt::Display for HostRecordBrief {
         let ts: DateTime<Utc> = DateTime::from_timestamp(self.ctime, 0).unwrap();
         write!(
             f,
-            "<{}> {} (created: {}) @ {}",
-            if self.node { "node" } else { "agnt" },
+            "{} {}{}{} @ {} {}",
             self.cn,
-            ts.to_rfc3339_opts(SecondsFormat::Secs, true),
-            self.zpr_addr,
+            "(created: ".dimmed(),
+            ts.to_rfc3339_opts(SecondsFormat::Secs, true).cyan(),
+            ")".dimmed(),
+            self.zpr_addr.yellow(),
+            if self.node { "[node]".green() } else {"".normal()},
         )
     }
 }

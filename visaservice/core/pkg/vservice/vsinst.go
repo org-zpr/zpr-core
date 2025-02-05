@@ -16,9 +16,9 @@ import (
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsapi"
 	"zpr.org/vsx/polio"
 	"zpr.org/vsx/snio/vsio"
 )
@@ -28,6 +28,7 @@ var (
 	ErrDeniedByPolicy = errors.New("denied by policy")
 	ErrVSMisconfigure = errors.New("visa service misconfigured")
 	ErrAuthExpired    = errors.New("auth expired")
+	ErrVisaNotFound   = errors.New("visa not found")
 )
 
 type HelloRecord struct {
@@ -432,5 +433,4 @@ func (vs *VSInst) expireAllVisas(config uint64) {
 	default:
 		vs.log.Warn("push channel full, failed to issue revoke, continuing")
 	}
-
 }

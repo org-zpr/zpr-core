@@ -451,7 +451,7 @@ func TestSelfValidate(t *testing.T) {
 	claims[agent.KAttrEPID] = reqAddr.String()
 	claims[agent.KAttrCN] = "ma.hatma"
 
-	aok, err := nv.SelfAuthenticate(netip.MustParseAddr("fd00:3001::22"), claims)
+	aok, err := nv.SelfAuthenticate(netip.MustParseAddr("fd00:3001::22"), claims, nil)
 	require.Nil(t, err)
 	require.NotEmpty(t, aok.Identities)
 }

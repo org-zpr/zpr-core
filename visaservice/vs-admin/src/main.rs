@@ -1,4 +1,12 @@
-use apitypes::HostRecordBrief;
+use std::fs::File;
+use std::io::prelude::*;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+
+
+use apitypes::RevokeResponse;
 use base64::prelude::*;
 use clap::{Args, Parser, Subcommand};
 use colored::Colorize;
@@ -7,14 +15,9 @@ use flate2::Compression;
 use reqwest;
 use reqwest::tls::Certificate;
 use reqwest::StatusCode;
-use std::fs::File;
-use std::io::prelude::*;
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 mod apitypes;
-use apitypes::{PolicyBundle, PolicyListEntry, PolicyVersion, VisaDescriptor};
+use apitypes::{PolicyBundle, PolicyListEntry, PolicyVersion, VisaDescriptor, HostRecordBrief};
 
 // Somewhat inconveniently, this must match the setting in:
 // - visaservice/mods/polio/const.go (used by the "new" visa service)
@@ -255,11 +258,35 @@ fn revoke_cn(
 }
 
 fn revoke_visa_id(
-    _api_url: &str,
-    _cert: Certificate,
-    _visa_id: u64,
+    api_url: &str,
+    cert: Certificate,
+    visa_id: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    Err("Not implemented".into())
+    let cb = reqwest::blocking::ClientBuilder::new()
+        .add_root_certificate(cert)
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_secs(10));
+    let client = cb.build()?;
+
+    let resp = client.delete(format!("{}/admin/visas/{}", api_url, visa_id)).send()?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "error (status {:?}:{}) : {}",
+            resp.status(),
+            reason_for(resp.status()),
+            resp.text()?
+        )
+        .into());
+    }
+
+    let rr: RevokeResponse = resp.json()?;
+    if rr.revoked.is_empty() {
+        println!("  {}", "ERROR".bold().red());
+    } else {
+        println!("  {}", "SUCCESS".bold().green());
+        println!("     {} {}", "REVOKED:".bold(), rr.revoked);
+    }
+    Ok(())
 }
 
 fn list_visas(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error::Error>> {
@@ -280,7 +307,9 @@ fn list_visas(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error
         .into());
     }
 
-    let entries: Vec<VisaDescriptor> = resp.json()?;
+    let mut entries: Vec<VisaDescriptor> = resp.json()?;
+    entries.sort_by(|a, b| a.id.cmp(&b.id));
+
 
     println!(
         "{}",
@@ -292,7 +321,7 @@ fn list_visas(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error
         .magenta()
     );
     for vd in entries {
-        println!("  - {}", vd);
+        println!("{vd}");
     }
     Ok(())
 }
@@ -327,7 +356,7 @@ fn list_agents(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::erro
         .magenta()
     );
     for hr in entries {
-        println!("  - {}", hr);
+        println!("{hr}");
     }
     Ok(())
 }

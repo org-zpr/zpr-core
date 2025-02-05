@@ -193,11 +193,19 @@ func (v *NodeValidator) Validate(msg *zds.ValidateRequest, cdb CertificateDB, re
 //
 // This produces a result that is similar enough to a "real" validation result that the
 // visa service is able to use it to enforce policy.
-func (v *NodeValidator) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string) (*AuthenticateOK, error) {
+func (v *NodeValidator) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string, revokes []*snauth.CredID) (*AuthenticateOK, error) {
 	expiration := time.Now().Add(v.maxAuthDuration)
 
 	if claims[agent.KAttrCN] == "" {
 		return nil, fmt.Errorf("missing required claim: %v", agent.KAttrCN)
+	}
+
+	matchCN := strings.ToLower(claims[agent.KAttrCN])
+	for _, revoked := range revokes {
+		if revoked.CType == snauth.CredIDTypeCN && revoked.ID == matchCN {
+			v.Log.Info("[NV] validation failes: CN has been revoked", "cn", claims[agent.KAttrCN])
+			return nil, errAuthRevoked
+		}
 	}
 
 	snjwt, err := v.makeJWT(claims[agent.KAttrCN], expiration, nil, nil)

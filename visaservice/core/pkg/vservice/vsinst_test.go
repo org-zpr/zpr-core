@@ -123,11 +123,13 @@ func (tas *TestAS) SetCurrentPolicy(cfg uint64, pol *policy.Policy) error {
 
 func (tas *TestAS) RevokeAuthority(string) error               { return nil }
 func (tas *TestAS) RevokeCredential(string) error              { return nil }
+func (tas *TestAS) RevokeCN(string) error                      { return nil }
+func (tas *TestAS) ClearAllRevokes() uint32                    { return 0 }
 func (tas *TestAS) InstallPolicy(uint64, byte, *policy.Policy) {}
 func (tas *TestAS) ActivateConfiguration(uint64, byte)         {}
-func (ts *TestAS) RemoveServiceByPrefix(_ string) int          { return 0 }
+func (tas *TestAS) RemoveServiceByPrefix(_ string) int         { return 0 }
 
-func (ts *TestAS) AddDatasourceProvider(_ string, _ netip.Addr, _ uint64) error {
+func (tas *TestAS) AddDatasourceProvider(_ string, _ netip.Addr, _ uint64) error {
 	return nil
 }
 

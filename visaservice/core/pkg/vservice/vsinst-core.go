@@ -15,8 +15,9 @@ import (
 	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vsapi"
+	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsapi"
 	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"
 )
@@ -478,4 +479,35 @@ func (vs *VSInst) checkAndUpdateAttrs(now time.Time, agnt *agent.Agent) (bool, m
 		}
 	}
 	return true, keepAttrs, nil // No error, and attributes have been updated
+}
+
+func (vs *VSInst) revokeVisaByID(visaID uint64) error {
+	var revokes []*vsapi.VisaRevocation
+
+	vs.vtable.mtx.Lock()
+	if ve, ok := vs.vtable.table[uint32(visaID)]; ok {
+		delete(vs.vtable.table, uint32(visaID))
+		vs.log.Info("visa revoked", "visa_id", visaID)
+		revokes = append(revokes, &vsapi.VisaRevocation{
+			IssuerID:      int32(visaID),
+			Configuration: int64(ve.v.Configuration),
+		})
+	}
+	vs.vtable.mtx.Unlock()
+
+	if len(revokes) == 0 {
+		return ErrVisaNotFound
+	}
+
+	push := adb.PushItem{
+		Broadcast:   true,
+		Revocations: revokes,
+	}
+	select {
+	case vs.visaPushC <- &push: // ok
+	default:
+		vs.log.Warn("push channel full, failed to issue revoke")
+		return fmt.Errorf("visa service push channel full")
+	}
+	return nil
 }

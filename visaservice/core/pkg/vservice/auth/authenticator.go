@@ -39,8 +39,8 @@ type Authenticator struct {
 	MaxAuthDuration time.Duration
 
 	rvkSvc struct {
-		sync.RWMutex
-		service RevocationService
+		rdb     *RevokeDB
+		service RevocationService // let over from protytpe -- now is just self
 	}
 
 	policy struct {
@@ -68,8 +68,6 @@ type ValidateResult struct {
 // `ep` is this nodes ZPR address (used as a point-of-entry ID)
 // `vsName` is a name for this visa service -- added as metadata to all JWTs we create.
 // `privateKey` is the key used to sign JWTs we create post validation.
-//
-// To make this fully functional you must call `SetRevocationService` at some point.
 func NewAuthenticator(mlog logr.Logger, ep netip.Addr, maxAuthLifetime time.Duration, vsName string, privateKey *rsa.PrivateKey) *Authenticator {
 	ath := &Authenticator{
 		log:             mlog,
@@ -79,13 +77,9 @@ func NewAuthenticator(mlog logr.Logger, ep netip.Addr, maxAuthLifetime time.Dura
 	}
 	ath.policy.validators = NewDirectory(snauth.NewCertCollection(), mlog)
 	ath.policy.localPrefixes = make(map[string]bool)
+	ath.rvkSvc.rdb = NewRevokeDB()
+	ath.rvkSvc.service = ath
 	return ath
-}
-
-func (a *Authenticator) SetRevocationService(service RevocationService) {
-	a.rvkSvc.Lock()
-	defer a.rvkSvc.Unlock()
-	a.rvkSvc.service = service
 }
 
 // SetCurrentPolicy extracts the datasource information from the given policy.
@@ -330,7 +324,7 @@ func (a *Authenticator) Authenticate(extDsPrefix string,
 
 // Dispatch the self-authentication to our NodeValidator.
 func (a *Authenticator) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string) (*AuthenticateOK, error) {
-	return a.local.SelfAuthenticate(reqAddr, claims)
+	return a.local.SelfAuthenticate(reqAddr, claims, a.loadRevocationData())
 }
 
 // Query runs an attribute query against datasources.
@@ -398,36 +392,6 @@ func (a *Authenticator) Query(fedreq *zds.QueryRequest) (*zds.QueryResponse, err
 	return result, nil
 }
 
-// revoke by a KEY id
-func (a *Authenticator) RevokeAuthority(ID string) error {
-	var rs RevocationService
-	a.rvkSvc.RLock()
-	rs = a.rvkSvc.service
-	a.rvkSvc.RUnlock()
-	if rs == nil {
-		return errors.New("revocation service is not set")
-	}
-	a.policy.RLock()
-	defer a.policy.RUnlock()
-	rs.ProposeRevokeAuthority(fmt.Sprintf("%d%s", a.policy.configID, a.policy.version), ID)
-	return nil
-}
-
-// revoke by a JTI
-func (a *Authenticator) RevokeCredential(ID string) error {
-	var rs RevocationService
-	a.rvkSvc.RLock()
-	rs = a.rvkSvc.service
-	a.rvkSvc.RUnlock()
-	if rs == nil {
-		return errors.New("revocation service is not set")
-	}
-	a.policy.RLock()
-	defer a.policy.RUnlock()
-	rs.ProposeRevokeCredential(fmt.Sprintf("%d%s", a.policy.configID, a.policy.version), ID)
-	return nil
-}
-
 // isJWTRevoked check if the passed JWT has an id value (jti) that matches a revoked
 // credential.
 func isJWTRevoked(jwtStr string, revokes []*snauth.CredID) bool {
@@ -454,33 +418,6 @@ func isJWTRevoked(jwtStr string, revokes []*snauth.CredID) bool {
 		}
 	}
 	return false
-}
-
-// loadRevocation data massages the revocation data from shared state into an array of snauth.CredID
-// (which is an older interface).
-//
-// Must hold the a.policy mutex.
-func (a *Authenticator) loadRevocationData() []*snauth.CredID {
-	var rs RevocationService
-	a.rvkSvc.RLock()
-	rs = a.rvkSvc.service
-	a.rvkSvc.RUnlock()
-	if rs == nil {
-		return nil
-	}
-
-	var revokes []*snauth.CredID
-	for _, rk := range rs.ListRevocationKeysFor(fmt.Sprintf("%d%s", a.policy.configID, a.policy.version)) {
-		if revRec := rs.GetRevoke(rk); revRec != nil {
-			if ctv := raftRevokeTypeToSnauthCredIDType(revRec.GetRType()); ctv != snauth.CredIDTypeNil {
-				revokes = append(revokes, &snauth.CredID{
-					CType: ctv,
-					ID:    revRec.GetCredId(),
-				})
-			}
-		}
-	}
-	return revokes
 }
 
 // Call with mutex on a.policy
@@ -557,13 +494,64 @@ func prefixRest(key string) (string, string) {
 	return bits[0], strings.Join(bits[1:], ".")
 }
 
+// revoke by a KEY id (just updates the revocation list)
+func (a *Authenticator) RevokeAuthority(ID string) error {
+	rs := a.rvkSvc.service
+	a.policy.RLock()
+	defer a.policy.RUnlock()
+	rs.ProposeRevokeAuthority(fmt.Sprintf("%d%s", a.policy.configID, a.policy.version), ID)
+	return nil
+}
+
+// revoke by a JTI (just updates the revocation list)
+func (a *Authenticator) RevokeCredential(ID string) error {
+	rs := a.rvkSvc.service
+	a.policy.RLock()
+	defer a.policy.RUnlock()
+	rs.ProposeRevokeCredential(fmt.Sprintf("%d%s", a.policy.configID, a.policy.version), ID)
+	return nil
+}
+
+// revoke by a CN (just updates the revocation list)
+func (a *Authenticator) RevokeCN(cn string) error {
+	rs := a.rvkSvc.service
+	a.policy.RLock()
+	defer a.policy.RUnlock()
+	rs.ProposeRevokeCN(fmt.Sprintf("%d%s", a.policy.configID, a.policy.version), cn)
+	return nil
+}
+
+// loadRevocation data massages the revocation data from shared state into an array of snauth.CredID
+// (which is an older interface).
+//
+// Must hold the a.policy mutex.
+func (a *Authenticator) loadRevocationData() []*snauth.CredID {
+	rs := a.rvkSvc.service
+	if rs == nil {
+		return nil
+	}
+
+	var revokes []*snauth.CredID
+	for _, rk := range rs.ListRevocationKeysFor(fmt.Sprintf("%d%s", a.policy.configID, a.policy.version)) {
+		if revRec := rs.GetRevoke(rk); revRec != nil {
+			if ctv := raftRevokeTypeToSnauthCredIDType(revRec.GetRType()); ctv != snauth.CredIDTypeNil {
+				revokes = append(revokes, &snauth.CredID{
+					CType: ctv,
+					ID:    revRec.GetCredId(),
+				})
+			}
+		}
+	}
+	return revokes
+}
+
 // ClearRevocationList should be called when a new policy is installed.
 func (a *Authenticator) clearRevocationList(forConfig uint64, forPolicy string) {
-	a.rvkSvc.RLock()
-	defer a.rvkSvc.RUnlock()
-	if a.rvkSvc.service != nil {
-		a.rvkSvc.service.ProposeClearAllRevokes(fmt.Sprintf("%d%s", forConfig, forPolicy))
-	}
+	a.rvkSvc.service.ProposeClearAllRevokes(fmt.Sprintf("%d%s", forConfig, forPolicy))
+}
+
+func (a *Authenticator) ClearAllRevokes() uint32 {
+	return a.rvkSvc.service.ProposeClearAllRevokes("")
 }
 
 // setInternalPrefixes sets the list of internal prefixes from policy.

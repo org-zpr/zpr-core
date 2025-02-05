@@ -140,7 +140,6 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16,
 	s.service.inst = vsinst
 
 	authenticator := auth.NewAuthenticator(s.log, s.myAddr, s.maxAuthDuration, issuerName, s.keys.tokenSigningKey)
-	authenticator.SetRevocationService(&auth.DummyRecovationService{})
 	s.authService = authenticator
 	vsinst.SetAuthSvc(authenticator)
 
@@ -256,6 +255,18 @@ func (s *VisaService) ListVisas() []*VisaDescriptor {
 // Implements an interface needed by the admin service.
 func (s *VisaService) ListAdapters() []*adb.HostRecordBrief {
 	return s.service.inst.agentDB.CloneToBrief()
+}
+
+// Implements an interface needed by the admin service.
+func (s *VisaService) ClearAllRevokes() uint32 {
+	return s.authService.ClearAllRevokes()
+}
+
+func (s *VisaService) RevokeVisa(vid uint64) error {
+	// Since revoking a visa just removes it from visa service table and
+	// notifies network, I don't bother writing it to the in-memory
+	// revocation database.
+	return s.service.inst.revokeVisaByID(vid)
 }
 
 // InstallPolicy is for installing a policy supplied by an admin through our admin-service.

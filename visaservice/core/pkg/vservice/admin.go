@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -37,6 +38,19 @@ type PolicyBundle struct {
 	Container string `json:"container"` // base-64 encoded, zlib compressed PolicyContainer
 }
 
+// Very simple for now.
+type RevokeAdminRequest struct {
+	ClearAll bool `json:"clear_all"` // TRUE clear all revocation data, FALSE is NOP
+}
+
+type RevokeAdminResponse struct {
+	ClearCount uint32 `json:"clear_count"`
+}
+
+type RevokeResponse struct {
+	Revoked string `json:"revoked"`
+}
+
 type VisaDescriptor struct {
 	// TODO: Might be nice to have a create time here.
 	ID      uint64 `json:"id"`
@@ -51,6 +65,8 @@ type VSApi interface {
 	InstallPolicy(*polio.ContainedPolicy) (string, uint64, error) // returns (version, config_id, error)
 	ListVisas() []*VisaDescriptor
 	ListAdapters() []*adb.HostRecordBrief
+	ClearAllRevokes() uint32
+	RevokeVisa(uint64) error
 }
 
 type AdminService struct {
@@ -89,6 +105,7 @@ func (svc *AdminService) StartAdminService(listenAddr netip.Addr, port int) erro
 	router.HandleFunc("/admin/visas/{ID}", svc.handleRevokeVisaByID).Methods("DELETE")
 	router.HandleFunc("/admin/agents", svc.handleListAgents).Methods("GET")
 	router.HandleFunc("/admin/agents/{CN}", svc.handleRevokeAgentByCN).Methods("DELETE")
+	router.HandleFunc("/admin/revokes", svc.handleRevokeAdmin).Methods("POST")
 
 	addrPort := netip.AddrPortFrom(listenAddr, uint16(port))
 	server := http.Server{
@@ -262,9 +279,22 @@ func (svc *AdminService) handleRevokeVisaByID(w http.ResponseWriter, r *http.Req
 		http.Error(w, "invalid visa ID", http.StatusBadRequest)
 		return
 	}
-	revokeResp := "not implemented"
+	err := svc.vsi.RevokeVisa(visaID)
+	if err != nil {
+		if errors.Is(err, ErrVisaNotFound) {
+			http.Error(w, "visa not found", http.StatusNotFound)
+		} else {
+			svc.log.WithError(err).Error("admin service: failed to revoke visa", "visa_id", visaID)
+			http.Error(w, "revoke visa failed", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	resp := &RevokeResponse{
+		Revoked: visaIDStr,
+	}
 	w.Header().Add("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(revokeResp)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (svc *AdminService) handleRevokeAgentByCN(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +304,28 @@ func (svc *AdminService) handleRevokeAgentByCN(w http.ResponseWriter, r *http.Re
 		http.Error(w, "invalid adapter CN", http.StatusBadRequest)
 		return
 	}
-	revokeResp := "not implemented"
+	resp := &RevokeResponse{
+		Revoked: "",
+	}
 	w.Header().Add("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(revokeResp)
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (svc *AdminService) handleRevokeAdmin(w http.ResponseWriter, r *http.Request) {
+	var command RevokeAdminRequest
+	err := json.NewDecoder(r.Body).Decode(&command)
+	if err != nil {
+		svc.log.WithError(err).Error("admin service: failed to unmarshal revoke admin request")
+		http.Error(w, "revoke admin failed", http.StatusBadRequest)
+		return
+	}
+	var count uint32
+	if command.ClearAll {
+		count = svc.vsi.ClearAllRevokes()
+	}
+	resp := &RevokeAdminResponse{
+		ClearCount: count,
+	}
+	w.Header().Add("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
