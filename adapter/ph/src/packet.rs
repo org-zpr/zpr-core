@@ -13,7 +13,6 @@ use std::mem::size_of;
 use zerocopy::*;
 use zpr;
 use zpr::L3Type;
-use zpr_ext::std::mem::DropGuard;
 
 /// Exclusive handle to an in-use packet buffer.
 ///
@@ -258,16 +257,6 @@ impl Packet {
             "packet buffer must be large enough to contain metadata"
         );
         Self::new_with_existing_data(buf, Self::MIN_BODY_OFFSET + headroom, 0)
-    }
-
-    /// Same as `new()`, but accepts a `DropGuard`-protected buffer, and produces
-    /// a `DropGuard`-protected packet buffer, so manually calling `destroy()`
-    /// is unnecessary.
-    pub fn new_guarded(
-        buf: impl DropGuard<PacketBuffer> + Send,
-        headroom: usize,
-    ) -> impl DropGuard<Self> + Send {
-        buf.map(move |b| Self::new(b, headroom), |p| p.destroy())
     }
 
     /// Consumes a packet handle, returning the underlying buffer.
