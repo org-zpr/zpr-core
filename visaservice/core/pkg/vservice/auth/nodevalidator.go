@@ -191,6 +191,8 @@ func (v *NodeValidator) Validate(msg *zds.ValidateRequest, cdb CertificateDB, re
 // Fake validation for use during initial version of node-visaservice integration.
 // To be removed eventually.
 //
+// TODO: This includes CN checking against revocations which will need to be put in the normal authenicate flow too.
+//
 // This produces a result that is similar enough to a "real" validation result that the
 // visa service is able to use it to enforce policy.
 func (v *NodeValidator) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string, revokes []*snauth.CredID) (*AuthenticateOK, error) {
