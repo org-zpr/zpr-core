@@ -28,6 +28,10 @@ func (r *Revoke) GetCredId() string {
 	return r.cid
 }
 
+func (r *Revoke) Equals(o *Revoke) bool {
+	return r.t == o.t && r.cid == o.cid
+}
+
 // The prototype used RAFT on the nodes to keep track of the revocations.
 // All the "propose" verbiage is left over from raft.
 //

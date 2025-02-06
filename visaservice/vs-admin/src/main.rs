@@ -289,7 +289,12 @@ fn revoke_cn(
     } else {
         println!("  {}", "SUCCESS".bold().green());
         println!("     {} {}", "REVOKED:".bold(), rr.revoked);
-        println!("     {} {}", "  COUNT:".bold(), rr.count);
+        print!("     {} {}", "  COUNT:".bold(), rr.count);
+        if rr.count == 0 {
+            println!(" {}", "(no visas were revoked)".yellow());
+        } else {
+            println!();
+        }
     }
     Ok(())
 }
@@ -425,7 +430,12 @@ fn clear_revokes(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::er
 
     let rr: RevokeAdminResponse = resp.json()?;
     println!("  {}", "SUCCESS".bold().green());
-    println!("     {} {}", "COUNT:".bold(), rr.clear_count);
+    print!("     {} {}", "COUNT:".bold(), rr.clear_count);
+    if rr.clear_count == 0 {
+        println!(" {}",  "(no revokes found)".yellow());
+    } else {
+        println!();
+    }
     Ok(())
 }
 

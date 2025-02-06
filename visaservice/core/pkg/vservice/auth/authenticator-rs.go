@@ -34,6 +34,12 @@ func (db *RevokeDB) insert(pver string, rvk *Revoke) {
 	rkey := fmt.Sprintf("%v/%d", pver, db.nextKeyNum)
 	db.nextKeyNum++
 	if prdb, ok := db.revokes[pver]; ok {
+		// Only add if not already in there. Potentially slow as we look at entire revoke list.
+		for _, v := range prdb.revokes {
+			if v.Equals(rvk) {
+				return
+			}
+		}
 		prdb.revokes[rkey] = rvk
 	} else {
 		rdb := make(map[string]*Revoke)
