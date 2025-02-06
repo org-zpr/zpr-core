@@ -23,91 +23,72 @@ pub async fn launch(
     requeue_outq: UnixDatagram,
 ) {
     let mut worker = FastpathWorker::new(config, worker_index, asm.clone());
-    let mut bufs = Vec::new();
 
     loop {
         // process the return buffer queue
-        worker
-            .adapter_manager
-            .try_recv_return_buffers(&mut bufs, worker.config.buffer_count);
-        worker.buffer_stack.put_buffers(bufs.drain(..));
-
-        // grab some buffers from the pool;
-        // if none are available immediately, also wait on the return buffer queue
-        select! {
-            biased;
-
-            _ = worker.buffer_stack
-                .get_buffers(worker.config.batch_size - bufs.len(), &mut bufs) => (),
-
-            buf = worker.adapter_manager.async_recv_return_buffer() => {
-                // weird two-step approach necessitated by bufs ownership issue with select
-                bufs.push(buf);
-                worker.adapter_manager.try_recv_return_buffers(&mut bufs, worker.config.batch_size - 1);
-            }
+        if worker.buffers.is_empty() {
+            // if we are out of buffers, block
+            worker
+                .adapter_manager
+                .async_recv_return_buffers(&mut worker.buffers, worker.config.buffer_count)
+                .await;
+        } else {
+            worker
+                .adapter_manager
+                .try_recv_return_buffers(&mut worker.buffers, worker.config.buffer_count);
         }
 
-        // read & forward packets one at a time, no sense to batch really
-        // since neither `read_buf()` nor `enqueue()` support it
-        for mut buf in bufs.drain(..) {
-            let (pkt, is_requeue) = loop {
-                let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
-                let is_requeue;
+        // read & forward packets one at a time
+        let mut pkt = Packet::new(
+            worker.buffers.pop().unwrap(),
+            config::DEFAULT_MESSAGE_HEADROOM,
+        );
 
-                select! {
-                    res = tun.recv_buf(&mut pkt) => {
-                        res.unwrap();
+        // TODO: batch receive
+        select! {
+            // read from TUN device
+            res = tun.recv_buf(&mut pkt) => {
+                res.unwrap();
 
-                        if zprtun::TUN_HAS_PI {
-                            let pi = TunPi::read_pi(&mut pkt);
-                            if pi.strip || !is_ip(pi) {
-                                // packet was too large or non-IP; drop
-                                asm.counters[CounterType::OutPacksDrop].increment();
-                                // reuse `buf`
-                                buf = pkt.destroy().try_into().unwrap();
-                                continue;
-                            }
-                        } else {
-                            // No packet info, permit IP and IPv6 only (for now?)
-                            if pkt.body()[0] >> 4 != 4 && pkt.body()[0] >> 4 != 6 {
-                                asm.counters[CounterType::OutPacksDrop].increment();
-                                buf = pkt.destroy().try_into().unwrap();
-                                continue;
-                            }
-                        }
-
-                        is_requeue = false;
+                if zprtun::TUN_HAS_PI {
+                    let pi = TunPi::read_pi(&mut pkt);
+                    if pi.strip || !is_ip(pi) {
+                        // packet was too large or non-IP; drop
+                        worker.drop_and_count(pkt, CounterType::OutPacksDrop);
+                        continue;
                     }
-
-                    _ = requeue_outq.readable() => {
-                        buf = pkt.destroy().try_into().unwrap();
-                        if let Err(err) = requeue_outq.try_recv(buf.as_mut()) {
-                            match err.kind() {
-                                std::io::ErrorKind::WouldBlock => {
-                                    continue;
-                                }
-
-                                _ => {
-                                    // FIXME: detect packet-too-large
-                                    panic!("unrecoverable I/O error {err}");
-                                }
-                            }
-                        }
-
-                        pkt = Packet::new_with_existing_metadata(buf);
-
-                        is_requeue = true;
+                } else {
+                    // No packet info, permit IP and IPv6 only (for now?)
+                    if pkt.body()[0] >> 4 != 4 && pkt.body()[0] >> 4 != 6 {
+                        worker.drop_and_count(pkt, CounterType::OutPacksDrop);
+                        continue;
                     }
                 }
 
-                break (pkt, is_requeue);
-            };
-
-            if is_requeue {
-                worker.agent_output_post_classify(pkt, /* allow_bind_request */ false);
-            } else {
-                asm.counters[CounterType::OutPacksRec].increment();
+                worker.asm.counters[CounterType::OutPacksRec].increment();
                 worker.agent_output(pkt);
+            }
+
+            // read from requeue
+            _ = requeue_outq.readable() => {
+                let mut buf = pkt.destroy();
+                if let Err(err) = requeue_outq.try_recv(buf.as_mut()) {
+                    match err.kind() {
+                        std::io::ErrorKind::WouldBlock => {
+                            worker.buffers.push(buf);
+                            continue;
+                        }
+
+                        _ => {
+                            // FIXME: detect packet-too-large
+                            panic!("unrecoverable I/O error {err}");
+                        }
+                    }
+                }
+
+                worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
+                let pkt = Packet::new_with_existing_metadata(buf);
+                worker.agent_output_post_classify(pkt, /* allow_bind_request */ false);
             }
         }
     }

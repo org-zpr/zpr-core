@@ -1,12 +1,12 @@
 use crate::assembly::Assembly;
 use crate::config;
+use crate::counters::*;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::packet::Packet;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::UdpSocket;
-use tokio::select;
 
 pub async fn launch(
     config: FastpathWorkerConfig,
@@ -15,54 +15,49 @@ pub async fn launch(
     socket: Arc<UdpSocket>,
 ) {
     let mut worker = FastpathWorker::new(config, worker_index, asm.clone());
-    let mut bufs = Vec::new();
 
     loop {
         // process the return buffer queue
-        worker
-            .mgmt_dispatch
-            .try_recv_return_buffers(&mut bufs, worker.config.buffer_count);
-        worker.buffer_stack.put_buffers(bufs.drain(..));
-
-        // grab some buffers from the pool;
-        // if none are available immediately, also wait on the return buffer queue
-        select! {
-            biased;
-
-            _ = worker.buffer_stack
-                .get_buffers(worker.config.batch_size - bufs.len(), &mut bufs) => (),
-
-            buf = worker.mgmt_dispatch.async_recv_return_buffer() => {
-                // weird two-step approach necessitated by bufs ownership issue with select
-                bufs.push(buf);
-                let _ = worker.mgmt_dispatch.try_recv_return_buffers(&mut bufs, worker.config.batch_size - 1);
-            }
+        if worker.buffers.is_empty() {
+            // if we are out of buffers, block
+            worker
+                .mgmt_dispatch
+                .async_recv_return_buffers(&mut worker.buffers, worker.config.buffer_count)
+                .await;
+        } else {
+            worker
+                .mgmt_dispatch
+                .try_recv_return_buffers(&mut worker.buffers, worker.config.buffer_count);
         }
 
         // TODO: batch receive
-        for buf in bufs.drain(..) {
-            let mut pkt = Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM);
-            let mut sender = loop {
-                match socket.recv_buf_from(&mut pkt).await {
-                    Ok((_size, sender)) => break sender,
+        let mut pkt = Packet::new(
+            worker.buffers.pop().unwrap(),
+            config::DEFAULT_MESSAGE_HEADROOM,
+        );
+        let mut sender = match socket.recv_buf_from(&mut pkt).await {
+            Ok((_size, sender)) => sender,
 
-                    Err(err) => {
-                        match err.kind() {
-                            ErrorKind::ConnectionRefused => (), // FIXME: do something with this later...
-                            _ => panic!("got socket error {}", err),
-                        }
+            Err(err) => {
+                match err.kind() {
+                    ErrorKind::ConnectionRefused => {
+                        // FIXME: do something with this later...
+                        worker.drop_and_count(pkt, CounterType::InPacksDrop);
+                        continue;
                     }
+                    _ => panic!("got socket error {}", err),
                 }
-            };
-
-            // SocketAddrV6 distinguishes addresses also by `flowinfo` which
-            // we do not want -- only the 5-tuple.  So clear it.
-            match &mut sender {
-                SocketAddr::V4(_) => (),
-                SocketAddr::V6(sender) => sender.set_flowinfo(0),
             }
+        };
 
-            worker.substrate_ingress(&sender, pkt);
+        // SocketAddrV6 distinguishes addresses also by `flowinfo` which
+        // we do not want -- only the 5-tuple.  So clear it.
+        match &mut sender {
+            SocketAddr::V4(_) => (),
+            SocketAddr::V6(sender) => sender.set_flowinfo(0),
         }
+
+        worker.asm.counters[CounterType::InPacksRec].increment();
+        worker.substrate_ingress(&sender, pkt);
     }
 }

@@ -5,7 +5,6 @@
 
 use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
-use crate::buffer_stack::BufferStack;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters::CounterType;
@@ -14,7 +13,7 @@ use crate::km::Codec;
 use crate::km_noise::NOISE_PADLEN;
 use crate::logging::targets::DATAPATH;
 use crate::net_defs;
-use crate::packet::Packet;
+use crate::packet::{Packet, PacketBuffer};
 use crate::queues::{AdapterManager, MgmtDispatch, TryEnqueueError};
 use crate::zdp;
 use crate::zdp_ll;
@@ -37,6 +36,7 @@ pub fn drop_and_count_heap(asm: &Assembly, pkt: Packet, reason: impl Into<Counte
     asm.counters[reason].increment();
 }
 
+/// Simple function used on an adapter to forward agent packets to the the tether and vice-versa.
 const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {
     // this optimization is checked by the static asserts below
     // this allows us to avoid an unpredictable branch on every packet
@@ -57,6 +57,7 @@ const AGENT_PACKET_FLOW_TRACKER: std::sync::LazyLock<
 #[derive(Clone, Copy)]
 pub struct FastpathWorkerConfig {
     pub buffer_count: usize,
+    #[allow(dead_code)]
     pub batch_size: usize,
 }
 
@@ -64,18 +65,15 @@ pub struct FastpathWorker {
     pub config: FastpathWorkerConfig,
     pub worker_index: usize,
     pub asm: Arc<Assembly>,
-    pub buffer_stack: BufferStack,
+    pub buffers: Vec<PacketBuffer>,
     pub adapter_manager: AdapterManager,
     pub mgmt_dispatch: MgmtDispatch,
 }
 
 impl FastpathWorker {
     pub fn new(config: FastpathWorkerConfig, worker_index: usize, asm: Arc<Assembly>) -> Self {
-        let buffer_stack = BufferStack::new(vec![
-            Box::new([0u8; config::PACKET_BUFFER_SIZE])
-                as Box<[_]>;
-            config.buffer_count
-        ]);
+        let buffers =
+            vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; config.buffer_count];
 
         let adapter_manager = asm.adapter_manager.clone();
         let mgmt_dispatch = asm.mgmt_dispatch.clone();
@@ -84,7 +82,7 @@ impl FastpathWorker {
             config,
             worker_index,
             asm,
-            buffer_stack,
+            buffers,
             adapter_manager,
             mgmt_dispatch,
         }
@@ -94,15 +92,12 @@ impl FastpathWorker {
     pub fn drop_and_count(&mut self, pkt: Packet, reason: impl Into<CounterType>) {
         let reason = reason.into();
         debug!(target: DATAPATH, "dropping packet because {reason}");
-        self.buffer_stack
-            .put_buffer(pkt.destroy().try_into().unwrap());
+        self.buffers.push(pkt.destroy());
         self.asm.counters[reason].increment();
     }
 
     /// Process packets ingressing from the specified address.
     pub fn substrate_ingress(&mut self, peer_sa: &zpr::SubstrateAddr, mut pkt: Packet) {
-        self.asm.counters[CounterType::InPacksRec].increment();
-
         pkt.metadata_mut().ingress_link_id =
             self.asm.peer_table.lookup_peer(peer_sa).unwrap_or_zero();
 

@@ -375,7 +375,6 @@ impl MgmtDispatch {
         self.sender.try_recv_many_returns(returns, limit)
     }
 
-    #[allow(dead_code)]
     pub async fn async_recv_return_buffers(
         &mut self,
         returns: &mut Vec<PacketBuffer>,
@@ -384,6 +383,7 @@ impl MgmtDispatch {
         self.sender.recv_many_returns(returns, limit).await
     }
 
+    #[allow(dead_code)]
     pub async fn async_recv_return_buffer(&mut self) -> PacketBuffer {
         self.sender.recv_return().await
     }
@@ -453,7 +453,6 @@ impl AdapterManager {
         self.sender.try_recv_many_returns(returns, limit)
     }
 
-    #[allow(dead_code)]
     pub async fn async_recv_return_buffers(
         &mut self,
         returns: &mut Vec<PacketBuffer>,
@@ -462,6 +461,7 @@ impl AdapterManager {
         self.sender.recv_many_returns(returns, limit).await
     }
 
+    #[allow(dead_code)]
     pub async fn async_recv_return_buffer(&mut self) -> PacketBuffer {
         self.sender.recv_return().await
     }

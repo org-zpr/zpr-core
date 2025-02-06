@@ -19,7 +19,6 @@ mod adapter_manager_worker;
 mod adapter_tables;
 mod agent_output_worker;
 mod assembly;
-mod buffer_stack;
 mod capture_worker;
 mod classifier;
 mod compress;
