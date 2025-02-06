@@ -5,6 +5,7 @@
 
 use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
+use crate::buffer_stack::BufferStack;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters::CounterType;
@@ -53,21 +54,37 @@ const AGENT_PACKET_FLOW_TRACKER: std::sync::LazyLock<
     dashmap::DashMap<(zpr::LinkId, zpr::StreamId), usize>,
 > = std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
+#[derive(Clone, Copy)]
+pub struct FastpathWorkerConfig {
+    pub buffer_count: usize,
+    pub batch_size: usize,
+}
+
 pub struct FastpathWorker {
+    pub config: FastpathWorkerConfig,
     pub worker_index: usize,
     pub asm: Arc<Assembly>,
+    pub buffer_stack: BufferStack,
     pub adapter_manager: AdapterManager,
     pub mgmt_dispatch: MgmtDispatch,
 }
 
 impl FastpathWorker {
-    pub fn new(worker_index: usize, asm: Arc<Assembly>) -> Self {
+    pub fn new(config: FastpathWorkerConfig, worker_index: usize, asm: Arc<Assembly>) -> Self {
+        let buffer_stack = BufferStack::new(vec![
+            Box::new([0u8; config::PACKET_BUFFER_SIZE])
+                as Box<[_]>;
+            config.buffer_count
+        ]);
+
         let adapter_manager = asm.adapter_manager.clone();
         let mgmt_dispatch = asm.mgmt_dispatch.clone();
 
         Self {
+            config,
             worker_index,
             asm,
+            buffer_stack,
             adapter_manager,
             mgmt_dispatch,
         }
@@ -77,8 +94,7 @@ impl FastpathWorker {
     pub fn drop_and_count(&mut self, pkt: Packet, reason: impl Into<CounterType>) {
         let reason = reason.into();
         debug!(target: DATAPATH, "dropping packet because {reason}");
-        self.asm
-            .buffer_stack
+        self.buffer_stack
             .put_buffer(pkt.destroy().try_into().unwrap());
         self.asm.counters[reason].increment();
     }

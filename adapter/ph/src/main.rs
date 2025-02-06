@@ -66,8 +66,8 @@ mod zprtun;
 mod km_testdata;
 
 use assembly::{Assembly, PhMode};
-use buffer_stack::BufferStack;
 use capture_worker::CaptureWorker;
+use fastpath::FastpathWorkerConfig;
 use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
@@ -151,9 +151,6 @@ fn main() -> ExitCode {
     //
 
     let topology_config = config::TopologyConfig::default();
-
-    let buf_storage =
-        vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; topology_config.buffer_count];
 
     // TODO: use get/setsockopt(SO_SNDBUF) to ensure we can buffer `capture_queue_size` packets
     let (cap_inq, cap_outq) = std::os::unix::net::UnixDatagram::pair().unwrap();
@@ -319,7 +316,6 @@ fn main() -> ExitCode {
         ph_mode,
         topology_config,
         agent_addresses: config.agent_addr,
-        buffer_stack: BufferStack::new(buf_storage),
         agent_input: AgentInput::new(tun_devs.clone()),
         substrate_egress: SubstrateEgress::new(substrate_sockets.clone()),
         agent_output_requeue: AgentOutputRequeue::new(agent_requeue_inqs),
@@ -392,15 +388,16 @@ fn main() -> ExitCode {
     // start data path workers
     //
 
+    let agent_output_worker_config = FastpathWorkerConfig {
+        buffer_count: asm.topology_config.buffer_count,
+        batch_size: asm.topology_config.agent_output_batch_size,
+    };
     for (worker_index, (tun_dev, requeue)) in
         tun_devs.into_iter().zip(agent_requeue_outqs).enumerate()
     {
         js.spawn(agent_output_worker::launch(
-            agent_output_worker::Config {
-                worker_index,
-                buffer_count: asm.topology_config.buffer_count,
-                batch_size: asm.topology_config.agent_output_batch_size,
-            },
+            agent_output_worker_config,
+            worker_index,
             asm.clone(),
             tun_dev,
             requeue,
@@ -418,13 +415,15 @@ fn main() -> ExitCode {
             substrate_sockets[0].local_addr().unwrap()
         );
     }
+
+    let substrate_ingress_worker_config = FastpathWorkerConfig {
+        buffer_count: asm.topology_config.buffer_count,
+        batch_size: asm.topology_config.substrate_ingress_batch_size,
+    };
     for (worker_index, socket) in substrate_sockets.into_iter().enumerate() {
         js.spawn(substrate_ingress_worker::launch(
-            substrate_ingress_worker::Config {
-                worker_index,
-                buffer_count: asm.topology_config.buffer_count,
-                batch_size: asm.topology_config.substrate_ingress_batch_size,
-            },
+            substrate_ingress_worker_config,
+            worker_index,
             asm.clone(),
             socket,
         ));

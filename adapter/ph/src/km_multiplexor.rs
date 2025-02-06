@@ -338,8 +338,6 @@ mod test {
     use super::*;
 
     use crate::assembly::test::{create_assembly, TestAssemblyBuilder};
-    use crate::buffer_stack::BufferStack;
-    use crate::config;
     use crate::km::KmLinkMsg;
     use crate::km_testdata::test::*;
     use crate::link_state::LinkType;
@@ -376,12 +374,8 @@ mod test {
         let (km_tx, mut km_rx) = mpsc::channel(4);
         let km_state = KmState::new(km_tx, km_sig_tx);
 
-        let buf_storage = vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; 8];
-        let buffer_stack = BufferStack::new(buf_storage);
-
         let mut builder = TestAssemblyBuilder::new();
         builder.km_state = Some(km_state);
-        builder.buffer_stack = Some(buffer_stack);
 
         let asm = Arc::new(create_assembly(builder));
 

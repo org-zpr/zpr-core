@@ -1,7 +1,7 @@
 use crate::assembly::Assembly;
 use crate::config;
 use crate::counters::*;
-use crate::fastpath::FastpathWorker;
+use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::net_defs;
 use crate::packet::Packet;
 use crate::sys::TunPi;
@@ -11,46 +11,39 @@ use std::sync::Arc;
 use tokio::net::UnixDatagram;
 use tokio::select;
 
-#[derive(Copy, Clone)]
-pub struct Config {
-    pub worker_index: usize,
-    pub buffer_count: usize,
-    #[allow(dead_code)]
-    pub batch_size: usize,
-}
-
 fn is_ip(pi: TunPi) -> bool {
     pi.proto == net_defs::ethertype::IP || pi.proto == net_defs::ethertype::IPV6
 }
 
 pub async fn launch(
-    config: Config,
+    config: FastpathWorkerConfig,
+    worker_index: usize,
     asm: Arc<Assembly>,
     tun: Arc<ZprTun>,
     requeue_outq: UnixDatagram,
 ) {
-    let mut worker = FastpathWorker::new(config.worker_index, asm.clone());
+    let mut worker = FastpathWorker::new(config, worker_index, asm.clone());
     let mut bufs = Vec::new();
 
     loop {
         // process the return buffer queue
         worker
             .adapter_manager
-            .try_recv_return_buffers(&mut bufs, config.buffer_count);
-        asm.buffer_stack.put_buffers(bufs.drain(..));
+            .try_recv_return_buffers(&mut bufs, worker.config.buffer_count);
+        worker.buffer_stack.put_buffers(bufs.drain(..));
 
         // grab some buffers from the pool;
         // if none are available immediately, also wait on the return buffer queue
         select! {
             biased;
 
-            _ = asm.buffer_stack
-                .get_buffers(config.batch_size - bufs.len(), &mut bufs) => (),
+            _ = worker.buffer_stack
+                .get_buffers(worker.config.batch_size - bufs.len(), &mut bufs) => (),
 
             buf = worker.adapter_manager.async_recv_return_buffer() => {
                 // weird two-step approach necessitated by bufs ownership issue with select
                 bufs.push(buf);
-                worker.adapter_manager.try_recv_return_buffers(&mut bufs, config.batch_size - 1);
+                worker.adapter_manager.try_recv_return_buffers(&mut bufs, worker.config.batch_size - 1);
             }
         }
 

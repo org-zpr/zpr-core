@@ -1,6 +1,6 @@
 use crate::assembly::Assembly;
 use crate::config;
-use crate::fastpath::FastpathWorker;
+use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::packet::Packet;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
@@ -8,37 +8,34 @@ use std::sync::Arc;
 use tokio::net::UdpSocket;
 use tokio::select;
 
-#[derive(Copy, Clone)]
-pub struct Config {
-    pub worker_index: usize,
-    pub buffer_count: usize,
-    #[allow(dead_code)]
-    pub batch_size: usize,
-}
-
-pub async fn launch(config: Config, asm: Arc<Assembly>, socket: Arc<UdpSocket>) {
-    let mut worker = FastpathWorker::new(config.worker_index, asm.clone());
+pub async fn launch(
+    config: FastpathWorkerConfig,
+    worker_index: usize,
+    asm: Arc<Assembly>,
+    socket: Arc<UdpSocket>,
+) {
+    let mut worker = FastpathWorker::new(config, worker_index, asm.clone());
     let mut bufs = Vec::new();
 
     loop {
         // process the return buffer queue
         worker
             .mgmt_dispatch
-            .try_recv_return_buffers(&mut bufs, config.buffer_count);
-        asm.buffer_stack.put_buffers(bufs.drain(..));
+            .try_recv_return_buffers(&mut bufs, worker.config.buffer_count);
+        worker.buffer_stack.put_buffers(bufs.drain(..));
 
         // grab some buffers from the pool;
         // if none are available immediately, also wait on the return buffer queue
         select! {
             biased;
 
-            _ = asm.buffer_stack
-                .get_buffers(config.batch_size - bufs.len(), &mut bufs) => (),
+            _ = worker.buffer_stack
+                .get_buffers(worker.config.batch_size - bufs.len(), &mut bufs) => (),
 
             buf = worker.mgmt_dispatch.async_recv_return_buffer() => {
                 // weird two-step approach necessitated by bufs ownership issue with select
                 bufs.push(buf);
-                let _ = worker.mgmt_dispatch.try_recv_return_buffers(&mut bufs, config.batch_size - 1);
+                let _ = worker.mgmt_dispatch.try_recv_return_buffers(&mut bufs, worker.config.batch_size - 1);
             }
         }
 
