@@ -3,12 +3,14 @@ package vservice
 import (
 	"fmt"
 	"net/netip"
+	"time"
 
 	"golang.org/x/net/context"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice/adb"
+	"zpr.org/vsapi"
+	"zpr.org/vsx/snio/vsio"
 )
 
 // Called by InstallPolicy
@@ -29,6 +31,17 @@ func (vs *VSInst) installPolicyWithVisasForNodes(pp *policy.Policy, configID uin
 func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.Policy, configID uint64) error {
 	var visas []*vsapi.VisaHop
 	var vssPort uint16
+
+	// We may have recently tried this operation and buffered the visas.
+	// If so, we do not want to regenerate the visas and buffer duplicates.
+	// So we track our attempts to bring node into sync.
+	if syncDeets := vs.agentDB.GetPeerSyncDetails(nodeAddr); syncDeets != nil {
+		if syncDeets.PolicyVersion == pp.VersionNumber() && syncDeets.ConfigID == configID && time.Until(syncDeets.VisasExpiration) > 30*time.Minute {
+			// Skip.
+			vs.log.Debug("skipping policy install for node: already pending", "node", nodeAddr, "time_until_expires", time.Until(syncDeets.VisasExpiration))
+			return nil
+		}
+	}
 
 	serviceAddr := vs.agentDB.GetNodeVSSAddr(nodeAddr)
 	if serviceAddr == "" {
@@ -74,6 +87,20 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 			vs.log.Warn("failed to generate a visa-support-service visa for the node", "reason", vsr.Reason)
 		} else {
 			visas = append(visas, vsr.Visa)
+		}
+	}
+
+	if len(visas) > 0 {
+		var first_expire time.Time
+		for _, vh := range visas {
+			vt := vsio.VToTime(vh.Visa.Expires)
+			if first_expire.IsZero() || first_expire.After(vt) {
+				first_expire = vt
+			}
+		}
+		// Update our state so we remember that we have tried this before.
+		if err := vs.agentDB.SetPeerSyncDetails(nodeAddr, pp.VersionNumber(), configID, first_expire); err != nil {
+			vs.log.WithError(err).Warn("failed to set peer sync details", "node", nodeAddr)
 		}
 	}
 
