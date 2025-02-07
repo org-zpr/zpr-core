@@ -66,6 +66,7 @@ type VSApi interface {
 	InstallPolicy(*polio.ContainedPolicy) (string, uint64, error) // returns (version, config_id, error)
 	ListVisas() []*VisaDescriptor
 	ListAdapters() []*adb.HostRecordBrief
+	ListNodes() []*adb.NodeRecordBrief
 	ClearAllRevokes() uint32
 	RevokeVisa(uint64) error
 	RevokeCN(string) uint32
@@ -108,6 +109,7 @@ func (svc *AdminService) StartAdminService(listenAddr netip.Addr, port int) erro
 	router.HandleFunc("/admin/agents", svc.handleListAgents).Methods("GET")
 	router.HandleFunc("/admin/agents/{CN}", svc.handleRevokeAgentByCN).Methods("DELETE")
 	router.HandleFunc("/admin/revokes", svc.handleRevokeAdmin).Methods("POST")
+	router.HandleFunc("/admin/nodes", svc.handleListNodes).Methods("GET")
 
 	addrPort := netip.AddrPortFrom(listenAddr, uint16(port))
 	server := http.Server{
@@ -271,6 +273,15 @@ func (svc *AdminService) handleListAgents(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Add("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(adapterList)
+}
+
+func (svc *AdminService) handleListNodes(w http.ResponseWriter, r *http.Request) {
+	nodeList := svc.vsi.ListNodes()
+	if nodeList == nil {
+		nodeList = []*adb.NodeRecordBrief{} // return an empty array, not an empty body.
+	}
+	w.Header().Add("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(nodeList)
 }
 
 func (svc *AdminService) handleRevokeVisaByID(w http.ResponseWriter, r *http.Request) {

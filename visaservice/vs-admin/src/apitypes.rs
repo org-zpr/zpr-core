@@ -28,11 +28,23 @@ pub struct VisaDescriptor {
 #[derive(Deserialize)]
 #[allow(dead_code)]
 pub struct HostRecordBrief {
-    ctime: i64, // unix SECONDS (not millis)
-    cn: String,
-    zpr_addr: String,
-    ident: String,
-    node: bool,
+    pub ctime: i64, // unix SECONDS (not millis)
+    pub cn: String,
+    pub zpr_addr: String,
+    pub ident: String,
+    pub node: bool,
+}
+
+#[derive(Deserialize)]
+pub struct NodeRecordBrief {
+    pub pending: u32,
+    pub ctime: i64,
+    pub last_contact: i64, // unix SECONDS
+    pub visa_requests: u64,
+    pub connect_requests: u64,
+    pub cn: String,
+    pub zpr_addr: String,
+    pub in_sync: bool,
 }
 
 #[derive(Deserialize)]
@@ -95,6 +107,59 @@ impl fmt::Display for HostRecordBrief {
             } else {
                 "".normal()
             },
+        )
+    }
+}
+
+impl fmt::Display for NodeRecordBrief {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let ts: DateTime<Utc> = DateTime::from_timestamp(self.ctime, 0).unwrap();
+        let last_contact: DateTime<Utc> = DateTime::from_timestamp(self.last_contact, 0).unwrap();
+        write!(
+            f,
+            "{} {}{}{} @ {} {} {} {} {}",
+            self.cn,
+            "(created: ".dimmed(),
+            ts.to_rfc3339_opts(SecondsFormat::Secs, true).cyan(),
+            ")".dimmed(),
+            self.zpr_addr.yellow(),
+            if self.pending > 0 {
+                format!("[{} pending]", self.pending).red()
+            } else {
+                "".normal()
+            },
+            format!(
+                "{}{}",
+                "SYNC:".dimmed(),
+                if self.in_sync {
+                    "YES".green()
+                } else {
+                    "NO".red()
+                }
+            ),
+            format!(
+                "{} {}",
+                "last_contact:".dimmed(),
+                if self.last_contact == 0 {
+                    "never".to_string().red()
+                } else {
+                    last_contact
+                        .to_rfc3339_opts(SecondsFormat::Secs, true)
+                        .cyan()
+                }
+            ),
+            // '[visas: VAL' '|' 'connects: VAL]'
+            format!(
+                "{} {} {}",
+                format!("{}{}", "[vreqs:".dimmed(), self.visa_requests),
+                "|".dimmed(),
+                format!(
+                    "{}{}{}",
+                    "creqs:".dimmed(),
+                    self.connect_requests,
+                    "]".dimmed()
+                ),
+            ),
         )
     }
 }
