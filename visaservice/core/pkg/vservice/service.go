@@ -13,9 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"zpr.org/vs/pkg/agent"
 	"zpr.org/vs/pkg/logr"
 
 	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
 
 	"zpr.org/vsx/polio"
@@ -139,7 +141,6 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16,
 	s.service.inst = vsinst
 
 	authenticator := auth.NewAuthenticator(s.log, s.myAddr, s.maxAuthDuration, issuerName, s.keys.tokenSigningKey)
-	authenticator.SetRevocationService(&auth.DummyRecovationService{})
 	s.authService = authenticator
 	vsinst.SetAuthSvc(authenticator)
 
@@ -233,7 +234,93 @@ func (s *VisaService) installPolicyFromFile(fname string, pubkey *rsa.PublicKey)
 	return s.doInstallPolicy(cp)
 }
 
+// Implements an interface needed by the admin service.
+func (s *VisaService) ListVisas() []*VisaDescriptor {
+	// Reach into the vsinst and rifle through the visas creating visa descriptors.
+	var descriptors []*VisaDescriptor
+	s.service.inst.vtable.mtx.RLock()
+	defer s.service.inst.vtable.mtx.RUnlock()
+	for issuerID, vtEnt := range s.service.inst.vtable.table {
+		srcAddr, _ := netip.AddrFromSlice(vtEnt.v.Source)
+		dstAddr, _ := netip.AddrFromSlice(vtEnt.v.Dest)
+		descriptors = append(descriptors, &VisaDescriptor{
+			ID:      uint64(issuerID),
+			Expires: uint64(vtEnt.v.Expires),
+			Source:  srcAddr.String(),
+			Dest:    dstAddr.String(),
+		})
+	}
+	return descriptors
+}
+
+// Implements an interface needed by the admin service.
+func (s *VisaService) ListAdapters() []*adb.HostRecordBrief {
+	return s.service.inst.agentDB.CloneToBrief()
+}
+
+// Implements an interface needed by the admin service.
+func (s *VisaService) ClearAllRevokes() uint32 {
+	return s.authService.ClearAllRevokes()
+}
+
+func (s *VisaService) RevokeVisa(vid uint64) error {
+	// Since revoking a visa just removes it from visa service table and
+	// notifies network, I don't bother writing it to the in-memory
+	// revocation database.
+	return s.service.inst.revokeVisaByID(vid)
+}
+
+func (s *VisaService) RevokeCN(cn string) uint32 {
+	// First update our memory so that if the CN shows up later it will fail.
+	s.log.Info("revoke CN", "cn", cn)
+	if err := s.authService.RevokeCN(cn); err != nil {
+		// Hmm, store to memory failed? Log but continue.
+		s.log.WithError(err).Warn("auth service failed to store CN revocation", "cn", cn)
+	}
+
+	// Then get rid of any visas involved with the CN.
+	// The visa service keeps a table of visas, but to find ones for a specific agent we need
+	// the ZPR addr of the agent.
+
+	var count uint32
+	agentList := s.service.inst.agentDB.GetAgentsWithClaim(agent.KAttrCN, cn)
+	if len(agentList) > 0 {
+		count = s.service.inst.revokeVisasForAgents(agentList)
+		if count > 0 {
+			s.log.Info("active visas removed due to revoked CN", "cn", cn, "visa_count", count)
+		} else {
+			s.log.Info("no active visas found for revoked CN", "cn", cn)
+		}
+		for _, agnt := range agentList {
+			s.removeAgent(agnt)
+		}
+	} else {
+		s.log.Info("no active visas found for revoked CN", "cn", cn)
+	}
+
+	// Ideally we would tell the docking node that we are booting this agent
+	// out of our system.
+	return count
+}
+
+// Remove an agent from the agent DB.
+// Should behave just as if de-register or disconnect were called over the vs-api.
+func (s *VisaService) removeAgent(agnt *agent.Agent) {
+	zprAddr := agnt.GetZPRIDIfSet()
+	if agnt.IsNode() {
+		if prec := s.service.inst.agentDB.GetPeerRecord(zprAddr); prec != nil {
+			s.service.inst.takePeerRecord(prec.APIKey)
+		}
+		s.service.inst.agentDB.RemoveNode(zprAddr)
+		s.log.Info("node-agent has been removed", "zpr_addr", zprAddr)
+	} else {
+		s.service.inst.agentDB.RemoveAdapter(zprAddr)
+		s.log.Info("adapter-agent has been removed", "zpr_addr", zprAddr)
+	}
+}
+
 // InstallPolicy is for installing a policy supplied by an admin through our admin-service.
+// Implements an interface needed by the admin service
 //
 // Returns (version, config_id, error)
 func (s *VisaService) InstallPolicy(cp *polio.ContainedPolicy) (string, uint64, error) {

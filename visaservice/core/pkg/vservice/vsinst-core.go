@@ -1,6 +1,7 @@
 package vservice
 
 import (
+	"bytes"
 	"context"
 	"crypto/md5"
 	"errors"
@@ -15,8 +16,9 @@ import (
 	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vsapi"
+	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsapi"
 	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"
 )
@@ -478,4 +480,113 @@ func (vs *VSInst) checkAndUpdateAttrs(now time.Time, agnt *agent.Agent) (bool, m
 		}
 	}
 	return true, keepAttrs, nil // No error, and attributes have been updated
+}
+
+// Returns ErrVisaNotFound if the visa is not found.
+func (vs *VSInst) revokeVisaByID(visaID uint64) error {
+	var revokes []*vsapi.VisaRevocation
+
+	vs.vtable.mtx.Lock()
+	if ve, ok := vs.vtable.table[uint32(visaID)]; ok {
+		delete(vs.vtable.table, uint32(visaID))
+		vs.log.Info("visa revoked", "visa_id", visaID)
+		revokes = append(revokes, &vsapi.VisaRevocation{
+			IssuerID:      int32(visaID),
+			Configuration: int64(ve.v.Configuration),
+		})
+	}
+	vs.vtable.mtx.Unlock()
+
+	if len(revokes) == 0 {
+		return ErrVisaNotFound
+	}
+
+	push := adb.PushItem{
+		Broadcast:   true,
+		Revocations: revokes,
+	}
+	select {
+	case vs.visaPushC <- &push: // ok
+	default:
+		vs.log.Warn("push channel full, failed to issue revoke")
+		return fmt.Errorf("visa service push channel full")
+	}
+	return nil
+}
+
+// revokeVisasForAgents revokes all visas associated with the given agents.
+// Returns numbe of visas removed from the table.
+func (vs *VSInst) revokeVisasForAgents(agents []*agent.Agent) uint32 {
+	var count uint32
+	var revokes []*vsapi.VisaRevocation
+
+	var addrs []netip.Addr
+	for _, agnt := range agents {
+		if zprAddr, ok := agnt.GetZPRID(); ok {
+			if zprAddr.Is6() {
+				addrs = append(addrs, zprAddr)
+			} else {
+				addrs = append(addrs, netip.AddrFrom16(zprAddr.As16()))
+			}
+		}
+	}
+	if len(addrs) == 0 {
+		return 0
+	}
+
+	visaIDs := vs.visaIDsWithIPv6Addrs(addrs)
+	if len(visaIDs) > 0 {
+		vs.vtable.mtx.Lock()
+		for _, vid := range visaIDs {
+			vKey := uint32(vid)
+			if ve, ok := vs.vtable.table[vKey]; ok {
+				delete(vs.vtable.table, vKey)
+				revokes = append(revokes, &vsapi.VisaRevocation{
+					IssuerID:      int32(vKey),
+					Configuration: int64(ve.v.Configuration),
+				})
+				count++
+			}
+		}
+		vs.vtable.mtx.Unlock()
+	}
+
+	if len(revokes) > 0 {
+		push := adb.PushItem{
+			Broadcast:   true,
+			Revocations: revokes,
+		}
+		select {
+		case vs.visaPushC <- &push: // ok
+		default:
+			vs.log.Warn("push channel full, failed to issue revoke (FIXME)")
+			// TODO: This is a problem. By now visa is removed from visa service but
+			//       we were unable to push through the revocation to the node.
+		}
+	}
+
+	return count
+}
+
+// Expensive search of the visa table to find visas that are associated with the
+// given addresses.
+//
+// `addrs` is a list of IPv6 addresses
+func (vs *VSInst) visaIDsWithIPv6Addrs(addrs []netip.Addr) []uint64 {
+	var visaIDs []uint64
+
+	vs.vtable.mtx.RLock()
+Entry:
+	for vid, ve := range vs.vtable.table {
+		for _, addr := range addrs {
+			// TODO: Here I assume that visa source and address are always IPv6
+			if bytes.Equal(ve.v.Source, addr.AsSlice()) || bytes.Equal(ve.v.Dest, addr.AsSlice()) {
+				visaIDs = append(visaIDs, uint64(vid))
+				continue Entry
+			}
+		}
+	}
+	vs.vtable.mtx.RUnlock()
+
+	return visaIDs
 }

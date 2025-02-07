@@ -32,6 +32,15 @@ type HostRecord struct {
 	node         bool
 }
 
+// This type also shared with the visa admin api.
+type HostRecordBrief struct {
+	CTime   int64      `json:"ctime"` // unix seconds
+	Cn      string     `json:"cn"`
+	ZPRAddr netip.Addr `json:"zpr_addr"`
+	Ident   string     `json:"ident"`
+	Node    bool       `json:"node"`
+}
+
 // The visa-service "peers" are always nodes.
 type PeerRecord struct {
 	APIKey               string
@@ -206,6 +215,28 @@ func (db *AgentDB) GetNodeList() []netip.Addr {
 		if rec.node {
 			list = append(list, netip.AddrFrom16(addr))
 		}
+	}
+	return list
+}
+
+func (db *AgentDB) CloneToBrief() []*HostRecordBrief {
+	db.RLock()
+	defer db.RUnlock()
+	var list []*HostRecordBrief
+	for _, rec := range db.agentsV6toHr {
+		var cn string
+		if claim, ok := rec.Agent.GetAuthedClaims()[agent.KAttrCN]; ok {
+			cn = claim.V
+		} else {
+			cn = ""
+		}
+		list = append(list, &HostRecordBrief{
+			CTime:   rec.CTime.Unix(),
+			Cn:      cn,
+			ZPRAddr: rec.ZPRAddr,
+			Ident:   rec.Agent.GetIdentity(),
+			Node:    rec.node,
+		})
 	}
 	return list
 }
@@ -427,4 +458,17 @@ func (db *AgentDB) SetPeerLastPolicyState(addr netip.Addr, policyVer, configID u
 		}
 	}
 	return false
+}
+
+// Does full search of database.
+func (db *AgentDB) GetAgentsWithClaim(key, val string) []*agent.Agent {
+	db.RLock()
+	defer db.RUnlock()
+	var agents []*agent.Agent
+	for _, rec := range db.agentsV6toHr {
+		if rec.Agent.HasAuthedClaim(key, val) {
+			agents = append(agents, rec.Agent)
+		}
+	}
+	return agents
 }

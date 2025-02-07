@@ -10,7 +10,7 @@ test: build
 	cargo test --verbose
 
 check:
-	cargo fmt --check && cargo rustc --bins -- -D warnings
+	cargo fmt --check && cargo rustc --lib -- -D warnings && cargo rustc --bin adapter -- -D warnings && cargo rustc --bin node -- -D warnings
 
 clean:
 	cargo clean

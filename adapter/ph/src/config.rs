@@ -14,7 +14,7 @@ pub const DEFAULT_REQUEST_RETRY_TIMER: usize = 1;
 
 pub const ANCILLARY_BUFFER_SIZE: usize = 128;
 
-const DEFAULT_BUFFER_COUNT: usize = 256;
+const DEFAULT_BUFFER_COUNT: usize = 16;
 const DEFAULT_BATCH_SIZE: usize = 8;
 const DEFAULT_DATAPATH_QUEUE_SIZE: usize = 16;
 const DEFAULT_MGMT_QUEUE_SIZE: usize = 16;
@@ -78,6 +78,7 @@ pub struct TopologyConfig {
     pub agent_output_batch_size: usize,
     pub capture_batch_size: usize,
 
+    #[allow(dead_code)] // see TODO in main
     pub capture_queue_size: usize,
     pub mgmt_dispatch_queue_size: usize,
     pub adapter_manager_queue_size: usize,

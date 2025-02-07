@@ -42,11 +42,7 @@ import (
 //
 // The EPID on the connection request is either a new one created by the node, or
 // one that the client has submitted at HELLO.
-//
-// Passing an `authedAgent` is a hack to deal with implementation decision to have a tunnel address on
-// each node. This tunnel address acts like a connection (with id of -1). So traffic can flow over
-// it. Here we "authenticate" it (in a manner of speaking).
-func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest, authedAgent *agent.Agent) (*agent.Agent, error) {
+func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest) (*agent.Agent, error) {
 	// The policy in use for this approval. Maybe pass in? But the VS should have it, right?
 	// Note that the auth-service has a policy which is going to be the one used.
 	curpol, curmatcher, configID := vs.getPolicyMatcherConfig()
@@ -54,20 +50,15 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest, authedAgent *agent
 	var err error
 	var validatedAgent *agent.Agent
 
-	if authedAgent == nil {
-		// First validate credentials with authorities, which will yied an authenticated Agent.
-		validatedAgent, err = vs.validateCredentials(curpol, cr)
-		if err != nil {
-			return nil, fmt.Errorf("validate credentials failed: %w", err)
-		}
-		for k, v := range validatedAgent.GetAuthedClaims() {
-			vs.log.Debugf("post-validate agent credential: %v -> %v", k, v)
-		}
-	} else {
-		validatedAgent = authedAgent
-		validatedAgent.SetConfigID(configID)
-		// TODO: Update expires?
+	// First validate credentials with authorities, which will yied an authenticated Agent.
+	validatedAgent, err = vs.validateCredentials(curpol, cr)
+	if err != nil {
+		return nil, fmt.Errorf("validate credentials failed: %w", err)
 	}
+	for k, v := range validatedAgent.GetAuthedClaims() {
+		vs.log.Debugf("post-validate agent credential: %v -> %v", k, v)
+	}
+
 	// Set connect-via
 	dockAddr, ok := netip.AddrFromSlice(cr.DockAddr)
 	if ok {

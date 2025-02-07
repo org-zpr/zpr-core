@@ -51,7 +51,15 @@ type AuthService interface {
 
 	ActivateConfiguration(uint64, byte) // deactivates all other configurations
 
-	RevokeAuthority(string) error // revoke by a KEY id
+	// revoke by a KEY identifier
+	RevokeAuthority(string) error
 
-	RevokeCredential(string) error // revoke by a JTI
+	// revoke by a JTI
+	RevokeCredential(string) error
+
+	// Revoke by zpr.adapter.cn
+	RevokeCN(string) error
+
+	// Clears all revocations and returns the count of revocations cleared.
+	ClearAllRevokes() uint32
 }

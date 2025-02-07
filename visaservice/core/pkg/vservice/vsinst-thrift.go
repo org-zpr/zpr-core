@@ -381,7 +381,7 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 			Challenge:          nil,
 			ChallengeResponses: nil,
 		}
-		if realNodeAgent, err = vs.ApproveConnection(&creq, nil); err != nil {
+		if realNodeAgent, err = vs.ApproveConnection(&creq); err != nil {
 			vs.log.WithError(err).Warn("registration: ApproveConnection failed")
 			return "", fmt.Errorf("connection denied by policy")
 		} else {
@@ -473,7 +473,7 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 	// credentials without checking.  I don't think we need or want that for ref-impl, but the arg is still
 	// there on the ApproveConnection function but we set it nil below.
 	var resp *vsapi.ConnectResponse
-	agnt, err := vs.ApproveConnection(request, nil)
+	agnt, err := vs.ApproveConnection(request)
 	if err != nil {
 		strerr := err.Error()
 		resp = &vsapi.ConnectResponse{

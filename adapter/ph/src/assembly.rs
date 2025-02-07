@@ -1,5 +1,4 @@
 use crate::adapter_tables;
-use crate::buffer_stack::BufferStack;
 use crate::capture_worker::CaptureWorker;
 use crate::config;
 use crate::counters::*;
@@ -57,8 +56,6 @@ pub struct Assembly {
 
     // Shared resources.  These may be accessed by any part of the system.
     pub agent_addresses: Vec<IpAddr>,
-
-    pub buffer_stack: BufferStack,
 
     pub agent_input: AgentInput,
     pub substrate_egress: SubstrateEgress,
@@ -301,7 +298,6 @@ pub mod test {
         pub ph_mode: Option<PhMode>,
         pub topology_config: Option<TopologyConfig>,
         pub agent_addresses: Option<Vec<IpAddr>>,
-        pub buffer_stack: Option<BufferStack>,
         pub agent_input: Option<AgentInput>,
         pub substrate_egress: Option<SubstrateEgress>,
         pub agent_output_requeue: Option<AgentOutputRequeue>,
@@ -341,10 +337,6 @@ pub mod test {
         let agent_addresses = builder
             .agent_addresses
             .unwrap_or(Vec::from([IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]));
-        let buffer_stack = builder.buffer_stack.unwrap_or_else(|| {
-            let buf_storage = vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; 0];
-            BufferStack::new(buf_storage)
-        });
         let agent_input = builder
             .agent_input
             .unwrap_or_else(|| AgentInput::new(Vec::new()));
@@ -356,7 +348,7 @@ pub mod test {
             .unwrap_or_else(|| AgentOutputRequeue::new(Vec::new()));
         let vsconn = builder.vsconn.unwrap_or(None);
         let capture_queue = builder.capture_queue.unwrap_or_else(|| {
-            let (cq_inq, _cq_outq) = mpsc::channel(1);
+            let (cq_inq, _cq_outq) = std::os::unix::net::UnixDatagram::pair().unwrap();
             Capture::new(cq_inq)
         });
         let capture_worker = builder
@@ -393,7 +385,6 @@ pub mod test {
             ph_mode,
             topology_config,
             agent_addresses,
-            buffer_stack,
             agent_input,
             substrate_egress,
             agent_output_requeue,

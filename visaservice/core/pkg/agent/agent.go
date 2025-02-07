@@ -227,6 +227,13 @@ func (a *Agent) GetAuthedClaims() map[string]*ClaimV {
 	return a.authClaims
 }
 
+func (a *Agent) HasAuthedClaim(key, val string) bool {
+	if c, ok := a.authClaims[key]; ok {
+		return c.V == val
+	}
+	return false
+}
+
 // GetClaims returns the unsubstantiated claims (read only)
 func (a *Agent) GetClaims() map[string]string {
 	return a.unubClaims

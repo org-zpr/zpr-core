@@ -6,6 +6,7 @@ use crate::sys::TunPi;
 use crate::sys::ZprTun;
 use crate::test_packet::*;
 use crate::two_way_queue;
+use bytes::Buf;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::result::Result;
@@ -16,9 +17,8 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
 use zpr;
-use zpr_ext::std::mem::DropGuard;
 
-pub enum TryEnqueueError<T> {
+pub enum TryEnqueueError<T = ()> {
     Full(T),
 }
 
@@ -87,10 +87,7 @@ impl AgentInput {
         }
     }
 
-    pub fn try_enqueue_packet<P: DropGuard<Packet>>(
-        &self,
-        mut packet: P,
-    ) -> Result<(), TryEnqueueError<P>> {
+    pub fn try_enqueue_packet(&self, packet: &mut Packet) -> Result<(), TryEnqueueError> {
         let tun = &self.tuns[packet.flowhash() as usize % self.tuns.len()];
         match TunPi::PI_SIZE {
             0 => (),
@@ -107,9 +104,13 @@ impl AgentInput {
             }
         };
 
-        match tun.try_send(packet.body()) {
+        let ret = tun.try_send(packet.body());
+
+        packet.advance(std::mem::size_of::<TunPi>());
+
+        match ret {
             Ok(_) => Ok(()),
-            Err(err) if err.kind() == ErrorKind::WouldBlock => Err(TryEnqueueError::Full(packet)),
+            Err(err) if err.kind() == ErrorKind::WouldBlock => Err(TryEnqueueError::Full(())),
             Err(err) => panic!("unrecoverable TUN error: {}", err),
         }
     }
@@ -132,12 +133,12 @@ impl SubstrateEgress {
         }
     }
 
-    pub async fn enqueue_packet<P: DropGuard<Packet>>(
+    pub async fn enqueue_packet(
         &self,
-        packet: P,
+        packet: &Packet,
         dest_sa: zpr::SubstrateAddr,
-    ) -> Result<(), P> {
-        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(&*packet, dest_sa);
+    ) -> Result<(), ()> {
+        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(packet, dest_sa);
 
         match socket.send_to(packet.body(), dest_sockaddr).await {
             Ok(_) => Ok(()),
@@ -151,19 +152,19 @@ impl SubstrateEgress {
                     // most other network errors are temporary; return packet to caller
                     // TODO: it would be nice to report to the user _why_ packets aren't moving;
                     // this depends on <https://github.com/rust-lang/rust/issues/86442> though
-                    _ => Err(packet),
+                    _ => Err(()),
                 }
             }
         }
     }
 
     // TODO: batch enqueue
-    pub fn try_enqueue_packet<P: DropGuard<Packet>>(
+    pub fn try_enqueue_packet(
         &self,
-        packet: P,
+        packet: &Packet,
         dest_sa: zpr::SubstrateAddr,
-    ) -> Result<(), TryEnqueueError<P>> {
-        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(&*packet, dest_sa);
+    ) -> Result<(), TryEnqueueError> {
+        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(packet, dest_sa);
 
         match socket.try_send_to(packet.body(), dest_sockaddr) {
             Ok(_) => Ok(()),
@@ -174,12 +175,12 @@ impl SubstrateEgress {
                         panic!("unrecoverable I/O error: {}", err)
                     }
 
-                    ErrorKind::WouldBlock => Err(TryEnqueueError::Full(packet)),
+                    ErrorKind::WouldBlock => Err(TryEnqueueError::Full(())),
 
                     // most other network errors are temporary; return packet to caller
                     // TODO: it would be nice to report to the user _why_ packets aren't moving;
                     // this depends on <https://github.com/rust-lang/rust/issues/86442> though
-                    _ => Err(TryEnqueueError::Full(packet)),
+                    _ => Err(TryEnqueueError::Full(())),
                 }
             }
         }
@@ -238,48 +239,58 @@ impl AgentOutputRequeue {
 }
 
 /// Capture will intercept packets in the PH and dump them into a file for debugging purposes
-pub struct CapPacket {
-    pub packet: Packet,
-    pub timestamp: SystemTime,
-    pub orig_len: usize,
-}
-
 pub struct Capture {
-    sender: mpsc::Sender<CapPacket>,
+    sender: std::os::unix::net::UnixDatagram,
 }
 
 impl Capture {
-    pub fn new(sender: mpsc::Sender<CapPacket>) -> Self {
+    pub fn new(sender: std::os::unix::net::UnixDatagram) -> Self {
+        sender.set_nonblocking(true).unwrap();
         Self { sender }
     }
 
-    /// Blocks until packet is enqueued
-    #[allow(dead_code)]
-    pub async fn enqueue_packet(&self, packet: Packet, timestamp: SystemTime, orig_len: usize) {
-        let cap_pack: CapPacket = CapPacket {
-            packet,
-            timestamp,
-            orig_len,
-        };
-        self.sender.send(cap_pack).await.unwrap();
-    }
-
-    /// Does not block
+    /// Try to send a packet to the capture system.
+    /// Only `incl_len` bytes will be captured.  (If this is larger than the
+    /// actual packet length, it is reduced accordingly.)
+    /// Does not block.
+    ///
+    /// NOTE: requires mut reference to the packet, but the packet is
+    /// materially unchanged.  Simply, a 16-byte header is briefly added to
+    /// and then removed from it.
     pub fn try_enqueue_packet(
         &self,
-        packet: Packet,
+        packet: &mut Packet,
         timestamp: SystemTime,
-        orig_len: usize,
-    ) -> Result<(), TryEnqueueError<Packet>> {
-        let cap_pack: CapPacket = CapPacket {
-            packet,
-            timestamp,
-            orig_len,
-        };
-        match self.sender.try_send(cap_pack) {
-            Ok(()) => Ok(()),
-            Err(TrySendError::Closed(_)) => panic!("capture channel closed"),
-            Err(TrySendError::Full(cap_pack)) => Err(TryEnqueueError::Full(cap_pack.packet)),
+        incl_len: usize,
+    ) -> Result<(), TryEnqueueError> {
+        let incl_len = std::cmp::min(incl_len, packet.remaining());
+
+        let hdr = crate::pcap_writer::PcaprecHdr::new(timestamp, incl_len, packet.remaining());
+
+        // temporarily add header
+        // TODO: instead of requiring a &mut Packet,
+        // we can instead accept any &[u8] and use vectored send
+        // once we it becomes stable
+        packet.push_header(&hdr);
+
+        // does not block, as we've set O_NONBLOCK in `new()`
+        let res = self.sender.send(
+            &packet.body()[..std::mem::size_of::<crate::pcap_writer::PcaprecHdr>() + incl_len],
+        );
+
+        // remove temporary header
+        packet.advance(std::mem::size_of::<crate::pcap_writer::PcaprecHdr>());
+
+        match res {
+            Ok(_) => Ok(()),
+
+            Err(err) => match err.kind() {
+                ErrorKind::WouldBlock => Err(TryEnqueueError::Full(())),
+                ErrorKind::ConnectionRefused | ErrorKind::BrokenPipe => {
+                    panic!("capture channel closed")
+                }
+                _ => panic!("unrecoverable I/O error: {}", err),
+            },
         }
     }
 }
@@ -364,7 +375,6 @@ impl MgmtDispatch {
         self.sender.try_recv_many_returns(returns, limit)
     }
 
-    #[allow(dead_code)]
     pub async fn async_recv_return_buffers(
         &mut self,
         returns: &mut Vec<PacketBuffer>,
@@ -373,6 +383,7 @@ impl MgmtDispatch {
         self.sender.recv_many_returns(returns, limit).await
     }
 
+    #[allow(dead_code)]
     pub async fn async_recv_return_buffer(&mut self) -> PacketBuffer {
         self.sender.recv_return().await
     }
@@ -442,7 +453,6 @@ impl AdapterManager {
         self.sender.try_recv_many_returns(returns, limit)
     }
 
-    #[allow(dead_code)]
     pub async fn async_recv_return_buffers(
         &mut self,
         returns: &mut Vec<PacketBuffer>,
@@ -451,6 +461,7 @@ impl AdapterManager {
         self.sender.recv_many_returns(returns, limit).await
     }
 
+    #[allow(dead_code)]
     pub async fn async_recv_return_buffer(&mut self) -> PacketBuffer {
         self.sender.recv_return().await
     }
