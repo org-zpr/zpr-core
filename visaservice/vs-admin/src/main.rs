@@ -16,7 +16,7 @@ use reqwest::tls::Certificate;
 use reqwest::StatusCode;
 
 use apitypes::RevokeResponse;
-use apitypes::{HostRecordBrief, VisaDescriptor};
+use apitypes::{HostRecordBrief, NodeRecordBrief, VisaDescriptor};
 use apitypes::{PolicyBundle, PolicyListEntry, PolicyVersion};
 use apitypes::{RevokeAdminRequest, RevokeAdminResponse};
 
@@ -71,6 +71,10 @@ enum SubCmd {
     /// List agents
     #[command()]
     Agents,
+
+    /// List Nodes
+    #[command()]
+    Nodes,
 }
 
 #[derive(Args)]
@@ -127,6 +131,11 @@ fn main() {
         }
         Some(SubCmd::Agents) => {
             list_agents(&args.svc_url, ca_cert).unwrap_or_else(|e| {
+                eprintln!("{} {}", "Error: ".red(), e);
+            });
+        }
+        Some(SubCmd::Nodes) => {
+            list_nodes(&args.svc_url, ca_cert).unwrap_or_else(|e| {
                 eprintln!("{} {}", "Error: ".red(), e);
             });
         }
@@ -404,6 +413,41 @@ fn list_agents(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+fn list_nodes(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error::Error>> {
+    let cb = reqwest::blocking::ClientBuilder::new()
+        .add_root_certificate(cert)
+        .danger_accept_invalid_certs(true)
+        .timeout(Duration::from_secs(10));
+    let client = cb.build()?;
+
+    let resp = client.get(format!("{}/admin/nodes", api_url)).send()?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "error (status {:?}:{}) : {}",
+            resp.status(),
+            reason_for(resp.status()),
+            resp.text()?
+        )
+        .into());
+    }
+
+    let entries: Vec<NodeRecordBrief> = resp.json()?;
+
+    println!(
+        "{}",
+        format!(
+            "🐎 found {} node{}",
+            entries.len(),
+            if entries.len() == 1 { "" } else { "s" }
+        )
+        .magenta()
+    );
+    for nr in entries {
+        println!("{nr}");
+    }
+    Ok(())
+}
+
 fn clear_revokes(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error::Error>> {
     let cb = reqwest::blocking::ClientBuilder::new()
         .add_root_certificate(cert)
@@ -432,7 +476,7 @@ fn clear_revokes(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::er
     println!("  {}", "SUCCESS".bold().green());
     print!("     {} {}", "COUNT:".bold(), rr.clear_count);
     if rr.clear_count == 0 {
-        println!(" {}",  "(no revokes found)".yellow());
+        println!(" {}", "(no revokes found)".yellow());
     } else {
         println!();
     }

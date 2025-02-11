@@ -3,12 +3,14 @@ package vservice
 import (
 	"fmt"
 	"net/netip"
+	"time"
 
 	"golang.org/x/net/context"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsapi"
 	"zpr.org/vs/pkg/vservice/adb"
+	"zpr.org/vsapi"
+	"zpr.org/vsx/snio/vsio"
 )
 
 // Called by InstallPolicy
@@ -30,61 +32,92 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	var visas []*vsapi.VisaHop
 	var vssPort uint16
 
-	serviceAddr := vs.agentDB.GetNodeVSSAddr(nodeAddr)
-	if serviceAddr == "" {
-		return fmt.Errorf("no support service addr for node")
-	}
-	if ap, err := netip.ParseAddrPort(serviceAddr); err == nil {
-		vssPort = ap.Port()
-		if vssPort == 0 {
-			// Problem!
-			return fmt.Errorf("misconfiguration - VSS reported port is zero (service_address = %v)", serviceAddr)
+	// We may have recently tried this operation and buffered the visas.
+	// If so, we do not want to regenerate the visas and buffer duplicates.
+	// So we track our attempts to bring node into sync.
+	needs_visas := true
+	if syncDeets := vs.agentDB.GetPeerSyncDetails(nodeAddr); syncDeets != nil {
+		if syncDeets.PolicyVersion == pp.VersionNumber() && syncDeets.ConfigID == configID && time.Until(syncDeets.VisasExpiration) > 30*time.Minute {
+			// Skip.
+			vs.log.Debug("detected previously generated visas for node", "node", nodeAddr, "time_until_expires", time.Until(syncDeets.VisasExpiration))
+			needs_visas = false
 		}
-		// The node tells the visa service its service address for the VSS. We assume that
-		// the address part matches the node address. That may not always be true but we
-		// confirm that here with an error message.
-		if ap.Addr() != nodeAddr {
-			vs.log.Error("node address does not match VSS address: VS->VSS visa will fail", "node", nodeAddr, "service_addr", serviceAddr)
-		}
-	} else {
-		return fmt.Errorf("invalid serice address for VSS: %v", serviceAddr)
 	}
 
-	{
-		vs.log.Info("generating a new visa-service visa for the node->VS", "node_addr_src", nodeAddr, "vs_addr_dest", vs.localAddr)
-		pktData := snip.NewTCPConnect(nodeAddr, 0, vs.localAddr, VisaServicePort)
-		vs.log.Debug("invoking request-visa for part of policy install (1/2)", "for_node", nodeAddr)
-		vsr, err := vs.doRequestVisa(context.Background(), nodeAddr, pktData, 0, pp.VersionNumber())
-		if err != nil {
-			vs.log.WithError(err).Warn("failed to generate a visa-service visa for the node", "node_addr", nodeAddr)
-		} else if vsr.Status != vsapi.StatusCode_SUCCESS {
-			vs.log.Warn("failed to generate a visa-service visa for the node", "node", nodeAddr, "reason", vsr.Reason)
+	if needs_visas {
+		serviceAddr := vs.agentDB.GetNodeVSSAddr(nodeAddr)
+		if serviceAddr == "" {
+			return fmt.Errorf("no support service addr for node")
+		}
+		if ap, err := netip.ParseAddrPort(serviceAddr); err == nil {
+			vssPort = ap.Port()
+			if vssPort == 0 {
+				// Problem!
+				return fmt.Errorf("misconfiguration - VSS reported port is zero (service_address = %v)", serviceAddr)
+			}
+			// The node tells the visa service its service address for the VSS. We assume that
+			// the address part matches the node address. That may not always be true but we
+			// confirm that here with an error message.
+			if ap.Addr() != nodeAddr {
+				vs.log.Error("node address does not match VSS address: VS->VSS visa will fail", "node", nodeAddr, "service_addr", serviceAddr)
+			}
 		} else {
-			visas = append(visas, vsr.Visa)
+			return fmt.Errorf("invalid serice address for VSS: %v", serviceAddr)
+		}
+
+		{
+			vs.log.Info("generating a new visa-service visa for the node->VS", "node_addr_src", nodeAddr, "vs_addr_dest", vs.localAddr)
+			pktData := snip.NewTCPConnect(nodeAddr, 0, vs.localAddr, VisaServicePort)
+			vs.log.Debug("invoking request-visa for part of policy install (1/2)", "for_node", nodeAddr)
+			vsr, err := vs.doRequestVisa(context.Background(), nodeAddr, pktData, 0, pp.VersionNumber())
+			if err != nil {
+				vs.log.WithError(err).Warn("failed to generate a visa-service visa for the node", "node_addr", nodeAddr)
+			} else if vsr.Status != vsapi.StatusCode_SUCCESS {
+				vs.log.Warn("failed to generate a visa-service visa for the node", "node", nodeAddr, "reason", vsr.Reason)
+			} else {
+				visas = append(visas, vsr.Visa)
+			}
+		}
+		{
+			vs.log.Info("generating a new visa-support-service visa for the VS->node", "vs_addr_src", vs.localAddr, "node_addr_dest", nodeAddr)
+			pktData := snip.NewTCPConnect(vs.localAddr, 0, nodeAddr, vssPort)
+			vs.log.Debug("invoking request-visa for part of policy install (2/2)", "for_node", nodeAddr)
+			vsr, err := vs.doRequestVisa(context.Background(), vs.localAddr, pktData, 0, pp.VersionNumber())
+			if err != nil {
+				vs.log.WithError(err).Warn("failed to generate a visa-service visa for the node")
+			} else if vsr.Status != vsapi.StatusCode_SUCCESS {
+				vs.log.Warn("failed to generate a visa-support-service visa for the node", "reason", vsr.Reason)
+			} else {
+				visas = append(visas, vsr.Visa)
+			}
 		}
 	}
-	{
-		vs.log.Info("generating a new visa-support-service visa for the VS->node", "vs_addr_src", vs.localAddr, "node_addr_dest", nodeAddr)
-		pktData := snip.NewTCPConnect(vs.localAddr, 0, nodeAddr, vssPort)
-		vs.log.Debug("invoking request-visa for part of policy install (2/2)", "for_node", nodeAddr)
-		vsr, err := vs.doRequestVisa(context.Background(), vs.localAddr, pktData, 0, pp.VersionNumber())
-		if err != nil {
-			vs.log.WithError(err).Warn("failed to generate a visa-service visa for the node")
-		} else if vsr.Status != vsapi.StatusCode_SUCCESS {
-			vs.log.Warn("failed to generate a visa-support-service visa for the node", "reason", vsr.Reason)
-		} else {
-			visas = append(visas, vsr.Visa)
+
+	if len(visas) > 0 {
+		var first_expire time.Time
+		for _, vh := range visas {
+			vt := vsio.VToTime(vh.Visa.Expires)
+			if first_expire.IsZero() || first_expire.After(vt) {
+				first_expire = vt
+			}
+		}
+		// Update our state so we remember that we have tried this before.
+		if err := vs.agentDB.SetPeerSyncDetails(nodeAddr, pp.VersionNumber(), configID, first_expire); err != nil {
+			vs.log.WithError(err).Warn("failed to set peer sync details", "node", nodeAddr)
 		}
 	}
 
 	if err := vs.updateNode(nodeAddr, pp.VersionNumber(), configID, visas); err != nil {
 		// Failed to update, stuff them in the push buffer.
-		vs.log.WithError(err).Warn("failed to update node during a policy install -- buffering", "node", nodeAddr)
-		item := adb.PushItem{
-			NodeAddr: nodeAddr,
-			Visas:    visas,
+		vs.log.WithError(err).Warn("failed to update node during a policy install", "node", nodeAddr)
+		if len(visas) > 0 {
+			vs.log.Debug("buffering vs visas for node", "node", nodeAddr, "visa_count", len(visas))
+			item := adb.PushItem{
+				NodeAddr: nodeAddr,
+				Visas:    visas,
+			}
+			vs.agentDB.BufferItemsForNode(nodeAddr, []*adb.PushItem{&item})
 		}
-		vs.agentDB.BufferItemsForNode(nodeAddr, []*adb.PushItem{&item})
 		return err
 	}
 	return nil
@@ -130,6 +163,7 @@ func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uin
 			goto RELEASE_UPDATE
 		}
 	}
+	vs.agentDB.SetNodeContactTime(nodeAddr, time.Now())
 
 	// Success!
 	_ = vs.agentDB.SetPeerLastPolicyState(nodeAddr, policyVer, configID)

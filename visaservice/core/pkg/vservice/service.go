@@ -258,11 +258,16 @@ func (s *VisaService) ListAdapters() []*adb.HostRecordBrief {
 	return s.service.inst.agentDB.CloneToBrief()
 }
 
+func (s *VisaService) ListNodes() []*adb.NodeRecordBrief {
+	return s.service.inst.agentDB.CloneNodesToBrief()
+}
+
 // Implements an interface needed by the admin service.
 func (s *VisaService) ClearAllRevokes() uint32 {
 	return s.authService.ClearAllRevokes()
 }
 
+// Implements an interface needed by the admin service.
 func (s *VisaService) RevokeVisa(vid uint64) error {
 	// Since revoking a visa just removes it from visa service table and
 	// notifies network, I don't bother writing it to the in-memory
@@ -270,6 +275,7 @@ func (s *VisaService) RevokeVisa(vid uint64) error {
 	return s.service.inst.revokeVisaByID(vid)
 }
 
+// Implements an interface needed by the admin service.
 func (s *VisaService) RevokeCN(cn string) uint32 {
 	// First update our memory so that if the CN shows up later it will fail.
 	s.log.Info("revoke CN", "cn", cn)

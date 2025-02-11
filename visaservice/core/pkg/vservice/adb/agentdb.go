@@ -41,6 +41,18 @@ type HostRecordBrief struct {
 	Node    bool       `json:"node"`
 }
 
+// This type also shared with the visa admin api.
+type NodeRecordBrief struct {
+	InSync          bool       `json:"in_sync"`
+	Pending         uint32     `json:"pending"`
+	CTime           int64      `json:"ctime"`        // unix seconds
+	LastContact     int64      `json:"last_contact"` // unix seconds
+	VisaRequests    uint64     `json:"visa_requests"`
+	ConnectRequests uint64     `json:"connect_requests"`
+	ZPRAddr         netip.Addr `json:"zpr_addr"`
+	Cn              string     `json:"cn"`
+}
+
 // The visa-service "peers" are always nodes.
 type PeerRecord struct {
 	APIKey               string
@@ -56,7 +68,16 @@ type PeerRecord struct {
 		WantConfigID      uint64
 		LastPushConfigID  uint64
 		LastPushPolicyVer uint64
+		LastSyncConfigID  uint64 // used by the bring-node-into-policy-sync system
+		LastSyncPolicyVer uint64
+		LastSyncVisasExp  time.Time
 	}
+}
+
+type PeerSyncDetails struct {
+	ConfigID        uint64
+	PolicyVersion   uint64
+	VisasExpiration time.Time
 }
 
 type Ipv6Addr [16]byte
@@ -219,6 +240,7 @@ func (db *AgentDB) GetNodeList() []netip.Addr {
 	return list
 }
 
+// Copies all the agent records into "brief" format and returns them.
 func (db *AgentDB) CloneToBrief() []*HostRecordBrief {
 	db.RLock()
 	defer db.RUnlock()
@@ -237,6 +259,38 @@ func (db *AgentDB) CloneToBrief() []*HostRecordBrief {
 			Ident:   rec.Agent.GetIdentity(),
 			Node:    rec.node,
 		})
+	}
+	return list
+}
+
+// Copies all the node records into "brief" format and returns them.
+func (db *AgentDB) CloneNodesToBrief() []*NodeRecordBrief {
+	db.RLock()
+	defer db.RUnlock()
+	var list []*NodeRecordBrief
+	for _, rec := range db.agentsV6toHr {
+		if rec.node {
+			brief := &NodeRecordBrief{
+				CTime:           rec.CTime.Unix(),
+				Cn:              "",
+				ZPRAddr:         rec.ZPRAddr,
+				LastContact:     0,
+				VisaRequests:    0,
+				ConnectRequests: 0,
+				InSync:          false,
+			}
+			if claim, ok := rec.Agent.GetAuthedClaims()[agent.KAttrCN]; ok {
+				brief.Cn = claim.V
+			}
+			if rec.Peer != nil {
+				if !rec.Peer.LastContactTime.IsZero() {
+					brief.LastContact = rec.Peer.LastContactTime.Unix()
+				}
+				brief.InSync = rec.Peer.IsInSync()
+				brief.Pending = uint32(rec.Peer.pending.Size())
+			}
+			list = append(list, brief)
+		}
 	}
 	return list
 }
@@ -366,6 +420,35 @@ func (db *AgentDB) BufferItemsForNode(addr netip.Addr, items []*PushItem) {
 			}
 		}
 	}
+}
+
+func (db *AgentDB) GetPeerSyncDetails(nodeAddr netip.Addr) *PeerSyncDetails {
+	db.RLock()
+	defer db.RUnlock()
+	if rec, ok := db.agentsV6toHr[nodeAddr.As16()]; ok {
+		if rec.node && rec.Peer != nil {
+			return &PeerSyncDetails{
+				ConfigID:        rec.Peer.State.LastSyncConfigID,
+				PolicyVersion:   rec.Peer.State.LastSyncPolicyVer,
+				VisasExpiration: rec.Peer.State.LastSyncVisasExp,
+			}
+		}
+	}
+	return nil
+}
+
+func (db *AgentDB) SetPeerSyncDetails(nodeAddr netip.Addr, polVersion, configID uint64, visasExpiration time.Time) error {
+	db.Lock()
+	defer db.Unlock()
+	if rec, ok := db.agentsV6toHr[nodeAddr.As16()]; ok {
+		if rec.node && rec.Peer != nil {
+			rec.Peer.State.LastSyncConfigID = configID
+			rec.Peer.State.LastSyncPolicyVer = polVersion
+			rec.Peer.State.LastSyncVisasExp = visasExpiration
+			return nil
+		}
+	}
+	return fmt.Errorf("node not found")
 }
 
 // Check the peer update status and set it to the given new value only if it is in the expected state.
