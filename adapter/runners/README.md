@@ -2,11 +2,15 @@
 
 Wrapper programs to make it easy to launch a node or adapter.
 
-These take care of setting up the TUN interface (but do not tear it down), as
-well as ensuring that the path for the control socket is created.
+These set up the local environment:
 
-Although you need to run these as root, they drop root before starting
-the packet handler. 
+* On linux, take care of setting up the TUN interface (but do not tear it
+down).
+* Ensure that the path for the control socket is created.
+
+You need to run these as root so that the TUN interface can be
+manipulated.  On linux this drops root privileges before starting the ph.
+On mac we keep root since the ph itself needs to bring up the TUN.
 
 
 ## Usage
