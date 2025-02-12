@@ -13,4 +13,7 @@ pub enum LaunchErr {
 
     #[error("io error: {0}")]
     IoError(#[from] std::io::Error),
+
+    #[error("file error: {0}")]
+    FileError(String),
 }

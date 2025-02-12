@@ -24,21 +24,6 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
         }
     };
 
-    // The control_path parent directories must exist. This can be set in the
-    // config, or there is a default.
-    let ctrl_path =
-        match rdr.get_config_str_value_for_section_and_key("global", zpr::CONTROL_PATH_KEY) {
-            Ok(Some(path)) => PathBuf::from(path),
-            Ok(None) => sys::get_data_home(),
-            Err(e) => return Err(LaunchErr::PCError(e)),
-        };
-    if dry_run {
-        println!("mkdir -p {}", ctrl_path.display());
-    } else {
-        fs::create_dir_all(&ctrl_path)?;
-    }
-    sys::get_platform().set_control_dir_owner_and_perms(&ctrl_path, &run_as_user, dry_run)?;
-
     let tun_addr_str = rdr.must_get_config_str_value_for_key(zpr::AGENT_ADDR_KEY)?;
     let tun_addr = tun_addr_str
         .parse::<IpAddr>()
@@ -94,7 +79,37 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
         "dropping root permissions, switching to user {}",
         run_as_user
     );
-    sys::get_platform().drop_privledges(&run_as_user, dry_run)?;
+
+    // We always drop privs, even in dry run mode.
+    sys::get_platform().drop_privledges(&run_as_user, false)?;
+
+    // The control_path parent directories must exist. This can be set in the
+    // config, or there is a default.  We do this after dropping privs since the
+    // path depends on the user. This means that sometimes user will need to manually
+    // step in here and create the directories.
+    let ctrl_path =
+        match rdr.get_config_str_value_for_section_and_key("global", zpr::CONTROL_PATH_KEY) {
+            Ok(Some(path)) => PathBuf::from(path),
+            Ok(None) => sys::get_data_home(),
+            Err(e) => return Err(LaunchErr::PCError(e)),
+        };
+    if dry_run {
+        println!("mkdir -p {}", ctrl_path.display());
+    } else {
+        fs::create_dir_all(&ctrl_path).or_else(|e| {
+            println!(
+                "tip: create {} manually or set a different value of {} in your config",
+                ctrl_path.display(),
+                zpr::CONTROL_PATH_KEY
+            );
+            Err(LaunchErr::FileError(format!(
+                "unable to create control path: {}: {}",
+                ctrl_path.display(),
+                e
+            )))
+        })?;
+    }
+    sys::get_platform().set_control_dir_owner_and_perms(&ctrl_path, &run_as_user, dry_run)?;
 
     Ok(())
 }
