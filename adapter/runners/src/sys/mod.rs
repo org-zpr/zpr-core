@@ -5,6 +5,9 @@ use std::process::Command;
 
 use thiserror::Error;
 
+#[cfg(target_family = "unix")]
+pub(crate) mod unix;
+
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
 
@@ -49,7 +52,7 @@ pub trait Platform {
     fn create_tun(
         &self,
         tun_name: &str,
-        node_addr: IpAddr,
+        tun_addr: IpAddr,
         mask: u8,
         mtu: usize,
         dry_run: bool,

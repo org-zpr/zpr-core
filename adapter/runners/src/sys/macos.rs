@@ -1,45 +1,61 @@
+use crate::sys::unix as common;
+use crate::sys::{Platform, PlatformErr};
 use std::net::IpAddr;
 use std::process::Command;
-
-use crate::sys::{Platform, PlatformErr};
-
-const DEFAULT_TUN_NAME: &str = "tun0";
 
 pub struct MacosPlatform {}
 
 impl Platform for MacosPlatform {
+    // TODO: is same as linux
     fn has_root_perms(&self) -> bool {
-        panic!("has_root_perms not implemented for macos");
+        common::has_root_perms()
     }
 
+    // On macos it's best to not set a tun name. The mac tun network code will create one.
     fn get_tun_ifname(&self) -> String {
-        DEFAULT_TUN_NAME.to_string()
+        return String::new();
     }
 
     fn is_tun_exist(&self, tun_name: &str) -> bool {
-        panic!("is_tun_exist not implemented for macos");
+        Command::new("ifconfig")
+            .arg(tun_name)
+            .status()
+            .unwrap()
+            .success()
+    }
+
+    fn set_control_dir_owner_and_perms(
+        &self,
+        ctrl_path: &std::path::PathBuf,
+        username: &str,
+        dry_run: bool,
+    ) -> Result<(), PlatformErr> {
+        common::set_control_dir_owner_and_perms(ctrl_path, username, dry_run)
+    }
+
+    fn drop_privledges(&self, _username: &str, dry_run: bool) -> Result<(), PlatformErr> {
+        if dry_run {
+            println!("drop_privledges is NOP on macos");
+        }
+        Ok(())
     }
 
     fn create_tun(
         &self,
-        tun_name: &str,
-        node_addr: IpAddr,
-        mask: u8,
-        mtu: usize,
+        _tun_name: &str,
+        _tun_addr: IpAddr,
+        _mask: u8,
+        _mtu: usize,
         dry_run: bool,
     ) -> Result<(), PlatformErr> {
+        // On mac, best to create tun in the PH.
         if dry_run {
-            println!("will panic due to create_tun not implemented for macos");
-            return Ok(());
+            println!("create_tun is NOP on macos");
         }
-        panic!("create_tun not implemented for macos");
+        Ok(())
     }
 
     fn exec(&self, cmd: Command, dry_run: bool) -> Result<(), PlatformErr> {
-        if dry_run {
-            println!("will panic due to exec not implemented for macos");
-            return Ok(());
-        }
-        panic!("exec not implemented for macos");
+        common::exec(cmd, dry_run)
     }
 }

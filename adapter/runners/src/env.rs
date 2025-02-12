@@ -54,6 +54,16 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
         None => sys::get_platform().get_tun_ifname().to_string(),
     };
 
+    #[cfg(target_os = "macos")]
+    {
+        if !tun_name.is_empty() {
+            println!(
+                "warning: on macos it is reccommended to not set a tun name (found {})",
+                tun_name
+            );
+        }
+    }
+
     // TODO: We could check self_addr setting and make sure that we have the
     //       address there on an interface.
 
