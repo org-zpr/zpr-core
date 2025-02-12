@@ -30,7 +30,7 @@ impl Platform for LinuxPlatform {
         common::set_control_dir_owner_and_perms(ctrl_path, username, dry_run)
     }
 
-    fn drop_privledges(&self, username: &str, dry_run: bool) -> Result<(), PlatformErr> {
+    fn drop_privileges(&self, username: &str, dry_run: bool) -> Result<(), PlatformErr> {
         let user = get_user_by_name(username)
             .ok_or(PlatformErr::OsError(format!("user {} not found", username)))?;
         if dry_run {

@@ -81,7 +81,7 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
     );
 
     // We always drop privs, even in dry run mode.
-    sys::get_platform().drop_privledges(&run_as_user, false)?;
+    sys::get_platform().drop_privileges(&run_as_user, false)?;
 
     // The control_path parent directories must exist. This can be set in the
     // config, or there is a default.  We do this after dropping privs since the

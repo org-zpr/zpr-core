@@ -34,9 +34,9 @@ impl Platform for MacosPlatform {
     }
 
     // On macos we do not drop since we need root to create the TUN interface.
-    fn drop_privledges(&self, _username: &str, dry_run: bool) -> Result<(), PlatformErr> {
+    fn drop_privileges(&self, _username: &str, dry_run: bool) -> Result<(), PlatformErr> {
         if dry_run {
-            println!("drop_privledges is NOP on macos");
+            println!("drop_privileges is NOP on macos");
         }
         Ok(())
     }

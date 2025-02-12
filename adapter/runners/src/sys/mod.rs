@@ -45,8 +45,8 @@ pub trait Platform {
         dry_run: bool,
     ) -> Result<(), PlatformErr>;
 
-    /// Drop root privledges by switching to the given OS user.
-    fn drop_privledges(&self, username: &str, dry_run: bool) -> Result<(), PlatformErr>;
+    /// Drop root privileges by switching to the given OS user.
+    fn drop_privileges(&self, username: &str, dry_run: bool) -> Result<(), PlatformErr>;
 
     /// Create a TUN interface with the given name, IP address, mask, and MTU.
     fn create_tun(
