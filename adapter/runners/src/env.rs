@@ -39,12 +39,15 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
     }
     sys::get_platform().set_control_dir_owner_and_perms(&ctrl_path, &run_as_user, dry_run)?;
 
-    let node_addr_str = rdr.must_get_config_str_value_for_key(zpr::AGENT_ADDR_KEY)?;
-    let node_addr = node_addr_str.parse::<IpAddr>().or(Err(PCErr::KeyError(
-        "node_addr not valid IP address".to_string(),
-    )))?;
+    let tun_addr_str = rdr.must_get_config_str_value_for_key(zpr::AGENT_ADDR_KEY)?;
+    let tun_addr = tun_addr_str
+        .parse::<IpAddr>()
+        .or(Err(PCErr::KeyError(format!(
+            "{} not valid IP address",
+            zpr::AGENT_ADDR_KEY
+        ))))?;
 
-    let mask = match node_addr {
+    let mask = match tun_addr {
         IpAddr::V4(_ipv4) => zpr::IPV4_MASK,
         IpAddr::V6(_ipv6) => zpr::IPV6_MASK,
     };
@@ -62,6 +65,13 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
                 tun_name
             );
         }
+        // The ph will fail anyway, but might as well warn here too.
+        match tun_addr {
+            IpAddr::V4(_ipv4) => (),
+            IpAddr::V6(_ipv6) => {
+                println!("warning: IPv6 for agent_addr tunnel address is not supported on macos");
+            }
+        }
     }
 
     // TODO: We could check self_addr setting and make sure that we have the
@@ -76,7 +86,7 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
         );
     } else {
         // Create the tun interface, assign addresses etc.
-        sys::get_platform().create_tun(&tun_name, node_addr, mask, zpr::TUN_MTU, dry_run)?;
+        sys::get_platform().create_tun(&tun_name, tun_addr, mask, zpr::TUN_MTU, dry_run)?;
     }
 
     // Now drop root permissions.

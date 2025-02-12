@@ -33,6 +33,7 @@ impl Platform for MacosPlatform {
         common::set_control_dir_owner_and_perms(ctrl_path, username, dry_run)
     }
 
+    // On macos we do not drop since we need root to create the TUN interface.
     fn drop_privledges(&self, _username: &str, dry_run: bool) -> Result<(), PlatformErr> {
         if dry_run {
             println!("drop_privledges is NOP on macos");
@@ -42,17 +43,27 @@ impl Platform for MacosPlatform {
 
     fn create_tun(
         &self,
-        _tun_name: &str,
+        tun_name: &str,
         _tun_addr: IpAddr,
         _mask: u8,
         _mtu: usize,
         dry_run: bool,
     ) -> Result<(), PlatformErr> {
-        // On mac, best to create tun in the PH.
+        // On mac, best (only possible?) to create tun in the PH.
         if dry_run {
-            println!("create_tun is NOP on macos");
+            if tun_name.is_empty() {
+                println!("create_tun: does nothing on macos");
+            } else {
+                println!("will fail with error: on macos tun should be created by ph");
+            }
         }
-        Ok(())
+        if !tun_name.is_empty() {
+            Err(PlatformErr::OsError(
+                "on macos tun should be created by ph: do not set tun_if".to_string(),
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     fn exec(&self, cmd: Command, dry_run: bool) -> Result<(), PlatformErr> {

@@ -78,12 +78,12 @@ impl Platform for LinuxPlatform {
     fn create_tun(
         &self,
         tun_name: &str,
-        node_addr: IpAddr,
+        tun_addr: IpAddr,
         mask: u8,
         mtu: usize,
         dry_run: bool,
     ) -> Result<(), PlatformErr> {
-        let addr_and_mask = format!("{}/{}", node_addr, mask);
+        let addr_and_mask = format!("{}/{}", tun_addr, mask);
         {
             let mut c = Command::new("ip");
             c.arg("tuntap")
