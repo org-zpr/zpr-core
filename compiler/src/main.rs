@@ -49,6 +49,9 @@ struct Cli {
     /// Write output binary to existing directory DIR instead of default.
     #[arg(short = 'd', long = "outdir", value_name = "DIR")]
     outdir: Option<PathBuf>,
+    /// Write the binary policy to filed named NAME instead of the default (input file with extension switched to .bin)
+    #[arg(short = 'o', long, value_name = "NAME")]
+    outfname: Option<String>,
 
     /// Sets extra verbosity.
     #[arg(short, long)]
@@ -71,6 +74,9 @@ fn main() {
     }
     if let Some(outdir) = cli.outdir {
         cb = cb.output_directory(&outdir);
+    }
+    if let Some(outfname) = cli.outfname {
+        cb = cb.output_filename(&outfname);
     }
     if let Some(key) = cli.key {
         let key = match load_rsa_private_key(&key) {
