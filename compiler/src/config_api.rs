@@ -25,26 +25,52 @@ impl ConfigApi {
         }
     }
 
+    pub fn get_version(&self) -> String {
+        String::new()
+    }
 
     // A key can start with a namespace or it uses the default namespace and
     // starts with "/".
     //
-    // Within a namespace there are some known keys:
+    // Versioning.
+    //    We can come up with a version as a hash of our source file.
+    //
+    //    Since this little api just reads a file, the version is constant.
+    //    So I think we ignore it here.
+    //
+    //    What if version is in the key path?
+    //       /versions -> returns ordered list of versions (most recent first)
+    //
+    //    Then prefix all calls with a version, eg:
+    //       /<version>/trusted_services -> 
+    //
+    // Within a namespace there are some known keys.
+    //
+    // I think the idea is we could load additional config and place it in a namespace.
+    // But with just one file, it's hard to understand how namespace works. So maybe
+    // ignore it for now?
+    //
     // - /trusted_services -> returns list of IDs of the trusted services (KeySet)
     // - /trusted_services/<foo> -> returns (type ?)
+    // - /trusted_services/<foo>/api -> the api value
     // - /trusted_services/<foo>/certificate -> returns certificate (if any)
+    // - /trusted_services/<foo>/provider -> k/v tuples
+    // - /trusted_services/<foo>/provides -> list of attribute names (probably also need type)
     //
-    // - /trusted_services?provides_attr=<foo> -> returns the trusted services that provides "foo" (KeySet?)
+    // (PREFIX - let's make prefix same as service ID.)
+    //
+    // Caller will want to get the service that provides attr FOO.
+    // So caller can just load them all up and create an index.
     //
     // - /services -> returns list of service names (KeySet)
     // - /services/<foo> -> returns ?
     // - /services/<foo>/provider -> returns list of k/v tuples
-    // - /services/<foo>/protocol -> returns protocol id?  What if service has it's own port?
+    // - /services/<foo>/protocol -> returns protocol id?  What if service has it's own port? Return a protocol-type
     //
-    // - /protocols/<foo> -> returns (type ?)
+    // - /protocols/<foo> -> returns a protocol type?
+    //                       Not sure we need this.  When we process the config, we attach protcols to services
     //
-    // Within the zpr namespace is:
-    // - zpr/version -> returns the configuration version as a hex string (a digest)
+    // Within the "global" zpr namespace is:
     //
     // - zpr/resolver/<foo> -> returns mapping (if any) for hostname "foo"
     //
@@ -52,7 +78,6 @@ impl ConfigApi {
     // - zpr/nodes/<id> -> returns (?)
     // - zpr/nodes/<id>/zpr_addr -> returns zpr address (string?) - pre resolving (ie, so might be a domain name that needs resolving)
     // - zpr/nodes/<id>/provider -> returns list of k/v tuples
-    //
     //
     // - zpr/visa_services -> returns list of visa service IDs (KeySet)
     // - zpr/visa_services/<id> -> returns (?)
