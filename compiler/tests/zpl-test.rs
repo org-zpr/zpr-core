@@ -133,7 +133,6 @@ fn can_compile_m3_policies() {
     }
 }
 
-
 // Make sure we can still compile the policies in the
 // integration-test. Note that this does not try to compile
 // with the IPv6 config used there.
