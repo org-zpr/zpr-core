@@ -1,7 +1,7 @@
 //! config.rs - load/parse a ZPL configuration TOML file
 
 use std::collections::HashMap;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -41,6 +41,14 @@ pub struct Config {
     pub services: Vec<Service>,
 }
 
+/// Service table
+#[derive(Debug)]
+pub struct Service {
+    pub id: String,
+    pub protocol_id: String, // TODO: Could consider using a list here
+    pub provider: Option<Vec<(String, String)>>, // optional provider attributes
+}
+
 /// Resolver table.
 #[allow(dead_code)]
 #[derive(Debug)]
@@ -74,7 +82,8 @@ pub struct Node {
 #[derive(Debug, Clone)]
 pub struct Interface {
     pub name: String,
-    pub netaddr: String,
+    pub host: String, // host or IP
+    pub port: u16,
 }
 
 /// Visa Service table ("visa_service")
@@ -92,11 +101,11 @@ pub struct VisaService {
 #[derive(Debug, Clone)]
 pub struct TrustedService {
     pub id: String,
-    api: String,
+    pub api: String,
     pub cert_path: Option<PathBuf>,
-    prefix: String,
-    returns_attrs: Vec<String>,
-    identity_attrs: Vec<String>,
+    pub prefix: String,
+    pub returns_attrs: Vec<String>,
+    pub identity_attrs: Vec<String>,
 }
 
 /// Protocol table
@@ -148,13 +157,6 @@ impl Protocol {
     }
 }
 
-/// Service table
-#[derive(Debug)]
-pub struct Service {
-    pub id: String,
-    pub protocol_id: String, // TODO: Could consider using a list here
-    pub provider: Option<Vec<(String, String)>>, // optional provider attributes
-}
 
 impl Config {
     /// Attempt to lookup the given hostname in the configurations resolver table.
@@ -388,14 +390,48 @@ fn parse_provider(ctx: &str, table: &Table) -> Result<Vec<(String, String)>, Com
 
 /// Parse the nodes interface entry.
 fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, CompilationError> {
+    if !iface.contains_key("netaddr") {
+        return Err(err_config!("interface {} missing netaddr", ifname));
+    }
     let netaddr = iface["netaddr"]
         .as_str()
         .ok_or(err_config!("interface {} missing netaddr", ifname))?
         .to_string();
-    Ok(Interface {
-        name: ifname.to_string(),
-        netaddr,
-    })
+
+    // Form of `netaddr` is HOST:PORT, host may be a hostname (which may need to be run through the resolver)
+    // or an IPv4 or IPv6 address.
+
+    // We'll try to parse as a SocketAddr first (which requires an IP address, not a name)
+    //let saddr: std::net::SocketAddr = netaddr.parse();
+    match netaddr.parse::<std::net::SocketAddr>() {
+        Ok(saddr) => {
+            return Ok(Interface {
+                name: ifname.to_string(),
+                host: saddr.ip().to_string(),
+                port: saddr.port(),
+            })
+        }
+        Err(_) => {
+            // Did not parse as a SocketAddr, so try as "hostname:portnum"
+            let parts: Vec<&str> = netaddr.split(':').collect();
+            if parts.len() != 2 {
+                return Err(err_config!(
+                    "interface {} netaddr must be in the form HOST:PORT",
+                    ifname
+                ));
+            }
+            let portnum = parts[1]
+                .parse::<u16>()
+                .map_err(|_| err_config!("interface {} port number is not a valid: {}", ifname, parts[1]))?;
+            return Ok(Interface {
+                name: ifname.to_string(),
+                host: parts[0].to_string(),
+                port: portnum,
+            });
+        }
+    }
+
+
 }
 
 /// Parse the very basic visa_service section.
@@ -847,11 +883,11 @@ mod test {
         provider = [["zpr.foo", "bar"], ["baz", 99]]
         interfaces = ["eth0", "eth1"]
         eth0.netaddr = "1.2.3.4:2000"
-        eth1.netaddr = "5.6.7.8:9000"
+        eth1.netaddr = "foo.addr:9000"
         "#;
         let ctoml = parse_toml(tstr);
         let nodes = parse_nodes(&ctoml);
-        assert!(nodes.is_ok());
+        assert!(nodes.is_ok(), "{:?}", nodes);
         let nodes = nodes.unwrap();
         assert_eq!(nodes.len(), 1);
         let n0 = nodes.get("n0").unwrap();
@@ -861,8 +897,14 @@ mod test {
         assert_eq!(n0.interfaces.len(), 2);
         for iface in &n0.interfaces {
             match iface.name.as_str() {
-                "eth0" => assert_eq!(iface.netaddr, "1.2.3.4:2000"),
-                "eth1" => assert_eq!(iface.netaddr, "5.6.7.8:9000"),
+                "eth0" => {
+                    assert_eq!(iface.host, "1.2.3.4");
+                    assert_eq!(iface.port, 2000);
+                },
+                "eth1" => {
+                    assert_eq!(iface.host, "foo.addr");
+                    assert_eq!(iface.port, 9000);
+                }
                 _ => panic!("unexpected interface name"),
             }
         }
@@ -872,6 +914,9 @@ mod test {
             .contains(&("zpr.foo".to_string(), "bar".to_string())));
         assert!(n0.provider.contains(&("baz".to_string(), "99".to_string())));
     }
+
+
+
 
     #[test]
     fn test_parse_visa_service() {

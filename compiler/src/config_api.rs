@@ -2,47 +2,138 @@
 //! in this "compiler", this may be a way to build out an api "service" which
 //! would be used by the compiler as well as the visa service.
 
-use crate::crypto::digest_as_hex;
-use crate::config::Config;
+use std::path::Path;
+use core::fmt;
+
+use base64::prelude::*;
+
+use crate::crypto::{digest_as_hex, load_asn1data_from_pem};
+use crate::config::{self, Config, IcmpFlowType};
+use crate::errors::CompilationError;
+use crate::protocols::IanaProtocol;
 
 
 pub struct ConfigApi {
     config: Config,
 }
 
+
+// Part of the somewhat complicated [ConfigItem::Protocol] variant.
+
+#[derive(Debug, PartialEq)]
+pub enum PortArgT {
+    Port(u16), // a single TCP/UDP port
+    PortRange(u16, u16), // range of TCP/UDP ports
+    PortList(Vec<u16>), // list of TCP/UDP ports
+    ICMPOneShot(Vec<u8>), // ICMP codes
+    ICMPReqRep(u8, u8), // Pair of ICMP codes (request, reply)
+}
+
+
+#[derive(Debug, PartialEq)]
 pub enum ConfigItem {
     StrVal(String),
-    BytesAsHex(String),
+    BytesB64(String),
     KeySet(Vec<String>),
     AttrList(Vec<(String, String)>), // vec of tuples
+    NetAddr(String, u16), // host, port
+    Protocol(String, IanaProtocol, PortArgT) // (NAME, protocol, ports-or-type-codes)
+}
+
+impl fmt::Display for ConfigItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ConfigItem::StrVal(s) => write!(f, "{}", s),
+            ConfigItem::BytesB64(s) => write!(f, "{}", s),
+            ConfigItem::KeySet(keys) => {
+                let mut first = true;
+                write!(f, "[")?;
+                for key in keys {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", key)?;
+                }
+                write!(f, "]")
+            },
+            ConfigItem::AttrList(attrs) => {
+                let mut first = true;
+                write!(f, "[")?;
+                for (k, v) in attrs {
+                    if first {
+                        first = false;
+                    } else {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}: {}", k, v)?;
+                }
+                write!(f, "]")
+            },
+            ConfigItem::NetAddr(host, port) => write!(f, "{}:{}", host, port),
+            ConfigItem::Protocol(name, prot, ports) => {
+                write!(f, "{}: {} ", name, prot)?;
+                match ports {
+                    PortArgT::Port(p) => write!(f, "{}", p),
+                    PortArgT::PortRange(p1, p2) => write!(f, "{}-{}", p1, p2),
+                    PortArgT::PortList(pl) => {
+                        let mut first = true;
+                        write!(f, "[")?;
+                        for p in pl {
+                            if first {
+                                first = false;
+                            } else {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{}", p)?;
+                        }
+                        write!(f, "]")
+                    },
+                    PortArgT::ICMPOneShot(codes) => {
+                        let mut first = true;
+                        write!(f, "[")?;
+                        for c in codes {
+                            if first {
+                                first = false;
+                            } else {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{}", c)?;
+                        }
+                        write!(f, "]")
+                    },
+                    PortArgT::ICMPReqRep(req, rep) => write!(f, "{}-{}", req, rep),
+                }
+            }
+        }
+    }
 }
 
 impl ConfigApi {
     // TODO: This should be "new from file" -- hide the config thing.
-    pub fn new_from_config(config: Config) -> ConfigApi {
-        ConfigApi {
+    pub fn new_from_toml_file(fname: &Path) -> Result<ConfigApi, CompilationError> {
+        let config = config::load_config(fname)?;
+        let api = ConfigApi {
             config,
-        }
+        };
+        Ok(api)
     }
 
-    pub fn get_version(&self) -> String {
-        String::new()
+    pub fn new_from_toml_content(content: &str, base_path: &Path) -> Result<ConfigApi, CompilationError> {
+        let config = config::parse_config(content, base_path)?;
+        let api = ConfigApi {
+            config,
+        };
+        Ok(api)
     }
 
     // A key can start with a namespace or it uses the default namespace and
     // starts with "/".
     //
-    // Versioning.
-    //    We can come up with a version as a hash of our source file.
-    //
-    //    Since this little api just reads a file, the version is constant.
-    //    So I think we ignore it here.
-    //
-    //    What if version is in the key path?
-    //       /versions -> returns ordered list of versions (most recent first)
-    //
-    //    Then prefix all calls with a version, eg:
-    //       /<version>/trusted_services -> 
+    // Anywhere in config where an address is used the author can use a value
+    // from resolver.host table.  Values coming out of this API are already run
+    // through the resolver.host table.
     //
     // Within a namespace there are some known keys.
     //
@@ -55,7 +146,8 @@ impl ConfigApi {
     // - /trusted_services/<foo>/api -> the api value
     // - /trusted_services/<foo>/certificate -> returns certificate (if any)
     // - /trusted_services/<foo>/provider -> k/v tuples
-    // - /trusted_services/<foo>/provides -> list of attribute names (probably also need type)
+    // - /trusted_services/<foo>/attributes -> list of attribute names (probably also need type)
+    // - /trusted_services/<foo>/id_attributes -> list of attribute names (probably also need type)
     //
     // (PREFIX - let's make prefix same as service ID.)
     //
@@ -110,9 +202,18 @@ impl ConfigApi {
         }
         let key = key_path[0];
         match key {
-            "trusted_services" => None,
-            "services" => None,
-            "protocols" => None,
+            "trusted_services" => {
+                if key_path.len() == 1 { // trusted_services -> list of trusted service IDs
+                    return Some(ConfigItem::KeySet(self.config.trusted_services.iter().map(|ts| ts.id.clone()).collect()));
+                }
+                self.get_trusted_service(key_path[1..].to_vec())
+            }
+            "services" => {
+                if key_path.len() == 1 { // services -> list of service IDs
+                    return Some(ConfigItem::KeySet(self.config.services.iter().map(|s| s.id.clone()).collect()));
+                }
+                self.get_service(key_path[1..].to_vec())
+            }
             _ => None,
         }
     }
@@ -124,14 +225,236 @@ impl ConfigApi {
         let key = key_path[0];
         match key {
             "version" => {
-                return Some(ConfigItem::BytesAsHex(digest_as_hex(&self.config.digest)));
+                return Some(ConfigItem::StrVal(digest_as_hex(&self.config.digest)));
             }
-            "resolver" => None,
-            "nodes" => None,
-            "visa_services" => None,
+            "resolver" => {
+                if key_path.len() == 1 {
+                    return None
+                }
+                self.resolve_hostname(key_path[1])
+            }
+            "nodes" => self.get_zpr_nodes(key_path),
+            "visa_services" => {
+                if key_path.len() == 1 { // visa_services -> list of visa service IDs
+                    // We only support one visa service at the moment.
+                    return Some(ConfigItem::KeySet(vec!["default".to_string()]))
+                }
+                self.get_zpr_visa_service(key_path[1..].to_vec())
+            }
+            _ => None,
+        }
+    }
+
+    /// `key_path` here is everything after services/ -- and it contains at least
+    /// one element (the service ID).
+    fn get_service(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
+        let svc = self.config.services.iter().find(|s| s.id == key_path[0])?;
+        if key_path.len() == 1 { // services/<id> -> <id>
+            return Some(ConfigItem::StrVal(svc.id.clone()));
+        }
+        let key = key_path[1];
+        match key {
+            "provider" => {
+                // TODO: Why is provider an option?
+                let Some(provider) = svc.provider.as_ref() else {
+                    return None;
+                };
+                Some(ConfigItem::AttrList(provider.clone()))
+            },
+            "protocol" => {
+                let Some(prot) = self.config.protocols.get(&svc.protocol_id) else {
+                    panic!("protocol {} for service {} not found", svc.protocol_id, svc.id);
+                };
+                match prot.protocol {
+                    IanaProtocol::TCP | IanaProtocol::UDP => {
+                        // TODO: The config should parse out the port. For now we only accept single port number.
+                        let Some(pstr) = prot.port.as_ref() else {
+                            panic!("port not set for service {}, protocol {}", svc.id, svc.protocol_id);
+                        };
+                        // TODO: This error should be caught in config parser
+                        let portnum = pstr.parse::<u16>()
+                            .expect(format!("failed to parse port number for serrvice {}", svc.id).as_str());
+                        Some(ConfigItem::Protocol(svc.id.clone(), prot.protocol, PortArgT::Port(portnum)))
+                    },
+                    IanaProtocol::ICMP | IanaProtocol::ICMPv6 => {
+                        let Some(flowtype) = prot.icmp.as_ref() else {
+                            panic!("flowtype not set for service {}, protocol {}", svc.id, svc.protocol_id);
+                        };
+                        match flowtype {
+                            IcmpFlowType::RequestResponse(req, rep) => {
+                                Some(ConfigItem::Protocol(svc.id.clone(), prot.protocol, PortArgT::ICMPReqRep(*req, *rep)))
+                            },
+                            IcmpFlowType::OneShot(codes) => {
+                                Some(ConfigItem::Protocol(svc.id.clone(), prot.protocol, PortArgT::ICMPOneShot(codes.clone())))
+                            }
+                        }
+                    }
+                }
+
+            }
+            _ => None,
+        }
+
+    }
+
+    /// `key_path` here is everything after trusted_services/ -- and it contains at least
+    /// one element (the trusted service ID).
+    fn get_trusted_service(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
+        let svc = self.config.trusted_services.iter().find(|ts| ts.id == key_path[0])?;
+        if key_path.len() == 1 { // trusted_services/<id> -> <id>
+            return Some(ConfigItem::StrVal(svc.id.clone()));
+        }
+        let key = key_path[1];
+        match key {
+            "api" => Some(ConfigItem::StrVal(svc.api.clone())),
+            "certificate" => {
+                let Some(cert_path) = svc.cert_path.as_ref() else {
+                    return None;
+                };
+                // TODO: pretty sure that the path in the config is not set up relative to source path.
+                // TODO: This may be a case where we need to return an error?
+                let cert_data = match load_asn1data_from_pem(cert_path) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        panic!("failed to load certificate data: {}", e);
+                    }
+                };
+                Some(ConfigItem::BytesB64(BASE64_STANDARD.encode(&cert_data)))
+            }
+            "prefix" => Some(ConfigItem::StrVal(svc.prefix.clone())),
+            "provider" => panic!("trusted_service.Provider not yet implemented"),
+            "attributes" => Some(ConfigItem::KeySet(svc.returns_attrs.clone())),
+            "id_attributes" => Some(ConfigItem::KeySet(svc.identity_attrs.clone())),
+            _ => None,
+        }
+
+    }
+
+
+    /// `key_path` here is everything after "zpr/visa_services"
+    fn get_zpr_visa_service(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
+        if key_path.len() == 1 { // visa_services/<id> -> <id>
+            if key_path[0] == "default" {
+                return Some(ConfigItem::StrVal("default".to_string()));
+            }
+            return None // unknown visa service
+        }
+        let key = key_path[1];
+        match key {
+            "admin_attrs" => {
+                Some(ConfigItem::AttrList(self.config.visa_service.admin_attrs.clone()))
+            }
+            "dock_node_id" => {
+                Some(ConfigItem::StrVal(self.config.visa_service.dock_node_id.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    /// Returns hostname or IP or None
+    fn resolve_hostname(&self, hostname: &str) -> Option<ConfigItem> {
+        let mapping = self.config.resolve(hostname)?;
+        Some(ConfigItem::StrVal(mapping.to_string()))
+    }
+
+    fn get_zpr_nodes(&self, key_path: Vec<&str>) -> Option<ConfigItem> {
+        if key_path.len() == 1 { // nodes -> list of node IDs
+            return Some(ConfigItem::KeySet(self.config.nodes.keys().cloned().collect()));
+        }
+        let node_id = key_path[1];
+        let node = self.config.nodes.get(node_id)?;
+        if key_path.len() == 2 { // nodes/<id> -> <id>
+            return Some(ConfigItem::StrVal(node.id.clone()));
+        }
+        let key = key_path[2];
+        match key {
+            "key" => Some(ConfigItem::StrVal(node.key.clone())),
+            "provider" => Some(ConfigItem::AttrList(node.provider.clone())),
+            "zpr_addr" => {
+                self.resolve_hostname(&node.zpr_address).or_else(|| Some(ConfigItem::StrVal(node.zpr_address.clone())))
+            },
+            "interfaces"=> {
+                if key_path.len() == 3 { // nodes/<id>/interfaces -> list of interface names
+                    return Some(ConfigItem::KeySet(node.interfaces.iter().map(|iface| iface.name.clone()).collect()));
+                }
+                let ifname = key_path[3];
+                // The only attribute on an interface is the netaddr, so we return that here ignoring
+                // any further key path.
+                let iface = node.interfaces.iter().find(|iface| iface.name == ifname)?;
+                // The hostname value may be a mapping.
+                let hostname = match self.config.resolve(&iface.host) {
+                    Some(mapping) => mapping.to_string(),
+                    None => iface.host.clone(),
+                };
+                return Some(ConfigItem::NetAddr(hostname, iface.port));
+            }
             _ => None,
         }
     }
 
 }
 
+
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_get_some_keys() {
+        let cfg = r#"
+        [resolver]
+        order = [ "hosts", "dns" ]
+
+        [resolver.hosts]
+        "node.zpr" = "fd5a:5052:90de::1"
+
+        [nodes.n0]
+        key = "none"
+        zpr_address = "node.zpr"
+        interfaces = [ "in1", "in2" ]
+        in1.netaddr = "127.0.0.1:5000"
+        in2.netaddr = "foo.bah:5000"
+        provider = [["foo", "fee"]]
+
+        [visa_service]
+        dock_node = "n0"
+        "#;
+        let api = ConfigApi::new_from_toml_content(cfg, &Path::new("")).unwrap();
+
+        let ver = api.get("zpr/version").unwrap();
+        assert_eq!(ver.to_string().len(), 64);
+
+        let nkeys = api.get("zpr/nodes").unwrap();
+        assert_eq!(nkeys.to_string(), "[n0]");
+        let nkeys = match nkeys {
+            ConfigItem::KeySet(keys) => keys,
+            _ => panic!("expected a KeySet")
+        };
+        assert_eq!(nkeys.len(), 1);
+        assert_eq!(nkeys[0], "n0");
+
+        assert_eq!(api.get("zpr/nodes/n0/key").unwrap(), ConfigItem::StrVal("none".to_string()));
+
+        // Note returns the node address post running through the resolver.
+        assert_eq!(api.get("zpr/nodes/n0/zpr_addr").unwrap(), ConfigItem::StrVal("fd5a:5052:90de::1".to_string()));
+        assert_eq!(api.get("zpr/nodes/n0/interfaces").unwrap().to_string(), "[in1, in2]");
+        {
+            let (poe_host, poe_port) = match api.get("zpr/nodes/n0/interfaces/in1/netaddr").unwrap() {
+                ConfigItem::NetAddr(host, port) => (host, port),
+                _ => panic!("expected a NetAddr")
+            };
+            assert_eq!(poe_host, "127.0.0.1");
+            assert_eq!(poe_port, 5000);
+        }
+        {
+            let (poe_host, poe_port) = match api.get("zpr/nodes/n0/interfaces/in2/netaddr").unwrap() {
+                ConfigItem::NetAddr(host, port) => (host, port),
+                _ => panic!("expected a NetAddr")
+            };
+            assert_eq!(poe_host, "foo.bah");
+            assert_eq!(poe_port, 5000);
+        }
+
+
+        assert_eq!(api.get("zpr/visa_services").unwrap().to_string(), "[default]");
+    }
+}

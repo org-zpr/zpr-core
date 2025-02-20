@@ -478,7 +478,7 @@ mod test {
         key = "none"
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
-        in1.netaddr = "127.0.0.1"
+        in1.netaddr = "127.0.0.1:5000"
         provider = [["foo", "fee"]]
 
         [visa_service]
@@ -519,7 +519,7 @@ mod test {
         key = "none"
         zpr_address = "fd5a:5052:90de::1"
         interfaces = [ "in1" ]
-        in1.netaddr = "127.0.0.1"
+        in1.netaddr = "127.0.0.1:5000"
         provider = [["foo", "fee"]]
 
         [visa_service]
