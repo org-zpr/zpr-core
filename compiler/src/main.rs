@@ -5,6 +5,7 @@ pub mod polio {
 mod allow;
 mod compilation;
 mod config;
+mod config_api;
 mod crypto;
 mod define;
 mod errors;
@@ -19,7 +20,6 @@ mod putil;
 mod weaver;
 mod zpl;
 mod zplstr;
-mod config_api;
 
 use clap::Parser;
 use std::path::PathBuf;

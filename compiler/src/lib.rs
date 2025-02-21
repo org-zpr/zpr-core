@@ -16,6 +16,7 @@ pub mod polio {
 mod allow;
 pub mod compilation;
 mod config;
+mod config_api;
 mod crypto;
 mod define;
 pub mod errors;
@@ -30,4 +31,3 @@ mod putil;
 mod weaver;
 mod zpl;
 mod zplstr;
-mod config_api;

@@ -227,9 +227,7 @@ impl Fabric {
     /// This also adds visa service access to the nodes visa support service.
     pub fn add_node(&mut self, node_id: &str, config: &ConfigApi) -> Result<(), CompilationError> {
         let mut node_attrs = match config.get(&format!("zpr/nodes/{node_id}/provider")) {
-            Some(ConfigItem::AttrList(tuples)) => {
-                vec_to_attributes(&tuples)?
-            },
+            Some(ConfigItem::AttrList(tuples)) => vec_to_attributes(&tuples)?,
             _ => {
                 return Err(CompilationError::ConfigError(format!(
                     "missing provider attributes for node {}",
@@ -238,7 +236,7 @@ impl Fabric {
             }
         };
 
-        let zpr_addr= match config.get(&format!("zpr/nodes/{node_id}/zpr_addr")) {
+        let zpr_addr = match config.get(&format!("zpr/nodes/{node_id}/zpr_addr")) {
             Some(ConfigItem::StrVal(s)) => s,
             _ => {
                 return Err(CompilationError::ConfigError(format!(

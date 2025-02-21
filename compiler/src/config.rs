@@ -10,9 +10,8 @@ use toml::Table;
 
 use crate::crypto::sha256;
 use crate::errors::CompilationError;
-use crate::protocols::{self, IanaProtocol, Protocol, IcmpFlowType};
+use crate::protocols::{self, IanaProtocol, IcmpFlowType, Protocol};
 use crate::zpl;
-
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
 /// (really anything that has a to_string function), or with two args: a format string and arguments.
@@ -106,7 +105,6 @@ pub struct TrustedService {
     pub returns_attrs: Vec<String>,
     pub identity_attrs: Vec<String>,
 }
-
 
 impl Config {
     /// Attempt to lookup the given hostname in the configurations resolver table.
@@ -331,9 +329,13 @@ fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, Compilation
                     ifname
                 ));
             }
-            let portnum = parts[1]
-                .parse::<u16>()
-                .map_err(|_| err_config!("interface {} port number is not a valid: {}", ifname, parts[1]))?;
+            let portnum = parts[1].parse::<u16>().map_err(|_| {
+                err_config!(
+                    "interface {} port number is not a valid: {}",
+                    ifname,
+                    parts[1]
+                )
+            })?;
             return Ok(Interface {
                 name: ifname.to_string(),
                 host: parts[0].to_string(),
@@ -341,8 +343,6 @@ fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, Compilation
             });
         }
     }
-
-
 }
 
 /// Parse the very basic visa_service section.
@@ -810,7 +810,7 @@ mod test {
                 "eth0" => {
                     assert_eq!(iface.host, "1.2.3.4");
                     assert_eq!(iface.port, 2000);
-                },
+                }
                 "eth1" => {
                     assert_eq!(iface.host, "foo.addr");
                     assert_eq!(iface.port, 9000);
@@ -824,9 +824,6 @@ mod test {
             .contains(&("zpr.foo".to_string(), "bar".to_string())));
         assert!(n0.provider.contains(&("baz".to_string(), "99".to_string())));
     }
-
-
-
 
     #[test]
     fn test_parse_visa_service() {

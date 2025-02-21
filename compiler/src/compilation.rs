@@ -50,7 +50,6 @@ impl Compilation {
             ))
         })?;
 
-
         let tokens = tokenize(&self.source_zpl)?;
         if self.verbose {
             println!("parsed {} tokens:", tokens.len());
