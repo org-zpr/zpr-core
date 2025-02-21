@@ -20,6 +20,7 @@ use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol};
 pub struct ConfigApi {
     config: Config,
     base_path: PathBuf,
+    verbose: bool,
 }
 
 /// [ConfigItem::Protocol] has this prt-arg thing as one of its fields.
@@ -214,11 +215,12 @@ impl From<&ConfigItem> for Protocol {
 
 impl ConfigApi {
     /// Create the api from the TOML configuration file.
-    pub fn new_from_toml_file(fname: &Path) -> Result<ConfigApi, CompilationError> {
+    pub fn new_from_toml_file(fname: &Path, verbose: bool) -> Result<ConfigApi, CompilationError> {
         let config = config::load_config(fname)?;
         let api = ConfigApi {
             config,
             base_path: fname.to_path_buf().parent().unwrap().to_path_buf(),
+            verbose,
         };
         Ok(api)
     }
@@ -229,11 +231,13 @@ impl ConfigApi {
     pub fn new_from_toml_content(
         content: &str,
         base_path: &Path,
+        verbose: bool,
     ) -> Result<ConfigApi, CompilationError> {
         let config = config::parse_config(content)?;
         let api = ConfigApi {
             config,
             base_path: PathBuf::from(base_path),
+            verbose,
         };
         Ok(api)
     }
@@ -288,7 +292,9 @@ impl ConfigApi {
     //
     pub fn get(&self, key: &str) -> Option<ConfigItem> {
         if key.is_empty() {
-            println!("zplc> FAIL {key}");
+            if self.verbose {
+                println!("zplc> FAIL {key}")
+            };
             return None;
         }
         let res = if key.starts_with("/") {
@@ -303,10 +309,12 @@ impl ConfigApi {
             let rest = key_path.collect::<Vec<&str>>();
             self.get_ns(ns, rest)
         };
-        if res.is_some() {
-            println!("zplc>  OK  {key}");
-        } else {
-            println!("zplc> FAIL {key}");
+        if self.verbose {
+            if res.is_some() {
+                println!("zplc>  OK  {key}");
+            } else {
+                println!("zplc> FAIL {key}");
+            }
         }
         res
     }
@@ -620,7 +628,7 @@ mod test {
         [services.foo]
         protocol = "bar"
         "#;
-        let api = ConfigApi::new_from_toml_content(cfg, &Path::new("")).unwrap();
+        let api = ConfigApi::new_from_toml_content(cfg, &Path::new(""), true).unwrap();
 
         let ver = api.get("zpr/version").unwrap();
         assert_eq!(ver.to_string().len(), 64);

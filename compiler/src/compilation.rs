@@ -43,12 +43,13 @@ impl Compilation {
             );
         }
         //let cfg = load_config(&self.source_config).map_err(|e| {
-        let cfg = ConfigApi::new_from_toml_file(&self.source_config).map_err(|e| {
-            CompilationError::ConfigError(format!(
-                "failed to load configuration from {:?}: {}",
-                self.source_config, e
-            ))
-        })?;
+        let cfg =
+            ConfigApi::new_from_toml_file(&self.source_config, self.verbose).map_err(|e| {
+                CompilationError::ConfigError(format!(
+                    "failed to load configuration from {:?}: {}",
+                    self.source_config, e
+                ))
+            })?;
 
         let tokens = tokenize(&self.source_zpl)?;
         if self.verbose {

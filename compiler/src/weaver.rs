@@ -573,7 +573,7 @@ mod test {
         let mut w = Weaver::new();
         let class_idx = HashMap::new();
         let policy = Policy::default();
-        let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir())
+        let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), true)
             .expect("failed to parse config");
 
         let res = w.init_services(&class_idx, &policy, &config);
@@ -623,7 +623,7 @@ mod test {
 
         let mut class_idx = HashMap::new();
         let mut policy = Policy::default();
-        let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir())
+        let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), true)
             .expect("failed to parse config");
 
         {
