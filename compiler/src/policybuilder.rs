@@ -149,9 +149,13 @@ impl PolicyBuilder {
     /// Configure the default (internal) authentication service in the policy. This is
     /// essentially just storing a CA certificate along with the expected prefix.
     fn set_default_auth(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
+        if fabric.default_auth_cert_asn.is_empty() {
+            println!("warning: refusing to add empty default certificate to policy");
+            return Ok(());
+        }
         let pcert = polio::Cert {
             id: 1,
-            asn1data: load_asn1data_from_pem(&fabric.default_auth_cert)?,
+            asn1data: fabric.default_auth_cert_asn.clone(),
             name: zpl::DEFAULT_TS_PREFIX.to_string(),
         };
         self.policy.certificates.push(pcert);
@@ -323,7 +327,7 @@ impl PolicyBuilder {
             //
             // So this registers as node service but uses a bogus endpoint.
             let proc = self.create_service_proc(
-                format!("/zpr/{}", &node.config_node.id).as_str(),
+                format!("/zpr/{}", &node.node_id).as_str(),
                 ServiceType::Regular,
                 "TCP/1",
                 Some(PFlags::node()),

@@ -2,8 +2,9 @@
 //! in this "compiler", this may be a way to build out an api "service" which
 //! would be used by the compiler as well as the visa service.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use core::fmt;
+use std::sync::Arc;
 
 use base64::prelude::*;
 
@@ -13,14 +14,16 @@ use crate::errors::CompilationError;
 use crate::protocols::IanaProtocol;
 
 
+
 pub struct ConfigApi {
     config: Config,
+    base_path: PathBuf,
 }
 
 
 // Part of the somewhat complicated [ConfigItem::Protocol] variant.
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum PortArgT {
     Port(u16), // a single TCP/UDP port
     PortRange(u16, u16), // range of TCP/UDP ports
@@ -30,7 +33,8 @@ pub enum PortArgT {
 }
 
 
-#[derive(Debug, PartialEq)]
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum ConfigItem {
     StrVal(String),
     BytesB64(String),
@@ -116,14 +120,17 @@ impl ConfigApi {
         let config = config::load_config(fname)?;
         let api = ConfigApi {
             config,
+            base_path: fname.to_path_buf().parent().unwrap().to_path_buf(),
         };
         Ok(api)
     }
 
+    #[allow(dead_code)]
     pub fn new_from_toml_content(content: &str, base_path: &Path) -> Result<ConfigApi, CompilationError> {
         let config = config::parse_config(content, base_path)?;
         let api = ConfigApi {
             config,
+            base_path: PathBuf::from(base_path),
         };
         Ok(api)
     }
@@ -178,15 +185,39 @@ impl ConfigApi {
     //
     pub fn get(&self, key: &str) -> Option<ConfigItem> {
         if key.is_empty() {
+            println!("zplc> FAIL {key}");
             return None;
         }
-        if key.starts_with("/") {
-            self.get_ns("", vec![key])
+        let res = if key.starts_with("/") {
+            let path: Vec<&str> = key.split("/").collect();
+            if path.len() < 2 {
+                return None;
+            }
+            self.get_ns("", path[1..].to_vec())
         } else {
             let mut key_path = key.split("/");
             let ns = key_path.next().unwrap();
             let rest = key_path.collect::<Vec<&str>>();
             self.get_ns(ns, rest)
+        };
+        if res.is_some() {
+            println!("zplc>  OK  {key}");
+        } else {
+            println!("zplc> FAIL {key}");
+        }
+        res
+    }
+
+
+    /// This version of [ConfigItem::get] will panic if the key is not found.
+    pub fn must_get(&self, key: &str) -> ConfigItem {
+        self.get(key).expect(format!("key not found: {}", key).as_str())
+    }
+
+    pub fn must_get_keys(&self, key: &str) -> Vec<String> {
+        match self.must_get(key) {
+            ConfigItem::KeySet(keys) => keys,
+            _ => panic!("not a KeySet")
         }
     }
 
@@ -214,7 +245,7 @@ impl ConfigApi {
                 }
                 self.get_service(key_path[1..].to_vec())
             }
-            _ => None,
+            _ => panic!("unknown key: {}", key),
         }
     }
 
@@ -241,7 +272,7 @@ impl ConfigApi {
                 }
                 self.get_zpr_visa_service(key_path[1..].to_vec())
             }
-            _ => None,
+            _ => panic!("unknown key: {}", key),
         }
     }
 
@@ -292,7 +323,7 @@ impl ConfigApi {
                 }
 
             }
-            _ => None,
+            _ => panic!("unknown key {}", key),
         }
 
     }
@@ -311,12 +342,17 @@ impl ConfigApi {
                 let Some(cert_path) = svc.cert_path.as_ref() else {
                     return None;
                 };
+                if cert_path.as_os_str().is_empty() {
+                    // No cert path. Possibly this is an error to be detected in config parser?
+                    return None;
+                }
                 // TODO: pretty sure that the path in the config is not set up relative to source path.
                 // TODO: This may be a case where we need to return an error?
-                let cert_data = match load_asn1data_from_pem(cert_path) {
+                let cert_path = self.abs_path(Path::new(cert_path));
+                let cert_data = match load_asn1data_from_pem(&cert_path) {
                     Ok(data) => data,
                     Err(e) => {
-                        panic!("failed to load certificate data: {}", e);
+                        panic!("failed to load certificate data from '{}': {}", cert_path.display(), e);
                     }
                 };
                 Some(ConfigItem::BytesB64(BASE64_STANDARD.encode(&cert_data)))
@@ -325,10 +361,23 @@ impl ConfigApi {
             "provider" => panic!("trusted_service.Provider not yet implemented"),
             "attributes" => Some(ConfigItem::KeySet(svc.returns_attrs.clone())),
             "id_attributes" => Some(ConfigItem::KeySet(svc.identity_attrs.clone())),
-            _ => None,
+            _ => panic!("unknown key {}", key),
         }
 
     }
+
+
+    /// Given a path, return the possibly adjusted absolute path.
+    /// If the passed path `p` is not absolute it is assumed to be relative to the base path.
+    ///
+    // TODO: This should happen in config - weaver doesn't need to do path stuff.
+    fn abs_path(&self, p: &Path) -> PathBuf {
+        if p.is_absolute() {
+            return p.to_path_buf();
+        }
+        self.base_path.join(p)
+    }
+
 
 
     /// `key_path` here is everything after "zpr/visa_services"
@@ -347,7 +396,7 @@ impl ConfigApi {
             "dock_node_id" => {
                 Some(ConfigItem::StrVal(self.config.visa_service.dock_node_id.clone()))
             }
-            _ => None,
+            _ => panic!("unknown key {}", key),
         }
     }
 
@@ -388,7 +437,7 @@ impl ConfigApi {
                 };
                 return Some(ConfigItem::NetAddr(hostname, iface.port));
             }
-            _ => None,
+            _ => panic!("unknown key: {}", key),
         }
     }
 
@@ -417,6 +466,13 @@ mod test {
 
         [visa_service]
         dock_node = "n0"
+
+        [protocols.bar]
+        protocol = "iana.TCP"
+        port = 21
+
+        [services.foo]
+        protocol = "bar"
         "#;
         let api = ConfigApi::new_from_toml_content(cfg, &Path::new("")).unwrap();
 
@@ -453,6 +509,7 @@ mod test {
             assert_eq!(poe_host, "foo.bah");
             assert_eq!(poe_port, 5000);
         }
+        assert!(api.get("/services/foo").is_some());
 
 
         assert_eq!(api.get("zpr/visa_services").unwrap().to_string(), "[default]");

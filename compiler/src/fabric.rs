@@ -7,6 +7,7 @@ use std::net::Ipv6Addr;
 use std::path::PathBuf;
 
 use crate::config::{Config, Node, Protocol};
+use crate::config_api::{ConfigApi, ConfigItem};
 use crate::errors::CompilationError;
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::lex::Token;
@@ -20,7 +21,7 @@ pub struct Fabric {
     pub revision: String,
     pub services: Vec<FabricService>,
     pub nodes: Vec<FabricNode>,
-    pub default_auth_cert: PathBuf, // CA cert for default/builtin trusted auth
+    pub default_auth_cert_asn: Vec<u8>, // CA cert for default/builtin trusted auth
 }
 
 #[allow(dead_code)]
@@ -52,7 +53,7 @@ impl Default for ServiceType {
 
 #[derive(Debug, Clone)]
 pub struct FabricNode {
-    pub config_node: Node,
+    pub node_id: String,
     pub provider_attrs: Vec<Attribute>, // parsed out of config::Node.provider
 }
 
@@ -70,8 +71,8 @@ impl fmt::Display for Fabric {
         write!(f, "revision: {}\n", self.revision)?;
         write!(
             f,
-            "default auth cert: {}\n",
-            self.default_auth_cert.display()
+            "default auth cert: {}bytes\n",
+            self.default_auth_cert_asn.len()
         )?;
         write!(
             f,
@@ -107,7 +108,7 @@ impl fmt::Display for Fabric {
             }
         }
         for n in &self.nodes {
-            write!(f, "  node: {}\n", n.config_node.id)?;
+            write!(f, "  node: {}\n", n.node_id)?;
             write!(f, "    provider attrs:\n")?;
             for a in &n.provider_attrs {
                 write!(f, "      {}\n", a)?;
@@ -226,38 +227,51 @@ impl Fabric {
     /// Add a node to the fabric.  Must add visa service before calling this.
     ///
     /// This also adds visa service access to the nodes visa support service.
-    pub fn add_node(&mut self, node: &Node, config: &Config) -> Result<(), CompilationError> {
-        let mut node_attrs = vec_to_attributes(&node.provider)?;
-        if !node.zpr_address.is_empty() {
-            // First check the resolver table:
-            let node_addr = config.resolve(&node.zpr_address);
-            if node_addr.is_none() {
-                // Attempt to directly parse it
-                let naddr: Ipv6Addr = match node.zpr_address.parse() {
-                    // TODO: Should be parsed to an IpAddr in config.rs
-                    Ok(a) => a,
-                    Err(e) => {
-                        return Err(CompilationError::ConfigError(format!(
-                            "invalid zpr address: {}: {}",
-                            node.zpr_address, e
-                        )))
-                    }
-                };
-                node_attrs.push(Attribute::attr(zpl::ZPR_ADDR_ATTR, &format!("{}", naddr)));
-            } else {
-                node_attrs.push(Attribute::attr(
-                    zpl::ZPR_ADDR_ATTR,
-                    &format!("{}", node_addr.unwrap()),
-                ));
+    pub fn add_node(&mut self, node_id: &str, config: &ConfigApi) -> Result<(), CompilationError> {
+
+
+        let node_attrs = match config.get(&format!("zpr/nodes/{node_id}/provider")) {
+            Some(ConfigItem::AttrList(tuples)) => {
+                vec_to_attributes(&tuples)?
+            },
+            _ => {
+                return Err(CompilationError::ConfigError(format!(
+                    "missing provider attributes for node {}",
+                    node_id
+                )))
             }
-        }
+        };
+
+        let zpr_addr= match config.get(&format!("zpr/nodes/{node_id}/zpr_addr")) {
+            Some(ConfigItem::StrVal(s)) => s,
+            _ => {
+                return Err(CompilationError::ConfigError(format!(
+                    "missing zpr address for node {}",
+                    node_id
+                )))
+            }
+        };
+
+        // The address returned from config-api has already gone though the resolver.
+        // We require an IPv6 address.
+        let naddr: Ipv6Addr = match zpr_addr.parse() {
+            // TODO: Should be parsed to an IpAddr in config.rs
+            Ok(a) => a,
+            Err(e) => {
+                return Err(CompilationError::ConfigError(format!(
+                    "invalid zpr IPv6 address: {}: {}",
+                    zpr_addr, e
+                )))
+            }
+        };
+
 
         // Note that we do not have line/col info from the config file.
         let attr_map = squash_attributes(&node_attrs, &Token::default())?;
         let provider_attrs = attr_map.into_values().collect::<Vec<Attribute>>();
 
         let fabn = FabricNode {
-            config_node: node.clone(),
+            node_id: node_id.to_string(),
             provider_attrs: provider_attrs.clone(),
         };
         self.nodes.push(fabn);
@@ -267,7 +281,7 @@ impl Fabric {
             .get_visa_service()
             .expect("visa service must be added before add_node is called");
         let vs_provider_attrs = vs.provider_attrs.clone();
-        let svc_name = format!("/zpr/{}/vss", node.id);
+        let svc_name = format!("/zpr/{}/vss", node_id);
 
         // There cannot be a service with this id already.
         if self.has_service(&svc_name) {

@@ -13,6 +13,7 @@ use crate::errors::CompilationError;
 use crate::protocols::{self, IanaProtocol};
 use crate::ptypes::Attribute;
 use crate::zpl;
+use crate::config_api::{ConfigItem, PortArgT};
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
 /// (really anything that has a to_string function), or with two args: a format string and arguments.
@@ -124,6 +125,76 @@ pub enum IcmpFlowType {
     RequestResponse(u8, u8),
     OneShot(Vec<u8>),
 }
+
+impl From<ConfigItem> for Protocol {
+    fn from(item: ConfigItem) -> Self {
+        match item {
+            ConfigItem::Protocol(name, prot, port_t) => {
+                let mut p = Protocol{
+                    id: name,
+                    protocol: prot,
+                    port: None,
+                    icmp: None,
+                };
+                match port_t {
+                    PortArgT::Port(pnum) => {
+                        p.port = Some(pnum.to_string());
+                    },
+                    PortArgT::PortRange(low, hi) => {
+                        p.port = Some(format!("{}-{}", low, hi));
+                    },
+                    PortArgT::PortList(plist) => {
+                        p.port = Some(plist.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(","));
+                    },
+                    PortArgT::ICMPOneShot(codes) => {
+                        p.icmp = Some(IcmpFlowType::OneShot(codes));
+                    },
+                    PortArgT::ICMPReqRep(req, resp) => {
+                        p.icmp = Some(IcmpFlowType::RequestResponse(req, resp));
+                    },
+                }
+                p
+            },
+            _ => panic!("ConfigItem is not a protocol"),
+        }
+    }
+}
+
+
+impl From<&ConfigItem> for Protocol {
+    fn from(item: &ConfigItem) -> Self {
+        match item {
+            ConfigItem::Protocol(name, prot, port_t) => {
+                let mut p = Protocol{
+                    id: name.clone(),
+                    protocol: prot.clone(),
+                    port: None,
+                    icmp: None,
+                };
+                match port_t {
+                    PortArgT::Port(pnum) => {
+                        p.port = Some(pnum.to_string());
+                    },
+                    PortArgT::PortRange(low, hi) => {
+                        p.port = Some(format!("{}-{}", low, hi));
+                    },
+                    PortArgT::PortList(plist) => {
+                        p.port = Some(plist.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(","));
+                    },
+                    PortArgT::ICMPOneShot(codes) => {
+                        p.icmp = Some(IcmpFlowType::OneShot(codes.clone()));
+                    },
+                    PortArgT::ICMPReqRep(req, resp) => {
+                        p.icmp = Some(IcmpFlowType::RequestResponse(*req, *resp));
+                    },
+                }
+                p
+            },
+            _ => panic!("ConfigItem is not a protocol"),
+        }
+    }
+}
+
 
 impl Protocol {
     pub fn to_endpoint_str(&self) -> String {
