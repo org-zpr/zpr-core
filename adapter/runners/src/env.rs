@@ -46,7 +46,7 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
     {
         if !tun_name.is_empty() {
             println!(
-                "warning: on macos it is reccommended to not set a tun name (found {})",
+                "warning: on macos it is recommended to not set a tun name (found {})",
                 tun_name
             );
         }
