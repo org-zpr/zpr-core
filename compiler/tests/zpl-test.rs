@@ -5,7 +5,6 @@ use zpc::compilation::CompilationBuilder;
 
 fn get_zpl_dir() -> PathBuf {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    // let zpl_dir = PathBuf::from(manifest_dir).join("test-data");
     PathBuf::from(manifest_dir).join("test-data")
 }
 
@@ -16,6 +15,15 @@ fn get_m3_policy_dir() -> PathBuf {
     pb.push("examples");
     pb.push("milestone3");
     pb.push("policies");
+    pb
+}
+
+fn get_integtest_policy_dir() -> PathBuf {
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let mut pb = PathBuf::from(manifest_dir);
+    pb.pop();
+    pb.push("integration-test");
+    pb.push("pregen");
     pb
 }
 
@@ -30,10 +38,11 @@ impl Drop for TempDir {
 }
 
 impl TempDir {
-    fn new() -> Self {
+    fn new(name_hint: &str) -> Self {
         let mut temp_dir = env::temp_dir();
         temp_dir.push(format!(
-            "zpl-test-{}-{}",
+            "zpl-test-{}-{}-{}",
+            name_hint,
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -92,11 +101,49 @@ fn can_parse_rfc_examples() {
 #[test]
 fn can_compile_m3_policies() {
     let zpl_dir = get_m3_policy_dir();
-    let temp_dir = TempDir::new();
+    let temp_dir = TempDir::new("m3");
 
     for fent in zpl_dir
         .read_dir()
         .expect("failed to list M3 policy directory")
+    {
+        if let Ok(fent) = fent {
+            let path = fent.path();
+            // Must end with ".zpl"
+            match path.extension() {
+                Some(ext) => {
+                    if ext != "zpl" {
+                        continue;
+                    }
+                }
+                None => continue,
+            }
+            let cb = CompilationBuilder::new(path)
+                .verbose(true)
+                .output_directory(&temp_dir.path);
+            let comp = cb.build();
+            match comp.compile() {
+                Ok(_) => println!("{:?}: compiled ok", fent.path()),
+                Err(e) => {
+                    println!("error: {}", e);
+                    panic!("failed to compile {:?}", fent.path());
+                }
+            }
+        }
+    }
+}
+
+// Make sure we can still compile the policies in the
+// integration-test. Note that this does not try to compile
+// with the IPv6 config used there.
+#[test]
+fn can_compile_integtest_policies() {
+    let zpl_dir = get_integtest_policy_dir();
+    let temp_dir = TempDir::new("integtest");
+
+    for fent in zpl_dir
+        .read_dir()
+        .expect("failed to list integration-test policy directory")
     {
         if let Ok(fent) = fent {
             let path = fent.path();

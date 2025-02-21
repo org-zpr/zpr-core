@@ -1,0 +1,42 @@
+# -*- mode: toml -*-
+
+[resolver]
+order = ["hosts", "dns"]
+
+[resolver.hosts]
+"n0.zpr" = "fd5a:5052::2"
+"n0.overlay" = "10.0.0.1"
+
+[nodes."node"]
+key = "b9oiUhEcvRAhtzqOrl0yY59j/R3mUCxcLiMjdr/d7g0="
+provider = [ [ "zpr.adapter.cn", "node" ] ]
+zpr_address = "n0.zpr"
+interfaces = ["in1"]
+in1.netaddr = "n0.overlay:12345"
+
+[trusted_services.default]
+cert_path = "ca-cert.pem"
+
+[visa_service]
+dock_node = "node"
+admin_attrs = [ ["zpr.adapter.cn", "client.zpr.org"] ]
+
+[protocols.ping]
+protocol = "iana.ICMP4"
+icmp_type = "request-response"
+icmp_codes = [ 0, 8 ]
+
+[services.A1Svc]
+protocol = "ping"
+
+[services.A2Svc]
+protocol = "ping"
+
+[services.A3Svc]
+protocol = "ping"
+
+[services.PingableVs]
+protocol = "ping"
+
+[services.PingableNode]
+protocol = "ping"

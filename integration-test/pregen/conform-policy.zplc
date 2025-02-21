@@ -1,0 +1,52 @@
+# -*- mode: toml -*-
+
+
+[resolver]
+order = ["hosts", "dns"]
+
+[resolver.hosts]
+"n0.zpr" = "fd5a:5052:90de::1" # zpr contact addr
+"n0.overlay" = "192.168.0.55" 
+"my.service" = "fd5a:5052:1::8080" # ZPR contact addr
+
+[nodes."node.zpr.org"]
+key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
+provider = [ ["zpr.adapter.cn", "node.zpr.org"] ]
+zpr_address = "n0.zpr"
+interfaces = ["in1"]
+in1.netaddr = "n0.overlay:5000"
+
+[trusted_services.default]
+cert_path = "conform-ca-cert.pem"
+
+[visa_service]
+dock_node = "node.zpr.org"
+admin_attrs = [ ["zpr.adapter.cn", "client.zpr.org"] ]
+
+[protocols.http]
+protocol = "iana.TCP"
+port = 80
+
+[protocols.perf]
+protocol = "iana.TCP"
+port = 5056
+
+[protocols.ping]
+protocol = "iana.ICMP6"
+icmp_type = "request-response"
+icmp_codes = [ 128, 129 ]
+
+[services.WebService]
+protocol = "http"
+
+
+[services.IPerfService]
+protocol = "perf"
+
+[services.PingableService]
+protocol = "ping"
+
+[services.PingableNode]
+protocol = "ping"
+
+

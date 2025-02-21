@@ -157,6 +157,7 @@ pub struct CompilationBuilder {
     private_key: Option<Rsa<Private>>,
     parse_only: bool,
     output_directory: Option<PathBuf>,
+    out_filename: Option<String>,
 }
 
 impl CompilationBuilder {
@@ -199,6 +200,11 @@ impl CompilationBuilder {
         self
     }
 
+    pub fn output_filename(mut self, out_filename: &str) -> Self {
+        self.out_filename = Some(out_filename.into());
+        self
+    }
+
     /// Create the [Compilation] object with the settings configured.
     pub fn build(self) -> Compilation {
         // Default config is same name as source replace .zpl extension with .zplc extension
@@ -211,7 +217,7 @@ impl CompilationBuilder {
             }
         };
 
-        let output_file = match self.output_directory {
+        let mut output_file = match self.output_directory {
             Some(outdir) => {
                 if !outdir.is_dir() {
                     panic!(
@@ -224,6 +230,12 @@ impl CompilationBuilder {
             }
             None => self.source_zpl.with_extension("bin"),
         };
+
+        // If user has selected an alternate output file, substitute that in now.
+        if let Some(out_filename) = self.out_filename {
+            let base = output_file.parent().unwrap();
+            output_file = base.join(out_filename);
+        }
 
         Compilation {
             verbose: self.verbose,
