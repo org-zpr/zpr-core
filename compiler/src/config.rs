@@ -1,7 +1,7 @@
 //! config.rs - load/parse a ZPL configuration TOML file
 
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -10,10 +10,9 @@ use toml::Table;
 
 use crate::crypto::sha256;
 use crate::errors::CompilationError;
-use crate::protocols::{self, IanaProtocol};
-use crate::ptypes::Attribute;
+use crate::protocols::{self, IanaProtocol, Protocol, IcmpFlowType};
 use crate::zpl;
-use crate::config_api::{ConfigItem, PortArgT};
+
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
 /// (really anything that has a to_string function), or with two args: a format string and arguments.
@@ -32,7 +31,6 @@ macro_rules! err_config {
 /// Configuration structure which is parsed from the TOML.
 #[allow(dead_code)]
 pub struct Config {
-    pub base_path: PathBuf,
     pub digest: Digest,
     resolver: Resolver,
     pub nodes: HashMap<String, Node>,
@@ -109,125 +107,6 @@ pub struct TrustedService {
     pub identity_attrs: Vec<String>,
 }
 
-/// Protocol table
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct Protocol {
-    pub id: String,
-    pub protocol: IanaProtocol,
-    pub port: Option<String>, // TODO: using string for now but needs to be a "port spec"
-    pub icmp: Option<IcmpFlowType>,
-}
-
-/// Part of a Protocol description.
-#[derive(Debug, Clone, PartialEq)]
-pub enum IcmpFlowType {
-    RequestResponse(u8, u8),
-    OneShot(Vec<u8>),
-}
-
-impl From<ConfigItem> for Protocol {
-    fn from(item: ConfigItem) -> Self {
-        match item {
-            ConfigItem::Protocol(name, prot, port_t) => {
-                let mut p = Protocol{
-                    id: name,
-                    protocol: prot,
-                    port: None,
-                    icmp: None,
-                };
-                match port_t {
-                    PortArgT::Port(pnum) => {
-                        p.port = Some(pnum.to_string());
-                    },
-                    PortArgT::PortRange(low, hi) => {
-                        p.port = Some(format!("{}-{}", low, hi));
-                    },
-                    PortArgT::PortList(plist) => {
-                        p.port = Some(plist.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(","));
-                    },
-                    PortArgT::ICMPOneShot(codes) => {
-                        p.icmp = Some(IcmpFlowType::OneShot(codes));
-                    },
-                    PortArgT::ICMPReqRep(req, resp) => {
-                        p.icmp = Some(IcmpFlowType::RequestResponse(req, resp));
-                    },
-                }
-                p
-            },
-            _ => panic!("ConfigItem is not a protocol"),
-        }
-    }
-}
-
-
-impl From<&ConfigItem> for Protocol {
-    fn from(item: &ConfigItem) -> Self {
-        match item {
-            ConfigItem::Protocol(name, prot, port_t) => {
-                let mut p = Protocol{
-                    id: name.clone(),
-                    protocol: prot.clone(),
-                    port: None,
-                    icmp: None,
-                };
-                match port_t {
-                    PortArgT::Port(pnum) => {
-                        p.port = Some(pnum.to_string());
-                    },
-                    PortArgT::PortRange(low, hi) => {
-                        p.port = Some(format!("{}-{}", low, hi));
-                    },
-                    PortArgT::PortList(plist) => {
-                        p.port = Some(plist.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(","));
-                    },
-                    PortArgT::ICMPOneShot(codes) => {
-                        p.icmp = Some(IcmpFlowType::OneShot(codes.clone()));
-                    },
-                    PortArgT::ICMPReqRep(req, resp) => {
-                        p.icmp = Some(IcmpFlowType::RequestResponse(*req, *resp));
-                    },
-                }
-                p
-            },
-            _ => panic!("ConfigItem is not a protocol"),
-        }
-    }
-}
-
-
-impl Protocol {
-    pub fn to_endpoint_str(&self) -> String {
-        let mut s = String::new();
-        let protname = self.protocol.to_string().to_uppercase();
-        if self.protocol.is_icmp() {
-            if let Some(ref icmp) = self.icmp {
-                match icmp {
-                    IcmpFlowType::RequestResponse(req, resp) => {
-                        s.push_str(&format!("{}/{}", protname, req));
-                        s.push_str(&format!(",{}/{}", protname, resp));
-                    }
-                    IcmpFlowType::OneShot(ref codes) => {
-                        for c in codes {
-                            s.push_str(&format!("{}/{}", protname, c));
-                        }
-                    }
-                }
-            } else {
-                s.push_str(&format!("{}/0", protname));
-            }
-        } else {
-            s.push_str(&format!("{}/", protname));
-            if let Some(ref port) = self.port {
-                s.push_str(port);
-            } else {
-                s.push_str("0");
-            }
-        }
-        s
-    }
-}
-
 
 impl Config {
     /// Attempt to lookup the given hostname in the configurations resolver table.
@@ -238,54 +117,16 @@ impl Config {
         //       For now that is not supported.
         self.resolver.hosts.as_ref()?.get(hostname)?.parse().ok()
     }
-
-    /// Given an attribute from ZPL (or config) ensure that it is provided by one
-    /// of the trusted services.  At the same time, return it in its full (with prefix) form.
-    ///
-    /// TODO: This could do more like check if the attribute is using the correct from (tag) or
-    /// if it is multi-value, is it using a valid value.  (TODO).
-    ///
-    /// Note that this config struct doesn't really fully parse the attributes anyway so maybe
-    /// in the future this logic should move into fabric.  For now this is just a match
-    /// against the string attributes in each trusted service.
-    ///
-    /// Do not pass the DEFAULT attributes in here (eg, "cn" or "zpr.adapter.cn") -- this
-    /// does not check for them.
-    pub fn resolve_attribute(&self, attr: &Attribute) -> Result<String, CompilationError> {
-        for ts in &self.trusted_services {
-            if ts.returns_attrs.contains(&attr.name) {
-                return Ok(format!("{}{}", ts.prefix, attr.name));
-            }
-            // Possibly the name is already prefixed...
-            if attr.name.starts_with(&ts.prefix) {
-                let name = String::from(&attr.name[ts.prefix.len()..]);
-                if ts.returns_attrs.contains(&name) {
-                    return Ok(attr.name.clone());
-                }
-            }
-        }
-        Err(err_config!(
-            "attribute not provided by any trusted service: {}",
-            attr.name
-        ))
-    }
 }
 
 /// Parse and do some (light) error checking on the ZPL TOML configuration.
 pub fn load_config(path: &Path) -> Result<Config, CompilationError> {
     let cstr = std::fs::read_to_string(path).map_err(|e| CompilationError::Io(e))?;
-
-    let abs_path = path.canonicalize().map_err(|e| CompilationError::Io(e))?;
-    let base_path = match abs_path.parent() {
-        Some(p) => p.to_path_buf(),
-        None => PathBuf::new(),
-    };
-
-    parse_config(&cstr, &base_path)
+    parse_config(&cstr)
 }
 
-/// Parse config from the toml string `cstr`. The `base_path` is used to resolve relative paths.
-pub fn parse_config(cstr: &str, base_path: &Path) -> Result<Config, CompilationError> {
+/// Parse config from the toml string `cstr`.
+pub fn parse_config(cstr: &str) -> Result<Config, CompilationError> {
     let digest = sha256(&cstr);
 
     let ctoml = cstr
@@ -293,7 +134,6 @@ pub fn parse_config(cstr: &str, base_path: &Path) -> Result<Config, CompilationE
         .map_err(|e| CompilationError::TomlError(e))?;
 
     let config = Config {
-        base_path: base_path.to_path_buf(),
         digest,
         resolver: parse_resolver(&ctoml)?,
         nodes: parse_nodes(&ctoml)?,
@@ -779,7 +619,6 @@ fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationEr
     };
 
     Ok(Protocol {
-        id: prot_id.to_string(),
         protocol,
         port,
         icmp,

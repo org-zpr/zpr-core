@@ -4,14 +4,13 @@
 
 use std::path::{Path, PathBuf};
 use core::fmt;
-use std::sync::Arc;
 
 use base64::prelude::*;
 
 use crate::crypto::{digest_as_hex, load_asn1data_from_pem};
-use crate::config::{self, Config, IcmpFlowType};
+use crate::config::{self, Config};
 use crate::errors::CompilationError;
-use crate::protocols::IanaProtocol;
+use crate::protocols::{IanaProtocol, Protocol, IcmpFlowType};
 
 
 
@@ -23,6 +22,7 @@ pub struct ConfigApi {
 
 // Part of the somewhat complicated [ConfigItem::Protocol] variant.
 
+#[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone)]
 pub enum PortArgT {
     Port(u16), // a single TCP/UDP port
@@ -114,6 +114,74 @@ impl fmt::Display for ConfigItem {
     }
 }
 
+
+impl From<ConfigItem> for Protocol {
+    fn from(item: ConfigItem) -> Self {
+        match item {
+            ConfigItem::Protocol(_name, prot, port_t) => {
+                let mut p = Protocol{
+                    protocol: prot,
+                    port: None,
+                    icmp: None,
+                };
+                match port_t {
+                    PortArgT::Port(pnum) => {
+                        p.port = Some(pnum.to_string());
+                    },
+                    PortArgT::PortRange(low, hi) => {
+                        p.port = Some(format!("{}-{}", low, hi));
+                    },
+                    PortArgT::PortList(plist) => {
+                        p.port = Some(plist.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(","));
+                    },
+                    PortArgT::ICMPOneShot(codes) => {
+                        p.icmp = Some(IcmpFlowType::OneShot(codes));
+                    },
+                    PortArgT::ICMPReqRep(req, resp) => {
+                        p.icmp = Some(IcmpFlowType::RequestResponse(req, resp));
+                    },
+                }
+                p
+            },
+            _ => panic!("ConfigItem is not a protocol"),
+        }
+    }
+}
+
+
+impl From<&ConfigItem> for Protocol {
+    fn from(item: &ConfigItem) -> Self {
+        match item {
+            ConfigItem::Protocol(_name, prot, port_t) => {
+                let mut p = Protocol{
+                    protocol: prot.clone(),
+                    port: None,
+                    icmp: None,
+                };
+                match port_t {
+                    PortArgT::Port(pnum) => {
+                        p.port = Some(pnum.to_string());
+                    },
+                    PortArgT::PortRange(low, hi) => {
+                        p.port = Some(format!("{}-{}", low, hi));
+                    },
+                    PortArgT::PortList(plist) => {
+                        p.port = Some(plist.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(","));
+                    },
+                    PortArgT::ICMPOneShot(codes) => {
+                        p.icmp = Some(IcmpFlowType::OneShot(codes.clone()));
+                    },
+                    PortArgT::ICMPReqRep(req, resp) => {
+                        p.icmp = Some(IcmpFlowType::RequestResponse(*req, *resp));
+                    },
+                }
+                p
+            },
+            _ => panic!("ConfigItem is not a protocol"),
+        }
+    }
+}
+
 impl ConfigApi {
     // TODO: This should be "new from file" -- hide the config thing.
     pub fn new_from_toml_file(fname: &Path) -> Result<ConfigApi, CompilationError> {
@@ -127,7 +195,7 @@ impl ConfigApi {
 
     #[allow(dead_code)]
     pub fn new_from_toml_content(content: &str, base_path: &Path) -> Result<ConfigApi, CompilationError> {
-        let config = config::parse_config(content, base_path)?;
+        let config = config::parse_config(content)?;
         let api = ConfigApi {
             config,
             base_path: PathBuf::from(base_path),
@@ -444,6 +512,7 @@ impl ConfigApi {
 }
 
 
+#[cfg(test)]
 mod test {
     use super::*;
 

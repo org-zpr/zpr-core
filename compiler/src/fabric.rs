@@ -4,14 +4,12 @@
 
 use core::fmt;
 use std::net::Ipv6Addr;
-use std::path::PathBuf;
 
-use crate::config::{Config, Node, Protocol};
 use crate::config_api::{ConfigApi, ConfigItem};
 use crate::errors::CompilationError;
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::lex::Token;
-use crate::protocols::IanaProtocol;
+use crate::protocols::{IanaProtocol, Protocol};
 use crate::ptypes::Attribute;
 use crate::zpl;
 
@@ -228,9 +226,7 @@ impl Fabric {
     ///
     /// This also adds visa service access to the nodes visa support service.
     pub fn add_node(&mut self, node_id: &str, config: &ConfigApi) -> Result<(), CompilationError> {
-
-
-        let node_attrs = match config.get(&format!("zpr/nodes/{node_id}/provider")) {
+        let mut node_attrs = match config.get(&format!("zpr/nodes/{node_id}/provider")) {
             Some(ConfigItem::AttrList(tuples)) => {
                 vec_to_attributes(&tuples)?
             },
@@ -259,12 +255,12 @@ impl Fabric {
             Ok(a) => a,
             Err(e) => {
                 return Err(CompilationError::ConfigError(format!(
-                    "invalid zpr IPv6 address: {}: {}",
+                    "invalid zpr IPv6 address for node: {}: {}",
                     zpr_addr, e
                 )))
             }
         };
-
+        node_attrs.push(Attribute::attr(zpl::ZPR_ADDR_ATTR, &naddr.to_string()));
 
         // Note that we do not have line/col info from the config file.
         let attr_map = squash_attributes(&node_attrs, &Token::default())?;
@@ -292,7 +288,6 @@ impl Fabric {
         }
 
         let vss_prot = Protocol {
-            id: "zpr_vsup".to_string(),
             protocol: IanaProtocol::TCP,
             port: Some(format!("{}", zpl::VISA_SUPPORT_SEVICE_PORT)),
             icmp: None,

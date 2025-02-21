@@ -1,21 +1,18 @@
 //! weaver.rs - Poetically named module that can "weave" a "fabric" from a ZPL policy and configuration.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
 use base64::prelude::*;
 
-
 use crate::compilation::Compilation;
-use crate::config::{Config, IcmpFlowType, Protocol, Service, TrustedService};
-use crate::config_api::{ConfigApi, ConfigItem, PortArgT};
+use crate::config_api::{ConfigApi, ConfigItem};
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
 use crate::fabric::{Fabric, ServiceType};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
-use crate::protocols::IanaProtocol;
+use crate::protocols::{IanaProtocol, Protocol};
 use crate::ptypes::{Attribute, Class, Policy};
-use crate::zpl::{self, DEFAULT_TRUSTED_SERVICE_ID};
+use crate::zpl;
 
 pub struct Weaver {
     fabric: Fabric,
@@ -126,7 +123,6 @@ impl Weaver {
     /// admin HTTPS API.
     fn visa_services_to_services(&mut self, config: &ConfigApi) -> Result<(), CompilationError> {
         let vs_protocol = Protocol {
-            id: "zpr_vsvc".to_string(),
             protocol: IanaProtocol::TCP,
             port: Some(zpl::VISA_SERVICE_PORT.to_string()),
             icmp: None,
@@ -150,7 +146,6 @@ impl Weaver {
 
         // Now add a service for the admin HTTPS API.
         let admin_api_protocol = Protocol {
-            id: "zpr_admin".to_string(),
             protocol: IanaProtocol::TCP,
             port: Some(zpl::VISA_SERVICE_ADMIN_PORT.to_string()),
             icmp: None,
