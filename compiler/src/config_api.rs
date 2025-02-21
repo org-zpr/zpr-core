@@ -12,31 +12,56 @@ use crate::crypto::{digest_as_hex, load_asn1data_from_pem};
 use crate::errors::CompilationError;
 use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol};
 
+/// ConfigApi wraps a pseudo RESTFUL api around the config data.
+/// Access is visa the [ConfigApi::get] method.
+///
+/// This is a testbed for the "can we implement configuration as
+/// a service" research.
 pub struct ConfigApi {
     config: Config,
     base_path: PathBuf,
 }
 
-// Part of the somewhat complicated [ConfigItem::Protocol] variant.
-
+/// [ConfigItem::Protocol] has this prt-arg thing as one of its fields.
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Clone)]
 pub enum PortArgT {
-    Port(u16),            // a single TCP/UDP port
-    PortRange(u16, u16),  // range of TCP/UDP ports
-    PortList(Vec<u16>),   // list of TCP/UDP ports
-    ICMPOneShot(Vec<u8>), // ICMP codes
-    ICMPReqRep(u8, u8),   // Pair of ICMP codes (request, reply)
+    /// a single TCP/UDP port
+    Port(u16),
+
+    /// A range of TCP/UDP ports (lo, high) inclusive
+    PortRange(u16, u16),
+
+    /// A list of TCP/UDP ports
+    PortList(Vec<u16>),
+
+    /// List of permissible ICMP codes
+    ICMPOneShot(Vec<u8>),
+
+    /// Pair of ICMP codes (request, reply)
+    ICMPReqRep(u8, u8),
 }
 
+/// The config API return values.
 #[derive(Debug, PartialEq, Clone)]
 pub enum ConfigItem {
+    /// Generic string value
     StrVal(String),
+
+    /// Base64 encoded byte buffer
     BytesB64(String),
+
+    /// A set of key values (eg, a set of node IDs)
     KeySet(Vec<String>),
-    AttrList(Vec<(String, String)>),          // vec of tuples
-    NetAddr(String, u16),                     // host, port
-    Protocol(String, IanaProtocol, PortArgT), // (NAME, protocol, ports-or-type-codes)
+
+    /// A set of attributes as key value pairs
+    AttrList(Vec<(String, String)>),
+
+    /// A network address (host, port). Host may be a hostname or an IP address.
+    NetAddr(String, u16),
+
+    /// A protocol definition. This is a tuple of (name, protocol, ports-or-type-codes)
+    Protocol(String, IanaProtocol, PortArgT),
 }
 
 impl fmt::Display for ConfigItem {
@@ -188,7 +213,7 @@ impl From<&ConfigItem> for Protocol {
 }
 
 impl ConfigApi {
-    // TODO: This should be "new from file" -- hide the config thing.
+    /// Create the api from the TOML configuration file.
     pub fn new_from_toml_file(fname: &Path) -> Result<ConfigApi, CompilationError> {
         let config = config::load_config(fname)?;
         let api = ConfigApi {
@@ -198,6 +223,8 @@ impl ConfigApi {
         Ok(api)
     }
 
+    /// Create the api from the TOML content. `base_path` is used for resolving
+    /// relative filenames in the config.
     #[allow(dead_code)]
     pub fn new_from_toml_content(
         content: &str,
