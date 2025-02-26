@@ -302,6 +302,10 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 	// TODO: Are we sure that the compiler or matcher will not allow matching of conflicting
 	//       procedures? I guess it is all additive, but I'm not sure this is proved to be correct
 	//       anywhere.
+
+	// By default, we grant adapter role.
+	state.Agent.SetAuthedClaim(agent.KAttrRole, &agent.ClaimV{V: "adapter", Exp: state.Agent.GetAuthExpires()})
+
 	for attrChanges > 0 {
 		matchedProcs := m.getProcsIfNotIn(matchedPolicies, procsRan)
 		m.log.Debug("[MX] -- MatchConnect agent matched", "policyCount", len(matchedPolicies), "procCount", len(matchedProcs))
@@ -322,11 +326,6 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 			m.log.Debug("[MX] -- MatchConnect -- -- NODE flag is set")
 			if rc, ok := agnt.GetAuthedClaims()[agent.KAttrRole]; !ok || rc.V != "node" {
 				agnt.SetAuthedClaim(agent.KAttrRole, &agent.ClaimV{V: "node", Exp: state.Agent.GetAuthExpires()})
-				attrChanges++
-			}
-		} else {
-			if rc, ok := agnt.GetAuthedClaims()[agent.KAttrRole]; !ok || rc.V != "adapter" {
-				agnt.SetAuthedClaim(agent.KAttrRole, &agent.ClaimV{V: "adapter", Exp: state.Agent.GetAuthExpires()})
 				attrChanges++
 			}
 		}
