@@ -67,12 +67,6 @@ pub fn parse_allow(
     let mut ps = PState::new(&parse_state.root_tok);
 
     // To parse this we start parsing and break if we hit a WITH or a TO.
-    //
-    // - If we hit a WITH, then we better have parsed a device clause, and we continue
-    //   parsing, breaking on a TO. At which point we should have parsed a user clause.
-    // - If we hit a TO, then we check to see if we parsed a USER or a DEVICE clause.
-    //
-    // The remaining tokens we parse to EOL as a service clause.
     ps.parse_tags_attrs_and_classname(
         &mut tokens,
         classes_idx,
@@ -82,9 +76,9 @@ pub fn parse_allow(
 
     match tokens.peek() {
         Some(tok) => {
-            // If we hit a TO then we expect either a DEVICE or USER clause
-            // If we hit a WITH then we expect a DEVICE clause
             let cn = ps.class_name.as_ref().unwrap();
+
+            // If we hit a TO then we expect either a DEVICE or USER clause
             match tok.tt {
                 TokenType::To => {
                     // Must have eitherr a device or user clause.
@@ -116,6 +110,8 @@ pub fn parse_allow(
                         }
                     }
                 }
+
+                // If we hit a WITH then we expect a DEVICE clause.
                 TokenType::With => {
                     // Hit WITH which means we must have parsed a device clause, and we expect a user clause to follow.
                     if classes_map.get(cn).unwrap().flavor == ClassFlavor::Device {
@@ -129,6 +125,8 @@ pub fn parse_allow(
                         ));
                     }
                 }
+
+                // Hmm what's this?
                 _ => {
                     return Err(CompilationError::ParseError(
                         format!("expected a TO or WITH, found '{:?}'", tok.tt),
@@ -139,18 +137,18 @@ pub fn parse_allow(
             }
         }
         None => {
+            // end of tokens!
             return Err(CompilationError::ParseError(
-                "expected a TO or WITH".to_string(),
+                "expected a TO or WITH not EOF".to_string(),
                 parse_state.root_tok.line,
                 parse_state.root_tok.col,
             ));
         }
     }
 
-    // If we get this far, we have parsed up to a WITH or a TO (or END OT STATEMENT)
+    // If we get this far, we have parsed up to a WITH or a TO.
     // If it's a WITH then we expect a user clause next.
     // If it's a TO then we expect a service clause next.
-
     let tok = tokens.next().unwrap();
     match tok.tt {
         TokenType::With => {
@@ -182,11 +180,8 @@ pub fn parse_allow(
         }
         TokenType::To => { /* continue to parse service clause */ }
         _ => {
-            return Err(CompilationError::ParseError(
-                "expected WITH or TO".to_string(),
-                tok.line,
-                tok.col,
-            ));
+            // We already peek'd the iterator above, so this case should not happen.
+            panic!("assertion fails - expected WITH or TO token");
         }
     }
 
@@ -196,7 +191,6 @@ pub fn parse_allow(
 
     // The remaining tokens should start with "access ..." which we pass to the service class parser.
     parse_allow_service_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
-
     Ok(parse_state.to_allow_clause(statement_id))
 }
 
