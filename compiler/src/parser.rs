@@ -141,7 +141,7 @@ optional tags full-time, part-time, and intern
 
 define marketing-emp as an employee with rule:marketing and tag full-time
 
-allow devices with marketing-emp to access services with role:marketing
+allow devices with marketing-emps to access role:marketing services
 "#;
         let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(pp).or_else(|e| {
             panic!("failed to tokenize '{}': {:?}", pp, e);
@@ -214,13 +214,36 @@ allow devices with marketing-emp to access services with role:marketing
     }
 
     #[test]
-    fn test_omit_endpoint() {
+    fn test_postifx_attr_prohibited() {
+        let valids = vec![
+            "allow devices with users with loc:italy to access services",
+            "allow devices with users to access services with color:green",
+        ];
+        for valid in valids {
+            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
+                panic!("failed to tokenize '{}': {:?}", valid, e);
+            });
+            let toks = tokens.unwrap();
+            let _pol = match parse(toks, true) {
+                Ok(_) => panic!("should not have parsed postfix notation: {}", valid),
+                Err(e) => {
+                    assert!(
+                        e.to_string().contains("postfix"),
+                        "unexpected error: {:?}",
+                        e
+                    );
+                }
+            };
+        }
+    }
+
+    #[test]
+    fn test_omit_device() {
         let valids = vec![
             "allow users to access services",
             "allow managed users to access services",
             "allow color:red users to access services",
-            "allow users with color:red to access services",
-            "allow managed users with color:red to access services",
+            "allow managed, color:red users to access services",
         ];
         for valid in valids {
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
@@ -240,8 +263,8 @@ allow devices with marketing-emp to access services with role:marketing
         let valids = vec![
             "allow devices to access services",
             "allow managed devices to access services",
-            "allow devices with color:red to access services",
-            "allow managed devices with color:red to access services",
+            "allow color:red devices to access services",
+            "allow managed, color:red devices to access services",
         ];
         for valid in valids {
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
@@ -257,10 +280,10 @@ allow devices with marketing-emp to access services with role:marketing
     }
 
     #[test]
-    fn test_verbose_endpoint() {
+    fn test_verbose_device() {
         let valids = vec![
-            "allow devices with color:green with managed users with color:red to access services",
-            "allow color:green devices with managed users with color:red to access services",
+            "allow color:green devices with managed, color:red users to access green services",
+            "allow color:green devices with color:red, managed users to access color:blue services",
         ];
         for valid in valids {
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {

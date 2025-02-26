@@ -4,8 +4,8 @@ pub const DEF_CLASS_SERVICE_AKA: &str = "services";
 pub const DEF_CLASS_USER_NAME: &str = "user";
 pub const DEF_CLASS_USER_AKA: &str = "users";
 
-pub const DEF_CLASS_ENDPOINT_NAME: &str = "device";
-pub const DEF_CLASS_ENDPOINT_AKA: &str = "devices";
+pub const DEF_CLASS_DEVICE_NAME: &str = "device";
+pub const DEF_CLASS_DEVICE_AKA: &str = "devices";
 
 pub const DEFAULT_TRUSTED_SERVICE_ID: &str = "default";
 pub const DEFAULT_TRUSTED_SERVICE_API: &str = "validation/1";

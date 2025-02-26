@@ -6,6 +6,6 @@ define adapter as a device with cn
 
 define ZServicePingable as a service with cn:service.zpr.org
 
-allow adapter with cn:client.zpr.org to access ZServicePingable
+allow cn:client.zpr.org adapter to access ZServicePingable
 
 

@@ -303,7 +303,7 @@ impl Weaver {
         config: &Config,
     ) -> Result<(), CompilationError> {
         // Every allow is an access condition (aka rule, aka policy).
-        // We need the attributes from the user and endpoints clauses.
+        // We need the attributes from the user and device clauses.
         for ac in &policy.allows {
             // Here we collect all attributes -- some will have no values.
             let mut attrs = Vec::new();
@@ -563,7 +563,6 @@ mod test {
 
         // But will create services if they are in the ZPL.
 
-        // Assert that any endpoint, any user can access some service named "foo".
         // We are only calling init_services which does not create policies anyway.
         // Will only notice that the 'foo' service is referenced.
         let a_foo = AllowClause {
