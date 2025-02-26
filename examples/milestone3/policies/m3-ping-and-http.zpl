@@ -3,7 +3,7 @@ Note: another adapter to access it.
 Note: Since we don't yet authenticate users, this policy is expressed using endpoints.
 
 
-define adapter as an endpoint with cn
+define adapter as a device with cn
 define GoldenClient as an adapter with cn:client.zpr.org
 
 define ZServicePingable as a service with cn:service.zpr.org

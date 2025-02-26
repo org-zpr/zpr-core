@@ -12,7 +12,7 @@ use crate::zpl;
 #[derive(Debug, Default)]
 struct ParseAllowState {
     root_tok: Token,
-    endpoint_clause: Option<Clause>,
+    device_clause: Option<Clause>,
     user_clause: Option<Clause>,
     service_clause: Option<Clause>,
 }
@@ -29,10 +29,10 @@ impl ParseAllowState {
     fn to_allow_clause(&mut self, id: usize) -> AllowClause {
         AllowClause {
             id,
-            endpoint: self
-                .endpoint_clause
+            device: self
+                .device_clause
                 .take()
-                .expect("endpoint clause not set"),
+                .expect("device clause not set"),
             user: self.user_clause.take().expect("user clause not set"),
             service: self.service_clause.take().expect("service clause not set"),
         }
@@ -80,7 +80,7 @@ pub fn parse_allow(
     }
 
     // At this point we have a valid endpoint and user clause.  Just need to parse the final service clause.
-    if parse_state.endpoint_clause.is_none() {
+    if parse_state.device_clause.is_none() {
         panic!("assertion fails - no endpoint clause");
     }
     if parse_state.user_clause.is_none() {
@@ -120,7 +120,7 @@ where
             let cn = ps.class_name.as_ref().unwrap();
             if classes_map.get(cn).unwrap().flavor == ClassFlavor::User {
                 // We guessed correctly. Endpoint clause is missing.
-                pa_state.endpoint_clause = Some(Clause::new(
+                pa_state.device_clause = Some(Clause::new(
                     zpl::DEF_CLASS_ENDPOINT_NAME,
                     pa_state.root_tok.clone(),
                 ));
@@ -169,8 +169,8 @@ where
                     zpl::DEF_CLASS_USER_NAME,
                     pa_state.root_tok.clone(),
                 ));
-                let ec = ps.to_clause("endpoint")?;
-                pa_state.endpoint_clause = Some(ec);
+                let ec = ps.to_clause("device")?;
+                pa_state.device_clause = Some(ec);
                 Ok(true)
             } else {
                 Ok(false)
@@ -212,7 +212,7 @@ fn parse_allow_endpoint_and_user_clauses(
         &mut tokens,
         classes_idx,
         &ParseOpts::stop_at_after_times(TokenType::With, 2),
-        "endpoint clause",
+        "device clause",
     ) {
         Ok(_) => {
             // great!
@@ -225,7 +225,7 @@ fn parse_allow_endpoint_and_user_clauses(
                 &mut tokens,
                 classes_idx,
                 &ParseOpts::stop_at(TokenType::With),
-                "endpoint clause",
+                "device clause",
             )?;
         }
         Err(e) => {
@@ -242,8 +242,8 @@ fn parse_allow_endpoint_and_user_clauses(
             pa_state.root_tok.col,
         ));
     }
-    let ec = ps.to_clause("endpoint")?;
-    pa_state.endpoint_clause = Some(ec);
+    let ec = ps.to_clause("device")?;
+    pa_state.device_clause = Some(ec);
 
     // Previous parse stopped at WITH.
     putil::require_tt(

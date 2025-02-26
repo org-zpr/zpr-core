@@ -141,7 +141,7 @@ optional tags full-time, part-time, and intern
 
 define marketing-emp as an employee with rule:marketing and tag full-time
 
-allow endpoints with marketing-emp to access services with role:marketing
+allow devices with marketing-emp to access services with role:marketing
 "#;
         let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(pp).or_else(|e| {
             panic!("failed to tokenize '{}': {:?}", pp, e);
@@ -197,7 +197,7 @@ allow endpoints with marketing-emp to access services with role:marketing
 
     #[test]
     fn test_base_allow() {
-        let valids = vec!["allow endpoints with users to access services"];
+        let valids = vec!["allow devices with users to access services"];
         for valid in valids {
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
                 panic!("failed to tokenize '{}': {:?}", valid, e);
@@ -238,10 +238,10 @@ allow endpoints with marketing-emp to access services with role:marketing
     #[test]
     fn test_omit_user() {
         let valids = vec![
-            "allow endpoints to access services",
-            "allow managed endpoints to access services",
-            "allow endpoints with color:red to access services",
-            "allow managed endpoints with color:red to access services",
+            "allow devices to access services",
+            "allow managed devices to access services",
+            "allow devices with color:red to access services",
+            "allow managed devices with color:red to access services",
         ];
         for valid in valids {
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
@@ -259,8 +259,8 @@ allow endpoints with marketing-emp to access services with role:marketing
     #[test]
     fn test_verbose_endpoint() {
         let valids = vec![
-            "allow endpoints with color:green with managed users with color:red to access services",
-            "allow color:green endpoints with managed users with color:red to access services",
+            "allow devices with color:green with managed users with color:red to access services",
+            "allow color:green devices with managed users with color:red to access services",
         ];
         for valid in valids {
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {

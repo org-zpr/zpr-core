@@ -42,7 +42,7 @@ impl From<&Token> for FPos {
 #[derive(Clone, Debug)]
 pub struct AllowClause {
     pub id: usize, // Within a given zpl policy, each allow clause gets a unique id.
-    pub endpoint: Clause,
+    pub device: Clause,
     pub user: Clause,
     pub service: Clause,
 }
@@ -52,7 +52,7 @@ impl fmt::Display for AllowClause {
         write!(
             f,
             "[{}] ALLOW {}\n   WITH {}\n      TO ACCESS {}",
-            self.id, self.endpoint, self.user, self.service
+            self.id, self.device, self.user, self.service
         )
     }
 }

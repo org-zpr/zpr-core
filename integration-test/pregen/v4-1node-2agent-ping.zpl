@@ -1,7 +1,7 @@
 Note: two adapters: they can ping each other
 Note: One node, one visa service: they can ping each other
 
-define adapter as an endpoint with cn
+define adapter as a device with cn
 
 define A1 as adapter with cn:adapter1
 define A2 as adapter with cn:adapter2

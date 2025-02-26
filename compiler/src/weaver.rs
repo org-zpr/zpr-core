@@ -309,10 +309,10 @@ impl Weaver {
             let mut attrs = Vec::new();
 
             // Grab all the endpint attributes
-            let ep_class_attrs = attrs_for_class(&class_idx, &ac.endpoint.class);
+            let ep_class_attrs = attrs_for_class(&class_idx, &ac.device.class);
             attrs.extend_from_slice(&ep_class_attrs);
             attrs.extend_from_slice(
-                &ac.endpoint
+                &ac.device
                     .with
                     .iter()
                     .filter(|a| !a.optional)
@@ -333,7 +333,7 @@ impl Weaver {
             );
 
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
-            let attr_map = squash_attributes(&attrs, &ac.endpoint.class_tok)?;
+            let attr_map = squash_attributes(&attrs, &ac.device.class_tok)?;
 
             let required_attrs = self
                 .resolve_attributes(&attr_map.into_values().collect::<Vec<Attribute>>(), config)?;
@@ -568,7 +568,7 @@ mod test {
         // Will only notice that the 'foo' service is referenced.
         let a_foo = AllowClause {
             id: 1,
-            endpoint: Clause::new("endpoint", Token::default()),
+            device: Clause::new("device", Token::default()),
             user: Clause::new("user", Token::default()),
             service: Clause::new("foo", Token::default()),
         };
