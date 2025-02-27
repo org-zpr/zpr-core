@@ -29,13 +29,14 @@ var (
 // 3) during regular packet traffic w/ a visa
 
 type Matcher struct {
-	log        logr.Logger
-	configID   uint64
-	keyMap     map[string]uint32 // attr-key -> key_code
-	valMap     map[string]uint32 // attr-value -> val_code
-	setIdx     map[uint32][]int  // key_code -> list of connect policy (by index) it is in.
-	policy     *polio.Policy
-	trafficIdx map[string]map[uint32]map[uint32][]int // SVC_ID -> PROTOCOL -> SVC_PORT -> []POLICY_INDEX
+	log         logr.Logger
+	configID    uint64
+	keyMap      map[string]uint32 // attr-key -> key_code
+	valMap      map[string]uint32 // attr-value -> val_code
+	blankValIdx int
+	setIdx      map[uint32][]int // key_code -> list of connect policy (by index) it is in.
+	policy      *polio.Policy
+	trafficIdx  map[string]map[uint32]map[uint32][]int // SVC_ID -> PROTOCOL -> SVC_PORT -> []POLICY_INDEX
 }
 
 type AgentInfo struct {
@@ -84,15 +85,20 @@ func NewMatcher(plcy *polio.Policy, netConfig uint64, log logr.Logger) (*Matcher
 			}
 		}
 	}
+	blankValIdx := -1
+	if idx, blankOk := valMap[""]; blankOk {
+		blankValIdx = int(idx)
+	}
 
 	mm := &Matcher{
-		keyMap:     keyMap,
-		valMap:     valMap,
-		setIdx:     setIdx,
-		log:        log,
-		configID:   netConfig,
-		policy:     plcy,
-		trafficIdx: make(map[string]map[uint32]map[uint32][]int),
+		keyMap:      keyMap,
+		valMap:      valMap,
+		blankValIdx: blankValIdx,
+		setIdx:      setIdx,
+		log:         log,
+		configID:    netConfig,
+		policy:      plcy,
+		trafficIdx:  make(map[string]map[uint32]map[uint32][]int),
 	}
 	mm.buildTrafficIndex()
 	return mm, nil
@@ -103,7 +109,9 @@ func NewMatcher(plcy *polio.Policy, netConfig uint64, log logr.Logger) (*Matcher
 func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*agent.ClaimV) ([]uint32, error) {
 	relevantAttrs := make(map[uint32]map[uint32]bool) // key code -> val code -> true
 
+	fmt.Printf("XXX matchAttrsToPolicies- KEY MAP = %#v\n", m.keyMap)
 	for agK, agV := range authedClaims {
+		fmt.Printf("XXX matchAttrsToPolicies- looking up claim %v\n", agK)
 		attrKeyCode, ok := m.keyMap[agK]
 		if !ok {
 			// This attribute is not in any connect policy.
@@ -119,8 +127,10 @@ func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*agent.ClaimV) ([
 			fromText = fmt.Sprintf(" (from %v)", agV.V)
 		}
 		for _, agVElem := range agVElems {
+			fmt.Printf("XXX matchAttrsToPolicies- looking up attr value '%v'\n", agVElem)
 			attrValCode, ok := m.valMap[agVElem]
-			if !ok {
+			// Issue here is that as soon as you have a blank value anywhere in policy, we have to check all policies.
+			if !ok && m.blankValIdx < 0 {
 				// This value is not in any connect policy.
 				m.log.Debug("[MX] -- irrelevant agent attribute value", "key", agK, "val", agV.V+fromText)
 				continue
@@ -146,7 +156,7 @@ func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*agent.ClaimV) ([
 			}
 			cpol := m.policy.GetConnects()[setx]
 			// All conditions in policy must match: (MULTIPLE matches is ok IFF there are max one proc)
-			if polMatch, i, err := matchAttrExprs(cpol.GetAttrExprs(), relevantAttrs); err != nil {
+			if polMatch, i, err := matchAttrExprs(cpol.GetAttrExprs(), relevantAttrs, m.blankValIdx); err != nil {
 				m.log.Debugf("[MX] -- failed to match claims, expression: %v: %v", formatAttrExpr(m.policy, cpol.GetAttrExprs()[i]), err)
 			} else if polMatch {
 				matchedPolicies = append(matchedPolicies, uint32(setx))
@@ -167,7 +177,7 @@ func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*agent.ClaimV) ([
 // expression found to evaluate to false. If any expression cannot be evaluated,
 // a non-nil error is returned, and the returned int is the index of the
 // offending expression.
-func matchAttrExprs(exprs []*polio.AttrExpr, claims map[uint32]map[uint32]bool) (bool, int, error) {
+func matchAttrExprs(exprs []*polio.AttrExpr, claims map[uint32]map[uint32]bool, blankValIdx int) (bool, int, error) {
 	for i, expr := range exprs {
 		claimedVals, keyDefined := claims[expr.Key]
 		if !keyDefined {
@@ -187,6 +197,10 @@ func matchAttrExprs(exprs []*polio.AttrExpr, claims map[uint32]map[uint32]bool) 
 				return false, i, nil
 			}
 		case polio.AttrOpT_HAS:
+			if blankValIdx >= 0 && int(expr.Val) == blankValIdx {
+				// This is a test for (<key>, has, "") which means key exists but we don't care about the value.
+				// We already know key is there since we got this far, so this is a passing condition.
+			}
 			if _, exists := claimedVals[expr.Val]; !exists {
 				return false, i, nil
 			}
@@ -463,7 +477,7 @@ POLICYLOOP:
 
 		// For this policy (pcy) to apply, all conditions must be met.
 		for _, conds := range pcy.CPol.GetConditions() {
-			if gotMatch, i, err := matchAttrExprs(conds.GetAttrExprs(), claimCodes); err != nil {
+			if gotMatch, i, err := matchAttrExprs(conds.GetAttrExprs(), claimCodes, m.blankValIdx); err != nil {
 				m.log.Debugf("[MX] -- failed to evaluate attribute expression %v: %v", formatAttrExpr(m.policy, conds.GetAttrExprs()[i]), err)
 				continue POLICYLOOP
 			} else if !gotMatch {

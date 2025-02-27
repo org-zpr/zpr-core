@@ -446,6 +446,9 @@ impl PolicyBuilder {
     fn index_from_table(&self, table: &HashMap<String, usize>) -> Vec<String> {
         let mut idx = Vec::new();
         idx.resize(table.len() + 1, "".to_string());
+        // TODO: Rework this so that we can use index 0 and get rid of this silly constant.
+        // This value must never match a real attribute value.
+        idx[0] = "__unused__ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456790".to_string();
         for (k, v) in table {
             idx[*v] = k.clone();
         }
