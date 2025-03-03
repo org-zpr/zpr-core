@@ -7,10 +7,19 @@ use nix::sys::socket;
 #[cfg(any(target_os = "linux", target_os = "android"))]
 use std::os::fd::AsRawFd;
 
+#[cfg(feature = "bytes")]
+use bytes::BufMut;
+
 pub trait UdpSocketExt {
     fn mtu(&self) -> io::Result<u32>;
+
     #[cfg(any(doc, target_os = "android", target_os = "linux"))]
     fn attach_reuse_port_cbpf(&self, filter: &[libc::sock_filter]) -> io::Result<()>;
+
+    #[cfg(feature = "bytes")]
+    fn recv_buf(&self, buf: &mut impl BufMut) -> io::Result<usize>;
+    #[cfg(feature = "bytes")]
+    fn recv_buf_from(&self, buf: &mut impl BufMut) -> io::Result<(usize, std::net::SocketAddr)>;
 }
 
 impl UdpSocketExt for UdpSocket {
@@ -57,5 +66,33 @@ impl UdpSocketExt for UdpSocket {
         } else {
             Ok(())
         }
+    }
+
+    #[cfg(feature = "bytes")]
+    fn recv_buf(&self, buf: &mut impl BufMut) -> io::Result<usize> {
+        let chunk = buf.chunk_mut();
+        // SAFETY: we will only be writing to this chunk
+        let chunk =
+            unsafe { &mut *(chunk as *mut _ as *mut [std::mem::MaybeUninit<u8>] as *mut [u8]) };
+        let recvd = self.recv(chunk)?;
+        // SAFETY: `recv` has written to the first `recvd` bytes of `buf`
+        unsafe {
+            buf.advance_mut(recvd);
+        }
+        Ok(recvd)
+    }
+
+    #[cfg(feature = "bytes")]
+    fn recv_buf_from(&self, buf: &mut impl BufMut) -> io::Result<(usize, std::net::SocketAddr)> {
+        let chunk = buf.chunk_mut();
+        // SAFETY: we will only be writing to this chunk
+        let chunk =
+            unsafe { &mut *(chunk as *mut _ as *mut [std::mem::MaybeUninit<u8>] as *mut [u8]) };
+        let (recvd, from) = self.recv_from(chunk)?;
+        // SAFETY: `recv` has written to the first `recvd` bytes of `buf`
+        unsafe {
+            buf.advance_mut(recvd);
+        }
+        Ok((recvd, from))
     }
 }
