@@ -9,9 +9,9 @@ use crate::sys::TunPi;
 #[allow(dead_code)]
 pub const DEFAULT_TUN_MTU: u16 = 1400;
 
-/// Error type used by some ZPRTun functions across platform implementations.
+/// Error type used by some ZprTun functions across platform implementations.
 #[derive(thiserror::Error, Debug)]
-pub enum ZPRTunError {
+pub enum ZprTunError {
     #[error("{0}")]
     IoError(#[from] std::io::Error),
 
