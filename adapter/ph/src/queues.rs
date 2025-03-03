@@ -361,31 +361,16 @@ impl MgmtDispatch {
         }
     }
 
-    #[allow(dead_code)]
     pub fn recv_return_buffers(&mut self, returns: &mut Vec<PacketBuffer>, limit: usize) -> usize {
         self.sender.blocking_recv_many_returns(returns, limit)
     }
 
-    #[allow(dead_code)]
     pub fn try_recv_return_buffers(
         &mut self,
         returns: &mut Vec<PacketBuffer>,
         limit: usize,
     ) -> usize {
         self.sender.try_recv_many_returns(returns, limit)
-    }
-
-    pub async fn async_recv_return_buffers(
-        &mut self,
-        returns: &mut Vec<PacketBuffer>,
-        limit: usize,
-    ) -> usize {
-        self.sender.recv_many_returns(returns, limit).await
-    }
-
-    #[allow(dead_code)]
-    pub async fn async_recv_return_buffer(&mut self) -> PacketBuffer {
-        self.sender.recv_return().await
     }
 }
 

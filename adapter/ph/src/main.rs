@@ -9,7 +9,6 @@ use std::path::Path;
 use std::process;
 use std::process::ExitCode;
 use std::sync::Arc;
-use tokio::net::UdpSocket;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -225,7 +224,7 @@ fn main() -> ExitCode {
     // open substrate sockets
     //
 
-    let mut substrate_sockets = Vec::new();
+    let mut substrate_sockets: Vec<Arc<std::net::UdpSocket>> = Vec::new();
 
     for _i in 0..topology_config.substrate_ingress_concurrency {
         let socket = socket2::Socket::new(
@@ -247,8 +246,13 @@ fn main() -> ExitCode {
             config.self_addr.set_port(port);
             info!(target: STARTUP, "assigned substrate UDP port {port}");
         }
-        substrate_sockets.push(Arc::new(UdpSocket::from_std(socket.into()).unwrap()));
+        substrate_sockets.push(Arc::new(socket.into()));
     }
+
+    let tokio_substrate_sockets: Box<[_]> = substrate_sockets
+        .iter()
+        .map(|s| Arc::new(tokio::net::UdpSocket::from_std(s.try_clone().unwrap()).unwrap()))
+        .collect();
 
     //
     // configure packet steering for better load balancing
@@ -316,7 +320,7 @@ fn main() -> ExitCode {
         topology_config,
         agent_addresses: config.agent_addr,
         agent_input: AgentInput::new(tun_devs.clone()),
-        substrate_egress: SubstrateEgress::new(substrate_sockets.clone()),
+        substrate_egress: SubstrateEgress::new(tokio_substrate_sockets),
         agent_output_requeue: AgentOutputRequeue::new(agent_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
         capture_queue: Capture::new(cap_inq),
@@ -415,17 +419,24 @@ fn main() -> ExitCode {
         );
     }
 
+    let mut fastpath_threads = Vec::new();
+
     let substrate_ingress_worker_config = FastpathWorkerConfig {
         buffer_count: asm.topology_config.buffer_count,
         batch_size: asm.topology_config.substrate_ingress_batch_size,
     };
     for (worker_index, socket) in substrate_sockets.into_iter().enumerate() {
-        js.spawn(substrate_ingress_worker::launch(
-            substrate_ingress_worker_config,
-            worker_index,
-            asm.clone(),
-            socket,
-        ));
+        let builder = std::thread::Builder::new().name(format!("ingress {worker_index}"));
+        fastpath_threads.push(
+            builder
+                .spawn(substrate_ingress_worker::launch(
+                    substrate_ingress_worker_config,
+                    worker_index,
+                    asm.clone(),
+                    socket,
+                ))
+                .unwrap(),
+        );
     }
 
     cap_outq.set_nonblocking(true).unwrap();
@@ -498,6 +509,10 @@ fn main() -> ExitCode {
             res.unwrap();
         }
     });
+
+    for th in fastpath_threads {
+        th.join().unwrap();
+    }
 
     info!(target: STARTUP, "exiting");
 
