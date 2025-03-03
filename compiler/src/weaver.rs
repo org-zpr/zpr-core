@@ -19,7 +19,6 @@ pub struct Weaver {
 
     // Map the allow clause ID to the fabric service ID.
     allowid_to_fab_svc: HashMap<usize, String>,
-    //base_path: PathBuf,
 }
 
 /// Weave produces the fabric from the ZPL and Configuration data structures,
