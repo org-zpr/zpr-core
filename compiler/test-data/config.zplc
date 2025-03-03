@@ -5,7 +5,7 @@ key = "none"
 provider = [["foo", "fee"]]
 zpr_address = "fd5a:5052:90de::1"
 interfaces = [ "in1" ]
-in1.netaddr = "overlay.addr"
+in1.netaddr = "1.2.3.4:5000"
 
 [visa_service]
 dock_node = "n0"

@@ -5,7 +5,7 @@ use openssl::pkey::Private;
 use openssl::rsa::Rsa;
 use prost::Message;
 
-use crate::config::load_config;
+use crate::config_api::ConfigApi;
 use crate::crypto::{sha256_of_file, sign_pkcs1v15_sha256};
 use crate::errors::CompilationError;
 use crate::lex::tokenize;
@@ -42,12 +42,14 @@ impl Compilation {
                 self.source_zpl, self.source_config
             );
         }
-        let cfg = load_config(&self.source_config).map_err(|e| {
-            CompilationError::ConfigError(format!(
-                "failed to load configuration from {:?}: {}",
-                self.source_config, e
-            ))
-        })?;
+        //let cfg = load_config(&self.source_config).map_err(|e| {
+        let cfg =
+            ConfigApi::new_from_toml_file(&self.source_config, self.verbose).map_err(|e| {
+                CompilationError::ConfigError(format!(
+                    "failed to load configuration from {:?}: {}",
+                    self.source_config, e
+                ))
+            })?;
 
         let tokens = tokenize(&self.source_zpl)?;
         if self.verbose {

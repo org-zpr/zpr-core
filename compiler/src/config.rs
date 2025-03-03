@@ -10,8 +10,7 @@ use toml::Table;
 
 use crate::crypto::sha256;
 use crate::errors::CompilationError;
-use crate::protocols::{self, IanaProtocol};
-use crate::ptypes::Attribute;
+use crate::protocols::{self, IanaProtocol, IcmpFlowType, Protocol};
 use crate::zpl;
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
@@ -31,14 +30,21 @@ macro_rules! err_config {
 /// Configuration structure which is parsed from the TOML.
 #[allow(dead_code)]
 pub struct Config {
-    pub base_path: PathBuf,
     pub digest: Digest,
-    pub resolver: Resolver,
+    resolver: Resolver,
     pub nodes: HashMap<String, Node>,
     pub visa_service: VisaService,
     pub trusted_services: Vec<TrustedService>,
     pub protocols: HashMap<String, Protocol>,
     pub services: Vec<Service>,
+}
+
+/// Service table
+#[derive(Debug)]
+pub struct Service {
+    pub id: String,
+    pub protocol_id: String, // TODO: Could consider using a list here
+    pub provider: Option<Vec<(String, String)>>, // optional provider attributes
 }
 
 /// Resolver table.
@@ -74,7 +80,8 @@ pub struct Node {
 #[derive(Debug, Clone)]
 pub struct Interface {
     pub name: String,
-    pub netaddr: String,
+    pub host: String, // host or IP
+    pub port: u16,
 }
 
 /// Visa Service table ("visa_service")
@@ -99,63 +106,6 @@ pub struct TrustedService {
     pub identity_attrs: Vec<String>,
 }
 
-/// Protocol table
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct Protocol {
-    pub id: String,
-    pub protocol: IanaProtocol,
-    pub port: Option<String>, // TODO: using string for now but needs to be a "port spec"
-    pub icmp: Option<IcmpFlowType>,
-}
-
-/// Part of a Protocol description.
-#[derive(Debug, Clone, PartialEq)]
-pub enum IcmpFlowType {
-    RequestResponse(u8, u8),
-    OneShot(Vec<u8>),
-}
-
-impl Protocol {
-    pub fn to_endpoint_str(&self) -> String {
-        let mut s = String::new();
-        let protname = self.protocol.to_string().to_uppercase();
-        if self.protocol.is_icmp() {
-            if let Some(ref icmp) = self.icmp {
-                match icmp {
-                    IcmpFlowType::RequestResponse(req, resp) => {
-                        s.push_str(&format!("{}/{}", protname, req));
-                        s.push_str(&format!(",{}/{}", protname, resp));
-                    }
-                    IcmpFlowType::OneShot(ref codes) => {
-                        for c in codes {
-                            s.push_str(&format!("{}/{}", protname, c));
-                        }
-                    }
-                }
-            } else {
-                s.push_str(&format!("{}/0", protname));
-            }
-        } else {
-            s.push_str(&format!("{}/", protname));
-            if let Some(ref port) = self.port {
-                s.push_str(port);
-            } else {
-                s.push_str("0");
-            }
-        }
-        s
-    }
-}
-
-/// Service table
-#[derive(Debug)]
-pub struct Service {
-    pub id: String,
-    pub protocol_id: String, // TODO: Could consider using a list here
-    pub provider: Option<Vec<(String, String)>>, // optional provider attributes
-}
-
 impl Config {
     /// Attempt to lookup the given hostname in the configurations resolver table.
     /// If the passed name does not map to an IP address, or if the name is not
@@ -165,54 +115,16 @@ impl Config {
         //       For now that is not supported.
         self.resolver.hosts.as_ref()?.get(hostname)?.parse().ok()
     }
-
-    /// Given an attribute from ZPL (or config) ensure that it is provided by one
-    /// of the trusted services.  At the same time, return it in its full (with prefix) form.
-    ///
-    /// TODO: This could do more like check if the attribute is using the correct from (tag) or
-    /// if it is multi-value, is it using a valid value.  (TODO).
-    ///
-    /// Note that this config struct doesn't really fully parse the attributes anyway so maybe
-    /// in the future this logic should move into fabric.  For now this is just a match
-    /// against the string attributes in each trusted service.
-    ///
-    /// Do not pass the DEFAULT attributes in here (eg, "cn" or "zpr.adapter.cn") -- this
-    /// does not check for them.
-    pub fn resolve_attribute(&self, attr: &Attribute) -> Result<String, CompilationError> {
-        for ts in &self.trusted_services {
-            if ts.returns_attrs.contains(&attr.name) {
-                return Ok(format!("{}{}", ts.prefix, attr.name));
-            }
-            // Possibly the name is already prefixed...
-            if attr.name.starts_with(&ts.prefix) {
-                let name = String::from(&attr.name[ts.prefix.len()..]);
-                if ts.returns_attrs.contains(&name) {
-                    return Ok(attr.name.clone());
-                }
-            }
-        }
-        Err(err_config!(
-            "attribute not provided by any trusted service: {}",
-            attr.name
-        ))
-    }
 }
 
 /// Parse and do some (light) error checking on the ZPL TOML configuration.
 pub fn load_config(path: &Path) -> Result<Config, CompilationError> {
     let cstr = std::fs::read_to_string(path).map_err(|e| CompilationError::Io(e))?;
-
-    let abs_path = path.canonicalize().map_err(|e| CompilationError::Io(e))?;
-    let base_path = match abs_path.parent() {
-        Some(p) => p.to_path_buf(),
-        None => PathBuf::new(),
-    };
-
-    parse_config(&cstr, &base_path)
+    parse_config(&cstr)
 }
 
-/// Parse config from the toml string `cstr`. The `base_path` is used to resolve relative paths.
-pub fn parse_config(cstr: &str, base_path: &Path) -> Result<Config, CompilationError> {
+/// Parse config from the toml string `cstr`.
+pub fn parse_config(cstr: &str) -> Result<Config, CompilationError> {
     let digest = sha256(&cstr);
 
     let ctoml = cstr
@@ -220,7 +132,6 @@ pub fn parse_config(cstr: &str, base_path: &Path) -> Result<Config, CompilationE
         .map_err(|e| CompilationError::TomlError(e))?;
 
     let config = Config {
-        base_path: base_path.to_path_buf(),
         digest,
         resolver: parse_resolver(&ctoml)?,
         nodes: parse_nodes(&ctoml)?,
@@ -388,14 +299,50 @@ fn parse_provider(ctx: &str, table: &Table) -> Result<Vec<(String, String)>, Com
 
 /// Parse the nodes interface entry.
 fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, CompilationError> {
+    if !iface.contains_key("netaddr") {
+        return Err(err_config!("interface {} missing netaddr", ifname));
+    }
     let netaddr = iface["netaddr"]
         .as_str()
         .ok_or(err_config!("interface {} missing netaddr", ifname))?
         .to_string();
-    Ok(Interface {
-        name: ifname.to_string(),
-        netaddr,
-    })
+
+    // Form of `netaddr` is HOST:PORT, host may be a hostname (which may need to be run through the resolver)
+    // or an IPv4 or IPv6 address.
+
+    // We'll try to parse as a SocketAddr first (which requires an IP address, not a name)
+    //let saddr: std::net::SocketAddr = netaddr.parse();
+    match netaddr.parse::<std::net::SocketAddr>() {
+        Ok(saddr) => {
+            return Ok(Interface {
+                name: ifname.to_string(),
+                host: saddr.ip().to_string(),
+                port: saddr.port(),
+            })
+        }
+        Err(_) => {
+            // Did not parse as a SocketAddr, so try as "hostname:portnum"
+            let parts: Vec<&str> = netaddr.split(':').collect();
+            if parts.len() != 2 {
+                return Err(err_config!(
+                    "interface {} netaddr must be in the form HOST:PORT",
+                    ifname
+                ));
+            }
+            let portnum = parts[1].parse::<u16>().map_err(|_| {
+                err_config!(
+                    "interface {} port number is not a valid: {}",
+                    ifname,
+                    parts[1]
+                )
+            })?;
+            return Ok(Interface {
+                name: ifname.to_string(),
+                host: parts[0].to_string(),
+                port: portnum,
+            });
+        }
+    }
 }
 
 /// Parse the very basic visa_service section.
@@ -672,7 +619,6 @@ fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationEr
     };
 
     Ok(Protocol {
-        id: prot_id.to_string(),
         protocol,
         port,
         icmp,
@@ -847,11 +793,11 @@ mod test {
         provider = [["zpr.foo", "bar"], ["baz", 99]]
         interfaces = ["eth0", "eth1"]
         eth0.netaddr = "1.2.3.4:2000"
-        eth1.netaddr = "5.6.7.8:9000"
+        eth1.netaddr = "foo.addr:9000"
         "#;
         let ctoml = parse_toml(tstr);
         let nodes = parse_nodes(&ctoml);
-        assert!(nodes.is_ok());
+        assert!(nodes.is_ok(), "{:?}", nodes);
         let nodes = nodes.unwrap();
         assert_eq!(nodes.len(), 1);
         let n0 = nodes.get("n0").unwrap();
@@ -861,8 +807,14 @@ mod test {
         assert_eq!(n0.interfaces.len(), 2);
         for iface in &n0.interfaces {
             match iface.name.as_str() {
-                "eth0" => assert_eq!(iface.netaddr, "1.2.3.4:2000"),
-                "eth1" => assert_eq!(iface.netaddr, "5.6.7.8:9000"),
+                "eth0" => {
+                    assert_eq!(iface.host, "1.2.3.4");
+                    assert_eq!(iface.port, 2000);
+                }
+                "eth1" => {
+                    assert_eq!(iface.host, "foo.addr");
+                    assert_eq!(iface.port, 9000);
+                }
                 _ => panic!("unexpected interface name"),
             }
         }
