@@ -5,6 +5,7 @@ pub mod polio {
 mod allow;
 mod compilation;
 mod config;
+mod config_api;
 mod crypto;
 mod define;
 mod errors;
