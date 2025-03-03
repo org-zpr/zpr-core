@@ -109,9 +109,7 @@ func NewMatcher(plcy *polio.Policy, netConfig uint64, log logr.Logger) (*Matcher
 func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*agent.ClaimV) ([]uint32, error) {
 	relevantAttrs := make(map[uint32]map[uint32]bool) // key code -> val code -> true
 
-	fmt.Printf("XXX matchAttrsToPolicies- KEY MAP = %#v\n", m.keyMap)
 	for agK, agV := range authedClaims {
-		fmt.Printf("XXX matchAttrsToPolicies- looking up claim %v\n", agK)
 		attrKeyCode, ok := m.keyMap[agK]
 		if !ok {
 			// This attribute is not in any connect policy.
@@ -127,7 +125,6 @@ func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*agent.ClaimV) ([
 			fromText = fmt.Sprintf(" (from %v)", agV.V)
 		}
 		for _, agVElem := range agVElems {
-			fmt.Printf("XXX matchAttrsToPolicies- looking up attr value '%v'\n", agVElem)
 			attrValCode, ok := m.valMap[agVElem]
 			// Issue here is that as soon as you have a blank value anywhere in policy, we have to check all policies.
 			if !ok && m.blankValIdx < 0 {
@@ -200,8 +197,7 @@ func matchAttrExprs(exprs []*polio.AttrExpr, claims map[uint32]map[uint32]bool, 
 			if blankValIdx >= 0 && int(expr.Val) == blankValIdx {
 				// This is a test for (<key>, has, "") which means key exists but we don't care about the value.
 				// We already know key is there since we got this far, so this is a passing condition.
-			}
-			if _, exists := claimedVals[expr.Val]; !exists {
+			} else if _, exists := claimedVals[expr.Val]; !exists {
 				return false, i, nil
 			}
 		case polio.AttrOpT_EXCLUDES:

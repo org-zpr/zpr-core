@@ -122,7 +122,6 @@ impl PolicyBuilder {
         let mut key_table = HashMap::new(); // key -> index
         let mut value_table = HashMap::new(); // value -> index
 
-        // Note that index 0 is not used
         self.populate_key_table(&fabric, &mut key_table);
         self.populate_value_table(&fabric, &mut value_table);
         self.policy.attr_key_index = self.index_from_table(&key_table);
@@ -448,10 +447,7 @@ impl PolicyBuilder {
     /// such that vec[index] = entry.
     fn index_from_table(&self, table: &HashMap<String, usize>) -> Vec<String> {
         let mut idx = Vec::new();
-        idx.resize(table.len() + 1, "".to_string());
-        // TODO: Rework this so that we can use index 0 and get rid of this silly constant.
-        // This value must never match a real attribute value.
-        idx[0] = "__unused__ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456790".to_string();
+        idx.resize(table.len(), "".to_string());
         for (k, v) in table {
             idx[*v] = k.clone();
         }
@@ -472,14 +468,14 @@ impl PolicyBuilder {
             for a in &s.provider_attrs {
                 let key = extraction_f(a);
                 if !table.contains_key(&key) {
-                    table.insert(key, table.len() + 1);
+                    table.insert(key, table.len());
                 }
             }
             for policy in &s.client_policies {
                 for a in &policy.condition {
                     let key = extraction_f(a);
                     if !table.contains_key(&key) {
-                        table.insert(key, table.len() + 1);
+                        table.insert(key, table.len());
                     }
                 }
             }
@@ -488,7 +484,7 @@ impl PolicyBuilder {
             for a in &n.provider_attrs {
                 let key = extraction_f(a);
                 if !table.contains_key(&key) {
-                    table.insert(key, table.len() + 1);
+                    table.insert(key, table.len());
                 }
             }
         }
