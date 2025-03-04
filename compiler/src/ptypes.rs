@@ -1,8 +1,10 @@
 //! ptypes - Parser types
+use ring::digest::Digest;
+use std::collections::HashMap;
+use std::fmt;
+
 use crate::lex::Token;
 use crate::zpl;
-use ring::digest::Digest;
-use std::fmt;
 
 /// The datastructure version of the ZPL policy after parsing.
 /// Just a bunch of defines and allows.
@@ -14,7 +16,7 @@ pub struct Policy {
 }
 
 /// FPos is a "file position" to better report errors in the ZPL parsing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FPos {
     pub line: usize,
     pub col: usize,
@@ -77,9 +79,27 @@ impl Clause {
             with: vec![],
         }
     }
+
     #[allow(dead_code)]
     pub fn add_attr(&mut self, attr: Attribute) {
         self.with.push(attr);
+    }
+
+    /// Given a clause (and classes map) return the number of "with" attributes that are
+    /// required by the clause class (and parent classes if any).
+    pub fn with_attr_count(&self, classes_map: &HashMap<String, Class>) -> usize {
+        let mut cur_class = &self.class;
+        let mut with_count = self.with.len();
+
+        loop {
+            let clz = classes_map.get(cur_class).expect("class not found"); // at this point only valid classes are present
+            with_count += clz.with_attrs.len();
+            if clz.is_builtin() || cur_class == &clz.parent {
+                break;
+            }
+            cur_class = &clz.parent;
+        }
+        with_count
     }
 }
 
@@ -104,6 +124,7 @@ pub enum ClassFlavor {
 
 /// A class is created from a ZPL define statement.
 /// There are also three built in classes: user, service, and endpoint.
+#[derive(Debug)]
 pub struct Class {
     pub flavor: ClassFlavor,
     pub parent: String,
@@ -202,11 +223,23 @@ impl Attribute {
             optional: false,
         }
     }
+
     /// Easy way to create a tuple type attribute.
     pub fn attr(name: &str, value: &str) -> Self {
         Attribute {
             name: name.to_string(),
             value: Some(value.to_string()),
+            multi_valued: false,
+            tag: false,
+            optional: false,
+        }
+    }
+
+    /// Create required, tuple type attribute without specifying a value.
+    pub fn attr_name_only(name: &str) -> Self {
+        Attribute {
+            name: name.to_string(),
+            value: None,
             multi_valued: false,
             tag: false,
             optional: false,
@@ -232,7 +265,9 @@ impl Attribute {
 
     /// The ZPL value for this attribute. If there is no value an empty string is returned.
     pub fn zpl_value(&self) -> String {
-        if let Some(v) = &self.value {
+        if self.tag {
+            self.name.clone()
+        } else if let Some(v) = &self.value {
             v.clone()
         } else {
             "".to_string()

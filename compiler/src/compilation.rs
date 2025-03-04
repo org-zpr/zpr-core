@@ -42,7 +42,6 @@ impl Compilation {
                 self.source_zpl, self.source_config
             );
         }
-        //let cfg = load_config(&self.source_config).map_err(|e| {
         let cfg =
             ConfigApi::new_from_toml_file(&self.source_config, self.verbose).map_err(|e| {
                 CompilationError::ConfigError(format!(

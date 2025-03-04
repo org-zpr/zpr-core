@@ -11,7 +11,7 @@ use crate::errors::CompilationError;
 use crate::fabric::{Fabric, ServiceType};
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
 use crate::protocols::{IanaProtocol, Protocol};
-use crate::ptypes::{Attribute, Class, Policy};
+use crate::ptypes::{Attribute, Class, ClassFlavor, FPos, Policy};
 use crate::zpl;
 
 pub struct Weaver {
@@ -112,6 +112,7 @@ impl Weaver {
         policy: &Policy,
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
+        self.defines_to_services(class_idx, policy, config)?;
         self.allow_clauses_to_services(class_idx, policy, config)?;
         self.visa_services_to_services(config)?;
 
@@ -179,6 +180,114 @@ impl Weaver {
         Ok(())
     }
 
+    /// Make sure that any service defines are reflected in policy so that proper service
+    /// attributes get set up at connect time.
+    fn defines_to_services(
+        &mut self,
+        class_idx: &HashMap<String, &Class>,
+        policy: &Policy,
+        config: &ConfigApi,
+    ) -> Result<(), CompilationError> {
+        let mut svc_id = usize::MAX;
+        for define in &policy.defines {
+            if define.flavor != ClassFlavor::Service {
+                continue;
+            }
+            // An actor can connect and offer the service if it is able to satisfy the
+            // set of attributes attached to it through the define or configuration.
+            //
+            // TODO: If there are no allow rules that permit access to the service then
+            // maybe we don't even allow it to connect?
+
+            let mut attrs = Vec::new();
+            let svc_class_attrs = attrs_for_class(&class_idx, &define.name);
+            attrs.extend_from_slice(&svc_class_attrs);
+
+            self.add_service(class_idx, define, &attrs, svc_id, config)?;
+            svc_id -= 1;
+        }
+        Ok(())
+    }
+
+    fn add_service(
+        &mut self,
+        class_idx: &HashMap<String, &Class>,
+        sclass: &Class,
+        initial_attrs: &[Attribute],
+        svc_id: usize,
+        config: &ConfigApi,
+    ) -> Result<(), CompilationError> {
+        let service_name = &sclass.name;
+
+        let mut attrs = Vec::new();
+        attrs.extend_from_slice(initial_attrs);
+
+        // Service class either match an ID in the configuration or must have a
+        // parent that does.  We take the first parent that matches a configuration as
+        // the service configuration to use.
+        //
+
+        let matched_service_name = find_defined_service(service_name, config, class_idx);
+        if matched_service_name.is_none() {
+            return Err(CompilationError::ConfigError(format!(
+                "no service for {} found in configuration",
+                service_name
+            )));
+        }
+        let matched_service_name = matched_service_name.unwrap();
+
+        // The service may have provider attributes that we need.
+        match config.get(&format!("/services/{}/provider", matched_service_name)) {
+            Some(citem) => match citem {
+                ConfigItem::AttrList(alist) => {
+                    attrs.extend_from_slice(&vec_to_attributes(&alist)?);
+                }
+                _ => {
+                    panic!("error: provider must be an attribute list");
+                }
+            },
+            None => {
+                // no provider attributes
+            }
+        };
+
+        // service must have a protocol
+        let prot = match config.get(&format!("/services/{}/protocol", matched_service_name)) {
+            Some(citem) => match &citem {
+                ConfigItem::Protocol(_, _, _) => Protocol::from(citem),
+                _ => {
+                    panic!("error: protocol must be a protocol enum");
+                }
+            },
+            None => {
+                return Err(CompilationError::ConfigError(format!(
+                    "protocol for {} not found in configuration",
+                    matched_service_name,
+                )))
+            }
+        };
+
+        let attr_map = squash_attributes(&attrs, &sclass.pos)?;
+
+        let resolved_attrs = self.resolve_attributes(
+            attr_map
+                .into_values()
+                .collect::<Vec<Attribute>>()
+                .as_slice(),
+            config,
+        )?;
+
+        let fabric_svc_id = self.fabric.add_service(
+            &matched_service_name,
+            &prot,
+            &resolved_attrs,
+            ServiceType::Regular,
+        )?;
+        self.allowid_to_fab_svc.insert(svc_id, fabric_svc_id);
+
+        Ok(())
+    }
+
     fn allow_clauses_to_services(
         &mut self,
         class_idx: &HashMap<String, &Class>,
@@ -198,69 +307,11 @@ impl Weaver {
             attrs.extend_from_slice(&svc_class_attrs);
             attrs.extend_from_slice(&ac.service.with);
 
-            // Otherwise the service class either match an ID in the configuration or must have a
-            // parent that does.  We take the first parent that matches a configuration as
-            // the service configuration to use.
-            //
+            let svc_class = class_idx
+                .get(&ac.service.class)
+                .expect("service class not found in class index");
 
-            let matched_service_name = find_defined_service(&ac.service.class, config, class_idx);
-            if matched_service_name.is_none() {
-                return Err(CompilationError::ConfigError(format!(
-                    "no service for {} found in configuration",
-                    ac.service.class
-                )));
-            }
-            let matched_service_name = matched_service_name.unwrap();
-
-            // The service may have provider attributes that we need.
-
-            match config.get(&format!("/services/{}/provider", matched_service_name)) {
-                Some(citem) => match citem {
-                    ConfigItem::AttrList(alist) => {
-                        attrs.extend_from_slice(&vec_to_attributes(&alist)?);
-                    }
-                    _ => {
-                        panic!("error: provider must be an attribute list");
-                    }
-                },
-                None => {
-                    // no provider attributes
-                }
-            };
-
-            // service must have a protocol
-            let prot = match config.get(&format!("/services/{}/protocol", matched_service_name)) {
-                Some(citem) => match &citem {
-                    ConfigItem::Protocol(_, _, _) => Protocol::from(citem),
-                    _ => {
-                        panic!("error: protocol must be a protocol enum");
-                    }
-                },
-                None => {
-                    return Err(CompilationError::ConfigError(format!(
-                        "protocol for {} not found in configuration",
-                        matched_service_name,
-                    )))
-                }
-            };
-
-            let attr_map = squash_attributes(&attrs, &ac.service.class_tok)?;
-
-            let resolved_attrs = self.resolve_attributes(
-                attr_map
-                    .into_values()
-                    .collect::<Vec<Attribute>>()
-                    .as_slice(),
-                config,
-            )?;
-
-            let fabric_svc_id = self.fabric.add_service(
-                &matched_service_name,
-                &prot,
-                &resolved_attrs,
-                ServiceType::Regular,
-            )?;
-            self.allowid_to_fab_svc.insert(ac.id, fabric_svc_id);
+            self.add_service(class_idx, svc_class, &attrs, ac.id, config)?;
         }
         Ok(())
     }
@@ -281,6 +332,12 @@ impl Weaver {
 
         let mut resolved_attrs = Vec::new();
         for a in attrs {
+            if a.tag {
+                return Err(CompilationError::AttributeError(format!(
+                    "tags not supported: {}",
+                    a.name
+                )));
+            }
             if a.name == zpl::ADAPTER_CN_ATTR {
                 resolved_attrs.push(a.clone());
             }
@@ -420,7 +477,8 @@ impl Weaver {
             );
 
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
-            let attr_map = squash_attributes(&attrs, &ac.endpoint.class_tok)?;
+            let fp = FPos::from(&ac.endpoint.class_tok);
+            let attr_map = squash_attributes(&attrs, &fp)?;
 
             let required_attrs = self
                 .resolve_attributes(&attr_map.into_values().collect::<Vec<Attribute>>(), config)?;

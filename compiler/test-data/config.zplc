@@ -29,3 +29,5 @@ protocol = "http"
 [services.Image-database]
 protocol = "http"
 
+[services.gateway]
+protocol = "http"

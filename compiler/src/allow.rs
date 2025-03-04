@@ -39,7 +39,10 @@ impl ParseAllowState {
     }
 }
 
-// First token is an ALLOW which is checked by caller.
+/// First token is an ALLOW which is checked by caller.
+///
+/// `classes_idx` maps class names and AKA names to their canonical names (eg, "services" -> "service").
+/// `classs_map` maps class canonical name to [Class] struct.
 pub fn parse_allow(
     allow_statement: &[Token],
     statement_id: usize,
@@ -90,7 +93,33 @@ pub fn parse_allow(
     // The remaining tokens should start with "to access ..." which we pass to the service class parser.
     parse_allow_service_clause(&mut parse_state, &mut tokens, classes_idx, classes_map)?;
 
-    Ok(parse_state.to_allow_clause(statement_id))
+    let ac = parse_state.to_allow_clause(statement_id);
+    validate_clause(&ac, classes_map)?;
+    Ok(ac)
+}
+
+fn validate_clause(
+    ac: &AllowClause,
+    classes_map: &HashMap<String, Class>,
+) -> Result<(), CompilationError> {
+    if ac.user.with_attr_count(classes_map) + ac.endpoint.with_attr_count(classes_map) == 0 {
+        return Err(CompilationError::ParseError(
+            "user and/or device must specify at least one discriminating attribute".to_string(),
+            ac.user.class_tok.line,
+            ac.user.class_tok.col,
+        ));
+    }
+    /*
+    if ac.service.with_attr_count(classes_map) == 0 {
+        return Err(CompilationError::ParseError(
+            "service must specify at least one discriminating attribute".to_string(),
+            ac.service.class_tok.line,
+            ac.service.class_tok.col,
+        ));
+    }
+    */
+
+    Ok(())
 }
 
 /// Assume there is only a user clause (no endpoint clause).

@@ -507,8 +507,15 @@ impl ConfigApi {
             }
             "prefix" => Some(ConfigItem::StrVal(svc.prefix.clone())),
             "provider" => panic!("trusted_service.Provider not yet implemented"),
-            "attributes" => Some(ConfigItem::KeySet(svc.returns_attrs.clone())),
-            "id_attributes" => Some(ConfigItem::KeySet(svc.identity_attrs.clone())),
+            // TODO: Just like when parsing config, we need a notation to express the attribute properties.
+            // Eg, multi-value or tag, required or optional.
+            // For now we assume all attributes are tuple-type.
+            "attributes" => Some(ConfigItem::KeySet(
+                svc.returns_attrs.iter().map(|a| a.name.clone()).collect(),
+            )),
+            "id_attributes" => Some(ConfigItem::KeySet(
+                svc.identity_attrs.iter().map(|a| a.name.clone()).collect(),
+            )),
             _ => panic!("unknown key {}", key),
         }
     }

@@ -280,7 +280,6 @@ impl PolicyBuilder {
                         attr_exprs: self.attr_list_to_attrexpr(&clipol.condition),
                         proc: NO_PROC,
                     };
-                    // self.policy.connects.push(pconnect);
                     self.add_connect(pconnect);
                 }
             }
@@ -304,7 +303,6 @@ impl PolicyBuilder {
                         attr_exprs: self.attr_list_to_attrexpr(&svc.provider_attrs),
                         proc: proc_idx,
                     };
-                    //self.policy.connects.push(pconnect);
                     self.add_connect(pconnect);
                 }
                 ServiceType::Trusted => {
@@ -342,7 +340,6 @@ impl PolicyBuilder {
             //self.policy.connects.push(pconnect);
             self.add_connect(pconnect);
         }
-
         Ok(())
     }
 
@@ -436,7 +433,11 @@ impl PolicyBuilder {
                 .unwrap();
             attrexpr.push(polio::AttrExpr {
                 key: key_idx as u32,
-                op: if val.is_empty() { polio::AttrOpT::Has as i32} else {polio::AttrOpT::Eq as i32 },
+                op: if val.is_empty() {
+                    polio::AttrOpT::Has as i32
+                } else {
+                    polio::AttrOpT::Eq as i32
+                },
                 val: val_idx as u32,
             });
         }

@@ -197,13 +197,13 @@ allow endpoints with marketing-emp to access services with role:marketing
 
     #[test]
     fn test_base_allow() {
-        let valids = vec!["allow endpoints with users to access services"];
+        let valids = vec!["allow endpoints with color:green users to access services"];
         for valid in valids {
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
                 panic!("failed to tokenize '{}': {:?}", valid, e);
             });
             let toks = tokens.unwrap();
-            assert_eq!(7, toks.len());
+            assert_eq!(8, toks.len());
             let _pol = match parse(toks, true) {
                 Ok(policy) => policy,
                 Err(e) => {
@@ -216,7 +216,7 @@ allow endpoints with marketing-emp to access services with role:marketing
     #[test]
     fn test_omit_endpoint() {
         let valids = vec![
-            "allow users to access services",
+            "allow color:red users to access services",
             "allow managed users to access services",
             "allow color:red users to access services",
             "allow users with color:red to access services",
@@ -238,7 +238,7 @@ allow endpoints with marketing-emp to access services with role:marketing
     #[test]
     fn test_omit_user() {
         let valids = vec![
-            "allow endpoints to access services",
+            "allow color:red endpoints to access services",
             "allow managed endpoints to access services",
             "allow endpoints with color:red to access services",
             "allow managed endpoints with color:red to access services",
