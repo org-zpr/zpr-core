@@ -1,4 +1,4 @@
-define adapter as an endpoint with cn
+define adapter as a device with cn
 
 Note: Our node offers PING too
 define PingableNode as a service with cn:node.zpr.org

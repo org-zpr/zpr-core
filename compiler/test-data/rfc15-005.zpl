@@ -1,2 +1,2 @@
-allow government users with clearance:classified to access 
+allow government, clearance:classified users to access 
 classified services

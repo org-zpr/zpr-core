@@ -1,6 +1,6 @@
-define Image-database as an endpoint with mach-type:idb
+define Image-database as a device with mach-type:idb
 
 define server as service with machine-id
 
-allow Image-database with users to access servers with service:image-database
+allow Image-database with users to access service:image-database servers
 

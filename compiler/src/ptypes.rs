@@ -44,7 +44,7 @@ impl From<&Token> for FPos {
 #[derive(Clone, Debug)]
 pub struct AllowClause {
     pub id: usize, // Within a given zpl policy, each allow clause gets a unique id.
-    pub endpoint: Clause,
+    pub device: Clause,
     pub user: Clause,
     pub service: Clause,
 }
@@ -54,13 +54,13 @@ impl fmt::Display for AllowClause {
         write!(
             f,
             "[{}] ALLOW {}\n   WITH {}\n      TO ACCESS {}",
-            self.id, self.endpoint, self.user, self.service
+            self.id, self.device, self.user, self.service
         )
     }
 }
 
 /// A parsed "clause" which appears in allow statements. For example, a user-clause describes
-/// the user component of the allow.  The other two are endpoint-clause and service-clause.
+/// the user component of the allow.  The other two are device-clause and service-clause.
 /// Each clause may have a set of attributes on it.
 #[derive(Default, Clone, Debug)]
 #[allow(dead_code)]
@@ -117,7 +117,7 @@ impl fmt::Display for Clause {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClassFlavor {
     Undefined, // they all start here
-    Endpoint,
+    Device,
     User,
     Service,
 }
@@ -141,7 +141,7 @@ impl Class {
         vec![
             Class::default_user(),
             Class::default_service(),
-            Class::default_endpoint(),
+            Class::default_device(),
         ]
     }
     pub fn default_user() -> Class {
@@ -164,12 +164,12 @@ impl Class {
             with_attrs: vec![],
         }
     }
-    pub fn default_endpoint() -> Class {
+    pub fn default_device() -> Class {
         Class {
-            flavor: ClassFlavor::Endpoint,
-            parent: zpl::DEF_CLASS_ENDPOINT_NAME.to_string(),
-            name: zpl::DEF_CLASS_ENDPOINT_NAME.to_string(),
-            aka: zpl::DEF_CLASS_ENDPOINT_AKA.to_string(),
+            flavor: ClassFlavor::Device,
+            parent: zpl::DEF_CLASS_DEVICE_NAME.to_string(),
+            name: zpl::DEF_CLASS_DEVICE_NAME.to_string(),
+            aka: zpl::DEF_CLASS_DEVICE_AKA.to_string(),
             pos: FPos { line: 0, col: 0 },
             with_attrs: vec![],
         }
@@ -177,7 +177,7 @@ impl Class {
     pub fn is_builtin(&self) -> bool {
         self.name == zpl::DEF_CLASS_USER_NAME
             || self.name == zpl::DEF_CLASS_SERVICE_NAME
-            || self.name == zpl::DEF_CLASS_ENDPOINT_NAME
+            || self.name == zpl::DEF_CLASS_DEVICE_NAME
     }
 }
 

@@ -15,7 +15,7 @@ pub fn require_tt(
                 Ok(())
             } else {
                 Err(CompilationError::ParseError(
-                    format!("expected {}", expect),
+                    format!("expected {expect}, found {:?}", tok.tt),
                     tok.line,
                     tok.col,
                 ))

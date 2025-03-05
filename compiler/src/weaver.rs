@@ -19,7 +19,6 @@ pub struct Weaver {
 
     // Map the allow clause ID to the fabric service ID.
     allowid_to_fab_svc: HashMap<usize, String>,
-    //base_path: PathBuf,
 }
 
 /// Weave produces the fabric from the ZPL and Configuration data structures,
@@ -447,16 +446,16 @@ impl Weaver {
         config: &ConfigApi,
     ) -> Result<(), CompilationError> {
         // Every allow is an access condition (aka rule, aka policy).
-        // We need the attributes from the user and endpoints clauses.
+        // We need the attributes from the user and device clauses.
         for ac in &policy.allows {
             // Here we collect all attributes -- some will have no values.
             let mut attrs = Vec::new();
 
             // Grab all the endpint attributes
-            let ep_class_attrs = attrs_for_class(&class_idx, &ac.endpoint.class);
+            let ep_class_attrs = attrs_for_class(&class_idx, &ac.device.class);
             attrs.extend_from_slice(&ep_class_attrs);
             attrs.extend_from_slice(
-                &ac.endpoint
+                &ac.device
                     .with
                     .iter()
                     .filter(|a| !a.optional)
@@ -477,7 +476,7 @@ impl Weaver {
             );
 
             // Now we consolidate the attributes into a map, preferring attributes that have a value.
-            let fp = FPos::from(&ac.endpoint.class_tok);
+            let fp = FPos::from(&ac.device.class_tok);
             let attr_map = squash_attributes(&attrs, &fp)?;
 
             let required_attrs = self
@@ -708,12 +707,11 @@ mod test {
 
         // But will create services if they are in the ZPL.
 
-        // Assert that any endpoint, any user can access some service named "foo".
         // We are only calling init_services which does not create policies anyway.
         // Will only notice that the 'foo' service is referenced.
         let a_foo = AllowClause {
             id: 1,
-            endpoint: Clause::new("endpoint", Token::default()),
+            device: Clause::new("device", Token::default()),
             user: Clause::new("user", Token::default()),
             service: Clause::new("foo", Token::default()),
         };

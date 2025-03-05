@@ -1,2 +1,2 @@
-allow endpoints with clearance:classified government users to access classified
+allow devices with clearance:classified government users to access classified
 services
