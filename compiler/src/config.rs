@@ -514,10 +514,7 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
     let mut idents = Vec::new();
     for ra in &identity_attrs {
         if ra.starts_with("#") {
-            return Err(err_config!(
-                "identity attribute cannot be a tag: '{}'",
-                ra
-            ))
+            return Err(err_config!("identity attribute cannot be a tag: '{}'", ra));
         }
         idents.push(Attribute::attr_name_only(ra));
     }

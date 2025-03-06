@@ -512,10 +512,18 @@ impl ConfigApi {
             // Eg, multi-value or tag, required or optional.
             // For now we assume all attributes are tuple-type.
             "attributes" => Some(ConfigItem::KeySet(
-                svc.returns_attrs.iter().filter(|a| !a.tag).map(|a| a.name.clone()).collect(),
+                svc.returns_attrs
+                    .iter()
+                    .filter(|a| !a.tag)
+                    .map(|a| a.name.clone())
+                    .collect(),
             )),
             "tags" => Some(ConfigItem::KeySet(
-                svc.returns_attrs.iter().filter(|a| a.tag).map(|a| a.name.clone()).collect(),
+                svc.returns_attrs
+                    .iter()
+                    .filter(|a| a.tag)
+                    .map(|a| a.name.clone())
+                    .collect(),
             )),
             "id_attributes" => Some(ConfigItem::KeySet(
                 svc.identity_attrs.iter().map(|a| a.name.clone()).collect(),

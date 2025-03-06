@@ -276,6 +276,13 @@ impl Weaver {
             config,
         )?;
 
+        if resolved_attrs.is_empty() {
+            return Err(CompilationError::ConfigError(format!(
+                "service with no attributes {}",
+                matched_service_name
+            )));
+        }
+
         let fabric_svc_id = self.fabric.add_service(
             &matched_service_name,
             &prot,
@@ -333,17 +340,19 @@ impl Weaver {
         for a in attrs {
             if a.name == zpl::ADAPTER_CN_ATTR {
                 if a.tag {
-                    return Err(CompilationError::ConfigError(
-                        format!("{} attribute used as a tag, but is a tuple attriubte", a.name)
-                    ));
+                    return Err(CompilationError::ConfigError(format!(
+                        "{} attribute used as a tag, but is a tuple attriubte",
+                        a.name
+                    )));
                 }
                 resolved_attrs.push(a.clone());
             }
             if a.name == zpl::DEFAULT_ATTR {
                 if a.tag {
-                    return Err(CompilationError::ConfigError(
-                        format!("{} attribute used as a tag, but is a tuple attribute", a.name)
-                    ));
+                    return Err(CompilationError::ConfigError(format!(
+                        "{} attribute used as a tag, but is a tuple attribute",
+                        a.name
+                    )));
                 }
                 resolved_attrs.push(a.set_name(zpl::ADAPTER_CN_ATTR));
             } else {
@@ -363,9 +372,11 @@ impl Weaver {
                     };
                     let ts_attrs: Vec<String>;
                     if a.tag {
-                        ts_attrs = config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name));
+                        ts_attrs =
+                            config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name));
                     } else {
-                        ts_attrs = config.must_get_keys(&format!("/trusted_services/{}/attributes", ts_name));
+                        ts_attrs = config
+                            .must_get_keys(&format!("/trusted_services/{}/attributes", ts_name));
                     }
                     if ts_attrs.contains(&search_name) {
                         if matched {
@@ -402,6 +413,12 @@ impl Weaver {
                             a.name, ts_name
                         )));
                     }
+                }
+                if !matched {
+                    return Err(CompilationError::ConfigError(format!(
+                        "attribute {} not found in any trusted service",
+                        a.name
+                    )));
                 }
             }
         }
@@ -678,6 +695,7 @@ mod test {
 
         [services.foo]
         protocol = "fee"
+        provider = [["cn", "fee"]]
 
         [services.bar]
         protocol = "boo"
@@ -691,7 +709,7 @@ mod test {
         {
             let mut w = Weaver::new();
             let res = w.init_services(&class_idx, &policy, &config);
-            assert!(res.is_ok());
+            assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
 
             // Should create two services: visa-service and visa-service-admin.
             // Does not create services just because they are in the config.
@@ -751,7 +769,7 @@ mod test {
             let mut w = Weaver::new();
             let res = w.init_services(&class_idx, &policy, &config);
             println!("{:?}", res);
-            assert!(res.is_ok());
+            assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
             assert_eq!(w.fabric.services.len(), 3);
             let vs = w.fabric.services.iter().find(|s| s.fabric_id == "foo");
             assert!(vs.is_some());

@@ -246,3 +246,257 @@ impl CompilationBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use std::env;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.path)
+                .expect("failed to remove compilation test temp dir");
+        }
+    }
+
+    impl TempDir {
+        fn new(name_hint: &str) -> Self {
+            let mut temp_dir = env::temp_dir();
+            temp_dir.push(format!(
+                "compilation-test-{}-{}-{}",
+                name_hint,
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs()
+            ));
+            std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir for zpc output");
+            TempDir { path: temp_dir }
+        }
+    }
+
+    const BASIC_CONFIG: &str = r#"
+    [nodes.n0]
+    key = "none"
+    zpr_address = "fd5a:5052:90de::1"
+    interfaces = [ "in1" ]
+    in1.netaddr = "127.0.0.1:5000"
+    provider = [["foo", "fee"]]
+
+    [visa_service]
+    dock_node = "n0"
+
+    [trusted_services.default]
+    cert_path = ""
+
+    [protocols.http]
+    protocol = "iana.TCP"
+    port = 80
+
+    [services.Webby]
+    protocol = "http"
+    "#;
+
+    #[test]
+    fn simple_compile() {
+        let zpl = r#"
+        define Webby as service with cn
+        allow cn: devices to access Webby
+        "#;
+
+        let tempdir = TempDir::new("simple_compile");
+        let zpl_file = tempdir.path.join("test.zpl");
+        std::fs::write(&zpl_file, zpl).expect("failed to write zpl file");
+
+        let cfg_file = tempdir.path.join("test.zplc");
+        std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
+
+        let compilation = Compilation::builder(zpl_file)
+            .config(&cfg_file)
+            .verbose(true)
+            .build();
+
+        let result = compilation.compile();
+        assert!(
+            result.is_ok(),
+            "compilation failed: {}",
+            result.unwrap_err()
+        );
+    }
+
+    // In this case with is required since there is no provider in config.
+    #[test]
+    fn define_requires_with() {
+        let zpl = r#"
+        define Webby as service
+        allow cn: devices to access Webby
+        "#;
+
+        let tempdir = TempDir::new("define_requires_with");
+        let zpl_file = tempdir.path.join("test.zpl");
+        std::fs::write(&zpl_file, zpl).expect("failed to write zpl file");
+
+        let cfg_file = tempdir.path.join("test.zplc");
+        std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
+
+        let compilation = Compilation::builder(zpl_file)
+            .config(&cfg_file)
+            .verbose(true)
+            .build();
+
+        let result = compilation.compile();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("service with no attributes"),
+            "unexpected error message: {}",
+            err_msg
+        );
+    }
+
+    // In this case with is not required since we have attributes in conifg.
+    #[test]
+    fn define_ok_without_with() {
+        let zplc = r#"
+        [nodes.n0]
+        key = "none"
+        zpr_address = "fd5a:5052:90de::1"
+        interfaces = [ "in1" ]
+        in1.netaddr = "127.0.0.1:5000"
+        provider = [["foo", "fee"]]
+
+        [visa_service]
+        dock_node = "n0"
+
+        [trusted_services.default]
+        cert_path = ""
+
+        [protocols.http]
+        protocol = "iana.TCP"
+        port = 80
+
+        [services.Webby]
+        protocol = "http"
+        provider = [["cn", ""]]
+        "#;
+
+        let zpl = r#"
+        define Webby as service
+        allow cn: devices to access Webby
+        "#;
+
+        let tempdir = TempDir::new("define_ok_without_with");
+        let zpl_file = tempdir.path.join("test.zpl");
+        std::fs::write(&zpl_file, zpl).expect("failed to write zpl file");
+
+        let cfg_file = tempdir.path.join("test.zplc");
+        std::fs::write(&cfg_file, zplc).expect("failed to write config file");
+
+        let compilation = Compilation::builder(zpl_file)
+            .config(&cfg_file)
+            .verbose(true)
+            .build();
+
+        let result = compilation.compile();
+        assert!(
+            result.is_ok(),
+            "compilation failed: {}",
+            result.unwrap_err()
+        );
+    }
+
+    #[test]
+    fn cannot_use_cn_as_tag() {
+        let zpl = r#"
+        define Webby as service with cn
+        allow cn devices to access Webby
+        "#;
+
+        let tempdir = TempDir::new("cannot_use_cn_as_tag");
+        let zpl_file = tempdir.path.join("test.zpl");
+        std::fs::write(&zpl_file, zpl).expect("failed to write zpl file");
+
+        let cfg_file = tempdir.path.join("test.zplc");
+        std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
+
+        let compilation = Compilation::builder(zpl_file)
+            .config(&cfg_file)
+            .verbose(true)
+            .build();
+
+        let result = compilation.compile();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("cn attribute used as a tag"),
+            "unexpected error message: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_svc_attrs_must_be_defined() {
+        let zpl = r#"
+        define Webby as service with unknown_attr
+        allow cn: devices to access services
+        "#;
+
+        let tempdir = TempDir::new("test_svc_attrs_must_be_defined");
+        let zpl_file = tempdir.path.join("test.zpl");
+        std::fs::write(&zpl_file, zpl).expect("failed to write zpl file");
+
+        let cfg_file = tempdir.path.join("test.zplc");
+        std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
+
+        let compilation = Compilation::builder(zpl_file)
+            .config(&cfg_file)
+            .verbose(true)
+            .build();
+
+        let result = compilation.compile();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("unknown_attr not found"),
+            "unexpected error message: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn test_allow_attrs_must_be_defined() {
+        let zpl = r#"
+        define Webby as service with cn
+        allow unknown_attr: devices to access services
+        "#;
+
+        let tempdir = TempDir::new("test_allow_attrs_must_be_defined");
+        let zpl_file = tempdir.path.join("test.zpl");
+        std::fs::write(&zpl_file, zpl).expect("failed to write zpl file");
+
+        let cfg_file = tempdir.path.join("test.zplc");
+        std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
+
+        let compilation = Compilation::builder(zpl_file)
+            .config(&cfg_file)
+            .verbose(true)
+            .build();
+
+        let result = compilation.compile();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("unknown_attr not found"),
+            "unexpected error message: {}",
+            err_msg
+        );
+    }
+}
