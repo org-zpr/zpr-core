@@ -16,7 +16,7 @@ cert_path = ""
 [trusted_services.foo]
 prefix = "foo" # maybe prefix should default to <service-name> ?
 api = "validation/1"
-returns_attributes = [ "clearance", "government", "service", "mach-type", "svc-id", "cleared", "machine-id", "managed", "government"]
+returns_attributes = [ "clearance", "#government", "service", "mach-type", "svc-id", "#cleared", "machine-id", "managed", "government"]
 
 
 [protocols.http]

@@ -331,12 +331,6 @@ impl Weaver {
 
         let mut resolved_attrs = Vec::new();
         for a in attrs {
-            if a.tag {
-                return Err(CompilationError::AttributeError(format!(
-                    "tags not supported: {}",
-                    a.name
-                )));
-            }
             if a.name == zpl::ADAPTER_CN_ATTR {
                 resolved_attrs.push(a.clone());
             }
@@ -357,10 +351,12 @@ impl Weaver {
                     } else {
                         a.name.clone()
                     };
-
-                    let ts_attrs =
-                        config.must_get_keys(&format!("/trusted_services/{}/attributes", ts_name));
-
+                    let ts_attrs: Vec<String>;
+                    if a.tag {
+                        ts_attrs = config.must_get_keys(&format!("/trusted_services/{}/tags", ts_name));
+                    } else {
+                        ts_attrs = config.must_get_keys(&format!("/trusted_services/{}/attributes", ts_name));
+                    }
                     if ts_attrs.contains(&search_name) {
                         if matched {
                             return Err(CompilationError::ConfigError(format!(
@@ -368,7 +364,6 @@ impl Weaver {
                                 a.name
                             )));
                         }
-                        // TODO: We need attr type info from config
                         let mut new_attr = a.clone();
                         new_attr.name = format!("{ts_prefix}.{search_name}");
                         resolved_attrs.push(new_attr);

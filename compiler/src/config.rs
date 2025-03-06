@@ -502,16 +502,25 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
         identity_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
     }
 
-    // Convert the plain attribute strings into Attribute object.
-    // Here we assume all attributes are required and tuple-type.
-    let returns = returns_attrs
-        .iter()
-        .map(|a| Attribute::attr_name_only(a))
-        .collect();
-    let idents = identity_attrs
-        .iter()
-        .map(|a| Attribute::attr_name_only(a))
-        .collect();
+    let mut returns = Vec::new();
+    for ra in &returns_attrs {
+        if ra.starts_with("#") {
+            returns.push(Attribute::tag(&ra[1..]));
+        } else {
+            returns.push(Attribute::attr_name_only(ra));
+        }
+    }
+
+    let mut idents = Vec::new();
+    for ra in &identity_attrs {
+        if ra.starts_with("#") {
+            return Err(err_config!(
+                "identity attribute cannot be a tag: '{}'",
+                ra
+            ))
+        }
+        idents.push(Attribute::attr_name_only(ra));
+    }
 
     Ok(TrustedService {
         id: ts_id.to_string(),

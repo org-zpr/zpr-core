@@ -38,16 +38,15 @@ impl ParseAllowState {
 
 /// First token is an ALLOW which is checked by caller.
 ///
-///
 /// Format of the allow statement is:
 ///
-///     allow <device-clause> with <user-clause> to access <service-clause>
+/// allow <device-clause> with <user-clause> to access <service-clause>
 ///
 /// If there are both device and user clauses they are separated by 'with'.
 /// You can omit either user or device clauses:
 ///
-///     allow <user-clause> to access <service-clause>
-///     allow <device-clause> to access <service-clause>
+/// allow <user-clause> to access <service-clause>
+/// allow <device-clause> to access <service-clause>
 ///
 /// `classes_idx` maps class names and AKA names to their canonical names (eg, "services" -> "service").
 /// `classs_map` maps class canonical name to [Class] struct.

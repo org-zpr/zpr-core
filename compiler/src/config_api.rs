@@ -261,6 +261,7 @@ impl ConfigApi {
     // - /trusted_services/<foo>/certificate -> returns certificate (if any)
     // - /trusted_services/<foo>/provider -> k/v tuples
     // - /trusted_services/<foo>/attributes -> list of attribute names (probably also need type)
+    // - /trusted_services/<foo>/tags -> list of attribute names (probably also need type)
     // - /trusted_services/<foo>/id_attributes -> list of attribute names (probably also need type)
     //
     // (PREFIX - let's make prefix same as service ID.)
@@ -511,7 +512,10 @@ impl ConfigApi {
             // Eg, multi-value or tag, required or optional.
             // For now we assume all attributes are tuple-type.
             "attributes" => Some(ConfigItem::KeySet(
-                svc.returns_attrs.iter().map(|a| a.name.clone()).collect(),
+                svc.returns_attrs.iter().filter(|a| !a.tag).map(|a| a.name.clone()).collect(),
+            )),
+            "tags" => Some(ConfigItem::KeySet(
+                svc.returns_attrs.iter().filter(|a| a.tag).map(|a| a.name.clone()).collect(),
             )),
             "id_attributes" => Some(ConfigItem::KeySet(
                 svc.identity_attrs.iter().map(|a| a.name.clone()).collect(),
