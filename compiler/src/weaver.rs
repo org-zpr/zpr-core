@@ -332,9 +332,19 @@ impl Weaver {
         let mut resolved_attrs = Vec::new();
         for a in attrs {
             if a.name == zpl::ADAPTER_CN_ATTR {
+                if a.tag {
+                    return Err(CompilationError::ConfigError(
+                        format!("{} attribute used as a tag, but is a tuple attriubte", a.name)
+                    ));
+                }
                 resolved_attrs.push(a.clone());
             }
             if a.name == zpl::DEFAULT_ATTR {
+                if a.tag {
+                    return Err(CompilationError::ConfigError(
+                        format!("{} attribute used as a tag, but is a tuple attribute", a.name)
+                    ));
+                }
                 resolved_attrs.push(a.set_name(zpl::ADAPTER_CN_ATTR));
             } else {
                 // TODO: This should be cached
