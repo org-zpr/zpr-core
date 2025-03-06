@@ -199,6 +199,7 @@ pub fn parse_allow(
     Ok(ac)
 }
 
+// The place to catch semantic errors before returning the clause.
 fn validate_clause(
     ac: &AllowClause,
     classes_map: &HashMap<String, Class>,
@@ -210,16 +211,6 @@ fn validate_clause(
             ac.user.class_tok.col,
         ));
     }
-    /*
-    if ac.service.with_attr_count(classes_map) == 0 {
-        return Err(CompilationError::ParseError(
-            "service must specify at least one discriminating attribute".to_string(),
-            ac.service.class_tok.line,
-            ac.service.class_tok.col,
-        ));
-    }
-    */
-
     Ok(())
 }
 

@@ -477,10 +477,6 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
                 ));
             }
         }
-
-        // TODO: Need to come up with a syntax to signify tags and multi-value.
-        // Maybe tags start with "#", and multi-value end with "()"?
-        // At the moment we don't support anything except default trusted service anyway.
     } else {
         if ts.contains_key("prefix") {
             return Err(err_config!(
@@ -501,6 +497,9 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
         returns_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
         identity_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
     }
+
+    // We have a simple way to specify tags in the config toml: prefix name with hash '#'.
+    // TODO: Need a notation for multi-valued attributes.
 
     let mut returns = Vec::new();
     for ra in &returns_attrs {
