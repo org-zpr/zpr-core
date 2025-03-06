@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"net/netip"
 
+	"zpr.org/vsapi"
 	"zpr.org/vst/pkg/packets"
 	"zpr.org/vst/pkg/plc"
 	"zpr.org/vst/pkg/testfw"
-	"zpr.org/vsapi"
+	"zpr.org/vsx/polio"
 )
 
 type VisaRequest struct{}
@@ -55,6 +56,8 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 	var candidate *plc.ConnectRec
 	var nodeCR *plc.ConnectRec
 	var service *plc.ConnectRec
+	var svcEndpoint *polio.Scope
+	var commPol *polio.CPolicy
 	for _, connect := range connects {
 		if connect.IsNode() {
 			if nodeCR != nil {
@@ -68,7 +71,11 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 		}
 		if len(connect.Provides) > 0 {
 			if service == nil {
-				service = connect
+				if ep, cpol := findTCPEndpoint(connect, policy); ep != nil {
+					svcEndpoint = ep
+					commPol = cpol
+					service = connect
+				}
 				continue
 			}
 		} else if candidate == nil {
@@ -83,7 +90,7 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 		return nil
 	}
 	if service == nil {
-		ctest.Failedm("cannot find a suitable service for visa request testing")
+		ctest.Failedm("cannot find a suitable (TCP) service for visa request testing")
 		return nil
 	}
 
@@ -91,28 +98,9 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 	//       Then ensure those attributes are present.
 
 	// Connect the service:
-	var svcID string
-	for sid := range service.Provides {
-		svcID = sid
-		break
-	}
+	commEndpoint := svcEndpoint
 
-	commPols := plc.GetCommPoliciesForService(policy, svcID)
-	if len(commPols) == 0 {
-		ctest.Failedm(fmt.Sprintf("no communication policies found for service %s", svcID))
-		return nil
-	}
-	commPol := commPols[0]
-
-	// Right now this tool only knows how to make a TCP connect.
-	endpoints := plc.FilterTCPScope(commPol.Scope)
-	if endpoints == nil {
-		ctest.Failedm(fmt.Sprintf("cannot find TCP scope from communication policy for %v", svcID))
-		return nil
-	}
-	commEndpoint := endpoints[0]
-
-	state.Log.Infow("connecting a service", "service_id", svcID)
+	state.Log.Infow("connecting a service", "endpoint", commEndpoint)
 	svcAgnt, err := connectAdapter(node, service, nodeCR.Addr, state.GetNextAdapterAddr())
 	if err != nil {
 		ctest.Failed(fmt.Errorf("failed to connect service: %w", err))
@@ -189,4 +177,21 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 	// TODO: check other visa aspects.
 	ctest.Passed()
 	return nil
+}
+
+func findTCPEndpoint(service *plc.ConnectRec, policy *polio.Policy) (*polio.Scope, *polio.CPolicy) {
+	// Connect the service:
+	for sid := range service.Provides {
+		commPols := plc.GetCommPoliciesForService(policy, sid)
+		if len(commPols) == 0 {
+			continue
+		}
+		commPol := commPols[0]
+		endpoints := plc.FilterTCPScope(commPol.Scope)
+		if endpoints == nil {
+			continue
+		}
+		return endpoints[0], commPol
+	}
+	return nil, nil
 }
