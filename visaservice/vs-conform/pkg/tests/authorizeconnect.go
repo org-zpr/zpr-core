@@ -15,6 +15,10 @@ func (t *AuthorizeConnect) Name() string {
 	return "AuthorizeConnect"
 }
 
+func (t *AuthorizeConnect) Order() int {
+	return 200
+}
+
 func (t *AuthorizeConnect) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
 	// If we don't have an API key in state, run the accept-valid-auth test.
 	node, err := state.GetNode()

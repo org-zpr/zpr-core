@@ -21,6 +21,10 @@ func (t *VisaRequest) Name() string {
 	return "VisaRequest"
 }
 
+func (t *VisaRequest) Order() int {
+	return 1000
+}
+
 // Connect node, then a client and a service and send in a visa request which should then be granted.
 func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
 	node, err := state.GetNode()

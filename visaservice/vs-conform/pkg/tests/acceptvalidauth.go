@@ -3,9 +3,9 @@ package tests
 import (
 	"time"
 
+	"zpr.org/vsapi"
 	"zpr.org/vst/pkg/plc"
 	"zpr.org/vst/pkg/testfw"
-	"zpr.org/vsapi"
 	"zpr.org/vst/pkg/zcrypt"
 )
 
@@ -17,6 +17,10 @@ func init() {
 
 func (t *AcceptValidAuth) Name() string {
 	return "AcceptValidAuth"
+}
+
+func (t *AcceptValidAuth) Order() int {
+	return 200
 }
 
 // Run a valid auth.

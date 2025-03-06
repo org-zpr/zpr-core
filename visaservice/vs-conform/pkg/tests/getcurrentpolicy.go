@@ -14,6 +14,10 @@ func (t *GetCurrentPolicy) Name() string {
 	return "GetCurrentPolicy"
 }
 
+func (t *GetCurrentPolicy) Order() int {
+	return 50
+}
+
 // If this works, it stores the current policy in the state.
 func (t *GetCurrentPolicy) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
 	if _, err := state.LoadPolicy(); err != nil {

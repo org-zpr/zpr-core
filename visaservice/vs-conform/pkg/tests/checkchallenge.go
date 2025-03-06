@@ -3,8 +3,8 @@ package tests
 import (
 	"fmt"
 
-	"zpr.org/vst/pkg/testfw"
 	"zpr.org/vsapi"
+	"zpr.org/vst/pkg/testfw"
 )
 
 const MinChallengeNonceSize = 32
@@ -17,6 +17,10 @@ func init() {
 
 func (t *CheckChallenge) Name() string {
 	return "CheckChallenge"
+}
+
+func (t *CheckChallenge) Order() int {
+	return 50
 }
 
 // Check challenge results from the visa service

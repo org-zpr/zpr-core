@@ -3,8 +3,8 @@ package tests
 import (
 	"fmt"
 
-	"zpr.org/vst/pkg/testfw"
 	"zpr.org/vsapi"
+	"zpr.org/vst/pkg/testfw"
 )
 
 type RejectInvalidAuth struct{}
@@ -15,6 +15,10 @@ func init() {
 
 func (t *RejectInvalidAuth) Name() string {
 	return "RejectInvalidAuth"
+}
+
+func (t *RejectInvalidAuth) Order() int {
+	return 100
 }
 
 // Send back a challenge response that is clearly not valid.

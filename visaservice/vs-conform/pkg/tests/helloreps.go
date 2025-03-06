@@ -18,6 +18,10 @@ func (hr *HelloReps) Name() string {
 	return "HelloReps"
 }
 
+func (t *HelloReps) Order() int {
+	return 200
+}
+
 // Send a bunch of hello messages in
 func (hr *HelloReps) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
 	reps := HelloRepsCount

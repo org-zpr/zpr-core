@@ -36,6 +36,13 @@ type PolicyEncap struct {
 	Version   string `json:"version"`
 }
 
+type VisaDescriptor struct {
+	VisaId     uint64 `json:"id"`
+	Expiration uint64 `json:"expires"`
+	Source     string `json:"source"`
+	Dest       string `json:"dest"`
+}
+
 func NewVSAdminClient(vsaddr netip.AddrPort, zlog *zap.Logger) (*Client, error) {
 	return &Client{
 		vsaddr: vsaddr,
@@ -149,6 +156,38 @@ func (c *Client) GetPolicy(configId uint64) (*PolicyEncap, error) {
 		return nil, fmt.Errorf("failed to decode policy json: %v", err)
 	}
 	return &encap, nil
+}
+
+func (c *Client) ListVisas() ([]*VisaDescriptor, error) {
+	resp, err := c.htGet(fmt.Sprintf("https://%s/admin/visas", c.vsaddr))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list visas: %v", err)
+	}
+	defer resp.Body.Close()
+	jsdata, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var vlist []*VisaDescriptor
+	if err := json.Unmarshal(jsdata, &vlist); err != nil {
+		return nil, fmt.Errorf("failed to decode visa-list json: %v", err)
+	}
+	return vlist, err
+}
+
+func (c *Client) DeleteVisa(visaId uint64) error {
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("https://%s/admin/visa/%d", c.vsaddr, visaId), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.newHttpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to delete visa %d, got status: %s", visaId, resp.Status)
+	}
+	return nil
 }
 
 // Decompress decompresses and unmarshalls a PolicyContainer.
