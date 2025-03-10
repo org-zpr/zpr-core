@@ -6,12 +6,24 @@ import (
 	"net/netip"
 	"time"
 
+	"zpr.org/vsapi"
 	"zpr.org/vst/pkg/mocks"
 	"zpr.org/vst/pkg/plc"
 	"zpr.org/vst/pkg/testfw"
-	"zpr.org/vsapi"
 	"zpr.org/vst/pkg/zcrypt"
 )
+
+func reconnectNode(state *testfw.TestState) error {
+	mockNode, err := state.GetNode()
+	if err != nil {
+		return err
+	}
+	if mockNode.HasApiKey() {
+		state.Close()
+	}
+	_, err = connectNodeAndGetApiKey(state)
+	return err
+}
 
 func connectNodeAndGetApiKey(state *testfw.TestState) (string, error) {
 	mockNode, err := state.GetNode()

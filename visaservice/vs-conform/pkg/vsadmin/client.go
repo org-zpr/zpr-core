@@ -176,7 +176,7 @@ func (c *Client) ListVisas() ([]*VisaDescriptor, error) {
 }
 
 func (c *Client) DeleteVisa(visaId uint64) error {
-	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("https://%s/admin/visa/%d", c.vsaddr, visaId), nil)
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("https://%s/admin/visas/%d", c.vsaddr, visaId), nil)
 	if err != nil {
 		return err
 	}

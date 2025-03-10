@@ -33,6 +33,7 @@ func (t *AcceptValidAuth) Run(state *testfw.TestState, ctest *testfw.TestRun) er
 	}
 
 	mockNode.DeRegister("") // ignore error
+	state.Pause()
 
 	resp, err := mockNode.Hello()
 	if err != nil {
@@ -94,6 +95,7 @@ func (t *AcceptValidAuth) Run(state *testfw.TestState, ctest *testfw.TestRun) er
 		return nil
 	}
 	state.Pause()
+	state.Log.Info("XXX checking for policy info message...")
 
 	// We should also have a policy message
 	pi := mockNode.PopPolicyInfo()

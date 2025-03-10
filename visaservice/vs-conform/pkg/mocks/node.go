@@ -22,25 +22,18 @@ type Node struct {
 	apiKey  string
 }
 
-func NewNode(vsAddr netip.AddrPort, lgr *zap.Logger) (*Node, error) {
-	return &Node{
-		zlog:   lgr.Sugar(),
-		plog:   NewPLogger("node", "vs"),
-		vsAddr: vsAddr,
-	}, nil
-}
-
-func (n *Node) EnableVSS(vssAddr netip.AddrPort) error {
-	if n.vss != nil {
-		return fmt.Errorf("call to enable VSS but VSS already enabled")
-	}
-	n.vssAddr = vssAddr
-	vss, err := NewVss(vssAddr, n.zlog.Desugar())
+func NewNode(vsAddr netip.AddrPort, lgr *zap.Logger, vssAddr netip.AddrPort) (*Node, error) {
+	vss, err := NewVss(vssAddr, lgr)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to init VSS: %w", err)
 	}
-	n.vss = vss
-	return nil
+	return &Node{
+		zlog:    lgr.Sugar(),
+		plog:    NewPLogger("node", "vs"),
+		vsAddr:  vsAddr,
+		vssAddr: vssAddr,
+		vss:     vss,
+	}, nil
 }
 
 func (n *Node) SetPlogEnabled(enabled bool) {
@@ -80,8 +73,12 @@ func (n *Node) Authenticate(chalresp *vsapi.NodeAuthRequest) (string, error) {
 		return "", err
 	}
 	defer cli.Close()
-	if n.vss != nil && chalresp.VssService == "" {
-		chalresp.VssService = n.vssAddr.String()
+	if chalresp.VssService == "" {
+		if n.vss != nil {
+			chalresp.VssService = n.vssAddr.String()
+		} else {
+			panic("VSS service address must be set") // programmer error
+		}
 	}
 	n.plog.Log(Fwd, "authenticate")
 	n.zlog.Info("node->vs: AUTHENTICATE")

@@ -36,7 +36,6 @@ func (t *AdminListVisas) Run(state *testfw.TestState, ctest *testfw.TestRun) err
 
 	// Remove any visas in there.
 	for _, v := range vlist {
-		fmt.Printf("XXX deleting visa %d\n", v.VisaId)
 		if err := admin.DeleteVisa(v.VisaId); err != nil {
 			ctest.Failed(err)
 			return nil
@@ -56,22 +55,11 @@ func (t *AdminListVisas) Run(state *testfw.TestState, ctest *testfw.TestRun) err
 	}
 
 	// Connect the node (should generate 2 visas)
-	node, err := state.GetNode()
-	if err != nil {
-		return err
+	if err := reconnectNode(state); err != nil {
+		ctest.Failed(err)
+		return nil
 	}
-	if !node.HasApiKey() {
-		_, err := connectNodeAndGetApiKey(state)
-		if err != nil {
-			ctest.Failed(err)
-			return nil
-		}
-		if !node.HasApiKey() {
-			ctest.Failedm("unable to get an API key from node")
-			return nil
-		}
-		state.Pause()
-	}
+	state.Pause()
 
 	{
 		vlist, err := admin.ListVisas()

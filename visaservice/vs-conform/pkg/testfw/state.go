@@ -79,12 +79,9 @@ func (ts *TestState) GetAdminClient() (*vsadmin.Client, error) {
 // Get node with VSS running
 func (ts *TestState) GetNode() (*mocks.Node, error) {
 	if ts.node == nil {
-		mockNode, err := mocks.NewNode(ts.vsAddr, ts.Log.Desugar())
+		mockNode, err := mocks.NewNode(ts.vsAddr, ts.Log.Desugar(), netip.MustParseAddrPort("0.0.0.0:8183"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create mock node: %v", err)
-		}
-		if err := mockNode.EnableVSS(netip.MustParseAddrPort("0.0.0.0:8183")); err != nil {
-			return nil, fmt.Errorf("failed to start VSS: %w", err)
 		}
 		ts.node = mockNode
 	}
