@@ -217,7 +217,7 @@ fn main() -> ExitCode {
         let (inq, outq) = tokio::net::UnixDatagram::pair().unwrap();
         // TODO: use get/setsockopt(SO_SNDBUF) to ensure we can transfer packets of PACKET_BUFFER_SIZE
         agent_requeue_inqs.push(inq);
-        agent_requeue_outqs.push(outq);
+        agent_requeue_outqs.push(outq.into_std().unwrap());
     }
 
     //
@@ -386,6 +386,8 @@ fn main() -> ExitCode {
     // start data path workers
     //
 
+    let mut fastpath_threads = Vec::new();
+
     let agent_output_worker_config = FastpathWorkerConfig {
         buffer_count: asm.topology_config.buffer_count,
         batch_size: asm.topology_config.agent_output_batch_size,
@@ -393,13 +395,18 @@ fn main() -> ExitCode {
     for (worker_index, (tun_dev, requeue)) in
         tun_devs.into_iter().zip(agent_requeue_outqs).enumerate()
     {
-        js.spawn(agent_output_worker::launch(
-            agent_output_worker_config,
-            worker_index,
-            asm.clone(),
-            tun_dev,
-            requeue,
-        ));
+        let builder = std::thread::Builder::new().name(format!("output {worker_index}"));
+        fastpath_threads.push(
+            builder
+                .spawn(agent_output_worker::launch(
+                    agent_output_worker_config,
+                    worker_index,
+                    asm.clone(),
+                    tun_dev,
+                    requeue,
+                ))
+                .unwrap(),
+        );
     }
 
     if ph_mode == PhMode::Node {

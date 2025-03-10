@@ -4,7 +4,7 @@ use nix::ioctl_write_ptr;
 use std::io;
 use std::io::Result;
 use std::net::IpAddr;
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 use tokio_tun::{Tun, TunBuilder};
 use zpr_ext::std::mem::slice_assume_init_mut;
 
@@ -51,19 +51,6 @@ impl ZprTun {
         self.0.try_send(buf)
     }
 
-    pub async fn recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> Result<usize> {
-        let uninit_slice = buf.chunk_mut();
-        // SAFETY: we are only writing to this uninitialized slice
-        let slice = unsafe { slice_assume_init_mut(uninit_slice.as_uninit_slice_mut()) };
-        let size = self.0.recv(slice).await?;
-        // SAFETY: we've now initialized this much of the slice
-        unsafe {
-            buf.advance_mut(size);
-        }
-        Ok(size)
-    }
-
-    #[allow(dead_code)]
     pub fn try_recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> Result<usize> {
         let uninit_slice = buf.chunk_mut();
         // SAFETY: we are only writing to this uninitialized slice
@@ -88,5 +75,11 @@ impl ZprTun {
         Err(ZprTunError::PlatformError(
             "cannot set TUN address after creation".to_string(),
         ))
+    }
+}
+
+impl AsRawFd for ZprTun {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
     }
 }
