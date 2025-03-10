@@ -41,6 +41,16 @@ pub const DOCK_LINK_ID: LinkId = 2;
 /// Stream ID
 pub type StreamId = u32;
 
+/// Forwarding entry used both for forwarding next-hops and looking up forwarding next-hops
+pub struct ForwardingEntry(pub LinkId, pub StreamId);
+
+/// Visa ID
+// TODO: Generate from Thrift instead?
+pub type VisaId = i32;
+
+// TODO: Get rid of this?
+pub const SPECIAL_VISA_ID: VisaId = 0;
+
 /// Reserved for node-to-node / control-plane traffic.
 pub const NODE_TO_NODE_STREAM_ID: StreamId = 0;
 

@@ -17,6 +17,7 @@ use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
 use crate::tun_ctl::TunCtl;
+use crate::visa_table;
 
 use enum_map::EnumMap;
 use km_noise::NoiseKeypair;
@@ -26,7 +27,7 @@ use std::result::Result;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::*;
-use zpr::{self, LinkId, SubstrateAddr};
+use zpr::{self, LinkId, SubstrateAddr, VisaId};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {
@@ -63,6 +64,8 @@ pub struct Assembly {
 
     pub vsconn: Option<libnode::vsconn::VSConnHandle>, // present only on nodes
 
+    pub visa_table: std::sync::Mutex<visa_table::VisaTable>, // Only for nodes
+
     // Used to intercept packets that are unencrypted but still have ZDP headers
     pub capture_queue: Capture,
     pub capture_worker: CaptureWorker,
@@ -97,6 +100,8 @@ pub enum AddRouteError {
     PeerGone,
     #[error("PFT full")]
     PftFull,
+    #[error("Visa gone")]
+    VisaGone,
 }
 
 impl Assembly {
@@ -233,6 +238,7 @@ impl Assembly {
     pub async fn add_route(
         &self,
         ingress_link_id: NonZero<LinkId>,
+        visa_id: VisaId,
         five_tuple: defs::FiveTuple,
         egress_link_id: NonZero<LinkId>,
         compression_mode: zpr::CompressionMode,
@@ -267,7 +273,8 @@ impl Assembly {
 
         // form PEP
         let pep = forwarding_tables::PftPep {
-            next_hop: forwarding_tables::PftNextHop(egress_link_id.get(), egress_tether_id),
+            next_hop: zpr::ForwardingEntry(egress_link_id.get(), egress_tether_id),
+            visa_id: visa_id,
         };
 
         let Some(ingress_peer_state) = self.peer_table.get(ingress_link_id.get()) else {
@@ -279,7 +286,31 @@ impl Assembly {
             .insert(pep)
             .map_err(|()| AddRouteError::PftFull)?;
 
+        if self
+            .visa_table
+            .lock()
+            .unwrap()
+            .link_forwarding_entry(
+                visa_id,
+                zpr::ForwardingEntry(ingress_link_id.get(), ingress_tether_id),
+            )
+            .is_err()
+        {
+            // Visa was either never granted or has already been removed
+            // Route is no longer valid
+            ingress_peer_state.pft.remove(ingress_tether_id);
+            return Err(AddRouteError::VisaGone);
+        }
+
         Ok(ingress_tether_id)
+    }
+
+    pub fn remove_route(&self, route: zpr::ForwardingEntry) {
+        let Some(peer_table) = self.peer_table.get(route.0) else {
+            // If the peer is gone, nothing to be done
+            return;
+        };
+        peer_table.pft.remove(route.1);
     }
 }
 
@@ -302,6 +333,7 @@ pub mod test {
         pub substrate_egress: Option<SubstrateEgress>,
         pub agent_output_requeue: Option<AgentOutputRequeue>,
         pub vsconn: Option<Option<libnode::vsconn::VSConnHandle>>,
+        pub visa_table: Option<visa_table::VisaTable>,
         pub capture_queue: Option<Capture>,
         pub capture_worker: Option<CaptureWorker>,
         pub flow_control: Option<FlowControl>,
@@ -347,6 +379,11 @@ pub mod test {
             .agent_output_requeue
             .unwrap_or_else(|| AgentOutputRequeue::new(Vec::new()));
         let vsconn = builder.vsconn.unwrap_or(None);
+        let visa_table = std::sync::Mutex::new(
+            builder
+                .visa_table
+                .unwrap_or_else(|| visa_table::VisaTable::new()),
+        );
         let capture_queue = builder.capture_queue.unwrap_or_else(|| {
             let (cq_inq, _cq_outq) = std::os::unix::net::UnixDatagram::pair().unwrap();
             Capture::new(cq_inq)
@@ -389,6 +426,7 @@ pub mod test {
             substrate_egress,
             agent_output_requeue,
             vsconn,
+            visa_table,
             capture_queue,
             capture_worker,
             flow_control,

@@ -469,6 +469,24 @@ pub async fn handle_bind_agent_address_request(
                 }
 
                 Err(super::dock::BindAgentAddressError::AddRouteError(
+                    assembly::AddRouteError::VisaGone,
+                )) => {
+                    // send error to requestor
+                    let message = "policy error";
+
+                    zdp::ZdpBindAgentAddressResponseHeader {
+                        status_code: zdp::ResponseCode::Other,
+                        info_len: message.len() as u8,
+                    }
+                    .write_to_buf(&mut rsp_pkt)
+                    .unwrap();
+
+                    rsp_pkt.put(message.as_bytes());
+
+                    ingress_tether_id = 0;
+                }
+
+                Err(super::dock::BindAgentAddressError::AddRouteError(
                     assembly::AddRouteError::BindFailed(err),
                 )) => {
                     // unable to bind next-hop; respond with error message

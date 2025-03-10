@@ -7,11 +7,9 @@
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
 use cslab::{RcuCslab, RcuCslabReader};
 use std::sync::Mutex;
-use zpr::{LinkId, StreamId};
+use zpr::{ForwardingEntry, StreamId, VisaId};
 
 const PEER_FORWARDING_TABLE_SIZE: usize = 1 << 20; // 1 million
-
-pub struct PftNextHop(pub LinkId, pub StreamId);
 
 // TODO: figure out whether a more complex PEP is warranted,
 // which can map a single tether ID to possibly different visa IDs
@@ -19,7 +17,8 @@ pub struct PftNextHop(pub LinkId, pub StreamId);
 // (necessary since (a) adapter can choose compression level, and (b)
 // visas may be more narrowly scoped than what can be compressed out)
 pub struct PftPep {
-    pub next_hop: PftNextHop,
+    pub next_hop: ForwardingEntry,
+    pub visa_id: VisaId,
 }
 
 pub struct PeerForwardingTable {
@@ -66,6 +65,10 @@ impl PeerForwardingTable {
         let new_reader = table.remove((tether_id as usize).wrapping_sub(1));
         std::mem::drop(table);
         self.reader.write(new_reader);
+    }
+
+    pub fn len(&self) -> usize {
+        self.table.lock().unwrap().len()
     }
 
     pub fn clear(&self) {

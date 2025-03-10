@@ -4,12 +4,14 @@ use crate::defs::FiveTuple;
 use crate::logging::targets::FLOW_MGMT;
 use crate::net_defs::IpAddress;
 use crate::special_peers;
+
+use chrono::{DateTime, Utc};
 use libnode::{vsapi, vsconn};
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::*;
-use zpr::{self, LinkId, StreamId};
+use zpr::{self, LinkId, StreamId, SPECIAL_VISA_ID};
 use zpr_ext::std::num::NonZeroExt;
 
 #[derive(Debug, Error)]
@@ -32,10 +34,16 @@ pub async fn bind_agent_address(
     packet_body: Vec<u8>,
 ) -> Result<StreamId, BindAgentAddressError> {
     let egress_link_id;
+    let visa_id;
 
     if let Some(spname) = special_peers::default_policy_lookup(ingress_link_id, &five_tuple) {
         if let Some(id) = asm.peer_table.lookup_special_peer(spname) {
             egress_link_id = id;
+            visa_id = SPECIAL_VISA_ID;
+            asm.visa_table
+                .lock()
+                .unwrap()
+                .insert_id(visa_id, DateTime::<Utc>::MAX_UTC);
         } else {
             debug!(target: FLOW_MGMT, "visa request error: special peer routing applies, but special peer ({spname:?}) not connected");
             return Err(BindAgentAddressError::PolicyError);
@@ -56,6 +64,11 @@ pub async fn bind_agent_address(
             // Unconditionally accept traffic from the Visa Service Adapter;
             // forward it to our local agent.
             egress_link_id = NonZero::new(zpr::LOCAL_AGENT_LINK_ID).unwrap();
+            visa_id = SPECIAL_VISA_ID;
+            asm.visa_table
+                .lock()
+                .unwrap()
+                .insert_id(visa_id, DateTime::<Utc>::MAX_UTC);
         } else {
             let visa_req = vsconn::VisaRequest {
                 source_tether_addr: five_tuple.src_address.into(),
@@ -70,8 +83,15 @@ pub async fn bind_agent_address(
                     visa,
                     ..
                 }) => {
+                    let Some(visa) = visa.unwrap().visa else {
+                        asm.counters[CounterType::VisaRequestError].increment();
+                        error!(target: FLOW_MGMT, "visa request error: Could not parse visa");
+                        return Err(BindAgentAddressError::ParseError(
+                            "Could not parse visa".into(),
+                        ));
+                    };
                     // for now, just pull the destination address tether to set up forwarding
-                    let Some(octets) = visa.unwrap().visa.unwrap().dest else {
+                    let Some(octets) = visa.dest.clone() else {
                         asm.counters[CounterType::VisaRequestError].increment();
                         error!(target: FLOW_MGMT, "visa request error: Could not parse visa");
                         return Err(BindAgentAddressError::ParseError(
@@ -90,6 +110,15 @@ pub async fn bind_agent_address(
                             asm.counters[CounterType::VisaRequestError].increment();
                             return Err(BindAgentAddressError::ParseError(
                                 "Could not parse visa dest address".into(),
+                            ));
+                        }
+                    }
+                    match asm.visa_table.lock().unwrap().insert_visa(visa) {
+                        Ok(issuer_id) => visa_id = issuer_id,
+                        Err(_) => {
+                            asm.counters[CounterType::VisaRequestError].increment();
+                            return Err(BindAgentAddressError::ParseError(
+                                "Could not parse visa ID".into(),
                             ));
                         }
                     }
@@ -120,6 +149,7 @@ pub async fn bind_agent_address(
     let route_result = asm
         .add_route(
             ingress_link_id,
+            visa_id,
             five_tuple,
             egress_link_id,
             compression_mode,

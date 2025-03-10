@@ -360,3 +360,29 @@ impl VacantPeerTableEntry<'_> {
         link_id
     }
 }
+
+#[cfg(test)]
+pub mod test {
+
+    use super::*;
+
+    #[allow(dead_code)]
+    pub fn create_dummy_peer_state(
+        link_id: NonZero<LinkId>,
+        link_type: LinkType,
+        substrate_addr: SubstrateAddr,
+    ) -> PeerState {
+        let (mp_inq, _mp_outq) = mpsc::channel(MGMT_PROCESSOR_QUEUE_SIZE);
+        let mgmt_processor = queues::MgmtProcessor::new(mp_inq);
+
+        PeerState {
+            substrate_addr,
+            link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
+            pft: PeerForwardingTable::new(),
+            sync_req_state: sync_req::SyncReqState::new(),
+            mgmt_processor,
+            mgmt_processor_worker: task::spawn(async {}),
+            km_state: PeerKmState::new(),
+        }
+    }
+}
