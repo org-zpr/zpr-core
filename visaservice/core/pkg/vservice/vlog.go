@@ -39,6 +39,18 @@ func (v *Vlog) LogVisaCreated(visa *vsio.Visa, pkt *snip.Traffic, explainer stri
 	v.out.Write([]byte(entry))
 }
 
+func (v *Vlog) LogVisaRevoked(visaId uint64, configId uint64) {
+	var b strings.Builder
+
+	b.WriteString(time.Now().Format(time.RFC3339))
+	b.WriteString("  ")
+	b.WriteString("REVOKE  ")
+	fmt.Fprintf(&b, "c:%d  ", configId)
+	fmt.Fprintf(&b, "id:%d\n\n", visaId)
+
+	v.out.Write([]byte(b.String()))
+}
+
 func (v *Vlog) LogVisaDenied(configID uint64, pkt *snip.Traffic, reason string, requestor netip.Addr) {
 	entry := newDeny(configID, pkt, reason, requestor)
 	v.out.Write([]byte(entry))

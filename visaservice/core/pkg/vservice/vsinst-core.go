@@ -500,7 +500,9 @@ func (vs *VSInst) revokeVisaByID(visaID uint64) error {
 	if len(revokes) == 0 {
 		return ErrVisaNotFound
 	}
-
+	for _, vr := range revokes {
+		vs.vlog.LogVisaRevoked(uint64(vr.IssuerID), uint64(vr.Configuration))
+	}
 	push := adb.PushItem{
 		Broadcast:   true,
 		Revocations: revokes,

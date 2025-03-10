@@ -133,7 +133,6 @@ func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uin
 	var opErr error
 
 	// if updating false, set true.
-
 	oldValue, ok := vs.agentDB.TestAndSetUpdating(nodeAddr, false, true)
 	if !ok {
 		return fmt.Errorf("node not found")
