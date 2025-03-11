@@ -8,11 +8,12 @@ use crate::test_packet::*;
 use crate::two_way_queue;
 use bytes::Buf;
 use std::io::ErrorKind;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, UdpSocket};
+use std::os::unix::net::UnixDatagram as StdUnixDatagram;
 use std::result::Result;
 use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::net::{UdpSocket, UnixDatagram};
+use tokio::net::UnixDatagram as TokioUnixDatagram;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
@@ -127,6 +128,7 @@ pub struct SubstrateEgress {
 }
 
 impl SubstrateEgress {
+    /// Sockets must be marked non-blocking by caller.
     pub fn new(sockets: impl IntoIterator<Item = Arc<UdpSocket>>) -> Self {
         Self {
             sockets: sockets.into_iter().collect(),
@@ -140,7 +142,8 @@ impl SubstrateEgress {
     ) -> Result<(), ()> {
         let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(packet, dest_sa);
 
-        match socket.send_to(packet.body(), dest_sockaddr).await {
+        // FIXME: make this actually blocking
+        match socket.send_to(packet.body(), dest_sockaddr) {
             Ok(_) => Ok(()),
 
             Err(err) => {
@@ -166,7 +169,7 @@ impl SubstrateEgress {
     ) -> Result<(), TryEnqueueError> {
         let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(packet, dest_sa);
 
-        match socket.try_send_to(packet.body(), dest_sockaddr) {
+        match socket.send_to(packet.body(), dest_sockaddr) {
             Ok(_) => Ok(()),
 
             Err(err) => {
@@ -175,7 +178,9 @@ impl SubstrateEgress {
                         panic!("unrecoverable I/O error: {}", err)
                     }
 
-                    ErrorKind::WouldBlock => Err(TryEnqueueError::Full(())),
+                    ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
+                        Err(TryEnqueueError::Full(()))
+                    }
 
                     // most other network errors are temporary; return packet to caller
                     // TODO: it would be nice to report to the user _why_ packets aren't moving;
@@ -210,11 +215,11 @@ impl SubstrateEgress {
 
 /// Used for requeueing agent output packets from mgmt.
 pub struct AgentOutputRequeue {
-    sockets: Box<[UnixDatagram]>,
+    sockets: Box<[TokioUnixDatagram]>,
 }
 
 impl AgentOutputRequeue {
-    pub fn new(sockets: impl IntoIterator<Item = UnixDatagram>) -> Self {
+    pub fn new(sockets: impl IntoIterator<Item = TokioUnixDatagram>) -> Self {
         Self {
             sockets: sockets.into_iter().collect(),
         }
@@ -233,18 +238,18 @@ impl AgentOutputRequeue {
         }
     }
 
-    fn select_socket(&self, packet: &Packet) -> &UnixDatagram {
+    fn select_socket(&self, packet: &Packet) -> &TokioUnixDatagram {
         &self.sockets[packet.metadata().ingress_lane_id as usize]
     }
 }
 
 /// Capture will intercept packets in the PH and dump them into a file for debugging purposes
 pub struct Capture {
-    sender: std::os::unix::net::UnixDatagram,
+    sender: StdUnixDatagram,
 }
 
 impl Capture {
-    pub fn new(sender: std::os::unix::net::UnixDatagram) -> Self {
+    pub fn new(sender: StdUnixDatagram) -> Self {
         sender.set_nonblocking(true).unwrap();
         Self { sender }
     }

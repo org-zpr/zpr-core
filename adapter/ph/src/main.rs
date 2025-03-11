@@ -249,11 +249,6 @@ fn main() -> ExitCode {
         substrate_sockets.push(Arc::new(socket.into()));
     }
 
-    let tokio_substrate_sockets: Box<[_]> = substrate_sockets
-        .iter()
-        .map(|s| Arc::new(tokio::net::UdpSocket::from_std(s.try_clone().unwrap()).unwrap()))
-        .collect();
-
     //
     // configure packet steering for better load balancing
     //
@@ -320,7 +315,7 @@ fn main() -> ExitCode {
         topology_config,
         agent_addresses: config.agent_addr,
         agent_input: AgentInput::new(tun_devs.clone()),
-        substrate_egress: SubstrateEgress::new(tokio_substrate_sockets),
+        substrate_egress: SubstrateEgress::new(substrate_sockets.iter().cloned()),
         agent_output_requeue: AgentOutputRequeue::new(agent_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
         capture_queue: Capture::new(cap_inq),
