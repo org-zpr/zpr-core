@@ -66,6 +66,10 @@ func (t *AuthorizeConnect) Run(state *testfw.TestState, ctest *testfw.TestRun) e
 		if len(connect.Provides) > 0 {
 			continue
 		}
+		if !plc.ConnectRecHasSetAttr(connect, "zpr.adapter.cn") {
+			// We cannot self-auth without this
+			continue
+		}
 		if candidate == nil {
 			candidate = connect
 		}
@@ -80,7 +84,7 @@ func (t *AuthorizeConnect) Run(state *testfw.TestState, ctest *testfw.TestRun) e
 
 	agent, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextAdapterAddr())
 	if err != nil {
-		ctest.Failedm(fmt.Sprintf("failed to connect adapter: %v", err))
+		ctest.Failedm(fmt.Sprintf("failed to connect adapter (CN='%v'): %v", candidate.CN, err))
 		return nil
 	}
 

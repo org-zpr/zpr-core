@@ -96,7 +96,7 @@ func (t *AdminDeleteVisasByCN) Run(state *testfw.TestState, ctest *testfw.TestRu
 	state.Log.Infow("connecting a client", "CN", cpair.Client.CN)
 	cliAgnt, err := connectAdapter(node, cpair.Client, cpair.DockAddr, state.GetNextAdapterAddr())
 	if err != nil {
-		ctest.Failed(fmt.Errorf("failed to connect client: %w", err))
+		ctest.Failed(fmt.Errorf("failed to connect client (CN='%v'): %w", cpair.Client.CN, err))
 		return nil
 	}
 	state.Pause()

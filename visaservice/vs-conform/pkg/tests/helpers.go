@@ -45,6 +45,10 @@ func findCommunicatingPair(policy *polio.Policy) (*CommunicatingPair, error) {
 		if connect.IsVisaService() {
 			continue
 		}
+		if !plc.ConnectRecHasSetAttr(connect, "zpr.adapter.cn") {
+			// We cannot self-auth without this
+			continue
+		}
 		if len(connect.Provides) > 0 {
 			if service == nil {
 				if ep, cpol := findTCPEndpoint(connect, policy); ep != nil {
