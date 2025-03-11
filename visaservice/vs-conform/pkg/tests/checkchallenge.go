@@ -1,8 +1,6 @@
 package tests
 
 import (
-	"fmt"
-
 	"zpr.org/vsapi"
 	"zpr.org/vst/pkg/testfw"
 )
@@ -24,35 +22,31 @@ func (t *CheckChallenge) Order() int {
 }
 
 // Check challenge results from the visa service
-func (t *CheckChallenge) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
+func (t *CheckChallenge) Run(state *testfw.TestState) *testfw.RunResult {
 	mockNode, err := state.GetNode()
 	if err != nil {
-		return err
+		return testfw.RunFailsFatal(err)
 	}
 	resp, err := mockNode.Hello()
 	if err != nil {
-		return err
+		return testfw.Faile(err)
 	}
 
 	if resp.SessionID == 0 {
-		ctest.Failedm("session id is zero")
-		return nil
+		return testfw.Fail("session id is zero")
 	}
 	if resp.Challenge == nil {
-		ctest.Failedm("challenge is nil")
-		return nil
+		return testfw.Fail("challenge is nil")
 	}
 	if resp.Challenge.ChallengeType != vsapi.CHALLENGE_TYPE_HMAC_SHA256 {
-		ctest.Failedm(fmt.Sprintf("unexpected challenge type: expected %d, got %d",
+		return testfw.Failf("unexpected challenge type: expected %d, got %d",
 			vsapi.CHALLENGE_TYPE_HMAC_SHA256,
-			resp.Challenge.ChallengeType))
-		return nil
+			resp.Challenge.ChallengeType)
 	}
 	if len(resp.Challenge.ChallengeData) < MinChallengeNonceSize {
-		ctest.Failedm(fmt.Sprintf("challenge data is too short: expected at least %d bytes, got %d",
+		return testfw.Failf("challenge data is too short: expected at least %d bytes, got %d",
 			MinChallengeNonceSize,
-			len(resp.Challenge.ChallengeData)))
-		return nil
+			len(resp.Challenge.ChallengeData))
 	}
 	zeroCount := 0
 	for _, b := range resp.Challenge.ChallengeData {
@@ -61,9 +55,7 @@ func (t *CheckChallenge) Run(state *testfw.TestState, ctest *testfw.TestRun) err
 		}
 	}
 	if zeroCount == len(resp.Challenge.ChallengeData) {
-		ctest.Failedm("challenge data is all zeros")
-		return nil
+		return testfw.Fail("challenge data is all zeros")
 	}
-	ctest.Passed()
-	return nil
+	return testfw.Ok()
 }

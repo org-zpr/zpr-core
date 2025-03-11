@@ -21,36 +21,32 @@ func (t *AuthorizeConnect) Order() int {
 	return 200
 }
 
-func (t *AuthorizeConnect) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
+func (t *AuthorizeConnect) Run(state *testfw.TestState) *testfw.RunResult {
 	// If we don't have an API key in state, run the accept-valid-auth test.
 	node, err := state.GetNode()
 	if err != nil {
-		return err
+		return testfw.RunFailsFatal(err)
 	}
 	if !node.HasApiKey() {
 		_, err := connectNodeAndGetApiKey(state)
 		if err != nil {
-			ctest.Failed(err)
-			return nil
+			return testfw.Faile(err)
 		}
 		state.Pause()
 	}
 	if !node.HasApiKey() {
-		ctest.Failedm("unable to get an API key from node")
-		return nil
+		return testfw.Fail("unable to get an API key from node")
 	}
 
 	policy, err := state.GetOrLoadPolicy(true)
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 
 	// Pick a non-node, non-provider to connect as.
 	connects := plc.GetConnects(policy)
 	if connects == nil {
-		ctest.Failedm("cannot find any authorized connectors in policy")
-		return nil
+		return testfw.Fail("cannot find any authorized connectors in policy")
 	}
 
 	var candidate *plc.ConnectRec
@@ -78,22 +74,18 @@ func (t *AuthorizeConnect) Run(state *testfw.TestState, ctest *testfw.TestRun) e
 		panic("expecting a node in policy")
 	}
 	if candidate == nil {
-		ctest.Failedm("cannot find any non-node, non-provider in policy")
-		return nil
+		return testfw.Fail("cannot find any non-node, non-provider in policy")
 	}
 
 	agent, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextAdapterAddr())
 	if err != nil {
-		ctest.Failedm(fmt.Sprintf("failed to connect adapter (CN='%v'): %v", candidate.CN, err))
-		return nil
+		return testfw.Fail(fmt.Sprintf("failed to connect adapter (CN='%v'): %v", candidate.CN, err))
 	}
 
 	// TODO: Check the agent.
 	if agent == nil {
-		ctest.Failedm("authorize-connect did not return an agent")
-		return nil
+		return testfw.Fail("authorize-connect did not return an agent")
 	}
 
-	ctest.Passed()
-	return nil
+	return testfw.Ok()
 }

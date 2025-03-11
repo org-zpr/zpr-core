@@ -1,8 +1,6 @@
 package tests
 
 import (
-	"fmt"
-
 	"zpr.org/vst/pkg/testfw"
 )
 
@@ -20,59 +18,50 @@ func (t *AdminListVisas) Order() int {
 	return 100
 }
 
-func (t *AdminListVisas) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
+func (t *AdminListVisas) Run(state *testfw.TestState) *testfw.RunResult {
 	admin, err := state.GetAdminClient()
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 
 	// Just test the API call, we don't know how many visas there are.  Probably zero.
 	vlist, err := admin.ListVisas()
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 
 	// Remove any visas in there.
 	for _, v := range vlist {
 		if err := admin.RevokeVisa(v.VisaId); err != nil {
-			ctest.Failed(err)
-			return nil
+			return testfw.Faile(err)
 		}
 	}
 
 	{
 		vlist, err := admin.ListVisas()
 		if err != nil {
-			ctest.Failed(err)
-			return nil
+			return testfw.Faile(err)
 		}
 		if len(vlist) != 0 {
-			ctest.Failedm("visa list not empty after delete")
-			return nil
+			return testfw.Fail("visa list not empty after delete")
 		}
 	}
 
 	// Connect the node (should generate 2 visas)
 	if err := reconnectNode(state); err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 	state.Pause()
 
 	{
 		vlist, err := admin.ListVisas()
 		if err != nil {
-			ctest.Failed(err)
-			return nil
+			return testfw.Faile(err)
 		}
 		if len(vlist) != 2 {
-			ctest.Failedm(fmt.Sprintf("expected 2 new visas, found %d", len(vlist)))
-			return nil
+			return testfw.Failf("expected 2 new visas, found %d", len(vlist))
 		}
 	}
 
-	ctest.Passed()
-	return nil
+	return testfw.Ok()
 }

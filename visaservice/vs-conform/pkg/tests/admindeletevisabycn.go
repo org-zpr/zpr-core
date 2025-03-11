@@ -24,41 +24,37 @@ func (t *AdminDeleteVisasByCN) Order() int {
 	return 100
 }
 
-func (t *AdminDeleteVisasByCN) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
+func (t *AdminDeleteVisasByCN) Run(state *testfw.TestState) *testfw.RunResult {
 	// Connect/Reconnect the node
 	if err := reconnectNode(state); err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 	state.Pause()
 
 	admin, err := state.GetAdminClient()
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 
 	// List hosts, just to test interface
 	origActors, err := admin.ListActors()
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 
 	// Attempt a delete for a non-existent CN. Should return zero count, not an error
 	if rr, err := admin.RevokeActor("foo.baz"); err == nil {
 		if rr.Count != 0 {
-			ctest.Failedm(fmt.Sprintf("expected zero count for non-existent CN, got %d", rr.Count))
-			return nil
+			return testfw.Failf("expected zero count for non-existent CN, got %d", rr.Count)
 		}
 	} else {
-		ctest.Failedm(fmt.Sprintf("unexpected error returned when deleting non-existent CN: %v", err))
-		return nil
+		return testfw.Failf("unexpected error returned when deleting non-existent CN: %v", err)
+
 	}
 
 	node, err := state.GetNode()
 	if err != nil {
-		return fmt.Errorf("state failed to return node: %w", err)
+		return testfw.RunFailsFatal(fmt.Errorf("state failed to return node: %w", err))
 	}
 
 	// Use policy to find a service and an adapter we can use to try to get a visa
@@ -66,20 +62,17 @@ func (t *AdminDeleteVisasByCN) Run(state *testfw.TestState, ctest *testfw.TestRu
 
 	policy, err := state.GetOrLoadPolicy(true)
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 	cpair, err := findCommunicatingPair(policy)
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 
 	// Ensure that the actor is not already known to the visa service.
 	for _, actor := range origActors {
 		if actor.Cn == cpair.Client.CN {
-			ctest.Failedm(fmt.Sprintf("actor already present in the visa service: %v", actor.Cn))
-			return nil
+			return testfw.Failf("actor already present in the visa service: %v", actor.Cn)
 		}
 	}
 
@@ -87,8 +80,7 @@ func (t *AdminDeleteVisasByCN) Run(state *testfw.TestState, ctest *testfw.TestRu
 	state.Log.Infow("connecting a service", "endpoint", cpair.CommEndpoint)
 	svcAgnt, err := connectAdapter(node, cpair.Service, cpair.DockAddr, state.GetNextAdapterAddr())
 	if err != nil {
-		ctest.Failed(fmt.Errorf("failed to connect service: %w", err))
-		return nil
+		return testfw.Failf("failed to connect service: %w", err)
 	}
 	state.Pause()
 
@@ -96,31 +88,26 @@ func (t *AdminDeleteVisasByCN) Run(state *testfw.TestState, ctest *testfw.TestRu
 	state.Log.Infow("connecting a client", "CN", cpair.Client.CN)
 	cliAgnt, err := connectAdapter(node, cpair.Client, cpair.DockAddr, state.GetNextAdapterAddr())
 	if err != nil {
-		ctest.Failed(fmt.Errorf("failed to connect client (CN='%v'): %w", cpair.Client.CN, err))
-		return nil
+		return testfw.Failf("failed to connect client (CN='%v'): %w", cpair.Client.CN, err)
 	}
 	state.Pause()
 
 	// Check that we have a new CN in the visa service
 	newActors, err := admin.ListActors()
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 	if len(newActors) <= len(origActors) {
-		ctest.Failedm(fmt.Sprintf("expected more actors after connect, got %d", len(newActors)))
-		return nil
+		return testfw.Failf("expected more actors after connect, got %d", len(newActors))
 	}
 
 	// Request a visa:
 	vresp, err := requestVisa(cliAgnt, svcAgnt, cpair.CommEndpoint, state)
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 	if vresp.Status != vsapi.StatusCode_SUCCESS {
-		ctest.Failed(fmt.Errorf("visa request failed: %v", vresp.Reason))
-		return nil
+		return testfw.Failf("visa request failed: %v", vresp.Reason)
 	}
 	state.Pause()
 
@@ -129,8 +116,7 @@ func (t *AdminDeleteVisasByCN) Run(state *testfw.TestState, ctest *testfw.TestRu
 
 	origVisas, err := admin.ListVisas()
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 	matched := 0
 	for _, vdesc := range origVisas {
@@ -139,26 +125,21 @@ func (t *AdminDeleteVisasByCN) Run(state *testfw.TestState, ctest *testfw.TestRu
 		}
 	}
 	if matched < 1 {
-		ctest.Failedm(fmt.Sprintf("visa %d not returned in visa list call", vresp.Visa.IssuerID))
-		return nil
+		return testfw.Failf("visa %d not returned in visa list call", vresp.Visa.IssuerID)
 	}
 
 	rr, err := admin.RevokeActor(cpair.Client.CN)
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 	if rr.Revoked != cpair.Client.CN {
-		ctest.Failedm(fmt.Sprintf("expected CN %s in response, got %s", cpair.Client.CN, rr.Revoked))
-		return nil
+		return testfw.Failf("expected CN %s in response, got %s", cpair.Client.CN, rr.Revoked)
 	}
 	if rr.Count != uint32(matched) {
-		ctest.Failedm(fmt.Sprintf("expected to remove %d visas, got %d", matched, rr.Count))
-		return nil
+		return testfw.Failf("expected to remove %d visas, got %d", matched, rr.Count)
 	}
 
-	ctest.Passed()
-	return nil
+	return testfw.Ok()
 }
 
 func requestVisa(sourceAgent, destAgent *vsapi.Agent, commEndpoint *polio.Scope, state *testfw.TestState) (*vsapi.VisaResponse, error) {

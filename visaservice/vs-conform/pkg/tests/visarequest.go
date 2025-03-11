@@ -26,34 +26,30 @@ func (t *VisaRequest) Order() int {
 }
 
 // Connect node, then a client and a service and send in a visa request which should then be granted.
-func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
+func (t *VisaRequest) Run(state *testfw.TestState) *testfw.RunResult {
 	node, err := state.GetNode()
 	if err != nil {
-		return err
+		return testfw.RunFailsFatal(err)
 	}
 	if !node.HasApiKey() {
 		_, err := connectNodeAndGetApiKey(state)
 		if err != nil {
-			ctest.Failed(err)
-			return nil
+			return testfw.Faile(err)
 		}
 		if !node.HasApiKey() {
-			ctest.Failedm("unable to get an API key from node")
-			return nil
+			return testfw.Fail("unable to get an API key from node")
 		}
 		state.Pause()
 	}
 
 	policy, err := state.GetOrLoadPolicy(true)
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 
 	cpair, err := findCommunicatingPair(policy)
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 
 	// TODO: Figure out what attributes our client needs in order to talk to service.
@@ -62,8 +58,7 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 	state.Log.Infow("connecting a service", "endpoint", cpair.CommEndpoint)
 	svcAgnt, err := connectAdapter(node, cpair.Service, cpair.DockAddr, state.GetNextAdapterAddr())
 	if err != nil {
-		ctest.Failed(fmt.Errorf("failed to connect service: %w", err))
-		return nil
+		return testfw.Faile(fmt.Errorf("failed to connect service: %w", err))
 	}
 	state.Pause()
 
@@ -71,8 +66,7 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 	state.Log.Infow("connecting a client", "CN", cpair.Client.CN)
 	cliAgnt, err := connectAdapter(node, cpair.Client, cpair.DockAddr, state.GetNextAdapterAddr())
 	if err != nil {
-		ctest.Failed(fmt.Errorf("failed to connect client (CN='%v'): %w", cpair.Client.CN, err))
-		return nil
+		return testfw.Faile(fmt.Errorf("failed to connect client (CN='%v'): %w", cpair.Client.CN, err))
 	}
 	state.Pause()
 
@@ -85,29 +79,24 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 	{
 		pkt, l3t, err := packets.GeneratePacket(sourceAddr, destAddr, cpair.CommEndpoint)
 		if err != nil {
-			ctest.Failed(err)
-			return nil
+			return testfw.Faile(err)
 		}
 
 		vresp, err := node.RequestVisa(node.GetAPIKey(), sourceAddr, l3t, pkt)
 		if err != nil {
-			ctest.Failed(err)
-			return nil
+			return testfw.Faile(err)
 		}
 
 		if vresp.Status != vsapi.StatusCode_SUCCESS {
-			ctest.Failed(fmt.Errorf("visa request failed: %v", vresp.Reason))
-			return nil
+			return testfw.Faile(fmt.Errorf("visa request failed: %v", vresp.Reason))
 		}
 
 		if vresp.Visa == nil {
-			ctest.Failedm("visa service returns nil visa")
-			return nil
+			return testfw.Fail("visa service returns nil visa")
 		}
 
 		if vresp.Visa.IssuerID <= 0 {
-			ctest.Failedm(fmt.Sprintf("visa service returns invalid issuer id: %d", vresp.Visa.IssuerID))
-			return nil
+			return testfw.Failf("visa service returns invalid issuer id: %d", vresp.Visa.IssuerID)
 		}
 	}
 
@@ -117,25 +106,21 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 		state.Log.Infow("preparing visa request with invalid port", "source", sourceAddr, "dest", destAddr, "comm_endpoint", badEp)
 		pkt, l3t, err := packets.GeneratePacket(sourceAddr, destAddr, badEp)
 		if err != nil {
-			ctest.Failed(err)
-			return nil
+			return testfw.Faile(err)
 		}
 
 		vresp, err := node.RequestVisa(node.GetAPIKey(), sourceAddr, l3t, pkt)
 		if err != nil {
-			ctest.Failed(err)
-			return nil
+			return testfw.Faile(err)
 		}
 
 		if vresp.Status == vsapi.StatusCode_SUCCESS {
-			ctest.Failed(fmt.Errorf("visa request for invalid port succeeded"))
-			return nil
+			return testfw.Faile(fmt.Errorf("visa request for invalid port succeeded"))
 		}
 	}
 
 	// TODO: check other visa aspects.
-	ctest.Passed()
-	return nil
+	return testfw.Ok()
 }
 
 func findTCPEndpoint(service *plc.ConnectRec, policy *polio.Policy) (*polio.Scope, *polio.CPolicy) {

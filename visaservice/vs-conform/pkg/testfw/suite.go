@@ -25,21 +25,21 @@ func RunTests(tests []Tester, vsAddr, adminAddr netip.AddrPort, nodeCert *x509.C
 	return card, nil
 }
 
+// Runs a test, only returns an error if the test returns a "fatal" RunResult.
 func RunTest(test Tester, state *TestState, card *Scorecard) error {
 	state.Reset()
-	ctest := card.Start(test)
 	state.Log.Infow("running test", "test", test.Name())
-	if err := test.Run(state, ctest); err != nil {
-		// Automatically fail the test and return the error if test returns an error.
-		// Note that we do not automtically pass the test if no error is returned.
-		state.Log.Errorw("test failed", "test", test.Name(), "error", err)
-		ctest.Failed(err)
-		return err
-	}
-	if ctest.Passing() {
+	ctest := card.Start(test)
+	result := test.Run(state)
+	if result == nil || result.Success() {
+		ctest.Passed()
 		state.Log.Infow("test passed", "test", test.Name())
 	} else {
+		ctest.Failedm(result.FailReason())
 		state.Log.Errorw("test failed", "test", test.Name())
+		if result.Fatal() {
+			return result.Error()
+		}
 	}
 	return nil
 }
