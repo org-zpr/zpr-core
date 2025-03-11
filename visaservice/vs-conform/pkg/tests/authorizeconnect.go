@@ -1,6 +1,8 @@
 package tests
 
 import (
+	"fmt"
+
 	"zpr.org/vst/pkg/plc"
 	"zpr.org/vst/pkg/testfw"
 )
@@ -78,7 +80,7 @@ func (t *AuthorizeConnect) Run(state *testfw.TestState, ctest *testfw.TestRun) e
 
 	agent, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextAdapterAddr())
 	if err != nil {
-		ctest.Failed(err)
+		ctest.Failedm(fmt.Sprintf("failed to connect adapter: %v", err))
 		return nil
 	}
 

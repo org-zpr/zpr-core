@@ -36,7 +36,7 @@ func (t *AdminListVisas) Run(state *testfw.TestState, ctest *testfw.TestRun) err
 
 	// Remove any visas in there.
 	for _, v := range vlist {
-		if err := admin.DeleteVisa(v.VisaId); err != nil {
+		if err := admin.RevokeVisa(v.VisaId); err != nil {
 			ctest.Failed(err)
 			return nil
 		}

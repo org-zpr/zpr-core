@@ -11,7 +11,71 @@ import (
 	"zpr.org/vst/pkg/plc"
 	"zpr.org/vst/pkg/testfw"
 	"zpr.org/vst/pkg/zcrypt"
+	"zpr.org/vsx/polio"
 )
+
+type CommunicatingPair struct {
+	CommPol      *polio.CPolicy
+	CommEndpoint *polio.Scope
+	DockAddr     netip.Addr
+	Service      *plc.ConnectRec
+	Client       *plc.ConnectRec
+}
+
+func findCommunicatingPair(policy *polio.Policy) (*CommunicatingPair, error) {
+	// Pick a non-node, non-provider to connect as.
+	connects := plc.GetConnects(policy)
+	if connects == nil {
+		return nil, fmt.Errorf("cannot find any authorized connectors in policy")
+	}
+
+	var candidate *plc.ConnectRec
+	var nodeCR *plc.ConnectRec
+	var service *plc.ConnectRec
+	var svcEndpoint *polio.Scope
+	var commPol *polio.CPolicy
+	for _, connect := range connects {
+		if connect.IsNode() {
+			if nodeCR != nil {
+				panic("expecting only one node in policy")
+			}
+			nodeCR = connect
+			continue
+		}
+		if connect.IsVisaService() {
+			continue
+		}
+		if len(connect.Provides) > 0 {
+			if service == nil {
+				if ep, cpol := findTCPEndpoint(connect, policy); ep != nil {
+					svcEndpoint = ep
+					commPol = cpol
+					service = connect
+				}
+				continue
+			}
+		} else if candidate == nil {
+			candidate = connect
+		}
+	}
+	if nodeCR == nil {
+		panic("expecting a node in policy")
+	}
+	if candidate == nil {
+		return nil, fmt.Errorf("cannot find any non-node, non-provider in policy")
+	}
+	if service == nil {
+		return nil, fmt.Errorf("cannot find a suitable (TCP) service for visa request testing")
+	}
+
+	return &CommunicatingPair{
+		CommPol:      commPol,
+		CommEndpoint: svcEndpoint,
+		DockAddr:     nodeCR.Addr,
+		Service:      service,
+		Client:       candidate,
+	}, nil
+}
 
 func reconnectNode(state *testfw.TestState) error {
 	mockNode, err := state.GetNode()
@@ -113,7 +177,7 @@ func connectAdapter(node *mocks.Node, crec *plc.ConnectRec, dockAddr, zprAddr ne
 		return nil, fmt.Errorf("connection id mismatch: expected %d, got %d", cid, cresp.ConnectionID)
 	}
 	if cresp.Status != vsapi.StatusCode_SUCCESS {
-		return nil, fmt.Errorf("status not success: %d (%s): %v", cresp.Status, cresp.Status, cresp.Reason)
+		return nil, fmt.Errorf("status not success: %d (%s): %s", cresp.Status, cresp.Status, cresp.GetReason())
 	}
 
 	// TODO: Check the agent.

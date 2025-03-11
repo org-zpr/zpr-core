@@ -34,7 +34,7 @@ func (t *AdminDeleteVisas) Run(state *testfw.TestState, ctest *testfw.TestRun) e
 	} else {
 		// Remove any visas in there.
 		for _, v := range vlist {
-			if err := admin.DeleteVisa(v.VisaId); err != nil {
+			if err := admin.RevokeVisa(v.VisaId); err != nil {
 				ctest.Failed(err)
 				return nil
 			}
@@ -50,7 +50,7 @@ func (t *AdminDeleteVisas) Run(state *testfw.TestState, ctest *testfw.TestRun) e
 	}
 
 	// Attempt a delete for a non-existent visa
-	if err := admin.DeleteVisa(12345); err != nil {
+	if err := admin.RevokeVisa(12345); err != nil {
 		// good.
 	} else {
 		ctest.Failedm("expected error returned when deleting non-existent visa")
@@ -81,7 +81,7 @@ func (t *AdminDeleteVisas) Run(state *testfw.TestState, ctest *testfw.TestRun) e
 		vids = append(vids, v.VisaId)
 	}
 	deleteId := vids[0]
-	if err := admin.DeleteVisa(deleteId); err != nil {
+	if err := admin.RevokeVisa(deleteId); err != nil {
 		ctest.Failedm(fmt.Sprintf("failed attempt to delete a visa: %v", err))
 		return nil
 	}

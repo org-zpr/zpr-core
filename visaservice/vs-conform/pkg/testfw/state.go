@@ -45,6 +45,13 @@ func (ts *TestState) Pause() {
 // Do whatever is needed to "reset" state before each test.
 // We keep many things hanging around, but we do clear any message in the VSS queues.
 func (ts *TestState) Reset() {
+	if cli, err := ts.GetAdminClient(); err == nil {
+		if n, err := cli.ClearAllRevokes(); err != nil {
+			ts.Log.Errorw("failed to clear all revokes", "error", err)
+		} else if n > 0 {
+			ts.Log.Infow("state-reset cleared revocations", "count", n)
+		}
+	}
 	if ts.node != nil {
 		ts.node.Reset()
 	}

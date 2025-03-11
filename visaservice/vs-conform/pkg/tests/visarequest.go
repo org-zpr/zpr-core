@@ -50,62 +50,17 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 		return nil
 	}
 
-	// Pick a non-node, non-provider to connect as.
-	connects := plc.GetConnects(policy)
-	if connects == nil {
-		ctest.Failedm("cannot find any authorized connectors in policy")
-		return nil
-	}
-
-	var candidate *plc.ConnectRec
-	var nodeCR *plc.ConnectRec
-	var service *plc.ConnectRec
-	var svcEndpoint *polio.Scope
-	var commPol *polio.CPolicy
-	for _, connect := range connects {
-		if connect.IsNode() {
-			if nodeCR != nil {
-				panic("expecting only one node in policy")
-			}
-			nodeCR = connect
-			continue
-		}
-		if connect.IsVisaService() {
-			continue
-		}
-		if len(connect.Provides) > 0 {
-			if service == nil {
-				if ep, cpol := findTCPEndpoint(connect, policy); ep != nil {
-					svcEndpoint = ep
-					commPol = cpol
-					service = connect
-				}
-				continue
-			}
-		} else if candidate == nil {
-			candidate = connect
-		}
-	}
-	if nodeCR == nil {
-		panic("expecting a node in policy")
-	}
-	if candidate == nil {
-		ctest.Failedm("cannot find any non-node, non-provider in policy")
-		return nil
-	}
-	if service == nil {
-		ctest.Failedm("cannot find a suitable (TCP) service for visa request testing")
+	cpair, err := findCommunicatingPair(policy)
+	if err != nil {
+		ctest.Failed(err)
 		return nil
 	}
 
 	// TODO: Figure out what attributes our client needs in order to talk to service.
 	//       Then ensure those attributes are present.
 
-	// Connect the service:
-	commEndpoint := svcEndpoint
-
-	state.Log.Infow("connecting a service", "endpoint", commEndpoint)
-	svcAgnt, err := connectAdapter(node, service, nodeCR.Addr, state.GetNextAdapterAddr())
+	state.Log.Infow("connecting a service", "endpoint", cpair.CommEndpoint)
+	svcAgnt, err := connectAdapter(node, cpair.Service, cpair.DockAddr, state.GetNextAdapterAddr())
 	if err != nil {
 		ctest.Failed(fmt.Errorf("failed to connect service: %w", err))
 		return nil
@@ -113,8 +68,8 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 	state.Pause()
 
 	// Connect the client:
-	state.Log.Infow("connecting a client", "CN", candidate.CN)
-	cliAgnt, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextAdapterAddr())
+	state.Log.Infow("connecting a client", "CN", cpair.Client.CN)
+	cliAgnt, err := connectAdapter(node, cpair.Client, cpair.DockAddr, state.GetNextAdapterAddr())
 	if err != nil {
 		ctest.Failed(fmt.Errorf("failed to connect client: %w", err))
 		return nil
@@ -125,10 +80,10 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 	sourceAddr, _ := netip.AddrFromSlice(cliAgnt.ZprAddr)
 	destAddr, _ := netip.AddrFromSlice(svcAgnt.ZprAddr)
 
-	state.Log.Infow("preparing visa request", "source", sourceAddr, "dest", destAddr, "comm_endpoint", commEndpoint)
+	state.Log.Infow("preparing visa request", "source", sourceAddr, "dest", destAddr, "comm_endpoint", cpair.CommEndpoint)
 
 	{
-		pkt, l3t, err := packets.GeneratePacket(sourceAddr, destAddr, commEndpoint)
+		pkt, l3t, err := packets.GeneratePacket(sourceAddr, destAddr, cpair.CommEndpoint)
 		if err != nil {
 			ctest.Failed(err)
 			return nil
@@ -158,7 +113,7 @@ func (t *VisaRequest) Run(state *testfw.TestState, ctest *testfw.TestRun) error 
 
 	// Now generate a packet between the valid hosts but use incorrect port.
 	{
-		badEp := plc.GenEndpointNotInScope(packets.ProtocolTCP, commPol.Scope)
+		badEp := plc.GenEndpointNotInScope(packets.ProtocolTCP, cpair.CommPol.Scope)
 		state.Log.Infow("preparing visa request with invalid port", "source", sourceAddr, "dest", destAddr, "comm_endpoint", badEp)
 		pkt, l3t, err := packets.GeneratePacket(sourceAddr, destAddr, badEp)
 		if err != nil {
