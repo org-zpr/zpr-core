@@ -8,9 +8,8 @@ use std::net::Ipv6Addr;
 use crate::config_api::{ConfigApi, ConfigItem};
 use crate::errors::CompilationError;
 use crate::fabric_util::{squash_attributes, vec_to_attributes};
-use crate::lex::Token;
 use crate::protocols::{IanaProtocol, Protocol};
-use crate::ptypes::Attribute;
+use crate::ptypes::{Attribute, FPos};
 use crate::zpl;
 
 /// A service oriented view of the network.
@@ -57,10 +56,13 @@ pub struct FabricNode {
 
 #[derive(Debug, Clone, Default)]
 pub struct ClientPolicy {
-    pub access_only: bool, // If true, this policy is only for access, not for setting up a connection
-    pub condition: Vec<Attribute>, // List of attributes that must be met for the policy to apply
-                           // TODO: withouts, constraints, etc.
-                           //       Actually, withouts are just attributes, eg (role, ne, marketing)
+    /// If true, this policy is only for access, not for setting up a connection
+    pub access_only: bool,
+
+    /// List of attributes that must be met for the policy to apply
+    pub condition: Vec<Attribute>,
+    // TODO: withouts, constraints, etc.
+    //       Actually, withouts are just attributes, eg (role, ne, marketing)
 }
 
 /// Debugging output
@@ -261,7 +263,7 @@ impl Fabric {
         node_attrs.push(Attribute::attr(zpl::ZPR_ADDR_ATTR, &naddr.to_string()));
 
         // Note that we do not have line/col info from the config file.
-        let attr_map = squash_attributes(&node_attrs, &Token::default())?;
+        let attr_map = squash_attributes(&node_attrs, &FPos::default())?;
         let provider_attrs = attr_map.into_values().collect::<Vec<Attribute>>();
 
         let fabn = FabricNode {

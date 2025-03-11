@@ -11,6 +11,7 @@ use toml::Table;
 use crate::crypto::sha256;
 use crate::errors::CompilationError;
 use crate::protocols::{self, IanaProtocol, IcmpFlowType, Protocol};
+use crate::ptypes::Attribute;
 use crate::zpl;
 
 /// Helper to create a ConfigError. Works with a single string (or &str) argument
@@ -102,8 +103,8 @@ pub struct TrustedService {
     pub api: String,
     pub cert_path: Option<PathBuf>,
     pub prefix: String,
-    pub returns_attrs: Vec<String>,
-    pub identity_attrs: Vec<String>,
+    pub returns_attrs: Vec<Attribute>,
+    pub identity_attrs: Vec<Attribute>,
 }
 
 impl Config {
@@ -496,13 +497,34 @@ fn parse_trusted_service(ts_id: &str, ts: &Table) -> Result<TrustedService, Comp
         returns_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
         identity_attrs = vec![zpl::DEFAULT_ATTR.to_string()];
     }
+
+    // We have a simple way to specify tags in the config toml: prefix name with hash '#'.
+    // TODO: Need a notation for multi-valued attributes.
+
+    let mut returns = Vec::new();
+    for ra in &returns_attrs {
+        if ra.starts_with("#") {
+            returns.push(Attribute::tag(&ra[1..]));
+        } else {
+            returns.push(Attribute::attr_name_only(ra));
+        }
+    }
+
+    let mut idents = Vec::new();
+    for ra in &identity_attrs {
+        if ra.starts_with("#") {
+            return Err(err_config!("identity attribute cannot be a tag: '{}'", ra));
+        }
+        idents.push(Attribute::attr_name_only(ra));
+    }
+
     Ok(TrustedService {
         id: ts_id.to_string(),
         api,
         cert_path,
         prefix,
-        returns_attrs,
-        identity_attrs,
+        returns_attrs: returns,
+        identity_attrs: idents,
     })
 }
 
@@ -876,9 +898,9 @@ mod test {
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.prefix, zpl::DEFAULT_TS_PREFIX);
         assert_eq!(ts.returns_attrs.len(), 1);
-        assert!(ts.returns_attrs.contains(&"cn".to_string()));
+        assert!(ts.returns_attrs[0].zpl_key() == "cn");
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs.contains(&"cn".to_string()));
+        assert!(ts.identity_attrs[0].zpl_key() == "cn");
     }
 
     #[test]
@@ -915,10 +937,17 @@ mod test {
         assert_eq!(ts.cert_path, Some(PathBuf::from("foo.pem")));
         assert_eq!(ts.prefix, "bar.hop");
         assert_eq!(ts.returns_attrs.len(), 2);
-        assert!(ts.returns_attrs.contains(&"a".to_string()));
-        assert!(ts.returns_attrs.contains(&"c".to_string()));
+        {
+            let attr_names = ts
+                .returns_attrs
+                .iter()
+                .map(|a| a.zpl_key())
+                .collect::<Vec<String>>();
+            assert!(attr_names.contains(&"a".to_string()));
+            assert!(attr_names.contains(&"c".to_string()));
+        }
         assert_eq!(ts.identity_attrs.len(), 1);
-        assert!(ts.identity_attrs.contains(&"c".to_string()));
+        assert!(ts.identity_attrs[0].zpl_key() == "c");
     }
 
     #[test]
