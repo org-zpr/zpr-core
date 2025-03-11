@@ -14,8 +14,8 @@ func (t *AdminDeleteVisas) Name() string {
 	return "AdminDeleteVisas"
 }
 
-func (t *AdminDeleteVisas) Order() int {
-	return 100
+func (t *AdminDeleteVisas) Order() testfw.Order {
+	return testfw.OrderEarlier
 }
 
 func (t *AdminDeleteVisas) Run(state *testfw.TestState) *testfw.RunResult {

@@ -7,7 +7,7 @@ import (
 
 type Registration struct {
 	test  Tester
-	order int
+	order Order
 }
 
 var Registry = make(map[string]*Registration)

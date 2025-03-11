@@ -17,8 +17,8 @@ func (t *CheckChallenge) Name() string {
 	return "CheckChallenge"
 }
 
-func (t *CheckChallenge) Order() int {
-	return 50
+func (t *CheckChallenge) Order() testfw.Order {
+	return testfw.OrderFirst
 }
 
 // Check challenge results from the visa service

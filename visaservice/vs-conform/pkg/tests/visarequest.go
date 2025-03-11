@@ -21,8 +21,8 @@ func (t *VisaRequest) Name() string {
 	return "VisaRequest"
 }
 
-func (t *VisaRequest) Order() int {
-	return 1000
+func (t *VisaRequest) Order() testfw.Order {
+	return testfw.OrderLater
 }
 
 // Connect node, then a client and a service and send in a visa request which should then be granted.

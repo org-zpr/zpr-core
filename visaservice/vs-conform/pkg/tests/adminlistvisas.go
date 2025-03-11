@@ -14,8 +14,8 @@ func (t *AdminListVisas) Name() string {
 	return "AdminListVisas"
 }
 
-func (t *AdminListVisas) Order() int {
-	return 100
+func (t *AdminListVisas) Order() testfw.Order {
+	return testfw.OrderEarlier
 }
 
 func (t *AdminListVisas) Run(state *testfw.TestState) *testfw.RunResult {

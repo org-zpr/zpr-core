@@ -14,8 +14,8 @@ func (t *GetCurrentPolicy) Name() string {
 	return "GetCurrentPolicy"
 }
 
-func (t *GetCurrentPolicy) Order() int {
-	return 50
+func (t *GetCurrentPolicy) Order() testfw.Order {
+	return testfw.OrderFirst
 }
 
 // If this works, it stores the current policy in the state.

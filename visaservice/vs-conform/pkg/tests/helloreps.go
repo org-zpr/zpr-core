@@ -16,8 +16,8 @@ func (hr *HelloReps) Name() string {
 	return "HelloReps"
 }
 
-func (t *HelloReps) Order() int {
-	return 200
+func (t *HelloReps) Order() testfw.Order {
+	return testfw.OrderDontCare
 }
 
 // Send a bunch of hello messages in

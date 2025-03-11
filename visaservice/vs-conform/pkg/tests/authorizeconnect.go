@@ -17,8 +17,8 @@ func (t *AuthorizeConnect) Name() string {
 	return "AuthorizeConnect"
 }
 
-func (t *AuthorizeConnect) Order() int {
-	return 200
+func (t *AuthorizeConnect) Order() testfw.Order {
+	return testfw.OrderEarlier
 }
 
 func (t *AuthorizeConnect) Run(state *testfw.TestState) *testfw.RunResult {

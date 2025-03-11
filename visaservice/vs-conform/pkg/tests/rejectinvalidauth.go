@@ -15,8 +15,8 @@ func (t *RejectInvalidAuth) Name() string {
 	return "RejectInvalidAuth"
 }
 
-func (t *RejectInvalidAuth) Order() int {
-	return 100
+func (t *RejectInvalidAuth) Order() testfw.Order {
+	return testfw.OrderDontCare
 }
 
 // Send back a challenge response that is clearly not valid.

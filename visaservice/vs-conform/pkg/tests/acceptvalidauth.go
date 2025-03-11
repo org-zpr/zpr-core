@@ -19,8 +19,8 @@ func (t *AcceptValidAuth) Name() string {
 	return "AcceptValidAuth"
 }
 
-func (t *AcceptValidAuth) Order() int {
-	return 200
+func (t *AcceptValidAuth) Order() testfw.Order {
+	return testfw.OrderDontCare
 }
 
 // Run a valid auth.
