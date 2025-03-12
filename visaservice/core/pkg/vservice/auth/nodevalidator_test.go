@@ -60,7 +60,7 @@ C0XJkkc8hwxl0UP1TtZKdxqdUQ==
 
 	// Here is the cert from the certificate authority.
 	caCertPEM = `
-	-----BEGIN CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
 MIIDrzCCApegAwIBAgIUWP3IYu6Y6KOuRHEVs06y8yML+JIwDQYJKoZIhvcNAQEL
 BQAwZzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAktZMRMwEQYDVQQHDApMb3Vpc3Zp
 bGxlMQswCQYDVQQKDAJBSTEMMAoGA1UECwwDWlBSMRswGQYDVQQDDBJjYTEuc3Bh
@@ -221,7 +221,6 @@ func (tdb *TCertDB) GetCertificate(id uint32) (*x509.Certificate, string, error)
 }
 
 func TestJWTCreateOneCert(t *testing.T) {
-	t.Skip("skipping until we replace the certificates in here which are expired")
 	pk, err := snauth.LoadRSAKeyFromPEM([]byte(nodePrivateKeyPEM))
 	if err != nil {
 		panic(err)
@@ -286,8 +285,9 @@ func TestJWTCreateOneCert(t *testing.T) {
 	require.Nil(t, err)
 
 	require.Equal(t, float64(1), jwtClaims["xsnz"])
-	require.Equal(t, "cert:x509:auth0.internal", jwtClaims["xsna.0"])
-	require.Equal(t, "3A:ED:61:17:C3:19:52:E5:32:AF:47:88:2D:5F:A8:78:96:11:FE:B2", jwtClaims["xsnc.0"])
+	require.Equal(t, "cert:x509:ca1.spacelaser.net", jwtClaims["xsna.0"])
+	require.Equal(t, "59:E7:DA:B7:4A:73:E9:A8:C9:AF:BE:8C:91:86:18:7D:5F:7F:94:27", jwtClaims["xsnc.0"])
+
 	require.Equal(t, "ma.hatma", jwtClaims["sub"])
 	require.Equal(t, "zpr", jwtClaims["aud"])
 	require.Equal(t, "nodename", jwtClaims["iss"])
@@ -300,7 +300,6 @@ func TestJWTCreateOneCert(t *testing.T) {
 }
 
 func TestRevokeAuthority(t *testing.T) {
-	t.Skip("skipping until we replace the certificates in here which are expired")
 	pk, err := snauth.LoadRSAKeyFromPEM([]byte(nodePrivateKeyPEM))
 	if err != nil {
 		panic(err)
@@ -370,7 +369,6 @@ func TestRevokeAuthority(t *testing.T) {
 }
 
 func TestRevokeCertificate(t *testing.T) {
-	t.Skip("skipping until we replace the certificates in here which are expired")
 	pk, err := snauth.LoadRSAKeyFromPEM([]byte(nodePrivateKeyPEM))
 	if err != nil {
 		panic(err)
