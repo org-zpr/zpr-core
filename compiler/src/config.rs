@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use ring::digest::Digest;
 use toml::Table;
 
+use crate::context::CompilationCtx;
 use crate::crypto::sha256;
 use crate::errors::CompilationError;
 use crate::protocols::{self, IanaProtocol, IcmpFlowType, Protocol};
@@ -38,6 +39,12 @@ pub struct Config {
     pub trusted_services: Vec<TrustedService>,
     pub protocols: HashMap<String, Protocol>,
     pub services: Vec<Service>,
+}
+
+/// ConfigParse holds state during a parse of the config toml.
+struct ConfigParse {
+    digest: Digest,
+    ctoml: Table,
 }
 
 /// Service table
@@ -119,107 +126,231 @@ impl Config {
 }
 
 /// Parse and do some (light) error checking on the ZPL TOML configuration.
-pub fn load_config(path: &Path) -> Result<Config, CompilationError> {
+pub fn load_config(path: &Path, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
     let cstr = std::fs::read_to_string(path).map_err(|e| CompilationError::Io(e))?;
-    parse_config(&cstr)
+    parse_config(&cstr, ctx)
 }
 
 /// Parse config from the toml string `cstr`.
-pub fn parse_config(cstr: &str) -> Result<Config, CompilationError> {
-    let digest = sha256(&cstr);
-
-    let ctoml = cstr
-        .parse::<Table>()
-        .map_err(|e| CompilationError::TomlError(e))?;
-
-    let config = Config {
-        digest,
-        resolver: parse_resolver(&ctoml)?,
-        nodes: parse_nodes(&ctoml)?,
-        visa_service: parse_visa_service(&ctoml)?,
-        trusted_services: parse_trusted_services(&ctoml)?,
-        protocols: parse_protocols(&ctoml)?,
-        services: parse_services(&ctoml)?,
-    };
-    Ok(config)
+pub fn parse_config(cstr: &str, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
+    let mut parser = ConfigParse::new_from_toml_str(cstr)?;
+    parser.parse(ctx)
 }
 
-/// Parse the resolver section which is optional.  The defualt is just
-/// to have an `resolver.order` set to [hosts, dns].  The hosts section is optional, but
-/// if present is mapping of hostnames to IP addresses.
-fn parse_resolver(ctoml: &Table) -> Result<Resolver, CompilationError> {
-    if !ctoml.contains_key("resolver") {
-        return Ok(Resolver::default());
-    }
-    let r = ctoml["resolver"]
-        .as_table()
-        .ok_or(err_config!("error reading resolver section"))?;
-    let mut order_vec = Vec::new();
-    if !r.contains_key("order") {
-        // Default order is hosts, dns
-        order_vec.push("hosts".to_string());
-        order_vec.push("dns".to_string());
-    } else {
-        let order = r["order"]
-            .as_array()
-            .ok_or(err_config!("resolver.order must be an array"))?;
-        for o in order {
-            order_vec.push(
-                o.as_str()
-                    .ok_or(err_config!("problem with order array"))?
-                    .to_string(),
-            );
-        }
+impl ConfigParse {
+    fn new_from_toml_str(cstr: &str) -> Result<ConfigParse, CompilationError> {
+        let digest = sha256(&cstr);
+
+        let ctoml = cstr
+            .parse::<Table>()
+            .map_err(|e| CompilationError::TomlError(e))?;
+
+        Ok(ConfigParse { digest, ctoml })
     }
 
-    let hosts = if r.contains_key("hosts") {
-        match r["hosts"].as_table() {
-            Some(h) => {
-                let mut hosts_map = HashMap::new();
-                for (k, v) in h {
-                    hosts_map.insert(
-                        k.to_string(),
-                        v.as_str()
-                            .ok_or(CompilationError::ConfigError(format!(
-                                "invalid hosts entry {}",
-                                k
-                            )))?
-                            .to_string(),
-                    );
-                }
-                Some(hosts_map)
+    fn parse(&mut self, ctx: &CompilationCtx) -> Result<Config, CompilationError> {
+        let resolver = self.parse_resolver()?;
+        let nodes = self.parse_nodes()?;
+        let visa_service = self.parse_visa_service(ctx)?;
+        let trusted_services = self.parse_trusted_services(ctx)?;
+        let protocols = self.parse_protocols(ctx)?;
+        let services = self.parse_services(ctx)?;
+
+        Ok(Config {
+            digest: self.digest,
+            resolver,
+            nodes,
+            visa_service,
+            trusted_services,
+            protocols,
+            services,
+        })
+    }
+
+    /// Parse the resolver section which is optional.  The defualt is just
+    /// to have an `resolver.order` set to [hosts, dns].  The hosts section is optional, but
+    /// if present is mapping of hostnames to IP addresses.
+    fn parse_resolver(&self) -> Result<Resolver, CompilationError> {
+        if !self.ctoml.contains_key("resolver") {
+            return Ok(Resolver::default());
+        }
+        let r = self.ctoml["resolver"]
+            .as_table()
+            .ok_or(err_config!("error reading resolver section"))?;
+        let mut order_vec = Vec::new();
+        if !r.contains_key("order") {
+            // Default order is hosts, dns
+            order_vec.push("hosts".to_string());
+            order_vec.push("dns".to_string());
+        } else {
+            let order = r["order"]
+                .as_array()
+                .ok_or(err_config!("resolver.order must be an array"))?;
+            for o in order {
+                order_vec.push(
+                    o.as_str()
+                        .ok_or(err_config!("problem with order array"))?
+                        .to_string(),
+                );
             }
-            None => None,
         }
-    } else {
-        None
-    };
 
-    Ok(Resolver {
-        order: order_vec,
-        hosts: hosts,
-    })
-}
+        let hosts = if r.contains_key("hosts") {
+            match r["hosts"].as_table() {
+                Some(h) => {
+                    let mut hosts_map = HashMap::new();
+                    for (k, v) in h {
+                        hosts_map.insert(
+                            k.to_string(),
+                            v.as_str()
+                                .ok_or(CompilationError::ConfigError(format!(
+                                    "invalid hosts entry {}",
+                                    k
+                                )))?
+                                .to_string(),
+                        );
+                    }
+                    Some(hosts_map)
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
 
-/// Parse all the nodes.<ID> sections. There must be at least one.
-fn parse_nodes(ctoml: &Table) -> Result<HashMap<String, Node>, CompilationError> {
-    if !ctoml.contains_key("nodes") {
-        return Err(err_config!("missing section: nodes"));
+        Ok(Resolver {
+            order: order_vec,
+            hosts: hosts,
+        })
     }
-    let nodes = ctoml["nodes"]
-        .as_table()
-        .ok_or(err_config!("error reading nodes section"))?;
-    // Within "nodes" each KEY is a node ID that is a table.
-    let mut node_map = HashMap::new();
-    for (node_id, v) in nodes {
-        let n = parse_node(
-            node_id,
-            v.as_table()
-                .ok_or(err_config!("node {} is not a table", node_id))?,
-        )?;
-        node_map.insert(node_id.to_string(), n);
+
+    /// Parse all the nodes.<ID> sections. There must be at least one.
+    fn parse_nodes(&self) -> Result<HashMap<String, Node>, CompilationError> {
+        if !self.ctoml.contains_key("nodes") {
+            return Err(err_config!("missing section: nodes"));
+        }
+        let nodes = self.ctoml["nodes"]
+            .as_table()
+            .ok_or(err_config!("error reading nodes section"))?;
+        // Within "nodes" each KEY is a node ID that is a table.
+        let mut node_map = HashMap::new();
+        for (node_id, v) in nodes {
+            let n = parse_node(
+                node_id,
+                v.as_table()
+                    .ok_or(err_config!("node {} is not a table", node_id))?,
+            )?;
+            node_map.insert(node_id.to_string(), n);
+        }
+        Ok(node_map)
     }
-    Ok(node_map)
+
+    /// Parse the very basic visa_service section.
+    fn parse_visa_service(
+        &mut self,
+        ctx: &CompilationCtx,
+    ) -> Result<VisaService, CompilationError> {
+        if !self.ctoml.contains_key("visa_service") {
+            return Err(err_config!("missing section: visa_service"));
+        }
+        let vs = self.ctoml["visa_service"]
+            .as_table()
+            .ok_or(err_config!("error reading visa_service section"))?;
+        if !vs.contains_key("dock_node") {
+            return Err(err_config!("visa_service missing dock_node"));
+        }
+        let dock_node_id = vs["dock_node"]
+            .as_str()
+            .ok_or(err_config!("visa_service missing dock_node"))?
+            .to_string();
+
+        let admin_attrs = if vs.contains_key("admin_attrs") {
+            let tuples = vs["admin_attrs"]
+                .as_array()
+                .ok_or(err_config!("visa_service missing admin_attrs list"))?;
+            tuples_to_tuple_str_vec("visa_service", tuples)?
+        } else {
+            ctx.warn("visa service has no admin_attrs")?;
+            Vec::new()
+        };
+        Ok(VisaService {
+            dock_node_id,
+            admin_attrs,
+        })
+    }
+
+    /// Parse the trusted_services.<ID> tables.  Currently I am reserving the ID of "default" for the
+    /// sort of built-in certificate authority based authentication mechanism.
+    fn parse_trusted_services(
+        &mut self,
+        ctx: &CompilationCtx,
+    ) -> Result<Vec<TrustedService>, CompilationError> {
+        if !self.ctoml.contains_key("trusted_services") {
+            ctx.warn("no trusted services in configuration")?;
+            return Ok(Vec::new());
+        }
+        let ts = self.ctoml["trusted_services"]
+            .as_table()
+            .ok_or(err_config!("error reading trusted_services section"))?;
+        let mut trusted_services = Vec::new();
+        for (ts_id, v) in ts {
+            let ts = parse_trusted_service(
+                ts_id,
+                v.as_table()
+                    .ok_or(err_config!("trusted_service {} is not a table", ts_id))?,
+            )?;
+            trusted_services.push(ts);
+        }
+        Ok(trusted_services)
+    }
+
+    /// Parse the protocols.<ID> tables.
+    fn parse_protocols(
+        &mut self,
+        ctx: &CompilationCtx,
+    ) -> Result<HashMap<String, Protocol>, CompilationError> {
+        if !self.ctoml.contains_key("protocols") {
+            ctx.warn("no protocols in configuration")?;
+            return Ok(HashMap::new());
+        }
+        let prots = self.ctoml["protocols"]
+            .as_table()
+            .ok_or(err_config!("error reading protocols section"))?;
+        let mut protocols = HashMap::new();
+        for (prot_id, v) in prots {
+            if protocols.contains_key(prot_id) {
+                return Err(err_config!("duplicate protocol id: {}", prot_id));
+            }
+            let prot = parse_protocol(
+                prot_id,
+                v.as_table()
+                    .ok_or(err_config!("protocol {} is not a table", prot_id))?,
+            )?;
+            protocols.insert(prot_id.to_string(), prot);
+        }
+        Ok(protocols)
+    }
+
+    /// Parse the services.<ID> tables
+    fn parse_services(&mut self, ctx: &CompilationCtx) -> Result<Vec<Service>, CompilationError> {
+        if !self.ctoml.contains_key("services") {
+            ctx.warn("no services in configuration")?;
+            return Ok(Vec::new());
+        }
+        let services = self.ctoml["services"]
+            .as_table()
+            .ok_or(err_config!("error reading services section"))?;
+        let mut ret = Vec::new();
+        for (sid, v) in services {
+            let s = parse_service(
+                sid,
+                v.as_table()
+                    .ok_or(err_config!("service {} is not a table", sid))?,
+            )?;
+            ret.push(s);
+        }
+        Ok(ret)
+    }
 }
 
 fn require_key(ctx: &str, table: &Table, key: &str) -> Result<(), CompilationError> {
@@ -346,37 +477,6 @@ fn parse_interface(ifname: &str, iface: &Table) -> Result<Interface, Compilation
     }
 }
 
-/// Parse the very basic visa_service section.
-fn parse_visa_service(ctoml: &Table) -> Result<VisaService, CompilationError> {
-    if !ctoml.contains_key("visa_service") {
-        return Err(err_config!("missing section: visa_service"));
-    }
-    let vs = ctoml["visa_service"]
-        .as_table()
-        .ok_or(err_config!("error reading visa_service section"))?;
-    if !vs.contains_key("dock_node") {
-        return Err(err_config!("visa_service missing dock_node"));
-    }
-    let dock_node_id = vs["dock_node"]
-        .as_str()
-        .ok_or(err_config!("visa_service missing dock_node"))?
-        .to_string();
-
-    let admin_attrs = if vs.contains_key("admin_attrs") {
-        let tuples = vs["admin_attrs"]
-            .as_array()
-            .ok_or(err_config!("visa_service missing admin_attrs list"))?;
-        tuples_to_tuple_str_vec("visa_service", tuples)?
-    } else {
-        println!("warning: visa service has no admin_attrs");
-        Vec::new()
-    };
-    Ok(VisaService {
-        dock_node_id,
-        admin_attrs,
-    })
-}
-
 fn tuples_to_tuple_str_vec(
     ctx: &str,
     tuples: &Vec<toml::Value>,
@@ -404,28 +504,6 @@ fn tuples_to_tuple_str_vec(
         svec.push((p0, p1));
     }
     Ok(svec)
-}
-
-/// Parse the trusted_services.<ID> tables.  Currently I am reserving the ID of "default" for the
-/// sort of built-in certificate authority based authentication mechanism.
-fn parse_trusted_services(ctoml: &Table) -> Result<Vec<TrustedService>, CompilationError> {
-    if !ctoml.contains_key("trusted_services") {
-        println!("warning: no trusted services in configuration");
-        return Ok(Vec::new());
-    }
-    let ts = ctoml["trusted_services"]
-        .as_table()
-        .ok_or(err_config!("error reading trusted_services section"))?;
-    let mut trusted_services = Vec::new();
-    for (ts_id, v) in ts {
-        let ts = parse_trusted_service(
-            ts_id,
-            v.as_table()
-                .ok_or(err_config!("trusted_service {} is not a table", ts_id))?,
-        )?;
-        trusted_services.push(ts);
-    }
-    Ok(trusted_services)
 }
 
 // Parse an individual trusted_service table.
@@ -547,30 +625,6 @@ fn parse_string_array(ts: &Table, key: &str, ctx: &str) -> Result<Vec<String>, C
     Ok(ret)
 }
 
-/// Parse the protocols.<ID> tables.
-fn parse_protocols(ctoml: &Table) -> Result<HashMap<String, Protocol>, CompilationError> {
-    if !ctoml.contains_key("protocols") {
-        println!("warning: no protocols in configuration");
-        return Ok(HashMap::new());
-    }
-    let prots = ctoml["protocols"]
-        .as_table()
-        .ok_or(err_config!("error reading protocols section"))?;
-    let mut protocols = HashMap::new();
-    for (prot_id, v) in prots {
-        if protocols.contains_key(prot_id) {
-            return Err(err_config!("duplicate protocol id: {}", prot_id));
-        }
-        let prot = parse_protocol(
-            prot_id,
-            v.as_table()
-                .ok_or(err_config!("protocol {} is not a table", prot_id))?,
-        )?;
-        protocols.insert(prot_id.to_string(), prot);
-    }
-    Ok(protocols)
-}
-
 /// Parse an individual protocol table.
 fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationError> {
     let protocol_name = prot["protocol"]
@@ -645,27 +699,6 @@ fn parse_protocol(prot_id: &str, prot: &Table) -> Result<Protocol, CompilationEr
         port,
         icmp,
     })
-}
-
-/// Parse the services.<ID> tables
-fn parse_services(ctoml: &Table) -> Result<Vec<Service>, CompilationError> {
-    if !ctoml.contains_key("services") {
-        println!("warning: no services in configuration");
-        return Ok(Vec::new());
-    }
-    let services = ctoml["services"]
-        .as_table()
-        .ok_or(err_config!("error reading services section"))?;
-    let mut ret = Vec::new();
-    for (sid, v) in services {
-        let s = parse_service(
-            sid,
-            v.as_table()
-                .ok_or(err_config!("service {} is not a table", sid))?,
-        )?;
-        ret.push(s);
-    }
-    Ok(ret)
 }
 
 /// Parse the very bare bones individual service table.
@@ -760,19 +793,13 @@ fn toml_as_u8(v: &toml::Value) -> Option<u8> {
 mod test {
     use super::*;
 
-    fn parse_toml(tstr: &str) -> toml::map::Map<String, toml::Value> {
-        tstr.parse::<Table>()
-            .map_err(|e| CompilationError::TomlError(e))
-            .unwrap()
-    }
-
     #[test]
     fn test_parse_resolver_empty() {
         let tstr = r#"
         [resolver]
         "#;
-        let ctoml = parse_toml(tstr);
-        let r = parse_resolver(&ctoml);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let r = cparser.parse_resolver();
         assert!(r.is_ok());
         let r = r.unwrap();
         assert_eq!(r.order.len(), 2);
@@ -790,8 +817,8 @@ mod test {
         "n0" = "1.2.3.4"
         "n1.foo" = "5.6.7.8"
         "#;
-        let ctoml = parse_toml(tstr);
-        let r = parse_resolver(&ctoml);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let r = cparser.parse_resolver();
         assert!(r.is_ok());
         let r = r.unwrap();
         assert_eq!(r.order.len(), 3);
@@ -817,8 +844,8 @@ mod test {
         eth0.netaddr = "1.2.3.4:2000"
         eth1.netaddr = "foo.addr:9000"
         "#;
-        let ctoml = parse_toml(tstr);
-        let nodes = parse_nodes(&ctoml);
+        let cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let nodes = cparser.parse_nodes();
         assert!(nodes.is_ok(), "{:?}", nodes);
         let nodes = nodes.unwrap();
         assert_eq!(nodes.len(), 1);
@@ -853,8 +880,9 @@ mod test {
         [visa_service]
         dock_node = "n0"
         "#;
-        let ctoml = parse_toml(tstr);
-        let vs = parse_visa_service(&ctoml);
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let vs = cparser.parse_visa_service(&ctx);
         assert!(vs.is_ok());
         let vs = vs.unwrap();
         assert_eq!(vs.dock_node_id, "n0");
@@ -867,8 +895,9 @@ mod test {
         dock_node = "n0"
         admin_attrs = [["cn", "foo"], ["bar", "baz"]]
         "#;
-        let ctoml = parse_toml(tstr);
-        let vs = parse_visa_service(&ctoml);
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let vs = cparser.parse_visa_service(&ctx);
         assert!(vs.is_ok());
         let vs = vs.unwrap();
         assert_eq!(vs.dock_node_id, "n0");
@@ -887,8 +916,9 @@ mod test {
         [trusted_services.default]
         cert_path = "foo.pem"
         "#;
-        let ctoml = parse_toml(tstr);
-        let services = parse_trusted_services(&ctoml);
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let services = cparser.parse_trusted_services(&ctx);
         assert!(services.is_ok());
         let services = services.unwrap();
         assert_eq!(services.len(), 1);
@@ -913,8 +943,9 @@ mod test {
         returns_attributes = ["a", "c"]
         identity_attributes = ["c"]
         "#;
-        let ctoml = parse_toml(tstr);
-        let services = parse_trusted_services(&ctoml);
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let services = cparser.parse_trusted_services(&ctx);
         assert!(services.is_err());
 
         // and with api succeeds
@@ -926,8 +957,9 @@ mod test {
         returns_attributes = ["a", "c"]
         identity_attributes = ["c"]
         "#;
-        let ctoml = parse_toml(tstr);
-        let services = parse_trusted_services(&ctoml);
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let services = cparser.parse_trusted_services(&ctx);
         assert!(services.is_ok());
         let services = services.unwrap();
         assert_eq!(services.len(), 1);
@@ -962,8 +994,9 @@ mod test {
         icmp_type = "request-response"
         icmp_codes = [128, 129]
         "#;
-        let ctoml = parse_toml(tstr);
-        let prots = parse_protocols(&ctoml);
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let prots = cparser.parse_protocols(&ctx);
         assert!(prots.is_ok());
         let prots = prots.unwrap();
         assert_eq!(prots.len(), 2);
@@ -994,8 +1027,9 @@ mod test {
         protocol = "pong"
         provider = [["foo", "bar"]]
         "#;
-        let ctoml = parse_toml(tstr);
-        let services = parse_services(&ctoml);
+        let mut cparser = ConfigParse::new_from_toml_str(tstr).unwrap();
+        let ctx = CompilationCtx::default();
+        let services = cparser.parse_services(&ctx);
         assert!(services.is_ok());
         let services = services.unwrap();
         assert_eq!(services.len(), 2);

@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::context::CompilationCtx;
 use crate::errors::CompilationError;
 use crate::zplstr::{ZPLStr, ZPLStrBuilder};
 
@@ -83,14 +84,19 @@ impl Default for Token {
     }
 }
 
-pub fn tokenize(zpl_in: &Path) -> Result<Vec<Token>, CompilationError> {
+#[derive(Debug)]
+pub struct Tokenization {
+    pub tokens: Vec<Token>,
+}
+
+pub fn tokenize(zpl_in: &Path, ctx: &CompilationCtx) -> Result<Tokenization, CompilationError> {
     let zpl = fs::read_to_string(zpl_in).map_err(|e| {
         CompilationError::FileError(format!("failed to read ZPL file {:?}: {}", zpl_in, e))
     })?;
-    tokenize_str(&zpl)
+    tokenize_str(&zpl, ctx)
 }
 
-pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
+pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, CompilationError> {
     let mut tokens = Vec::new();
     let mut line = 1;
     let mut col = 1;
@@ -179,10 +185,10 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
             }
             '.' => {
                 let followed_by_whitespace = if let Some(&next) = chars.peek() {
-                        next.is_whitespace()
-                    } else {
-                        true // none (end of input)
-                    };
+                    next.is_whitespace()
+                } else {
+                    true // none (end of input)
+                };
                 if current_word.len() > 0 && quoting {
                     current_word.push(c, quoting, line, col)?;
                 } else if current_word.len() > 0 {
@@ -203,8 +209,10 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                         // Special case: if we see that there is another period following this one we warn the user.
                         if let Some(&next) = chars.peek() {
                             if next == '.' {
-                                // TODO: Maybe a way to return warnings instead of emitting them directly?
-                                println!("warning: multiple unquoted periods at line {} col {}", line, col);
+                                ctx.warn(&format!(
+                                    "multiple unquoted periods at line: {}, col: {}",
+                                    line, col,
+                                ))?;
                             }
                         }
                     }
@@ -322,17 +330,19 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
         }
     }
 
-    Ok(tokens)
+    let tz = Tokenization { tokens };
+    Ok(tz)
 }
-
 
 #[cfg(test)]
 mod test {
+    use crate::context::CompilationCtx;
 
     #[test]
     fn test_tuple_literal() {
         let zpl = "define foo as user with color:purple, `role`:`manager`, office:`fris:co`, and tag `foo bar`";
-        let tokens = super::tokenize_str(zpl).unwrap();
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
         println!("{:?}", tokens);
         assert_eq!(tokens.len(), 14);
         let colorpurple = &tokens[5];
@@ -346,7 +356,8 @@ mod test {
     #[test]
     fn test_multiple_periods() {
         let zpl = "define alien as user with color green. . . allow aliens to access services";
-        let tokens = super::tokenize_str(zpl).unwrap();
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
         println!("{:?}", tokens);
         assert_eq!(tokens.len(), 15);
     }
@@ -356,14 +367,15 @@ mod test {
         {
             // TODO: Should this fail since it does not end in period?
             let zpl = "define alien as user with color:green. allow aliens to access services";
-            let tokens = super::tokenize_str(zpl).unwrap();
+            let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+            let tokens = tz.tokens;
             assert_eq!(tokens.len(), 12);
         }
 
         {
             // This will fail since a period is not allowed on an unquoted string
             let zpl = "define alien as user with color:green.. allow aliens to access services";
-            let res = super::tokenize_str(zpl);
+            let res = super::tokenize_str(zpl, &CompilationCtx::default());
             assert!(res.is_err());
             let err = res.unwrap_err();
             match err {
@@ -378,12 +390,13 @@ mod test {
     #[test]
     fn test_quoted_period_in_attr_value() {
         let zpl = "Define alien as user with color:'green.'.";
-        let tokens = super::tokenize_str(zpl).unwrap();
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
         assert_eq!(tokens.len(), 7);
         assert_eq!(tokens[6].tt, super::TokenType::Period);
-        assert_eq!(tokens[5].tt, super::TokenType::Tuple(("color".to_string(), "green.".to_string())));
+        assert_eq!(
+            tokens[5].tt,
+            super::TokenType::Tuple(("color".to_string(), "green.".to_string()))
+        );
     }
-
-
-
 }

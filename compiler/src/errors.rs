@@ -75,4 +75,7 @@ pub enum CompilationError {
 
     #[error("crypto error: {0}")]
     CryptoError(String),
+
+    #[error("warning: {0}")]
+    Warning(String),
 }

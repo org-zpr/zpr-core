@@ -110,7 +110,13 @@ impl ZPLStrBuilder {
     }
     */
 
-    pub fn push(&mut self, c: char, quoted: bool, line: usize, col: usize) -> Result<(), CompilationError> {
+    pub fn push(
+        &mut self,
+        c: char,
+        quoted: bool,
+        line: usize,
+        col: usize,
+    ) -> Result<(), CompilationError> {
         if self.input_to_value {
             if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_') {
                 return Err(CompilationError::IllegalStringLiteralChar(c, line, col));

@@ -324,19 +324,17 @@ pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(),
     Ok(())
 }
 
-
-
-
 #[cfg(test)]
 mod test {
 
     use super::*;
-    use crate::lex::tokenize_str;
+    use crate::{context::CompilationCtx, lex::tokenize_str};
 
     #[test]
     fn test_required_tag() {
         let statement = "define marketing-emp as a user with tag full-time";
-        let tokens = tokenize_str(statement).unwrap();
+        let tz = tokenize_str(statement, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
         let class = parse_define(&tokens).unwrap();
         assert_eq!(class.name, "marketing-emp");
     }
@@ -349,8 +347,10 @@ mod test {
             "define marketing-emp as a user with tags multiple foo",
             "define marketing-emp as a user with tag and foo",
         ];
+        let ctx = CompilationCtx::default();
         for statement in invalids {
-            let tokens = tokenize_str(statement).unwrap();
+            let tz = tokenize_str(statement, &ctx).unwrap();
+            let tokens = tz.tokens;
             match parse_define(&tokens) {
                 Ok(_) => panic!("should have failed on: '{}'", statement),
                 Err(_) => {}

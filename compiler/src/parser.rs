@@ -1,13 +1,19 @@
 use std::collections::HashMap;
 
 use crate::allow::parse_allow;
+use crate::context::CompilationCtx;
 use crate::define::{parse_define, resolve_class_flavors};
 use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
 use crate::ptypes::{Class, Policy};
 
+#[derive(Default)]
+pub struct ParsingResult {
+    pub policy: Policy,
+}
 
-pub fn parse(tokens: Vec<Token>, verbose: bool) -> Result<Policy, CompilationError> {
+pub fn parse(tokens: Vec<Token>, ctx: &CompilationCtx) -> Result<ParsingResult, CompilationError> {
+    let mut result = ParsingResult::default();
     let mut statements = Vec::new();
     let mut current_statement = Vec::new();
 
@@ -50,7 +56,7 @@ pub fn parse(tokens: Vec<Token>, verbose: bool) -> Result<Policy, CompilationErr
     }
 
     if statements.is_empty() {
-        println!("warning: empty policy")
+        ctx.warn("empty policy")?;
     }
 
     let mut policy = Policy::default();
@@ -97,14 +103,14 @@ pub fn parse(tokens: Vec<Token>, verbose: bool) -> Result<Policy, CompilationErr
     for (i, statement) in statements.iter().enumerate() {
         if statement[0].tt == TokenType::Allow {
             let allow = parse_allow(statement, i + 1, &class_index, &classes)?;
-            if verbose {
+            if ctx.verbose {
                 println!("{}", allow);
             }
             policy.allows.push(allow);
         }
     }
 
-    if verbose {
+    if ctx.verbose {
         println!()
     }
 
@@ -114,7 +120,7 @@ pub fn parse(tokens: Vec<Token>, verbose: bool) -> Result<Policy, CompilationErr
         if class.is_builtin() {
             continue;
         }
-        if verbose {
+        if ctx.verbose {
             println!("defined class: {} (is a {:?})", class.name, class.flavor);
             for attr in &class.with_attrs {
                 println!("  with: {}", attr);
@@ -123,13 +129,14 @@ pub fn parse(tokens: Vec<Token>, verbose: bool) -> Result<Policy, CompilationErr
         policy.defines.push(class);
     }
 
-    Ok(policy)
+    result.policy = policy;
+    Ok(result)
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::lex::tokenize_str;
+    use crate::lex::{tokenize_str, Tokenization};
     use crate::ptypes::ClassFlavor;
 
     #[test]
@@ -143,11 +150,13 @@ mod test {
             "define gateway as a service with an external-network-connection \n define internet-gateway as a gateway with external-network-connection:public-internet",
             "define peripheral as a user with function \n define mouse AKA mice as a peripheral with function:pointing"
         ];
+        let ctx = CompilationCtx::default();
         for valid in valids {
-            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
-                panic!("failed to tokenize '{}': {:?}", valid, e);
-            });
-            let _pol = match parse(tokens.unwrap(), true) {
+            let tz: Result<Tokenization, CompilationError> =
+                tokenize_str(valid, &ctx).or_else(|e| {
+                    panic!("failed to tokenize '{}': {:?}", valid, e);
+                });
+            let _pol = match parse(tz.unwrap().tokens, &ctx) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
@@ -166,11 +175,12 @@ define marketing-emp as an employee with rule:marketing and tag full-time
 
 allow devices with marketing-emps to access role:marketing services
 "#;
-        let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(pp).or_else(|e| {
+        let ctx = CompilationCtx::default();
+        let tz: Result<Tokenization, CompilationError> = tokenize_str(pp, &ctx).or_else(|e| {
             panic!("failed to tokenize '{}': {:?}", pp, e);
         });
-        let pol = match parse(tokens.unwrap(), true) {
-            Ok(policy) => policy,
+        let pol = match parse(tz.unwrap().tokens, &ctx) {
+            Ok(pr) => pr.policy,
             Err(e) => {
                 panic!("failed to parse '{}': {:?}", pp, e);
             }
@@ -221,13 +231,15 @@ allow devices with marketing-emps to access role:marketing services
     #[test]
     fn test_base_allow() {
         let valids = vec!["allow devices with color:green users to access services"];
+        let ctx = CompilationCtx::default();
         for valid in valids {
-            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
-                panic!("failed to tokenize '{}': {:?}", valid, e);
-            });
-            let toks = tokens.unwrap();
+            let tokens: Result<Tokenization, CompilationError> =
+                tokenize_str(valid, &ctx).or_else(|e| {
+                    panic!("failed to tokenize '{}': {:?}", valid, e);
+                });
+            let toks = tokens.unwrap().tokens;
             assert_eq!(8, toks.len());
-            let _pol = match parse(toks, true) {
+            let _pol = match parse(toks, &ctx) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
@@ -242,12 +254,14 @@ allow devices with marketing-emps to access role:marketing services
             "allow devices with users with loc:italy to access services",
             "allow devices with users to access services with color:green",
         ];
+        let ctx = CompilationCtx::default();
         for valid in valids {
-            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
-                panic!("failed to tokenize '{}': {:?}", valid, e);
-            });
-            let toks = tokens.unwrap();
-            let _pol = match parse(toks, true) {
+            let tokens: Result<Tokenization, CompilationError> =
+                tokenize_str(valid, &ctx).or_else(|e| {
+                    panic!("failed to tokenize '{}': {:?}", valid, e);
+                });
+            let toks = tokens.unwrap().tokens;
+            let _pol = match parse(toks, &ctx) {
                 Ok(_) => panic!("should not have parsed postfix notation: {}", valid),
                 Err(e) => {
                     assert!(
@@ -268,11 +282,13 @@ allow devices with marketing-emps to access role:marketing services
             "allow color:red users to access services",
             "allow managed, color:red users to access services",
         ];
+        let ctx = CompilationCtx::default();
         for valid in valids {
-            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
-                panic!("failed to tokenize '{}': {:?}", valid, e);
-            });
-            let _pol = match parse(tokens.unwrap(), true) {
+            let tokens: Result<Tokenization, CompilationError> =
+                tokenize_str(valid, &ctx).or_else(|e| {
+                    panic!("failed to tokenize '{}': {:?}", valid, e);
+                });
+            let _pol = match parse(tokens.unwrap().tokens, &ctx) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
@@ -288,11 +304,13 @@ allow devices with marketing-emps to access role:marketing services
             "allow color:red devices to access services",
             "allow managed, color:red devices to access services",
         ];
+        let ctx = CompilationCtx::default();
         for valid in valids {
-            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
-                panic!("failed to tokenize '{}': {:?}", valid, e);
-            });
-            let _pol = match parse(tokens.unwrap(), true) {
+            let tokens: Result<Tokenization, CompilationError> =
+                tokenize_str(valid, &ctx).or_else(|e| {
+                    panic!("failed to tokenize '{}': {:?}", valid, e);
+                });
+            let _pol = match parse(tokens.unwrap().tokens, &ctx) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
@@ -307,11 +325,13 @@ allow devices with marketing-emps to access role:marketing services
             "allow color:green devices with managed, color:red users to access green services",
             "allow color:green devices with color:red, managed users to access color:blue services",
         ];
+        let ctx = CompilationCtx::default();
         for valid in valids {
-            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
-                panic!("failed to tokenize '{}': {:?}", valid, e);
-            });
-            let _pol = match parse(tokens.unwrap(), true) {
+            let tokens: Result<Tokenization, CompilationError> =
+                tokenize_str(valid, &ctx).or_else(|e| {
+                    panic!("failed to tokenize '{}': {:?}", valid, e);
+                });
+            let _pol = match parse(tokens.unwrap().tokens, &ctx) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
@@ -319,7 +339,6 @@ allow devices with marketing-emps to access role:marketing services
             };
         }
     }
-
 
     // Test splitting statements with a period. Will work anyway since we
     // use Allow and Define as our statement delimiters.
@@ -329,11 +348,13 @@ allow devices with marketing-emps to access role:marketing services
             "Define Alien as a user with color:green. Allow Aliens to access services.",
             ".",
         ];
+        let ctx = CompilationCtx::default();
         for valid in valids {
-            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
-                panic!("failed to tokenize '{}': {:?}", valid, e);
-            });
-            let _pol = match parse(tokens.unwrap(), true) {
+            let tokens: Result<Tokenization, CompilationError> =
+                tokenize_str(valid, &ctx).or_else(|e| {
+                    panic!("failed to tokenize '{}': {:?}", valid, e);
+                });
+            let _pol = match parse(tokens.unwrap().tokens, &ctx) {
                 Ok(policy) => policy,
                 Err(e) => {
                     panic!("failed to parse '{}': {:?}", valid, e);
@@ -342,7 +363,6 @@ allow devices with marketing-emps to access role:marketing services
         }
     }
 
-
     // Put periods in where they don't belong. Should fail.
     #[test]
     fn test_use_periods_in_error() {
@@ -350,11 +370,13 @@ allow devices with marketing-emps to access role:marketing services
             "Define Alien. as a user with color:green. Allow Aliens to. access services",
             "Define alien as a user. with color:green.",
         ];
+        let ctx = CompilationCtx::default();
         for valid in invalids {
-            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
-                panic!("failed to tokenize '{}': {:?}", valid, e);
-            });
-            let _pol = match parse(tokens.unwrap(), true) {
+            let tokens: Result<Tokenization, CompilationError> =
+                tokenize_str(valid, &ctx).or_else(|e| {
+                    panic!("failed to tokenize '{}': {:?}", valid, e);
+                });
+            let _pol = match parse(tokens.unwrap().tokens, &ctx) {
                 Ok(_policy) => {
                     panic!("should not have parsed '{}'", valid);
                 }
@@ -362,6 +384,4 @@ allow devices with marketing-emps to access role:marketing services
             };
         }
     }
-
-
 }
