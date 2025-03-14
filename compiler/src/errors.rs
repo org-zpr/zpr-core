@@ -25,11 +25,23 @@ pub enum CompilationError {
     #[error("unexpected keyword at line {1}, column {2}: {0}")]
     UnexpectedKeyword(String, usize, usize),
 
+    #[error("illegal character for unquoted string literal at line {1}, column {2}: {0}")]
+    IllegalStringLiteralChar(char, usize, usize),
+
+    #[error("illegal character for unquoted name literal at line {1}, column {2}: {0}")]
+    IllegalNameLiteralChar(char, usize, usize),
+
     #[error("redefinition of {0} at line {1}, column {2}")]
     Redefinition(String, usize, usize),
 
     #[error("[ line {1}, column {2} ]  {0}")]
     ParseError(String, usize, usize),
+
+    #[error("[ line {1}, column {2} ]  {0}")]
+    AllowStmtParseError(String, usize, usize),
+
+    #[error("[ line {1}, column {2} ]  {0}")]
+    DefineStmtParseError(String, usize, usize),
 
     #[error("[ line {1}, column {2} ]  syntax error in {0}")]
     SyntaxError(String, usize, usize),

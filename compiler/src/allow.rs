@@ -104,7 +104,7 @@ pub fn parse_allow(
                             parse_state.device_clause = Some(dc);
                         }
                         _ => {
-                            return Err(CompilationError::ParseError(
+                            return Err(CompilationError::AllowStmtParseError(
                                 format!("not a user or device clause: '{}'", cn),
                                 parse_state.root_tok.line,
                                 parse_state.root_tok.col,
@@ -120,7 +120,7 @@ pub fn parse_allow(
                         let dc = ps.to_clause("device")?;
                         parse_state.device_clause = Some(dc);
                     } else {
-                        return Err(CompilationError::ParseError(
+                        return Err(CompilationError::AllowStmtParseError(
                             format!("not a device clause: '{}'", cn),
                             parse_state.root_tok.line,
                             parse_state.root_tok.col,
@@ -130,7 +130,7 @@ pub fn parse_allow(
 
                 // Hmm what's this?
                 _ => {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::AllowStmtParseError(
                         format!("expected a TO or WITH, found '{:?}'", tok.tt),
                         parse_state.root_tok.line,
                         parse_state.root_tok.col,
@@ -140,7 +140,7 @@ pub fn parse_allow(
         }
         None => {
             // end of tokens!
-            return Err(CompilationError::ParseError(
+            return Err(CompilationError::AllowStmtParseError(
                 "expected a TO or WITH not EOF".to_string(),
                 parse_state.root_tok.line,
                 parse_state.root_tok.col,
@@ -165,7 +165,7 @@ pub fn parse_allow(
                 classes_map,
             )? {
                 // Hmm, a non error failure?
-                return Err(CompilationError::ParseError(
+                return Err(CompilationError::AllowStmtParseError(
                     "expected a user clause to follow WITH".to_string(),
                     tok.line,
                     tok.col,
@@ -205,7 +205,7 @@ fn validate_clause(
     classes_map: &HashMap<String, Class>,
 ) -> Result<(), CompilationError> {
     if ac.user.with_attr_count(classes_map) + ac.device.with_attr_count(classes_map) == 0 {
-        return Err(CompilationError::ParseError(
+        return Err(CompilationError::AllowStmtParseError(
             "user and/or device must specify at least one discriminating attribute".to_string(),
             ac.user.class_tok.line,
             ac.user.class_tok.col,
@@ -276,7 +276,7 @@ where
 
     let cn = ps.class_name.as_ref().unwrap();
     if classes_map.get(cn).unwrap().flavor != ClassFlavor::Service {
-        return Err(CompilationError::ParseError(
+        return Err(CompilationError::AllowStmtParseError(
             format!("not a service class: '{}'", cn),
             pa_state.root_tok.line,
             pa_state.root_tok.col,
@@ -342,7 +342,7 @@ impl PState {
 
     fn to_clause(&self, kind: &str) -> Result<Clause, CompilationError> {
         if self.class_name.is_none() {
-            return Err(CompilationError::ParseError(
+            return Err(CompilationError::AllowStmtParseError(
                 format!("expected a class name in a {} clause", kind),
                 self.root_tok.line,
                 self.root_tok.col,
@@ -389,8 +389,8 @@ impl PState {
                 TokenType::Literal(s) => {
                     // This could be a class name or a tag name.
                     if let Some(class) = classes.get(s) {
-                        // We already have a class name.
                         if self.class_name.is_some() {
+                            // We already have a class name.
                             let tok = tokens.next().unwrap();
                             return Err(CompilationError::MultipleClassNames(
                                 format!("found class '{class}' but class already set: {context}"),
@@ -410,7 +410,7 @@ impl PState {
                     // We used to support a postfix form of attributes but no longer.
                     // If we see this we report an error to help people covert old ZPL.
                     let tok = tokens.next().unwrap();
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::AllowStmtParseError(
                         format!(
                             "postfix attribute form using WITH no longer supported: {}",
                             context
@@ -430,7 +430,7 @@ impl PState {
             };
         }
         if tcount == 0 {
-            return Err(CompilationError::ParseError(
+            return Err(CompilationError::AllowStmtParseError(
                 format!("{} is empty", context),
                 self.root_tok.line,
                 self.root_tok.col,
@@ -438,7 +438,7 @@ impl PState {
         }
 
         if self.class_name.is_none() {
-            return Err(CompilationError::ParseError(
+            return Err(CompilationError::AllowStmtParseError(
                 format!("expected a class name in {}", context),
                 self.root_tok.line,
                 self.root_tok.col,

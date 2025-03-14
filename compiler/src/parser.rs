@@ -6,28 +6,51 @@ use crate::errors::CompilationError;
 use crate::lex::{Token, TokenType};
 use crate::ptypes::{Class, Policy};
 
+
 pub fn parse(tokens: Vec<Token>, verbose: bool) -> Result<Policy, CompilationError> {
-    // Convert the tokens into statements, which are just sub-lists of the tokens.
-    // Currently the compiler only accepts ALLOW statements and DEFINE statements.
     let mut statements = Vec::new();
     let mut current_statement = Vec::new();
 
+    // Convert the tokens into statements, which are just sub-lists of the tokens.
+    // Currently the compiler only accepts ALLOW statements and DEFINE statements.
+    // Periods are still optional, but if you use them incorrectly they parser will
+    // complain.
+    let mut in_statement = false;
     for tok in tokens {
         match tok.tt {
+            TokenType::Period => {
+                if !current_statement.is_empty() {
+                    statements.push(current_statement);
+                    current_statement = Vec::new();
+                }
+                in_statement = false;
+            }
             TokenType::Allow | TokenType::Define => {
                 if !current_statement.is_empty() {
                     statements.push(current_statement);
                     current_statement = Vec::new();
                 }
                 current_statement.push(tok);
+                in_statement = true;
+            }
+            _ if in_statement => {
+                current_statement.push(tok);
             }
             _ => {
-                current_statement.push(tok);
+                return Err(CompilationError::ParseError(
+                    "unexpected token".to_string(),
+                    tok.line,
+                    tok.col,
+                ));
             }
         }
     }
     if !current_statement.is_empty() {
         statements.push(current_statement);
+    }
+
+    if statements.is_empty() {
+        println!("warning: empty policy")
     }
 
     let mut policy = Policy::default();
@@ -296,4 +319,49 @@ allow devices with marketing-emps to access role:marketing services
             };
         }
     }
+
+
+    // Test splitting statements with a period. Will work anyway since we
+    // use Allow and Define as our statement delimiters.
+    #[test]
+    fn test_use_periods() {
+        let valids = vec![
+            "Define Alien as a user with color:green. Allow Aliens to access services.",
+            ".",
+        ];
+        for valid in valids {
+            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
+                panic!("failed to tokenize '{}': {:?}", valid, e);
+            });
+            let _pol = match parse(tokens.unwrap(), true) {
+                Ok(policy) => policy,
+                Err(e) => {
+                    panic!("failed to parse '{}': {:?}", valid, e);
+                }
+            };
+        }
+    }
+
+
+    // Put periods in where they don't belong. Should fail.
+    #[test]
+    fn test_use_periods_in_error() {
+        let invalids = vec![
+            "Define Alien. as a user with color:green. Allow Aliens to. access services",
+            "Define alien as a user. with color:green.",
+        ];
+        for valid in invalids {
+            let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
+                panic!("failed to tokenize '{}': {:?}", valid, e);
+            });
+            let _pol = match parse(tokens.unwrap(), true) {
+                Ok(_policy) => {
+                    panic!("should not have parsed '{}'", valid);
+                }
+                Err(_e) => (),
+            };
+        }
+    }
+
+
 }

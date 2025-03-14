@@ -94,7 +94,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
                 tokens.next();
                 parse_attributes(&mut class, &mut tokens)?;
             } else {
-                return Err(CompilationError::ParseError(
+                return Err(CompilationError::DefineStmtParseError(
                     "expected WITH clause".to_string(),
                     tok.line,
                     tok.col,
@@ -130,14 +130,14 @@ where
         match &tok.tt {
             TokenType::Tags => {
                 if tags {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "multiple TAGS statements".to_string(),
                         tok.line,
                         tok.col,
                     ));
                 }
                 if tag {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "TAGS following TAG".to_string(),
                         tok.line,
                         tok.col,
@@ -148,7 +148,7 @@ where
             TokenType::Tag => {
                 // tag is the non-greedy version of tags. Next token is the tag name.
                 if tags {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "TAG following TAGS".to_string(),
                         tok.line,
                         tok.col,
@@ -158,14 +158,14 @@ where
             }
             TokenType::Optional => {
                 if tags || tag {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "OPTIONAL not allowed after tag/tags".to_string(),
                         tok.line,
                         tok.col,
                     ));
                 }
                 if optional {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "multiple OPTIONAL statements".to_string(),
                         tok.line,
                         tok.col,
@@ -175,14 +175,14 @@ where
             }
             TokenType::Multiple => {
                 if tags || tag {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "MULTIPLE not allowed after tag/tags".to_string(),
                         tok.line,
                         tok.col,
                     ));
                 }
                 if multiple {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "multiple MULTIPLE statements".to_string(),
                         tok.line,
                         tok.col,
@@ -192,14 +192,14 @@ where
             }
             TokenType::And => {
                 if and {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "multiple AND statements".to_string(),
                         tok.line,
                         tok.col,
                     ));
                 }
                 if tag {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "TAG requires a tag name, not AND".to_string(),
                         tok.line,
                         tok.col,
@@ -210,7 +210,7 @@ where
             TokenType::With => {
                 // Only valid after an and.
                 if !and {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "WITH must follow AND".to_string(),
                         tok.line,
                         tok.col,
@@ -226,7 +226,7 @@ where
             TokenType::Comma => {}
             TokenType::Tuple((name, value)) => {
                 if tags || tag {
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         "attributes not allowed in tag/tags".to_string(),
                         tok.line,
                         tok.col,
@@ -257,7 +257,7 @@ where
                 tag = false; // not greedy
             }
             _ => {
-                return Err(CompilationError::ParseError(
+                return Err(CompilationError::DefineStmtParseError(
                     format!("syntax error ({:?})", tok.tt),
                     tok.line,
                     tok.col,
@@ -290,7 +290,7 @@ pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(),
                 Some(parent) => parent.flavor.clone(),
                 None => {
                     // This is an error, the parent class does not exist.
-                    return Err(CompilationError::ParseError(
+                    return Err(CompilationError::DefineStmtParseError(
                         format!(
                             "parent class {} of {} does not exist",
                             parentless_ref.parent, name
@@ -314,7 +314,7 @@ pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(),
                     undefined.push(name.clone());
                 }
             }
-            return Err(CompilationError::ParseError(
+            return Err(CompilationError::DefineStmtParseError(
                 format!("could not resolve classes: {:?}", undefined),
                 0,
                 0,
@@ -323,6 +323,9 @@ pub fn resolve_class_flavors(classes: &mut HashMap<String, Class>) -> Result<(),
     }
     Ok(())
 }
+
+
+
 
 #[cfg(test)]
 mod test {

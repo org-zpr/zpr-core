@@ -7,12 +7,12 @@ define A1 as adapter with cn:adapter1
 define A2 as adapter with cn:adapter2
 define A3 as adapter with cn:adapter3
 define Node as adapter with cn:node
-define Vs as adapter with cn:vs.zpr
+define Vs as adapter with cn:'vs.zpr'
 
 define A1Svc as a service with cn:adapter1
 define A2Svc as a service with cn:adapter2
 define A3Svc as a service with cn:adapter3
-define PingableVs as a service with cn:vs.zpr
+define PingableVs as a service with cn:'vs.zpr'
 define PingableNode as a service with cn:node
 
 allow A1 to access A2Svc
