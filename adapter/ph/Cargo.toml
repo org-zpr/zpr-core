@@ -60,7 +60,6 @@ rcu-crossbeam-epoch = ["dep:crossbeam-epoch"]
 rcu-aarc = ["dep:aarc"]
 
 [profile.dev]
-panic="abort"
 
 [profile.release]
 panic="abort"
