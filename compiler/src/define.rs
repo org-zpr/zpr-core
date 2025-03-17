@@ -77,12 +77,7 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
         _ => ClassFlavor::Undefined,
     };
 
-    // define class_name [ aka foo ] as a parent-class-name with
-    //                                                      ^^^^
-    putil::require_tt(root_tok, tokens.next(), "WITH", "define", TokenType::With)?;
-
-    // Now just parse attributes
-
+    // The "with" clause is optional.
     let mut class = Class {
         flavor,
         parent: parent_class_name.clone(),
@@ -92,8 +87,24 @@ pub fn parse_define(define_statement: &[Token]) -> Result<Class, CompilationErro
         with_attrs: Vec::new(),
     };
 
-    parse_attributes(&mut class, &mut tokens)?;
-
+    match tokens.peek() {
+        Some(tok) => {
+            if tok.tt == TokenType::With {
+                // consume the WITH token
+                tokens.next();
+                parse_attributes(&mut class, &mut tokens)?;
+            } else {
+                return Err(CompilationError::ParseError(
+                    "expected WITH clause".to_string(),
+                    tok.line,
+                    tok.col,
+                ));
+            }
+        }
+        None => {
+            // No WITH clause, so we are done.
+        }
+    }
     Ok(class)
 }
 

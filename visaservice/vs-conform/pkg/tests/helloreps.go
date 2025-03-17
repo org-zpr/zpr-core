@@ -1,8 +1,6 @@
 package tests
 
 import (
-	"fmt"
-
 	"zpr.org/vst/pkg/testfw"
 )
 
@@ -18,12 +16,16 @@ func (hr *HelloReps) Name() string {
 	return "HelloReps"
 }
 
+func (t *HelloReps) Order() testfw.Order {
+	return testfw.OrderDontCare
+}
+
 // Send a bunch of hello messages in
-func (hr *HelloReps) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
+func (hr *HelloReps) Run(state *testfw.TestState) *testfw.RunResult {
 	reps := HelloRepsCount
 	mockNode, err := state.GetNode()
 	if err != nil {
-		return err
+		return testfw.RunFailsFatal(err)
 	}
 	mockNode.SetPlogEnabled(false) // too chatty
 	sids := make(map[int32]bool)
@@ -32,8 +34,7 @@ func (hr *HelloReps) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
 	for i := 0; i < reps; i++ {
 		resp, err := mockNode.Hello()
 		if err != nil {
-			ctest.Failedm(fmt.Sprintf("hello failed at rep %d: %v", i, err))
-			return nil
+			return testfw.Failf("hello failed at rep %d: %v", i, err)
 		}
 		if sids[resp.SessionID] {
 			dupeCount++
@@ -47,6 +48,5 @@ func (hr *HelloReps) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
 		state.Log.Infow("repeat hello test complete", "reps", reps, "duplicate_session_ids", dupeCount)
 	}
 
-	ctest.Passed()
-	return nil
+	return testfw.Ok()
 }

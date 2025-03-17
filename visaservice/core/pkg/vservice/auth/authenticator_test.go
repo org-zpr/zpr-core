@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"zpr.org/vs/pkg/logr"
-	"zpr.org/vsx/zpl/compiler"
-	"zpr.org/vsx/zpl/fs"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vsx/snio/zds"
 	"zpr.org/vs/pkg/vservice/auth"
+	"zpr.org/vsx/snio/zds"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
 
 	"zpr.org/vsx/polio"
 )

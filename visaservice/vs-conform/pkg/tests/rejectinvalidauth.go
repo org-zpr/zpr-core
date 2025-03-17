@@ -1,10 +1,8 @@
 package tests
 
 import (
-	"fmt"
-
-	"zpr.org/vst/pkg/testfw"
 	"zpr.org/vsapi"
+	"zpr.org/vst/pkg/testfw"
 )
 
 type RejectInvalidAuth struct{}
@@ -17,21 +15,24 @@ func (t *RejectInvalidAuth) Name() string {
 	return "RejectInvalidAuth"
 }
 
+func (t *RejectInvalidAuth) Order() testfw.Order {
+	return testfw.OrderDontCare
+}
+
 // Send back a challenge response that is clearly not valid.
-func (t *RejectInvalidAuth) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
+func (t *RejectInvalidAuth) Run(state *testfw.TestState) *testfw.RunResult {
 	mockNode, err := state.GetNode()
 	if err != nil {
-		return err
+		return testfw.RunFailsFatal(err)
 	}
 
 	// NODE->VS : Hello
 	resp, err := mockNode.Hello()
 	if err != nil {
-		return err
+		return testfw.Faile(err)
 	}
 	if resp.Challenge == nil {
-		ctest.Failedm("challenge is nil")
-		return nil
+		return testfw.Fail("challenge is nil")
 	}
 	state.Pause()
 
@@ -47,9 +48,7 @@ func (t *RejectInvalidAuth) Run(state *testfw.TestState, ctest *testfw.TestRun) 
 	}
 	apiKey, err := mockNode.Authenticate(&authReq)
 	if err == nil {
-		ctest.Failedm(fmt.Sprintf("authenticate succeeded with invalid auth: %s", apiKey))
-		return nil
+		return testfw.Failf("authenticate succeeded with invalid auth: %s", apiKey)
 	}
-	ctest.Passed()
-	return nil
+	return testfw.Ok()
 }

@@ -37,6 +37,8 @@ pub mod targets {
     pub const VISA_MGMT: &str = "visa_mgmt";
     pub const ZDP: &str = "zdp";
 
+    pub use libnode::logging::targets::*;
+
     pub const ALL_TARGETS: &[&str] = &[
         ALL,
         CAPTURE,
@@ -50,6 +52,8 @@ pub mod targets {
         RPC,
         STARTUP,
         VISA_MGMT,
+        VS_RPC,
+        VSS_RPC,
         ZDP,
     ];
 }

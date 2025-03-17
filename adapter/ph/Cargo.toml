@@ -21,7 +21,7 @@ enumset = "1.1.5"
 hdrhistogram = { version = "7.5.4" }
 libc = { version = "0.2.155" }
 libnode = { path = "../../libnode" }
-nix = { version = "0.29.0", features = ["ioctl", "net"] }
+nix = { version = "0.29.0", features = ["ioctl", "net", "poll"] }
 open-enum = { version = "0.5.1" }
 openssl = { version = "0.10.64" }
 openssl-sys = { version = "0.9.102" }
@@ -48,10 +48,8 @@ tokio-tun = { version = "0.11.5" }
 # may need going forward.
 tun = { version = "=0.7.1", features = ["async"] }
 
-
 [dev-dependencies]
 rand = "0.8.5"
-
 
 [features]
 default = ["rcu-crossbeam-epoch"]
@@ -61,3 +59,8 @@ rcu-mutex-arc = []
 rcu-crossbeam-epoch = ["dep:crossbeam-epoch"]
 rcu-aarc = ["dep:aarc"]
 
+[profile.dev]
+panic="abort"
+
+[profile.release]
+panic="abort"

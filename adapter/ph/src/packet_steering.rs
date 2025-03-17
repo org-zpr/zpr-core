@@ -1,6 +1,6 @@
 //! OS-level control of steering packets into sockets.
 
-use tokio::net::UdpSocket;
+use std::net::UdpSocket;
 
 #[allow(dead_code)]
 pub enum SteeringMethod {
@@ -38,7 +38,7 @@ mod os_impl {
     use std::io;
     use std::mem::{offset_of, size_of};
     use zpr;
-    use zpr_ext::tokio::net::UdpSocketExt;
+    use zpr_ext::std::net::UdpSocketExt;
 
     pub fn set_steering(
         sock: &UdpSocket,

@@ -36,6 +36,38 @@ type PolicyEncap struct {
 	Version   string `json:"version"`
 }
 
+type VisaDescriptor struct {
+	VisaId     uint64 `json:"id"`
+	Expiration uint64 `json:"expires"`
+	Source     string `json:"source"`
+	Dest       string `json:"dest"`
+}
+
+// see `core/pkg/vservice/adb/agentdb.go`
+type HostRecordBrief struct {
+	CTime   int64      `json:"ctime"` // unix seconds
+	Cn      string     `json:"cn"`
+	ZPRAddr netip.Addr `json:"zpr_addr"`
+	Ident   string     `json:"ident"`
+	Node    bool       `json:"node"`
+}
+
+// see `core/pkg/vservice/admin.go`
+type RevokeResponse struct {
+	Revoked string `json:"revoked"`
+	Count   uint32 `json:"count"`
+}
+
+// see `core/pkg/vservice/admin.go`
+type RevokeAdminRequest struct {
+	ClearAll bool `json:"clear_all"` // TRUE clear all revocation data, FALSE is NOP
+}
+
+// see `core/pkg/vservice/admin.go`
+type RevokeAdminResponse struct {
+	ClearCount uint32 `json:"clear_count"`
+}
+
 func NewVSAdminClient(vsaddr netip.AddrPort, zlog *zap.Logger) (*Client, error) {
 	return &Client{
 		vsaddr: vsaddr,
@@ -107,6 +139,7 @@ func (c *Client) newHttpClient() *http.Client {
 }
 
 func (c *Client) htGet(url string) (*http.Response, error) {
+	c.zlog.Infow("GET", "url", url)
 	resp, err := c.newHttpClient().Get(url)
 	if err != nil {
 		return nil, err
@@ -149,6 +182,119 @@ func (c *Client) GetPolicy(configId uint64) (*PolicyEncap, error) {
 		return nil, fmt.Errorf("failed to decode policy json: %v", err)
 	}
 	return &encap, nil
+}
+
+func (c *Client) ListVisas() ([]*VisaDescriptor, error) {
+	resp, err := c.htGet(fmt.Sprintf("https://%s/admin/visas", c.vsaddr))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list visas: %v", err)
+	}
+	defer resp.Body.Close()
+	jsdata, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var vlist []*VisaDescriptor
+	if err := json.Unmarshal(jsdata, &vlist); err != nil {
+		return nil, fmt.Errorf("failed to decode visa-list json: %v", err)
+	}
+	return vlist, err
+}
+
+func (c *Client) RevokeVisa(visaId uint64) error {
+	c.zlog.Infow("api revoke visa", "ID", visaId)
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("https://%s/admin/visas/%d", c.vsaddr, visaId), nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.newHttpClient().Do(req)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to delete visa %d, got status: %s", visaId, resp.Status)
+	}
+	return nil
+}
+
+func (c *Client) ListActors() ([]*HostRecordBrief, error) {
+	resp, err := c.htGet(fmt.Sprintf("https://%s/admin/agents", c.vsaddr))
+	if err != nil {
+		return nil, fmt.Errorf("failed to list visas: %v", err)
+	}
+	defer resp.Body.Close()
+	jsdata, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var alist []*HostRecordBrief
+	if err := json.Unmarshal(jsdata, &alist); err != nil {
+		return nil, fmt.Errorf("failed to decode agents-list json: %v", err)
+	}
+	return alist, err
+}
+
+// DeleteActor will not only try to remove existing visas for the CN, but will install a
+// revocation into visa service state which will prevent new visas from being issues for the CN.
+// Use Client.ClearAllRevokes to reset visa service state.
+func (c *Client) RevokeActor(actorCN string) (*RevokeResponse, error) {
+	c.zlog.Infow("api delete actor", "cn", actorCN)
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("https://%s/admin/agents/%s", c.vsaddr, actorCN), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.newHttpClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to delete actor by CN %s, got status: %s", actorCN, resp.Status)
+	}
+	defer resp.Body.Close()
+	jsdata, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var rr RevokeResponse
+	if err := json.Unmarshal(jsdata, &rr); err != nil {
+		return nil, fmt.Errorf("failed to decode revoke-response json: %v", err)
+	}
+	return &rr, nil
+}
+
+// ClearAllRevokes will remove all revocations from visa service state, returns the number of revocations removed
+// as reported by the API.
+func (c *Client) ClearAllRevokes() (int, error) {
+	c.zlog.Infow("api clear all revokes")
+	rreq := RevokeAdminRequest{
+		ClearAll: true,
+	}
+	buf, err := json.Marshal(rreq)
+	if err != nil {
+		return 0, err
+	}
+	rdr := bytes.NewReader(buf)
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("https://%s/admin/revokes", c.vsaddr), rdr)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.newHttpClient().Do(req)
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("clear all revokes failed, got status: %s", resp.Status)
+	}
+	defer resp.Body.Close()
+	jsdata, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	var rr RevokeAdminResponse
+	if err := json.Unmarshal(jsdata, &rr); err != nil {
+		return 0, fmt.Errorf("failed to decode revoke-admin-response json: %v", err)
+	}
+	return int(rr.ClearCount), nil
 }
 
 // Decompress decompresses and unmarshalls a PolicyContainer.

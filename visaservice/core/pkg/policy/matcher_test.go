@@ -1175,3 +1175,50 @@ communications:
 	require.Equal(t, "access", match.CPol.Id)
 	require.Equal(t, "/zpr/testnet/webserver", match.CPol.ServiceId)
 }
+
+func TestConnectUsingHasKey(t *testing.T) {
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.adapter.cn, has, ""]
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [intern.foo, eq, fee]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t07",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	claims := mkClaims("zpr.addr", "fc00:3001::1", time.Hour)
+	claims["zpr.adapter.cn"] = mkClaim("foo", time.Hour)
+	client.SetAuthenticated(claims, time.Time{}, nil, nil, 1)
+
+	state, err := policy.NewConnectState(client, nil, netip.Addr{}, logr.NewTestLogger())
+	require.Nil(t, err)
+	attrs, err := m.MatchConnect(state)
+	require.Nil(t, err)
+	require.Len(t, attrs, 1)
+	require.Contains(t, attrs, "zpr.adapter.cn")
+	require.Contains(t, state.Services, "/zpr/testnet/webserver")
+}

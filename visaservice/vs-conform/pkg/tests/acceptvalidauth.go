@@ -3,9 +3,9 @@ package tests
 import (
 	"time"
 
+	"zpr.org/vsapi"
 	"zpr.org/vst/pkg/plc"
 	"zpr.org/vst/pkg/testfw"
-	"zpr.org/vsapi"
 	"zpr.org/vst/pkg/zcrypt"
 )
 
@@ -19,24 +19,28 @@ func (t *AcceptValidAuth) Name() string {
 	return "AcceptValidAuth"
 }
 
+func (t *AcceptValidAuth) Order() testfw.Order {
+	return testfw.OrderDontCare
+}
+
 // Run a valid auth.
 //
 // Note that node state will keep track of the API key.
-func (t *AcceptValidAuth) Run(state *testfw.TestState, ctest *testfw.TestRun) error {
+func (t *AcceptValidAuth) Run(state *testfw.TestState) *testfw.RunResult {
 	mockNode, err := state.GetNode()
 	if err != nil {
-		return err
+		return testfw.Faile(err)
 	}
 
 	mockNode.DeRegister("") // ignore error
+	state.Pause()
 
 	resp, err := mockNode.Hello()
 	if err != nil {
-		return err
+		return testfw.Faile(err)
 	}
 	if resp.Challenge == nil {
-		ctest.Failedm("challenge is nil")
-		return nil
+		return testfw.Fail("challenge is nil")
 	}
 	state.Pause()
 
@@ -44,27 +48,23 @@ func (t *AcceptValidAuth) Run(state *testfw.TestState, ctest *testfw.TestRun) er
 
 	policy, err := state.GetOrLoadPolicy(true)
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 
 	nodeCR := plc.GetNodeConnect(policy)
 	if nodeCR == nil {
-		ctest.Failedm("no node connect information found in policy")
-		return nil
+		return testfw.Fail("no node connect information found in policy")
 	}
 
 	nodeName := nodeCR.GetNodeName()
 	if nodeName == "" {
 		// This is a policy error.
-		ctest.Failedm("node name not found node service list")
-		return nil
+		return testfw.Fail("node name not found node service list")
 	}
 
 	nodeAgent, err := plc.CreateNodeAgent(policy, 3600)
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 
 	m2HMAC := zcrypt.GenM2HMAC(resp.Challenge.ChallengeData, resp.SessionID, timestamp)
@@ -82,25 +82,21 @@ func (t *AcceptValidAuth) Run(state *testfw.TestState, ctest *testfw.TestRun) er
 	state.Log.Infow("attempting authenticate for node", "node_name", nodeName, "CN", nodeCR.CN)
 	apiKey, err := mockNode.Authenticate(&authReq)
 	if err != nil {
-		ctest.Failed(err)
-		return nil
+		return testfw.Faile(err)
 	}
 	if apiKey == "" {
-		ctest.Failedm("authenticate failed to return an API key")
-		return nil
+		return testfw.Fail("authenticate failed to return an API key")
 	}
 	state.Pause()
 
 	// We should also have a policy message
 	pi := mockNode.PopPolicyInfo()
 	if pi == nil {
-		ctest.Failedm("did not get a policy info message over VSS")
-		return nil
+		return testfw.Fail("did not get a policy info message over VSS")
 	}
 	pi = mockNode.PopPolicyInfo()
 	if pi != nil {
-		ctest.Failedm("got >1 info message over VSS")
-		return nil
+		return testfw.Fail("got >1 info message over VSS")
 	}
 
 	// We should get a visa
@@ -108,10 +104,8 @@ func (t *AcceptValidAuth) Run(state *testfw.TestState, ctest *testfw.TestRun) er
 	//       But we won't get the vss visa unless we spoof the real node ZPR address.
 	vsa := mockNode.PopVisa()
 	if vsa == nil {
-		ctest.Failedm("did not get a visa message over VSS")
-		return nil
+		return testfw.Fail("did not get a visa message over VSS")
 	}
 
-	ctest.Passed()
-	return nil
+	return testfw.Ok()
 }

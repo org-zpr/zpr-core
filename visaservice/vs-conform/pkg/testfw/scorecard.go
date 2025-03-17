@@ -23,9 +23,10 @@ type TestResult struct {
 
 // TestRun exists while a test is running.
 type TestRun struct {
-	Test  string
-	Start time.Time
-	Card  *Scorecard
+	Test    string
+	Start   time.Time
+	Card    *Scorecard
+	passing bool
 }
 
 func NewScorecard(testCount int) *Scorecard {
@@ -37,11 +38,13 @@ func NewScorecard(testCount int) *Scorecard {
 // Note that a test is starting. Should be followed later by a call to
 // Passed or Failed.
 func (s *Scorecard) Start(t Tester) *TestRun {
-	fmt.Printf("running test %d of %d: %s\n", len(s.Tests)+1, s.count, t.Name())
+	// fmt.Printf("running test %d of %d: %s\n", len(s.Tests)+1, s.count, t.Name())
+	color.Yellow("running test %d of %d: %s", len(s.Tests)+1, s.count, t.Name())
 	tr := TestRun{
-		Test:  t.Name(),
-		Start: time.Now(),
-		Card:  s,
+		Test:    t.Name(),
+		Start:   time.Now(),
+		Card:    s,
+		passing: true,
 	}
 	return &tr
 }
@@ -57,17 +60,23 @@ func (tr *TestRun) Passed() {
 
 // Note that a test has failed.
 func (tr *TestRun) Failed(err error) {
+	tr.passing = false
 	tr.Failedm(err.Error())
 }
 
 // Note that a test has failed.
 func (tr *TestRun) Failedm(msg string) {
+	tr.passing = false
 	tr.Card.addTestResult(TestResult{
 		Test:       tr.Test,
 		Pass:       false,
 		Elapsed:    time.Since(tr.Start),
 		FailReason: msg,
 	})
+}
+
+func (tr *TestRun) Passing() bool {
+	return tr.passing
 }
 
 func (s *Scorecard) addTestResult(tr TestResult) {

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"zpr.org/vst/pkg/packets"
 	"zpr.org/vsapi"
+	"zpr.org/vst/pkg/packets"
 	"zpr.org/vsx/polio"
 )
 
@@ -121,6 +121,14 @@ func attrExprToMap(attrExprs []*polio.AttrExpr, policy *polio.Policy) map[string
 		}
 	}
 	return attrs
+}
+
+// Retruns true if the connect record has an attribute set using EQUALS with the given key.
+func ConnectRecHasSetAttr(rec *ConnectRec, attrKey string) bool {
+	if exp, ok := rec.Attrs[attrKey]; ok {
+		return exp.Op == "EQ"
+	}
+	return false
 }
 
 // Find the connect record corresponding to the node.

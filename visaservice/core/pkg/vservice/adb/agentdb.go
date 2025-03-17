@@ -207,7 +207,6 @@ func (db *AgentDB) RemoveNode(addr netip.Addr) bool {
 // True if found and removed
 func (db *AgentDB) RemoveAdapter(addr netip.Addr) bool {
 	db.Lock()
-	db.Unlock()
 
 	ipKey := addr.As16()
 	rec, ok := db.agentsV6toHr[ipKey]

@@ -1,4 +1,4 @@
-use crate::zprtun::{ZPRTunError, DEFAULT_TUN_MTU};
+use crate::zprtun::{ZprTunError, DEFAULT_TUN_MTU};
 use bytes::buf;
 use std::net::IpAddr;
 use std::result::Result;
@@ -13,9 +13,9 @@ impl From<AsyncDevice> for ZprTun {
     }
 }
 
-impl From<tun::Error> for ZPRTunError {
+impl From<tun::Error> for ZprTunError {
     fn from(e: tun::Error) -> Self {
-        ZPRTunError::PlatformError(e.to_string())
+        ZprTunError::PlatformError(e.to_string())
     }
 }
 
@@ -27,7 +27,7 @@ impl ZprTun {
         ifname: Option<String>,
         concurrency: usize,
         address: Option<IpAddr>,
-    ) -> std::result::Result<Vec<Self>, ZPRTunError> {
+    ) -> std::result::Result<Vec<Self>, ZprTunError> {
         let mut config = tun::Configuration::default();
         if let Some(name) = ifname {
             config.tun_name(&name);
@@ -38,7 +38,7 @@ impl ZprTun {
             config.address(addr);
         }
         if concurrency <= 0 || concurrency > 1 {
-            return Err(ZPRTunError::PlatformError(String::from(
+            return Err(ZprTunError::PlatformError(String::from(
                 "on macos concurrency (queues) must be 1",
             )));
         }
@@ -70,11 +70,11 @@ impl ZprTun {
     }
 
     #[allow(dead_code)]
-    pub fn set_address(&mut self, addr: IpAddr) -> Result<(), ZPRTunError> {
+    pub fn set_address(&mut self, addr: IpAddr) -> Result<(), ZprTunError> {
         let idev = &mut *(self.0);
         match idev.set_address(addr) {
             Ok(_) => Ok(()),
-            Err(e) => Err(ZPRTunError::PlatformError(e.to_string())),
+            Err(e) => Err(ZprTunError::PlatformError(e.to_string())),
         }
     }
 }

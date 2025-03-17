@@ -3,18 +3,26 @@ use crate::config;
 use crate::counters::*;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::packet::Packet;
+use nix::poll;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
+use std::net::UdpSocket;
+use std::os::fd::AsFd;
 use std::sync::Arc;
-use tokio::net::UdpSocket;
+use zpr_ext::std::net::UdpSocketExt;
 
-pub async fn launch(
+pub fn launch(
     config: FastpathWorkerConfig,
     worker_index: usize,
     asm: Arc<Assembly>,
     socket: Arc<UdpSocket>,
-) {
-    let mut worker = FastpathWorker::new(config, worker_index, asm.clone());
+) -> impl FnOnce() {
+    let worker = FastpathWorker::new(config, worker_index, asm.clone());
+    move || substrate_ingress_main(worker, &socket)
+}
+
+fn substrate_ingress_main(mut worker: FastpathWorker, socket: &UdpSocket) {
+    let mut poll_fd = poll::PollFd::new(socket.as_fd(), poll::PollFlags::POLLIN);
 
     loop {
         // process the return buffer queue
@@ -22,29 +30,43 @@ pub async fn launch(
             // if we are out of buffers, block
             worker
                 .mgmt_dispatch
-                .async_recv_return_buffers(&mut worker.buffers, worker.config.buffer_count)
-                .await;
+                .recv_return_buffers(&mut worker.buffers, worker.config.buffer_count);
         } else {
             worker
                 .mgmt_dispatch
                 .try_recv_return_buffers(&mut worker.buffers, worker.config.buffer_count);
         }
 
+        let _n = match poll::poll(std::slice::from_mut(&mut poll_fd), poll::PollTimeout::NONE)
+            .map_err(|err| std::io::Error::from_raw_os_error(err as i32))
+        {
+            Ok(n) => n,
+            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+            ret @ Err(_) => ret.unwrap(),
+        };
+
         // TODO: batch receive
         let mut pkt = Packet::new(
             worker.buffers.pop().unwrap(),
             config::DEFAULT_MESSAGE_HEADROOM,
         );
-        let mut sender = match socket.recv_buf_from(&mut pkt).await {
+
+        let mut sender = match socket.recv_buf_from(&mut pkt) {
             Ok((_size, sender)) => sender,
 
             Err(err) => {
                 match err.kind() {
-                    ErrorKind::ConnectionRefused => {
-                        // FIXME: do something with this later...
-                        worker.drop_and_count(pkt, CounterType::InPacksDrop);
+                    ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
+                        worker.buffers.push(pkt.destroy());
                         continue;
                     }
+
+                    // FIXME: do something with this later...
+                    ErrorKind::ConnectionRefused => {
+                        worker.buffers.push(pkt.destroy());
+                        continue;
+                    }
+
                     _ => panic!("got socket error {}", err),
                 }
             }

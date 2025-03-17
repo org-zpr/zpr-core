@@ -45,6 +45,13 @@ func (ts *TestState) Pause() {
 // Do whatever is needed to "reset" state before each test.
 // We keep many things hanging around, but we do clear any message in the VSS queues.
 func (ts *TestState) Reset() {
+	if cli, err := ts.GetAdminClient(); err == nil {
+		if n, err := cli.ClearAllRevokes(); err != nil {
+			ts.Log.Errorw("failed to clear all revokes", "error", err)
+		} else if n > 0 {
+			ts.Log.Infow("state-reset cleared revocations", "count", n)
+		}
+	}
 	if ts.node != nil {
 		ts.node.Reset()
 	}
@@ -79,12 +86,9 @@ func (ts *TestState) GetAdminClient() (*vsadmin.Client, error) {
 // Get node with VSS running
 func (ts *TestState) GetNode() (*mocks.Node, error) {
 	if ts.node == nil {
-		mockNode, err := mocks.NewNode(ts.vsAddr, ts.Log.Desugar())
+		mockNode, err := mocks.NewNode(ts.vsAddr, ts.Log.Desugar(), netip.MustParseAddrPort("0.0.0.0:8183"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create mock node: %v", err)
-		}
-		if err := mockNode.EnableVSS(netip.MustParseAddrPort("0.0.0.0:8183")); err != nil {
-			return nil, fmt.Errorf("failed to start VSS: %w", err)
 		}
 		ts.node = mockNode
 	}

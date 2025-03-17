@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use crate::errors::CompilationError;
-use crate::lex::Token;
 use crate::ptypes::Attribute;
+use crate::ptypes::FPos;
 
 /// Convert the list of (key, value) pairs into a list of attributes.
 ///
@@ -21,7 +21,7 @@ pub fn vec_to_attributes(v: &[(String, String)]) -> Result<Vec<Attribute>, Compi
 // attributes and the ones with values should take precedence over ones without.
 pub fn squash_attributes(
     attrs: &[Attribute],
-    tok: &Token,
+    tok: &FPos,
 ) -> Result<HashMap<String, Attribute>, CompilationError> {
     let mut attr_map: HashMap<String, Attribute> = HashMap::new();
     for a in attrs {

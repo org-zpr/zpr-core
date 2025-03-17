@@ -1,4 +1,4 @@
-use crate::zprtun::ZPRTunError;
+use crate::zprtun::ZprTunError;
 use bytes::buf;
 use nix::ioctl_write_ptr;
 use std::io;
@@ -27,7 +27,7 @@ impl ZprTun {
         ifname: Option<String>,
         concurrency: usize,
         address: Option<IpAddr>,
-    ) -> std::result::Result<Vec<Self>, ZPRTunError> {
+    ) -> std::result::Result<Vec<Self>, ZprTunError> {
         let mut bldr = TunBuilder::new();
         if let Some(ifname) = ifname {
             bldr = bldr.name(&ifname);
@@ -36,13 +36,13 @@ impl ZprTun {
             match addr {
                 IpAddr::V4(ipa) => bldr = bldr.address(ipa),
                 IpAddr::V6(_) => {
-                    return Err(ZPRTunError::PlatformError("IPv6 not supported".to_string()))
+                    return Err(ZprTunError::PlatformError("IPv6 not supported".to_string()))
                 }
             }
         }
         let tok_tun_devs = bldr
             .try_build_mq(concurrency)
-            .or_else(|e| Err(ZPRTunError::PlatformError(e.to_string())))?;
+            .or_else(|e| Err(ZprTunError::PlatformError(e.to_string())))?;
 
         Ok(tok_tun_devs.into_iter().map(ZprTun).collect())
     }
@@ -83,9 +83,9 @@ impl ZprTun {
     }
 
     #[allow(dead_code)]
-    pub fn set_address(&mut self, _addr: IpAddr) -> std::result::Result<(), ZPRTunError> {
+    pub fn set_address(&mut self, _addr: IpAddr) -> std::result::Result<(), ZprTunError> {
         // This needs work -- the linux tun API only allows address to be set at construction time.
-        Err(ZPRTunError::PlatformError(
+        Err(ZprTunError::PlatformError(
             "cannot set TUN address after creation".to_string(),
         ))
     }

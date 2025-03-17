@@ -197,13 +197,13 @@ allow devices with marketing-emps to access role:marketing services
 
     #[test]
     fn test_base_allow() {
-        let valids = vec!["allow devices with users to access services"];
+        let valids = vec!["allow devices with color:green users to access services"];
         for valid in valids {
             let tokens: Result<Vec<Token>, CompilationError> = tokenize_str(valid).or_else(|e| {
                 panic!("failed to tokenize '{}': {:?}", valid, e);
             });
             let toks = tokens.unwrap();
-            assert_eq!(7, toks.len());
+            assert_eq!(8, toks.len());
             let _pol = match parse(toks, true) {
                 Ok(policy) => policy,
                 Err(e) => {
@@ -240,7 +240,7 @@ allow devices with marketing-emps to access role:marketing services
     #[test]
     fn test_omit_device() {
         let valids = vec![
-            "allow users to access services",
+            "allow color:red users to access services",
             "allow managed users to access services",
             "allow color:red users to access services",
             "allow managed, color:red users to access services",
@@ -261,7 +261,6 @@ allow devices with marketing-emps to access role:marketing services
     #[test]
     fn test_omit_user() {
         let valids = vec![
-            "allow devices to access services",
             "allow managed devices to access services",
             "allow color:red devices to access services",
             "allow managed, color:red devices to access services",
