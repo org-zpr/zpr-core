@@ -92,7 +92,7 @@ fn main() {
         let key = match load_rsa_private_key(&key) {
             Ok(k) => k,
             Err(e) => {
-                eprintln!(
+                println!(
                     "{}{} {}: {}",
                     "error".red().bold(),
                     ":".bold(),
@@ -108,7 +108,7 @@ fn main() {
     match comp.compile() {
         Ok(_) => (),
         Err(e) => {
-            eprintln!("{}{} {}", "error".red().bold(), ":".bold(), e);
+            println!("{}{} {}", "error".red().bold(), ":".bold(), e);
             exit_code = 1;
         }
     }
