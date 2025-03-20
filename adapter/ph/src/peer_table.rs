@@ -324,6 +324,15 @@ impl PeerTable {
         };
         entry.pft.clear();
     }
+
+    /// Remove a route from a peer forwarding table
+    pub fn remove_route(&self, route: zpr::ForwardingEntry) {
+        let Some(entry) = self.get(route.0) else {
+            // If the peer is gone, nothing to be done
+            return;
+        };
+        entry.pft.remove(route.1);
+    }
 }
 
 pub struct VacantPeerTableEntry<'a> {

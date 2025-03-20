@@ -64,7 +64,7 @@ pub struct Assembly {
 
     pub vsconn: Option<libnode::vsconn::VSConnHandle>, // present only on nodes
 
-    pub visa_table: std::sync::Mutex<visa_table::VisaTable>, // Only for nodes
+    pub visa_table: tokio::sync::RwLock<visa_table::VisaTable>, // Only for nodes
 
     // Used to intercept packets that are unencrypted but still have ZDP headers
     pub capture_queue: Capture,
@@ -288,8 +288,8 @@ impl Assembly {
 
         if self
             .visa_table
-            .lock()
-            .unwrap()
+            .write()
+            .await
             .link_forwarding_entry(
                 visa_id,
                 zpr::ForwardingEntry(ingress_link_id.get(), ingress_tether_id),
@@ -303,14 +303,6 @@ impl Assembly {
         }
 
         Ok(ingress_tether_id)
-    }
-
-    pub fn remove_route(&self, route: zpr::ForwardingEntry) {
-        let Some(peer_table) = self.peer_table.get(route.0) else {
-            // If the peer is gone, nothing to be done
-            return;
-        };
-        peer_table.pft.remove(route.1);
     }
 }
 
@@ -379,7 +371,7 @@ pub mod test {
             .agent_output_requeue
             .unwrap_or_else(|| AgentOutputRequeue::new(Vec::new()));
         let vsconn = builder.vsconn.unwrap_or(None);
-        let visa_table = std::sync::Mutex::new(
+        let visa_table = tokio::sync::RwLock::new(
             builder
                 .visa_table
                 .unwrap_or_else(|| visa_table::VisaTable::new()),

@@ -2,24 +2,23 @@
 
 #![allow(dead_code)]
 
-use crate::assembly::Assembly;
 use crate::logging::targets::VISA_MGMT;
+use crate::peer_table;
 
 use chrono::{DateTime, Utc};
 use libnode::vsapi;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
-use std::sync::Arc;
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::*;
 use zpr::{ForwardingEntry, VisaId};
 
 #[derive(Debug, Error)]
-pub enum VisaTableError<'a> {
+pub enum VisaTableError {
     #[error("Visa {0} Not Found")]
     NotFound(VisaId),
     #[error("Failed to parse visa field {0}")]
-    ParseFailure(&'a str),
+    ParseError(String),
     #[error("Failed to insert visa into table")]
     InsertError,
 }
@@ -62,10 +61,10 @@ impl Eq for VisaTimeout {}
 
 impl Visa {
     /// Remove all forwarding entries associated with this visa
-    pub fn remove_forwarding_entries(&mut self, asm: &Arc<Assembly>) {
-        while let Some(entry) = self.streams.pop() {
-            asm.remove_route(entry);
-        }
+    pub fn remove_forwarding_entries(&mut self, peer_table: &peer_table::PeerTable) {
+        self.streams
+            .drain(..)
+            .for_each(|entry| peer_table.remove_route(entry));
     }
 
     /// Link a forwarding entry to this visa
@@ -107,17 +106,17 @@ impl VisaTable {
     /// Insert a visa from the Visa Service into the Visa Table
     pub fn insert_visa(&mut self, visa: vsapi::Visa) -> Result<VisaId, VisaTableError> {
         let Some(visa_id) = visa.issuer_id else {
-            return Err(VisaTableError::ParseFailure("issuer_id"));
+            return Err(VisaTableError::ParseError("issuer_id".into()));
         };
         let Some(timestamp) = visa.expires else {
-            return Err(VisaTableError::ParseFailure("expiration"));
+            return Err(VisaTableError::ParseError("expiration".into()));
         };
         let Some(expiration) = DateTime::from_timestamp_millis(timestamp) else {
-            return Err(VisaTableError::ParseFailure("expiration"));
+            return Err(VisaTableError::ParseError("expiration".into()));
         };
 
-        debug!(target: VISA_MGMT,
-            "Dummy visa inserted into VisaTable ID: {visa_id}, Expiration: {}",
+        info!(target: VISA_MGMT,
+            "Visa inserted into VisaTable ID: {visa_id}, Expiration: {}",
             expiration.format("%y-%m-%d %H:%M:%S"));
 
         let visa = Visa {
@@ -150,16 +149,21 @@ impl VisaTable {
     }
 
     /// Revoke (or otherwise remove) a visa
-    pub fn revoke(&mut self, asm: &Arc<Assembly>, visa_id: VisaId) -> Result<(), VisaTableError> {
+    pub fn revoke(
+        &mut self,
+        peer_table: &peer_table::PeerTable,
+        visa_id: VisaId,
+    ) -> Result<(), VisaTableError> {
         let Some(mut visa) = self.table.remove(&visa_id) else {
             return Err(VisaTableError::NotFound(visa_id));
         };
-        visa.remove_forwarding_entries(asm);
+        visa.remove_forwarding_entries(peer_table);
+        info!(target: VISA_MGMT, "Revoked visa {visa_id}");
         Ok(())
     }
 
     /// Remove every expired visa from the table
-    pub fn handle_expirations(&mut self, asm: &Arc<Assembly>) {
+    pub fn handle_expirations(&mut self, peer_table: &peer_table::PeerTable) {
         let current_time = Utc::now();
         while self
             .timeout_queue
@@ -168,7 +172,7 @@ impl VisaTable {
         {
             let timeout_entry = self.timeout_queue.pop().unwrap();
             // Ignore if the visa was not found, since it might have been previously revoked
-            let _ = self.revoke(asm, timeout_entry.id);
+            let _ = self.revoke(peer_table, timeout_entry.id);
         }
     }
 }
@@ -183,9 +187,10 @@ mod tests {
     use crate::peer_table::test::create_dummy_peer_state;
     use std::net::{IpAddr, Ipv4Addr};
     use std::num::NonZero;
+    use std::sync::Arc;
 
-    #[test]
-    fn test_timeouts() {
+    #[tokio::test]
+    async fn test_timeouts() {
         let mut builder = TestAssemblyBuilder::new();
         builder.visa_table = Some(VisaTable::new());
         let asm = Arc::new(create_assembly(builder));
@@ -194,7 +199,7 @@ mod tests {
         let visa1 = 12345;
         let visa2 = 67890;
         let visa3 = 234;
-        let mut visa_table = asm.visa_table.lock().unwrap();
+        let mut visa_table = asm.visa_table.write().await;
         visa_table.insert_id(visa1, DateTime::<Utc>::MIN_UTC); // An element that will timeout immediately
         visa_table.insert_id(visa2, DateTime::<Utc>::MAX_UTC); // An element that won't timeout
         visa_table.insert_id(visa3, Utc::now() + one_second); // An element that will time out in a second
@@ -205,7 +210,7 @@ mod tests {
         assert_eq!(true, visa_table.table.contains_key(&visa2));
         assert_eq!(true, visa_table.table.contains_key(&visa3));
 
-        visa_table.handle_expirations(&asm);
+        visa_table.handle_expirations(&asm.peer_table);
 
         assert_eq!(2, visa_table.table.len());
         assert_eq!(2, visa_table.timeout_queue.len());
@@ -215,7 +220,7 @@ mod tests {
 
         std::thread::sleep(one_second);
 
-        visa_table.handle_expirations(&asm);
+        visa_table.handle_expirations(&asm.peer_table);
 
         assert_eq!(1, visa_table.table.len());
         assert_eq!(1, visa_table.timeout_queue.len());
@@ -223,7 +228,7 @@ mod tests {
         assert_eq!(true, visa_table.table.contains_key(&visa2));
         assert_eq!(false, visa_table.table.contains_key(&visa3));
 
-        assert!(visa_table.revoke(&asm, visa2).is_ok());
+        assert!(visa_table.revoke(&asm.peer_table, visa2).is_ok());
 
         assert_eq!(0, visa_table.table.len());
         assert_eq!(1, visa_table.timeout_queue.len());
@@ -270,7 +275,7 @@ mod tests {
         let tether_id2 = peer_state.pft.insert(pep2).expect("Failed to insert PEP");
         assert_eq!(2, peer_state.pft.len());
 
-        let mut visa_table = asm.visa_table.lock().unwrap();
+        let mut visa_table = asm.visa_table.write().await;
         visa_table.insert_id(visa1, DateTime::<Utc>::MAX_UTC); // An element that won't timeout
         visa_table.insert_id(visa2, Utc::now() + one_second); // An element that will time out in a second
         assert!(visa_table
@@ -282,10 +287,10 @@ mod tests {
 
         std::thread::sleep(one_second);
 
-        visa_table.handle_expirations(&asm);
+        visa_table.handle_expirations(&asm.peer_table);
         assert_eq!(1, peer_state.pft.len());
 
-        assert!(visa_table.revoke(&asm, visa1).is_ok());
+        assert!(visa_table.revoke(&asm.peer_table, visa1).is_ok());
         assert_eq!(0, peer_state.pft.len());
     }
 }

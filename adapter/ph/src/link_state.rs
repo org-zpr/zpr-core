@@ -8,7 +8,7 @@ use crate::mgmt::core::SyncReqError;
 use crate::net_defs::IpAddress;
 use crate::sample_ring::SampleRing;
 use crate::special_peers;
-use crate::vs_worker;
+use crate::visa_mgmt;
 use crate::zdp::{ResponseCode, TerminateReason};
 
 use std::fmt::{Display, Formatter};
@@ -558,8 +558,8 @@ impl LinkStateWrapper {
                     "Link {link_id} received agent address ({addr}).  Authorizing with visa service"
                 );
 
-                match vs_worker::build_connect_request(asm, link_id, addr) {
-                    Ok(Some(conn_req)) => Ok(vs_worker::authorize_connect(asm, link_id, conn_req)),
+                match visa_mgmt::build_connect_request(asm, link_id, addr) {
+                    Ok(Some(conn_req)) => Ok(visa_mgmt::authorize_connect(asm, link_id, conn_req)),
                     Ok(None) => {
                         locked_fsm.set_state(LinkState::Active);
                         debug!(
@@ -688,7 +688,7 @@ impl LinkStateWrapper {
                     asm.tun_ctl.set_carrier(false).unwrap();
                 }
                 for addr in locked_fsm.agent_addresses.clone() {
-                    vs_worker::agent_disconnect(asm, addr);
+                    visa_mgmt::agent_disconnect(asm, addr);
                 }
                 locked_fsm.agent_addresses.clear();
                 locked_fsm.silent = false;

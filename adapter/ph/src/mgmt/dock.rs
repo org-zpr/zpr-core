@@ -2,8 +2,8 @@ use crate::assembly::{AddRouteError, Assembly};
 use crate::counters::CounterType;
 use crate::defs::FiveTuple;
 use crate::logging::targets::FLOW_MGMT;
-use crate::net_defs::IpAddress;
 use crate::special_peers;
+use crate::visa_mgmt;
 
 use chrono::{DateTime, Utc};
 use libnode::{vsapi, vsconn};
@@ -41,8 +41,8 @@ pub async fn bind_agent_address(
             egress_link_id = id;
             visa_id = SPECIAL_VISA_ID;
             asm.visa_table
-                .lock()
-                .unwrap()
+                .write()
+                .await
                 .insert_id(visa_id, DateTime::<Utc>::MAX_UTC);
         } else {
             debug!(target: FLOW_MGMT, "visa request error: special peer routing applies, but special peer ({spname:?}) not connected");
@@ -66,8 +66,8 @@ pub async fn bind_agent_address(
             egress_link_id = NonZero::new(zpr::LOCAL_AGENT_LINK_ID).unwrap();
             visa_id = SPECIAL_VISA_ID;
             asm.visa_table
-                .lock()
-                .unwrap()
+                .write()
+                .await
                 .insert_id(visa_id, DateTime::<Utc>::MAX_UTC);
         } else {
             let visa_req = vsconn::VisaRequest {
@@ -83,45 +83,16 @@ pub async fn bind_agent_address(
                     visa,
                     ..
                 }) => {
-                    let Some(visa) = visa.unwrap().visa else {
+                    let Some(visa) = visa else {
                         asm.counters[CounterType::VisaRequestError].increment();
                         error!(target: FLOW_MGMT, "visa request error: Could not parse visa");
                         return Err(BindAgentAddressError::ParseError(
                             "Could not parse visa".into(),
                         ));
                     };
-                    // for now, just pull the destination address tether to set up forwarding
-                    let Some(octets) = visa.dest.clone() else {
-                        asm.counters[CounterType::VisaRequestError].increment();
-                        error!(target: FLOW_MGMT, "visa request error: Could not parse visa");
-                        return Err(BindAgentAddressError::ParseError(
-                            "Could not parse visa".into(),
-                        ));
-                    };
-                    let Ok(addr) = IpAddress::try_from(octets) else {
-                        asm.counters[CounterType::VisaRequestError].increment();
-                        return Err(BindAgentAddressError::ParseError(
-                            "Could not parse visa dest address".into(),
-                        ));
-                    };
-                    match asm.find_egress_link(addr) {
-                        Some(link_id) => egress_link_id = link_id,
-                        None => {
-                            asm.counters[CounterType::VisaRequestError].increment();
-                            return Err(BindAgentAddressError::ParseError(
-                                "Could not parse visa dest address".into(),
-                            ));
-                        }
-                    }
-                    match asm.visa_table.lock().unwrap().insert_visa(visa) {
-                        Ok(issuer_id) => visa_id = issuer_id,
-                        Err(_) => {
-                            asm.counters[CounterType::VisaRequestError].increment();
-                            return Err(BindAgentAddressError::ParseError(
-                                "Could not parse visa ID".into(),
-                            ));
-                        }
-                    }
+                    (visa_id, egress_link_id) = visa_mgmt::parse_visa(asm, visa)
+                        .await
+                        .map_err(|e| BindAgentAddressError::ParseError(e.to_string()))?;
                     asm.counters[CounterType::VisaRequestSuccess].increment();
                     debug!(
                         target: FLOW_MGMT,
