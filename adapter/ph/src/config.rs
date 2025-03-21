@@ -74,11 +74,9 @@ pub struct TopologyConfig {
     /// Number of packet buffers to allocate per fastpath worker.
     pub buffer_count: usize,
 
-    pub substrate_ingress_concurrency: usize,
-    pub agent_output_concurrency: usize,
+    pub fastpath_concurrency: usize,
 
-    pub substrate_ingress_batch_size: usize,
-    pub agent_output_batch_size: usize,
+    pub fastpath_batch_size: usize,
     pub capture_batch_size: usize,
 
     #[allow(dead_code)] // see TODO in main
@@ -98,11 +96,9 @@ impl Default for TopologyConfig {
         Self {
             buffer_count: DEFAULT_BUFFER_COUNT,
 
-            substrate_ingress_concurrency: DEFAULT_WORKER_CONCURRENCY,
-            agent_output_concurrency: DEFAULT_WORKER_CONCURRENCY,
+            fastpath_concurrency: DEFAULT_WORKER_CONCURRENCY,
 
-            substrate_ingress_batch_size: DEFAULT_BATCH_SIZE,
-            agent_output_batch_size: DEFAULT_BATCH_SIZE,
+            fastpath_batch_size: DEFAULT_BATCH_SIZE,
             capture_batch_size: DEFAULT_BATCH_SIZE,
 
             capture_queue_size: DEFAULT_DATAPATH_QUEUE_SIZE,

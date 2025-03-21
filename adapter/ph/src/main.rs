@@ -204,7 +204,7 @@ fn main() -> ExitCode {
 
     let tun_devs: Vec<_> = match ZprTun::new_mq(
         config.tun_if,
-        topology_config.agent_output_concurrency,
+        topology_config.fastpath_concurrency,
         tun_addr,
     ) {
         Ok(devs) => devs.into_iter().map(Arc::new).collect(),
@@ -217,7 +217,7 @@ fn main() -> ExitCode {
 
     let mut agent_requeue_inqs = Vec::new();
     let mut agent_requeue_outqs = Vec::new();
-    for _i in 0..topology_config.agent_output_concurrency {
+    for _i in 0..topology_config.fastpath_concurrency {
         let (inq, outq) = tokio::net::UnixDatagram::pair().unwrap();
         // TODO: use get/setsockopt(SO_SNDBUF) to ensure we can transfer packets of PACKET_BUFFER_SIZE
         agent_requeue_inqs.push(inq);
@@ -230,7 +230,7 @@ fn main() -> ExitCode {
 
     let mut substrate_sockets: Vec<Arc<std::net::UdpSocket>> = Vec::new();
 
-    for _i in 0..topology_config.substrate_ingress_concurrency {
+    for _i in 0..topology_config.fastpath_concurrency {
         let socket = socket2::Socket::new(
             socket2::Domain::for_address(config.self_addr),
             socket2::Type::DGRAM,
@@ -259,7 +259,7 @@ fn main() -> ExitCode {
 
     if let Err(err) = packet_steering::set_steering(
         &substrate_sockets[0],
-        topology_config.substrate_ingress_concurrency,
+        topology_config.fastpath_concurrency,
         packet_steering::SteeringMethod::ZdpStreamId,
     ) {
         // It's OK if this fails; flows will still be pinned to a queue;
@@ -393,9 +393,9 @@ fn main() -> ExitCode {
 
     let mut fastpath_threads = Vec::new();
 
-    let agent_output_worker_config = FastpathWorkerConfig {
+    let fastpath_worker_config = FastpathWorkerConfig {
         buffer_count: asm.topology_config.buffer_count,
-        batch_size: asm.topology_config.agent_output_batch_size,
+        batch_size: asm.topology_config.fastpath_batch_size,
     };
     for (worker_index, (tun_dev, requeue)) in
         tun_devs.into_iter().zip(agent_requeue_outqs).enumerate()
@@ -404,7 +404,7 @@ fn main() -> ExitCode {
         fastpath_threads.push(
             builder
                 .spawn(agent_output_worker::launch(
-                    agent_output_worker_config,
+                    fastpath_worker_config,
                     worker_index,
                     asm.clone(),
                     tun_dev,
@@ -428,16 +428,12 @@ fn main() -> ExitCode {
 
     let mut fastpath_threads = Vec::new();
 
-    let substrate_ingress_worker_config = FastpathWorkerConfig {
-        buffer_count: asm.topology_config.buffer_count,
-        batch_size: asm.topology_config.substrate_ingress_batch_size,
-    };
     for (worker_index, socket) in substrate_sockets.into_iter().enumerate() {
         let builder = std::thread::Builder::new().name(format!("ingress {worker_index}"));
         fastpath_threads.push(
             builder
                 .spawn(substrate_ingress_worker::launch(
-                    substrate_ingress_worker_config,
+                    fastpath_worker_config,
                     worker_index,
                     asm.clone(),
                     socket,
