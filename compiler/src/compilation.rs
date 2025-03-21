@@ -37,7 +37,7 @@ impl Compilation {
     }
 
     /// Create a policy from the ZPL source and configuration.
-    pub fn compile(&mut self) -> Result<(), CompilationError> {
+    pub fn compile(&self) -> Result<(), CompilationError> {
         let cctx = CompilationCtx::new(self.verbose, self.werror);
         if self.verbose {
             println!(
@@ -114,7 +114,7 @@ impl Compilation {
 
     /// Create the container struct and optionally sign the policy with the private key.
     fn contain_policy(
-        &mut self,
+        &self,
         pol: &polio::Policy,
         ctx: &CompilationCtx,
     ) -> Result<polio::PolicyContainer, CompilationError> {
@@ -333,7 +333,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let mut compilation = Compilation::builder(zpl_file)
+        let compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -361,7 +361,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let mut compilation = Compilation::builder(zpl_file)
+        let compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -414,7 +414,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, zplc).expect("failed to write config file");
 
-        let mut compilation = Compilation::builder(zpl_file)
+        let compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -441,7 +441,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let mut compilation = Compilation::builder(zpl_file)
+        let compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -470,7 +470,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let mut compilation = Compilation::builder(zpl_file)
+        let compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();
@@ -499,7 +499,7 @@ mod test {
         let cfg_file = tempdir.path.join("test.zplc");
         std::fs::write(&cfg_file, BASIC_CONFIG).expect("failed to write config file");
 
-        let mut compilation = Compilation::builder(zpl_file)
+        let compilation = Compilation::builder(zpl_file)
             .config(&cfg_file)
             .verbose(true)
             .build();

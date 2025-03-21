@@ -104,7 +104,7 @@ fn main() {
         };
         cb = cb.sign_with_key(key);
     }
-    let mut comp = cb.build();
+    let comp = cb.build();
     match comp.compile() {
         Ok(_) => (),
         Err(e) => {

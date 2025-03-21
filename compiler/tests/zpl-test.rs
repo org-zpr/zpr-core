@@ -86,7 +86,7 @@ fn can_parse_rfc_examples() {
                 .verbose(true)
                 .parse_only(true)
                 .config(&config_file);
-            let mut comp = cb.build();
+            let comp = cb.build();
             match comp.compile() {
                 Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
                 Err(e) => {
@@ -121,7 +121,7 @@ fn can_compile_m3_policies() {
             let cb = CompilationBuilder::new(path)
                 .verbose(true)
                 .output_directory(&temp_dir.path);
-            let mut comp = cb.build();
+            let comp = cb.build();
             match comp.compile() {
                 Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
                 Err(e) => {
@@ -159,7 +159,7 @@ fn can_compile_integtest_policies() {
             let cb = CompilationBuilder::new(path)
                 .verbose(true)
                 .output_directory(&temp_dir.path);
-            let mut comp = cb.build();
+            let comp = cb.build();
             match comp.compile() {
                 Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
                 Err(e) => {
