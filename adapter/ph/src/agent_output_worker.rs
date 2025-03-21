@@ -31,8 +31,10 @@ pub fn launch(
     tun: Arc<ZprTun>,
     requeue_outq: UnixDatagram,
 ) -> impl FnOnce() {
-    let worker = FastpathWorker::new(config, worker_index, asm.clone());
-    move || agent_output_main(worker, &tun, &requeue_outq)
+    move || {
+        let worker = FastpathWorker::new(config, worker_index, asm.clone());
+        agent_output_main(worker, &tun, &requeue_outq);
+    }
 }
 
 fn agent_output_main(mut worker: FastpathWorker, tun: &ZprTun, requeue_outq: &UnixDatagram) {
@@ -45,6 +47,9 @@ fn agent_output_main(mut worker: FastpathWorker, tun: &ZprTun, requeue_outq: &Un
     };
 
     loop {
+        // output anything we've queued up
+        worker.process_out_queues();
+
         // process the return buffer queue
         if worker.buffers.is_empty() {
             // if we are out of buffers, block
@@ -102,41 +107,57 @@ fn agent_output_main(mut worker: FastpathWorker, tun: &ZprTun, requeue_outq: &Un
             .unwrap()
             .contains(poll::PollFlags::POLLIN)
         {
-            // read from TUN device
-            // TODO: batch receive
-            let mut pkt = Packet::new(
-                worker.buffers.pop().unwrap(),
-                config::DEFAULT_MESSAGE_HEADROOM,
-            );
+            let nbufs = std::cmp::min(worker.buffers.len(), worker.config.batch_size);
 
-            if let Err(err) = tun.try_recv_buf(&mut pkt) {
-                match err.kind() {
-                    ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
-                        worker.buffers.push(pkt.destroy());
+            // read from TUN device
+            let mut pkts: Vec<_> = worker
+                .buffers
+                .drain(worker.buffers.len() - nbufs..)
+                .rev()
+                .map(|buf| Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM))
+                .collect(); // TODO: recycle
+            let mut results = Vec::new(); // TODO: recycle
+            let n = worker
+                .batch_io
+                .try_read_buf_batch(&tun_fd, pkts.iter_mut(), &mut results)
+                .unwrap();
+
+            // return empty buffers to pool
+            worker
+                .buffers
+                .extend(pkts.drain(n..).rev().map(|pkt| pkt.destroy()));
+
+            // process packets
+            for (mut pkt, result) in pkts.into_iter().zip(results) {
+                if let Err(err) = result {
+                    match err.kind() {
+                        ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
+                            worker.buffers.push(pkt.destroy());
+                            continue;
+                        }
+
+                        _ => panic!("unrecoverable I/O error {err}"),
+                    }
+                }
+
+                if zprtun::TUN_HAS_PI {
+                    let pi = TunPi::read_pi(&mut pkt);
+                    if pi.strip || !is_ip(pi) {
+                        // packet was too large or non-IP; drop
+                        worker.drop_and_count(pkt, CounterType::OutPacksDrop);
                         continue;
                     }
-
-                    _ => panic!("unrecoverable I/O error {err}"),
+                } else {
+                    // No packet info, permit IP and IPv6 only (for now?)
+                    if pkt.body()[0] >> 4 != 4 && pkt.body()[0] >> 4 != 6 {
+                        worker.drop_and_count(pkt, CounterType::OutPacksDrop);
+                        continue;
+                    }
                 }
+
+                worker.asm.counters[CounterType::OutPacksRec].increment();
+                worker.agent_output(pkt);
             }
-
-            if zprtun::TUN_HAS_PI {
-                let pi = TunPi::read_pi(&mut pkt);
-                if pi.strip || !is_ip(pi) {
-                    // packet was too large or non-IP; drop
-                    worker.drop_and_count(pkt, CounterType::OutPacksDrop);
-                    continue;
-                }
-            } else {
-                // No packet info, permit IP and IPv6 only (for now?)
-                if pkt.body()[0] >> 4 != 4 && pkt.body()[0] >> 4 != 6 {
-                    worker.drop_and_count(pkt, CounterType::OutPacksDrop);
-                    continue;
-                }
-            }
-
-            worker.asm.counters[CounterType::OutPacksRec].increment();
-            worker.agent_output(pkt);
         }
     }
 }

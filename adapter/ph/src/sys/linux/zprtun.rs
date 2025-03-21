@@ -1,7 +1,6 @@
 use crate::zprtun::ZprTunError;
 use bytes::buf;
 use nix::ioctl_write_ptr;
-use std::io;
 use std::io::Result;
 use std::net::IpAddr;
 use std::os::fd::{AsRawFd, RawFd};
@@ -47,10 +46,7 @@ impl ZprTun {
         Ok(tok_tun_devs.into_iter().map(ZprTun).collect())
     }
 
-    pub fn try_send(&self, buf: &[u8]) -> io::Result<usize> {
-        self.0.try_send(buf)
-    }
-
+    #[allow(dead_code)]
     pub fn try_recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> Result<usize> {
         let uninit_slice = buf.chunk_mut();
         // SAFETY: we are only writing to this uninitialized slice

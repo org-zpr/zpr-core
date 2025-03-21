@@ -74,6 +74,7 @@ pub enum CounterType {
     OutCapPacksDrop,
     InCapPacksFilt,
     OutCapPacksFilt,
+    DroppedOversize,
 
     QueueBackpressure,
     DroppedAwaitingBind,
@@ -131,6 +132,7 @@ impl CounterType {
             Self::OutCapPacksDrop => "Outbound Capture Packets Dropped",
             Self::InCapPacksFilt => "Inbound Capture Packets Filtered",
             Self::OutCapPacksFilt => "Outbound Capture Packets Filtered",
+            Self::DroppedOversize => "Inbound Oversize Packets Dropped",
 
             // Packet drops
             Self::QueueBackpressure => "QueueBackpressure",

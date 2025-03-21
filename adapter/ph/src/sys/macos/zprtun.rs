@@ -48,23 +48,6 @@ impl ZprTun {
         Ok(vec![ZprTun::from(dev)])
     }
 
-    pub async fn recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> std::io::Result<usize> {
-        let uninit_slice = buf.chunk_mut();
-        // SAFETY: we are only writing to this uninitialized slice
-        let slice = unsafe { slice_assume_init_mut(uninit_slice.as_uninit_slice_mut()) };
-        let size = self.0.recv(slice).await?;
-        // SAFETY: we've now initialized this much of the slice
-        unsafe {
-            buf.advance_mut(size);
-        }
-        Ok(size)
-    }
-
-    pub fn try_send(&self, buf: &[u8]) -> std::io::Result<usize> {
-        let idev = &*(self.0);
-        idev.send(buf)
-    }
-
     /// A NOP on mac.
     pub fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
         Ok(())
