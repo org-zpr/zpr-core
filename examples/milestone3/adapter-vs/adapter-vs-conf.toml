@@ -1,0 +1,27 @@
+# Config for client adapter in front of the visa service
+
+[global]
+name = "vs"
+ca_file = "auth-ca.crt"
+certificate_file = "adapter-vs-noise.crt"
+private_key_file = "adapter-vs-noise.key"
+agent_addr = [ "fd5a:5052::1" ] # visa service well known addr
+self_addr = "0.0.0.0:5000"
+
+# use `sudo ./mktun.sh` to set this up
+tun_if = "tun9"
+
+
+[adapter]
+# TODO: Can we use the OCI private/internal addr here?
+node_addr = "129.153.152.175:5000"
+node_public_key_file = "node-noise-pub.pem"
+
+
+
+
+
+
+
+
+
