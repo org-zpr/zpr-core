@@ -8,7 +8,7 @@ order = ["hosts", "dns"]
 "node0.overlay" = "129.153.152.175"
 
 [nodes."node.zpr.org"]
-key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
+key = "DNBguc3HqkzfLys68PWm2CnWSA/IhAIFiHFII9cFrFo="
 provider = [ ["zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "node0.zpr"
 interfaces = ["in1"]
