@@ -18,7 +18,7 @@ pub enum VisaTableError {
     #[error("Visa {0} Not Found")]
     NotFound(VisaId),
     #[error("Failed to parse visa field {0}")]
-    ParseError(String),
+    ParseError(&'static str),
     #[error("Failed to insert visa into table")]
     InsertError,
 }
@@ -106,13 +106,13 @@ impl VisaTable {
     /// Insert a visa from the Visa Service into the Visa Table
     pub fn insert_visa(&mut self, visa: vsapi::Visa) -> Result<VisaId, VisaTableError> {
         let Some(visa_id) = visa.issuer_id else {
-            return Err(VisaTableError::ParseError("issuer_id".into()));
+            return Err(VisaTableError::ParseError("issuer_id"));
         };
         let Some(timestamp) = visa.expires else {
-            return Err(VisaTableError::ParseError("expiration".into()));
+            return Err(VisaTableError::ParseError("expiration"));
         };
         let Some(expiration) = DateTime::from_timestamp_millis(timestamp) else {
-            return Err(VisaTableError::ParseError("expiration".into()));
+            return Err(VisaTableError::ParseError("expiration"));
         };
 
         info!(target: VISA_MGMT,

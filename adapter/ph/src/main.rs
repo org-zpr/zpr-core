@@ -16,7 +16,7 @@ use tracing::*;
 
 mod adapter_manager_worker;
 mod adapter_tables;
-mod admin;
+mod admin_worker;
 mod agent_output_worker;
 mod assembly;
 mod capture_worker;
@@ -378,7 +378,7 @@ fn main() -> ExitCode {
     js.spawn_local(signal_worker::launch(asm.clone()));
     js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq));
     js.spawn_local(adapter_manager_worker::launch(asm.clone(), am_outq));
-    js.spawn_local(admin::launch(asm.clone(), control_socket));
+    js.spawn_local(admin_worker::launch(asm.clone(), control_socket));
     js.spawn_local(km_multiplexor::launch_signal_worker(
         asm.clone(),
         km_sig_outq,

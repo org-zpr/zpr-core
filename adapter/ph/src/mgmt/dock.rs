@@ -4,6 +4,7 @@ use crate::defs::FiveTuple;
 use crate::logging::targets::FLOW_MGMT;
 use crate::special_peers;
 use crate::visa_mgmt;
+use crate::visa_table::VisaTableError;
 
 use chrono::{DateTime, Utc};
 use libnode::{vsapi, vsconn};
@@ -19,7 +20,7 @@ pub enum BindAgentAddressError {
     #[error("policy error")]
     PolicyError,
     #[error("parse error: {0}")]
-    ParseError(String),
+    ParseError(&'static str),
     #[error("adding route failed: {0}")]
     AddRouteError(AddRouteError),
 }
@@ -86,13 +87,17 @@ pub async fn bind_agent_address(
                     let Some(visa) = visa else {
                         asm.counters[CounterType::VisaRequestError].increment();
                         error!(target: FLOW_MGMT, "visa request error: Could not parse visa");
-                        return Err(BindAgentAddressError::ParseError(
-                            "Could not parse visa".into(),
-                        ));
+                        return Err(BindAgentAddressError::ParseError("Could not parse visa"));
                     };
-                    (visa_id, egress_link_id) = visa_mgmt::parse_visa(asm, visa)
-                        .await
-                        .map_err(|e| BindAgentAddressError::ParseError(e.to_string()))?;
+                    (visa_id, egress_link_id) =
+                        visa_mgmt::parse_visa(asm, visa)
+                            .await
+                            .map_err(|e| match e {
+                                VisaTableError::ParseError(field) => {
+                                    BindAgentAddressError::ParseError(field)
+                                }
+                                e => panic!("Got unexpected error type {e}"),
+                            })?;
                     asm.counters[CounterType::VisaRequestSuccess].increment();
                     debug!(
                         target: FLOW_MGMT,
