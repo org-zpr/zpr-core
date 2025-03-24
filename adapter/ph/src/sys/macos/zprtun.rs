@@ -1,6 +1,7 @@
 use crate::zprtun::{ZprTunError, DEFAULT_TUN_MTU};
 use bytes::buf;
 use std::net::IpAddr;
+use std::os::fd::{AsRawFd, RawFd};
 use std::result::Result;
 use tun::{AbstractDevice, AsyncDevice};
 use zpr_ext::std::mem::slice_assume_init_mut;
@@ -76,5 +77,11 @@ impl ZprTun {
             Ok(_) => Ok(()),
             Err(e) => Err(ZprTunError::PlatformError(e.to_string())),
         }
+    }
+}
+
+impl AsRawFd for ZprTun {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_raw_fd()
     }
 }

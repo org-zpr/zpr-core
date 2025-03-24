@@ -4,10 +4,10 @@ Note: Since we don't yet authenticate users, this policy is expressed using endp
 
 
 define adapter as a device with cn
-define GoldenClient as an adapter with cn:client.zpr.org
+define GoldenClient as an adapter with cn:'client.zpr.org'
 
-define ZServicePingable as a service with cn:service.zpr.org
-define ZWebService as a service with cn:service.zpr.org
+define ZServicePingable as a service with cn:'service.zpr.org'
+define ZWebService as a service with cn:'service.zpr.org'
 
 allow GoldenClient to access ZServicePingable
 allow GoldenClient to access ZWebService

@@ -5,6 +5,8 @@
 
 use std::fmt;
 
+use crate::errors::CompilationError;
+
 pub struct ZPLStr {
     name: String,
     value: Option<String>,
@@ -98,12 +100,36 @@ impl ZPLStrBuilder {
         self.name.len() + self.value.len()
     }
 
+    /*
     pub fn push(&mut self, c: char) {
         if self.input_to_value {
             self.value.push(c);
         } else {
             self.name.push(c);
         }
+    }
+    */
+
+    pub fn push(
+        &mut self,
+        c: char,
+        quoted: bool,
+        line: usize,
+        col: usize,
+    ) -> Result<(), CompilationError> {
+        if self.input_to_value {
+            if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '-' | '_') {
+                return Err(CompilationError::IllegalStringLiteralChar(c, line, col));
+            }
+            self.value.push(c);
+        } else {
+            // The name part of a tuple is allowed to contain periods wihout needing quotes.
+            if !quoted && !c.is_ascii_alphanumeric() && !matches!(c, '.' | '-' | '_') {
+                return Err(CompilationError::IllegalNameLiteralChar(c, line, col));
+            }
+            self.name.push(c);
+        }
+        Ok(())
     }
 
     /// Switch to value mode ... all further pushes go to the tuple value. Implies that this is a tuple.

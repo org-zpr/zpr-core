@@ -16,6 +16,7 @@ use tracing::*;
 
 mod adapter_manager_worker;
 mod adapter_tables;
+mod admin_worker;
 mod agent_output_worker;
 mod assembly;
 mod capture_worker;
@@ -44,7 +45,6 @@ mod pcap_writer;
 mod peer_table;
 mod queues;
 mod rcu;
-mod rpc_worker;
 mod sample_ring;
 mod signal_worker;
 mod special_peers;
@@ -54,6 +54,7 @@ mod sys;
 mod test_packet;
 mod tun_ctl;
 mod two_way_queue;
+mod visa_mgmt;
 mod visa_table;
 mod vs_worker;
 mod vss_worker;
@@ -218,7 +219,7 @@ fn main() -> ExitCode {
         let (inq, outq) = tokio::net::UnixDatagram::pair().unwrap();
         // TODO: use get/setsockopt(SO_SNDBUF) to ensure we can transfer packets of PACKET_BUFFER_SIZE
         agent_requeue_inqs.push(inq);
-        agent_requeue_outqs.push(outq);
+        agent_requeue_outqs.push(outq.into_std().unwrap());
     }
 
     //
@@ -319,7 +320,7 @@ fn main() -> ExitCode {
         substrate_egress: SubstrateEgress::new(substrate_sockets.iter().cloned()),
         agent_output_requeue: AgentOutputRequeue::new(agent_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
-        visa_table: std::sync::Mutex::new(visa_table::VisaTable::new()),
+        visa_table: tokio::sync::RwLock::new(visa_table::VisaTable::new()),
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
         flow_control: FlowControl::new(),
@@ -377,7 +378,7 @@ fn main() -> ExitCode {
     js.spawn_local(signal_worker::launch(asm.clone()));
     js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq));
     js.spawn_local(adapter_manager_worker::launch(asm.clone(), am_outq));
-    js.spawn_local(rpc_worker::launch(asm.clone(), control_socket));
+    js.spawn_local(admin_worker::launch(asm.clone(), control_socket));
     js.spawn_local(km_multiplexor::launch_signal_worker(
         asm.clone(),
         km_sig_outq,
@@ -388,6 +389,8 @@ fn main() -> ExitCode {
     // start data path workers
     //
 
+    let mut fastpath_threads = Vec::new();
+
     let agent_output_worker_config = FastpathWorkerConfig {
         buffer_count: asm.topology_config.buffer_count,
         batch_size: asm.topology_config.agent_output_batch_size,
@@ -395,13 +398,18 @@ fn main() -> ExitCode {
     for (worker_index, (tun_dev, requeue)) in
         tun_devs.into_iter().zip(agent_requeue_outqs).enumerate()
     {
-        js.spawn(agent_output_worker::launch(
-            agent_output_worker_config,
-            worker_index,
-            asm.clone(),
-            tun_dev,
-            requeue,
-        ));
+        let builder = std::thread::Builder::new().name(format!("output {worker_index}"));
+        fastpath_threads.push(
+            builder
+                .spawn(agent_output_worker::launch(
+                    agent_output_worker_config,
+                    worker_index,
+                    asm.clone(),
+                    tun_dev,
+                    requeue,
+                ))
+                .unwrap(),
+        );
     }
 
     if ph_mode == PhMode::Node {

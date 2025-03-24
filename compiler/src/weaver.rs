@@ -6,6 +6,7 @@ use base64::prelude::*;
 
 use crate::compilation::Compilation;
 use crate::config_api::{ConfigApi, ConfigItem};
+use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, sha256_of_bytes};
 use crate::errors::CompilationError;
 use crate::fabric::{Fabric, ServiceType};
@@ -26,6 +27,7 @@ pub fn weave(
     _comp: &Compilation,
     config: &ConfigApi,
     policy: &Policy,
+    ctx: &CompilationCtx,
 ) -> Result<Fabric, CompilationError> {
     let mut weaver = Weaver::new();
 
@@ -67,17 +69,17 @@ pub fn weave(
     // will not be readable by visa service.
     for ts_id in &config.must_get_keys("/trusted_services") {
         if ts_id != zpl::DEFAULT_TRUSTED_SERVICE_ID {
-            println!(
-                "warning: trusted_service '{}': non-default trusted services not supported",
+            ctx.warn(&format!(
+                "trusted_service '{}': non-default trusted services not supported",
                 ts_id
-            );
+            ))?;
         }
     }
 
-    weaver.init_services(&class_idx, policy, config)?;
+    weaver.init_services(&class_idx, policy, config, ctx)?;
     weaver.init_nodes(config)?;
     weaver.add_client_policies(&class_idx, policy, config)?;
-    weaver.add_default_auth(config)?;
+    weaver.add_default_auth(config, ctx)?;
 
     Ok(weaver.fabric)
 }
@@ -110,10 +112,11 @@ impl Weaver {
         class_idx: &HashMap<String, &Class>,
         policy: &Policy,
         config: &ConfigApi,
+        ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         self.defines_to_services(class_idx, policy, config)?;
         self.allow_clauses_to_services(class_idx, policy, config)?;
-        self.visa_services_to_services(config)?;
+        self.visa_services_to_services(config, ctx)?;
 
         Ok(())
     }
@@ -122,7 +125,11 @@ impl Weaver {
     /// Most visa service related functionality is built in. However user can set
     /// the attributes of the administrator who is able to access the visa service
     /// admin HTTPS API.
-    fn visa_services_to_services(&mut self, config: &ConfigApi) -> Result<(), CompilationError> {
+    fn visa_services_to_services(
+        &mut self,
+        config: &ConfigApi,
+        ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
         let vs_protocol = Protocol {
             protocol: IanaProtocol::TCP,
             port: Some(zpl::VISA_SERVICE_PORT.to_string()),
@@ -167,7 +174,7 @@ impl Weaver {
         };
         if admin_access_attrs.is_empty() {
             // TODO: is this an error?
-            println!("warning: no admin attributes set for visa service admin access");
+            ctx.warn("no admin attributes set for visa service admin access")?;
         } else {
             self.fabric
                 .add_condition_to_service(&fab_admin_svc_id, &admin_access_attrs, false)?;
@@ -534,7 +541,11 @@ impl Weaver {
 
     /// For now we only accept the DEFAULT (builtin) trusted service.
     /// And the only thing we care about is the certificate.
-    fn add_default_auth(&mut self, config: &ConfigApi) -> Result<(), CompilationError> {
+    fn add_default_auth(
+        &mut self,
+        config: &ConfigApi,
+        ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
         if config
             .get(&format!(
                 "/trusted_services/{}",
@@ -562,7 +573,7 @@ impl Weaver {
             },
             _ => {
                 // TODO: This should probably be an error, but helps for testing.
-                println!("warning: default trusted service did not return a certificate");
+                ctx.warn("no certificate for default trusted service")?;
                 vec![]
             }
         };
@@ -631,6 +642,8 @@ fn attrs_for_class(class_idx: &HashMap<String, &Class>, class_name: &str) -> Vec
 #[cfg(test)]
 mod test {
     use super::*;
+
+    use crate::context::CompilationCtx;
     use crate::lex::Token;
     use crate::ptypes::{AllowClause, ClassFlavor, Clause, FPos};
     use std::env;
@@ -652,10 +665,11 @@ mod test {
         let mut w = Weaver::new();
         let class_idx = HashMap::new();
         let policy = Policy::default();
-        let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), true)
-            .expect("failed to parse config");
+        let config =
+            ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), &CompilationCtx::default())
+                .expect("failed to parse config");
 
-        let res = w.init_services(&class_idx, &policy, &config);
+        let res = w.init_services(&class_idx, &policy, &config, &CompilationCtx::default());
         assert!(res.is_ok());
 
         // Should create two services: visa-service and visa-service-admin
@@ -703,12 +717,13 @@ mod test {
 
         let mut class_idx = HashMap::new();
         let mut policy = Policy::default();
-        let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), true)
+        let ctx = CompilationCtx::default();
+        let config = ConfigApi::new_from_toml_content(&cfg, &env::temp_dir(), &ctx)
             .expect("failed to parse config");
 
         {
             let mut w = Weaver::new();
-            let res = w.init_services(&class_idx, &policy, &config);
+            let res = w.init_services(&class_idx, &policy, &config, &ctx);
             assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
 
             // Should create two services: visa-service and visa-service-admin.
@@ -767,7 +782,7 @@ mod test {
 
         {
             let mut w = Weaver::new();
-            let res = w.init_services(&class_idx, &policy, &config);
+            let res = w.init_services(&class_idx, &policy, &config, &ctx);
             println!("{:?}", res);
             assert!(res.is_ok(), "init_services failed: {}", res.unwrap_err());
             assert_eq!(w.fabric.services.len(), 3);

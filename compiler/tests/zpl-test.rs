@@ -88,7 +88,7 @@ fn can_parse_rfc_examples() {
                 .config(&config_file);
             let comp = cb.build();
             match comp.compile() {
-                Ok(_) => println!("{:?}: compiled ok", fent.path()),
+                Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
                 Err(e) => {
                     println!("error: {}", e);
                     panic!("failed to compile {:?}", fent.path());
@@ -123,7 +123,7 @@ fn can_compile_m3_policies() {
                 .output_directory(&temp_dir.path);
             let comp = cb.build();
             match comp.compile() {
-                Ok(_) => println!("{:?}: compiled ok", fent.path()),
+                Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
                 Err(e) => {
                     println!("error: {}", e);
                     panic!("failed to compile {:?}", fent.path());
@@ -161,7 +161,7 @@ fn can_compile_integtest_policies() {
                 .output_directory(&temp_dir.path);
             let comp = cb.build();
             match comp.compile() {
-                Ok(_) => println!("{:?}: compiled ok", fent.path()),
+                Ok(_warnings) => println!("{:?}: compiled ok", fent.path()),
                 Err(e) => {
                     println!("error: {}", e);
                     panic!("failed to compile {:?}", fent.path());

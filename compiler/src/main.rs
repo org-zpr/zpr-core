@@ -6,6 +6,7 @@ mod allow;
 mod compilation;
 mod config;
 mod config_api;
+mod context;
 mod crypto;
 mod define;
 mod errors;
@@ -22,6 +23,7 @@ mod zpl;
 mod zplstr;
 
 use clap::Parser;
+use colored::Colorize;
 use std::path::PathBuf;
 
 use compilation::Compilation;
@@ -50,6 +52,7 @@ struct Cli {
     /// Write output binary to existing directory DIR instead of default.
     #[arg(short = 'd', long = "outdir", value_name = "DIR")]
     outdir: Option<PathBuf>,
+
     /// Write the binary policy to filed named NAME instead of the default (input file with extension switched to .bin)
     #[arg(short = 'o', long, value_name = "NAME")]
     outfname: Option<String>,
@@ -61,12 +64,18 @@ struct Cli {
     /// Only perform parsing step. Does not produce a binary policy.
     #[arg(short, long)]
     parse_only: bool,
+
+    /// Treat warnings like errors and halt compilation when they occur.
+    #[arg(long = "Werror")]
+    werror: bool,
 }
 
 fn main() {
     let mut exit_code = 0;
     let cli = Cli::parse();
-    let mut cb = Compilation::builder(cli.zpl).verbose(cli.verbose);
+    let mut cb = Compilation::builder(cli.zpl)
+        .verbose(cli.verbose)
+        .werror(cli.werror);
     if cli.parse_only {
         cb = cb.parse_only(true);
     }
@@ -83,7 +92,13 @@ fn main() {
         let key = match load_rsa_private_key(&key) {
             Ok(k) => k,
             Err(e) => {
-                eprintln!("error loading private key: {}", e);
+                println!(
+                    "{}{} {}: {}",
+                    "error".red().bold(),
+                    ":".bold(),
+                    "failed to load private key",
+                    e
+                );
                 std::process::exit(1);
             }
         };
@@ -91,9 +106,9 @@ fn main() {
     }
     let comp = cb.build();
     match comp.compile() {
-        Ok(_) => println!("ℤ done!"),
+        Ok(_) => (),
         Err(e) => {
-            eprintln!("error: {}", e);
+            println!("{}{} {}", "error".red().bold(), ":".bold(), e);
             exit_code = 1;
         }
     }
