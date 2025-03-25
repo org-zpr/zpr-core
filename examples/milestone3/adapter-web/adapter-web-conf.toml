@@ -12,7 +12,7 @@ tun_if = "tun9"
 
 [adapter]
 # TODO: Can we use the OCI private/internal addr here?
-node_addr = "129.153.152.175:5000"
+node_addr = "10.0.0.21:5000"
 node_public_key_file = "node-noise-pub.pem"
 
 

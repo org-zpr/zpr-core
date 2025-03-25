@@ -7,6 +7,13 @@ node, there there are two services available: a web service and a
 NextCloud service.
 
 
+Clients:
+
+- `fd5a:5052:2::100` - admin
+- `fd5a:5052:2::101` - mathias
+- `fd5a:5052:2::102` - sarah
+- `fd5a:5052:2::103` - chris
+
 
 
 
