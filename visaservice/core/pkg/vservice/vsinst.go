@@ -188,6 +188,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		visaServiceAgent.SetProvides([]string{
 			polio.VisaServiceName,
 			fmt.Sprintf("/zpr/%s", polio.VisaServiceName),
+			fmt.Sprintf("/zpr/%s/admin", polio.VisaServiceName),
 		})
 		authedClaims := make(map[string]*agent.ClaimV)
 		authedClaims[agent.KAttrVisaServiceAdapter] = &agent.ClaimV{
