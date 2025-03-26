@@ -820,6 +820,7 @@ impl LinkStateWrapper {
         tokio::task::spawn_local(async move {
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            let mut consecutive_misses = 0;
             while task_asm.is_link_ready(link_id) {
                 interval.tick().await;
                 let start_time = Instant::now();
@@ -834,21 +835,37 @@ impl LinkStateWrapper {
                         link_data
                             .latency_data
                             .add(Instant::now().duration_since(start_time));
+                        consecutive_misses = 0;
                     }
                     Err(SyncReqError::Timeout) => {
                         peer.link_state_machine
                             .locked_data
                             .lock()
                             .unwrap()
-                            .echo_timeout += 1
+                            .echo_timeout += 1;
+                        consecutive_misses += 1;
                     }
                     Err(_) => {
                         peer.link_state_machine
                             .locked_data
                             .lock()
                             .unwrap()
-                            .echo_failure += 1
+                            .echo_failure += 1;
+                        consecutive_misses += 1;
                     }
+                }
+
+                if consecutive_misses > 3 {
+                    if task_asm
+                        .process_link_state_event(
+                            link_id,
+                            LinkEvent::Close(TerminateReason::RequestTimedOut),
+                        )
+                        .is_err()
+                    {
+                        error!(target: LINK_STATE, "Failed to shut down link after missed keepalives");
+                    }
+                    return;
                 }
             }
         });
