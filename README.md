@@ -41,9 +41,15 @@ You will be prompted for a pass phrase. You'll need to use that whenever
 you sign a certificate using the authority key.
 
 ```bash
-mkdir authorita
+# A place to put the files
+mkdir authority
+
 cd authority
+
+# New key for the CA
 openssl genrsa -aes256 -out auth-ca.key 4096
+
+# New self-signed cert
 openssl req -x509 -new -nodes -key auth-ca.key -sha256 -days 1826 -out auth-ca.crt
 ```
 
@@ -92,7 +98,10 @@ Use the `tools/zpr-pki` tool to create NOISE keys for all the participants:
 Once you have private key (PEM) files, you need to create certificates as follows:
 
 ```bash
+# First extract a public key from the private one
 ./zpr-pki pubkey <node-noise.key >node-noise-pub.pem
+
+# Then sign the public key
 ./zpr-pki gensignedcert authority/auth-ca.crt authority/auth-ca.key \
   /CN=node.zpr.org 365 < node-noise-pub.pem >node-noise.crt
 ```
@@ -160,19 +169,78 @@ be present in the same directory as the configuration file.
 
 ### Write a policy and compile it.
 
-(TODO)
+Here is a simple policy to let any adapter with a signed Noise key access 
+some serivce called a WebService.  
 
+We assume:
+- WebService is connected using an adpater with `CN=web.zpr.org`.
+- WebService is accessed using HTTP port 80.
+
+Create a file called `zpr-full-access.zpl` with these contents:
+
+```
+Define adapter as a device with cn.
+Define WebService as a service with cn:'web.zpr.org'.
+Allow cn: adapter to access WebService.
+```
+
+Then write a configuration file.
+Create a file called `zpr-full-access.zplc` with these contents.
+
+```toml
+[resolver]
+order = ["hosts", "dns"]
+
+[resolver.hosts]
+"node0.zpr" = "fd5a:5052:90de::1"
+"node0.overlay" = "129.6.7.1"
+
+[nodes."node"]
+key = "<node-public-noise-key-in-base64-here>"
+provider = [ ["zpr.adapter.cn", "node.zpr.org"]]
+zpr_address = "node0.zpr"
+interfaces = ["in1"]
+in1.netaddr = "node0.overlay:5000"
+
+[trusted_services.default]
+cert_path = "ca-cert.pem"
+
+[visa_service]
+dock_node = "node"
+admin_attrs = [ [ "zpr.adapter.cn", "admin.zpr.org" ] ]
+
+[protocols.http]
+protocol = "iana.TCP"
+port = 80
+
+[services.WebService]
+protocol = "http"
+```
+
+To compile, use the compiler:
+
+```bash
+zpc -k zpr-rsa-key.pem zpr-full-access.zpl
+
+# This will create the binary policy file, "zpr-full-access.bin"
+```
 
 ### Start up the node, the visa service and the visa service adapter.
 
-(TODO)
+Assuming you have three separate hosts for this.  On host 1 start the node:
+
+    sudo node -c /path/to/node-conf.toml
+
+On host 2, in one terminal start the visa service:
+
+    vserice -c /path/to/vs-config.yaml -p zpr-full-access.bin
+
+On host 2, in another termainal start the adapter:
+
+    sudo adapter -c /path/to/adapter-vs-conf.toml
 
 
-
-
-
-
-
+Now you can attach additional adapters and start up the "WebService".
 
 
 ## License
