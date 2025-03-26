@@ -15,6 +15,24 @@ Clients:
 - `fd5a:5052:2::103` - chris
 
 
+## Relevant VS Admin Commands
+
+For M3 you need to run `vs-admin` from the host running the visa service (you
+cannot connect in through ZPR as a VS admin yet). So in a terminal window on the
+VS machine:
+
+**List all agents**
+
+    vs-admin -s https://\[fd5a:5052::1\]:8182 -c vs.config/auth-ca.crt agents
+
+**List all visas**
+
+    vs-admin -s https://\[fd5a:5052::1\]:8182 -c vs.config/auth-ca.crt visas
+
+**Revoke Visas Using a CN**
+
+    vs-admin -s https://\[fd5a:5052::1\]:8182 -c vs.config/auth-ca.crt revoke --agent-cn mathias.zpr.org
+
 
 
 ## Network Configuration
