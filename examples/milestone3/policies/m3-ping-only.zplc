@@ -1,43 +1,31 @@
 # -*- mode: toml -*-
 
-
 [resolver]
 order = ["hosts", "dns"]
 
 [resolver.hosts]
 "node0.zpr" = "fd5a:5052:90de::1"
-"node0.overlay" = "192.168.0.55"
+"node0.overlay" = "10.0.0.21"
 "my.service" = "fd5a:5052:1::8080"
 
-# [nodes]
-
 [nodes."node.zpr.org"]
-key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
+key = "DNBguc3HqkzfLys68PWm2CnWSA/IhAIFiHFII9cFrFo="
 provider = [ ["zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "node0.zpr"
 interfaces = ["in1"]
 in1.netaddr = "node0.overlay:5000"
-# netaddr is really only needed for topology I think, can we remove for M3?
 
-# [trusted_services]
-
-[trusted_services.default] # note that "default" is special
+[trusted_services.default]
 cert_path = "ca-cert.pem"
 
-
-[visa_service] # Only one visa service support at the moment.
+[visa_service]
 dock_node = "node.zpr.org"
 admin_attrs = [ [ "zpr.adapter.cn", "client.zpr.org" ] ]
-# provider is hardcoded with zpr.adapter.cn:vs.zpr
-
-# [protocols]
 
 [protocols.ping]
 protocol = "iana.ICMP6"
 icmp_type = "request-response"
 icmp_codes = [ 128, 129 ]
-
-# [services]
 
 [services.ZServicePingable]
 protocol = "ping"
