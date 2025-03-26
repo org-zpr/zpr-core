@@ -17,6 +17,7 @@ use crate::net_defs;
 use crate::packet::{Packet, PacketBuffer};
 use crate::queues::{AdapterManager, MgmtDispatch, TryEnqueueError};
 use crate::sys::{TunPi, ZprTun};
+use crate::two_way_queue;
 use crate::zdp;
 use crate::zdp_ll;
 use crate::{compress, km};
@@ -70,6 +71,8 @@ pub struct FastpathWorker {
     pub worker_index: usize,
     pub asm: Arc<Assembly>,
     pub buffers: Vec<PacketBuffer>,
+
+    pub return_q: two_way_queue::ReturnQueue<PacketBuffer>,
     pub adapter_manager: AdapterManager,
     pub mgmt_dispatch: MgmtDispatch,
 
@@ -86,8 +89,9 @@ impl FastpathWorker {
         let buffers =
             vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; config.buffer_count];
 
-        let adapter_manager = asm.adapter_manager.clone();
-        let mgmt_dispatch = asm.mgmt_dispatch.clone();
+        let return_q = two_way_queue::ReturnQueue::new();
+        let adapter_manager = asm.adapter_manager_factory.make(&return_q);
+        let mgmt_dispatch = asm.mgmt_dispatch_factory.make(&return_q);
 
         let agent_input_tun = asm.agent_input.tuns[worker_index].clone(); // TEMP HACK
         let substrate_egress_socket = asm.substrate_egress.sockets[worker_index].clone(); // TEMP HACK
@@ -97,6 +101,8 @@ impl FastpathWorker {
             worker_index,
             asm,
             buffers,
+
+            return_q,
             adapter_manager,
             mgmt_dispatch,
 

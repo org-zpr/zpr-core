@@ -244,16 +244,11 @@ impl two_way_queue::TwoWayReturnable<MgmtDispatchMessage> for PacketBuffer {
     }
 }
 
-#[derive(Clone)]
 pub struct MgmtDispatch {
     sender: two_way_queue::Sender<MgmtDispatchMessage, PacketBuffer>,
 }
 
 impl MgmtDispatch {
-    pub fn new(sender: two_way_queue::Sender<MgmtDispatchMessage, PacketBuffer>) -> Self {
-        Self { sender }
-    }
-
     pub fn try_dispatch_mgmt_packet_with_link(
         &mut self,
         packet: Packet,
@@ -295,17 +290,20 @@ impl MgmtDispatch {
             }
         }
     }
+}
 
-    pub fn recv_return_buffers(&mut self, returns: &mut Vec<PacketBuffer>, limit: usize) -> usize {
-        self.sender.blocking_recv_many_returns(returns, limit)
+/// Factory to build `MgmtDispatch` ingresses for specified two-way-queue return queues.
+pub struct MgmtDispatchFactory(two_way_queue::SenderFactory<MgmtDispatchMessage, PacketBuffer>);
+
+impl MgmtDispatchFactory {
+    pub fn new(fact: two_way_queue::SenderFactory<MgmtDispatchMessage, PacketBuffer>) -> Self {
+        Self(fact)
     }
 
-    pub fn try_recv_return_buffers(
-        &mut self,
-        returns: &mut Vec<PacketBuffer>,
-        limit: usize,
-    ) -> usize {
-        self.sender.try_recv_many_returns(returns, limit)
+    pub fn make(&self, ret_q: &two_way_queue::ReturnQueue<PacketBuffer>) -> MgmtDispatch {
+        MgmtDispatch {
+            sender: self.0.make(ret_q),
+        }
     }
 }
 
@@ -321,16 +319,11 @@ impl two_way_queue::TwoWayReturnable<AdapterManagerMessage> for PacketBuffer {
     }
 }
 
-#[derive(Clone)]
 pub struct AdapterManager {
     sender: two_way_queue::Sender<AdapterManagerMessage, PacketBuffer>,
 }
 
 impl AdapterManager {
-    pub fn new(sender: two_way_queue::Sender<AdapterManagerMessage, PacketBuffer>) -> Self {
-        Self { sender }
-    }
-
     /// Request a tether ID to use for sending packets starting with the
     /// specified packet.
     ///
@@ -358,16 +351,19 @@ impl AdapterManager {
             },
         }
     }
+}
 
-    pub fn recv_return_buffers(&mut self, returns: &mut Vec<PacketBuffer>, limit: usize) -> usize {
-        self.sender.blocking_recv_many_returns(returns, limit)
+/// Factory to build `AdapterManager` ingresses for specified two-way-queue return queues.
+pub struct AdapterManagerFactory(two_way_queue::SenderFactory<AdapterManagerMessage, PacketBuffer>);
+
+impl AdapterManagerFactory {
+    pub fn new(fact: two_way_queue::SenderFactory<AdapterManagerMessage, PacketBuffer>) -> Self {
+        Self(fact)
     }
 
-    pub fn try_recv_return_buffers(
-        &mut self,
-        returns: &mut Vec<PacketBuffer>,
-        limit: usize,
-    ) -> usize {
-        self.sender.try_recv_many_returns(returns, limit)
+    pub fn make(&self, ret_q: &two_way_queue::ReturnQueue<PacketBuffer>) -> AdapterManager {
+        AdapterManager {
+            sender: self.0.make(ret_q),
+        }
     }
 }
