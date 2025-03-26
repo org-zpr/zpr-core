@@ -219,8 +219,16 @@ impl Assembly {
 
     /// Temporary? function to find a link based on the agent address
     pub fn find_egress_link(&self, agent_addr: IpAddress) -> Option<NonZero<LinkId>> {
+        // Fist check the local agent addresses to see if it's a locally-destined packet
+        for addr in &self.agent_addresses {
+            if agent_addr == (*addr).into() {
+                return Some(NonZero::new(zpr::LOCAL_AGENT_LINK_ID).unwrap());
+            }
+        }
+
         let ids = self.peer_ids.lock().unwrap().clone();
 
+        // Check peer agent addresses to see if one of them matches
         for id in ids.iter() {
             let peer = self
                 .peer_table

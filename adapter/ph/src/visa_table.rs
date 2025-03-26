@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 use crate::logging::targets::VISA_MGMT;
+use crate::net_defs::IpAddress;
 use crate::peer_table;
 
 use chrono::{DateTime, Utc};
@@ -19,6 +20,8 @@ pub enum VisaTableError {
     NotFound(VisaId),
     #[error("Failed to parse visa field {0}")]
     ParseError(&'static str),
+    #[error("Could not find destination {0}")]
+    DestNotFound(IpAddress),
     #[error("Failed to insert visa into table")]
     InsertError,
 }

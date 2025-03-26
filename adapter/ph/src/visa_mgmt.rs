@@ -153,9 +153,7 @@ pub async fn parse_visa(
     };
     let Some(link_id) = asm.find_egress_link(addr) else {
         asm.counters[CounterType::VisaRequestError].increment();
-        return Err(visa_table::VisaTableError::ParseError(
-            "destination address".into(),
-        ));
+        return Err(visa_table::VisaTableError::DestNotFound(addr));
     };
     let visa_id = asm.visa_table.write().await.insert_visa(visa)?;
     Ok((visa_id, link_id))
