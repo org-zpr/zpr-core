@@ -36,7 +36,15 @@ pub fn set_control_dir_owner_and_perms(
                     Some(Uid::from_raw(user.uid())),
                     Some(Gid::from_raw(user.primary_group_id())),
                 )
-                .map_err(|e| PlatformErr::OsError(format!("chown failed: {}", e)))?;
+                .map_err(|e| {
+                    PlatformErr::OsError(format!(
+                        "chown {:?} as user:{} group:{} failed: {}",
+                        ctrl_path,
+                        user.uid(),
+                        user.primary_group_id(),
+                        e
+                    ))
+                })?;
             }
         }
     };
