@@ -6,6 +6,7 @@ use openssl::rsa::Rsa;
 use prost::Message;
 
 use crate::config_api::ConfigApi;
+use crate::context::CompilationCtx;
 use crate::crypto::{sha256_of_file, sign_pkcs1v15_sha256};
 use crate::errors::CompilationError;
 use crate::lex::tokenize;
@@ -20,6 +21,7 @@ pub const CONTAINER_VERSION: u32 = 1121;
 /// Create one of these with the [CompilationBuilder].
 pub struct Compilation {
     pub verbose: bool,
+    werror: bool,
     pub source_zpl: PathBuf,
     pub source_config: PathBuf,
     pub output_file: PathBuf,
@@ -36,40 +38,41 @@ impl Compilation {
 
     /// Create a policy from the ZPL source and configuration.
     pub fn compile(&self) -> Result<(), CompilationError> {
+        let cctx = CompilationCtx::new(self.verbose, self.werror);
         if self.verbose {
             println!(
                 "compiling {:?} with config {:?}",
                 self.source_zpl, self.source_config
             );
         }
-        let cfg =
-            ConfigApi::new_from_toml_file(&self.source_config, self.verbose).map_err(|e| {
-                CompilationError::ConfigError(format!(
-                    "failed to load configuration from {:?}: {}",
-                    self.source_config, e
-                ))
-            })?;
+        let cfg = ConfigApi::new_from_toml_file(&self.source_config, &cctx).map_err(|e| {
+            CompilationError::ConfigError(format!(
+                "failed to load configuration from {:?}: {}",
+                self.source_config, e
+            ))
+        })?;
 
-        let tokens = tokenize(&self.source_zpl)?;
+        let tz = tokenize(&self.source_zpl, &cctx)?;
         if self.verbose {
-            println!("parsed {} tokens:", tokens.len());
-            for t in &tokens {
+            println!("parsed {} tokens:", tz.tokens.len());
+            for t in &tz.tokens {
                 println!("   {:?}", t);
             }
             println!();
         }
 
-        let mut policy = parse(tokens, self.verbose)?;
+        let pr = parse(tz.tokens, &cctx)?;
+        let mut policy = pr.policy;
         let policy_digest = sha256_of_file(&self.source_zpl)?;
         policy.digest = Some(policy_digest);
 
-        let fabric = weave(&self, &cfg, &policy)?;
+        let fabric = weave(&self, &cfg, &policy, &cctx)?;
         if self.verbose {
             println!();
             println!("fabric production:\n{}", fabric);
         }
 
-        println!("ℤ parse successful");
+        cctx.info("parse successful");
         if self.parse_only {
             return Ok(());
         }
@@ -77,14 +80,13 @@ impl Compilation {
         let mut builder = PolicyBuilder::new(self.verbose);
         builder.with_max_visa_lifetime(Duration::from_secs(60 * 60 * 12)); // 12 hours (TODO: Should come from config)
 
-        builder.with_fabric(&fabric)?;
+        builder.with_fabric(&fabric, &cctx)?;
 
         let pol = builder.build()?;
-        println!("ℤ build successful");
+        cctx.info("build successful");
 
-        let pcontainer = self.contain_policy(&pol)?;
-        self.write_container(&pcontainer, &self.output_file)?;
-
+        let pcontainer = self.contain_policy(&pol, &cctx)?;
+        self.write_container(&pcontainer, &self.output_file, &cctx)?;
         Ok(())
     }
 
@@ -93,6 +95,7 @@ impl Compilation {
         &self,
         container: &polio::PolicyContainer,
         file: &Path,
+        ctx: &CompilationCtx,
     ) -> Result<(), CompilationError> {
         let mut buf = Vec::new();
         buf.reserve(container.encoded_len());
@@ -105,7 +108,7 @@ impl Compilation {
                 file, e
             ))
         })?;
-        println!("ℤ wrote {}", &file.display());
+        ctx.info(&format!("wrote {}", &file.display()));
         Ok(())
     }
 
@@ -113,6 +116,7 @@ impl Compilation {
     fn contain_policy(
         &self,
         pol: &polio::Policy,
+        ctx: &CompilationCtx,
     ) -> Result<polio::PolicyContainer, CompilationError> {
         let mut buf = Vec::new();
         buf.reserve(pol.encoded_len());
@@ -127,7 +131,9 @@ impl Compilation {
                 signature = sign_pkcs1v15_sha256(key, &buf)?;
             }
             None => {
-                println!("warning: policy not signed, use `--key <pemfile>` to specify a private key for signing");
+                ctx.warn(
+                    "policy not signed, use `--key <pemfile>` to specify a private key for signing",
+                )?;
                 signature = Vec::new();
             }
         }
@@ -153,6 +159,7 @@ pub struct CompilationBuilder {
     source_zpl: PathBuf,
     source_config: Option<PathBuf>,
     verbose: bool,
+    werror: bool,
     private_key: Option<Rsa<Private>>,
     parse_only: bool,
     output_directory: Option<PathBuf>,
@@ -172,6 +179,12 @@ impl CompilationBuilder {
     /// Enable verbose console output from the compilation process.
     pub fn verbose(mut self, verbose: bool) -> Self {
         self.verbose = verbose;
+        self
+    }
+
+    /// If set true, treat warnings as errors and halt compilation when they occur.
+    pub fn werror(mut self, werror: bool) -> Self {
+        self.werror = werror;
         self
     }
 
@@ -238,6 +251,7 @@ impl CompilationBuilder {
 
         Compilation {
             verbose: self.verbose,
+            werror: self.werror,
             source_zpl: self.source_zpl,
             source_config: config,
             output_file,

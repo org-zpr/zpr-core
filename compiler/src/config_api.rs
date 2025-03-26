@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use base64::prelude::*;
 
 use crate::config::{self, Config};
+use crate::context::CompilationCtx;
 use crate::crypto::{digest_as_hex, load_asn1data_from_pem};
 use crate::errors::CompilationError;
 use crate::protocols::{IanaProtocol, IcmpFlowType, Protocol};
@@ -215,12 +216,15 @@ impl From<&ConfigItem> for Protocol {
 
 impl ConfigApi {
     /// Create the api from the TOML configuration file.
-    pub fn new_from_toml_file(fname: &Path, verbose: bool) -> Result<ConfigApi, CompilationError> {
-        let config = config::load_config(fname)?;
+    pub fn new_from_toml_file(
+        fname: &Path,
+        ctx: &CompilationCtx,
+    ) -> Result<ConfigApi, CompilationError> {
+        let config = config::load_config(fname, ctx)?;
         let api = ConfigApi {
             config,
             base_path: fname.to_path_buf().parent().unwrap().to_path_buf(),
-            verbose,
+            verbose: ctx.verbose,
         };
         Ok(api)
     }
@@ -231,13 +235,13 @@ impl ConfigApi {
     pub fn new_from_toml_content(
         content: &str,
         base_path: &Path,
-        verbose: bool,
+        ctx: &CompilationCtx,
     ) -> Result<ConfigApi, CompilationError> {
-        let config = config::parse_config(content)?;
+        let config = config::parse_config(content, ctx)?;
         let api = ConfigApi {
             config,
             base_path: PathBuf::from(base_path),
-            verbose,
+            verbose: ctx.verbose,
         };
         Ok(api)
     }
@@ -647,7 +651,8 @@ mod test {
         [services.foo]
         protocol = "bar"
         "#;
-        let api = ConfigApi::new_from_toml_content(cfg, &Path::new(""), true).unwrap();
+        let ctx = CompilationCtx::default();
+        let api = ConfigApi::new_from_toml_content(cfg, &Path::new(""), &ctx).unwrap();
 
         let ver = api.get("zpr/version").unwrap();
         assert_eq!(ver.to_string().len(), 64);

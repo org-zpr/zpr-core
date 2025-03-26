@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::context::CompilationCtx;
 use crate::errors::CompilationError;
 use crate::zplstr::{ZPLStr, ZPLStrBuilder};
 
@@ -24,6 +25,7 @@ pub enum TokenType {
     Multiple,
     Literal(String),
     Tuple((String, String)),
+    Period,
     EOS, // means "end of statement" but is never actually created
 }
 
@@ -61,6 +63,7 @@ impl Token {
             "tags" => TokenType::Tags,
             "optional" => TokenType::Optional,
             "multiple" => TokenType::Multiple,
+            "." => TokenType::Period,
             _ => TokenType::Literal(s.as_atom()),
         };
         Token::new(tok, line, col)
@@ -81,14 +84,19 @@ impl Default for Token {
     }
 }
 
-pub fn tokenize(zpl_in: &Path) -> Result<Vec<Token>, CompilationError> {
+#[derive(Debug)]
+pub struct Tokenization {
+    pub tokens: Vec<Token>,
+}
+
+pub fn tokenize(zpl_in: &Path, ctx: &CompilationCtx) -> Result<Tokenization, CompilationError> {
     let zpl = fs::read_to_string(zpl_in).map_err(|e| {
         CompilationError::FileError(format!("failed to read ZPL file {:?}: {}", zpl_in, e))
     })?;
-    tokenize_str(&zpl)
+    tokenize_str(&zpl, ctx)
 }
 
-pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
+pub fn tokenize_str(zpl: &str, ctx: &CompilationCtx) -> Result<Tokenization, CompilationError> {
     let mut tokens = Vec::new();
     let mut line = 1;
     let mut col = 1;
@@ -97,7 +105,6 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
     let mut current_word = ZPLStrBuilder::new();
     let mut current_start = (line, col);
     let mut quoting = false;
-    let mut quote_char = ' ';
 
     while let Some(c) = chars.next() {
         match c {
@@ -141,7 +148,7 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                 // if we are quoting the literal, keep space, otherwise this is a delimiter
                 if current_word.len() > 0 {
                     if quoting {
-                        current_word.push(c);
+                        current_word.push(c, quoting, line, col)?;
                     } else {
                         if !current_word.is_sugar() {
                             tokens.push(Token::new_from_str(
@@ -159,7 +166,7 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                 // if we are quoting the literal, keep comma, otherwise this is new COMMA token (should this be AND?)
                 if current_word.len() > 0 {
                     if quoting {
-                        current_word.push(c);
+                        current_word.push(c, quoting, line, col)?;
                     } else {
                         if !current_word.is_sugar() {
                             tokens.push(Token::new_from_str(
@@ -169,11 +176,52 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                             ));
                         }
                         current_word.clear();
-                        col += 1;
                         tokens.push(Token::new(TokenType::Comma, line, col));
-                        col += 1;
                     }
+                } else {
+                    tokens.push(Token::new(TokenType::Comma, line, col));
                 }
+                col += 1;
+            }
+            '.' => {
+                let followed_by_whitespace = if let Some(&next) = chars.peek() {
+                    next.is_whitespace()
+                } else {
+                    true // none (end of input)
+                };
+                if current_word.len() > 0 && quoting {
+                    current_word.push(c, quoting, line, col)?;
+                } else if current_word.len() > 0 {
+                    // We have a word going, we are not quoting. A period followed by whitespace ends the statement.
+                    // Otherwise it is assumed to be part of the word.
+                    if followed_by_whitespace {
+                        if !current_word.is_sugar() {
+                            tokens.push(Token::new_from_str(
+                                &current_word.build(),
+                                current_start.0,
+                                current_start.1,
+                            ));
+                        }
+                        current_word.clear();
+                        tokens.push(Token::new(TokenType::Period, line, col));
+                    } else {
+                        current_word.push(c, quoting, line, col)?;
+                        // Special case: if we see that there is another period following this one we warn the user.
+                        if let Some(&next) = chars.peek() {
+                            if next == '.' {
+                                ctx.warn(&format!(
+                                    "multiple unquoted periods at line: {}, col: {}",
+                                    line, col,
+                                ))?;
+                            }
+                        }
+                    }
+                } else if followed_by_whitespace {
+                    tokens.push(Token::new(TokenType::Period, line, col));
+                } else {
+                    current_word.push(c, quoting, line, col)?; // I guess it is allowed to start a "word" with a period?
+                }
+                col += 1;
             }
             ':' => {
                 // If we are quoting, then this is just a normal colon.
@@ -183,7 +231,7 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                     return Err(CompilationError::IllegalColon(line, col));
                 }
                 if quoting {
-                    current_word.push(c);
+                    current_word.push(c, quoting, line, col)?;
                 } else if current_word.is_comment_start() {
                     // consume the rest of the line
                     while let Some(c) = chars.next() {
@@ -208,55 +256,50 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                 if current_word.len() == 0 {
                     if !quoting {
                         quoting = true;
-                        quote_char = c;
                         current_start = (line, col);
                     } else {
-                        // we are quoting already and word is empty, so only a repeat is allowed.
-                        if c == quote_char {
-                            current_word.push(c);
-                            quoting = false;
-                        } else {
-                            return Err(CompilationError::MismatchedQuote(line, col));
-                        }
+                        // No word in buffer, and now a repeated quote char? Error.
+                        return Err(CompilationError::IllegalQuote(line, col));
                     }
-                    col += 1;
                 } else {
                     // We have a word in buffer
                     if quoting {
-                        if c == quote_char {
-                            // End of the quoted literal. If next char is a colon, then we continue to parse attr value.
-                            if let Some(&next) = chars.peek() {
-                                if next == ':' {
-                                    quoting = false;
-                                    col += 1;
-                                    continue;
-                                }
-                            }
-                            if !current_word.is_sugar() {
-                                tokens.push(Token::new_from_str(
-                                    &current_word.build(),
-                                    current_start.0,
-                                    current_start.1,
-                                ));
-                            }
-                            current_word.clear();
-                            quoting = false;
-                        } else {
-                            current_word.push(c);
-                        }
-                    } else {
-                        // not quoting so this is allowed for escape or for a quoted tuple value.
+                        // We are quoting, if next char is the same quote char, then we are escaping.
+                        // Set flag here which we detect next time.
                         if let Some(&next) = chars.peek() {
                             if next == c {
-                                // this is an escape
-                                current_word.push(c);
+                                current_word.push(c, quoting, line, col)?;
                                 chars.next();
-                                col += 1;
-                            } else if current_word.is_tuple() && current_word.value_len() == 0 {
-                                quoting = true;
-                            } else {
-                                return Err(CompilationError::IllegalQuote(line, col));
+                                col += 2;
+                                continue;
                             }
+                        }
+                        // Else we are at the end of the quoted literal.
+                        // If next char is a colon, then we continue to parse attr value.
+                        if let Some(&next) = chars.peek() {
+                            if next == ':' {
+                                quoting = false;
+                                col += 1;
+                                continue;
+                            }
+                        }
+                        // Otherwise consume the current word.
+                        if !current_word.is_sugar() {
+                            tokens.push(Token::new_from_str(
+                                &current_word.build(),
+                                current_start.0,
+                                current_start.1,
+                            ));
+                        }
+                        current_word.clear();
+                        quoting = false;
+                    } else {
+                        // We have a word in buffer but are not quoting and we just read a quote char?
+                        // Only allowed if this is starting to quote a tuple value.
+                        if current_word.is_tuple() && current_word.value_len() == 0 {
+                            quoting = true; // turn on tuple value quoting
+                        } else {
+                            return Err(CompilationError::IllegalQuote(line, col));
                         }
                     }
                 }
@@ -266,19 +309,8 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
                 if current_word.len() == 0 && !quoting {
                     current_start = (line, col);
                 }
+                current_word.push(c, quoting, line, col)?;
                 col += 1;
-
-                // Trailing period is discarded
-                if c == '.' {
-                    if let Some(&next) = chars.peek() {
-                        if next.is_whitespace() {
-                            // discard the period
-                            continue;
-                        }
-                    }
-                }
-
-                current_word.push(c);
             }
         }
     }
@@ -298,23 +330,73 @@ pub fn tokenize_str(zpl: &str) -> Result<Vec<Token>, CompilationError> {
         }
     }
 
-    Ok(tokens)
+    let tz = Tokenization { tokens };
+    Ok(tz)
 }
 
 #[cfg(test)]
 mod test {
+    use crate::context::CompilationCtx;
 
     #[test]
     fn test_tuple_literal() {
         let zpl = "define foo as user with color:purple, `role`:`manager`, office:`fris:co`, and tag `foo bar`";
-        let tokens = super::tokenize_str(zpl).unwrap();
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
         println!("{:?}", tokens);
-        assert_eq!(tokens.len(), 12);
+        assert_eq!(tokens.len(), 14);
         let colorpurple = &tokens[5];
         assert_eq!(colorpurple.tt, super::tuple_from_strs("color", "purple"));
         let rolemanager = &tokens[7];
         assert_eq!(rolemanager.tt, super::tuple_from_strs("role", "manager"));
-        let officefrisco = &tokens[8];
+        let officefrisco = &tokens[9];
         assert_eq!(officefrisco.tt, super::tuple_from_strs("office", "fris:co"));
+    }
+
+    #[test]
+    fn test_multiple_periods() {
+        let zpl = "define alien as user with color green. . . allow aliens to access services";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        println!("{:?}", tokens);
+        assert_eq!(tokens.len(), 15);
+    }
+
+    #[test]
+    fn test_successive_periods() {
+        {
+            // TODO: Should this fail since it does not end in period?
+            let zpl = "define alien as user with color:green. allow aliens to access services";
+            let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+            let tokens = tz.tokens;
+            assert_eq!(tokens.len(), 12);
+        }
+
+        {
+            // This will fail since a period is not allowed on an unquoted string
+            let zpl = "define alien as user with color:green.. allow aliens to access services";
+            let res = super::tokenize_str(zpl, &CompilationCtx::default());
+            assert!(res.is_err());
+            let err = res.unwrap_err();
+            match err {
+                super::CompilationError::IllegalStringLiteralChar(c, _line, _col) => {
+                    assert_eq!(c, '.');
+                }
+                _ => panic!("unexpected error: {:?}", err),
+            }
+        }
+    }
+
+    #[test]
+    fn test_quoted_period_in_attr_value() {
+        let zpl = "Define alien as user with color:'green.'.";
+        let tz = super::tokenize_str(zpl, &CompilationCtx::default()).unwrap();
+        let tokens = tz.tokens;
+        assert_eq!(tokens.len(), 7);
+        assert_eq!(tokens[6].tt, super::TokenType::Period);
+        assert_eq!(
+            tokens[5].tt,
+            super::TokenType::Tuple(("color".to_string(), "green.".to_string()))
+        );
     }
 }

@@ -17,6 +17,7 @@ mod allow;
 pub mod compilation;
 mod config;
 mod config_api;
+mod context;
 mod crypto;
 mod define;
 pub mod errors;

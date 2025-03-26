@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::env;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::context::CompilationCtx;
 use crate::errors::CompilationError;
 use crate::fabric::{Fabric, FabricService, ServiceType};
 use crate::polio;
@@ -115,7 +116,11 @@ impl PolicyBuilder {
     ///   - The certificates used for trusted services (TODO) and for the default/internal auth service.
     ///
     /// This does most of the work in building the policy.
-    pub fn with_fabric(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
+    pub fn with_fabric(
+        &mut self,
+        fabric: &Fabric,
+        ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
         self.policy.policy_revision = fabric.revision.clone();
 
         // The policy refers to attribute keys and values using a lookup table.
@@ -129,7 +134,7 @@ impl PolicyBuilder {
 
         self.set_connects(&fabric)?;
         self.set_policies(&fabric)?;
-        self.set_default_auth(&fabric)?;
+        self.set_default_auth(&fabric, ctx)?;
 
         if self.verbose {
             println!("  {} connect rules", self.policy.connects.len());
@@ -146,9 +151,13 @@ impl PolicyBuilder {
 
     /// Configure the default (internal) authentication service in the policy. This is
     /// essentially just storing a CA certificate along with the expected prefix.
-    fn set_default_auth(&mut self, fabric: &Fabric) -> Result<(), CompilationError> {
+    fn set_default_auth(
+        &mut self,
+        fabric: &Fabric,
+        ctx: &CompilationCtx,
+    ) -> Result<(), CompilationError> {
         if fabric.default_auth_cert_asn.is_empty() {
-            println!("warning: refusing to add empty default certificate to policy");
+            ctx.warn("refusing to add empty default certificate to policy")?;
             return Ok(());
         }
         let pcert = polio::Cert {

@@ -16,6 +16,7 @@ use tracing::*;
 
 mod adapter_manager_worker;
 mod adapter_tables;
+mod admin_worker;
 mod agent_output_worker;
 mod assembly;
 mod batch_io;
@@ -45,7 +46,6 @@ mod pcap_writer;
 mod peer_table;
 mod queues;
 mod rcu;
-mod rpc_worker;
 mod sample_ring;
 mod signal_worker;
 mod special_peers;
@@ -55,6 +55,7 @@ mod sys;
 mod test_packet;
 mod tun_ctl;
 mod two_way_queue;
+mod visa_mgmt;
 mod visa_table;
 mod vs_worker;
 mod vss_worker;
@@ -320,7 +321,7 @@ fn main() -> ExitCode {
         substrate_egress: SubstrateEgress::new(substrate_sockets.iter().cloned()),
         agent_output_requeue: AgentOutputRequeue::new(agent_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
-        visa_table: std::sync::Mutex::new(visa_table::VisaTable::new()),
+        visa_table: tokio::sync::RwLock::new(visa_table::VisaTable::new()),
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
         flow_control: FlowControl::new(),
@@ -378,7 +379,7 @@ fn main() -> ExitCode {
     js.spawn_local(signal_worker::launch(asm.clone()));
     js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq));
     js.spawn_local(adapter_manager_worker::launch(asm.clone(), am_outq));
-    js.spawn_local(rpc_worker::launch(asm.clone(), control_socket));
+    js.spawn_local(admin_worker::launch(asm.clone(), control_socket));
     js.spawn_local(km_multiplexor::launch_signal_worker(
         asm.clone(),
         km_sig_outq,

@@ -6,6 +6,7 @@ export RUST_BACKTRACE=1
 PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/ph-debug/target/debug/ph-debug")
 VS_BIN=$(realpath "$(dirname $0)/../visaservice/core/build/vservice")
+VS_ADMIN_BIN=$(realpath "$(dirname $0)/../visaservice/vs-admin/target/debug/vs-admin")
 PREGEN=$(realpath "$(dirname $0)/pregen")
 
 source "$(dirname $0)/common_funcs.sh"
@@ -174,7 +175,6 @@ echo "Carrier has arrived."
 # This sleep solves a display issue because magic
 sleep 1
 
-
 #
 # Run test
 #
@@ -188,6 +188,18 @@ fi
 
 sleep 1
 
+#
+# Revoke zpr-b's visa and try to ping again
+#
+
+sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_ADMIN_BIN" \
+	--ca-cert ca.crt \
+	--svc-url "https://[$VS_ZPR_ADDR]:8182" \
+	revoke --agent-cn adapter2
+
+if ! ping_a_b
+then PASS=0
+fi
 
 #
 # Check stats
