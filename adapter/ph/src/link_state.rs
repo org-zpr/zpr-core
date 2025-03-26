@@ -1,4 +1,5 @@
-use crate::assembly::{Assembly, PhMode};
+use crate::assembly::Assembly;
+use crate::config;
 use crate::counters::CounterType;
 use crate::km::ZPIPair;
 use crate::km_multiplexor;
@@ -169,7 +170,7 @@ pub enum LinkStateError {
     OperationNotSupportedYet,
 }
 
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, Debug)]
 pub enum LinkType {
     Internal,
     AdapterToNode,
@@ -674,6 +675,32 @@ impl LinkStateWrapper {
         Ok(())
     }
 
+    /// Tear down link state
+    fn clean_up_link_state(&self, asm: &Arc<Assembly>) {
+        let link_id = self.id;
+        info!(target: LINK_STATE, "Link {link_id} is clearing its state");
+
+        asm.peer_table.clear_peer_state(link_id);
+
+        if self.link_type == LinkType::AdapterToNode {
+            asm.tun_ctl.set_carrier(false).unwrap();
+        }
+
+        for addr in self.locked_fsm.lock().unwrap().agent_addresses.drain(..) {
+            visa_mgmt::agent_disconnect(asm, addr);
+        }
+
+        let task_asm = asm.clone();
+        tokio::task::spawn_local(async move {
+            // NOTE: Any mgmt messages MUST have been sent before this is called
+            km_multiplexor::drop_link(&task_asm, link_id).await;
+
+            if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::CloseDone) {
+                error!(target: LINK_STATE, "Error shutting down link {link_id}: {e:?}");
+            }
+        });
+    }
+
     /// Complete a link shutdown, upon receiving a terminate request or response
     /// Transitions from Closing to Inactive
     /// Generates no packets
@@ -682,23 +709,19 @@ impl LinkStateWrapper {
         info!(target: LINK_STATE, "Shutting down link {link_id}");
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
-        match locked_fsm.state {
-            LinkState::Closing => {
-                if asm.ph_mode != PhMode::Node {
-                    asm.tun_ctl.set_carrier(false).unwrap();
-                }
-                for addr in locked_fsm.agent_addresses.clone() {
-                    visa_mgmt::agent_disconnect(asm, addr);
-                }
-                locked_fsm.agent_addresses.clear();
+        match (locked_fsm.state, self.link_type) {
+            (LinkState::Closing | LinkState::Resetting, LinkType::NodeToAdapter) => {
+                // Clear whole peer out
+                drop(locked_fsm);
+                asm.drop_peer(link_id);
+                return;
+            }
+            (LinkState::Closing, _) => {
                 locked_fsm.silent = false;
                 locked_fsm.set_state(LinkState::Inactive);
                 info!("Link {link_id} has fully shut down");
             }
-            LinkState::Resetting => {
-                if asm.ph_mode != PhMode::Node {
-                    asm.tun_ctl.set_carrier(false).unwrap();
-                }
+            (LinkState::Resetting, _) => {
                 *locked_fsm = LinkStateMachine::new();
                 info!("Link {link_id} has fully reset");
             }
@@ -717,8 +740,7 @@ impl LinkStateWrapper {
         info!(target: LINK_STATE,"Received terminate response for link {link_id}");
         let state = self.locked_fsm.lock().unwrap().state;
         match state {
-            LinkState::Closing => Ok(self.clean_up_link_state(asm)),
-            LinkState::Resetting => Ok(self.clean_up_link_state(asm)),
+            LinkState::Closing | LinkState::Resetting => Ok(self.clean_up_link_state(asm)),
             _ => Err(LinkStateError::UnexpectedTransition(
                 state,
                 "terminate response".to_string(),
@@ -737,45 +759,21 @@ impl LinkStateWrapper {
         );
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (locked_fsm.state, reason) {
-            (LinkState::Initial, _) => Err(LinkStateError::UnexpectedTransition(
-                locked_fsm.state,
-                "terminate indication".to_string(),
-            )),
             (LinkState::Inactive, TerminateReason::Reset) => {
-                locked_fsm.set_state(LinkState::Closing);
+                locked_fsm.set_state(LinkState::Resetting);
                 Ok(self.clean_up_link_state(asm))
             }
-            (LinkState::Inactive, _) => Err(LinkStateError::UnexpectedTransition(
-                locked_fsm.state,
-                "terminate indication".to_string(),
-            )),
+            (LinkState::Initial | LinkState::Inactive, _) => {
+                Err(LinkStateError::UnexpectedTransition(
+                    locked_fsm.state,
+                    "terminate indication".to_string(),
+                ))
+            }
             (_, _) => {
                 locked_fsm.set_state(LinkState::Closing);
                 Ok(self.clean_up_link_state(asm))
             }
         }
-    }
-
-    /// Tear down link state
-    fn clean_up_link_state(&self, asm: &Arc<Assembly>) {
-        let link_id = self.id;
-        info!(target: LINK_STATE, "Link {link_id} is clearing its state");
-
-        asm.peer_table.clear_peer_state(link_id);
-
-        if self.link_type == LinkType::AdapterToNode {
-            asm.tun_ctl.set_carrier(false).unwrap();
-        }
-
-        let task_asm = asm.clone();
-        tokio::task::spawn_local(async move {
-            // NOTE: Any mgmt messages MUST have been sent before this is called
-            km_multiplexor::drop_link(&task_asm, link_id).await;
-
-            if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::CloseDone) {
-                error!(target: LINK_STATE, "Error shutting down link {link_id}: {e:?}");
-            }
-        });
     }
 
     /// Reset the link, shutting it down and wiping its configuration
@@ -818,16 +816,21 @@ impl LinkStateWrapper {
         asm.counters[CounterType::PeerHandshakeSuccess].increment();
         debug!(target: LINK_STATE, "Link {link_id} entering active state");
         tokio::task::spawn_local(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3));
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+                config::DEFAULT_KEEP_ALIVE_PERIOD,
+            ));
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             let mut consecutive_misses = 0;
             while task_asm.is_link_ready(link_id) {
                 interval.tick().await;
                 let start_time = Instant::now();
-                let response = mgmt::requests::send_echo_request(&task_asm, link_id).await;
                 let Some(peer) = task_asm.peer_table.get(link_id) else {
                     return;
                 };
+                if peer.link_state_machine.locked_fsm.lock().unwrap().state != LinkState::Active {
+                    return;
+                }
+                let response = mgmt::requests::send_echo_request(&task_asm, link_id).await;
                 match response {
                     Ok(()) => {
                         let mut link_data = peer.link_state_machine.locked_data.lock().unwrap();
@@ -855,7 +858,7 @@ impl LinkStateWrapper {
                     }
                 }
 
-                if consecutive_misses > 3 {
+                if consecutive_misses >= config::DEFAULT_KEEP_ALIVE_RETRIES {
                     if task_asm
                         .process_link_state_event(
                             link_id,
@@ -893,8 +896,7 @@ async fn send_terminate_request(
             warn!(target: LINK_STATE,
                 "Link {link_id} got error '{e:?}' when trying to shut down.  Shutting down anyway"
             );
-            mgmt::requests::send_terminate_indication(asm, link_id, reason).await;
-            asm.process_link_state_event(link_id, LinkEvent::SentTerminate)?;
+            let _ = send_terminate_indication(asm, link_id, reason).await;
             Ok(())
         }
         Ok(response) => {
@@ -908,6 +910,8 @@ impl Display for LinkStateWrapper {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // FIXME: This doesn't print link ID because the caller is printing link ID
         // followed by substrate addr, which is out of scope for this display function
+        write!(f, "  Type: {:?}\n", self.link_type)?;
+
         write!(f, "{}", self.locked_fsm.lock().unwrap())?;
         if self.get_state() == LinkState::Active {
             write!(f, "{}", self.locked_data.lock().unwrap())?;

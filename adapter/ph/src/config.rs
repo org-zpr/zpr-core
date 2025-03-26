@@ -26,6 +26,9 @@ const DEFAULT_WORKER_CONCURRENCY: usize = 4;
 #[cfg(target_os = "macos")]
 const DEFAULT_WORKER_CONCURRENCY: usize = 1;
 
+pub const DEFAULT_KEEP_ALIVE_PERIOD: u64 = 3;
+pub const DEFAULT_KEEP_ALIVE_RETRIES: usize = 3;
+
 /// This config struct is loaded up from the command line args and used by the
 /// ph system to configure itself.  Do not create this directly, use [argparse].
 #[derive(Debug)]

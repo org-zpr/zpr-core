@@ -180,6 +180,13 @@ impl Assembly {
         Ok(entry.insert(peer_state))
     }
 
+    pub fn drop_peer(self: &Arc<Self>, link_id: LinkId) {
+        debug!(target: PEER_MGMT, "Removing peer {link_id}");
+        self.peer_table.remove(link_id);
+        self.peer_ids.lock().unwrap().retain(|id| *id != link_id);
+        info!(target: PEER_MGMT, "Removed peer {link_id}");
+    }
+
     /// Add a tether to the peer table
     pub fn start_tether(
         self: &Arc<Self>,

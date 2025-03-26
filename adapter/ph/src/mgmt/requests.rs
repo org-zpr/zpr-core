@@ -185,7 +185,7 @@ pub async fn send_terminate_request<'a, 'pktbuf>(
         }
 
         Err(err) => {
-            warn!("{} error with RegisterAgentAddressRequest", err);
+            warn!("{} error with TerminateLinkResponse", err);
             Err(())
         }
     }
