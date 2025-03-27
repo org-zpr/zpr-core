@@ -79,7 +79,6 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
         "dropping root permissions, switching to user {}",
         run_as_user
     );
-
     // We always drop privs, even in dry run mode.
     sys::get_platform().drop_privileges(&run_as_user, false)?;
 
@@ -109,7 +108,26 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
             )))
         })?;
     }
-    sys::get_platform().set_control_dir_owner_and_perms(&ctrl_path, &run_as_user, dry_run)?;
+    // First try to explicitly set perms
+    match sys::get_platform().set_control_dir_owner_and_perms(&ctrl_path, &run_as_user, dry_run) {
+        Ok(_) => (),
+        Err(_) => {
+            // Failed to set, confirm that it's a dir and we can write there.
+            let md = fs::metadata(&ctrl_path)?;
+            if !md.is_dir() {
+                return Err(LaunchErr::FileError(format!(
+                    "control path does not exist or is not a directory: {:?}",
+                    ctrl_path
+                )));
+            }
+            if md.permissions().readonly() {
+                return Err(LaunchErr::FileError(format!(
+                    "user {} cannot write to directory {:?}",
+                    &run_as_user, ctrl_path
+                )));
+            }
+        }
+    }
 
     Ok(())
 }

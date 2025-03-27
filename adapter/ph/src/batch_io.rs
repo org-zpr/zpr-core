@@ -1,6 +1,3 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-
 //! Batch I/O operations.
 //!
 //! These vary both by operating system and feature set.

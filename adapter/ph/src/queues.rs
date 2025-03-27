@@ -1,8 +1,6 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
 
-use crate::net_defs;
 use crate::packet::{Packet, PacketBuffer};
-use crate::sys::TunPi;
 use crate::sys::ZprTun;
 use crate::test_packet::*;
 use crate::two_way_queue;
@@ -76,7 +74,7 @@ impl MgmtProcessor {
 /// AgentInput is responsible for emitting decapsulated agent packets on the
 /// host's TUN interface.
 pub struct AgentInput {
-    tuns: Box<[Arc<ZprTun>]>,
+    pub tuns: Box<[Arc<ZprTun>]>,
 }
 
 impl AgentInput {
@@ -87,44 +85,11 @@ impl AgentInput {
             tuns: tuns.into_iter().collect(),
         }
     }
-
-    pub fn try_enqueue_packet(&self, packet: &mut Packet) -> Result<(), TryEnqueueError> {
-        let tun = &self.tuns[packet.flowhash() as usize % self.tuns.len()];
-        match TunPi::PI_SIZE {
-            0 => (),
-            sz => {
-                let proto = net_defs::ip_ethertype(net_defs::ip_version(packet.body()));
-                let mut hdr = packet.alloc_zeroed_headroom(sz);
-                TunPi::write_pi(
-                    &mut hdr,
-                    TunPi {
-                        strip: false,
-                        proto,
-                    },
-                );
-            }
-        };
-
-        let ret = tun.try_send(packet.body());
-
-        packet.advance(std::mem::size_of::<TunPi>());
-
-        match ret {
-            Ok(_) => Ok(()),
-            Err(err) if err.kind() == ErrorKind::WouldBlock => Err(TryEnqueueError::Full(())),
-            Err(err) => panic!("unrecoverable TUN error: {}", err),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn fanout(&self) -> usize {
-        self.tuns.len()
-    }
 }
 
 /// SubstrateEgress is responsible for sending encapsulated agent packets to the dock.
 pub struct SubstrateEgress {
-    sockets: Box<[Arc<UdpSocket>]>,
+    pub sockets: Box<[Arc<UdpSocket>]>,
 }
 
 impl SubstrateEgress {
@@ -161,36 +126,6 @@ impl SubstrateEgress {
         }
     }
 
-    // TODO: batch enqueue
-    pub fn try_enqueue_packet(
-        &self,
-        packet: &Packet,
-        dest_sa: zpr::SubstrateAddr,
-    ) -> Result<(), TryEnqueueError> {
-        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(packet, dest_sa);
-
-        match socket.send_to(packet.body(), dest_sockaddr) {
-            Ok(_) => Ok(()),
-
-            Err(err) => {
-                match err.kind() {
-                    ErrorKind::InvalidInput | ErrorKind::Unsupported => {
-                        panic!("unrecoverable I/O error: {}", err)
-                    }
-
-                    ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
-                        Err(TryEnqueueError::Full(()))
-                    }
-
-                    // most other network errors are temporary; return packet to caller
-                    // TODO: it would be nice to report to the user _why_ packets aren't moving;
-                    // this depends on <https://github.com/rust-lang/rust/issues/86442> though
-                    _ => Err(TryEnqueueError::Full(())),
-                }
-            }
-        }
-    }
-
     fn select_socket_and_set_flowinfo(
         &self,
         packet: &Packet,
@@ -205,11 +140,6 @@ impl SubstrateEgress {
             &self.sockets[packet.flowhash() as usize % self.sockets.len()],
             dest_sa,
         )
-    }
-
-    #[allow(dead_code)]
-    pub fn fanout(&self) -> usize {
-        self.sockets.len()
     }
 }
 

@@ -5,6 +5,7 @@
 
 use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
+use crate::batch_io::BatchIo;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters::CounterType;
@@ -15,11 +16,15 @@ use crate::logging::targets::DATAPATH;
 use crate::net_defs;
 use crate::packet::{Packet, PacketBuffer};
 use crate::queues::{AdapterManager, MgmtDispatch, TryEnqueueError};
+use crate::sys::{TunPi, ZprTun};
 use crate::zdp;
 use crate::zdp_ll;
 use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
+use std::io::ErrorKind;
+use std::net::UdpSocket;
+use std::os::fd::{AsRawFd, BorrowedFd};
 use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::*;
@@ -57,7 +62,6 @@ const AGENT_PACKET_FLOW_TRACKER: std::sync::LazyLock<
 #[derive(Clone, Copy)]
 pub struct FastpathWorkerConfig {
     pub buffer_count: usize,
-    #[allow(dead_code)]
     pub batch_size: usize,
 }
 
@@ -68,6 +72,13 @@ pub struct FastpathWorker {
     pub buffers: Vec<PacketBuffer>,
     pub adapter_manager: AdapterManager,
     pub mgmt_dispatch: MgmtDispatch,
+
+    pub agent_input_q: Vec<Packet>,
+    pub substrate_egress_q: Vec<(Packet, std::net::SocketAddr)>,
+
+    pub batch_io: BatchIo,
+    pub agent_input_tun: Arc<ZprTun>,
+    pub substrate_egress_socket: Arc<UdpSocket>,
 }
 
 impl FastpathWorker {
@@ -78,6 +89,9 @@ impl FastpathWorker {
         let adapter_manager = asm.adapter_manager.clone();
         let mgmt_dispatch = asm.mgmt_dispatch.clone();
 
+        let agent_input_tun = asm.agent_input.tuns[worker_index].clone(); // TEMP HACK
+        let substrate_egress_socket = asm.substrate_egress.sockets[worker_index].clone(); // TEMP HACK
+
         Self {
             config,
             worker_index,
@@ -85,6 +99,13 @@ impl FastpathWorker {
             buffers,
             adapter_manager,
             mgmt_dispatch,
+
+            agent_input_q: Vec::with_capacity(config.buffer_count),
+            substrate_egress_q: Vec::with_capacity(config.buffer_count),
+
+            batch_io: BatchIo::new(config.batch_size).unwrap(),
+            agent_input_tun,
+            substrate_egress_socket,
         }
     }
 
@@ -463,11 +484,8 @@ impl FastpathWorker {
             return self.drop_and_count(pkt, CounterType::MicvFailure);
         }
 
-        // send out decapsulated packet & drop
-        match self.asm.agent_input.try_enqueue_packet(&mut pkt) {
-            Ok(()) => self.drop_and_count(pkt, CounterType::InPacksSent),
-            Err(TryEnqueueError::Full(())) => self.drop_and_count(pkt, CounterType::InPacksDrop),
-        }
+        // queue decapsulated packet for send to agent
+        self.agent_input_q.push(pkt);
     }
 
     /// Egress a ZDP packet on the given link ID, according to the given ZPI.
@@ -486,10 +504,99 @@ impl FastpathWorker {
             }
         };
 
-        match self.asm.substrate_egress.try_enqueue_packet(&pkt, dest_sa) {
-            Ok(()) => self.drop_and_count(pkt, CounterType::OutPacksSent),
-            Err(TryEnqueueError::Full(())) => self.drop_and_count(pkt, CounterType::OutPacksErr),
+        // queue packet for send via substrate
+        self.substrate_egress_q.push((pkt, dest_sa));
+    }
+
+    pub fn process_out_queues(&mut self) {
+        self.process_agent_input_queue();
+        self.process_substrate_egress_queue();
+    }
+
+    fn process_agent_input_queue(&mut self) {
+        // temp hack until we move ZprTun to be non-Tokio
+        let tun_fd = unsafe { BorrowedFd::borrow_raw(self.agent_input_tun.as_raw_fd()) };
+
+        // Add TUN PI header.
+        match TunPi::PI_SIZE {
+            0 => (),
+            sz => {
+                for pkt in &mut self.agent_input_q {
+                    let proto = net_defs::ip_ethertype(net_defs::ip_version(pkt.body()));
+                    let mut hdr = pkt.alloc_zeroed_headroom(sz);
+                    TunPi::write_pi(
+                        &mut hdr,
+                        TunPi {
+                            strip: false,
+                            proto,
+                        },
+                    );
+                }
+            }
         }
+
+        // (Try to) send packets.
+        let mut results = Vec::new(); // TODO: recycle
+        let n = self
+            .batch_io
+            .try_write_batch(
+                &tun_fd,
+                self.agent_input_q.iter().map(|pkt| pkt.body()),
+                &mut results,
+            )
+            .expect("unrecoverable TUN error");
+
+        // Tally results.
+        let mut dropped = self.agent_input_q.len() - n;
+        for res in results {
+            match res {
+                Ok(_) => (),
+                Err(err) if err.kind() == ErrorKind::WouldBlock => dropped += 1,
+                Err(err) => panic!("unrecoverable TUN error: {}", err),
+            }
+        }
+        self.asm.counters[CounterType::InPacksSent]
+            .increase_by((self.agent_input_q.len() - dropped) as u64);
+        self.asm.counters[CounterType::InPacksDrop].increase_by(dropped as u64);
+
+        // Return buffers to buffer stack.
+        self.buffers
+            .extend(self.agent_input_q.drain(..).map(|pkt| pkt.destroy()));
+    }
+
+    fn process_substrate_egress_queue(&mut self) {
+        // (Try to) send packets.
+        let mut results = Vec::new(); // TODO: recycle
+        let n = self
+            .batch_io
+            .try_send_to_batch(
+                &self.substrate_egress_socket,
+                self.substrate_egress_q
+                    .iter()
+                    .map(|(pkt, dest)| (pkt.body(), *dest)),
+                &mut results,
+            )
+            .expect("unrecoverable I/O error");
+
+        // Tally results.
+        let mut dropped = self.substrate_egress_q.len() - n;
+        for res in results {
+            match res {
+                Ok(_) => (),
+                Err(err) if err.kind() == ErrorKind::WouldBlock => dropped += 1,
+                Err(err) => panic!("unrecoverable I/O error: {}", err),
+            }
+        }
+        self.asm.counters[CounterType::OutPacksSent]
+            .increase_by((self.substrate_egress_q.len() - dropped) as u64);
+        self.asm.counters[CounterType::OutPacksDrop].increase_by(dropped as u64);
+
+        // Return buffers to buffer stack.
+        self.buffers.extend(
+            self.substrate_egress_q
+                .drain(..)
+                .map(|(pkt, _)| pkt.destroy()),
+        );
     }
 }
 
