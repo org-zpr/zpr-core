@@ -34,12 +34,12 @@ fn substrate_ingress_main(mut worker: FastpathWorker, socket: &UdpSocket) {
         if worker.buffers.is_empty() {
             // if we are out of buffers, block
             worker
-                .mgmt_dispatch
-                .recv_return_buffers(&mut worker.buffers, worker.config.buffer_count);
+                .return_q
+                .blocking_recv_many_returns(&mut worker.buffers, worker.config.buffer_count);
         } else {
             worker
-                .mgmt_dispatch
-                .try_recv_return_buffers(&mut worker.buffers, worker.config.buffer_count);
+                .return_q
+                .try_recv_many_returns(&mut worker.buffers, worker.config.buffer_count);
         }
 
         let _n = match poll::poll(std::slice::from_mut(&mut poll_fd), poll::PollTimeout::NONE)

@@ -82,8 +82,8 @@ pub struct Assembly {
     pub alt: adapter_tables::AgentLookupTable,
     pub dlt: adapter_tables::DockLookupTable,
 
-    pub mgmt_dispatch: MgmtDispatch,
-    pub adapter_manager: AdapterManager,
+    pub mgmt_dispatch_factory: MgmtDispatchFactory,
+    pub adapter_manager_factory: AdapterManagerFactory,
     pub km_state: KmState,
 
     pub self_noise_keypair: Option<NoiseKeypair>,
@@ -350,8 +350,8 @@ pub mod test {
         pub peer_ids: Option<Vec<zpr::LinkId>>,
         pub alt: Option<adapter_tables::AgentLookupTable>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
-        pub mgmt_dispatch: Option<MgmtDispatch>,
-        pub adapter_manager: Option<AdapterManager>,
+        pub mgmt_dispatch_factory: Option<MgmtDispatchFactory>,
+        pub adapter_manager_factory: Option<AdapterManagerFactory>,
         pub km_state: Option<KmState>,
         pub system_start_time: Option<std::time::Instant>,
     }
@@ -411,13 +411,13 @@ pub mod test {
         let dlt = builder
             .dlt
             .unwrap_or_else(|| adapter_tables::DockLookupTable::new());
-        let mgmt_dispatch = builder.mgmt_dispatch.unwrap_or_else(|| {
-            let (md_inq, _md_outq) = two_way_queue::two_way_queue(1);
-            MgmtDispatch::new(md_inq)
+        let mgmt_dispatch_factory = builder.mgmt_dispatch_factory.unwrap_or_else(|| {
+            let (md_inq_factory, _md_outq) = two_way_queue::two_way_queue(1);
+            MgmtDispatchFactory::new(md_inq_factory)
         });
-        let adapter_manager = builder.adapter_manager.unwrap_or_else(|| {
-            let (am_inq, _am_outq) = two_way_queue::two_way_queue(1);
-            AdapterManager::new(am_inq)
+        let adapter_manager_factory = builder.adapter_manager_factory.unwrap_or_else(|| {
+            let (am_inq_factory, _am_outq) = two_way_queue::two_way_queue(1);
+            AdapterManagerFactory::new(am_inq_factory)
         });
         let km_state = builder.km_state.unwrap_or_else(|| {
             let (km_sig_tx, _km_sig_rx) = mpsc::channel(1);
@@ -443,8 +443,8 @@ pub mod test {
             peer_ids,
             alt,
             dlt,
-            mgmt_dispatch,
-            adapter_manager,
+            mgmt_dispatch_factory,
+            adapter_manager_factory,
             km_state,
             self_noise_keypair: None,
             peer_noise_keypair: None,

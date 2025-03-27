@@ -287,6 +287,8 @@ func (db *AgentDB) CloneNodesToBrief() []*NodeRecordBrief {
 				}
 				brief.InSync = rec.Peer.IsInSync()
 				brief.Pending = uint32(rec.Peer.pending.Size())
+				brief.VisaRequests = rec.Peer.VisaRequestsCount
+				brief.ConnectRequests = rec.Peer.ConnectRequestsCount
 			}
 			list = append(list, brief)
 		}

@@ -155,8 +155,9 @@ fn main() -> ExitCode {
 
     // TODO: use get/setsockopt(SO_SNDBUF) to ensure we can buffer `capture_queue_size` packets
     let (cap_inq, cap_outq) = std::os::unix::net::UnixDatagram::pair().unwrap();
-    let (md_inq, md_outq) = two_way_queue::two_way_queue(topology_config.mgmt_dispatch_queue_size);
-    let (am_inq, am_outq) =
+    let (md_inq_factory, md_outq) =
+        two_way_queue::two_way_queue(topology_config.mgmt_dispatch_queue_size);
+    let (am_inq_factory, am_outq) =
         two_way_queue::two_way_queue(topology_config.adapter_manager_queue_size);
     let (km_sig_inq, km_sig_outq) = mpsc::channel(topology_config.km_signal_queue_size);
     let (km_inq, km_outq) = mpsc::channel(topology_config.km_message_queue_size);
@@ -331,8 +332,8 @@ fn main() -> ExitCode {
         peer_ids: Default::default(),
         alt: adapter_tables::AgentLookupTable::new(),
         dlt: adapter_tables::DockLookupTable::new(),
-        mgmt_dispatch: MgmtDispatch::new(md_inq),
-        adapter_manager: AdapterManager::new(am_inq),
+        mgmt_dispatch_factory: MgmtDispatchFactory::new(md_inq_factory),
+        adapter_manager_factory: AdapterManagerFactory::new(am_inq_factory),
         km_state: KmState::new(km_inq, km_sig_inq),
         self_noise_keypair,
         peer_noise_keypair,

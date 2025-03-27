@@ -14,13 +14,29 @@
 //! differ if `TwoWayReturnable<Forward>` is implemented for the reverse
 //! type.  (This is chosen instead of using `From` so that non-default conversions
 //! can be used.)
+//!
+//! There are three components to any "two-way" queue flow.  Each "service"
+//! to which items are being sent creates a single `Receiver` to receive
+//! tiems on.  Each "client" which is sending items (to any number of
+//! "services") creates a single `ReturnQueue` to receive returned items.
+//! Then, for each client-server pairing, the client creates a `Sender` which
+//! sends items to the given `Receiver`, to be returned on the client's own
+//! `ReturnQueue`.
+//!
+//! The two main entry points to create all these objects are
+//! `ReturnQueue::new()`, and `two_way_queue()`.  The former creates a
+//! single `ReturnQueue`.  The latter creates a pair of a `SenderFactory`
+//! and a `Receiver`.  The `SenderFactory` is then used to create `Sender`
+//! instances linked to the `Receiver` and a supplied `ReturnQueue`.
 
 #![allow(dead_code)]
 
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
 use tokio::sync::mpsc;
+use zpr_ext::std::cell::scalar::UsizeCell;
 
 /// Trait representing a type which can be returned through a `TwoWayQueue`.
 pub trait TwoWayReturnable<T> {
@@ -44,28 +60,21 @@ pub enum TryRecvReturnError {
     Disconnected,
 }
 
-/// The producer half of a two-way queue.
-pub struct Sender<T, U> {
-    outgoing_q: mpsc::Sender<(T, mpsc::UnboundedSender<U>)>,
-    outgoing_return_q: mpsc::UnboundedSender<U>,
+/// The return path of a two-way queue.
+pub struct ReturnQueue<U> {
     incoming_return_q: mpsc::UnboundedReceiver<U>,
-    outstanding: usize,
+    outgoing_return_q: mpsc::UnboundedSender<U>,
+    outstanding: Rc<UsizeCell>,
 }
 
-impl<T, U> Sender<T, U> {
-    /// Try to send an item.  Note that it is possible for the queue
-    /// to appear full for the reason that there are outstanding returns.
-    pub fn try_send(&mut self, item: T) -> Result<(), TrySendError<T>> {
-        match self
-            .outgoing_q
-            .try_send((item, self.outgoing_return_q.clone()))
-        {
-            Ok(()) => {
-                self.outstanding += 1;
-                Ok(())
-            }
-            Err(mpsc::error::TrySendError::Full((item, _))) => Err(TrySendError::Full(item)),
-            Err(mpsc::error::TrySendError::Closed((item, _))) => Err(TrySendError::Closed(item)),
+impl<U> ReturnQueue<U> {
+    /// Construct a new return queue.
+    pub fn new() -> Self {
+        let (outgoing_return_q, incoming_return_q) = mpsc::unbounded_channel();
+        Self {
+            incoming_return_q,
+            outgoing_return_q,
+            outstanding: Rc::new(UsizeCell::new(0)),
         }
     }
 
@@ -73,9 +82,9 @@ impl<T, U> Sender<T, U> {
     ///
     /// Panics if called when no items are outstanding.
     pub fn blocking_recv_return(&mut self) -> U {
-        assert!(self.outstanding > 0);
+        assert!(self.outstanding.load() > 0);
         let ret = self.incoming_return_q.blocking_recv().unwrap();
-        self.outstanding -= 1;
+        self.outstanding.fetch_sub(1);
         return ret;
     }
 
@@ -85,9 +94,9 @@ impl<T, U> Sender<T, U> {
     ///
     /// Panics if called when no items are outstanding.
     pub fn blocking_recv_many_returns(&mut self, returns: &mut Vec<U>, limit: usize) -> usize {
-        assert!(self.outstanding > 0 || limit == 0);
+        assert!(self.outstanding.load() > 0 || limit == 0);
         let ret = self.incoming_return_q.blocking_recv_many(returns, limit);
-        self.outstanding -= ret;
+        self.outstanding.fetch_sub(ret);
         return ret;
     }
 
@@ -97,7 +106,7 @@ impl<T, U> Sender<T, U> {
     pub fn try_recv_return(&mut self) -> Option<U> {
         let ret = self.incoming_return_q.try_recv().ok();
         if ret.is_some() {
-            self.outstanding -= 1;
+            self.outstanding.fetch_sub(1);
         }
         return ret;
     }
@@ -110,39 +119,73 @@ impl<T, U> Sender<T, U> {
             match self.incoming_return_q.try_recv() {
                 Ok(item) => returns.push(item),
                 Err(_) => {
-                    self.outstanding -= i;
+                    self.outstanding.fetch_sub(i);
                     return i;
                 }
             }
         }
 
-        self.outstanding -= limit;
+        self.outstanding.fetch_sub(limit);
         return limit;
     }
 
     /// Async version of `blocking_recv_return()`.
     pub async fn recv_return(&mut self) -> U {
+        assert!(self.outstanding.load() > 0);
         let ret = self.incoming_return_q.recv().await.unwrap();
-        self.outstanding -= 1;
+        self.outstanding.fetch_sub(1);
         return ret;
     }
 
     /// Async version of `blocking_recv_many_returns()`.
     pub async fn recv_many_returns(&mut self, returns: &mut Vec<U>, limit: usize) -> usize {
+        assert!(self.outstanding.load() > 0 || limit == 0);
         let ret = self.incoming_return_q.recv_many(returns, limit).await;
-        self.outstanding -= ret;
+        self.outstanding.fetch_sub(ret);
         return ret;
     }
 }
 
-impl<T, U> Clone for Sender<T, U> {
-    fn clone(&self) -> Self {
-        let (outgoing_return_q, incoming_return_q) = mpsc::unbounded_channel();
-        Self {
+/// The producer half of a two-way queue.
+pub struct Sender<T, U> {
+    outgoing_q: mpsc::Sender<(T, mpsc::UnboundedSender<U>)>,
+    outgoing_return_q: mpsc::UnboundedSender<U>,
+    outstanding: Rc<UsizeCell>,
+}
+
+impl<T, U> Sender<T, U> {
+    /// Try to send an item.  Note that it is possible for the queue
+    /// to appear full for the reason that there are outstanding returns.
+    pub fn try_send(&mut self, item: T) -> Result<(), TrySendError<T>> {
+        match self
+            .outgoing_q
+            .try_send((item, self.outgoing_return_q.clone()))
+        {
+            Ok(()) => {
+                self.outstanding.fetch_add(1);
+                Ok(())
+            }
+            Err(mpsc::error::TrySendError::Full((item, _))) => Err(TrySendError::Full(item)),
+            Err(mpsc::error::TrySendError::Closed((item, _))) => Err(TrySendError::Closed(item)),
+        }
+    }
+}
+
+/// `SenderFactory` is used to create `Sender` instances which send to the
+/// associated `Receiver` and return items along the specified
+/// `ReturnQueue`.
+#[derive(Clone)]
+pub struct SenderFactory<T, U> {
+    outgoing_q: mpsc::Sender<(T, mpsc::UnboundedSender<U>)>,
+}
+
+impl<T, U> SenderFactory<T, U> {
+    /// Construct a sender for the factory's associated receiver which returns items on the given return queue.
+    pub fn make(&self, ret_q: &ReturnQueue<U>) -> Sender<T, U> {
+        Sender {
             outgoing_q: self.outgoing_q.clone(),
-            outgoing_return_q,
-            incoming_return_q,
-            outstanding: 0,
+            outgoing_return_q: ret_q.outgoing_return_q.clone(),
+            outstanding: ret_q.outstanding.clone(),
         }
     }
 }
@@ -206,17 +249,11 @@ impl<T, U: TwoWayReturnable<T>> Drop for ItemGuard<'_, T, U> {
     }
 }
 
-/// Construct a send-receive pair for a two-way queue.
-pub fn two_way_queue<T, U>(buffer: usize) -> (Sender<T, U>, Receiver<T, U>) {
+/// Construct a receive queue of the specified size.
+///
+/// Also returns a `SenderFactory`, which can be used to create one or more
+/// `Sender` instances associated with specified `ReturnQueue`s.
+pub fn two_way_queue<T, U>(buffer: usize) -> (SenderFactory<T, U>, Receiver<T, U>) {
     let (outgoing_q, incoming_q) = mpsc::channel(buffer);
-    let (outgoing_return_q, incoming_return_q) = mpsc::unbounded_channel();
-    (
-        Sender {
-            outgoing_q,
-            outgoing_return_q,
-            incoming_return_q,
-            outstanding: 0,
-        },
-        Receiver { incoming_q },
-    )
+    (SenderFactory { outgoing_q }, Receiver { incoming_q })
 }

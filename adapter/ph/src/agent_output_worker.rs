@@ -50,16 +50,18 @@ fn agent_output_main(mut worker: FastpathWorker, tun: &ZprTun, requeue_outq: &Un
         // output anything we've queued up
         worker.process_out_queues();
 
+        // WORKING: move return logic into fastpath common
+
         // process the return buffer queue
         if worker.buffers.is_empty() {
             // if we are out of buffers, block
             worker
-                .adapter_manager
-                .recv_return_buffers(&mut worker.buffers, worker.config.buffer_count);
+                .return_q
+                .blocking_recv_many_returns(&mut worker.buffers, worker.config.buffer_count);
         } else {
             worker
-                .adapter_manager
-                .try_recv_return_buffers(&mut worker.buffers, worker.config.buffer_count);
+                .return_q
+                .try_recv_many_returns(&mut worker.buffers, worker.config.buffer_count);
         }
 
         // read & forward packets one at a time

@@ -5,7 +5,7 @@ order = ["hosts", "dns"]
 
 [resolver.hosts]
 "node0.zpr" = "fd5a:5052:90de::1"
-"node0.overlay" = "10.0.0.21"
+"node0.overlay" = "10.0.0.21" # 129.153.152.175
 
 [nodes."node.zpr.org"]
 key = "DNBguc3HqkzfLys68PWm2CnWSA/IhAIFiHFII9cFrFo="
@@ -14,12 +14,12 @@ zpr_address = "node0.zpr"
 interfaces = ["in1"]
 in1.netaddr = "node0.overlay:5000"
 
-[trusted_services.default]
+[trusted_services.default] # note that "default" is special
 cert_path = "ca-cert.pem"
 
-[visa_service]
+[visa_service] # Only one visa service support at the moment.
 dock_node = "node.zpr.org"
-admin_attrs = [ [ "zpr.adapter.cn", "client.zpr.org" ] ]
+admin_attrs = [ [ "zpr.adapter.cn", "admin.zpr.org" ] ]
 
 [protocols.ping]
 protocol = "iana.ICMP6"
@@ -30,11 +30,21 @@ icmp_codes = [ 128, 129 ]
 protocol = "iana.TCP"
 port = 80
 
-[services.ZServicePingable]
+[protocols.https]
+protocol = "iana.TCP"
+port = 443
+
+[services.NextCloud]
+protocol = "https"
+
+[services.RfcDB]
+protocol = "http"
+
+[services.NextCloudPing]
 protocol = "ping"
 
-[services.ZWebService]
-protocol = "http"
+[services.RfcDBPing]
+protocol = "ping"
 
 
 
