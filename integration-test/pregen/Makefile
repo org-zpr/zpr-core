@@ -1,4 +1,4 @@
-ZPC := ../../compiler/target/debug/zpc
+ZPC ?= zpc
 KEY := zpr-rsa-key.pem
 
 OBJS := conform-policy.bin v4-1node-2agent-ping.bin v4-1node-3agent-ping.bin v6-1node-2agent-ping.bin v6-1node-3agent-ping.bin
@@ -10,7 +10,7 @@ info:
 	@echo make clean - removes all the .bin policy files
 	@echo make all   - recompiles out of date policy files
 	@echo
-	@echo Requires that compiles is built in debug target.
+	@echo Requires that \'zpc\' the ZPL compiler is in your path.
 	@echo Or you can set path to zpc by setting ZPC variable.
 	@echo
 
