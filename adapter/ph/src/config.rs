@@ -26,7 +26,7 @@ const DEFAULT_WORKER_CONCURRENCY: usize = 4;
 #[cfg(target_os = "macos")]
 const DEFAULT_WORKER_CONCURRENCY: usize = 1;
 
-pub const DEFAULT_KEEP_ALIVE_PERIOD: u64 = 3;
+pub const DEFAULT_KEEP_ALIVE_PERIOD: std::time::Duration = std::time::Duration::from_secs(3);
 pub const DEFAULT_KEEP_ALIVE_RETRIES: usize = 3;
 
 /// This config struct is loaded up from the command line args and used by the

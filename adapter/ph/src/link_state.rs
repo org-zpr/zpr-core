@@ -821,9 +821,7 @@ impl LinkStateWrapper {
         asm.counters[CounterType::PeerHandshakeSuccess].increment();
         debug!(target: LINK_STATE, "Link {link_id} entering active state");
         tokio::task::spawn_local(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(
-                config::DEFAULT_KEEP_ALIVE_PERIOD,
-            ));
+            let mut interval = tokio::time::interval(config::DEFAULT_KEEP_ALIVE_PERIOD);
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             let mut consecutive_misses = 0;
             while task_asm.is_link_ready(link_id) {
