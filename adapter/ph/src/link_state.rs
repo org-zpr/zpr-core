@@ -682,12 +682,14 @@ impl LinkStateWrapper {
 
         asm.peer_table.clear_peer_state(link_id);
 
-        if self.link_type == LinkType::AdapterToNode {
-            asm.tun_ctl.set_carrier(false).unwrap();
-        }
-
-        for addr in self.locked_fsm.lock().unwrap().agent_addresses.drain(..) {
-            visa_mgmt::agent_disconnect(asm, addr);
+        match self.link_type {
+            LinkType::AdapterToNode => asm.tun_ctl.set_carrier(false).unwrap(),
+            LinkType::NodeToAdapter => {
+                for addr in self.locked_fsm.lock().unwrap().agent_addresses.drain(..) {
+                    visa_mgmt::agent_disconnect(asm, addr);
+                }
+            }
+            _ => {}
         }
 
         let task_asm = asm.clone();
@@ -761,6 +763,7 @@ impl LinkStateWrapper {
         match (locked_fsm.state, reason) {
             (LinkState::Inactive, TerminateReason::Reset) => {
                 locked_fsm.set_state(LinkState::Resetting);
+                drop(locked_fsm);
                 Ok(self.clean_up_link_state(asm))
             }
             (LinkState::Initial | LinkState::Inactive, _) => {
@@ -771,6 +774,7 @@ impl LinkStateWrapper {
             }
             (_, _) => {
                 locked_fsm.set_state(LinkState::Closing);
+                drop(locked_fsm);
                 Ok(self.clean_up_link_state(asm))
             }
         }
@@ -806,6 +810,7 @@ impl LinkStateWrapper {
                 locked_fsm.state
             );
             locked_fsm.set_state(LinkState::Resetting);
+            drop(locked_fsm);
             let _ = send_terminate_indication(&asm, link_id, TerminateReason::Reset).await;
         }
     }
