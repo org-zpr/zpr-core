@@ -153,20 +153,28 @@ fn run_cli(socket: &str) -> std::io::Result<()> {
         print!("> ");
         io::stdout().flush()?;
         let mut line = String::new();
-        io::stdin().read_line(&mut line)?;
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        match parse_and_exec(line, socket) {
-            Ok(quit) => {
-                if quit {
-                    return Ok(());
-                }
+        match io::stdin().read_line(&mut line) {
+            Ok(0) => {
+                println!("Goodbye!");
+                return Ok(());
             }
-            Err(err) => {
-                println!("Failed to parse command \"{}\".  Error: {}", line, err);
+            Err(e) => return Err(e),
+            Ok(_) => {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+
+                match parse_and_exec(line, socket) {
+                    Ok(quit) => {
+                        if quit {
+                            return Ok(());
+                        }
+                    }
+                    Err(err) => {
+                        println!("Failed to parse command \"{}\".  Error: {}", line, err);
+                    }
+                }
             }
         }
     }
