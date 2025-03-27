@@ -23,7 +23,7 @@ libc = { version = "0.2.155" }
 libnode = { path = "../../libnode" }
 nix = { version = "0.29.0", features = ["ioctl", "net", "poll"] }
 open-enum = { version = "0.5.1" }
-openssl = { version = "0.10.64" }
+openssl = { version = "0.10.70" }
 openssl-sys = { version = "0.9.102" }
 serde = { version = "1.0.214", features = ["derive"] }
 snow = "0.9.6"

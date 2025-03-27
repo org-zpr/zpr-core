@@ -10,7 +10,7 @@ clap = { version = "4.5.23", features = ["derive"] }
 colored = "3.0.0"
 hex = "0.4.3"
 nix = { version = "0.29.0", features = ["hostname"] }
-openssl = "0.10.68"
+openssl = "0.10.70"
 prost = "0.13.4"
 ring = "0.17.8"
 serde = { version = "1.0.217", features = ["derive"] }
