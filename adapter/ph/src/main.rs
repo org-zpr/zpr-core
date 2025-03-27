@@ -17,7 +17,6 @@ use tracing::*;
 mod adapter_manager_worker;
 mod adapter_tables;
 mod admin_worker;
-mod agent_output_worker;
 mod assembly;
 mod batch_io;
 mod capture_worker;
@@ -27,6 +26,7 @@ mod config;
 mod counters;
 mod defs;
 mod fastpath;
+mod fastpath_worker;
 mod flow_control;
 mod forwarding_tables;
 mod km;
@@ -49,7 +49,6 @@ mod rcu;
 mod sample_ring;
 mod signal_worker;
 mod special_peers;
-mod substrate_ingress_worker;
 mod sync_req;
 mod sys;
 mod test_packet;
@@ -391,29 +390,6 @@ fn main() -> ExitCode {
     // start data path workers
     //
 
-    let mut fastpath_threads = Vec::new();
-
-    let fastpath_worker_config = FastpathWorkerConfig {
-        buffer_count: asm.topology_config.buffer_count,
-        batch_size: asm.topology_config.fastpath_batch_size,
-    };
-    for (worker_index, (tun_dev, requeue)) in
-        tun_devs.into_iter().zip(agent_requeue_outqs).enumerate()
-    {
-        let builder = std::thread::Builder::new().name(format!("output {worker_index}"));
-        fastpath_threads.push(
-            builder
-                .spawn(agent_output_worker::launch(
-                    fastpath_worker_config,
-                    worker_index,
-                    asm.clone(),
-                    tun_dev,
-                    requeue,
-                ))
-                .unwrap(),
-        );
-    }
-
     if ph_mode == PhMode::Node {
         if config.self_addr.port() == 0 {
             // TODO: Should we force setting a port when configuring a node?
@@ -428,15 +404,26 @@ fn main() -> ExitCode {
 
     let mut fastpath_threads = Vec::new();
 
-    for (worker_index, socket) in substrate_sockets.into_iter().enumerate() {
-        let builder = std::thread::Builder::new().name(format!("ingress {worker_index}"));
+    let fastpath_worker_config = FastpathWorkerConfig {
+        buffer_count: asm.topology_config.buffer_count,
+        batch_size: asm.topology_config.fastpath_batch_size,
+    };
+    for (worker_index, ((socket, tun_dev), requeue)) in substrate_sockets
+        .into_iter()
+        .zip(tun_devs.into_iter())
+        .zip(agent_requeue_outqs)
+        .enumerate()
+    {
+        let builder = std::thread::Builder::new().name(format!("fastpath {worker_index}"));
         fastpath_threads.push(
             builder
-                .spawn(substrate_ingress_worker::launch(
+                .spawn(fastpath_worker::launch(
                     fastpath_worker_config,
                     worker_index,
                     asm.clone(),
                     socket,
+                    tun_dev,
+                    requeue,
                 ))
                 .unwrap(),
         );

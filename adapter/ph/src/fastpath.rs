@@ -123,6 +123,19 @@ impl FastpathWorker {
         self.asm.counters[reason].increment();
     }
 
+    pub fn get_fresh_packets(&mut self, n: usize, dest: &mut Vec<Packet>) -> usize {
+        let nbufs = std::cmp::min(self.buffers.len(), n);
+
+        dest.extend(
+            self.buffers
+                .drain(self.buffers.len() - nbufs..)
+                .rev()
+                .map(|buf| Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM)),
+        );
+
+        nbufs
+    }
+
     /// Process packets ingressing from the specified address.
     pub fn substrate_ingress(&mut self, peer_sa: &zpr::SubstrateAddr, mut pkt: Packet) {
         pkt.metadata_mut().ingress_link_id =

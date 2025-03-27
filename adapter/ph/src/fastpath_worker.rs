@@ -1,5 +1,4 @@
 use crate::assembly::Assembly;
-use crate::config;
 use crate::counters::*;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::net_defs;
@@ -7,9 +6,12 @@ use crate::packet::Packet;
 use crate::sys::TunPi;
 use crate::sys::ZprTun;
 use crate::zprtun;
+use bytes::Buf;
 use enum_map::{enum_map, Enum};
 use nix::poll;
 use std::io::ErrorKind;
+use std::net::SocketAddr;
+use std::net::UdpSocket;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 use std::os::unix::net::UnixDatagram;
 use std::sync::Arc;
@@ -20,6 +22,7 @@ fn is_ip(pi: TunPi) -> bool {
 
 #[derive(Enum)]
 enum PollSlot {
+    Substrate,
     Tun,
     Requeue,
 }
@@ -28,20 +31,27 @@ pub fn launch(
     config: FastpathWorkerConfig,
     worker_index: usize,
     asm: Arc<Assembly>,
+    socket: Arc<UdpSocket>,
     tun: Arc<ZprTun>,
     requeue_outq: UnixDatagram,
 ) -> impl FnOnce() {
     move || {
         let worker = FastpathWorker::new(config, worker_index, asm.clone());
-        agent_output_main(worker, &tun, &requeue_outq);
+        fastpath_main(worker, &socket, &tun, &requeue_outq);
     }
 }
 
-fn agent_output_main(mut worker: FastpathWorker, tun: &ZprTun, requeue_outq: &UnixDatagram) {
+fn fastpath_main(
+    mut worker: FastpathWorker,
+    socket: &UdpSocket,
+    tun: &ZprTun,
+    requeue_outq: &UnixDatagram,
+) {
     // temp hack until we move ZprTun to be non-Tokio
     let tun_fd = unsafe { BorrowedFd::borrow_raw(tun.as_raw_fd()) };
 
     let mut poll_fds = enum_map! {
+        PollSlot::Substrate => poll::PollFd::new(socket.as_fd(), poll::PollFlags::POLLIN),
         PollSlot::Tun => poll::PollFd::new(tun_fd, poll::PollFlags::POLLIN),
         PollSlot::Requeue => poll::PollFd::new(requeue_outq.as_fd(), poll::PollFlags::POLLIN),
     };
@@ -104,20 +114,72 @@ fn agent_output_main(mut worker: FastpathWorker, tun: &ZprTun, requeue_outq: &Un
             worker.agent_output_post_classify(pkt, /* allow_bind_request */ false);
         }
 
+        if poll_fds[PollSlot::Substrate]
+            .revents()
+            .unwrap()
+            .contains(poll::PollFlags::POLLIN)
+        {
+            // read from socket
+            let mut pkts = Vec::new(); // TODO: recycle
+            let _nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
+            let mut results = Vec::new(); // TODO: recycle
+            let n = worker
+                .batch_io
+                .try_recv_buf_from_batch(&socket, pkts.iter_mut(), &mut results)
+                .unwrap();
+
+            // return empty buffers to pool
+            worker
+                .buffers
+                .extend(pkts.drain(n..).rev().map(|pkt| pkt.destroy()));
+
+            // process packets
+            for (pkt, result) in pkts.into_iter().zip(results) {
+                let mut sender = match result {
+                    Ok((size, _sender)) if size > pkt.remaining() => {
+                        worker.drop_and_count(pkt, CounterType::DroppedOversize);
+                        continue;
+                    }
+
+                    Ok((_size, sender)) => {
+                        sender.expect("received from non-IP address, should not happen!")
+                    }
+
+                    Err(err) => {
+                        match err.kind() {
+                            ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
+                                worker.buffers.push(pkt.destroy());
+                                continue;
+                            }
+
+                            // FIXME: do something with this later...
+                            ErrorKind::ConnectionRefused => {
+                                worker.buffers.push(pkt.destroy());
+                                continue;
+                            }
+
+                            _ => panic!("got socket error {}", err),
+                        }
+                    }
+                };
+
+                // SocketAddrV6 distinguishes addresses also by `flowinfo` which
+                // we do not want -- only the 5-tuple.  So clear it.
+                clear_flowinfo(&mut sender);
+
+                worker.asm.counters[CounterType::InPacksRec].increment();
+                worker.substrate_ingress(&sender, pkt);
+            }
+        }
+
         if poll_fds[PollSlot::Tun]
             .revents()
             .unwrap()
             .contains(poll::PollFlags::POLLIN)
         {
-            let nbufs = std::cmp::min(worker.buffers.len(), worker.config.batch_size);
-
             // read from TUN device
-            let mut pkts: Vec<_> = worker
-                .buffers
-                .drain(worker.buffers.len() - nbufs..)
-                .rev()
-                .map(|buf| Packet::new(buf, config::DEFAULT_MESSAGE_HEADROOM))
-                .collect(); // TODO: recycle
+            let mut pkts = Vec::new(); // TODO: recycle
+            let _nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
             let mut results = Vec::new(); // TODO: recycle
             let n = worker
                 .batch_io
@@ -161,5 +223,12 @@ fn agent_output_main(mut worker: FastpathWorker, tun: &ZprTun, requeue_outq: &Un
                 worker.agent_output(pkt);
             }
         }
+    }
+}
+
+fn clear_flowinfo(addr: &mut SocketAddr) {
+    match addr {
+        SocketAddr::V4(_) => (),
+        SocketAddr::V6(addr) => addr.set_flowinfo(0),
     }
 }

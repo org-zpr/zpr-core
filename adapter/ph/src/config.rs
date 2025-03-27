@@ -14,7 +14,7 @@ pub const DEFAULT_REQUEST_RETRY_TIMER: usize = 1;
 
 pub const ANCILLARY_BUFFER_SIZE: usize = 128;
 
-const DEFAULT_BUFFER_COUNT: usize = 16;
+const DEFAULT_BUFFER_COUNT: usize = 32; // should be at least 2x batch size
 const DEFAULT_BATCH_SIZE: usize = 8;
 const DEFAULT_DATAPATH_QUEUE_SIZE: usize = 16;
 const DEFAULT_MGMT_QUEUE_SIZE: usize = 16;
