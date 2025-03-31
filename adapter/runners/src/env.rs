@@ -88,7 +88,18 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
     // step in here and create the directories.
     let ctrl_path =
         match rdr.get_config_str_value_for_section_and_key("global", zpr::CONTROL_PATH_KEY) {
-            Ok(Some(path)) => PathBuf::from(path),
+            Ok(Some(path)) => {
+                let path = PathBuf::from(path);
+                match path.parent() {
+                    Some(path) => path.to_owned(),
+                    None => {
+                        return Err(LaunchErr::FileError(format!(
+                            "invalid control path: {}",
+                            path.display(),
+                        )))
+                    }
+                }
+            }
             Ok(None) => sys::get_data_home(),
             Err(e) => return Err(LaunchErr::PCError(e)),
         };
