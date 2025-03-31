@@ -462,7 +462,9 @@ impl FastpathWorker {
             let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
             base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
 
-            self.substrate_egress(egress_link_id, pkt);
+            pkt.metadata_mut().egress_link_id = egress_link_id;
+
+            self.substrate_egress(pkt);
         }
     }
 
@@ -513,7 +515,9 @@ impl FastpathWorker {
 
     /// Egress a ZDP packet on the given link ID, according to the given ZPI.
     /// The ZPI header will be added to the packet.
-    pub fn substrate_egress(&mut self, link_id: zpr::LinkId, mut pkt: Packet) {
+    pub fn substrate_egress(&mut self, mut pkt: Packet) {
+        let link_id = pkt.metadata().egress_link_id;
+
         let dest_sa = match substrate_egress_common(&self.asm, link_id, &mut pkt) {
             Ok(Some(dest_sa)) => dest_sa,
             Ok(None) => {
@@ -521,7 +525,7 @@ impl FastpathWorker {
                 return;
             }
             Err(err) => {
-                error!(target: DATAPATH, "egress: link {}: encryption error: {}", link_id, err);
+                error!(target: DATAPATH, "egress: link {link_id}: encryption error: {err}");
                 self.drop_and_count(pkt, CounterType::EncryptionFailure);
                 return;
             }

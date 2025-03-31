@@ -25,6 +25,7 @@ enum PollSlot {
     Substrate,
     Tun,
     Requeue,
+    MgmtSubstrate,
     Returns,
 }
 
@@ -35,20 +36,40 @@ pub fn launch(
     socket: Arc<UdpSocket>,
     agent_input_tun: Arc<ZprTun>,
     requeue_outq: UnixDatagram,
+    mgmt_substrate_outq: Option<UnixDatagram>,
 ) -> impl FnOnce() {
     move || {
         let worker = FastpathWorker::new(config, worker_index, asm.clone(), agent_input_tun);
-        fastpath_main(worker, &socket, &requeue_outq);
+        fastpath_main(worker, &socket, &requeue_outq, mgmt_substrate_outq.as_ref());
     }
 }
 
-fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &UnixDatagram) {
+fn fastpath_main(
+    mut worker: FastpathWorker,
+    socket: &UdpSocket,
+    requeue_outq: &UnixDatagram,
+    maybe_mgmt_substrate_outq: Option<&UnixDatagram>,
+) {
+    // HACK: nix does not support disabling an FD, so instead, make a dummy mgmt_substrate_outq socket
+    // if we weren't given one
+    let mgmt_substrate_outq;
+    let fake_mgmt_substrate_outq;
+    match maybe_mgmt_substrate_outq {
+        Some(outq) => mgmt_substrate_outq = outq,
+        None => {
+            let (_, outq) = UnixDatagram::pair().unwrap();
+            fake_mgmt_substrate_outq = Some(outq);
+            mgmt_substrate_outq = fake_mgmt_substrate_outq.as_ref().unwrap();
+        }
+    }
+
     loop {
         // try to immediately output anything we've queued up;
         // if we can't, drop it, unless it's on the substrate and marked PRIORITY
         worker.process_out_queues();
 
         let recv_poll_flags;
+
         if worker.buffers.is_empty() {
             // If we have no buffers, let's not get woken up to receive packets.
             recv_poll_flags = poll::PollFlags::empty();
@@ -67,6 +88,7 @@ fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &
             PollSlot::Substrate => poll::PollFd::new(socket.as_fd(), recv_poll_flags | send_poll_flags),
             PollSlot::Tun => poll::PollFd::new(worker.agent_input_tun.as_fd(), recv_poll_flags),
             PollSlot::Requeue => poll::PollFd::new(requeue_outq.as_fd(), recv_poll_flags),
+            PollSlot::MgmtSubstrate => poll::PollFd::new(mgmt_substrate_outq.as_fd(), recv_poll_flags),
             PollSlot::Returns => poll::PollFd::new(worker.return_q.poll_fd(), poll::PollFlags::POLLIN),
         };
 
@@ -93,31 +115,59 @@ fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &
         if revents[PollSlot::Requeue].contains(poll::PollFlags::POLLIN) {
             // read from requeue
             // TODO: batch receive
-            let mut buf = worker.buffers.pop().unwrap();
+            while let Some(mut buf) = worker.buffers.pop() {
+                if let Err(err) = requeue_outq.recv(buf.as_mut()) {
+                    match err.kind() {
+                        ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
+                            worker.buffers.push(buf);
+                            break;
+                        }
 
-            if let Err(err) = requeue_outq.recv(buf.as_mut()) {
-                match err.kind() {
-                    ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
-                        worker.buffers.push(buf);
-                        continue;
-                    }
-
-                    _ => {
-                        // FIXME: detect packet-too-large
-                        panic!("unrecoverable I/O error {err}");
+                        _ => {
+                            // FIXME: detect packet-too-large
+                            panic!("unrecoverable I/O error {err}");
+                        }
                     }
                 }
-            }
 
-            worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
-            let pkt = Packet::new_with_existing_metadata(buf);
-            worker.agent_output_post_classify(pkt, /* allow_bind_request */ false);
+                worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
+                let pkt = Packet::new_with_existing_metadata(buf);
+                worker.agent_output_post_classify(pkt, /* allow_bind_request */ false);
+            }
+        }
+
+        if revents[PollSlot::MgmtSubstrate].contains(poll::PollFlags::POLLIN) {
+            // read from mgmt_substrate
+            // TODO: batch receive
+            while let Some(mut buf) = worker.buffers.pop() {
+                if let Err(err) = mgmt_substrate_outq.recv(buf.as_mut()) {
+                    match err.kind() {
+                        ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
+                            worker.buffers.push(buf);
+                            break;
+                        }
+
+                        _ => {
+                            // FIXME: detect packet-too-large
+                            panic!("unrecoverable I/O error {err}");
+                        }
+                    }
+                }
+
+                worker.asm.counters[CounterType::MgmtPacketsSent].increment();
+                let pkt = Packet::new_with_existing_metadata(buf);
+                worker.substrate_egress(pkt);
+            }
         }
 
         if revents[PollSlot::Substrate].contains(poll::PollFlags::POLLIN) {
             // read from socket
             let mut pkts = Vec::new(); // TODO: recycle
-            let _nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
+            let nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
+            if nbufs == 0 {
+                continue;
+            }
+
             let mut results = Vec::new(); // TODO: recycle
             let n = worker
                 .batch_io
@@ -171,7 +221,11 @@ fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &
         if revents[PollSlot::Tun].contains(poll::PollFlags::POLLIN) {
             // read from TUN device
             let mut pkts = Vec::new(); // TODO: recycle
-            let _nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
+            let nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
+            if nbufs == 0 {
+                continue;
+            }
+
             let mut results = Vec::new(); // TODO: recycle
             let n = worker
                 .batch_io

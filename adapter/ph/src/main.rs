@@ -225,7 +225,7 @@ fn main() -> ExitCode {
     }
 
     //
-    // open substrate sockets
+    // open substrate sockets and mgmt substrate injection socket
     //
 
     let mut substrate_sockets: Vec<Arc<std::net::UdpSocket>> = Vec::new();
@@ -252,6 +252,9 @@ fn main() -> ExitCode {
         }
         substrate_sockets.push(Arc::new(socket.into()));
     }
+
+    let (_mgmt_substrate_inq, mgmt_substrate_outq) = tokio::net::UnixDatagram::pair().unwrap();
+    let mgmt_substrate_outq = mgmt_substrate_outq.into_std().unwrap();
 
     //
     // configure packet steering for better load balancing
@@ -404,12 +407,14 @@ fn main() -> ExitCode {
 
     let mut fastpath_threads = Vec::new();
 
+    let mut mgmt_substrate_outq = Some(mgmt_substrate_outq); // only the first fastpath worker gets this
+
     let fastpath_worker_config = FastpathWorkerConfig {
         buffer_count: asm.topology_config.buffer_count,
         batch_size: asm.topology_config.fastpath_batch_size,
     };
 
-    for (worker_index, socket, tun_dev, requeue) in izip!(
+    for (worker_index, socket, tun_dev, requeue_outq) in izip!(
         0..asm.topology_config.fastpath_concurrency,
         substrate_sockets,
         tun_devs,
@@ -424,7 +429,8 @@ fn main() -> ExitCode {
                     asm.clone(),
                     socket,
                     tun_dev,
-                    requeue,
+                    requeue_outq,
+                    mgmt_substrate_outq.take(),
                 ))
                 .unwrap(),
         );
