@@ -14,7 +14,7 @@ use crate::km::Codec;
 use crate::km_noise::NOISE_PADLEN;
 use crate::logging::targets::DATAPATH;
 use crate::net_defs;
-use crate::packet::{Packet, PacketBuffer};
+use crate::packet::{self, Packet, PacketBuffer};
 use crate::queues::{AdapterManager, MgmtDispatch, TryEnqueueError};
 use crate::sys::{TunPi, ZprTun};
 use crate::two_way_queue;
@@ -608,22 +608,46 @@ impl FastpathWorker {
             .expect("unrecoverable I/O error");
 
         // Tally results.
-        let mut dropped = self.substrate_egress_q.len() - n;
-        for res in results {
-            match res {
-                Ok(_) => (),
-                Err(err) if err.kind() == ErrorKind::WouldBlock => dropped += 1,
-                Err(err) => panic!("unrecoverable I/O error: {}", err),
+        let mut dropped = 0;
+        let mut retained = 0;
+
+        for i in 0..self.substrate_egress_q.len() {
+            // Determine whether the packet was in fact sent.
+            // If it was, leave it in place and skip to the next packet.
+            if i < n {
+                match &results[i] {
+                    Ok(_) => continue,
+                    Err(err) if err.kind() == ErrorKind::WouldBlock => (),
+                    Err(err) => panic!("unrecoverable I/O error: {err}"),
+                }
+            }
+
+            // Packet was not sent.
+
+            if self.substrate_egress_q[i].0.metadata().flags & packet::flags::PRIORITY != 0 {
+                // This was a priority packet.  Move it to the front of the queue:
+                // `retained` is the number of packets we've retained so far, so swap
+                // this packet with the one at that index.  We'll later drop all packets
+                // in the range `retained..`.
+                self.substrate_egress_q.swap(i, retained);
+                retained += 1;
+            } else {
+                // This was a normal packet.  Leave it to get dropped.
+                dropped += 1;
             }
         }
+
+        // Now all un-sent priority packets are at the head of the queue.
+
         self.asm.counters[CounterType::OutPacksSent]
-            .increase_by((self.substrate_egress_q.len() - dropped) as u64);
+            .increase_by((self.substrate_egress_q.len() - dropped - retained) as u64);
         self.asm.counters[CounterType::OutPacksDrop].increase_by(dropped as u64);
 
-        // Return buffers to buffer stack.
+        // Return buffers to buffer stack, except for un-sent priority packets (in the range `..retained`),
+        // which are retained for next time.
         self.buffers.extend(
             self.substrate_egress_q
-                .drain(..)
+                .drain(retained..)
                 .map(|(pkt, _)| pkt.destroy()),
         );
     }

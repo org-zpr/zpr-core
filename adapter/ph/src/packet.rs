@@ -167,9 +167,19 @@ pub struct PacketMetadata {
     /// which fastpath lane this packet arrived on
     pub ingress_lane_id: u8,
 
-    _padding: [u8; 1],
+    /// various flags
+    pub flags: PacketFlags,
 
     five_tuple: FiveTuple,
+}
+
+pub type PacketFlags = u8;
+
+pub mod flags {
+    use super::PacketFlags;
+
+    /// Packets marked `PRIORITY` are not dropped on egress queue backpressure.
+    pub const PRIORITY: PacketFlags = 1;
 }
 
 #[allow(dead_code)]
