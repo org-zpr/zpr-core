@@ -126,7 +126,7 @@ struct LinkArgs {
 #[derive(Debug, Subcommand)]
 enum LinkCommands {
     /// Show a link's status
-    Show { id: u32 },
+    Show { id: Option<u32> },
     /// Configure a link
     Configure { id: u32 },
     /// Start a link
@@ -411,7 +411,8 @@ fn handle_set_capture_program(program: Option<String>, socket: &str) -> std::io:
 
 fn handle_link_command(link_args: LinkArgs, socket: &str) -> std::io::Result<()> {
     match link_args.command {
-        LinkCommands::Show { id } => basic_command!(RpcCommands::ShowLink, socket, id)?,
+        LinkCommands::Show { id: None } => basic_command!(RpcCommands::ShowLink, socket)?,
+        LinkCommands::Show { id: Some(id) } => basic_command!(RpcCommands::ShowLink, socket, id)?,
         LinkCommands::Configure { id } => basic_command!(RpcCommands::ConfigureLink, socket, id)?,
         LinkCommands::Start { id } => basic_command!(RpcCommands::StartLink, socket, id)?,
         LinkCommands::Stop { id } => basic_command!(RpcCommands::StopLink, socket, id)?,
