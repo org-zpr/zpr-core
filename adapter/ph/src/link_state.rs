@@ -521,7 +521,7 @@ impl LinkStateWrapper {
         let link_id = self.id;
         let task_asm = asm.clone();
         tokio::task::spawn_local(async move {
-            for agent_addr in &task_asm.agent_addresses {
+            for agent_addr in &task_asm.local_zpr_addresses {
                 let result = mgmt::requests::send_register_agent_address_request(
                     &task_asm,
                     link_id,

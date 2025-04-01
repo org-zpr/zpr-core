@@ -96,7 +96,7 @@ pub struct CommonArgs {
 
     /// ZPR address (no port) of the adapter (must match your TUN address)
     #[arg(long, short = 'z')]
-    agent_addr: Vec<IpAddr>,
+    zpr_addr: Vec<IpAddr>,
 
     /// Enable debug logging for specified targets
     #[arg(long, short = 'd', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
@@ -174,7 +174,7 @@ impl Default for Config {
             debug: Vec::new(),
             quiet: Vec::new(),
             node_addr: None,
-            agent_addr: Vec::new(),
+            zpr_addr: Vec::new(),
             node_public_key_file: None,
         }
     }
@@ -249,8 +249,8 @@ impl Config {
             return Err("private_key_file".arg_missing());
         }
         check_file_exists("private key file", &self.private_key_file)?;
-        if self.agent_addr.is_empty() {
-            return Err("agent_addr".arg_missing());
+        if self.zpr_addr.is_empty() {
+            return Err("zpr_addr".arg_missing());
         }
         match mode {
             PhMode::Adapter => {
@@ -313,8 +313,8 @@ impl Config {
         if let Some(tun_if) = &config.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
-        if let Some(agent_addr) = &config.agent_addr {
-            self.agent_addr.extend(&*agent_addr);
+        if let Some(actor_addr) = &config.zpr_addr {
+            self.zpr_addr.extend(&*actor_addr);
         }
         if let Some(debug) = &config.debug {
             self.debug.extend(debug.into_iter().cloned());
@@ -404,7 +404,7 @@ impl Config {
         if let Some(tun_if) = &common.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
-        self.agent_addr.extend(&common.agent_addr);
+        self.zpr_addr.extend(&common.zpr_addr);
 
         self.debug.extend(common.debug.iter().cloned());
         self.quiet.extend(common.quiet.iter().cloned());
@@ -441,7 +441,7 @@ struct GlobalConfigSection {
     certificate_file: Option<PathBuf>,
     private_key_file: Option<PathBuf>,
     tun_if: Option<String>,
-    agent_addr: Option<Vec<IpAddr>>,
+    zpr_addr: Option<Vec<IpAddr>>,
     debug: Option<Vec<String>>,
     quiet: Option<Vec<String>>,
 }
@@ -626,7 +626,7 @@ mod test {
         certificate_file = "tests/certificate.pem"
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
         debug = [ "capture" ]
         quiet = [ "all" ]
 
@@ -674,7 +674,7 @@ mod test {
             ))
         );
         assert_eq!(
-            config.global.agent_addr,
+            config.global.zpr_addr,
             Some(Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(
                 10, 0, 0, 1
             ))]))
@@ -741,7 +741,7 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         tun_if = "tun23"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
         debug = [ "link_state" ]
         quiet = [ "startup" ]
 
@@ -792,7 +792,7 @@ mod test {
             ))
         );
         assert_eq!(
-            config.agent_addr,
+            config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
@@ -860,7 +860,7 @@ mod test {
             tmpfile.get_path().to_str().unwrap(),
             "--node-addr",
             "192.168.0.2:5000",
-            "--agent-addr",
+            "--zpr-addr",
             "10.0.0.1",
             "--node-public-key-file",
             &node_pk_fname,
@@ -878,7 +878,7 @@ mod test {
             ))
         );
         assert_eq!(
-            config.agent_addr,
+            config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
@@ -896,7 +896,7 @@ mod test {
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -958,7 +958,7 @@ mod test {
             ))
         );
         assert_eq!(
-            config.agent_addr,
+            config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
@@ -976,7 +976,7 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -1023,7 +1023,7 @@ mod test {
             ))
         );
         assert_eq!(
-            config.agent_addr,
+            config.zpr_addr,
             Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1))])
         );
         assert_eq!(
@@ -1041,7 +1041,7 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
         "#;
 
         let ca_file = TempFile::touch();
@@ -1096,7 +1096,7 @@ mod test {
             &pk_file_fname,
             "--control-path",
             "/tmp/control.sock",
-            "--agent-addr",
+            "--zpr-addr",
             "10.0.0.1",
         ];
 

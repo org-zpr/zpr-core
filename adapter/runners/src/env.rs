@@ -24,12 +24,12 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
         }
     };
 
-    let tun_addr_str = rdr.must_get_config_str_value_for_key(zpr::AGENT_ADDR_KEY)?;
+    let tun_addr_str = rdr.must_get_config_str_value_for_key(zpr::ACTOR_ADDR_KEY)?;
     let tun_addr = tun_addr_str
         .parse::<IpAddr>()
         .or(Err(PCErr::KeyError(format!(
             "{} not valid IP address",
-            zpr::AGENT_ADDR_KEY
+            zpr::ACTOR_ADDR_KEY
         ))))?;
 
     let mask = match tun_addr {
@@ -54,7 +54,7 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
         match tun_addr {
             IpAddr::V4(_ipv4) => (),
             IpAddr::V6(_ipv6) => {
-                println!("warning: IPv6 for agent_addr tunnel address is not supported on macos");
+                println!("warning: IPv6 for apr_addr tunnel address is not supported on macos");
             }
         }
     }

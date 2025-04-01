@@ -124,7 +124,7 @@ ca_file = "auth-ca.crt"
 certificate_file = "node-noise.crt"
 private_key_file = "node-noise.key"
 self_addr = "129.6.7.1:5000"
-agent_addr = [ "fd5a:5052:90de::1" ]
+zpr_addr = [ "fd5a:5052:90de::1" ]
 tun_if = "tun9"
 ```
 
@@ -155,7 +155,7 @@ name = "vs"
 ca_file = "auth-ca.crt"
 certificate_file = "adapter-vs-noise.crt"
 private_key_file = "adapter-vs-noise.key"
-agent_addr = [ "fd5a:5052::1" ] # visa service well known addr
+zpr_addr = [ "fd5a:5052::1" ] # visa service well known addr
 self_addr = "0.0.0.0:5000"
 tun_if = "tun9"
 

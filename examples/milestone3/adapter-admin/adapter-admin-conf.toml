@@ -3,7 +3,7 @@ name = "admin"
 ca_file = "auth-ca.crt"
 certificate_file = "adapter-admin-noise.crt"
 private_key_file = "adapter-admin-noise.key"
-agent_addr = [ "fd5a:5052:2::100" ] 
+zpr_addr = [ "fd5a:5052:2::100" ] 
 self_addr = "0.0.0.0:5000"
 
 tun_if = "tun9"

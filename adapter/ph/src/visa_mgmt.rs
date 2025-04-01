@@ -65,7 +65,7 @@ pub fn build_connect_request(
     // issue an Authorize Connect Request to the visa service for this adapter
     let connect_req = libnode::vsapi::ConnectRequest {
         connection_id: Some(123), // unused
-        dock_addr: Some(IpAddress::new_from_std(&asm.agent_addresses[0]).v6.to_vec()),
+        dock_addr: Some(IpAddress::new_from_std(&asm.local_zpr_addresses[0]).v6.to_vec()),
         claims: Some(
             [
                 ("zpr.addr".to_owned(), addr.to_string()),

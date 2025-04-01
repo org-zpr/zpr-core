@@ -101,7 +101,7 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --certificate-file node.crt \
   --private-key-file node.key \
   --tun-if tun0 \
-  --agent-addr "$NODE_ZPR_ADDR" 2>&1 | tee node.log | prefix_log zpr-node &
+  --zpr-addr "$NODE_ZPR_ADDR" 2>&1 | tee node.log | prefix_log zpr-node &
 
 sleep 2  # TODO: remove?
 
@@ -117,7 +117,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$VS_ZPR_ADDR" 2>&1 | tee adapter-vs.log | prefix_log zpr-vs &
+  --zpr-addr "$VS_ZPR_ADDR" 2>&1 | tee adapter-vs.log | prefix_log zpr-vs &
 
 sleep 5
 
@@ -131,7 +131,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$A_ZPR_ADDR" 2>&1 | tee adapter1.log | prefix_log zpr-a &
+  --zpr-addr "$A_ZPR_ADDR" 2>&1 | tee adapter1.log | prefix_log zpr-a &
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
@@ -143,7 +143,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
   --node-public-key-file node.pubkey \
-  --agent-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
+  --zpr-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
 if [[ "$NUM_AGENTS" -ge 3 ]]; then
   sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
@@ -156,7 +156,7 @@ if [[ "$NUM_AGENTS" -ge 3 ]]; then
     --tun-if tun0 \
     --node-addr "$NODE_SUBSTRATE_ADDR_C":12345 \
     --node-public-key-file node.pubkey \
-    --agent-addr "$C_ZPR_ADDR" 2>&1 | tee adapter3.log | prefix_log zpr-c &
+    --zpr-addr "$C_ZPR_ADDR" 2>&1 | tee adapter3.log | prefix_log zpr-c &
 fi
 
 #

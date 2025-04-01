@@ -195,8 +195,8 @@ fn main() -> ExitCode {
     //
 
     // HACK: If we are using a new TUN (requirement on MAC I think), we will set the address.
-    let tun_addr = if !config.agent_addr.is_empty() && config.tun_if.is_none() {
-        Some(config.agent_addr[0].clone())
+    let tun_addr = if !config.zpr_addr.is_empty() && config.tun_if.is_none() {
+        Some(config.zpr_addr[0].clone())
     } else {
         None
     };
@@ -288,7 +288,7 @@ fn main() -> ExitCode {
         info!(target: STARTUP, "node name is \"{node_name}\"");
 
         let node_agent =
-            libnode::vsconn::new_node_agent(config.agent_addr[0], &node_name, &Default::default());
+            libnode::vsconn::new_node_agent(config.zpr_addr[0], &node_name, &Default::default());
 
         let (vs_inq, vs_outq_inner) = mpsc::channel(topology_config.vs_queue_size);
         vs_outq = Some(vs_outq_inner);
@@ -299,7 +299,7 @@ fn main() -> ExitCode {
                 vs_inq,
                 &SocketAddr::new(zpr::VISA_SERVICE_ADDR, zpr::VISA_SERVICE_PORT).to_string(),
                 &config.certificate_file,
-                config.agent_addr[0],
+                config.zpr_addr[0],
                 None,
             )
             .expect("error launching Visa Service connection manager"),
@@ -316,7 +316,7 @@ fn main() -> ExitCode {
     let asm = Arc::new(Assembly {
         ph_mode,
         topology_config,
-        agent_addresses: config.agent_addr,
+        local_zpr_addresses: config.zpr_addr,
         agent_input: AgentInput::new(tun_devs.clone()),
         substrate_egress: SubstrateEgress::new(substrate_sockets.iter().cloned()),
         agent_output_requeue: AgentOutputRequeue::new(agent_requeue_inqs),
@@ -465,7 +465,7 @@ fn main() -> ExitCode {
         let (vss_inq, vss_outq) = mpsc::channel(asm.topology_config.vss_queue_size);
 
         let vss_addr =
-            std::net::SocketAddr::new(asm.agent_addresses[0], libnode::vss::DEFAULT_VSS_PORT);
+            std::net::SocketAddr::new(asm.local_zpr_addresses[0], libnode::vss::DEFAULT_VSS_PORT);
 
         js.spawn_blocking(move || libnode::vss::start_vss_server(vss_inq, vss_addr));
 

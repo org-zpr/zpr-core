@@ -5,7 +5,7 @@ name = "vservice"
 ca_file = "ca-cert.pem"
 certificate_file = "adapter-vs-cert.pem"
 private_key_file = "adapter-vs-key.pem"
-agent_addr = [ "fd5a:5052::1" ] # visa service well known addr
+zpr_addr = [ "fd5a:5052::1" ] # visa service well known addr
 self_addr = "0.0.0.0:5000"
 
 # use `sudo ./mktun.sh` to set this up
