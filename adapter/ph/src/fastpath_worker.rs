@@ -33,20 +33,25 @@ pub fn launch(
     config: FastpathWorkerConfig,
     worker_index: usize,
     asm: Arc<Assembly>,
-    socket: Arc<UdpSocket>,
+    substrate_socket: UdpSocket,
     agent_input_tun: Arc<ZprTun>,
     requeue_outq: UnixDatagram,
     mgmt_substrate_outq: Option<UnixDatagram>,
 ) -> impl FnOnce() {
     move || {
-        let worker = FastpathWorker::new(config, worker_index, asm.clone(), agent_input_tun);
-        fastpath_main(worker, &socket, &requeue_outq, mgmt_substrate_outq.as_ref());
+        let worker = FastpathWorker::new(
+            config,
+            worker_index,
+            asm.clone(),
+            substrate_socket,
+            agent_input_tun,
+        );
+        fastpath_main(worker, &requeue_outq, mgmt_substrate_outq.as_ref());
     }
 }
 
 fn fastpath_main(
     mut worker: FastpathWorker,
-    socket: &UdpSocket,
     requeue_outq: &UnixDatagram,
     maybe_mgmt_substrate_outq: Option<&UnixDatagram>,
 ) {
@@ -69,7 +74,6 @@ fn fastpath_main(
         worker.process_out_queues();
 
         let recv_poll_flags;
-
         if worker.buffers.is_empty() {
             // If we have no buffers, let's not get woken up to receive packets.
             recv_poll_flags = poll::PollFlags::empty();
@@ -85,7 +89,7 @@ fn fastpath_main(
         }
 
         let mut poll_fds = enum_map! {
-            PollSlot::Substrate => poll::PollFd::new(socket.as_fd(), recv_poll_flags | send_poll_flags),
+            PollSlot::Substrate => poll::PollFd::new(worker.substrate_socket.as_fd(), recv_poll_flags | send_poll_flags),
             PollSlot::Tun => poll::PollFd::new(worker.agent_input_tun.as_fd(), recv_poll_flags),
             PollSlot::Requeue => poll::PollFd::new(requeue_outq.as_fd(), recv_poll_flags),
             PollSlot::MgmtSubstrate => poll::PollFd::new(mgmt_substrate_outq.as_fd(), recv_poll_flags),
@@ -171,7 +175,7 @@ fn fastpath_main(
             let mut results = Vec::new(); // TODO: recycle
             let n = worker
                 .batch_io
-                .try_recv_buf_from_batch(&socket, pkts.iter_mut(), &mut results)
+                .try_recv_buf_from_batch(&worker.substrate_socket, pkts.iter_mut(), &mut results)
                 .unwrap();
 
             // return empty buffers to pool
@@ -204,7 +208,7 @@ fn fastpath_main(
                                 continue;
                             }
 
-                            _ => panic!("got socket error {}", err),
+                            _ => panic!("got socket error {err}"),
                         }
                     }
                 };

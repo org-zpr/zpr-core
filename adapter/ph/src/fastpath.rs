@@ -24,7 +24,7 @@ use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
 use std::io::ErrorKind;
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::os::fd::{AsRawFd, BorrowedFd};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -33,14 +33,6 @@ use zerocopy::FromBytes;
 use zpr;
 use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
-
-/// Drop a heap-allocated packet and count the drop with the given reason.
-pub fn drop_and_count_heap(asm: &Assembly, pkt: Packet, reason: impl Into<CounterType>) {
-    let reason = reason.into();
-    debug!(target: DATAPATH, "dropping packet because {reason}");
-    drop(pkt);
-    asm.counters[reason].increment();
-}
 
 /// Simple function used on an adapter to forward agent packets to the the tether and vice-versa.
 const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {
@@ -81,7 +73,7 @@ pub struct FastpathWorker {
 
     pub batch_io: BatchIo,
     pub agent_input_tun: Arc<ZprTun>,
-    pub substrate_egress_socket: Arc<UdpSocket>,
+    pub substrate_socket: UdpSocket,
 }
 
 impl FastpathWorker {
@@ -89,6 +81,7 @@ impl FastpathWorker {
         config: FastpathWorkerConfig,
         worker_index: usize,
         asm: Arc<Assembly>,
+        substrate_socket: UdpSocket,
         agent_input_tun: Arc<ZprTun>,
     ) -> Self {
         let buffers =
@@ -97,8 +90,6 @@ impl FastpathWorker {
         let return_q = two_way_queue::ReturnQueue::new();
         let adapter_manager = asm.adapter_manager_factory.make(&return_q);
         let mgmt_dispatch = asm.mgmt_dispatch_factory.make(&return_q);
-
-        let substrate_egress_socket = asm.substrate_egress.sockets[worker_index].clone(); // TEMP HACK
 
         Self {
             config,
@@ -115,7 +106,7 @@ impl FastpathWorker {
 
             batch_io: BatchIo::new(config.batch_size).unwrap(),
             agent_input_tun,
-            substrate_egress_socket,
+            substrate_socket,
         }
     }
 
@@ -603,7 +594,7 @@ impl FastpathWorker {
         let n = self
             .batch_io
             .try_send_to_batch(
-                &self.substrate_egress_socket,
+                &self.substrate_socket,
                 self.substrate_egress_q
                     .iter()
                     .map(|(pkt, dest)| (pkt.body(), *dest)),
@@ -622,6 +613,8 @@ impl FastpathWorker {
                 match &results[i] {
                     Ok(_) => continue,
                     Err(err) if err.kind() == ErrorKind::WouldBlock => (),
+                    // TODO: pending <https://github.com/rust-lang/rust/issues/86442>, provide more info to user
+                    // (or potentially recover from certain errors)
                     Err(err) => panic!("unrecoverable I/O error: {err}"),
                 }
             }
@@ -938,28 +931,19 @@ fn substrate_egress_common(
         }
     }
 
-    Ok(Some(peer_state.substrate_addr))
+    let mut dest_sa = peer_state.substrate_addr;
+
+    // Set substrate flowinfo from our flowhash.
+    set_flowinfo(&mut dest_sa, pkt.flowhash());
+
+    Ok(Some(dest_sa))
 }
 
-/// A blocking/async version of `substrate_egress()`, for management path use.
-/// Useful to ensure fairness under high load.
-pub async fn substrate_egress_blocking(asm: &Assembly, link_id: zpr::LinkId, mut pkt: Packet) {
-    let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
-        Ok(Some(dest_sa)) => dest_sa,
-        Ok(None) => {
-            drop_and_count_heap(asm, pkt, CounterType::PeerRemoved);
-            return;
-        }
-        Err(err) => {
-            error!(target: DATAPATH, "egress: link {}: encryption error: {}", link_id, err);
-            drop_and_count_heap(asm, pkt, CounterType::EncryptionFailure);
-            return;
-        }
-    };
-
-    match asm.substrate_egress.enqueue_packet(&pkt, dest_sa).await {
-        Ok(()) => drop_and_count_heap(asm, pkt, CounterType::OutPacksSent),
-        Err(()) => drop_and_count_heap(asm, pkt, CounterType::OutPacksErr),
+/// If substrate supports flow info, set it to the specified value.
+fn set_flowinfo(substrate_addr: &mut zpr::SubstrateAddr, flowinfo: u32) {
+    match substrate_addr {
+        SocketAddr::V4(_) => (),
+        SocketAddr::V6(sa) => sa.set_flowinfo(flowinfo),
     }
 }
 

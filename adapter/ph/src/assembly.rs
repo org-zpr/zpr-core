@@ -58,7 +58,7 @@ pub struct Assembly {
     // Shared resources.  These may be accessed by any part of the system.
     pub local_zpr_addresses: Vec<IpAddr>,
 
-    pub substrate_egress: SubstrateEgress,
+    pub mgmt_substrate_egress: MgmtSubstrateEgress,
     pub agent_output_requeue: AgentOutputRequeue,
 
     pub vsconn: Option<libnode::vsconn::VSConnHandle>, // present only on nodes
@@ -335,7 +335,7 @@ pub mod test {
         pub ph_mode: Option<PhMode>,
         pub topology_config: Option<TopologyConfig>,
         pub local_zpr_addresses: Option<Vec<IpAddr>>,
-        pub substrate_egress: Option<SubstrateEgress>,
+        pub mgmt_substrate_egress: Option<MgmtSubstrateEgress>,
         pub agent_output_requeue: Option<AgentOutputRequeue>,
         pub vsconn: Option<Option<libnode::vsconn::VSConnHandle>>,
         pub visa_table: Option<visa_table::VisaTable>,
@@ -374,9 +374,9 @@ pub mod test {
         let local_zpr_addresses = builder
             .local_zpr_addresses
             .unwrap_or(Vec::from([IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]));
-        let substrate_egress = builder
-            .substrate_egress
-            .unwrap_or_else(|| SubstrateEgress::new(Vec::new()));
+        let mgmt_substrate_egress = builder.mgmt_substrate_egress.unwrap_or_else(|| {
+            MgmtSubstrateEgress::new(tokio::net::UnixDatagram::pair().unwrap().0)
+        });
         let agent_output_requeue = builder
             .agent_output_requeue
             .unwrap_or_else(|| AgentOutputRequeue::new(Vec::new()));
@@ -424,7 +424,7 @@ pub mod test {
             ph_mode,
             topology_config,
             local_zpr_addresses,
-            substrate_egress,
+            mgmt_substrate_egress,
             agent_output_requeue,
             vsconn,
             visa_table,

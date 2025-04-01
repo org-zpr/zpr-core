@@ -228,7 +228,7 @@ fn main() -> ExitCode {
     // open substrate sockets and mgmt substrate injection socket
     //
 
-    let mut substrate_sockets: Vec<Arc<std::net::UdpSocket>> = Vec::new();
+    let mut substrate_sockets: Vec<std::net::UdpSocket> = Vec::new();
 
     for _i in 0..topology_config.fastpath_concurrency {
         let socket = socket2::Socket::new(
@@ -250,10 +250,10 @@ fn main() -> ExitCode {
             config.self_addr.set_port(port);
             info!(target: STARTUP, "assigned substrate UDP port {port}");
         }
-        substrate_sockets.push(Arc::new(socket.into()));
+        substrate_sockets.push(socket.into());
     }
 
-    let (_mgmt_substrate_inq, mgmt_substrate_outq) = tokio::net::UnixDatagram::pair().unwrap();
+    let (mgmt_substrate_inq, mgmt_substrate_outq) = tokio::net::UnixDatagram::pair().unwrap();
     let mgmt_substrate_outq = mgmt_substrate_outq.into_std().unwrap();
 
     //
@@ -321,7 +321,7 @@ fn main() -> ExitCode {
         ph_mode,
         topology_config,
         local_zpr_addresses: config.zpr_addr,
-        substrate_egress: SubstrateEgress::new(substrate_sockets.iter().cloned()),
+        mgmt_substrate_egress: MgmtSubstrateEgress::new(mgmt_substrate_inq),
         agent_output_requeue: AgentOutputRequeue::new(agent_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
         visa_table: tokio::sync::RwLock::new(visa_table::VisaTable::new()),
