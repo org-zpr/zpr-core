@@ -12,7 +12,7 @@ use nix::poll;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::net::UdpSocket;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
+use std::os::fd::AsFd;
 use std::os::unix::net::UnixDatagram;
 use std::sync::Arc;
 
@@ -42,9 +42,6 @@ pub fn launch(
 }
 
 fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &UnixDatagram) {
-    // temp hack until we move ZprTun to be non-Tokio
-    let tun_fd = unsafe { BorrowedFd::borrow_raw(worker.agent_input_tun.as_raw_fd()) };
-
     loop {
         // output anything we've queued up
         worker.process_out_queues();
@@ -65,7 +62,7 @@ fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &
 
         let mut poll_fds = enum_map! {
             PollSlot::Substrate => poll::PollFd::new(socket.as_fd(), poll::PollFlags::POLLIN),
-            PollSlot::Tun => poll::PollFd::new(tun_fd, poll::PollFlags::POLLIN),
+            PollSlot::Tun => poll::PollFd::new(worker.agent_input_tun.as_fd(), poll::PollFlags::POLLIN),
             PollSlot::Requeue => poll::PollFd::new(requeue_outq.as_fd(), poll::PollFlags::POLLIN),
         };
 
@@ -170,7 +167,7 @@ fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &
             let mut results = Vec::new(); // TODO: recycle
             let n = worker
                 .batch_io
-                .try_read_buf_batch(&tun_fd, pkts.iter_mut(), &mut results)
+                .try_read_buf_batch(&worker.agent_input_tun, pkts.iter_mut(), &mut results)
                 .unwrap();
 
             // return empty buffers to pool

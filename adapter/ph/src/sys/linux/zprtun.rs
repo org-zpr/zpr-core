@@ -1,20 +1,23 @@
 use crate::zprtun::ZprTunError;
-use bytes::buf;
 use nix::ioctl_write_ptr;
 use std::io::Result;
 use std::net::IpAddr;
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use tokio_tun::{Tun, TunBuilder};
-use zpr_ext::std::mem::slice_assume_init_mut;
 
 // from /usr/include/linux/if_tun.h
 ioctl_write_ptr!(tun_set_carrier, b'T', 226, libc::c_int);
 
-pub struct ZprTun(Tun);
+pub struct ZprTun(OwnedFd);
 
 impl From<Tun> for ZprTun {
     fn from(tun: Tun) -> Self {
-        ZprTun(tun)
+        // SAFETY: the FD is live until we exit this function
+        ZprTun(
+            (unsafe { BorrowedFd::borrow_raw(tun.as_raw_fd()) })
+                .try_clone_to_owned()
+                .unwrap(),
+        )
     }
 }
 
@@ -43,20 +46,7 @@ impl ZprTun {
             .try_build_mq(concurrency)
             .or_else(|e| Err(ZprTunError::PlatformError(e.to_string())))?;
 
-        Ok(tok_tun_devs.into_iter().map(ZprTun).collect())
-    }
-
-    #[allow(dead_code)]
-    pub fn try_recv_buf<B: buf::BufMut>(&self, buf: &mut B) -> Result<usize> {
-        let uninit_slice = buf.chunk_mut();
-        // SAFETY: we are only writing to this uninitialized slice
-        let slice = unsafe { slice_assume_init_mut(uninit_slice.as_uninit_slice_mut()) };
-        let size = self.0.try_recv(slice)?;
-        // SAFETY: we've now initialized this much of the slice
-        unsafe {
-            buf.advance_mut(size);
-        }
-        Ok(size)
+        Ok(tok_tun_devs.into_iter().map(ZprTun::from).collect())
     }
 
     pub fn set_carrier(&self, carrier: bool) -> Result<()> {
@@ -71,6 +61,12 @@ impl ZprTun {
         Err(ZprTunError::PlatformError(
             "cannot set TUN address after creation".to_string(),
         ))
+    }
+}
+
+impl AsFd for ZprTun {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
     }
 }
 
