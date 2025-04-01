@@ -35,6 +35,7 @@ mod km_multiplexor;
 mod km_noise;
 mod link_state;
 mod logging;
+mod main_argparse;
 mod main_args;
 mod mgmt;
 mod mgmt_dispatch_worker;
@@ -81,7 +82,7 @@ fn main() -> ExitCode {
     //
     // parse configuration from command line
     //
-    let (ph_mode, mut config) = match main_args::argparse(None) {
+    let (ph_mode, mut config) = match main_argparse::argparse(None) {
         Ok((ph_mode, config)) => (ph_mode, config),
         Err(e) => {
             eprintln!("failed to parse command line arguments: {:?}", e);
@@ -106,14 +107,13 @@ fn main() -> ExitCode {
     let peer_noise_keypair;
     let certx;
 
-    let private_key = match km_cert_exchange::load_private_key(&Path::new(&config.private_key_file))
-    {
+    let private_key = match config.get_noise_private_key_data() {
         Ok(key) => key,
         Err(e) => {
             error!(
                 target: STARTUP,
-                "failed to load private key file: {:?}: {e:?}",
-                &config.private_key_file,
+                "failed to load private key from: {:?}: {e:?}",
+                config.noise_private_key_source()
             );
             return ExitCode::FAILURE;
         }
