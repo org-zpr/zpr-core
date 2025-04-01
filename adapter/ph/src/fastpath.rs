@@ -85,7 +85,12 @@ pub struct FastpathWorker {
 }
 
 impl FastpathWorker {
-    pub fn new(config: FastpathWorkerConfig, worker_index: usize, asm: Arc<Assembly>) -> Self {
+    pub fn new(
+        config: FastpathWorkerConfig,
+        worker_index: usize,
+        asm: Arc<Assembly>,
+        agent_input_tun: Arc<ZprTun>,
+    ) -> Self {
         let buffers =
             vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; config.buffer_count];
 
@@ -93,7 +98,6 @@ impl FastpathWorker {
         let adapter_manager = asm.adapter_manager_factory.make(&return_q);
         let mgmt_dispatch = asm.mgmt_dispatch_factory.make(&return_q);
 
-        let agent_input_tun = asm.agent_input.tuns[worker_index].clone(); // TEMP HACK
         let substrate_egress_socket = asm.substrate_egress.sockets[worker_index].clone(); // TEMP HACK
 
         Self {

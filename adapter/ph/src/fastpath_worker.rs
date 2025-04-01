@@ -32,23 +32,18 @@ pub fn launch(
     worker_index: usize,
     asm: Arc<Assembly>,
     socket: Arc<UdpSocket>,
-    tun: Arc<ZprTun>,
+    agent_input_tun: Arc<ZprTun>,
     requeue_outq: UnixDatagram,
 ) -> impl FnOnce() {
     move || {
-        let worker = FastpathWorker::new(config, worker_index, asm.clone());
-        fastpath_main(worker, &socket, &tun, &requeue_outq);
+        let worker = FastpathWorker::new(config, worker_index, asm.clone(), agent_input_tun);
+        fastpath_main(worker, &socket, &requeue_outq);
     }
 }
 
-fn fastpath_main(
-    mut worker: FastpathWorker,
-    socket: &UdpSocket,
-    tun: &ZprTun,
-    requeue_outq: &UnixDatagram,
-) {
+fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &UnixDatagram) {
     // temp hack until we move ZprTun to be non-Tokio
-    let tun_fd = unsafe { BorrowedFd::borrow_raw(tun.as_raw_fd()) };
+    let tun_fd = unsafe { BorrowedFd::borrow_raw(worker.agent_input_tun.as_raw_fd()) };
 
     loop {
         // output anything we've queued up

@@ -1,7 +1,6 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
 
 use crate::packet::{Packet, PacketBuffer};
-use crate::sys::ZprTun;
 use crate::test_packet::*;
 use crate::two_way_queue;
 use bytes::Buf;
@@ -68,22 +67,6 @@ impl MgmtProcessor {
             .unwrap();
 
         Ok(test_tuple.1.await?)
-    }
-}
-
-/// AgentInput is responsible for emitting decapsulated agent packets on the
-/// host's TUN interface.
-pub struct AgentInput {
-    pub tuns: Box<[Arc<ZprTun>]>,
-}
-
-impl AgentInput {
-    // We necessarily have multiple queues, corresponding to the multiple
-    // FDs of a multiqueue-enabled TUN interface.
-    pub fn new(tuns: impl IntoIterator<Item = Arc<ZprTun>>) -> Self {
-        Self {
-            tuns: tuns.into_iter().collect(),
-        }
     }
 }
 
