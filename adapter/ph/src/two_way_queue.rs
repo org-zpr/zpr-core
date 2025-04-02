@@ -31,10 +31,13 @@
 
 #![allow(dead_code)]
 
+use crate::sys::notify::Notify;
 use std::marker::PhantomData;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
+use std::os::fd::BorrowedFd;
 use std::rc::Rc;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use zpr_ext::std::cell::scalar::UsizeCell;
 
@@ -64,6 +67,7 @@ pub enum TryRecvReturnError {
 pub struct ReturnQueue<U> {
     incoming_return_q: mpsc::UnboundedReceiver<U>,
     outgoing_return_q: mpsc::UnboundedSender<U>,
+    return_notify: Arc<Notify>,
     outstanding: Rc<UsizeCell>,
 }
 
@@ -74,6 +78,7 @@ impl<U> ReturnQueue<U> {
         Self {
             incoming_return_q,
             outgoing_return_q,
+            return_notify: Arc::new(Notify::new().unwrap()),
             outstanding: Rc::new(UsizeCell::new(0)),
         }
     }
@@ -83,9 +88,8 @@ impl<U> ReturnQueue<U> {
     /// Panics if called when no items are outstanding.
     pub fn blocking_recv_return(&mut self) -> U {
         assert!(self.outstanding.load() > 0);
-        let ret = self.incoming_return_q.blocking_recv().unwrap();
-        self.outstanding.fetch_sub(1);
-        return ret;
+        self.return_notify.wait_and_consume();
+        self.try_recv_return().unwrap()
     }
 
     /// Receive up to `limit` returned items.  Blocks until at least one item can be returned.
@@ -95,9 +99,8 @@ impl<U> ReturnQueue<U> {
     /// Panics if called when no items are outstanding.
     pub fn blocking_recv_many_returns(&mut self, returns: &mut Vec<U>, limit: usize) -> usize {
         assert!(self.outstanding.load() > 0 || limit == 0);
-        let ret = self.incoming_return_q.blocking_recv_many(returns, limit);
-        self.outstanding.fetch_sub(ret);
-        return ret;
+        self.return_notify.wait_and_consume();
+        self.try_recv_many_returns(returns, limit)
     }
 
     /// Try to receive a single returned item.  Does not block, returning
@@ -108,6 +111,13 @@ impl<U> ReturnQueue<U> {
         if ret.is_some() {
             self.outstanding.fetch_sub(1);
         }
+
+        if !self.incoming_return_q.is_empty() {
+            // It is possible the caller ate the notification of this remaining item.
+            // Re-post it.  (If we didn't eat it, this is harmless.)
+            self.return_notify.post();
+        }
+
         return ret;
     }
 
@@ -115,41 +125,40 @@ impl<U> ReturnQueue<U> {
     /// returning 0 if no items are immediately available (possibly because
     /// none are outstanding).
     pub fn try_recv_many_returns(&mut self, returns: &mut Vec<U>, limit: usize) -> usize {
-        for i in 0..limit {
+        let mut recvd = 0;
+
+        while recvd < limit {
             match self.incoming_return_q.try_recv() {
-                Ok(item) => returns.push(item),
-                Err(_) => {
-                    self.outstanding.fetch_sub(i);
-                    return i;
+                Ok(item) => {
+                    recvd += 1;
+                    returns.push(item);
                 }
+
+                Err(_) => break,
             }
         }
 
-        self.outstanding.fetch_sub(limit);
-        return limit;
+        self.outstanding.fetch_sub(recvd);
+
+        if !self.incoming_return_q.is_empty() {
+            // It is possible the caller ate the notification of this remaining item.
+            // Re-post it.  (If we didn't eat it, this is harmless.)
+            self.return_notify.post();
+        }
+
+        return recvd;
     }
 
-    /// Async version of `blocking_recv_return()`.
-    pub async fn recv_return(&mut self) -> U {
-        assert!(self.outstanding.load() > 0);
-        let ret = self.incoming_return_q.recv().await.unwrap();
-        self.outstanding.fetch_sub(1);
-        return ret;
-    }
-
-    /// Async version of `blocking_recv_many_returns()`.
-    pub async fn recv_many_returns(&mut self, returns: &mut Vec<U>, limit: usize) -> usize {
-        assert!(self.outstanding.load() > 0 || limit == 0);
-        let ret = self.incoming_return_q.recv_many(returns, limit).await;
-        self.outstanding.fetch_sub(ret);
-        return ret;
+    pub fn poll_fd(&self) -> BorrowedFd<'_> {
+        self.return_notify.poll_fd()
     }
 }
 
 /// The producer half of a two-way queue.
 pub struct Sender<T, U> {
-    outgoing_q: mpsc::Sender<(T, mpsc::UnboundedSender<U>)>,
+    outgoing_q: mpsc::Sender<(T, mpsc::UnboundedSender<U>, Arc<Notify>)>,
     outgoing_return_q: mpsc::UnboundedSender<U>,
+    return_notify: Arc<Notify>,
     outstanding: Rc<UsizeCell>,
 }
 
@@ -157,16 +166,17 @@ impl<T, U> Sender<T, U> {
     /// Try to send an item.  Note that it is possible for the queue
     /// to appear full for the reason that there are outstanding returns.
     pub fn try_send(&mut self, item: T) -> Result<(), TrySendError<T>> {
-        match self
-            .outgoing_q
-            .try_send((item, self.outgoing_return_q.clone()))
-        {
+        match self.outgoing_q.try_send((
+            item,
+            self.outgoing_return_q.clone(),
+            self.return_notify.clone(),
+        )) {
             Ok(()) => {
                 self.outstanding.fetch_add(1);
                 Ok(())
             }
-            Err(mpsc::error::TrySendError::Full((item, _))) => Err(TrySendError::Full(item)),
-            Err(mpsc::error::TrySendError::Closed((item, _))) => Err(TrySendError::Closed(item)),
+            Err(mpsc::error::TrySendError::Full((item, _, _))) => Err(TrySendError::Full(item)),
+            Err(mpsc::error::TrySendError::Closed((item, _, _))) => Err(TrySendError::Closed(item)),
         }
     }
 }
@@ -176,7 +186,7 @@ impl<T, U> Sender<T, U> {
 /// `ReturnQueue`.
 #[derive(Clone)]
 pub struct SenderFactory<T, U> {
-    outgoing_q: mpsc::Sender<(T, mpsc::UnboundedSender<U>)>,
+    outgoing_q: mpsc::Sender<(T, mpsc::UnboundedSender<U>, Arc<Notify>)>,
 }
 
 impl<T, U> SenderFactory<T, U> {
@@ -185,6 +195,7 @@ impl<T, U> SenderFactory<T, U> {
         Sender {
             outgoing_q: self.outgoing_q.clone(),
             outgoing_return_q: ret_q.outgoing_return_q.clone(),
+            return_notify: ret_q.return_notify.clone(),
             outstanding: ret_q.outstanding.clone(),
         }
     }
@@ -192,7 +203,7 @@ impl<T, U> SenderFactory<T, U> {
 
 /// The consumer half of a two-way queue.
 pub struct Receiver<T, U> {
-    incoming_q: mpsc::Receiver<(T, mpsc::UnboundedSender<U>)>,
+    incoming_q: mpsc::Receiver<(T, mpsc::UnboundedSender<U>, Arc<Notify>)>,
 }
 
 impl<T, U> Receiver<T, U>
@@ -210,10 +221,11 @@ where
     /// transformed using `TwoWayReturnable::convert()` on its way back to
     /// the producer.
     pub async fn recv(&mut self) -> Option<ItemGuard<'_, T, U>> {
-        let (item, outgoing_return_q) = self.incoming_q.recv().await?;
+        let (item, outgoing_return_q, return_notify) = self.incoming_q.recv().await?;
         Some(ItemGuard {
             item: ManuallyDrop::new(item),
             outgoing_return_q,
+            return_notify,
             receiver: PhantomData,
         })
     }
@@ -223,6 +235,7 @@ where
 pub struct ItemGuard<'a, T, U: TwoWayReturnable<T>> {
     item: ManuallyDrop<T>,
     outgoing_return_q: mpsc::UnboundedSender<U>,
+    return_notify: Arc<Notify>,
     receiver: PhantomData<&'a Receiver<T, U>>,
 }
 
@@ -246,6 +259,8 @@ impl<T, U: TwoWayReturnable<T>> Drop for ItemGuard<'_, T, U> {
         let _ = self
             .outgoing_return_q
             .send(U::convert(unsafe { ManuallyDrop::take(&mut self.item) }));
+
+        self.return_notify.post();
     }
 }
 
