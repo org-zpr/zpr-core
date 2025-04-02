@@ -22,7 +22,7 @@ hdrhistogram = { version = "7.5.4" }
 libc = { version = "0.2.155" }
 libnode = { path = "../../libnode" }
 itertools = "0.14"
-nix = { version = "0.29.0", features = ["ioctl", "net", "poll"] }
+nix = { version = "0.29.0", features = ["fs", "ioctl", "net", "poll"] }
 open-enum = { version = "0.5.1" }
 openssl = { version = "0.10.70" }
 openssl-sys = { version = "0.9.102" }

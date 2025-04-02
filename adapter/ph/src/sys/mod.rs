@@ -11,3 +11,6 @@ pub(crate) mod macos;
 pub use self::macos::TunPi;
 #[cfg(target_os = "macos")]
 pub use self::macos::ZprTun;
+
+pub(crate) mod posix;
+pub use self::posix::notify;
