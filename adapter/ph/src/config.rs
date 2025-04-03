@@ -29,6 +29,8 @@ const DEFAULT_WORKER_CONCURRENCY: usize = 1;
 pub const DEFAULT_KEEP_ALIVE_PERIOD: std::time::Duration = std::time::Duration::from_secs(3);
 pub const DEFAULT_KEEP_ALIVE_RETRIES: usize = 3;
 
+pub const DEFAULT_LINK_RESTART_HOLDDOWN: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// This config struct is loaded up from the command line args and used by the
 /// ph system to configure itself.  Do not create this directly, use [argparse].
 #[derive(Debug)]

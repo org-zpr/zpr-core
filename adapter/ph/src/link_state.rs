@@ -9,6 +9,7 @@ use crate::mgmt::core::SyncReqError;
 use crate::net_defs::IpAddress;
 use crate::sample_ring::SampleRing;
 use crate::special_peers;
+use crate::special_peers::SpecialPeerName;
 use crate::visa_mgmt;
 use crate::zdp::{ResponseCode, TerminateReason};
 
@@ -24,39 +25,40 @@ use zpr::ZPI_ENCRYPTED_HEADER_FLAG;
 /// State machine for links and docking sessions
 
 // Node-to-Node
-// +---------+       +----------+       +--------+
-// | INITIAL |--CD-->| INACTIVE |--ST-->| KEYING |
-// +---------+       +----------+       +--------+
-//     ^                  ^               | |  |
-//     |                  |   +------KDe--+ |  +--KDu--------+
-//     |                  CC  |       C    KDo               |
-//     |                  |   V             V                V
-//     |              +---------+  HDe  +----------+     +----------+
-//     |              | CLOSING |<--C---| HELLOING |     | HELLOING |
-//     |              +---------+       +----------+     | SILENT   |
-//     R                  ^                  |   |       +----------+
-//     |                  |                 HDo HDu          |    |
-//     |                  C                  |   |          HDu   C
-//     |                  |                  |   +------+   HDo  HDe
-//     |                  |                  V          V    V     |
-//     |                  | KDe, C, KF   +--------+    +--------+  |
-//     |                  +----------+---| ACTIVE |--->| ACTIVE |  |
-//     |                             |   +--------+ KDu| Silent |  |
-//     +<-R-[ANY STATE]               \                +--------+  |
-//     |                               \                   |       |
-// +-------+                            \                  C       |
-// | ERROR |<-- Error -- [ANY STATE]     \                 |       |
+// +--------------+       +----------+       +--------+
+// | UNCONFIGURED |--CD-->| INACTIVE |--ST-->| KEYING |
+// +--------------+       +----------+       +--------+
+//     ^                       ^               | |  |
+//     |                       |   +------KDe--+ |  +--KDu--------+
+//     |                       CC  |       C    KDo               |
+//     |                       |   V             V                V
+//     |                   +---------+  HDe  +----------+     +----------+
+//     |                   | CLOSING |<--C---| HELLOING |     | HELLOING |
+//     |                   +---------+       +----------+     | SILENT   |
+//     R                       ^                  |   |       +----------+
+//     |                       |                 HDo HDu          |    |
+//     |                       C                  |   |          HDu   C
+//     |                       |                  |   +------+   HDo  HDe
+//     |                       |                  V          V    V     |
+//     |                       | KDe, C, KF   +--------+    +--------+  |
+//     |                       +----------+---| ACTIVE |--->| ACTIVE |  |
+//     |                                  |   +--------+ KDu| Silent |  |
+//     +<-R-[ANY STATE]                   |            +--------+  |
+//     |                                  |                |       |
+// +-------+                              |                C       |
+// | ERROR |<-- Error -- [ANY STATE]      |                |       |
 // +-------+                              +----------------+-------+
 
 // Node-to-Adapter
-// +---------+       +----------+       +-----------+      +--------+
-// | INITIAL |--CD-->| INACTIVE |--ST-->| LISTENING |-RKM->| KEYING |
-// +---------+       +----------+       +-----------+      +--------+
-//     ^                  ^                    |             | |  |
-//     |                  |   +------KDe------- -------------+ |  +--KDu--+
-//     |                  CC  |       C        |              KDo         |
-//     |                  |   |                +- RHM---+   +--+          |
-//     |                  |   V                         V   V             V
+// NOTE: The LISTENING state, just like the UNCONFIGURED state, is implicit
+// +--------------+       +-----------+                    +--------+
+// | UNCONFIGURED |--CD-->| LISTENING |---------------RKM->| KEYING |
+// +--------------+       +-----------+                    +--------+
+//     ^                    ^                                | |  |
+//     |                    | +------KDe---------------------+ |  +--KDu--+
+//     |                   CC |       C                       KDo         |
+//     |                    | |                             +--+          |
+//     |                    | V                             V             V
 //     |              +---------+              HDe   +----------+  +----------+
 //     |              | CLOSING |<---------------C---| HELLOING |  | HELLOING |
 //     |              +---------+                    +----------+  | SILENT   |
@@ -81,22 +83,18 @@ use zpr::ZPI_ENCRYPTED_HEADER_FLAG;
 // +-------+                        \                  C                     |
 // | ERROR |<-- Error - [ANY STATE]  \                 |                     |
 // +-------+                          +----------------+---------------------+
-//
-// NOTE: Because we currently lack a way to know that an adapter will be
-// connecting before the key management message comes, the LISTENING state
-// is currently not implemented.
 
 // Adapter-to-Node
-// +---------+       +----------+                          +--------+
-// | INITIAL |--CD-->| INACTIVE |--ST--------------------->| KEYING |
-// +---------+       +----------+                          +--------+
-//     ^                  ^                                  | |  |
-//     |                  |   +------KDe---------------------+ |  +--KDu-----+
-//     |                  CC  |       C                       KDo            |
-//     |                  |   |                                |             |
-//     |                  |   V                                V             V
+// +--------------+       +----------+                     +--------+
+// | UNCONFIGURED |--CD-->| INACTIVE |---------ST--------->| KEYING |
+// +--------------+       +----------+                     +--------+
+//     ^                   ^                                 | |  |
+//     |                   |  +------KDe---------------------+ |  +--KDu-----+
+//     |                   CC |       C                       KDo            |
+//     |                   |  |                                |             |
+//     |                   |  V                                V             V
 //     |              +---------+             HDe   +----------+  +----------+
-//     |              | CLOSING |<--------------C---| HELLOING |  | HELLOING |
+//     |              | CLOSING |<-------------C----| HELLOING |  | HELLOING |
 //     |              +---------+                   +----------+  | SILENT   |
 //     R                  ^                              |   |    +----------+
 //     |                  |                             HDo HDu        |    |
@@ -120,13 +118,9 @@ use zpr::ZPI_ENCRYPTED_HEADER_FLAG;
 // | ERROR |<- Error - [ANY STATE]  \                 |                     |
 // +-------+                         +----------------+---------------------+
 
-// NOTE: I think long term we want these added by topology instead of how they are now
-
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum LinkState {
-    Initial,
     Inactive,
-    // Listening, // Unused, see note above
     Keying,
     Helloing,
     Closing,
@@ -139,7 +133,6 @@ pub enum LinkState {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum LinkEvent {
-    Configure,
     Start,
     KeyingDone,
     ReceivedHelloRequest,
@@ -154,7 +147,6 @@ pub enum LinkEvent {
     SentTerminate,
     Close(TerminateReason),
     CloseDone,
-    Reset,
     Error,
 }
 
@@ -216,7 +208,7 @@ pub struct LinkStateMachine {
 impl LinkStateMachine {
     pub fn new() -> Self {
         Self {
-            state: LinkState::Initial,
+            state: LinkState::Inactive,
             status: LinkStatus::Down,
             silent: false,
             agent_addresses: Default::default(),
@@ -262,13 +254,29 @@ impl LinkStateWrapper {
         locked_fsm.agent_addresses.clone()
     }
 
+    fn deregister_agent_addresses(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
+        let mut join_set = tokio::task::JoinSet::new();
+
+        let vs_id = asm
+            .peer_table
+            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
+        if vs_id.is_some() && vs_id.unwrap().get() == self.id {
+            return join_set;
+        }
+
+        for addr in self.locked_fsm.lock().unwrap().agent_addresses.drain(..) {
+            debug!(target: LINK_STATE, "Deregistering {addr}");
+            join_set.spawn_local(visa_mgmt::agent_disconnect(asm.clone(), addr));
+        }
+        join_set
+    }
+
     pub fn process_event(
         &self,
         asm: &Arc<Assembly>,
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
         match event {
-            LinkEvent::Configure => self.configure(asm),
             LinkEvent::Start => self.start(asm),
             LinkEvent::KeyingDone => self.keying_done(asm),
             LinkEvent::ReceivedHelloRequest => self.process_hello_request(asm),
@@ -285,38 +293,12 @@ impl LinkStateWrapper {
             LinkEvent::ReceivedTerminateIndication(code) => {
                 self.process_terminate_indication(asm, code)
             }
-            LinkEvent::SentTerminate => Ok(self.clean_up_link_state(asm)),
+            LinkEvent::SentTerminate => Ok(self.clean_up_link_state(asm).detach_all()),
             LinkEvent::ReceivedKeepAliveResponse => Err(LinkStateError::OperationNotSupportedYet),
             LinkEvent::Close(code) => self.initiate_close(asm, code),
-            LinkEvent::Reset => Ok(self.reset(asm)),
             LinkEvent::CloseDone => Ok(self.complete_close(asm)),
             LinkEvent::Error => self.process_error_response(asm),
         }
-    }
-
-    /// Configure an uninitialized link/tether
-    /// Transitions from Initial -> Inactive
-    /// Does not generate any packets
-    fn configure(&self, _asm: &Assembly) -> Result<(), LinkStateError> {
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        if locked_fsm.state != LinkState::Initial {
-            return Err(LinkStateError::UnexpectedTransition(
-                locked_fsm.state,
-                "configure".to_string(),
-            ));
-        }
-
-        // TODO: What configuration goes here?
-        // For now, just set the link up and transition it to the inactive state
-        locked_fsm.status = LinkStatus::Up;
-        locked_fsm.set_state(LinkState::Inactive);
-
-        debug!(
-            target: LINK_STATE,
-            "Configured link {}.  State: {:?}, status: {:?}",
-            self.id, locked_fsm.state, locked_fsm.status
-        );
-        Ok(())
     }
 
     /// Start an inactive link/tether
@@ -333,6 +315,7 @@ impl LinkStateWrapper {
             ));
         }
 
+        locked_fsm.status = LinkStatus::Up;
         locked_fsm.set_state(LinkState::Keying);
 
         info!(target: LINK_STATE, "Link {link_id} started.  Keying in progress");
@@ -628,7 +611,7 @@ impl LinkStateWrapper {
         warn!(target: LINK_STATE, "Link {link_id} bringup failed at state {:?}",
             self.locked_fsm.lock().unwrap().state);
 
-        return self.initiate_close(&asm, TerminateReason::Other);
+        self.initiate_close(&asm, TerminateReason::Other)
     }
 
     /// Validate a received shutdown request
@@ -644,7 +627,7 @@ impl LinkStateWrapper {
             "Received shutdown request on link {link_id} for reason {reason:?}"
         );
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        if locked_fsm.state == LinkState::Initial || locked_fsm.state == LinkState::Inactive {
+        if locked_fsm.state == LinkState::Inactive {
             Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
                 "terminate".to_string(),
@@ -676,24 +659,21 @@ impl LinkStateWrapper {
     }
 
     /// Tear down link state
-    fn clean_up_link_state(&self, asm: &Arc<Assembly>) {
+    fn clean_up_link_state(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
         let link_id = self.id;
+        let mut join_set = tokio::task::JoinSet::new();
         info!(target: LINK_STATE, "Link {link_id} is clearing its state");
 
         asm.peer_table.clear_peer_state(link_id);
 
         match self.link_type {
             LinkType::AdapterToNode => asm.tun_ctl.set_carrier(false).unwrap(),
-            LinkType::NodeToAdapter => {
-                for addr in self.locked_fsm.lock().unwrap().agent_addresses.drain(..) {
-                    visa_mgmt::agent_disconnect(asm, addr);
-                }
-            }
+            LinkType::NodeToAdapter => join_set = self.deregister_agent_addresses(asm),
             _ => {}
         }
 
         let task_asm = asm.clone();
-        tokio::task::spawn_local(async move {
+        join_set.spawn_local(async move {
             // NOTE: Any mgmt messages MUST have been sent before this is called
             km_multiplexor::drop_link(&task_asm, link_id).await;
 
@@ -701,6 +681,7 @@ impl LinkStateWrapper {
                 error!(target: LINK_STATE, "Error shutting down link {link_id}: {e:?}");
             }
         });
+        join_set
     }
 
     /// Complete a link shutdown, upon receiving a terminate request or response
@@ -712,7 +693,7 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
         match (locked_fsm.state, self.link_type) {
-            (LinkState::Closing | LinkState::Resetting, LinkType::NodeToAdapter) => {
+            (LinkState::Closing, LinkType::NodeToAdapter) | (LinkState::Resetting, _) => {
                 // Clear whole peer out
                 drop(locked_fsm);
                 asm.drop_peer(link_id);
@@ -722,10 +703,8 @@ impl LinkStateWrapper {
                 locked_fsm.silent = false;
                 locked_fsm.set_state(LinkState::Inactive);
                 info!("Link {link_id} has fully shut down");
-            }
-            (LinkState::Resetting, _) => {
-                *locked_fsm = LinkStateMachine::new();
-                info!("Link {link_id} has fully reset");
+                drop(locked_fsm);
+                self.setup_restart(asm);
             }
             _ => {
                 error!(
@@ -736,13 +715,44 @@ impl LinkStateWrapper {
         }
     }
 
+    /// Set a timer to attempt a link restart after a holddown period
+    fn setup_restart(&self, asm: &Arc<Assembly>) {
+        let link_id = self.id;
+        let task_asm = asm.clone();
+        tokio::task::spawn_local(async move {
+            tokio::time::sleep(config::DEFAULT_LINK_RESTART_HOLDDOWN).await;
+            info!(target: LINK_STATE, "Attempting to restart link {link_id}");
+            let _ = task_asm.process_link_state_event(link_id, LinkEvent::Start);
+        });
+    }
+
+    /// Reset the link, shutting it down and wiping its configuration
+    /// Instead of transitioning, the state machine will be destroyed
+    /// Sends a Terminate Indication
+    pub async fn reset(&self, asm: &Arc<Assembly>) {
+        let link_id = self.id;
+        info!(target: LINK_STATE,
+            "Resetting link {link_id} from state {:?}",
+            self.locked_fsm.lock().unwrap().state
+        );
+        self.locked_fsm
+            .lock()
+            .unwrap()
+            .set_state(LinkState::Resetting);
+        mgmt::requests::send_terminate_indication(asm, link_id, TerminateReason::Reset).await;
+        let _ = self.clean_up_link_state(asm).join_all().await;
+    }
+
     /// Handle a terminate response packet
     fn process_terminate_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
         info!(target: LINK_STATE,"Received terminate response for link {link_id}");
         let state = self.locked_fsm.lock().unwrap().state;
         match state {
-            LinkState::Closing | LinkState::Resetting => Ok(self.clean_up_link_state(asm)),
+            LinkState::Closing => {
+                self.clean_up_link_state(asm).detach_all();
+                Ok(())
+            }
             _ => Err(LinkStateError::UnexpectedTransition(
                 state,
                 "terminate response".to_string(),
@@ -759,60 +769,12 @@ impl LinkStateWrapper {
         info!(target: LINK_STATE,
             "Received terminate indication for link {link_id} with reason {reason:?}"
         );
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        match (locked_fsm.state, reason) {
-            (LinkState::Inactive, TerminateReason::Reset) => {
-                locked_fsm.set_state(LinkState::Resetting);
-                drop(locked_fsm);
-                Ok(self.clean_up_link_state(asm))
-            }
-            (LinkState::Initial | LinkState::Inactive, _) => {
-                Err(LinkStateError::UnexpectedTransition(
-                    locked_fsm.state,
-                    "terminate indication".to_string(),
-                ))
-            }
-            (_, _) => {
-                locked_fsm.set_state(LinkState::Closing);
-                drop(locked_fsm);
-                Ok(self.clean_up_link_state(asm))
-            }
-        }
-    }
-
-    /// Reset the link, shutting it down and wiping its configuration
-    /// Transitions to Initial from any state
-    /// Sends a Terminate Indication
-    pub fn reset(&self, asm: &Arc<Assembly>) {
-        let link_id = self.id;
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        info!(target: LINK_STATE,
-            "Resetting link {link_id} from state {:?}",
-            locked_fsm.state
-        );
-        locked_fsm.set_state(LinkState::Resetting);
-
-        let task_asm = asm.clone();
-        tokio::task::spawn_local(async move {
-            let _ = send_terminate_indication(&task_asm, link_id, TerminateReason::Reset).await;
-        });
-    }
-
-    /// Reset the link, shutting it down and wiping its configuration
-    /// Transitions to Initial from any state
-    /// Sends a Terminate Indication
-    pub async fn reset_blocking(&self, asm: &Arc<Assembly>) {
-        let link_id = self.id;
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        if locked_fsm.state != LinkState::Initial && locked_fsm.state != LinkState::Inactive {
-            info!(target: LINK_STATE,
-                "Resetting link {link_id} from state {:?}",
-                locked_fsm.state
-            );
-            locked_fsm.set_state(LinkState::Resetting);
-            drop(locked_fsm);
-            let _ = send_terminate_indication(&asm, link_id, TerminateReason::Reset).await;
-        }
+        self.locked_fsm
+            .lock()
+            .unwrap()
+            .set_state(LinkState::Closing);
+        self.clean_up_link_state(asm).detach_all();
+        Ok(())
     }
 
     pub fn run_active(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
@@ -879,16 +841,6 @@ impl LinkStateWrapper {
     }
 }
 
-async fn send_terminate_indication(
-    asm: &Arc<Assembly>,
-    link_id: LinkId,
-    reason: TerminateReason,
-) -> Result<(), LinkStateError> {
-    mgmt::requests::send_terminate_indication(asm, link_id, reason).await;
-    asm.process_link_state_event(link_id, LinkEvent::SentTerminate)?;
-    Ok(())
-}
-
 async fn send_terminate_request(
     asm: &Arc<Assembly>,
     link_id: LinkId,
@@ -899,12 +851,11 @@ async fn send_terminate_request(
             warn!(target: LINK_STATE,
                 "Link {link_id} got error '{e:?}' when trying to shut down.  Shutting down anyway"
             );
-            let _ = send_terminate_indication(asm, link_id, reason).await;
-            Ok(())
+            mgmt::requests::send_terminate_indication(asm, link_id, reason).await;
+            asm.process_link_state_event(link_id, LinkEvent::SentTerminate)
         }
         Ok(response) => {
-            asm.process_link_state_event(link_id, LinkEvent::ReceivedTerminateResponse(response))?;
-            Ok(())
+            asm.process_link_state_event(link_id, LinkEvent::ReceivedTerminateResponse(response))
         }
     }
 }

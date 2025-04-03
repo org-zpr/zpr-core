@@ -113,6 +113,7 @@ pub type PeerTableEntryGuard<'a> = RcuCslabEntryGuard<'a, PeerState>;
 #[derive(Debug)]
 pub enum PeerInsertError {
     TableFull,
+    Other,
 }
 
 #[derive(Debug)]

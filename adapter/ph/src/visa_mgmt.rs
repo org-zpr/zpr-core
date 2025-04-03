@@ -110,22 +110,19 @@ fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateE
     Ok(cn)
 }
 
-pub fn agent_disconnect(asm: &Arc<Assembly>, addr: IpAddress) {
-    let task_asm = asm.clone();
-    tokio::task::spawn_local(async move {
-        match task_asm
-            .vsconn
-            .as_ref()
-            .unwrap()
-            .agent_disconnect(addr.into())
-            .await
-        {
-            Err(e) => {
-                warn!(target: VISA_MGMT, "Failed to disconnect agent {addr} with error {e:?}")
-            }
-            Ok(()) => debug!(target: VISA_MGMT, "Successfully disconnected agent {addr}"),
+pub async fn agent_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
+    match asm
+        .vsconn
+        .as_ref()
+        .unwrap()
+        .agent_disconnect(addr.into())
+        .await
+    {
+        Err(e) => {
+            warn!(target: VISA_MGMT, "Failed to disconnect agent {addr} with error {e:?}")
         }
-    });
+        Ok(()) => debug!(target: VISA_MGMT, "Successfully disconnected agent {addr}"),
+    }
 }
 
 pub async fn parse_visa(

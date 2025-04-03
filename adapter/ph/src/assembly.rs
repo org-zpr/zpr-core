@@ -16,6 +16,7 @@ use crate::net_defs::IpAddress;
 use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
+use crate::special_peers::SpecialPeerName;
 use crate::tun_ctl::TunCtl;
 use crate::visa_table;
 
@@ -109,19 +110,22 @@ impl Assembly {
         std::time::Instant::now().duration_since(self.system_start_time)
     }
 
-    // Graceful shutdown routine.  Not guaranteed to be called
+    /// Graceful shutdown routine.  Not guaranteed to be called
     pub async fn shutdown(self: &Arc<Self>) {
         // Probably not worth blocking for this
-        let Ok(locked_ids) = self.peer_ids.try_lock() else {
-            warn!(target: PEER_MGMT, "Unable to shutdown gracefully");
-            return;
-        };
-        for peer_id in locked_ids.iter() {
-            if let Some(peer) = self.peer_table.get(*peer_id) {
+        let peer_ids = self.peer_ids.lock().unwrap().clone();
+        let vs_peer = self
+            .peer_table
+            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
+        for peer_id in peer_ids {
+            if vs_peer.is_none() || peer_id != vs_peer.unwrap().get() {
                 // This should be a short block and must be blocked on,
                 // otherwise the messages won't get sent
-                peer.link_state_machine.reset_blocking(self).await;
+                self.reset_peer(peer_id).await;
             }
+        }
+        if let Some(vs_peer) = vs_peer {
+            self.reset_peer(vs_peer.get()).await;
         }
     }
 
@@ -187,6 +191,12 @@ impl Assembly {
         info!(target: PEER_MGMT, "Removed peer {link_id}");
     }
 
+    pub async fn reset_peer(self: &Arc<Self>, link_id: LinkId) {
+        if let Some(peer) = self.peer_table.get(link_id) {
+            peer.link_state_machine.reset(self).await;
+        }
+    }
+
     /// Add a tether to the peer table
     pub fn start_tether(
         self: &Arc<Self>,
@@ -205,20 +215,15 @@ impl Assembly {
 
         if let Err(e) = peer
             .link_state_machine
-            .process_event(self, LinkEvent::Configure)
+            .process_event(self, LinkEvent::Start)
         {
-            error!(target: PEER_MGMT, "Link {peer_id} failed to configure with error {e}.  Resetting");
-            peer.link_state_machine.reset(self);
+            error!(target: PEER_MGMT, "Link {peer_id} failed to start with error {e}.  Resetting");
+            peer.link_state_machine
+                .process_event(self, LinkEvent::Error)
+                .expect("This shouldn't error!");
+            return Err(PeerInsertError::Other);
         } else {
-            if let Err(e) = peer
-                .link_state_machine
-                .process_event(self, LinkEvent::Start)
-            {
-                error!(target: PEER_MGMT, "Link {peer_id} failed to start with error {e}.  Resetting");
-                peer.link_state_machine.reset(self);
-            } else {
-                info!(target: PEER_MGMT, "Successfully started tether with {adapter_addr}.  Assigned ID {peer_id}");
-            }
+            info!(target: PEER_MGMT, "Successfully started tether with {adapter_addr}.  Assigned ID {peer_id}");
         }
 
         return Ok(peer_id);
