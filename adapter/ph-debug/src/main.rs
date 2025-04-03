@@ -297,18 +297,21 @@ fn handle_watch(interval: u64, socket: &str) -> std::io::Result<()> {
         for (n, count) in counts[1..].iter().enumerate() {
             // split up the individual lines to get the count from the end and convert to u64
             let one_line: Vec<&str> = count.split(':').collect();
-            if one_line[0] == "OK" {
-                break;
+            match one_line[0] {
+                "OK" => break,
+                "Uptime" => println!("Uptime: {}", one_line[1]),
+                _ => {
+                    let mut num: String = one_line[1].to_string();
+                    num.remove(0);
+                    let num_packets: u64 = num.parse().unwrap();
+
+                    // calculate difference between current pkt nums and previous pkt nums
+                    let difference = num_packets - values[n];
+
+                    println!("{} increased by: {}", one_line[0], difference);
+                    values[n] = num_packets; // store new packet counts
+                }
             }
-            let mut num: String = one_line[1].to_string();
-            num.remove(0);
-            let num_packets: u64 = num.parse().unwrap();
-
-            // calculate difference between current pkt nums and previous pkt nums
-            let difference = num_packets - values[n];
-
-            println!("{} increased by: {}", one_line[0], difference);
-            values[n] = num_packets; // store new packet counts
         }
 
         first_run = false;
