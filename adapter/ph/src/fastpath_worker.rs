@@ -44,10 +44,9 @@ pub fn launch(
 
 fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &UnixDatagram) {
     loop {
-        // output anything we've queued up
+        // try to immediately output anything we've queued up;
+        // if we can't, drop it, unless it's on the substrate and marked PRIORITY
         worker.process_out_queues();
-
-        // WORKING: move return logic into fastpath common
 
         let recv_poll_flags;
         if worker.buffers.is_empty() {
@@ -57,8 +56,15 @@ fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &
             recv_poll_flags = poll::PollFlags::POLLIN;
         }
 
+        let send_poll_flags;
+        if worker.substrate_egress_packets_queued() {
+            send_poll_flags = poll::PollFlags::POLLOUT;
+        } else {
+            send_poll_flags = poll::PollFlags::empty();
+        }
+
         let mut poll_fds = enum_map! {
-            PollSlot::Substrate => poll::PollFd::new(socket.as_fd(), recv_poll_flags),
+            PollSlot::Substrate => poll::PollFd::new(socket.as_fd(), recv_poll_flags | send_poll_flags),
             PollSlot::Tun => poll::PollFd::new(worker.agent_input_tun.as_fd(), recv_poll_flags),
             PollSlot::Requeue => poll::PollFd::new(requeue_outq.as_fd(), recv_poll_flags),
             PollSlot::Returns => poll::PollFd::new(worker.return_q.poll_fd(), poll::PollFlags::POLLIN),
@@ -78,6 +84,11 @@ fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &
 
         // FIXME: fairness... address this in tandem with batch receive
         // for now, prioritize requeue so it doesn't starve
+
+        if revents[PollSlot::Substrate].contains(poll::PollFlags::POLLOUT) {
+            // try to send queued PRIORITY packets
+            worker.process_substrate_egress_queue();
+        }
 
         if revents[PollSlot::Requeue].contains(poll::PollFlags::POLLIN) {
             // read from requeue
