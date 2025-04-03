@@ -531,12 +531,17 @@ impl FastpathWorker {
         self.substrate_egress_q.push((pkt, dest_sa));
     }
 
+    /// Egress any queued packets, or drop if there is no space in the system queues.
+    ///
+    /// After this call, the agent input queue will be empty, and the substrate egress queue
+    /// will contain only PRIORITY packets.
     pub fn process_out_queues(&mut self) {
         self.process_agent_input_queue();
         self.process_substrate_egress_queue();
     }
 
-    fn process_agent_input_queue(&mut self) {
+    /// Egress queued agent input packets only.
+    pub fn process_agent_input_queue(&mut self) {
         // temp hack until we move ZprTun to be non-Tokio
         let tun_fd = unsafe { BorrowedFd::borrow_raw(self.agent_input_tun.as_raw_fd()) };
 
@@ -587,7 +592,8 @@ impl FastpathWorker {
             .extend(self.agent_input_q.drain(..).map(|pkt| pkt.destroy()));
     }
 
-    fn process_substrate_egress_queue(&mut self) {
+    /// Egress queued substrate egress packets only.
+    pub fn process_substrate_egress_queue(&mut self) {
         // (Try to) send packets.
         let mut results = Vec::new(); // TODO: recycle
         let n = self
@@ -620,6 +626,12 @@ impl FastpathWorker {
                 .drain(..)
                 .map(|(pkt, _)| pkt.destroy()),
         );
+    }
+
+    #[allow(dead_code)]
+    /// Are there any substrate egress packets remaining queued?
+    pub fn substrate_egress_packets_queued(&self) -> bool {
+        !self.substrate_egress_q.is_empty()
     }
 }
 

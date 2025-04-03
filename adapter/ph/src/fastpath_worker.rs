@@ -25,6 +25,7 @@ enum PollSlot {
     Substrate,
     Tun,
     Requeue,
+    Returns,
 }
 
 pub fn launch(
@@ -48,25 +49,21 @@ fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &
 
         // WORKING: move return logic into fastpath common
 
-        // process the return buffer queue
+        let recv_poll_flags;
         if worker.buffers.is_empty() {
-            // if we are out of buffers, block
-            worker
-                .return_q
-                .blocking_recv_many_returns(&mut worker.buffers, worker.config.buffer_count);
+            // If we have no buffers, let's not get woken up to receive packets.
+            recv_poll_flags = poll::PollFlags::empty();
         } else {
-            worker
-                .return_q
-                .try_recv_many_returns(&mut worker.buffers, worker.config.buffer_count);
+            recv_poll_flags = poll::PollFlags::POLLIN;
         }
 
         let mut poll_fds = enum_map! {
-            PollSlot::Substrate => poll::PollFd::new(socket.as_fd(), poll::PollFlags::POLLIN),
-            PollSlot::Tun => poll::PollFd::new(worker.agent_input_tun.as_fd(), poll::PollFlags::POLLIN),
-            PollSlot::Requeue => poll::PollFd::new(requeue_outq.as_fd(), poll::PollFlags::POLLIN),
+            PollSlot::Substrate => poll::PollFd::new(socket.as_fd(), recv_poll_flags),
+            PollSlot::Tun => poll::PollFd::new(worker.agent_input_tun.as_fd(), recv_poll_flags),
+            PollSlot::Requeue => poll::PollFd::new(requeue_outq.as_fd(), recv_poll_flags),
+            PollSlot::Returns => poll::PollFd::new(worker.return_q.poll_fd(), poll::PollFlags::POLLIN),
         };
 
-        // read & forward packets one at a time
         let _n = match poll::poll(poll_fds.as_mut_slice(), poll::PollTimeout::NONE)
             .map_err(|err| std::io::Error::from_raw_os_error(err as i32))
         {
@@ -206,6 +203,13 @@ fn fastpath_main(mut worker: FastpathWorker, socket: &UdpSocket, requeue_outq: &
                 worker.asm.counters[CounterType::OutPacksRec].increment();
                 worker.agent_output(pkt);
             }
+        }
+
+        if revents[PollSlot::Returns].contains(poll::PollFlags::POLLIN) {
+            // process the return buffer queue
+            worker
+                .return_q
+                .try_recv_many_returns(&mut worker.buffers, worker.config.buffer_count);
         }
     }
 }

@@ -83,39 +83,25 @@ impl<U> ReturnQueue<U> {
         }
     }
 
-    /// Receive a single returned item.  Blocks until there is such an item.
-    ///
-    /// Panics if called when no items are outstanding.
-    pub fn blocking_recv_return(&mut self) -> U {
-        assert!(self.outstanding.load() > 0);
-        self.return_notify.wait_and_consume();
-        self.try_recv_return().unwrap()
-    }
-
-    /// Receive up to `limit` returned items.  Blocks until at least one item can be returned.
-    ///
-    /// Immediately returns 0 if-and-only-if `limit` is 0.
-    ///
-    /// Panics if called when no items are outstanding.
-    pub fn blocking_recv_many_returns(&mut self, returns: &mut Vec<U>, limit: usize) -> usize {
-        assert!(self.outstanding.load() > 0 || limit == 0);
-        self.return_notify.wait_and_consume();
-        self.try_recv_many_returns(returns, limit)
-    }
-
     /// Try to receive a single returned item.  Does not block, returning
     /// `None` if no items are immediately available (possibly because none
     /// are outstanding).
     pub fn try_recv_return(&mut self) -> Option<U> {
+        if !self.return_notify.consume() {
+            return None;
+        }
+
+        let avail = self.incoming_return_q.len();
+
         let ret = self.incoming_return_q.try_recv().ok();
         if ret.is_some() {
             self.outstanding.fetch_sub(1);
-        }
 
-        if !self.incoming_return_q.is_empty() {
-            // It is possible the caller ate the notification of this remaining item.
-            // Re-post it.  (If we didn't eat it, this is harmless.)
-            self.return_notify.post();
+            if avail > 1 {
+                // It is likely that we ate the notification of these remaining items.
+                // Re-post it.  (If we didn't eat it, this is harmless.)
+                self.return_notify.post();
+            }
         }
 
         return ret;
@@ -125,6 +111,12 @@ impl<U> ReturnQueue<U> {
     /// returning 0 if no items are immediately available (possibly because
     /// none are outstanding).
     pub fn try_recv_many_returns(&mut self, returns: &mut Vec<U>, limit: usize) -> usize {
+        if !self.return_notify.consume() {
+            return 0;
+        }
+
+        let avail = self.incoming_return_q.len();
+
         let mut recvd = 0;
 
         while recvd < limit {
@@ -140,8 +132,8 @@ impl<U> ReturnQueue<U> {
 
         self.outstanding.fetch_sub(recvd);
 
-        if !self.incoming_return_q.is_empty() {
-            // It is possible the caller ate the notification of this remaining item.
+        if recvd > avail {
+            // It is likely that we ate the notification of these remaining items.
             // Re-post it.  (If we didn't eat it, this is harmless.)
             self.return_notify.post();
         }

@@ -118,6 +118,7 @@ impl Notify {
     }
 
     /// Wait for a notification to be present, and consume it.
+    #[allow(dead_code)]
     pub fn wait_and_consume(&self) {
         let mut pollfd = poll::PollFd::new(self.poll_fd(), poll::PollFlags::POLLIN);
 
