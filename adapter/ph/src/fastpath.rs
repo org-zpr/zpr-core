@@ -5,7 +5,6 @@
 
 use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
-use crate::batch_io::BatchIo;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters::CounterType;
@@ -14,18 +13,15 @@ use crate::km::Codec;
 use crate::km_noise::NOISE_PADLEN;
 use crate::logging::targets::DATAPATH;
 use crate::net_defs;
-use crate::packet::{self, Packet, PacketBuffer};
+use crate::packet::{Packet, PacketBuffer};
 use crate::queues::{AdapterManager, MgmtDispatch, TryEnqueueError};
-use crate::sys::{TunPi, ZprTun};
 use crate::two_way_queue;
 use crate::zdp;
 use crate::zdp_ll;
 use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
-use std::io::ErrorKind;
-use std::net::{SocketAddr, UdpSocket};
-use std::os::fd::{AsRawFd, BorrowedFd};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::*;
@@ -70,20 +66,10 @@ pub struct FastpathWorker {
 
     pub agent_input_q: Vec<Packet>,
     pub substrate_egress_q: Vec<(Packet, std::net::SocketAddr)>,
-
-    pub batch_io: BatchIo,
-    pub agent_input_tun: Arc<ZprTun>,
-    pub substrate_socket: UdpSocket,
 }
 
 impl FastpathWorker {
-    pub fn new(
-        config: FastpathWorkerConfig,
-        worker_index: usize,
-        asm: Arc<Assembly>,
-        substrate_socket: UdpSocket,
-        agent_input_tun: Arc<ZprTun>,
-    ) -> Self {
+    pub fn new(config: FastpathWorkerConfig, worker_index: usize, asm: Arc<Assembly>) -> Self {
         let buffers =
             vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; config.buffer_count];
 
@@ -103,10 +89,6 @@ impl FastpathWorker {
 
             agent_input_q: Vec::with_capacity(config.buffer_count),
             substrate_egress_q: Vec::with_capacity(config.buffer_count),
-
-            batch_io: BatchIo::new(config.batch_size).unwrap(),
-            agent_input_tun,
-            substrate_socket,
         }
     }
 
@@ -131,7 +113,7 @@ impl FastpathWorker {
         nbufs
     }
 
-    /// Process packets ingressing from the specified address.
+    /// Process packet ingressing from the specified address.
     pub fn substrate_ingress(&mut self, peer_sa: &zpr::SubstrateAddr, mut pkt: Packet) {
         pkt.metadata_mut().ingress_link_id =
             self.asm.peer_table.lookup_peer(peer_sa).unwrap_or_zero();
@@ -526,131 +508,6 @@ impl FastpathWorker {
         self.substrate_egress_q.push((pkt, dest_sa));
     }
 
-    /// Egress any queued packets, or drop if there is no space in the system queues.
-    ///
-    /// After this call, the agent input queue will be empty, and the substrate egress queue
-    /// will contain only PRIORITY packets.
-    pub fn process_out_queues(&mut self) {
-        self.process_agent_input_queue();
-        self.process_substrate_egress_queue();
-    }
-
-    /// Egress queued agent input packets only.
-    pub fn process_agent_input_queue(&mut self) {
-        // temp hack until we move ZprTun to be non-Tokio
-        let tun_fd = unsafe { BorrowedFd::borrow_raw(self.agent_input_tun.as_raw_fd()) };
-
-        // Add TUN PI header.
-        match TunPi::PI_SIZE {
-            0 => (),
-            sz => {
-                for pkt in &mut self.agent_input_q {
-                    let proto = net_defs::ip_ethertype(net_defs::ip_version(pkt.body()));
-                    let mut hdr = pkt.alloc_zeroed_headroom(sz);
-                    TunPi::write_pi(
-                        &mut hdr,
-                        TunPi {
-                            strip: false,
-                            proto,
-                        },
-                    );
-                }
-            }
-        }
-
-        // (Try to) send packets.
-        let mut results = Vec::new(); // TODO: recycle
-        let n = self
-            .batch_io
-            .try_write_batch(
-                &tun_fd,
-                self.agent_input_q.iter().map(|pkt| pkt.body()),
-                &mut results,
-            )
-            .expect("unrecoverable TUN error");
-
-        // Tally results.
-        let mut dropped = self.agent_input_q.len() - n;
-        for res in results {
-            match res {
-                Ok(_) => (),
-                Err(err) if err.kind() == ErrorKind::WouldBlock => dropped += 1,
-                Err(err) => panic!("unrecoverable TUN error: {}", err),
-            }
-        }
-        self.asm.counters[CounterType::InPacksSent]
-            .increase_by((self.agent_input_q.len() - dropped) as u64);
-        self.asm.counters[CounterType::InPacksDrop].increase_by(dropped as u64);
-
-        // Return buffers to buffer stack.
-        self.buffers
-            .extend(self.agent_input_q.drain(..).map(|pkt| pkt.destroy()));
-    }
-
-    /// Egress queued substrate egress packets only.
-    pub fn process_substrate_egress_queue(&mut self) {
-        // (Try to) send packets.
-        let mut results = Vec::new(); // TODO: recycle
-        let n = self
-            .batch_io
-            .try_send_to_batch(
-                &self.substrate_socket,
-                self.substrate_egress_q
-                    .iter()
-                    .map(|(pkt, dest)| (pkt.body(), *dest)),
-                &mut results,
-            )
-            .expect("unrecoverable I/O error");
-
-        // Tally results.
-        let mut dropped = 0;
-        let mut retained = 0;
-
-        for i in 0..self.substrate_egress_q.len() {
-            // Determine whether the packet was in fact sent.
-            // If it was, leave it in place and skip to the next packet.
-            if i < n {
-                match &results[i] {
-                    Ok(_) => continue,
-                    Err(err) if err.kind() == ErrorKind::WouldBlock => (),
-                    // TODO: pending <https://github.com/rust-lang/rust/issues/86442>, provide more info to user
-                    // (or potentially recover from certain errors)
-                    Err(err) => panic!("unrecoverable I/O error: {err}"),
-                }
-            }
-
-            // Packet was not sent.
-
-            if self.substrate_egress_q[i].0.metadata().flags & packet::flags::PRIORITY != 0 {
-                // This was a priority packet.  Move it to the front of the queue:
-                // `retained` is the number of packets we've retained so far, so swap
-                // this packet with the one at that index.  We'll later drop all packets
-                // in the range `retained..`.
-                self.substrate_egress_q.swap(i, retained);
-                retained += 1;
-            } else {
-                // This was a normal packet.  Leave it to get dropped.
-                dropped += 1;
-            }
-        }
-
-        // Now all un-sent priority packets are at the head of the queue.
-
-        self.asm.counters[CounterType::OutPacksSent]
-            .increase_by((self.substrate_egress_q.len() - dropped - retained) as u64);
-        self.asm.counters[CounterType::OutPacksDrop].increase_by(dropped as u64);
-
-        // Return buffers to buffer stack, except for un-sent priority packets (in the range `..retained`),
-        // which are retained for next time.
-        self.buffers.extend(
-            self.substrate_egress_q
-                .drain(retained..)
-                .map(|(pkt, _)| pkt.destroy()),
-        );
-    }
-
-    #[allow(dead_code)]
-    /// Are there any substrate egress packets remaining queued?
     pub fn substrate_egress_packets_queued(&self) -> bool {
         !self.substrate_egress_q.is_empty()
     }

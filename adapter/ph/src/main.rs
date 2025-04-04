@@ -27,6 +27,7 @@ mod config;
 mod counters;
 mod defs;
 mod fastpath;
+mod fastpath_io;
 mod fastpath_worker;
 mod flow_control;
 mod forwarding_tables;

@@ -1,24 +1,12 @@
 use crate::assembly::Assembly;
-use crate::counters::*;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
-use crate::net_defs;
-use crate::packet::Packet;
-use crate::sys::TunPi;
+use crate::fastpath_io::FastpathIo;
 use crate::sys::ZprTun;
-use crate::zprtun;
-use bytes::Buf;
 use enum_map::{enum_map, Enum};
 use nix::poll;
-use std::io::ErrorKind;
-use std::net::SocketAddr;
 use std::net::UdpSocket;
-use std::os::fd::AsFd;
 use std::os::unix::net::UnixDatagram;
 use std::sync::Arc;
-
-fn is_ip(pi: TunPi) -> bool {
-    pi.proto == net_defs::ethertype::IP || pi.proto == net_defs::ethertype::IPV6
-}
 
 #[derive(Enum)]
 enum PollSlot {
@@ -39,39 +27,23 @@ pub fn launch(
     mgmt_substrate_outq: Option<UnixDatagram>,
 ) -> impl FnOnce() {
     move || {
-        let worker = FastpathWorker::new(
+        let worker = FastpathWorker::new(config, worker_index, asm.clone());
+        let io = FastpathIo::new(
             config,
-            worker_index,
-            asm.clone(),
             substrate_socket,
             agent_input_tun,
+            requeue_outq,
+            mgmt_substrate_outq,
         );
-        fastpath_main(worker, &requeue_outq, mgmt_substrate_outq.as_ref());
+        fastpath_main(worker, io);
     }
 }
 
-fn fastpath_main(
-    mut worker: FastpathWorker,
-    requeue_outq: &UnixDatagram,
-    maybe_mgmt_substrate_outq: Option<&UnixDatagram>,
-) {
-    // HACK: nix does not support disabling an FD, so instead, make a dummy mgmt_substrate_outq socket
-    // if we weren't given one
-    let mgmt_substrate_outq;
-    let fake_mgmt_substrate_outq;
-    match maybe_mgmt_substrate_outq {
-        Some(outq) => mgmt_substrate_outq = outq,
-        None => {
-            let (_, outq) = UnixDatagram::pair().unwrap();
-            fake_mgmt_substrate_outq = Some(outq);
-            mgmt_substrate_outq = fake_mgmt_substrate_outq.as_ref().unwrap();
-        }
-    }
-
+fn fastpath_main(mut worker: FastpathWorker, mut io: FastpathIo) {
     loop {
         // try to immediately output anything we've queued up;
         // if we can't, drop it, unless it's on the substrate and marked PRIORITY
-        worker.process_out_queues();
+        io.process_out_queues(&mut worker);
 
         let recv_poll_flags;
         if worker.buffers.is_empty() {
@@ -89,10 +61,10 @@ fn fastpath_main(
         }
 
         let mut poll_fds = enum_map! {
-            PollSlot::Substrate => poll::PollFd::new(worker.substrate_socket.as_fd(), recv_poll_flags | send_poll_flags),
-            PollSlot::Tun => poll::PollFd::new(worker.agent_input_tun.as_fd(), recv_poll_flags),
-            PollSlot::Requeue => poll::PollFd::new(requeue_outq.as_fd(), recv_poll_flags),
-            PollSlot::MgmtSubstrate => poll::PollFd::new(mgmt_substrate_outq.as_fd(), recv_poll_flags),
+            PollSlot::Substrate => poll::PollFd::new(io.substrate_socket_fd(), recv_poll_flags | send_poll_flags),
+            PollSlot::Tun => poll::PollFd::new(io.agent_tun_fd(), recv_poll_flags),
+            PollSlot::Requeue => poll::PollFd::new(io.requeue_fd(), recv_poll_flags),
+            PollSlot::MgmtSubstrate => poll::PollFd::new(io.mgmt_substrate_fd(), recv_poll_flags),
             PollSlot::Returns => poll::PollFd::new(worker.return_q.poll_fd(), poll::PollFlags::POLLIN),
         };
 
@@ -113,55 +85,17 @@ fn fastpath_main(
 
         if revents[PollSlot::Substrate].contains(poll::PollFlags::POLLOUT) {
             // try to send queued PRIORITY packets
-            worker.process_substrate_egress_queue();
+            io.process_substrate_socket_out(&mut worker);
         }
 
         if revents[PollSlot::Requeue].contains(poll::PollFlags::POLLIN) {
             // read from requeue
-            // TODO: batch receive
-            while let Some(mut buf) = worker.buffers.pop() {
-                if let Err(err) = requeue_outq.recv(buf.as_mut()) {
-                    match err.kind() {
-                        ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
-                            worker.buffers.push(buf);
-                            break;
-                        }
-
-                        _ => {
-                            // FIXME: detect packet-too-large
-                            panic!("unrecoverable I/O error {err}");
-                        }
-                    }
-                }
-
-                worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
-                let pkt = Packet::new_with_existing_metadata(buf);
-                worker.agent_output_post_classify(pkt, /* allow_bind_request */ false);
-            }
+            io.process_requeue_in(&mut worker);
         }
 
         if revents[PollSlot::MgmtSubstrate].contains(poll::PollFlags::POLLIN) {
             // read from mgmt_substrate
-            // TODO: batch receive
-            while let Some(mut buf) = worker.buffers.pop() {
-                if let Err(err) = mgmt_substrate_outq.recv(buf.as_mut()) {
-                    match err.kind() {
-                        ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
-                            worker.buffers.push(buf);
-                            break;
-                        }
-
-                        _ => {
-                            // FIXME: detect packet-too-large
-                            panic!("unrecoverable I/O error {err}");
-                        }
-                    }
-                }
-
-                worker.asm.counters[CounterType::MgmtPacketsSent].increment();
-                let pkt = Packet::new_with_existing_metadata(buf);
-                worker.substrate_egress(pkt);
-            }
+            io.process_mgmt_substrate_in(&mut worker);
         }
 
         if revents[PollSlot::Substrate].contains(poll::PollFlags::POLLIN) {
@@ -172,54 +106,7 @@ fn fastpath_main(
                 continue;
             }
 
-            let mut results = Vec::new(); // TODO: recycle
-            let n = worker
-                .batch_io
-                .try_recv_buf_from_batch(&worker.substrate_socket, pkts.iter_mut(), &mut results)
-                .unwrap();
-
-            // return empty buffers to pool
-            worker
-                .buffers
-                .extend(pkts.drain(n..).rev().map(|pkt| pkt.destroy()));
-
-            // process packets
-            for (pkt, result) in pkts.into_iter().zip(results) {
-                let mut sender = match result {
-                    Ok((size, _sender)) if size > pkt.remaining() => {
-                        worker.drop_and_count(pkt, CounterType::DroppedOversize);
-                        continue;
-                    }
-
-                    Ok((_size, sender)) => {
-                        sender.expect("received from non-IP address, should not happen!")
-                    }
-
-                    Err(err) => {
-                        match err.kind() {
-                            ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
-                                worker.buffers.push(pkt.destroy());
-                                continue;
-                            }
-
-                            // FIXME: do something with this later...
-                            ErrorKind::ConnectionRefused => {
-                                worker.buffers.push(pkt.destroy());
-                                continue;
-                            }
-
-                            _ => panic!("got socket error {err}"),
-                        }
-                    }
-                };
-
-                // SocketAddrV6 distinguishes addresses also by `flowinfo` which
-                // we do not want -- only the 5-tuple.  So clear it.
-                clear_flowinfo(&mut sender);
-
-                worker.asm.counters[CounterType::InPacksRec].increment();
-                worker.substrate_ingress(&sender, pkt);
-            }
+            io.process_substrate_socket_in(&mut worker, &mut pkts);
         }
 
         if revents[PollSlot::Tun].contains(poll::PollFlags::POLLIN) {
@@ -230,48 +117,7 @@ fn fastpath_main(
                 continue;
             }
 
-            let mut results = Vec::new(); // TODO: recycle
-            let n = worker
-                .batch_io
-                .try_read_buf_batch(&worker.agent_input_tun, pkts.iter_mut(), &mut results)
-                .unwrap();
-
-            // return empty buffers to pool
-            worker
-                .buffers
-                .extend(pkts.drain(n..).rev().map(|pkt| pkt.destroy()));
-
-            // process packets
-            for (mut pkt, result) in pkts.into_iter().zip(results) {
-                if let Err(err) = result {
-                    match err.kind() {
-                        ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
-                            worker.buffers.push(pkt.destroy());
-                            continue;
-                        }
-
-                        _ => panic!("unrecoverable I/O error {err}"),
-                    }
-                }
-
-                if zprtun::TUN_HAS_PI {
-                    let pi = TunPi::read_pi(&mut pkt);
-                    if pi.strip || !is_ip(pi) {
-                        // packet was too large or non-IP; drop
-                        worker.drop_and_count(pkt, CounterType::OutPacksDrop);
-                        continue;
-                    }
-                } else {
-                    // No packet info, permit IP and IPv6 only (for now?)
-                    if pkt.body()[0] >> 4 != 4 && pkt.body()[0] >> 4 != 6 {
-                        worker.drop_and_count(pkt, CounterType::OutPacksDrop);
-                        continue;
-                    }
-                }
-
-                worker.asm.counters[CounterType::OutPacksRec].increment();
-                worker.agent_output(pkt);
-            }
+            io.process_agent_tun_in(&mut worker, &mut pkts);
         }
 
         if revents[PollSlot::Returns].contains(poll::PollFlags::POLLIN) {
@@ -280,12 +126,5 @@ fn fastpath_main(
                 .return_q
                 .try_recv_many_returns(&mut worker.buffers, worker.config.buffer_count);
         }
-    }
-}
-
-fn clear_flowinfo(addr: &mut SocketAddr) {
-    match addr {
-        SocketAddr::V4(_) => (),
-        SocketAddr::V6(addr) => addr.set_flowinfo(0),
     }
 }
