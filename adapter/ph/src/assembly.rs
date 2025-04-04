@@ -221,7 +221,7 @@ impl Assembly {
             peer.link_state_machine
                 .process_event(self, LinkEvent::Error)
                 .expect("This shouldn't error!");
-            return Err(PeerInsertError::Other);
+            return Err(PeerInsertError::FailedToStart(e.to_string()));
         } else {
             info!(target: PEER_MGMT, "Successfully started tether with {adapter_addr}.  Assigned ID {peer_id}");
         }
