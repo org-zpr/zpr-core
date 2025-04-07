@@ -69,11 +69,13 @@ impl FastpathIo {
     }
 
     /// Process an input-ready notification on the substrate socket (substrate ingress).
-    pub fn process_substrate_socket_in(
-        &mut self,
-        worker: &mut FastpathWorker,
-        pkts: &mut Vec<Packet>,
-    ) {
+    pub fn process_substrate_socket_in(&mut self, worker: &mut FastpathWorker) {
+        let mut pkts = Vec::new(); // TODO: recycle
+        let nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
+        if nbufs == 0 {
+            return;
+        }
+
         let mut results = Vec::new(); // TODO: recycle
         let n = self
             .batch_io
@@ -131,7 +133,13 @@ impl FastpathIo {
     }
 
     /// Process an input-ready notification on the agent TUN (agent output).
-    pub fn process_agent_tun_in(&mut self, worker: &mut FastpathWorker, pkts: &mut Vec<Packet>) {
+    pub fn process_agent_tun_in(&mut self, worker: &mut FastpathWorker) {
+        let mut pkts = Vec::new(); // TODO: recycle
+        let nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
+        if nbufs == 0 {
+            return;
+        }
+
         let mut results = Vec::new(); // TODO: recycle
         let n = self
             .batch_io
@@ -178,7 +186,6 @@ impl FastpathIo {
 
     /// Process an input-ready notification on the requeue socket.
     pub fn process_requeue_in(&mut self, worker: &mut FastpathWorker) {
-        // TODO: batch receive
         while let Some(mut buf) = worker.buffers.pop() {
             if let Err(err) = self.requeue_outq.recv(buf.as_mut()) {
                 match err.kind() {
@@ -202,7 +209,6 @@ impl FastpathIo {
 
     /// Process an input-ready notification on the mgmt substrate socket.
     pub fn process_mgmt_substrate_in(&mut self, worker: &mut FastpathWorker) {
-        // TODO: batch receive
         while let Some(mut buf) = worker.buffers.pop() {
             if let Err(err) = self.mgmt_substrate_outq.recv(buf.as_mut()) {
                 match err.kind() {

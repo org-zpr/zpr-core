@@ -2,6 +2,7 @@ use crate::assembly::Assembly;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::fastpath_io::FastpathIo;
 use crate::sys::ZprTun;
+use crate::util::fair;
 use enum_map::{enum_map, Enum};
 use nix::poll;
 use std::net::UdpSocket;
@@ -40,6 +41,8 @@ pub fn launch(
 }
 
 fn fastpath_main(mut worker: FastpathWorker, mut io: FastpathIo) {
+    let mut fair = 0usize; // counter used to ensure fairness, below
+
     loop {
         // try to immediately output anything we've queued up;
         // if we can't, drop it, unless it's on the substrate and marked PRIORITY
@@ -80,44 +83,15 @@ fn fastpath_main(mut worker: FastpathWorker, mut io: FastpathIo) {
         // references to things in `worker`, which we need `&mut` access to later.
         let revents = poll_fds.map(|_, pfd| pfd.revents().unwrap());
 
-        // FIXME: fairness... address this in tandem with batch receive
-        // for now, prioritize requeue so it doesn't starve
+        // First, process I/O events which involve releasing packet buffers.
+        // These do not compete with each other and thus can be run in any order
+        // without affecting fairness guarantees.
+        // We run them first so that any released buffers are immediately available
+        // for use for packet receive below.
 
         if revents[PollSlot::Substrate].contains(poll::PollFlags::POLLOUT) {
             // try to send queued PRIORITY packets
             io.process_substrate_socket_out(&mut worker);
-        }
-
-        if revents[PollSlot::Requeue].contains(poll::PollFlags::POLLIN) {
-            // read from requeue
-            io.process_requeue_in(&mut worker);
-        }
-
-        if revents[PollSlot::MgmtSubstrate].contains(poll::PollFlags::POLLIN) {
-            // read from mgmt_substrate
-            io.process_mgmt_substrate_in(&mut worker);
-        }
-
-        if revents[PollSlot::Substrate].contains(poll::PollFlags::POLLIN) {
-            // read from socket
-            let mut pkts = Vec::new(); // TODO: recycle
-            let nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
-            if nbufs == 0 {
-                continue;
-            }
-
-            io.process_substrate_socket_in(&mut worker, &mut pkts);
-        }
-
-        if revents[PollSlot::Tun].contains(poll::PollFlags::POLLIN) {
-            // read from TUN device
-            let mut pkts = Vec::new(); // TODO: recycle
-            let nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
-            if nbufs == 0 {
-                continue;
-            }
-
-            io.process_agent_tun_in(&mut worker, &mut pkts);
         }
 
         if revents[PollSlot::Returns].contains(poll::PollFlags::POLLIN) {
@@ -126,5 +100,34 @@ fn fastpath_main(mut worker: FastpathWorker, mut io: FastpathIo) {
                 .return_q
                 .try_recv_many_returns(&mut worker.buffers, worker.config.buffer_count);
         }
+
+        // Now, process I/O events which involve consuming packet buffers.
+        // Since these compete with each other, we want to ensure some fairness among them.
+
+        fair!(
+            fair,
+            {
+                if revents[PollSlot::Requeue].contains(poll::PollFlags::POLLIN) {
+                    io.process_requeue_in(&mut worker);
+                }
+            },
+            {
+                if revents[PollSlot::MgmtSubstrate].contains(poll::PollFlags::POLLIN) {
+                    io.process_mgmt_substrate_in(&mut worker);
+                }
+            },
+            {
+                if revents[PollSlot::Substrate].contains(poll::PollFlags::POLLIN) {
+                    io.process_substrate_socket_in(&mut worker);
+                }
+            },
+            {
+                if revents[PollSlot::Tun].contains(poll::PollFlags::POLLIN) {
+                    io.process_agent_tun_in(&mut worker);
+                }
+            },
+        );
+
+        fair = fair.wrapping_add(1);
     }
 }
