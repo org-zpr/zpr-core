@@ -50,12 +50,6 @@ fn fastpath_main(
     // temp hack until we move ZprTun to be non-Tokio
     let tun_fd = unsafe { BorrowedFd::borrow_raw(tun.as_raw_fd()) };
 
-    let mut poll_fds = enum_map! {
-        PollSlot::Substrate => poll::PollFd::new(socket.as_fd(), poll::PollFlags::POLLIN),
-        PollSlot::Tun => poll::PollFd::new(tun_fd, poll::PollFlags::POLLIN),
-        PollSlot::Requeue => poll::PollFd::new(requeue_outq.as_fd(), poll::PollFlags::POLLIN),
-    };
-
     loop {
         // output anything we've queued up
         worker.process_out_queues();
@@ -74,6 +68,12 @@ fn fastpath_main(
                 .try_recv_many_returns(&mut worker.buffers, worker.config.buffer_count);
         }
 
+        let mut poll_fds = enum_map! {
+            PollSlot::Substrate => poll::PollFd::new(socket.as_fd(), poll::PollFlags::POLLIN),
+            PollSlot::Tun => poll::PollFd::new(tun_fd, poll::PollFlags::POLLIN),
+            PollSlot::Requeue => poll::PollFd::new(requeue_outq.as_fd(), poll::PollFlags::POLLIN),
+        };
+
         // read & forward packets one at a time
         let _n = match poll::poll(poll_fds.as_mut_slice(), poll::PollTimeout::NONE)
             .map_err(|err| std::io::Error::from_raw_os_error(err as i32))
@@ -83,14 +83,14 @@ fn fastpath_main(
             ret @ Err(_) => ret.unwrap(),
         };
 
+        // Extracting the revents here allows us to drop the `PollFd`s, which hold
+        // references to things in `worker`, which we need `&mut` access to later.
+        let revents = poll_fds.map(|_, pfd| pfd.revents().unwrap());
+
         // FIXME: fairness... address this in tandem with batch receive
         // for now, prioritize requeue so it doesn't starve
 
-        if poll_fds[PollSlot::Requeue]
-            .revents()
-            .unwrap()
-            .contains(poll::PollFlags::POLLIN)
-        {
+        if revents[PollSlot::Requeue].contains(poll::PollFlags::POLLIN) {
             // read from requeue
             // TODO: batch receive
             let mut buf = worker.buffers.pop().unwrap();
@@ -114,11 +114,7 @@ fn fastpath_main(
             worker.agent_output_post_classify(pkt, /* allow_bind_request */ false);
         }
 
-        if poll_fds[PollSlot::Substrate]
-            .revents()
-            .unwrap()
-            .contains(poll::PollFlags::POLLIN)
-        {
+        if revents[PollSlot::Substrate].contains(poll::PollFlags::POLLIN) {
             // read from socket
             let mut pkts = Vec::new(); // TODO: recycle
             let _nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
@@ -172,11 +168,7 @@ fn fastpath_main(
             }
         }
 
-        if poll_fds[PollSlot::Tun]
-            .revents()
-            .unwrap()
-            .contains(poll::PollFlags::POLLIN)
-        {
+        if revents[PollSlot::Tun].contains(poll::PollFlags::POLLIN) {
             // read from TUN device
             let mut pkts = Vec::new(); // TODO: recycle
             let _nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
