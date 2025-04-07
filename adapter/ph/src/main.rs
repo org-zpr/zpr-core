@@ -57,6 +57,7 @@ mod sys;
 mod test_packet;
 mod tun_ctl;
 mod two_way_queue;
+mod util;
 mod visa_mgmt;
 mod visa_table;
 mod vs_worker;
