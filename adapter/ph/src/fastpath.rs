@@ -188,13 +188,13 @@ impl FastpathWorker {
                 }
                 None => {
                     // Either no security association on link, or it is not yet established.
-                    warn!(target: DATAPATH, "INSECURE, no SA on link {}", pkt.metadata().ingress_link_id);
+                    debug!(target: DATAPATH, "INSECURE, no SA on link {}", pkt.metadata().ingress_link_id);
                     secure = false;
                 }
             },
             None => {
                 // No link in peer table
-                warn!(
+                debug!(
                     target: DATAPATH,
                     "INSECURE, no link in peer table for {}",
                     pkt.metadata().ingress_link_id
@@ -215,7 +215,7 @@ impl FastpathWorker {
                 self.drop_and_count(pkt, CounterType::UnknownZpi);
                 return;
             }
-            warn!(
+            debug!(
                 target: DATAPATH,
                 "INSECURE, decrypting null packet from {}",
                 pkt.metadata().ingress_link_id
