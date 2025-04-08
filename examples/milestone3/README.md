@@ -21,9 +21,9 @@ For M3 you need to run `vs-admin` from the host running the visa service (you
 cannot connect in through ZPR as a VS admin yet). So in a terminal window on the
 VS machine:
 
-**List all agents**
+**List all actors**
 
-    vs-admin -s https://\[fd5a:5052::1\]:8182 -c vs.config/auth-ca.crt agents
+    vs-admin -s https://\[fd5a:5052::1\]:8182 -c vs.config/auth-ca.crt actors
 
 **List all visas**
 
