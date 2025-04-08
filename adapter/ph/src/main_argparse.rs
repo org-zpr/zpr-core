@@ -191,7 +191,7 @@ mod test {
         certificate_file = "tests/certificate.pem"
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
         debug = [ "capture" ]
         quiet = [ "all" ]
 
@@ -307,7 +307,7 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         tun_if = "tun23"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
         debug = [ "link_state" ]
         quiet = [ "startup" ]
 
@@ -468,7 +468,7 @@ mod test {
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -552,7 +552,7 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -621,7 +621,7 @@ mod test {
         certificate_file = "$CERTFILE"
         private_key_file = "$PKFILE"
         control_path = "/tmp/control.sock"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
         "#;
 
         let ca_file = TempFile::touch();
@@ -712,7 +712,7 @@ mod test {
         ca_file = "$CAFILE"
         certificate_file = "$CERTFILE"
         control_path = "/tmp/control.sock"
-        agent_addr = [ "10.0.0.1" ]
+        zpr_addr = [ "10.0.0.1" ]
 
         [adapter]
         node_addr = "192.168.0.2:5000"
