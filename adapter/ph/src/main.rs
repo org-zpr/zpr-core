@@ -1,5 +1,6 @@
 #![cfg_attr(feature = "ci", deny(warnings))]
 
+use itertools::izip;
 use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
@@ -317,7 +318,6 @@ fn main() -> ExitCode {
         ph_mode,
         topology_config,
         local_zpr_addresses: config.zpr_addr,
-        agent_input: AgentInput::new(tun_devs.clone()),
         substrate_egress: SubstrateEgress::new(substrate_sockets.iter().cloned()),
         agent_output_requeue: AgentOutputRequeue::new(agent_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
@@ -408,12 +408,13 @@ fn main() -> ExitCode {
         buffer_count: asm.topology_config.buffer_count,
         batch_size: asm.topology_config.fastpath_batch_size,
     };
-    for (worker_index, ((socket, tun_dev), requeue)) in substrate_sockets
-        .into_iter()
-        .zip(tun_devs.into_iter())
-        .zip(agent_requeue_outqs)
-        .enumerate()
-    {
+
+    for (worker_index, socket, tun_dev, requeue) in izip!(
+        0..asm.topology_config.fastpath_concurrency,
+        substrate_sockets,
+        tun_devs,
+        agent_requeue_outqs
+    ) {
         let builder = std::thread::Builder::new().name(format!("fastpath {worker_index}"));
         fastpath_threads.push(
             builder

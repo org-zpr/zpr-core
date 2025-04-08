@@ -1,13 +1,13 @@
 use crate::zprtun::{ZprTunError, DEFAULT_TUN_MTU};
 use std::net::IpAddr;
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::result::Result;
-use tun::{AbstractDevice, AsyncDevice};
+use tun::{AbstractDevice, Device};
 
-pub struct ZprTun(tun::AsyncDevice);
+pub struct ZprTun(tun::Device);
 
-impl From<AsyncDevice> for ZprTun {
-    fn from(tun_device: AsyncDevice) -> Self {
+impl From<Device> for ZprTun {
+    fn from(tun_device: Device) -> Self {
         ZprTun(tun_device)
     }
 }
@@ -42,7 +42,7 @@ impl ZprTun {
             )));
         }
 
-        let dev = tun::create_as_async(&config)?;
+        let dev = tun::create(&config)?;
         Ok(vec![ZprTun::from(dev)])
     }
 
@@ -53,11 +53,18 @@ impl ZprTun {
 
     #[allow(dead_code)]
     pub fn set_address(&mut self, addr: IpAddr) -> Result<(), ZprTunError> {
-        let idev = &mut *(self.0);
+        let idev = &mut self.0;
         match idev.set_address(addr) {
             Ok(_) => Ok(()),
             Err(e) => Err(ZprTunError::PlatformError(e.to_string())),
         }
+    }
+}
+
+impl AsFd for ZprTun {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        // SAFETY: we know the FD will be live for the lifetime of the `Device`
+        unsafe { BorrowedFd::borrow_raw(self.0.as_raw_fd()) }
     }
 }
 

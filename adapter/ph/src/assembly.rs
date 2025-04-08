@@ -58,7 +58,6 @@ pub struct Assembly {
     // Shared resources.  These may be accessed by any part of the system.
     pub local_zpr_addresses: Vec<IpAddr>,
 
-    pub agent_input: AgentInput,
     pub substrate_egress: SubstrateEgress,
     pub agent_output_requeue: AgentOutputRequeue,
 
@@ -336,7 +335,6 @@ pub mod test {
         pub ph_mode: Option<PhMode>,
         pub topology_config: Option<TopologyConfig>,
         pub local_zpr_addresses: Option<Vec<IpAddr>>,
-        pub agent_input: Option<AgentInput>,
         pub substrate_egress: Option<SubstrateEgress>,
         pub agent_output_requeue: Option<AgentOutputRequeue>,
         pub vsconn: Option<Option<libnode::vsconn::VSConnHandle>>,
@@ -376,9 +374,6 @@ pub mod test {
         let local_zpr_addresses = builder
             .local_zpr_addresses
             .unwrap_or(Vec::from([IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]));
-        let agent_input = builder
-            .agent_input
-            .unwrap_or_else(|| AgentInput::new(Vec::new()));
         let substrate_egress = builder
             .substrate_egress
             .unwrap_or_else(|| SubstrateEgress::new(Vec::new()));
@@ -429,7 +424,6 @@ pub mod test {
             ph_mode,
             topology_config,
             local_zpr_addresses,
-            agent_input,
             substrate_egress,
             agent_output_requeue,
             vsconn,
