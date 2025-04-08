@@ -135,6 +135,7 @@ mod test {
 
     use super::*;
     use rand::Rng;
+    use serial_test::{parallel, serial};
     use std::env;
     use std::fs;
     use std::net::{IpAddr, SocketAddr};
@@ -296,6 +297,7 @@ mod test {
     }
 
     #[test]
+    #[parallel(env)]
     fn test_main_args_argparse_adapter_config() {
         let mut tomltxt = r#"
         [global]
@@ -369,6 +371,7 @@ mod test {
     }
 
     #[test]
+    #[parallel(env)]
     fn test_main_args_adapter_config_requires_adapter_section() {
         let tomltxt = r#"
         [global]
@@ -392,6 +395,7 @@ mod test {
     // You can leave the adapter section blank and provide the details on
     // the command line.
     #[test]
+    #[parallel(env)]
     fn test_main_args_adapter_config_blank_adapter() {
         let mut tomltxt = r#"
         [global]
@@ -456,6 +460,7 @@ mod test {
 
     // Leave out some stuff in the config file, but specify on command line.
     #[test]
+    #[parallel(env)]
     fn test_main_args_argparse_adapter_config_override_globs() {
         let mut tomltxt = r#"
         [global]
@@ -538,6 +543,7 @@ mod test {
     }
 
     #[test]
+    #[parallel(env)]
     fn test_main_args_argparse_adapter_config_minimal() {
         // Not quite minimal since we need to set control path to make CI happy.
         let mut tomltxt = r#"
@@ -606,6 +612,7 @@ mod test {
     }
 
     #[test]
+    #[parallel(env)]
     fn test_main_args_argparse_node_config_minimal() {
         // Not quite minimal since we need to set control path to make CI happy.
         let mut tomltxt = r#"
@@ -652,6 +659,7 @@ mod test {
     }
 
     #[test]
+    #[parallel(env)]
     fn test_main_args_argparse_node_config_no_toml() {
         // The files references on command line need to exist
         let ca_file = TempFile::touch();
@@ -697,6 +705,7 @@ mod test {
     }
 
     #[test]
+    #[serial(env)] // serialize with other tests because we modify process environment
     fn test_main_args_argparse_adapter_key_in_env() {
         let mut tomltxt = r#"
         [global]

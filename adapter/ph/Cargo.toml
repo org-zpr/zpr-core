@@ -52,6 +52,7 @@ tun = { version = "=0.7.1", features = ["async"] }
 
 [dev-dependencies]
 rand = "0.8.5"
+serial_test = "3.2"
 
 [features]
 default = ["io-uring", "rcu-crossbeam-epoch"]
