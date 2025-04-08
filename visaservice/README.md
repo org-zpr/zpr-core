@@ -37,8 +37,8 @@ line tool which uses the admin interface.
 | GET    | `/admin/policy/{configID}/current`  | get the current policy for configuration |
 | GET    | `/admin/visas`                      | list visas       |
 | DELETE | `/admin/visas/{ID}`                 |  revoke a visa by its ID |
-| GET    | `/admin/agents`                     | list connected agents    |
-| DELETE | `/admin/agents/{CN}`                | revoke an agent (and all its visas) by adapter CN |
+| GET    | `/admin/actors`                     | list connected actors    |
+| DELETE | `/admin/actors/{CN}`                | revoke an actor (and all its visas) by adapter CN |
 | POST   | `/admin/revokes`                    | administer the revocation table |
 | GET    | `/admin/nodes`                      | list nodes |
 
@@ -134,9 +134,9 @@ Returns:
 ```
 
 
-### List agents `GET /admin/agents`
+### List actors `GET /admin/actors`
 
-Get a brief summary of connected agents.
+Get a brief summary of connected actors.
 
 
 Returns:
@@ -201,13 +201,13 @@ Returns:
 }
 ```
 
-### Revoke CN access and associated visas `DELETE /admin/agents/{CN}`
+### Revoke CN access and associated visas `DELETE /admin/actors/{CN}`
 
 Sends a delete request to revoke access to an adapter by its CN. Also revokes
 any visas associatd with the adapter.
 
 ```bash
-DELETE /admin/agents/foo.zpr.org
+DELETE /admin/actors/foo.zpr.org
 ```
 
 Returns:

@@ -218,9 +218,9 @@ func (c *Client) RevokeVisa(visaId uint64) error {
 }
 
 func (c *Client) ListActors() ([]*HostRecordBrief, error) {
-	resp, err := c.htGet(fmt.Sprintf("https://%s/admin/agents", c.vsaddr))
+	resp, err := c.htGet(fmt.Sprintf("https://%s/admin/actors", c.vsaddr))
 	if err != nil {
-		return nil, fmt.Errorf("failed to list visas: %v", err)
+		return nil, fmt.Errorf("failed to list actors: %v", err)
 	}
 	defer resp.Body.Close()
 	jsdata, err := io.ReadAll(resp.Body)
@@ -229,7 +229,7 @@ func (c *Client) ListActors() ([]*HostRecordBrief, error) {
 	}
 	var alist []*HostRecordBrief
 	if err := json.Unmarshal(jsdata, &alist); err != nil {
-		return nil, fmt.Errorf("failed to decode agents-list json: %v", err)
+		return nil, fmt.Errorf("failed to decode actors-list json: %v", err)
 	}
 	return alist, err
 }
@@ -239,7 +239,7 @@ func (c *Client) ListActors() ([]*HostRecordBrief, error) {
 // Use Client.ClearAllRevokes to reset visa service state.
 func (c *Client) RevokeActor(actorCN string) (*RevokeResponse, error) {
 	c.zlog.Infow("api delete actor", "cn", actorCN)
-	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("https://%s/admin/agents/%s", c.vsaddr, actorCN), nil)
+	req, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("https://%s/admin/actors/%s", c.vsaddr, actorCN), nil)
 	if err != nil {
 		return nil, err
 	}

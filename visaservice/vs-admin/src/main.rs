@@ -68,9 +68,9 @@ enum SubCmd {
     #[command()]
     Visas,
 
-    /// List agents
+    /// List actors
     #[command()]
-    Agents,
+    Actors,
 
     /// List Nodes
     #[command()]
@@ -86,7 +86,7 @@ struct RevokeArg {
 
     /// Revoke access to a given adapter CN
     #[arg(long)]
-    agent_cn: Option<String>,
+    actor_cn: Option<String>,
 }
 
 fn main() {
@@ -107,8 +107,8 @@ fn main() {
                 eprintln!("{} {}", "Error: ".red(), e);
             }
         },
-        Some(SubCmd::Revoke { arg }) if arg.agent_cn.is_some() => {
-            revoke_cn(&args.svc_url, ca_cert, arg.agent_cn.unwrap()).unwrap_or_else(|e| {
+        Some(SubCmd::Revoke { arg }) if arg.actor_cn.is_some() => {
+            revoke_cn(&args.svc_url, ca_cert, arg.actor_cn.unwrap()).unwrap_or_else(|e| {
                 eprintln!("{} {}", "Error: ".red(), e);
             });
         }
@@ -129,8 +129,8 @@ fn main() {
                 eprintln!("{} {}", "Error: ".red(), e);
             });
         }
-        Some(SubCmd::Agents) => {
-            list_agents(&args.svc_url, ca_cert).unwrap_or_else(|e| {
+        Some(SubCmd::Actors) => {
+            list_actors(&args.svc_url, ca_cert).unwrap_or_else(|e| {
                 eprintln!("{} {}", "Error: ".red(), e);
             });
         }
@@ -271,7 +271,7 @@ fn install(
 fn revoke_cn(
     api_url: &str,
     cert: Certificate,
-    agent_cn: String,
+    a_cn: String,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let cb = reqwest::blocking::ClientBuilder::new()
         .add_root_certificate(cert)
@@ -280,7 +280,7 @@ fn revoke_cn(
     let client = cb.build()?;
 
     let resp = client
-        .delete(format!("{}/admin/agents/{}", api_url, agent_cn))
+        .delete(format!("{}/admin/actors/{}", api_url, a_cn))
         .send()?;
     if !resp.status().is_success() {
         return Err(format!(
@@ -378,14 +378,14 @@ fn list_visas(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
-fn list_agents(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error::Error>> {
+fn list_actors(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::error::Error>> {
     let cb = reqwest::blocking::ClientBuilder::new()
         .add_root_certificate(cert)
         .danger_accept_invalid_certs(true)
         .timeout(Duration::from_secs(10));
     let client = cb.build()?;
 
-    let resp = client.get(format!("{}/admin/agents", api_url)).send()?;
+    let resp = client.get(format!("{}/admin/actors", api_url)).send()?;
     if !resp.status().is_success() {
         return Err(format!(
             "error (status {:?}:{}) : {}",

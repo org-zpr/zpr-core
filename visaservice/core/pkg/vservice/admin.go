@@ -106,8 +106,8 @@ func (svc *AdminService) StartAdminService(listenAddr netip.Addr, port int) erro
 	router.HandleFunc("/admin/policy", svc.handleInstallPolicy).Methods("POST")
 	router.HandleFunc("/admin/visas", svc.handleListVisas).Methods("GET")
 	router.HandleFunc("/admin/visas/{ID}", svc.handleRevokeVisaByID).Methods("DELETE")
-	router.HandleFunc("/admin/agents", svc.handleListAgents).Methods("GET")
-	router.HandleFunc("/admin/agents/{CN}", svc.handleRevokeAgentByCN).Methods("DELETE")
+	router.HandleFunc("/admin/actors", svc.handleListActors).Methods("GET")
+	router.HandleFunc("/admin/actors/{CN}", svc.handleRevokeActorByCN).Methods("DELETE")
 	router.HandleFunc("/admin/revokes", svc.handleRevokeAdmin).Methods("POST")
 	router.HandleFunc("/admin/nodes", svc.handleListNodes).Methods("GET")
 
@@ -266,7 +266,7 @@ func (svc *AdminService) handleListVisas(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(visaIDList)
 }
 
-func (svc *AdminService) handleListAgents(w http.ResponseWriter, r *http.Request) {
+func (svc *AdminService) handleListActors(w http.ResponseWriter, r *http.Request) {
 	adapterList := svc.vsi.ListAdapters()
 	if adapterList == nil {
 		adapterList = []*adb.HostRecordBrief{} // return an empty array, not an empty body.
@@ -311,7 +311,7 @@ func (svc *AdminService) handleRevokeVisaByID(w http.ResponseWriter, r *http.Req
 	json.NewEncoder(w).Encode(resp)
 }
 
-func (svc *AdminService) handleRevokeAgentByCN(w http.ResponseWriter, r *http.Request) {
+func (svc *AdminService) handleRevokeActorByCN(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	cn := params["CN"]
 	if cn == "" {
