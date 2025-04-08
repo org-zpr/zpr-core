@@ -1,10 +1,7 @@
-use crate::zprtun::{ZprTunError, DEFAULT_TUN_MTU};
-
 use std::net::IpAddr;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
-use std::result::Result;
-// use tun::{AbstractDevice, Device};
 
+use crate::zprtun::ZprTunError;
 use crate::sys::macos::tun;
 
 pub struct ZprTun(tun::Tun);
@@ -32,10 +29,10 @@ impl ZprTun {
         }
         let mut bldr = tun::Tun::builder();
         if let Some(name) = ifname {
-            bldr.set_tun_name(&name);
+            bldr.with_tun_name(&name);
         }
         if let Some(addr) = address {
-            bldr.set_address(addr);
+            bldr.with_address(addr);
         }
         let dev = tun::Tun::create(&bldr)?;
         Ok(vec![ZprTun(dev)])
