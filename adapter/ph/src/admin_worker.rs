@@ -157,6 +157,12 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                 buf_writer.write_all("OK\n".as_bytes()).await?
             }
             Ok(RpcCommands::ShowLink) => match vec_message.len() {
+                1 => {
+                    buf_writer
+                        .write_all(show_link_summary(&asm.clone()).as_bytes())
+                        .await?;
+                    buf_writer.write_all("OK\n".as_bytes()).await?
+                }
                 2 => match vec_message[1].parse::<u32>() {
                     Ok(link_id) => {
                         buf_writer
@@ -466,6 +472,28 @@ fn delete_capture_program(asm: &Assembly) -> String {
     asm.flow_control.delete_program();
 
     String::from("Program deleted\n")
+}
+
+fn get_link_summary(asm: &Arc<Assembly>, link_id: LinkId) -> String {
+    match asm.peer_table.get(link_id) {
+        Some(peer) => format!(
+            "{} ({:?})",
+            peer.substrate_addr,
+            peer.link_state_machine.get_state()
+        ),
+        None => format!("Unconfigured"),
+    }
+}
+
+fn show_link_summary(asm: &Arc<Assembly>) -> String {
+    let mut links: String = String::new();
+    let _ = write!(&mut links, "Link summary:\n");
+
+    for id in asm.peer_ids.lock().unwrap().clone() {
+        let _ = write!(&mut links, "  {id}: {}\n", get_link_summary(asm, id));
+    }
+
+    links
 }
 
 fn show_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {

@@ -1,7 +1,7 @@
 # zpr-core
 Core ZPR components
 
-We are currently working towards Milestone 3.  
+We are currently working towards Milestone 4.  
 - See the [current iteration and backlog](https://github.com/orgs/org-zpr/projects/1/views/3).
 - See the [roadmap](https://github.com/orgs/org-zpr/projects/3/views/6).
 
