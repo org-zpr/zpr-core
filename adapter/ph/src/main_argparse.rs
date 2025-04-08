@@ -239,7 +239,7 @@ mod test {
             ))
         );
         assert_eq!(
-            config.global.agent_addr,
+            config.global.zpr_addr,
             Some(Vec::from([IpAddr::V4(std::net::Ipv4Addr::new(
                 10, 0, 0, 1
             ))]))
