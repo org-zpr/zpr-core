@@ -401,7 +401,7 @@ fn list_actors(api_url: &str, cert: Certificate) -> Result<(), Box<dyn std::erro
     println!(
         "{}",
         format!(
-            "🐎 found {} agent{}",
+            "🐎 found {} actor{}",
             entries.len(),
             if entries.len() == 1 { "" } else { "s" }
         )
