@@ -195,7 +195,7 @@ sleep 1
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_ADMIN_BIN" \
 	--ca-cert ca.crt \
 	--svc-url "https://[$VS_ZPR_ADDR]:8182" \
-	revoke --agent-cn adapter2
+	revoke --actor-cn adapter2
 
 if ! ping_a_b
 then PASS=0

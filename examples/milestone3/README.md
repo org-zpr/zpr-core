@@ -31,7 +31,7 @@ VS machine:
 
 **Revoke Visas Using a CN**
 
-    vs-admin -s https://\[fd5a:5052::1\]:8182 -c vs.config/auth-ca.crt revoke --agent-cn mathias.zpr.org
+    vs-admin -s https://\[fd5a:5052::1\]:8182 -c vs.config/auth-ca.crt revoke --actor-cn mathias.zpr.org
 
 
 
