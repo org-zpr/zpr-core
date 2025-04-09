@@ -129,8 +129,8 @@ pub struct Capture {
 }
 
 impl Capture {
+    /// `sender` must be set nonblocking
     pub fn new(sender: StdUnixDatagram) -> Self {
-        sender.set_nonblocking(true).unwrap();
         Self { sender }
     }
 
@@ -158,7 +158,7 @@ impl Capture {
         // once we it becomes stable
         packet.push_header(&hdr);
 
-        // does not block, as we've set O_NONBLOCK in `new()`
+        // does not block, as we know the socket is nonblocking
         let res = self.sender.send(
             &packet.body()[..std::mem::size_of::<crate::pcap_writer::PcaprecHdr>() + incl_len],
         );
