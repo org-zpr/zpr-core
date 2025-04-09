@@ -22,7 +22,7 @@ pub fn launch(
     worker_index: usize,
     asm: Arc<Assembly>,
     substrate_socket: UdpSocket,
-    agent_input_tun: Arc<ZprTun>,
+    actor_input_tun: Arc<ZprTun>,
     requeue_outq: UnixDatagram,
     mgmt_substrate_outq: Option<UnixDatagram>,
 ) -> impl FnOnce() {
@@ -31,7 +31,7 @@ pub fn launch(
         let io = FastpathIo::new(
             config,
             substrate_socket,
-            agent_input_tun,
+            actor_input_tun,
             requeue_outq,
             mgmt_substrate_outq,
         );
@@ -62,7 +62,7 @@ fn fastpath_main(mut worker: FastpathWorker, mut io: FastpathIo) {
 
         let mut poll_fds = enum_map! {
             PollSlot::Substrate => poll::PollFd::new(io.substrate_socket_fd(), recv_poll_flags | send_poll_flags),
-            PollSlot::Tun => poll::PollFd::new(io.agent_tun_fd(), recv_poll_flags),
+            PollSlot::Tun => poll::PollFd::new(io.actor_tun_fd(), recv_poll_flags),
             PollSlot::Requeue => poll::PollFd::new(io.requeue_fd(), recv_poll_flags),
             PollSlot::MgmtSubstrate => poll::PollFd::new(io.mgmt_substrate_fd(), recv_poll_flags),
             PollSlot::Returns => poll::PollFd::new(worker.return_q.poll_fd(), poll::PollFlags::POLLIN),
@@ -117,7 +117,7 @@ fn fastpath_main(mut worker: FastpathWorker, mut io: FastpathIo) {
                 continue;
             }
 
-            io.process_agent_tun_in(&mut worker, &mut pkts);
+            io.process_actor_tun_in(&mut worker, &mut pkts);
         }
 
         if revents[PollSlot::Returns].contains(poll::PollFlags::POLLIN) {

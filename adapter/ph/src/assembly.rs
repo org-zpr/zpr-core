@@ -60,7 +60,7 @@ pub struct Assembly {
     pub local_zpr_addresses: Vec<IpAddr>,
 
     pub mgmt_substrate_egress: MgmtSubstrateEgress,
-    pub agent_output_requeue: AgentOutputRequeue,
+    pub actor_output_requeue: ActorOutputRequeue,
 
     pub vsconn: Option<libnode::vsconn::VSConnHandle>, // present only on nodes
 
@@ -79,7 +79,7 @@ pub struct Assembly {
     pub peer_ids: std::sync::Mutex<Vec<zpr::LinkId>>, // HACK until peer_table is enumerable
 
     // Adapter tables
-    pub alt: adapter_tables::AgentLookupTable,
+    pub alt: adapter_tables::ActorLookupTable,
     pub dlt: adapter_tables::DockLookupTable,
 
     pub mgmt_dispatch_factory: MgmtDispatchFactory,
@@ -95,7 +95,7 @@ pub struct Assembly {
 #[derive(Debug, Error)]
 pub enum AddRouteError {
     #[error("bind failed: {0}")]
-    BindFailed(mgmt::requests::BindAgentAddressError),
+    BindFailed(mgmt::requests::BindActorAddressError),
     #[error("peer gone")]
     PeerGone,
     #[error("PFT full")]
@@ -147,13 +147,13 @@ impl Assembly {
     }
 
     /// Populates the Peer Table with the "fake" internal peer used to hold
-    /// state relating to the local agent / internal dock.
+    /// state relating to the local actor / internal dock.
     ///
     /// Must be called prior to adding any other peers; panics otherwise.
-    pub fn add_local_agent_peer(&self) {
+    pub fn add_local_actor_peer(&self) {
         let entry = self.peer_table.vacant_entry().unwrap();
 
-        assert_eq!(entry.key().get(), zpr::LOCAL_AGENT_LINK_ID);
+        assert_eq!(entry.key().get(), zpr::LOCAL_ACTOR_LINK_ID);
 
         let peer_state = peer_table::PeerState::new(
             entry.key(),
@@ -228,25 +228,25 @@ impl Assembly {
         return Ok(peer_id);
     }
 
-    /// Temporary? function to find a link based on the agent address
-    pub fn find_egress_link(&self, agent_addr: IpAddress) -> Option<NonZero<LinkId>> {
-        // Fist check the local agent addresses to see if it's a locally-destined packet
+    /// Temporary? function to find a link based on the actor address
+    pub fn find_egress_link(&self, actor_addr: IpAddress) -> Option<NonZero<LinkId>> {
+        // Fist check the local actor addresses to see if it's a locally-destined packet
         for addr in &self.local_zpr_addresses {
-            if agent_addr == (*addr).into() {
-                return Some(NonZero::new(zpr::LOCAL_AGENT_LINK_ID).unwrap());
+            if actor_addr == (*addr).into() {
+                return Some(NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap());
             }
         }
 
         let ids = self.peer_ids.lock().unwrap().clone();
 
-        // Check peer agent addresses to see if one of them matches
+        // Check peer actor addresses to see if one of them matches
         for id in ids.iter() {
             let peer = self
                 .peer_table
                 .get(*id)
                 .expect("Peer IDs out of sync with peer table");
-            for addr in peer.link_state_machine.get_agent_addresses() {
-                if addr == agent_addr {
+            for addr in peer.link_state_machine.get_actor_addresses() {
+                if addr == actor_addr {
                     return Some(NonZero::new(*id).unwrap());
                 }
             }
@@ -264,7 +264,7 @@ impl Assembly {
         packet_body: Vec<u8>,
     ) -> Result<zpr::StreamId, AddRouteError> {
         let egress_tether_id;
-        if egress_link_id.get() == zpr::LOCAL_AGENT_LINK_ID {
+        if egress_link_id.get() == zpr::LOCAL_ACTOR_LINK_ID {
             egress_tether_id = self
                 .dlt
                 .insert(adapter_tables::DltPep {
@@ -273,13 +273,13 @@ impl Assembly {
                 })
                 .map_err(|()| {
                     AddRouteError::BindFailed(
-                        mgmt::requests::BindAgentAddressError::BindAgentAddressError(
+                        mgmt::requests::BindActorAddressError::BindActorAddressError(
                             "DLT full".into(),
                         ),
                     )
                 })?;
         } else {
-            egress_tether_id = mgmt::requests::send_bind_agent_address_request(
+            egress_tether_id = mgmt::requests::send_bind_actor_address_request(
                 self,
                 egress_link_id.get(),
                 compression_mode,
@@ -341,7 +341,7 @@ pub mod test {
         pub topology_config: Option<TopologyConfig>,
         pub local_zpr_addresses: Option<Vec<IpAddr>>,
         pub mgmt_substrate_egress: Option<MgmtSubstrateEgress>,
-        pub agent_output_requeue: Option<AgentOutputRequeue>,
+        pub actor_output_requeue: Option<ActorOutputRequeue>,
         pub vsconn: Option<Option<libnode::vsconn::VSConnHandle>>,
         pub visa_table: Option<visa_table::VisaTable>,
         pub capture_queue: Option<Capture>,
@@ -351,7 +351,7 @@ pub mod test {
         pub tun_ctl: Option<Box<dyn TunCtl + Send>>,
         pub peer_table: Option<peer_table::PeerTable>,
         pub peer_ids: Option<Vec<zpr::LinkId>>,
-        pub alt: Option<adapter_tables::AgentLookupTable>,
+        pub alt: Option<adapter_tables::ActorLookupTable>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
         pub mgmt_dispatch_factory: Option<MgmtDispatchFactory>,
         pub adapter_manager_factory: Option<AdapterManagerFactory>,
@@ -382,9 +382,9 @@ pub mod test {
         let mgmt_substrate_egress = builder.mgmt_substrate_egress.unwrap_or_else(|| {
             MgmtSubstrateEgress::new(tokio::net::UnixDatagram::pair().unwrap().0)
         });
-        let agent_output_requeue = builder
-            .agent_output_requeue
-            .unwrap_or_else(|| AgentOutputRequeue::new(Vec::new()));
+        let actor_output_requeue = builder
+            .actor_output_requeue
+            .unwrap_or_else(|| ActorOutputRequeue::new(Vec::new()));
         let vsconn = builder.vsconn.unwrap_or(None);
         let visa_table = tokio::sync::RwLock::new(
             builder
@@ -407,7 +407,7 @@ pub mod test {
         let peer_ids = std::sync::Mutex::new(builder.peer_ids.unwrap_or_default());
         let alt = builder
             .alt
-            .unwrap_or_else(|| adapter_tables::AgentLookupTable::new());
+            .unwrap_or_else(|| adapter_tables::ActorLookupTable::new());
         let dlt = builder
             .dlt
             .unwrap_or_else(|| adapter_tables::DockLookupTable::new());
@@ -430,7 +430,7 @@ pub mod test {
             topology_config,
             local_zpr_addresses,
             mgmt_substrate_egress,
-            agent_output_requeue,
+            actor_output_requeue,
             vsconn,
             visa_table,
             capture_queue,

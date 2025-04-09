@@ -30,21 +30,21 @@ use zpr;
 use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
 
-/// Simple function used on an adapter to forward agent packets to the the tether and vice-versa.
+/// Simple function used on an adapter to forward actor packets to the the tether and vice-versa.
 const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {
     // this optimization is checked by the static asserts below
     // this allows us to avoid an unpredictable branch on every packet
     (ingress_link_id % 2) + 1
 }
 
-const _: () = assert!(adapter_next_hop_link(zpr::LOCAL_AGENT_LINK_ID) == zpr::DOCK_LINK_ID);
-const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::LOCAL_AGENT_LINK_ID);
+const _: () = assert!(adapter_next_hop_link(zpr::LOCAL_ACTOR_LINK_ID) == zpr::DOCK_LINK_ID);
+const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::LOCAL_ACTOR_LINK_ID);
 
 #[cfg(debug_assertions)]
 /// This table is used to track whether a flow ever switches from one worker
 /// to another (indicating potential for out-of-order packets) -- meaning
 /// our packet steerer isn't steering correctly.  This is used only in debug mode.
-const AGENT_PACKET_FLOW_TRACKER: std::sync::LazyLock<
+const ACTOR_PACKET_FLOW_TRACKER: std::sync::LazyLock<
     dashmap::DashMap<(zpr::LinkId, zpr::StreamId), usize>,
 > = std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
@@ -64,7 +64,7 @@ pub struct FastpathWorker {
     pub adapter_manager: AdapterManager,
     pub mgmt_dispatch: MgmtDispatch,
 
-    pub agent_input_q: Vec<Packet>,
+    pub actor_input_q: Vec<Packet>,
     pub substrate_egress_q: Vec<(Packet, std::net::SocketAddr)>,
 }
 
@@ -87,7 +87,7 @@ impl FastpathWorker {
             adapter_manager,
             mgmt_dispatch,
 
-            agent_input_q: Vec::with_capacity(config.buffer_count),
+            actor_input_q: Vec::with_capacity(config.buffer_count),
             substrate_egress_q: Vec::with_capacity(config.buffer_count),
         }
     }
@@ -268,11 +268,11 @@ impl FastpathWorker {
         let ingress_stream_id: zpr::StreamId = per_flow_hdr.stream_id.into();
         pkt.metadata_mut().ingress_stream_id = ingress_stream_id;
 
-        // in debug builds, track which worker this agent traffic came in on
+        // in debug builds, track which worker this actor traffic came in on
         // ensure a given flow isn't hopping between workers (potentially
         // resulting in out-of-order packets)
         #[cfg(debug_assertions)]
-        if let Some(old_index) = AGENT_PACKET_FLOW_TRACKER.insert(
+        if let Some(old_index) = ACTOR_PACKET_FLOW_TRACKER.insert(
             (
                 pkt.metadata().ingress_link_id,
                 pkt.metadata().ingress_stream_id,
@@ -280,17 +280,17 @@ impl FastpathWorker {
             self.worker_index,
         ) {
             if old_index != self.worker_index {
-                self.asm.counters[CounterType::AgentPacketsOutOfOrder].increment();
+                self.asm.counters[CounterType::ActorPacketsOutOfOrder].increment();
             }
         }
 
         self.forward(pkt);
     }
 
-    /// Process uncompressed packet from the agent.
+    /// Process uncompressed packet from the actor.
     /// The packet will be compressed, or trigger a Bind request.
-    pub fn agent_output(&mut self, mut pkt: Packet) {
-        pkt.metadata_mut().ingress_link_id = zpr::LOCAL_AGENT_LINK_ID;
+    pub fn actor_output(&mut self, mut pkt: Packet) {
+        pkt.metadata_mut().ingress_link_id = zpr::LOCAL_ACTOR_LINK_ID;
         pkt.metadata_mut().ingress_lane_id = self.worker_index as u8;
 
         // determine five tuple
@@ -318,16 +318,16 @@ impl FastpathWorker {
             }
         }
 
-        self.agent_output_post_classify(pkt, /* allow_bind_request */ true);
+        self.actor_output_post_classify(pkt, /* allow_bind_request */ true);
     }
 
-    /// Post-classification portion of `agent_output` function.  Used for
+    /// Post-classification portion of `actor_output` function.  Used for
     /// re-injecting already-classified packets e.g.  which were held
     /// awaiting bind.  `allow_bind_request` should be `true` for "real"
     /// packets; `false` for packets re-injected from mgmt plane after
     /// fulfilling a bind request (so as to prevent the theoretical
     /// possibility of a packet loop).
-    pub fn agent_output_post_classify(&mut self, mut pkt: Packet, allow_bind_request: bool) {
+    pub fn actor_output_post_classify(&mut self, mut pkt: Packet, allow_bind_request: bool) {
         // note: this weird two-phase structure is needed to appease the borrow checker
         let forward = {
             // lookup five tuple in ALT
@@ -342,7 +342,7 @@ impl FastpathWorker {
 
                 // issue bind request
                 match self.adapter_manager.try_request_tether_id(pkt) {
-                    Ok(()) => self.asm.counters[CounterType::AgentSlowpath].increment(),
+                    Ok(()) => self.asm.counters[CounterType::ActorSlowpath].increment(),
                     Err(TryEnqueueError::Full(pkt)) => {
                         self.drop_and_count(pkt, CounterType::QueueBackpressure)
                     }
@@ -426,8 +426,8 @@ impl FastpathWorker {
             }
         }
 
-        if egress_link_id == zpr::LOCAL_AGENT_LINK_ID {
-            self.agent_input(egress_stream_id, pkt);
+        if egress_link_id == zpr::LOCAL_ACTOR_LINK_ID {
+            self.actor_input(egress_stream_id, pkt);
         } else {
             let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
             per_flow_hdr.stream_id = egress_stream_id.into();
@@ -441,9 +441,9 @@ impl FastpathWorker {
         }
     }
 
-    /// Send a compressed agent packet to the agent.
+    /// Send a compressed actor packet to the actor.
     /// The packet will be decompressed according to the given stream ID.
-    pub fn agent_input(
+    pub fn actor_input(
         &mut self,
         tether_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
         mut pkt: Packet,
@@ -482,8 +482,8 @@ impl FastpathWorker {
             return self.drop_and_count(pkt, CounterType::MicvFailure);
         }
 
-        // queue decapsulated packet for send to agent
-        self.agent_input_q.push(pkt);
+        // queue decapsulated packet for send to actor
+        self.actor_input_q.push(pkt);
     }
 
     /// Egress a ZDP packet on the given link ID, according to the given ZPI.

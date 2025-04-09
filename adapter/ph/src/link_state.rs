@@ -201,7 +201,7 @@ pub struct LinkStateMachine {
     state: LinkState,
     status: LinkStatus,
     silent: bool,
-    agent_addresses: Vec<IpAddress>,
+    actor_addresses: Vec<IpAddress>,
     last_state_change: std::time::Instant,
 }
 
@@ -211,7 +211,7 @@ impl LinkStateMachine {
             state: LinkState::Inactive,
             status: LinkStatus::Down,
             silent: false,
-            agent_addresses: Default::default(),
+            actor_addresses: Default::default(),
             last_state_change: std::time::Instant::now(),
         }
     }
@@ -249,12 +249,12 @@ impl LinkStateWrapper {
         locked_fsm.status == LinkStatus::Up && locked_fsm.state == LinkState::Active
     }
 
-    pub fn get_agent_addresses(&self) -> Vec<IpAddress> {
+    pub fn get_actor_addresses(&self) -> Vec<IpAddress> {
         let locked_fsm = self.locked_fsm.lock().unwrap();
-        locked_fsm.agent_addresses.clone()
+        locked_fsm.actor_addresses.clone()
     }
 
-    fn deregister_agent_addresses(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
+    fn deregister_actor_addresses(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
         let mut join_set = tokio::task::JoinSet::new();
 
         let vs_id = asm
@@ -264,9 +264,9 @@ impl LinkStateWrapper {
             return join_set;
         }
 
-        for addr in self.locked_fsm.lock().unwrap().agent_addresses.drain(..) {
+        for addr in self.locked_fsm.lock().unwrap().actor_addresses.drain(..) {
             debug!(target: LINK_STATE, "Deregistering {addr}");
-            join_set.spawn_local(visa_mgmt::agent_disconnect(asm.clone(), addr));
+            join_set.spawn_local(visa_mgmt::actor_disconnect(asm.clone(), addr));
         }
         join_set
     }
@@ -282,10 +282,10 @@ impl LinkStateWrapper {
             LinkEvent::ReceivedHelloRequest => self.process_hello_request(asm),
             LinkEvent::ReceivedHelloResponse(code) => self.process_hello_response(asm, code),
             LinkEvent::ReceivedRegisterRequest(addr) => {
-                self.process_register_agent_address_request(asm, addr)
+                self.process_register_actor_address_request(asm, addr)
             }
             LinkEvent::ReceivedRegisterResponse(code) => {
-                self.process_register_agent_address_response(asm, code)
+                self.process_register_actor_address_response(asm, code)
             }
             LinkEvent::ReceivedAuthorizeResponse => self.process_authorize_repsonse(asm),
             LinkEvent::ReceivedTerminateRequest(code) => self.process_terminate_request(asm, code),
@@ -423,7 +423,7 @@ impl LinkStateWrapper {
     }
 
     /// Update link state based on received hello request
-    /// Transitions from Helloing to Registering Agent Address
+    /// Transitions from Helloing to Registering Actor Address
     /// Does not generate any packets
     fn process_hello_request(&self, _asm: &Assembly) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
@@ -438,7 +438,7 @@ impl LinkStateWrapper {
                 locked_fsm.set_state(LinkState::RegisterAA);
                 debug!(
                     target: LINK_STATE,
-                    "Link {link_id} finished helloing.  Waiting on register agent address"
+                    "Link {link_id} finished helloing.  Waiting on register actor address"
                 );
                 Ok(())
             }
@@ -456,8 +456,8 @@ impl LinkStateWrapper {
     }
 
     /// Update link state based on received hello response
-    /// Transitions from Helloing to Registering Agent Address
-    /// Sends a Register Agent Address request if this is an adapter
+    /// Transitions from Helloing to Registering Actor Address
+    /// Sends a Register Actor Address request if this is an adapter
     fn process_hello_response(
         &self,
         asm: &Arc<Assembly>,
@@ -476,7 +476,7 @@ impl LinkStateWrapper {
                 locked_fsm.set_state(LinkState::RegisterAA);
                 debug!(
                     target: LINK_STATE,
-                    "Link {link_id} finished helloing.  Sending register agent address"
+                    "Link {link_id} finished helloing.  Sending register actor address"
                 );
                 drop(locked_fsm);
                 self.send_register_address(asm);
@@ -504,16 +504,16 @@ impl LinkStateWrapper {
         let link_id = self.id;
         let task_asm = asm.clone();
         tokio::task::spawn_local(async move {
-            for agent_addr in &task_asm.local_zpr_addresses {
-                let result = mgmt::requests::send_register_agent_address_request(
+            for actor_addr in &task_asm.local_zpr_addresses {
+                let result = mgmt::requests::send_register_actor_address_request(
                     &task_asm,
                     link_id,
-                    *agent_addr,
+                    *actor_addr,
                 )
                 .await;
 
                 if result.is_err() || result.unwrap() == ResponseCode::Other {
-                    warn!(target: LINK_STATE, "Link {link_id} failed to register address {agent_addr}");
+                    warn!(target: LINK_STATE, "Link {link_id} failed to register address {actor_addr}");
                 }
             }
 
@@ -524,10 +524,10 @@ impl LinkStateWrapper {
         });
     }
 
-    /// Update link state based on received register agent address request
-    /// Transitions from Registering Agent Address to Active
+    /// Update link state based on received register actor address request
+    /// Transitions from Registering Actor Address to Active
     /// Does not generate any packets
-    fn process_register_agent_address_request(
+    fn process_register_actor_address_request(
         &self,
         asm: &Arc<Assembly>,
         addr: IpAddress,
@@ -536,10 +536,10 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
-                locked_fsm.agent_addresses.push(addr);
+                locked_fsm.actor_addresses.push(addr);
                 debug!(
                     target: LINK_STATE,
-                    "Link {link_id} received agent address ({addr}).  Authorizing with visa service"
+                    "Link {link_id} received actor address ({addr}).  Authorizing with visa service"
                 );
 
                 match visa_mgmt::build_connect_request(asm, link_id, addr) {
@@ -548,7 +548,7 @@ impl LinkStateWrapper {
                         locked_fsm.set_state(LinkState::Active);
                         debug!(
                             target: LINK_STATE,
-                            "Link {link_id} (Visa Service) received agent address.  Becoming active, no authorization required"
+                            "Link {link_id} (Visa Service) received actor address.  Becoming active, no authorization required"
                         );
                         drop(locked_fsm);
                         self.run_active(asm)
@@ -578,10 +578,10 @@ impl LinkStateWrapper {
         }
     }
 
-    /// Update link state based on received register agent address response
-    /// Transitions from Registering Agent Address to Active
+    /// Update link state based on received register actor address response
+    /// Transitions from Registering Actor Address to Active
     /// Does not generate any packets
-    fn process_register_agent_address_response(
+    fn process_register_actor_address_response(
         &self,
         asm: &Arc<Assembly>,
         _code: ResponseCode,
@@ -594,7 +594,7 @@ impl LinkStateWrapper {
                 asm.tun_ctl.set_carrier(true).unwrap();
                 debug!(
                     target: LINK_STATE,
-                    "Link {link_id} finished registering agent address.  Becoming active"
+                    "Link {link_id} finished registering actor address.  Becoming active"
                 );
                 drop(locked_fsm);
                 self.run_active(asm)
@@ -668,7 +668,7 @@ impl LinkStateWrapper {
 
         match self.link_type {
             LinkType::AdapterToNode => asm.tun_ctl.set_carrier(false).unwrap(),
-            LinkType::NodeToAdapter => join_set = self.deregister_agent_addresses(asm),
+            LinkType::NodeToAdapter => join_set = self.deregister_actor_addresses(asm),
             _ => {}
         }
 
@@ -876,11 +876,11 @@ impl Display for LinkStateWrapper {
 
 impl Display for LinkStateMachine {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        if self.agent_addresses.is_empty() {
-            write!(f, "  Agent Addresses: None\n")?;
+        if self.actor_addresses.is_empty() {
+            write!(f, "  Actor Addresses: None\n")?;
         } else {
-            write!(f, "  Agent Addresses: [ {}", self.agent_addresses[0])?;
-            for addr in &self.agent_addresses[1..self.agent_addresses.len()] {
+            write!(f, "  Actor Addresses: [ {}", self.actor_addresses[0])?;
+            for addr in &self.actor_addresses[1..self.actor_addresses.len()] {
                 write!(f, ", {}", addr)?;
             }
             write!(f, " ]\n")?;

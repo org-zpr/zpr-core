@@ -90,7 +90,7 @@ fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateE
 
     let Some(sa) = peer_state.get_established_transport_association() else {
         return Err(LinkStateError::InvalidOperation(
-            "Attempted to Register Agent Address when SA not established".to_owned(),
+            "Attempted to Register Actor Address when SA not established".to_owned(),
         ));
     };
 
@@ -114,7 +114,7 @@ fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateE
     Ok(cn)
 }
 
-pub async fn agent_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
+pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
     match asm
         .vsconn
         .as_ref()
@@ -123,9 +123,9 @@ pub async fn agent_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
         .await
     {
         Err(e) => {
-            warn!(target: VISA_MGMT, "Failed to disconnect agent {addr} with error {e:?}")
+            warn!(target: VISA_MGMT, "Failed to disconnect actor {addr} with error {e:?}")
         }
-        Ok(()) => debug!(target: VISA_MGMT, "Successfully disconnected agent {addr}"),
+        Ok(()) => debug!(target: VISA_MGMT, "Successfully disconnected actor {addr}"),
     }
 }
 

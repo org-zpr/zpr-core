@@ -85,7 +85,7 @@ pub enum CounterType {
     InternalRoutingError, // a packet ended up somewhere it shouldn't have due to a coding error
 
     DispatchedToMgmt, // exited fastpath from substrate ingress, sent to mgmt
-    AgentSlowpath,    // exited fastpath from agent output, sent to mgmt
+    ActorSlowpath,    // exited fastpath from actor output, sent to mgmt
     BadMgmtResponse,
     UnexpectedMgmtResponse,
 
@@ -112,7 +112,7 @@ pub enum CounterType {
     VisaRequestError,
 
     #[cfg(debug_assertions)]
-    AgentPacketsOutOfOrder,
+    ActorPacketsOutOfOrder,
 }
 
 impl CounterType {
@@ -146,7 +146,7 @@ impl CounterType {
 
             // Management packets
             Self::DispatchedToMgmt => "Dispatched to Management",
-            Self::AgentSlowpath => "Agent Slowpath",
+            Self::ActorSlowpath => "Actor Slowpath",
             Self::BadMgmtResponse => "Bad Management Response",
             Self::UnexpectedMgmtResponse => "Unexpected Management Response",
 
@@ -175,7 +175,7 @@ impl CounterType {
             Self::VisaRequestError => "Visa Request Error",
 
             #[cfg(debug_assertions)]
-            Self::AgentPacketsOutOfOrder => "Agent Packets Out-Of-Order",
+            Self::ActorPacketsOutOfOrder => "Actor Packets Out-Of-Order",
         }
     }
 }

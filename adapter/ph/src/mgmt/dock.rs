@@ -16,7 +16,7 @@ use zpr::{self, LinkId, StreamId, SPECIAL_VISA_ID};
 use zpr_ext::std::num::NonZeroExt;
 
 #[derive(Debug, Error)]
-pub enum BindAgentAddressError {
+pub enum BindActorAddressError {
     #[error("policy error")]
     PolicyError,
     #[error("parse error: {0}")]
@@ -25,15 +25,15 @@ pub enum BindAgentAddressError {
     AddRouteError(AddRouteError),
 }
 
-/// Fulfills a Bind Agent Address request.
+/// Fulfills a Bind Actor Address request.
 /// Returns the ingress tether ID on success.
-pub async fn bind_agent_address(
+pub async fn bind_actor_address(
     asm: &Arc<Assembly>,
     ingress_link_id: NonZero<LinkId>,
     compression_mode: zpr::CompressionMode,
     five_tuple: FiveTuple,
     packet_body: Vec<u8>,
-) -> Result<StreamId, BindAgentAddressError> {
+) -> Result<StreamId, BindActorAddressError> {
     let egress_link_id;
     let visa_id;
 
@@ -47,13 +47,13 @@ pub async fn bind_agent_address(
                 .insert_id(visa_id, DateTime::<Utc>::MAX_UTC);
         } else {
             debug!(target: FLOW_MGMT, "visa request error: special peer routing applies, but special peer ({spname:?}) not connected");
-            return Err(BindAgentAddressError::PolicyError);
+            return Err(BindActorAddressError::PolicyError);
         }
     } else {
-        if ingress_link_id.get() == zpr::LOCAL_AGENT_LINK_ID {
-            // Reject packets from the local agent.
+        if ingress_link_id.get() == zpr::LOCAL_ACTOR_LINK_ID {
+            // Reject packets from the local actor.
             // (Packets destined to the Visa Service Adapter fall under special-peer policy.)
-            return Err(BindAgentAddressError::PolicyError);
+            return Err(BindActorAddressError::PolicyError);
         }
 
         let visa_server_id = asm
@@ -63,8 +63,8 @@ pub async fn bind_agent_address(
         if ingress_link_id.get() == visa_server_id {
             // VERY HACK
             // Unconditionally accept traffic from the Visa Service Adapter;
-            // forward it to our local agent.
-            egress_link_id = NonZero::new(zpr::LOCAL_AGENT_LINK_ID).unwrap();
+            // forward it to our local actor.
+            egress_link_id = NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap();
             visa_id = SPECIAL_VISA_ID;
             asm.visa_table
                 .write()
@@ -87,14 +87,14 @@ pub async fn bind_agent_address(
                     let Some(visa) = visa else {
                         asm.counters[CounterType::VisaRequestError].increment();
                         error!(target: FLOW_MGMT, "visa request error: Could not parse visa");
-                        return Err(BindAgentAddressError::ParseError("Could not parse visa"));
+                        return Err(BindActorAddressError::ParseError("Could not parse visa"));
                     };
                     (visa_id, egress_link_id) =
                         visa_mgmt::parse_visa(asm, visa)
                             .await
                             .map_err(|e| match e {
                                 VisaTableError::ParseError(field) => {
-                                    BindAgentAddressError::ParseError(field)
+                                    BindActorAddressError::ParseError(field)
                                 }
                                 e => panic!("Got unexpected error type {e}"),
                             })?;
@@ -108,13 +108,13 @@ pub async fn bind_agent_address(
                 Ok(resp) => {
                     asm.counters[CounterType::VisaRequestDenied].increment();
                     debug!(target: FLOW_MGMT, "visa request rejected: {resp:?}");
-                    return Err(BindAgentAddressError::PolicyError);
+                    return Err(BindActorAddressError::PolicyError);
                 }
 
                 Err(err) => {
                     asm.counters[CounterType::VisaRequestError].increment();
                     error!(target: FLOW_MGMT, "visa request error: {err}");
-                    return Err(BindAgentAddressError::PolicyError);
+                    return Err(BindActorAddressError::PolicyError);
                 }
             }
         }
@@ -136,5 +136,5 @@ pub async fn bind_agent_address(
     // TODO: reverse ingress TID needs to be sent to next-hop;
     // this is blocked on switching to new-style bind requests
 
-    route_result.map_err(BindAgentAddressError::AddRouteError)
+    route_result.map_err(BindActorAddressError::AddRouteError)
 }

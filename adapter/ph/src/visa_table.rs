@@ -248,7 +248,7 @@ mod tests {
         let link_id = asm
             .peer_table
             .insert(create_dummy_peer_state(
-                NonZero::new(zpr::LOCAL_AGENT_LINK_ID).unwrap(),
+                NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap(),
                 LinkType::Internal,
                 zpr::SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 443),
             ))

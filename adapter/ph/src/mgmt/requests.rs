@@ -92,20 +92,20 @@ pub async fn send_hello_request(
     }
 }
 
-/// send a Register Agent Address Request (RFC 6.5 § 6.3.10)
-pub async fn send_register_agent_address_request(
+/// send a Register Actor Address Request (RFC 6.5 § 6.3.10)
+pub async fn send_register_actor_address_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
-    agent_addr: IpAddr,
+    actor_addr: IpAddr,
 ) -> Result<zdp::ResponseCode, ()> {
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
-        zdp::ZdpPacketType::RegisterAgentAddressRequest,
-        zdp::ZdpPacketType::RegisterAgentAddressResponse,
-        move |mut req| match agent_addr {
+        zdp::ZdpPacketType::RegisterActorAddressRequest,
+        zdp::ZdpPacketType::RegisterActorAddressResponse,
+        move |mut req| match actor_addr {
             IpAddr::V4(addr) => {
-                zdp::ZdpRegisterAgentAddressRequestHeader {
+                zdp::ZdpRegisterActorAddressRequestHeader {
                     ip_version: zpr::L3Type::Ipv4,
                 }
                 .write_to_buf(&mut req)
@@ -114,7 +114,7 @@ pub async fn send_register_agent_address_request(
             }
 
             IpAddr::V6(addr) => {
-                zdp::ZdpRegisterAgentAddressRequestHeader {
+                zdp::ZdpRegisterActorAddressRequestHeader {
                     ip_version: zpr::L3Type::Ipv6,
                 }
                 .write_to_buf(&mut req)
@@ -129,21 +129,21 @@ pub async fn send_register_agent_address_request(
     match response {
         Ok(mut register_res) => {
             let Ok(hdr) =
-                zdp::ZdpRegisterAgentAddressResponseHeader::read_from_buf(&mut register_res)
+                zdp::ZdpRegisterActorAddressResponseHeader::read_from_buf(&mut register_res)
             else {
                 core::count_event(asm, &mut register_res, CounterType::BadStructure);
                 return Err(());
             };
             debug!(
                 target: ZDP,
-                "Received RegisterAgentAddressResponse, status: {:?}",
+                "Received RegisterActorAddressResponse, status: {:?}",
                 hdr.status_code
             );
             return Ok(hdr.status_code);
         }
 
         Err(err) => {
-            warn!(target: ZDP, "{err} error with RegisterAgentAddressRequest");
+            warn!(target: ZDP, "{err} error with RegisterActorAddressRequest");
             return Err(());
         }
     }
@@ -210,31 +210,31 @@ pub async fn send_terminate_indication<'a, 'pktbuf>(
 }
 
 #[derive(Debug, Error)]
-pub enum BindAgentAddressError {
+pub enum BindActorAddressError {
     #[error("{0}")]
     SyncReqError(core::SyncReqError),
     #[error("bad structure")]
     BadStructure,
     #[error("{0}")]
-    BindAgentAddressError(Box<str>),
+    BindActorAddressError(Box<str>),
 }
 
-/// send a Bind Agent Address Request and wait for the Response (RFC 6.5 § 6.3.11)
-pub async fn send_bind_agent_address_request(
+/// send a Bind Actor Address Request and wait for the Response (RFC 6.5 § 6.3.11)
+pub async fn send_bind_actor_address_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
     compression_mode: zpr::CompressionMode,
     five_tuple: FiveTuple,
     packet_body: Vec<u8>,
-) -> Result<zpr::StreamId, BindAgentAddressError> {
+) -> Result<zpr::StreamId, BindActorAddressError> {
     let response = core::send_sync_per_flow_req(
         asm,
         link_id,
-        zdp::ZdpPacketType::BindAgentAddressRequest,
-        zdp::ZdpPacketType::BindAgentAddressResponse,
+        zdp::ZdpPacketType::BindActorAddressRequest,
+        zdp::ZdpPacketType::BindActorAddressResponse,
         0,
         move |mut req| {
-            zdp::ZdpBindAgentAddressRequestHeader {
+            zdp::ZdpBindActorAddressRequestHeader {
                 ip_version: five_tuple.l3_type,
                 compression_mode,
             }
@@ -268,9 +268,9 @@ pub async fn send_bind_agent_address_request(
 
     match response {
         Ok((tether_id, mut resp)) => {
-            let Ok(hdr) = zdp::ZdpBindAgentAddressResponseHeader::read_from_buf(&mut resp) else {
+            let Ok(hdr) = zdp::ZdpBindActorAddressResponseHeader::read_from_buf(&mut resp) else {
                 core::count_event(asm, &mut resp, CounterType::BadStructure);
-                return Err(BindAgentAddressError::BadStructure);
+                return Err(BindActorAddressError::BadStructure);
             };
 
             match hdr.status_code {
@@ -279,26 +279,26 @@ pub async fn send_bind_agent_address_request(
                 zdp::ResponseCode::Other => {
                     if hdr.info_len as usize > resp.remaining() {
                         core::count_event(asm, &mut resp, CounterType::BadStructure);
-                        return Err(BindAgentAddressError::BadStructure);
+                        return Err(BindActorAddressError::BadStructure);
                     }
 
                     let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
                         core::count_event(asm, &mut resp, CounterType::BadStructure);
-                        return Err(BindAgentAddressError::BadStructure);
+                        return Err(BindActorAddressError::BadStructure);
                     };
                     let msg: Box<str> = msg.into();
 
-                    Err(BindAgentAddressError::BindAgentAddressError(msg))
+                    Err(BindActorAddressError::BindActorAddressError(msg))
                 }
 
                 _ => {
                     core::count_event(asm, &mut resp, CounterType::BadStructure);
-                    Err(BindAgentAddressError::BadStructure)
+                    Err(BindActorAddressError::BadStructure)
                 }
             }
         }
 
-        Err(err) => Err(BindAgentAddressError::SyncReqError(err)),
+        Err(err) => Err(BindActorAddressError::SyncReqError(err)),
     }
 }
 

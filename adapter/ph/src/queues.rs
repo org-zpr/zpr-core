@@ -93,12 +93,12 @@ impl MgmtSubstrateEgress {
     }
 }
 
-/// Used for requeueing agent output packets from mgmt.
-pub struct AgentOutputRequeue {
+/// Used for requeueing actor output packets from mgmt.
+pub struct ActorOutputRequeue {
     sockets: Box<[TokioUnixDatagram]>,
 }
 
-impl AgentOutputRequeue {
+impl ActorOutputRequeue {
     pub fn new(sockets: impl IntoIterator<Item = TokioUnixDatagram>) -> Self {
         Self {
             sockets: sockets.into_iter().collect(),

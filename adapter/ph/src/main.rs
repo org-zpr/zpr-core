@@ -193,7 +193,7 @@ fn main() -> ExitCode {
     info!(target: STARTUP, "control socket bound to {:?}", config.control_path);
 
     //
-    // open TUN devices and agent requeue sockets
+    // open TUN devices and actor requeue sockets
     //
 
     // HACK: If we are using a new TUN (requirement on MAC I think), we will set the address.
@@ -216,13 +216,13 @@ fn main() -> ExitCode {
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(tun_devs[0].clone()));
     tun_ctl.set_carrier(false).unwrap();
 
-    let mut agent_requeue_inqs = Vec::new();
-    let mut agent_requeue_outqs = Vec::new();
+    let mut actor_requeue_inqs = Vec::new();
+    let mut actor_requeue_outqs = Vec::new();
     for _i in 0..topology_config.fastpath_concurrency {
         let (inq, outq) = tokio::net::UnixDatagram::pair().unwrap();
         // TODO: use get/setsockopt(SO_SNDBUF) to ensure we can transfer packets of PACKET_BUFFER_SIZE
-        agent_requeue_inqs.push(inq);
-        agent_requeue_outqs.push(outq.into_std().unwrap());
+        actor_requeue_inqs.push(inq);
+        actor_requeue_outqs.push(outq.into_std().unwrap());
     }
 
     //
@@ -292,7 +292,7 @@ fn main() -> ExitCode {
             .expect("CN must be UTF-8 string");
         info!(target: STARTUP, "node name is \"{node_name}\"");
 
-        let node_agent =
+        let node_actor =
             libnode::vsconn::new_node_agent(config.zpr_addr[0], &node_name, &Default::default());
 
         let (vs_inq, vs_outq_inner) = mpsc::channel(topology_config.vs_queue_size);
@@ -300,7 +300,7 @@ fn main() -> ExitCode {
 
         vsconn = Some(
             libnode::vsconn::VSConn::new(
-                node_agent,
+                node_actor,
                 vs_inq,
                 &SocketAddr::new(zpr::VISA_SERVICE_ADDR, zpr::VISA_SERVICE_PORT).to_string(),
                 &config.certificate_file,
@@ -323,7 +323,7 @@ fn main() -> ExitCode {
         topology_config,
         local_zpr_addresses: config.zpr_addr,
         mgmt_substrate_egress: MgmtSubstrateEgress::new(mgmt_substrate_inq),
-        agent_output_requeue: AgentOutputRequeue::new(agent_requeue_inqs),
+        actor_output_requeue: ActorOutputRequeue::new(actor_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
         visa_table: tokio::sync::RwLock::new(visa_table::VisaTable::new()),
         capture_queue: Capture::new(cap_inq),
@@ -333,7 +333,7 @@ fn main() -> ExitCode {
         tun_ctl,
         peer_table: peer_table::PeerTable::new(),
         peer_ids: Default::default(),
-        alt: adapter_tables::AgentLookupTable::new(),
+        alt: adapter_tables::ActorLookupTable::new(),
         dlt: adapter_tables::DockLookupTable::new(),
         mgmt_dispatch_factory: MgmtDispatchFactory::new(md_inq_factory),
         adapter_manager_factory: AdapterManagerFactory::new(am_inq_factory),
@@ -353,10 +353,10 @@ fn main() -> ExitCode {
     let _local_set_guard = local_set.enter();
 
     //
-    // instantiate the "fake" local agent link
+    // instantiate the "fake" local actor link
     //
 
-    asm.add_local_agent_peer();
+    asm.add_local_actor_peer();
 
     //
     // instantiate tether if we're an adapter
@@ -419,7 +419,7 @@ fn main() -> ExitCode {
         0..asm.topology_config.fastpath_concurrency,
         substrate_sockets,
         tun_devs,
-        agent_requeue_outqs
+        actor_requeue_outqs
     ) {
         let builder = std::thread::Builder::new().name(format!("fastpath {worker_index}"));
         fastpath_threads.push(

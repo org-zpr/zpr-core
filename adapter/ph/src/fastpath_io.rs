@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 pub struct FastpathIo {
     batch_io: BatchIo,
-    agent_tun: Arc<ZprTun>,
+    actor_tun: Arc<ZprTun>,
     substrate_socket: UdpSocket,
     pub requeue_outq: UnixDatagram,
     pub mgmt_substrate_outq: UnixDatagram,
@@ -24,7 +24,7 @@ impl FastpathIo {
     pub fn new(
         config: FastpathWorkerConfig,
         substrate_socket: UdpSocket,
-        agent_tun: Arc<ZprTun>,
+        actor_tun: Arc<ZprTun>,
         requeue_outq: UnixDatagram,
         maybe_mgmt_substrate_outq: Option<UnixDatagram>,
     ) -> Self {
@@ -41,7 +41,7 @@ impl FastpathIo {
 
         Self {
             batch_io: BatchIo::new(config.batch_size).unwrap(),
-            agent_tun,
+            actor_tun,
             substrate_socket,
             requeue_outq,
             mgmt_substrate_outq,
@@ -53,9 +53,9 @@ impl FastpathIo {
         self.substrate_socket.as_fd()
     }
 
-    /// Agent TUN FD for polling.
-    pub fn agent_tun_fd(&self) -> BorrowedFd<'_> {
-        self.agent_tun.as_fd()
+    /// Actor TUN FD for polling.
+    pub fn actor_tun_fd(&self) -> BorrowedFd<'_> {
+        self.actor_tun.as_fd()
     }
 
     /// Requeue socket FD for polling.
@@ -130,12 +130,12 @@ impl FastpathIo {
         self.process_substrate_egress_queue(worker);
     }
 
-    /// Process an input-ready notification on the agent TUN (agent output).
-    pub fn process_agent_tun_in(&mut self, worker: &mut FastpathWorker, pkts: &mut Vec<Packet>) {
+    /// Process an input-ready notification on the actor TUN (actor output).
+    pub fn process_actor_tun_in(&mut self, worker: &mut FastpathWorker, pkts: &mut Vec<Packet>) {
         let mut results = Vec::new(); // TODO: recycle
         let n = self
             .batch_io
-            .try_read_buf_batch(&self.agent_tun, pkts.iter_mut(), &mut results)
+            .try_read_buf_batch(&self.actor_tun, pkts.iter_mut(), &mut results)
             .unwrap();
 
         // return empty buffers to pool
@@ -172,7 +172,7 @@ impl FastpathIo {
             }
 
             worker.asm.counters[CounterType::OutPacksRec].increment();
-            worker.agent_output(pkt);
+            worker.actor_output(pkt);
         }
     }
 
@@ -196,7 +196,7 @@ impl FastpathIo {
 
             worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
             let pkt = Packet::new_with_existing_metadata(buf);
-            worker.agent_output_post_classify(pkt, /* allow_bind_request */ false);
+            worker.actor_output_post_classify(pkt, /* allow_bind_request */ false);
         }
     }
 
@@ -226,20 +226,20 @@ impl FastpathIo {
 
     /// Egress any queued packets, or drop if there is no space in the system queues.
     ///
-    /// After this call, the agent input queue will be empty, and the substrate egress queue
+    /// After this call, the actor input queue will be empty, and the substrate egress queue
     /// will contain only PRIORITY packets.
     pub fn process_out_queues(&mut self, worker: &mut FastpathWorker) {
-        self.process_agent_input_queue(worker);
+        self.process_actor_input_queue(worker);
         self.process_substrate_egress_queue(worker);
     }
 
-    /// Egress queued agent input packets only.
-    fn process_agent_input_queue(&mut self, worker: &mut FastpathWorker) {
+    /// Egress queued actor input packets only.
+    fn process_actor_input_queue(&mut self, worker: &mut FastpathWorker) {
         // Add TUN PI header.
         match TunPi::PI_SIZE {
             0 => (),
             sz => {
-                for pkt in &mut worker.agent_input_q {
+                for pkt in &mut worker.actor_input_q {
                     let proto = net_defs::ip_ethertype(net_defs::ip_version(pkt.body()));
                     let mut hdr = pkt.alloc_zeroed_headroom(sz);
                     TunPi::write_pi(
@@ -258,14 +258,14 @@ impl FastpathIo {
         let n = self
             .batch_io
             .try_write_batch(
-                &self.agent_tun.as_fd(),
-                worker.agent_input_q.iter().map(|pkt| pkt.body()),
+                &self.actor_tun.as_fd(),
+                worker.actor_input_q.iter().map(|pkt| pkt.body()),
                 &mut results,
             )
             .expect("unrecoverable TUN error");
 
         // Tally results.
-        let mut dropped = worker.agent_input_q.len() - n;
+        let mut dropped = worker.actor_input_q.len() - n;
         for res in results {
             match res {
                 Ok(_) => (),
@@ -274,13 +274,13 @@ impl FastpathIo {
             }
         }
         worker.asm.counters[CounterType::InPacksSent]
-            .increase_by((worker.agent_input_q.len() - dropped) as u64);
+            .increase_by((worker.actor_input_q.len() - dropped) as u64);
         worker.asm.counters[CounterType::InPacksDrop].increase_by(dropped as u64);
 
         // Return buffers to buffer stack.
         worker
             .buffers
-            .extend(worker.agent_input_q.drain(..).map(|pkt| pkt.destroy()));
+            .extend(worker.actor_input_q.drain(..).map(|pkt| pkt.destroy()));
     }
 
     /// Egress queued substrate egress packets only.

@@ -22,10 +22,10 @@ pub enum ZdpPacketType {
     VisaRetractResponse = 8,
     VisaDeacceptIndication = 9,
     VisaDeacceptAcknowledgement = 10,
-    BindAgentAddressRequest = 11,
-    BindAgentAddressResponse = 12,
-    UnbindAgentAddressRequest = 13,
-    UnbindAgentAddressResponse = 14,
+    BindActorAddressRequest = 11,
+    BindActorAddressResponse = 12,
+    UnbindActorAddressRequest = 13,
+    UnbindActorAddressResponse = 14,
     AuthenticationRequest = 15,
     SetPathMtu = 16,
     AuthenticationResponse = 17,
@@ -42,10 +42,10 @@ pub enum ZdpPacketType {
     HelloResponse = 137,
     ConfigurationRequest = 138,
     ConfigurationResponse = 139,
-    RegisterAgentAddressRequest = 140,
-    RegisterAgentAddressResponse = 142,
-    UnregisterAgentAddressRequest = 143,
-    UnregisterAgentAddressResponse = 144,
+    RegisterActorAddressRequest = 140,
+    RegisterActorAddressResponse = 142,
+    UnregisterActorAddressRequest = 143,
+    UnregisterActorAddressResponse = 144,
     Report = 145,
 }
 
@@ -65,15 +65,15 @@ impl ZdpPacketType {
             | Self::VisaUpdateResponse
             | Self::VisaRetractResponse
             | Self::VisaDeacceptAcknowledgement
-            | Self::BindAgentAddressResponse
-            | Self::UnbindAgentAddressResponse
+            | Self::BindActorAddressResponse
+            | Self::UnbindActorAddressResponse
             | Self::AuthenticationResponse
             | Self::EchoResponse
             | Self::TerminateLinkResponse
             | Self::HelloResponse
             | Self::ConfigurationResponse
-            | Self::RegisterAgentAddressResponse
-            | Self::UnregisterAgentAddressResponse => true,
+            | Self::RegisterActorAddressResponse
+            | Self::UnregisterActorAddressResponse => true,
             _ => false,
         }
     }
@@ -140,14 +140,14 @@ pub struct ZdpHelloResponseHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpRegisterAgentAddressRequestHeader {
+pub struct ZdpRegisterActorAddressRequestHeader {
     pub ip_version: zpr::L3Type,
     // Length of address determined by IP type
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpRegisterAgentAddressResponseHeader {
+pub struct ZdpRegisterActorAddressResponseHeader {
     pub status_code: ResponseCode,
     pub info_len: u8,
 }
@@ -186,18 +186,18 @@ pub struct ZdpTerminateLinkResponseHeader {
     pub data_len: u8,
 }
 
-/// Bind Agent Address request (§ 6.3.11)
+/// Bind Actor Address request (§ 6.3.11)
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpBindAgentAddressRequestHeader {
+pub struct ZdpBindActorAddressRequestHeader {
     pub ip_version: zpr::L3Type,
     pub compression_mode: zpr::CompressionMode,
 }
 
-/// Bind Agent Address response (§ 6.3.11)
+/// Bind Actor Address response (§ 6.3.11)
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpBindAgentAddressResponseHeader {
+pub struct ZdpBindActorAddressResponseHeader {
     pub status_code: ResponseCode,
     pub info_len: u8,
 }

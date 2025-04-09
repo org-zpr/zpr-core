@@ -259,8 +259,8 @@ impl Config {
         if let Some(tun_if) = &config.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
-        if let Some(agent_addr) = &config.zpr_addr {
-            self.zpr_addr.extend(&*agent_addr);
+        if let Some(actor_addr) = &config.zpr_addr {
+            self.zpr_addr.extend(&*actor_addr);
         }
         if let Some(debug) = &config.debug {
             self.debug.extend(debug.into_iter().cloned());
