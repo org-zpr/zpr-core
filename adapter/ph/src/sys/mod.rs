@@ -26,10 +26,6 @@ pub struct TunPi {
     pub proto: u16,
 }
 
-// The TunPi uses the linux flavor of packet info; the "proto" field is the ethertype.
-pub const TUN_PI_ETH_P_IP: u16 = 0x0800;
-pub const TUN_PI_ETH_P_IPV6: u16 = 0x86dd;
-
 impl TunPi {
     /// The size of a per-packet packet info structure.
     pub const PI_SIZE: usize = std::mem::size_of::<TunPiImpl>();

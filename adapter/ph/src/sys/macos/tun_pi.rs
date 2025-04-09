@@ -1,4 +1,4 @@
-use crate::sys::{TunPi, TUN_PI_ETH_P_IP, TUN_PI_ETH_P_IPV6};
+use crate::sys::TunPi;
 use libc::{AF_INET, AF_INET6};
 
 // TODO: I have not confirmed that the packet info FLAGS field is the same as linux.
@@ -8,6 +8,10 @@ const TUN_PKT_STRIP: u16 = 0x0001;
 // 16 bit versions of the libc constants.
 const PI_AF_INET: u16 = AF_INET as u16;
 const PI_AF_INET6: u16 = AF_INET6 as u16;
+
+// The TunPi uses the linux flavor of packet info; the "proto" field is the ethertype.
+const TUN_PI_ETH_P_IP: u16 = 0x0800;
+const TUN_PI_ETH_P_IPV6: u16 = 0x86dd;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
