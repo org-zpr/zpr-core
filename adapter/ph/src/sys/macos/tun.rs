@@ -1,22 +1,20 @@
+use nix::{ioctl_readwrite, ioctl_write_ptr};
+use std::ffi::CStr;
+use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::AsFd;
-use std::os::unix::io::{AsRawFd, OwnedFd, FromRawFd, BorrowedFd};
-use std::mem;
+use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
 use std::ptr;
-use std::ffi::CStr;
-use nix::{ioctl_readwrite, ioctl_write_ptr};
 
-use tracing::*;
 use thiserror::Error;
+use tracing::*;
 
 use crate::zprtun::{DEFAULT_TUN_MTU, ZPRNET_PREFIX_LEN};
 
 use libc::{
-    self, IFNAMSIZ, PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL,
-    AF_SYSTEM, AF_SYS_CONTROL, AF_INET, AF_INET6,
-    UTUN_OPT_IFNAME,
-    c_uint, c_int, c_char, socklen_t, sockaddr, c_void, ifreq,
-    sockaddr_in, sockaddr_in6, ctl_info,
+    self, c_char, c_int, c_uint, c_void, ctl_info, ifreq, sockaddr, sockaddr_in, sockaddr_in6,
+    socklen_t, AF_INET, AF_INET6, AF_SYSTEM, AF_SYS_CONTROL, IFNAMSIZ, PF_SYSTEM, SOCK_DGRAM,
+    SYSPROTO_CONTROL, UTUN_OPT_IFNAME,
 };
 
 // Not in libc. Copied from netinet6/in6_var.h
@@ -36,21 +34,16 @@ const ND6_INFINITE_LIFETIME: libc::c_uint = 0xffffffff;
 const IPV6_MMTU: u16 = 1280; // Minimum MTU for IPv6
 const IPV4_MMTU: u16 = 576; // Minimum MTU for IPv4
 
-
-
 /// Special macOS controller name for creating tun devices. (see net/if_utun.h)
 pub const UTUN_CONTROL_NAME: &str = "com.apple.net.utun_control";
 
 /// Size of the ifr_ifru union in the ifreq struct. (see net/if.h)
 const OVERWRITE_SIZE_IP4: usize = std::mem::size_of::<libc::__c_anonymous_ifr_ifru>();
 
-
 ioctl_readwrite!(ctliocginfo, b'N', 3, ctl_info); // Convert kernel controller name to kernel controller ID
 ioctl_write_ptr!(siocsifaddr, b'i', 12, ifreq); // set ifnet address (is this IPv4 only?)
 ioctl_write_ptr!(siocaifaddr_in6, b'i', 26, in6_aliasreq); // set ifnet address (ipv6)
 ioctl_write_ptr!(siocsifmtu, b'i', 52, ifreq); // set ifnet MTU
-
-
 
 #[derive(Debug, Error)]
 pub enum TunError {
@@ -83,13 +76,11 @@ pub struct Tun {
     name: String,
 }
 
-
 impl AsFd for Tun {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.tun_fd.as_fd()
     }
 }
-
 
 impl Tun {
     /// An address is required.
@@ -215,7 +206,6 @@ impl Tun {
         Ok(req)
     }
 
-
     /// Set the address of the TUN device.  `prefix_len` is the prefix length for IPv6 and is ignored for IPv4.
     fn set_address(&mut self, addr: IpAddr, prefix_len: usize) -> Result<(), TunError> {
         match addr {
@@ -267,7 +257,6 @@ impl Tun {
         }
     }
 
-
     fn set_mtu(&mut self, value: u16) -> Result<(), TunError> {
         unsafe {
             let mut req = self.request_v4()?;
@@ -278,10 +267,7 @@ impl Tun {
             Ok(())
         }
     }
-
 }
-
-
 
 #[derive(Debug)]
 pub struct Builder {
@@ -291,7 +277,6 @@ pub struct Builder {
     address: IpAddr, // required
     ipv6: bool,
 }
-
 
 impl Builder {
     /// Create a new builder, which is used to configure the TUN device.
@@ -312,32 +297,29 @@ impl Builder {
         self
     }
 
+    /// Will use a default setting if not supplied.
     #[allow(dead_code)]
     pub fn with_mtu(&mut self, mtu: u16) -> &mut Self {
         self.mtu = Some(mtu);
         self
     }
 
-    /// Set IPv6 prefix len (0<=prefix_len<=128)
+    /// Set IPv6 prefix len (0<=prefix_len<=128). Will use a default setting is not supplied.
     #[allow(dead_code)]
     pub fn with_prefix_len(&mut self, prefix_len: usize) -> &mut Self {
         self.prefix_len = Some(prefix_len);
         self
     }
-
 }
-
-
 
 /// Fill the `addr` with the address particulars. `size` is the size of the
 /// sockaddr structure to be filled (used as our upper bound for the copy).
-pub unsafe fn ipv4addr_to_sockaddr (
+pub unsafe fn ipv4addr_to_sockaddr(
     src_addr: Ipv4Addr,
     src_port: u16,
     addr: &mut libc::sockaddr,
     size: usize,
-)
-{
+) {
     let mut s_addr: sockaddr_in = unsafe { std::mem::zeroed() };
     s_addr.sin_len = std::mem::size_of::<libc::sockaddr_in>() as u8;
     s_addr.sin_family = libc::AF_INET as libc::sa_family_t;
@@ -348,20 +330,19 @@ pub unsafe fn ipv4addr_to_sockaddr (
         std::ptr::copy_nonoverlapping(
             &s_addr as *const _ as *const libc::c_void,
             addr as *mut _ as *mut libc::c_void,
-            size.min(std::mem::size_of::<sockaddr_in>()));
+            size.min(std::mem::size_of::<sockaddr_in>()),
+        );
     };
 }
 
-
 /// Fill the `addr` with the address particulars. `size` is the size of the
 /// sockaddr structure to be filled (used as our upper bound for the copy).
-pub unsafe fn ipv6addr_to_sockaddr (
+pub unsafe fn ipv6addr_to_sockaddr(
     src_addr: Ipv6Addr,
     src_port: u16,
     addr: &mut libc::sockaddr_in6,
     size: usize,
-)
-{
+) {
     let mut s_addr: sockaddr_in6 = unsafe { std::mem::zeroed() };
     s_addr.sin6_len = std::mem::size_of::<libc::sockaddr_in6>() as u8;
     s_addr.sin6_family = libc::AF_INET6 as libc::sa_family_t;
@@ -373,9 +354,7 @@ pub unsafe fn ipv6addr_to_sockaddr (
         std::ptr::copy_nonoverlapping(
             &s_addr as *const _ as *const libc::c_void,
             addr as *mut _ as *mut libc::c_void,
-            size.min(std::mem::size_of::<sockaddr_in6>()));
+            size.min(std::mem::size_of::<sockaddr_in6>()),
+        );
     };
 }
-
-
-

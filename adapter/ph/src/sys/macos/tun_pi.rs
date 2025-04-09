@@ -1,6 +1,5 @@
-
 use crate::sys::{TunPi, TUN_PI_ETH_P_IP, TUN_PI_ETH_P_IPV6};
-use libc::{AF_INET6, AF_INET};
+use libc::{AF_INET, AF_INET6};
 
 // TODO: I have not confirmed that the packet info FLAGS field is the same as linux.
 // Assuming it is for now.
@@ -9,7 +8,6 @@ const TUN_PKT_STRIP: u16 = 0x0001;
 // 16 bit versions of the libc constants.
 const PI_AF_INET: u16 = AF_INET as u16;
 const PI_AF_INET6: u16 = AF_INET6 as u16;
-
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -47,8 +45,7 @@ impl From<TunPi> for TunPiImpl {
                 PI_AF_INET6.to_be_bytes()
             } else {
                 panic!("PI write expects IPv4 or IPv6 packet");
-            }
+            },
         }
     }
 }
-

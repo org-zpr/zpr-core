@@ -1,11 +1,10 @@
 use std::net::IpAddr;
 use std::os::fd::{AsFd, BorrowedFd};
 
-use crate::zprtun::ZprTunError;
 use crate::sys::macos::tun;
+use crate::zprtun::ZprTunError;
 
 pub struct ZprTun(tun::Tun);
-
 
 impl From<tun::TunError> for ZprTunError {
     fn from(e: tun::TunError) -> Self {
@@ -22,7 +21,7 @@ impl ZprTun {
         concurrency: usize,
         address: Option<IpAddr>,
     ) -> std::result::Result<Vec<Self>, ZprTunError> {
-        if concurrency <= 0 || concurrency > 1 {
+        if concurrency != 1 {
             return Err(ZprTunError::PlatformError(String::from(
                 "on macos concurrency (queues) must be 1",
             )));
@@ -30,7 +29,6 @@ impl ZprTun {
         let addr = address.ok_or_else(|| {
             ZprTunError::PlatformError(String::from("address is required on macos"))
         })?;
-
         let mut bldr = tun::Tun::builder(addr);
         if let Some(name) = ifname {
             bldr.with_tun_name(&name);
@@ -50,4 +48,3 @@ impl AsFd for ZprTun {
         self.0.as_fd()
     }
 }
-
