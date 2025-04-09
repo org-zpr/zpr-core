@@ -40,6 +40,8 @@ const DEFAULT_WORKER_CONCURRENCY: usize = 1;
 pub const DEFAULT_KEEP_ALIVE_PERIOD: std::time::Duration = std::time::Duration::from_secs(3);
 pub const DEFAULT_KEEP_ALIVE_RETRIES: usize = 3;
 
+pub const DEFAULT_LINK_RESTART_HOLDDOWN: std::time::Duration = std::time::Duration::from_secs(5);
+
 // Little trait to make creating "missing argument" errors easier.
 trait ArgError {
     fn arg_missing(&self) -> ArgsError;
@@ -257,8 +259,8 @@ impl Config {
         if let Some(tun_if) = &config.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
-        if let Some(agent_addr) = &config.agent_addr {
-            self.zpr_addr.extend(&*agent_addr);
+        if let Some(actor_addr) = &config.zpr_addr {
+            self.zpr_addr.extend(&*actor_addr);
         }
         if let Some(debug) = &config.debug {
             self.debug.extend(debug.into_iter().cloned());
@@ -359,7 +361,9 @@ impl Config {
         if let Some(tun_if) = &common.tun_if {
             self.tun_if = Some(tun_if.clone());
         }
-        self.zpr_addr.extend(&common.zpr_addr);
+        if let Some(addrs) = &common.zpr_addr {
+            self.zpr_addr.extend(addrs);
+        }
 
         self.debug.extend(common.debug.iter().cloned());
         self.quiet.extend(common.quiet.iter().cloned());
@@ -415,7 +419,7 @@ pub struct GlobalConfigSection {
     pub certificate_file: Option<PathBuf>,
     pub private_key_file: Option<PathBuf>,
     pub tun_if: Option<String>,
-    pub agent_addr: Option<Vec<IpAddr>>,
+    pub zpr_addr: Option<Vec<IpAddr>>,
     pub debug: Option<Vec<String>>,
     pub quiet: Option<Vec<String>>,
 }

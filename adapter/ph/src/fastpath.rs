@@ -5,7 +5,6 @@
 
 use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
-use crate::batch_io::BatchIo;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters::CounterType;
@@ -16,16 +15,13 @@ use crate::logging::targets::DATAPATH;
 use crate::net_defs;
 use crate::packet::{Packet, PacketBuffer};
 use crate::queues::{AdapterManager, MgmtDispatch, TryEnqueueError};
-use crate::sys::{TunPi, ZprTun};
 use crate::two_way_queue;
 use crate::zdp;
 use crate::zdp_ll;
 use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
-use std::io::ErrorKind;
-use std::net::UdpSocket;
-use std::os::fd::AsFd;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::*;
@@ -34,29 +30,21 @@ use zpr;
 use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
 
-/// Drop a heap-allocated packet and count the drop with the given reason.
-pub fn drop_and_count_heap(asm: &Assembly, pkt: Packet, reason: impl Into<CounterType>) {
-    let reason = reason.into();
-    debug!(target: DATAPATH, "dropping packet because {reason}");
-    drop(pkt);
-    asm.counters[reason].increment();
-}
-
-/// Simple function used on an adapter to forward agent packets to the the tether and vice-versa.
+/// Simple function used on an adapter to forward actor packets to the the tether and vice-versa.
 const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {
     // this optimization is checked by the static asserts below
     // this allows us to avoid an unpredictable branch on every packet
     (ingress_link_id % 2) + 1
 }
 
-const _: () = assert!(adapter_next_hop_link(zpr::LOCAL_AGENT_LINK_ID) == zpr::DOCK_LINK_ID);
-const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::LOCAL_AGENT_LINK_ID);
+const _: () = assert!(adapter_next_hop_link(zpr::LOCAL_ACTOR_LINK_ID) == zpr::DOCK_LINK_ID);
+const _: () = assert!(adapter_next_hop_link(zpr::DOCK_LINK_ID) == zpr::LOCAL_ACTOR_LINK_ID);
 
 #[cfg(debug_assertions)]
 /// This table is used to track whether a flow ever switches from one worker
 /// to another (indicating potential for out-of-order packets) -- meaning
 /// our packet steerer isn't steering correctly.  This is used only in debug mode.
-const AGENT_PACKET_FLOW_TRACKER: std::sync::LazyLock<
+const ACTOR_PACKET_FLOW_TRACKER: std::sync::LazyLock<
     dashmap::DashMap<(zpr::LinkId, zpr::StreamId), usize>,
 > = std::sync::LazyLock::new(|| dashmap::DashMap::new());
 
@@ -76,29 +64,18 @@ pub struct FastpathWorker {
     pub adapter_manager: AdapterManager,
     pub mgmt_dispatch: MgmtDispatch,
 
-    pub agent_input_q: Vec<Packet>,
+    pub actor_input_q: Vec<Packet>,
     pub substrate_egress_q: Vec<(Packet, std::net::SocketAddr)>,
-
-    pub batch_io: BatchIo,
-    pub agent_input_tun: Arc<ZprTun>,
-    pub substrate_egress_socket: Arc<UdpSocket>,
 }
 
 impl FastpathWorker {
-    pub fn new(
-        config: FastpathWorkerConfig,
-        worker_index: usize,
-        asm: Arc<Assembly>,
-        agent_input_tun: Arc<ZprTun>,
-    ) -> Self {
+    pub fn new(config: FastpathWorkerConfig, worker_index: usize, asm: Arc<Assembly>) -> Self {
         let buffers =
             vec![Box::new([0u8; config::PACKET_BUFFER_SIZE]) as Box<[_]>; config.buffer_count];
 
         let return_q = two_way_queue::ReturnQueue::new();
         let adapter_manager = asm.adapter_manager_factory.make(&return_q);
         let mgmt_dispatch = asm.mgmt_dispatch_factory.make(&return_q);
-
-        let substrate_egress_socket = asm.substrate_egress.sockets[worker_index].clone(); // TEMP HACK
 
         Self {
             config,
@@ -110,12 +87,8 @@ impl FastpathWorker {
             adapter_manager,
             mgmt_dispatch,
 
-            agent_input_q: Vec::with_capacity(config.buffer_count),
+            actor_input_q: Vec::with_capacity(config.buffer_count),
             substrate_egress_q: Vec::with_capacity(config.buffer_count),
-
-            batch_io: BatchIo::new(config.batch_size).unwrap(),
-            agent_input_tun,
-            substrate_egress_socket,
         }
     }
 
@@ -140,7 +113,7 @@ impl FastpathWorker {
         nbufs
     }
 
-    /// Process packets ingressing from the specified address.
+    /// Process packet ingressing from the specified address.
     pub fn substrate_ingress(&mut self, peer_sa: &zpr::SubstrateAddr, mut pkt: Packet) {
         pkt.metadata_mut().ingress_link_id =
             self.asm.peer_table.lookup_peer(peer_sa).unwrap_or_zero();
@@ -295,11 +268,11 @@ impl FastpathWorker {
         let ingress_stream_id: zpr::StreamId = per_flow_hdr.stream_id.into();
         pkt.metadata_mut().ingress_stream_id = ingress_stream_id;
 
-        // in debug builds, track which worker this agent traffic came in on
+        // in debug builds, track which worker this actor traffic came in on
         // ensure a given flow isn't hopping between workers (potentially
         // resulting in out-of-order packets)
         #[cfg(debug_assertions)]
-        if let Some(old_index) = AGENT_PACKET_FLOW_TRACKER.insert(
+        if let Some(old_index) = ACTOR_PACKET_FLOW_TRACKER.insert(
             (
                 pkt.metadata().ingress_link_id,
                 pkt.metadata().ingress_stream_id,
@@ -307,17 +280,17 @@ impl FastpathWorker {
             self.worker_index,
         ) {
             if old_index != self.worker_index {
-                self.asm.counters[CounterType::AgentPacketsOutOfOrder].increment();
+                self.asm.counters[CounterType::ActorPacketsOutOfOrder].increment();
             }
         }
 
         self.forward(pkt);
     }
 
-    /// Process uncompressed packet from the agent.
+    /// Process uncompressed packet from the actor.
     /// The packet will be compressed, or trigger a Bind request.
-    pub fn agent_output(&mut self, mut pkt: Packet) {
-        pkt.metadata_mut().ingress_link_id = zpr::LOCAL_AGENT_LINK_ID;
+    pub fn actor_output(&mut self, mut pkt: Packet) {
+        pkt.metadata_mut().ingress_link_id = zpr::LOCAL_ACTOR_LINK_ID;
         pkt.metadata_mut().ingress_lane_id = self.worker_index as u8;
 
         // determine five tuple
@@ -345,16 +318,16 @@ impl FastpathWorker {
             }
         }
 
-        self.agent_output_post_classify(pkt, /* allow_bind_request */ true);
+        self.actor_output_post_classify(pkt, /* allow_bind_request */ true);
     }
 
-    /// Post-classification portion of `agent_output` function.  Used for
+    /// Post-classification portion of `actor_output` function.  Used for
     /// re-injecting already-classified packets e.g.  which were held
     /// awaiting bind.  `allow_bind_request` should be `true` for "real"
     /// packets; `false` for packets re-injected from mgmt plane after
     /// fulfilling a bind request (so as to prevent the theoretical
     /// possibility of a packet loop).
-    pub fn agent_output_post_classify(&mut self, mut pkt: Packet, allow_bind_request: bool) {
+    pub fn actor_output_post_classify(&mut self, mut pkt: Packet, allow_bind_request: bool) {
         // note: this weird two-phase structure is needed to appease the borrow checker
         let forward = {
             // lookup five tuple in ALT
@@ -369,7 +342,7 @@ impl FastpathWorker {
 
                 // issue bind request
                 match self.adapter_manager.try_request_tether_id(pkt) {
-                    Ok(()) => self.asm.counters[CounterType::AgentSlowpath].increment(),
+                    Ok(()) => self.asm.counters[CounterType::ActorSlowpath].increment(),
                     Err(TryEnqueueError::Full(pkt)) => {
                         self.drop_and_count(pkt, CounterType::QueueBackpressure)
                     }
@@ -453,8 +426,8 @@ impl FastpathWorker {
             }
         }
 
-        if egress_link_id == zpr::LOCAL_AGENT_LINK_ID {
-            self.agent_input(egress_stream_id, pkt);
+        if egress_link_id == zpr::LOCAL_ACTOR_LINK_ID {
+            self.actor_input(egress_stream_id, pkt);
         } else {
             let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
             per_flow_hdr.stream_id = egress_stream_id.into();
@@ -462,13 +435,15 @@ impl FastpathWorker {
             let base_hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
             base_hdr.packet_type = zdp::ZdpPacketType::TransitPacket;
 
-            self.substrate_egress(egress_link_id, pkt);
+            pkt.metadata_mut().egress_link_id = egress_link_id;
+
+            self.substrate_egress(pkt);
         }
     }
 
-    /// Send a compressed agent packet to the agent.
+    /// Send a compressed actor packet to the actor.
     /// The packet will be decompressed according to the given stream ID.
-    pub fn agent_input(
+    pub fn actor_input(
         &mut self,
         tether_id: zpr::StreamId, // TODO: should we keep this in metadata? or per-flow header?
         mut pkt: Packet,
@@ -507,13 +482,15 @@ impl FastpathWorker {
             return self.drop_and_count(pkt, CounterType::MicvFailure);
         }
 
-        // queue decapsulated packet for send to agent
-        self.agent_input_q.push(pkt);
+        // queue decapsulated packet for send to actor
+        self.actor_input_q.push(pkt);
     }
 
     /// Egress a ZDP packet on the given link ID, according to the given ZPI.
     /// The ZPI header will be added to the packet.
-    pub fn substrate_egress(&mut self, link_id: zpr::LinkId, mut pkt: Packet) {
+    pub fn substrate_egress(&mut self, mut pkt: Packet) {
+        let link_id = pkt.metadata().egress_link_id;
+
         let dest_sa = match substrate_egress_common(&self.asm, link_id, &mut pkt) {
             Ok(Some(dest_sa)) => dest_sa,
             Ok(None) => {
@@ -521,7 +498,7 @@ impl FastpathWorker {
                 return;
             }
             Err(err) => {
-                error!(target: DATAPATH, "egress: link {}: encryption error: {}", link_id, err);
+                error!(target: DATAPATH, "egress: link {link_id}: encryption error: {err}");
                 self.drop_and_count(pkt, CounterType::EncryptionFailure);
                 return;
             }
@@ -531,96 +508,8 @@ impl FastpathWorker {
         self.substrate_egress_q.push((pkt, dest_sa));
     }
 
-    pub fn process_out_queues(&mut self) {
-        self.process_agent_input_queue();
-        self.process_substrate_egress_queue();
-    }
-
-    fn process_agent_input_queue(&mut self) {
-        // temp hack until we move ZprTun to be non-Tokio
-        //let tun_fd = unsafe { BorrowedFd::borrow_raw(self.agent_input_tun.as_raw_fd()) };
-        let tun_fd = self.agent_input_tun.as_fd();
-
-        // Add TUN PI header.
-        match TunPi::PI_SIZE {
-            0 => (),
-            sz => {
-                for pkt in &mut self.agent_input_q {
-                    let proto = net_defs::ip_ethertype(net_defs::ip_version(pkt.body()));
-                    let mut hdr = pkt.alloc_zeroed_headroom(sz);
-                    TunPi::write_pi(
-                        &mut hdr,
-                        TunPi {
-                            strip: false,
-                            proto,
-                        },
-                    );
-                }
-            }
-        }
-
-        // (Try to) send packets.
-        let mut results = Vec::new(); // TODO: recycle
-        let n = self
-            .batch_io
-            .try_write_batch(
-                &tun_fd,
-                self.agent_input_q.iter().map(|pkt| pkt.body()),
-                &mut results,
-            )
-            .expect("unrecoverable TUN error");
-
-        // Tally results.
-        let mut dropped = self.agent_input_q.len() - n;
-        for res in results {
-            match res {
-                Ok(_) => (),
-                Err(err) if err.kind() == ErrorKind::WouldBlock => dropped += 1,
-                Err(err) => panic!("unrecoverable TUN error: {}", err),
-            }
-        }
-        self.asm.counters[CounterType::InPacksSent]
-            .increase_by((self.agent_input_q.len() - dropped) as u64);
-        self.asm.counters[CounterType::InPacksDrop].increase_by(dropped as u64);
-
-        // Return buffers to buffer stack.
-        self.buffers
-            .extend(self.agent_input_q.drain(..).map(|pkt| pkt.destroy()));
-    }
-
-    fn process_substrate_egress_queue(&mut self) {
-        // (Try to) send packets.
-        let mut results = Vec::new(); // TODO: recycle
-        let n = self
-            .batch_io
-            .try_send_to_batch(
-                &self.substrate_egress_socket,
-                self.substrate_egress_q
-                    .iter()
-                    .map(|(pkt, dest)| (pkt.body(), *dest)),
-                &mut results,
-            )
-            .expect("unrecoverable I/O error");
-
-        // Tally results.
-        let mut dropped = self.substrate_egress_q.len() - n;
-        for res in results {
-            match res {
-                Ok(_) => (),
-                Err(err) if err.kind() == ErrorKind::WouldBlock => dropped += 1,
-                Err(err) => panic!("unrecoverable I/O error: {}", err),
-            }
-        }
-        self.asm.counters[CounterType::OutPacksSent]
-            .increase_by((self.substrate_egress_q.len() - dropped) as u64);
-        self.asm.counters[CounterType::OutPacksDrop].increase_by(dropped as u64);
-
-        // Return buffers to buffer stack.
-        self.buffers.extend(
-            self.substrate_egress_q
-                .drain(..)
-                .map(|(pkt, _)| pkt.destroy()),
-        );
+    pub fn substrate_egress_packets_queued(&self) -> bool {
+        !self.substrate_egress_q.is_empty()
     }
 }
 
@@ -899,28 +788,19 @@ fn substrate_egress_common(
         }
     }
 
-    Ok(Some(peer_state.substrate_addr))
+    let mut dest_sa = peer_state.substrate_addr;
+
+    // Set substrate flowinfo from our flowhash.
+    set_flowinfo(&mut dest_sa, pkt.flowhash());
+
+    Ok(Some(dest_sa))
 }
 
-/// A blocking/async version of `substrate_egress()`, for management path use.
-/// Useful to ensure fairness under high load.
-pub async fn substrate_egress_blocking(asm: &Assembly, link_id: zpr::LinkId, mut pkt: Packet) {
-    let dest_sa = match substrate_egress_common(asm, link_id, &mut pkt) {
-        Ok(Some(dest_sa)) => dest_sa,
-        Ok(None) => {
-            drop_and_count_heap(asm, pkt, CounterType::PeerRemoved);
-            return;
-        }
-        Err(err) => {
-            error!(target: DATAPATH, "egress: link {}: encryption error: {}", link_id, err);
-            drop_and_count_heap(asm, pkt, CounterType::EncryptionFailure);
-            return;
-        }
-    };
-
-    match asm.substrate_egress.enqueue_packet(&pkt, dest_sa).await {
-        Ok(()) => drop_and_count_heap(asm, pkt, CounterType::OutPacksSent),
-        Err(()) => drop_and_count_heap(asm, pkt, CounterType::OutPacksErr),
+/// If substrate supports flow info, set it to the specified value.
+fn set_flowinfo(substrate_addr: &mut zpr::SubstrateAddr, flowinfo: u32) {
+    match substrate_addr {
+        SocketAddr::V4(_) => (),
+        SocketAddr::V6(sa) => sa.set_flowinfo(flowinfo),
     }
 }
 

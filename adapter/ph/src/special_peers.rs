@@ -35,7 +35,7 @@ pub fn default_policy_lookup(
 ) -> Option<SpecialPeerName> {
     match (ingress_link_id.get(), five_tuple) {
         (
-            zpr::LOCAL_AGENT_LINK_ID,
+            zpr::LOCAL_ACTOR_LINK_ID,
             FiveTuple {
                 // FIXME: total hack
                 dst_address: VISA_SERVICE_IP_ADDRESS,

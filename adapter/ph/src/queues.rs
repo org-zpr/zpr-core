@@ -1,14 +1,12 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
 
-use crate::packet::{Packet, PacketBuffer};
+use crate::packet::{self, Packet, PacketBuffer};
 use crate::test_packet::*;
 use crate::two_way_queue;
 use bytes::Buf;
 use std::io::ErrorKind;
-use std::net::{SocketAddr, UdpSocket};
 use std::os::unix::net::UnixDatagram as StdUnixDatagram;
 use std::result::Result;
-use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::net::UnixDatagram as TokioUnixDatagram;
 use tokio::sync::mpsc;
@@ -70,68 +68,37 @@ impl MgmtProcessor {
     }
 }
 
-/// SubstrateEgress is responsible for sending encapsulated agent packets to the dock.
-pub struct SubstrateEgress {
-    pub sockets: Box<[Arc<UdpSocket>]>,
+/// MgmtSubstrateEgress allows mgmt to inject ZDP packets into the substrate egress fastpath.
+pub struct MgmtSubstrateEgress {
+    socket: TokioUnixDatagram,
 }
 
-impl SubstrateEgress {
+impl MgmtSubstrateEgress {
     /// Sockets must be marked non-blocking by caller.
-    pub fn new(sockets: impl IntoIterator<Item = Arc<UdpSocket>>) -> Self {
-        Self {
-            sockets: sockets.into_iter().collect(),
-        }
+    pub fn new(socket: TokioUnixDatagram) -> Self {
+        Self { socket }
     }
 
-    pub async fn enqueue_packet(
-        &self,
-        packet: &Packet,
-        dest_sa: zpr::SubstrateAddr,
-    ) -> Result<(), ()> {
-        let (socket, dest_sockaddr) = self.select_socket_and_set_flowinfo(packet, dest_sa);
-
-        // FIXME: make this actually blocking
-        match socket.send_to(packet.body(), dest_sockaddr) {
-            Ok(_) => Ok(()),
-
-            Err(err) => {
-                match err.kind() {
-                    ErrorKind::InvalidInput | ErrorKind::Unsupported => {
-                        panic!("unrecoverable I/O error: {}", err)
-                    }
-
-                    // most other network errors are temporary; return packet to caller
-                    // TODO: it would be nice to report to the user _why_ packets aren't moving;
-                    // this depends on <https://github.com/rust-lang/rust/issues/86442> though
-                    _ => Err(()),
-                }
-            }
-        }
-    }
-
-    fn select_socket_and_set_flowinfo(
-        &self,
-        packet: &Packet,
-        mut dest_sa: zpr::SubstrateAddr,
-    ) -> (&UdpSocket, std::net::SocketAddr) {
-        match &mut dest_sa {
-            SocketAddr::V4(_) => (),
-            SocketAddr::V6(dest_sa) => dest_sa.set_flowinfo(packet.flowhash()),
-        }
-
-        (
-            &self.sockets[packet.flowhash() as usize % self.sockets.len()],
-            dest_sa,
-        )
+    // Enqueue the given packet to be egressed on the substrate.
+    // Blocks until the packet is in the hands of the fastpath.
+    // The packet is marked PRIORITY, which instructs the fastpath to
+    // ensure it eventually gets queued with the OS.
+    pub async fn enqueue_packet(&self, link_id: zpr::LinkId, mut packet: Packet) {
+        packet.metadata_mut().egress_link_id = link_id;
+        packet.metadata_mut().flags |= packet::flags::PRIORITY;
+        self.socket
+            .send(packet.buffer())
+            .await
+            .expect("unrecoverable I/O error");
     }
 }
 
-/// Used for requeueing agent output packets from mgmt.
-pub struct AgentOutputRequeue {
+/// Used for requeueing actor output packets from mgmt.
+pub struct ActorOutputRequeue {
     sockets: Box<[TokioUnixDatagram]>,
 }
 
-impl AgentOutputRequeue {
+impl ActorOutputRequeue {
     pub fn new(sockets: impl IntoIterator<Item = TokioUnixDatagram>) -> Self {
         Self {
             sockets: sockets.into_iter().collect(),

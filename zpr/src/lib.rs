@@ -32,8 +32,8 @@ pub type LinkId = u32;
 /// Link ID used to refer to a packet not associated with a link (typically a link setup packet).
 pub const LINK_ID_UNKNOWN: LinkId = 0;
 
-/// Link ID used to refer to a node or adapter's local agent.
-pub const LOCAL_AGENT_LINK_ID: LinkId = 1;
+/// Link ID used to refer to a node or adapter's local actor.
+pub const LOCAL_ACTOR_LINK_ID: LinkId = 1;
 
 /// Link ID used on an adapter to refer to the dock to which it's connected.
 pub const DOCK_LINK_ID: LinkId = 2;
@@ -69,7 +69,7 @@ pub const KM_ID_IKEV2: KmId = 1;
 /// Key Management Identifier indicating Noise algorithm.
 pub const KM_ID_NOISE: KmId = 2;
 
-/// ZPR agent packet L3 type (RFC 6.5 § 6.3.11)
+/// ZPR actor packet L3 type (RFC 6.5 § 6.3.11)
 #[open_enum]
 #[derive(Copy, Clone, Debug, FromBytes, Hash, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(u8)]
@@ -88,7 +88,7 @@ impl std::fmt::Display for L3Type {
     }
 }
 
-/// Bitmask indicating how an agent packet is compressed.
+/// Bitmask indicating how an actor packet is compressed.
 pub type CompressionMode = u8;
 
 /// CompressionMode constants (RFC 6.5 § 6.3.11)

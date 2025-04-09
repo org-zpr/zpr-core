@@ -16,6 +16,7 @@ use std::num::NonZero;
 use std::sync::atomic::{self, Ordering};
 use std::sync::Mutex;
 use std::sync::MutexGuard;
+use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
@@ -110,9 +111,12 @@ pub struct PeerTable {
 
 pub type PeerTableEntryGuard<'a> = RcuCslabEntryGuard<'a, PeerState>;
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 pub enum PeerInsertError {
+    #[error("The peer table is full")]
     TableFull,
+    #[error("Failed to start link with error: {0}")]
+    FailedToStart(String),
 }
 
 #[derive(Debug)]

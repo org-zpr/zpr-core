@@ -214,7 +214,7 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                 2 => match vec_message[1].parse::<u32>() {
                     Ok(link_id) => {
                         buf_writer
-                            .write_all(reset_link(&asm.clone(), link_id).as_bytes())
+                            .write_all(reset_link(&asm.clone(), link_id).await.as_bytes())
                             .await?;
                         buf_writer.write_all("OK\n".as_bytes()).await?
                     }
@@ -511,11 +511,8 @@ fn show_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
     }
 }
 
-fn configure_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
-    match asm.process_link_state_event(link_id, LinkEvent::Configure) {
-        Ok(_) => format!("Link {} configured\n", link_id),
-        Err(e) => format!("Failed to configure link {}: {:?}\n", link_id, e),
-    }
+fn configure_link(_asm: &Arc<Assembly>, _link_id: LinkId) -> String {
+    format!("Command currently unsupported\n")
 }
 
 fn start_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
@@ -532,9 +529,7 @@ fn stop_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
     }
 }
 
-fn reset_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
-    match asm.process_link_state_event(link_id, LinkEvent::Reset) {
-        Ok(_) => format!("Link {} reset\n", link_id),
-        Err(e) => format!("Failed to reset link {}: {:?}\n", link_id, e),
-    }
+async fn reset_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
+    asm.reset_peer(link_id).await;
+    format!("Link {} reset\n", link_id)
 }

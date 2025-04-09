@@ -75,7 +75,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
 
     let bind_result = match asm.ph_mode {
         PhMode::Adapter => {
-            mgmt::requests::send_bind_agent_address_request(
+            mgmt::requests::send_bind_actor_address_request(
                 asm,
                 dock_link_id,
                 compression_mode,
@@ -85,16 +85,16 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
             .await
         }
 
-        PhMode::Node => mgmt::dock::bind_agent_address(
+        PhMode::Node => mgmt::dock::bind_actor_address(
             asm,
-            NonZero::new(zpr::LOCAL_AGENT_LINK_ID).unwrap(),
+            NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap(),
             compression_mode,
             five_tuple,
             packet_body,
         )
         .await
         .map_err(|err| {
-            mgmt::requests::BindAgentAddressError::BindAgentAddressError(err.to_string().into())
+            mgmt::requests::BindActorAddressError::BindActorAddressError(err.to_string().into())
         }),
     };
 
@@ -125,7 +125,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
             };
 
             // now send out initial packet
-            match asm.agent_output_requeue.try_enqueue_packet(initial_packet) {
+            match asm.actor_output_requeue.try_enqueue_packet(initial_packet) {
                 Ok(()) => (),
                 Err(TryEnqueueError::Full(_pkt)) => {
                     debug!(target: FLOW_MGMT, "Requeue backpressure on bind of {five_tuple}, dropping initial packet");

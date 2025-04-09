@@ -26,7 +26,7 @@ pub enum AltEntry {
     Pending(Packet),
 }
 
-pub struct AgentLookupTable {
+pub struct ActorLookupTable {
     table: DashMap<FiveTuple, AltEntry>,
 }
 
@@ -40,7 +40,7 @@ impl std::ops::Deref for AltEntryGuard<'_> {
     }
 }
 
-impl AgentLookupTable {
+impl ActorLookupTable {
     pub fn new() -> Self {
         Self {
             table: DashMap::new(),

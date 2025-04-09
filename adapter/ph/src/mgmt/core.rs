@@ -6,7 +6,6 @@
 use crate::assembly::Assembly;
 use crate::config;
 use crate::counters::CounterType;
-use crate::fastpath;
 use crate::packet::Packet;
 use crate::zdp;
 use std::time::Duration;
@@ -117,7 +116,9 @@ async fn send_mgmt_helper(
         hdr.sequence_number = (sequence_number as u16).into();
     }
 
-    fastpath::substrate_egress_blocking(asm, link_id, packet).await;
+    asm.mgmt_substrate_egress
+        .enqueue_packet(link_id, packet)
+        .await;
 }
 
 /// Sender function for non-per flow request management packet.

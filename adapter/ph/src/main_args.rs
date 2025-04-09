@@ -83,7 +83,7 @@ pub struct CommonArgs {
 
     /// ZPR address (no port) of the adapter (must match your TUN address)
     #[arg(long, short = 'z')]
-    pub zpr_addr: Vec<IpAddr>,
+    pub zpr_addr: Option<Vec<IpAddr>>,
 
     /// Enable debug logging for specified targets
     #[arg(long, short = 'd', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]

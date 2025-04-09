@@ -69,8 +69,8 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
         match base_hdr.packet_type {
             ZdpPacketType::TransitPacket => panic!("unexpected Transit Packet in management path"),
 
-            ZdpPacketType::BindAgentAddressRequest => {
-                handlers::handle_bind_agent_address_request(asm, seq_num, pkt).await
+            ZdpPacketType::BindActorAddressRequest => {
+                handlers::handle_bind_actor_address_request(asm, seq_num, pkt).await
             }
 
             packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),
@@ -101,12 +101,12 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                 handlers::handle_hello_response(asm, seq_num, pkt).await
             }
 
-            ZdpPacketType::RegisterAgentAddressRequest => {
-                handlers::handle_register_agent_address_request(asm, seq_num, pkt).await
+            ZdpPacketType::RegisterActorAddressRequest => {
+                handlers::handle_register_actor_address_request(asm, seq_num, pkt).await
             }
 
-            ZdpPacketType::RegisterAgentAddressResponse => {
-                handlers::handle_register_agent_address_response(asm, seq_num, pkt).await
+            ZdpPacketType::RegisterActorAddressResponse => {
+                handlers::handle_register_actor_address_response(asm, seq_num, pkt).await
             }
 
             packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),

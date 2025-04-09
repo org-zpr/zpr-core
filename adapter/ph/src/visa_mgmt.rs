@@ -90,7 +90,7 @@ fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateE
 
     let Some(sa) = peer_state.get_established_transport_association() else {
         return Err(LinkStateError::InvalidOperation(
-            "Attempted to Register Agent Address when SA not established".to_owned(),
+            "Attempted to Register Actor Address when SA not established".to_owned(),
         ));
     };
 
@@ -114,22 +114,19 @@ fn get_common_name(asm: &Arc<Assembly>, id: LinkId) -> Result<String, LinkStateE
     Ok(cn)
 }
 
-pub fn agent_disconnect(asm: &Arc<Assembly>, addr: IpAddress) {
-    let task_asm = asm.clone();
-    tokio::task::spawn_local(async move {
-        match task_asm
-            .vsconn
-            .as_ref()
-            .unwrap()
-            .agent_disconnect(addr.into())
-            .await
-        {
-            Err(e) => {
-                warn!(target: VISA_MGMT, "Failed to disconnect agent {addr} with error {e:?}")
-            }
-            Ok(()) => debug!(target: VISA_MGMT, "Successfully disconnected agent {addr}"),
+pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
+    match asm
+        .vsconn
+        .as_ref()
+        .unwrap()
+        .agent_disconnect(addr.into())
+        .await
+    {
+        Err(e) => {
+            warn!(target: VISA_MGMT, "Failed to disconnect actor {addr} with error {e:?}")
         }
-    });
+        Ok(()) => debug!(target: VISA_MGMT, "Successfully disconnected actor {addr}"),
+    }
 }
 
 pub async fn parse_visa(

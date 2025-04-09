@@ -158,18 +158,33 @@ pub struct PacketMetadata {
     offset: usize, // packet offset (must be >= PACKET_BODY_BUFFER_MIN_OFFSET)
     len: usize,    // packet length
 
-    /// which link this packet arrived on
-    pub ingress_link_id: zpr::LinkId,
-
-    /// which stream ID this packet is associated with
-    pub ingress_stream_id: zpr::StreamId,
+    five_tuple: FiveTuple,
 
     /// which fastpath lane this packet arrived on
     pub ingress_lane_id: u8,
 
-    _padding: [u8; 1],
+    /// various flags
+    pub flags: PacketFlags,
 
-    five_tuple: FiveTuple,
+    _padding: [u8; 4],
+
+    /// which link this packet arrived on
+    pub ingress_link_id: zpr::LinkId,
+
+    /// which link this packet should be egressed on
+    pub egress_link_id: zpr::LinkId,
+
+    /// which stream ID this packet is associated with
+    pub ingress_stream_id: zpr::StreamId,
+}
+
+pub type PacketFlags = u8;
+
+pub mod flags {
+    use super::PacketFlags;
+
+    /// Packets marked `PRIORITY` are not dropped on egress queue backpressure.
+    pub const PRIORITY: PacketFlags = 1;
 }
 
 #[allow(dead_code)]
