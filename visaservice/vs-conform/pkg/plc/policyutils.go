@@ -274,11 +274,11 @@ func FilterScopeForProtocol(protocol uint32, scopes []*polio.Scope) []*polio.Sco
 	return results
 }
 
-// Create a node agent data structure based on info in the policy.
-func CreateNodeAgent(pol *polio.Policy, expires time.Duration) (*vsapi.Agent, error) {
+// Create a node actor data structure based on info in the policy.
+func CreateNodeActor(pol *polio.Policy, expires time.Duration) (*vsapi.Actor, error) {
 	nodeCR := GetNodeConnect(pol)
 	if nodeCR == nil {
-		return nil, fmt.Errorf("cannot createa node agent: no node connect information found in policy")
+		return nil, fmt.Errorf("cannot createa node actor: no node connect information found in policy")
 	}
 
 	claims := make(map[string]string)
@@ -294,8 +294,8 @@ func CreateNodeAgent(pol *polio.Policy, expires time.Duration) (*vsapi.Agent, er
 	nodeAddr := nodeCR.Addr
 	tetherAddr := nodeAddr
 
-	nodeAgent := vsapi.Agent{
-		AgentType:   vsapi.AgentType_NODE,
+	nodeActor := vsapi.Actor{
+		ActorType:   vsapi.ActorType_NODE,
 		Attrs:       claims,
 		AuthExpires: time.Now().Unix() + int64(expires.Seconds()),
 		ZprAddr:     nodeAddr.AsSlice(),    // zpr address
@@ -303,7 +303,7 @@ func CreateNodeAgent(pol *polio.Policy, expires time.Duration) (*vsapi.Agent, er
 		Ident:       "ident-not-generated", // identity
 		Provides:    provides,              // []string
 	}
-	return &nodeAgent, nil
+	return &nodeActor, nil
 }
 
 // Return TRUE if args contains the given flag.

@@ -14,7 +14,7 @@ import (
 	"net/netip"
 	"time"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vservice/adb"
@@ -115,8 +115,8 @@ func (vs *VSInst) takePeerRecord(key string) (netip.Addr, *adb.PeerRecord) {
 	}
 	vs.sessions.Unlock()
 
-	vs.agentDB.DisableAPIKey(naddr)
-	return naddr, vs.agentDB.GetPeerRecord(naddr)
+	vs.actorDB.DisableAPIKey(naddr)
+	return naddr, vs.actorDB.GetPeerRecord(naddr)
 }
 
 func (vs *VSInst) validAPIKey(key string) bool {
@@ -146,7 +146,7 @@ func (vs *VSInst) updateContactTime(key string) {
 		return
 	}
 
-	vs.agentDB.SetNodeContactTime(naddr, time.Now())
+	vs.actorDB.SetNodeContactTime(naddr, time.Now())
 }
 
 // Returns (key_is_valid, last_heard_from_time, node_address)
@@ -161,7 +161,7 @@ func (vs *VSInst) validAPIKeyAndDeets(key string) (bool, time.Time, netip.Addr) 
 	vs.sessions.RUnlock()
 
 	if found {
-		lastContact, ok := vs.agentDB.GetNodeLastContact(nodeAddr)
+		lastContact, ok := vs.actorDB.GetNodeLastContact(nodeAddr)
 		if ok {
 			return true, lastContact, nodeAddr
 		}
@@ -201,7 +201,7 @@ func verifyMilestone2HMAC(nonce []byte, sid int32, timestamp int64, sig []byte) 
 
 // --------------------------------- BACKDOOR ------------------------------- //
 //
-// These functions are used by unit tests to get agents into the visa service.
+// These functions are used by unit tests to get actors into the visa service.
 //
 // TODO: This is placeholder code until I find a cleaner way to do this.
 //
@@ -216,48 +216,48 @@ func (vs *VSInst) BackDoorInstallAPIKeyForUnitTestExp(node_addr netip.Addr, node
 
 	_, _, cid := vs.getPolicyMatcherConfig()
 
-	claims := make(map[string]*agent.ClaimV)
-	claims[agent.KAttrEPID] = agent.NewClaimV(node_addr.String(), expiration)
-	claims[agent.KAttrRole] = agent.NewClaimV("node", expiration)
+	claims := make(map[string]*actor.ClaimV)
+	claims[actor.KAttrEPID] = actor.NewClaimV(node_addr.String(), expiration)
+	claims[actor.KAttrRole] = actor.NewClaimV("node", expiration)
 
 	provides := []string{fmt.Sprintf("/zpr/%s", node_name)}
 
-	nodeAgent := agent.EmptyAgent()
-	nodeAgent.SetProvides(provides)
-	nodeAgent.SetTetherAddr(node_addr)
-	nodeAgent.SetAuthenticated(claims, expiration, nil, nil, cid)
+	nodeActor := actor.EmptyActor()
+	nodeActor.SetProvides(provides)
+	nodeActor.SetTetherAddr(node_addr)
+	nodeActor.SetAuthenticated(claims, expiration, nil, nil, cid)
 
-	apiKey, err := vs.finishAuthenticate(node_addr, nodeAgent, vssAddr)
+	apiKey, err := vs.finishAuthenticate(node_addr, nodeActor, vssAddr)
 	if err != nil {
 		return "", err
 	}
 	return apiKey, nil
 }
 
-func (vs *VSInst) BackDoorConnectAdapter(tether_addr netip.Addr, zpr_addr netip.Addr, dock_addr netip.Addr, extra_claims map[string]*agent.ClaimV, expiration time.Time) error {
+func (vs *VSInst) BackDoorConnectAdapter(tether_addr netip.Addr, zpr_addr netip.Addr, dock_addr netip.Addr, extra_claims map[string]*actor.ClaimV, expiration time.Time) error {
 	return vs.BackDoorConnectSvcAdapter(tether_addr, zpr_addr, dock_addr, extra_claims, nil, expiration)
 }
 
-func (vs *VSInst) BackDoorConnectSvcAdapter(tether_addr netip.Addr, zpr_addr netip.Addr, dock_addr netip.Addr, extra_claims map[string]*agent.ClaimV, provides []string, expiration time.Time) error {
+func (vs *VSInst) BackDoorConnectSvcAdapter(tether_addr netip.Addr, zpr_addr netip.Addr, dock_addr netip.Addr, extra_claims map[string]*actor.ClaimV, provides []string, expiration time.Time) error {
 	_, _, cid := vs.getPolicyMatcherConfig()
 
-	claims := make(map[string]*agent.ClaimV)
-	claims[agent.KAttrEPID] = agent.NewClaimV(zpr_addr.String(), expiration)
-	claims[agent.KAttrRole] = agent.NewClaimV("adapter", expiration)
-	claims[agent.KAttrConnectVia] = agent.NewClaimV(dock_addr.String(), expiration)
+	claims := make(map[string]*actor.ClaimV)
+	claims[actor.KAttrEPID] = actor.NewClaimV(zpr_addr.String(), expiration)
+	claims[actor.KAttrRole] = actor.NewClaimV("adapter", expiration)
+	claims[actor.KAttrConnectVia] = actor.NewClaimV(dock_addr.String(), expiration)
 
 	for k, v := range extra_claims {
 		claims[k] = v
 	}
 
-	agnt := agent.EmptyAgent()
+	agnt := actor.EmptyActor()
 	if len(provides) > 0 {
 		agnt.SetProvides(provides)
 	}
 	agnt.SetTetherAddr(tether_addr)
 	agnt.SetAuthenticated(claims, expiration, nil, nil, cid)
 
-	return vs.agentDB.AddOrUpdateAdapter(zpr_addr, agnt.GetTetherAddr(), agnt)
+	return vs.actorDB.AddOrUpdateAdapter(zpr_addr, agnt.GetTetherAddr(), agnt)
 }
 
 // Poll used to be a VS API function, but is superceded by the VSS push functions.
@@ -269,7 +269,7 @@ func (vs *VSInst) Poll(key string) (*PollResponse, error) {
 		vs.log.Debug("poll called with invalid key", "key", key)
 		return nil, vsapi.NewUnauthorizedError()
 	}
-	messages := vs.agentDB.DrainPending(zprAddr)
+	messages := vs.actorDB.DrainPending(zprAddr)
 	vcount, rcount := 0, 0
 	for _, msg := range messages {
 		vcount += len(msg.Visas)
@@ -330,18 +330,18 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		return "", fmt.Errorf("timestamp is too old")
 	}
 
-	if req.NodeAgent == nil {
-		vs.log.Warn("registration: authenticate for node -- missing node agent")
-		return "", fmt.Errorf("agent is required")
+	if req.NodeActor == nil {
+		vs.log.Warn("registration: authenticate for node -- missing node actor")
+		return "", fmt.Errorf("actor is required")
 	}
 
-	if req.NodeAgent.AgentType != vsapi.AgentType_NODE {
-		vs.log.Warn("registration: authenticate for node -- invalid agent type", "type", req.NodeAgent.AgentType)
-		return "", fmt.Errorf("invalid agent type")
+	if req.NodeActor.ActorType != vsapi.ActorType_NODE {
+		vs.log.Warn("registration: authenticate for node -- invalid actor type", "type", req.NodeActor.ActorType)
+		return "", fmt.Errorf("invalid actor type")
 	}
 
-	if len(req.NodeAgent.Provides) < 1 {
-		// The node-agent must at least provide /zpr/<node-name>
+	if len(req.NodeActor.Provides) < 1 {
+		// The node-actor must at least provide /zpr/<node-name>
 		vs.log.Warn("registration: authenticate for node -- missing provides")
 		return "", fmt.Errorf("missing provides")
 	}
@@ -352,28 +352,28 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		return "", fmt.Errorf("failed to verify HMAC")
 	}
 
-	naddr, ok := netip.AddrFromSlice(req.NodeAgent.ZprAddr)
+	naddr, ok := netip.AddrFromSlice(req.NodeActor.ZprAddr)
 	if !ok {
-		vs.log.Warn("registration: node passes invalid ZPR address", "addr", req.NodeAgent.ZprAddr)
-		return "", fmt.Errorf("invalid agent ZPR address")
+		vs.log.Warn("registration: node passes invalid ZPR address", "addr", req.NodeActor.ZprAddr)
+		return "", fmt.Errorf("invalid actor ZPR address")
 	}
 
 	// In prototype, the node calls authorize_connect for ITSELF after registration.
 	// That is important as it sets up other services and such that may be on the
 	// node.  So let's try invoking that here.  Note that we do not have challenge
-	// or challenge response to do real agent auth. So if you were to enable challenge
+	// or challenge response to do real actor auth. So if you were to enable challenge
 	// validation in the visa service config, this call would always fail.
-	var realNodeAgent *agent.Agent = nil
+	var realNodeActor *actor.Actor = nil
 
 	vs.log.Debug("registration: running ApproveConnection for node")
 	{
 		claims := make(map[string]string)
-		claims[agent.KAttrEPID] = naddr.String()
+		claims[actor.KAttrEPID] = naddr.String()
 		claims["zpr.adapter.cn"] = nodeCert.Subject.CommonName
-		claims[agent.KAttrRole] = "node" // does ApproveConnection set this?
+		claims[actor.KAttrRole] = "node" // does ApproveConnection set this?
 
-		// Now this ought to to create a real agent... so if this "works" we need to patch up the finishAuthentication function
-		// so we don't overwrite the good agent with a fake one.
+		// Now this ought to to create a real actor... so if this "works" we need to patch up the finishAuthentication function
+		// so we don't overwrite the good actor with a fake one.
 		creq := vsapi.ConnectRequest{
 			ConnectionID:       1,
 			DockAddr:           netip.MustParseAddr("0.0.0.0").AsSlice(),
@@ -381,20 +381,20 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 			Challenge:          nil,
 			ChallengeResponses: nil,
 		}
-		if realNodeAgent, err = vs.ApproveConnection(&creq); err != nil {
+		if realNodeActor, err = vs.ApproveConnection(&creq); err != nil {
 			vs.log.WithError(err).Warn("registration: ApproveConnection failed")
 			return "", fmt.Errorf("connection denied by policy")
 		} else {
-			vs.log.Info("registration: ApproveConnection successful", "agent", realNodeAgent)
+			vs.log.Info("registration: ApproveConnection successful", "actor", realNodeActor)
 		}
 	}
 
 	// TODO: Need to fix this a bit. We used to rely on the nodes to keep the RAFT
 	//       database of connected entities.  But we are moving that function (probably
 	//       without raft) to the visa service.  So here I need to tell visa serice
-	//       that this node (the passed agent) is now connected.
+	//       that this node (the passed actor) is now connected.
 	//
-	// For now I am fabricating a node-agent here.  Eventually the node will reun through
+	// For now I am fabricating a node-actor here.  Eventually the node will reun through
 	// the ZDP authentication steps to establish proper credentials.
 
 	// expiration := time.Now().Add(vs.bootstrapAuthDuration)
@@ -414,10 +414,10 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		vs.log.Info("registration: got VSS service address", "vss_addr", vssServiceAddr)
 	}
 
-	// apiKey, err := vs.finishAuthenticate(naddr, expiration, req.NodeAgent.Provides, vssServiceAddr)
-	apiKey, err := vs.finishAuthenticate(naddr, realNodeAgent, vssServiceAddr)
+	// apiKey, err := vs.finishAuthenticate(naddr, expiration, req.NodeActor.Provides, vssServiceAddr)
+	apiKey, err := vs.finishAuthenticate(naddr, realNodeActor, vssServiceAddr)
 	if err != nil {
-		vs.log.WithError(err).Warn("registration: failed to write to agent DB")
+		vs.log.WithError(err).Warn("registration: failed to write to actor DB")
 		return "", fmt.Errorf("internal error")
 	}
 
@@ -430,11 +430,11 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 }
 
 // func (vs *VSInst) finishAuthenticate(naddr netip.Addr, expiration time.Time, provides []string, vssServiceAddr string) (string, error) {
-func (vs *VSInst) finishAuthenticate(naddr netip.Addr, nodeAgent *agent.Agent, vssServiceAddr string) (string, error) {
+func (vs *VSInst) finishAuthenticate(naddr netip.Addr, nodeActor *actor.Actor, vssServiceAddr string) (string, error) {
 	apiKey := uuid.New().String()
 
 	// Becuase ApproveConnection does not add nodes to the database... (TODO: FIXME)
-	if err := vs.agentDB.AddNode(naddr, naddr, nodeAgent, apiKey, vssServiceAddr); err != nil {
+	if err := vs.actorDB.AddNode(naddr, naddr, nodeActor, apiKey, vssServiceAddr); err != nil {
 		return "", err
 	}
 
@@ -453,7 +453,7 @@ func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
 		return vsapi.NewUnauthorizedError()
 	}
 	vs.log.Info("de-register", "node_addr", naddr, "visa_requests", rec.VisaRequestsCount, "connects", rec.ConnectRequestsCount)
-	vs.agentDB.RemoveNode(naddr)
+	vs.actorDB.RemoveNode(naddr)
 	return nil
 }
 
@@ -465,10 +465,10 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 	}
 
 	if naddr, ok := vs.nodeAddrForKey(key); ok {
-		vs.agentDB.IncrNodeConnectReq(naddr)
+		vs.actorDB.IncrNodeConnectReq(naddr)
 	}
 
-	// Note that the prototype visa service allowed a node to pass itself (its own agent) in to this call,
+	// Note that the prototype visa service allowed a node to pass itself (its own actor) in to this call,
 	// and in that case we pass it in to approve connection which ends up just accepting the nodes
 	// credentials without checking.  I don't think we need or want that for ref-impl, but the arg is still
 	// there on the ApproveConnection function but we set it nil below.
@@ -483,46 +483,46 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 		}
 		vs.log.WithError(err).Info("authorize connect fails")
 	} else {
-		vs.log.Info("authorize connect succeeds", "agent_ident", agnt.GetIdentity())
+		vs.log.Info("authorize connect succeeds", "actor_ident", agnt.GetIdentity())
 		resp = &vsapi.ConnectResponse{
 			ConnectionID: request.ConnectionID,
 			Status:       vsapi.StatusCode_SUCCESS,
-			Agent:        agentToVsapiAgent(agnt, nil), // TODO: Tether address?
+			Actor:        actorToVsapiActor(agnt, nil), // TODO: Tether address?
 		}
 	}
 	return resp, nil
 }
 
-func (vs *VSInst) AgentDisconnect(ctx context.Context, key string, zprAddr []byte) error {
-	vs.log.Debug("*AGENT_DISCONNECT*")
+func (vs *VSInst) ActorDisconnect(ctx context.Context, key string, zprAddr []byte) error {
+	vs.log.Debug("*ACTOR_DISCONNECT*")
 	if !vs.validAPIKey(key) {
-		vs.log.Debug("agent-disconnect called with invalid key", "key", key)
+		vs.log.Debug("actor-disconnect called with invalid key", "key", key)
 		return vsapi.NewUnauthorizedError()
 	}
 	vs.updateContactTime(key)
 	zaddr, addrOk := netip.AddrFromSlice(zprAddr)
 	if !addrOk {
-		vs.log.Warn("registration: de-register but agent record has invalid address", "addr", zprAddr)
+		vs.log.Warn("registration: de-register but actor record has invalid address", "addr", zprAddr)
 		return nil
 	}
-	vs.log.Info("agent disconnect", "zpr_addr", zaddr)
+	vs.log.Info("actor disconnect", "zpr_addr", zaddr)
 
 	// Normally this would be an adapter disconnect.
-	found := vs.agentDB.Contains(zaddr)
-	isNode := vs.agentDB.IsNode(zaddr)
+	found := vs.actorDB.Contains(zaddr)
+	isNode := vs.actorDB.IsNode(zaddr)
 
 	if !found {
-		vs.log.Warn("agent-disconnect called but address not found", "addr", zaddr)
+		vs.log.Warn("actor-disconnect called but address not found", "addr", zaddr)
 		return nil
 	}
 	if !isNode {
-		vs.agentDB.RemoveAdapter(zaddr)
+		vs.actorDB.RemoveAdapter(zaddr)
 		return nil
 	}
 
 	// Hmm -- is a node.  I would expect a node to call DeRegister instead.  But we will
 	// de-register this node too.
-	vs.log.Info("agent-disconnect: de-registering a node", "addr", zaddr)
+	vs.log.Info("actor-disconnect: de-registering a node", "addr", zaddr)
 	return vs.DeRegister(ctx, key)
 }
 
@@ -553,7 +553,7 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 		return nil, errors.New("invalid tether address on visa request")
 	}
 	vs.log.Info("request visa", "peer", zprAddr, "src_tether_addr", tetherAddr, "pkt_len", len(traffic))
-	vs.agentDB.IncrNodeVisaReq(zprAddr)
+	vs.actorDB.IncrNodeVisaReq(zprAddr)
 
 	trafficDesc, err := snip.DescribePacket(snip.L3Type(l3_type), traffic)
 	if err != nil {

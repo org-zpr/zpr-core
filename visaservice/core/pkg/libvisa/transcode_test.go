@@ -42,7 +42,7 @@ func TestVsioVisaToThrift(t *testing.T) {
 
 	vsioVisa, err := libvisa.NewVisaBuilder(33, srcTAddr, dstTAddr).
 		WithExpiration(time.Now().Add(time.Hour)).
-		WithClientAgentIdent("test-client").
+		WithClientActorIdent("test-client").
 		WithSessionKeyAndEncoding([]byte("test-key"), libvisa.SKEv1).
 		WithIssuerID(12345).
 		WithTrafficAndPolicy(traf, []*polio.MatchedPolicy{pol}).Visa()

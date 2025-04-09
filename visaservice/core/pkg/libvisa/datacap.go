@@ -2,7 +2,7 @@ package libvisa
 
 import "time"
 
-// DataCap is a policy constraint and it applies to an (agent,service) tuple.
+// DataCap is a policy constraint and it applies to an (actor,service) tuple.
 // If it is grouped then it applies to all the services in the group.
 type DataCap struct {
 	CapBytes  uint64

@@ -107,8 +107,8 @@ func TestAuthenticateHappyPathInternOnly(t *testing.T) {
 	}
 
 	conf := map[string]string{
-		"key_data":  base64.StdEncoding.EncodeToString([]byte(agentKeyPEM)),
-		"cert_data": base64.StdEncoding.EncodeToString([]byte(agentCertPEM)),
+		"key_data":  base64.StdEncoding.EncodeToString([]byte(actorKeyPEM)),
+		"cert_data": base64.StdEncoding.EncodeToString([]byte(actorCertPEM)),
 	}
 
 	unauthClaims["ca0.x509.cn"] = "ma.hatma"

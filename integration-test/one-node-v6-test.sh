@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-$(dirname $0)/one-node-test.sh --agent_protocol IPv6
+$(dirname $0)/one-node-test.sh --actor_protocol IPv6

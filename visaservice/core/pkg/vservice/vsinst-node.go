@@ -16,7 +16,7 @@ import (
 // Called by InstallPolicy
 func (vs *VSInst) installPolicyWithVisasForNodes(pp *policy.Policy, configID uint64) error {
 	errCount := 0
-	for _, nodeAddr := range vs.agentDB.GetNodeList() {
+	for _, nodeAddr := range vs.actorDB.GetNodeList() {
 		if err := vs.installPolicyWithVisasForNode(nodeAddr, pp, configID); err != nil {
 			vs.log.WithError(err).Warn("failed to install policy on node", "node", nodeAddr)
 			errCount++
@@ -36,7 +36,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	// If so, we do not want to regenerate the visas and buffer duplicates.
 	// So we track our attempts to bring node into sync.
 	needs_visas := true
-	if syncDeets := vs.agentDB.GetPeerSyncDetails(nodeAddr); syncDeets != nil {
+	if syncDeets := vs.actorDB.GetPeerSyncDetails(nodeAddr); syncDeets != nil {
 		if syncDeets.PolicyVersion == pp.VersionNumber() && syncDeets.ConfigID == configID && time.Until(syncDeets.VisasExpiration) > 30*time.Minute {
 			// Skip.
 			vs.log.Debug("detected previously generated visas for node", "node", nodeAddr, "time_until_expires", time.Until(syncDeets.VisasExpiration))
@@ -45,7 +45,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	}
 
 	if needs_visas {
-		serviceAddr := vs.agentDB.GetNodeVSSAddr(nodeAddr)
+		serviceAddr := vs.actorDB.GetNodeVSSAddr(nodeAddr)
 		if serviceAddr == "" {
 			return fmt.Errorf("no support service addr for node")
 		}
@@ -102,7 +102,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 			}
 		}
 		// Update our state so we remember that we have tried this before.
-		if err := vs.agentDB.SetPeerSyncDetails(nodeAddr, pp.VersionNumber(), configID, first_expire); err != nil {
+		if err := vs.actorDB.SetPeerSyncDetails(nodeAddr, pp.VersionNumber(), configID, first_expire); err != nil {
 			vs.log.WithError(err).Warn("failed to set peer sync details", "node", nodeAddr)
 		}
 	}
@@ -116,7 +116,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 				NodeAddr: nodeAddr,
 				Visas:    visas,
 			}
-			vs.agentDB.BufferItemsForNode(nodeAddr, []*adb.PushItem{&item})
+			vs.actorDB.BufferItemsForNode(nodeAddr, []*adb.PushItem{&item})
 		}
 		return err
 	}
@@ -133,7 +133,7 @@ func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uin
 	var opErr error
 
 	// if updating false, set true.
-	oldValue, ok := vs.agentDB.TestAndSetUpdating(nodeAddr, false, true)
+	oldValue, ok := vs.actorDB.TestAndSetUpdating(nodeAddr, false, true)
 	if !ok {
 		return fmt.Errorf("node not found")
 	}
@@ -141,11 +141,11 @@ func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uin
 		// already updating
 		return nil
 	}
-	serviceAddr = vs.agentDB.GetNodeVSSAddr(nodeAddr)
+	serviceAddr = vs.actorDB.GetNodeVSSAddr(nodeAddr)
 	if serviceAddr == "" {
 		return fmt.Errorf("no VSS address for node")
 	}
-	if ok := vs.agentDB.SetPeerDesiredPolicyState(nodeAddr, policyVer, configID); !ok {
+	if ok := vs.actorDB.SetPeerDesiredPolicyState(nodeAddr, policyVer, configID); !ok {
 		return fmt.Errorf("node not found")
 	}
 
@@ -162,13 +162,13 @@ func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uin
 			goto RELEASE_UPDATE
 		}
 	}
-	vs.agentDB.SetNodeContactTime(nodeAddr, time.Now())
+	vs.actorDB.SetNodeContactTime(nodeAddr, time.Now())
 
 	// Success!
-	_ = vs.agentDB.SetPeerLastPolicyState(nodeAddr, policyVer, configID)
+	_ = vs.actorDB.SetPeerLastPolicyState(nodeAddr, policyVer, configID)
 
 RELEASE_UPDATE:
-	_, _ = vs.agentDB.TestAndSetUpdating(nodeAddr, true, false)
+	_, _ = vs.actorDB.TestAndSetUpdating(nodeAddr, true, false)
 	return opErr
 }
 
@@ -184,11 +184,11 @@ func (vs *VSInst) EnqueuePushVisasToNode(addr netip.Addr, visas []*vsapi.VisaHop
 // Do not call this directly -- use PushVisa.
 //
 // We use the VSS to send the item and if send fails we put the item on the
-// node buffer (in agentDB) for retry.
+// node buffer (in actorDB) for retry.
 func (vs *VSInst) pushToNode(item *adb.PushItem) {
 	if item.Broadcast {
 		// Push to all nodes!
-		for _, node := range vs.agentDB.GetNodeList() {
+		for _, node := range vs.actorDB.GetNodeList() {
 			vs.pushToNodeOrBuffer(node, []*adb.PushItem{item})
 		}
 	} else {
@@ -202,7 +202,7 @@ func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, items []*adb.PushItem)
 
 	vs.log.Debug("begin push items to node", "node", nodeAddr, "count", len(items))
 
-	serviceAddr := vs.agentDB.GetNodeVSSAddr(nodeAddr)
+	serviceAddr := vs.actorDB.GetNodeVSSAddr(nodeAddr)
 	if serviceAddr == "" {
 		vs.log.Warn("attempt to push to node but node not found", "addr", nodeAddr)
 		return
@@ -234,7 +234,7 @@ func (vs *VSInst) pushToNodeOrBuffer(nodeAddr netip.Addr, items []*adb.PushItem)
 
 	if len(failing.Revocations) > 0 || len(failing.Visas) > 0 {
 		vs.log.Debug("adding visas/revocations to pushbuffer for node", "node", nodeAddr, "visas", len(failing.Visas), "revocations", len(failing.Revocations))
-		vs.agentDB.BufferItemsForNode(nodeAddr, []*adb.PushItem{&failing})
+		vs.actorDB.BufferItemsForNode(nodeAddr, []*adb.PushItem{&failing})
 	}
 }
 
@@ -253,7 +253,7 @@ func (vs *VSInst) handleNodeRegister(nodeAddr netip.Addr) {
 // This should not be called by multiple routines at once.
 func (vs *VSInst) checkNodesVSSState() {
 	pp, _, configID := vs.getPolicyMatcherConfig()
-	for _, nodeAddr := range vs.agentDB.GetOutOfSyncNonUpdatingNodes() {
+	for _, nodeAddr := range vs.actorDB.GetOutOfSyncNonUpdatingNodes() {
 		vs.log.Debug("checkNodesVSSState - node out of sync", "node", nodeAddr)
 		if err := vs.installPolicyWithVisasForNode(nodeAddr, pp, configID); err != nil {
 			vs.log.WithError(err).Warn("failed to install policy on node", "node", nodeAddr)
@@ -262,8 +262,8 @@ func (vs *VSInst) checkNodesVSSState() {
 }
 
 func (vs *VSInst) checkPushBuffers() {
-	for _, nodeAddr := range vs.agentDB.GetNodesWithPending() {
-		pushBuffer := vs.agentDB.DrainPending(nodeAddr)
+	for _, nodeAddr := range vs.actorDB.GetNodesWithPending() {
+		pushBuffer := vs.actorDB.DrainPending(nodeAddr)
 		if len(pushBuffer) > 0 {
 			vs.log.Debug("checkPushBuffers - found pending items for node", "node", nodeAddr, "count", len(pushBuffer))
 			vs.pushToNodeOrBuffer(nodeAddr, pushBuffer)

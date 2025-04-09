@@ -6,7 +6,7 @@ import (
 	"math"
 	"strings"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
 
@@ -42,13 +42,13 @@ type Matcher struct {
 	trafficIdx  map[string]map[uint32]map[uint32][]int // SVC_ID -> PROTOCOL -> SVC_PORT -> []POLICY_INDEX
 }
 
-type AgentInfo struct {
-	AgentAttrs    map[string]*agent.ClaimV // Authed Claims
-	AgentProvides []string
+type ActorInfo struct {
+	ActorAttrs    map[string]*actor.ClaimV // Authed Claims
+	ActorProvides []string
 }
 
-func (aa *AgentInfo) Provides(svcID string) bool {
-	for _, id := range aa.AgentProvides {
+func (aa *ActorInfo) Provides(svcID string) bool {
+	for _, id := range aa.ActorProvides {
 		if id == svcID {
 			return true
 		}
@@ -112,14 +112,14 @@ func NewMatcher(plcy *polio.Policy, netConfig uint64, log logr.Logger) (*Matcher
 
 // matchAttrsToPolicies take a set of authenticated attributes, find any connect policies that
 // are matching.  Returns the policies by their index.
-func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*agent.ClaimV) ([]uint32, error) {
+func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*actor.ClaimV) ([]uint32, error) {
 	relevantAttrs := make(map[uint32]map[uint32]bool) // key code -> val code -> true
 
 	for agK, agV := range authedClaims {
 		attrKeyCode, ok := m.keyMap[agK]
 		if !ok {
 			// This attribute is not in any connect policy.
-			m.log.Debug("[MX] -- irrelevant agent attribute", "key", agK)
+			m.log.Debug("[MX] -- irrelevant actor attribute", "key", agK)
 			continue
 		}
 		if _, exists := relevantAttrs[attrKeyCode]; !exists {
@@ -135,7 +135,7 @@ func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*agent.ClaimV) ([
 			// Issue here is that as soon as you have a blank value anywhere in policy, we have to check all policies.
 			if !ok && m.blankValIdx < 0 {
 				// This value is not in any connect policy.
-				m.log.Debug("[MX] -- irrelevant agent attribute value", "key", agK, "val", agV.V+fromText)
+				m.log.Debug("[MX] -- irrelevant actor attribute value", "key", agK, "val", agV.V+fromText)
 				continue
 			}
 			if !ok {
@@ -145,14 +145,14 @@ func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*agent.ClaimV) ([
 				attrValCode = ScratchValIdx
 			}
 			relevantAttrs[attrKeyCode][attrValCode] = true
-			m.log.Debug("[MX] -- relevant agent attribute", "key", agK, "val", agV.V+fromText, "keyCode", attrKeyCode, "valCode", attrValCode)
+			m.log.Debug("[MX] -- relevant actor attribute", "key", agK, "val", agV.V+fromText, "keyCode", attrKeyCode, "valCode", attrValCode)
 		}
 	}
 
 	var matchedPolicies []uint32          // by index
 	checkedPolicies := make(map[int]bool) // avoid duplicate work
 
-	for agKC := range relevantAttrs { // For each of the attributes presented by agent...
+	for agKC := range relevantAttrs { // For each of the attributes presented by actor...
 		setsToCheck, ok := m.setIdx[agKC] // get all connect policies that incorporate this attribute
 		if !ok {
 			continue
@@ -233,7 +233,7 @@ func formatAttrExpr(policy *polio.Policy, expr *polio.AttrExpr) string {
 }
 
 // Returns a string representation of a map of claimed attributes.
-func formatClaimedAttrs(attrs map[string]*agent.ClaimV) string {
+func formatClaimedAttrs(attrs map[string]*actor.ClaimV) string {
 	var buf strings.Builder
 	for key, val := range attrs {
 		if buf.String() != "" {
@@ -285,21 +285,21 @@ func (m *Matcher) getProcsIfNotIn(matchedPolicies []uint32, plist []uint32) []ui
 // At this point a client has responded to an auth challenge. State is set up appropriately. If a rule matches
 // it is applied to state (via the procs) which could set a flag or provides.
 //
-// Note that `state` is modified (and the agent inside it)
-// Note that `agent` is also modified (gets a list of provides, gets zpr.role)
+// Note that `state` is modified (and the actor inside it)
+// Note that `actor` is also modified (gets a list of provides, gets zpr.role)
 //
-// Returns the agent attribute names that matched policy (or policies)
+// Returns the actor attribute names that matched policy (or policies)
 func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 	// We have a bunch of attribute sets.
-	// See if the agents set is a supserset of any of them.
-	m.log.Debug("[MX] MatchConnect", "state.agent", state.Agent.Hash())
+	// See if the actors set is a supserset of any of them.
+	m.log.Debug("[MX] MatchConnect", "state.actor", state.Actor.Hash())
 	m.log.Debug("[MX] MatchConnect starts, claims offered:")
-	for ck, cv := range state.Agent.GetAuthedClaims() {
+	for ck, cv := range state.Actor.GetAuthedClaims() {
 		m.log.Debug("[MX] -- -- offered_claim", "key", ck, "value", cv)
 	}
 
 	// Given the attributes, see what policies match.
-	matchedPolicies, err := m.matchAttrsToPolicies(state.Agent.GetAuthedClaims())
+	matchedPolicies, err := m.matchAttrsToPolicies(state.Actor.GetAuthedClaims())
 	if err != nil {
 		return nil, err
 	}
@@ -318,19 +318,19 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 	var procsRan []uint32 // Matching connect PROCS (already ran)
 	attrChanges := 1
 
-	// Loop here in case a policy connect procedure alters the agent claims. In that case
-	// we will need to re-match the agent to the policy.
+	// Loop here in case a policy connect procedure alters the actor claims. In that case
+	// we will need to re-match the actor to the policy.
 	//
 	// TODO: Are we sure that the compiler or matcher will not allow matching of conflicting
 	//       procedures? I guess it is all additive, but I'm not sure this is proved to be correct
 	//       anywhere.
 
 	// By default, we grant adapter role.
-	state.Agent.SetAuthedClaim(agent.KAttrRole, &agent.ClaimV{V: "adapter", Exp: state.Agent.GetAuthExpires()})
+	state.Actor.SetAuthedClaim(actor.KAttrRole, &actor.ClaimV{V: "adapter", Exp: state.Actor.GetAuthExpires()})
 
 	for attrChanges > 0 {
 		matchedProcs := m.getProcsIfNotIn(matchedPolicies, procsRan)
-		m.log.Debug("[MX] -- MatchConnect agent matched", "policyCount", len(matchedPolicies), "procCount", len(matchedProcs))
+		m.log.Debug("[MX] -- MatchConnect actor matched", "policyCount", len(matchedPolicies), "procCount", len(matchedProcs))
 
 		for _, px := range matchedProcs {
 			proc := m.policy.GetProcs()[px]
@@ -343,18 +343,18 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 		attrChanges = 0
 
 		// The connect proc may set a node flag, which we use to set zpr.role.
-		agnt := state.Agent
+		agnt := state.Actor
 		if state.Node {
 			m.log.Debug("[MX] -- MatchConnect -- -- NODE flag is set")
-			if rc, ok := agnt.GetAuthedClaims()[agent.KAttrRole]; !ok || rc.V != "node" {
-				agnt.SetAuthedClaim(agent.KAttrRole, &agent.ClaimV{V: "node", Exp: state.Agent.GetAuthExpires()})
+			if rc, ok := agnt.GetAuthedClaims()[actor.KAttrRole]; !ok || rc.V != "node" {
+				agnt.SetAuthedClaim(actor.KAttrRole, &actor.ClaimV{V: "node", Exp: state.Actor.GetAuthExpires()})
 				attrChanges++
 			}
 		}
 		if state.VisaserviceDock {
 			m.log.Debug("[MX] -- MatchConnect -- -- VISASERVICE_DOCK flag is set")
-			if rc, ok := agnt.GetAuthedClaims()[agent.KAttrVisaServiceAdapter]; !ok || rc.V != "true" {
-				agnt.SetAuthedClaim(agent.KAttrVisaServiceAdapter, &agent.ClaimV{V: "true", Exp: state.Agent.GetAuthExpires()})
+			if rc, ok := agnt.GetAuthedClaims()[actor.KAttrVisaServiceAdapter]; !ok || rc.V != "true" {
+				agnt.SetAuthedClaim(actor.KAttrVisaServiceAdapter, &actor.ClaimV{V: "true", Exp: state.Actor.GetAuthExpires()})
 				attrChanges++
 			}
 		}
@@ -401,32 +401,32 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 		}
 	}
 
-	// Get the list of unique agent keys that were used in matching a connect.
+	// Get the list of unique actor keys that were used in matching a connect.
 	uniqs := make(map[string]bool)
 	for _, px := range matchedPolicies {
 		for _, attrExpr := range m.policy.GetConnects()[px].GetAttrExprs() {
 			uniqs[m.policy.GetAttrKeyIndex()[attrExpr.Key]] = true
 		}
 	}
-	var matchedAgentKeys []string
+	var matchedActorKeys []string
 	for k := range uniqs {
 		m.log.Debugf("[MX] -- connect matched on key %v", k)
-		matchedAgentKeys = append(matchedAgentKeys, k)
+		matchedActorKeys = append(matchedActorKeys, k)
 	}
 
-	var agentProvides []string
+	var actorProvides []string
 	for _, svc := range state.Services {
-		m.log.Debugf("[MX] -- connect policy sets agent provides: %v", svc.Name)
-		agentProvides = append(agentProvides, svc.Name)
+		m.log.Debugf("[MX] -- connect policy sets actor provides: %v", svc.Name)
+		actorProvides = append(actorProvides, svc.Name)
 	}
 	// If visaservice flag is set, create a "virtual" service entry.
 	if state.Visaservice {
-		agentProvides = append(agentProvides, polio.VisaServiceName)                         // TODO: compiler must prevent this from ever being defined.
-		agentProvides = append(agentProvides, fmt.Sprintf("/zpr/%s", polio.VisaServiceName)) // TODO: compiler must prevent this from ever being defined.
+		actorProvides = append(actorProvides, polio.VisaServiceName)                         // TODO: compiler must prevent this from ever being defined.
+		actorProvides = append(actorProvides, fmt.Sprintf("/zpr/%s", polio.VisaServiceName)) // TODO: compiler must prevent this from ever being defined.
 	}
-	state.Agent.SetProvides(agentProvides)
+	state.Actor.SetProvides(actorProvides)
 
-	return matchedAgentKeys, nil
+	return matchedActorKeys, nil
 }
 
 // MatchTraffic tries to match a traffic signature to the policy in order to issue a visa.
@@ -437,29 +437,29 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 // This does not pay any attention to TCP flags.
 //
 // Returns (LINE_REF, IS_FWD_MATCH, ERROR)
-func (m *Matcher) MatchTraffic(td *snip.Traffic, srcAgent, dstAgent *AgentInfo) (cpols []*polio.MatchedPolicy, err error) {
-	polset := m.policiesForScope(td, srcAgent, dstAgent)
+func (m *Matcher) MatchTraffic(td *snip.Traffic, srcActor, dstActor *ActorInfo) (cpols []*polio.MatchedPolicy, err error) {
+	polset := m.policiesForScope(td, srcActor, dstActor)
 	m.log.Debugf("[MX] MatchTraffic found %d candidate policies based on scope", len(polset))
 	if len(polset) == 0 {
 		return nil, errNoMatchScope
 	}
 
-	// The policy attributes must match the _connecting_ agent.
+	// The policy attributes must match the _connecting_ actor.
 	// If this is client->server then we are checking the client.
 	// If this is server->client again, we are checking client.
 
 POLICYLOOP:
 	for _, pcy := range polset {
 
-		clientAttrs := srcAgent.AgentAttrs
+		clientAttrs := srcActor.ActorAttrs
 		if !pcy.FWD {
-			clientAttrs = dstAgent.AgentAttrs
+			clientAttrs = dstActor.ActorAttrs
 		}
 
 		m.log.Debug("[MX] checking policy", "ID", pcy.CPol.GetId(), "FWD?", pcy.FWD)
-		m.log.Debugf("[MX] -- agent claims attributes: %v", formatClaimedAttrs(clientAttrs))
+		m.log.Debugf("[MX] -- actor claims attributes: %v", formatClaimedAttrs(clientAttrs))
 		if len(clientAttrs) == 0 {
-			m.log.Warn("[MX] client agent has no attributes") // probably indicates some sort of bug
+			m.log.Warn("[MX] client actor has no attributes") // probably indicates some sort of bug
 		}
 
 		// Build a map of claimed attribute keys to sets of values (broken out
@@ -514,7 +514,7 @@ POLICYLOOP:
 	return cpols, nil
 }
 
-func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentInfo) []*polio.MatchedPolicy {
+func (m *Matcher) policiesForScope(td *snip.Traffic, srcActor, dstActor *ActorInfo) []*polio.MatchedPolicy {
 	var pset []*polio.MatchedPolicy
 
 	// HACK - The prototype compiler will allow for ICMPv4 and ICMPv6, but it always writes
@@ -528,14 +528,14 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 
 	// In all cases, either the source or destination must have a service to offer. Possibly they both do.
 	m.log.Debug("[MX] matcher - running policiesForScope")
-	for _, svcID := range dstAgent.AgentProvides {
-		m.log.Debug("[MX] found dest agent provides", "provides", svcID)
+	for _, svcID := range dstActor.ActorProvides {
+		m.log.Debug("[MX] found dest actor provides", "provides", svcID)
 		if protIdx, match := m.trafficIdx[svcID]; match {
 			m.log.Debug("[MX]  -- found service in match table", "protocolCount", len(protIdx))
 			m.log.Debug("[MX]  -- ", "wanted_proto_num", tdProtoNum, "protIdx", protIdx)
 			if portIdx, match := protIdx[tdProtoNum]; match {
 				m.log.Debug("[MX]  -- found protocol in match table", "portCount", len(portIdx))
-				if set, merr := m.matchy(td, true, portIdx, dstAgent); len(set) > 0 { // FORWARD !
+				if set, merr := m.matchy(td, true, portIdx, dstActor); len(set) > 0 { // FORWARD !
 					m.log.Debugf("[MX]  -- -- matched %d policies on FWD", len(set))
 					pset = append(pset, set...)
 				} else if merr != nil {
@@ -550,11 +550,11 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 
 		}
 	}
-	for _, svcID := range srcAgent.AgentProvides {
-		m.log.Debug("[MX]  checking source agent provides", "provides", svcID)
+	for _, svcID := range srcActor.ActorProvides {
+		m.log.Debug("[MX]  checking source actor provides", "provides", svcID)
 		if protIdx, match := m.trafficIdx[svcID]; match {
 			if portIdx, match := protIdx[tdProtoNum]; match {
-				if set, merr := m.matchy(td, false, portIdx, dstAgent); len(set) > 0 { // REVERSE !
+				if set, merr := m.matchy(td, false, portIdx, dstActor); len(set) > 0 { // REVERSE !
 					m.log.Debugf("[MX]  -- -- matched %d policies on REV", len(set))
 					pset = append(pset, set...)
 				} else if merr != nil {
@@ -569,7 +569,7 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 
 // matchy try to match the traffic to the policy based on scope.
 // Return matched list could be empty, explanatory errors are sometimes returned.
-func (m *Matcher) matchy(td *snip.Traffic, isFWD bool, portIdx map[uint32][]int, dstAgent *AgentInfo) ([]*polio.MatchedPolicy, error) {
+func (m *Matcher) matchy(td *snip.Traffic, isFWD bool, portIdx map[uint32][]int, dstActor *ActorInfo) ([]*polio.MatchedPolicy, error) {
 	var pset []*polio.MatchedPolicy
 	var qPortVal uint32
 	switch td.Proto {
@@ -603,8 +603,8 @@ func (m *Matcher) matchy(td *snip.Traffic, isFWD bool, portIdx map[uint32][]int,
 			//     128 must match client to service
 			//     129 must match service to client
 			//
-			// We are client to service IF dst.Agent provides policy
-			icmpFWD := dstAgent.Provides(cpol.GetServiceId())
+			// We are client to service IF dst.Actor provides policy
+			icmpFWD := dstActor.Provides(cpol.GetServiceId())
 			if mpol := m.icmpSpecialHandling(cpol, qPortVal, icmpFWD); mpol != nil {
 				pset = append(pset, mpol)
 			}

@@ -3,28 +3,28 @@
 # Usage message
 usage() {
     echo "Usage:"
-	echo "    $0 [--agent_protocol <IPv4|IPv6>] [--num_agents <number of agents>]"
+	echo "    $0 [--actor_protocol <IPv4|IPv6>] [--num_actors <number of actors>]"
     exit 1
 }
 
 # Parse command-line arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --agent_protocol)
+        --actor_protocol)
             if [[ -n $2 && ! $2 == --* ]]; then
-                AGENT_PROTOCOL="${2,,}"
+                ACTOR_PROTOCOL="${2,,}"
                 shift 2
             else
-                echo "Error: --agent_protocol requires an argument [IPv4|IPv6]." >&2
+                echo "Error: --actor_protocol requires an argument [IPv4|IPv6]." >&2
                 usage
             fi
             ;;
-	--num_agents)
+	--num_actors)
             if [[ -n $2 && ! $2 == --* && $2 -ge 2 && $2 -le 3 ]]; then
-	        NUM_AGENTS=$2
+	        NUM_ACTORS=$2
 	        shift 2
 	    else
-	        echo "Error: Only 2 or 3 agents currently supported." >&2
+	        echo "Error: Only 2 or 3 actors currently supported." >&2
 		usage
 	    fi
 	    ;;
@@ -43,12 +43,12 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 # Check if protocol is set
-if [ -z "$AGENT_PROTOCOL" ]; then
-    echo "Error: --agent_protocol is required."
+if [ -z "$ACTOR_PROTOCOL" ]; then
+    echo "Error: --actor_protocol is required."
     usage
 fi
 
-case "$AGENT_PROTOCOL" in
+case "$ACTOR_PROTOCOL" in
     ipv4)
         echo "Running test in IPv4 mode"
 
@@ -60,7 +60,7 @@ case "$AGENT_PROTOCOL" in
 		C_ZPR_ADDR=10.253.3.1
 		ZPR_SUBNET=10.253.0.0/16
 
-		POLICY_BIN="v4-1node-${NUM_AGENTS}agent-ping.bin"
+		POLICY_BIN="v4-1node-${NUM_ACTORS}actor-ping.bin"
         ;;
     ipv6)
         echo "Running test in IPv6 mode"
@@ -73,10 +73,10 @@ case "$AGENT_PROTOCOL" in
 		C_ZPR_ADDR=fd00:1:3::1
 		ZPR_SUBNET=fd00:1::0/32
 
-		POLICY_BIN="v6-1node-${NUM_AGENTS}agent-ping.bin"
+		POLICY_BIN="v6-1node-${NUM_ACTORS}actor-ping.bin"
         ;;
     *)
-        echo "Protocol '$AGENT_PROTOCOL' not supported."
+        echo "Protocol '$ACTOR_PROTOCOL' not supported."
 		echo
 		usage
         ;;

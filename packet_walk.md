@@ -10,7 +10,7 @@ For the purposes of this document specifically, an IP substrate is assumed, but 
 
 ## A Packet Arrives
 
-An agent initiates a flow by sending a packet to the Ingress Client Adapter, the gateway into the ZPR network.  At this point, the Adapter has no entry for the flow in its Agent Lookup Table (keyed by the 5-tuple) and the failure of that lookup will indicate that it needs to issue a ZDP Bind Request to the dock.  A Bind Request is created which includes the packet body and it is forwarded to the Dock.
+An actor initiates a flow by sending a packet to the Ingress Client Adapter, the gateway into the ZPR network.  At this point, the Adapter has no entry for the flow in its Actor Lookup Table (keyed by the 5-tuple) and the failure of that lookup will indicate that it needs to issue a ZDP Bind Request to the dock.  A Bind Request is created which includes the packet body and it is forwarded to the Dock.
 
 If the packet is too big to include in the Bind Request, it is instead cached and as much of it as can fit is included in the Bind Request.
 
@@ -34,7 +34,7 @@ The Dock, upon receiving the Visa Response, will install the visa in its Dock Fo
 
 ### Ingress Adapter Receives A Bind Response
 
-The Adapter's outstanding Bind Request finally gets a response.  If the response indicates success, the Adapter will map the 5-tuple of the packet to the Tether ID registered in the Bind Response in its Agent Lookup Table.  If the full packet had been too large to forward to the Dock in the Bind Request, the cached packet is now forwarded to the Dock, using the compression specified in the Bind Response and with an A2A HMAC appended to it.
+The Adapter's outstanding Bind Request finally gets a response.  If the response indicates success, the Adapter will map the 5-tuple of the packet to the Tether ID registered in the Bind Response in its Actor Lookup Table.  If the full packet had been too large to forward to the Dock in the Bind Request, the cached packet is now forwarded to the Dock, using the compression specified in the Bind Response and with an A2A HMAC appended to it.
 
 Any packets that were received on the stream between the issuance of the Bind Request and receiving the Response have been dropped.
 
@@ -44,7 +44,7 @@ When the heralding process reaches the last Node in the path, a Bind Request is 
 
 ## A Packet Arrives And Matches A Flow
 
-When the next packet arrives from the same agent, it now has an entry in the Agent Lookup Table to match.  A2A HMAC is calculated over the packet and appended to it.  The Adapter will compress the packet according to the rules established during the Bind exchange, placing a ZDP transit header in the compressed space.  That packet will then be forwarded on to the Dock.
+When the next packet arrives from the same actor, it now has an entry in the Actor Lookup Table to match.  A2A HMAC is calculated over the packet and appended to it.  The Adapter will compress the packet according to the rules established during the Bind exchange, placing a ZDP transit header in the compressed space.  That packet will then be forwarded on to the Dock.
 
 The Dock should now also have an entry in its own Dock Forwarding Table, which is indexed by the Tether ID in the ZDP header.  It verifies that the packet received matches the visa that authorizes the flow.  If the verification fails, the packet is counted and dropped.  If the verification succeeds, the packet is forwarded on using the Link ID and Stream/Tether ID indicated by the Dock Forwarding Table.
 
@@ -52,4 +52,4 @@ If the next ZPR hop is another Node, it does the same, except that it does not n
 
 ### Packet Reaches The Egress Adapter
 
-When the packet arrives at its last ZPR hop, the Egress Client Adapter, it is uncompressed according to the rules installed during the Bind exchange.  After that, its A2A HMAC is checked for packet integrity.  Should the integrity check fail, the packet will be dropped.  Should it succeed, the packet is forwarded on to the Agent.  A reverse packet should flow seamlessly through all of the same stages and checks as this non-first forward packet.
+When the packet arrives at its last ZPR hop, the Egress Client Adapter, it is uncompressed according to the rules installed during the Bind exchange.  After that, its A2A HMAC is checked for packet integrity.  Should the integrity check fail, the packet will be dropped.  Should it succeed, the packet is forwarded on to the Actor.  A reverse packet should flow seamlessly through all of the same stages and checks as this non-first forward packet.

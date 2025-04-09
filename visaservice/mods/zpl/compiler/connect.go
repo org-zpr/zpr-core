@@ -285,7 +285,7 @@ func (c *Compilation) warnIfAddrClaimRequired(sets []*AttrExprSet) {
 				}
 			}
 			if matched == (len(setA.AttrExprs)-1) && addrMisMatch {
-				c.warnf("claim \"%v\" is required for agents to differentiate between %v and %v",
+				c.warnf("claim \"%v\" is required for actors to differentiate between %v and %v",
 					defs.KAttrEPID, setA.GetProvides(), setB.GetProvides())
 			}
 			pchecked = append(pchecked, strings.Join(pairing, ","), fmt.Sprintf("%v,%v", pairing[1], pairing[0]))

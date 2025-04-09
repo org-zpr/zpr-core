@@ -123,7 +123,7 @@ func connectNodeAndGetApiKey(state *testfw.TestState) (string, error) {
 		return "", fmt.Errorf("node name not found node service list")
 	}
 
-	nodeAgent, err := plc.CreateNodeAgent(policy, 3600)
+	nodeActor, err := plc.CreateNodeActor(policy, 3600)
 	if err != nil {
 		return "", err
 	}
@@ -137,7 +137,7 @@ func connectNodeAndGetApiKey(state *testfw.TestState) (string, error) {
 		NodeCert:   zcrypt.CertToPEM(state.NodeCert),
 		Hmac:       m2HMAC,
 		VssService: "", // node code will set this
-		NodeAgent:  nodeAgent,
+		NodeActor:  nodeActor,
 	}
 	state.Log.Infow("attempting authenticate for node", "node_name", nodeName, "CN", nodeCR.CN)
 	apiKey, err := mockNode.Authenticate(&authReq)
@@ -152,7 +152,7 @@ func connectNodeAndGetApiKey(state *testfw.TestState) (string, error) {
 
 // Note that `zprAddr` is only used if the connect record from policy does not
 // include the `zpr.addr` attribute.
-func connectAdapter(node *mocks.Node, crec *plc.ConnectRec, dockAddr, zprAddr netip.Addr) (*vsapi.Agent, error) {
+func connectAdapter(node *mocks.Node, crec *plc.ConnectRec, dockAddr, zprAddr netip.Addr) (*vsapi.Actor, error) {
 	claims := make(map[string]string)
 	claims["zpr.adapter.cn"] = crec.CN
 	if crec.HasAddr() {
@@ -184,7 +184,7 @@ func connectAdapter(node *mocks.Node, crec *plc.ConnectRec, dockAddr, zprAddr ne
 		return nil, fmt.Errorf("status not success: %d (%s): %s", cresp.Status, cresp.Status, cresp.GetReason())
 	}
 
-	// TODO: Check the agent.
+	// TODO: Check the actor.
 
-	return cresp.Agent, nil
+	return cresp.Actor, nil
 }

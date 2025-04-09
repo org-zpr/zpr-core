@@ -1249,7 +1249,7 @@ func TestDetectDupePMCTL(t *testing.T) {
 	require.Contains(t, err.Error(), "duplicate service")
 }
 
-func TestAgentLimitAndGroup(t *testing.T) {
+func TestActorLimitAndGroup(t *testing.T) {
 	pyaml := `
     zpl_format: 2
     services:
@@ -1297,7 +1297,7 @@ func TestAgentLimitAndGroup(t *testing.T) {
                       attrs:
                         - [zpr.authority, eq, ca0]
                   constraints:
-                    agent_limit: 100MB/1d @g1
+                    actor_limit: 100MB/1d @g1
             web2.service:
               desc: web02
               services: [http]
@@ -1311,7 +1311,7 @@ func TestAgentLimitAndGroup(t *testing.T) {
                       attrs:
                         - [zpr.authority, eq, ca0]
                   constraints:
-                    agent_limit: 100MB/1d @g1
+                    actor_limit: 100MB/1d @g1
     `
 
 	fst, _ := fs.NewMemoryFileStore()

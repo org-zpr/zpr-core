@@ -104,8 +104,8 @@ func TestApplyICMPEchoReply(t *testing.T) {
 	ptxt := `#include <ping>
 	role auth0 -p auth0.spacelaser.net -t auth -b tcp/5001
 	role auth0client -c service/auth0.spacelaser.net,max_bw=1Mbps
-	agent aa -a sn.epid=85V3ws1T7TqekzRSh51rUmBTK2dh -a sn.authority=auth0.spacelaser.net
-	agent bb -a sn.epid=85V3wrhhpaeNVg2ZQv9MAjwoau7R -a sn.authority=auth0.spacelaser.net
+	actor aa -a sn.epid=85V3ws1T7TqekzRSh51rUmBTK2dh -a sn.authority=auth0.spacelaser.net
+	actor bb -a sn.epid=85V3wrhhpaeNVg2ZQv9MAjwoau7R -a sn.authority=auth0.spacelaser.net
 	#
 	grant aa -r auth0 -r surenet.Pingable
 	grant bb -r auth0client -r surenet.Pinger`
@@ -198,8 +198,8 @@ func TestApplySetConfig(t *testing.T) {
 	role auth0 -p auth0.spacelaser.net -t auth -b tcp/5001
 	role auth0client -c service/auth0.spacelaser.net,max_bw=1Mbps
 	role n0 -p n0.spacelaser.net
-	agent aa -a sn.epid=85V3ws1T7TqekzRSh51rUmBTK2dh -a sn.authority=auth0.spacelaser.net
-	agent bb -a sn.epid=85V3wrhhpaeNVg2ZQv9MAjwoau7R -a sn.authority=auth0.spacelaser.net
+	actor aa -a sn.epid=85V3ws1T7TqekzRSh51rUmBTK2dh -a sn.authority=auth0.spacelaser.net
+	actor bb -a sn.epid=85V3wrhhpaeNVg2ZQv9MAjwoau7R -a sn.authority=auth0.spacelaser.net
 	#
 	grant aa -r auth0
 	grant bb -r n0 -r auth0client -r surenet.Node`

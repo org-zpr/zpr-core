@@ -16,7 +16,7 @@ require (
 	google.golang.org/grpc v1.64.0
 	google.golang.org/protobuf v1.34.2
 	gopkg.in/yaml.v2 v2.4.0
-	zpr.org/vsapi v0.1.0
+	zpr.org/vsapi v0.2.0
 	zpr.org/vsx/polio v0.0.0-00010101000000-000000000000
 	zpr.org/vsx/snio v0.0.0-00010101000000-000000000000
 	zpr.org/vsx/zpl v0.0.0-00010101000000-000000000000
@@ -37,7 +37,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace zpr.org/vsapi => github.com/org-zpr/zpr-vsapi-go v0.1.0
+replace zpr.org/vsapi => github.com/org-zpr/zpr-vsapi-go v0.2.0
 
 replace zpr.org/vsx/polio => ../mods/polio
 

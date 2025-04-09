@@ -81,7 +81,7 @@ ADAPTER                 NODE                VISASVC
   .                       .                    .
   .                       .                    .
   | terminate             |                    |       =\
-  +---------------------->| vs.agent_disconnect|        | polite link down
+  +---------------------->| vs.actor_disconnect|        | polite link down
   |                       +------------------->|       =/
   X                       |                    |
                           .                    .
@@ -102,9 +102,9 @@ NOTES:
     calling auth_connect.  It is possible for the key management handshake to
     fail and one side not realize it.
     
-(3) "raa" is RegisterAgentAddress in which the agent sends its ZPR address to the
+(3) "raa" is RegisterActorAddress in which the actor sends its ZPR address to the
     node. Required since the node includes this in the connect message to the 
-    visa service.  "raar" is RegisterAgentAddressResponse.
+    visa service.  "raar" is RegisterActorAddressResponse.
     
 (4) The "hello" and "hellor" (hello-response) messages are placeholders and do not
     transfer any information at the moment.

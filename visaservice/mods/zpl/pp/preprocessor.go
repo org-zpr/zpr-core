@@ -160,7 +160,7 @@ func newDatasourcePolicy(prefix string, authServiceName string, vsProviderAttrs 
 		Services: []string{authServiceName},
 		Conditions: []*doc.Condition{
 			{
-				Desc:      doc.MustNewZplString(fmt.Sprintf("(BUILTIN) agent with visa service attrs can access data source %v", prefix)),
+				Desc:      doc.MustNewZplString(fmt.Sprintf("(BUILTIN) actor with visa service attrs can access data source %v", prefix)),
 				AttrExprs: vsProviderAttrs,
 			},
 		},
@@ -421,7 +421,7 @@ func (pps *PPState) parseZPR(networkPath []yt.Node) error {
 		zpr.Globals = &doc.NetGlobs{}
 		zpr.Globals.MaxConnections, _ = doc.NewZplUnsigned(doc.DefaultMaxConnections)
 		zpr.Globals.MaxConnectionsPerDock, _ = doc.NewZplUnsigned(doc.DefaultMaxConnectionsPerDock)
-		zpr.Globals.MaxConnectionsPerAgent, _ = doc.NewZplUnsigned(doc.DefaultMaxConnectionsPerAgent)
+		zpr.Globals.MaxConnectionsPerActor, _ = doc.NewZplUnsigned(doc.DefaultMaxConnectionsPerActor)
 	}
 
 	// We need the datasource list before we can parse nodes.
@@ -685,8 +685,8 @@ func parseNetworkGlobals(globalsPath []yt.Node, fussy ErrMode) (*doc.NetGlobs, e
 			globals.MaxConnections, err = doc.NewZplUnsigned(childPath)
 		case "max_connections_per_dock":
 			globals.MaxConnectionsPerDock, err = doc.NewZplUnsigned(childPath)
-		case "max_connections_per_agent":
-			globals.MaxConnectionsPerAgent, err = doc.NewZplUnsigned(childPath)
+		case "max_connections_per_actor":
+			globals.MaxConnectionsPerActor, err = doc.NewZplUnsigned(childPath)
 		case "max_heap_size", "tether_net", "zpr_net":
 			if err := warnNotImpl(fmt.Sprintf("zpr.globals.%s", key), childPath, fussy); err != nil {
 				return nil, err
@@ -2359,11 +2359,11 @@ func parseConstraints(consPath []yt.Node, fussy ErrMode) (*doc.Constraint, error
 			} else if _, err = doc.ParseDurationType(cons.Duration.String()); err != nil {
 				return nil, doc.ZplScalarErrorf(cons.Duration, "invalid duration constraint: %w", err)
 			}
-		case "agent_limit":
-			if cons.AgentLimit, err = doc.NewZplString(childPath); err != nil {
+		case "actor_limit":
+			if cons.ActorLimit, err = doc.NewZplString(childPath); err != nil {
 				return nil, err
-			} else if _, _, err = doc.ParseCapacityType(cons.AgentLimit.String()); err != nil {
-				return nil, doc.ZplScalarErrorf(cons.AgentLimit, "invalid agent limit constraint: %w", err)
+			} else if _, _, err = doc.ParseCapacityType(cons.ActorLimit.String()); err != nil {
+				return nil, doc.ZplScalarErrorf(cons.ActorLimit, "invalid actor limit constraint: %w", err)
 			}
 		default:
 			if err := noteInvalidKey(childPath, fussy); err != nil {

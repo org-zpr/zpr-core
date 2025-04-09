@@ -246,9 +246,9 @@ func potentialAccessImpl(ctx yt.EvaluationContext, arg interface{}) (interface{}
 
 // Implementation for the internal-language permitted_access function, which
 // examines a ZPL policy or component node and returns a summary of the kinds
-// of access the policy or component is guaranteed to permit to any agent whose
+// of access the policy or component is guaranteed to permit to any actor whose
 // attributes satisfy a given condition predicate, provided the constraints of
-// any visa granted to such an agent satisfy a given constraint predicate.
+// any visa granted to such an actor satisfy a given constraint predicate.
 //
 // The second argument must be a slice containing three elements: (1) the root
 // of a policy block or component block, (2) a condition predicate, and (3) a
@@ -265,9 +265,9 @@ func permittedAccessImpl(ctx yt.EvaluationContext, arg interface{}) (interface{}
 
 // Implementation for the internal-language nonforbidden_access function, which
 // examines a ZPL policy or component node and returns a summary of the kinds of
-// access the policy or component is not guaranteed to deny to any agent whose
+// access the policy or component is not guaranteed to deny to any actor whose
 // attributes satisfy a given condition predicate, provided the constraints of
-// any visa granted to such an agent satisfy a given constraint predicate.
+// any visa granted to such an actor satisfy a given constraint predicate.
 //
 // The second argument must be a slice containing three elements: (1) the root
 // of a policy block or component block, (2) a condition predicate, and (3) a
@@ -529,8 +529,8 @@ func extractServicesFromComponentNArr(m map[string][]yt.Node) []string {
 }
 
 // Tells whether or not a predicate implies the conditions of a policy. Returns
-// true iff knowledge that an agent's attributes satisfy pred is sufficient to
-// conclude that pol's conditions would all be met for that agent. Returns a
+// true iff knowledge that an actor's attributes satisfy pred is sufficient to
+// conclude that pol's conditions would all be met for that actor. Returns a
 // non-nil error if pred is not parsable by parseConditionPredicate.
 func predicateImpliesPolicyConditionsSatisfied(pred string, pol *doc.Policy) (bool, error) {
 	predFactors, err := parseConditionPredicate(pred)
@@ -569,9 +569,9 @@ condLoop:
 }
 
 // Tells whether or not a predicate implies violation of the conditions of a
-// policy. Returns true iff knowledge that an agent's attributes satisfy pred
+// policy. Returns true iff knowledge that an actor's attributes satisfy pred
 // is sufficient to conclude that pol's conditions would not all be met for
-// that agent. Returns a non-nil error if pred is not parsable by
+// that actor. Returns a non-nil error if pred is not parsable by
 // parseConditionPredicate.
 func predicateImpliesPolicyConditionsViolated(pred string, pol *doc.Policy) (bool, error) {
 	predFactors, err := parseConditionPredicate(pred)
@@ -668,15 +668,15 @@ func predicateImpliesPolicyConstraintsSatisfied(pred string, pol *doc.Policy) (b
 
 // Implementation for the internal-language permitted_access_counts function,
 // which accepts the same arguments as permitted_access and returns the same
-// information plus current counts of agents with for kind of access. Returns
+// information plus current counts of actors with for kind of access. Returns
 // a slice of string descriptors of the form "<proto><param>=<count>", where
 // <proto> is a protocol (e.g., "tcp"), <param> is a corresponding port number
 // or other discriminating code (e.g., a type value for icmp), and <count> is
-// an agent count.
+// an actor count.
 //
 // As for permittedAccessImpl, the second argument must be a slice containing
 // three elements: (1) the root of a policy block or component block, (2) a
-// condition predicate, and (3) a constraint predicate. Each returned agent
+// condition predicate, and (3) a constraint predicate. Each returned actor
 // count represents the number of users whose attributes satisfy the condition
 // predicate (or, if it is empty, the policy conditions for the associated
 // <proto><param> access) and are sufficient to grant access for which the
@@ -724,20 +724,20 @@ func permittedAccessCountsImpl(ctx yt.EvaluationContext, arg interface{}) (inter
 	}
 
 	// Set up a map of access descriptors (a la potential_access) to sets of
-	// unique IDs for all agents whose attributes satisfy the argument
+	// unique IDs for all actors whose attributes satisfy the argument
 	// predicate (if any) and also entitle them to the corresponding forms
 	// of access according to at least one of the policies we're about to
 	// examine.  These ID sets will be unions of corresponding the sets
 	// computed for the different policies.
-	unionAgentIds := make(map[string]map[string]bool) // descriptor (e.g., "tcp22") -> ID -> true
+	unionActorIds := make(map[string]map[string]bool) // descriptor (e.g., "tcp22") -> ID -> true
 
-	// Set up (1) a set of unique IDs for all agents whose attributes satisfy
+	// Set up (1) a set of unique IDs for all actors whose attributes satisfy
 	// the argument condition predicate and (2) a map of data source names to
-	// corresponding agent counts. Don't populate these yet; do so later only
+	// corresponding actor counts. Don't populate these yet; do so later only
 	// if some policy's conditions and constraints are found to be satisfied
 	// by both of the argument predicates.
-	var condPredAgentIds map[string]bool   // agent ID -> true
-	var condPredAgentCounts map[string]int // DS name -> count
+	var condPredActorIds map[string]bool   // actor ID -> true
+	var condPredActorCounts map[string]int // DS name -> count
 
 	for _, pp := range parsedPolicies {
 		pol := pp.parsed
@@ -783,25 +783,25 @@ func permittedAccessCountsImpl(ctx yt.EvaluationContext, arg interface{}) (inter
 		polTestInfo := fmt.Sprintf("conditions%s satisfied, constraints%s satisfied", not(conditionsSatisfied), not(constraintsSatisfied))
 
 		// Computed results for this policy.
-		var polAgentIds map[string]bool        // ID -> true
-		var polAgentCounts map[string]int      // DS name -> count
+		var polActorIds map[string]bool        // ID -> true
+		var polActorCounts map[string]int      // DS name -> count
 		var polPermittedAccess map[string]bool // access desc (e.g., "tcp443") -> true
 
 		if conditionsSatisfied && constraintsSatisfied {
 			// The argument predicates (if any) satisfy this policy's conditions
-			// and constraints, so now we need to get the IDs of all agents the
+			// and constraints, so now we need to get the IDs of all actors the
 			// policy would grant access to. If there is a condition predicate,
-			// then we need to find out which agents' attributes satisfy it.
-			// Otherwise we need to know which agents' attributes satisfy all of
+			// then we need to find out which actors' attributes satisfy it.
+			// Otherwise we need to know which actors' attributes satisfy all of
 			// this policy's condition expressions.
 			if condPred != "" {
 				// There is a condition predicate argument. Break it into simple
 				// predicate factors, group them by data source, and query each
-				// data source for the IDs of the agents that satisfy the
+				// data source for the IDs of the actors that satisfy the
 				// corresponding factors. We only need to do this once, because
 				// the results are independent of which policy we're looking at.
-				if condPredAgentIds == nil {
-					condPredAgentIds = make(map[string]bool)
+				if condPredActorIds == nil {
+					condPredActorIds = make(map[string]bool)
 					condPredFactors, _ := parseConditionPredicate(condPred) // can't fail at this point
 					if len(condPredFactors) > 0 {
 						attrExprs := make(map[string][]AttributeExpression) // ds name -> attr exprs
@@ -815,22 +815,22 @@ func permittedAccessCountsImpl(ctx yt.EvaluationContext, arg interface{}) (inter
 							attrName := identFields[1]
 							attrExprs[dsName] = append(attrExprs[dsName], AttributeExpression{Name: attrName, Operator: fact.op, Value: fact.val})
 						}
-						if agentIds, agentCounts, err := queryDataSourcesForAgentIds(dataSourceProxies, attrExprs, exprSource); err != nil {
+						if actorIds, actorCounts, err := queryDataSourcesForActorIds(dataSourceProxies, attrExprs, exprSource); err != nil {
 							return nil, err
 						} else {
-							condPredAgentIds = agentIds
-							condPredAgentCounts = agentCounts
+							condPredActorIds = actorIds
+							condPredActorCounts = actorCounts
 						}
 					}
 				}
-				polAgentIds = condPredAgentIds
-				polAgentCounts = condPredAgentCounts
+				polActorIds = condPredActorIds
+				polActorCounts = condPredActorCounts
 			} else {
 				// There is no condition predicate argument, so we need to find
-				// the IDs of all agents whose attribute satisfy the current
+				// the IDs of all actors whose attribute satisfy the current
 				// policy's conditions. So group the conditions' attribute
 				// expressions by data source, and query each data source for
-				// the agent IDs that satisfy the corresponding expressions.
+				// the actor IDs that satisfy the corresponding expressions.
 				attrExprs := make(map[string][]AttributeExpression) // DS name -> exprs
 				attrExprTexts := make([]string, 0)
 				for _, cond := range pol.Conditions {
@@ -848,25 +848,25 @@ func permittedAccessCountsImpl(ctx yt.EvaluationContext, arg interface{}) (inter
 					}
 				}
 				exprSource := "policy attribute expression(s) " + strings.Join(attrExprTexts, ", ")
-				if agentIds, agentCounts, err := queryDataSourcesForAgentIds(dataSourceProxies, attrExprs, exprSource); err != nil {
+				if actorIds, actorCounts, err := queryDataSourcesForActorIds(dataSourceProxies, attrExprs, exprSource); err != nil {
 					return nil, err
 				} else {
-					polAgentIds = agentIds
-					polAgentCounts = agentCounts
+					polActorIds = actorIds
+					polActorCounts = actorCounts
 				}
 			}
 
-			// Compute that access this policy permits and add the IDs of the agents
+			// Compute that access this policy permits and add the IDs of the actors
 			// it authorizes to the union sets.
 			polPermittedAccess = make(map[string]bool, len(pp.comServices))
 			for _, desc := range pp.comServices {
 				polPermittedAccess[desc] = true
-				idSet := unionAgentIds[desc]
+				idSet := unionActorIds[desc]
 				if idSet == nil {
 					idSet = make(map[string]bool)
-					unionAgentIds[desc] = idSet
+					unionActorIds[desc] = idSet
 				}
-				for id, _ := range polAgentIds {
+				for id, _ := range polActorIds {
 					idSet[id] = true
 				}
 			}
@@ -876,13 +876,13 @@ func permittedAccessCountsImpl(ctx yt.EvaluationContext, arg interface{}) (inter
 		if ctx.NodeLogger() != nil {
 			polCountInfo := ""
 			if conditionsSatisfied && constraintsSatisfied {
-				if len(polAgentCounts) > 0 {
+				if len(polActorCounts) > 0 {
 					var counts []string
-					for dsName, count := range polAgentCounts {
+					for dsName, count := range polActorCounts {
 						counts = append(counts, fmt.Sprintf("(%s, %d)", dsName, count))
 					}
 					sort.Strings(counts)
-					polCountInfo = fmt.Sprintf("data source agent counts: %s", strings.Join(counts, ", "))
+					polCountInfo = fmt.Sprintf("data source actor counts: %s", strings.Join(counts, ", "))
 				}
 			}
 
@@ -896,9 +896,9 @@ func permittedAccessCountsImpl(ctx yt.EvaluationContext, arg interface{}) (inter
 		}
 	}
 
-	// Build a sorted list of access descriptors plus agent counts.
-	countDescs := make([]string, 0, len(unionAgentIds))
-	for desc, idSet := range unionAgentIds {
+	// Build a sorted list of access descriptors plus actor counts.
+	countDescs := make([]string, 0, len(unionActorIds))
+	for desc, idSet := range unionActorIds {
 		countDescs = append(countDescs, fmt.Sprintf("%s=%d", desc, len(idSet)))
 	}
 	sort.Strings(countDescs)
@@ -906,7 +906,7 @@ func permittedAccessCountsImpl(ctx yt.EvaluationContext, arg interface{}) (inter
 	if ctx.NodeLogger() != nil && node.Kind() != yt.SequenceKind {
 		// Policy nodes are sequences, so this node must be for a component.
 		compPath := yt.PathFrom(ctx.YamlRoot(), node)
-		ctx.NodeLogger().Log(compPath, fmt.Sprintf("agent counts for component: {%s}", strings.Join(countDescs, ", ")))
+		ctx.NodeLogger().Log(compPath, fmt.Sprintf("actor counts for component: {%s}", strings.Join(countDescs, ", ")))
 	}
 
 	// Return the results in a sorted slice
@@ -955,32 +955,32 @@ func accessDescriptorsForServices(scopings []*doc.Scoping) ([]string, error) {
 	return descs, nil
 }
 
-// Queries external data sources for the IDs of agents that satisfy a collection
+// Queries external data sources for the IDs of actors that satisfy a collection
 // of attribute expressions. The first two arguments contain data source proxies
 // and attribute expressions, in both cases indexed by data source name. The
 // last argument is a brief description of where the expression came from and is
 // included in an error value in case of failure. On success returns (1) a set
-// of all agent IDs (mapped to true) that occur in the query results from all
+// of all actor IDs (mapped to true) that occur in the query results from all
 // data sources in the key set of attrExprs and (2) a map of data source names
 // to corresponding result set sizes.
-func queryDataSourcesForAgentIds(dataSources map[string]DataSourceProxy, attrExprs map[string][]AttributeExpression, exprSource string) (map[string]bool, map[string]int, error) {
+func queryDataSourcesForActorIds(dataSources map[string]DataSourceProxy, attrExprs map[string][]AttributeExpression, exprSource string) (map[string]bool, map[string]int, error) {
 	var resultIds map[string]bool        // ID -> true
 	resultCounts := make(map[string]int) // DS name -> count
 	for dsName, dsExprs := range attrExprs {
 		if proxy, ok := dataSources[dsName]; !ok {
 			return nil, nil, fmt.Errorf(`no proxy defined for data source %q referenced in %s`, dsName, exprSource)
-		} else if agentIds, err := proxy.AgentIds(dsExprs); err != nil {
+		} else if actorIds, err := proxy.ActorIds(dsExprs); err != nil {
 			return nil, nil, fmt.Errorf(`failed to query data source proxy %q referenced in %s: %w`, dsName, exprSource, err)
 		} else {
-			resultCounts[dsName] = len(agentIds)
+			resultCounts[dsName] = len(actorIds)
 			if resultIds == nil {
 				resultIds = make(map[string]bool)
-				for _, id := range agentIds {
+				for _, id := range actorIds {
 					resultIds[id] = true
 				}
 			} else {
 				newResultIds := make(map[string]bool, len(resultIds))
-				for _, id := range agentIds {
+				for _, id := range actorIds {
 					if resultIds[id] {
 						newResultIds[id] = true
 					}

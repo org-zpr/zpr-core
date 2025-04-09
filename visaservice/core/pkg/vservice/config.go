@@ -10,7 +10,7 @@ import (
 
 type VSConfig struct {
 	// The (noise) certificate used by the visa service adapter.
-	// Used to obtain the correct CN for visa service bootstrap agent.
+	// Used to obtain the correct CN for visa service bootstrap actor.
 	AdapterCert string `yaml:"adapter_cert,omitempty"`
 
 	// The authority cert is used to check (noise) certificate signatures.

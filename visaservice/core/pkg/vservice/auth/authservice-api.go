@@ -4,7 +4,7 @@ import (
 	"net/netip"
 	"time"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vsx/snio/zds"
 )
@@ -14,7 +14,7 @@ type AuthenticateOK struct {
 	Identities  []string                 // Identity tokens
 	Expire      time.Time                // Expiration of the authentication (derived from the tokens)
 	Credentials []string                 // Credential IDs used in the authentication
-	Claims      map[string]*agent.ClaimV // These are attributes returned from validation service to use to augment/replace the user claims.
+	Claims      map[string]*actor.ClaimV // These are attributes returned from validation service to use to augment/replace the user claims.
 	Prefixes    []string                 // Eg, "ca0", "simplev"
 }
 

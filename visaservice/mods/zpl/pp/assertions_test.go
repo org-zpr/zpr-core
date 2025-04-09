@@ -517,10 +517,10 @@ func TestDynamicStandardLanguageAssertions(t *testing.T) {
             divA:
               desc: division A
               assertions:
-                - desc: 1. every type of access must have at least one authorized agent
+                - desc: 1. every type of access must have at least one authorized actor
                   assert: allowed for count(users) > 0
 
-                - desc: 2. all offered tcp and udp access must have at least one authorized agent
+                - desc: 2. all offered tcp and udp access must have at least one authorized actor
                   assert: tcp and udp allowed for count(users) > 0
 
                 - desc: 3. fewer than 6 users have access to any service of any component

@@ -11,7 +11,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	log "zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vsx/snio/zds"
@@ -49,7 +49,7 @@ type ValidityTok struct {
 	Expires         time.Time // Expiration of auth (from certificate)
 	Authority       *ValidityChain
 	CertID          string            // For example a certificate fingerprint
-	AA              *agent.AuthAttr   // The policy AuthAttr
+	AA              *actor.AuthAttr   // The policy AuthAttr
 	AuthorityPrefix string            // Eg, "ca0"
 	AttrKey         string            // String for base attribute key.
 	Claims          map[string]string // asserted properties
@@ -88,7 +88,7 @@ func (v *NodeValidator) Validate(msg *zds.ValidateRequest, cdb CertificateDB, re
 	// TODO: At some point in future we want to support mutliple schemes for a single user.
 	var vtok *ValidityTok
 	for _, crb := range msg.GetCrespSet() {
-		aa, err := agent.ParseAuthAttr(crb.GetRespSpec())
+		aa, err := actor.ParseAuthAttr(crb.GetRespSpec())
 		if err != nil {
 			return nil, fmt.Errorf("invalid spec %v", crb.GetRespSpec())
 		}
@@ -97,7 +97,7 @@ func (v *NodeValidator) Validate(msg *zds.ValidateRequest, cdb CertificateDB, re
 			continue
 		}
 
-		if aa.T != agent.AuthTCert {
+		if aa.T != actor.AuthTCert {
 			v.Log.Info("[NV] internal validation scheme not supported", "scheme", aa.T, "auth", aa.String())
 			continue
 		}
@@ -115,7 +115,7 @@ func (v *NodeValidator) Validate(msg *zds.ValidateRequest, cdb CertificateDB, re
 		return nil, errAuthFailed
 	}
 
-	// TODO: We probably need to have multiple agent IDs -- maybe we return the
+	// TODO: We probably need to have multiple actor IDs -- maybe we return the
 	//       certs that we have verified?  For now we are fabricating a sort of
 	//       node "attestation" token, signed with surenet key and listing the
 	//       type of auth and the CN of the authority who checks it.
@@ -155,9 +155,9 @@ func (v *NodeValidator) Validate(msg *zds.ValidateRequest, cdb CertificateDB, re
 	// Copy some claims from the user over:
 	for k, kv := range msg.Claims {
 		switch kk := strings.ToLower(k); kk {
-		case agent.KAttrEPID:
+		case actor.KAttrEPID:
 			// Here we allow the user to request an EPID. It is therefore up to policy
-			// writers to ensure that they have sufficient details in their agent lines
+			// writers to ensure that they have sufficient details in their actor lines
 			// to prevent epid masquerading!
 			//
 			// TODO: Why is this here? This returns the EPID requested by the adapter as a "validated" claim.
@@ -198,19 +198,19 @@ func (v *NodeValidator) Validate(msg *zds.ValidateRequest, cdb CertificateDB, re
 func (v *NodeValidator) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string, revokes []*snauth.CredID) (*AuthenticateOK, error) {
 	expiration := time.Now().Add(v.maxAuthDuration)
 
-	if claims[agent.KAttrCN] == "" {
-		return nil, fmt.Errorf("missing required claim: %v", agent.KAttrCN)
+	if claims[actor.KAttrCN] == "" {
+		return nil, fmt.Errorf("missing required claim: %v", actor.KAttrCN)
 	}
 
-	matchCN := strings.ToLower(claims[agent.KAttrCN])
+	matchCN := strings.ToLower(claims[actor.KAttrCN])
 	for _, revoked := range revokes {
 		if revoked.CType == snauth.CredIDTypeCN && revoked.ID == matchCN {
-			v.Log.Info("[NV] validation failes: CN has been revoked", "cn", claims[agent.KAttrCN])
+			v.Log.Info("[NV] validation failes: CN has been revoked", "cn", claims[actor.KAttrCN])
 			return nil, errAuthRevoked
 		}
 	}
 
-	snjwt, err := v.makeJWT(claims[agent.KAttrCN], expiration, nil, nil)
+	snjwt, err := v.makeJWT(claims[actor.KAttrCN], expiration, nil, nil)
 	if err != nil {
 		v.Log.WithError(err).Error("[NV] JWT create failed")
 		snjwt = "jwt_create_failed"
@@ -221,25 +221,25 @@ func (v *NodeValidator) SelfAuthenticate(reqAddr netip.Addr, claims map[string]s
 		Expire:      expiration,
 		Credentials: []string{},
 		Prefixes:    []string{"zpr.adapter"},
-		Claims:      make(map[string]*agent.ClaimV),
+		Claims:      make(map[string]*actor.ClaimV),
 	}
 	for k, v := range claims {
-		if k == agent.KAttrCN {
-			aok.Claims[agent.KAttrCN] = &agent.ClaimV{V: v, Exp: aok.Expire}
+		if k == actor.KAttrCN {
+			aok.Claims[actor.KAttrCN] = &actor.ClaimV{V: v, Exp: aok.Expire}
 			continue
 		}
 	}
-	if reqAddr.IsValid() && reqAddr != agent.ZeroAddr {
-		aok.Claims[agent.KAttrEPID] = &agent.ClaimV{V: reqAddr.String(), Exp: aok.Expire}
+	if reqAddr.IsValid() && reqAddr != actor.ZeroAddr {
+		aok.Claims[actor.KAttrEPID] = &actor.ClaimV{V: reqAddr.String(), Exp: aok.Expire}
 	}
 	return aok, nil
 }
 
 // validateCert validates one of our cert type auth schemes. Either x509 or
 // U2F.
-func (v *NodeValidator) validateCert(submittedAA *agent.AuthAttr, msg *zds.ValidateRequest, crb *zds.ChallengeResponse, cdb CertificateDB, revokes []*snauth.CredID) (*ValidityTok, error) {
+func (v *NodeValidator) validateCert(submittedAA *actor.AuthAttr, msg *zds.ValidateRequest, crb *zds.ChallengeResponse, cdb CertificateDB, revokes []*snauth.CredID) (*ValidityTok, error) {
 	switch submittedAA.CT {
-	case agent.AuthCertTX509:
+	case actor.AuthCertTX509:
 		// See if the cert has correct authority signature
 		// On the node, our authorities are identifiers.
 
@@ -341,7 +341,7 @@ func (v *NodeValidator) validateCert(submittedAA *agent.AuthAttr, msg *zds.Valid
 		}
 		return nil, errValidateFail
 
-	case agent.AuthCertTU2F:
+	case actor.AuthCertTU2F:
 		// See if the cert has correct authority signature
 		// See if the props on the AuthAttr from POLICY are present in the cert.
 		// Now, use the public key in the cert to check the U2F response block.
@@ -389,11 +389,11 @@ func (v *NodeValidator) validateClaims(cert *x509.Certificate, claims map[string
 	return authedClaims, true
 }
 
-// makeJWT construct a signed JWT for returning as the "agentID". This can
+// makeJWT construct a signed JWT for returning as the "actorID". This can
 // be retrieved by clients on surenet using the whois function.
 func (v *NodeValidator) makeJWT(subject string, expiration time.Time, issuers, credIDs []string) (string, error) {
 	claims := jwt.MapClaims{
-		agent.JWTXAuthCount: len(issuers),
+		actor.JWTXAuthCount: len(issuers),
 		"sub":               subject,
 		"aud":               "zpr",
 		"iss":               v.name,
@@ -403,8 +403,8 @@ func (v *NodeValidator) makeJWT(subject string, expiration time.Time, issuers, c
 		"jti":               snauth.NewJTI(),
 	}
 	for i, isr := range issuers {
-		claims[fmt.Sprintf("%s.%d", agent.JWTXAuthIssuerPfx, i)] = isr
-		claims[fmt.Sprintf("%s.%d", agent.JWTXAuthIDPfx, i)] = credIDs[i]
+		claims[fmt.Sprintf("%s.%d", actor.JWTXAuthIssuerPfx, i)] = isr
+		claims[fmt.Sprintf("%s.%d", actor.JWTXAuthIDPfx, i)] = credIDs[i]
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	return token.SignedString(v.privateKey)

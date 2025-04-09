@@ -1,6 +1,6 @@
-package agent
+package actor
 
-// Well known agent attribute keys in ZPR namespace
+// Well known actor attribute keys in ZPR namespace
 const (
 	KAttrEPID               = "zpr.addr"                 // ZPR contact address (was Endpoint ID) required for nodes and services
 	KAttrAuthority          = "zpr.authority"            // authority identifier
@@ -13,5 +13,5 @@ const (
 )
 
 const (
-	KAttrAgentAuthority = "authority" // Agent requested authority
+	KAttrActorAuthority = "authority" // Actor requested authority
 )

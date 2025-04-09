@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/logr"
 
 	"zpr.org/vs/pkg/policy"
@@ -56,7 +56,7 @@ type VisaService struct {
 }
 
 // `bootstrapAuthDuration` is used to set the expiration of the self-authentication
-// for the visa serviec agent as well as the initial visas handed to the first
+// for the visa serviec actor as well as the initial visas handed to the first
 // connecting node.  This would normally be short (~1hr).
 func NewVisaService(initialPolicyFile string,
 	vs_cn string,
@@ -255,11 +255,11 @@ func (s *VisaService) ListVisas() []*VisaDescriptor {
 
 // Implements an interface needed by the admin service.
 func (s *VisaService) ListAdapters() []*adb.HostRecordBrief {
-	return s.service.inst.agentDB.CloneToBrief()
+	return s.service.inst.actorDB.CloneToBrief()
 }
 
 func (s *VisaService) ListNodes() []*adb.NodeRecordBrief {
-	return s.service.inst.agentDB.CloneNodesToBrief()
+	return s.service.inst.actorDB.CloneNodesToBrief()
 }
 
 // Implements an interface needed by the admin service.
@@ -285,43 +285,43 @@ func (s *VisaService) RevokeCN(cn string) uint32 {
 	}
 
 	// Then get rid of any visas involved with the CN.
-	// The visa service keeps a table of visas, but to find ones for a specific agent we need
-	// the ZPR addr of the agent.
+	// The visa service keeps a table of visas, but to find ones for a specific actor we need
+	// the ZPR addr of the actor.
 
 	var count uint32
-	agentList := s.service.inst.agentDB.GetAgentsWithClaim(agent.KAttrCN, cn)
-	if len(agentList) > 0 {
-		count = s.service.inst.revokeVisasForAgents(agentList)
+	actorList := s.service.inst.actorDB.GetActorsWithClaim(actor.KAttrCN, cn)
+	if len(actorList) > 0 {
+		count = s.service.inst.revokeVisasForActors(actorList)
 		if count > 0 {
 			s.log.Info("active visas removed due to revoked CN", "cn", cn, "visa_count", count)
 		} else {
 			s.log.Info("no active visas found for revoked CN", "cn", cn)
 		}
-		for _, agnt := range agentList {
-			s.removeAgent(agnt)
+		for _, agnt := range actorList {
+			s.removeActor(agnt)
 		}
 	} else {
 		s.log.Info("no active visas found for revoked CN", "cn", cn)
 	}
 
-	// Ideally we would tell the docking node that we are booting this agent
+	// Ideally we would tell the docking node that we are booting this actor
 	// out of our system.
 	return count
 }
 
-// Remove an agent from the agent DB.
+// Remove an actor from the actor DB.
 // Should behave just as if de-register or disconnect were called over the vs-api.
-func (s *VisaService) removeAgent(agnt *agent.Agent) {
+func (s *VisaService) removeActor(agnt *actor.Actor) {
 	zprAddr := agnt.GetZPRIDIfSet()
 	if agnt.IsNode() {
-		if prec := s.service.inst.agentDB.GetPeerRecord(zprAddr); prec != nil {
+		if prec := s.service.inst.actorDB.GetPeerRecord(zprAddr); prec != nil {
 			s.service.inst.takePeerRecord(prec.APIKey)
 		}
-		s.service.inst.agentDB.RemoveNode(zprAddr)
-		s.log.Info("node-agent has been removed", "zpr_addr", zprAddr)
+		s.service.inst.actorDB.RemoveNode(zprAddr)
+		s.log.Info("node-actor has been removed", "zpr_addr", zprAddr)
 	} else {
-		s.service.inst.agentDB.RemoveAdapter(zprAddr)
-		s.log.Info("adapter-agent has been removed", "zpr_addr", zprAddr)
+		s.service.inst.actorDB.RemoveAdapter(zprAddr)
+		s.log.Info("adapter-actor has been removed", "zpr_addr", zprAddr)
 	}
 }
 

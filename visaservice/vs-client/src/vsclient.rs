@@ -88,8 +88,8 @@ pub fn authenticate(
         IpAddr::V6(v6) => v6.octets().to_vec(),
     };
 
-    let agent = vsapi::Agent {
-        agent_type: Some(vsapi::AgentType::NODE),
+    let actor = vsapi::Actor {
+        actor_type: Some(vsapi::ActorType::NODE),
         attrs: Some(attrs),
         auth_expires: Some((timestamp + 60 * 60) as i64),
         zpr_addr: Some(addr_bytes.clone()),
@@ -114,7 +114,7 @@ pub fn authenticate(
         node_cert: Some(cert_pem_data.into()),
         hmac: Some(hmac),
         vss_service: Some(SocketAddr::new(*zpr_addr, vss_port).to_string()),
-        node_agent: Some(agent),
+        node_actor: Some(actor),
     };
 
     match client.authenticate(authreq) {
@@ -213,8 +213,8 @@ pub fn authorize_connect(
                     println!("  status: {:?}", resp.status) // unexpected
                 }
             }
-            if let Some(agnt) = resp.agent {
-                println!("  agent: {:?}", agnt);
+            if let Some(agnt) = resp.actor {
+                println!("  actor: {:?}", agnt);
             }
             if let Some(reason) = resp.reason {
                 println!("  reason: {}", reason);
@@ -228,7 +228,7 @@ pub fn authorize_connect(
     Ok(())
 }
 
-pub fn agent_disconnect(service: &str, apikey: &str, addrstr: &str) -> thrift::Result<()> {
+pub fn actor_disconnect(service: &str, apikey: &str, addrstr: &str) -> thrift::Result<()> {
     let addr: IpAddr = addrstr.parse().unwrap();
 
     let octets = match addr {
@@ -237,9 +237,9 @@ pub fn agent_disconnect(service: &str, apikey: &str, addrstr: &str) -> thrift::R
     };
 
     let mut client = newclient(service)?;
-    match client.agent_disconnect(apikey.into(), octets) {
+    match client.actor_disconnect(apikey.into(), octets) {
         Ok(result) => {
-            println!("agent_disconnect sent!");
+            println!("actor_disconnect sent!");
             println!("result = {:?}", result);
         }
         Err(e) => {

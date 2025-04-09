@@ -18,8 +18,8 @@ github.com/hashicorp/go-version v1.7.0 h1:5tqGy27NaOTB8yJKUZELlFAS/LTKJkrmONwQKe
 github.com/hashicorp/go-version v1.7.0/go.mod h1:fltr4n8CU8Ke44wwGCBoEymUuxUHl09ZGVZPK5anwXA=
 github.com/klauspost/cpuid/v2 v2.0.12 h1:p9dKCg8i4gmOxtv35DvrYoWqYzQrvEVdjQ762Y0OqZE=
 github.com/klauspost/cpuid/v2 v2.0.12/go.mod h1:g2LTdtYhdyuGPqyWyv7qRAmj1WBqxuObKfj5c0PQa7c=
-github.com/org-zpr/zpr-vsapi-go v0.1.0 h1:RwYbZLhJgKOM8EWcrO9Cp7/Bwm4uQ4zdAc9hho740v4=
-github.com/org-zpr/zpr-vsapi-go v0.1.0/go.mod h1:RhHUvtaLqrcBESgbzOTKEEsDlgc1LCbCAjQkOjx559E=
+github.com/org-zpr/zpr-vsapi-go v0.2.0 h1:HtVCj+McnQx3gQalgD32YEE2NsVwfMc1E8lFtcx2G78=
+github.com/org-zpr/zpr-vsapi-go v0.2.0/go.mod h1:RhHUvtaLqrcBESgbzOTKEEsDlgc1LCbCAjQkOjx559E=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/russross/blackfriday/v2 v2.1.0 h1:JIOH55/0cWyOuilr9/qlrm0BSXldqnqwMsf35Ld67mk=

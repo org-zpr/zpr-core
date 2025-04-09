@@ -62,7 +62,7 @@ func (t *AcceptValidAuth) Run(state *testfw.TestState) *testfw.RunResult {
 		return testfw.Fail("node name not found node service list")
 	}
 
-	nodeAgent, err := plc.CreateNodeAgent(policy, 3600)
+	nodeActor, err := plc.CreateNodeActor(policy, 3600)
 	if err != nil {
 		return testfw.Faile(err)
 	}
@@ -77,7 +77,7 @@ func (t *AcceptValidAuth) Run(state *testfw.TestState) *testfw.RunResult {
 		NodeCert:   zcrypt.CertToPEM(state.NodeCert),
 		Hmac:       m2HMAC,
 		VssService: "", // HMM normally this would need to be a ZPR address
-		NodeAgent:  nodeAgent,
+		NodeActor:  nodeActor,
 	}
 	state.Log.Infow("attempting authenticate for node", "node_name", nodeName, "CN", nodeCR.CN)
 	apiKey, err := mockNode.Authenticate(&authReq)

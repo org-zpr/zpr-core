@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
@@ -141,9 +141,9 @@ func getAuthEndpoint(svc *polio.Service) *snip.Endpoint {
 	return nil
 }
 
-// Sets the agent providing the datasource.
+// Sets the actor providing the datasource.
 //
-// The `configID` is the configuration ID at the last time the agent authenticated and was
+// The `configID` is the configuration ID at the last time the actor authenticated and was
 // permitted to advertise the service.
 //
 // TODO: Needs configuration-ID attached.
@@ -209,7 +209,7 @@ func (a *Authenticator) Authenticate(extDsPrefix string,
 	}
 
 	for _, crb := range chalResp {
-		aa, err := agent.ParseAuthAttr(crb.GetRespSpec())
+		aa, err := actor.ParseAuthAttr(crb.GetRespSpec())
 		if err != nil {
 			a.log.Warn("invalid challenge response block", "spec", crb.GetRespSpec())
 			continue
@@ -283,7 +283,7 @@ func (a *Authenticator) Authenticate(extDsPrefix string,
 	//       same as ours. As it is, the JWT in the auth response (ident) will
 	//       have an independent expires time that surenet is ignorant of.
 
-	// Since multiple sources could validate this, there may be multiple agent IDs.
+	// Since multiple sources could validate this, there may be multiple actor IDs.
 
 	localOK := (!useInt) || (internResponse.VResp.GetStat() == zds.ValidateResponse_SUCCESS)
 	extOK := (!useExt) || (externResponse.VResp.GetStat() == zds.ValidateResponse_SUCCESS)
@@ -295,17 +295,17 @@ func (a *Authenticator) Authenticate(extDsPrefix string,
 	// ELSE: success !
 
 	var prefixes []string
-	authClaims := make(map[string]*agent.ClaimV)
+	authClaims := make(map[string]*actor.ClaimV)
 	if useInt {
 		for _, kvx := range internResponse.VResp.Attrs {
-			authClaims[kvx.Key] = &agent.ClaimV{V: kvx.Val, Exp: time.Unix(kvx.Exp, 0)}
+			authClaims[kvx.Key] = &actor.ClaimV{V: kvx.Val, Exp: time.Unix(kvx.Exp, 0)}
 		}
 		// Internal could be using any number of CA names
 		prefixes = append(prefixes, internResponse.Prefix)
 	}
 	if useExt {
 		for _, kvx := range externResponse.VResp.Attrs {
-			authClaims[kvx.Key] = &agent.ClaimV{V: kvx.Val, Exp: time.Unix(kvx.Exp, 0)}
+			authClaims[kvx.Key] = &actor.ClaimV{V: kvx.Val, Exp: time.Unix(kvx.Exp, 0)}
 		}
 		prefixes = append(prefixes, externResponse.Prefix)
 	}
@@ -431,7 +431,7 @@ func (a *Authenticator) authenticateExtern(externReq *zds.ValidateRequest, dsPre
 	}
 	// Finally:
 	if externResponse.VResp.GetStat() == zds.ValidateResponse_SUCCESS {
-		// The AgentID is a JWT token. Its possible this has been revoked by JTI value.
+		// The ActorID is a JWT token. Its possible this has been revoked by JTI value.
 		if isJWTRevoked(string(externResponse.VResp.GetToken()), revokes) {
 			a.log.Info("externally generated JWT is on revoke list, auth fails")
 			return nil, errAuthRevoked

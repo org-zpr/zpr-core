@@ -20,7 +20,7 @@ const (
 
 // DataCapFunc is used when you need to do extra work to get
 // datacap constraint details.
-// Arguments are (FWD, DataCap, clientAgentIdent) and returns (capKey, remainBytes, error)
+// Arguments are (FWD, DataCap, clientActorIdent) and returns (capKey, remainBytes, error)
 type DataCapFunc func(bool, *DataCap, string) (string, uint64, error)
 
 type VisaBuilder struct {
@@ -37,7 +37,7 @@ type VisaBuilder struct {
 	capKey             string
 	datacapRemain      uint64
 	fwd                bool
-	clientAgentIdent   string
+	clientActorIdent   string
 	sessionKey         []byte
 	sessionKeyEncoding SessionKeyEncoding
 }
@@ -84,17 +84,17 @@ func (b *VisaBuilder) Visa() (*vsio.Visa, error) {
 		}
 		capVal := fmt.Sprintf("%v/%v", visaConfig.Cap.CapBytes, visaConfig.Cap.CapPeriod.String())
 
-		if b.clientAgentIdent == "" {
-			return nil, fmt.Errorf("client agent ident not set")
+		if b.clientActorIdent == "" {
+			return nil, fmt.Errorf("client actor ident not set")
 		}
 
 		if b.dynamicDataCapCBFn != nil {
-			b.capKey, b.datacapRemain, err = b.dynamicDataCapCBFn(b.fwd, visaConfig.Cap, b.clientAgentIdent)
+			b.capKey, b.datacapRemain, err = b.dynamicDataCapCBFn(b.fwd, visaConfig.Cap, b.clientActorIdent)
 			if err != nil {
 				return nil, fmt.Errorf("dynamic datacap callback failed: %w", err)
 			}
 		} else {
-			b.capKey = fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%v_%v_%v_%v", b.fwd, b.clientAgentIdent, capID, capVal))))
+			b.capKey = fmt.Sprintf("%x", md5.Sum([]byte(fmt.Sprintf("%v_%v_%v_%v", b.fwd, b.clientActorIdent, capID, capVal))))
 			b.datacapRemain = visaConfig.Cap.CapBytes
 		}
 		if b.datacapRemain == 0 {
@@ -160,12 +160,12 @@ func (b *VisaBuilder) WithDatacapComputeFunc(callback DataCapFunc) *VisaBuilder 
 	return b
 }
 
-// WithClientAgentIdent sets the client agent identifier. In a forward match, the client agent is the
-// source agent, otherwise it is the destination agent.
+// WithClientActorIdent sets the client actor identifier. In a forward match, the client actor is the
+// source actor, otherwise it is the destination actor.
 //
 // Required if a DataCap is used.
-func (b *VisaBuilder) WithClientAgentIdent(ident string) *VisaBuilder {
-	b.clientAgentIdent = ident
+func (b *VisaBuilder) WithClientActorIdent(ident string) *VisaBuilder {
+	b.clientActorIdent = ident
 	return b
 }
 

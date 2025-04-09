@@ -43,7 +43,7 @@ type VisaDescriptor struct {
 	Dest       string `json:"dest"`
 }
 
-// see `core/pkg/vservice/adb/agentdb.go`
+// see `core/pkg/vservice/adb/actordb.go`
 type HostRecordBrief struct {
 	CTime   int64      `json:"ctime"` // unix seconds
 	Cn      string     `json:"cn"`

@@ -204,7 +204,7 @@ type GenChalRequest struct {
 	SchemaVersion  string            `protobuf:"bytes,2,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
 	RequestId      uint64            `protobuf:"varint,3,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	ChallengerAddr []byte            `protobuf:"bytes,4,opt,name=challenger_addr,json=challengerAddr,proto3" json:"challenger_addr,omitempty"`                                                   // node IP address.
-	Claims         map[string]string `protobuf:"bytes,5,rep,name=claims,proto3" json:"claims,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"` // untrusted claims from agent
+	Claims         map[string]string `protobuf:"bytes,5,rep,name=claims,proto3" json:"claims,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"` // untrusted claims from actor
 	Conf           map[string]string `protobuf:"bytes,6,rep,name=conf,proto3" json:"conf,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`     // optional, configuration information from
 }
 

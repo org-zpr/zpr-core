@@ -1,4 +1,4 @@
-package agent
+package actor
 
 import (
 	"errors"

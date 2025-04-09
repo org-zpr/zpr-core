@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"google.golang.org/protobuf/proto"
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsapi"
@@ -37,71 +37,71 @@ import (
 // NOTE we are in vsimpl here and probably want to be in node somewhere.
 //
 
-// ApproveConnection check connection against validation and policy.  If `authedAgent` is set we assume that this is being called by
+// ApproveConnection check connection against validation and policy.  If `authedActor` is set we assume that this is being called by
 // the node to "self approve" its own tunnel, so we skip validation.
 //
 // The EPID on the connection request is either a new one created by the node, or
 // one that the client has submitted at HELLO.
-func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest) (*agent.Agent, error) {
+func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest) (*actor.Actor, error) {
 	// The policy in use for this approval. Maybe pass in? But the VS should have it, right?
 	// Note that the auth-service has a policy which is going to be the one used.
 	curpol, curmatcher, configID := vs.getPolicyMatcherConfig()
 
 	var err error
-	var validatedAgent *agent.Agent
+	var validatedActor *actor.Actor
 
-	// First validate credentials with authorities, which will yied an authenticated Agent.
-	validatedAgent, err = vs.validateCredentials(curpol, cr)
+	// First validate credentials with authorities, which will yied an authenticated Actor.
+	validatedActor, err = vs.validateCredentials(curpol, cr)
 	if err != nil {
 		return nil, fmt.Errorf("validate credentials failed: %w", err)
 	}
-	for k, v := range validatedAgent.GetAuthedClaims() {
-		vs.log.Debugf("post-validate agent credential: %v -> %v", k, v)
+	for k, v := range validatedActor.GetAuthedClaims() {
+		vs.log.Debugf("post-validate actor credential: %v -> %v", k, v)
 	}
 
 	// Set connect-via
 	dockAddr, ok := netip.AddrFromSlice(cr.DockAddr)
 	if ok {
-		validatedAgent.SetAuthedClaimWithExp(agent.KAttrConnectVia, dockAddr.String(), validatedAgent.GetAuthExpires())
+		validatedActor.SetAuthedClaimWithExp(actor.KAttrConnectVia, dockAddr.String(), validatedActor.GetAuthExpires())
 	} else {
 		vs.log.Warn("unable to parse dock address for connect-via claim", "addr", cr.DockAddr)
 	}
 	// Then run through any connect policy lines.
-	_, _, err = vs.applyConnectPolicy(curpol, curmatcher, dockAddr, validatedAgent)
+	_, _, err = vs.applyConnectPolicy(curpol, curmatcher, dockAddr, validatedActor)
 	if err != nil {
 		vs.log.WithError(err).Info("apply policy failed")
 		return nil, fmt.Errorf("apply policy failed: %w", err)
 	}
 
-	// At this point the agent must have an address.
-	zprAddr, ok := validatedAgent.GetZPRID()
+	// At this point the actor must have an address.
+	zprAddr, ok := validatedActor.GetZPRID()
 	if !ok {
-		vs.log.Error("failed to assign an address to the agent, denying connection")
+		vs.log.Error("failed to assign an address to the actor, denying connection")
 		return nil, fmt.Errorf("failed to get an address")
 	}
 
-	// Agent has N attributes, some M of those attributes (where M<=N) have been
+	// Actor has N attributes, some M of those attributes (where M<=N) have been
 	// matched to connect policy.  I'd like a table tracking which attributes are
-	// in use by which agents.
-	if validatedAgent.GetConfigID() != configID {
-		vs.log.Error("auth'd agent configID should match current policy configID", "got", validatedAgent.GetConfigID(), "expected", configID)
+	// in use by which actors.
+	if validatedActor.GetConfigID() != configID {
+		vs.log.Error("auth'd actor configID should match current policy configID", "got", validatedActor.GetConfigID(), "expected", configID)
 	}
 
 	// presumably nodes get added when they HELLO. But they may also need updating here.
-	if validatedAgent.IsAdapter() {
-		vs.agentDB.AddAdapter(zprAddr, zprAddr, validatedAgent)
+	if validatedActor.IsAdapter() {
+		vs.actorDB.AddAdapter(zprAddr, zprAddr, validatedActor)
 	}
 
-	return validatedAgent, nil
+	return validatedActor, nil
 }
 
 // applyConnectPolicy runs the old connect "procedures" from policy, creating the flowstate.
-// The passed agent may be modified by adding to the list of provided services.
+// The passed actor may be modified by adding to the list of provided services.
 //
 // Returns the list of keys that matched along with other details.
-// The passed agent is almost certainly modified (in place).
-// The agent returned is the same pointer as the one passed in.
-func (vs *VSInst) applyConnectPolicy(curpol *policy.Policy, matcher *policy.Matcher, dockZPRAddr netip.Addr, agnt *agent.Agent) (*agent.Agent, []string, error) {
+// The passed actor is almost certainly modified (in place).
+// The actor returned is the same pointer as the one passed in.
+func (vs *VSInst) applyConnectPolicy(curpol *policy.Policy, matcher *policy.Matcher, dockZPRAddr netip.Addr, agnt *actor.Actor) (*actor.Actor, []string, error) {
 	// Note passing of "configurator" here -- do we need that?
 	fs, err := policy.NewConnectState(agnt, vs, dockZPRAddr, vs.log)
 	if err != nil {
@@ -111,12 +111,12 @@ func (vs *VSInst) applyConnectPolicy(curpol *policy.Policy, matcher *policy.Matc
 	if err != nil {
 		return nil, nil, err
 	}
-	return fs.Agent, matchedAttrKeys, nil
+	return fs.Actor, matchedAttrKeys, nil
 }
 
-// validateCredentials uses the data source API to validate the agent credentials.
+// validateCredentials uses the data source API to validate the actor credentials.
 // The ConnectionRequest `cr` is possibly modified (claims).
-func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRequest) (*agent.Agent, error) {
+func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRequest) (*actor.Actor, error) {
 
 	// externalSvc, externalDomain, externalPrefix := curpol.GetExternalAuthority()
 	// vs.log.Debug("(MakeAuthDec) EXTERNAL authority is set", "prefix", externalPrefix)
@@ -138,22 +138,22 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRe
 		}
 	}
 
-	// The address assigned to the agent is either requested by the agent and propogated by the node
-	// into the agents claims, or it is assigned by the node, or it is not set at all (and must be set by policy).
+	// The address assigned to the actor is either requested by the actor and propogated by the node
+	// into the actors claims, or it is assigned by the node, or it is not set at all (and must be set by policy).
 	var reqAddr netip.Addr
-	if epidClaim, found := cr.Claims[agent.KAttrEPID]; found {
+	if epidClaim, found := cr.Claims[actor.KAttrEPID]; found {
 		reqAddr, err = netip.ParseAddr(epidClaim)
 		if err != nil {
 			vs.log.WithError(err).Warn("EPID claim is invalid", "claim", epidClaim)
 		}
-		delete(cr.Claims, agent.KAttrEPID)
+		delete(cr.Claims, actor.KAttrEPID)
 	}
 
 	// If there is an "authority" claim, stip it out now.
-	delete(cr.Claims, agent.KAttrAgentAuthority)
+	delete(cr.Claims, actor.KAttrActorAuthority)
 
-	agnt := agent.NewAgentFromUnsubstantiatedClaims(cr.Claims) // TODO: Why bother with the unsubstantiated claims?
-	vs.log.Debug("NEW AGENT", "claims_in", cr.Claims)
+	agnt := actor.NewActorFromUnsubstantiatedClaims(cr.Claims) // TODO: Why bother with the unsubstantiated claims?
+	vs.log.Debug("NEW ACTOR", "claims_in", cr.Claims)
 
 	var aok *auth.AuthenticateOK
 
@@ -184,12 +184,12 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRe
 		}
 	}
 
-	aok.Claims[agent.KAttrAuthority] = &agent.ClaimV{V: strings.Join(aok.Prefixes, ","), Exp: aok.Expire}
+	aok.Claims[actor.KAttrAuthority] = &actor.ClaimV{V: strings.Join(aok.Prefixes, ","), Exp: aok.Expire}
 
 	// If an authority sets <AUTHID>.zpr.addr, convert that to just "zpr.addr"
 	for _, authID := range aok.Prefixes {
-		if epidVal, found := aok.Claims[fmt.Sprintf("%v.%v", authID, agent.KAttrEPID)]; found {
-			if existing, ok := aok.Claims[agent.KAttrEPID]; ok {
+		if epidVal, found := aok.Claims[fmt.Sprintf("%v.%v", authID, actor.KAttrEPID)]; found {
+			if existing, ok := aok.Claims[actor.KAttrEPID]; ok {
 				// sn.epid is already set.
 				if existing != epidVal {
 					// And it is different??
@@ -197,13 +197,13 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRe
 				}
 			} else {
 				// Not set.
-				aok.Claims[agent.KAttrEPID] = epidVal
+				aok.Claims[actor.KAttrEPID] = epidVal
 			}
 		}
 	}
 
 	if _, ok := agnt.GetZPRID(); !ok {
-		vs.log.Debug("no ZPRID claim found on authenticated agent")
+		vs.log.Debug("no ZPRID claim found on authenticated actor")
 		// Should be set later then in policy -- or if not it is a connection error.
 	}
 
@@ -214,7 +214,7 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRe
 
 	// Validation succeeds!
 	// Need to use the claims from the validation claims from user to match an
-	// agent claim in policy. MatchConnect will only work with a valid claim.
+	// actor claim in policy. MatchConnect will only work with a valid claim.
 
 	vs.log.Debug("validation success, dumping claims")
 	for k, v := range cr.Claims {
@@ -239,9 +239,9 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRe
 func (vs *VSInst) SelectValidateDSPrefix(curpol *policy.Policy, cr *vsapi.ConnectRequest) (string, error) {
 	var connectAuthority string
 
-	if apfx, found := cr.Claims[agent.KAttrAgentAuthority]; found {
+	if apfx, found := cr.Claims[actor.KAttrActorAuthority]; found {
 		connectAuthority = apfx
-	} else if apfx, found := cr.Claims[agent.KAttrAuthority]; found {
+	} else if apfx, found := cr.Claims[actor.KAttrAuthority]; found {
 		// This is the older way of doing things.
 		connectAuthority = apfx
 	}
@@ -262,7 +262,7 @@ func (vs *VSInst) SelectValidateDSPrefix(curpol *policy.Policy, cr *vsapi.Connec
 	var xAuthSvc *polio.Service
 	var authPrefix string
 	for _, crb := range chalResps {
-		if aa, err := agent.ParseAuthAttr(crb.GetRespSpec()); err == nil {
+		if aa, err := actor.ParseAuthAttr(crb.GetRespSpec()); err == nil {
 			if aa.IsExternal() {
 				usingExternal = true
 				break
@@ -324,7 +324,7 @@ func (vs *VSInst) guessSnAuthority(curpol *policy.Policy, arbs []*zds.ChallengeR
 		externalPrefix = extAuth.GetPrefix()
 	}
 
-	// Either agents need to tell us what they expect their authorities to
+	// Either actors need to tell us what they expect their authorities to
 	// be or we need a way to set a default in policy.  For now, if there is just
 	// one non-external authority we take that to be default.
 	defaultInternalAuthority := curpol.GetDefaultINTAuthority()
@@ -335,7 +335,7 @@ func (vs *VSInst) guessSnAuthority(curpol *policy.Policy, arbs []*zds.ChallengeR
 	uniqauths := make(map[string]bool)
 	for _, crb := range arbs {
 		vs.log.Debug("(guessSnAuthority) parsing spec", "spec", crb.GetRespSpec())
-		if aa, err := agent.ParseAuthAttr(crb.GetRespSpec()); err != nil {
+		if aa, err := actor.ParseAuthAttr(crb.GetRespSpec()); err != nil {
 			return "", fmt.Errorf("bad challenge response spec: %w", err)
 		} else {
 			if aa.IsExternal() && (externalPrefix != "") {
@@ -350,7 +350,7 @@ func (vs *VSInst) guessSnAuthority(curpol *policy.Policy, arbs []*zds.ChallengeR
 				uniqauths[defaultInternalAuthority] = true
 			} else {
 				// This is a fail. We need to know who the authority is in order to
-				// have a hope of matching the agent line in the policy.
+				// have a hope of matching the actor line in the policy.
 				return "", fmt.Errorf("default internal authority not set and incoming spec lacks authority name")
 			}
 		}
@@ -366,12 +366,12 @@ func (vs *VSInst) guessSnAuthority(curpol *policy.Policy, arbs []*zds.ChallengeR
 	return strings.Join(auths, ","), nil
 }
 
-// Note that this is not a reversible operation.  Converting to vsapi.Agent
-// drops a lot of agent info.  The visa service has all the real agent info
+// Note that this is not a reversible operation.  Converting to vsapi.Actor
+// drops a lot of actor info.  The visa service has all the real actor info
 // so can look the details up when it needs them.
-func agentToVsapiAgent(a *agent.Agent, tetherAddr []byte) *vsapi.Agent {
-	aa := &vsapi.Agent{
-		AgentType:   vsapi.AgentType_ADAPTER, // default
+func actorToVsapiActor(a *actor.Actor, tetherAddr []byte) *vsapi.Actor {
+	aa := &vsapi.Actor{
+		ActorType:   vsapi.ActorType_ADAPTER, // default
 		Attrs:       make(map[string]string),
 		AuthExpires: a.GetAuthExpires().Unix(),
 		TetherAddr:  tetherAddr,
@@ -379,17 +379,17 @@ func agentToVsapiAgent(a *agent.Agent, tetherAddr []byte) *vsapi.Agent {
 	}
 	for k, v := range a.GetAuthedClaims() {
 		aa.Attrs[k] = v.V // note we drop the claim expiration here. Ok?
-		if k == agent.KAttrRole && v.V == "node" {
-			aa.AgentType = vsapi.AgentType_NODE
+		if k == actor.KAttrRole && v.V == "node" {
+			aa.ActorType = vsapi.ActorType_NODE
 		}
 	}
-	if _, found := aa.Attrs[agent.KAttrHash]; !found {
+	if _, found := aa.Attrs[actor.KAttrHash]; !found {
 		if a.Hash() != "" {
-			aa.Attrs[agent.KAttrHash] = a.Hash()
+			aa.Attrs[actor.KAttrHash] = a.Hash()
 		}
 	}
-	if _, found := aa.Attrs[agent.KAttrConfigID]; !found {
-		aa.Attrs[agent.KAttrConfigID] = fmt.Sprintf("%d", a.GetConfigID())
+	if _, found := aa.Attrs[actor.KAttrConfigID]; !found {
+		aa.Attrs[actor.KAttrConfigID] = fmt.Sprintf("%d", a.GetConfigID())
 	}
 	if zid, ok := a.GetZPRID(); ok {
 		aa.ZprAddr = zid.AsSlice()

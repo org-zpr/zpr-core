@@ -135,7 +135,7 @@ func (n *Node) AuthorizeConnect(apikey string, req *vsapi.ConnectRequest) (*vsap
 	}
 	n.plog.Log(Rev, "connect_response")
 	if resp.Status == vsapi.StatusCode_SUCCESS {
-		if zaddr, ok := netip.AddrFromSlice(resp.Agent.ZprAddr); ok {
+		if zaddr, ok := netip.AddrFromSlice(resp.Actor.ZprAddr); ok {
 			n.zlog.Infow("authorize connect succeeds", "zpr_addr", zaddr)
 			n.connects = append(n.connects, zaddr)
 		} else {
@@ -169,7 +169,7 @@ func (n *Node) RequestVisa(apikey string, srcTether netip.Addr, l3Type int, pkt 
 // exit.
 func (n *Node) Close() {
 	if n.apiKey != "" {
-		_ = n.disconnectAgents()
+		_ = n.disconnectActors()
 		_ = n.DeRegister(n.apiKey)
 		n.apiKey = ""
 	}
@@ -182,7 +182,7 @@ func (n *Node) Close() {
 // Clear any transient state (for use in-between tests).
 func (n *Node) Reset() {
 	if n.apiKey != "" {
-		_ = n.disconnectAgents()
+		_ = n.disconnectActors()
 	}
 	if n.vss != nil {
 		n.vss.Reset()
@@ -191,8 +191,8 @@ func (n *Node) Reset() {
 }
 
 // The node keeps track of successful calls to AuthorizeConnect, this function will
-// send matching calls to AgentDisconnect to clean up state held on the visa service side.
-func (n *Node) disconnectAgents() error {
+// send matching calls to ActorDisconnect to clean up state held on the visa service side.
+func (n *Node) disconnectActors() error {
 	count := len(n.connects)
 	if count == 0 {
 		return nil
@@ -205,21 +205,21 @@ func (n *Node) disconnectAgents() error {
 	var lastErr error
 	err_count := 0
 	for _, addr := range n.connects {
-		n.plog.Log(Fwd, "agent_disconnect")
-		n.zlog.Infow("node->vs: AGENT_DISCONNECT", "zpr_addr", addr)
-		err := cli.client.AgentDisconnect(defaultCtx, n.apiKey, addr.AsSlice())
+		n.plog.Log(Fwd, "actor_disconnect")
+		n.zlog.Infow("node->vs: ACTOR_DISCONNECT", "zpr_addr", addr)
+		err := cli.client.ActorDisconnect(defaultCtx, n.apiKey, addr.AsSlice())
 		if err != nil {
 			err_count++
 			lastErr = err
-			n.zlog.Infow("agent_disconnect failed", "error", err)
+			n.zlog.Infow("actor_disconnect failed", "error", err)
 		}
 	}
 	n.connects = make([]netip.Addr, 0)
 	if err_count == 0 {
-		n.zlog.Infow("agent_disconnect succeeds", "total", count)
+		n.zlog.Infow("actor_disconnect succeeds", "total", count)
 		return nil
 	} else {
-		n.zlog.Infow("agent_disconnect failed", "failures", err_count, "total", count)
+		n.zlog.Infow("actor_disconnect failed", "failures", err_count, "total", count)
 		return lastErr
 	}
 }

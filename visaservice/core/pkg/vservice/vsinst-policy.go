@@ -48,7 +48,7 @@ func (vs *VSInst) ActivateConfiguration(configID uint64, _ byte) {
 // Other things that happen when a new policy is installed (but not inside this function):
 //   - renew the visa-service visas.
 //   - cancel all the old policy visas.
-//   - ensure all agents are still ok to connect.
+//   - ensure all actors are still ok to connect.
 //
 // must install the policy under the given configuration.
 // implementation of policy.PolicyListener

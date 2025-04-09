@@ -81,7 +81,7 @@ enum Commands {
         #[arg(short, long, value_name = "KEY=VALUE")]
         claim: Vec<String>,
     },
-    /// Call the visa service agent_disconnect function, requires an API key
+    /// Call the visa service actor_disconnect function, requires an API key
     #[command()]
     Disconnect {
         #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
@@ -202,7 +202,7 @@ fn main() {
             service,
             apikey,
             addr,
-        }) => match vsclient::agent_disconnect(&service, &apikey, &addr) {
+        }) => match vsclient::actor_disconnect(&service, &apikey, &addr) {
             Ok(_) => {
                 println!("Disconnect command executed successfully");
             }

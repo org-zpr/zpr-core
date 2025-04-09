@@ -44,7 +44,7 @@ func (t *RejectInvalidAuth) Run(state *testfw.TestState) *testfw.RunResult {
 		NodeCert:   nil,
 		Hmac:       nil,
 		VssService: "",
-		NodeAgent:  nil,
+		NodeActor:  nil,
 	}
 	apiKey, err := mockNode.Authenticate(&authReq)
 	if err == nil {

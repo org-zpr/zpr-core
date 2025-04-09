@@ -119,7 +119,7 @@ pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
         .vsconn
         .as_ref()
         .unwrap()
-        .agent_disconnect(addr.into())
+        .actor_disconnect(addr.into())
         .await
     {
         Err(e) => {

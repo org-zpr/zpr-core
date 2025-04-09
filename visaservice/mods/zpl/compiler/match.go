@@ -348,22 +348,22 @@ func (c *Compilation) constraintsFor(pp *doc.Policy) ([]*polio.Constraint, error
 			},
 		})
 	}
-	if pp.Constraints.AgentLimit.Value() != nil {
-		lval, gtag, err := c.splitGroup(pp.Constraints.AgentLimit.String())
+	if pp.Constraints.ActorLimit.Value() != nil {
+		lval, gtag, err := c.splitGroup(pp.Constraints.ActorLimit.String())
 		if err != nil {
-			return nil, doc.ZplScalarErrorf(pp.Constraints.AgentLimit, "constraint.agent_limit parse error: %w", err)
+			return nil, doc.ZplScalarErrorf(pp.Constraints.ActorLimit, "constraint.actor_limit parse error: %w", err)
 		}
 		floatBits, floatSec, err := doc.ParseCapacityType(lval)
 		if err != nil {
-			return nil, doc.ZplScalarErrorf(pp.Constraints.AgentLimit, "constraint.agent_limit parse error: %w", err)
+			return nil, doc.ZplScalarErrorf(pp.Constraints.ActorLimit, "constraint.actor_limit parse error: %w", err)
 		}
 		intBits, err := uint64FromFloat64(floatBits)
 		if err != nil {
-			return nil, doc.ZplScalarErrorf(pp.Constraints.AgentLimit, "constraint.agent_limit bit count value error: %w", err)
+			return nil, doc.ZplScalarErrorf(pp.Constraints.ActorLimit, "constraint.actor_limit bit count value error: %w", err)
 		}
 		intSec, err := uint64FromFloat64(floatSec)
 		if err != nil {
-			return nil, doc.ZplScalarErrorf(pp.Constraints.AgentLimit, "constraint.agent_limit period value error: %w", err)
+			return nil, doc.ZplScalarErrorf(pp.Constraints.ActorLimit, "constraint.actor_limit period value error: %w", err)
 		}
 		cons = append(cons, &polio.Constraint{
 			Carg: &polio.Constraint_Cap{

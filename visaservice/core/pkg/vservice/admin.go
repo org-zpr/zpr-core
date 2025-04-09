@@ -257,7 +257,7 @@ func (svc *AdminService) handleInstallPolicy(w http.ResponseWriter, r *http.Requ
 }
 
 func (svc *AdminService) handleListVisas(w http.ResponseWriter, r *http.Request) {
-	// TODO: Possibly can add more info to each visa record. Like when created, when expires, agents involved?
+	// TODO: Possibly can add more info to each visa record. Like when created, when expires, actors involved?
 	visaIDList := svc.vsi.ListVisas()
 	if visaIDList == nil {
 		visaIDList = []*VisaDescriptor{} // return an empty array, not an empty body.

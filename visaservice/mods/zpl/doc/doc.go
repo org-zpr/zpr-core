@@ -15,7 +15,7 @@ const (
 	DefaultMaxConnections         = 100
 	DefaultMaxConnectionsPerDock  = 100
 	DefaultNodeDockFlag           = true
-	DefaultMaxConnectionsPerAgent = 1
+	DefaultMaxConnectionsPerActor = 1
 	DefaultBridgeCost             = 1
 	ICMPReqRep                    = "request-response" // ICMP type
 	ICMPOnce                      = "oneshot"          // ICMP type
@@ -72,7 +72,7 @@ type NetGlobs struct {
 	ZplRef                 ZplScalar
 	MaxConnections         ZplUnsigned
 	MaxConnectionsPerDock  ZplUnsigned
-	MaxConnectionsPerAgent ZplUnsigned
+	MaxConnectionsPerActor ZplUnsigned
 }
 
 type NetAddresses struct {
@@ -228,7 +228,7 @@ type Constraint struct {
 	ZplRef     ZplScalar
 	Bandwidth  ZplString
 	Duration   ZplString
-	AgentLimit ZplString
+	ActorLimit ZplString
 }
 
 // IP returns the IP address if an IP address was specified in the host entry, or

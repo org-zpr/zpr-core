@@ -31,7 +31,7 @@ message GenChalRequest {
     string schema_version      = 2;
     uint64 request_id          = 3;
     bytes challenger_addr      = 4; // node IP address.
-    map<string, string> claims = 5; // untrusted claims from agent
+    map<string, string> claims = 5; // untrusted claims from actor
     map<string, string> conf   = 6; // optional, configuration information from
                                     // ZPR or policy.
 }
@@ -83,7 +83,7 @@ message ValidateResponse {
 
     Challenge follow_on       = 7;  // If NEEDS_MORE is set, this is a 
                                     // Challenge structure to send to 
-                                    // the agent for an additional response.
+                                    // the actor for an additional response.
 }
 
 

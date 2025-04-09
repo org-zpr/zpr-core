@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
 
@@ -32,7 +32,7 @@ type Service struct {
 //
 // Implements vm.State
 type ConnectState struct {
-	Agent           *agent.Agent
+	Actor           *actor.Actor
 	Node            bool                // TRUE if the NODE flag has been set
 	Visaservice     bool                // TRUE if visa service flag has been set
 	VisaserviceDock bool                // TURE if VS_DOCK has been set
@@ -45,10 +45,10 @@ type ConnectState struct {
 // NewConnectState
 //
 // `edgeNode` is the endpoint for the node recieving the connect.
-func NewConnectState(agnt *agent.Agent, cfgr Configurator, edgeNode netip.Addr, log logr.Logger) (*ConnectState, error) {
+func NewConnectState(agnt *actor.Actor, cfgr Configurator, edgeNode netip.Addr, log logr.Logger) (*ConnectState, error) {
 	remote, _ := agnt.GetZPRID()
 	cs := &ConnectState{
-		Agent:    agnt,
+		Actor:    agnt,
 		Services: make(map[string]*Service),
 		selfFlag: (remote != zeroAddr) && remote.String() == edgeNode.String(),
 		log:      log,

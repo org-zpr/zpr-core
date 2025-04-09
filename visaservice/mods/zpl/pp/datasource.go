@@ -25,15 +25,15 @@ import (
 // the permitted_access_count function. Each DataSourceProxy interacts with one
 // data source.
 type DataSourceProxy interface {
-	// AgentIds returns the IDs of all agents whose attributes satisfy a set of
-	// expressions according to the data source. An agent's ID is included in
+	// ActorIds returns the IDs of all actors whose attributes satisfy a set of
+	// expressions according to the data source. An actor's ID is included in
 	// the returned slice if and only if its attributes satisfy all of the
-	// expressions in attrExprs. Agent IDs are expected to be unique across all
+	// expressions in attrExprs. Actor IDs are expected to be unique across all
 	// data sources in a ZPR network. A nil slice and a non-nil error are
-	// returned if the agent query fails.
+	// returned if the actor query fails.
 	//
 	// TODO: Should take a context
-	AgentIds(attrExprs []AttributeExpression) ([]string, error)
+	ActorIds(attrExprs []AttributeExpression) ([]string, error)
 }
 
 // A DataSourceProxy implementation that wraps another DataSourceProxy and
@@ -160,7 +160,7 @@ func newCachingDataSourceProxy(proxy DataSourceProxy) DataSourceProxy {
 	return &cachingDataSourceProxy{proxy, make(map[string][]string)}
 }
 
-func (p *cachingDataSourceProxy) AgentIds(attrExprs []AttributeExpression) ([]string, error) {
+func (p *cachingDataSourceProxy) ActorIds(attrExprs []AttributeExpression) ([]string, error) {
 	// Build a cache key from the set of attribute expressions.
 	exprStrings := make([]string, len(attrExprs))
 	for i, expr := range attrExprs {
@@ -173,11 +173,11 @@ func (p *cachingDataSourceProxy) AgentIds(attrExprs []AttributeExpression) ([]st
 	if cachedVal, inCache := p.cache[exprKey]; inCache {
 		return cachedVal, nil
 	} else {
-		if agentIds, err := p.proxy.AgentIds(attrExprs); err != nil {
+		if actorIds, err := p.proxy.ActorIds(attrExprs); err != nil {
 			return nil, err
 		} else {
-			p.cache[exprKey] = agentIds
-			return agentIds, nil
+			p.cache[exprKey] = actorIds
+			return actorIds, nil
 		}
 	}
 }
@@ -192,19 +192,19 @@ func newDSProxImpl(dsd *DSDesc) (*DSProxImpl, error) {
 	return i, nil
 }
 
-// AgentIds implements DataSourceProxy.AgentIds.
+// ActorIds implements DataSourceProxy.ActorIds.
 //
 // This will open a GRPC connection to the datasource and send a `DSatisfy` call.
 //
 // Note that the prefix has been stripped from the query. Is that OK? Does the caller
 // ensure that only attributes for this data source are queried here?
-func (ds *DSProxImpl) AgentIds(attrExprs []AttributeExpression) ([]string, error) {
+func (ds *DSProxImpl) ActorIds(attrExprs []AttributeExpression) ([]string, error) {
 	exp, err := convertAttrExpr(attrExprs)
 	if err != nil {
 		return nil, fmt.Errorf("invalid attribute expression: %w", err)
 	}
 	if len(exp) == 0 {
-		return nil, fmt.Errorf("no attributes passed in agent-ids query") // programming error?
+		return nil, fmt.Errorf("no attributes passed in actor-ids query") // programming error?
 	}
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(ds.desc.TLSCert),

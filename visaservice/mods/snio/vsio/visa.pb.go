@@ -558,7 +558,7 @@ type Visa_Constraints struct {
 	BwLimitBps      uint64 `protobuf:"varint,2,opt,name=bw_limit_bps,json=bwLimitBps,proto3" json:"bw_limit_bps,omitempty"`
 	DataCapId       string `protobuf:"bytes,3,opt,name=data_cap_id,json=dataCapId,proto3" json:"data_cap_id,omitempty"` // Empty for no data cap
 	DataCapBytes    uint64 `protobuf:"varint,4,opt,name=data_cap_bytes,json=dataCapBytes,proto3" json:"data_cap_bytes,omitempty"`
-	DataCapAffinity []byte `protobuf:"bytes,5,opt,name=data_cap_affinity,json=dataCapAffinity,proto3" json:"data_cap_affinity,omitempty"` // tether address of service agent
+	DataCapAffinity []byte `protobuf:"bytes,5,opt,name=data_cap_affinity,json=dataCapAffinity,proto3" json:"data_cap_affinity,omitempty"` // tether address of service actor
 }
 
 func (x *Visa_Constraints) Reset() {

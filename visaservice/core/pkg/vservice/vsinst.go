@@ -12,7 +12,7 @@ import (
 
 	"github.com/apache/thrift/lib/go/thrift"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
@@ -69,7 +69,7 @@ type VSInst struct {
 	reauthBumpTime        time.Duration
 	accessToken           []byte // Access token for special node operations
 	allowInvalidPeerAddr  bool   // Set to TRUE for testing only.
-	agentDB               *adb.AgentDB
+	actorDB               *adb.ActorDB
 	validationEnabled     bool // normally yes.
 	bootstrapAuthDuration time.Duration
 	authorityCert         *x509.Certificate // for checking certififactes from nodes/adapters
@@ -95,7 +95,7 @@ type VSInst struct {
 	sessions struct {
 		sync.RWMutex
 		hellos  map[int32]*HelloRecord
-		apiKeys map[string]netip.Addr // ZPR Addr (can use to lookup in the agent DB)
+		apiKeys map[string]netip.Addr // ZPR Addr (can use to lookup in the actor DB)
 	}
 }
 
@@ -166,7 +166,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	vs.vtable.nextVisaID = minVisaID
 	vs.sessions.apiKeys = make(map[string]netip.Addr)
 	vs.sessions.hellos = make(map[int32]*HelloRecord)
-	vs.agentDB = adb.NewAgentDB(vs)
+	vs.actorDB = adb.NewActorDB(vs)
 
 	nopol := policy.NewEmptyPolicy()
 	vs.plcy.p = nopol
@@ -177,38 +177,38 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		vs.plcy.matcher = m
 	}
 
-	// We need a visa service agent to exist.
+	// We need a visa service actor to exist.
 	// TODO: These claims need to come from configuration. Note that the adapter holds the claims
-	//       for the visa service agent.
+	//       for the visa service actor.
 	//
 	// TODO: In prototype, the dock attached to the visa service adapter would evetually authenticate with the
 	//       visa service after bootstrap.  We need to do something like that too.
-	visaServiceAgent := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	visaServiceActor := actor.NewActorFromUnsubstantiatedClaims(nil)
 	{
-		visaServiceAgent.SetProvides([]string{
+		visaServiceActor.SetProvides([]string{
 			polio.VisaServiceName,
 			fmt.Sprintf("/zpr/%s", polio.VisaServiceName),
 			fmt.Sprintf("/zpr/%s/admin", polio.VisaServiceName),
 		})
-		authedClaims := make(map[string]*agent.ClaimV)
-		authedClaims[agent.KAttrVisaServiceAdapter] = &agent.ClaimV{
+		authedClaims := make(map[string]*actor.ClaimV)
+		authedClaims[actor.KAttrVisaServiceAdapter] = &actor.ClaimV{
 			V:   "true",
 			Exp: time.Now().Add(vs.bootstrapAuthDuration),
 		}
-		authedClaims[agent.KAttrEPID] = &agent.ClaimV{
+		authedClaims[actor.KAttrEPID] = &actor.ClaimV{
 			V:   vcf.VSAddr.String(),
 			Exp: time.Now().Add(vs.bootstrapAuthDuration),
 		}
-		authedClaims["zpr.adapter.cn"] = &agent.ClaimV{
+		authedClaims["zpr.adapter.cn"] = &actor.ClaimV{
 			V:   vcf.CN,
 			Exp: time.Now().Add(vs.bootstrapAuthDuration),
 		}
-		visaServiceAgent.SetTetherAddr(vcf.VSAddr)
-		visaServiceAgent.SetAuthenticated(authedClaims, time.Now().Add(vs.bootstrapAuthDuration), nil, nil, 0)
+		visaServiceActor.SetTetherAddr(vcf.VSAddr)
+		visaServiceActor.SetAuthenticated(authedClaims, time.Now().Add(vs.bootstrapAuthDuration), nil, nil, 0)
 	}
 
-	if err := vs.agentDB.AddAdapter(vcf.VSAddr, visaServiceAgent.GetTetherAddr(), visaServiceAgent); err != nil {
-		return nil, fmt.Errorf("failed to add visa service agent")
+	if err := vs.actorDB.AddAdapter(vcf.VSAddr, visaServiceActor.GetTetherAddr(), visaServiceActor); err != nil {
+		return nil, fmt.Errorf("failed to add visa service actor")
 	}
 
 	vs.log.Info("visa service instance configured", "reauthBumpTime", vs.reauthBumpTime.String())
@@ -337,9 +337,9 @@ func (vs *VSInst) extendVisaServiceVisas() {
 			remain := time.Until(vsio.VToTime(ve.v.GetExpires()))
 			if remain < VSVisaRenewalTime {
 				sourceAddr, _ := netip.AddrFromSlice(ve.v.Source)
-				agnt, err := vs.agentDB.AgentAtContactAddr(sourceAddr) // for a node contact_addr is visa "tether" addr.
+				agnt, err := vs.actorDB.ActorAtContactAddr(sourceAddr) // for a node contact_addr is visa "tether" addr.
 				if err != nil || agnt == nil {
-					continue // agent is gone
+					continue // actor is gone
 				}
 				expiringVisas = append(expiringVisas, ve)
 			}
@@ -380,7 +380,7 @@ func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration,
 				targetNodes := make(map[netip.Addr]bool)
 				for _, addr := range [][]byte{ve.v.Source, ve.v.Dest, ve.v.SourceContact, ve.v.DestContact} {
 					if a, ok := netip.AddrFromSlice(addr); ok {
-						if vs.agentDB.IsNode(a) {
+						if vs.actorDB.IsNode(a) {
 							targetNodes[a] = true
 						}
 					}

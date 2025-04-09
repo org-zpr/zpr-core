@@ -142,13 +142,13 @@ func (t *AdminDeleteVisasByCN) Run(state *testfw.TestState) *testfw.RunResult {
 	return testfw.Ok()
 }
 
-func requestVisa(sourceAgent, destAgent *vsapi.Agent, commEndpoint *polio.Scope, state *testfw.TestState) (*vsapi.VisaResponse, error) {
+func requestVisa(sourceActor, destActor *vsapi.Actor, commEndpoint *polio.Scope, state *testfw.TestState) (*vsapi.VisaResponse, error) {
 	node, err := state.GetNode()
 	if err != nil {
 		return nil, err
 	}
-	sourceAddr, _ := netip.AddrFromSlice(sourceAgent.ZprAddr)
-	destAddr, _ := netip.AddrFromSlice(destAgent.ZprAddr)
+	sourceAddr, _ := netip.AddrFromSlice(sourceActor.ZprAddr)
+	destAddr, _ := netip.AddrFromSlice(destActor.ZprAddr)
 	state.Log.Infow("preparing visa request", "source", sourceAddr, "dest", destAddr, "comm_endpoint", commEndpoint)
 	var vresp *vsapi.VisaResponse
 	{

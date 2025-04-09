@@ -640,10 +640,10 @@ func TestNonforbiddenAccessFunction(t *testing.T) {
 
 // An in-memory DataSourceProxy implementation for testing.
 type testDataSourceProxy struct {
-	attrs map[string]map[string]string // agent ID -> attr name -> attr value
+	attrs map[string]map[string]string // actor ID -> attr name -> attr value
 }
 
-func (p *testDataSourceProxy) AgentIds(exprs []pp.AttributeExpression) ([]string, error) {
+func (p *testDataSourceProxy) ActorIds(exprs []pp.AttributeExpression) ([]string, error) {
 	has := func(val1, val2 string) bool {
 		for _, v := range strings.Split(val1, ",") {
 			if v == val2 {

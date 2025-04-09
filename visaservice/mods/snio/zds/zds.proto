@@ -54,8 +54,8 @@ service ZDS {
     //
     // ------------------------------------------------------------------------
 
-    // AValidate validates a challenge response from an agent.
-    // This is called when an agent is connecting to the network, or during a
+    // AValidate validates a challenge response from an actor.
+    // This is called when an actor is connecting to the network, or during a
     // re-authentication.
     //
     // If AValidate is not supported, the UNIMPLEMENTED status code should
@@ -73,7 +73,7 @@ service ZDS {
     // The API has two endpoints:
     //
     // 1) A query that returns the value of a specific set of attributes for
-    //    an agent.
+    //    an actor.
     // 2) A "satisfy" operation that returns the set of user identifiers that
     //    satisfy a set of attributes.
     //
@@ -101,7 +101,7 @@ service ZDS {
     //
     // ------------------------------------------------------------------------
 
-    // DQuery returns the value of a specific set of attributes for an agent.
+    // DQuery returns the value of a specific set of attributes for an actor.
     // This may be called during visa request processing.
     //
     // If DQuery is not supported, the UNIMPLEMENTED status code should be
@@ -122,20 +122,20 @@ service ZDS {
 // is a buffer of random bytes which is designed to be large enough to satisfy
 // common cryptography requirements.  When the ZPR challenge is insufficient,
 // the authentication service must use the NEEDS_MORE response status to send
-// their own challenge to the agent.
+// their own challenge to the actor.
 //
 message Challenge {
     string spec      = 1;  // A string identifying the challenge type, this is
                            // interpreted by the adapter.
     string timestamp = 2;  // Timestamp that challenge was generated (RFC3339).
-    bytes nonce      = 3;  // Random bytes to be used by the agent to respond.
+    bytes nonce      = 3;  // Random bytes to be used by the actor to respond.
     bytes data       = 4;  // Optional additional bytes if needed for the
                            // challenge type.
 }
 
 // ValidateRequest is the argument to AValidate.
 message ValidateRequest {
-    Challenge chal                       = 1;  // A copy of the challenge sent to the agent.
+    Challenge chal                       = 1;  // A copy of the challenge sent to the actor.
     repeated ChallengeResponse cresp_set = 2;  // A the response details, created by the adapter based on the challenge
                                                // type. This is a flexible structure mostly opaque to ZPR.
     map<string,string> claims            = 3;  // All the claims sent by the adapter.
@@ -150,8 +150,8 @@ message ValidateRequest {
 // The JWT token returned by a successful call to validate has the following
 // required fields:
 //
-//   sub   Must be set to the agent identifier. A particular identifier must
-//         always be maped to the same agent within a given ZPR network.
+//   sub   Must be set to the actor identifier. A particular identifier must
+//         always be maped to the same actor within a given ZPR network.
 //
 //   exp   Must be set to the expiration of the auth token. This may be
 //         reduced by policy.  (unix time seconds)
@@ -185,10 +185,10 @@ message ValidateResponse {
                                     // successful validation. See details above.
 
     repeated Attribute attrs  = 5;  // The list of validated claims and additional attributes to associate
-                                    // with the agent.
+                                    // with the actor.
 
     Challenge follow_on       = 6;  // If NEEDS_MORE is set, this is an AuthChallenge structure to
-                                    // send to the agent for an additional response..
+                                    // send to the actor for an additional response..
 }
 
 // RefreshRequest is the argument to the ARefresh call.
@@ -203,19 +203,19 @@ message RefreshResponse {
 
 // QueryRequest is the argument to the DQuery call.
 message QueryRequest {
-    repeated bytes token_list = 1;  // A list of the JWT tokens associated with the agent.
+    repeated bytes token_list = 1;  // A list of the JWT tokens associated with the actor.
                                     // The tokens come from validation services.
 
     repeated string attr_keys = 2; // A list of attribute keys to query for.
 }
 
 message QueryResponse {
-    repeated Attribute attrs = 1;  // A list of result attributes that apply to the agent and match
-                                   // the keys sent in the query request. If the agent is unknown
+    repeated Attribute attrs = 1;  // A list of result attributes that apply to the actor and match
+                                   // the keys sent in the query request. If the actor is unknown
                                    // to the validation service, it should return an empty.
                                    // 
                                    // There must be no duplicate Attribute.key values in this list.
-                                   // If the agent has multiple values for an attribute then the
+                                   // If the actor has multiple values for an attribute then the
                                    // values should be returned as a single, comma-separated value.
                                    // Eg, 
                                    //    Attribute {

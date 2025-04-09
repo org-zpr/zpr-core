@@ -35,7 +35,7 @@ pub struct VSClient {
 pub trait VSClientI: Send {
     fn authenticate(
         &mut self,
-        agent: &vsapi::Agent,
+        actor: &vsapi::Actor,
         cert_pem_data: &str,
         vss_service_addr: SocketAddr,
     ) -> Result<String, VSClientError>;
@@ -51,7 +51,7 @@ pub trait VSClientI: Send {
         &mut self,
         req: vsapi::ConnectRequest,
     ) -> Result<vsapi::ConnectResponse, VSClientError>;
-    fn agent_disconnect(&mut self, agent_zpr_addr: IpAddr) -> Result<(), VSClientError>;
+    fn actor_disconnect(&mut self, actor_zpr_addr: IpAddr) -> Result<(), VSClientError>;
 }
 
 /// Wrapper on top of the the THRIFT generated code.
@@ -101,7 +101,7 @@ impl VSClientI for VSClient {
     ///
     fn authenticate(
         &mut self,
-        agent: &vsapi::Agent,
+        actor: &vsapi::Actor,
         cert_pem_data: &str,
         vss_service_addr: SocketAddr,
     ) -> Result<String, VSClientError> {
@@ -126,7 +126,7 @@ impl VSClientI for VSClient {
             node_cert: Some(cert_pem_data.into()),
             hmac: Some(hmac),
             vss_service: Some(vss_service_addr.to_string()),
-            node_agent: Some(agent.clone()),
+            node_actor: Some(actor.clone()),
         };
 
         debug!(target: VS_RPC, "sending AUTHENTICATE to {}", self.service);
@@ -208,18 +208,18 @@ impl VSClientI for VSClient {
         }
     }
 
-    /// Synchronous agent disconnect request.
-    fn agent_disconnect(&mut self, agent_zpr_addr: IpAddr) -> Result<(), VSClientError> {
+    /// Synchronous actor disconnect request.
+    fn actor_disconnect(&mut self, actor_zpr_addr: IpAddr) -> Result<(), VSClientError> {
         if self.key.is_none() {
             return Err(VSClientError::NoAPIKey);
         }
         let key = self.key.as_ref().unwrap();
-        let addr_bytes = match agent_zpr_addr {
+        let addr_bytes = match actor_zpr_addr {
             IpAddr::V4(v4) => v4.octets().to_vec(),
             IpAddr::V6(v6) => v6.octets().to_vec(),
         };
-        debug!(target: VS_RPC, "sending AGENT_DISCONNECT to {}", self.service);
-        match self.cli.agent_disconnect(key.clone(), addr_bytes) {
+        debug!(target: VS_RPC, "sending ACTOR_DISCONNECT to {}", self.service);
+        match self.cli.actor_disconnect(key.clone(), addr_bytes) {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
         }

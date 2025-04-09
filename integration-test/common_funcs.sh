@@ -126,21 +126,21 @@ function create_ca_key_and_cert() {
   #openssl x509 -new -subj /CN="$CA_NAME" -key "$CA_NAME.key" -extfile /etc/ssl/openssl.cnf -extensions v3_ca -days 1 -out "$CA_NAME.crt"
 }
 
-function create_agent_key_and_cert() {
+function create_actor_key_and_cert() {
   CA_NAME=$1
-  AGENT_NAME=$2
-  "$ZPR_PKI_BIN" genkey >"$AGENT_NAME.key"
-  "$ZPR_PKI_BIN" pubkey <"$AGENT_NAME.key" >"$AGENT_NAME.pubkey"
-  "$ZPR_PKI_BIN" gensignedcert "$CA_NAME.crt" "$CA_NAME.key" /CN="$AGENT_NAME" 1 <"$AGENT_NAME.pubkey" >"$AGENT_NAME.crt"
+  ACTOR_NAME=$2
+  "$ZPR_PKI_BIN" genkey >"$ACTOR_NAME.key"
+  "$ZPR_PKI_BIN" pubkey <"$ACTOR_NAME.key" >"$ACTOR_NAME.pubkey"
+  "$ZPR_PKI_BIN" gensignedcert "$CA_NAME.crt" "$CA_NAME.key" /CN="$ACTOR_NAME" 1 <"$ACTOR_NAME.pubkey" >"$ACTOR_NAME.crt"
   
-  #openssl genrsa -out "$AGENT_NAME.key"
-  #openssl req -new -subj /CN="$AGENT_NAME" -key "$AGENT_NAME.key" -config /etc/ssl/openssl.cnf -reqexts v3_req -out "$AGENT_NAME.csr" 2> /dev/null
-  #openssl x509 -req -CA "$CA_NAME.crt" -CAkey "$CA_NAME.key" -copy_extensions copyall -days 1 -in "$AGENT_NAME.csr" -out "$AGENT_NAME.crt" 2> /dev/null
+  #openssl genrsa -out "$ACTOR_NAME.key"
+  #openssl req -new -subj /CN="$ACTOR_NAME" -key "$ACTOR_NAME.key" -config /etc/ssl/openssl.cnf -reqexts v3_req -out "$ACTOR_NAME.csr" 2> /dev/null
+  #openssl x509 -req -CA "$CA_NAME.crt" -CAkey "$CA_NAME.key" -copy_extensions copyall -days 1 -in "$ACTOR_NAME.csr" -out "$ACTOR_NAME.crt" 2> /dev/null
 }
 
 function emit_vs_config() {
   CA_NAME=$1
-  VS_AGENT_NAME=$2
+  VS_ACTOR_NAME=$2
   cat <<EOF
 adapter_cert: $(realpath "$2.crt")
 root_ca: $(realpath "$1.crt")
@@ -160,7 +160,7 @@ function ping_test() {
   sudo ip netns exec zpr-vs ping -q -c 5 -w 5 "$NODE_ZPR_ADDR" & wait -f $!
   ping_a_b
 
-  if [[ "$NUM_AGENTS" -ge 3 ]]; then
+  if [[ "$NUM_ACTORS" -ge 3 ]]; then
     sudo ip netns exec zpr-a ping -q -c 5 -w 5 "$C_ZPR_ADDR" & wait -f $!
     sudo ip netns exec zpr-b ping -q -c 5 -w 5 "$C_ZPR_ADDR" & wait -f $!
     sudo ip netns exec zpr-c ping -q -c 5 -w 5 "$A_ZPR_ADDR" & wait -f $!

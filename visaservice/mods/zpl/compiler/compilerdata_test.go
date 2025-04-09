@@ -194,7 +194,7 @@ zpr:
   globals:
     max_connections: 100
     max_connections_per_dock: 10
-    max_connections_per_agent: 3
+    max_connections_per_actor: 3
 
   nodes:
     defines:

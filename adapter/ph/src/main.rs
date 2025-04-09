@@ -309,7 +309,7 @@ fn main() -> ExitCode {
         info!(target: STARTUP, "node name is \"{node_name}\"");
 
         let node_actor =
-            libnode::vsconn::new_node_agent(config.zpr_addr[0], &node_name, &Default::default());
+            libnode::vsconn::new_node_actor(config.zpr_addr[0], &node_name, &Default::default());
 
         let (vs_inq, vs_outq_inner) = mpsc::channel(topology_config.vs_queue_size);
         vs_outq = Some(vs_outq_inner);

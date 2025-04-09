@@ -16,8 +16,8 @@ const (
 	// bootstrap visas.
 	minVisaID = 8
 
-	// DefaultReauthBumpTime is added to visa expiration if either of the agents
-	// credentials are expiring at the visa expiration time. This gives the agents
+	// DefaultReauthBumpTime is added to visa expiration if either of the actors
+	// credentials are expiring at the visa expiration time. This gives the actors
 	// a chance to re-auth before expiring the visa.
 	//
 	// For unit tests it is helpful to reduce this.

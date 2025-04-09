@@ -8,7 +8,7 @@ adapter_cert: adapter-vs-cert.pem
 # The certificate authority's certificate.
 root_ca: ca-cert.pem
 
-# If set TRUE then visa service will not try to do agent
+# If set TRUE then visa service will not try to do actor
 # authentication (using challenge/challenge_response).
 disable_connect_validation: true
 

@@ -1,17 +1,17 @@
 package vservice
 
 import (
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	"zpr.org/vsx/polio"
 )
 
-// Callback function for adb/agentdb
-func (vs *VSInst) HandleDBAgentAdded(agnt *agent.Agent) {
+// Callback function for adb/actordb
+func (vs *VSInst) HandleDBActorAdded(agnt *actor.Actor) {
 	pp, _, curConfig := vs.getPolicyMatcherConfig()
 
 	if curConfig != agnt.GetConfigID() {
 		// Not sure yet if this is an issue, so will log it.
-		vs.log.Warn("agent added with different config id", "agent_config_id", agnt.GetConfigID(), "current_config", curConfig)
+		vs.log.Warn("actor added with different config id", "actor_config_id", agnt.GetConfigID(), "current_config", curConfig)
 	}
 
 	svcAddr, hasAddr := agnt.GetZPRID()
@@ -33,11 +33,11 @@ func (vs *VSInst) HandleDBAgentAdded(agnt *agent.Agent) {
 	}
 }
 
-// Callback function for adb/agentdb
-func (vs *VSInst) HandleDBAgentRemoved(agnt *agent.Agent) {
+// Callback function for adb/actordb
+func (vs *VSInst) HandleDBActorRemoved(agnt *actor.Actor) {
 	pp, _, curConfig := vs.getPolicyMatcherConfig()
 	if curConfig != agnt.GetConfigID() {
-		vs.log.Warn("host-remove with different configuration", "agent_config_id", agnt.GetConfigID(), "current_config", curConfig)
+		vs.log.Warn("host-remove with different configuration", "actor_config_id", agnt.GetConfigID(), "current_config", curConfig)
 	}
 	for _, serviceName := range agnt.GetProvides() {
 		if psvc := pp.ServiceByName(serviceName); psvc != nil {

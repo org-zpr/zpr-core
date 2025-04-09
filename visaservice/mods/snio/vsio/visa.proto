@@ -21,7 +21,7 @@ message Visa {
         uint64 bw_limit_bps     = 2;
         string data_cap_id      = 3; // Empty for no data cap
         uint64 data_cap_bytes   = 4;
-        bytes data_cap_affinity = 5; // tether address of service agent
+        bytes data_cap_affinity = 5; // tether address of service actor
     }
 
     uint32      issuer_id      = 1;

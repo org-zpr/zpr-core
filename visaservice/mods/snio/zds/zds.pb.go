@@ -128,7 +128,7 @@ func (AttributeExpression_OPER) EnumDescriptor() ([]byte, []int) {
 // is a buffer of random bytes which is designed to be large enough to satisfy
 // common cryptography requirements.  When the ZPR challenge is insufficient,
 // the authentication service must use the NEEDS_MORE response status to send
-// their own challenge to the agent.
+// their own challenge to the actor.
 type Challenge struct {
 	state         protoimpl.MessageState
 	sizeCache     protoimpl.SizeCache
@@ -137,7 +137,7 @@ type Challenge struct {
 	Spec string `protobuf:"bytes,1,opt,name=spec,proto3" json:"spec,omitempty"` // A string identifying the challenge type, this is
 	// interpreted by the adapter.
 	Timestamp string `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"` // Timestamp that challenge was generated (RFC3339).
-	Nonce     []byte `protobuf:"bytes,3,opt,name=nonce,proto3" json:"nonce,omitempty"`         // Random bytes to be used by the agent to respond.
+	Nonce     []byte `protobuf:"bytes,3,opt,name=nonce,proto3" json:"nonce,omitempty"`         // Random bytes to be used by the actor to respond.
 	Data      []byte `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`           // Optional additional bytes if needed for the
 }
 
@@ -207,7 +207,7 @@ type ValidateRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Chal     *Challenge           `protobuf:"bytes,1,opt,name=chal,proto3" json:"chal,omitempty"`                         // A copy of the challenge sent to the agent.
+	Chal     *Challenge           `protobuf:"bytes,1,opt,name=chal,proto3" json:"chal,omitempty"`                         // A copy of the challenge sent to the actor.
 	CrespSet []*ChallengeResponse `protobuf:"bytes,2,rep,name=cresp_set,json=crespSet,proto3" json:"cresp_set,omitempty"` // A the response details, created by the adapter based on the challenge
 	// type. This is a flexible structure mostly opaque to ZPR.
 	Claims         map[string]string `protobuf:"bytes,3,rep,name=claims,proto3" json:"claims,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"` // All the claims sent by the adapter.
@@ -288,8 +288,8 @@ func (x *ValidateRequest) GetChallengerAddr() []byte {
 // The JWT token returned by a successful call to validate has the following
 // required fields:
 //
-//	sub   Must be set to the agent identifier. A particular identifier must
-//	      always be maped to the same agent within a given ZPR network.
+//	sub   Must be set to the actor identifier. A particular identifier must
+//	      always be maped to the same actor within a given ZPR network.
 //
 //	exp   Must be set to the expiration of the auth token. This may be
 //	      reduced by policy.  (unix time seconds)
@@ -504,7 +504,7 @@ type QueryRequest struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	TokenList [][]byte `protobuf:"bytes,1,rep,name=token_list,json=tokenList,proto3" json:"token_list,omitempty"` // A list of the JWT tokens associated with the agent.
+	TokenList [][]byte `protobuf:"bytes,1,rep,name=token_list,json=tokenList,proto3" json:"token_list,omitempty"` // A list of the JWT tokens associated with the actor.
 	AttrKeys  []string `protobuf:"bytes,2,rep,name=attr_keys,json=attrKeys,proto3" json:"attr_keys,omitempty"`    // A list of attribute keys to query for.
 }
 
@@ -559,7 +559,7 @@ type QueryResponse struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Attrs []*Attribute `protobuf:"bytes,1,rep,name=attrs,proto3" json:"attrs,omitempty"` // A list of result attributes that apply to the agent and match
+	Attrs []*Attribute `protobuf:"bytes,1,rep,name=attrs,proto3" json:"attrs,omitempty"` // A list of result attributes that apply to the actor and match
 	Ttl   uint32       `protobuf:"varint,2,opt,name=ttl,proto3" json:"ttl,omitempty"`    // Time-to-live value in seconds for caching of this RPC call.
 }
 

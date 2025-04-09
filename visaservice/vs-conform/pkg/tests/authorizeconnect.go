@@ -77,14 +77,14 @@ func (t *AuthorizeConnect) Run(state *testfw.TestState) *testfw.RunResult {
 		return testfw.Fail("cannot find any non-node, non-provider in policy")
 	}
 
-	agent, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextAdapterAddr())
+	actor, err := connectAdapter(node, candidate, nodeCR.Addr, state.GetNextAdapterAddr())
 	if err != nil {
 		return testfw.Fail(fmt.Sprintf("failed to connect adapter (CN='%v'): %v", candidate.CN, err))
 	}
 
-	// TODO: Check the agent.
-	if agent == nil {
-		return testfw.Fail("authorize-connect did not return an agent")
+	// TODO: Check the actor.
+	if actor == nil {
+		return testfw.Fail("authorize-connect did not return an actor")
 	}
 
 	return testfw.Ok()

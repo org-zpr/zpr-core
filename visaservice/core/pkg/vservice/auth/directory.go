@@ -53,7 +53,7 @@ func (f *DSFeatures) ShortStr() string {
 
 // VLoc is a "Validation service LOCation"
 type VLoc struct {
-	configID      uint64 // Config ID when agent connected and was permitted to add itself
+	configID      uint64 // Config ID when actor connected and was permitted to add itself
 	contactAddr   netip.Addr
 	Prefix        string // The data source prefix for this source
 	Domain        string // Must match the TLS cert
@@ -269,7 +269,7 @@ func (vs *Directory) HasAuthPrefix(p string) bool {
 	return found
 }
 
-// validate makes the grpc call to validate the agent.  The message includes the
+// validate makes the grpc call to validate the actor.  The message includes the
 // challenge that the node generated as well as the response from the entity.
 //
 // This is called on the VLoc for the stated domain. We send a validation

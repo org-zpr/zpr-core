@@ -46,7 +46,7 @@ enum VSCommand {
         vsapi::ConnectRequest,
         oneshot::Sender<AuthorizeConnectResponse>,
     ),
-    AgentDisconnect(IpAddr, oneshot::Sender<DisconnectStatus>), // takes a ZPR address assigned to the agent
+    ActorDisconnect(IpAddr, oneshot::Sender<DisconnectStatus>), // takes a ZPR address assigned to the actor
 }
 
 // This will change a bit too. This is for output messages from the visa service. These are asynchronous
@@ -65,17 +65,17 @@ pub struct VSConn {
     output_tx: mpsc::Sender<VSOutput>,
     client_fac: vscli::VSClientFactory,
     vss_service_addr: SocketAddr, // visa support service listen address
-    agent: vsapi::Agent,
+    actor: vsapi::Actor,
 }
 
-/// Helper function to create a basic node agent. Probably only useful for early versions
-/// of the node.  In the future the node will create it's own agent datastructure and
+/// Helper function to create a basic node actor. Probably only useful for early versions
+/// of the node.  In the future the node will create it's own actor datastructure and
 /// had it to [VSConn::new].
-pub fn new_node_agent(
+pub fn new_node_actor(
     node_addr: IpAddr,
     node_name: &str,
     claims: &BTreeMap<String, String>,
-) -> vsapi::Agent {
+) -> vsapi::Actor {
     let provides = vec![format!("/zpr/{}", node_name)];
 
     // In prototype, the node zpr address is the same as its tether address. May not be true going forward.
@@ -96,8 +96,8 @@ pub fn new_node_agent(
     }
     augmented_claims.insert(String::from("zpr.addr"), node_addr.to_string());
 
-    vsapi::Agent {
-        agent_type: Some(vsapi::AgentType::NODE),
+    vsapi::Actor {
+        actor_type: Some(vsapi::ActorType::NODE),
         attrs: Some(augmented_claims),
         auth_expires: Some((timestamp + 60 * 60) as i64),
         zpr_addr: Some(zaddr_bytes),
@@ -113,7 +113,7 @@ pub fn new_node_agent(
 impl VSConn {
     /// Create a new Visa Service Connection manager.
     ///
-    /// - `node_agent` is the node's Agent representation.  See [new_node_agent] for a helper function to create this.
+    /// - `node_actor` is the node's Actor representation.  See [new_node_actor] for a helper function to create this.
     /// - `output_tx` is the channel to send output messages to the node.
     /// - `service_addr` is ADDR:PORT of the visa service (ADDR should be a ZPR address)
     /// - `node_cert_file` is the path to the node's signed (for now) EC certificate file
@@ -122,7 +122,7 @@ impl VSConn {
     ///   support service. If not set, then we will advertise `<NODE_ZPR_ADDR>:<DEFAULT_VSS_PORT>`.
     //
     pub fn new(
-        node_agent: vsapi::Agent,
+        node_actor: vsapi::Actor,
         output_tx: mpsc::Sender<VSOutput>,
         service_addr: &str,
         node_cert_file: &Path,
@@ -149,7 +149,7 @@ impl VSConn {
             output_tx,
             client_fac: vscli::default_vsclient_factory,
             vss_service_addr,
-            agent: node_agent,
+            actor: node_actor,
         };
 
         Ok(vs_conn)
@@ -166,7 +166,7 @@ impl VSConn {
         debug!(target: VS_RPC, "VSConn::initialize starts");
 
         let _apikey =
-            match client.authenticate(&self.agent, &self.node_cert_pem_data, self.vss_service_addr)
+            match client.authenticate(&self.actor, &self.node_cert_pem_data, self.vss_service_addr)
             {
                 Ok(k) => k,
                 Err(e) => return Err(e.into()),
@@ -232,7 +232,7 @@ impl VSConn {
                         // send errors simply mean requestor ignored reply; ignore them
                         VSCommand::RequestVisa(req, resp_chan) => { let _ = resp_chan.send(Self::handle_request_visa(&mut client, req)); },
                         VSCommand::AuthorizeConnect(cr, resp_chan) => { let _ = resp_chan.send(Self::handle_authorize_connect(&mut client, cr)); },
-                        VSCommand::AgentDisconnect(ipa, resp_chan) => { let _ = resp_chan.send(Self::handle_agent_disconnect(&mut client, ipa)); },
+                        VSCommand::ActorDisconnect(ipa, resp_chan) => { let _ = resp_chan.send(Self::handle_actor_disconnect(&mut client, ipa)); },
                     }
                 }
             }
@@ -266,11 +266,11 @@ impl VSConn {
         }
     }
 
-    fn handle_agent_disconnect(client: &mut Box<dyn VSClientI>, ipa: IpAddr) -> DisconnectStatus {
-        match client.agent_disconnect(ipa) {
+    fn handle_actor_disconnect(client: &mut Box<dyn VSClientI>, ipa: IpAddr) -> DisconnectStatus {
+        match client.actor_disconnect(ipa) {
             Ok(_) => Ok(()),
             Err(e) => {
-                error!(target: VS_RPC, "failed to call agent disconnect: {e}");
+                error!(target: VS_RPC, "failed to call actor disconnect: {e}");
                 Err(e)
             }
         }
@@ -321,13 +321,13 @@ impl VSConnHandle {
         rx.await.map_err(|_| VSClientError::ConnClosed)?
     }
 
-    /// Async message to visa service noting that an agent has disconnected.
+    /// Async message to visa service noting that an actor has disconnected.
     ///
     /// ## Errors
     /// - [VSError::EnqueueError] if the request could not be enqueued.
-    pub async fn agent_disconnect(&self, zpr_addr: IpAddr) -> DisconnectStatus {
+    pub async fn actor_disconnect(&self, zpr_addr: IpAddr) -> DisconnectStatus {
         let (tx, rx) = oneshot::channel();
-        self.send_command(VSCommand::AgentDisconnect(zpr_addr, tx))
+        self.send_command(VSCommand::ActorDisconnect(zpr_addr, tx))
             .await?;
         rx.await.map_err(|_| VSClientError::ConnClosed)?
     }
@@ -416,7 +416,7 @@ s5JVZ48=
         Auth,
         Ping,
         DeRegister,
-        AgentDisconnect,
+        ActorDisconnect,
     }
 
     static RUN_LOCK: Mutex<u32> = Mutex::new(0); // Each test holds this while running.
@@ -444,7 +444,7 @@ s5JVZ48=
             CounterT::Auth => test_state.auth_count,
             CounterT::Ping => test_state.ping_count,
             CounterT::DeRegister => test_state.de_register_count,
-            CounterT::AgentDisconnect => test_state.disconnect_count,
+            CounterT::ActorDisconnect => test_state.disconnect_count,
         }
     }
 
@@ -454,7 +454,7 @@ s5JVZ48=
             CounterT::Auth => test_state.auth_count += 1,
             CounterT::Ping => test_state.ping_count += 1,
             CounterT::DeRegister => test_state.de_register_count += 1,
-            CounterT::AgentDisconnect => test_state.disconnect_count += 1,
+            CounterT::ActorDisconnect => test_state.disconnect_count += 1,
         }
     }
 
@@ -472,7 +472,7 @@ s5JVZ48=
     impl VSClientI for TestVSCli {
         fn authenticate(
             &mut self,
-            _agent: &vsapi::Agent,
+            _actor: &vsapi::Actor,
             _cert_pem_data: &str,
             _vss_service_addr: SocketAddr,
         ) -> Result<String, VSClientError> {
@@ -535,8 +535,8 @@ s5JVZ48=
                 }
                 None => {}
             };
-            let agnt = vsapi::Agent {
-                agent_type: Some(vsapi::AgentType::ADAPTER),
+            let agnt = vsapi::Actor {
+                actor_type: Some(vsapi::ActorType::ADAPTER),
                 attrs: Some(attrs),
                 auth_expires: Some(0),
                 zpr_addr: None,
@@ -547,14 +547,14 @@ s5JVZ48=
             let cr = vsapi::ConnectResponse {
                 connection_id: req.connection_id,
                 status: Some(vsapi::StatusCode::SUCCESS),
-                agent: Some(agnt),
+                actor: Some(agnt),
                 reason: Some(format!("")),
             };
             Ok(cr)
         }
 
-        fn agent_disconnect(&mut self, _agent_zpr_addr: IpAddr) -> Result<(), VSClientError> {
-            incr(CounterT::AgentDisconnect);
+        fn actor_disconnect(&mut self, _actor_zpr_addr: IpAddr) -> Result<(), VSClientError> {
+            incr(CounterT::ActorDisconnect);
             if let Some(e) = take_next_error() {
                 return Err(e);
             }
@@ -578,7 +578,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(node_addr, "n0", &claims);
+        let agnt = new_node_actor(node_addr, "n0", &claims);
 
         let mut conn = VSConn::new(
             agnt,
@@ -621,7 +621,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(node_addr, "n0", &claims);
+        let agnt = new_node_actor(node_addr, "n0", &claims);
 
         let mut conn = VSConn::new(
             agnt,
@@ -710,7 +710,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(node_addr, "n0", &claims);
+        let agnt = new_node_actor(node_addr, "n0", &claims);
 
         let mut conn = VSConn::new(
             agnt,
@@ -760,8 +760,8 @@ s5JVZ48=
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
                 let cresp = resp.unwrap();
-                assert!(cresp.agent.is_some());
-                let agnt = cresp.agent.unwrap();
+                assert!(cresp.actor.is_some());
+                let agnt = cresp.actor.unwrap();
                 let attrs = agnt.attrs.unwrap();
                 for (k, v) in attrs {
                     assert_eq!(v, *(claims.get(&k).unwrap()));
@@ -797,7 +797,7 @@ s5JVZ48=
     }
 
     #[tokio::test]
-    async fn test_agent_disconnect() {
+    async fn test_actor_disconnect() {
         let _lockval = RUN_LOCK.lock().unwrap();
         reset_state();
         let certfile = TempFile::new_pem(CERT_DATA);
@@ -808,7 +808,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_agent(node_addr, "n0", &claims);
+        let agnt = new_node_actor(node_addr, "n0", &claims);
 
         let mut conn = VSConn::new(
             agnt,
@@ -844,9 +844,9 @@ s5JVZ48=
             }
         }
 
-        assert_eq!(get_counter(CounterT::AgentDisconnect), 0);
+        assert_eq!(get_counter(CounterT::ActorDisconnect), 0);
 
-        let resp = conn_handle.agent_disconnect(node_addr);
+        let resp = conn_handle.actor_disconnect(node_addr);
 
         tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -855,21 +855,21 @@ s5JVZ48=
                 assert!(resp.is_ok());
             }
             _ => {
-                panic!("expected agent-disconnect-response message, but got nothing (timeout)");
+                panic!("expected actor-disconnect-response message, but got nothing (timeout)");
             }
         }
-        assert_eq!(get_counter(CounterT::AgentDisconnect), 1);
+        assert_eq!(get_counter(CounterT::ActorDisconnect), 1);
 
         // Run disconnect again check that we get the error:
         set_next_error(VSClientError::NoAPIKey);
-        let resp = conn_handle.agent_disconnect(node_addr);
+        let resp = conn_handle.actor_disconnect(node_addr);
 
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
                 assert!(matches!(resp.unwrap_err(), VSClientError::NoAPIKey));
             }
             _ => {
-                panic!("expected agent-disconnect-response message, but got nothing (timeout)");
+                panic!("expected actor-disconnect-response message, but got nothing (timeout)");
             }
         }
 

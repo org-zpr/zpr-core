@@ -1,4 +1,4 @@
-package agent_test
+package actor_test
 
 import (
 	"testing"
@@ -6,14 +6,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 )
 
-func NewAgentFromClaims(c map[string]string, exp time.Time) *agent.Agent {
-	a := agent.NewAgentFromUnsubstantiatedClaims(nil)
-	authedClaims := make(map[string]*agent.ClaimV)
+func NewActorFromClaims(c map[string]string, exp time.Time) *actor.Actor {
+	a := actor.NewActorFromUnsubstantiatedClaims(nil)
+	authedClaims := make(map[string]*actor.ClaimV)
 	for k, v := range c {
-		authedClaims[k] = &agent.ClaimV{
+		authedClaims[k] = &actor.ClaimV{
 			V:   v,
 			Exp: exp,
 		}
@@ -26,7 +26,7 @@ func TestDualAuth(t *testing.T) {
 	claims := map[string]string{
 		"zpr.addr": "fc00:3001:abd5:d0d:847a:9fd6:586:7777",
 	}
-	a := NewAgentFromClaims(claims, time.Now().Add(1*time.Hour))
+	a := NewActorFromClaims(claims, time.Now().Add(1*time.Hour))
 	require.Equal(t, "d955aaea9189bcb5b5ff3b1837a0c91ae7e7460c52650b1d322b132e369350bf", a.Hash())
 }
 
@@ -35,13 +35,13 @@ func TestSame(t *testing.T) {
 		"alpha": "beta",
 		"gamma": "delta",
 	}
-	a1 := NewAgentFromClaims(cl1, time.Now().Add(1*time.Hour))
+	a1 := NewActorFromClaims(cl1, time.Now().Add(1*time.Hour))
 
 	cl2 := map[string]string{
 		"gamma": "delta",
 		"alpha": "beta",
 	}
-	a2 := NewAgentFromClaims(cl2, time.Now().Add(1*time.Hour))
+	a2 := NewActorFromClaims(cl2, time.Now().Add(1*time.Hour))
 	require.Equal(t, a1.Hash(), a2.Hash())
 }
 
@@ -49,16 +49,16 @@ func TestIdentity(t *testing.T) {
 	cl1 := map[string]string{
 		"alpha":         "beta",
 		"gamma":         "delta",
-		agent.KAttrEPID: "fc00:3001:abd5:d0d:847a:9fd6:586:3836",
+		actor.KAttrEPID: "fc00:3001:abd5:d0d:847a:9fd6:586:3836",
 	}
-	a1 := NewAgentFromClaims(cl1, time.Now().Add(1*time.Hour))
+	a1 := NewActorFromClaims(cl1, time.Now().Add(1*time.Hour))
 
 	cl2 := map[string]string{
 		"gamma":         "delta",
 		"alpha":         "beta",
-		agent.KAttrEPID: "fc00:3001:abd5:d0d:847a:9fd6:586:9999",
+		actor.KAttrEPID: "fc00:3001:abd5:d0d:847a:9fd6:586:9999",
 	}
-	a2 := NewAgentFromClaims(cl2, time.Now().Add(1*time.Hour))
+	a2 := NewActorFromClaims(cl2, time.Now().Add(1*time.Hour))
 	require.NotEqual(t, a1.Hash(), a2.Hash())
 	require.Equal(t, a1.GetIdentity(), a2.GetIdentity())
 }
@@ -69,7 +69,7 @@ func TestEPID(t *testing.T) {
 		"zpr.authority": "ca0",
 		"zpr.addr":      "fc00:3001:abd5:d0d:847a:9fd6:586:3836",
 	}
-	a := agent.NewAgentFromUnsubstantiatedClaims(clms)
+	a := actor.NewActorFromUnsubstantiatedClaims(clms)
 
 	{
 		_, ok := a.GetZPRID()
@@ -78,9 +78,9 @@ func TestEPID(t *testing.T) {
 
 	// Attempt a self auth
 	exp := time.Now().Add(6 * time.Hour)
-	authedClaims := make(map[string]*agent.ClaimV)
+	authedClaims := make(map[string]*actor.ClaimV)
 	for k, v := range a.GetClaims() {
-		authedClaims[k] = &agent.ClaimV{
+		authedClaims[k] = &actor.ClaimV{
 			V:   v,
 			Exp: exp,
 		}
@@ -98,7 +98,7 @@ func TestGetTokenKeys(t *testing.T) {
 	toks := []string{
 		"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyLCJ4c256IjoxLCJ4c25hLjAiOiJmb286YmFyIiwieHNuYy4wIjoiYTpiOmM6ZCJ9.f5Vsz5vG6RoQt1V_mWsntv3OSxHkwJmNBZ9NF6LKdLQ",
 	}
-	sa := agent.EmptyAgent()
+	sa := actor.EmptyActor()
 	sa.SetAuthenticated(nil, exp, nil, toks, 1)
 	require.Empty(t, sa.TokenIDs()) // no jti
 	keys := sa.TokenKeyIDs()
@@ -111,7 +111,7 @@ func TestGetMultTokenKeys(t *testing.T) {
 	toks := []string{
 		"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyLCJ4c256IjoyLCJqdGkiOiIzMDAwIiwieHNuYS4wIjoiZm9vOmJhciIsInhzbmMuMCI6ImE6YjpjOmQiLCJ4c25hLjEiOiJmZWU6YmFoIiwieHNuYy4xIjoiZTpmOmc6aCJ9.9aHxqTijhtF2wrlNpB4D_1mS6p7VRVNT0YJxSuMyf7E",
 	}
-	sa := agent.EmptyAgent()
+	sa := actor.EmptyActor()
 	sa.SetAuthenticated(nil, exp, nil, toks, 1)
 	keys := sa.TokenKeyIDs()
 	require.Len(t, keys, 2)
@@ -125,7 +125,7 @@ func TestGetTokenIDs(t *testing.T) {
 	toks := []string{
 		"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyLCJ4c256IjoxLCJqdGkiOiIzMDAwIiwieHNuYS4wIjoiZm9vOmJhciIsInhzbmMuMCI6ImE6YjpjOmQifQ.i-0M2bslRyXgGG0l5hJYR1CF17kypmjF8xiZKXadIJM",
 	}
-	sa := agent.EmptyAgent()
+	sa := actor.EmptyActor()
 	sa.SetAuthenticated(nil, exp, nil, toks, 1)
 	keys := sa.TokenKeyIDs()
 	require.Len(t, keys, 1)

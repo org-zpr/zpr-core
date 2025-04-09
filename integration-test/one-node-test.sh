@@ -24,8 +24,8 @@ B_SUBSTRATE_ADDR=10.0.2.2
 C_SUBSTRATE_ADDR=10.0.3.2
 
 # Default protocol is ipv6.
-AGENT_PROTOCOL="ipv6"
-NUM_AGENTS=3
+ACTOR_PROTOCOL="ipv6"
+NUM_ACTORS=3
 # Note: POLICY_BIN, NODE_ZPR_ADDR, VS_ZPR_ADDR, A_ZPR_ADDR, and B_ZPR_ADDR are defined by parsing the input arguments.
 source "$(dirname $0)/parse_arguments.sh"
 
@@ -61,11 +61,11 @@ destroy_network
 create_network
 
 create_ca_key_and_cert ca
-create_agent_key_and_cert ca vs.zpr
-#create_agent_key_and_cert ca node
-create_agent_key_and_cert ca adapter1
-create_agent_key_and_cert ca adapter2
-create_agent_key_and_cert ca adapter3
+create_actor_key_and_cert ca vs.zpr
+#create_actor_key_and_cert ca node
+create_actor_key_and_cert ca adapter1
+create_actor_key_and_cert ca adapter2
+create_actor_key_and_cert ca adapter3
 
 # Temporary hack until our policy compiler is in-repo
 cp "$PREGEN/node.key" node.key
@@ -145,7 +145,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --node-public-key-file node.pubkey \
   --zpr-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
-if [[ "$NUM_AGENTS" -ge 3 ]]; then
+if [[ "$NUM_ACTORS" -ge 3 ]]; then
   sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
     adapter \
     --control-path "$ADAPTER3_SOCK" \
@@ -168,7 +168,7 @@ wait_for 5 check_carrier zpr-node tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-vs tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
 wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
-if [[ "$NUM_AGENTS" -ge 3 ]]; then
+if [[ "$NUM_ACTORS" -ge 3 ]]; then
   wait_for 5 check_carrier zpr-c tun0 || { echo "FAILURE"; exit 1; }
 fi
 echo "Carrier has arrived."
@@ -207,11 +207,11 @@ fi
 
 for SOCK in "$NODE_SOCK" "$VS_SOCK" "$ADAPTER1_SOCK" "$ADAPTER2_SOCK"
 do
-	# TODO: test also with encrypted agent traffic
-	APOOO=$(counters "$SOCK" | awk -F': ' '$1 == "Agent Packets Out-Of-Order" { print $2 }')
+	# TODO: test also with encrypted actor traffic
+	APOOO=$(counters "$SOCK" | awk -F': ' '$1 == "Actor Packets Out-Of-Order" { print $2 }')
 	if (( APOOO != 0 ))
 	then
-		echo "$(basename "$SOCK"): ERROR: found agent packets out-of-order: $APOOO"
+		echo "$(basename "$SOCK"): ERROR: found actor packets out-of-order: $APOOO"
 		PASS=1
 	fi
 done

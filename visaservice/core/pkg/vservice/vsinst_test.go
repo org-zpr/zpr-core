@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
@@ -98,12 +98,12 @@ func (tas *TestAS) Authenticate(domain string, epID netip.Addr,
 func (tas *TestAS) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string) (*auth.AuthenticateOK, error) {
 	expiration := time.Now().Add(time.Hour)
 
-	authedClaims := make(map[string]*agent.ClaimV)
+	authedClaims := make(map[string]*actor.ClaimV)
 	for k, v := range claims {
-		authedClaims[k] = &agent.ClaimV{V: v, Exp: expiration}
+		authedClaims[k] = &actor.ClaimV{V: v, Exp: expiration}
 	}
-	authedClaims[agent.KAttrEPID] = &agent.ClaimV{V: reqAddr.String(), Exp: expiration}
-	authedClaims[agent.KAttrAgentAuthority] = &agent.ClaimV{V: "zpr.adapter.cn", Exp: expiration} // policy must match this!
+	authedClaims[actor.KAttrEPID] = &actor.ClaimV{V: reqAddr.String(), Exp: expiration}
+	authedClaims[actor.KAttrActorAuthority] = &actor.ClaimV{V: "zpr.adapter.cn", Exp: expiration} // policy must match this!
 
 	resp := auth.AuthenticateOK{
 		Identities:  nil,
@@ -262,8 +262,8 @@ func TestRequestVisaWithConstraint(t *testing.T) {
 	// Prior to requesting a visa, we need to have told visa service about the
 	// adapter(s).
 	{
-		claims := map[string]*agent.ClaimV{
-			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
+		claims := map[string]*actor.ClaimV{
+			"ca0.foo": &actor.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
 		}
 		svc.BackDoorConnectAdapter(taddr, saddr, naddr, claims, time.Now().Add(5*time.Minute))
 	}
@@ -368,8 +368,8 @@ func TestRequestVisaDupes(t *testing.T) {
 	createPacket(pktbuf, saddr, daddr, 30000, 80)
 
 	{
-		claims := map[string]*agent.ClaimV{
-			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
+		claims := map[string]*actor.ClaimV{
+			"ca0.foo": &actor.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
 		}
 		svc.BackDoorConnectAdapter(taddr, saddr, naddr, claims, time.Now().Add(5*time.Minute))
 	}
@@ -402,7 +402,7 @@ func TestRequestVisaDupes(t *testing.T) {
 	require.NotEqual(t, v1.IssuerID, v2.IssuerID) // New unique issuer IDs
 }
 
-// Ensure that if agent auth has expired, no visa is issued.
+// Ensure that if actor auth has expired, no visa is issued.
 func TestAuthExpireNoVisa(t *testing.T) {
 	alog := logr.NewTestLogger()
 
@@ -487,8 +487,8 @@ func TestAuthExpireNoVisa(t *testing.T) {
 	createPacket(pktbuf, saddr, daddr, 30000, 80)
 
 	{
-		claims := map[string]*agent.ClaimV{
-			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
+		claims := map[string]*actor.ClaimV{
+			"ca0.foo": &actor.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
 		}
 		svc.BackDoorConnectAdapter(taddr, saddr, naddr, claims, time.Now().Add(-time.Hour)) // <--- note expired
 	}
@@ -566,8 +566,8 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	_, err = svc.BackDoorInstallAPIKeyForUnitTestExp(n1addr, "n1", time.Now().Add(10*time.Second), vssListenAddr) // <--- note expiry in 10s
 	require.Nil(t, err)
 
-	vs_claims := make(map[string]*agent.ClaimV)
-	vs_claims["ca0.foo"] = &agent.ClaimV{V: "fox", Exp: time.Now().Add(time.Hour)}
+	vs_claims := make(map[string]*actor.ClaimV)
+	vs_claims["ca0.foo"] = &actor.ClaimV{V: "fox", Exp: time.Now().Add(time.Hour)}
 	err = svc.BackDoorConnectSvcAdapter(vsaddr, vsaddr, n0addr, vs_claims, []string{"$$zpr/visaservice", "/zpr/$$zpr/visaservice"}, time.Now().Add(time.Hour))
 	require.Nil(t, err)
 
@@ -596,8 +596,8 @@ func TestVisaServiceVisasExtended(t *testing.T) {
 	{
 		client110 := netip.MustParseAddr("fc00:3001:1::10")
 		client110ta := netip.MustParseAddr("fc00:3001::10")
-		claims := map[string]*agent.ClaimV{
-			"ca0.foo": &agent.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
+		claims := map[string]*actor.ClaimV{
+			"ca0.foo": &actor.ClaimV{V: "fee", Exp: time.Now().Add(time.Hour)},
 		}
 		svc.BackDoorConnectAdapter(client110ta, client110, n1addr, claims, time.Now().Add(time.Hour))
 	}

@@ -178,7 +178,7 @@ func (p *Policy) GetServiceMesh() *ServiceMesh {
 
 // Checks if policy `other` is "connect compatible" with `p`. Returns TRUE if the
 // `other` policy permits all the connections that `p` does.  Returns FALSE when
-// the `other` policy would prevent some agents that could have connected in `p` from
+// the `other` policy would prevent some actors that could have connected in `p` from
 // connecting.
 //
 // This is not very sophisticated - the connection attributes must match exactly to

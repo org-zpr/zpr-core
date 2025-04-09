@@ -787,7 +787,7 @@ func TestMatchingPathsAssertion(t *testing.T) {
 	require.Equal(t, []string{}, sortedPathExprs(root, `one.{blue}{yellow}red`))
 	require.Equal(t, []string{"one.red"}, sortedPathExprs(root, `one.{blue}!{yellow}red`))
 	require.Equal(t, []string{}, sortedPathExprs(root, `one.!{blue}!{yellow}red`))
-	require.Equal(t, []string{"one.red"}, sortedPathExprs(root, `one.!{magenta}!{yellow}red`))
+	require.Equal(t, []string{"one.red"}, sortedPathExprs(root, `one.!{mactora}!{yellow}red`))
 	require.Equal(t, []string{"two[0][0]"}, sortedPathExprs(root, `two.{[1][1]$*1}[0][0]$*0`))
 	require.Equal(t, []string{"two[0][0]"}, sortedPathExprs(root, `two{[1][1]$*1}[0][0]$*0`))
 	require.Equal(t, []string{}, sortedPathExprs(root, `two{[1][2]$*1}[0][0]$*0`))

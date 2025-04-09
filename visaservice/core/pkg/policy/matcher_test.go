@@ -11,7 +11,7 @@ import (
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vsx/polio"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 
@@ -39,7 +39,7 @@ zpr:
   globals:
     max_connections: 100
     max_connections_per_dock: 10
-    max_connections_per_agent: 3
+    max_connections_per_actor: 3
   visaservice:
     provider:
       - [intern.foo, fox]
@@ -109,7 +109,7 @@ zpr:
   globals:
     max_connections: 100
     max_connections_per_dock: 10
-    max_connections_per_agent: 3
+    max_connections_per_actor: 3
   visaservice:
     provider:
       - [intern.foo, fox]
@@ -157,21 +157,21 @@ zpr:
                     -----END CERTIFICATE-----
 `
 
-// MatchTrafficAgents helper to call matcher.MatchTraffic
-func MatchTrafficAgents(m *policy.Matcher, td *snip.Traffic, src, dst *agent.Agent) ([]*polio.MatchedPolicy, error) {
-	mtSrc, mtDst := &policy.AgentInfo{src.GetAuthedClaims(), src.GetProvides()}, &policy.AgentInfo{dst.GetAuthedClaims(), dst.GetProvides()}
+// MatchTrafficActors helper to call matcher.MatchTraffic
+func MatchTrafficActors(m *policy.Matcher, td *snip.Traffic, src, dst *actor.Actor) ([]*polio.MatchedPolicy, error) {
+	mtSrc, mtDst := &policy.ActorInfo{src.GetAuthedClaims(), src.GetProvides()}, &policy.ActorInfo{dst.GetAuthedClaims(), dst.GetProvides()}
 	return m.MatchTraffic(td, mtSrc, mtDst)
 }
 
-func mkClaim(val string, ttl time.Duration) *agent.ClaimV {
-	return &agent.ClaimV{
+func mkClaim(val string, ttl time.Duration) *actor.ClaimV {
+	return &actor.ClaimV{
 		V:   val,
 		Exp: time.Now().Add(ttl),
 	}
 }
 
-func mkClaims(key, val string, ttl time.Duration) map[string]*agent.ClaimV {
-	m := make(map[string]*agent.ClaimV)
+func mkClaims(key, val string, ttl time.Duration) map[string]*actor.ClaimV {
+	m := make(map[string]*actor.ClaimV)
 	m[key] = mkClaim(val, ttl)
 	return m
 }
@@ -210,10 +210,10 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
@@ -227,7 +227,7 @@ communications:
 			Flags:   uint32(0x02), // SYN
 		}
 
-		matches, err := MatchTrafficAgents(m, td, client, server)
+		matches, err := MatchTrafficActors(m, td, client, server)
 		require.Nil(t, err)
 		require.Len(t, matches, 1)
 		match := matches[0]
@@ -238,7 +238,7 @@ communications:
 
 	// Sanity check:
 	{
-		wrongServer := agent.NewAgentFromUnsubstantiatedClaims(nil)
+		wrongServer := actor.NewActorFromUnsubstantiatedClaims(nil)
 		wrongServer.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 		wrongServer.SetProvides([]string{"/zpr/testnet/database"})
 
@@ -251,7 +251,7 @@ communications:
 			Flags:   uint32(0x02), // SYN
 		}
 
-		_, err := MatchTrafficAgents(m, td, client, wrongServer)
+		_, err := MatchTrafficActors(m, td, client, wrongServer)
 		require.NotNil(t, err)
 	}
 }
@@ -290,10 +290,10 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
@@ -307,7 +307,7 @@ communications:
 			Flags:   uint32(0x10), // ACK
 		}
 
-		matches, err := MatchTrafficAgents(m, td, server, client)
+		matches, err := MatchTrafficActors(m, td, server, client)
 		require.Nil(t, err)
 		require.Len(t, matches, 1)
 		match := matches[0]
@@ -325,7 +325,7 @@ communications:
 			Flags:   uint32(0x10), // ACK
 		}
 
-		matches, err := MatchTrafficAgents(m, td, server, client)
+		matches, err := MatchTrafficActors(m, td, server, client)
 		require.Nil(t, err)
 		require.Len(t, matches, 1)
 		match := matches[0]
@@ -369,10 +369,10 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
@@ -385,7 +385,7 @@ communications:
 		Flags:   uint32(0x02), // SYN
 	}
 
-	_, err = MatchTrafficAgents(m, td, server, client)
+	_, err = MatchTrafficActors(m, td, server, client)
 	require.NotNil(t, err)
 }
 
@@ -423,10 +423,10 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
@@ -438,7 +438,7 @@ communications:
 		ICMPCode: 0,
 	}
 
-	matches, err := MatchTrafficAgents(m, td, client, server)
+	matches, err := MatchTrafficActors(m, td, client, server)
 	require.Nil(t, err)
 	require.Len(t, matches, 1)
 	match := matches[0]
@@ -481,10 +481,10 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
@@ -496,7 +496,7 @@ communications:
 		ICMPCode: 0,
 	}
 
-	matches, err := MatchTrafficAgents(m, td, server, client)
+	matches, err := MatchTrafficActors(m, td, server, client)
 	require.Nil(t, err)
 	require.Len(t, matches, 1)
 	match := matches[0]
@@ -539,7 +539,7 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 
 	state, err := policy.NewConnectState(server, nil, netip.Addr{}, logr.NewTestLogger())
@@ -584,7 +584,7 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	client.SetAuthenticated(mkClaims("intern.whack", "yes", time.Hour), time.Time{}, nil, nil, 1)
 
 	state, err := policy.NewConnectState(client, nil, netip.Addr{}, logr.NewTestLogger())
@@ -627,14 +627,14 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	{
 		ac := mkClaims("intern.foo", "fee", time.Hour)
 		ac["zpr.addr"] = mkClaim("fc00:3001::fa57:abcf:9895:6469", time.Hour)
 		client.SetAuthenticated(ac, time.Time{}, []string{"intern"}, []string{"token"}, 1)
 	}
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
@@ -648,7 +648,7 @@ communications:
 			Flags:   uint32(0x02), // SYN
 		}
 
-		matches, err := MatchTrafficAgents(m, td, client, server)
+		matches, err := MatchTrafficActors(m, td, client, server)
 		require.Nil(t, err)
 		require.Len(t, matches, 1)
 		match := matches[0]
@@ -701,14 +701,14 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
-	claims := map[string]*agent.ClaimV{
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
+	claims := map[string]*actor.ClaimV{
 		"intern.foo": mkClaim("fee", time.Hour),
 		"intern.fee": mkClaim("foo", time.Hour),
 	}
 	client.SetAuthenticated(claims, time.Time{}, []string{"intern"}, []string{"token"}, 1)
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
@@ -722,7 +722,7 @@ communications:
 			Flags:   uint32(0x02), // SYN
 		}
 
-		matches, err := MatchTrafficAgents(m, td, client, server)
+		matches, err := MatchTrafficActors(m, td, client, server)
 		require.Nil(t, err)
 		require.Len(t, matches, 2)
 		require.True(t, matches[0].FWD)
@@ -769,11 +769,11 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	claims := mkClaims("intern.Foo", "fee", time.Hour)
 	client.SetAuthenticated(claims, time.Time{}, []string{"intern"}, []string{"token"}, 1)
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
@@ -787,7 +787,7 @@ communications:
 			Flags:   uint32(0x02), // SYN
 		}
 
-		matches, err := MatchTrafficAgents(m, td, client, server)
+		matches, err := MatchTrafficActors(m, td, client, server)
 		require.Nil(t, err)
 		require.Len(t, matches, 1)
 		require.True(t, matches[0].FWD)
@@ -830,11 +830,11 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	claims := mkClaims("intern.foo", "fEE", time.Hour)
 	client.SetAuthenticated(claims, time.Time{}, []string{"intern"}, []string{"token"}, 1)
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
@@ -848,7 +848,7 @@ communications:
 			Flags:   uint32(0x02), // SYN
 		}
 
-		matches, err := MatchTrafficAgents(m, td, client, server)
+		matches, err := MatchTrafficActors(m, td, client, server)
 		require.Nil(t, err)
 		require.Len(t, matches, 1)
 		require.True(t, matches[0].FWD)
@@ -900,15 +900,15 @@ communications:
 		Flags:   uint32(0x02), // SYN
 	}
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 
 	claims0 := mkClaims("intern.foo", "fee", time.Hour)
 	client.SetAuthenticated(claims0, time.Time{}, []string{"intern"}, []string{"token"}, 1)
-	matches, err := MatchTrafficAgents(m, td, client, server)
+	matches, err := MatchTrafficActors(m, td, client, server)
 	require.Nil(t, err)
 	require.Len(t, matches, 1)
 	require.True(t, matches[0].FWD)
@@ -917,7 +917,7 @@ communications:
 
 	claims1 := mkClaims("intern.foo", "notfee", time.Hour)
 	client.SetAuthenticated(claims1, time.Time{}, []string{"intern"}, []string{"token"}, 1)
-	_, err = MatchTrafficAgents(m, td, client, server)
+	_, err = MatchTrafficActors(m, td, client, server)
 	require.NotNil(t, err)
 }
 
@@ -964,15 +964,15 @@ communications:
 		Flags:   uint32(0x02), // SYN
 	}
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 
 	claims0 := mkClaims("intern.foo", "notfee", time.Hour)
 	client.SetAuthenticated(claims0, time.Time{}, []string{"intern"}, []string{"token"}, 1)
-	matches, err := MatchTrafficAgents(m, td, client, server)
+	matches, err := MatchTrafficActors(m, td, client, server)
 	require.Nil(t, err)
 	require.Len(t, matches, 1)
 	require.True(t, matches[0].FWD)
@@ -981,7 +981,7 @@ communications:
 
 	claims1 := mkClaims("intern.foo", "fee", time.Hour)
 	client.SetAuthenticated(claims1, time.Time{}, []string{"intern"}, []string{"token"}, 1)
-	_, err = MatchTrafficAgents(m, td, client, server)
+	_, err = MatchTrafficActors(m, td, client, server)
 	require.NotNil(t, err)
 }
 
@@ -1028,15 +1028,15 @@ communications:
 		Flags:   uint32(0x02), // SYN
 	}
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 
 	claims0 := mkClaims("intern.foo", "there,is,a,fee,here", time.Hour)
 	client.SetAuthenticated(claims0, time.Time{}, []string{"intern"}, []string{"token"}, 1)
-	matches, err := MatchTrafficAgents(m, td, client, server)
+	matches, err := MatchTrafficActors(m, td, client, server)
 	require.Nil(t, err)
 	require.Len(t, matches, 1)
 	require.True(t, matches[0].FWD)
@@ -1045,7 +1045,7 @@ communications:
 
 	claims1 := mkClaims("intern.foo", "there,is,a,nonfee,here", time.Hour)
 	client.SetAuthenticated(claims1, time.Time{}, []string{"intern"}, []string{"token"}, 1)
-	_, err = MatchTrafficAgents(m, td, client, server)
+	_, err = MatchTrafficActors(m, td, client, server)
 	require.NotNil(t, err)
 }
 
@@ -1092,15 +1092,15 @@ communications:
 		Flags:   uint32(0x02), // SYN
 	}
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "fc00:3001::683c:c1ec:6785:af0", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 
 	claims0 := mkClaims("intern.foo", "there,is,a,nonfee,here", time.Hour)
 	client.SetAuthenticated(claims0, time.Time{}, []string{"intern"}, []string{"token"}, 1)
-	matches, err := MatchTrafficAgents(m, td, client, server)
+	matches, err := MatchTrafficActors(m, td, client, server)
 	require.Nil(t, err)
 	require.Len(t, matches, 1)
 	require.True(t, matches[0].FWD)
@@ -1109,7 +1109,7 @@ communications:
 
 	claims1 := mkClaims("intern.foo", "there,is,a,fee,here", time.Hour)
 	client.SetAuthenticated(claims1, time.Time{}, []string{"intern"}, []string{"token"}, 1)
-	_, err = MatchTrafficAgents(m, td, client, server)
+	_, err = MatchTrafficActors(m, td, client, server)
 	require.NotNil(t, err)
 }
 
@@ -1153,10 +1153,10 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	client.SetAuthenticated(mkClaims("intern.foo", "fee", time.Hour), time.Time{}, []string{"intern"}, []string{"token"}, 1)
 
-	server := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	server := actor.NewActorFromUnsubstantiatedClaims(nil)
 	server.SetAuthenticated(mkClaims("zpr.addr", "10.1.0.8", time.Hour), time.Time{}, nil, nil, 1)
 	server.SetProvides([]string{"/zpr/testnet/webserver"})
 
@@ -1168,7 +1168,7 @@ communications:
 		ICMPCode: 0,
 	}
 
-	matches, err := MatchTrafficAgents(m, td, client, server)
+	matches, err := MatchTrafficActors(m, td, client, server)
 	require.Nil(t, err)
 	require.Len(t, matches, 1)
 	match := matches[0]
@@ -1210,7 +1210,7 @@ communications:
 	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
 	require.Nil(t, err)
 
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	claims := mkClaims("zpr.addr", "fc00:3001::1", time.Hour)
 	claims["zpr.adapter.cn"] = mkClaim("foo", time.Hour)
 	client.SetAuthenticated(claims, time.Time{}, nil, nil, 1)
@@ -1269,7 +1269,7 @@ communications:
 	require.Nil(t, err)
 
 	// Now connect a client
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	claims := mkClaims("zpr.addr", "fc00:3001::1", time.Hour)
 	claims["zpr.adapter.cn"] = mkClaim("foo", time.Hour)
 	client.SetAuthenticated(claims, time.Time{}, nil, nil, 1)
@@ -1284,7 +1284,7 @@ communications:
 }
 
 // See https://github.com/org-zpr/zpr-core/issues/746
-func TestAgentConnectUsingM3Policy(t *testing.T) {
+func TestActorConnectUsingM3Policy(t *testing.T) {
 	pfile := filepath.Join("testdata", "oci-m3-full-access.bin")
 	cp, err := polio.OpenContainedPolicyFile(pfile, nil)
 	require.Nil(t, err)
@@ -1294,7 +1294,7 @@ func TestAgentConnectUsingM3Policy(t *testing.T) {
 	require.Nil(t, err)
 
 	// Now connect a client
-	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	client := actor.NewActorFromUnsubstantiatedClaims(nil)
 	claims := mkClaims("zpr.addr", "fd5a:5052:2::101", time.Hour)
 	claims["zpr.adapter.cn"] = mkClaim("mathias.zpr.org", time.Hour)
 	client.SetAuthenticated(claims, time.Time{}, nil, nil, 1)

@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice"
 	"zpr.org/vs/pkg/vservice/auth"
@@ -57,10 +57,10 @@ func (s *TAuthSvc) Query(*zds.QueryRequest) (*zds.QueryResponse, error) {
 	return nil, fmt.Errorf("query failed")
 }
 
-func attrsToMap(attrs []*zds.Attribute) map[string]*agent.ClaimV {
-	am := make(map[string]*agent.ClaimV)
+func attrsToMap(attrs []*zds.Attribute) map[string]*actor.ClaimV {
+	am := make(map[string]*actor.ClaimV)
 	for _, a := range attrs {
-		am[a.Key] = &agent.ClaimV{
+		am[a.Key] = &actor.ClaimV{
 			V:   a.Val,
 			Exp: time.Unix(a.Exp, 0),
 		}

@@ -48,8 +48,8 @@ const (
 //
 // ----------------------------------------------------------------------------
 type ZDSClient interface {
-	// AValidate validates a challenge response from an agent.
-	// This is called when an agent is connecting to the network, or during a
+	// AValidate validates a challenge response from an actor.
+	// This is called when an actor is connecting to the network, or during a
 	// re-authentication.
 	//
 	// If AValidate is not supported, the UNIMPLEMENTED status code should
@@ -57,7 +57,7 @@ type ZDSClient interface {
 	AValidate(ctx context.Context, in *ValidateRequest, opts ...grpc.CallOption) (*ValidateResponse, error)
 	// ARefresh requests an extension of a previous validation.
 	ARefresh(ctx context.Context, in *RefreshRequest, opts ...grpc.CallOption) (*RefreshResponse, error)
-	// DQuery returns the value of a specific set of attributes for an agent.
+	// DQuery returns the value of a specific set of attributes for an actor.
 	// This may be called during visa request processing.
 	//
 	// If DQuery is not supported, the UNIMPLEMENTED status code should be
@@ -144,8 +144,8 @@ func (c *zDSClient) DSatisfy(ctx context.Context, in *SatisfyRequest, opts ...gr
 //
 // ----------------------------------------------------------------------------
 type ZDSServer interface {
-	// AValidate validates a challenge response from an agent.
-	// This is called when an agent is connecting to the network, or during a
+	// AValidate validates a challenge response from an actor.
+	// This is called when an actor is connecting to the network, or during a
 	// re-authentication.
 	//
 	// If AValidate is not supported, the UNIMPLEMENTED status code should
@@ -153,7 +153,7 @@ type ZDSServer interface {
 	AValidate(context.Context, *ValidateRequest) (*ValidateResponse, error)
 	// ARefresh requests an extension of a previous validation.
 	ARefresh(context.Context, *RefreshRequest) (*RefreshResponse, error)
-	// DQuery returns the value of a specific set of attributes for an agent.
+	// DQuery returns the value of a specific set of attributes for an actor.
 	// This may be called during visa request processing.
 	//
 	// If DQuery is not supported, the UNIMPLEMENTED status code should be

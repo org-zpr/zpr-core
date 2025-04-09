@@ -17,7 +17,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
 
-	"zpr.org/vs/pkg/agent"
+	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vservice/auth"
@@ -84,9 +84,9 @@ UKre9UYjF/onz0V6nOciKdtJgaXyW2hj8oZCBwC8rdCQSe8=
 -----END CERTIFICATE-----
 	`
 
-	// Here is a certificate that includes the agents public key
+	// Here is a certificate that includes the actors public key
 	// and is signed by the certificate authority.
-	agentCertPEM = `
+	actorCertPEM = `
 -----BEGIN CERTIFICATE-----
 MIID1jCCAr6gAwIBAgIUB/IDuntZN2Yi/0GlTzO4CWskqm0wDQYJKoZIhvcNAQEL
 BQAwZzELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAktZMRMwEQYDVQQHDApMb3Vpc3Zp
@@ -112,9 +112,9 @@ dcwCfDu4D0HGzRYGgfrjxd28BNeYRqQhm0Y=
 -----END CERTIFICATE-----
 	`
 
-	// Here is the agent private key which is used by the agent
+	// Here is the actor private key which is used by the actor
 	// to respond to the challenge.
-	agentKeyPEM = `
+	actorKeyPEM = `
 -----BEGIN PRIVATE KEY-----
 MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCXI39rAgJbZRiq
 +31eCl9BDoVeLc1eZ9Nm/fhx4MXXjz7Ml0pZScC5hrYorayV1MUTmfTDQq/xTWiX
@@ -227,8 +227,8 @@ func TestJWTCreateOneCert(t *testing.T) {
 	}
 	caCert := loadCert([]byte(caCertPEM))
 	conf := map[string]string{
-		"key_data":  base64.StdEncoding.EncodeToString([]byte(agentKeyPEM)),
-		"cert_data": base64.StdEncoding.EncodeToString([]byte(agentCertPEM)),
+		"key_data":  base64.StdEncoding.EncodeToString([]byte(actorKeyPEM)),
+		"cert_data": base64.StdEncoding.EncodeToString([]byte(actorCertPEM)),
 	}
 
 	nv := auth.NewNodeValidator(tlog, 20*time.Minute, "nodename", pk)
@@ -308,8 +308,8 @@ func TestRevokeAuthority(t *testing.T) {
 	caPrint, err := snauth.NewSHA1Fingerprint(caCert.Raw)
 	require.Nil(t, err)
 	conf := map[string]string{
-		"key_data":  base64.StdEncoding.EncodeToString([]byte(agentKeyPEM)),
-		"cert_data": base64.StdEncoding.EncodeToString([]byte(agentCertPEM)),
+		"key_data":  base64.StdEncoding.EncodeToString([]byte(actorKeyPEM)),
+		"cert_data": base64.StdEncoding.EncodeToString([]byte(actorCertPEM)),
 	}
 
 	nv := auth.NewNodeValidator(tlog, 20*time.Minute, "nodename", pk)
@@ -374,12 +374,12 @@ func TestRevokeCertificate(t *testing.T) {
 		panic(err)
 	}
 	caCert := loadCert([]byte(caCertPEM))
-	agentCert := loadCert([]byte(agentCertPEM))
-	agentPrint, err := snauth.NewSHA1Fingerprint(agentCert.Raw)
+	actorCert := loadCert([]byte(actorCertPEM))
+	actorPrint, err := snauth.NewSHA1Fingerprint(actorCert.Raw)
 	require.Nil(t, err)
 	conf := map[string]string{
-		"key_data":  base64.StdEncoding.EncodeToString([]byte(agentKeyPEM)),
-		"cert_data": base64.StdEncoding.EncodeToString([]byte(agentCertPEM)),
+		"key_data":  base64.StdEncoding.EncodeToString([]byte(actorKeyPEM)),
+		"cert_data": base64.StdEncoding.EncodeToString([]byte(actorCertPEM)),
 	}
 
 	nv := auth.NewNodeValidator(tlog, 20*time.Minute, "nodename", pk)
@@ -415,7 +415,7 @@ func TestRevokeCertificate(t *testing.T) {
 	revokes := []*snauth.CredID{
 		&snauth.CredID{
 			CType: snauth.CredIDTypeAuthority,
-			ID:    agentPrint.String(),
+			ID:    actorPrint.String(),
 		},
 	}
 
@@ -450,8 +450,8 @@ func TestSelfValidate(t *testing.T) {
 
 	reqAddr := netip.MustParseAddr("fd00:3001::22")
 	claims := make(map[string]string)
-	claims[agent.KAttrEPID] = reqAddr.String()
-	claims[agent.KAttrCN] = "ma.hatma"
+	claims[actor.KAttrEPID] = reqAddr.String()
+	claims[actor.KAttrCN] = "ma.hatma"
 
 	aok, err := nv.SelfAuthenticate(netip.MustParseAddr("fd00:3001::22"), claims, nil)
 	require.Nil(t, err)

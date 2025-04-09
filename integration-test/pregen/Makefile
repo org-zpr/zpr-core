@@ -1,7 +1,7 @@
 ZPC ?= zpc
 KEY := zpr-rsa-key.pem
 
-OBJS := conform-policy.bin v4-1node-2agent-ping.bin v4-1node-3agent-ping.bin v6-1node-2agent-ping.bin v6-1node-3agent-ping.bin
+OBJS := conform-policy.bin v4-1node-2actor-ping.bin v4-1node-3actor-ping.bin v6-1node-2actor-ping.bin v6-1node-3actor-ping.bin
 
 info:
 	@echo Makefile to help with compiling the ZPR policies
@@ -19,12 +19,12 @@ all: $(OBJS)
 clean:
 	rm -f $(OBJS)
 
-v6-1node-2agent-ping.bin: v6-1node-2agent-ping.zplc v4-1node-2agent-ping.zpl
-	$(ZPC) -c v6-1node-2agent-ping.zplc -k $(KEY) -o $@ v4-1node-2agent-ping.zpl
+v6-1node-2actor-ping.bin: v6-1node-2actor-ping.zplc v4-1node-2actor-ping.zpl
+	$(ZPC) -c v6-1node-2actor-ping.zplc -k $(KEY) -o $@ v4-1node-2actor-ping.zpl
 
 
-v6-1node-3agent-ping.bin: v6-1node-3agent-ping.zplc v4-1node-3agent-ping.zpl
-	$(ZPC) -c v6-1node-3agent-ping.zplc -k $(KEY) -o $@ v4-1node-3agent-ping.zpl
+v6-1node-3actor-ping.bin: v6-1node-3actor-ping.zplc v4-1node-3actor-ping.zpl
+	$(ZPC) -c v6-1node-3actor-ping.zplc -k $(KEY) -o $@ v4-1node-3actor-ping.zpl
 
 
 %.bin: %.zpl %.zplc

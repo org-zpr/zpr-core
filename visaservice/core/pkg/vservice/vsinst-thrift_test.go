@@ -255,8 +255,8 @@ func TestThriftRegister(t *testing.T) {
 
 	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, helloResp.SessionID, timestamp)
 
-	agnt := &vsapi.Agent{
-		AgentType:   vsapi.AgentType_NODE,
+	agnt := &vsapi.Actor{
+		ActorType:   vsapi.ActorType_NODE,
 		AuthExpires: time.Now().Unix() + 11400, // +4hrs
 		ZprAddr:     netip.MustParseAddr("fc00:3001::8").AsSlice(),
 		TetherAddr:  netip.MustParseAddr("fc00:3001::8").AsSlice(),
@@ -270,7 +270,7 @@ func TestThriftRegister(t *testing.T) {
 		Timestamp: timestamp,
 		NodeCert:  []byte(nodeNoiseCert),
 		Hmac:      sig[:],
-		NodeAgent: agnt,
+		NodeActor: agnt,
 	}
 
 	apiKey, err := svc.Authenticate(context.Background(), authReq)
@@ -293,8 +293,8 @@ func TestThriftRegisterNullChallenge(t *testing.T) {
 
 	timestamp := time.Now().Unix()
 
-	agnt := &vsapi.Agent{
-		AgentType:   vsapi.AgentType_NODE,
+	agnt := &vsapi.Actor{
+		ActorType:   vsapi.ActorType_NODE,
 		AuthExpires: time.Now().Unix() + 11400, // +4hrs
 		ZprAddr:     netip.MustParseAddr("fc00:3001::8").AsSlice(),
 		TetherAddr:  netip.MustParseAddr("fc00:3001::8").AsSlice(),
@@ -308,7 +308,7 @@ func TestThriftRegisterNullChallenge(t *testing.T) {
 		Timestamp: timestamp,
 		NodeCert:  []byte(nodeNoiseCert),
 		Hmac:      []byte("foo"),
-		NodeAgent: agnt,
+		NodeActor: agnt,
 	}
 
 	_, err = svc.Authenticate(context.Background(), authReq)
@@ -332,8 +332,8 @@ func TestThriftRegisterNoFakeHello(t *testing.T) {
 	timestamp := time.Now().Unix()
 	sig := createMilestone2HMAC(fakeHelloResp.Challenge.ChallengeData, fakeHelloResp.SessionID, timestamp)
 
-	agnt := &vsapi.Agent{
-		AgentType:   vsapi.AgentType_NODE,
+	agnt := &vsapi.Actor{
+		ActorType:   vsapi.ActorType_NODE,
 		AuthExpires: time.Now().Unix() + 11400, // +4hrs
 		ZprAddr:     netip.MustParseAddr("fc00:3001::8").AsSlice(),
 		TetherAddr:  netip.MustParseAddr("fc00:3001::8").AsSlice(),
@@ -347,7 +347,7 @@ func TestThriftRegisterNoFakeHello(t *testing.T) {
 		Timestamp: timestamp,
 		NodeCert:  []byte(nodeNoiseCert),
 		Hmac:      sig[:],
-		NodeAgent: agnt,
+		NodeActor: agnt,
 	}
 
 	_, err := svc.Authenticate(context.Background(), authReq)
@@ -367,8 +367,8 @@ func TestThriftRegisterInvalidSig(t *testing.T) {
 	// bad session id
 	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, 1679, timestamp)
 
-	agnt := &vsapi.Agent{
-		AgentType:   vsapi.AgentType_NODE,
+	agnt := &vsapi.Actor{
+		ActorType:   vsapi.ActorType_NODE,
 		AuthExpires: time.Now().Unix() + 11400, // +4hrs
 		ZprAddr:     netip.MustParseAddr("fc00:3001::8").AsSlice(),
 		TetherAddr:  netip.MustParseAddr("fc00:3001::8").AsSlice(),
@@ -382,14 +382,14 @@ func TestThriftRegisterInvalidSig(t *testing.T) {
 		Timestamp: timestamp,
 		NodeCert:  []byte(nodeNoiseCert),
 		Hmac:      sig[:],
-		NodeAgent: agnt,
+		NodeActor: agnt,
 	}
 
 	_, err = svc.Authenticate(context.Background(), authReq)
 	require.ErrorContains(t, err, "failed to verify HMAC")
 }
 
-func TestThriftRegisterNullAgent(t *testing.T) {
+func TestThriftRegisterNullActor(t *testing.T) {
 	svc := initVisaservice(t)
 
 	helloResp, err := svc.Hello(context.Background())
@@ -409,7 +409,7 @@ func TestThriftRegisterNullAgent(t *testing.T) {
 	}
 
 	_, err = svc.Authenticate(context.Background(), authReq)
-	require.ErrorContains(t, err, "agent is required")
+	require.ErrorContains(t, err, "actor is required")
 }
 
 func TestThriftDeRegisterNoKeyNoCrash(t *testing.T) {
@@ -450,8 +450,8 @@ func TestThriftPollRespectKey(t *testing.T) {
 	timestamp := time.Now().Unix()
 	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, helloResp.SessionID, timestamp)
 
-	agnt := &vsapi.Agent{
-		AgentType:   vsapi.AgentType_NODE,
+	agnt := &vsapi.Actor{
+		ActorType:   vsapi.ActorType_NODE,
 		AuthExpires: time.Now().Unix() + 11400, // +4hrs
 		ZprAddr:     netip.MustParseAddr("fc00:3001::8").AsSlice(),
 		TetherAddr:  netip.MustParseAddr("fc00:3001::8").AsSlice(),
@@ -465,7 +465,7 @@ func TestThriftPollRespectKey(t *testing.T) {
 		Timestamp: timestamp,
 		NodeCert:  []byte(nodeNoiseCert),
 		Hmac:      sig[:],
-		NodeAgent: agnt,
+		NodeActor: agnt,
 	}
 
 	apiKey, err := svc.Authenticate(context.Background(), authReq)
@@ -529,8 +529,8 @@ func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 	nodeAddr := netip.MustParseAddr("fc00:3001::8")
 	dockAddr := netip.MustParseAddr("fc00:3001::8")
 
-	agnt := &vsapi.Agent{
-		AgentType:   vsapi.AgentType_NODE,
+	agnt := &vsapi.Actor{
+		ActorType:   vsapi.ActorType_NODE,
 		AuthExpires: time.Now().Unix() + 11400, // +4hrs
 		ZprAddr:     nodeAddr.AsSlice(),
 		TetherAddr:  dockAddr.AsSlice(),
@@ -544,22 +544,22 @@ func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 		Timestamp: timestamp,
 		NodeCert:  []byte(nodeNoiseCert),
 		Hmac:      sig[:],
-		NodeAgent: agnt,
+		NodeActor: agnt,
 	}
 
 	apiKey, err := svc.Authenticate(context.Background(), authReq)
 	require.Nil(t, err)
 	require.NotEmpty(t, apiKey)
 
-	agentClaims := map[string]string{
+	actorClaims := map[string]string{
 		"zpr.addr":       vservice.VisaServiceAddress,
-		"zpr.adapter.cn": "some.agent",
+		"zpr.adapter.cn": "some.actor",
 	}
 
 	req := vsapi.ConnectRequest{
 		ConnectionID:       99,
 		DockAddr:           dockAddr.AsSlice(),
-		Claims:             agentClaims,
+		Claims:             actorClaims,
 		Challenge:          nil,
 		ChallengeResponses: nil, // will fail anyway
 	}
@@ -579,7 +579,7 @@ func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
 }
 
 // This time prepare a "real" connection request. Will not fail
-// because we can not yet enable acutal agent challenge validation.
+// because we can not yet enable acutal actor challenge validation.
 // So this will succeed.
 //
 // See `initVisaservice` where we turn off connect validation.
@@ -616,8 +616,8 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	nodeAddr := netip.MustParseAddr("fc00:3001::8")
 	dockAddr := netip.MustParseAddr("fc00:3001::8")
 
-	agnt := &vsapi.Agent{
-		AgentType:   vsapi.AgentType_NODE,
+	agnt := &vsapi.Actor{
+		ActorType:   vsapi.ActorType_NODE,
 		AuthExpires: time.Now().Unix() + 11400, // +4hrs
 		ZprAddr:     nodeAddr.AsSlice(),
 		TetherAddr:  dockAddr.AsSlice(),
@@ -631,14 +631,14 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 		Timestamp: timestamp,
 		NodeCert:  []byte(nodeNoiseCert),
 		Hmac:      sig[:],
-		NodeAgent: agnt,
+		NodeActor: agnt,
 	}
 
 	apiKey, err := svc.Authenticate(context.Background(), authReq)
 	require.Nil(t, err)
 	require.NotEmpty(t, apiKey)
 
-	agentClaims := map[string]string{
+	actorClaims := map[string]string{
 		"zpr.addr":       vservice.VisaServiceAddress,
 		"zpr.adapter.cn": "vs.zpr",
 	}
@@ -675,7 +675,7 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	req := vsapi.ConnectRequest{
 		ConnectionID:       99,
 		DockAddr:           dockAddr.AsSlice(),
-		Claims:             agentClaims,
+		Claims:             actorClaims,
 		Challenge:          chalbuf,
 		ChallengeResponses: chalresps,
 	}
@@ -683,7 +683,7 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	require.Nil(t, err)
 	require.Equal(t, req.ConnectionID, cr.ConnectionID)
 	require.Equal(t, vsapi.StatusCode_SUCCESS, cr.Status)
-	require.NotNil(t, cr.Agent)
+	require.NotNil(t, cr.Actor)
 }
 
 func TestThriftRequestVisaNoRouteToHost(t *testing.T) {
@@ -720,8 +720,8 @@ func TestThriftRequestVisaNoRouteToHost(t *testing.T) {
 	nodeZprAddr := netip.MustParseAddr("fc00:3001::8")
 	nodeTetherAddr := nodeZprAddr
 
-	agnt := &vsapi.Agent{
-		AgentType:   vsapi.AgentType_NODE,
+	agnt := &vsapi.Actor{
+		ActorType:   vsapi.ActorType_NODE,
 		AuthExpires: time.Now().Unix() + 11400, // +4hrs
 		ZprAddr:     nodeZprAddr.AsSlice(),
 		TetherAddr:  nodeTetherAddr.AsSlice(),
@@ -735,21 +735,21 @@ func TestThriftRequestVisaNoRouteToHost(t *testing.T) {
 		Timestamp: timestamp,
 		NodeCert:  []byte(nodeNoiseCert),
 		Hmac:      sig[:],
-		NodeAgent: agnt,
+		NodeActor: agnt,
 	}
 
 	apiKey, err := svc.Authenticate(context.Background(), authReq)
 	require.Nil(t, err)
 	require.NotEmpty(t, apiKey)
 
-	agentTetherAddr := netip.MustParseAddr("fc00:3003::5:10")
-	agentContactAddr := netip.MustParseAddr("fc00:3001::10:20")
+	actorTetherAddr := netip.MustParseAddr("fc00:3003::5:10")
+	actorContactAddr := netip.MustParseAddr("fc00:3001::10:20")
 
 	pktbuf := gopacket.NewSerializeBuffer()
 
-	createPacket(pktbuf, agentContactAddr, nodeZprAddr, 31337, 22)
+	createPacket(pktbuf, actorContactAddr, nodeZprAddr, 31337, 22)
 
-	vr, err := svc.RequestVisa(context.Background(), apiKey, agentTetherAddr.AsSlice(), 6, pktbuf.Bytes())
+	vr, err := svc.RequestVisa(context.Background(), apiKey, actorTetherAddr.AsSlice(), 6, pktbuf.Bytes())
 	require.Nil(t, err)
 	require.NotNil(t, vr)
 	require.Equal(t, vsapi.StatusCode_FAIL, vr.Status)
@@ -757,7 +757,7 @@ func TestThriftRequestVisaNoRouteToHost(t *testing.T) {
 
 	// And as usual, wrong key -- no dice
 	{
-		_, err := svc.RequestVisa(context.Background(), apiKey+"foo", agentTetherAddr.AsSlice(), 6, pktbuf.Bytes())
+		_, err := svc.RequestVisa(context.Background(), apiKey+"foo", actorTetherAddr.AsSlice(), 6, pktbuf.Bytes())
 		require.NotNil(t, err)
 		require.ErrorContains(t, err, "Unauthorized")
 	}
