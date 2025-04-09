@@ -1,5 +1,4 @@
 use crate::sys::TunPi;
-use bytes::buf;
 
 const TUN_PKT_STRIP: u16 = 0x0001;
 

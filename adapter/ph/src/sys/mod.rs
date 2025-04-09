@@ -1,7 +1,7 @@
 #[cfg(target_os = "linux")]
 pub(crate) mod linux;
 #[cfg(target_os = "linux")]
-pub use self::linux::TunPi;
+pub use self::linux::TunPiImpl;
 #[cfg(target_os = "linux")]
 pub use self::linux::ZprTun;
 
