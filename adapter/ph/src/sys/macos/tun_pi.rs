@@ -1,35 +1,54 @@
-use bytes::buf;
 
-/// per-packet packet info
+use crate::sys::{TunPi, TUN_PI_ETH_P_IP, TUN_PI_ETH_P_IPV6};
+use libc::{AF_INET6, AF_INET};
+
+// TODO: I have not confirmed that the packet info FLAGS field is the same as linux.
+// Assuming it is for now.
+const TUN_PKT_STRIP: u16 = 0x0001;
+
+// 16 bit versions of the libc constants.
+const PI_AF_INET: u16 = AF_INET as u16;
+const PI_AF_INET6: u16 = AF_INET6 as u16;
+
+
+#[repr(C)]
 #[derive(Clone, Copy)]
-pub struct TunPi {
-    /// True if the inbound packet was truncated (ignored outbound)
-    pub strip: bool,
-    /// Ethertype of packet
-    pub proto: u16,
+pub struct TunPiImpl {
+    flags: u16,
+    proto: [u8; 2],
 }
 
-impl TunPi {
-    /// The size of a per-packet packet info structure.
-    /// On macos this is `0` and informs the system that there is no
-    /// PI information on the front of the packet.
-    ///
-    /// TODO: Needs more exploration-- the rust-tun code indiciates that
-    /// there is PI on the mac utun interface, but our tests reading
-    /// packets do not show it. (See #541)
-    ///
-    pub const PI_SIZE: usize = 0;
-
-    /// Since macos does not provide packet info, we just return a
-    /// [TunPi] here with `strip = false` and `proto = 0`.
-    pub fn read_pi<B: buf::Buf>(_buf: &mut B) -> TunPi {
+impl From<TunPiImpl> for TunPi {
+    fn from(pi: TunPiImpl) -> TunPi {
         TunPi {
-            strip: false,
-            proto: 0,
+            strip: pi.flags & TUN_PKT_STRIP != 0,
+            proto: {
+                let plat_pi = u16::from_be_bytes(pi.proto);
+                if plat_pi == PI_AF_INET {
+                    TUN_PI_ETH_P_IP
+                } else if plat_pi == PI_AF_INET6 {
+                    TUN_PI_ETH_P_IPV6
+                } else {
+                    // Choosing not to barf here and just let the next layer sort it out.
+                    plat_pi
+                }
+            },
         }
     }
-
-    /// Write per-packet packet info into a `BufMut`.
-    /// Since macos does not support packet info this does nothing.
-    pub fn write_pi<B: buf::BufMut>(_buf: &mut B, _pi: TunPi) {}
 }
+
+impl From<TunPi> for TunPiImpl {
+    fn from(pi: TunPi) -> TunPiImpl {
+        TunPiImpl {
+            flags: 0,
+            proto: if pi.proto == TUN_PI_ETH_P_IP {
+                PI_AF_INET.to_be_bytes()
+            } else if pi.proto == TUN_PI_ETH_P_IPV6 {
+                PI_AF_INET6.to_be_bytes()
+            } else {
+                panic!("PI write expects IPv4 or IPv6 packet");
+            }
+        }
+    }
+}
+

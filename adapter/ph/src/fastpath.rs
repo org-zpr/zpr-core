@@ -25,7 +25,7 @@ use blake3;
 use bytes::{Buf, BufMut};
 use std::io::ErrorKind;
 use std::net::UdpSocket;
-use std::os::fd::{AsRawFd, BorrowedFd};
+use std::os::fd::AsFd;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::*;
@@ -538,7 +538,8 @@ impl FastpathWorker {
 
     fn process_agent_input_queue(&mut self) {
         // temp hack until we move ZprTun to be non-Tokio
-        let tun_fd = unsafe { BorrowedFd::borrow_raw(self.agent_input_tun.as_raw_fd()) };
+        //let tun_fd = unsafe { BorrowedFd::borrow_raw(self.agent_input_tun.as_raw_fd()) };
+        let tun_fd = self.agent_input_tun.as_fd();
 
         // Add TUN PI header.
         match TunPi::PI_SIZE {

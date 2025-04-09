@@ -9,6 +9,9 @@ use crate::sys::TunPi;
 #[allow(dead_code)]
 pub const DEFAULT_TUN_MTU: u16 = 1400;
 
+/// Default prefix len for local tun IPv6 zpr addresses.
+pub const ZPRNET_PREFIX_LEN: usize = 32;
+
 /// Error type used by some ZprTun functions across platform implementations.
 #[derive(thiserror::Error, Debug)]
 pub enum ZprTunError {

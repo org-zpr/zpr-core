@@ -1,74 +1,115 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::os::unix::io::{RawFd, AsRawFd};
+use std::os::fd::AsFd;
+use std::os::unix::io::{AsRawFd, OwnedFd, FromRawFd, BorrowedFd};
 use std::mem;
 use std::ptr;
 use std::ffi::CStr;
 use nix::{ioctl_readwrite, ioctl_write_ptr};
 
+use tracing::*;
 use thiserror::Error;
 
-use crate::zprtun::DEFAULT_TUN_MTU;
+use crate::zprtun::{DEFAULT_TUN_MTU, ZPRNET_PREFIX_LEN};
 
 use libc::{
-    self, IFNAMSIZ, PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL, AF_SYSTEM, AF_SYS_CONTROL, AF_INET,
-    UTUN_OPT_IFNAME, c_uint, c_char, socklen_t, sockaddr, c_void, ifreq,
-    sockaddr_in, sockaddr_in6,
+    self, IFNAMSIZ, PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL,
+    AF_SYSTEM, AF_SYS_CONTROL, AF_INET, AF_INET6,
+    UTUN_OPT_IFNAME,
+    c_uint, c_int, c_char, socklen_t, sockaddr, c_void, ifreq,
+    sockaddr_in, sockaddr_in6, ctl_info,
 };
+
+// Not in libc. Copied from netinet6/in6_var.h
+#[allow(non_camel_case_types)]
+#[repr(C)]
+pub struct in6_aliasreq {
+    pub ifra_name: [c_char; IFNAMSIZ],
+    pub ifra_addr: libc::sockaddr_in6,
+    pub ifra_dstaddr: libc::sockaddr_in6,
+    pub ifra_prefixmask: libc::sockaddr_in6,
+    pub ifra_flags: c_int,
+    pub ifra_lifetime: libc::in6_addrlifetime,
+}
+
+// Not in libc. Copied from netinet6/nd6.h
+const ND6_INFINITE_LIFETIME: libc::c_uint = 0xffffffff;
+const IPV6_MMTU: u16 = 1280; // Minimum MTU for IPv6
+const IPV4_MMTU: u16 = 576; // Minimum MTU for IPv4
+
+
 
 /// Special macOS controller name for creating tun devices. (see net/if_utun.h)
 pub const UTUN_CONTROL_NAME: &str = "com.apple.net.utun_control";
 
 /// Size of the ifr_ifru union in the ifreq struct. (see net/if.h)
-const OVERWRITE_SIZE: usize = std::mem::size_of::<libc::__c_anonymous_ifr_ifru>();
+const OVERWRITE_SIZE_IP4: usize = std::mem::size_of::<libc::__c_anonymous_ifr_ifru>();
 
 
 ioctl_readwrite!(ctliocginfo, b'N', 3, ctl_info); // Convert kernel controller name to kernel controller ID
-ioctl_write_ptr!(siocsifaddr, b'i', 12, ifreq); // set ifnet address (XXX is this IPv4 only?)
-// ioctl_write_ptr!(siocsifaddr_in6, b'i', 12, in6_ifreq); // set ifnet address (ipv6)
+ioctl_write_ptr!(siocsifaddr, b'i', 12, ifreq); // set ifnet address (is this IPv4 only?)
+ioctl_write_ptr!(siocaifaddr_in6, b'i', 26, in6_aliasreq); // set ifnet address (ipv6)
 ioctl_write_ptr!(siocsifmtu, b'i', 52, ifreq); // set ifnet MTU
 
-
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct ctl_info {
-    pub ctl_id: c_uint, // kernel controller ID (filled in on return)
-    pub ctl_name: [c_char; 96], // kernel controller name
-}
 
 
 #[derive(Debug, Error)]
 pub enum TunError {
     #[error("TUN device name is too long")]
     NameTooLong,
+
     #[error("TUN device name is invalid (expect 'utun<N>')")]
     InvalidName,
+
     #[error("Failed to parse TUN interface name: {0}")]
     ParseError(#[from] std::num::ParseIntError),
+
     #[error("I/O Error: {0}")]
     IOError(#[from] std::io::Error),
+
+    #[error("Invalid prefix length (0-128)")]
+    InvalidPrefixLen,
+
+    #[error("Invalid MTU size (must be >= 1280 for IPv6)")]
+    InvalidIpv6Mtu,
+
+    #[error("Invalid MTU size (must be >= 576 for IPv4)")]
+    InvalidIpv4Mtu,
 }
 
-/// TUN device on macOS.
+/// Basic TUN device on macOS.
 pub struct Tun {
-    tun_fd: RawFd,
-    ctl_fd: RawFd,
+    tun_fd: OwnedFd,
+    ctl_fd: OwnedFd,
     name: String,
 }
 
-impl AsRawFd for Tun {
-    fn as_raw_fd(&self) -> RawFd {
-        self.tun_fd
+
+impl AsFd for Tun {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.tun_fd.as_fd()
     }
 }
 
+
 impl Tun {
-    pub fn builder() -> Builder {
-        Builder::default()
+    /// An address is required.
+    pub fn builder(tun_addr: IpAddr) -> Builder {
+        Builder::new(tun_addr)
     }
 
+    /// Create the configure the TUN device.
     pub fn create(config: &Builder) -> Result<Self, TunError> {
         let mtu = config.mtu.unwrap_or(DEFAULT_TUN_MTU);
-
+        let prefix_len = config.prefix_len.unwrap_or(ZPRNET_PREFIX_LEN);
+        if prefix_len > 128 {
+            return Err(TunError::InvalidPrefixLen);
+        }
+        if config.ipv6 && mtu < IPV6_MMTU {
+            return Err(TunError::InvalidIpv6Mtu);
+        }
+        if !config.ipv6 && mtu < IPV4_MMTU {
+            return Err(TunError::InvalidIpv4Mtu);
+        }
         // The id is one plus the number after the "utun" prefix.
         // If we pass the kernel id=0 it will assign the next available id.
         let id = if let Some(tun_name) = config.name.as_ref() {
@@ -98,6 +139,7 @@ impl Tun {
 
             // Obtain a ctl_id for utun controller
             if let Err(err) = ctliocginfo(fd, &mut info as *mut _ as *mut _) {
+                libc::close(fd);
                 return Err(std::io::Error::from(err).into());
             }
 
@@ -110,9 +152,10 @@ impl Tun {
                 sc_reserved: [0; 5],
             };
 
-            // Pretty sure this 'connect' call will create the TUN device
+            // This 'connect' call will request creation of the TUN device
             let address = &addr as *const libc::sockaddr_ctl as *const sockaddr;
             if libc::connect(fd, address, mem::size_of_val(&addr) as socklen_t) < 0 {
+                libc::close(fd);
                 return Err(std::io::Error::last_os_error().into());
             }
 
@@ -122,6 +165,7 @@ impl Tun {
             let optval = &mut tun_name as *mut _ as *mut c_void;
             let optlen = &mut name_len as *mut socklen_t;
             if libc::getsockopt(fd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, optval, optlen) < 0 {
+                libc::close(fd);
                 return Err(std::io::Error::last_os_error().into());
             }
 
@@ -129,26 +173,37 @@ impl Tun {
                 .to_string_lossy()
                 .into();
 
+            debug!("cerated TUN device with name: {}", tun_name_str);
 
-            let ctl = libc::socket(AF_INET, SOCK_DGRAM, 0);
+            let ctl_sock;
+            if config.ipv6 {
+                ctl_sock = libc::socket(AF_INET6, SOCK_DGRAM, 0);
+            } else {
+                ctl_sock = libc::socket(AF_INET, SOCK_DGRAM, 0);
+            }
+            if ctl_sock < 0 {
+                libc::close(fd);
+                return Err(std::io::Error::last_os_error().into());
+            }
 
             Tun {
-                tun_fd: fd,
-                ctl_fd: ctl,
+                tun_fd: OwnedFd::from_raw_fd(fd),
+                ctl_fd: OwnedFd::from_raw_fd(ctl_sock),
                 name: tun_name_str,
             }
         };
+        info!("TUN device created: {}", tundev.name);
 
-        if config.address.is_some() {
-            tundev.set_address(config.address.unwrap())?;
-        }
+        tundev.set_address(config.address, prefix_len)?;
         tundev.set_mtu(mtu)?;
+
+        // TODO: Set interface UP? Not required? Seems like kernel sets it to UP already.
 
         Ok(tundev)
     }
 
-    /// Prepare a new request for kernel control socket.
-    unsafe fn request(&self) -> Result<libc::ifreq, TunError> {
+    /// Prepare a new `ifreq` request for kernel control socket.  Fills in the name field.
+    unsafe fn request_v4(&self) -> Result<libc::ifreq, TunError> {
         let mut req: libc::ifreq = unsafe { mem::zeroed() };
         unsafe {
             ptr::copy_nonoverlapping(
@@ -160,18 +215,20 @@ impl Tun {
         Ok(req)
     }
 
-    fn set_address(&mut self, addr: IpAddr) -> Result<(), TunError> {
+
+    /// Set the address of the TUN device.  `prefix_len` is the prefix length for IPv6 and is ignored for IPv4.
+    fn set_address(&mut self, addr: IpAddr, prefix_len: usize) -> Result<(), TunError> {
         match addr {
             IpAddr::V4(ipv4) => self.set_address_ipv4(ipv4),
-            IpAddr::V6(ipv6) => self.set_address_ipv6(ipv6),
+            IpAddr::V6(ipv6) => self.set_address_ipv6(ipv6, prefix_len),
         }
     }
 
     fn set_address_ipv4(&mut self, value: Ipv4Addr) -> Result<(), TunError> {
         unsafe {
-            let mut req = self.request()?;
-            ipv4addr_to_sockaddr(value, 0, &mut req.ifr_ifru.ifru_addr, OVERWRITE_SIZE);
-            if let Err(err) = siocsifaddr(self.ctl_fd, &req) {
+            let mut req = self.request_v4()?;
+            ipv4addr_to_sockaddr(value, 0, &mut req.ifr_ifru.ifru_addr, OVERWRITE_SIZE_IP4);
+            if let Err(err) = siocsifaddr(self.ctl_fd.as_raw_fd(), &req) {
                 return Err(std::io::Error::from(err).into());
             }
             // TODO: Update routing?
@@ -179,11 +236,30 @@ impl Tun {
         }
     }
 
-    fn set_address_ipv6(&mut self, value: Ipv6Addr) -> Result<(), TunError> {
+    fn set_address_ipv6(&mut self, value: Ipv6Addr, prefix_len: usize) -> Result<(), TunError> {
+        let mut req: in6_aliasreq = unsafe { mem::zeroed() };
         unsafe {
-            let mut req = self.request()?;
-            ipv6addr_to_sockaddr(value, 0, &mut req.ifr_ifru.ifru_addr, OVERWRITE_SIZE);
-            if let Err(err) = siocsifaddr(self.ctl_fd, &req) {
+            ptr::copy_nonoverlapping(
+                self.name.as_ptr() as *const c_char,
+                req.ifra_name.as_mut_ptr(),
+                self.name.len(),
+            );
+
+            ipv6addr_to_sockaddr(value, 0, &mut req.ifra_addr, mem::size_of::<sockaddr_in6>());
+
+            req.ifra_prefixmask.sin6_family = AF_INET6 as libc::sa_family_t;
+            req.ifra_prefixmask.sin6_len = mem::size_of::<sockaddr_in6>() as u8;
+
+            let mut pfx_mask: u128 = 0;
+            for i in 0..prefix_len {
+                pfx_mask |= 1 << (127 - i);
+            }
+            req.ifra_prefixmask.sin6_addr.s6_addr = pfx_mask.to_be_bytes();
+
+            req.ifra_lifetime.ia6t_vltime = ND6_INFINITE_LIFETIME;
+            req.ifra_lifetime.ia6t_pltime = ND6_INFINITE_LIFETIME;
+
+            if let Err(err) = siocaifaddr_in6(self.ctl_fd.as_raw_fd(), &req) {
                 return Err(std::io::Error::from(err).into());
             }
             // TODO: Update routing?
@@ -194,9 +270,9 @@ impl Tun {
 
     fn set_mtu(&mut self, value: u16) -> Result<(), TunError> {
         unsafe {
-            let mut req = self.request()?;
+            let mut req = self.request_v4()?;
             req.ifr_ifru.ifru_mtu = value as i32;
-            if let Err(err) = siocsifmtu(self.ctl_fd, &req) {
+            if let Err(err) = siocsifmtu(self.ctl_fd.as_raw_fd(), &req) {
                 return Err(std::io::Error::from(err).into());
             }
             Ok(())
@@ -207,17 +283,28 @@ impl Tun {
 
 
 
-#[derive(Default)]
+#[derive(Debug)]
 pub struct Builder {
     name: Option<String>,
     mtu: Option<u16>,
-    address: Option<IpAddr>,
-    // flags: Option<i32>,
-    // queue_count: usize,
+    prefix_len: Option<usize>,
+    address: IpAddr, // required
+    ipv6: bool,
 }
 
 
 impl Builder {
+    /// Create a new builder, which is used to configure the TUN device.
+    pub fn new(tun_addr: IpAddr) -> Builder {
+        Builder {
+            name: None,
+            mtu: None,
+            prefix_len: None,
+            address: tun_addr,
+            ipv6: tun_addr.is_ipv6(),
+        }
+    }
+
     /// Tun name is optional. If provided must be of format "utun<N>" where N is a number.
     #[allow(dead_code)]
     pub fn with_tun_name(&mut self, name: &str) -> &mut Self {
@@ -231,11 +318,13 @@ impl Builder {
         self
     }
 
+    /// Set IPv6 prefix len (0<=prefix_len<=128)
     #[allow(dead_code)]
-    pub fn with_address(&mut self, addr: IpAddr) -> &mut Self {
-        self.address = Some(addr);
+    pub fn with_prefix_len(&mut self, prefix_len: usize) -> &mut Self {
+        self.prefix_len = Some(prefix_len);
         self
     }
+
 }
 
 
@@ -263,10 +352,13 @@ pub unsafe fn ipv4addr_to_sockaddr (
     };
 }
 
+
+/// Fill the `addr` with the address particulars. `size` is the size of the
+/// sockaddr structure to be filled (used as our upper bound for the copy).
 pub unsafe fn ipv6addr_to_sockaddr (
     src_addr: Ipv6Addr,
     src_port: u16,
-    addr: &mut libc::sockaddr,
+    addr: &mut libc::sockaddr_in6,
     size: usize,
 )
 {
