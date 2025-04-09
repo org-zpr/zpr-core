@@ -79,6 +79,23 @@ use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
 
+/// Creates a nonblocking local socket pair suitable for transferring
+/// PACKET_BUFFER_SIZE-sized messages.
+fn packet_buffer_socket_pair() -> std::io::Result<(
+    std::os::unix::net::UnixDatagram,
+    std::os::unix::net::UnixDatagram,
+)> {
+    // NOTE: ideally we'd use SOCK_SEQPACKET for reliable delivery, but it
+    // isn't supported on macOS, and Linux provides reliable delivery
+    // with SOCK_DGRAM.
+    let (a, b) = socket2::Socket::pair(socket2::Domain::UNIX, socket2::Type::DGRAM, None)?;
+    a.set_send_buffer_size(config::PACKET_BUFFER_SIZE)?;
+    b.set_send_buffer_size(config::PACKET_BUFFER_SIZE)?;
+    a.set_nonblocking(true)?;
+    b.set_nonblocking(true)?;
+    Ok((a.into(), b.into()))
+}
+
 fn main() -> ExitCode {
     let system_start_time = std::time::Instant::now();
     //
@@ -155,7 +172,7 @@ fn main() -> ExitCode {
     let topology_config = config::TopologyConfig::default();
 
     // TODO: use get/setsockopt(SO_SNDBUF) to ensure we can buffer `capture_queue_size` packets
-    let (cap_inq, cap_outq) = std::os::unix::net::UnixDatagram::pair().unwrap();
+    let (cap_inq, cap_outq) = packet_buffer_socket_pair().unwrap();
     let (md_inq_factory, md_outq) =
         two_way_queue::two_way_queue(topology_config.mgmt_dispatch_queue_size);
     let (am_inq_factory, am_outq) =
@@ -219,10 +236,9 @@ fn main() -> ExitCode {
     let mut actor_requeue_inqs = Vec::new();
     let mut actor_requeue_outqs = Vec::new();
     for _i in 0..topology_config.fastpath_concurrency {
-        let (inq, outq) = tokio::net::UnixDatagram::pair().unwrap();
-        // TODO: use get/setsockopt(SO_SNDBUF) to ensure we can transfer packets of PACKET_BUFFER_SIZE
-        actor_requeue_inqs.push(inq);
-        actor_requeue_outqs.push(outq.into_std().unwrap());
+        let (inq, outq) = packet_buffer_socket_pair().unwrap();
+        actor_requeue_inqs.push(tokio::net::UnixDatagram::from_std(inq).unwrap());
+        actor_requeue_outqs.push(outq);
     }
 
     //
@@ -254,8 +270,8 @@ fn main() -> ExitCode {
         substrate_sockets.push(socket.into());
     }
 
-    let (mgmt_substrate_inq, mgmt_substrate_outq) = tokio::net::UnixDatagram::pair().unwrap();
-    let mgmt_substrate_outq = mgmt_substrate_outq.into_std().unwrap();
+    let (mgmt_substrate_inq, mgmt_substrate_outq) = packet_buffer_socket_pair().unwrap();
+    let mgmt_substrate_inq = tokio::net::UnixDatagram::from_std(mgmt_substrate_inq).unwrap();
 
     //
     // configure packet steering for better load balancing
@@ -437,7 +453,6 @@ fn main() -> ExitCode {
         );
     }
 
-    cap_outq.set_nonblocking(true).unwrap();
     js.spawn(capture_worker::launch(
         capture_worker::Config {
             batch_size: asm.topology_config.capture_batch_size,
