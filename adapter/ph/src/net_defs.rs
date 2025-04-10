@@ -180,6 +180,21 @@ pub fn ip_ethertype(ip_version: IpVersion) -> u16 {
 
 pub type IpProtocol = u8;
 
+pub mod ip_number {
+    use super::IpProtocol;
+
+    pub const HOPOPT: IpProtocol = 0;
+    pub const ICMP: IpProtocol = 1;
+    pub const IPINIP: IpProtocol = 4;
+    pub const TCP: IpProtocol = 6;
+    pub const UDP: IpProtocol = 17;
+    pub const IPV6_ROUTE: IpProtocol = 43;
+    pub const IPV6_FRAG: IpProtocol = 44;
+    pub const AH: IpProtocol = 51;
+    pub const IPV6_ICMP: IpProtocol = 58;
+    pub const IPV6_OPTS: IpProtocol = 60;
+}
+
 /// RFC 1071 Internet Checksum.  The input data must be non-empty, and
 /// length at most ~128 KiB.
 pub fn inet_checksum(data: &[u8]) -> [u8; 2] {

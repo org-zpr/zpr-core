@@ -72,6 +72,22 @@ struct UDPHeader {
     pub checksum: [u8; 2],
 }
 
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(C)]
+struct ICMPv6Header {
+    pub icmp_type: u8,
+    pub icmp_code: u8,
+    pub checksum: [u8; 2],
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(C)]
+struct ICMPHeader {
+    pub icmp_type: u8,
+    pub icmp_code: u8,
+    pub checksum: [u8; 2],
+}
+
 pub fn get_ip_version(body: &[u8]) -> u8 {
     (body[0] & IP_VERSION_MASK) >> 4
 }
@@ -197,16 +213,16 @@ fn classify_next_header(
     // carry a payload which is "unsupported" for the IP version, e.g.
     // ICMPv4 over IPv6, or IPv6 options over IPv4
     match protocol {
-        0 => skip_v6_option(metadata, body),    // Hop-by-hop
-        1 => classify_icmp(metadata, body),     // ICMP
-        4 => classify_unclassified(metadata),   // IP in IP
-        6 => classify_tcp(metadata, body),      // TCP
-        17 => classify_udp(metadata, body),     // UDP
-        43 => skip_v6_option(metadata, body),   // Routing
-        44 => classify_frag(metadata, body),    // Fragment
-        51 => skip_auth_header(metadata, body), // AH
-        58 => classify_icmpv6(metadata, body),  // IPv6-ICMP
-        60 => skip_v6_option(metadata, body),   // Dest opts
+        ip_number::HOPOPT => skip_v6_option(metadata, body),
+        ip_number::ICMP => classify_icmp(metadata, body),
+        ip_number::IPINIP => classify_unclassified(metadata),
+        ip_number::TCP => classify_tcp(metadata, body),
+        ip_number::UDP => classify_udp(metadata, body),
+        ip_number::IPV6_ROUTE => skip_v6_option(metadata, body),
+        ip_number::IPV6_FRAG => classify_frag(metadata, body),
+        ip_number::AH => skip_auth_header(metadata, body),
+        ip_number::IPV6_ICMP => classify_icmpv6(metadata, body),
+        ip_number::IPV6_OPTS => skip_v6_option(metadata, body),
         _ => classify_unclassified(metadata),
     }
 }
@@ -275,21 +291,23 @@ fn classify_frag(
 
 fn classify_icmp(
     metadata: &mut packet::PacketMetadata,
-    _body: &[u8],
+    body: &[u8],
 ) -> Result<ClassifierResult, &'static str> {
-    // TODO: check type and code
-    metadata.set_src_port(0);
-    metadata.set_dst_port(0);
+    let icmp_bytes = &body[..size_of::<ICMPHeader>()];
+    let icmp_header = ICMPHeader::ref_from_bytes(icmp_bytes).unwrap();
+    metadata.set_src_port(icmp_header.icmp_type as u16);
+    metadata.set_dst_port(icmp_header.icmp_code as u16);
     Ok(ClassifierResult::OK)
 }
 
 fn classify_icmpv6(
     metadata: &mut packet::PacketMetadata,
-    _body: &[u8],
+    body: &[u8],
 ) -> Result<ClassifierResult, &'static str> {
-    // TODO: check type and code
-    metadata.set_src_port(0);
-    metadata.set_dst_port(0);
+    let icmp_bytes = &body[..size_of::<ICMPv6Header>()];
+    let icmp_header = ICMPv6Header::ref_from_bytes(icmp_bytes).unwrap();
+    metadata.set_src_port(icmp_header.icmp_type as u16);
+    metadata.set_dst_port(icmp_header.icmp_code as u16);
     Ok(ClassifierResult::OK)
 }
 
@@ -347,6 +365,7 @@ mod tests {
     use crate::config;
     use crate::packet::Packet;
     use bytes::BufMut;
+    use std::net::Ipv6Addr;
     use zerocopy::FromZeros;
 
     #[test]
@@ -1209,7 +1228,7 @@ mod tests {
             [0x01, 0x01, 0x01, 0x01],
             metadata.get_dst_address().read_as_v4()
         );
-        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(8u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(1u8, metadata.get_l4_protocol());
     }
@@ -1250,8 +1269,148 @@ mod tests {
             ]),
             metadata.get_dst_address()
         );
-        assert_eq!(0u16, metadata.get_src_port_hbo());
+        assert_eq!(135u16, metadata.get_src_port_hbo());
         assert_eq!(0u16, metadata.get_dst_port_hbo());
         assert_eq!(58u8, metadata.get_l4_protocol());
+    }
+
+    #[test]
+    fn test_icmpv6_extracts_type() {
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+
+        // echo request ::1 -> ::1
+        #[rustfmt::skip]
+        let packet_data = [
+            0x60, 0x08, 0x01, 0x00, 0x00, 0x10, 0x3a, 0x40,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x80, 0x00, 0x9a, 0x24, 0xdc, 0x5f, 0x00, 0x00,
+            0x67, 0xf8, 0x21, 0x32, 0x00, 0x07, 0x7f, 0xfd,
+        ];
+        packet.put_slice(&packet_data);
+
+        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+
+        let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
+
+        let localhost: Ipv6Addr = "::1".parse().unwrap();
+        assert_eq!(
+            IpAddress::new_from_std_v6(&localhost),
+            metadata.get_src_address()
+        );
+        assert_eq!(
+            IpAddress::new_from_std_v6(&localhost),
+            metadata.get_dst_address()
+        );
+        assert_eq!(128u16, metadata.get_src_port_hbo()); // type
+        assert_eq!(0u16, metadata.get_dst_port_hbo()); // code
+        assert_eq!(ip_number::IPV6_ICMP, metadata.get_l4_protocol());
+    }
+
+    #[test]
+    fn test_icmpv6_extracts_type_code() {
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+
+        // hand doctored ICMP ::1 -> ::1 (checksum not valid)
+        // TYPE 4 CODE 2
+        #[rustfmt::skip]
+        let packet_data = [
+            0x60, 0x08, 0x01, 0x00, 0x00, 0x10, 0x3a, 0x40,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x04, 0x02, 0x9a, 0x24, 0xdc, 0x5f, 0x00, 0x00,
+            0x67, 0xf8, 0x21, 0x32, 0x00, 0x07, 0x7f, 0xfd,
+        ];
+        packet.put_slice(&packet_data);
+
+        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+
+        let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
+
+        let localhost: Ipv6Addr = "::1".parse().unwrap();
+        assert_eq!(
+            IpAddress::new_from_std_v6(&localhost),
+            metadata.get_src_address()
+        );
+        assert_eq!(
+            IpAddress::new_from_std_v6(&localhost),
+            metadata.get_dst_address()
+        );
+        assert_eq!(4u16, metadata.get_src_port_hbo()); // type
+        assert_eq!(2u16, metadata.get_dst_port_hbo()); // code
+        assert_eq!(ip_number::IPV6_ICMP, metadata.get_l4_protocol());
+    }
+
+    #[test]
+    fn test_icmp_extracts_type() {
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+
+        // echo request 127.0.0.1 -> 127.0.0.1
+        #[rustfmt::skip]
+        let packet_data: &[u8] = &[
+            0x45, 0x00, 0x00, 0x54, 0x41, 0xde, 0x00, 0x00,
+            0x40, 0x01, 0x00, 0x00, 0x7f, 0x00, 0x00, 0x01,
+            0x7f, 0x00, 0x00, 0x01, 0x08, 0x00, 0x33, 0x4b,
+            0x5a, 0xdf, 0x00, 0x00, 0x67, 0xf8, 0x27, 0x98,
+            0x00, 0x0c, 0xef, 0x35, 0x08, 0x09, 0x0a, 0x0b,
+            0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13,
+            0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
+            0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23,
+            0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b,
+            0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33,
+            0x34, 0x35, 0x36, 0x37,
+        ];
+        packet.put_slice(&packet_data);
+
+        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+
+        let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
+
+        assert_eq!(8u16, metadata.get_src_port_hbo()); // type
+        assert_eq!(0u16, metadata.get_dst_port_hbo()); // code
+        assert_eq!(ip_number::ICMP, metadata.get_l4_protocol());
+    }
+
+    #[test]
+    fn test_icmp_extracts_type_code() {
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+
+        // Hand doctored ICMP packet. 127.0.0.1 -> 127.0.0.1 (checksum invalid)
+        // TYPE: 3, CODE: 11
+        #[rustfmt::skip]
+        let packet_data: &[u8] = &[
+            0x45, 0x00, 0x00, 0x54, 0x41, 0xde, 0x00, 0x00,
+            0x40, 0x01, 0x00, 0x00, 0x7f, 0x00, 0x00, 0x01,
+            0x7f, 0x00, 0x00, 0x01, 0x03, 0x0b, 0x33, 0x4b,
+            0x5a, 0xdf, 0x00, 0x00, 0x67, 0xf8, 0x27, 0x98,
+            0x00, 0x0c, 0xef, 0x35, 0x08, 0x09, 0x0a, 0x0b,
+            0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13,
+            0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
+            0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x22, 0x23,
+            0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b,
+            0x2c, 0x2d, 0x2e, 0x2f, 0x30, 0x31, 0x32, 0x33,
+            0x34, 0x35, 0x36, 0x37,
+        ];
+        packet.put_slice(&packet_data);
+
+        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+
+        let metadata = packet.metadata();
+        assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
+
+        assert_eq!(3u16, metadata.get_src_port_hbo()); // type
+        assert_eq!(11u16, metadata.get_dst_port_hbo()); // code
+        assert_eq!(ip_number::ICMP, metadata.get_l4_protocol());
     }
 }
