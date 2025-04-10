@@ -16,4 +16,7 @@ pub enum LaunchErr {
 
     #[error("file error: {0}")]
     FileError(String),
+
+    #[error("environment error: {0}")]
+    EnvironmentErr(String),
 }

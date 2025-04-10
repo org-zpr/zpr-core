@@ -65,16 +65,6 @@ impl Platform for LinuxPlatform {
         Ok(())
     }
 
-    fn is_tun_exist(&self, tun_name: &str) -> bool {
-        Command::new("ip")
-            .arg("link")
-            .arg("show")
-            .arg(tun_name)
-            .status()
-            .unwrap()
-            .success()
-    }
-
     fn create_tun(
         &self,
         tun_name: &str,

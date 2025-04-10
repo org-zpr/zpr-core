@@ -33,9 +33,6 @@ pub trait Platform {
     /// Return the default TUN interface name for this platform.
     fn get_tun_ifname(&self) -> String;
 
-    /// Check if a TUN interface with the given name exists.
-    fn is_tun_exist(&self, tun_name: &str) -> bool;
-
     /// The control directory holds the control socket for the ph.
     /// This function sets the owner and permissions on the control directory.
     fn set_control_dir_owner_and_perms(

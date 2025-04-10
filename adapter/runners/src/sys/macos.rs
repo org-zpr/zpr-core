@@ -16,14 +16,6 @@ impl Platform for MacosPlatform {
         return String::new();
     }
 
-    fn is_tun_exist(&self, tun_name: &str) -> bool {
-        Command::new("ifconfig")
-            .arg(tun_name)
-            .status()
-            .unwrap()
-            .success()
-    }
-
     fn set_control_dir_owner_and_perms(
         &self,
         ctrl_path: &std::path::PathBuf,

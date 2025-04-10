@@ -2,6 +2,8 @@ use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
+use local_ip_address::list_afinet_netifas;
+
 use crate::config::{ConfigRdr, PCErr};
 use crate::errors::LaunchErr;
 use crate::sys;
@@ -42,6 +44,10 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
         None => sys::get_platform().get_tun_ifname().to_string(),
     };
 
+    if !tun_name.is_empty() {
+        check_tun_interface_addr_matches(&tun_name, tun_addr)?;
+    }
+
     #[cfg(target_os = "macos")]
     {
         if !tun_name.is_empty() {
@@ -64,7 +70,7 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
 
     // If TUN already exists we could check to see if it has correct address etc.
     // But for now just notify.
-    if sys::get_platform().is_tun_exist(&tun_name) {
+    if tun_if_exists(&tun_name)? {
         println!(
             "TUN interface {} already exists, skipping TUN configuration",
             tun_name
@@ -141,4 +147,43 @@ pub fn configure_env(config: &Path, dry_run: bool) -> Result<(), LaunchErr> {
     }
 
     Ok(())
+}
+
+/// Check that if the interface `tun_name` exists, and it has an address, then the address
+/// (or one of its addresses) is `tun_addr`.
+fn check_tun_interface_addr_matches(tun_name: &str, tun_addr: IpAddr) -> Result<(), LaunchErr> {
+    // Get all the addresses set on the `tun_name` interface.
+    let addrs = list_afinet_netifas()
+        .or(Err(LaunchErr::EnvironmentErr(format!(
+            "unable to list addresses for interface {}",
+            tun_name
+        ))))?
+        .into_iter()
+        .filter(|(name, _)| name == tun_name)
+        .map(|(_, addr)| addr)
+        .collect::<Vec<_>>();
+    if addrs.is_empty() {
+        return Ok(());
+    }
+    for addr in addrs {
+        if addr == tun_addr {
+            return Ok(());
+        }
+    }
+    Err(LaunchErr::EnvironmentErr(format!(
+        "interface {} already has addresses set, but none match the configured address {}",
+        tun_name, tun_addr
+    )))
+}
+
+/// Return true if there is an interface with name `tun_name`.
+fn tun_if_exists(tun_name: &str) -> Result<bool, LaunchErr> {
+    let ifa = list_afinet_netifas()
+        .or(Err(LaunchErr::EnvironmentErr(
+            "unable to list interfaces".into(),
+        )))?
+        .into_iter()
+        .find(|(name, _)| name == tun_name);
+
+    Ok(ifa.is_some())
 }
