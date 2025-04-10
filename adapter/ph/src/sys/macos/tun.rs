@@ -22,15 +22,15 @@ use libc::{
 #[repr(C)]
 pub struct in6_aliasreq {
     pub ifra_name: [c_char; IFNAMSIZ],
-    pub ifra_addr: libc::sockaddr_in6,
-    pub ifra_dstaddr: libc::sockaddr_in6,
-    pub ifra_prefixmask: libc::sockaddr_in6,
+    pub ifra_addr: sockaddr_in6,
+    pub ifra_dstaddr: sockaddr_in6,
+    pub ifra_prefixmask: sockaddr_in6,
     pub ifra_flags: c_int,
     pub ifra_lifetime: libc::in6_addrlifetime,
 }
 
 // Not in libc. Copied from netinet6/nd6.h
-const ND6_INFINITE_LIFETIME: libc::c_uint = 0xffffffff;
+const ND6_INFINITE_LIFETIME: c_uint = 0xffffffff;
 const IPV6_MMTU: u16 = 1280; // Minimum MTU for IPv6
 const IPV4_MMTU: u16 = 576; // Minimum MTU for IPv4
 
@@ -76,6 +76,7 @@ pub struct Tun {
     name: String,
 }
 
+// This is the way ZPR accesses the tun device.
 impl AsFd for Tun {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.tun_fd.as_fd()
@@ -88,7 +89,7 @@ impl Tun {
         Builder::new(tun_addr)
     }
 
-    /// Create the configure the TUN device.
+    /// Create and configure the TUN device.
     pub fn create(config: &Builder) -> Result<Self, TunError> {
         let mtu = config.mtu.unwrap_or(DEFAULT_TUN_MTU);
         let prefix_len = config.prefix_len.unwrap_or(ZPRNET_PREFIX_LEN);
