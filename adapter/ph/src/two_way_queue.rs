@@ -63,11 +63,17 @@ pub enum TryRecvReturnError {
     Disconnected,
 }
 
+struct ReturnQueueHandleInner<U> {
+    outgoing_return_q: mpsc::UnboundedSender<U>,
+    notify: Notify,
+}
+
+type ReturnQueueHandle<U> = Arc<ReturnQueueHandleInner<U>>;
+
 /// The return path of a two-way queue.
 pub struct ReturnQueue<U> {
     incoming_return_q: mpsc::UnboundedReceiver<U>,
-    outgoing_return_q: mpsc::UnboundedSender<U>,
-    return_notify: Arc<Notify>,
+    handle: ReturnQueueHandle<U>,
     outstanding: Rc<UsizeCell>,
 }
 
@@ -75,10 +81,15 @@ impl<U> ReturnQueue<U> {
     /// Construct a new return queue.
     pub fn new() -> Self {
         let (outgoing_return_q, incoming_return_q) = mpsc::unbounded_channel();
+
+        let handle = ReturnQueueHandleInner {
+            outgoing_return_q,
+            notify: Notify::new().unwrap(),
+        };
+
         Self {
             incoming_return_q,
-            outgoing_return_q,
-            return_notify: Arc::new(Notify::new().unwrap()),
+            handle: Arc::new(handle),
             outstanding: Rc::new(UsizeCell::new(0)),
         }
     }
@@ -87,7 +98,7 @@ impl<U> ReturnQueue<U> {
     /// `None` if no items are immediately available (possibly because none
     /// are outstanding).
     pub fn try_recv_return(&mut self) -> Option<U> {
-        if !self.return_notify.consume() {
+        if !self.handle.notify.consume() {
             return None;
         }
 
@@ -100,7 +111,7 @@ impl<U> ReturnQueue<U> {
             if avail > 1 {
                 // It is likely that we ate the notification of these remaining items.
                 // Re-post it.  (If we didn't eat it, this is harmless.)
-                self.return_notify.post();
+                self.handle.notify.post();
             }
         }
 
@@ -111,46 +122,38 @@ impl<U> ReturnQueue<U> {
     /// returning 0 if no items are immediately available (possibly because
     /// none are outstanding).
     pub fn try_recv_many_returns(&mut self, returns: &mut Vec<U>, limit: usize) -> usize {
-        if !self.return_notify.consume() {
+        if !self.handle.notify.consume() {
             return 0;
         }
 
         let avail = self.incoming_return_q.len();
-
-        let mut recvd = 0;
-
-        while recvd < limit {
-            match self.incoming_return_q.try_recv() {
-                Ok(item) => {
-                    recvd += 1;
-                    returns.push(item);
-                }
-
-                Err(_) => break,
-            }
+        if avail == 0 {
+            return 0;
         }
+
+        // Will not block, as we know something is there to receive.
+        let recvd = self.incoming_return_q.blocking_recv_many(returns, limit);
 
         self.outstanding.fetch_sub(recvd);
 
         if recvd > avail {
             // It is likely that we ate the notification of these remaining items.
             // Re-post it.  (If we didn't eat it, this is harmless.)
-            self.return_notify.post();
+            self.handle.notify.post();
         }
 
         return recvd;
     }
 
     pub fn poll_fd(&self) -> BorrowedFd<'_> {
-        self.return_notify.poll_fd()
+        self.handle.notify.poll_fd()
     }
 }
 
 /// The producer half of a two-way queue.
 pub struct Sender<T, U> {
-    outgoing_q: mpsc::Sender<(T, mpsc::UnboundedSender<U>, Arc<Notify>)>,
-    outgoing_return_q: mpsc::UnboundedSender<U>,
-    return_notify: Arc<Notify>,
+    outgoing_q: mpsc::Sender<(T, ReturnQueueHandle<U>)>,
+    return_q_handle: ReturnQueueHandle<U>,
     outstanding: Rc<UsizeCell>,
 }
 
@@ -158,17 +161,16 @@ impl<T, U> Sender<T, U> {
     /// Try to send an item.  Note that it is possible for the queue
     /// to appear full for the reason that there are outstanding returns.
     pub fn try_send(&mut self, item: T) -> Result<(), TrySendError<T>> {
-        match self.outgoing_q.try_send((
-            item,
-            self.outgoing_return_q.clone(),
-            self.return_notify.clone(),
-        )) {
+        match self
+            .outgoing_q
+            .try_send((item, self.return_q_handle.clone()))
+        {
             Ok(()) => {
                 self.outstanding.fetch_add(1);
                 Ok(())
             }
-            Err(mpsc::error::TrySendError::Full((item, _, _))) => Err(TrySendError::Full(item)),
-            Err(mpsc::error::TrySendError::Closed((item, _, _))) => Err(TrySendError::Closed(item)),
+            Err(mpsc::error::TrySendError::Full((item, _))) => Err(TrySendError::Full(item)),
+            Err(mpsc::error::TrySendError::Closed((item, _))) => Err(TrySendError::Closed(item)),
         }
     }
 }
@@ -178,7 +180,7 @@ impl<T, U> Sender<T, U> {
 /// `ReturnQueue`.
 #[derive(Clone)]
 pub struct SenderFactory<T, U> {
-    outgoing_q: mpsc::Sender<(T, mpsc::UnboundedSender<U>, Arc<Notify>)>,
+    outgoing_q: mpsc::Sender<(T, ReturnQueueHandle<U>)>,
 }
 
 impl<T, U> SenderFactory<T, U> {
@@ -186,8 +188,7 @@ impl<T, U> SenderFactory<T, U> {
     pub fn make(&self, ret_q: &ReturnQueue<U>) -> Sender<T, U> {
         Sender {
             outgoing_q: self.outgoing_q.clone(),
-            outgoing_return_q: ret_q.outgoing_return_q.clone(),
-            return_notify: ret_q.return_notify.clone(),
+            return_q_handle: ret_q.handle.clone(),
             outstanding: ret_q.outstanding.clone(),
         }
     }
@@ -195,7 +196,7 @@ impl<T, U> SenderFactory<T, U> {
 
 /// The consumer half of a two-way queue.
 pub struct Receiver<T, U> {
-    incoming_q: mpsc::Receiver<(T, mpsc::UnboundedSender<U>, Arc<Notify>)>,
+    incoming_q: mpsc::Receiver<(T, ReturnQueueHandle<U>)>,
 }
 
 impl<T, U> Receiver<T, U>
@@ -213,11 +214,10 @@ where
     /// transformed using `TwoWayReturnable::convert()` on its way back to
     /// the producer.
     pub async fn recv(&mut self) -> Option<ItemGuard<'_, T, U>> {
-        let (item, outgoing_return_q, return_notify) = self.incoming_q.recv().await?;
+        let (item, return_q_handle) = self.incoming_q.recv().await?;
         Some(ItemGuard {
             item: ManuallyDrop::new(item),
-            outgoing_return_q,
-            return_notify,
+            return_q_handle,
             receiver: PhantomData,
         })
     }
@@ -226,8 +226,7 @@ where
 /// Guard for an item received from a two-way queue.
 pub struct ItemGuard<'a, T, U: TwoWayReturnable<T>> {
     item: ManuallyDrop<T>,
-    outgoing_return_q: mpsc::UnboundedSender<U>,
-    return_notify: Arc<Notify>,
+    return_q_handle: ReturnQueueHandle<U>,
     receiver: PhantomData<&'a Receiver<T, U>>,
 }
 
@@ -249,10 +248,11 @@ impl<T, U: TwoWayReturnable<T>> Drop for ItemGuard<'_, T, U> {
     fn drop(&mut self) {
         // SAFETY: because we are in the destructor, `take()` can never be called again
         let _ = self
+            .return_q_handle
             .outgoing_return_q
             .send(U::convert(unsafe { ManuallyDrop::take(&mut self.item) }));
 
-        self.return_notify.post();
+        self.return_q_handle.notify.post();
     }
 }
 
