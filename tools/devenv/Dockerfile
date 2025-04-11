@@ -1,8 +1,8 @@
 FROM linuxcontainers/debian-slim:12
-LABEL org.zpr.version="0.0.3"
+LABEL org.zpr.version="0.0.4"
 LABEL org.opencontainers.image.source=https://github.com/org-zpr/zpr-core
 LABEL org.opencontainers.image.description="zpr build env DEB"
-LABEL org.opencontainers.image.version="0.0.3"
+LABEL org.opencontainers.image.version="0.0.4"
 
 WORKDIR /opt
 
@@ -34,19 +34,16 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs >rustup.sh \
 
 
 # thrift
-RUN wget -nv https://dlcdn.apache.org/thrift/0.21.0/thrift-0.21.0.tar.gz \
-&& tar xf thrift-0.21.0.tar.gz \
-&& cd thrift-0.21.0 \
+RUN wget -nv https://archive.apache.org/dist/thrift/0.17.0/thrift-0.17.0.tar.gz \
+&& tar xf thrift-0.17.0.tar.gz \
+&& cd thrift-0.17.0 \
 && ./bootstrap.sh \
 && ./configure --with-go --with-rs --without-python --without-py3 --without-swift --without-php --without-kotlin --without-java --without-nodejs --without-netstd --disable-tests --disable-tutorial --disable-dependency-tracking \
 && make && make install \
 && cd /opt \
-&& rm -rf thrift-0.21.0 && rm thrift-0.21.0.tar.gz
+&& rm -rf thrift-0.17.0 && rm thrift-0.17.0.tar.gz
 
 
 
 
 ENV PATH="$PATH:/opt/go/bin:/root/.cargo/bin"
-
-
-
