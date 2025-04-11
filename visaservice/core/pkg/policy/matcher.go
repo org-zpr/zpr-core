@@ -3,6 +3,7 @@ package policy
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"zpr.org/vs/pkg/agent"
@@ -21,6 +22,8 @@ var (
 	errTCPRevSyn         = errors.New("TCP SYN from service")
 	errKeyNotClaimed     = errors.New("expression references key with no claimed value")
 )
+
+const ScratchValIdx = math.MaxUint32
 
 // matcher for matching policy rules to traffic.
 // Three contexts:
@@ -59,6 +62,9 @@ func NewMatcher(plcy *polio.Policy, netConfig uint64, log logr.Logger) (*Matcher
 	valMap := make(map[string]uint32)
 
 	for i, k := range plcy.GetAttrKeyIndex() {
+		if uint32(i) == ScratchValIdx {
+			panic("ScratchValIdx must not be used as an attribute key index")
+		}
 		keyMap[k] = uint32(i)
 	}
 	for i, v := range plcy.GetAttrValIndex() {
@@ -132,8 +138,14 @@ func (m *Matcher) matchAttrsToPolicies(authedClaims map[string]*agent.ClaimV) ([
 				m.log.Debug("[MX] -- irrelevant agent attribute value", "key", agK, "val", agV.V+fromText)
 				continue
 			}
+			if !ok {
+				// The attrValCode was not found in the map, and since we are potentially matching on a
+				// blank "has" type of expression we need to put something here but it is not a real value.
+				// The index we use must not match any valid index in the table.
+				attrValCode = ScratchValIdx
+			}
 			relevantAttrs[attrKeyCode][attrValCode] = true
-			m.log.Debug("[MX] -- relevant agent attribute", "key", agK, "val", agV.V+fromText)
+			m.log.Debug("[MX] -- relevant agent attribute", "key", agK, "val", agV.V+fromText, "keyCode", attrKeyCode, "valCode", attrValCode)
 		}
 	}
 
@@ -520,7 +532,7 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 		m.log.Debug("[MX] found dest agent provides", "provides", svcID)
 		if protIdx, match := m.trafficIdx[svcID]; match {
 			m.log.Debug("[MX]  -- found service in match table", "protocolCount", len(protIdx))
-			m.log.Debug("[MX]  -- XXX ", "wanted_proto_num", tdProtoNum, "protIdx", protIdx)
+			m.log.Debug("[MX]  -- ", "wanted_proto_num", tdProtoNum, "protIdx", protIdx)
 			if portIdx, match := protIdx[tdProtoNum]; match {
 				m.log.Debug("[MX]  -- found protocol in match table", "portCount", len(portIdx))
 				if set, merr := m.matchy(td, true, portIdx, dstAgent); len(set) > 0 { // FORWARD !
@@ -530,10 +542,10 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcAgent, dstAgent *AgentIn
 					m.log.Debug("[MX] -- -- scope match failed", "reason", merr.Error(), "dir", "FWD")
 				}
 			}
-		} else { // XXX DEBUG
-			m.log.Debugf("[MX] XXX   FAILED to find service '%v' in our traffic index.  Dumping index::", svcID)
+		} else {
+			m.log.Debugf("[MX]       FAILED to find service '%v' in our traffic index.  Dumping index::", svcID)
 			for svcID, protIdx := range m.trafficIdx {
-				m.log.Debug("[MX] XXX     index level 1", "svcID", svcID, "->protocol+", protIdx)
+				m.log.Debug("[MX]         index level 1", "svcID", svcID, "->protocol+", protIdx)
 			}
 
 		}

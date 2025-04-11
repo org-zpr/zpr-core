@@ -2,6 +2,7 @@ package policy_test
 
 import (
 	"net/netip"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -1221,4 +1222,87 @@ communications:
 	require.Len(t, attrs, 1)
 	require.Contains(t, attrs, "zpr.adapter.cn")
 	require.Contains(t, state.Services, "/zpr/testnet/webserver")
+}
+
+func TestConnectUsingHasForAccess(t *testing.T) {
+	pyml := mtpreamble + network + `
+communications:
+  systems:
+    testnet:
+      desc: testnet
+      components:
+        webserver:
+          desc: webserver
+          services: [http]
+          provider:
+            - [zpr.adapter.cn, eq, "web.zpr"]
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [zpr.adapter.cn, has, ""]
+        rfcserver:
+          desc: rfcserver
+          services: [http]
+          provider:
+            - [zpr.adapter.cn, eq, "rfc.zpr"]
+          policies:
+            - desc: access
+              conditions:
+                - desc: all access
+                  attrs:
+                    - [zpr.adapter.cn, has, ""]
+`
+
+	fs, err := fs.NewMemoryFileStore()
+	require.Nil(t, err)
+	fs.AddFile("root.yaml", []byte(pyml))
+	opts := compiler.CompileOpts{
+		Revision: "t07",
+		Verbose:  true,
+	}
+	p, err := compiler.Compile("root.yaml", fs, &opts)
+	require.Nil(t, err)
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	// Now connect a client
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	claims := mkClaims("zpr.addr", "fc00:3001::1", time.Hour)
+	claims["zpr.adapter.cn"] = mkClaim("foo", time.Hour)
+	client.SetAuthenticated(claims, time.Time{}, nil, nil, 1)
+
+	state, err := policy.NewConnectState(client, nil, netip.Addr{}, logr.NewTestLogger())
+	require.Nil(t, err)
+	attrs, err := m.MatchConnect(state)
+	require.Nil(t, err)
+	require.Len(t, attrs, 1)
+	require.Contains(t, attrs, "zpr.adapter.cn")
+	require.Empty(t, state.Services)
+}
+
+// See https://github.com/org-zpr/zpr-core/issues/746
+func TestAgentConnectUsingM3Policy(t *testing.T) {
+	pfile := filepath.Join("testdata", "oci-m3-full-access.bin")
+	cp, err := polio.OpenContainedPolicyFile(pfile, nil)
+	require.Nil(t, err)
+	p := cp.Policy
+
+	m, err := policy.NewMatcher(p, 1, logr.NewTestLogger())
+	require.Nil(t, err)
+
+	// Now connect a client
+	client := agent.NewAgentFromUnsubstantiatedClaims(nil)
+	claims := mkClaims("zpr.addr", "fd5a:5052:2::101", time.Hour)
+	claims["zpr.adapter.cn"] = mkClaim("mathias.zpr.org", time.Hour)
+	client.SetAuthenticated(claims, time.Time{}, nil, nil, 1)
+
+	state, err := policy.NewConnectState(client, nil, netip.Addr{}, logr.NewTestLogger())
+	require.Nil(t, err)
+	attrs, err := m.MatchConnect(state)
+	require.Nil(t, err)
+	require.Len(t, attrs, 1)
+	require.Empty(t, state.Services)
 }
