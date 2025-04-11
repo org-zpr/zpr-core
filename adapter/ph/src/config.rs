@@ -441,8 +441,8 @@ pub struct TopologyConfig {
     pub fastpath_batch_size: usize,
     pub capture_batch_size: usize,
 
-    #[allow(dead_code)] // see TODO in main
     pub capture_queue_size: usize,
+    pub mgmt_datapath_queue_size: usize,
     pub mgmt_dispatch_queue_size: usize,
     pub adapter_manager_queue_size: usize,
     pub km_signal_queue_size: usize,
@@ -464,6 +464,7 @@ impl Default for TopologyConfig {
             capture_batch_size: DEFAULT_BATCH_SIZE,
 
             capture_queue_size: DEFAULT_DATAPATH_QUEUE_SIZE,
+            mgmt_datapath_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
             mgmt_dispatch_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
             adapter_manager_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
             km_signal_queue_size: DEFAULT_MGMT_QUEUE_SIZE,
