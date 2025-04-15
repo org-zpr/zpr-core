@@ -1,0 +1,12 @@
+[package]
+name = "bas"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5.36", features = ["derive"] }
+openssl = "0.10.72"
+serde = { version = "1.0.219", features = ["derive"] }
+thiserror = "2.0.12"
+toml = "0.8.20"
+ 

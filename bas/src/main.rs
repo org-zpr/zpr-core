@@ -1,0 +1,138 @@
+mod fsdb;
+
+use std::path::Path;
+use clap::{Parser, Subcommand, Args};
+
+use fsdb::FsDb;
+
+const DEFAULT_DB_PATH: &str = "./db";
+
+
+
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<CliCommand>,
+}
+
+#[derive(Subcommand)]
+enum CliCommand {
+    /// Create a new actor record.
+    Create(CreateArgs),
+
+    /// Delete an existing actor record.
+    Delete(DeleteArgs),
+
+    /// Display the public key of an actor in PEM format.
+    Pubkey(PubKeyArgs),
+
+    /// List the database contents.
+    List(ListArgs),
+
+    /// Add attributes to an actor.
+    AddAttribute(AddAttributeArgs),
+
+    /// Start the authentication server.
+    Serve
+}
+
+#[derive(Args)]
+struct CreateArgs {
+    /// CN for the new actor
+    cn: String,
+}
+
+#[derive(Args)]
+struct DeleteArgs {
+    /// CN of the actor to delete
+    cn: String,
+}
+
+#[derive(Args)]
+struct PubKeyArgs {
+    /// CN of the actor whose public key to retrieve
+    cn: String,
+}
+
+#[derive(Args)]
+struct ListArgs {
+
+    /// Also list any attributes
+    #[arg(long, short)]
+    attrs: bool,
+
+    /// Only list actors matching this CN pattern
+    cn: Option<String>,
+}
+
+#[derive(Args)]
+struct AddAttributeArgs {
+    /// CN of the actor to add attributes to
+    cn: String,
+    /// Attributes to add for is 'name:value', 'name:value1,value2' or just 'name' for a tag.
+    attrs: Vec<String>
+}
+
+
+fn main() {
+    let cli = Cli::parse();
+    match cli.command {
+        Some(CliCommand::Create(args)) => {
+            let db = init_db(Path::new(DEFAULT_DB_PATH));
+            let created = db.create_actor(&args.cn).unwrap_or_else(|e| {
+                eprintln!("Error creating actor: {}", e);
+                std::process::exit(1);
+            });
+            println!("created: {}", created);
+        }
+        Some(CliCommand::Delete(args)) => {
+            let db = init_db(Path::new(DEFAULT_DB_PATH));
+            let deleted = db.delete_actor(&args.cn).unwrap_or_else(|e| {
+                eprintln!("Error deleting actor: {}", e);
+                std::process::exit(1);
+            });
+            println!("deleted: {}", deleted);
+        }
+        Some(CliCommand::Pubkey(args)) => {
+            let db = init_db(Path::new(DEFAULT_DB_PATH));
+            println!("{}", db.get_pub_key(&args.cn).unwrap_or_else(|e| {
+                eprintln!("Error retrieving public key: {}", e);
+                std::process::exit(1);
+            }));
+        }
+        Some(CliCommand::List(args)) => {
+            let db = init_db(Path::new(DEFAULT_DB_PATH));
+            db.print(&args.cn, args.attrs).unwrap_or_else(|e| {
+                eprintln!("error listing database {}", e);
+                std::process::exit(1);
+            });
+        }
+        Some(CliCommand::AddAttribute(args)) => {
+            let db = init_db(Path::new(DEFAULT_DB_PATH));
+            let cn = db.add_attributes(&args.cn, &args.attrs).unwrap_or_else(|e| {
+                eprintln!("Error adding attributes: {}", e);
+                std::process::exit(1);
+            });
+            println!("added attributes to: {}", cn);
+        }
+        Some(CliCommand::Serve) => {
+            println!("Starting server...");
+            // Here you would call the function to start the server
+            // start_server();
+        }
+        None => {
+            println!("No command provided. Use --help for more information.");
+        }
+    }
+}
+
+fn init_db(root: &Path) -> FsDb {
+    match FsDb::new(root) {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("Error initializing database: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
