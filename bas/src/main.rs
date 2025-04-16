@@ -1,9 +1,12 @@
 mod fsdb;
+mod server;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand, Args};
+use tracing_subscriber;
 
 use fsdb::FsDb;
+use server::start_server;
 
 const DEFAULT_DB_PATH: &str = "./db";
 
@@ -34,7 +37,7 @@ enum CliCommand {
     AddAttribute(AddAttributeArgs),
 
     /// Start the authentication server.
-    Serve
+    Serve(ServeArgs),
 }
 
 #[derive(Args)]
@@ -72,6 +75,17 @@ struct AddAttributeArgs {
     cn: String,
     /// Attributes to add for is 'name:value', 'name:value1,value2' or just 'name' for a tag.
     attrs: Vec<String>
+}
+
+#[derive(Args)]
+struct ServeArgs {
+    /// Path to the TLS key file
+    #[arg(long, short)]
+    key: PathBuf,
+
+    /// Path to the TLS certificate file
+    #[arg(long, short)]
+    cert: PathBuf,
 }
 
 
@@ -116,16 +130,19 @@ fn main() {
             });
             println!("added attributes to: {}", cn);
         }
-        Some(CliCommand::Serve) => {
-            println!("Starting server...");
-            // Here you would call the function to start the server
-            // start_server();
+        Some(CliCommand::Serve(args)) => {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            tracing_subscriber::fmt::init();
+            rt.block_on(async {
+                start_server(&args.key, &args.cert).await;
+            });
         }
         None => {
             println!("No command provided. Use --help for more information.");
         }
     }
 }
+
 
 fn init_db(root: &Path) -> FsDb {
     match FsDb::new(root) {
