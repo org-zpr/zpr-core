@@ -301,14 +301,63 @@ impl Packet {
         pkt
     }
 
+    fn metadata_is_valid(&self) -> bool {
+        let md = self.metadata();
+        md.offset >= Self::MIN_BODY_OFFSET && md.len <= self.buf.len()
+            || md.offset <= self.buf.len() - md.len
+    }
+
     /// Initialize a buffer with existing packet data and metadata as a packet buffer.
-    pub fn new_with_existing_metadata(buf: PacketBuffer) -> Self {
+    /// Returns an error if packet body metadata is invalid.
+    pub fn try_new_with_existing_metadata(buf: PacketBuffer) -> Result<Self, PacketBuffer> {
         let pkt = Packet { buf };
-        let md = pkt.metadata();
-        assert!(md.offset >= Self::MIN_BODY_OFFSET);
-        assert!(md.len <= pkt.buf.len());
-        assert!(md.offset <= pkt.buf.len() - md.len);
-        pkt
+        if !pkt.metadata_is_valid() {
+            return Err(pkt.destroy());
+        }
+        Ok(pkt)
+    }
+
+    /// Initialize a buffer with existing packet data and metadata as a packet buffer.
+    /// Panics if packet body metadata is invalid.
+    pub fn new_with_existing_metadata(buf: PacketBuffer) -> Self {
+        Self::try_new_with_existing_metadata(buf).unwrap()
+    }
+
+    /// Copy the backing buffer's data to a destination buffer in a compact form.
+    /// (Specifically, only the metadata and packet body are copied.)
+    pub fn serialize(&self, mut buf: impl buf::BufMut) -> Result<(), ()> {
+        if size_of::<PacketMetadata>() + self.metadata().len > buf.remaining_mut() {
+            return Err(());
+        }
+
+        buf.put(self.metadata().as_bytes());
+        buf.put(self.body());
+
+        Ok(())
+    }
+
+    /// Reconstitute a packet from its serialized form.
+    /// The reconstituted packet will have the same amount of headroom and tailroom
+    /// as the original packet, so long as the given packet buffer is of the same size.
+    /// If the given packet buffer cannot hold the deserialized packet, we return an error.
+    pub fn deserialize_into(
+        mut src: impl buf::Buf,
+        mut buf: PacketBuffer,
+    ) -> Result<Packet, PacketBuffer> {
+        if src.remaining() < size_of::<PacketMetadata>() {
+            return Err(buf);
+        }
+
+        src.copy_to_slice(&mut buf[..size_of::<PacketMetadata>()]);
+        let mut pkt = Self::try_new_with_existing_metadata(buf)?;
+
+        if src.remaining() < pkt.metadata().len {
+            return Err(pkt.destroy());
+        }
+
+        src.copy_to_slice(pkt.body_mut());
+
+        Ok(pkt)
     }
 
     /// Copy this packet's metadata, data and layout into a new buffer, returning a handle for it.
@@ -370,6 +419,11 @@ impl Packet {
         let offset = self.metadata().offset;
         let len = self.metadata().len;
         &self.buf[offset..offset + len]
+    }
+
+    /// Length of packet body.
+    pub fn len(&self) -> usize {
+        self.metadata().len
     }
 
     /// Returns a mutable reference to the packet body.
@@ -475,7 +529,7 @@ impl buf::Buf for Packet {
 
     /// This is simply the packet size.
     fn remaining(&self) -> usize {
-        self.metadata().len
+        self.len()
     }
 
     /// Provides a reference to a portion of the remaining packet.
@@ -634,6 +688,25 @@ mod tests {
         pkt.metadata_mut().ingress_stream_id = 100;
         let buf2 = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
         let pkt2 = pkt.clone_into_with_headroom(buf2, 456);
+        assert_eq!(
+            pkt.metadata().ingress_stream_id,
+            pkt2.metadata().ingress_stream_id
+        );
+        assert_eq!(*pkt.body(), *pkt2.body());
+    }
+
+    #[test]
+    fn serialize_deserialize_test() {
+        let mut buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let offset = Packet::MIN_BODY_OFFSET + 123;
+        let data = [1, 2, 3, 4, 5, 6, 7, 8].as_slice();
+        buf[offset..offset + 8].copy_from_slice(data);
+        let mut pkt = Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET + 123, 8);
+        pkt.metadata_mut().ingress_stream_id = 100;
+        let mut buf_temp = [0u8; config::PACKET_BUFFER_SIZE];
+        pkt.serialize(buf_temp.as_mut_slice()).unwrap();
+        let buf2 = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let pkt2 = Packet::deserialize_into(buf_temp.as_slice(), buf2).unwrap();
         assert_eq!(
             pkt.metadata().ingress_stream_id,
             pkt2.metadata().ingress_stream_id
