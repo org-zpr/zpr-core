@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 axum = "0.8.3"
+base64 = "0.22.1"
 clap = { version = "4.5.36", features = ["derive"] }
 futures-util = "0.3.31"
 hyper = "1.6.0"
