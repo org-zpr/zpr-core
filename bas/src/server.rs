@@ -52,7 +52,7 @@ pub struct AdapterAuthentication {
     pub payload: String, // base64 encoded signature payload created by adapter
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AccessTokenResponse {
     pub access_token: Option<String>,
     pub token_type: Option<String>, // "bearer"
@@ -142,8 +142,9 @@ fn native_tls_acceptor(key_file: &Path, cert_file: &Path) -> NativeTlsAcceptor {
         .unwrap()
 }
 
-async fn start_adapter_server(acceptor: NativeTlsAcceptor, port: u16, state: SharedState) {
-    let app = Router::new()
+// Create router for the adapter services. Broken out to ease unit testing.
+fn adapter_app(state: SharedState) -> Router {
+    Router::new()
         .route(
             "/preauthorize",
             get(authrequest_adapter).with_state(state.clone()),
@@ -151,16 +152,21 @@ async fn start_adapter_server(acceptor: NativeTlsAcceptor, port: u16, state: Sha
         .route(
             "/authorize",
             post(authenticate_adapter).with_state(state.clone()),
-        );
+        )
+}
 
-    start_tls_server("adapter services", app, acceptor, port).await;
+async fn start_adapter_server(acceptor: NativeTlsAcceptor, port: u16, state: SharedState) {
+    start_tls_server("adapter services", adapter_app(state), acceptor, port).await;
+}
+
+// Create router for the visa-service services. Broken out to ease unit testing.
+fn vs_app(state: SharedState) -> Router {
+    Router::new().route("/token", post(tokenrequest_vs).with_state(state.clone()))
+    // TODO: /refresh
 }
 
 async fn start_vs_server(acceptor: NativeTlsAcceptor, port: u16, state: SharedState) {
-    let app = Router::new().route("/token", post(tokenrequest_vs).with_state(state.clone()));
-    // TODO: /refresh
-
-    start_tls_server("visa service services", app, acceptor, port).await;
+    start_tls_server("visa service services", vs_app(state), acceptor, port).await;
 }
 
 // The scaffolding code here is liberally borrowed from the auxm example:
@@ -201,7 +207,7 @@ async fn start_tls_server(desc: &str, app: Router, acceptor: NativeTlsAcceptor, 
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[allow(dead_code)]
 struct TokenRequestInput {
     grant_type: String,
@@ -456,4 +462,273 @@ fn create_authorization_code() -> u128 {
     let mut buf = [0; 16];
     rand_bytes(&mut buf).unwrap();
     u128::from_be_bytes(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::token::claims_for;
+    use http_body_util::BodyExt; // for `collect`
+    use serde_json::{Value, json};
+    use tempfile;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn test_authrequest_adapter_no_client() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let dbpath = tempdir.path().join("db");
+        let shared_state = Arc::new(RwLock::new(AppState::new(FsDb::new(&dbpath).unwrap())));
+
+        let app = adapter_app(shared_state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/preauthorize?response_type=code&client_id=foo.bar")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Will fail since CN not in DB
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_authrequest_adapter_creates_nonce() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let dbpath = tempdir.path().join("db");
+        let shared_state = Arc::new(RwLock::new(AppState::new(FsDb::new(&dbpath).unwrap())));
+
+        let key = CnKey::from_str("foo.bar").unwrap();
+        let db = FsDb::new(&dbpath).unwrap();
+        db.create_actor(&key).unwrap();
+        let attrs = vec![String::from("color:red")];
+        db.add_attributes(&key, &attrs).unwrap();
+
+        let app = adapter_app(shared_state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/preauthorize?response_type=code&client_id=foo.bar")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        let nonce = body["nonce"].as_str().unwrap();
+        assert!(!nonce.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_authenticate_adapter_bad_nonce() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let dbpath = tempdir.path().join("db");
+        let shared_state = Arc::new(RwLock::new(AppState::new(FsDb::new(&dbpath).unwrap())));
+
+        let key = CnKey::from_str("foo.bar").unwrap();
+        let db = FsDb::new(&dbpath).unwrap();
+        db.create_actor(&key).unwrap();
+        let attrs = vec![String::from("color:red")];
+        db.add_attributes(&key, &attrs).unwrap();
+
+        let app = adapter_app(shared_state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/authorize")
+                    .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                    .body(Body::from(
+                        serde_json::to_vec(&json!({
+                            "client_id": "foo.bar",
+                            "nonce": "bad_nonce",
+                            "payload": "payload"
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FOUND);
+
+        response
+            .headers()
+            .get("Location")
+            .map(|h| h.to_str().unwrap())
+            .map(|l| assert!(l.contains("error=invalid_request")))
+            .unwrap_or_else(|| panic!("no location header"));
+    }
+
+    #[tokio::test]
+    async fn test_tokenrequest_vs_bad_code() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let dbpath = tempdir.path().join("db");
+        let shared_state = Arc::new(RwLock::new(AppState::new(FsDb::new(&dbpath).unwrap())));
+
+        let key = CnKey::from_str("foo.bar").unwrap();
+        let db = FsDb::new(&dbpath).unwrap();
+        db.create_actor(&key).unwrap();
+        let attrs = vec![String::from("color:red")];
+        db.add_attributes(&key, &attrs).unwrap();
+
+        let app = vs_app(shared_state.clone());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/token")
+                    .header(
+                        http::header::CONTENT_TYPE,
+                        mime::APPLICATION_WWW_FORM_URLENCODED.as_ref(),
+                    )
+                    .body(Body::from(
+                        serde_urlencoded::to_string(&TokenRequestInput {
+                            grant_type: "authorization_code".to_string(),
+                            code: "bad_code".to_string(),
+                            client_id: "foo.bar".to_string(),
+                            redirect_url: "https://auth.zpr".to_string(),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_full_auth_path() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let dbpath = tempdir.path().join("db");
+        let shared_state = Arc::new(RwLock::new(AppState::new(FsDb::new(&dbpath).unwrap())));
+
+        let key = CnKey::from_str("foo.bar").unwrap();
+        let db = FsDb::new(&dbpath).unwrap();
+        db.create_actor(&key).unwrap();
+        let attrs = vec![String::from("color:red")];
+        db.add_attributes(&key, &attrs).unwrap();
+
+        // ======= call preauthorize to generate a nonce
+        let nonce: String;
+        {
+            let app = adapter_app(shared_state.clone());
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/preauthorize?response_type=code&client_id=foo.bar")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+
+            let body: Value = serde_json::from_slice(&body).unwrap();
+            nonce = String::from(body["nonce"].as_str().unwrap());
+            assert!(!nonce.is_empty());
+        }
+
+        // ======= call authorize with the nonce to get an access code
+        let mut code: Option<String> = None;
+        {
+            let app = adapter_app(shared_state.clone());
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method(http::Method::POST)
+                        .uri("/authorize")
+                        .header(http::header::CONTENT_TYPE, mime::APPLICATION_JSON.as_ref())
+                        .body(Body::from(
+                            serde_json::to_vec(&json!({
+                                "client_id": "foo.bar",
+                                "nonce": nonce.clone(),
+                                "payload": "payload"
+                            }))
+                            .unwrap(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::FOUND);
+
+            // Now grab the code value from the location header
+            response
+                .headers()
+                .get("Location")
+                .map(|h| h.to_str().unwrap())
+                .map(|l| {
+                    assert!(l.contains("code="));
+                    let cs = l.split("code=").nth(1).unwrap();
+                    assert!(!cs.is_empty());
+                    code = Some(cs.to_string());
+                });
+        }
+        assert!(code.is_some());
+
+        // ======= call token to get the access token
+        {
+            let app = vs_app(shared_state.clone());
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method(http::Method::POST)
+                        .uri("/token")
+                        .header(
+                            http::header::CONTENT_TYPE,
+                            mime::APPLICATION_WWW_FORM_URLENCODED.as_ref(),
+                        )
+                        .body(Body::from(
+                            serde_urlencoded::to_string(&TokenRequestInput {
+                                grant_type: "authorization_code".to_string(),
+                                code: code.unwrap(),
+                                client_id: "foo.bar".to_string(),
+                                redirect_url: "https://auth.zpr".to_string(),
+                            })
+                            .unwrap(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let resp: AccessTokenResponse = serde_json::from_slice(&body).unwrap();
+
+            assert!(resp.access_token.is_some());
+            assert_eq!(resp.token_type, Some("bearer".to_string()));
+            assert_eq!(resp.expires_in, Some(JWT_LIFETIME_SECONDS));
+            assert!(resp.refresh_token.is_none());
+            assert!(resp.error.is_none());
+
+            // Now decode the JWT and check the attributes.
+            let tok = resp.access_token.unwrap();
+            let claims = claims_for(&tok).unwrap();
+            assert_eq!(claims["aud"], "zpr");
+            assert_eq!(claims["sub"], "foo.bar");
+            assert_eq!(claims["iss"], "zpr/bas");
+            assert_eq!(claims["z/color"], "red");
+        }
+    }
 }
