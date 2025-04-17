@@ -4,6 +4,14 @@ Provides a ZPR authentication service that uses RSA keypairs to confirm
 actor identity.  Can be configured to return atbitrary attributes along
 with an identity token.
 
+This creates a simple file based database on disk.
+
+To run the server you need to create a certificate for TLS.  Eg,
+
+```bash
+openssl req -new -newkey rsa:4096 -x509 -sha256 -days 365 -nodes -out tlscert.crt -keyout tlskey.key
+```
+
 
 ## Demonstration Usage
 
