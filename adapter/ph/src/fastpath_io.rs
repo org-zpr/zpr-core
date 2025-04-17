@@ -179,44 +179,18 @@ impl FastpathIo {
 
     /// Process an input-ready notification on the requeue socket.
     pub fn process_requeue_in(&mut self, worker: &mut FastpathWorker) {
-        while let Some(buf) = worker.buffers.pop() {
-            match self.requeue_outq.try_recv(buf) {
-                Ok(pkt) => {
-                    worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
-                    worker.actor_output_post_classify(pkt, /* allow_bind_request */ false);
-                }
-
-                Err(packet_queue::TryRecvError::Empty(buf)) => {
-                    worker.buffers.push(buf);
-                    break;
-                }
-
-                Err(err) => {
-                    panic!("unrecoverable I/O error {err:?}");
-                }
-            }
-        }
+        batch_process_packet_queue(worker, &mut self.requeue_outq, |worker, pkt| {
+            worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
+            worker.actor_output_post_classify(pkt, /* allow_bind_request */ false);
+        });
     }
 
     /// Process an input-ready notification on the mgmt substrate socket.
     pub fn process_mgmt_substrate_in(&mut self, worker: &mut FastpathWorker) {
-        while let Some(buf) = worker.buffers.pop() {
-            match self.mgmt_substrate_outq.try_recv(buf) {
-                Ok(pkt) => {
-                    worker.asm.counters[CounterType::MgmtPacketsSent].increment();
-                    worker.substrate_egress(pkt);
-                }
-
-                Err(packet_queue::TryRecvError::Empty(buf)) => {
-                    worker.buffers.push(buf);
-                    break;
-                }
-
-                Err(err) => {
-                    panic!("unrecoverable I/O error {err:?}");
-                }
-            }
-        }
+        batch_process_packet_queue(worker, &mut self.mgmt_substrate_outq, |worker, pkt| {
+            worker.asm.counters[CounterType::MgmtPacketsSent].increment();
+            worker.substrate_egress(pkt);
+        });
     }
 
     /// Egress any queued packets, or drop if there is no space in the system queues.
@@ -347,5 +321,28 @@ fn clear_flowinfo(addr: &mut SocketAddr) {
     match addr {
         SocketAddr::V4(_) => (),
         SocketAddr::V6(addr) => addr.set_flowinfo(0),
+    }
+}
+
+fn batch_process_packet_queue(
+    worker: &mut FastpathWorker,
+    queue: &mut packet_queue::Receiver<{ config::PACKET_BUFFER_SIZE }>,
+    mut process_fn: impl FnMut(&mut FastpathWorker, Packet),
+) {
+    while let Some(buf) = worker.buffers.pop() {
+        match queue.try_recv(buf) {
+            Ok(pkt) => {
+                process_fn(worker, pkt);
+            }
+
+            Err(packet_queue::TryRecvError::Empty(buf)) => {
+                worker.buffers.push(buf);
+                break;
+            }
+
+            Err(err) => {
+                panic!("unrecoverable I/O error {err:?}");
+            }
+        }
     }
 }
