@@ -6,6 +6,7 @@ use crate::packet_queue;
 use crate::test_packet::*;
 use crate::two_way_queue;
 use bytes::Buf;
+use libc;
 use std::io::ErrorKind;
 use std::os::unix::net::UnixDatagram;
 use std::result::Result;
@@ -194,7 +195,10 @@ impl Capture {
                 ErrorKind::ConnectionRefused | ErrorKind::BrokenPipe => {
                     panic!("capture channel closed")
                 }
-                _ => panic!("unrecoverable I/O error: {}", err),
+                _ => match err.raw_os_error() {
+                    Some(libc::ENOBUFS) => Err(TryEnqueueError::Full(())),
+                    _ => panic!("unrecoverable I/O error: {}", err),
+                },
             },
         }
     }
