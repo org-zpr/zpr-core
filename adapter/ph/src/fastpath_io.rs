@@ -329,7 +329,16 @@ fn batch_process_packet_queue(
     queue: &mut packet_queue::Receiver<{ config::PACKET_BUFFER_SIZE }>,
     mut process_fn: impl FnMut(&mut FastpathWorker, Packet),
 ) {
-    while let Some(buf) = worker.buffers.pop() {
+    // Do not receive more than is currently in the queue;
+    // avoids racing with a fast sender and getting stuck here
+    // indefinitely.
+    let limit = queue.len();
+
+    for _i in 0..limit {
+        let Some(buf) = worker.buffers.pop() else {
+            break;
+        };
+
         match queue.try_recv(buf) {
             Ok(pkt) => {
                 process_fn(worker, pkt);
