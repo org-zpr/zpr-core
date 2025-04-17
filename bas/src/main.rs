@@ -1,5 +1,6 @@
 mod fsdb;
 mod server;
+mod token;
 
 use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand, Args};
@@ -65,6 +66,10 @@ struct ListArgs {
     #[arg(long, short)]
     attrs: bool,
 
+    /// Include tokens too
+    #[arg(long, short)]
+    tokens: bool,
+
     /// Only list actors matching this CN pattern
     cn: Option<String>,
 }
@@ -117,7 +122,7 @@ fn main() {
         }
         Some(CliCommand::List(args)) => {
             let db = init_db(Path::new(DEFAULT_DB_PATH));
-            db.print(&args.cn, args.attrs).unwrap_or_else(|e| {
+            db.print(&args.cn, args.attrs, args.tokens).unwrap_or_else(|e| {
                 eprintln!("error listing database {}", e);
                 std::process::exit(1);
             });
@@ -134,7 +139,7 @@ fn main() {
             let rt = tokio::runtime::Runtime::new().unwrap();
             tracing_subscriber::fmt::init();
             rt.block_on(async {
-                start_server(&args.key, &args.cert).await;
+                start_server(&args.key, &args.cert, init_db(Path::new(DEFAULT_DB_PATH))).await;
             });
         }
         None => {

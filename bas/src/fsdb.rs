@@ -5,6 +5,8 @@ use openssl::rsa::Rsa;
 use serde::{Deserialize, Serialize};
 use toml::Table;
 
+use crate::token::claims_for;
+
 const KEY_SIZE: u32 = 2048;
 
 
@@ -30,9 +32,11 @@ pub enum FsDbError {
 }
 
 
+#[derive(Debug, Clone, Default)]
 pub struct FsDb {
     root: PathBuf,
 }
+
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Metadata {
@@ -51,7 +55,7 @@ impl FsDb {
         Ok(FsDb { root: root.to_path_buf() })
     }
 
-    pub fn print(&self, pat: &Option<String>, attrs: bool) -> Result<(), FsDbError> {
+    pub fn print(&self, pat: &Option<String>, attrs: bool, tokens: bool) -> Result<(), FsDbError> {
         let entries = std::fs::read_dir(&self.root)?;
         for entry in entries {
             let entry = entry?;
@@ -64,12 +68,41 @@ impl FsDb {
                 if pat.is_none() || cn.contains(pat.as_ref().unwrap()) {
                     println!("{}", &cn[3..]); // Skip the "cn." prefix
                     if attrs {
-                        self.print_attributes(&cn[3..])?;
+                        let attributes = self.get_attributes(&cn[3..])?;
+                        for tuple in &attributes {
+                            if tuple.1.is_empty() {
+                                println!("   #{}", tuple.0);
+                            } else {
+                                println!("   {}:{}", tuple.0, tuple.1);
+                            }
+                        }
+                    }
+                    if tokens {
+                        let tokens = self.list_tokens(&cn[3..])?;
+                        for tuple in &tokens {
+                            println!("   token.{}:", tuple.0);
+                            match claims_for(&tuple.1) {
+                                Ok(claims) => {
+                                    for (k, v) in claims.iter() {
+                                        println!("      {}: {}", k, v);
+                                    }
+                                }
+                                Err(e) => {
+                                    println!("      Error parsing token: {}", e);
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
         Ok(())
+    }
+
+    pub fn actor_exists(&self, cn: &str) -> bool {
+        let cn = clean_cn(cn);
+        let actor_path = self.root.join(format!("cn.{cn}"));
+        actor_path.exists()
     }
 
     pub fn create_actor(&self, cn: &str) -> Result<String, FsDbError> {
@@ -113,6 +146,63 @@ impl FsDb {
         let public_key_data = std::fs::read(public_key_path)?;
         let public_key = String::from_utf8(public_key_data)?;
         Ok(public_key)
+    }
+
+    /// Add a token to the actors directory. Note this is MUT to avoid adding these
+    /// in multiple threads at the same time (since we count the number of tokens
+    /// already in the directory to come up with the file name).
+    pub fn add_token(&mut self , cn: &str, token: &str) -> Result<(), FsDbError> {
+        let cn = clean_cn(cn);
+        let actor_path = self.root.join(format!("cn.{cn}"));
+        if !actor_path.exists() {
+            return Err(FsDbError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("actor {} not found", cn),
+            )));
+        }
+
+        // Count the files that start with "token."
+        let token_count = std::fs::read_dir(&actor_path)?
+            .into_iter()
+            .filter(|entry| {
+                let de = entry.as_ref().unwrap();
+                let path = de.path();
+                path.is_file() && path.file_name().unwrap().to_str().unwrap().starts_with("token.")
+            })
+            .count();
+
+        let token_path = actor_path.join(format!("token.{token_count}"));
+        std::fs::write(token_path, token)?;
+        Ok(())
+    }
+
+
+    /// The result list is of (token_id, encoded_toke) pairs.
+    pub fn list_tokens(&self, cn: &str) -> Result<Vec<(String, String)>, FsDbError> {
+        let cn = clean_cn(cn);
+        let actor_path = self.root.join(format!("cn.{cn}"));
+        if !actor_path.exists() {
+            return Err(FsDbError::IoError(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("actor {} not found", cn),
+            )));
+        }
+        let mut tokens = Vec::new();
+        for entry in std::fs::read_dir(&actor_path)? {
+            let entry = entry?;
+            let path = &entry.path();
+            if path.is_file() {
+                let fname = path.file_name().unwrap().to_str().unwrap();
+                if fname.starts_with("token.") {
+                    // Read the token data
+                    let token_data = std::fs::read(path)?;
+                    let token = String::from_utf8(token_data)?;
+                    let token_id = fname[6..].to_string();
+                    tokens.push((token_id, token));
+                }
+            }
+        }
+        Ok(tokens)
     }
 
     /// Add attributes to a record.
@@ -168,7 +258,13 @@ impl FsDb {
         Ok(cn)
     }
 
-    pub fn print_attributes(&self, cn: &str) -> Result<(), FsDbError> {
+
+    // Note that this does loose the type information about multi-value attributes.
+    // The attribute types are always (KEY, VALUE) and if there are multiple values
+    // the VALUE is a comma separated list of values.  Tags have blank value.
+    //
+    // TODO: Could use a real ZprAttribute type.
+    pub fn get_attributes(&self, cn: &str) -> Result<Vec<(String, String)>, FsDbError> {
         let cn = clean_cn(cn);
         let actor_path = self.root.join(format!("cn.{cn}"));
         if !actor_path.exists() {
@@ -178,32 +274,31 @@ impl FsDb {
             )));
         }
         let md_path = actor_path.join("metadata.toml");
+        let mut attrs = Vec::new();
         if !md_path.exists() {
             // No attributes
-            return Ok(());
+            return Ok(attrs);
         }
         let toml_data = std::fs::read_to_string(&md_path)?;
         let metadata: Metadata = toml::from_str(&toml_data)?;
         for (key, value) in metadata.attributes.iter() {
             match value {
                 toml::Value::String(s) => {
-                    if s.is_empty() {
-                        println!("   #{}", key);
-                    } else {
-                        println!("   {}:{}", key, s);
-                    }
+                    attrs.push((key.clone(), s.clone()));
                 }
                 toml::Value::Array(arr) => {
                     let values: Vec<String> = arr.iter()
                         .filter_map(|v| if let toml::Value::String(s) = v { Some(s.clone()) } else { None })
                         .collect();
-                    println!("   {}:[{}]", key, values.join(", "));
+                    attrs.push((key.clone(), values.join(",")));
                 }
                 _ => return Err(FsDbError::MetadataError(format!("malformed attribute: {}: {:?}", key, value)))
             }
         }
-        Ok(())
+        Ok(attrs)
     }
+
+
 
     fn create_keypair(&self, dir: &Path) -> Result<(), FsDbError> {
         println!("creating new SSL keypair...");
@@ -225,3 +320,5 @@ fn clean_cn(cn: &str) -> String {
     cn = cn.replace("..", "_");
     cn
 }
+
+

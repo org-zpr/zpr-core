@@ -6,6 +6,9 @@ use std::collections::HashMap;
 use tokio::net::TcpListener;
 use base64::prelude::*;
 
+use crate::fsdb::FsDb;
+use crate::token::{create_token, JWT_LIFETIME_SECONDS};
+
 use axum::{
     body::Body,
     extract::{Request, Form, State},
@@ -61,7 +64,6 @@ pub struct AccessTokenResponse {
     pub token_type: Option<String>, // "bearer"
     pub expires_in: Option<u64>, // seconds
     pub refresh_token: Option<String>,
-    pub zpr_attrs: Option<Vec<String>>, // attributes from our database
     pub error: Option<String>, // error code
 }
 
@@ -78,11 +80,20 @@ struct AuthRecord {
 
 type SharedState = Arc<RwLock<AppState>>;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct AppState {
     auths: HashMap<String, AuthRecord>, // client_id
+    db: FsDb,
 }
 
+impl AppState {
+    fn new(db: FsDb) -> Self {
+        AppState {
+            auths: HashMap::new(),
+            db,
+        }
+    }
+}
 
 impl AuthRecord {
     fn new(client_id: &str) -> Self {
@@ -103,7 +114,6 @@ impl AccessTokenResponse {
             token_type: None,
             expires_in: None,
             refresh_token: None,
-            zpr_attrs: None,
             error: Some(msg.to_string()),
         }
     }
@@ -114,8 +124,8 @@ impl AccessTokenResponse {
 }
 
 
-pub async fn start_server(key_file: &Path, cert_file: &Path) {
-    let shared_state = SharedState::default();
+pub async fn start_server(key_file: &Path, cert_file: &Path, db: FsDb) {
+    let shared_state = Arc::new(RwLock::new(AppState::new(db)));
     tokio::spawn(start_vs_server(native_tls_acceptor(key_file, cert_file), 3999, Arc::clone(&shared_state)));
     start_adapter_server(native_tls_acceptor(key_file, cert_file), 4000, Arc::clone(&shared_state)).await;
 }
@@ -138,8 +148,8 @@ fn native_tls_acceptor(key_file: &Path, cert_file: &Path) -> NativeTlsAcceptor {
 async fn start_adapter_server(acceptor: NativeTlsAcceptor, port: u16, state: SharedState) {
 
     let app = Router::new()
-        .route("/authrequest", get(authrequest_adapter).with_state(state.clone()))
-        .route("/authenticate", post(authenticate_adapter).with_state(state.clone()));
+        .route("/preauthorize", get(authrequest_adapter).with_state(state.clone()))
+        .route("/authorize", post(authenticate_adapter).with_state(state.clone()));
 
     start_tls_server("adapter services", app, acceptor, port).await;
 }
@@ -147,7 +157,7 @@ async fn start_adapter_server(acceptor: NativeTlsAcceptor, port: u16, state: Sha
 
 async fn start_vs_server(acceptor: NativeTlsAcceptor, port: u16, state: SharedState) {
     let app = Router::new()
-        .route("/tokenrequest", post(tokenrequest_vs).with_state(state.clone()));
+        .route("/token", post(tokenrequest_vs).with_state(state.clone()));
         // TODO: /refresh
 
     start_tls_server("visa service services", app, acceptor, port).await;
@@ -207,6 +217,8 @@ struct TokenRequestInput {
 // This an OAuth style API used by the visa service to obtain an access token
 // given an authorization code.
 //
+// See RFC6749 section 4.1.3.
+//
 // Requires form-encoded params:
 // - grant_type (must be set to "authorization_code")
 // - code (the code returned from adapter authentication)
@@ -236,13 +248,11 @@ async fn tokenrequest_vs(
                 AccessTokenResponse::err("invalid_client")
             } else {
                 // Code matches, and we have token.
-                // TODO: Also lookup attrs in our database (or do that earlier).
                 let resp = AccessTokenResponse{
                     access_token: rec.token.clone(),
                     token_type: Some("bearer".to_string()),
-                    expires_in: Some(3600),
+                    expires_in: Some(JWT_LIFETIME_SECONDS),
                     refresh_token: None,
-                    zpr_attrs: None, // TODO
                     error: None,
                 };
 
@@ -280,6 +290,9 @@ struct AuthRequestInput {
 // this authentication service.  This ends up returning a challenge to the
 // adapter which it will sign and return in a call to `authenticate_adapter`.
 //
+// This call does not map exactly onto OAuth.  It is a sort of the first part
+// of authorize.  See RFC6745 section 4.1.1.
+//
 // This expects form encoded params in query string:
 // - response_type (must be set to "code")
 // - client_id
@@ -297,6 +310,8 @@ async fn authrequest_adapter(
     Form(input): Form<AuthRequestInput>,
 ) -> (StatusCode, Json<AdapterAuthRequest>) {
     info!("authrequest for {}", input.client_id);
+
+
     if input.response_type != "code" {
         warn!("authrequest for {} has invalid response_type {}", input.client_id, input.response_type);
         return(StatusCode::BAD_REQUEST, Json(AdapterAuthRequest::default()));
@@ -305,9 +320,14 @@ async fn authrequest_adapter(
     // TODO: how to prevent bad adapter from messing with other clients trying to authenticate?  Maybe limit to once per minute?
     // For now, a request made by a client_id that is already in progress will cancel the existing one.
 
-    let auths = &mut state.write().unwrap().auths;
+    let state = &mut state.write().unwrap();
 
-    if let Some(rec) = auths.get(&input.client_id) {
+    if !state.db.actor_exists(&input.client_id) {
+        warn!("authrequest for {} but client_id not in database", &input.client_id);
+        return(StatusCode::UNAUTHORIZED, Json(AdapterAuthRequest::default()));
+    }
+
+    if let Some(rec) = state.auths.get(&input.client_id) {
         if rec.code.is_none() {
             warn!("authrequest for {} but auth already in progress, previous is now invalid", &input.client_id);
         } else {
@@ -323,7 +343,7 @@ async fn authrequest_adapter(
     let nonce = BASE64_STANDARD.encode(&buf);
     rec.nonce = nonce.clone();
 
-    auths.insert(input.client_id.clone(), rec);
+    state.auths.insert(input.client_id.clone(), rec);
 
     return(StatusCode::OK, Json(AdapterAuthRequest {
         nonce,
@@ -334,6 +354,8 @@ async fn authrequest_adapter(
 // This is the OAuth style API used by an adapter to authenticate its actor with
 // this authentication service.  This accepts the signature payload from the adapter
 // and we will check that it is valid against a public key in our database.
+//
+// See RFC6749 section 4.1.1 & 4.1.2.
 //
 // This expects a JSON post data.
 //
@@ -352,10 +374,21 @@ async fn authenticate_adapter(
 ) -> Result<Response, StatusCode> {
 
 
-    let auths = &mut state.write().unwrap().auths;
+    let state = &mut state.write().unwrap();
 
-    let location = match auths.get_mut(&payload.client_id) {
+    let attrs = state.db.get_attributes(&payload.client_id)
+        .unwrap_or_else(|e| {
+            error!("error getting attributes for {}: {}", &payload.client_id, e);
+            // Just skip them in this case.
+            vec![]
+        });
+
+    let mut token: Option<String> = None;
+
+
+    let location = match state.auths.get_mut(&payload.client_id) {
         Some(rec) => {
+            info!("token request for {}", &payload.client_id);
             if (!rec.nonce.is_empty()) && rec.nonce != payload.nonce {
                 warn!("authenticate_adapter for {} but nonce does not match", &payload.client_id);
                 format!("https://auth.zpr?error=invalid_request&error_description=bad+nonce")
@@ -367,8 +400,11 @@ async fn authenticate_adapter(
                 info!("faking signature check success for {}", &payload.client_id);
 
                 rec.nonce.clear();
+                // The code is secret and only for one time use and should be kept in memory only.
                 let code = create_authorization_code();
-                rec.token = Some(create_token(&payload.client_id, code));
+                let tok = create_token(&payload.client_id, &attrs);
+                rec.token = Some(tok.clone());
+                token = Some(tok);
                 rec.code = Some(format!("{code}"));
 
                 format!("https://auth.zpr?code={}", code)
@@ -379,6 +415,13 @@ async fn authenticate_adapter(
             format!("https://auth.zpr?error=invalid_request&error_description=not+started") // TODO
         }
     };
+
+    if let Some(tok) = token {
+        state.db.add_token(&payload.client_id, &tok)
+            .unwrap_or_else(|e| {
+                error!("error adding token to DB for {}: {}", &payload.client_id, e);
+            });
+    }
     let resp = Response::builder()
         .status(StatusCode::FOUND)
         .header("Location", location)
@@ -396,7 +439,5 @@ fn create_authorization_code() -> u128 {
     u128::from_be_bytes(buf)
 }
 
-/// TODO: I think this will return a JWT
-fn create_token(client_id: &str, code: u128) -> String {
-    format!("placeholder_token/{client_id}/{code}")
-}
+
+
