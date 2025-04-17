@@ -44,6 +44,7 @@ mod mgmt_dispatch_worker;
 mod mgmt_processor_worker;
 mod net_defs;
 mod packet;
+mod packet_queue;
 mod packet_steering;
 mod pcap_writer;
 mod peer_table;
