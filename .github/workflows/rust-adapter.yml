@@ -21,63 +21,12 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: true
 
 jobs:
-  # Tests for ph on Ubuntu
-  ph-build-ubuntu:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
-      with:
-        workspaces: |
-          adapter/ph
-          adapter/ph-debug
-          zpr-ext
-          cslab
-          cbpf-rs
-
-    - name: Setup Git credentials
-      timeout-minutes: 1
-      run: |
-        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
-        chmod +x "$HOME/.git-askpass"
-        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
-
-    - name: Build + test ph
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        make ph
-        cd adapter/ph
-        make test
-
-    - name: Check format
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        cd adapter/ph
-        cargo fmt --check
-
-    - name: Check warnings
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        cd adapter/ph
-        cargo rustc --bin ph -- -D warnings
-
-    - name: Check test warnings
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        cd adapter/ph
-        cargo rustc --tests -- -D warnings
-
-  # Tests for ph on MacOS
-  ph-build-macos:
-    runs-on: macos-latest
+  # Tests for ph
+  ph-build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
     - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
@@ -188,7 +137,7 @@ jobs:
 
   # Integration tests
   basic-integration-test:
-    needs: [ph-build-ubuntu, ph-debug-build]
+    needs: [ph-build, ph-debug-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -230,7 +179,7 @@ jobs:
         ZPR_TEST_VERBOSE=1 integration-test/one-node-v6-test.sh
 
   capture-integration-test:
-    needs: [ph-build-ubuntu, ph-debug-build]
+    needs: [ph-build, ph-debug-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4

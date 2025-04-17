@@ -18,7 +18,7 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: true
 
 jobs:
-  build:
+  libnode-build:
     runs-on: ubuntu-latest
     container:
       image: docker://ghcr.io/org-zpr/38f3bb925e5e:latest
@@ -49,4 +49,3 @@ jobs:
         ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
       run: |
         cd libnode && make test
-
