@@ -277,8 +277,7 @@ fn main() -> ExitCode {
     }
 
     let (mgmt_substrate_inq, mgmt_substrate_outq) =
-        packet_buffer_socket_pair(topology_config.mgmt_datapath_queue_size).unwrap();
-    let mgmt_substrate_inq = tokio::net::UnixDatagram::from_std(mgmt_substrate_inq).unwrap();
+        packet_queue::packet_queue(topology_config.mgmt_datapath_queue_size);
 
     //
     // configure packet steering for better load balancing

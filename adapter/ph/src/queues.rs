@@ -1,6 +1,8 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
 
+use crate::config;
 use crate::packet::{self, Packet, PacketBuffer};
+use crate::packet_queue;
 use crate::test_packet::*;
 use crate::two_way_queue;
 use bytes::Buf;
@@ -69,27 +71,35 @@ impl MgmtProcessor {
 }
 
 /// MgmtSubstrateEgress allows mgmt to inject ZDP packets into the substrate egress fastpath.
-pub struct MgmtSubstrateEgress {
-    socket: TokioUnixDatagram,
-}
+pub struct MgmtSubstrateEgress(packet_queue::Sender<{ config::PACKET_BUFFER_SIZE }>);
 
 impl MgmtSubstrateEgress {
     /// Sockets must be marked non-blocking by caller.
-    pub fn new(socket: TokioUnixDatagram) -> Self {
-        Self { socket }
+    pub fn new(queue: packet_queue::Sender<{ config::PACKET_BUFFER_SIZE }>) -> Self {
+        Self(queue)
     }
 
-    // Enqueue the given packet to be egressed on the substrate.
-    // Blocks until the packet is in the hands of the fastpath.
-    // The packet is marked PRIORITY, which instructs the fastpath to
-    // ensure it eventually gets queued with the OS.
+    /// Enqueue the given packet to be egressed on the substrate.
+    /// Blocks until the packet is in the hands of the fastpath.
+    /// The packet is marked PRIORITY, which instructs the fastpath to
+    /// ensure it eventually gets queued with the OS.
     pub async fn enqueue_packet(&self, link_id: zpr::LinkId, mut packet: Packet) {
         packet.metadata_mut().egress_link_id = link_id;
         packet.metadata_mut().flags |= packet::flags::PRIORITY;
-        self.socket
-            .send(packet.buffer())
-            .await
-            .expect("unrecoverable I/O error");
+        self.0.send(&packet).await.expect("unrecoverable I/O error");
+    }
+
+    /// Try to enqueue the given packet to be egressed on the substrate.
+    /// Returns said packet if there is no room in the queue.
+    /// Unlike `enqueue_packet()`, the packet is not marked for any special processing.
+    #[allow(dead_code)]
+    pub fn try_enqueue_packet(&self, link_id: zpr::LinkId, mut packet: Packet) -> bool {
+        packet.metadata_mut().egress_link_id = link_id;
+        match self.0.try_send(&packet) {
+            Ok(()) => true,
+            Err(packet_queue::TrySendError::Full) => false,
+            Err(err) => panic!("unrecoverable I/O error: {err:?}"),
+        }
     }
 }
 
