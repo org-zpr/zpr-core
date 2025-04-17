@@ -241,9 +241,8 @@ fn main() -> ExitCode {
     let mut actor_requeue_inqs = Vec::new();
     let mut actor_requeue_outqs = Vec::new();
     for _i in 0..topology_config.fastpath_concurrency {
-        let (inq, outq) =
-            packet_buffer_socket_pair(topology_config.mgmt_datapath_queue_size).unwrap();
-        actor_requeue_inqs.push(tokio::net::UnixDatagram::from_std(inq).unwrap());
+        let (inq, outq) = packet_queue::packet_queue(topology_config.mgmt_datapath_queue_size);
+        actor_requeue_inqs.push(inq);
         actor_requeue_outqs.push(outq);
     }
 

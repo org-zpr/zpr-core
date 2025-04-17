@@ -11,14 +11,13 @@ use bytes::Buf;
 use std::io::ErrorKind;
 use std::net::{SocketAddr, UdpSocket};
 use std::os::fd::{AsFd, BorrowedFd};
-use std::os::unix::net::UnixDatagram;
 use std::sync::Arc;
 
 pub struct FastpathIo {
     batch_io: BatchIo,
     actor_tun: Arc<ZprTun>,
     substrate_socket: UdpSocket,
-    pub requeue_outq: UnixDatagram,
+    pub requeue_outq: packet_queue::Receiver<{ config::PACKET_BUFFER_SIZE }>,
     pub mgmt_substrate_outq: packet_queue::Receiver<{ config::PACKET_BUFFER_SIZE }>,
 }
 
@@ -27,7 +26,7 @@ impl FastpathIo {
         config: FastpathWorkerConfig,
         substrate_socket: UdpSocket,
         actor_tun: Arc<ZprTun>,
-        requeue_outq: UnixDatagram,
+        requeue_outq: packet_queue::Receiver<{ config::PACKET_BUFFER_SIZE }>,
         maybe_mgmt_substrate_outq: Option<packet_queue::Receiver<{ config::PACKET_BUFFER_SIZE }>>,
     ) -> Self {
         // HACK: nix does not support disabling an FD, so instead, make a dummy mgmt_substrate_outq socket
@@ -62,7 +61,7 @@ impl FastpathIo {
 
     /// Requeue socket FD for polling.
     pub fn requeue_fd(&self) -> BorrowedFd<'_> {
-        self.requeue_outq.as_fd()
+        self.requeue_outq.poll_fd()
     }
 
     /// Mgmt substrate FD for polling.
@@ -180,31 +179,27 @@ impl FastpathIo {
 
     /// Process an input-ready notification on the requeue socket.
     pub fn process_requeue_in(&mut self, worker: &mut FastpathWorker) {
-        // TODO: batch receive
-        while let Some(mut buf) = worker.buffers.pop() {
-            if let Err(err) = self.requeue_outq.recv(buf.as_mut()) {
-                match err.kind() {
-                    ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
-                        worker.buffers.push(buf);
-                        break;
-                    }
+        while let Some(buf) = worker.buffers.pop() {
+            match self.requeue_outq.try_recv(buf) {
+                Ok(pkt) => {
+                    worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
+                    worker.actor_output_post_classify(pkt, /* allow_bind_request */ false);
+                }
 
-                    _ => {
-                        // FIXME: detect packet-too-large
-                        panic!("unrecoverable I/O error {err}");
-                    }
+                Err(packet_queue::TryRecvError::Empty(buf)) => {
+                    worker.buffers.push(buf);
+                    break;
+                }
+
+                Err(err) => {
+                    panic!("unrecoverable I/O error {err:?}");
                 }
             }
-
-            worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
-            let pkt = Packet::new_with_existing_metadata(buf);
-            worker.actor_output_post_classify(pkt, /* allow_bind_request */ false);
         }
     }
 
     /// Process an input-ready notification on the mgmt substrate socket.
     pub fn process_mgmt_substrate_in(&mut self, worker: &mut FastpathWorker) {
-        // TODO: batch receive
         while let Some(buf) = worker.buffers.pop() {
             match self.mgmt_substrate_outq.try_recv(buf) {
                 Ok(pkt) => {

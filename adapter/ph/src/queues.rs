@@ -7,10 +7,9 @@ use crate::test_packet::*;
 use crate::two_way_queue;
 use bytes::Buf;
 use std::io::ErrorKind;
-use std::os::unix::net::UnixDatagram as StdUnixDatagram;
+use std::os::unix::net::UnixDatagram;
 use std::result::Result;
 use std::time::SystemTime;
-use tokio::net::UnixDatagram as TokioUnixDatagram;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
@@ -71,12 +70,14 @@ impl MgmtProcessor {
 }
 
 /// MgmtSubstrateEgress allows mgmt to inject ZDP packets into the substrate egress fastpath.
-pub struct MgmtSubstrateEgress(packet_queue::Sender<{ config::PACKET_BUFFER_SIZE }>);
+pub struct MgmtSubstrateEgress {
+    queue: packet_queue::Sender<{ config::PACKET_BUFFER_SIZE }>,
+}
 
 impl MgmtSubstrateEgress {
     /// Sockets must be marked non-blocking by caller.
     pub fn new(queue: packet_queue::Sender<{ config::PACKET_BUFFER_SIZE }>) -> Self {
-        Self(queue)
+        Self { queue }
     }
 
     /// Enqueue the given packet to be egressed on the substrate.
@@ -86,7 +87,10 @@ impl MgmtSubstrateEgress {
     pub async fn enqueue_packet(&self, link_id: zpr::LinkId, mut packet: Packet) {
         packet.metadata_mut().egress_link_id = link_id;
         packet.metadata_mut().flags |= packet::flags::PRIORITY;
-        self.0.send(&packet).await.expect("unrecoverable I/O error");
+        self.queue
+            .send(&packet)
+            .await
+            .expect("unrecoverable I/O error");
     }
 
     /// Try to enqueue the given packet to be egressed on the substrate.
@@ -95,7 +99,7 @@ impl MgmtSubstrateEgress {
     #[allow(dead_code)]
     pub fn try_enqueue_packet(&self, link_id: zpr::LinkId, mut packet: Packet) -> bool {
         packet.metadata_mut().egress_link_id = link_id;
-        match self.0.try_send(&packet) {
+        match self.queue.try_send(&packet) {
             Ok(()) => true,
             Err(packet_queue::TrySendError::Full) => false,
             Err(err) => panic!("unrecoverable I/O error: {err:?}"),
@@ -105,42 +109,48 @@ impl MgmtSubstrateEgress {
 
 /// Used for requeueing actor output packets from mgmt.
 pub struct ActorOutputRequeue {
-    sockets: Box<[TokioUnixDatagram]>,
+    queues: Box<[packet_queue::Sender<{ config::PACKET_BUFFER_SIZE }>]>,
 }
 
 impl ActorOutputRequeue {
-    pub fn new(sockets: impl IntoIterator<Item = TokioUnixDatagram>) -> Self {
+    pub fn new(
+        queues: impl IntoIterator<Item = packet_queue::Sender<{ config::PACKET_BUFFER_SIZE }>>,
+    ) -> Self {
         Self {
-            sockets: sockets.into_iter().collect(),
+            queues: queues.into_iter().collect(),
         }
     }
 
     pub fn try_enqueue_packet(&self, packet: Packet) -> Result<(), TryEnqueueError<Packet>> {
-        let socket = self.select_socket(&packet);
+        let queue = self.select_queue(&packet);
 
-        match socket.try_send(packet.buffer()) {
-            Ok(_) => Ok(()),
+        match queue.try_send(&packet) {
+            Ok(()) => {
+                drop(packet);
+                Ok(())
+            }
 
-            Err(err) => match err.kind() {
-                ErrorKind::WouldBlock => Err(TryEnqueueError::Full(packet)),
-                _ => panic!("unrecoverable I/O error: {}", err),
-            },
+            Err(packet_queue::TrySendError::Full) => Err(TryEnqueueError::Full(packet)),
+            Err(err) => panic!("unrecoverable I/O error: {err:?}"),
         }
     }
 
-    fn select_socket(&self, packet: &Packet) -> &TokioUnixDatagram {
-        &self.sockets[packet.metadata().ingress_lane_id as usize]
+    fn select_queue(
+        &self,
+        packet: &Packet,
+    ) -> &packet_queue::Sender<{ config::PACKET_BUFFER_SIZE }> {
+        &self.queues[packet.metadata().ingress_lane_id as usize]
     }
 }
 
 /// Capture will intercept packets in the PH and dump them into a file for debugging purposes
 pub struct Capture {
-    sender: StdUnixDatagram,
+    sender: UnixDatagram,
 }
 
 impl Capture {
     /// `sender` must be set nonblocking
-    pub fn new(sender: StdUnixDatagram) -> Self {
+    pub fn new(sender: UnixDatagram) -> Self {
         Self { sender }
     }
 
