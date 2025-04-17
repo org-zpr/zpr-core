@@ -169,7 +169,7 @@ async fn start_vs_server(acceptor: NativeTlsAcceptor, port: u16, state: SharedSt
     start_tls_server("visa service services", vs_app(state), acceptor, port).await;
 }
 
-// The scaffolding code here is liberally borrowed from the auxm example:
+// The scaffolding code here is liberally borrowed from the axum example:
 // https://github.com/tokio-rs/axum/blob/main/examples/low-level-native-tls/src/main.rs
 async fn start_tls_server(desc: &str, app: Router, acceptor: NativeTlsAcceptor, port: u16) {
     // TODO: refresh
@@ -305,7 +305,6 @@ struct AuthRequestInput {
 //
 // This will create a nonce for this client to use for generating as [AdapterAuthentication].
 // We will keep track of the client_id/nonce used.
-// async fn authrequest_adapter(req: Request) -> (StatusCode, Json<AdapterAuthRequest>) {
 async fn authrequest_adapter(
     State(state): State<SharedState>,
     Form(input): Form<AuthRequestInput>,
