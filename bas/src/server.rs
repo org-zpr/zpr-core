@@ -1,22 +1,20 @@
-
-use std::{path::Path, time};
-use std::sync::{Arc, RwLock};
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::{path::Path, time};
 
-use tokio::net::TcpListener;
 use base64::prelude::*;
+use tokio::net::TcpListener;
 
 use crate::fsdb::FsDb;
-use crate::token::{create_token, JWT_LIFETIME_SECONDS};
+use crate::token::{JWT_LIFETIME_SECONDS, create_token};
 
 use axum::{
+    Json, Router,
     body::Body,
-    extract::{Request, Form, State},
-    routing::{get, post},
+    extract::{Form, Request, State},
     http::StatusCode,
     response::Response,
-    Json,
-    Router,
+    routing::{get, post},
 };
 
 use futures_util::pin_mut;
@@ -26,18 +24,16 @@ use tower_service::Service;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 
-
 use serde::{Deserialize, Serialize};
 
 use tokio_native_tls::{
-    native_tls::{Identity, Protocol, TlsAcceptor as NativeTlsAcceptor},
     TlsAcceptor,
+    native_tls::{Identity, Protocol, TlsAcceptor as NativeTlsAcceptor},
 };
 
 use openssl::rand::rand_bytes;
 
-use tracing::{info, warn, error};
-
+use tracing::{error, info, warn};
 
 /// Sent from the auth service to the adapter. This is the "challenge" part of the
 /// authentication protocol. The adapter will use the nonce in a signed message.
@@ -46,27 +42,24 @@ pub struct AdapterAuthRequest {
     pub nonce: String, // base64 encoded bytes
 }
 
-
 /// Sent from the adapter to the auth service as step 2 in the authentication
 /// protocol.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 pub struct AdapterAuthentication {
     pub client_id: String,
-    pub nonce: String, // copied from response to adapter
+    pub nonce: String,   // copied from response to adapter
     pub payload: String, // base64 encoded signature payload created by adapter
 }
-
 
 #[derive(Debug, Serialize)]
 pub struct AccessTokenResponse {
     pub access_token: Option<String>,
     pub token_type: Option<String>, // "bearer"
-    pub expires_in: Option<u64>, // seconds
+    pub expires_in: Option<u64>,    // seconds
     pub refresh_token: Option<String>,
     pub error: Option<String>, // error code
 }
-
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -123,14 +116,20 @@ impl AccessTokenResponse {
     }
 }
 
-
 pub async fn start_server(key_file: &Path, cert_file: &Path, db: FsDb) {
     let shared_state = Arc::new(RwLock::new(AppState::new(db)));
-    tokio::spawn(start_vs_server(native_tls_acceptor(key_file, cert_file), 3999, Arc::clone(&shared_state)));
-    start_adapter_server(native_tls_acceptor(key_file, cert_file), 4000, Arc::clone(&shared_state)).await;
+    tokio::spawn(start_vs_server(
+        native_tls_acceptor(key_file, cert_file),
+        3999,
+        Arc::clone(&shared_state),
+    ));
+    start_adapter_server(
+        native_tls_acceptor(key_file, cert_file),
+        4000,
+        Arc::clone(&shared_state),
+    )
+    .await;
 }
-
-
 
 fn native_tls_acceptor(key_file: &Path, cert_file: &Path) -> NativeTlsAcceptor {
     let key_pem = std::fs::read_to_string(&key_file).unwrap();
@@ -143,26 +142,26 @@ fn native_tls_acceptor(key_file: &Path, cert_file: &Path) -> NativeTlsAcceptor {
         .unwrap()
 }
 
-
-
 async fn start_adapter_server(acceptor: NativeTlsAcceptor, port: u16, state: SharedState) {
-
     let app = Router::new()
-        .route("/preauthorize", get(authrequest_adapter).with_state(state.clone()))
-        .route("/authorize", post(authenticate_adapter).with_state(state.clone()));
+        .route(
+            "/preauthorize",
+            get(authrequest_adapter).with_state(state.clone()),
+        )
+        .route(
+            "/authorize",
+            post(authenticate_adapter).with_state(state.clone()),
+        );
 
     start_tls_server("adapter services", app, acceptor, port).await;
 }
 
-
 async fn start_vs_server(acceptor: NativeTlsAcceptor, port: u16, state: SharedState) {
-    let app = Router::new()
-        .route("/token", post(tokenrequest_vs).with_state(state.clone()));
-        // TODO: /refresh
+    let app = Router::new().route("/token", post(tokenrequest_vs).with_state(state.clone()));
+    // TODO: /refresh
 
     start_tls_server("visa service services", app, acceptor, port).await;
 }
-
 
 // The scaffolding code here is liberally borrowed from the auxm example:
 // https://github.com/tokio-rs/axum/blob/main/examples/low-level-native-tls/src/main.rs
@@ -200,10 +199,7 @@ async fn start_tls_server(desc: &str, app: Router, acceptor: NativeTlsAcceptor, 
             }
         });
     }
-
 }
-
-
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -230,7 +226,6 @@ async fn tokenrequest_vs(
     State(state): State<SharedState>,
     Form(input): Form<TokenRequestInput>,
 ) -> (StatusCode, Json<AccessTokenResponse>) {
-
     // The client_id must be in our database, and must have valid token.
     // (TODO: once we have a JWT, check for expiration)
     //
@@ -239,7 +234,7 @@ async fn tokenrequest_vs(
     let auths = &mut state.write().unwrap().auths;
 
     let resp = match auths.get_mut(&input.client_id) {
-        Some(rec) =>{
+        Some(rec) => {
             if rec.code.is_none() || rec.code != Some(input.code.clone()) {
                 warn!("tokenrequest for {} but code is invalid", &input.client_id);
                 AccessTokenResponse::err("invalid_client")
@@ -248,7 +243,7 @@ async fn tokenrequest_vs(
                 AccessTokenResponse::err("invalid_client")
             } else {
                 // Code matches, and we have token.
-                let resp = AccessTokenResponse{
+                let resp = AccessTokenResponse {
                     access_token: rec.token.clone(),
                     token_type: Some("bearer".to_string()),
                     expires_in: Some(JWT_LIFETIME_SECONDS),
@@ -267,14 +262,15 @@ async fn tokenrequest_vs(
             AccessTokenResponse::err("invalid_client")
         }
     };
-    return(
-        if resp.is_err() { StatusCode::BAD_REQUEST } else {StatusCode::OK},
-        Json(resp)
+    return (
+        if resp.is_err() {
+            StatusCode::BAD_REQUEST
+        } else {
+            StatusCode::OK
+        },
+        Json(resp),
     );
-
 }
-
-
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -284,7 +280,6 @@ struct AuthRequestInput {
     scope: Option<String>,
     state: Option<String>,
 }
-
 
 // This is the OAuth style API used by an adapter to authentiate its actor with
 // this authentication service.  This ends up returning a challenge to the
@@ -311,10 +306,12 @@ async fn authrequest_adapter(
 ) -> (StatusCode, Json<AdapterAuthRequest>) {
     info!("authrequest for {}", input.client_id);
 
-
     if input.response_type != "code" {
-        warn!("authrequest for {} has invalid response_type {}", input.client_id, input.response_type);
-        return(StatusCode::BAD_REQUEST, Json(AdapterAuthRequest::default()));
+        warn!(
+            "authrequest for {} has invalid response_type {}",
+            input.client_id, input.response_type
+        );
+        return (StatusCode::BAD_REQUEST, Json(AdapterAuthRequest::default()));
     }
 
     // TODO: how to prevent bad adapter from messing with other clients trying to authenticate?  Maybe limit to once per minute?
@@ -323,13 +320,22 @@ async fn authrequest_adapter(
     let state = &mut state.write().unwrap();
 
     if !state.db.actor_exists(&input.client_id) {
-        warn!("authrequest for {} but client_id not in database", &input.client_id);
-        return(StatusCode::UNAUTHORIZED, Json(AdapterAuthRequest::default()));
+        warn!(
+            "authrequest for {} but client_id not in database",
+            &input.client_id
+        );
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(AdapterAuthRequest::default()),
+        );
     }
 
     if let Some(rec) = state.auths.get(&input.client_id) {
         if rec.code.is_none() {
-            warn!("authrequest for {} but auth already in progress, previous is now invalid", &input.client_id);
+            warn!(
+                "authrequest for {} but auth already in progress, previous is now invalid",
+                &input.client_id
+            );
         } else {
             info!("new authrequest for {}", &input.client_id);
         }
@@ -345,11 +351,8 @@ async fn authrequest_adapter(
 
     state.auths.insert(input.client_id.clone(), rec);
 
-    return(StatusCode::OK, Json(AdapterAuthRequest {
-        nonce,
-    }));
+    return (StatusCode::OK, Json(AdapterAuthRequest { nonce }));
 }
-
 
 // This is the OAuth style API used by an adapter to authenticate its actor with
 // this authentication service.  This accepts the signature payload from the adapter
@@ -372,11 +375,11 @@ async fn authenticate_adapter(
     State(state): State<SharedState>,
     Json(payload): Json<AdapterAuthentication>,
 ) -> Result<Response, StatusCode> {
-
-
     let state = &mut state.write().unwrap();
 
-    let attrs = state.db.get_attributes(&payload.client_id)
+    let attrs = state
+        .db
+        .get_attributes(&payload.client_id)
         .unwrap_or_else(|e| {
             error!("error getting attributes for {}: {}", &payload.client_id, e);
             // Just skip them in this case.
@@ -385,12 +388,14 @@ async fn authenticate_adapter(
 
     let mut token: Option<String> = None;
 
-
     let location = match state.auths.get_mut(&payload.client_id) {
         Some(rec) => {
             info!("token request for {}", &payload.client_id);
             if (!rec.nonce.is_empty()) && rec.nonce != payload.nonce {
-                warn!("authenticate_adapter for {} but nonce does not match", &payload.client_id);
+                warn!(
+                    "authenticate_adapter for {} but nonce does not match",
+                    &payload.client_id
+                );
                 format!("https://auth.zpr?error=invalid_request&error_description=bad+nonce")
             } else {
                 // client_id and nonce are known to us, so we can check the signature
@@ -411,13 +416,18 @@ async fn authenticate_adapter(
             }
         }
         None => {
-            warn!("authenticate_adapter for {} but no auth in progress", &payload.client_id);
+            warn!(
+                "authenticate_adapter for {} but no auth in progress",
+                &payload.client_id
+            );
             format!("https://auth.zpr?error=invalid_request&error_description=not+started") // TODO
         }
     };
 
     if let Some(tok) = token {
-        state.db.add_token(&payload.client_id, &tok)
+        state
+            .db
+            .add_token(&payload.client_id, &tok)
             .unwrap_or_else(|e| {
                 error!("error adding token to DB for {}: {}", &payload.client_id, e);
             });
@@ -430,14 +440,9 @@ async fn authenticate_adapter(
     Ok(resp)
 }
 
-
-
 /// Create random authorization code
 fn create_authorization_code() -> u128 {
     let mut buf = [0; 16];
     rand_bytes(&mut buf).unwrap();
     u128::from_be_bytes(buf)
 }
-
-
-

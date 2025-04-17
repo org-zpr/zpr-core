@@ -2,16 +2,14 @@ mod fsdb;
 mod server;
 mod token;
 
+use clap::{Args, Parser, Subcommand};
 use std::path::{Path, PathBuf};
-use clap::{Parser, Subcommand, Args};
 use tracing_subscriber;
 
 use fsdb::FsDb;
 use server::start_server;
 
 const DEFAULT_DB_PATH: &str = "./db";
-
-
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -61,7 +59,6 @@ struct PubKeyArgs {
 
 #[derive(Args)]
 struct ListArgs {
-
     /// Also list any attributes
     #[arg(long, short)]
     attrs: bool,
@@ -79,7 +76,7 @@ struct AddAttributeArgs {
     /// CN of the actor to add attributes to
     cn: String,
     /// Attributes to add for is 'name:value', 'name:value1,value2' or just 'name' for a tag.
-    attrs: Vec<String>
+    attrs: Vec<String>,
 }
 
 #[derive(Args)]
@@ -92,7 +89,6 @@ struct ServeArgs {
     #[arg(long, short)]
     cert: PathBuf,
 }
-
 
 fn main() {
     let cli = Cli::parse();
@@ -115,24 +111,30 @@ fn main() {
         }
         Some(CliCommand::Pubkey(args)) => {
             let db = init_db(Path::new(DEFAULT_DB_PATH));
-            println!("{}", db.get_pub_key(&args.cn).unwrap_or_else(|e| {
-                eprintln!("Error retrieving public key: {}", e);
-                std::process::exit(1);
-            }));
+            println!(
+                "{}",
+                db.get_pub_key(&args.cn).unwrap_or_else(|e| {
+                    eprintln!("Error retrieving public key: {}", e);
+                    std::process::exit(1);
+                })
+            );
         }
         Some(CliCommand::List(args)) => {
             let db = init_db(Path::new(DEFAULT_DB_PATH));
-            db.print(&args.cn, args.attrs, args.tokens).unwrap_or_else(|e| {
-                eprintln!("error listing database {}", e);
-                std::process::exit(1);
-            });
+            db.print(&args.cn, args.attrs, args.tokens)
+                .unwrap_or_else(|e| {
+                    eprintln!("error listing database {}", e);
+                    std::process::exit(1);
+                });
         }
         Some(CliCommand::AddAttribute(args)) => {
             let db = init_db(Path::new(DEFAULT_DB_PATH));
-            let cn = db.add_attributes(&args.cn, &args.attrs).unwrap_or_else(|e| {
-                eprintln!("Error adding attributes: {}", e);
-                std::process::exit(1);
-            });
+            let cn = db
+                .add_attributes(&args.cn, &args.attrs)
+                .unwrap_or_else(|e| {
+                    eprintln!("Error adding attributes: {}", e);
+                    std::process::exit(1);
+                });
             println!("added attributes to: {}", cn);
         }
         Some(CliCommand::Serve(args)) => {
@@ -147,7 +149,6 @@ fn main() {
         }
     }
 }
-
 
 fn init_db(root: &Path) -> FsDb {
     match FsDb::new(root) {

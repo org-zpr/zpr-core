@@ -1,14 +1,13 @@
-use std::path::{PathBuf, Path};
+use std::path::{Path, PathBuf};
 
-use thiserror::Error;
 use openssl::rsa::Rsa;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use toml::Table;
 
 use crate::token::claims_for;
 
 const KEY_SIZE: u32 = 2048;
-
 
 #[derive(Debug, Error)]
 pub enum FsDbError {
@@ -28,15 +27,13 @@ pub enum FsDbError {
     TomlSerError(#[from] toml::ser::Error),
 
     #[error("Metadata Error: {0}")]
-    MetadataError(String)
+    MetadataError(String),
 }
-
 
 #[derive(Debug, Clone, Default)]
 pub struct FsDb {
     root: PathBuf,
 }
-
 
 #[derive(Debug, Deserialize, Serialize)]
 struct Metadata {
@@ -52,7 +49,9 @@ impl FsDb {
         if !root.exists() {
             std::fs::create_dir_all(&root)?;
         }
-        Ok(FsDb { root: root.to_path_buf() })
+        Ok(FsDb {
+            root: root.to_path_buf(),
+        })
     }
 
     pub fn print(&self, pat: &Option<String>, attrs: bool, tokens: bool) -> Result<(), FsDbError> {
@@ -151,7 +150,7 @@ impl FsDb {
     /// Add a token to the actors directory. Note this is MUT to avoid adding these
     /// in multiple threads at the same time (since we count the number of tokens
     /// already in the directory to come up with the file name).
-    pub fn add_token(&mut self , cn: &str, token: &str) -> Result<(), FsDbError> {
+    pub fn add_token(&mut self, cn: &str, token: &str) -> Result<(), FsDbError> {
         let cn = clean_cn(cn);
         let actor_path = self.root.join(format!("cn.{cn}"));
         if !actor_path.exists() {
@@ -167,7 +166,13 @@ impl FsDb {
             .filter(|entry| {
                 let de = entry.as_ref().unwrap();
                 let path = de.path();
-                path.is_file() && path.file_name().unwrap().to_str().unwrap().starts_with("token.")
+                path.is_file()
+                    && path
+                        .file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .starts_with("token.")
             })
             .count();
 
@@ -175,7 +180,6 @@ impl FsDb {
         std::fs::write(token_path, token)?;
         Ok(())
     }
-
 
     /// The result list is of (token_id, encoded_toke) pairs.
     pub fn list_tokens(&self, cn: &str) -> Result<Vec<(String, String)>, FsDbError> {
@@ -225,7 +229,9 @@ impl FsDb {
             let toml_data = std::fs::read_to_string(&md_path)?;
             toml::from_str(&toml_data)?
         } else {
-            Metadata { attributes: Table::new() }
+            Metadata {
+                attributes: Table::new(),
+            }
         };
 
         for attr in attrs {
@@ -233,22 +239,35 @@ impl FsDb {
             let parts: Vec<&str> = attr.split(':').collect();
             let key = parts[0].to_string();
             let value = if parts.len() > 1 {
-                parts[1].split(',').map(|s| s.to_string()).collect::<Vec<_>>()
+                parts[1]
+                    .split(',')
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
             } else {
                 vec![]
             };
             if value.is_empty() {
                 // Tag
-                metadata.attributes.insert(key.clone(), toml::Value::String(String::new()));
+                metadata
+                    .attributes
+                    .insert(key.clone(), toml::Value::String(String::new()));
             } else if value.len() > 1 {
                 // Multivalue -- skip empty values
-                metadata.attributes.insert(key.clone(),
-                    toml::Value::Array(value.into_iter()
-                        .filter(|s| !s.is_empty())
-                        .map(toml::Value::String).collect()));
+                metadata.attributes.insert(
+                    key.clone(),
+                    toml::Value::Array(
+                        value
+                            .into_iter()
+                            .filter(|s| !s.is_empty())
+                            .map(toml::Value::String)
+                            .collect(),
+                    ),
+                );
             } else {
                 // Single value
-                metadata.attributes.insert(key.clone(), toml::Value::String(value[0].clone()));
+                metadata
+                    .attributes
+                    .insert(key.clone(), toml::Value::String(value[0].clone()));
             }
         }
 
@@ -257,7 +276,6 @@ impl FsDb {
         std::fs::write(&md_path, toml_data)?;
         Ok(cn)
     }
-
 
     // Note that this does loose the type information about multi-value attributes.
     // The attribute types are always (KEY, VALUE) and if there are multiple values
@@ -287,18 +305,28 @@ impl FsDb {
                     attrs.push((key.clone(), s.clone()));
                 }
                 toml::Value::Array(arr) => {
-                    let values: Vec<String> = arr.iter()
-                        .filter_map(|v| if let toml::Value::String(s) = v { Some(s.clone()) } else { None })
+                    let values: Vec<String> = arr
+                        .iter()
+                        .filter_map(|v| {
+                            if let toml::Value::String(s) = v {
+                                Some(s.clone())
+                            } else {
+                                None
+                            }
+                        })
                         .collect();
                     attrs.push((key.clone(), values.join(",")));
                 }
-                _ => return Err(FsDbError::MetadataError(format!("malformed attribute: {}: {:?}", key, value)))
+                _ => {
+                    return Err(FsDbError::MetadataError(format!(
+                        "malformed attribute: {}: {:?}",
+                        key, value
+                    )));
+                }
             }
         }
         Ok(attrs)
     }
-
-
 
     fn create_keypair(&self, dir: &Path) -> Result<(), FsDbError> {
         println!("creating new SSL keypair...");
@@ -311,7 +339,6 @@ impl FsDb {
     }
 }
 
-
 /// Since we use CN as part of a file name, we restrict it pretty substantially here
 /// to only certain characters.
 fn clean_cn(cn: &str) -> String {
@@ -320,5 +347,3 @@ fn clean_cn(cn: &str) -> String {
     cn = cn.replace("..", "_");
     cn
 }
-
-
