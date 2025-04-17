@@ -5,7 +5,7 @@ use std::{path::Path, time};
 use base64::prelude::*;
 use tokio::net::TcpListener;
 
-use crate::fsdb::FsDb;
+use crate::fsdb::{CnKey, FsDb};
 use crate::token::{JWT_LIFETIME_SECONDS, create_token};
 
 use axum::{
@@ -318,8 +318,12 @@ async fn authrequest_adapter(
     // For now, a request made by a client_id that is already in progress will cancel the existing one.
 
     let state = &mut state.write().unwrap();
+    let Ok(key) = CnKey::from_str(&input.client_id) else {
+        error!("error parsing client_id {}", &input.client_id);
+        return (StatusCode::BAD_REQUEST, Json(AdapterAuthRequest::default()));
+    };
 
-    if !state.db.actor_exists(&input.client_id) {
+    if !state.db.actor_exists(&key) {
         warn!(
             "authrequest for {} but client_id not in database",
             &input.client_id
@@ -377,14 +381,24 @@ async fn authenticate_adapter(
 ) -> Result<Response, StatusCode> {
     let state = &mut state.write().unwrap();
 
-    let attrs = state
-        .db
-        .get_attributes(&payload.client_id)
-        .unwrap_or_else(|e| {
-            error!("error getting attributes for {}: {}", &payload.client_id, e);
-            // Just skip them in this case.
-            vec![]
-        });
+    let Ok(key) = CnKey::from_str(&payload.client_id) else {
+        error!("error parsing client_id {}", &payload.client_id);
+        let resp = Response::builder()
+            .status(StatusCode::FOUND)
+            .header(
+                "Location",
+                "https://auth.zpr?error=invalid_request&error_description=bad+client_id",
+            )
+            .body(Body::empty())
+            .unwrap();
+        return Ok(resp);
+    };
+
+    let attrs = state.db.get_attributes(&key).unwrap_or_else(|e| {
+        error!("error getting attributes for {}: {}", &payload.client_id, e);
+        // Just skip them in this case.
+        vec![]
+    });
 
     let mut token: Option<String> = None;
 
@@ -425,12 +439,9 @@ async fn authenticate_adapter(
     };
 
     if let Some(tok) = token {
-        state
-            .db
-            .add_token(&payload.client_id, &tok)
-            .unwrap_or_else(|e| {
-                error!("error adding token to DB for {}: {}", &payload.client_id, e);
-            });
+        state.db.add_token(&key, &tok).unwrap_or_else(|e| {
+            error!("error adding token to DB for {}: {}", &payload.client_id, e);
+        });
     }
     let resp = Response::builder()
         .status(StatusCode::FOUND)

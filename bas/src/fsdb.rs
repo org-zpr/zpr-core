@@ -1,3 +1,4 @@
+use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
 use openssl::rsa::Rsa;
@@ -28,11 +29,56 @@ pub enum FsDbError {
 
     #[error("Metadata Error: {0}")]
     MetadataError(String),
+
+    #[error("malformed CN")]
+    MalformedCn,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct FsDb {
     root: PathBuf,
+}
+
+/// The CkKey type is the type used for the CN values in the DB.
+/// Use one of the from_xxx functions to create these.
+pub struct CnKey(String);
+
+impl CnKey {
+    pub fn from_str(s: &str) -> Result<Self, FsDbError> {
+        return Self::from_string(s.to_string());
+    }
+
+    pub fn from_string(s: String) -> Result<Self, FsDbError> {
+        if s.is_empty() {
+            return Err(FsDbError::MalformedCn);
+        }
+        let clean = clean_cn(&s);
+        if s != clean {
+            return Err(FsDbError::MalformedCn);
+        }
+        Ok(CnKey(clean))
+    }
+}
+
+/// Since we use CN as part of a file name, we restrict it pretty substantially here
+/// to only certain characters.
+fn clean_cn(cn: &str) -> String {
+    let mut cn = cn.to_string();
+    cn.retain(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
+    cn = cn.replace("..", "_");
+    cn
+}
+
+impl Into<String> for CnKey {
+    fn into(self) -> String {
+        self.0.clone()
+    }
+}
+
+impl Display for CnKey {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -67,7 +113,8 @@ impl FsDb {
                 if pat.is_none() || cn.contains(pat.as_ref().unwrap()) {
                     println!("{}", &cn[3..]); // Skip the "cn." prefix
                     if attrs {
-                        let attributes = self.get_attributes(&cn[3..])?;
+                        let attributes =
+                            self.get_attributes(&CnKey::from_str(&cn[3..]).unwrap())?;
                         for tuple in &attributes {
                             if tuple.1.is_empty() {
                                 println!("   #{}", tuple.0);
@@ -77,7 +124,7 @@ impl FsDb {
                         }
                     }
                     if tokens {
-                        let tokens = self.list_tokens(&cn[3..])?;
+                        let tokens = self.list_tokens(&CnKey::from_str(&cn[3..]).unwrap())?;
                         for tuple in &tokens {
                             println!("   token.{}:", tuple.0);
                             match claims_for(&tuple.1) {
@@ -98,14 +145,12 @@ impl FsDb {
         Ok(())
     }
 
-    pub fn actor_exists(&self, cn: &str) -> bool {
-        let cn = clean_cn(cn);
+    pub fn actor_exists(&self, cn: &CnKey) -> bool {
         let actor_path = self.root.join(format!("cn.{cn}"));
         actor_path.exists()
     }
 
-    pub fn create_actor(&self, cn: &str) -> Result<String, FsDbError> {
-        let cn = clean_cn(cn);
+    pub fn create_actor(&self, cn: &CnKey) -> Result<(), FsDbError> {
         let actor_path = self.root.join(format!("cn.{cn}"));
         if actor_path.exists() {
             return Err(FsDbError::IoError(std::io::Error::new(
@@ -115,11 +160,10 @@ impl FsDb {
         }
         std::fs::create_dir_all(&actor_path)?;
         self.create_keypair(&actor_path)?;
-        Ok(cn)
+        Ok(())
     }
 
-    pub fn delete_actor(&self, cn: &str) -> Result<String, FsDbError> {
-        let cn = clean_cn(cn);
+    pub fn delete_actor(&self, cn: &CnKey) -> Result<(), FsDbError> {
         let actor_path = self.root.join(format!("cn.{cn}"));
         if !actor_path.exists() {
             return Err(FsDbError::IoError(std::io::Error::new(
@@ -128,12 +172,11 @@ impl FsDb {
             )));
         }
         std::fs::remove_dir_all(&actor_path)?;
-        Ok(cn)
+        Ok(())
     }
 
     /// Returns the public key in PEM format.
-    pub fn get_pub_key(&self, cn: &str) -> Result<String, FsDbError> {
-        let cn = clean_cn(cn);
+    pub fn get_pub_key(&self, cn: &CnKey) -> Result<String, FsDbError> {
         let actor_path = self.root.join(format!("cn.{cn}"));
         let public_key_path = actor_path.join("public.pem");
         if !public_key_path.exists() {
@@ -150,8 +193,7 @@ impl FsDb {
     /// Add a token to the actors directory. Note this is MUT to avoid adding these
     /// in multiple threads at the same time (since we count the number of tokens
     /// already in the directory to come up with the file name).
-    pub fn add_token(&mut self, cn: &str, token: &str) -> Result<(), FsDbError> {
-        let cn = clean_cn(cn);
+    pub fn add_token(&mut self, cn: &CnKey, token: &str) -> Result<(), FsDbError> {
         let actor_path = self.root.join(format!("cn.{cn}"));
         if !actor_path.exists() {
             return Err(FsDbError::IoError(std::io::Error::new(
@@ -182,8 +224,7 @@ impl FsDb {
     }
 
     /// The result list is of (token_id, encoded_toke) pairs.
-    pub fn list_tokens(&self, cn: &str) -> Result<Vec<(String, String)>, FsDbError> {
-        let cn = clean_cn(cn);
+    pub fn list_tokens(&self, cn: &CnKey) -> Result<Vec<(String, String)>, FsDbError> {
         let actor_path = self.root.join(format!("cn.{cn}"));
         if !actor_path.exists() {
             return Err(FsDbError::IoError(std::io::Error::new(
@@ -214,8 +255,7 @@ impl FsDb {
     /// - A multi-value attribute is of the form "key:value1,value2,..." You can set a multi-values attribute to just a
     ///   single value by adding a trailing comma.  Eg, "key:value1,".
     /// - A tag is of the form "key" (no colon, no value).
-    pub fn add_attributes(&self, cn: &str, attrs: &[String]) -> Result<String, FsDbError> {
-        let cn = clean_cn(cn);
+    pub fn add_attributes(&self, cn: &CnKey, attrs: &[String]) -> Result<(), FsDbError> {
         let actor_path = self.root.join(format!("cn.{cn}"));
         if !actor_path.exists() {
             return Err(FsDbError::IoError(std::io::Error::new(
@@ -274,7 +314,7 @@ impl FsDb {
         // Now write the metadata back to the file.
         let toml_data = toml::to_string(&metadata)?;
         std::fs::write(&md_path, toml_data)?;
-        Ok(cn)
+        Ok(())
     }
 
     // Note that this does loose the type information about multi-value attributes.
@@ -282,8 +322,7 @@ impl FsDb {
     // the VALUE is a comma separated list of values.  Tags have blank value.
     //
     // TODO: Could use a real ZprAttribute type.
-    pub fn get_attributes(&self, cn: &str) -> Result<Vec<(String, String)>, FsDbError> {
-        let cn = clean_cn(cn);
+    pub fn get_attributes(&self, cn: &CnKey) -> Result<Vec<(String, String)>, FsDbError> {
         let actor_path = self.root.join(format!("cn.{cn}"));
         if !actor_path.exists() {
             return Err(FsDbError::IoError(std::io::Error::new(
@@ -337,13 +376,4 @@ impl FsDb {
         std::fs::write(dir.join("public.pem"), public_key_data)?;
         Ok(())
     }
-}
-
-/// Since we use CN as part of a file name, we restrict it pretty substantially here
-/// to only certain characters.
-fn clean_cn(cn: &str) -> String {
-    let mut cn = cn.to_string();
-    cn.retain(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.');
-    cn = cn.replace("..", "_");
-    cn
 }

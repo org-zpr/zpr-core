@@ -6,7 +6,7 @@ use clap::{Args, Parser, Subcommand};
 use std::path::{Path, PathBuf};
 use tracing_subscriber;
 
-use fsdb::FsDb;
+use fsdb::{CnKey, FsDb};
 use server::start_server;
 
 const DEFAULT_DB_PATH: &str = "./db";
@@ -95,25 +95,37 @@ fn main() {
     match cli.command {
         Some(CliCommand::Create(args)) => {
             let db = init_db(Path::new(DEFAULT_DB_PATH));
-            let created = db.create_actor(&args.cn).unwrap_or_else(|e| {
+            let key = CnKey::from_str(&args.cn).unwrap_or_else(|e| {
+                eprintln!("Error parsing CN: {}", e);
+                std::process::exit(1);
+            });
+            db.create_actor(&key).unwrap_or_else(|e| {
                 eprintln!("Error creating actor: {}", e);
                 std::process::exit(1);
             });
-            println!("created: {}", created);
+            println!("created: {}", key);
         }
         Some(CliCommand::Delete(args)) => {
             let db = init_db(Path::new(DEFAULT_DB_PATH));
-            let deleted = db.delete_actor(&args.cn).unwrap_or_else(|e| {
+            let key = CnKey::from_str(&args.cn).unwrap_or_else(|e| {
+                eprintln!("Error parsing CN: {}", e);
+                std::process::exit(1);
+            });
+            db.delete_actor(&key).unwrap_or_else(|e| {
                 eprintln!("Error deleting actor: {}", e);
                 std::process::exit(1);
             });
-            println!("deleted: {}", deleted);
+            println!("deleted: {}", key);
         }
         Some(CliCommand::Pubkey(args)) => {
             let db = init_db(Path::new(DEFAULT_DB_PATH));
+            let key = CnKey::from_str(&args.cn).unwrap_or_else(|e| {
+                eprintln!("Error parsing CN: {}", e);
+                std::process::exit(1);
+            });
             println!(
                 "{}",
-                db.get_pub_key(&args.cn).unwrap_or_else(|e| {
+                db.get_pub_key(&key).unwrap_or_else(|e| {
                     eprintln!("Error retrieving public key: {}", e);
                     std::process::exit(1);
                 })
@@ -129,13 +141,15 @@ fn main() {
         }
         Some(CliCommand::AddAttribute(args)) => {
             let db = init_db(Path::new(DEFAULT_DB_PATH));
-            let cn = db
-                .add_attributes(&args.cn, &args.attrs)
-                .unwrap_or_else(|e| {
-                    eprintln!("Error adding attributes: {}", e);
-                    std::process::exit(1);
-                });
-            println!("added attributes to: {}", cn);
+            let key = CnKey::from_str(&args.cn).unwrap_or_else(|e| {
+                eprintln!("Error parsing CN: {}", e);
+                std::process::exit(1);
+            });
+            db.add_attributes(&key, &args.attrs).unwrap_or_else(|e| {
+                eprintln!("Error adding attributes: {}", e);
+                std::process::exit(1);
+            });
+            println!("added attributes to: {}", key);
         }
         Some(CliCommand::Serve(args)) => {
             let rt = tokio::runtime::Runtime::new().unwrap();

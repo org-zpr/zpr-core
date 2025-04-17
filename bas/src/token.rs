@@ -29,10 +29,12 @@ pub fn create_token(client_id: &str, attributes: &Vec<(String, String)>) -> Stri
     token_claims.registered.issuer = Some("zpr/bas".to_string());
     token_claims.registered.audience = Some("zpr".to_string());
 
+    // All the attributes are stored as "z/<name>" in the private claims.
+    // TODO: An improvement would be to put all the tags in a single attribute, say "ztags".
     for tuple in attributes {
         token_claims
             .private
-            .insert(format!("zpra/{}", tuple.0), json!(tuple.1.clone()));
+            .insert(format!("z/{}", tuple.0), json!(tuple.1.clone()));
     }
 
     // TODO: In future we will sign with our private RSA key which will allow the visa service
@@ -51,10 +53,10 @@ pub fn create_token(client_id: &str, attributes: &Vec<(String, String)>) -> Stri
 }
 
 /// Return the claims in the token without regard to signature or header.
+/// Note that ZPR attribute "claims" are prefixed with "z/".
 pub fn claims_for(tstr: &str) -> Result<BTreeMap<String, String>, jwt::Error> {
     let token: Token<Header, Claims, _> = Token::parse_unverified(tstr)?;
     let claims = token.claims().clone();
-
     let mut result = BTreeMap::new();
 
     if claims.registered.audience.is_some() {
@@ -91,7 +93,36 @@ pub fn claims_for(tstr: &str) -> Result<BTreeMap<String, String>, jwt::Error> {
         );
     }
     for (k, v) in &claims.private {
-        result.insert(k.clone(), v.to_string());
+        match v {
+            serde_json::Value::String(s) => {
+                result.insert(k.clone(), s.clone());
+            }
+            serde_json::Value::Number(n) => {
+                result.insert(k.clone(), n.to_string());
+            }
+            _ => {
+                result.insert(k.clone(), v.to_string());
+            }
+        }
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_create_and_claims_for() {
+        let client_id = "test_client_id";
+        let attributes = vec![("key1".to_string(), "value1".to_string())];
+
+        let token = create_token(client_id, &attributes);
+        let claims = claims_for(&token).unwrap();
+
+        assert_eq!(claims.get("sub").unwrap(), client_id);
+        assert_eq!(claims.get("aud").unwrap(), "zpr");
+        assert_eq!(claims.get("iss").unwrap(), "zpr/bas");
+        assert_eq!(claims.get("z/key1").unwrap(), "value1");
+    }
 }
