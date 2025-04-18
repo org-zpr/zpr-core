@@ -330,6 +330,7 @@ pub mod test {
 
     use super::*;
     use crate::config::TopologyConfig;
+    use crate::packet_queue;
     use crate::two_way_queue;
     use std::net::Ipv4Addr;
     use tokio::sync::mpsc;
@@ -379,9 +380,9 @@ pub mod test {
         let local_zpr_addresses = builder
             .local_zpr_addresses
             .unwrap_or(Vec::from([IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]));
-        let mgmt_substrate_egress = builder.mgmt_substrate_egress.unwrap_or_else(|| {
-            MgmtSubstrateEgress::new(tokio::net::UnixDatagram::pair().unwrap().0)
-        });
+        let mgmt_substrate_egress = builder
+            .mgmt_substrate_egress
+            .unwrap_or_else(|| MgmtSubstrateEgress::new(packet_queue::packet_queue(1).0));
         let actor_output_requeue = builder
             .actor_output_requeue
             .unwrap_or_else(|| ActorOutputRequeue::new(Vec::new()));
