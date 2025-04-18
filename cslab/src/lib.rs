@@ -258,22 +258,33 @@ unsafe impl<T> Send for CslabStorage<T> {}
 unsafe impl<T> Sync for CslabStorage<T> {}
 
 fn get_impl<T>(storage: &CslabStorage<T>, idx: usize) -> Option<&T> {
-    if idx >= storage.len() {
-        return None;
-    }
-
-    // check flag
-    if (storage.bitmap()[idx / usize::BITS as usize].load(Ordering::Acquire) /* [Gb] */
-        >> (idx % usize::BITS as usize))
-        & 1
-        != 0
-    {
+    if contains_key_impl(storage, idx) {
         // load item
         // SAFETY: the bitmap has told us there is an item
-        Some(unsafe { &(*storage.table()[idx].get()).item }) /* [Gi] */
+        Some(unsafe { get_unchecked_impl(storage, idx) })
     } else {
         None
     }
+}
+
+// note: this method performs an acquire operation on the bitmap,
+// so is safe for establishing synchronization
+fn contains_key_impl<T>(storage: &CslabStorage<T>, idx: usize) -> bool {
+    if idx >= storage.len() {
+        return false;
+    }
+
+    // check flag
+    (storage.bitmap()[idx / usize::BITS as usize].load(Ordering::Acquire) /* [Gb] */
+        >> (idx % usize::BITS as usize))
+        & 1
+        != 0
+}
+
+// SAFETY: this method requires that we've already confirmed an item is present.
+// (It's OK if the item is pending removal.  But it must not actually be removed yet.)
+unsafe fn get_unchecked_impl<T>(storage: &CslabStorage<T>, idx: usize) -> &T {
+    unsafe { &(*storage.table()[idx].get()).item } /* [Gi] */
 }
 
 /// Cloneable read-only handle to a `Cslab`.
@@ -291,6 +302,23 @@ impl<T> CslabReader<T> {
     /// returned is however still valid.)
     pub fn get(&self, idx: usize) -> Option<&T> {
         get_impl(&*self.0, idx)
+    }
+
+    /// Like `get()`, but simply returns whether an item is present or not.
+    pub fn contains_key(&self, idx: usize) -> bool {
+        contains_key_impl(&*self.0, idx)
+    }
+
+    /// Gets an item known not to have been finalized.  (I.e., the item must be
+    /// present or pending removal.)
+    ///
+    /// # Safety
+    ///
+    /// A previous call to `get()` or `contains_key()` has indicated
+    /// that an item is present at this index, and `finalize_remove()`
+    /// has not been called on this index in the interim.
+    pub unsafe fn get_unchecked(&self, idx: usize) -> &T {
+        get_unchecked_impl(&*self.0, idx)
     }
 }
 
@@ -769,8 +797,8 @@ pub struct RcuCslabReader<T> {
     reader: CslabReader<T>,
 
     // a reference to the generation we were created in; we don't actually
-    // use the value, but keeping this reference is necessary to maintain
-    // total ordering of generations
+    // use the value, but keeping this reference is necessary to prevent
+    // finalization of the generation
     gen: Arc<RcuCslabGen<T>>,
 }
 
@@ -784,8 +812,32 @@ impl<T> RcuCslabReader<T> {
     /// synchronized, it is possible for this method to return items which
     /// have been marked for removal by the writer thread.  (The item
     /// returned is however still valid.)
+    ///
+    /// Note that, it is possible for this method to return `None`
+    /// even if it previously returned `Some`!  The only guarantee
+    /// this method gives is that the reference returned remains valid
+    /// for the lifetime of the reader.
     pub fn get(&self, idx: usize) -> Option<&T> {
         self.reader.get(idx)
+    }
+
+    /// Like `get()`, but simply returns whether an item is present or not.
+    pub fn contains_key(&self, idx: usize) -> bool {
+        self.reader.contains_key(idx)
+    }
+
+    /// Gets an item known not to have been finalized.  (I.e., the item must be
+    /// present or pending removal.)
+    ///
+    /// # Safety
+    ///
+    /// A previous call to `get()` or `contains_key()` has indicated
+    /// that an item is present at this index.
+    pub unsafe fn get_unchecked(&self, idx: usize) -> &T {
+        // SAFETY: the caller has ensured an item was once present here,
+        // and we are holding a reference to the current generation
+        // which prevents any removal of this item from being finalized
+        unsafe { self.reader.get_unchecked(idx) }
     }
 }
 
