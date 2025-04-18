@@ -28,8 +28,9 @@ impl ZprTun {
         }
         let addr = address.ok_or_else(|| {
             ZprTunError::PlatformError(String::from("address is required on macos"))
+            // TODO: Temporary
         })?;
-        let mut bldr = tun::Tun::builder(addr);
+        let mut bldr = tun::Tun::builder(addr.into());
         if let Some(name) = ifname {
             bldr.with_tun_name(&name);
         }

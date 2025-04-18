@@ -30,6 +30,7 @@ pub mod targets {
     pub const KEY_MGMT: &str = "key_mgmt";
     pub const LINK_STATE: &str = "link_state";
     pub const MGMT_EVENTS: &str = "mgmt_events";
+    pub const NET_OS: &str = "net_os";
     pub const PEER_MGMT: &str = "peer_mgmt";
     pub const REPORTING: &str = "reporting";
     pub const RPC: &str = "rpc";
@@ -47,6 +48,7 @@ pub mod targets {
         KEY_MGMT,
         LINK_STATE,
         MGMT_EVENTS,
+        NET_OS,
         PEER_MGMT,
         REPORTING,
         RPC,

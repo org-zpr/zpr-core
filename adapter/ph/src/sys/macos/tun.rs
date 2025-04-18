@@ -9,6 +9,7 @@ use std::ptr;
 use thiserror::Error;
 use tracing::*;
 
+use crate::logging::targets::NET_OS;
 use crate::zprtun::{DEFAULT_TUN_MTU, ZPRNET_PREFIX_LEN};
 
 use libc::{
@@ -83,25 +84,29 @@ impl AsFd for Tun {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum IPV {
+    V4,
+    V6,
+}
+
+impl From<IpAddr> for IPV {
+    fn from(addr: IpAddr) -> Self {
+        match addr {
+            IpAddr::V4(_) => IPV::V4,
+            IpAddr::V6(_) => IPV::V6,
+        }
+    }
+}
+
 impl Tun {
-    /// An address is required.
-    pub fn builder(tun_addr: IpAddr) -> Builder {
-        Builder::new(tun_addr)
+    /// Create a build to aid in configuring the tun.
+    pub fn builder(ipv: IPV) -> Builder {
+        Builder::new(ipv)
     }
 
     /// Create and configure the TUN device.
     pub fn create(config: &Builder) -> Result<Self, TunError> {
-        let mtu = config.mtu.unwrap_or(DEFAULT_TUN_MTU);
-        let prefix_len = config.prefix_len.unwrap_or(ZPRNET_PREFIX_LEN);
-        if prefix_len > 128 {
-            return Err(TunError::InvalidPrefixLen);
-        }
-        if config.ipv6 && mtu < IPV6_MMTU {
-            return Err(TunError::InvalidIpv6Mtu);
-        }
-        if !config.ipv6 && mtu < IPV4_MMTU {
-            return Err(TunError::InvalidIpv4Mtu);
-        }
         // The id is one plus the number after the "utun" prefix.
         // If we pass the kernel id=0 it will assign the next available id.
         let id = if let Some(tun_name) = config.name.as_ref() {
@@ -117,7 +122,7 @@ impl Tun {
         };
 
         let mut tundev = unsafe {
-            let fd = libc::socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
+            let fd = OwnedFd::from_raw_fd(libc::socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL));
             let mut info = ctl_info {
                 ctl_id: 0,
                 ctl_name: {
@@ -130,8 +135,7 @@ impl Tun {
             };
 
             // Obtain a ctl_id for utun controller
-            if let Err(err) = ctliocginfo(fd, &mut info as *mut _ as *mut _) {
-                libc::close(fd);
+            if let Err(err) = ctliocginfo(fd.as_raw_fd(), &mut info as *mut _ as *mut _) {
                 return Err(std::io::Error::from(err).into());
             }
 
@@ -146,8 +150,12 @@ impl Tun {
 
             // This 'connect' call will request creation of the TUN device
             let address = &addr as *const libc::sockaddr_ctl as *const sockaddr;
-            if libc::connect(fd, address, mem::size_of_val(&addr) as socklen_t) < 0 {
-                libc::close(fd);
+            if libc::connect(
+                fd.as_raw_fd(),
+                address,
+                mem::size_of_val(&addr) as socklen_t,
+            ) < 0
+            {
                 return Err(std::io::Error::last_os_error().into());
             }
 
@@ -156,8 +164,14 @@ impl Tun {
             let mut name_len: socklen_t = 64;
             let optval = &mut tun_name as *mut _ as *mut c_void;
             let optlen = &mut name_len as *mut socklen_t;
-            if libc::getsockopt(fd, SYSPROTO_CONTROL, UTUN_OPT_IFNAME, optval, optlen) < 0 {
-                libc::close(fd);
+            if libc::getsockopt(
+                fd.as_raw_fd(),
+                SYSPROTO_CONTROL,
+                UTUN_OPT_IFNAME,
+                optval,
+                optlen,
+            ) < 0
+            {
                 return Err(std::io::Error::last_os_error().into());
             }
 
@@ -165,33 +179,57 @@ impl Tun {
                 .to_string_lossy()
                 .into();
 
-            debug!("cerated TUN device with name: {}", tun_name_str);
-
             let ctl_sock;
-            if config.ipv6 {
+            if config.is_ipv6() {
                 ctl_sock = libc::socket(AF_INET6, SOCK_DGRAM, 0);
             } else {
                 ctl_sock = libc::socket(AF_INET, SOCK_DGRAM, 0);
             }
             if ctl_sock < 0 {
-                libc::close(fd);
                 return Err(std::io::Error::last_os_error().into());
             }
 
             Tun {
-                tun_fd: OwnedFd::from_raw_fd(fd),
+                tun_fd: fd,
                 ctl_fd: OwnedFd::from_raw_fd(ctl_sock),
                 name: tun_name_str,
             }
         };
-        info!("TUN device created: {}", tundev.name);
+        info!(target: NET_OS, "TUN device created: {}", tundev.name);
 
-        tundev.set_address(config.address, prefix_len)?;
-        tundev.set_mtu(mtu)?;
+        tundev.configure(config)?;
 
         // TODO: Set interface UP? Not required? Seems like kernel sets it to UP already.
 
         Ok(tundev)
+    }
+
+    // Post create configuration based on the builder.
+    fn configure(&mut self, config: &Builder) -> Result<(), TunError> {
+        let mtu: Option<u16>;
+        if let Some(addr) = config.address {
+            let prefix_len = config.prefix_len.unwrap_or(ZPRNET_PREFIX_LEN);
+            if prefix_len > 128 {
+                return Err(TunError::InvalidPrefixLen);
+            }
+            self.set_address(addr, prefix_len)?;
+
+            // If address is specified, always also set MTU
+            mtu = Some(config.mtu.unwrap_or(DEFAULT_TUN_MTU));
+        } else {
+            // Address not specied, only set MTU if it (MTU) is specified.
+            mtu = config.mtu;
+        }
+        if let Some(mtu) = mtu {
+            if config.is_ipv6() && mtu < IPV6_MMTU {
+                return Err(TunError::InvalidIpv6Mtu);
+            }
+            if !config.is_ipv6() && mtu < IPV4_MMTU {
+                return Err(TunError::InvalidIpv4Mtu);
+            }
+            self.set_mtu(mtu)?;
+        }
+        Ok(())
     }
 
     /// Prepare a new `ifreq` request for kernel control socket.  Fills in the name field.
@@ -208,7 +246,7 @@ impl Tun {
     }
 
     /// Set the address of the TUN device.  `prefix_len` is the prefix length for IPv6 and is ignored for IPv4.
-    fn set_address(&mut self, addr: IpAddr, prefix_len: usize) -> Result<(), TunError> {
+    pub fn set_address(&mut self, addr: IpAddr, prefix_len: usize) -> Result<(), TunError> {
         match addr {
             IpAddr::V4(ipv4) => self.set_address_ipv4(ipv4),
             IpAddr::V6(ipv6) => self.set_address_ipv6(ipv6, prefix_len),
@@ -258,7 +296,7 @@ impl Tun {
         }
     }
 
-    fn set_mtu(&mut self, value: u16) -> Result<(), TunError> {
+    pub fn set_mtu(&mut self, value: u16) -> Result<(), TunError> {
         unsafe {
             let mut req = self.request_v4()?;
             req.ifr_ifru.ifru_mtu = value as i32;
@@ -275,20 +313,39 @@ pub struct Builder {
     name: Option<String>,
     mtu: Option<u16>,
     prefix_len: Option<usize>,
-    address: IpAddr, // required
-    ipv6: bool,
+    address: Option<IpAddr>,
+    ipv: IPV,
 }
 
 impl Builder {
     /// Create a new builder, which is used to configure the TUN device.
-    pub fn new(tun_addr: IpAddr) -> Builder {
+    /// You must choose either IPv4 or IPv6.
+    fn new(ipv: IPV) -> Builder {
         Builder {
             name: None,
             mtu: None,
             prefix_len: None,
-            address: tun_addr,
-            ipv6: tun_addr.is_ipv6(),
+            address: None,
+            ipv,
         }
+    }
+
+    pub fn is_ipv6(&self) -> bool {
+        self.ipv == IPV::V6
+    }
+
+    /// Set the address of the TUN device.  If you set this in the builder then
+    /// the address will be assigned when you create the TUN device.
+    #[allow(dead_code)]
+    pub fn with_address(&mut self, addr: IpAddr) -> &mut Self {
+        if addr.is_ipv4() && self.is_ipv6() {
+            panic!("Cannot set IPv4 address on IPv6 TUN device");
+        }
+        if addr.is_ipv6() && !self.is_ipv6() {
+            panic!("Cannot set IPv6 address on IPv4 TUN device");
+        }
+        self.address = Some(addr);
+        self
     }
 
     /// Tun name is optional. If provided must be of format "utun<N>" where N is a number.
