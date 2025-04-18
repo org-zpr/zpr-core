@@ -370,10 +370,9 @@ impl<T> std::ops::Deref for RcuCslabEntryGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        let entry = self.guard.get(self.key);
-        // SAFETY: this can only be constructed via methods
-        // which validate that the guarded entry is present
-        unsafe { entry.unwrap_unchecked() }
+        // SAFETY: we've validated already (in `get_guarded`) that the key
+        // was at one point visible to this reader
+        unsafe { self.guard.get_unchecked(self.key) }
     }
 }
 
@@ -383,10 +382,10 @@ impl<T> RcuBox<cslab::RcuCslabReader<T>> {
     /// for efficiency/ease of use.
     pub fn get_guarded(&self, key: usize) -> Option<RcuCslabEntryGuard<'_, T>> {
         let guard = self.get();
-        if guard.get(key).is_none() {
-            None
-        } else {
+        if guard.contains_key(key) {
             Some(RcuCslabEntryGuard { guard, key })
+        } else {
+            None
         }
     }
 }
