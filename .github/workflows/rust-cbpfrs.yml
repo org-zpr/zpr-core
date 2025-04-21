@@ -18,46 +18,40 @@ env:
 jobs:
   cbpf-build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./cbpf-rs
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    - name: Build + test cbpf
+
+    - name: Install dependencies
       timeout-minutes: 5
       run: |
-        sudo apt update
+        echo "set man-db/auto-update false" | sudo debconf-communicate
+        sudo dpkg-reconfigure man-db
         sudo apt install libpcap-dev
-        cd cbpf-rs && cargo build --verbose
-        cargo test --verbose
 
-  cbpf-format:
-    needs: [cbpf-build]
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+    - name: Build cbpf
+      id: build
+      timeout-minutes: 5
+      run: cargo build --verbose
+
+    - name: Test cbpf
+      if: ${{ ! cancelled() && steps.build.outcome == 'success' }}
+      timeout-minutes: 5
+      run: cargo test --verbose
+
     - name: Check format
-      timeout-minutes: 5
-      run: |
-        cd cbpf-rs
-        cargo fmt --check
+      if: ${{ ! cancelled() }}
+      timeout-minutes: 1
+      run: cargo fmt --check
 
-  cbpf-warnings:
-    needs: [cbpf-build]
-    runs-on: ubuntu-latest
-    steps: 
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
     - name: Check warnings
+      if: ${{ ! cancelled() && steps.build.outcome == 'success' }}
       timeout-minutes: 5
-      run: |
-        cd cbpf-rs
-        cargo rustc -- -D warnings
+      run: cargo rustc -- -D warnings
 
-  cbpf-test-warnings:
-    needs: [cbpf-build]
-    runs-on: ubuntu-latest
-    steps: 
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
     - name: Check test warnings
+      if: ${{ ! cancelled() && steps.build.outcome == 'success' }}
       timeout-minutes: 5
-      run: |
-        sudo apt update
-        sudo apt install libpcap-dev
-        cd cbpf-rs && cargo rustc --tests -- -D warnings
+      run: cargo rustc --tests -- -D warnings

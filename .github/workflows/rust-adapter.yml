@@ -21,14 +21,18 @@ env:
   CARGO_NET_GIT_FETCH_WITH_CLI: true
 
 jobs:
-  # Tests for ph
-  ph-build:
+  # Build and upload ph
+  build-ph:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+    # Necessary to run before rust-cache
+    - run: rustup toolchain install stable --profile minimal
     - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
       with:
         workspaces: |
@@ -45,44 +49,39 @@ jobs:
         chmod +x "$HOME/.git-askpass"
         echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
 
-    - name: Build + test ph
+    - name: Build PH
       timeout-minutes: 5
       env:
         ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        make ph
-        cd adapter/ph
-        make test
+      working-directory: ./adapter/ph
+      run: make
 
-    - name: Check format
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        cd adapter/ph
-        cargo fmt --check
+    - name: Package ph
+      timeout-minutes: 1
+      run: tar -cvf ph.tar adapter/ph/target/debug/ph
 
-    - name: Check warnings
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        cd adapter/ph
-        cargo rustc --bin ph -- -D warnings
+    - name: Upload build artifacts
+      id: upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: ph-${{ matrix.os }}
+        path: ph.tar
+        retention-days: 1
 
-    - name: Check test warnings
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        cd adapter/ph
-        cargo rustc --tests -- -D warnings
-
-  # Tests for ph-cli
-  ph-cli-build:
-    runs-on: ubuntu-latest
+  # Test ph, check for warnings, and check formatting
+  test-ph:
+    needs: [build-ph]
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ./adapter/ph
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+    # Necessary to run before rust-cache
+    - run: rustup toolchain install stable --profile minimal
     - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
       with:
         workspaces: |
@@ -92,55 +91,153 @@ jobs:
           cslab
           cbpf-rs
 
-    - name: Build + test ph
-      timeout-minutes: 5
+    - name: Setup Git credentials
+      timeout-minutes: 1
       run: |
-        sudo apt update
-        sudo apt install libpcap-dev
-        cd adapter/cli && cargo build --verbose
-        cargo test --verbose
+        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+        chmod +x "$HOME/.git-askpass"
+        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
 
-  ph-cli-format:
-    needs: [ph-cli-build]
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+    - uses: actions/download-artifact@v4
+      with:
+        name: ph-${{ matrix.os }}
+
+    - name: Unpack artifacts
+      working-directory: ./
+      run: tar -xvf ph.tar
+
+    - name: Run PH unit tests
+      if: ${{ ! cancelled() }}
+      timeout-minutes: 5
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+      run: make test
+
     - name: Check format
-      timeout-minutes: 5
-      run: |
-        cd adapter/cli
-        cargo fmt --check
+      if: ${{ ! cancelled() }}
+      timeout-minutes: 1
+      run: cargo fmt --check
 
-  ph-cli-warnings:
-    needs: [ph-cli-build]
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
     - name: Check warnings
+      if: ${{ ! cancelled() }}
       timeout-minutes: 5
-      run: |
-        sudo apt update
-        sudo apt install libpcap-dev
-        cd adapter/cli && cargo rustc -- -D warnings
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+      run: cargo rustc --bin ph -- -D warnings
 
-  ph-cli-test-warnings:
-    needs: [ph-cli-build]
+    - name: Check test warnings
+      if: ${{ ! cancelled() }}
+      timeout-minutes: 5
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+      run: cargo rustc --tests -- -D warnings
+
+  # Build and upload ph-cli
+  build-ph-cli:
     runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    - name: Check test warnings
+    # Necessary to run before rust-cache
+    - run: rustup toolchain install stable --profile minimal
+    - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+      with:
+        workspaces: |
+          adapter/ph
+          adapter/cli
+          zpr-ext
+          cslab
+          cbpf-rs
+
+    - name: Install dependencies
       timeout-minutes: 5
       run: |
-        sudo apt update
+        echo 'set man-db/auto-update false' | sudo debconf-communicate
+        sudo dpkg-reconfigure man-db
         sudo apt install libpcap-dev
-        cd adapter/cli && cargo rustc --tests -- -D warnings
+
+    - name: Build ph-cli
+      timeout-minutes: 5
+      working-directory: ./adapter/cli
+      run: cargo build --verbose
+
+    - name: Package ph-cli
+      timeout-minutes: 1
+      run: tar -cvf ph-cli.tar adapter/cli/target/debug/ph-cli
+
+    - name: Upload build artifacts
+      id: upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: ph-cli
+        path: ph-cli.tar
+        retention-days: 1
+
+  # Test ph-cli, check for warnings, and check formatting
+  test-ph-cli:
+    needs: [build-ph-cli]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./adapter/cli
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+    # Necessary to run before rust-cache
+    - run: rustup toolchain install stable --profile minimal
+    - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      with:
+        workspaces: |
+          adapter/ph
+          adapter/cli
+          zpr-ext
+          cslab
+          cbpf-rs
+
+    - name: Install dependencies
+      timeout-minutes: 5
+      run: |
+        echo 'set man-db/auto-update false' | sudo debconf-communicate
+        sudo dpkg-reconfigure man-db
+        sudo apt install libpcap-dev
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: ph-cli
+
+    - name: Unpack artifacts
+      working-directory: ./
+      run: tar -xvf ph-cli.tar
+
+    - name: Test ph-cli
+      timeout-minutes: 5
+      run: cargo test --verbose
+
+    - name: Check format
+      if: ${{ ! cancelled() }}
+      timeout-minutes: 1
+      run: cargo fmt --check
+
+    - name: Check warnings
+      if: ${{ ! cancelled() }}
+      timeout-minutes: 5
+      run: cargo rustc -- -D warnings
+
+    - name: Check test warnings
+      if: ${{ ! cancelled() }}
+      timeout-minutes: 5
+      run: cargo rustc --tests -- -D warnings
 
   # Integration tests
   basic-integration-test:
-    needs: [ph-build, ph-cli-build]
+    needs: [build-ph, build-ph-cli]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+    # Necessary to run before rust-cache
+    - run: rustup toolchain install stable --profile minimal
     - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
       with:
         workspaces: |
@@ -162,16 +259,19 @@ jobs:
         echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
         go env -w GOPRIVATE="github.com/org-zpr/*"
 
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: ph-{cli,ubuntu-latest}
+        merge-multiple: true
+
     - name: Build
       timeout-minutes: 10
       env:
         ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
       run: |
-        sudo apt update
-        sudo apt install libpcap-dev
-        make ph
+        tar -xvf ph.tar
+        tar -xvf ph-cli.tar
         make visaservice
-        cargo build --manifest-path adapter/cli/Cargo.toml
 
     - name: One Node v6 Test
       timeout-minutes: 10
@@ -179,10 +279,12 @@ jobs:
         ZPR_TEST_VERBOSE=1 integration-test/one-node-v6-test.sh
 
   capture-integration-test:
-    needs: [ph-build, ph-cli-build]
+    needs: [build-ph, build-ph-cli]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+    # Necessary to run before rust-cache
+    - run: rustup toolchain install stable --profile minimal
     - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
       with:
         workspaces: |
@@ -204,16 +306,19 @@ jobs:
         echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
         go env -w GOPRIVATE="github.com/org-zpr/*"
 
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: ph-{cli,ubuntu-latest}
+        merge-multiple: true
+
     - name: Build
       timeout-minutes: 10
       env:
         ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
       run: |
-        sudo apt update
-        sudo apt install libpcap-dev
-        make ph
-        make visaservice
-        cargo build --manifest-path adapter/cli/Cargo.toml
+        tar -xvf ph.tar
+        tar -xvf ph-cli.tar
+        cd visaservice && make build-go
 
     - name: Capture Test
       timeout-minutes: 10
