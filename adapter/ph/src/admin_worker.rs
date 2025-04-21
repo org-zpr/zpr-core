@@ -1,4 +1,4 @@
-//! Receives commands, either from ph-debug tool or from someone directly interfacing
+//! Receives commands, either from the cli or from someone directly interfacing
 //! with the socket, performs action based on received command
 //! To avoid excess parsing, the command must not have spaces
 

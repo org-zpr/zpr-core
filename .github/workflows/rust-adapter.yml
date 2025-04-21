@@ -6,7 +6,7 @@ on:
   pull_request:
     paths:
       - 'adapter/ph/**'
-      - 'adapter/ph-debug/**'
+      - 'adapter/cli/**'
       - 'zpr-ext/**'
       - 'cslab/**'
       - 'cbpf-rs/**'
@@ -33,7 +33,7 @@ jobs:
       with:
         workspaces: |
           adapter/ph
-          adapter/ph-debug
+          adapter/cli
           zpr-ext
           cslab
           cbpf-rs
@@ -78,8 +78,8 @@ jobs:
         cd adapter/ph
         cargo rustc --tests -- -D warnings
 
-  # Tests for ph-debug
-  ph-debug-build:
+  # Tests for ph-cli
+  ph-cli-build:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -87,7 +87,7 @@ jobs:
       with:
         workspaces: |
           adapter/ph
-          adapter/ph-debug
+          adapter/cli
           zpr-ext
           cslab
           cbpf-rs
@@ -97,22 +97,22 @@ jobs:
       run: |
         sudo apt update
         sudo apt install libpcap-dev
-        cd adapter/ph-debug && cargo build --verbose
+        cd adapter/cli && cargo build --verbose
         cargo test --verbose
 
-  ph-debug-format:
-    needs: [ph-debug-build]
+  ph-cli-format:
+    needs: [ph-cli-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
     - name: Check format
       timeout-minutes: 5
       run: |
-        cd adapter/ph-debug
+        cd adapter/cli
         cargo fmt --check
 
-  ph-debug-warnings:
-    needs: [ph-debug-build]
+  ph-cli-warnings:
+    needs: [ph-cli-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -121,10 +121,10 @@ jobs:
       run: |
         sudo apt update
         sudo apt install libpcap-dev
-        cd adapter/ph-debug && cargo rustc -- -D warnings
+        cd adapter/cli && cargo rustc -- -D warnings
 
-  ph-debug-test-warnings:
-    needs: [ph-debug-build]
+  ph-cli-test-warnings:
+    needs: [ph-cli-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -133,11 +133,11 @@ jobs:
       run: |
         sudo apt update
         sudo apt install libpcap-dev
-        cd adapter/ph-debug && cargo rustc --tests -- -D warnings
+        cd adapter/cli && cargo rustc --tests -- -D warnings
 
   # Integration tests
   basic-integration-test:
-    needs: [ph-build, ph-debug-build]
+    needs: [ph-build, ph-cli-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -145,7 +145,7 @@ jobs:
       with:
         workspaces: |
           adapter/ph
-          adapter/ph-debug
+          adapter/cli
           zpr-ext
           cslab
           cbpf-rs
@@ -171,7 +171,7 @@ jobs:
         sudo apt install libpcap-dev
         make ph
         make visaservice
-        cargo build --manifest-path adapter/ph-debug/Cargo.toml
+        cargo build --manifest-path adapter/cli/Cargo.toml
 
     - name: One Node v6 Test
       timeout-minutes: 10
@@ -179,7 +179,7 @@ jobs:
         ZPR_TEST_VERBOSE=1 integration-test/one-node-v6-test.sh
 
   capture-integration-test:
-    needs: [ph-build, ph-debug-build]
+    needs: [ph-build, ph-cli-build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -187,7 +187,7 @@ jobs:
       with:
         workspaces: |
           adapter/ph
-          adapter/ph-debug
+          adapter/cli
           zpr-ext
           cslab
           cbpf-rs
@@ -213,7 +213,7 @@ jobs:
         sudo apt install libpcap-dev
         make ph
         make visaservice
-        cargo build --manifest-path adapter/ph-debug/Cargo.toml
+        cargo build --manifest-path adapter/cli/Cargo.toml
 
     - name: Capture Test
       timeout-minutes: 10

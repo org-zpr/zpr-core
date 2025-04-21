@@ -20,11 +20,11 @@ info:
 	@echo
 
 
-it-so: deps adapter ph ph-debug visaservice
+it-so: deps adapter ph ph-cli visaservice
 
 it-gone:
 	cd adapter/ph && cargo clean
-	cd adapter/ph-debug && cargo clean
+	cd adapter/cli && cargo clean
 	cd cbpf-rs && cargo clean
 	cd cslab && cargo clean
 	$(MAKE) -C libnode dist-clean
@@ -35,7 +35,7 @@ it-gone:
 
 test:
 	$(MAKE) -C adapter/ph test
-	cd adapter/ph-debug && cargo test
+	cd adapter/cli && cargo test
 	cd cbpf-rs && cargo test
 	cd cslab && cargo test
 	$(MAKE) -C libnode test
@@ -52,8 +52,8 @@ libnode:
 ph: libnode
 	$(MAKE) -C adapter/ph
 
-ph-debug:
-	cd adapter/ph-debug && cargo build
+ph-cli:
+	cd adapter/cli && cargo build
 
 diagrams:
 	$(MAKE) -C diagrams
@@ -71,6 +71,6 @@ visaservice:
 	$(MAKE) -C visaservice all
 
 
-.PHONY: it-so it-gone test deps libnode ph ph-debug diagrams cbpf cslab zpr-ext visaservice
+.PHONY: it-so it-gone test deps libnode ph ph-cli diagrams cbpf cslab zpr-ext visaservice
 
 .DEFAULT_GOAL := info

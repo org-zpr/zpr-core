@@ -4,7 +4,7 @@ set -euo pipefail
 export RUST_BACKTRACE=1
 
 PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
-PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/ph-debug/target/debug/ph-debug")
+PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/cli/target/debug/ph-cli")
 VS_BIN=$(realpath "$(dirname $0)/../visaservice/core/build/vservice")
 VS_ADMIN_BIN=$(realpath "$(dirname $0)/../visaservice/vs-admin/target/debug/vs-admin")
 PREGEN=$(realpath "$(dirname $0)/pregen")
