@@ -5,7 +5,7 @@ use nix::unistd::{self, Gid, Uid};
 use std::os::unix::process::CommandExt;
 use std::process::Command;
 
-use users::get_user_by_name;
+use uzers::get_user_by_name;
 
 use crate::sys::PlatformErr;
 
