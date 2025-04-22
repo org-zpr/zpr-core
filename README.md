@@ -91,8 +91,8 @@ openssl x509 -req -in zpr.csr -CA auth-ca.crt -CAkey auth-ca.key -CAcreateserial
 ### Create Noise keys and signed certificates for all
 
 Use the `tools/zpr-pki` tool to create NOISE keys for all the participants:
-- `./zpr-pki >node-noise.key`
-- `./zpr-pki >adapter-vs-noise.key`
+- `./zpr-pki genkey >node-noise.key`
+- `./zpr-pki genkey >adapter-vs-noise.key`
 - (and so on for other adapters)
 
 Once you have private key (PEM) files, you need to create certificates as follows:
