@@ -7,6 +7,7 @@ use crate::counters;
 use crate::defs::*;
 use crate::link_state::LinkEvent;
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
+use crate::mgmt::requests::send_init_authentication;
 use crate::net_defs::IpAddress;
 use crate::packet::Packet;
 use crate::zdp;
@@ -88,6 +89,33 @@ pub async fn handle_echo_request(
     Ok(())
 }
 
+/// TODO: Not yet in RFC 6
+///
+/// This is a fire and forget message from the node telling us that authentication
+/// is needed.  Upon receipt, we should take steps to perform authentication with
+/// an authentication service.
+///
+/// If we (the receiver) is configured to perform bootstrap authentication and the
+/// packet includes the necessary bits (nonce, etc) we should do bootstrap authentication
+/// now.
+pub async fn handle_init_authentication(_asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
+    let ingress_link_id = pkt.metadata().ingress_link_id;
+
+    let Ok(payload) = zdp::ZdpInitAuthenticationPayload::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+
+    if payload.flags & zdp::init_authentication_flags::BOOTSTRAP_SUPPORT != 0 {
+        // bootstrap is supported
+        debug!(target: ZDP, "Received Init Authentication for link {ingress_link_id} with nonce {:x?}", payload.nonce);
+        // TODO: run the self authentication -- if this adapter is configured to do so.
+    } else {
+        debug!(target: ZDP, "Received Init Authentication for link {ingress_link_id} -- bootstrap not supported");
+    }
+
+    Ok(())
+}
+
 /// handle a Terminate Request (RFC 6.5 § 6.3.3)
 pub async fn handle_terminate_request(
     asm: &Arc<Assembly>,
@@ -161,10 +189,11 @@ pub async fn handle_hello_request(
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
 
-    hdr.status =
+    let send_init: bool;
+    (hdr.status, send_init) =
         match asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest) {
-            Err(_) => zdp::ResponseCode::Other,
-            Ok(()) => zdp::ResponseCode::Success,
+            Err(_) => (zdp::ResponseCode::Other, false),
+            Ok(()) => (zdp::ResponseCode::Success, true),
         };
 
     super::core::send_non_flow_mgmt_response(
@@ -175,6 +204,10 @@ pub async fn handle_hello_request(
         rsp_pkt,
     )
     .await;
+
+    if send_init {
+        send_init_authentication(asm, ingress_link_id).await;
+    }
     Ok(())
 }
 

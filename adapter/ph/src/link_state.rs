@@ -527,6 +527,12 @@ impl LinkStateWrapper {
     /// Update link state based on received register actor address request
     /// Transitions from Registering Actor Address to Active
     /// Does not generate any packets
+    ///
+    /// The "Register Actor Address" is to become the "Acquire ZPR Address"
+    /// message soon.  In that version, the Acquire message will include a
+    /// BLOB showing evidence of authentication which we can evaluate and
+    /// pass to the visa service.  Visa service will grant access and an
+    /// address and call back down here to [process_authorize_response].
     fn process_register_actor_address_request(
         &self,
         asm: &Arc<Assembly>,

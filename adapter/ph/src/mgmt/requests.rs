@@ -7,9 +7,12 @@ use crate::counters::CounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
 use crate::mgmt::core::SyncReqError;
+use crate::peer_table::AUTH_KEY_SIZE_BYTES;
 use crate::zdp;
 use bytes::{Buf, BufMut};
+use openssl::rand::rand_bytes;
 use std::net::IpAddr;
+use std::time::SystemTime;
 use thiserror::Error;
 use tracing::*;
 use zpr;
@@ -90,6 +93,83 @@ pub async fn send_hello_request(
             Err(())
         }
     }
+}
+
+/// Send Init Authentication (NOT YET IN RFC 6)
+///
+/// This call is not integrated into the link state machine and is called
+/// as a side effect in the Hello Request handler ([handlers::handle_hello_request]).
+///
+/// Message payload is ([zdp::ZdpInitAuthenticationPayload]):
+///
+///     offset  0: flags (1 byte)
+///     offset  1: 8-byte nonce
+///     offset  9: 8-byte (64 bit, big endian) create time (unix seconds)
+///     offset 17: 32-byte blake3 hash
+///
+/// Blake 3 hash is used in keyed-hash mode. The peer_table keeps track of a 256-bit
+/// key on each link.  It in the future it may even change it from time to time.
+/// The nonce and hash are returned in the bootstrap authentication BLOB and
+/// are checked by the node before processing.
+///
+pub async fn send_init_authentication(asm: &Assembly, link_id: zpr::LinkId) {
+    let ctime = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as u64;
+    let be_time = ctime.to_be_bytes();
+
+    let mut nonce = [0u8; 8];
+
+    // TODO: Whether or not we are in bootstrap mode comes from visa service.  For now hardcoded ON.
+    let is_bootstrap = true;
+
+    let payload: zdp::ZdpInitAuthenticationPayload;
+
+    if is_bootstrap {
+        rand_bytes(&mut nonce).expect("failed to generate random bytes for nonce");
+
+        // TODO: Pretty sure I do not need `inspect_sync` below. The key is set at create time and not changed.
+        let key = asm.peer_table.inspect(link_id, {
+            |peer| {
+                let mut key = [0u8; AUTH_KEY_SIZE_BYTES];
+                key[0..AUTH_KEY_SIZE_BYTES].copy_from_slice(&peer.auth_key[0..AUTH_KEY_SIZE_BYTES]);
+                key
+            }
+        });
+
+        match key {
+            Some(key) => {
+                let mut hasher = blake3::Hasher::new_keyed(&key);
+                hasher.update(&nonce);
+                hasher.update(&be_time);
+                let hmac = blake3::keyed_hash(&key, &nonce);
+                payload = zdp::ZdpInitAuthenticationPayload {
+                    flags: zdp::init_authentication_flags::BOOTSTRAP_SUPPORT,
+                    nonce,
+                    ctime: ctime.into(),
+                    hmac: hmac.into(),
+                }
+            }
+            None => {
+                // TODO: Possibly we want to send the Init Authentication message anyway, but
+                //       just not support bootstrap mode.
+                error!(target: ZDP, "unable to send Init Authentication: no auth key found for link {link_id}");
+                return;
+            }
+        }
+    } else {
+        // non-bootstrap mode, just send empty payload.
+        payload = zdp::ZdpInitAuthenticationPayload {
+            flags: 0x0,
+            nonce,
+            ctime: 0.into(),
+            hmac: [0u8; 32],
+        };
+    }
+    let mut pkt = core::new_heap_packet();
+    payload.write_to_buf(&mut pkt).unwrap();
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::InitAuthentication, pkt).await;
 }
 
 /// send a Register Actor Address Request (RFC 6.5 § 6.3.10)
