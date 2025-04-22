@@ -8,7 +8,7 @@ use crate::packet_queue;
 use crate::sys::{TunPi, ZprTun};
 use crate::zprtun;
 use bytes::Buf;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Result};
 use std::net::{SocketAddr, UdpSocket};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::sync::Arc;
@@ -19,6 +19,13 @@ pub struct FastpathIo {
     substrate_socket: UdpSocket,
     pub requeue_outq: packet_queue::Receiver<{ config::PACKET_BUFFER_SIZE }>,
     pub mgmt_substrate_outq: packet_queue::Receiver<{ config::PACKET_BUFFER_SIZE }>,
+
+    /// temporary packet storage during I/O batch operations
+    packets: Vec<Packet>,
+    /// temporary read result storage during I/O batch operations
+    io_results: Vec<Result<usize>>,
+    /// temporary recv result storage during I/O batch operations
+    recv_results: Vec<Result<(usize, Option<SocketAddr>)>>,
 }
 
 impl FastpathIo {
@@ -46,6 +53,9 @@ impl FastpathIo {
             substrate_socket,
             requeue_outq,
             mgmt_substrate_outq,
+            packets: Vec::with_capacity(config.batch_size),
+            io_results: Vec::with_capacity(config.batch_size),
+            recv_results: Vec::with_capacity(config.batch_size),
         }
     }
 
@@ -70,24 +80,26 @@ impl FastpathIo {
     }
 
     /// Process an input-ready notification on the substrate socket (substrate ingress).
-    pub fn process_substrate_socket_in(
-        &mut self,
-        worker: &mut FastpathWorker,
-        pkts: &mut Vec<Packet>,
-    ) {
-        let mut results = Vec::new(); // TODO: recycle
+    pub fn process_substrate_socket_in(&mut self, worker: &mut FastpathWorker) {
+        let _nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut self.packets);
+
+        self.io_results.clear();
         let n = self
             .batch_io
-            .try_recv_buf_from_batch(&self.substrate_socket, pkts.iter_mut(), &mut results)
+            .try_recv_buf_from_batch(
+                &self.substrate_socket,
+                self.packets.iter_mut(),
+                &mut self.recv_results,
+            )
             .unwrap();
 
         // return empty buffers to pool
         worker
             .buffers
-            .extend(pkts.drain(n..).rev().map(|pkt| pkt.destroy()));
+            .extend(self.packets.drain(n..).rev().map(|pkt| pkt.destroy()));
 
         // process packets
-        for (pkt, result) in pkts.drain(..).zip(results) {
+        for (pkt, result) in self.packets.drain(..).zip(self.recv_results.drain(..)) {
             let mut sender = match result {
                 Ok((size, _sender)) if size > pkt.remaining() => {
                     worker.drop_and_count(pkt, CounterType::DroppedOversize);
@@ -132,20 +144,26 @@ impl FastpathIo {
     }
 
     /// Process an input-ready notification on the actor TUN (actor output).
-    pub fn process_actor_tun_in(&mut self, worker: &mut FastpathWorker, pkts: &mut Vec<Packet>) {
-        let mut results = Vec::new(); // TODO: recycle
+    pub fn process_actor_tun_in(&mut self, worker: &mut FastpathWorker) {
+        let _nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut self.packets);
+
+        self.io_results.clear();
         let n = self
             .batch_io
-            .try_read_buf_batch(&self.actor_tun, pkts.iter_mut(), &mut results)
+            .try_read_buf_batch(
+                &self.actor_tun,
+                self.packets.iter_mut(),
+                &mut self.io_results,
+            )
             .unwrap();
 
         // return empty buffers to pool
         worker
             .buffers
-            .extend(pkts.drain(n..).rev().map(|pkt| pkt.destroy()));
+            .extend(self.packets.drain(n..).rev().map(|pkt| pkt.destroy()));
 
         // process packets
-        for (mut pkt, result) in pkts.drain(..).zip(results) {
+        for (mut pkt, result) in self.packets.drain(..).zip(self.io_results.drain(..)) {
             if let Err(err) = result {
                 match err.kind() {
                     ErrorKind::WouldBlock | ErrorKind::ResourceBusy => {
@@ -223,19 +241,19 @@ impl FastpathIo {
         }
 
         // (Try to) send packets.
-        let mut results = Vec::new(); // TODO: recycle
+        self.io_results.clear();
         let n = self
             .batch_io
             .try_write_batch(
                 &self.actor_tun.as_fd(),
                 worker.actor_input_q.iter().map(|pkt| pkt.body()),
-                &mut results,
+                &mut self.io_results,
             )
             .expect("unrecoverable TUN error");
 
         // Tally results.
         let mut dropped = worker.actor_input_q.len() - n;
-        for res in results {
+        for res in self.io_results.drain(..) {
             match res {
                 Ok(_) => (),
                 Err(err) if err.kind() == ErrorKind::WouldBlock => dropped += 1,
@@ -255,7 +273,7 @@ impl FastpathIo {
     /// Egress queued substrate egress packets only.
     fn process_substrate_egress_queue(&mut self, worker: &mut FastpathWorker) {
         // (Try to) send packets.
-        let mut results = Vec::new(); // TODO: recycle
+        self.io_results.clear();
         let n = self
             .batch_io
             .try_send_to_batch(
@@ -264,7 +282,7 @@ impl FastpathIo {
                     .substrate_egress_q
                     .iter()
                     .map(|(pkt, dest)| (pkt.body(), *dest)),
-                &mut results,
+                &mut self.io_results,
             )
             .expect("unrecoverable I/O error");
 
@@ -276,7 +294,7 @@ impl FastpathIo {
             // Determine whether the packet was in fact sent.
             // If it was, leave it in place and skip to the next packet.
             if i < n {
-                match &results[i] {
+                match &self.io_results[i] {
                     Ok(_) => continue,
                     Err(err) if err.kind() == ErrorKind::WouldBlock => (),
                     // TODO: pending <https://github.com/rust-lang/rust/issues/86442>, provide more info to user
@@ -296,6 +314,7 @@ impl FastpathIo {
                 dropped += 1;
             }
         }
+        self.io_results.clear();
 
         // Now all un-sent priority packets are at the head of the queue.
 

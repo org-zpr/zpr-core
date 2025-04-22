@@ -101,24 +101,12 @@ fn fastpath_main(mut worker: FastpathWorker, mut io: FastpathIo) {
 
         if revents[PollSlot::Substrate].contains(poll::PollFlags::POLLIN) {
             // read from socket
-            let mut pkts = Vec::new(); // TODO: recycle
-            let nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
-            if nbufs == 0 {
-                continue;
-            }
-
-            io.process_substrate_socket_in(&mut worker, &mut pkts);
+            io.process_substrate_socket_in(&mut worker);
         }
 
         if revents[PollSlot::Tun].contains(poll::PollFlags::POLLIN) {
             // read from TUN device
-            let mut pkts = Vec::new(); // TODO: recycle
-            let nbufs = worker.get_fresh_packets(worker.config.batch_size, &mut pkts);
-            if nbufs == 0 {
-                continue;
-            }
-
-            io.process_actor_tun_in(&mut worker, &mut pkts);
+            io.process_actor_tun_in(&mut worker);
         }
 
         if revents[PollSlot::Returns].contains(poll::PollFlags::POLLIN) {
