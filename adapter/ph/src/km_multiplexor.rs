@@ -313,7 +313,6 @@ fn add_noise_link(
 ///
 /// # Errors
 ///
-/// - [KmMsgProcessingError::InvalidState] if the KM state machine is in an invalid state.
 /// - [KmMsgProcessingError::EnqueueFailed] if the message could not be enqueued on the state machine.
 /// - [KmMsgProcessingError::LinkUnconfigured] if the link is not configured for Key Management.
 ///

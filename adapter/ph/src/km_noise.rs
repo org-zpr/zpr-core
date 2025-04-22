@@ -171,7 +171,7 @@ impl KmNoise {
     ///
     /// This requires Noise keys.  Eventually (TODO) we will also pass certificates through here
     /// so that each side can check for certificate authority signautre.
-    /// (https://github.com/org-zpr/zpr-core/issues/419)
+    /// (<https://github.com/org-zpr/zpr-core/issues/419>)
     ///
     /// The ZPI stuff here is definately first pass. Currently there is no way to change the
     /// ZPI values.  The ZPIs passed in here are sent to the peer for use in messages sent to us.

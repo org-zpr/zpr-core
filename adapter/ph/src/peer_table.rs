@@ -234,7 +234,7 @@ impl PeerTable {
         Ok(())
     }
 
-    /// At some point shortly after the link security assocaition is initialized, the [km_multiplexor] will
+    /// At some point shortly after the link security assocaition is initialized, the [crate::km_multiplexor] will
     /// stash its handle in here.
     ///
     /// Only possible error is if there is no entry in the table under the `link_id`.
