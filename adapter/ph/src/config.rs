@@ -9,6 +9,7 @@ use base64::prelude::*;
 use serde::Deserialize;
 
 use crate::assembly::PhMode;
+use crate::bootstrap::RsaBootstrapAuth;
 use crate::km_cert_exchange;
 use crate::km_noise::NOISE_KEY_LEN;
 
@@ -73,11 +74,11 @@ pub struct Config {
     pub certificate_file: PathBuf,
 
     /// Path to a PEM file containing the noise private key, if specified.
-    /// One of either [private_key_file] or [private_key_data] must be specified.
+    /// One of either `private_key_file` or `private_key_data` must be specified.
     private_key_file: Option<PathBuf>,
 
     /// The noise private key data, base64 encoded. User has option to set this through an environment variable.
-    /// One of either [private_key_file] or [private_key_data] must be specified.
+    /// One of either `private_key_file` or `private_key_data` must be specified.
     private_key_data: Option<String>,
 
     /// Optionally specify the name of the TUN interface to use. In most cases this
@@ -98,6 +99,8 @@ pub struct Config {
 
     /// Required for adapter - the path to the PEM file containing the nodes noise public key (not a certificate).
     pub node_public_key_file: Option<PathBuf>,
+
+    pub bootstrap: Option<RsaBootstrapAuth>,
 }
 
 impl Config {
@@ -387,6 +390,7 @@ impl Default for Config {
             node_addr: None,
             zpr_addr: Vec::new(),
             node_public_key_file: None,
+            bootstrap: None,
         }
     }
 }

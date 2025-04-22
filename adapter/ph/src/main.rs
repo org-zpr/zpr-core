@@ -20,6 +20,7 @@ mod adapter_tables;
 mod admin_worker;
 mod assembly;
 mod batch_io;
+mod bootstrap;
 mod capture_worker;
 mod classifier;
 mod compress;
