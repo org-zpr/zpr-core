@@ -14,21 +14,11 @@ use openssl::sign::Signer;
 use base64::prelude::*;
 use thiserror::Error;
 
-use zerocopy::byteorder::network_endian::*; // XXX
-use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned}; // XXX
 
 use serde::{Deserialize, Serialize};
 
-// XXX This struct from zdp is pending in another PR
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[allow(dead_code)]
-#[repr(packed)]
-pub struct ZdpInitAuthenticationPayload {
-    pub flags: u8,
-    pub nonce: [u8; 8],
-    pub ctime: U64,
-    pub hmac: [u8; 32],
-}
+use crate::zdp::ZdpInitAuthenticationPayload;
+
 
 /// "self signed" blob type
 const BLOB_TYPE_SS: &str = "SS";
