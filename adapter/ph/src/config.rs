@@ -9,8 +9,7 @@ use base64::prelude::*;
 use serde::Deserialize;
 
 use crate::assembly::PhMode;
-use crate::km_cert_exchange;
-use crate::km_noise::NOISE_KEY_LEN;
+use crate::pki::{load_noise_private_key, NOISE_KEY_LEN};
 
 use crate::main_args::{ArgsError, CommonArgs};
 
@@ -116,7 +115,7 @@ impl Config {
             return Ok(key_data);
         }
         if let Some(ref pkf) = self.private_key_file {
-            return km_cert_exchange::load_private_key(&pkf).map_err(|e| {
+            return load_noise_private_key(&pkf).map_err(|e| {
                 ArgsError::ParseError(format!("failed to load private key from file: {e:?}"))
             });
         }

@@ -48,6 +48,7 @@ mod packet_queue;
 mod packet_steering;
 mod pcap_writer;
 mod peer_table;
+mod pki;
 mod queues;
 mod rcu;
 mod sample_ring;
@@ -75,6 +76,7 @@ use fastpath::FastpathWorkerConfig;
 use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
+use pki::{load_cert, load_noise_public_key};
 use logging::targets::STARTUP;
 use queues::*;
 use sys::ZprTun;
@@ -146,7 +148,7 @@ fn main() -> ExitCode {
         peer_noise_keypair = None;
         self_noise_keypair = Some(NoiseKeypair::new(private_key));
     } else {
-        let public_key = match km_cert_exchange::load_public_key(&Path::new(
+        let public_key = match load_noise_public_key(&Path::new(
             &config.node_public_key_file.unwrap(),
         )) {
             Ok(key) => key,
@@ -300,7 +302,7 @@ fn main() -> ExitCode {
     let vs_outq;
 
     if ph_mode == PhMode::Node {
-        let node_cert = km_cert_exchange::load_cert(&config.certificate_file)
+        let node_cert = load_cert(&config.certificate_file)
             .expect("unable to read certificate");
 
         let node_name = node_cert
