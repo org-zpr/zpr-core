@@ -23,10 +23,8 @@ use tracing::error;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
-
 use crate::logging::targets::KEY_MGMT;
 use crate::pki::{load_cert, ParseError};
-
 
 #[derive(Debug)]
 pub enum CertExchangeError {
@@ -39,7 +37,6 @@ pub enum CertExchangeError {
     CertificateVerificationError,
     KeyMismatchError,
 }
-
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
@@ -197,9 +194,6 @@ impl KmCertExchange {
         return Ok(initiator_cert);
     }
 }
-
-
-
 
 #[cfg(test)]
 mod test {

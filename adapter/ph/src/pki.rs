@@ -1,24 +1,20 @@
 //! Collection of PKI related utility functions.
 
-use std::path::Path;
 use std::fs;
+use std::path::Path;
 
 use openssl::pkey::PKey;
 use openssl::x509::X509;
 use thiserror::Error;
 use tracing::error;
 
-use crate::logging::targets::KEY_MGMT;  // TODO: eliminate logging from this module
-
-
+use crate::logging::targets::KEY_MGMT; // TODO: eliminate logging from this module
 
 const PEM_BEGIN_CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END_CERTIFICATE: &str = "-----END CERTIFICATE-----";
 
 /// The size in bytes of a noise key.
 pub const NOISE_KEY_LEN: usize = 32;
-
-
 
 #[derive(Debug, Error)]
 pub enum ParseError {
@@ -34,9 +30,6 @@ pub enum ParseError {
     #[error("I/O error {0}")]
     IOError(#[from] std::io::Error),
 }
-
-
-
 
 /// Look for first instance of "-----BEGIN CERTIFICATE-----" and return that up to and
 /// including the "-----END CERTIFICATE-----" line.
@@ -69,7 +62,6 @@ fn extract_cert_pem_data(textdata: &str) -> Result<String, ParseError> {
     }
 }
 
-
 /// Load a certificate from a file.
 pub fn load_cert(path: &Path) -> Result<X509, ParseError> {
     let contents = match fs::read_to_string(path) {
@@ -85,7 +77,6 @@ pub fn load_cert(path: &Path) -> Result<X509, ParseError> {
         }
     }
 }
-
 
 /// Load a private X22519 key from a PEM file
 pub fn load_noise_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {
@@ -114,7 +105,6 @@ pub fn load_noise_private_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseE
         }
     }
 }
-
 
 /// Load a public X22519 key from a PEM file
 pub fn load_noise_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseError> {

@@ -76,8 +76,8 @@ use fastpath::FastpathWorkerConfig;
 use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
-use pki::{load_cert, load_noise_public_key};
 use logging::targets::STARTUP;
+use pki::{load_cert, load_noise_public_key};
 use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
@@ -148,15 +148,14 @@ fn main() -> ExitCode {
         peer_noise_keypair = None;
         self_noise_keypair = Some(NoiseKeypair::new(private_key));
     } else {
-        let public_key = match load_noise_public_key(&Path::new(
-            &config.node_public_key_file.unwrap(),
-        )) {
-            Ok(key) => key,
-            Err(e) => {
-                error!(target: STARTUP, "failed to load node public key file: {e:?}");
-                return ExitCode::FAILURE;
-            }
-        };
+        let public_key =
+            match load_noise_public_key(&Path::new(&config.node_public_key_file.unwrap())) {
+                Ok(key) => key,
+                Err(e) => {
+                    error!(target: STARTUP, "failed to load node public key file: {e:?}");
+                    return ExitCode::FAILURE;
+                }
+            };
         peer_noise_keypair = Some(NoiseKeypair {
             public: public_key,
             private: [0u8; 32], // unknown
@@ -302,8 +301,7 @@ fn main() -> ExitCode {
     let vs_outq;
 
     if ph_mode == PhMode::Node {
-        let node_cert = load_cert(&config.certificate_file)
-            .expect("unable to read certificate");
+        let node_cert = load_cert(&config.certificate_file).expect("unable to read certificate");
 
         let node_name = node_cert
             .subject_name()

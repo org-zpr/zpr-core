@@ -63,7 +63,6 @@ pub const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte no
 // The size (in bytes) of the random HMAC key used for messages over which we just compute a hmac.
 const HMAC_KEY_LEN: usize = 32;
 
-
 impl From<snow::Error> for KmError {
     fn from(e: snow::Error) -> KmError {
         KmError::MachineError(e.to_string())
