@@ -10,6 +10,7 @@ use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use enum_map::EnumMap;
+use openssl::rand::rand_bytes;
 use std::default::Default;
 use std::future::Future;
 use std::num::NonZero;
@@ -25,6 +26,8 @@ use zpr::{self, LinkId, SubstrateAddr, LINK_ID_UNKNOWN};
 
 const PEER_TABLE_SIZE: usize = 1024;
 
+pub const AUTH_KEY_SIZE_BYTES: usize = 32; // blake3 256bit key
+
 pub struct PeerState {
     pub substrate_addr: SubstrateAddr,
     pub link_state_machine: LinkStateWrapper,
@@ -32,6 +35,7 @@ pub struct PeerState {
     pub pft: PeerForwardingTable,
     pub mgmt_processor: queues::MgmtProcessor,
     pub mgmt_processor_worker: task::JoinHandle<()>,
+    pub auth_key: [u8; 32], // set in ::new and never changed.
     km_state: PeerKmState,
 }
 
@@ -79,6 +83,10 @@ impl PeerState {
 
         let mgmt_processor_worker = task::spawn_local(launch_mgmt_processor_worker(mp_outq));
 
+        let mut key = [0u8; AUTH_KEY_SIZE_BYTES];
+        if link_type == LinkType::NodeToAdapter {
+            rand_bytes(&mut key).expect("failed to generate random bytes for peer auth key");
+        }
         Self {
             substrate_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
@@ -87,6 +95,7 @@ impl PeerState {
             mgmt_processor,
             mgmt_processor_worker,
             km_state: PeerKmState::new(),
+            auth_key: key,
         }
     }
 
@@ -396,6 +405,7 @@ pub mod test {
             mgmt_processor,
             mgmt_processor_worker: task::spawn(async {}),
             km_state: PeerKmState::new(),
+            auth_key: [42u8; AUTH_KEY_SIZE_BYTES],
         }
     }
 }

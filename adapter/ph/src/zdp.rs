@@ -47,6 +47,7 @@ pub enum ZdpPacketType {
     UnregisterActorAddressRequest = 143,
     UnregisterActorAddressResponse = 144,
     Report = 145,
+    InitAuthentication = 146, // TODO: add to RFC 6
 }
 
 pub const ZDP_PACKET_TYPE_NON_FLOW_FLAG: u8 = 0x80;
@@ -136,6 +137,21 @@ pub struct ZdpHelloResponseHeader {
     // Policy ID
     // Version info len
     // Version info
+}
+
+/// Bitflags for the [ZdpInitAuthenticationPayload] flags field.
+pub mod init_authentication_flags {
+    pub const BOOTSTRAP_SUPPORT: u8 = 0x01;
+}
+
+/// Tentative -- pending inclusion into spec.
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpInitAuthenticationPayload {
+    pub flags: u8,
+    pub nonce: [u8; 8],
+    pub ctime: U64,
+    pub hmac: [u8; 32],
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]

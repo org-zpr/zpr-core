@@ -101,6 +101,10 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                 handlers::handle_hello_response(asm, seq_num, pkt).await
             }
 
+            ZdpPacketType::InitAuthentication => {
+                handlers::handle_init_authentication(asm, pkt).await
+            }
+
             ZdpPacketType::RegisterActorAddressRequest => {
                 handlers::handle_register_actor_address_request(asm, seq_num, pkt).await
             }
