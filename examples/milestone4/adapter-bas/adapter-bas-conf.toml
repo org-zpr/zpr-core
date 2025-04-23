@@ -13,8 +13,7 @@ tun_if = "tun9"
 [adapter]
 node_addr = "192.168.4.69:5000"
 node_public_key_file = "node-noise-pub.pem"
-bootstrap = "rsa"
-rsa_key = "adapter-bas-rsa.key"
+bootstrap_key = "adapter-bas-rsa.key"
 
 
 

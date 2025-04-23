@@ -64,8 +64,8 @@ pub struct RsaBootstrapAuth {
 /// Implementes BootstrapAuth using our RSA signature scheme.
 impl RsaBootstrapAuth {
     /// Create a new RsaBootstrapAuth object.
-    /// The cn is the common name of the actor.
-    /// The rsa_keyfile is the path to the PEM file containing the RSA private key.
+    /// The `cn` is the common name of the actor.
+    /// The `rsa_keyfile` is the path to the PEM file containing the RSA private key.
     /// The visa service (policy) must be configured with the corresponding public key.
     pub fn new(cn: &str, rsa_keyfile: &Path) -> Result<Self, BootstrapError> {
         let pemdata = std::fs::read(rsa_keyfile)?;
@@ -88,6 +88,7 @@ impl RsaBootstrapAuth {
         &self,
         payload: &ZdpInitAuthenticationPayload,
     ) -> Result<String, BootstrapError> {
+        // TODO: Check the payload.flags?
         // TODO: This could be an impl function in zdp
         let mut challenge = [0u8; 48];
         challenge[0..8].copy_from_slice(&payload.nonce);
