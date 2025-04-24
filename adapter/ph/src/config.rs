@@ -9,7 +9,7 @@ use base64::prelude::*;
 use serde::Deserialize;
 
 use crate::assembly::PhMode;
-use crate::bootstrap::RsaBootstrapAuth;
+use crate::auth::RsaBootstrapAuth;
 use crate::km_cert_exchange;
 use crate::km_noise::NOISE_KEY_LEN;
 
@@ -583,6 +583,6 @@ mod test {
             node_public_key_file = "node_pubkey.pem"
             bootstrap_key = "rsa_key.pem"
             "#;
-        let config: AdapterConfigSection = toml::from_str(toml_str).unwrap();
+        let _config: AdapterConfigSection = toml::from_str(toml_str).unwrap();
     }
 }

@@ -6,12 +6,12 @@
 
 use std::fs;
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use clap::Parser;
 
 use crate::assembly::PhMode;
-use crate::bootstrap;
+use crate::auth;
 use crate::main_args::{ArgsError, Command, Control};
 
 use crate::config::{AdapterConfig, Config, NodeConfig};
@@ -85,7 +85,7 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
                         )))
                     })?;
                 }
-                config.bootstrap = Some(bootstrap::RsaBootstrapAuth::new(
+                config.bootstrap = Some(auth::RsaBootstrapAuth::new(
                     &config.get_noise_cn()?,
                     &bootstrap_key,
                 )?);
@@ -155,6 +155,7 @@ mod test {
     use std::fs;
     use std::net::{IpAddr, SocketAddr};
     use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::PathBuf;
 
     struct TempFile {
         path: String,

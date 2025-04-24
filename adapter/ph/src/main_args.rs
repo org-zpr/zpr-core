@@ -4,7 +4,7 @@
 //! and any config file, returning a PH configuration.
 
 use crate::logging::targets::*;
-use crate::bootstrap::BootstrapError;
+use crate::auth::AuthError;
 use clap::{Args, Parser, Subcommand};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -26,7 +26,7 @@ pub enum ArgsError {
     PathError(String),
 
     #[error("bootstrap config error: {0}")]
-    BootstrapError(#[from] BootstrapError),
+    AuthError(#[from] AuthError),
 }
 
 /// ZPR Packet Handler

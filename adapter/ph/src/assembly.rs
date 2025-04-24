@@ -1,4 +1,5 @@
 use crate::adapter_tables;
+use crate::auth::RsaBootstrapAuth;
 use crate::capture_worker::CaptureWorker;
 use crate::config;
 use crate::counters::*;
@@ -89,6 +90,7 @@ pub struct Assembly {
     pub self_noise_keypair: Option<NoiseKeypair>,
     pub peer_noise_keypair: Option<NoiseKeypair>,
     pub certx: Option<KmCertExchange>,
+    pub bsauth: Option<RsaBootstrapAuth>,
     pub system_start_time: std::time::Instant,
 }
 
@@ -450,6 +452,7 @@ pub mod test {
             peer_noise_keypair: None,
             certx: None,
             system_start_time: std::time::Instant::now(),
+            bsauth: None,
         }
     }
 }

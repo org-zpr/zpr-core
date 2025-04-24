@@ -2,17 +2,14 @@
 #![allow(dead_code)]
 
 use super::core;
-use crate::assembly::Assembly;
+use crate::{assembly::Assembly, auth};
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
 use crate::mgmt::core::SyncReqError;
-use crate::peer_table::AUTH_KEY_SIZE_BYTES;
 use crate::zdp;
 use bytes::{Buf, BufMut};
-use openssl::rand::rand_bytes;
 use std::net::IpAddr;
-use std::time::SystemTime;
 use thiserror::Error;
 use tracing::*;
 use zpr;
@@ -97,137 +94,218 @@ pub async fn send_hello_request(
 
 /// Send Init Authentication (NOT YET IN RFC 6)
 ///
-/// This call is not integrated into the link state machine and is called
-/// as a side effect in the Hello Request handler ([handlers::handle_hello_request]).
+/// A side effect in the Hello Request handler ([handlers::handle_hello_request]).
 ///
 /// Message payload is ([zdp::ZdpInitAuthenticationPayload]):
-///
-///     offset  0: flags (1 byte)
-///     offset  1: 8-byte nonce
-///     offset  9: 8-byte (64 bit, big endian) create time (unix seconds)
-///     offset 17: 32-byte blake3 hash
 ///
 /// Blake 3 hash is used in keyed-hash mode. The peer_table keeps track of a 256-bit
 /// key on each link.  It in the future it may even change it from time to time.
 /// The nonce and hash are returned in the bootstrap authentication BLOB and
 /// are checked by the node before processing.
 ///
-pub async fn send_init_authentication(asm: &Assembly, link_id: zpr::LinkId) {
-    let ctime = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as u64;
-    let be_time = ctime.to_be_bytes();
-
-    let mut nonce = [0u8; 8];
-
+pub async fn send_init_authentication_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<zdp::ResponseCode, ()> {
     // TODO: Whether or not we are in bootstrap mode comes from visa service.  For now hardcoded ON.
     let is_bootstrap = true;
 
-    let payload: zdp::ZdpInitAuthenticationPayload;
+    let payload: auth::ZdpInitAuthenticationPayload;
+    let mut flags = 0u8;
 
     if is_bootstrap {
-        rand_bytes(&mut nonce).expect("failed to generate random bytes for nonce");
+        flags |= zdp::init_authentication_flags::BOOTSTRAP_SUPPORT;
 
         // TODO: Pretty sure I do not need `inspect_sync` below. The key is set at create time and not changed.
         let key = asm.peer_table.inspect(link_id, {
             |peer| {
-                let mut key = [0u8; AUTH_KEY_SIZE_BYTES];
-                key[0..AUTH_KEY_SIZE_BYTES].copy_from_slice(&peer.auth_key[0..AUTH_KEY_SIZE_BYTES]);
+                let mut key = [0u8; auth::AUTH_KEY_SIZE_BYTES];
+                key[0..auth::AUTH_KEY_SIZE_BYTES].copy_from_slice(&peer.auth_key[0..auth::AUTH_KEY_SIZE_BYTES]);
                 key
             }
         });
-
         match key {
             Some(key) => {
-                let mut hasher = blake3::Hasher::new_keyed(&key);
-                hasher.update(&nonce);
-                hasher.update(&be_time);
-                let hmac = blake3::keyed_hash(&key, &nonce);
-                payload = zdp::ZdpInitAuthenticationPayload {
-                    flags: zdp::init_authentication_flags::BOOTSTRAP_SUPPORT,
-                    nonce,
-                    ctime: ctime.into(),
-                    hmac: hmac.into(),
-                }
+                payload = auth::create_bootstrap_authentication_payload(&key)
             }
             None => {
                 // TODO: Possibly we want to send the Init Authentication message anyway, but
                 //       just not support bootstrap mode.
                 error!(target: ZDP, "unable to send Init Authentication: no auth key found for link {link_id}");
-                return;
+                return Err(());
             }
         }
     } else {
-        // non-bootstrap mode, just send empty payload.
-        payload = zdp::ZdpInitAuthenticationPayload {
-            flags: 0x0,
-            nonce,
-            ctime: 0.into(),
-            hmac: [0u8; 32],
-        };
+        payload = auth::create_empty_authentication_payload();
     }
-    let mut pkt = core::new_heap_packet();
-    payload.write_to_buf(&mut pkt).unwrap();
-    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::InitAuthentication, pkt).await;
-}
-
-/// send a Register Actor Address Request (RFC 6.5 § 6.3.10)
-pub async fn send_register_actor_address_request(
-    asm: &Assembly,
-    link_id: zpr::LinkId,
-    actor_addr: IpAddr,
-) -> Result<zdp::ResponseCode, ()> {
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
-        zdp::ZdpPacketType::RegisterActorAddressRequest,
-        zdp::ZdpPacketType::RegisterActorAddressResponse,
-        move |mut req| match actor_addr {
-            IpAddr::V4(addr) => {
-                zdp::ZdpRegisterActorAddressRequestHeader {
-                    ip_version: zpr::L3Type::Ipv4,
-                }
-                .write_to_buf(&mut req)
-                .unwrap();
-                req.put(&addr.octets()[..]);
-            }
+        zdp::ZdpPacketType::InitAuthenticationRequest,
+        zdp::ZdpPacketType::InitAuthenticationResponse,
+        move |mut req| {
+            let hdr = zdp::ZdpInitAuthenticationRequestHeader {
+                flags,
+                data_len: (size_of::<auth::ZdpInitAuthenticationPayload>() as u16).into(),
+            };
+            hdr.write_to_buf(&mut req).unwrap();
+            payload.write_to_buf(&mut req).unwrap();
+        },
+    ).await;
 
-            IpAddr::V6(addr) => {
-                zdp::ZdpRegisterActorAddressRequestHeader {
-                    ip_version: zpr::L3Type::Ipv6,
+    match response {
+        Ok(mut init_auth_res) => {
+            let Ok(hdr) = zdp::ZdpInitAuthenticationResponseHeader::read_from_buf(&mut init_auth_res)
+            else {
+                core::count_event(asm, &mut init_auth_res, CounterType::BadStructure);
+                return Err(());
+            };
+            let status = hdr.status_code;
+            debug!(target: ZDP, "Received InitAuthenticationResponse, status: {status:?}");
+            Ok(status)
+        }
+
+        Err(err) => {
+            warn!(target: ZDP, "{} error with InitAuthenticationRequest", err);
+            Err(())
+        }
+    }
+}
+
+
+/// Send an AcquireZPRAddressRequest (TODO: not yet in RFC 6)
+///
+/// All requested addresses must be same IP version.
+/// The `blob` is for bootstrap authentcation and can be empty.
+///
+/// Once this returns the link_state should transition to RegisterAA
+/// as we wait for a grant.
+pub async fn send_acquire_zpr_address_request(
+    asm: &Assembly,
+    link_id: zpr::LinkId,
+    actor_addrs: &[IpAddr],
+    blob: Option<Vec<u8>>,
+) -> Result<zdp::ResponseCode, ()> {
+
+    // Copy the blob amd addrs for use in closure below.
+    let blob_data = blob.unwrap_or_default();
+    let mut c_actor_addrs = Vec::new();
+    c_actor_addrs.extend_from_slice(actor_addrs);
+
+    let response = core::send_sync_non_flow_req(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::AcquireZprAddressRequest,
+        zdp::ZdpPacketType::AcquireZprAddressResponse,
+        move |mut req| {
+
+            let ip_version = if c_actor_addrs.is_empty() {
+                zpr::L3Type::Ipv6 // whatever, doesn't matter since count is zero.
+            } else {
+                c_actor_addrs[0].into()
+            };
+            let hdr = zdp::ZdpAcquireZprAddressRequestHeader {
+                blob_len: (blob_data.len() as u16).into(),
+                ip_version,
+                addr_count: c_actor_addrs.len() as u8,
+            };
+            hdr.write_to_buf(&mut req).unwrap();
+            if !blob_data.is_empty() {
+                req.put_slice(&blob_data);
+            }
+            for addr in &c_actor_addrs {
+                match addr {
+                    IpAddr::V4(addr) => req.put(&addr.octets()[..]),
+                    IpAddr::V6(addr) => req.put(&addr.octets()[..]),
                 }
-                .write_to_buf(&mut req)
-                .unwrap();
-                req.put(&addr.octets()[..]);
             }
         },
     )
     .await;
 
-    // TODO: Break these apart
     match response {
-        Ok(mut register_res) => {
-            let Ok(hdr) =
-                zdp::ZdpRegisterActorAddressResponseHeader::read_from_buf(&mut register_res)
+        Ok(mut rpkt) => {
+            let Ok(hdr) = zdp::ZdpAcquireZprAddressResponseHeader::read_from_buf(&mut rpkt)
             else {
-                core::count_event(asm, &mut register_res, CounterType::BadStructure);
+                core::count_event(asm, &mut rpkt, CounterType::BadStructure);
                 return Err(());
             };
-            debug!(
-                target: ZDP,
-                "Received RegisterActorAddressResponse, status: {:?}",
-                hdr.status_code
-            );
-            return Ok(hdr.status_code);
+            let resp_code = hdr.status_code;
+            info!("Received AcquireZprAddressResponse, status: {:?}", resp_code);
+            Ok(resp_code)
         }
 
         Err(err) => {
-            warn!(target: ZDP, "{err} error with RegisterActorAddressRequest");
-            return Err(());
+            warn!("{} error with AcquireZprAddressResponse", err);
+            Err(())
         }
     }
 }
+
+
+
+/// Send an GrantZprAddressRequest (TODO: not yet in RFC 6)
+///
+/// All granted addresses must be same IP version.
+///
+/// Once this returns the link_state should transition from RegisterAA
+/// to (I think) Active.
+pub async fn send_grant_zpr_address_request(
+    asm: &Assembly,
+    link_id: zpr::LinkId,
+    status_code: zdp::ResponseCode,
+    actor_addrs: &[IpAddr],
+) -> Result<zdp::ResponseCode, ()> {
+
+    let mut c_actor_addrs = Vec::new();
+    c_actor_addrs.extend_from_slice(actor_addrs);
+
+    let response = core::send_sync_non_flow_req(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::GrantZprAddressRequest,
+        zdp::ZdpPacketType::GrantZprAddressResponse,
+        move |mut req| {
+
+            let ip_version = if c_actor_addrs.is_empty() {
+                zpr::L3Type::Ipv6 // whatever, doesn't matter since count is zero.
+            } else {
+                c_actor_addrs[0].into()
+            };
+            let hdr = zdp::ZdpGrantZprAddressRequestHeader {
+                status_code,
+                ip_version,
+                addr_count: c_actor_addrs.len() as u8,
+            };
+            hdr.write_to_buf(&mut req).unwrap();
+            for addr in &c_actor_addrs {
+                match addr {
+                    IpAddr::V4(addr) => req.put(&addr.octets()[..]),
+                    IpAddr::V6(addr) => req.put(&addr.octets()[..]),
+                }
+            }
+        },
+    )
+    .await;
+
+    match response {
+        Ok(mut rpkt) => {
+            let Ok(hdr) = zdp::ZdpGrantZprAddressResponseHeader::read_from_buf(&mut rpkt)
+            else {
+                core::count_event(asm, &mut rpkt, CounterType::BadStructure);
+                return Err(());
+            };
+            let resp_code = hdr.status_code;
+            info!("Received GrantZprAddressResponse, status: {:?}", resp_code);
+            Ok(resp_code)
+        }
+
+        Err(err) => {
+            warn!("{} error with GrantZprAddressResponse", err);
+            Err(())
+        }
+    }
+}
+
+
+
 
 /// send a Terminate Request (RFC 6.5 § 6.3.3)
 pub async fn send_terminate_request<'a, 'pktbuf>(

@@ -88,6 +88,15 @@ impl std::fmt::Display for L3Type {
     }
 }
 
+impl From<IpAddr> for L3Type {
+    fn from(ip: IpAddr) -> Self {
+        match ip {
+            IpAddr::V4(_) => Self::Ipv4,
+            IpAddr::V6(_) => Self::Ipv6,
+        }
+    }
+}
+
 /// Bitmask indicating how an actor packet is compressed.
 pub type CompressionMode = u8;
 

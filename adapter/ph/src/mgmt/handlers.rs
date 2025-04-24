@@ -1,13 +1,13 @@
 //! Handlers for management requests.
 
 use crate::adapter_tables;
+use crate::auth;
 use crate::assembly::{self, Assembly, PhMode};
 use crate::config;
 use crate::counters;
 use crate::defs::*;
 use crate::link_state::LinkEvent;
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
-use crate::mgmt::requests::send_init_authentication;
 use crate::net_defs::IpAddress;
 use crate::packet::Packet;
 use crate::zdp;
@@ -22,6 +22,7 @@ pub enum HandleMgmtError {
     UnknownType(u8),
     BadStructure,
     LinkStateError,
+    NonSuccess(zdp::ResponseCode),
 }
 
 impl From<HandleMgmtError> for counters::CounterType {
@@ -30,6 +31,7 @@ impl From<HandleMgmtError> for counters::CounterType {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,
             HandleMgmtError::BadStructure => Self::BadStructure,
             HandleMgmtError::LinkStateError => Self::OtherError,
+            HandleMgmtError::NonSuccess(_code) => Self::OtherError,
         }
     }
 }
@@ -91,27 +93,63 @@ pub async fn handle_echo_request(
 
 /// TODO: Not yet in RFC 6
 ///
-/// This is a fire and forget message from the node telling us that authentication
-/// is needed.  Upon receipt, we should take steps to perform authentication with
-/// an authentication service.
+/// Message from node requesting authentication.
 ///
-/// If we (the receiver) is configured to perform bootstrap authentication and the
-/// packet includes the necessary bits (nonce, etc) we should do bootstrap authentication
-/// now.
-pub async fn handle_init_authentication(_asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
+///
+pub async fn handle_init_authentication_request(
+    asm: &Arc<Assembly>,
+    seq_num: zpr::SeqNum,
+    mut pkt: Packet
+) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
-    let Ok(payload) = zdp::ZdpInitAuthenticationPayload::read_from_buf(&mut pkt) else {
+
+    let Ok(hdr) = zdp::ZdpInitAuthenticationRequestHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
+    let is_bootstrap = hdr.flags & zdp::init_authentication_flags::BOOTSTRAP_SUPPORT != 0;
 
-    if payload.flags & zdp::init_authentication_flags::BOOTSTRAP_SUPPORT != 0 {
-        // bootstrap is supported
-        debug!(target: ZDP, "Received Init Authentication for link {ingress_link_id} with nonce {:x?}", payload.nonce);
-        // TODO: run the self authentication -- if this adapter is configured to do so.
+
+    let challenge_opt: Option<auth::ZdpInitAuthenticationPayload>;
+
+    if is_bootstrap {
+        if hdr.data_len == 0 {
+            warn!(target: ZDP, "Received Init Authentication with bootstrap support but no payload");
+            return Err((HandleMgmtError::BadStructure, pkt));
+        }
+        if hdr.data_len < size_of::<auth::ZdpInitAuthenticationPayload>() as u16 {
+            warn!(target: ZDP, "Received Init Authentication with unexpected payload size {}", hdr.data_len);
+            return Err((HandleMgmtError::BadStructure, pkt));
+        }
+        if pkt.remaining() < usize::from(hdr.data_len) {
+            warn!(target: ZDP, "packet too short for payload");
+            return Err((HandleMgmtError::BadStructure, pkt));
+        }
+        debug!(target: ZDP, "Received Init Authentication w/bootstrap for link {ingress_link_id}");
+
+        let Ok(payload) = auth::ZdpInitAuthenticationPayload::read_from_buf(&mut pkt) else {
+            return Err((HandleMgmtError::BadStructure, pkt));
+        };
+        challenge_opt = Some(payload);
     } else {
         debug!(target: ZDP, "Received Init Authentication for link {ingress_link_id} -- bootstrap not supported");
+        challenge_opt = None;
     }
+
+    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpInitAuthenticationResponseHeader>();
+    hdr.status_code = zdp::ResponseCode::Success;
+
+    super::core::send_non_flow_mgmt_response(
+        asm,
+        ingress_link_id,
+        zdp::ZdpPacketType::InitAuthenticationResponse,
+        seq_num,
+        rsp_pkt,
+    )
+    .await;
+
+    let _ = asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedInitAuth((is_bootstrap, challenge_opt)));
 
     Ok(())
 }
@@ -177,6 +215,7 @@ pub async fn handle_terminate_indication(
 }
 
 /// handle a Hello Request (RFC 6.5 § 6.3.4)
+/// Reads the hello, fire a ReceivedHelloRequest event, and then sends a response.
 pub async fn handle_hello_request(
     asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
@@ -189,11 +228,11 @@ pub async fn handle_hello_request(
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
 
-    let send_init: bool;
-    (hdr.status, send_init) =
+
+    hdr.status =
         match asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest) {
-            Err(_) => (zdp::ResponseCode::Other, false),
-            Ok(()) => (zdp::ResponseCode::Success, true),
+            Err(_) => zdp::ResponseCode::Other,
+            Ok(()) => zdp::ResponseCode::Success,
         };
 
     super::core::send_non_flow_mgmt_response(
@@ -205,12 +244,12 @@ pub async fn handle_hello_request(
     )
     .await;
 
-    if send_init {
-        send_init_authentication(asm, ingress_link_id).await;
-    }
     Ok(())
 }
 
+/// TODO: When is this called? Aren't hello-requests sent through the link state SYNC request thing?
+///       If that's true then the response will be directed there not here. Right?
+///
 /// handle a Hello Response (RFC 6.5 § 6.3.4)
 pub async fn handle_hello_response(
     asm: &Arc<Assembly>,
@@ -235,8 +274,23 @@ pub async fn handle_hello_response(
     Ok(())
 }
 
-/// handle a Register Actor Address Request (RFC 6.5 § 6.3.10)
-pub async fn handle_register_actor_address_request(
+/// Handle the AcquireZprAddressRequest (TODO: Not yet in RFC 6)
+///
+/// This message is from an adapter to a node.  Or in the future from
+/// a joining node to an existing node.
+///
+/// This request must include an authentication blob from the
+/// adapter.
+///
+/// In the future we (node/vs) will assign a ZPR address to the adapter
+/// after verifying authentication.  During a transition period to full
+/// authentication we permit the adapter to send us an address it wants
+/// to have and if authentication succeeds, we just send that address
+/// back (in the grant message).
+///
+/// The authentication blob may come from bootstrap auth or from real
+/// auth-service auth.
+pub async fn handle_acquire_zpr_address_request(
     asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
     mut pkt: Packet,
@@ -244,13 +298,15 @@ pub async fn handle_register_actor_address_request(
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     let mut status_code = zdp::ResponseCode::Other;
-    if let Ok(actor_address) = parse_register_actor_address_request(&mut pkt) {
-        debug!(target: ZDP, "Received Register Actor Address Request for link {ingress_link_id} with address {actor_address}");
+    if let Ok((actor_addresses, blob)) = parse_acquire_zpr_address_request(&mut pkt) {
+
+        debug!(target: ZDP,
+            "Received Register Actor Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
 
         if asm
             .process_link_state_event(
                 ingress_link_id,
-                LinkEvent::ReceivedRegisterRequest(actor_address),
+                LinkEvent::ReceivedAcquireZprAddressRequest(actor_addresses, blob),
             )
             .is_ok()
         {
@@ -258,14 +314,15 @@ pub async fn handle_register_actor_address_request(
         }
     }
 
+    // Send an ACK.
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpRegisterActorAddressResponseHeader>();
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpAcquireZprAddressResponseHeader>();
     hdr.status_code = status_code;
 
     super::core::send_non_flow_mgmt_response(
         asm,
         ingress_link_id,
-        zdp::ZdpPacketType::RegisterActorAddressResponse,
+        zdp::ZdpPacketType::AcquireZprAddressResponse,
         seq_num,
         rsp_pkt,
     )
@@ -273,55 +330,216 @@ pub async fn handle_register_actor_address_request(
     Ok(())
 }
 
-fn parse_register_actor_address_request(pkt: &mut Packet) -> Result<IpAddress, HandleMgmtError> {
-    let Ok(hdr) = zdp::ZdpRegisterActorAddressRequestHeader::read_from_buf(pkt) else {
-        return Err(HandleMgmtError::BadStructure);
-    };
 
-    let actor_address: IpAddress;
-    match hdr.ip_version {
-        zpr::L3Type::Ipv4 => {
-            let Ok(actor_addr) = <[u8; 4]>::read_from_buf(pkt) else {
-                return Err(HandleMgmtError::BadStructure);
-            };
-            actor_address = actor_addr.into();
-        }
-        zpr::L3Type::Ipv6 => {
-            let Ok(actor_addr) = <[u8; 16]>::read_from_buf(pkt) else {
-                return Err(HandleMgmtError::BadStructure);
-            };
-            actor_address = actor_addr.into();
-        }
-
-        _ => {
-            return Err(HandleMgmtError::BadStructure);
-        }
-    }
-    Ok(actor_address)
-}
-
-/// handle a Register Actor Address Response (RFC 6.5 § 6.3.10)
-pub async fn handle_register_actor_address_response(
+/// Handle the GrantZprAddressRequest (TODO: Not yet in RFC 6)
+///
+/// This message comes from a node post verification of the authentication blob
+/// which we get in an Acquire message.
+///
+/// This will fire off a link state event that includes the addresses.
+/// If the request indicates a fail, we send the event with empty address list.
+pub async fn handle_grant_zpr_address_request(
     asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
+    seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
-    let Ok(hdr) = zdp::ZdpRegisterActorAddressResponseHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
-    };
-    let status = hdr.status_code;
 
-    debug!(target: ZDP, "Received Register Actor Address Response for link {ingress_link_id} with status {status:?}");
+    let mut status_code = zdp::ResponseCode::Other;
 
-    if asm
-        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedRegisterResponse(status))
-        .is_err()
-    {
-        return Err((HandleMgmtError::LinkStateError, pkt));
-    };
+    match parse_grant_zpr_address_request(&mut pkt) {
+        Ok(actor_addresses) => {
+            debug!(target: ZDP,
+                "Received Register Grant Zpr Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
+            if asm
+                .process_link_state_event(
+                    ingress_link_id,
+                    LinkEvent::ReceivedGrantZprAddressRequest(Some(actor_addresses))
+                )
+                .is_ok()
+            {
+                status_code = zdp::ResponseCode::Success;
+            }
+        }
+        Err(HandleMgmtError::NonSuccess(c)) => {
+            info!(target: ZDP, "Grant request indicates non-success; code: {:?}", c);
+            if asm
+                .process_link_state_event(
+                    ingress_link_id,
+                    LinkEvent::ReceivedGrantZprAddressRequest(None)
+                )
+                .is_ok()
+            {
+                status_code = zdp::ResponseCode::Success; // parsing was successful
+            }
+        }
+        Err(_) => { }
+    }
+
+    // Send an ACK.
+    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpGrantZprAddressResponseHeader>();
+    hdr.status_code = status_code;
+
+    super::core::send_non_flow_mgmt_response(
+        asm,
+        ingress_link_id,
+        zdp::ZdpPacketType::GrantZprAddressResponse,
+        seq_num,
+        rsp_pkt,
+    )
+    .await;
     Ok(())
 }
+
+
+/// Returns tuple of (actor_addresses, blob)
+/// The addresses are left the address requested by the adapter. This is left over from
+/// the older register-actor-address.  Until we are actually assigning addresses we
+/// will honor the senders request.
+///
+/// The blob is a base64 encoded json object.
+fn parse_acquire_zpr_address_request(pkt: &mut Packet) -> Result<(Option<Vec<IpAddress>>, String), HandleMgmtError> {
+    let Ok(hdr) = zdp::ZdpAcquireZprAddressRequestHeader::read_from_buf(pkt) else {
+        return Err(HandleMgmtError::BadStructure);
+    };
+
+    // In memmory:
+    //     header
+    //     blob
+    //     actor addresses (optional)
+
+    let blob: String;
+    let blen = hdr.blob_len.get() as usize;
+    if blen == 0 {
+        // BLOB must be sent!
+        error!(target: ZDP, "Received AcquireZprAddressRequest with no blob");
+        return Err(HandleMgmtError::BadStructure);
+    } else {
+        if pkt.remaining() < blen {
+            warn!(target: ZDP, "packet too short for blob");
+            return Err(HandleMgmtError::BadStructure);
+        }
+
+        // TODO: Is this correct way to read buffer off packet?
+        let mut blob_buffer = Vec::with_capacity(blen);
+        blob_buffer.extend_from_slice(&pkt.body()[..blen]);
+        pkt.advance(blen);
+        match String::from_utf8(blob_buffer) {
+            Ok(b) => {
+                blob = b;
+            }
+            Err(_) => {
+                warn!(target: ZDP, "failed to parse blob as utf8");
+                return Err(HandleMgmtError::BadStructure);
+            }
+        }
+    }
+
+    let actor_addresses: Option<Vec<IpAddress>>;
+    if hdr.addr_count > 0 {
+        let bytes_needed = match hdr.ip_version {
+            zpr::L3Type::Ipv4 => 4 * hdr.addr_count as usize,
+            zpr::L3Type::Ipv6 => 16 * hdr.addr_count as usize,
+            _ => {
+                warn!(target: ZDP, "invalid ip_version field");
+                return Err(HandleMgmtError::BadStructure);
+            }
+        };
+        if pkt.remaining() < bytes_needed {
+            warn!(target: ZDP, "packet too short for addresses");
+            return Err(HandleMgmtError::BadStructure);
+        }
+        let mut addrs = Vec::new();
+        for _ in 0..hdr.addr_count {
+            let addr: IpAddress;
+            match hdr.ip_version {
+                zpr::L3Type::Ipv4 => {
+                    let Ok(addr_bytes) = <[u8; 4]>::read_from_buf(pkt) else {
+                        return Err(HandleMgmtError::BadStructure);
+                    };
+                    addr = addr_bytes.into();
+                }
+                zpr::L3Type::Ipv6 => {
+                    let Ok(addr_bytes) = <[u8; 16]>::read_from_buf(pkt) else {
+                        return Err(HandleMgmtError::BadStructure);
+                    };
+                    addr = addr_bytes.into();
+                }
+                _ => {
+                    panic!("already handled this error above")
+                }
+            }
+            addrs.push(addr);
+        }
+        actor_addresses = Some(addrs);
+    } else {
+        actor_addresses = None;
+    }
+    Ok((actor_addresses, blob))
+}
+
+
+
+
+/// The grant is a message from a node to an adapter (future: or to a joining node).
+/// In includes the address (or addresses) we have been assigned to use.
+fn parse_grant_zpr_address_request(pkt: &mut Packet) -> Result<Vec<IpAddress>, HandleMgmtError> {
+    let Ok(hdr) = zdp::ZdpGrantZprAddressRequestHeader::read_from_buf(pkt) else {
+        return Err(HandleMgmtError::BadStructure);
+    };
+
+    // In memmory:
+    //     header
+    //     actor addresses (optional)
+
+    if hdr.status_code != zdp::ResponseCode::Success {
+        warn!(target: ZDP, "Received Grant Zpr Address Request with non-success status code {:?}", hdr.status_code);
+        return Err(HandleMgmtError::NonSuccess(hdr.status_code));
+    }
+    if hdr.addr_count == 0 {
+        warn!(target: ZDP, "Received Grant Zpr Address Request with no addresses");
+        return Err(HandleMgmtError::LinkStateError);
+    }
+
+    let mut actor_addresses = Vec::new();
+    let bytes_needed = match hdr.ip_version {
+        zpr::L3Type::Ipv4 => 4 * hdr.addr_count as usize,
+        zpr::L3Type::Ipv6 => 16 * hdr.addr_count as usize,
+        _ => {
+            warn!(target: ZDP, "invalid ip_version field");
+            return Err(HandleMgmtError::BadStructure);
+        }
+    };
+    if pkt.remaining() < bytes_needed {
+        warn!(target: ZDP, "packet too short for addresses");
+        return Err(HandleMgmtError::BadStructure);
+    }
+    for _ in 0..hdr.addr_count {
+        let addr: IpAddress;
+        match hdr.ip_version {
+            zpr::L3Type::Ipv4 => {
+                let Ok(addr_bytes) = <[u8; 4]>::read_from_buf(pkt) else {
+                    return Err(HandleMgmtError::BadStructure);
+                };
+                addr = addr_bytes.into();
+            }
+            zpr::L3Type::Ipv6 => {
+                let Ok(addr_bytes) = <[u8; 16]>::read_from_buf(pkt) else {
+                    return Err(HandleMgmtError::BadStructure);
+                };
+                addr = addr_bytes.into();
+            }
+            _ => {
+                return Err(HandleMgmtError::BadStructure);
+            }
+        }
+        actor_addresses.push(addr);
+    }
+    Ok(actor_addresses)
+}
+
+
 
 /// handle a Bind Actor Address Request (RFC 6.5 § 6.3.11)
 pub async fn handle_bind_actor_address_request(

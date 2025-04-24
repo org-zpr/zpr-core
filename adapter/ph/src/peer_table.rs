@@ -6,6 +6,7 @@ use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::special_peers::*;
 use crate::sync_req;
+use crate::auth::AUTH_KEY_SIZE_BYTES;
 use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
@@ -26,7 +27,7 @@ use zpr::{self, LinkId, SubstrateAddr, LINK_ID_UNKNOWN};
 
 const PEER_TABLE_SIZE: usize = 1024;
 
-pub const AUTH_KEY_SIZE_BYTES: usize = 32; // blake3 256bit key
+
 
 pub struct PeerState {
     pub substrate_addr: SubstrateAddr,

@@ -42,12 +42,16 @@ pub enum ZdpPacketType {
     HelloResponse = 137,
     ConfigurationRequest = 138,
     ConfigurationResponse = 139,
-    RegisterActorAddressRequest = 140,
-    RegisterActorAddressResponse = 142,
+    AcquireZprAddressRequest = 140, // TODO: add to RFC 6
+    AcquireZprAddressResponse = 142, // TODO: add to RFC 6
     UnregisterActorAddressRequest = 143,
     UnregisterActorAddressResponse = 144,
     Report = 145,
-    InitAuthentication = 146, // TODO: add to RFC 6
+    InitAuthenticationRequest = 146, // TODO: add to RFC 6
+    InitAuthenticationResponse = 147, // TODO: add to RFC 6
+    GrantZprAddressRequest = 148, // TODO: add to RFC 6
+    GrantZprAddressResponse = 149, // TODO: add to RFC 6
+
 }
 
 pub const ZDP_PACKET_TYPE_NON_FLOW_FLAG: u8 = 0x80;
@@ -73,7 +77,8 @@ impl ZdpPacketType {
             | Self::TerminateLinkResponse
             | Self::HelloResponse
             | Self::ConfigurationResponse
-            | Self::RegisterActorAddressResponse
+            | Self::AcquireZprAddressResponse
+            | Self::GrantZprAddressResponse
             | Self::UnregisterActorAddressResponse => true,
             _ => false,
         }
@@ -139,34 +144,66 @@ pub struct ZdpHelloResponseHeader {
     // Version info
 }
 
-/// Bitflags for the [ZdpInitAuthenticationPayload] flags field.
+
+/// Bitflags for the [ZdpInitAuthenticationRequestHeader] flags field.
 pub mod init_authentication_flags {
     pub const BOOTSTRAP_SUPPORT: u8 = 0x01;
 }
 
+
 /// Tentative -- pending inclusion into spec.
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpInitAuthenticationPayload {
+pub struct ZdpInitAuthenticationRequestHeader {
     pub flags: u8,
-    pub nonce: [u8; 8],
-    pub ctime: U64,
-    pub hmac: [u8; 32],
+    pub data_len: U16,
+    // Followed by challenge payload, eg ZdpInitAuthenticationPayload below.
 }
+
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpRegisterActorAddressRequestHeader {
-    pub ip_version: zpr::L3Type,
-    // Length of address determined by IP type
-}
-
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
-pub struct ZdpRegisterActorAddressResponseHeader {
+pub struct ZdpInitAuthenticationResponseHeader {
     pub status_code: ResponseCode,
-    pub info_len: u8,
 }
+
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpAcquireZprAddressRequestHeader {
+    pub blob_len: U16,
+    pub ip_version: zpr::L3Type, // Length of address determined by IP type
+    pub addr_count: u8,
+    // Followed in memory by:
+    //  - BLOB (of blob_len bytes) is-a base64 encoded json string.
+    //  - IP addresses (addr_count * IP address size bytes)
+}
+
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpAcquireZprAddressResponseHeader {
+    pub status_code: ResponseCode,
+}
+
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpGrantZprAddressRequestHeader {
+    pub status_code: ResponseCode,
+    pub ip_version: zpr::L3Type, // Length of address determined by IP type
+    pub addr_count: u8,
+    // Followed in memory by:
+    //  - IP addresses (addr_count * IP address size bytes)
+}
+
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpGrantZprAddressResponseHeader {
+    pub status_code: ResponseCode,
+}
+
 
 #[open_enum]
 #[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]

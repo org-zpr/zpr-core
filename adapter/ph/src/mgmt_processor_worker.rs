@@ -101,16 +101,16 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                 handlers::handle_hello_response(asm, seq_num, pkt).await
             }
 
-            ZdpPacketType::InitAuthentication => {
-                handlers::handle_init_authentication(asm, pkt).await
+            ZdpPacketType::InitAuthenticationRequest => {
+                handlers::handle_init_authentication_request(asm, seq_num, pkt).await
             }
 
-            ZdpPacketType::RegisterActorAddressRequest => {
-                handlers::handle_register_actor_address_request(asm, seq_num, pkt).await
+            ZdpPacketType::AcquireZprAddressRequest => {
+                handlers::handle_acquire_zpr_address_request(asm, seq_num, pkt).await
             }
 
-            ZdpPacketType::RegisterActorAddressResponse => {
-                handlers::handle_register_actor_address_response(asm, seq_num, pkt).await
+            ZdpPacketType::GrantZprAddressRequest => {
+                handlers::handle_grant_zpr_address_request(asm, seq_num, pkt).await
             }
 
             packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),

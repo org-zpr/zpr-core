@@ -19,8 +19,8 @@ mod adapter_manager_worker;
 mod adapter_tables;
 mod admin_worker;
 mod assembly;
+mod auth;
 mod batch_io;
-mod bootstrap;
 mod capture_worker;
 mod classifier;
 mod compress;
@@ -355,6 +355,7 @@ fn main() -> ExitCode {
         peer_noise_keypair,
         certx,
         system_start_time,
+        bsauth: config.bootstrap,
     });
 
     //
