@@ -1,5 +1,5 @@
 use nix::unistd::{self, Gid, Uid};
-use users::get_user_by_name;
+use uzers::get_user_by_name;
 
 use std::net::IpAddr;
 use std::process::Command;

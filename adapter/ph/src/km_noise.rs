@@ -35,6 +35,7 @@
 use crate::km::*;
 use crate::km_cert_exchange::KmCertExchange;
 use crate::logging::targets::KEY_MGMT;
+use crate::pki::NOISE_KEY_LEN;
 use base64::prelude::*;
 use bytes::{BufMut, Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
@@ -61,9 +62,6 @@ pub const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte no
 
 // The size (in bytes) of the random HMAC key used for messages over which we just compute a hmac.
 const HMAC_KEY_LEN: usize = 32;
-
-// The size in bytes of a noise key.
-pub const NOISE_KEY_LEN: usize = 32;
 
 impl From<snow::Error> for KmError {
     fn from(e: snow::Error) -> KmError {

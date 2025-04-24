@@ -10,8 +10,7 @@ use serde::Deserialize;
 
 use crate::assembly::PhMode;
 use crate::auth::RsaBootstrapAuth;
-use crate::km_cert_exchange;
-use crate::km_noise::NOISE_KEY_LEN;
+use crate::pki::{load_cert, load_noise_private_key, NOISE_KEY_LEN};
 
 use crate::main_args::{ArgsError, CommonArgs};
 
@@ -120,7 +119,7 @@ impl Config {
             return Ok(key_data);
         }
         if let Some(ref pkf) = self.private_key_file {
-            return km_cert_exchange::load_private_key(&pkf).map_err(|e| {
+            return load_noise_private_key(&pkf).map_err(|e| {
                 ArgsError::ParseError(format!("failed to load private key from file: {e:?}"))
             });
         }
@@ -550,7 +549,7 @@ fn check_file_exists(desc: &str, path: &Path) -> Result<(), ArgsError> {
 ///
 /// TODO: This has nothing to do with noise.  And nothing to do with km_cert_exchange.  Move to a pki util file.
 pub fn get_noise_cn(certificate_file: &Path) -> Result<String, ArgsError> {
-    let cert = km_cert_exchange::load_cert(certificate_file)
+    let cert = load_cert(certificate_file)
         .map_err(|e| {
             ArgsError::ParseError(format!(
                 "failed to load noise certificate: {e:?}"

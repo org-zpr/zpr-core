@@ -49,6 +49,7 @@ mod packet_queue;
 mod packet_steering;
 mod pcap_writer;
 mod peer_table;
+mod pki;
 mod queues;
 mod rcu;
 mod sample_ring;
@@ -77,6 +78,7 @@ use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
 use logging::targets::STARTUP;
+use pki::load_noise_public_key;
 use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
@@ -147,15 +149,14 @@ fn main() -> ExitCode {
         peer_noise_keypair = None;
         self_noise_keypair = Some(NoiseKeypair::new(private_key));
     } else {
-        let public_key = match km_cert_exchange::load_public_key(&Path::new(
-            &config.node_public_key_file.unwrap(),
-        )) {
-            Ok(key) => key,
-            Err(e) => {
-                error!(target: STARTUP, "failed to load node public key file: {e:?}");
-                return ExitCode::FAILURE;
-            }
-        };
+        let public_key =
+            match load_noise_public_key(&Path::new(&config.node_public_key_file.unwrap())) {
+                Ok(key) => key,
+                Err(e) => {
+                    error!(target: STARTUP, "failed to load node public key file: {e:?}");
+                    return ExitCode::FAILURE;
+                }
+            };
         peer_noise_keypair = Some(NoiseKeypair {
             public: public_key,
             private: [0u8; 32], // unknown
