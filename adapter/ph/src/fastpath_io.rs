@@ -197,18 +197,28 @@ impl FastpathIo {
 
     /// Process an input-ready notification on the requeue socket.
     pub fn process_requeue_in(&mut self, worker: &mut FastpathWorker) {
-        batch_process_packet_queue(worker, &mut self.requeue_outq, |worker, pkt| {
-            worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
-            worker.actor_output_post_classify(pkt, /* allow_bind_request */ false);
-        });
+        batch_process_packet_queue(
+            worker,
+            &mut self.requeue_outq,
+            worker.config.batch_size,
+            |worker, pkt| {
+                worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
+                worker.actor_output_post_classify(pkt, /* allow_bind_request */ false);
+            },
+        );
     }
 
     /// Process an input-ready notification on the mgmt substrate socket.
     pub fn process_mgmt_substrate_in(&mut self, worker: &mut FastpathWorker) {
-        batch_process_packet_queue(worker, &mut self.mgmt_substrate_outq, |worker, pkt| {
-            worker.asm.counters[CounterType::MgmtPacketsSent].increment();
-            worker.substrate_egress(pkt);
-        });
+        batch_process_packet_queue(
+            worker,
+            &mut self.mgmt_substrate_outq,
+            worker.config.batch_size,
+            |worker, pkt| {
+                worker.asm.counters[CounterType::MgmtPacketsSent].increment();
+                worker.substrate_egress(pkt);
+            },
+        );
     }
 
     /// Egress any queued packets, or drop if there is no space in the system queues.
@@ -346,13 +356,9 @@ fn clear_flowinfo(addr: &mut SocketAddr) {
 fn batch_process_packet_queue(
     worker: &mut FastpathWorker,
     queue: &mut packet_queue::Receiver<{ config::PACKET_BUFFER_SIZE }>,
+    limit: usize,
     mut process_fn: impl FnMut(&mut FastpathWorker, Packet),
 ) {
-    // Do not receive more than is currently in the queue;
-    // avoids racing with a fast sender and getting stuck here
-    // indefinitely.
-    let limit = queue.len();
-
     for _i in 0..limit {
         let Some(buf) = worker.buffers.pop() else {
             break;

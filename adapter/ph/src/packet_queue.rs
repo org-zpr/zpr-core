@@ -89,6 +89,7 @@ impl<const BUFSIZE: usize> Receiver<BUFSIZE> {
         self.notify.poll_fd()
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.recv.len()
     }

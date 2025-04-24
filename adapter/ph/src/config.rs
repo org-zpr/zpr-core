@@ -25,11 +25,11 @@ pub const DEFAULT_REQUEST_RETRY_TIMER: usize = 1;
 
 pub const ANCILLARY_BUFFER_SIZE: usize = 128;
 
-const DEFAULT_BUFFER_COUNT: usize = 512; // should be at least 2x batch size
-const DEFAULT_BATCH_SIZE: usize = 256;
+const DEFAULT_BUFFER_COUNT: usize = 512; // should be at least 5x batch size; see fastpath_worker.rs for explanation
+const DEFAULT_BATCH_SIZE: usize = 64;
 const DEFAULT_DATAPATH_QUEUE_SIZE: usize = 256;
-const DEFAULT_MGMT_QUEUE_SIZE: usize = 256;
-const DEFAULT_SERVICE_QUEUE_SIZE: usize = 256;
+const DEFAULT_MGMT_QUEUE_SIZE: usize = 128; // should be at least 2x batch size to avoid oscillating behavior
+const DEFAULT_SERVICE_QUEUE_SIZE: usize = 128;
 
 #[cfg(not(target_os = "macos"))]
 const DEFAULT_WORKER_CONCURRENCY: usize = 4;
