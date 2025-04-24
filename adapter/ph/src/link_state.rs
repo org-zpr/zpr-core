@@ -15,9 +15,9 @@ use crate::visa_mgmt;
 use crate::zdp::{ResponseCode, TerminateReason};
 
 use std::fmt::{Display, Formatter};
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use std::net::IpAddr;
 use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::*;
@@ -143,7 +143,7 @@ pub enum LinkEvent {
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
 
-    ReceivedAcquireZprAddressRequest(Option<Vec<IpAddress>>, String),  // (requested_addrs, auth_blob)
+    ReceivedAcquireZprAddressRequest(Option<Vec<IpAddress>>, String), // (requested_addrs, auth_blob)
     ReceivedAcquireResponse(ResponseCode),
 
     ReceivedGrantZprAddressRequest(Option<Vec<IpAddress>>), // granted_addrs, None means failure.
@@ -295,22 +295,16 @@ impl LinkStateWrapper {
             LinkEvent::ReceivedAcquireZprAddressRequest(addrs, blob) => {
                 self.process_acquire_zpr_address_request(asm, addrs, blob)
             }
-            LinkEvent::ReceivedAcquireResponse(code) => {
-                self.process_acquire_response(asm, code)
-            }
-
+            LinkEvent::ReceivedAcquireResponse(code) => self.process_acquire_response(asm, code),
 
             LinkEvent::ReceivedInitAuth((bootstrap_flag, challenge)) => {
                 self.process_init_auth(asm, bootstrap_flag, challenge)
             }
 
-
             LinkEvent::ReceivedGrantZprAddressRequest(addrs) => {
                 self.process_grant_zpr_address_request(asm, addrs)
             }
-            LinkEvent::ReceivedGrantResponse(code) => {
-                self.process_grant_response(asm, code)
-            }
+            LinkEvent::ReceivedGrantResponse(code) => self.process_grant_response(asm, code),
 
             LinkEvent::ReceivedAuthorizeResponse => self.process_authorize_repsonse(asm),
 
@@ -534,7 +528,6 @@ impl LinkStateWrapper {
         }
     }
 
-
     /// The ZprAddressRequest is from adapter to node (furute: joining node to node).
     /// Includes authentication blob from sender, as well as the requested addresses.
     /// Inclusion of requested addresses is temporary.
@@ -547,16 +540,17 @@ impl LinkStateWrapper {
         addrs: Option<Vec<IpAddress>>,
         blob: String,
     ) -> Result<(), LinkStateError> {
-
         let link_id = self.id;
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
         match (self.link_type, locked_fsm.state) {
-            (LinkType::NodeToAdapter, LinkState::RegisterAA) => { }
+            (LinkType::NodeToAdapter, LinkState::RegisterAA) => {}
 
-            (_, _) => return Err(LinkStateError::InvalidOperation(
-                "Discarded unsolicited register address request".to_string(),
-            )),
+            (_, _) => {
+                return Err(LinkStateError::InvalidOperation(
+                    "Discarded unsolicited register address request".to_string(),
+                ))
+            }
         }
 
         if addrs.is_none() {
@@ -579,7 +573,6 @@ impl LinkStateWrapper {
             target: LINK_STATE,
             "Link {link_id} received acquire addr request for actor ({requested_addr})."
         );
-
 
         // We created this blob earlier, so we should be able to verify it.
         let ss_blob = match auth::decode_blob(&blob, auth::BLOB_TYPE_SS) {
@@ -617,7 +610,6 @@ impl LinkStateWrapper {
         // Now we have verified our part of the blob, we can send to the visa service for checking the signature.
         // TODO: Send to visa service, check signature, etc.
 
-
         info!(target: LINK_STATE, "TODO: not yet sending blob to vs");
         match visa_mgmt::build_connect_request(asm, link_id, requested_addr) {
             Ok(Some(conn_req)) => {
@@ -640,8 +632,11 @@ impl LinkStateWrapper {
         }
     }
 
-
-    fn process_acquire_response(&self, _asm: &Arc<Assembly>, code: ResponseCode) -> Result<(), LinkStateError> {
+    fn process_acquire_response(
+        &self,
+        _asm: &Arc<Assembly>,
+        code: ResponseCode,
+    ) -> Result<(), LinkStateError> {
         let link_id = self.id;
         let locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
@@ -649,15 +644,20 @@ impl LinkStateWrapper {
                 info!(target: LINK_STATE, "link {link_id} acquire ZDP address response (ACK) message recieved, code {:?}", code);
                 Ok(())
             }
-            (_, _) => Err(LinkStateError::InvalidOperation("Discarded unsolicited acquire zpr adress response".to_string()))
+            (_, _) => Err(LinkStateError::InvalidOperation(
+                "Discarded unsolicited acquire zpr adress response".to_string(),
+            )),
         }
     }
-
 
     /// A grant response is just an ACK of a ZPR address grant message.
     /// For now only expected from an adapter to a a node.
     /// If status is OK means the link is addressed and up on sender side.
-    fn process_grant_response(&self, asm: &Arc<Assembly>, code: ResponseCode) -> Result<(), LinkStateError> {
+    fn process_grant_response(
+        &self,
+        asm: &Arc<Assembly>,
+        code: ResponseCode,
+    ) -> Result<(), LinkStateError> {
         let link_id = self.id;
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
@@ -712,7 +712,7 @@ impl LinkStateWrapper {
                         drop(locked_fsm);
                         self.run_active(asm)
                     }
-                    None =>  {
+                    None => {
                         // Grant failed.
                         warn!(target: LINK_STATE, "Link {link_id} failed to be granted ZPR address");
                         locked_fsm.set_state(LinkState::Error);
@@ -727,8 +727,6 @@ impl LinkStateWrapper {
         }
     }
 
-
-
     /// This is the event handler fro the return path from the visa service AUTHORIZE operation.
     /// This needs to trigger sending of the Grant Address message.
     ///
@@ -738,10 +736,12 @@ impl LinkStateWrapper {
     fn process_authorize_repsonse(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
-            (LinkType::NodeToAdapter, LinkState::RegisterAA) => { }, // ok
-            (_, _) => return Err(LinkStateError::InvalidOperation(
-                "Discarded unsolicited authorize response".to_string(),
-            )),
+            (LinkType::NodeToAdapter, LinkState::RegisterAA) => {} // ok
+            (_, _) => {
+                return Err(LinkStateError::InvalidOperation(
+                    "Discarded unsolicited authorize response".to_string(),
+                ))
+            }
         }
 
         // Send a Grant message, consume the response and then send in an event
@@ -752,9 +752,6 @@ impl LinkStateWrapper {
         self.send_grant_zpr_address_request(asm, addrs);
         Ok(())
     }
-
-
-
 
     /// Handle an init-auth message from sender.
     ///
@@ -767,9 +764,13 @@ impl LinkStateWrapper {
     /// For now we must be in WaitForInitAuth to accept this message.
     /// We transition to RegisterAA if we successfully self-auth, otherwise we go to
     /// error and shutdown the link.
-    fn process_init_auth(&self, asm: &Arc<Assembly>, bootstrap: bool, challenge: Option<auth::ZdpInitAuthenticationPayload>) -> Result<(), LinkStateError> {
+    fn process_init_auth(
+        &self,
+        asm: &Arc<Assembly>,
+        bootstrap: bool,
+        challenge: Option<auth::ZdpInitAuthenticationPayload>,
+    ) -> Result<(), LinkStateError> {
         let link_id = self.id;
-
 
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
@@ -813,7 +814,6 @@ impl LinkStateWrapper {
                         }
                     }
                 }
-
             }
             (_, _) => {
                 return Err(LinkStateError::UnexpectedTransition(
@@ -826,7 +826,6 @@ impl LinkStateWrapper {
         Ok(())
     }
 
-
     /// Send off the Inti-Authentication message with a blob that the receiver could
     /// use for authentication.
     fn send_init_authentication_request(&self, asm: &Arc<Assembly>) {
@@ -834,11 +833,7 @@ impl LinkStateWrapper {
         let task_asm = asm.clone();
 
         tokio::task::spawn_local(async move {
-            let result = mgmt::requests::send_init_authentication_request(
-                &task_asm,
-                link_id,
-            )
-            .await;
+            let result = mgmt::requests::send_init_authentication_request(&task_asm, link_id).await;
             if result.is_err() {
                 error!(target: LINK_STATE, "Link {link_id} failed to send init-auth request");
                 if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::Error) {
@@ -847,7 +842,6 @@ impl LinkStateWrapper {
             }
         });
     }
-
 
     /// Send the Grant message, if all goes well then fire off a ReceivedGrantResponse event.
     fn send_grant_zpr_address_request(&self, asm: &Arc<Assembly>, addrs: Vec<IpAddress>) {
@@ -880,13 +874,15 @@ impl LinkStateWrapper {
                 }
             } else {
                 // Did send and got response.
-                if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::ReceivedGrantResponse(result.unwrap())) {
+                if let Err(e) = task_asm.process_link_state_event(
+                    link_id,
+                    LinkEvent::ReceivedGrantResponse(result.unwrap()),
+                ) {
                     error!(target: LINK_STATE, "event handling error: {e}");
                 }
             }
         });
     }
-
 
     /// Send Acquire message, and if all goes well fire off a ReceivedAcquireResponse event.
     fn send_acquire_zpr_address_request(&self, asm: &Arc<Assembly>, blob: &str) {
@@ -901,7 +897,6 @@ impl LinkStateWrapper {
                 link_id,
                 &task_asm.local_zpr_addresses,
                 blob_opt,
-
             )
             .await;
 
@@ -912,16 +907,15 @@ impl LinkStateWrapper {
                 }
             } else {
                 // Did send and got response.
-                if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::ReceivedAcquireResponse(result.unwrap())) {
+                if let Err(e) = task_asm.process_link_state_event(
+                    link_id,
+                    LinkEvent::ReceivedAcquireResponse(result.unwrap()),
+                ) {
                     error!(target: LINK_STATE, "event handling error {e}");
                 }
             }
         });
-
     }
-
-
-
 
     fn process_error_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;

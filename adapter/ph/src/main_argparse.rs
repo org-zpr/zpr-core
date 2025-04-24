@@ -154,8 +154,8 @@ mod test {
     use std::env;
     use std::fs;
     use std::net::{IpAddr, SocketAddr};
-    use std::time::{SystemTime, UNIX_EPOCH};
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     struct TempFile {
         path: String,

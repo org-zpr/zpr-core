@@ -168,7 +168,6 @@ impl Config {
         Ok(config)
     }
 
-
     /// Parse the `certificate_file` (a noise certificate) and return the CN value found within.
     pub fn get_noise_cn(&self) -> Result<String, ArgsError> {
         return get_noise_cn(&self.certificate_file);
@@ -308,7 +307,10 @@ impl Config {
             let cn = self.get_noise_cn()?;
 
             if bootstrap_key_file.is_relative() {
-                self.bootstrap = Some(RsaBootstrapAuth::new(&cn, &base_dir.join(bootstrap_key_file))?);
+                self.bootstrap = Some(RsaBootstrapAuth::new(
+                    &cn,
+                    &base_dir.join(bootstrap_key_file),
+                )?);
             } else {
                 self.bootstrap = Some(RsaBootstrapAuth::new(&cn, bootstrap_key_file)?);
             }
@@ -459,7 +461,6 @@ pub struct AdapterConfigSection {
     pub bootstrap_key: Option<PathBuf>,
 }
 
-
 /// Configuration of data path & control plane topology.
 pub struct TopologyConfig {
     /// Number of packet buffers to allocate per fastpath worker.
@@ -543,18 +544,12 @@ fn check_file_exists(desc: &str, path: &Path) -> Result<(), ArgsError> {
     }
 }
 
-
-
 /// Parse the `certificate_file` (a noise certificate) and return the CN value found within.
 ///
 /// TODO: This has nothing to do with noise.  And nothing to do with km_cert_exchange.  Move to a pki util file.
 pub fn get_noise_cn(certificate_file: &Path) -> Result<String, ArgsError> {
     let cert = load_cert(certificate_file)
-        .map_err(|e| {
-            ArgsError::ParseError(format!(
-                "failed to load noise certificate: {e:?}"
-            ))
-        })?;
+        .map_err(|e| ArgsError::ParseError(format!("failed to load noise certificate: {e:?}")))?;
     let common_name = cert
         .subject_name()
         .entries_by_nid(openssl::nid::Nid::COMMONNAME)
@@ -566,10 +561,6 @@ pub fn get_noise_cn(certificate_file: &Path) -> Result<String, ArgsError> {
 
     Ok(common_name.to_string())
 }
-
-
-
-
 
 #[cfg(test)]
 mod test {

@@ -2,26 +2,22 @@
 //! when we need to join a ZPRnet but there are no authentication services
 //! attached yet.  Also includes other "auth" related functionality.
 
-
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
-use openssl::rand::rand_bytes;
 use openssl::hash::MessageDigest;
 use openssl::pkey::{PKey, Private};
+use openssl::rand::rand_bytes;
 use openssl::rsa::Padding;
 use openssl::sign::Signer;
 
 use base64::prelude::*;
 use thiserror::Error;
 
-
 use serde::{Deserialize, Serialize};
-
-
 
 pub const AUTH_KEY_SIZE_BYTES: usize = 32; // blake3 256bit key
 
@@ -30,8 +26,6 @@ pub const BLOB_TYPE_SS: &str = "SS";
 
 pub const MAX_BLOB_AGE_SECONDS: u64 = 120; // 2 minutes
 
-
-
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug)]
 #[repr(packed)]
 pub struct ZdpInitAuthenticationPayload {
@@ -39,8 +33,6 @@ pub struct ZdpInitAuthenticationPayload {
     pub ctime: U64,
     pub hmac: [u8; 32],
 }
-
-
 
 // Note that this passed around as JSON text encoded in base64.
 #[derive(Serialize, Deserialize, Debug)]
@@ -82,9 +74,10 @@ pub struct RsaBootstrapAuth {
     cn: String,
 }
 
-
 // TODO: move payload here and this should be a new() method
-pub fn create_bootstrap_authentication_payload(key: &[u8; AUTH_KEY_SIZE_BYTES]) -> ZdpInitAuthenticationPayload {
+pub fn create_bootstrap_authentication_payload(
+    key: &[u8; AUTH_KEY_SIZE_BYTES],
+) -> ZdpInitAuthenticationPayload {
     let ctime = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
@@ -116,28 +109,34 @@ pub fn decode_blob(blob_str: &str, expect_type: &str) -> Result<ZdpSelfSignedBlo
     let blob = BASE64_STANDARD.decode(blob_str)?;
     let ss_blob = serde_json::from_slice::<ZdpSelfSignedBlob>(&blob)?;
     if ss_blob.blob_type != expect_type {
-        return Err(AuthError::FormatError(format!("incorrect blob type: {}", ss_blob.blob_type)));
+        return Err(AuthError::FormatError(format!(
+            "incorrect blob type: {}",
+            ss_blob.blob_type
+        )));
     }
     Ok(ss_blob)
 }
 
-
-
 /// The `challenge` field in the blob is a base64 encoded [zdp::ZdpInitAuthenticationPayload].
 /// This extracts that data and checks it.
-pub fn verify_blob_challenge(ss_blob: &ZdpSelfSignedBlob, key: &[u8; AUTH_KEY_SIZE_BYTES]) -> Result<(), AuthError> {
+pub fn verify_blob_challenge(
+    ss_blob: &ZdpSelfSignedBlob,
+    key: &[u8; AUTH_KEY_SIZE_BYTES],
+) -> Result<(), AuthError> {
     let payload_bytes = BASE64_STANDARD.decode(ss_blob.challenge.clone())?;
     if payload_bytes.len() != size_of::<ZdpInitAuthenticationPayload>() {
-        return Err(AuthError::FormatError(format!("challenge size is incorrect")))
+        return Err(AuthError::FormatError(format!(
+            "challenge size is incorrect"
+        )));
     }
-    let zpayload = match ZdpInitAuthenticationPayload::read_from_bytes(&payload_bytes)
-    {
+    let zpayload = match ZdpInitAuthenticationPayload::read_from_bytes(&payload_bytes) {
         Ok(zpayload) => zpayload,
         Err(e) => {
-            return Err(AuthError::FormatError(format!("failed to deserialize ZdpInitAuthenticationPayload: {e}")));
+            return Err(AuthError::FormatError(format!(
+                "failed to deserialize ZdpInitAuthenticationPayload: {e}"
+            )));
         }
     };
-
 
     let hash_ok = {
         let mut hasher = blake3::Hasher::new_keyed(&key);
@@ -149,22 +148,21 @@ pub fn verify_blob_challenge(ss_blob: &ZdpSelfSignedBlob, key: &[u8; AUTH_KEY_SI
     };
 
     if !hash_ok {
-        return Err(AuthError::InvalidHmac)
+        return Err(AuthError::InvalidHmac);
     }
 
     // Now can check age of blob.
-    let now= SystemTime::now()
+    let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs() as u64;
 
     if now > zpayload.ctime.get() + MAX_BLOB_AGE_SECONDS {
-        return Err(AuthError::ChallengeTooOld)
+        return Err(AuthError::ChallengeTooOld);
     }
 
     Ok(())
 }
-
 
 /// Implementes BootstrapAuth using our RSA signature scheme.
 impl RsaBootstrapAuth {
@@ -245,16 +243,13 @@ impl RsaBootstrapAuth {
         let blob_str = BASE64_STANDARD.encode(&json_txt);
         Ok(blob_str)
     }
-
-
 }
-
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::path::PathBuf;
     use openssl::sign::Verifier;
+    use std::path::PathBuf;
 
     #[test]
     fn test_rsa_bootstrap_auth() {
@@ -319,6 +314,4 @@ mod test {
         }
         assert!(verifier.verify(&sig_data).unwrap());
     }
-
-
 }

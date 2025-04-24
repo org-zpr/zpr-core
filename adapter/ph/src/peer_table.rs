@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use crate::auth::AUTH_KEY_SIZE_BYTES;
 use crate::forwarding_tables::PeerForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
@@ -6,7 +7,6 @@ use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::special_peers::*;
 use crate::sync_req;
-use crate::auth::AUTH_KEY_SIZE_BYTES;
 use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
@@ -26,8 +26,6 @@ use tokio_util::sync::CancellationToken;
 use zpr::{self, LinkId, SubstrateAddr, LINK_ID_UNKNOWN};
 
 const PEER_TABLE_SIZE: usize = 1024;
-
-
 
 pub struct PeerState {
     pub substrate_addr: SubstrateAddr,

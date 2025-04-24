@@ -3,8 +3,8 @@
 //! The main entry point is [crate::main_argparse::argparse] which will parse the command line arguments
 //! and any config file, returning a PH configuration.
 
-use crate::logging::targets::*;
 use crate::auth::AuthError;
+use crate::logging::targets::*;
 use clap::{Args, Parser, Subcommand};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;

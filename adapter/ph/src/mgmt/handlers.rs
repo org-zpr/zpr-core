@@ -1,8 +1,8 @@
 //! Handlers for management requests.
 
 use crate::adapter_tables;
-use crate::auth;
 use crate::assembly::{self, Assembly, PhMode};
+use crate::auth;
 use crate::config;
 use crate::counters;
 use crate::defs::*;
@@ -99,16 +99,14 @@ pub async fn handle_echo_request(
 pub async fn handle_init_authentication_request(
     asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
-    mut pkt: Packet
+    mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
-
 
     let Ok(hdr) = zdp::ZdpInitAuthenticationRequestHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
     };
     let is_bootstrap = hdr.flags & zdp::init_authentication_flags::BOOTSTRAP_SUPPORT != 0;
-
 
     let challenge_opt: Option<auth::ZdpInitAuthenticationPayload>;
 
@@ -149,7 +147,10 @@ pub async fn handle_init_authentication_request(
     )
     .await;
 
-    let _ = asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedInitAuth((is_bootstrap, challenge_opt)));
+    let _ = asm.process_link_state_event(
+        ingress_link_id,
+        LinkEvent::ReceivedInitAuth((is_bootstrap, challenge_opt)),
+    );
 
     Ok(())
 }
@@ -228,7 +229,6 @@ pub async fn handle_hello_request(
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
 
-
     hdr.status =
         match asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest) {
             Err(_) => zdp::ResponseCode::Other,
@@ -299,7 +299,6 @@ pub async fn handle_acquire_zpr_address_request(
 
     let mut status_code = zdp::ResponseCode::Other;
     if let Ok((actor_addresses, blob)) = parse_acquire_zpr_address_request(&mut pkt) {
-
         debug!(target: ZDP,
             "Received Register Actor Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
 
@@ -330,7 +329,6 @@ pub async fn handle_acquire_zpr_address_request(
     Ok(())
 }
 
-
 /// Handle the GrantZprAddressRequest (TODO: Not yet in RFC 6)
 ///
 /// This message comes from a node post verification of the authentication blob
@@ -354,7 +352,7 @@ pub async fn handle_grant_zpr_address_request(
             if asm
                 .process_link_state_event(
                     ingress_link_id,
-                    LinkEvent::ReceivedGrantZprAddressRequest(Some(actor_addresses))
+                    LinkEvent::ReceivedGrantZprAddressRequest(Some(actor_addresses)),
                 )
                 .is_ok()
             {
@@ -366,14 +364,14 @@ pub async fn handle_grant_zpr_address_request(
             if asm
                 .process_link_state_event(
                     ingress_link_id,
-                    LinkEvent::ReceivedGrantZprAddressRequest(None)
+                    LinkEvent::ReceivedGrantZprAddressRequest(None),
                 )
                 .is_ok()
             {
                 status_code = zdp::ResponseCode::Success; // parsing was successful
             }
         }
-        Err(_) => { }
+        Err(_) => {}
     }
 
     // Send an ACK.
@@ -392,14 +390,15 @@ pub async fn handle_grant_zpr_address_request(
     Ok(())
 }
 
-
 /// Returns tuple of (actor_addresses, blob)
 /// The addresses are left the address requested by the adapter. This is left over from
 /// the older register-actor-address.  Until we are actually assigning addresses we
 /// will honor the senders request.
 ///
 /// The blob is a base64 encoded json object.
-fn parse_acquire_zpr_address_request(pkt: &mut Packet) -> Result<(Option<Vec<IpAddress>>, String), HandleMgmtError> {
+fn parse_acquire_zpr_address_request(
+    pkt: &mut Packet,
+) -> Result<(Option<Vec<IpAddress>>, String), HandleMgmtError> {
     let Ok(hdr) = zdp::ZdpAcquireZprAddressRequestHeader::read_from_buf(pkt) else {
         return Err(HandleMgmtError::BadStructure);
     };
@@ -479,9 +478,6 @@ fn parse_acquire_zpr_address_request(pkt: &mut Packet) -> Result<(Option<Vec<IpA
     Ok((actor_addresses, blob))
 }
 
-
-
-
 /// The grant is a message from a node to an adapter (future: or to a joining node).
 /// In includes the address (or addresses) we have been assigned to use.
 fn parse_grant_zpr_address_request(pkt: &mut Packet) -> Result<Vec<IpAddress>, HandleMgmtError> {
@@ -538,8 +534,6 @@ fn parse_grant_zpr_address_request(pkt: &mut Packet) -> Result<Vec<IpAddress>, H
     }
     Ok(actor_addresses)
 }
-
-
 
 /// handle a Bind Actor Address Request (RFC 6.5 § 6.3.11)
 pub async fn handle_bind_actor_address_request(
