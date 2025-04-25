@@ -1,0 +1,100 @@
+name: Rust Test
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        required: false
+        type: string
+        default: './'
+      name:
+        required: true
+        type: string
+      runs-on:
+        required: false
+        type: string
+        default: "['ubuntu-latest', 'macos-latest']"
+      needs-libpcap:
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      ZPR_CICD_RO_TOKEN:
+        required: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_GIT_FETCH_WITH_CLI: true
+
+jobs:
+  test:
+    name: "Test [${{ matrix.os }}]"
+    strategy:
+      matrix:
+        os: ${{ fromJson(inputs.runs-on) }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.path }}
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      # Necessary to run before rust-cache
+    - run: rustup toolchain install stable --profile minimal
+    - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+      with:
+        workspaces: |
+          adapter/ph
+          adapter/cli
+          zpr-ext
+          cslab
+          cbpf-rs
+
+    - name: Setup Git credentials
+      timeout-minutes: 1
+      run: |
+        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
+        chmod +x "$HOME/.git-askpass"
+        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
+
+    - name: Install libpcap-dev
+      if: ${{ inputs.needs-libpcap }}
+      timeout-minutes: 5
+      run: |
+        echo 'set man-db/auto-update false' | sudo debconf-communicate
+        sudo dpkg-reconfigure man-db
+        sudo apt install libpcap-dev
+
+    - uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.name }}-${{ matrix.os }}
+
+    - name: Unpack artifacts
+      working-directory: ./
+      run: tar -xvf ${{ inputs.name }}.tar
+
+    - name: Test ${{ inputs.name }}
+      timeout-minutes: 5
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+      run: cargo test --verbose
+
+    - name: Check format
+      if: ${{ ! cancelled() }}
+      timeout-minutes: 5
+      run: cargo fmt --check
+
+    - name: Check warnings
+      if: ${{ ! cancelled() }}
+      timeout-minutes: 5
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+      run: cargo rustc -- -D warnings
+
+    - name: Check test warnings
+      if: ${{ ! cancelled() }}
+      timeout-minutes: 5
+      env:
+        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
+      run: cargo rustc --tests -- -D warnings

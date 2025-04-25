@@ -18,6 +18,7 @@ on:
       - 'zpr-ext/**'
       - 'cslab/**'
       - 'cbpf-rs/**'
+      - 'libnode/**'
       - '.github/workflows/rust-adapter.yml'
 
 concurrency:
@@ -31,217 +32,56 @@ env:
 jobs:
   # Build and upload ph
   build-ph:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    outputs:
-      artifact-id: ${{ steps.upload.outputs.artifact-id }}
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    # Necessary to run before rust-cache
-    - run: rustup toolchain install stable --profile minimal
-    - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
-      with:
-        workspaces: |
-          adapter/ph
-          adapter/cli
-          zpr-ext
-          cslab
-          cbpf-rs
-
-    - name: Setup Git credentials
-      timeout-minutes: 1
-      run: |
-        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
-        chmod +x "$HOME/.git-askpass"
-        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
-
-    - name: Build PH
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      working-directory: ./adapter/ph
-      run: make
-
-    - name: Package ph
-      timeout-minutes: 1
-      run: tar -cvf ph.tar adapter/ph/target/debug/ph
-
-    - name: Upload build artifacts
-      id: upload
-      uses: actions/upload-artifact@v4
-      with:
-        name: ph-${{ matrix.os }}
-        path: ph.tar
-        retention-days: 1
-
-  # Test ph, check for warnings, and check formatting
-  test-ph:
-    needs: [build-ph]
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: ./adapter/ph
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    # Necessary to run before rust-cache
-    - run: rustup toolchain install stable --profile minimal
-    - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
-      with:
-        workspaces: |
-          adapter/ph
-          adapter/cli
-          zpr-ext
-          cslab
-          cbpf-rs
-
-    - name: Setup Git credentials
-      timeout-minutes: 1
-      run: |
-        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
-        chmod +x "$HOME/.git-askpass"
-        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
-
-    - uses: actions/download-artifact@v4
-      with:
-        name: ph-${{ matrix.os }}
-
-    - name: Unpack artifacts
-      working-directory: ./
-      run: tar -xvf ph.tar
-
-    - name: Run PH unit tests
-      if: ${{ ! cancelled() }}
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: make test
-
-    - name: Check format
-      if: ${{ ! cancelled() }}
-      timeout-minutes: 1
-      run: cargo fmt --check
-
-    - name: Check warnings
-      if: ${{ ! cancelled() }}
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: cargo rustc --bin ph -- -D warnings
-
-    - name: Check test warnings
-      if: ${{ ! cancelled() }}
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: cargo rustc --tests -- -D warnings
+    name: PH
+    uses: ./.github/workflows/rust-build-test.yml
+    with:
+      name: 'ph'
+      path: './adapter/ph'
+      package: true
+    secrets: inherit
 
   # Build and upload ph-cli
   build-ph-cli:
-    runs-on: ubuntu-latest
-    outputs:
-      artifact-id: ${{ steps.upload.outputs.artifact-id }}
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    # Necessary to run before rust-cache
-    - run: rustup toolchain install stable --profile minimal
-    - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      with:
-        workspaces: |
-          adapter/ph
-          adapter/cli
-          zpr-ext
-          cslab
-          cbpf-rs
+    name: PH CLI
+    uses: ./.github/workflows/rust-build-test.yml
+    with:
+      name: 'ph-cli'
+      path: './adapter/cli'
+      package: true
+      runs-on: "['ubuntu-latest']"
+      needs-libpcap: true
+    secrets: inherit
 
-    - name: Install dependencies
-      timeout-minutes: 5
-      run: |
-        echo 'set man-db/auto-update false' | sudo debconf-communicate
-        sudo dpkg-reconfigure man-db
-        sudo apt install libpcap-dev
-
-    - name: Build ph-cli
-      timeout-minutes: 5
-      working-directory: ./adapter/cli
-      run: cargo build --verbose
-
-    - name: Package ph-cli
-      timeout-minutes: 1
-      run: tar -cvf ph-cli.tar adapter/cli/target/debug/ph-cli
-
-    - name: Upload build artifacts
-      id: upload
-      uses: actions/upload-artifact@v4
-      with:
-        name: ph-cli
-        path: ph-cli.tar
-        retention-days: 1
+  # Test ph, check for warnings, and check formatting
+  test-ph:
+    name: PH
+    needs: [build-ph]
+    uses: ./.github/workflows/rust-test.yml
+    with:
+      name: 'ph'
+      path: './adapter/ph'
+    secrets: inherit
 
   # Test ph-cli, check for warnings, and check formatting
   test-ph-cli:
+    name: PH CLI
     needs: [build-ph-cli]
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./adapter/cli
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    # Necessary to run before rust-cache
-    - run: rustup toolchain install stable --profile minimal
-    - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
-      with:
-        workspaces: |
-          adapter/ph
-          adapter/cli
-          zpr-ext
-          cslab
-          cbpf-rs
-
-    - name: Install dependencies
-      timeout-minutes: 5
-      run: |
-        echo 'set man-db/auto-update false' | sudo debconf-communicate
-        sudo dpkg-reconfigure man-db
-        sudo apt install libpcap-dev
-
-    - uses: actions/download-artifact@v4
-      with:
-        name: ph-cli
-
-    - name: Unpack artifacts
-      working-directory: ./
-      run: tar -xvf ph-cli.tar
-
-    - name: Test ph-cli
-      timeout-minutes: 5
-      run: cargo test --verbose
-
-    - name: Check format
-      if: ${{ ! cancelled() }}
-      timeout-minutes: 1
-      run: cargo fmt --check
-
-    - name: Check warnings
-      if: ${{ ! cancelled() }}
-      timeout-minutes: 5
-      run: cargo rustc -- -D warnings
-
-    - name: Check test warnings
-      if: ${{ ! cancelled() }}
-      timeout-minutes: 5
-      run: cargo rustc --tests -- -D warnings
+    uses: ./.github/workflows/rust-test.yml
+    with:
+      name: 'ph-cli'
+      path: './adapter/cli'
+      runs-on: "['ubuntu-latest']"
+      needs-libpcap: true
+    secrets: inherit
 
   # Integration tests
   basic-integration-test:
+    name: Run 1-Node Test (v6)
     needs: [build-ph, build-ph-cli]
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
     # Necessary to run before rust-cache
@@ -269,7 +109,7 @@ jobs:
 
     - uses: actions/download-artifact@v4
       with:
-        pattern: ph-{cli,ubuntu-latest}
+        pattern: ph-*${{ matrix.os }}
         merge-multiple: true
 
     - name: Build
@@ -287,8 +127,12 @@ jobs:
         ZPR_TEST_VERBOSE=1 integration-test/one-node-v6-test.sh
 
   capture-integration-test:
+    name: Run Capture Test
     needs: [build-ph, build-ph-cli]
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
     # Necessary to run before rust-cache
@@ -316,7 +160,7 @@ jobs:
 
     - uses: actions/download-artifact@v4
       with:
-        pattern: ph-{cli,ubuntu-latest}
+        pattern: ph-*${{ matrix.os }}
         merge-multiple: true
 
     - name: Build
