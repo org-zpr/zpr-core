@@ -21,8 +21,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-
   setup:
+    name: Build & test Visa Service (Go)
+    defaults:
+      run:
+        working-directory: ./visaservice
     runs-on: ubuntu-latest
     container:
       image: docker://ghcr.io/org-zpr/38f3bb925e5e:latest
@@ -45,21 +48,15 @@ jobs:
       timeout-minutes: 5
       env:
         ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        cd visaservice
-        make all-go
+      run: make all-go
 
     - name: Test
       timeout-minutes: 5
       env:
         ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        cd visaservice
-        make test-go
+      run: make test-go
 
     - name: Conform
+      working-directory: ./
       timeout-minutes: 5
-      run: |
-        ZPR_TEST_VERBOSE=1 integration-test/vs-conform-test.sh
-
-
+      run: ZPR_TEST_VERBOSE=1 integration-test/vs-conform-test.sh
