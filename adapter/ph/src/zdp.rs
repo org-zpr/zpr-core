@@ -88,7 +88,7 @@ pub enum ResponseCode {
     Other = 1,
 }
 
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[derive(Copy, Clone, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpZpiHeader {
     pub zpi: u8,

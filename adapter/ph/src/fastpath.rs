@@ -9,7 +9,7 @@ use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters::CounterType;
 use crate::defs::Direction;
-use crate::km::Codec;
+use crate::km::{Codec, KmTransportSA};
 use crate::km_noise::NOISE_PADLEN;
 use crate::logging::targets::DATAPATH;
 use crate::net_defs;
@@ -124,86 +124,10 @@ impl FastpathWorker {
             return;
         };
 
-        let peer_state = self.asm.peer_table.get(pkt.metadata().ingress_link_id);
-
-        // If a ZPI is setup on this link, then we expect the message to use one of the valid
-        // ZPI values.
-        let secure;
-        match peer_state {
-            Some(state) => match state.get_established_transport_association() {
-                Some(ref transport_sa) => {
-                    if zpi_hdr.zpi == transport_sa.recv_zpis.hmac {
-                        match decrypt_hmac(transport_sa.recv_hmac_key, &mut pkt) {
-                            Ok(()) => secure = true,
-                            Err(err) => {
-                                self.drop_and_count(pkt, err);
-                                return;
-                            }
-                        }
-                    } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
-                        // TODO: Put padlen in state somewhere too
-                        match decrypt_full(&self.asm, &*transport_sa.codec, NOISE_PADLEN, &mut pkt)
-                        {
-                            Ok(()) => secure = true,
-                            Err(err) => {
-                                self.drop_and_count(pkt, err);
-                                return;
-                            }
-                        }
-                    } else {
-                        // We have an SA and ZPI does not match.
-                        warn!(
-                            target: DATAPATH,
-                            "ingress: link {}: unexpected ZPI value {} (expected {:?})",
-                            pkt.metadata().ingress_link_id,
-                            zpi_hdr.zpi,
-                            transport_sa.recv_zpis
-                        );
-                        self.drop_and_count(pkt, CounterType::UnknownZpi);
-                        return;
-                    }
-                }
-                None => {
-                    // Either no security association on link, or it is not yet established.
-                    debug!(target: DATAPATH, "INSECURE, no SA on link {}", pkt.metadata().ingress_link_id);
-                    secure = false;
-                }
-            },
-            None => {
-                // No link in peer table
-                debug!(
-                    target: DATAPATH,
-                    "INSECURE, no link in peer table for {}",
-                    pkt.metadata().ingress_link_id
-                );
-                secure = false;
-            }
-        };
-
-        if !secure {
-            // Not under a security assocation, which means only ZPI 0 is allowed.
-            if zpi_hdr.zpi != zpr::ZPI_0 && pkt.metadata().ingress_link_id != zpr::LINK_ID_UNKNOWN {
-                warn!(
-                    target: DATAPATH,
-                    "ingress: {}: ZPI {} not allowed on unestablished SA",
-                    pkt.metadata().ingress_link_id,
-                    zpi_hdr.zpi
-                );
-                self.drop_and_count(pkt, CounterType::UnknownZpi);
-                return;
-            }
-            debug!(
-                target: DATAPATH,
-                "INSECURE, decrypting null packet from {}",
-                pkt.metadata().ingress_link_id
-            );
-            match decrypt_null(&mut pkt) {
-                Ok(()) => (),
-                Err(err) => {
-                    self.drop_and_count(pkt, err);
-                    return;
-                }
-            }
+        // Decrypt the packet, per its ZPI header and security association (if any)
+        if let Err(err) = decrypt(&self.asm, zpi_hdr, &mut pkt) {
+            self.drop_and_count(pkt, err);
+            return;
         }
 
         // Watch out -- may not be secure
@@ -234,9 +158,9 @@ impl FastpathWorker {
             return self.drop_and_count(pkt, CounterType::BadStructure);
         };
 
-        // In ZPI zero only KM messages are allowed (well, and APR ARP which we don't support yet)
+        // In ZPI zero only KM messages are allowed (well, and ZPR ARP which we don't support yet)
         // Can be overridden (FOR TESTING ONLY) in the flags.
-        if !secure && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
+        if zpi_hdr.zpi == zpr::ZPI_0 && base_hdr.packet_type != zdp::ZdpPacketType::KeyManagement {
             warn!(
                 target: DATAPATH,
                 "ingress: link {}: ZPI 0 only allows key management messages, not {:?}",
@@ -415,6 +339,7 @@ impl FastpathWorker {
                 };
 
                 let Some(pep) = ingress_peer_state.pft.get(pkt.metadata().ingress_stream_id) else {
+                    drop(ingress_peer_state);
                     self.drop_and_count(pkt, CounterType::UnknownStreamId);
                     return;
                 };
@@ -479,6 +404,7 @@ impl FastpathWorker {
         // check A2A MAC
         // TODO: use actual A2A SAID & keyed hash
         if blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size] != a2a_mac[..a2a_mac_size] {
+            drop(pep);
             return self.drop_and_count(pkt, CounterType::MicvFailure);
         }
 
@@ -632,8 +558,7 @@ pub fn encrypt_full(
     }
 }
 
-#[allow(dead_code)]
-pub enum DecryptError {
+enum DecryptError {
     BadStructure,
     UnknownZpi,
     DecryptionFailure,
@@ -653,8 +578,8 @@ impl From<DecryptError> for CounterType {
     }
 }
 
-/// Decrypt a ZDP packet according to its ZPI header (which is not removed).
-pub fn decrypt_null(pkt: &mut Packet) -> Result<(), DecryptError> {
+/// "Decrypt" a packet using NULL encryption.
+fn decrypt_null(pkt: &mut Packet) -> Result<(), DecryptError> {
     // RFC 6.5 § 5.25.2
     if !net_defs::validate_inet_checksum(&pkt.body()[std::mem::size_of::<zdp::ZdpZpiHeader>()..]) {
         return Err(DecryptError::BadChecksum);
@@ -666,7 +591,7 @@ pub fn decrypt_null(pkt: &mut Packet) -> Result<(), DecryptError> {
 }
 
 /// Check and remove the link-2-link HMAC on the (presumed) transit packet.
-pub fn decrypt_hmac(recv_hmac_key: [u8; 32], pkt: &mut Packet) -> Result<(), DecryptError> {
+fn decrypt_hmac(recv_hmac_key: [u8; 32], pkt: &mut Packet) -> Result<(), DecryptError> {
     if pkt.body().len() < zdp::ZDP_PACKET_MAC_SIZE {
         return Err(DecryptError::BadStructure);
     }
@@ -685,8 +610,8 @@ pub fn decrypt_hmac(recv_hmac_key: [u8; 32], pkt: &mut Packet) -> Result<(), Dec
     Ok(())
 }
 
-/// Decrypt a ZDP packet according to its ZPI header (which is not removed).
-pub fn decrypt_full(
+/// Decrypt a packet using the given encryption codec.
+fn decrypt_full(
     _asm: &Assembly,
     codec: &dyn Codec,
     padlen: usize,
@@ -714,6 +639,85 @@ pub fn decrypt_full(
         }
     }
     Ok(())
+}
+
+/// Decrypt a ZDP packet according to its ZPI header (which is not removed) and known security association.
+fn decrypt_with_sa(
+    asm: &Assembly,
+    zpi_hdr: zdp::ZdpZpiHeader,
+    transport_sa: &KmTransportSA,
+    pkt: &mut Packet,
+) -> Result<(), DecryptError> {
+    if zpi_hdr.zpi == transport_sa.recv_zpis.hmac {
+        return decrypt_hmac(transport_sa.recv_hmac_key, pkt);
+    } else if zpi_hdr.zpi == transport_sa.recv_zpis.encr {
+        // TODO: Put padlen in state somewhere too
+        return decrypt_full(asm, &*transport_sa.codec, NOISE_PADLEN, pkt);
+    } else {
+        // We have an SA and ZPI does not match.
+        warn!(
+            target: DATAPATH,
+            "ingress: link {}: unexpected ZPI value {} (expected {:?})",
+            pkt.metadata().ingress_link_id,
+            zpi_hdr.zpi,
+            transport_sa.recv_zpis
+        );
+        return Err(DecryptError::UnknownZpi);
+    }
+}
+
+/// Decrypt a ZDP packet according to its ZPI header (which is not removed).
+fn decrypt(
+    asm: &Assembly,
+    zpi_hdr: zdp::ZdpZpiHeader,
+    pkt: &mut Packet,
+) -> Result<(), DecryptError> {
+    let peer_state = asm.peer_table.get(pkt.metadata().ingress_link_id);
+
+    // If a ZPI is setup on this link, then we expect the message to use one of the valid
+    // ZPI values.
+    match peer_state {
+        Some(state) => {
+            match state.get_established_transport_association() {
+                Some(ref transport_sa) => {
+                    // We've found a matching security association; use it to decrypt.
+                    return decrypt_with_sa(asm, zpi_hdr, &transport_sa, pkt);
+                }
+                None => {
+                    // Either no security association on link, or it is not yet established.
+                    debug!(target: DATAPATH, "INSECURE, no SA on link {}", pkt.metadata().ingress_link_id);
+                }
+            }
+        }
+        None => {
+            // No link in peer table
+            debug!(
+                target: DATAPATH,
+                "INSECURE, no link in peer table for {}",
+                pkt.metadata().ingress_link_id
+            );
+        }
+    }
+
+    // If we got here, it's because we couldn't find a security association.
+    // This means only ZPI 0 is allowed.
+    if zpi_hdr.zpi != zpr::ZPI_0 && pkt.metadata().ingress_link_id != zpr::LINK_ID_UNKNOWN {
+        warn!(
+            target: DATAPATH,
+            "ingress: {}: ZPI {} not allowed on unestablished SA",
+            pkt.metadata().ingress_link_id,
+            zpi_hdr.zpi
+        );
+        return Err(DecryptError::UnknownZpi);
+    }
+
+    debug!(
+        target: DATAPATH,
+        "INSECURE, decrypting null packet from {}",
+        pkt.metadata().ingress_link_id
+    );
+
+    return decrypt_null(pkt);
 }
 
 fn substrate_egress_common(

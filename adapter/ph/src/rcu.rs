@@ -42,6 +42,7 @@ mod rcu_impl {
 
     /// A protected reference to the item in an RCU-protected box.
     pub struct RcuGuard<'a, T>(RwLockReadGuard<'a, T>);
+    // Note, `RcuGuard`'s drop glue has lifetime `'a` due to `RwLockReadGuard`.
 
     impl<T> std::ops::Deref for RcuGuard<'_, T> {
         type Target = T;
@@ -110,6 +111,11 @@ mod rcu_impl {
         arc: Arc<T>,
     }
 
+    impl<T> Drop for RcuGuard<'_, T> {
+        // dummy `Drop` impl to ensure same drop glue lifetime as other Rcu impls
+        fn drop(&mut self) {}
+    }
+
     impl<T> std::ops::Deref for RcuGuard<'_, T> {
         type Target = T;
 
@@ -168,6 +174,11 @@ mod rcu_impl {
     pub struct RcuGuard<'a, T> {
         guard: epoch::Guard,
         atomic: &'a epoch::Atomic<T>,
+    }
+
+    impl<T> Drop for RcuGuard<'_, T> {
+        // dummy `Drop` impl to ensure same drop glue lifetime as other Rcu impls
+        fn drop(&mut self) {}
     }
 
     impl<T> std::ops::Deref for RcuGuard<'_, T> {
@@ -276,7 +287,7 @@ mod rcu_impl {
         }
 
         pub fn update(&self, f: impl Fn(&T) -> Option<T>) -> Result<(), ()> {
-            let guard = self.1.lock().unwrap();
+            let _guard = self.1.lock().unwrap();
             let Some(new_value) = self.inspect(f) else {
                 return Err(());
             };
