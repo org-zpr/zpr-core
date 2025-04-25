@@ -19,49 +19,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  zpr-ext-build:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    - name: Build + test zpr-ext
-      timeout-minutes: 5
-      run: |
-        cd zpr-ext
-        cargo build --verbose
-        cargo test --verbose
-
-  zpr-ext-format:
-    needs: [zpr-ext-build]
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    - name: Check format
-      timeout-minutes: 5
-      run: |
-        cd zpr-ext
-        cargo fmt --check
-
-  zpr-ext-warnings:
-    needs: [zpr-ext-build]
-    runs-on: ubuntu-latest
-    steps: 
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    - name: Check warnings
-      timeout-minutes: 5
-      run: |
-        cd zpr-ext
-        cargo rustc -- -D warnings
-
-  zpr-ext-test-warnings:
-    needs: [zpr-ext-build]
-    runs-on: ubuntu-latest
-    steps: 
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-    - name: Check test warnings
-      timeout-minutes: 5
-      run: |
-        cd zpr-ext
-        cargo rustc --tests -- -D warnings
+  zpr-ext:
+    name: ZPR Ext
+    uses: ./.github/workflows/rust-build-test.yml
+    with:
+      name: 'ZPR-Ext'
+      path: './zpr-ext'
+    secrets: inherit
