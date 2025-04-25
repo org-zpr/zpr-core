@@ -20,6 +20,7 @@ use thiserror::Error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// When a node signs a challenge for an adapter it uses this sort of key.
 pub const AUTH_KEY_SIZE_BYTES: usize = 32; // blake3 256bit key
 
 /// "self signed" blob type
@@ -28,17 +29,29 @@ pub const BLOB_TYPE_SS: &str = "SS";
 /// Auth Code blob type
 pub const BLOB_TYPE_AC: &str = "AC";
 
+/// When checking a challenge returned to a node by an adapter, it may
+/// be no older than this.
 pub const MAX_BLOB_AGE_SECONDS: u64 = 120; // 2 minutes
 
+/// This is the data payload in a [zdp::PacketType::InitAuthenticationRequest] packet.
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug)]
 #[repr(packed)]
 pub struct ZdpInitAuthenticationPayload {
+    /// 8 bytes random data
     pub nonce: [u8; 8],
+
+    /// Unix time seconds, big endian
     pub ctime: U64,
+
+    /// blake3 hmac over nonce and ctime
     pub hmac: [u8; 32],
 }
 
-// Note that this passed around as JSON text encoded in base64.
+/// The "self signed" authentication BLOB which originates on an adatper and is
+/// passed to a node via a [zdp::PacketType::AcquireZprAddressRequest]
+/// message.
+///
+/// Note that this passed around as JSON text encoded in base64.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ZdpSelfSignedBlob {
     pub blob_type: String, // "SS"
@@ -48,7 +61,11 @@ pub struct ZdpSelfSignedBlob {
     pub sig: String,       // byte buffer, base64 encoded
 }
 
-// Note that this passed around as JSON text encoded in base64.
+/// The "Auth Code" authentication BLOB which originates on an adatper and is
+/// passed to a node via a [zdp::PacketType::AcquireZprAddressRequest]
+/// message.
+///
+/// Note that this passed around as JSON text encoded in base64.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ZdpAuthCodeBlob {
     pub blob_type: String, // "AC"
@@ -64,12 +81,6 @@ pub struct ZdpAuthCodeBlob {
 pub enum DecodedBlob {
     SelfSigned(ZdpSelfSignedBlob),
     AuthCode(ZdpAuthCodeBlob),
-}
-
-// This will go away.
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Zdp {
-    pub blob_type: String, // "NONE"
 }
 
 #[derive(Debug, Error)]
@@ -102,47 +113,98 @@ pub struct RsaBootstrapAuth {
     cn: String,
 }
 
-/// Placeholder function that returns a fake AuthCode blob.
-/// Returns base64 encoded JSON serialized [ZdpAuthCodeBlob].
-pub fn noauth() -> String {
-    let blob = ZdpAuthCodeBlob {
-        blob_type: BLOB_TYPE_AC.to_string(),
-        code: "fake_auth_code".to_string(),
-        pkce: "fake_pkce".to_string(),
-        client_id: "fake_client_id".to_string(),
-        asa: "fake_asa".to_string(),
-    };
-    let json_txt = serde_json::to_string(&blob).unwrap();
-    BASE64_STANDARD.encode(&json_txt)
-}
+impl ZdpAuthCodeBlob {
+    /// Placeholder function that returns a fake AuthCode blob.
+    /// Returns base64 encoded JSON serialized [ZdpAuthCodeBlob].
+    pub fn new_fake() -> Self {
+        ZdpAuthCodeBlob {
+            blob_type: BLOB_TYPE_AC.to_string(),
+            code: "fake_auth_code".to_string(),
+            pkce: "fake_pkce".to_string(),
+            client_id: "fake_clientid".to_string(),
+            asa: "fake_asa".to_string(),
+        }
+    }
 
-// TODO: move payload here and this should be a new() method
-pub fn create_bootstrap_authentication_payload(
-    key: &[u8; AUTH_KEY_SIZE_BYTES],
-) -> ZdpInitAuthenticationPayload {
-    let ctime = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as u64;
-    let be_time = ctime.to_be_bytes();
-    let mut nonce = [0u8; 8];
-    rand_bytes(&mut nonce).expect("failed to generate random bytes for nonce");
-    let mut hasher = blake3::Hasher::new_keyed(&key);
-    hasher.update(&nonce);
-    hasher.update(&be_time);
-    let hmac = hasher.finalize();
-    ZdpInitAuthenticationPayload {
-        nonce,
-        ctime: ctime.into(),
-        hmac: hmac.into(),
+    /// Gets the "encoded" form of the blob: base64 encoded JSON.
+    pub fn encode(&self) -> String {
+        let json_txt = serde_json::to_string(self).unwrap();
+        BASE64_STANDARD.encode(&json_txt)
     }
 }
 
-pub fn create_empty_authentication_payload() -> ZdpInitAuthenticationPayload {
-    ZdpInitAuthenticationPayload {
-        nonce: [0u8; 8],
-        ctime: 0.into(),
-        hmac: [0u8; 32],
+impl ZdpSelfSignedBlob {
+    /// The `challenge` field in the blob is a base64 encoded [zdp::ZdpInitAuthenticationPayload].
+    /// This extracts that data and checks it.
+    pub fn verify_blob_challenge(&self, key: &[u8; AUTH_KEY_SIZE_BYTES]) -> Result<(), AuthError> {
+        let payload_bytes = BASE64_STANDARD.decode(self.challenge.clone())?;
+        if payload_bytes.len() != size_of::<ZdpInitAuthenticationPayload>() {
+            return Err(AuthError::FormatError(format!(
+                "challenge size is incorrect"
+            )));
+        }
+        let zpayload = match ZdpInitAuthenticationPayload::read_from_bytes(&payload_bytes) {
+            Ok(zpayload) => zpayload,
+            Err(e) => {
+                return Err(AuthError::FormatError(format!(
+                    "failed to deserialize ZdpInitAuthenticationPayload: {e}"
+                )));
+            }
+        };
+
+        let hash_ok = {
+            let mut hasher = blake3::Hasher::new_keyed(&key);
+            hasher.update(&zpayload.nonce);
+            hasher.update(&zpayload.ctime.to_bytes());
+            let computed_hmac = hasher.finalize();
+            let presented_hmac = blake3::Hash::from_bytes(zpayload.hmac);
+            computed_hmac == presented_hmac
+        };
+
+        if !hash_ok {
+            return Err(AuthError::InvalidHmac);
+        }
+
+        // Now can check age of blob.
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u64;
+
+        if now > zpayload.ctime.get() + MAX_BLOB_AGE_SECONDS {
+            return Err(AuthError::ChallengeTooOld);
+        }
+
+        Ok(())
+    }
+}
+
+impl ZdpInitAuthenticationPayload {
+    pub fn new(key: &[u8; AUTH_KEY_SIZE_BYTES]) -> Self {
+        let ctime = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u64;
+        let be_time = ctime.to_be_bytes();
+        let mut nonce = [0u8; 8];
+        rand_bytes(&mut nonce).expect("failed to generate random bytes for nonce");
+        let mut hasher = blake3::Hasher::new_keyed(&key);
+        hasher.update(&nonce);
+        hasher.update(&be_time);
+        let hmac = hasher.finalize();
+        ZdpInitAuthenticationPayload {
+            nonce,
+            ctime: ctime.into(),
+            hmac: hmac.into(),
+        }
+    }
+
+    pub fn new_empty() -> Self {
+        ZdpInitAuthenticationPayload {
+            nonce: [0u8; 8],
+            ctime: 0.into(),
+            hmac: [0u8; 32],
+        }
     }
 }
 
@@ -168,53 +230,6 @@ pub fn decode_blob(blob_str: &str) -> Result<DecodedBlob, AuthError> {
             blob_type
         ))),
     }
-}
-
-/// The `challenge` field in the blob is a base64 encoded [zdp::ZdpInitAuthenticationPayload].
-/// This extracts that data and checks it.
-pub fn verify_blob_challenge(
-    ss_blob: &ZdpSelfSignedBlob,
-    key: &[u8; AUTH_KEY_SIZE_BYTES],
-) -> Result<(), AuthError> {
-    let payload_bytes = BASE64_STANDARD.decode(ss_blob.challenge.clone())?;
-    if payload_bytes.len() != size_of::<ZdpInitAuthenticationPayload>() {
-        return Err(AuthError::FormatError(format!(
-            "challenge size is incorrect"
-        )));
-    }
-    let zpayload = match ZdpInitAuthenticationPayload::read_from_bytes(&payload_bytes) {
-        Ok(zpayload) => zpayload,
-        Err(e) => {
-            return Err(AuthError::FormatError(format!(
-                "failed to deserialize ZdpInitAuthenticationPayload: {e}"
-            )));
-        }
-    };
-
-    let hash_ok = {
-        let mut hasher = blake3::Hasher::new_keyed(&key);
-        hasher.update(&zpayload.nonce);
-        hasher.update(&zpayload.ctime.to_bytes());
-        let computed_hmac = hasher.finalize();
-        let presented_hmac = blake3::Hash::from_bytes(zpayload.hmac);
-        computed_hmac == presented_hmac
-    };
-
-    if !hash_ok {
-        return Err(AuthError::InvalidHmac);
-    }
-
-    // Now can check age of blob.
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as u64;
-
-    if now > zpayload.ctime.get() + MAX_BLOB_AGE_SECONDS {
-        return Err(AuthError::ChallengeTooOld);
-    }
-
-    Ok(())
 }
 
 /// Implementes BootstrapAuth using our RSA signature scheme.

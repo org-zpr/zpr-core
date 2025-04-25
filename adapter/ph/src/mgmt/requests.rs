@@ -2,12 +2,14 @@
 #![allow(dead_code)]
 
 use super::core;
+use crate::auth::ZdpInitAuthenticationPayload;
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
 use crate::mgmt::core::SyncReqError;
 use crate::zdp;
 use crate::{assembly::Assembly, auth};
+
 use bytes::{Buf, BufMut};
 use std::net::IpAddr;
 use thiserror::Error;
@@ -126,7 +128,7 @@ pub async fn send_init_authentication_request(
             }
         });
         match key {
-            Some(key) => payload = auth::create_bootstrap_authentication_payload(&key),
+            Some(key) => payload = ZdpInitAuthenticationPayload::new(&key),
             None => {
                 // TODO: Possibly we want to send the Init Authentication message anyway, but
                 //       just not support bootstrap mode.
@@ -135,7 +137,7 @@ pub async fn send_init_authentication_request(
             }
         }
     } else {
-        payload = auth::create_empty_authentication_payload();
+        payload = ZdpInitAuthenticationPayload::new_empty();
     }
     debug!(target: ZDP, "Link {link_id}: sending IntitAuthenticationRequest, flags: {flags:x?}");
     let response = core::send_sync_non_flow_req(

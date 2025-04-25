@@ -1,5 +1,5 @@
 use crate::assembly::Assembly;
-use crate::auth::{self, DecodedBlob, ZdpSelfSignedBlob, AUTH_KEY_SIZE_BYTES};
+use crate::auth::{self, DecodedBlob, ZdpAuthCodeBlob, ZdpSelfSignedBlob, AUTH_KEY_SIZE_BYTES};
 use crate::config;
 use crate::counters::CounterType;
 use crate::km::ZPIPair;
@@ -674,7 +674,7 @@ impl LinkStateWrapper {
         }
         let key = key.unwrap();
 
-        if let Err(e) = auth::verify_blob_challenge(&ss_blob, &key) {
+        if let Err(e) = ss_blob.verify_blob_challenge(&key) {
             warn!(target: LINK_STATE, "Link {link_id} challenge verification failed: {e}");
             return false;
         }
@@ -866,7 +866,7 @@ impl LinkStateWrapper {
                     // Bootstrap not allowed or not configured. (TODO: Real actor auth)
                     locked_fsm.set_state(LinkState::RegisterAA);
                     drop(locked_fsm);
-                    let blob = auth::noauth();
+                    let blob = ZdpAuthCodeBlob::new_fake().encode();
                     self.send_acquire_zpr_address_request(asm, &blob);
                 }
             }
