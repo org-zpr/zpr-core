@@ -695,7 +695,7 @@ impl LinkStateWrapper {
         let locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::RegisterAA) => {
-                info!(target: LINK_STATE, "link {link_id} acquire ZDP address response (ACK) message recieved, code {:?}", code);
+                debug!(target: LINK_STATE, "link {link_id} acquire ZDP address response (ACK) message recieved, code {:?}", code);
                 Ok(())
             }
             (_, _) => Err(LinkStateError::InvalidOperation(
@@ -756,7 +756,7 @@ impl LinkStateWrapper {
                 match addrs {
                     Some(addrs) => {
                         // TODO: In future we will take addresses from here and configure TUN.
-                        debug!(target: LINK_STATE, "Link {link_id} granted ZPR addresses {:?}", addrs);
+                        info!(target: LINK_STATE, "Link {link_id} granted ZPR addresses {:?}, becoming ACTIVE", addrs);
                         locked_fsm.set_state(LinkState::Active);
                         asm.tun_ctl.set_carrier(true).unwrap();
                         debug!(

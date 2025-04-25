@@ -229,7 +229,7 @@ pub async fn send_acquire_zpr_address_request(
                 return Err(());
             };
             let resp_code = hdr.status_code;
-            info!(
+            debug!(
                 "Link {link_id} Received AcquireZprAddressResponse, status: {:?}",
                 resp_code
             );
@@ -296,7 +296,7 @@ pub async fn send_grant_zpr_address_request(
                 return Err(());
             };
             let resp_code = hdr.status_code;
-            info!(
+            debug!(
                 "Link {link_id}: received GrantZprAddressResponse, status: {:?}",
                 resp_code
             );
@@ -344,7 +344,7 @@ pub async fn send_terminate_request<'a, 'pktbuf>(
                 return Err(());
             };
             let resp_code = hdr.response_code;
-            info!(
+            debug!(
                 "Link {link_id}: received TerminateLinkResponse, status: {:?}",
                 resp_code
             );

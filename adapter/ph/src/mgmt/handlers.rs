@@ -333,7 +333,7 @@ pub async fn handle_grant_zpr_address_request(
 
     match parse_grant_zpr_address_request(&mut pkt) {
         Ok(actor_addresses) => {
-            debug!(target: ZDP,
+            info!(target: ZDP,
                 "Received Grant Zpr Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
             if asm
                 .process_link_state_event(
