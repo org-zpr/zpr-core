@@ -18,11 +18,15 @@ use base64::prelude::*;
 use thiserror::Error;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub const AUTH_KEY_SIZE_BYTES: usize = 32; // blake3 256bit key
 
 /// "self signed" blob type
 pub const BLOB_TYPE_SS: &str = "SS";
+
+/// Auth Code blob type
+pub const BLOB_TYPE_AC: &str = "AC";
 
 pub const MAX_BLOB_AGE_SECONDS: u64 = 120; // 2 minutes
 
@@ -42,6 +46,30 @@ pub struct ZdpSelfSignedBlob {
     pub cn: String,
     pub challenge: String, // byte buffer, base64 encoded
     pub sig: String,       // byte buffer, base64 encoded
+}
+
+// Note that this passed around as JSON text encoded in base64.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ZdpAuthCodeBlob {
+    pub blob_type: String, // "AC"
+    pub code: String,
+    pub pkce: String,
+    pub client_id: String,
+    pub asa: String,
+}
+
+/// Enum used to return different blob types based on their blob_type field.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub enum DecodedBlob {
+    SelfSigned(ZdpSelfSignedBlob),
+    AuthCode(ZdpAuthCodeBlob),
+}
+
+// This will go away.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Zdp {
+    pub blob_type: String, // "NONE"
 }
 
 #[derive(Debug, Error)]
@@ -74,6 +102,20 @@ pub struct RsaBootstrapAuth {
     cn: String,
 }
 
+/// Placeholder function that returns a fake AuthCode blob.
+/// Returns base64 encoded JSON serialized [ZdpAuthCodeBlob].
+pub fn noauth() -> String {
+    let blob = ZdpAuthCodeBlob {
+        blob_type: BLOB_TYPE_AC.to_string(),
+        code: "fake_auth_code".to_string(),
+        pkce: "fake_pkce".to_string(),
+        client_id: "fake_client_id".to_string(),
+        asa: "fake_asa".to_string(),
+    };
+    let json_txt = serde_json::to_string(&blob).unwrap();
+    BASE64_STANDARD.encode(&json_txt)
+}
+
 // TODO: move payload here and this should be a new() method
 pub fn create_bootstrap_authentication_payload(
     key: &[u8; AUTH_KEY_SIZE_BYTES],
@@ -104,17 +146,28 @@ pub fn create_empty_authentication_payload() -> ZdpInitAuthenticationPayload {
     }
 }
 
-/// Decode the blob which is base64 encoded json string, check its type.
-pub fn decode_blob(blob_str: &str, expect_type: &str) -> Result<ZdpSelfSignedBlob, AuthError> {
-    let blob = BASE64_STANDARD.decode(blob_str)?;
-    let ss_blob = serde_json::from_slice::<ZdpSelfSignedBlob>(&blob)?;
-    if ss_blob.blob_type != expect_type {
-        return Err(AuthError::FormatError(format!(
-            "incorrect blob type: {}",
-            ss_blob.blob_type
-        )));
+pub fn decode_blob(blob_str: &str) -> Result<DecodedBlob, AuthError> {
+    let json_txt = BASE64_STANDARD.decode(blob_str)?;
+
+    let jobj: Value = serde_json::from_slice(&json_txt)?;
+    let blob_type = jobj.get("blob_type").ok_or_else(|| {
+        AuthError::FormatError(format!("missing blob_type field in blob: {}", blob_str))
+    })?;
+
+    match blob_type.as_str() {
+        Some(BLOB_TYPE_SS) => {
+            let ss_blob = serde_json::from_slice::<ZdpSelfSignedBlob>(&json_txt)?;
+            Ok(DecodedBlob::SelfSigned(ss_blob))
+        }
+        Some(BLOB_TYPE_AC) => {
+            let ac_blob = serde_json::from_slice::<ZdpAuthCodeBlob>(&json_txt)?;
+            Ok(DecodedBlob::AuthCode(ac_blob))
+        }
+        _ => Err(AuthError::FormatError(format!(
+            "unknown blob_type: {:?}",
+            blob_type
+        ))),
     }
-    Ok(ss_blob)
 }
 
 /// The `challenge` field in the blob is a base64 encoded [zdp::ZdpInitAuthenticationPayload].

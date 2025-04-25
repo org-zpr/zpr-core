@@ -77,6 +77,7 @@ impl ZdpPacketType {
             | Self::HelloResponse
             | Self::ConfigurationResponse
             | Self::AcquireZprAddressResponse
+            | Self::InitAuthenticationResponse
             | Self::GrantZprAddressResponse
             | Self::UnregisterActorAddressResponse => true,
             _ => false,

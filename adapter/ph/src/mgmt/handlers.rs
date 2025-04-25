@@ -123,7 +123,7 @@ pub async fn handle_init_authentication_request(
             warn!(target: ZDP, "packet too short for payload");
             return Err((HandleMgmtError::BadStructure, pkt));
         }
-        debug!(target: ZDP, "Received Init Authentication w/bootstrap for link {ingress_link_id}");
+        debug!(target: ZDP, "Received Init Authentication +bootstrap for link {ingress_link_id}");
 
         let Ok(payload) = auth::ZdpInitAuthenticationPayload::read_from_buf(&mut pkt) else {
             return Err((HandleMgmtError::BadStructure, pkt));
@@ -290,6 +290,7 @@ pub async fn handle_hello_response(
 ///
 /// The authentication blob may come from bootstrap auth or from real
 /// auth-service auth.
+///
 pub async fn handle_acquire_zpr_address_request(
     asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
@@ -298,19 +299,12 @@ pub async fn handle_acquire_zpr_address_request(
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     let mut status_code = zdp::ResponseCode::Other;
-    if let Ok((actor_addresses, blob)) = parse_acquire_zpr_address_request(&mut pkt) {
-        debug!(target: ZDP,
-            "Received Register Actor Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
 
-        if asm
-            .process_link_state_event(
-                ingress_link_id,
-                LinkEvent::ReceivedAcquireZprAddressRequest(actor_addresses, blob),
-            )
-            .is_ok()
-        {
-            status_code = zdp::ResponseCode::Success;
-        }
+    let parse_res = parse_acquire_zpr_address_request(&mut pkt);
+    if parse_res.is_ok() {
+        status_code = zdp::ResponseCode::Success; // parse OK
+    } else {
+        warn!(target: ZDP, "Link {ingress_link_id} Failed to parse Acquire Zpr Address Request message");
     }
 
     // Send an ACK.
@@ -326,6 +320,25 @@ pub async fn handle_acquire_zpr_address_request(
         rsp_pkt,
     )
     .await;
+
+    // Now we can do our async prcessing of the acquire which will involve talking to
+    // the visa service.
+
+    let (actor_addresses, blob) = match parse_res {
+        Ok((actor_addresses, blob)) => (actor_addresses, blob),
+        Err(_) => {
+            return Ok(()); // this only happens if we fail to parse the blob above
+        }
+    };
+    debug!(target: ZDP, "Link {}: received Acquire ZPR Address Request for link with addresses {:?}", ingress_link_id, actor_addresses);
+
+    if let Err(e) = asm.process_link_state_event(
+        ingress_link_id,
+        LinkEvent::ReceivedAcquireZprAddressRequest(actor_addresses, blob),
+    ) {
+        error!(target: ZDP, "Link {ingress_link_id}: Failed to process ReceivedAcquireZprAddressRequest event: {:?}", e);
+    }
+
     Ok(())
 }
 
@@ -348,7 +361,7 @@ pub async fn handle_grant_zpr_address_request(
     match parse_grant_zpr_address_request(&mut pkt) {
         Ok(actor_addresses) => {
             debug!(target: ZDP,
-                "Received Register Grant Zpr Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
+                "Received Grant Zpr Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
             if asm
                 .process_link_state_event(
                     ingress_link_id,
@@ -371,7 +384,14 @@ pub async fn handle_grant_zpr_address_request(
                 status_code = zdp::ResponseCode::Success; // parsing was successful
             }
         }
-        Err(_) => {}
+        Err(_) => {
+            error!(target: ZDP, "Failed to parse Grant Zpr Address Request message, grant fails.");
+            // Need to tell state machine.
+            let _ = asm.process_link_state_event(
+                ingress_link_id,
+                LinkEvent::ReceivedGrantZprAddressRequest(None),
+            );
+        }
     }
 
     // Send an ACK.

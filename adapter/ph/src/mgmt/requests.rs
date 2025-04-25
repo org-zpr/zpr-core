@@ -81,12 +81,12 @@ pub async fn send_hello_request(
                 return Err(());
             };
             let status = hdr.status;
-            debug!(target: ZDP, "Received HelloResponse, status: {status:?}");
+            debug!(target: ZDP, "Link {link_id}: received HelloResponse, status: {status:?}");
             Ok(status)
         }
 
         Err(err) => {
-            warn!(target: ZDP, "{err} error with HelloRequest");
+            warn!(target: ZDP, "Link {link_id}: error with HelloRequest: {err}");
             Err(())
         }
     }
@@ -137,6 +137,7 @@ pub async fn send_init_authentication_request(
     } else {
         payload = auth::create_empty_authentication_payload();
     }
+    debug!(target: ZDP, "Link {link_id}: sending IntitAuthenticationRequest, flags: {flags:x?}");
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -162,12 +163,12 @@ pub async fn send_init_authentication_request(
                 return Err(());
             };
             let status = hdr.status_code;
-            debug!(target: ZDP, "Received InitAuthenticationResponse, status: {status:?}");
+            debug!(target: ZDP, "Link {link_id}: Received InitAuthenticationResponse, status: {status:?}");
             Ok(status)
         }
 
         Err(err) => {
-            warn!(target: ZDP, "{} error with InitAuthenticationRequest", err);
+            warn!(target: ZDP, "Link {link_id}: error with InitAuthenticationRequest: {}", err);
             Err(())
         }
     }
@@ -229,14 +230,17 @@ pub async fn send_acquire_zpr_address_request(
             };
             let resp_code = hdr.status_code;
             info!(
-                "Received AcquireZprAddressResponse, status: {:?}",
+                "Link {link_id} Received AcquireZprAddressResponse, status: {:?}",
                 resp_code
             );
             Ok(resp_code)
         }
 
         Err(err) => {
-            warn!("{} error with AcquireZprAddressResponse", err);
+            warn!(
+                "Link {link_id}: error with AcquireZprAddressResponse: {}",
+                err
+            );
             Err(())
         }
     }
@@ -257,6 +261,7 @@ pub async fn send_grant_zpr_address_request(
     let mut c_actor_addrs = Vec::new();
     c_actor_addrs.extend_from_slice(actor_addrs);
 
+    info!(target: ZDP, "Link {link_id} - sending GrantZprAddressRequest, status: {status_code:?}");
     let response = core::send_sync_non_flow_req(
         asm,
         link_id,
@@ -291,12 +296,18 @@ pub async fn send_grant_zpr_address_request(
                 return Err(());
             };
             let resp_code = hdr.status_code;
-            info!("Received GrantZprAddressResponse, status: {:?}", resp_code);
+            info!(
+                "Link {link_id}: received GrantZprAddressResponse, status: {:?}",
+                resp_code
+            );
             Ok(resp_code)
         }
 
         Err(err) => {
-            warn!("{} error with GrantZprAddressResponse", err);
+            warn!(
+                "Link {link_id}: error with GrantZprAddressResponse: {}",
+                err
+            );
             Err(())
         }
     }
@@ -333,12 +344,15 @@ pub async fn send_terminate_request<'a, 'pktbuf>(
                 return Err(());
             };
             let resp_code = hdr.response_code;
-            info!("Received TerminateLinkResponse, status: {:?}", resp_code);
+            info!(
+                "Link {link_id}: received TerminateLinkResponse, status: {:?}",
+                resp_code
+            );
             Ok(resp_code)
         }
 
         Err(err) => {
-            warn!("{} error with TerminateLinkResponse", err);
+            warn!("Link {link_id}: error with TerminateLinkResponse: {}", err);
             Err(())
         }
     }
@@ -405,7 +419,7 @@ pub async fn send_bind_actor_address_request(
                     req.put(five_tuple.dst_address.v6.as_slice());
                 }
 
-                other => panic!("bad L3 type: {}", other.0),
+                other => panic!("Link {link_id}: bad L3 type: {}", other.0),
             }
 
             req.put_u8(five_tuple.l4_protocol);
