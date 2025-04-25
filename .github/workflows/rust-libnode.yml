@@ -17,37 +17,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_NET_GIT_FETCH_WITH_CLI: true
 
 jobs:
   libnode-build:
-    runs-on: ubuntu-latest
-    container:
-      image: docker://ghcr.io/org-zpr/38f3bb925e5e:latest
-    steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-
-    - name: Prepare Rust
-      timeout-minutes: 5
-      run: rustup default stable
-
-    - name: Setup Git credentials
-      timeout-minutes: 1
-      run: |
-        echo 'echo $ZPR_CICD_RO_TOKEN' > "$HOME/.git-askpass"
-        chmod +x "$HOME/.git-askpass"
-        echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
-
-    - name: Build libnode
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        cd libnode && make all
-
-    - name: Run tests
-      timeout-minutes: 5
-      env:
-        ZPR_CICD_RO_TOKEN: ${{ secrets.ZPR_CICD_RO_TOKEN }}
-      run: |
-        cd libnode && make test
+    name: Libnode
+    uses: ./.github/workflows/rust-containerized-build-test.yml
+    with:
+      name: Libnode
+      path: ./libnode
+    secrets: inherit
