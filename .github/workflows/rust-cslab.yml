@@ -3,6 +3,9 @@ name: Rust-cslab
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'cslab/**'
+      - '.github/workflows/rust-cslab.yml'
   pull_request:
     paths:
       - 'cslab/**'

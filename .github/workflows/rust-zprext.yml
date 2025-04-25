@@ -3,8 +3,11 @@ name: Rust-zprext
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'zpr-ext/**'
+      - '.github/workflows/rust-zprext.yml'
   pull_request:
-    paths: 
+    paths:
       - 'zpr-ext/**'
       - '.github/workflows/rust-zprext.yml'
 

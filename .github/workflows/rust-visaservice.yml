@@ -3,9 +3,16 @@ name: Rust-visaservice
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'libnode/**'
+      - 'visaservice/vs-client/**'
+      - 'visaservice/vs-admin/**'
+      - '.github/workflows/rust-visaservice.yml'
   pull_request:
     paths:
-      - 'visaservice/cli/**'
+      - 'libnode/**'
+      - 'visaservice/vs-client/**'
+      - 'visaservice/vs-admin/**'
       - '.github/workflows/rust-visaservice.yml'
 
 concurrency:
