@@ -247,32 +247,6 @@ pub async fn handle_hello_request(
     Ok(())
 }
 
-/// TODO: When is this called? Aren't hello-requests sent through the link state SYNC request thing?
-///       If that's true then the response will be directed there not here. Right?
-///
-/// handle a Hello Response (RFC 6.5 § 6.3.4)
-pub async fn handle_hello_response(
-    asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
-    mut pkt: Packet,
-) -> HandleMgmtResult {
-    let ingress_link_id = pkt.metadata().ingress_link_id;
-
-    let Ok(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
-    };
-    let status = hdr.status;
-    debug!(target: ZDP, "Received Hello Response for link {ingress_link_id}, status: {status:?}");
-
-    if asm
-        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloResponse(status))
-        .is_err()
-    {
-        return Err((HandleMgmtError::LinkStateError, pkt));
-    };
-
-    Ok(())
-}
 
 /// Handle the AcquireZprAddressRequest (TODO: Not yet in RFC 6)
 ///

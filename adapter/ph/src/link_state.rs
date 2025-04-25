@@ -8,6 +8,7 @@ use crate::logging::targets::LINK_STATE;
 use crate::mgmt;
 use crate::mgmt::core::SyncReqError;
 use crate::net_defs::IpAddress;
+use crate::pki::get_cn_from_cert;
 use crate::sample_ring::SampleRing;
 use crate::special_peers;
 use crate::special_peers::SpecialPeerName;
@@ -410,7 +411,6 @@ impl LinkStateWrapper {
 
         if let Some(ref peer_cert) = sa.peer_cert {
             info!(target: LINK_STATE, "Link {link_id} has name {:?}", peer_cert.subject_name());
-
             // assign special-peer name if this peer is special
             for name in
                 special_peers::special_peer_names_from_x509_subject_name(peer_cert.subject_name())
@@ -639,9 +639,28 @@ impl LinkStateWrapper {
         link_id: LinkId,
         ss_blob: &ZdpSelfSignedBlob,
     ) -> bool {
-        // TODO: Check that the CN in the message is the CN set on this link. Not sure how to get the CN at this point.
-        info!(target: LINK_STATE, "TODO: check CN in message is same as CN at other side of this link");
+        // Now check that the in the presented blob matches the CN the peer used to establish link.
+        let Some(peer_state) = asm.peer_table.get(link_id) else {
+            warn!(target: LINK_STATE, "Link {link_id} blob check failed: cannot find peer state entry");
+            return false;
+        };
+        let Some(sa) = peer_state.get_established_transport_association() else {
+            warn!(target: LINK_STATE, "Link {link_id} blob check failed: cannot find SA");
+            return false;
+        };
+        if let Some(ref peer_cert) = sa.peer_cert {
+            if let Some(link_cn) = get_cn_from_cert(peer_cert) {
+                if link_cn != ss_blob.cn {
+                    warn!(target: LINK_STATE, "Link {link_id} blob check failed: CN mismatch: expected {link_cn} found {}", ss_blob.cn);
+                    return false;
+                }
+            } else {
+                warn!(target: LINK_STATE, "Link {link_id} blob check failed: no CN in cert");
+                return false;
+            }
+        }
 
+        // Now make sure that the sender returned the exact challenge we sent.
         let key = asm.peer_table.inspect(link_id, {
             |peer| {
                 let mut key = [0u8; AUTH_KEY_SIZE_BYTES];
@@ -1187,6 +1206,7 @@ impl LinkStateWrapper {
         });
         Ok(())
     }
+
 }
 
 async fn send_terminate_request(
