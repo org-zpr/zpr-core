@@ -247,7 +247,6 @@ pub async fn handle_hello_request(
     Ok(())
 }
 
-
 /// Handle the AcquireZprAddressRequest (TODO: Not yet in RFC 6)
 ///
 /// This message is from an adapter to a node.  Or in the future from

@@ -904,7 +904,10 @@ impl LinkStateWrapper {
         let task_asm = asm.clone();
 
         // Convert the IpAddresses into IpAddrs
-        let ipaddrs = addrs.iter().map(|addr| IpAddr::from(addr)).collect::<Vec<_>>();
+        let ipaddrs = addrs
+            .iter()
+            .map(|addr| IpAddr::from(addr))
+            .collect::<Vec<_>>();
 
         tokio::task::spawn_local(async move {
             let result = mgmt::requests::send_grant_zpr_address_request(
@@ -1199,7 +1202,6 @@ impl LinkStateWrapper {
         });
         Ok(())
     }
-
 }
 
 async fn send_terminate_request(

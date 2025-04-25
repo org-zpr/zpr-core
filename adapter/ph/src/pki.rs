@@ -141,7 +141,6 @@ pub fn load_noise_public_key(path: &Path) -> Result<[u8; NOISE_KEY_LEN], ParseEr
     }
 }
 
-
 /// Get the CN value as a string out of the certificate. If not found or any
 /// other issue, returns None.
 pub fn get_cn_from_cert(cert: &X509) -> Option<String> {
@@ -150,9 +149,7 @@ pub fn get_cn_from_cert(cert: &X509) -> Option<String> {
         .entries_by_nid(openssl::nid::Nid::COMMONNAME)
         .next();
     if let Some(entry_ref) = entry_ref_opt {
-        let sslstr_res = entry_ref
-            .data()
-            .as_utf8();
+        let sslstr_res = entry_ref.data().as_utf8();
         if let Ok(sslstr) = sslstr_res {
             return Some(sslstr.to_string());
         }
@@ -160,14 +157,12 @@ pub fn get_cn_from_cert(cert: &X509) -> Option<String> {
     None
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
     fn test_extract_cert_pem_data() {
-
         let cert_pem_data = r#"-----BEGIN CERTIFICATE-----
 MIIDWzCCAUOgAwIBAgIURkj38EC8A6U5BF8Ue/ZWxz/+SLcwDQYJKoZIhvcNAQEL
 BQAwYjELMAkGA1UEBhMCVVMxCzAJBgNVBAgMAk1BMQ8wDQYDVQQHDAZCb3N0b24x

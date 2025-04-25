@@ -551,10 +551,9 @@ fn check_file_exists(desc: &str, path: &Path) -> Result<(), ArgsError> {
 pub fn get_noise_cn(certificate_file: &Path) -> Result<String, ArgsError> {
     let cert = load_cert(certificate_file)
         .map_err(|e| ArgsError::ParseError(format!("failed to load noise certificate: {e:?}")))?;
-    pki::get_cn_from_cert(&cert)
-        .ok_or(
-            ArgsError::ParseError("failed to get CN from certificate".to_string()),
-        )
+    pki::get_cn_from_cert(&cert).ok_or(ArgsError::ParseError(
+        "failed to get CN from certificate".to_string(),
+    ))
 }
 
 #[cfg(test)]
