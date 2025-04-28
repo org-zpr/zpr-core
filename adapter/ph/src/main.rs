@@ -252,6 +252,13 @@ fn main() -> ExitCode {
     // open substrate sockets and mgmt substrate injection socket
     //
 
+    if ph_mode == PhMode::Node {
+        if config.self_addr.port() == 0 {
+            // TODO: Should we force setting a port when configuring a node?
+            warn!(target: STARTUP, "self_addr port is 0 which means dock listening port will be chosen by OS");
+        }
+    }
+
     let mut substrate_sockets: Vec<std::net::UdpSocket> = Vec::new();
 
     for _i in 0..topology_config.fastpath_concurrency {
@@ -275,6 +282,14 @@ fn main() -> ExitCode {
             info!(target: STARTUP, "assigned substrate UDP port {port}");
         }
         substrate_sockets.push(socket.into());
+    }
+
+    if ph_mode == PhMode::Node {
+        info!(
+            target: STARTUP,
+            "dock listening on {}",
+            substrate_sockets[0].local_addr().unwrap()
+        );
     }
 
     let (mgmt_substrate_inq, mgmt_substrate_outq) =
@@ -408,18 +423,6 @@ fn main() -> ExitCode {
     //
     // start data path workers
     //
-
-    if ph_mode == PhMode::Node {
-        if config.self_addr.port() == 0 {
-            // TODO: Should we force setting a port when configuring a node?
-            warn!(target: STARTUP, "self_addr port is 0 which means dock listening port will be randomly assigned");
-        }
-        info!(
-            target: STARTUP,
-            "dock listening on {}",
-            substrate_sockets[0].local_addr().unwrap()
-        );
-    }
 
     let mut fastpath_threads = Vec::new();
 
