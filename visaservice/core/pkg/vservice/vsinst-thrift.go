@@ -12,12 +12,14 @@ import (
 	"hash/crc32"
 	"math/rand"
 	"net/netip"
+	"strings"
 	"time"
 
 	"zpr.org/vs/pkg/actor"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vservice/adb"
+	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsapi"
 
 	"github.com/apache/thrift/lib/go/thrift"
@@ -360,9 +362,21 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 
 	// In prototype, the node calls authorize_connect for ITSELF after registration.
 	// That is important as it sets up other services and such that may be on the
-	// node.  So let's try invoking that here.  Note that we do not have challenge
-	// or challenge response to do real actor auth. So if you were to enable challenge
-	// validation in the visa service config, this call would always fail.
+	// node.  So let's try invoking that here.
+	//
+	// We could think about just using boostrap auth for nodes, but that does mean
+	// that the node needs an RSA keypair and the public key needs to be in policy.
+	// I think our current more ad-hoc scheme just uses a cert which might be more
+	// convenient for network admins.
+	//
+	// TODO: Revisit the HMAC thing in the registration request -- do we need that?
+	//
+	// It would be nicer if the ApproveConnection call could do the actual auth
+	// checking instead of us here.
+	//
+	// TODO: For now I am passing in a fake self-signed (but unsigned) blob and the "magic"
+	// claim of "nodeness" which ApproveConnection will honor (instead of
+	// looking into policy to find a public key).
 	var realNodeActor *actor.Actor = nil
 
 	vs.log.Debug("registration: running ApproveConnection for node")
@@ -372,6 +386,15 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		claims["zpr.adapter.cn"] = nodeCert.Subject.CommonName
 		claims[actor.KAttrRole] = "node" // does ApproveConnection set this?
 
+		blob := auth.NewZdpSelfSignedBlobUnsiged(nodeCert.Subject.CommonName, req.Challenge.ChallengeData)
+		blobStr, err := blob.Encode()
+		if err != nil {
+			vs.log.WithError(err).Warn("registration: failed to encode blob")
+			return "", fmt.Errorf("failed to encode blob")
+		}
+		responses := make([][]byte, 1)
+		responses[0] = []byte(blobStr)
+
 		// Now this ought to to create a real actor... so if this "works" we need to patch up the finishAuthentication function
 		// so we don't overwrite the good actor with a fake one.
 		creq := vsapi.ConnectRequest{
@@ -379,7 +402,7 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 			DockAddr:           netip.MustParseAddr("0.0.0.0").AsSlice(),
 			Claims:             claims,
 			Challenge:          nil,
-			ChallengeResponses: nil,
+			ChallengeResponses: responses,
 		}
 		if realNodeActor, err = vs.ApproveConnection(&creq); err != nil {
 			vs.log.WithError(err).Warn("registration: ApproveConnection failed")
@@ -397,8 +420,6 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 	// For now I am fabricating a node-actor here.  Eventually the node will reun through
 	// the ZDP authentication steps to establish proper credentials.
 
-	// expiration := time.Now().Add(vs.bootstrapAuthDuration)
-
 	var vssServiceAddr string
 
 	if req.VssService == "" {
@@ -414,7 +435,6 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 		vs.log.Info("registration: got VSS service address", "vss_addr", vssServiceAddr)
 	}
 
-	// apiKey, err := vs.finishAuthenticate(naddr, expiration, req.NodeActor.Provides, vssServiceAddr)
 	apiKey, err := vs.finishAuthenticate(naddr, realNodeActor, vssServiceAddr)
 	if err != nil {
 		vs.log.WithError(err).Warn("registration: failed to write to actor DB")
@@ -457,6 +477,8 @@ func (vs *VSInst) DeRegister(ctx context.Context, key string) error {
 	return nil
 }
 
+// Latest ref-impl stuffs any authentication BLOBS into the ConnectRequest.ChallengeResponse
+// byte buffers.  An authentication BLOB is just a base64 encoded JSON object.
 func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsapi.ConnectRequest) (*vsapi.ConnectResponse, error) {
 	vs.log.Debug("*AUTHORIZE_CONNECT*")
 	if !vs.validAPIKey(key) {
@@ -466,6 +488,27 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 
 	if naddr, ok := vs.nodeAddrForKey(key); ok {
 		vs.actorDB.IncrNodeConnectReq(naddr)
+	}
+
+	// Ensure that claims passed in do not include any sensitive ones.
+	scrubbedClaims := make(map[string]string)
+	for k, v := range request.Claims {
+		if strings.HasPrefix(k, "zpr.") {
+			// We allow:
+			//    zpr.addr - for requsting an address (temporary) (TODO)
+			//    zpr.adapter.cn - CN name determined by node (but must match signed blob too)
+			switch k {
+			case actor.KAttrEPID, actor.KAttrCN:
+				{
+					scrubbedClaims[k] = v
+				}
+			default:
+				vs.log.Warn("registration: authorize-connect -- rejected claim", "claim", k, "value", v)
+				continue
+			}
+		} else {
+			scrubbedClaims[k] = v
+		}
 	}
 
 	// Note that the prototype visa service allowed a node to pass itself (its own actor) in to this call,

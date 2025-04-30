@@ -110,49 +110,53 @@ func (vs *Directory) Size() int {
 //
 // Returns ErrNotSupported if domain (why not prefix?) does not support validate.
 func (vs *Directory) Validate(dsPrefix string, msg *zds.ValidateRequest, revokes []*snauth.CredID) (*ValidateResult, error) {
-	vs.mtx.RLock()
-	v, ok := vs.m[dsPrefix]
-	if ok && !v.allowValidate {
-		return nil, ErrNotSupported
-	}
-	vs.mtx.RUnlock()
-	if !ok {
-		return nil, errUnknownValidator
-	}
-	pool, domFinger, err := vs.certPoolForDomain(v.Domain, revokes)
-	if err != nil {
-		return nil, err
-	}
-	resp, pfx, err := v.validate(pool, msg)
-	if err != nil {
-		if errors.Is(err, ErrNotSupported) {
-			vs.mtx.Lock()
-			v.allowValidate = false
-			vs.mtx.Unlock()
+	// TODO: This is old prototype valdation system
+	return nil, fmt.Errorf("external validation not supported")
+	/*
+		vs.mtx.RLock()
+		v, ok := vs.m[dsPrefix]
+		if ok && !v.allowValidate {
+			return nil, ErrNotSupported
 		}
-		return nil, err
-	}
-	// The external service may succeed but the credential may be revoked.
-	// So need to check the JTI.
-	if jti := snauth.GetStrClaimFromJWTStr("jti", string(resp.GetToken())); jti != "" {
-		for _, cd := range revokes {
-			if cd.CType == snauth.CredIDTypeCertificate {
-				if cd.ID == jti {
-					vs.log.Info("auth fails due to revoked credential", "credential_id", cd.ID)
-					return nil, errAuthRevoked
+		vs.mtx.RUnlock()
+		if !ok {
+			return nil, errUnknownValidator
+		}
+		pool, domFinger, err := vs.certPoolForDomain(v.Domain, revokes)
+		if err != nil {
+			return nil, err
+		}
+		resp, pfx, err := v.validate(pool, msg)
+		if err != nil {
+			if errors.Is(err, ErrNotSupported) {
+				vs.mtx.Lock()
+				v.allowValidate = false
+				vs.mtx.Unlock()
+			}
+			return nil, err
+		}
+		// The external service may succeed but the credential may be revoked.
+		// So need to check the JTI.
+		if jti := snauth.GetStrClaimFromJWTStr("jti", string(resp.GetToken())); jti != "" {
+			for _, cd := range revokes {
+				if cd.CType == snauth.CredIDTypeCertificate {
+					if cd.ID == jti {
+						vs.log.Info("auth fails due to revoked credential", "credential_id", cd.ID)
+						return nil, errAuthRevoked
+					}
 				}
 			}
 		}
-	}
-	vres := &ValidateResult{
-		Prefix: pfx,
-		VResp:  resp,
-	}
-	// Add the key fingerprint for this domain auth to the response.
-	if domFinger != nil {
-		vres.DomainCredID = domFinger.String()
-	}
-	return vres, nil
+		vres := &ValidateResult{
+			Prefix: pfx,
+			VResp:  resp,
+		}
+		// Add the key fingerprint for this domain auth to the response.
+		if domFinger != nil {
+			vres.DomainCredID = domFinger.String()
+		}
+		return vres, nil
+	*/
 }
 
 // QueryByPrefix may return ErrNotSupported if the datasource does not support query.

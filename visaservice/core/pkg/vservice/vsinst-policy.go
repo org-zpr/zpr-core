@@ -53,6 +53,10 @@ func (vs *VSInst) ActivateConfiguration(configID uint64, _ byte) {
 // must install the policy under the given configuration.
 // implementation of policy.PolicyListener
 func (vs *VSInst) InstallPolicy(configID uint64, _ byte, pol *policy.Policy) error {
+
+	vs.log.Info("installing policy to auth service")
+	vs.authr.InstallPolicy(configID, 0, pol)
+
 	vs.plcy.Lock()
 
 	vs.log.Debug("new policy arrives for install")

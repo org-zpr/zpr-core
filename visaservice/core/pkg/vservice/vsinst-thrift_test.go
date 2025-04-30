@@ -3,26 +3,28 @@ package vservice_test
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"net/netip"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/google/gopacket"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vservice"
+	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsapi"
 
 	"zpr.org/vsx/polio"
-	"zpr.org/vsx/snio/zds"
 	"zpr.org/vsx/zpl/compiler"
 	"zpr.org/vsx/zpl/fs"
 )
@@ -175,14 +177,13 @@ func newDefaultVSConfig(t *testing.T) *vservice.VSIConfig {
 	authcert, err := snauth.LoadCertFromPEMBuffer([]byte(caCert))
 	require.Nil(t, err)
 	return &vservice.VSIConfig{
-		Log:                      logr.NewTestLogger(),
-		CN:                       "vs.zpr",
-		VSAddr:                   netip.MustParseAddr(vservice.VisaServiceAddress),
-		HopCount:                 99,
-		AllowInvalidPeerAddr:     true,
-		BootstrapAuthDuration:    1 * time.Hour,
-		AuthorityCert:            authcert,
-		DisableConnectValidation: true, // does not check challenges or challenge-responses
+		Log:                   logr.NewTestLogger(),
+		CN:                    "vs.zpr",
+		VSAddr:                netip.MustParseAddr(vservice.VisaServiceAddress),
+		HopCount:              99,
+		AllowInvalidPeerAddr:  true,
+		BootstrapAuthDuration: 1 * time.Hour,
+		AuthorityCert:         authcert,
 	}
 }
 
@@ -190,7 +191,17 @@ func initVisaserviceWithOpts(t *testing.T, vcfg *vservice.VSIConfig) *vservice.V
 	svc, err := vservice.NewVSInst(vcfg)
 	require.Nil(t, err)
 	require.NotNil(t, svc)
-	svc.SetAuthSvc(&TestAS{})
+
+	authKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.Nil(t, err)
+
+	authsvc := auth.NewAuthenticator(logr.NewTestLogger(),
+		netip.MustParseAddr("127.0.0.1"),
+		1000*time.Hour,
+		"vs.zpr",
+		authKey)
+
+	svc.SetAuthSvc(authsvc)
 	return svc
 }
 
@@ -496,88 +507,6 @@ func TestThriftPollRespectKey(t *testing.T) {
 	}
 }
 
-func TestThriftAuthorizeConnectRespectKey(t *testing.T) {
-	svc := initVisaservice(t)
-
-	{
-		// Compile and install the policy
-		fst, _ := fs.NewMemoryFileStore()
-		fst.AddFile("/pol.yaml", []byte(testPolicyYaml))
-		fst.AddFile("/ca0-cert.pem", []byte(caCert))
-
-		opts := &compiler.CompileOpts{
-			Revision: "foo1",
-			Verbose:  true,
-		}
-		plcy, err := compiler.Compile("/pol.yaml", fst, opts)
-		require.Nil(t, err)
-		require.NotNil(t, plcy)
-		alog := logr.NewTestLogger()
-		pp := policy.NewPolicyFromPol(plcy, alog)
-		svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
-	}
-
-	helloResp, err := svc.Hello(context.Background())
-	if err != nil {
-		t.Fatalf("Hello failed: %v", err)
-	}
-
-	// create HMAC(nonce + timestamp + session_id)
-	timestamp := time.Now().Unix()
-	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, helloResp.SessionID, timestamp)
-
-	nodeAddr := netip.MustParseAddr("fc00:3001::8")
-	dockAddr := netip.MustParseAddr("fc00:3001::8")
-
-	agnt := &vsapi.Actor{
-		ActorType:   vsapi.ActorType_NODE,
-		AuthExpires: time.Now().Unix() + 11400, // +4hrs
-		ZprAddr:     nodeAddr.AsSlice(),
-		TetherAddr:  dockAddr.AsSlice(),
-		Ident:       uuid.New().String(),
-	}
-	agnt.Provides = append(agnt.Provides, "/zpr/n0")
-
-	authReq := &vsapi.NodeAuthRequest{
-		SessionID: helloResp.SessionID,
-		Challenge: helloResp.Challenge,
-		Timestamp: timestamp,
-		NodeCert:  []byte(nodeNoiseCert),
-		Hmac:      sig[:],
-		NodeActor: agnt,
-	}
-
-	apiKey, err := svc.Authenticate(context.Background(), authReq)
-	require.Nil(t, err)
-	require.NotEmpty(t, apiKey)
-
-	actorClaims := map[string]string{
-		"zpr.addr":       vservice.VisaServiceAddress,
-		"zpr.adapter.cn": "some.actor",
-	}
-
-	req := vsapi.ConnectRequest{
-		ConnectionID:       99,
-		DockAddr:           dockAddr.AsSlice(),
-		Claims:             actorClaims,
-		Challenge:          nil,
-		ChallengeResponses: nil, // will fail anyway
-	}
-	cr, err := svc.AuthorizeConnect(context.Background(), apiKey, &req)
-	require.Nil(t, err)
-	require.Equal(t, req.ConnectionID, cr.ConnectionID)
-	require.Equal(t, vsapi.StatusCode_FAIL, cr.Status)
-	require.NotNil(t, cr.Reason)
-	require.Contains(t, *cr.Reason, "no matching rule/policy")
-
-	svc.DeRegister(context.Background(), apiKey)
-	{
-		_, err := svc.Poll(apiKey)
-		require.NotNil(t, err)
-		require.ErrorContains(t, err, "Unauthorized")
-	}
-}
-
 // This time prepare a "real" connection request. Will not fail
 // because we can not yet enable acutal actor challenge validation.
 // So this will succeed.
@@ -587,21 +516,16 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	svc := initVisaservice(t)
 
 	{
-		// Compile and install the policy
-		fst, _ := fs.NewMemoryFileStore()
-		fst.AddFile("/pol.yaml", []byte(testPolicyYaml))
-		fst.AddFile("/ca0-cert.pem", []byte(caCert))
+		// We cannot use our ZPL in here since to run this
+		// sort of connect we need to use boostrap which is
+		// not supported by the old ZPL compiler.
 
-		opts := &compiler.CompileOpts{
-			Revision: "foo1",
-			Verbose:  true,
-		}
-		plcy, err := compiler.Compile("/pol.yaml", fst, opts)
+		pfile := filepath.Join("auth", "testdata", "vs-auth-test.bin")
+		cp, err := polio.OpenContainedPolicyFile(pfile, nil)
 		require.Nil(t, err)
-		require.NotNil(t, plcy)
-		alog := logr.NewTestLogger()
-		pp := policy.NewPolicyFromPol(plcy, alog)
-		svc.InstallPolicy(policy.InitialConfiguration, 1, pp)
+		polplcy := cp.Policy
+		plcy := policy.NewPolicyFromPol(polplcy, logr.NewTestLogger())
+		svc.InstallPolicy(1234, 0, plcy)
 	}
 
 	helloResp, err := svc.Hello(context.Background())
@@ -613,8 +537,8 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	timestamp := time.Now().Unix()
 	sig := createMilestone2HMAC(helloResp.Challenge.ChallengeData, helloResp.SessionID, timestamp)
 
-	nodeAddr := netip.MustParseAddr("fc00:3001::8")
-	dockAddr := netip.MustParseAddr("fc00:3001::8")
+	nodeAddr := netip.MustParseAddr("fd5a:5052:90de::1")
+	dockAddr := netip.MustParseAddr("fd5a:5052:90de::1")
 
 	agnt := &vsapi.Actor{
 		ActorType:   vsapi.ActorType_NODE,
@@ -623,7 +547,7 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 		TetherAddr:  dockAddr.AsSlice(),
 		Ident:       uuid.New().String(),
 	}
-	agnt.Provides = append(agnt.Provides, "/zpr/n0")
+	agnt.Provides = append(agnt.Provides, "/zpr/node.zpr.org")
 
 	authReq := &vsapi.NodeAuthRequest{
 		SessionID: helloResp.SessionID,
@@ -638,6 +562,8 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	require.Nil(t, err)
 	require.NotEmpty(t, apiKey)
 
+	// Clearly, the only thing we can connect is a visa service.
+
 	actorClaims := map[string]string{
 		"zpr.addr":       vservice.VisaServiceAddress,
 		"zpr.adapter.cn": "vs.zpr",
@@ -646,38 +572,25 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 	nonce := make([]byte, snauth.ChallengeNonceSize)
 	snauth.NewNonce(nonce)
 
-	zchal := &zds.Challenge{
-		Spec:      "chal-node-v1",
-		Timestamp: time.Now().Format(time.RFC3339),
-		Nonce:     nonce,
-	}
-	chalbuf, err := proto.Marshal(zchal)
+	// The policy in auth/testdata has a public key for bootstrap init.
+	pkey, err := snauth.LoadRSAKeyFromFile(filepath.Join("auth", "testdata", "vs.zpr_key.pem"))
 	require.Nil(t, err)
 
-	rsac := snauth.NewRSAv2()
-
-	rsaconfig := make(map[string]string)
-	rsaconfig["cert_data_pem"] = testCert
-	rsaconfig["key_data_pem"] = testPrivakeKey
-
-	zchalresps, err := rsac.Respond(rsaconfig, zchal, 0)
+	blob := auth.NewZdpSelfSignedBlobUnsiged("vs.zpr", nonce)
+	err = blob.Sign(pkey)
 	require.Nil(t, err)
-	require.NotNil(t, zchalresps)
-	require.NotEmpty(t, zchalresps)
 
-	var chalresps [][]byte
-	for _, zchalresp := range zchalresps {
-		pbuf, err := proto.Marshal(zchalresp)
-		require.Nil(t, err)
-		chalresps = append(chalresps, pbuf)
-	}
+	zchalresps := make([][]byte, 1)
+	blobbuf, err := blob.Encode()
+	require.Nil(t, err)
+	zchalresps[0] = []byte(blobbuf)
 
 	req := vsapi.ConnectRequest{
 		ConnectionID:       99,
 		DockAddr:           dockAddr.AsSlice(),
 		Claims:             actorClaims,
-		Challenge:          chalbuf,
-		ChallengeResponses: chalresps,
+		Challenge:          nil, // unused
+		ChallengeResponses: zchalresps,
 	}
 	cr, err := svc.AuthorizeConnect(context.Background(), apiKey, &req)
 	require.Nil(t, err)

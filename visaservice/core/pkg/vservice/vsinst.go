@@ -70,7 +70,6 @@ type VSInst struct {
 	accessToken           []byte // Access token for special node operations
 	allowInvalidPeerAddr  bool   // Set to TRUE for testing only.
 	actorDB               *adb.ActorDB
-	validationEnabled     bool // normally yes.
 	bootstrapAuthDuration time.Duration
 	authorityCert         *x509.Certificate // for checking certififactes from nodes/adapters
 
@@ -115,18 +114,17 @@ type vtableEnt struct {
 
 // VSIConfig is the rather complex configuration bundle for the visa service.
 type VSIConfig struct {
-	Log                      logr.Logger   // General logging
-	VSAddr                   netip.Addr    // Visa service ZPR public address
-	HopCount                 uint          // Is set on every visa we create
-	CN                       string        // Visa service CN value used by the vs adapter
-	Creds                    *tls.Config   // TLS for the thrift channel
-	ReauthBumpTimeOverride   time.Duration // For unit testing (see DefaultReauthBumpTime defined above)
-	AccessToken              []byte        // Auth token for node to access special VS capabilities
-	AllowInvalidPeerAddr     bool          // Set to TRUE for testing only.
-	Constrainer              ConstraintService
-	DisableConnectValidation bool // Set to TRUE to disable connect validation for adapters
-	BootstrapAuthDuration    time.Duration
-	AuthorityCert            *x509.Certificate // for checking certififactes from nodes/adapters
+	Log                    logr.Logger   // General logging
+	VSAddr                 netip.Addr    // Visa service ZPR public address
+	HopCount               uint          // Is set on every visa we create
+	CN                     string        // Visa service CN value used by the vs adapter
+	Creds                  *tls.Config   // TLS for the thrift channel
+	ReauthBumpTimeOverride time.Duration // For unit testing (see DefaultReauthBumpTime defined above)
+	AccessToken            []byte        // Auth token for node to access special VS capabilities
+	AllowInvalidPeerAddr   bool          // Set to TRUE for testing only.
+	Constrainer            ConstraintService
+	BootstrapAuthDuration  time.Duration
+	AuthorityCert          *x509.Certificate // for checking certififactes from nodes/adapters
 }
 
 var EMPTY_ADDR = netip.Addr{}
@@ -155,7 +153,6 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 		allowInvalidPeerAddr:  vcf.AllowInvalidPeerAddr,
 		nodeState:             vcf.Constrainer,
 		vsMsgC:                make(chan *VSMsg, 16),
-		validationEnabled:     !vcf.DisableConnectValidation,
 		bootstrapAuthDuration: vcf.BootstrapAuthDuration,
 		authorityCert:         vcf.AuthorityCert,
 	}

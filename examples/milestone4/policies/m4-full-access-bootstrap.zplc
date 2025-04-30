@@ -1,0 +1,56 @@
+# -*- mode: toml -*-
+
+[resolver]
+order = ["hosts", "dns"]
+
+[resolver.hosts]
+"node0.zpr" = "fd5a:5052:90de::1"
+"node0.overlay" = "10.0.0.21" # 129.153.152.175
+
+[nodes."node.zpr.org"]
+key = "DNBguc3HqkzfLys68PWm2CnWSA/IhAIFiHFII9cFrFo="
+provider = [ ["zpr.adapter.cn", "node.zpr.org"]]
+zpr_address = "node0.zpr"
+interfaces = ["in1"]
+in1.netaddr = "node0.overlay:5000"
+
+[trusted_services.default] # note that "default" is special
+cert_path = "ca-cert.pem"
+
+[visa_service]
+dock_node = "node.zpr.org"
+admin_attrs = [ [ "zpr.adapter.cn", "admin.zpr.org" ] ]
+
+# Every adapter that is not a visa service (or a node) needs
+# a boostrap record since we have no authentication service.
+[bootstrap]
+"bas.zpr.org" = "bas.zpr.org.pem"
+
+[protocols.ping]
+protocol = "iana.ICMP6"
+icmp_type = "request-response"
+icmp_codes = [ 128, 129 ]
+
+[protocols.http]
+protocol = "iana.TCP"
+port = 80
+
+[protocols.https]
+protocol = "iana.TCP"
+port = 443
+
+[services.NextCloud]
+protocol = "https"
+
+[services.RfcDB]
+protocol = "http"
+
+[services.NextCloudPing]
+protocol = "ping"
+
+[services.RfcDBPing]
+protocol = "ping"
+
+
+
+

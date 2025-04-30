@@ -113,7 +113,7 @@ func mustNewRandToken() []byte {
 // `vsPort` is the port of the THRIFT visa service.
 // `adminPort` is port for HTTP admin service
 // `issuerName` is used on the JWT tokens we issue.
-func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16, adminPort uint16, validationDisabled bool) error {
+func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16, adminPort uint16) error {
 	s.log.Info("starting visa service", "name", issuerName, "bootstrap_auth_duration", s.bootstrapAuthDuration.String(), "max_auth_duration", s.maxAuthDuration.String())
 	s.vsWg.Add(1)
 	defer s.vsWg.Done()
@@ -122,16 +122,15 @@ func (s *VisaService) Start(issuerName string, vsAddr netip.Addr, vsPort uint16,
 
 	s.log.Infom("bootstrap: starting visa service")
 	icfg := &VSIConfig{
-		Log:                      s.log,
-		CN:                       s.cn,
-		VSAddr:                   vsAddr,
-		HopCount:                 99, // TODO
-		Creds:                    s.keys.visaServiceTLSCreds,
-		AccessToken:              s.authToken,
-		Constrainer:              NewDummyConstraintService(),
-		DisableConnectValidation: validationDisabled,
-		BootstrapAuthDuration:    s.bootstrapAuthDuration,
-		AuthorityCert:            s.keys.authorityCert,
+		Log:                   s.log,
+		CN:                    s.cn,
+		VSAddr:                vsAddr,
+		HopCount:              99, // TODO
+		Creds:                 s.keys.visaServiceTLSCreds,
+		AccessToken:           s.authToken,
+		Constrainer:           NewDummyConstraintService(),
+		BootstrapAuthDuration: s.bootstrapAuthDuration,
+		AuthorityCert:         s.keys.authorityCert,
 	}
 	vsinst, err := NewVSInst(icfg)
 	if err != nil {
@@ -357,10 +356,7 @@ func (s *VisaService) doInstallPolicy(cp *polio.ContainedPolicy) error {
 		return fmt.Errorf("policy install failed: %w", err)
 	}
 
-	s.log.Info("installing policy to auth service")
-	s.authService.InstallPolicy(configID, 0, pp)
-
-	s.log.Info("installing policy to visa service")
+	s.log.Info("installing policy to visa service instance")
 	return s.service.inst.InstallPolicy(configID, 0, pp)
 }
 

@@ -28,11 +28,8 @@ type AuthService interface {
 	// TODO: The result struct AuthenticateOK should be defined here in visa service, not in auth package.
 	Authenticate(prefix string,
 		reqAddr netip.Addr,
-		chal *zds.Challenge,
-		chalResp []*zds.ChallengeResponse,
+		blob Blob,
 		claims map[string]string) (*AuthenticateOK, error)
-
-	SelfAuthenticate(reqAddr netip.Addr, claims map[string]string) (*AuthenticateOK, error)
 
 	// Query runs an attribute query against datasources.
 	// Note that the attributes passed in the request will have prefixes on them, and

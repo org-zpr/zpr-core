@@ -21,6 +21,11 @@ cert_path = "ca-cert.pem"
 dock_node = "node"
 admin_attrs = [ ["zpr.adapter.cn", "client.zpr.org"] ]
 
+[bootstrap]
+"adapter1" = "actor1.pem"
+"adapter2" = "actor2.pem"
+
+
 [protocols.ping]
 protocol = "iana.ICMP4"
 icmp_type = "request-response"

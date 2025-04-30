@@ -3,6 +3,7 @@
 package policy
 
 import (
+	"crypto/rsa"
 	"crypto/sha512"
 	"crypto/x509"
 	"encoding/binary"
@@ -157,6 +158,25 @@ func (p *Policy) AuthServiceForPrefix(pfx string) *polio.Service {
 		}
 	}
 	return nil
+}
+
+// Lookup RSA public key for the given common name (CN).
+// If found, and we can deserialize the key it is returned.
+// If not found, or there is a problem deserializing the key, an error is returned.
+func (p *Policy) GetPublicKeyForCN(cn string) (*rsa.PublicKey, error) {
+	if p.bun == nil {
+		return nil, errors.New("empty policy")
+	}
+	for _, k := range p.bun.Pubkeys {
+		if k.Cn == cn {
+			if pk, err := x509.ParsePKIXPublicKey(k.Keydata); err == nil {
+				return pk.(*rsa.PublicKey), nil
+			} else {
+				return nil, fmt.Errorf("failed to parse public key: %w", err)
+			}
+		}
+	}
+	return nil, fmt.Errorf("no public key found for CN: %s", cn)
 }
 
 // GetDefaultINTAuthority returns the default "internal" authority prefix value. Internal is as

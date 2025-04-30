@@ -221,6 +221,8 @@ impl ZdpInitAuthenticationPayload {
     }
 }
 
+/// Decode a blob string into a [DecodedBlob] object.
+/// The blob string is base64 encoded JSON which contains a "blob_type" field.
 pub fn decode_blob(blob_str: &str) -> Result<DecodedBlob, AuthError> {
     let json_txt = BASE64_STANDARD.decode(blob_str)?;
 

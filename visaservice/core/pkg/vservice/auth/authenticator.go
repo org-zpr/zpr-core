@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"zpr.org/vs/pkg/actor"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/logr"
@@ -28,15 +30,18 @@ var (
 	errQueryFailed = errors.New("query operation failed")
 )
 
+const AUTH_PREFIX_BOOTSTRAP = "zpr.ss"
+
 // Authenticator is responsible for running all authentication on the node either
 // by calling to an external service or using local (cert-style) validation.
 //
 // Implements vsa.AuthService interface.
 type Authenticator struct {
 	log             logr.Logger
-	local           *NodeValidator // For local cert validation
 	ep              netip.Addr
 	MaxAuthDuration time.Duration
+	privateKey      *rsa.PrivateKey
+	name            string // name of this visa service
 
 	rvkSvc struct {
 		rdb     *RevokeDB
@@ -56,9 +61,11 @@ type Authenticator struct {
 }
 
 type ValidateResult struct {
-	Prefix       string                // Prefix which did the validation
-	DomainCredID string                // Credential ID of the validation domain (if any)
-	VResp        *zds.ValidateResponse // The Validate response
+	Prefix       string // Prefix which did the validation
+	DomainCredID string // Credential ID of the validation domain (if any)
+	Token        string // The JWT identity token
+	Attrs        map[string]*actor.ClaimV
+	//VResp        *zds.ValidateResponse // The Validate response
 }
 
 // NewAuthenticator
@@ -73,7 +80,8 @@ func NewAuthenticator(mlog logr.Logger, ep netip.Addr, maxAuthLifetime time.Dura
 		log:             mlog,
 		ep:              ep,
 		MaxAuthDuration: maxAuthLifetime,
-		local:           NewNodeValidator(mlog, maxAuthLifetime, vsName, privateKey),
+		privateKey:      privateKey,
+		name:            vsName,
 	}
 	ath.policy.validators = NewDirectory(snauth.NewCertCollection(), mlog)
 	ath.policy.localPrefixes = make(map[string]bool)
@@ -176,17 +184,13 @@ func (a *Authenticator) AddDatasourceProvider(service string, contactAddr netip.
 // A non nil error return from this means that caller must signal the link
 // with failure signal. If nil, it is taken care of.
 //
-// `extDsPrefix` is used to look up an external validation service (if applicable).
-//
 // TODO: Eventually we want to support multiple prefixes. The calling code actually may end
 // up setting extDsPrefix to a comma separated list. That is not yet supported here.
 //
 // It is also a little odd that we expect this function to determine if it needs
 // to use external auth or not, yet we also need to provide a DsPrefix only if
 // external auth is needed.
-func (a *Authenticator) Authenticate(extDsPrefix string,
-	epID netip.Addr, chal *zds.Challenge, chalResp []*zds.ChallengeResponse,
-	unauthClaims map[string]string) (*AuthenticateOK, error) {
+func (a *Authenticator) Authenticate(dsPrefix string, epID netip.Addr, blob Blob, unauthClaims map[string]string) (*AuthenticateOK, error) {
 
 	var err error
 
@@ -197,134 +201,196 @@ func (a *Authenticator) Authenticate(extDsPrefix string,
 		return nil, errors.New("cannot authenticate because policy is not set")
 	}
 
-	internReq := &zds.ValidateRequest{
-		ChallengerAddr: a.ep.AsSlice(),
-		Chal:           chal,
-		Claims:         unauthClaims,
-	}
-	externReq := &zds.ValidateRequest{
-		ChallengerAddr: a.ep.AsSlice(),
-		Chal:           chal,
-		Claims:         unauthClaims,
-	}
-
-	for _, crb := range chalResp {
-		aa, err := actor.ParseAuthAttr(crb.GetRespSpec())
-		if err != nil {
-			a.log.Warn("invalid challenge response block", "spec", crb.GetRespSpec())
-			continue
-		}
-		if aa.IsExternal() {
-			externReq.CrespSet = append(externReq.CrespSet, crb)
-		} else {
-			internReq.CrespSet = append(internReq.CrespSet, crb)
-		}
-	}
-
-	useInt := len(internReq.CrespSet) > 0
-	useExt := len(externReq.CrespSet) > 0
-
-	if !(useInt || useExt) {
-		return nil, fmt.Errorf("no challenge response")
-	}
-
-	var internResponse, externResponse *ValidateResult
-	var credentials []string // Will hold all "credential identifiers" (eg, key fingerprints)
-	var idents []string
-
-	// We keep the minimum expire time.
-	var expires time.Time
-	revokes := a.loadRevocationData()
-
-	if useExt {
-		externResponse, err = a.authenticateExtern(externReq, extDsPrefix, revokes)
-		if err != nil {
-			return nil, err
-		}
-		if externResponse.VResp.GetStat() == zds.ValidateResponse_SUCCESS {
-			idents = append(idents, string(externResponse.VResp.GetToken()))
-			expTS, credentialID := a.extractExpireAndCredFromJWT(string(externResponse.VResp.GetToken()))
-			expires = expTS
-			if credentialID != "" {
-				credentials = append(credentials, credentialID)
-			}
-			if externResponse.DomainCredID != "" {
-				credentials = append(credentials, externResponse.DomainCredID)
-			}
-		}
-	}
-
-	// Now check internal if we have any creds for that.  Also only if external succeeded.
-	if useInt && (!useExt || (externResponse.VResp.GetStat() == zds.ValidateResponse_SUCCESS)) {
-		internResponse, err = a.authenticateIntern(internReq, revokes)
-		if err != nil {
-			return nil, err
-		}
-		if internResponse.VResp.GetStat() == zds.ValidateResponse_SUCCESS {
-			idents = append(idents, string(internResponse.VResp.GetToken()))
-			expTS, credentialID := a.extractExpireAndCredFromJWT(string(internResponse.VResp.GetToken()))
-			if credentialID != "" {
-				credentials = append(credentials, credentialID)
-			}
-			if expires.IsZero() || expTS.Before(expires) {
-				expires = expTS
-			}
-			if internResponse.DomainCredID != "" {
-				credentials = append(credentials, internResponse.DomainCredID)
-			}
-		}
-	}
-
-	// Expiration time should be in the future. And we may have a policy about
-	// the maximum lifetime of authentication credentials.
+	// If prefix is our special BOOTSTRAP type, we check that we got a self-signed
+	// blob and validate the signature based on public key for the CN held in policy.
 	//
-	// TODO: We should probably share our MaxAuthDuration with the auth service
-	//       so that it can create tokens that have an expiration time that is
-	//       same as ours. As it is, the JWT in the auth response (ident) will
-	//       have an independent expires time that surenet is ignorant of.
+	// Prefix must be known to us as a configured and active authentication service.
+	// If so, we can use the http api to talk to the service by sending over the blob
+	// and asking them to confirm it and return attributes. (TODO)
+	//
+	// If prefix is unknown we just return error.
 
-	// Since multiple sources could validate this, there may be multiple actor IDs.
+	var vresponse *ValidateResult
 
-	localOK := (!useInt) || (internResponse.VResp.GetStat() == zds.ValidateResponse_SUCCESS)
-	extOK := (!useExt) || (externResponse.VResp.GetStat() == zds.ValidateResponse_SUCCESS)
+	switch dsPrefix {
+	case AUTH_PREFIX_BOOTSTRAP:
+		vresponse, err = a.authenticateSS(epID, blob, unauthClaims)
 
-	if !(localOK && extOK) {
+	default:
+		return nil, fmt.Errorf("unknown authentication prefix: %v", dsPrefix)
+	}
+
+	if err != nil {
+		a.log.WithError(err).Info("authentication error", "prefix", dsPrefix)
 		return nil, errAuthFailed
 	}
 
-	// ELSE: success !
+	// We keep the minimum expire time.
+	var expires time.Time
+	var credentials []string // certficate IDs
 
-	var prefixes []string
-	authClaims := make(map[string]*actor.ClaimV)
-	if useInt {
-		for _, kvx := range internResponse.VResp.Attrs {
-			authClaims[kvx.Key] = &actor.ClaimV{V: kvx.Val, Exp: time.Unix(kvx.Exp, 0)}
-		}
-		// Internal could be using any number of CA names
-		prefixes = append(prefixes, internResponse.Prefix)
+	expTS, credentialID := a.extractExpireAndCredFromJWT(vresponse.Token)
+
+	if credentialID != "" {
+		credentials = append(credentials, credentialID)
 	}
-	if useExt {
-		for _, kvx := range externResponse.VResp.Attrs {
-			authClaims[kvx.Key] = &actor.ClaimV{V: kvx.Val, Exp: time.Unix(kvx.Exp, 0)}
-		}
-		prefixes = append(prefixes, externResponse.Prefix)
+
+	if expires.IsZero() || expTS.Before(expires) {
+		expires = expTS
 	}
+
+	if vresponse.DomainCredID != "" {
+		credentials = append(credentials, vresponse.DomainCredID)
+	}
+
+	for _, cd := range a.loadRevocationData() {
+		for _, credential := range credentials {
+			switch cd.CType {
+			case snauth.CredIDTypeAuthority:
+				a.log.Info("TODO: not sure how to check this revocation type AUTHORITY", "value", cd.ID) // TODO
+			case snauth.CredIDTypeCertificate:
+				if cd.ID == credential {
+					a.log.Info("auth fails due to revoked credential", "credential_id", cd.ID)
+					return nil, errAuthRevoked
+				}
+			case snauth.CredIDTypeVisaID:
+				// nothing to do with us
+			case snauth.CredIDTypeCN:
+				if actorCn, ok := vresponse.Attrs[actor.KAttrCN]; ok {
+					if strings.ToLower(actorCn.V) == cd.ID {
+						a.log.Info("auth fails due to revoked CN", "cn", cd.ID)
+						return nil, errAuthRevoked
+					}
+				}
+			default:
+				panic("unknown credential type")
+			}
+		}
+	}
+
 	if expires.After(time.Now()) && time.Until(expires) > a.MaxAuthDuration {
 		// Limit to MaxAuthDuration
 		expires = time.Now().Add(a.MaxAuthDuration)
 	}
+
 	return &AuthenticateOK{
-		Identities:  idents, // TODO: Maybe we loose this and just use attributes?
+		Identities:  []string{vresponse.Token},
 		Expire:      expires,
 		Credentials: credentials,
-		Claims:      authClaims,
-		Prefixes:    prefixes,
+		Claims:      vresponse.Attrs,
+		Prefixes:    []string{vresponse.Prefix},
 	}, nil
 }
 
-// Dispatch the self-authentication to our NodeValidator.
-func (a *Authenticator) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string) (*AuthenticateOK, error) {
-	return a.local.SelfAuthenticate(reqAddr, claims, a.loadRevocationData())
+// TODO: Note that if authentication (based on key in policy) is successful, we will copy the
+// passed `epID` address here into the claims as a 'zpr.addr' claim. This is not quite correct
+// and we have not yet determined where we will make the address assignments.  For now the
+// adapter is still setting its own address and telling the node which ends up passing it
+// up here to the visa service.
+func (a *Authenticator) authenticateSS(epID netip.Addr, blob Blob, unauthClaims map[string]string) (*ValidateResult, error) {
+
+	ssb, ok := blob.(*ZdpSelfSignedBlob)
+	if !ok {
+		return nil, fmt.Errorf("authentication failed: blob is not a self-signed blob")
+	}
+
+	// TODO: We could accept the CN in the blob since the node should have checked it.
+	// But I think the node sets the CN in the authenticated claims, so we load it there.
+	// At any rate, that one must match the blob too.
+	var actorCN string
+	if cn, ok := unauthClaims[actor.KAttrCN]; ok {
+		actorCN = cn
+	} else {
+		return nil, fmt.Errorf("authentication failed: no CN found in unauthenticated claims")
+	}
+
+	expiration := time.Now().Add(a.MaxAuthDuration)
+
+	a.policy.RLock()
+	defer a.policy.RUnlock()
+
+	// TODO: Should we integrate nodes with our bootstrap scheme?  For now presence of the node claim skips signature checking.
+
+	isNode := false
+	if nv, ok := unauthClaims[actor.KAttrRole]; ok {
+		if nv == "node" {
+			isNode = true
+		}
+	}
+
+	if !isNode {
+		pubkey, err := a.policy.policy.GetPublicKeyForCN(actorCN)
+		if err != nil {
+			return nil, fmt.Errorf("authentication failed: no public key found for CN %v", actorCN)
+		}
+
+		success, err := ssb.VerifySignature(actorCN, pubkey)
+		if err != nil {
+			return nil, fmt.Errorf("authentication failed: %v", err)
+		}
+		if !success {
+			return nil, fmt.Errorf("authentication failed: signature verification failed")
+		}
+		a.log.Info("bootstrap blob signature verified", "cn", actorCN)
+	}
+
+	// TODO: What else to put in claims?
+	attrs := make(map[string]*actor.ClaimV)
+
+	if epID.IsValid() {
+		attrs[actor.KAttrEPID] = &actor.ClaimV{
+			V:   epID.String(),
+			Exp: expiration,
+		}
+	}
+	attrs[actor.KAttrAuthority] = &actor.ClaimV{
+		V:   AUTH_PREFIX_BOOTSTRAP,
+		Exp: expiration,
+	}
+	attrs[actor.KAttrConfigID] = &actor.ClaimV{
+		V:   strconv.FormatUint(a.policy.configID, 10),
+		Exp: expiration,
+	}
+	attrs[actor.KAttrCN] = &actor.ClaimV{
+		V:   actorCN,
+		Exp: expiration,
+	}
+
+	snjwt, err := a.makeJWT(actorCN, expiration, nil, nil)
+	if err != nil {
+		a.log.WithError(err).Error("authenticateSS: JWT create failed")
+		snjwt = "jwt_create_failed"
+	}
+
+	vr := ValidateResult{
+		Prefix:       AUTH_PREFIX_BOOTSTRAP,
+		DomainCredID: "",
+		Token:        snjwt,
+		Attrs:        attrs,
+	}
+
+	return &vr, nil
+}
+
+// makeJWT construct a signed JWT for returning as the "actorID". This can
+// be retrieved by clients on surenet using the whois function.
+func (a *Authenticator) makeJWT(subject string, expiration time.Time, issuers, credIDs []string) (string, error) {
+	claims := jwt.MapClaims{
+		actor.JWTXAuthCount: len(issuers),
+		"sub":               subject,
+		"aud":               "zpr",
+		"iss":               a.name,
+		"iat":               time.Now().Unix(),
+		"exp":               expiration.Unix(),
+		"nbf":               time.Now().Add(-1 * time.Minute).Unix(),
+		"jti":               snauth.NewJTI(),
+	}
+	for i, isr := range issuers {
+		claims[fmt.Sprintf("%s.%d", actor.JWTXAuthIssuerPfx, i)] = isr
+		claims[fmt.Sprintf("%s.%d", actor.JWTXAuthIDPfx, i)] = credIDs[i]
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	return token.SignedString(a.privateKey)
 }
 
 // Query runs an attribute query against datasources.
@@ -420,46 +486,7 @@ func isJWTRevoked(jwtStr string, revokes []*snauth.CredID) bool {
 	return false
 }
 
-// Call with mutex on a.policy
-func (a *Authenticator) authenticateExtern(externReq *zds.ValidateRequest, dsPrefix string, revokes []*snauth.CredID) (*ValidateResult, error) {
-	// TODO: How come we do not need to check policy auths with the EXT
-	//       validation?
-	externResponse, err := a.policy.validators.Validate(dsPrefix, externReq, revokes)
-	if err != nil {
-		a.log.WithError(err).Info("external validate failed, auth denied", "prefix", dsPrefix)
-		return nil, err
-	}
-	// Finally:
-	if externResponse.VResp.GetStat() == zds.ValidateResponse_SUCCESS {
-		// The ActorID is a JWT token. Its possible this has been revoked by JTI value.
-		if isJWTRevoked(string(externResponse.VResp.GetToken()), revokes) {
-			a.log.Info("externally generated JWT is on revoke list, auth fails")
-			return nil, errAuthRevoked
-		}
-	} else {
-		a.log.Info("external validation has failed", "error", externResponse.VResp.GetError())
-	}
-	return externResponse, nil
-}
-
-// Should have a mutex on a.policy
-func (a *Authenticator) authenticateIntern(internReq *zds.ValidateRequest, revokes []*snauth.CredID) (*ValidateResult, error) {
-	internResponse, err := a.local.Validate(internReq, a.policy.policy, revokes)
-	if err != nil {
-		a.log.WithError(err).Info("internal validate failed")
-		return internResponse, nil
-	}
-	if internResponse.VResp.GetStat() != zds.ValidateResponse_SUCCESS {
-		a.log.Info("internal validation has failed", "error", internResponse.VResp.GetError())
-		return internResponse, nil
-	}
-	if isJWTRevoked(string(internResponse.VResp.GetToken()), revokes) {
-		a.log.Info("internally generated JWT is on revoke list, auth fails")
-		return nil, errAuthRevoked
-	}
-	return internResponse, nil
-}
-
+// Returns the expiration time and the JTI value from the token.
 func (a *Authenticator) extractExpireAndCredFromJWT(token string) (time.Time, string) {
 	// The TTL value is for the attributes, the token itself has the auth expiration
 	// on it.

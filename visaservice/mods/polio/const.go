@@ -2,7 +2,7 @@ package polio
 
 const (
 	ContainerVersion = uint32(1121)
-	SerialVersion    = 41 // Written to pol.Policy.SerialVersion
+	SerialVersion    = 42 // Written to pol.Policy.SerialVersion
 	ConfKeyCIDR      = "cidr"
 	NoProc           = uint32(0xFFFFFFFF)
 	NoHash           = uint32(0xFFFFFFFF)

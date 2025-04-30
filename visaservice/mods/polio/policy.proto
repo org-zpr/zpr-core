@@ -1,7 +1,7 @@
 syntax="proto3";
 package polio;
 
-option go_package = "zpr.org/vsx/polio";
+option go_package = "spacelaser.net/zpr/pkg/snet/polio";
 
 
 
@@ -34,6 +34,7 @@ message Policy {
     repeated string attr_key_index = 12; // Attribute keys, in order
     repeated string attr_val_index = 13; // Attribute values, in order
     repeated ConfigSetting config  = 14; // Global settings
+    repeated PublicKey pubkeys     = 15; // Public keys used for bootstrap
 }
 
 
@@ -168,8 +169,13 @@ message AttrExpr {
 
 message Cert {
     uint32 ID      = 1; // TODO: What is this?
-    bytes asn1data = 2;
+    bytes asn1data = 2; // DER encoded x509
     string name    = 3; // = auth "prefix"
+}
+
+message PublicKey {
+    string cn     = 1;
+    bytes keydata = 2; // DER encoded x509
 }
 
 message Proc {

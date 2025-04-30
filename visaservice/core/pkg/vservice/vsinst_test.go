@@ -91,27 +91,8 @@ func mustUnmarshalVisa(pb []byte) *vsio.Visa {
 type TestAS struct{}
 
 func (tas *TestAS) Authenticate(domain string, epID netip.Addr,
-	chal *zds.Challenge, chalResp []*zds.ChallengeResponse, claims map[string]string) (*auth.AuthenticateOK, error) {
+	blob auth.Blob, claims map[string]string) (*auth.AuthenticateOK, error) {
 	return nil, fmt.Errorf("Authenticate not implemented")
-}
-
-func (tas *TestAS) SelfAuthenticate(reqAddr netip.Addr, claims map[string]string) (*auth.AuthenticateOK, error) {
-	expiration := time.Now().Add(time.Hour)
-
-	authedClaims := make(map[string]*actor.ClaimV)
-	for k, v := range claims {
-		authedClaims[k] = &actor.ClaimV{V: v, Exp: expiration}
-	}
-	authedClaims[actor.KAttrEPID] = &actor.ClaimV{V: reqAddr.String(), Exp: expiration}
-	authedClaims[actor.KAttrActorAuthority] = &actor.ClaimV{V: "zpr.adapter.cn", Exp: expiration} // policy must match this!
-
-	resp := auth.AuthenticateOK{
-		Identities:  nil,
-		Expire:      time.Now().Add(time.Hour),
-		Credentials: nil,
-		Claims:      authedClaims,
-	}
-	return &resp, nil
 }
 
 func (tas *TestAS) Query(*zds.QueryRequest) (*zds.QueryResponse, error) {

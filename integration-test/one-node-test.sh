@@ -72,6 +72,9 @@ create_actor_key_and_cert ca adapter3
 cp "$PREGEN/node.key" node.key
 cp "$PREGEN/node-cert.pem" node.crt
 cp "$PREGEN/node-pubkey.pem" node.pubkey
+cp "$PREGEN/actor1-rsa.key" actor1-rsa.key
+cp "$PREGEN/actor2-rsa.key" actor2-rsa.key
+cp "$PREGEN/actor3-rsa.key" actor3-rsa.key
 
 emit_vs_config ca vs.zpr > vs-config.yaml
 
@@ -129,6 +132,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --ca-file ca.crt \
   --certificate-file adapter1.crt \
   --private-key-file adapter1.key \
+  --bootstrap-key actor1-rsa.key \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
   --node-public-key-file node.pubkey \
@@ -141,6 +145,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --ca-file ca.crt \
   --certificate-file adapter2.crt \
   --private-key-file adapter2.key \
+  --bootstrap-key actor2-rsa.key \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
   --node-public-key-file node.pubkey \
@@ -156,6 +161,7 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
     --ca-file ca.crt \
     --certificate-file adapter3.crt \
     --private-key-file adapter3.key \
+    --bootstrap-key actor3-rsa.key \
     --tun-if tun0 \
     --node-addr "$NODE_SUBSTRATE_ADDR_C_ALT":12345 \
     --node-public-key-file node.pubkey \

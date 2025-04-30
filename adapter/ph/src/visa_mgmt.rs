@@ -55,12 +55,16 @@ pub fn build_connect_request(
     asm: &Arc<Assembly>,
     id: LinkId,
     addr: IpAddress,
+    blob: &str,
 ) -> Result<Option<libnode::vsapi::ConnectRequest>, LinkStateError> {
     let cn = get_common_name(asm, id)?;
 
     if cn == zpr::VISA_SERVICE_CN {
         return Ok(None);
     }
+
+    // The visa service expects to find the BLOBs in the challenge response buffers.
+    let crbufs: Vec<Vec<u8>> = vec![blob.as_bytes().to_vec()];
 
     // issue an Authorize Connect Request to the visa service for this adapter
     let connect_req = libnode::vsapi::ConnectRequest {
@@ -77,8 +81,8 @@ pub fn build_connect_request(
             ]
             .into(),
         ),
-        challenge: None,           // unused
-        challenge_responses: None, // unused
+        challenge: None, // unused
+        challenge_responses: Some(crbufs),
     };
     Ok(Some(connect_req))
 }

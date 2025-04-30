@@ -36,14 +36,9 @@ func (s *TAuthSvc) AddDatasourceProvider(_ string, _ netip.Addr, _ uint64) error
 
 func (s *TAuthSvc) Authenticate(domain string,
 	epID netip.Addr,
-	chal *zds.Challenge,
-	chalResp []*zds.ChallengeResponse,
+	blob auth.Blob,
 	claims map[string]string) (*auth.AuthenticateOK, error) {
 	return nil, fmt.Errorf("Authenticate not implemented")
-}
-
-func (s *TAuthSvc) SelfAuthenticate(_ netip.Addr, _ map[string]string) (*auth.AuthenticateOK, error) {
-	return nil, fmt.Errorf("SelfAuthenticate not implemented")
 }
 
 func (s *TAuthSvc) Query(*zds.QueryRequest) (*zds.QueryResponse, error) {

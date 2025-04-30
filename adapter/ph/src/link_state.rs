@@ -599,10 +599,7 @@ impl LinkStateWrapper {
         }
 
         // Now we have verified our part of the blob, we can send to the visa service for checking the signature.
-        // TODO: Send d_blob to visa service, check signature, etc.
-
-        info!(target: LINK_STATE, "TODO: not yet sending blob to vs");
-        match visa_mgmt::build_connect_request(asm, link_id, requested_addr) {
+        match visa_mgmt::build_connect_request(asm, link_id, requested_addr, &blob) {
             Ok(Some(conn_req)) => {
                 drop(locked_fsm);
                 Ok(visa_mgmt::authorize_connect(asm, link_id, conn_req))
