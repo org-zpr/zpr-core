@@ -663,12 +663,21 @@ mod posix_unbatched {
                     // SAFETY: We will only be writing to the chunk.
                     let chunk =
                         unsafe { slice_assume_init_mut(buf.chunk_mut().as_uninit_slice_mut()) };
-                    // FIXME: use MSG_TRUNC
-                    let (amt, addr) =
-                        socket::recvfrom(fd.as_raw_fd(), chunk).map_err(errno_to_error)?;
+                    let mut io_slice = IoSliceMut::new(chunk);
+                    // NOTE: nix's `recvfrom` weirdly is missing the `flags` argument,
+                    // so we're forced to use `recvmsg` here
+                    let recvmsg = socket::recvmsg(
+                        fd.as_raw_fd(),
+                        std::slice::from_mut(&mut io_slice),
+                        None,
+                        MsgFlags::MSG_TRUNC,
+                    )
+                    .map_err(errno_to_error)?;
+                    let amt = recvmsg.bytes;
+                    let from_addr = recvmsg.address.and_then(sockaddr_to_socket_addr);
                     // SAFETY: We know we've written the given number of bytes in the BufMut.
-                    unsafe { buf.advance_mut(amt) };
-                    Ok((amt, addr.and_then(sockaddr_to_socket_addr)))
+                    unsafe { buf.advance_mut(std::cmp::min(amt, buf.remaining_mut())) };
+                    Ok((amt, from_addr))
                 },
                 fd,
                 bufs,
@@ -872,6 +881,32 @@ mod tests {
             assert_eq!(res.1, Some(sender));
             assert_eq!(bufs[i].as_slice(), msgs[i].as_bytes());
         }
+    }
+
+    #[test]
+    fn test_oversize_recv() {
+        let inq = udp_socket().unwrap();
+        let outq = udp_socket().unwrap();
+        inq.set_nonblocking(true).unwrap();
+        outq.set_nonblocking(true).unwrap();
+        inq.connect(outq.local_addr().unwrap()).unwrap();
+
+        let mut bio = BatchIo::new(1).unwrap();
+
+        let msg = [123u8; 128];
+
+        let _ = inq.send(&[123u8; 128]).unwrap();
+
+        let limit = 64;
+        let mut buf = Vec::with_capacity(64).limit(limit);
+        let mut results = Vec::new();
+
+        let n = bio.try_recv_buf_from_batch(&outq, std::iter::once(&mut buf), &mut results);
+        assert!(n.unwrap() == 1);
+
+        assert_eq!(results[0].as_ref().unwrap().0, msg.len());
+        assert_eq!(buf.get_ref().len(), limit);
+        assert_eq!(buf.get_ref().as_slice(), &msg[..limit]);
     }
 
     #[test]
