@@ -67,11 +67,12 @@ function create_network() {
   sudo ip -n zpr-node addr add "$NODE_SUBSTRATE_ADDR_VS" peer "$VS_SUBSTRATE_ADDR" dev veth-zpr-vs
   sudo ip -n zpr-node addr add "$NODE_SUBSTRATE_ADDR_A" peer "$A_SUBSTRATE_ADDR" dev veth-zpr-a
   sudo ip -n zpr-node addr add "$NODE_SUBSTRATE_ADDR_B" peer "$B_SUBSTRATE_ADDR" dev veth-zpr-b
-  sudo ip -n zpr-node addr add "$NODE_SUBSTRATE_ADDR_C" peer "$C_SUBSTRATE_ADDR" dev veth-zpr-c
+  sudo ip -n zpr-node addr add "$NODE_SUBSTRATE_ADDR_C/24" dev veth-zpr-c
+  sudo ip -n zpr-node addr add "$NODE_SUBSTRATE_ADDR_C_ALT/24" dev veth-zpr-c  # Used for testing routing.
   sudo ip -n zpr-vs addr add "$VS_SUBSTRATE_ADDR" peer "$NODE_SUBSTRATE_ADDR_VS" dev veth0
   sudo ip -n zpr-a addr add "$A_SUBSTRATE_ADDR" peer "$NODE_SUBSTRATE_ADDR_A" dev veth0
   sudo ip -n zpr-b addr add "$B_SUBSTRATE_ADDR" peer "$NODE_SUBSTRATE_ADDR_B" dev veth0
-  sudo ip -n zpr-c addr add "$C_SUBSTRATE_ADDR" peer "$NODE_SUBSTRATE_ADDR_C" dev veth0
+  sudo ip -n zpr-c addr add "$C_SUBSTRATE_ADDR/24" dev veth0
 
   sudo ip -n zpr-node link set veth-zpr-vs up
   sudo ip -n zpr-node link set veth-zpr-a up

@@ -18,6 +18,7 @@ NODE_SUBSTRATE_ADDR_VS=10.0.0.1
 NODE_SUBSTRATE_ADDR_A=10.0.1.1
 NODE_SUBSTRATE_ADDR_B=10.0.2.1
 NODE_SUBSTRATE_ADDR_C=10.0.3.1
+NODE_SUBSTRATE_ADDR_C_ALT=10.0.3.129  # Used for testing routing when a dock has multiple addresses.
 VS_SUBSTRATE_ADDR=10.0.0.2
 A_SUBSTRATE_ADDR=10.0.1.2
 B_SUBSTRATE_ADDR=10.0.2.2
@@ -146,6 +147,8 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --zpr-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
 if [[ "$NUM_ACTORS" -ge 3 ]]; then
+  # Note, this adapter we connect to the "alternative" dock address
+  # on this interface, to test that replies are still routed correctly.
   sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
     adapter \
     --control-path "$ADAPTER3_SOCK" \
@@ -154,7 +157,7 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
     --certificate-file adapter3.crt \
     --private-key-file adapter3.key \
     --tun-if tun0 \
-    --node-addr "$NODE_SUBSTRATE_ADDR_C":12345 \
+    --node-addr "$NODE_SUBSTRATE_ADDR_C_ALT":12345 \
     --node-public-key-file node.pubkey \
     --zpr-addr "$C_ZPR_ADDR" 2>&1 | tee adapter3.log | prefix_log zpr-c &
 fi
