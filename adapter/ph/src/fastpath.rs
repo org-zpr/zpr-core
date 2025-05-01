@@ -54,6 +54,12 @@ pub struct FastpathWorkerConfig {
     pub batch_size: usize,
 }
 
+pub struct QueuedEgressPacket {
+    pub pkt: Packet,
+    pub dst: std::net::SocketAddr,
+    pub src: net_defs::ScopedIpAddr,
+}
+
 pub struct FastpathWorker {
     pub config: FastpathWorkerConfig,
     pub worker_index: usize,
@@ -65,7 +71,7 @@ pub struct FastpathWorker {
     pub mgmt_dispatch: MgmtDispatch,
 
     pub actor_input_q: Vec<Packet>,
-    pub substrate_egress_q: Vec<(Packet, std::net::SocketAddr)>,
+    pub substrate_egress_q: Vec<QueuedEgressPacket>,
 }
 
 impl FastpathWorker {
@@ -114,9 +120,18 @@ impl FastpathWorker {
     }
 
     /// Process packet ingressing from the specified address.
-    pub fn substrate_ingress(&mut self, peer_sa: &zpr::SubstrateAddr, mut pkt: Packet) {
-        pkt.metadata_mut().ingress_link_id =
-            self.asm.peer_table.lookup_peer(peer_sa).unwrap_or_zero();
+    pub fn substrate_ingress(
+        &mut self,
+        peer_sa: &zpr::SubstrateAddr,
+        interface_addr: &net_defs::ScopedIpAddr,
+        mut pkt: Packet,
+    ) {
+        // Lookup peer by its substrate address.
+        pkt.metadata_mut().ingress_link_id = self
+            .asm
+            .peer_table
+            .lookup_peer(peer_sa, interface_addr)
+            .unwrap_or_zero();
 
         // Read, but do not remove the ZPI header
         let Ok((zpi_hdr, _)) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
@@ -142,10 +157,11 @@ impl FastpathWorker {
         // If we weren't able to match this packet to an existing link,
         // send it off to be processed as a potential new link.
         if pkt.metadata().ingress_link_id == zpr::LINK_ID_UNKNOWN {
-            match self
-                .mgmt_dispatch
-                .try_dispatch_mgmt_packet_with_addr(peer_sa, pkt)
-            {
+            match self.mgmt_dispatch.try_dispatch_mgmt_packet_with_addr(
+                peer_sa,
+                interface_addr,
+                pkt,
+            ) {
                 Ok(()) => self.asm.counters[CounterType::DispatchedToMgmt].increment(),
                 Err(TryEnqueueError::Full(pkt)) => {
                     self.drop_and_count(pkt, CounterType::QueueBackpressure)
@@ -417,8 +433,8 @@ impl FastpathWorker {
     pub fn substrate_egress(&mut self, mut pkt: Packet) {
         let link_id = pkt.metadata().egress_link_id;
 
-        let dest_sa = match substrate_egress_common(&self.asm, link_id, &mut pkt) {
-            Ok(Some(dest_sa)) => dest_sa,
+        let (dest_sa, src_intf) = match substrate_egress_common(&self.asm, link_id, &mut pkt) {
+            Ok(Some((dest_sa, src_intf))) => (dest_sa, src_intf),
             Ok(None) => {
                 self.drop_and_count(pkt, CounterType::PeerRemoved);
                 return;
@@ -431,7 +447,11 @@ impl FastpathWorker {
         };
 
         // queue packet for send via substrate
-        self.substrate_egress_q.push((pkt, dest_sa));
+        self.substrate_egress_q.push(QueuedEgressPacket {
+            pkt,
+            dst: dest_sa,
+            src: src_intf,
+        });
     }
 
     pub fn substrate_egress_packets_queued(&self) -> bool {
@@ -724,7 +744,7 @@ fn substrate_egress_common(
     asm: &Assembly,
     link_id: zpr::LinkId,
     pkt: &mut Packet,
-) -> Result<Option<zpr::SubstrateAddr>, km::EncryptionError> {
+) -> Result<Option<(zpr::SubstrateAddr, net_defs::ScopedIpAddr)>, km::EncryptionError> {
     // TODO: should we add ZDP header here also??
 
     let zdp_hdr = match zdp::ZdpBaseHeader::ref_from_prefix(&pkt.body()) {
@@ -797,7 +817,7 @@ fn substrate_egress_common(
     // Set substrate flowinfo from our flowhash.
     set_flowinfo(&mut dest_sa, pkt.flowhash());
 
-    Ok(Some(dest_sa))
+    Ok(Some((dest_sa, peer_state.interface_addr)))
 }
 
 /// If substrate supports flow info, set it to the specified value.

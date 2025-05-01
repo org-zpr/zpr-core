@@ -6,6 +6,7 @@ use crate::counters::CounterType;
 use crate::km_multiplexor;
 use crate::link_state::LinkType;
 use crate::logging::targets::{KEY_MGMT, ZDP};
+use crate::net_defs;
 use crate::packet::Packet;
 use crate::queues;
 use crate::zdp;
@@ -23,6 +24,7 @@ use zpr_ext::zerocopy::FromBytesExt;
 pub fn dispatch_mgmt_packet_with_addr(
     asm: &Arc<Assembly>,
     peer_sa: zpr::SubstrateAddr,
+    interface_addr: net_defs::ScopedIpAddr,
     pkt: &mut Packet,
 ) {
     match zdp::ZdpBaseHeader::ref_from_prefix(pkt.body()) {
@@ -31,7 +33,9 @@ pub fn dispatch_mgmt_packet_with_addr(
 
             // TODO: once we have multi-node, how do we know whether this is a link or a
             // tether?
-            let Some(ingress_link_id) = asm.start_tether(&peer_sa, LinkType::NodeToAdapter).ok()
+            let Some(ingress_link_id) = asm
+                .start_tether(&peer_sa, &interface_addr, LinkType::NodeToAdapter)
+                .ok()
             else {
                 core::count_event(asm, pkt, CounterType::UnknownPeer);
                 return;

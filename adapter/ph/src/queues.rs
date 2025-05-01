@@ -1,6 +1,7 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
 
 use crate::config;
+use crate::net_defs;
 use crate::packet::{self, Packet, PacketBuffer};
 use crate::packet_queue;
 use crate::test_packet::*;
@@ -206,14 +207,18 @@ impl Capture {
 
 pub enum MgmtDispatchMessage {
     WithLink(Packet), // Link ID stored in packet metadata
-    WithAddr(zpr::SubstrateAddr, Packet),
+    WithAddr {
+        peer_sa: zpr::SubstrateAddr,
+        interface_addr: net_defs::ScopedIpAddr,
+        packet: Packet,
+    },
 }
 
 impl two_way_queue::TwoWayReturnable<MgmtDispatchMessage> for PacketBuffer {
     fn convert(value: MgmtDispatchMessage) -> Self {
         match value {
             MgmtDispatchMessage::WithLink(pkt) => pkt.destroy(),
-            MgmtDispatchMessage::WithAddr(_, pkt) => pkt.destroy(),
+            MgmtDispatchMessage::WithAddr { packet, .. } => packet.destroy(),
         }
     }
 }
@@ -245,22 +250,24 @@ impl MgmtDispatch {
     pub fn try_dispatch_mgmt_packet_with_addr(
         &mut self,
         peer_sa: &zpr::SubstrateAddr,
+        interface_addr: &net_defs::ScopedIpAddr,
         packet: Packet,
     ) -> Result<(), TryEnqueueError<Packet>> {
         debug_assert_eq!(packet.metadata().ingress_link_id, 0);
-        match self
-            .sender
-            .try_send(MgmtDispatchMessage::WithAddr(*peer_sa, packet))
-        {
+        match self.sender.try_send(MgmtDispatchMessage::WithAddr {
+            peer_sa: *peer_sa,
+            interface_addr: *interface_addr,
+            packet,
+        }) {
             Ok(()) => Ok(()),
 
             Err(two_way_queue::TrySendError::Closed(_)) => panic!("mgmt dispatch channel closed"),
 
             Err(two_way_queue::TrySendError::Full(msg)) => {
-                let MgmtDispatchMessage::WithAddr(_, pkt) = msg else {
+                let MgmtDispatchMessage::WithAddr { packet, .. } = msg else {
                     unreachable!()
                 };
-                Err(TryEnqueueError::Full(pkt))
+                Err(TryEnqueueError::Full(packet))
             }
         }
     }

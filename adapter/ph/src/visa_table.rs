@@ -187,6 +187,7 @@ mod tests {
     use crate::assembly::test::{create_assembly, TestAssemblyBuilder};
     use crate::forwarding_tables::PftPep;
     use crate::link_state::LinkType;
+    use crate::net_defs;
     use crate::peer_table::test::create_dummy_peer_state;
     use std::net::{IpAddr, Ipv4Addr};
     use std::num::NonZero;
@@ -251,6 +252,7 @@ mod tests {
                 NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap(),
                 LinkType::Internal,
                 zpr::SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 443),
+                net_defs::ScopedIpAddr::V4(Ipv4Addr::new(1, 2, 3, 5)),
             ))
             .unwrap()
             .get();

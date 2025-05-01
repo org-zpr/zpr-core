@@ -25,7 +25,7 @@ pub struct FastpathIo {
     /// temporary read result storage during I/O batch operations
     io_results: Vec<Result<usize>>,
     /// temporary recv result storage during I/O batch operations
-    recv_results: Vec<Result<(usize, Option<SocketAddr>)>>,
+    recv_results: Vec<Result<(usize, Option<SocketAddr>, Option<net_defs::ScopedIpAddr>)>>,
 }
 
 impl FastpathIo {
@@ -86,7 +86,7 @@ impl FastpathIo {
         self.io_results.clear();
         let n = self
             .batch_io
-            .try_recv_buf_from_batch(
+            .try_recv_buf_from_to_batch(
                 &self.substrate_socket,
                 self.packets.iter_mut(),
                 &mut self.recv_results,
@@ -100,15 +100,16 @@ impl FastpathIo {
 
         // process packets
         for (pkt, result) in self.packets.drain(..).zip(self.recv_results.drain(..)) {
-            let mut sender = match result {
-                Ok((size, _sender)) if size > pkt.remaining() => {
+            let (mut sender, dest) = match result {
+                Ok((size, _sender, _dest)) if size > pkt.remaining() => {
                     worker.drop_and_count(pkt, CounterType::DroppedOversize);
                     continue;
                 }
 
-                Ok((_size, sender)) => {
-                    sender.expect("received from non-IP address, should not happen!")
-                }
+                Ok((_size, sender, dest)) => (
+                    sender.expect("received from non-IP address, should not happen!"),
+                    dest.expect("unknown recipient, should not happen!"),
+                ),
 
                 Err(err) => {
                     match err.kind() {
@@ -133,7 +134,7 @@ impl FastpathIo {
             clear_flowinfo(&mut sender);
 
             worker.asm.counters[CounterType::InPacksRec].increment();
-            worker.substrate_ingress(&sender, pkt);
+            worker.substrate_ingress(&sender, &dest, pkt);
         }
     }
 
@@ -286,12 +287,12 @@ impl FastpathIo {
         self.io_results.clear();
         let n = self
             .batch_io
-            .try_send_to_batch(
+            .try_send_to_from_batch(
                 &self.substrate_socket,
                 worker
                     .substrate_egress_q
                     .iter()
-                    .map(|(pkt, dest)| (pkt.body(), *dest)),
+                    .map(|pkt| (pkt.pkt.body(), pkt.dst, Some(pkt.src))),
                 &mut self.io_results,
             )
             .expect("unrecoverable I/O error");
@@ -315,7 +316,7 @@ impl FastpathIo {
 
             // Packet was not sent.
 
-            if worker.substrate_egress_q[i].0.metadata().flags & packet::flags::PRIORITY != 0 {
+            if worker.substrate_egress_q[i].pkt.metadata().flags & packet::flags::PRIORITY != 0 {
                 // This was a priority packet.  Move it to the front of the queue.
                 worker.substrate_egress_q.swap(i, retained);
                 retained += 1;
@@ -337,7 +338,7 @@ impl FastpathIo {
             worker
                 .substrate_egress_q
                 .drain(retained..)
-                .map(|(pkt, _)| pkt.destroy()),
+                .map(|pkt| pkt.pkt.destroy()),
         );
     }
 }

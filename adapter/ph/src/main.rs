@@ -78,6 +78,7 @@ use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
 use logging::targets::STARTUP;
+use net_defs::SocketAddrExt;
 use pki::load_noise_public_key;
 use queues::*;
 use sys::ZprTun;
@@ -269,6 +270,7 @@ fn main() -> ExitCode {
         )
         .unwrap();
         socket.set_nonblocking(true).unwrap();
+        batch_io::set_recv_packet_info(&socket, true).unwrap();
         socket.set_reuse_port(true).unwrap();
         socket
             .bind(&socket2::SockAddr::from(config.self_addr))
@@ -397,6 +399,7 @@ fn main() -> ExitCode {
         let dsid = asm
             .start_tether(
                 config.node_addr.as_ref().unwrap(),
+                &config.self_addr.scoped_ip(),
                 link_state::LinkType::AdapterToNode,
             )
             .unwrap();

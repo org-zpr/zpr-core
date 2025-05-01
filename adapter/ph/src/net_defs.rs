@@ -182,6 +182,15 @@ pub enum ScopedIpAddr {
     V6(ScopedIpv6Addr),
 }
 
+impl ScopedIpAddr {
+    pub fn ip(&self) -> IpAddr {
+        match self {
+            ScopedIpAddr::V4(v4) => IpAddr::V4(*v4),
+            ScopedIpAddr::V6(v6) => IpAddr::V6(v6.ip),
+        }
+    }
+}
+
 impl std::fmt::Display for ScopedIpAddr {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

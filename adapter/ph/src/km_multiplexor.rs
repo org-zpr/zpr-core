@@ -5,6 +5,7 @@ use crate::km_noise::{KmNoise, NoiseKeypair};
 use crate::link_state::LinkEvent;
 use crate::logging::targets::{KEY_MGMT, LINK_STATE};
 use crate::mgmt::requests;
+use crate::net_defs;
 use crate::peer_table::KmHandle;
 use bytes::Bytes;
 use std::collections::HashMap;
@@ -398,10 +399,13 @@ mod test {
                     let fake_sa =
                         zpr::SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9000);
 
+                    let fake_intf_addr = net_defs::ScopedIpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
+
                     let peer_state = peer_table::PeerState::new(
                         entry.key(),
                         LinkType::NodeToAdapter,
                         fake_sa,
+                        fake_intf_addr,
                         |q| mgmt_processor_worker::launch(worker_config, asm.clone(), q),
                     );
 

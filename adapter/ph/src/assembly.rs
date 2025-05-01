@@ -13,7 +13,7 @@ use crate::link_state::{LinkEvent, LinkStateError, LinkType};
 use crate::logging::targets::PEER_MGMT;
 use crate::mgmt;
 use crate::mgmt_processor_worker;
-use crate::net_defs::IpAddress;
+use crate::net_defs::{self, IpAddress, ScopedIpAddr};
 use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
@@ -161,6 +161,7 @@ impl Assembly {
             entry.key(),
             LinkType::Internal,
             std::net::SocketAddrV6::new(std::net::Ipv6Addr::from_bits(0), 0, 0, 0).into(),
+            net_defs::ScopedIpv6Addr::new(std::net::Ipv6Addr::from_bits(0), 0).into(),
             |_| std::future::pending(),
         );
 
@@ -171,6 +172,7 @@ impl Assembly {
         self: &Arc<Self>,
         link_type: LinkType,
         peer_addr: &SubstrateAddr,
+        interface_addr: &ScopedIpAddr,
     ) -> Result<NonZero<LinkId>, PeerInsertError> {
         let entry = self.peer_table.vacant_entry()?;
 
@@ -178,9 +180,10 @@ impl Assembly {
             link_id: entry.key(),
         };
 
-        let peer_state = peer_table::PeerState::new(entry.key(), link_type, *peer_addr, |q| {
-            mgmt_processor_worker::launch(worker_config, self.clone(), q)
-        });
+        let peer_state =
+            peer_table::PeerState::new(entry.key(), link_type, *peer_addr, *interface_addr, |q| {
+                mgmt_processor_worker::launch(worker_config, self.clone(), q)
+            });
 
         Ok(entry.insert(peer_state))
     }
@@ -202,11 +205,12 @@ impl Assembly {
     pub fn start_tether(
         self: &Arc<Self>,
         adapter_addr: &SubstrateAddr,
+        interface_addr: &ScopedIpAddr,
         link_type: LinkType,
     ) -> Result<NonZero<LinkId>, PeerInsertError> {
         assert!(link_type != LinkType::NodeToNode);
-        debug!(target: PEER_MGMT, "Starting tether with {adapter_addr}");
-        let peer_id = self.add_peer(link_type, adapter_addr)?;
+        debug!(target: PEER_MGMT, "Starting tether with {adapter_addr} connected to {interface_addr}");
+        let peer_id = self.add_peer(link_type, adapter_addr, interface_addr)?;
         self.peer_ids.lock().unwrap().push(peer_id.get());
 
         let Some(peer) = self.peer_table.get(peer_id.get()) else {

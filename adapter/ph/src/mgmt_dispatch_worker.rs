@@ -16,8 +16,12 @@ pub async fn launch(
             MgmtDispatchMessage::WithLink(pkt) => {
                 dispatch::dispatch_mgmt_packet_with_link(&asm, pkt);
             }
-            MgmtDispatchMessage::WithAddr(peer_sa, pkt) => {
-                dispatch::dispatch_mgmt_packet_with_addr(&asm, *peer_sa, pkt);
+            MgmtDispatchMessage::WithAddr {
+                peer_sa,
+                interface_addr,
+                packet,
+            } => {
+                dispatch::dispatch_mgmt_packet_with_addr(&asm, *peer_sa, *interface_addr, packet);
             }
         }
     }

@@ -3,6 +3,7 @@ use crate::auth::AUTH_KEY_SIZE_BYTES;
 use crate::forwarding_tables::PeerForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
+use crate::net_defs::ScopedIpAddr;
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::special_peers::*;
@@ -29,6 +30,7 @@ const PEER_TABLE_SIZE: usize = 1024;
 
 pub struct PeerState {
     pub substrate_addr: SubstrateAddr,
+    pub interface_addr: ScopedIpAddr,
     pub link_state_machine: LinkStateWrapper,
     pub sync_req_state: sync_req::SyncReqState,
     pub pft: PeerForwardingTable,
@@ -70,6 +72,7 @@ impl PeerState {
         link_id: NonZero<LinkId>,
         link_type: LinkType,
         substrate_addr: SubstrateAddr,
+        interface_addr: ScopedIpAddr,
         launch_mgmt_processor_worker: impl FnOnce(
             mpsc::Receiver<queues::MgmtProcessorMessage>,
         ) -> Worker,
@@ -88,6 +91,7 @@ impl PeerState {
         }
         Self {
             substrate_addr,
+            interface_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
             pft: PeerForwardingTable::new(),
             sync_req_state: sync_req::SyncReqState::new(),
@@ -112,7 +116,7 @@ const _: () = assert!(std::mem::size_of::<AtomicLinkId>() == std::mem::size_of::
 pub struct PeerTable {
     peer_slab: Mutex<RcuCslab<PeerState>>,
     peer_slab_reader: RcuBox<RcuCslabReader<PeerState>>,
-    sa_to_link: DashMap<SubstrateAddr, NonZero<LinkId>>,
+    sa_to_link: DashMap<(SubstrateAddr, ScopedIpAddr), NonZero<LinkId>>,
     // TODO: it would be nice if this lived in the same RCU as peer_slab_reader
     special_peers: RcuBox<EnumMap<SpecialPeerName, LinkId>>,
 }
@@ -166,7 +170,8 @@ impl PeerTable {
         let Some(peer_state) = peer_slab.get((link_id as usize).wrapping_sub(1)) else {
             return;
         };
-        self.sa_to_link.remove(&peer_state.substrate_addr);
+        self.sa_to_link
+            .remove(&(peer_state.substrate_addr, peer_state.interface_addr));
 
         self.special_peers
             .update(|sp_ref| {
@@ -197,8 +202,15 @@ impl PeerTable {
             .map(inspector)
     }
 
-    pub fn lookup_peer(&self, substrate_addr: &SubstrateAddr) -> Option<NonZero<LinkId>> {
-        let id = self.sa_to_link.get(substrate_addr).map(|id| *id);
+    pub fn lookup_peer(
+        &self,
+        substrate_addr: &SubstrateAddr,
+        interface_addr: &ScopedIpAddr,
+    ) -> Option<NonZero<LinkId>> {
+        let id = self
+            .sa_to_link
+            .get(&(*substrate_addr, *interface_addr))
+            .map(|id| *id);
 
         // synchronizes with the Release in VacantPeerTableEntry::insert();
         // ensures anyone who reads from the slab following this sees the peer
@@ -349,7 +361,7 @@ impl PeerTable {
 
 pub struct VacantPeerTableEntry<'a> {
     peer_slab_guard: MutexGuard<'a, RcuCslab<PeerState>>,
-    sa_to_link_ref: &'a DashMap<SubstrateAddr, NonZero<LinkId>>,
+    sa_to_link_ref: &'a DashMap<(SubstrateAddr, ScopedIpAddr), NonZero<LinkId>>,
 }
 
 impl VacantPeerTableEntry<'_> {
@@ -368,13 +380,13 @@ impl VacantPeerTableEntry<'_> {
         // the "reverse" table with Acquire ordering
         atomic::fence(Ordering::Release);
 
-        if let Some(other) = self
-            .sa_to_link_ref
-            .insert(peer_state_ref.substrate_addr, link_id)
-        {
+        if let Some(other) = self.sa_to_link_ref.insert(
+            (peer_state_ref.substrate_addr, peer_state_ref.interface_addr),
+            link_id,
+        ) {
             panic!(
-                "duplicate peer substrate address: {link_id} and {other} share {}",
-                peer_state_ref.substrate_addr
+                "duplicate peer substrate address: {link_id} and {other} share {} on dock {}",
+                peer_state_ref.substrate_addr, peer_state_ref.interface_addr,
             );
         }
 
@@ -392,12 +404,14 @@ pub mod test {
         link_id: NonZero<LinkId>,
         link_type: LinkType,
         substrate_addr: SubstrateAddr,
+        interface_addr: ScopedIpAddr,
     ) -> PeerState {
         let (mp_inq, _mp_outq) = mpsc::channel(MGMT_PROCESSOR_QUEUE_SIZE);
         let mgmt_processor = queues::MgmtProcessor::new(mp_inq);
 
         PeerState {
             substrate_addr,
+            interface_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
             pft: PeerForwardingTable::new(),
             sync_req_state: sync_req::SyncReqState::new(),
