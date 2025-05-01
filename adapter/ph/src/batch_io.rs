@@ -5,8 +5,80 @@
 //! All these operations assume a file descriptor which has been set
 //! non-blocking, and they perform non-blocking I/O operations.
 
-use nix::sys::socket::{AddressFamily, SockaddrLike, SockaddrStorage};
-use std::net::SocketAddr;
+use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
+use nix::sys::socket::{self, AddressFamily, ControlMessageOwned, SockaddrLike, SockaddrStorage};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::os::fd::{AsFd, AsRawFd};
+
+macro_rules! scoped_ip_addr_to_cmsg (
+    ($cmsg_id:ident : $addr:expr) => {
+        let in_pktinfo;
+        let in6_pktinfo;
+        let $cmsg_id;
+        match $addr {
+            $crate::net_defs::ScopedIpAddr::V4(addr) => {
+                in_pktinfo = libc::in_pktinfo {
+                        ipi_ifindex: 0,
+                        ipi_spec_dst: libc::in_addr { s_addr: addr.to_bits().to_be() },
+                        ipi_addr: libc::in_addr { s_addr: 0 },
+                    };
+
+                $cmsg_id = nix::sys::socket::ControlMessage::Ipv4PacketInfo(&in_pktinfo);
+            },
+
+            $crate::net_defs::ScopedIpAddr::V6(addr) => {
+                in6_pktinfo = libc::in6_pktinfo {
+                        ipi6_addr: libc::in6_addr { s6_addr: addr.ip().octets() },
+                        ipi6_ifindex: addr.scope_id(),
+                    };
+
+                $cmsg_id = nix::sys::socket::ControlMessage::Ipv6PacketInfo(&in6_pktinfo);
+            },
+        }
+    }
+);
+
+fn cmsg_to_scoped_ip_addr(cmsg: ControlMessageOwned) -> Option<ScopedIpAddr> {
+    match cmsg {
+        ControlMessageOwned::Ipv4PacketInfo(info) => Some(ScopedIpAddr::V4(Ipv4Addr::from(
+            u32::from_be(info.ipi_addr.s_addr),
+        ))),
+
+        ControlMessageOwned::Ipv6PacketInfo(info) => Some(ScopedIpAddr::V6(ScopedIpv6Addr::new(
+            Ipv6Addr::from(info.ipi6_addr.s6_addr),
+            info.ipi6_ifindex,
+        ))),
+
+        _ => None,
+    }
+}
+
+fn sockaddr_to_socket_addr(sa: SockaddrStorage) -> Option<SocketAddr> {
+    match sa.family()? {
+        AddressFamily::Inet => Some(SocketAddr::V4((*sa.as_sockaddr_in().unwrap()).into())),
+        AddressFamily::Inet6 => Some(SocketAddr::V6((*sa.as_sockaddr_in6().unwrap()).into())),
+        _ => None,
+    }
+}
+
+fn errno_to_error(errno: nix::errno::Errno) -> std::io::Error {
+    std::io::Error::from_raw_os_error(errno as i32)
+}
+
+/// Enable the reception of packet info on a socket.  Required for
+/// `try_recv_buf_from_to_batch()` to return the destination address.
+pub fn set_recv_packet_info(fd: &impl AsFd, enable: bool) -> std::io::Result<()> {
+    match socket::getsockname::<SockaddrStorage>(fd.as_fd().as_raw_fd())?.family() {
+        Some(AddressFamily::Inet) => {
+            socket::setsockopt(fd, socket::sockopt::Ipv4PacketInfo, &enable).map_err(errno_to_error)
+        }
+        Some(AddressFamily::Inet6) => {
+            socket::setsockopt(fd, socket::sockopt::Ipv6RecvPacketInfo, &enable)
+                .map_err(errno_to_error)
+        }
+        _ => Ok(()),
+    }
+}
 
 #[cfg(all(target_os = "linux", feature = "io-uring"))]
 mod io_uring {
@@ -408,8 +480,7 @@ mod io_uring {
         where
             B: BufMut + 'a,
         {
-            let foo = TryRecvBufFromBatchOp::new();
-            self.do_batch_op(foo, fd, bufs, results)
+            self.do_batch_op(TryRecvBufFromBatchOp::new(), fd, bufs, results)
         }
     }
 
@@ -429,15 +500,18 @@ mod io_uring {
     }
 }
 
-#[cfg(not(all(target_os = "linux", feature = "io-uring")))]
+//#[cfg(not(all(target_os = "linux", feature = "io-uring")))]
 mod posix_unbatched {
     //! Unbatched implementation using POSIX primitives.
 
-    use super::sockaddr_to_socket_addr;
+    use super::*;
+    use crate::net_defs::ScopedIpAddr;
     use bytes::BufMut;
-    use nix::sys::socket::{self, MsgFlags, SockaddrStorage};
+    use libc;
+    use nix::cmsg_space;
+    use nix::sys::socket::{self, sockaddr_storage, MsgFlags, SockaddrStorage};
     use nix::unistd;
-    use std::io::{Error, Result};
+    use std::io::{IoSlice, IoSliceMut, Result};
     use std::net::SocketAddr;
     use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
     use zpr_ext::std::mem::slice_assume_init_mut;
@@ -445,20 +519,19 @@ mod posix_unbatched {
     #[allow(dead_code)]
     pub const MAX_ENTRIES: usize = 1024;
 
-    pub struct BatchIo {}
-
-    fn errno_to_error(errno: nix::errno::Errno) -> Error {
-        Error::from_raw_os_error(errno as i32)
+    pub struct BatchIo {
+        cmsg_buffer: Vec<u8>,
     }
 
     impl BatchIo {
         pub fn new(_entries: usize) -> Result<Self> {
-            Ok(Self {})
+            Ok(Self {
+                cmsg_buffer: cmsg_space!(sockaddr_storage),
+            })
         }
 
         fn do_batch_op<'a, Item, Res>(
-            &mut self,
-            op: impl Fn(BorrowedFd<'a>, Item) -> Result<Res>,
+            mut op: impl FnMut(BorrowedFd<'a>, Item) -> Result<Res>,
             fd: &'a impl AsFd,
             items: impl IntoIterator<Item = Item>,
             results: &'a mut Vec<Result<Res>>,
@@ -487,7 +560,7 @@ mod posix_unbatched {
             bufs: impl IntoIterator<Item = &'a [u8]>,
             results: &'a mut Vec<Result<usize>>,
         ) -> Result<usize> {
-            self.do_batch_op(
+            Self::do_batch_op(
                 |fd, buf| unistd::write(fd, buf).map_err(errno_to_error),
                 fd,
                 bufs,
@@ -504,7 +577,7 @@ mod posix_unbatched {
         where
             B: BufMut + 'a,
         {
-            self.do_batch_op(
+            Self::do_batch_op(
                 |fd, buf| {
                     // SAFETY: We will only be writing to the chunk.
                     let chunk =
@@ -526,7 +599,7 @@ mod posix_unbatched {
             bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr)>,
             results: &'a mut Vec<Result<usize>>,
         ) -> Result<usize> {
-            self.do_batch_op(
+            Self::do_batch_op(
                 |fd, (buf, addr)| {
                     socket::sendto(
                         fd.as_raw_fd(),
@@ -535,6 +608,40 @@ mod posix_unbatched {
                         MsgFlags::empty(),
                     )
                     .map_err(errno_to_error)
+                },
+                fd,
+                bufs,
+                results,
+            )
+        }
+
+        pub fn try_send_to_from_batch<'a>(
+            &'a mut self,
+            fd: &'a impl AsFd,
+            bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
+            results: &'a mut Vec<Result<usize>>,
+        ) -> Result<usize> {
+            Self::do_batch_op(
+                |fd, (buf, dst, src)| match src {
+                    Some(src) => {
+                        scoped_ip_addr_to_cmsg!(cmsg: &src);
+                        socket::sendmsg(
+                            fd.as_raw_fd(),
+                            &[IoSlice::new(buf)],
+                            &[cmsg],
+                            MsgFlags::empty(),
+                            Some(&SockaddrStorage::from(dst)),
+                        )
+                        .map_err(errno_to_error)
+                    }
+
+                    None => socket::sendto(
+                        fd.as_raw_fd(),
+                        buf,
+                        &SockaddrStorage::from(dst),
+                        MsgFlags::empty(),
+                    )
+                    .map_err(errno_to_error),
                 },
                 fd,
                 bufs,
@@ -551,16 +658,55 @@ mod posix_unbatched {
         where
             B: BufMut + 'a,
         {
-            self.do_batch_op(
+            Self::do_batch_op(
                 |fd, buf| {
                     // SAFETY: We will only be writing to the chunk.
                     let chunk =
                         unsafe { slice_assume_init_mut(buf.chunk_mut().as_uninit_slice_mut()) };
+                    // FIXME: use MSG_TRUNC
                     let (amt, addr) =
                         socket::recvfrom(fd.as_raw_fd(), chunk).map_err(errno_to_error)?;
                     // SAFETY: We know we've written the given number of bytes in the BufMut.
-                    unsafe { buf.advance_mut(amt as usize) };
+                    unsafe { buf.advance_mut(amt) };
                     Ok((amt, addr.and_then(sockaddr_to_socket_addr)))
+                },
+                fd,
+                bufs,
+                results,
+            )
+        }
+
+        pub fn try_recv_buf_from_to_batch<'a, B>(
+            &'a mut self,
+            fd: &'a impl AsFd,
+            bufs: impl IntoIterator<Item = &'a mut B>,
+            results: &'a mut Vec<Result<(usize, Option<SocketAddr>, Option<ScopedIpAddr>)>>,
+        ) -> Result<usize>
+        where
+            B: BufMut + 'a,
+        {
+            Self::do_batch_op(
+                |fd, buf| {
+                    // SAFETY: We will only be writing to the chunk.
+                    let chunk =
+                        unsafe { slice_assume_init_mut(buf.chunk_mut().as_uninit_slice_mut()) };
+                    let mut io_slice = IoSliceMut::new(chunk);
+                    let recvmsg = socket::recvmsg(
+                        fd.as_raw_fd(),
+                        std::slice::from_mut(&mut io_slice),
+                        Some(&mut self.cmsg_buffer),
+                        MsgFlags::MSG_TRUNC,
+                    )
+                    .map_err(errno_to_error)?;
+                    let amt = recvmsg.bytes;
+                    let from_addr = recvmsg.address.and_then(sockaddr_to_socket_addr);
+                    let to_addr = recvmsg
+                        .cmsgs()
+                        .expect("cmsgs sizing error")
+                        .find_map(cmsg_to_scoped_ip_addr);
+                    // SAFETY: We know we've written the given number of bytes in the BufMut.
+                    unsafe { buf.advance_mut(std::cmp::min(amt, buf.remaining_mut())) };
+                    Ok((amt, from_addr, to_addr))
                 },
                 fd,
                 bufs,
@@ -570,28 +716,21 @@ mod posix_unbatched {
     }
 }
 
-#[cfg(all(target_os = "linux", feature = "io-uring"))]
+/*#[cfg(all(target_os = "linux", feature = "io-uring"))]
 pub use io_uring::*;
-#[cfg(not(all(target_os = "linux", feature = "io-uring")))]
+#[cfg(not(all(target_os = "linux", feature = "io-uring")))]*/
 pub use posix_unbatched::*;
-
-fn sockaddr_to_socket_addr(sa: SockaddrStorage) -> Option<SocketAddr> {
-    match sa.family() {
-        Some(AddressFamily::Inet) => Some(SocketAddr::V4((*sa.as_sockaddr_in().unwrap()).into())),
-        Some(AddressFamily::Inet6) => Some(SocketAddr::V6((*sa.as_sockaddr_in6().unwrap()).into())),
-        _ => None,
-    }
-}
 
 #[cfg(test)]
 mod tests {
-    use super::BatchIo;
+    use super::*;
+    use bytes::BufMut;
     use std::io::Result;
     use std::net::UdpSocket;
     use std::os::unix::net::UnixDatagram;
 
     #[test]
-    fn write_test() {
+    fn test_write() {
         // FIXME: we need to test EAGAIN behavior... possibly by first filling queue, then draining a few
 
         let (inq, outq) = UnixDatagram::pair().unwrap();
@@ -625,7 +764,7 @@ mod tests {
     }
 
     #[test]
-    fn read_test() {
+    fn test_read() {
         let (inq, outq) = UnixDatagram::pair().unwrap();
         inq.set_nonblocking(true).unwrap();
         outq.set_nonblocking(true).unwrap();
@@ -657,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn send_test() {
+    fn test_send() {
         // FIXME: we need to test EAGAIN behavior... possibly by first filling queue, then draining a few
 
         let inq = udp_socket().unwrap();
@@ -698,7 +837,7 @@ mod tests {
     }
 
     #[test]
-    fn recv_test() {
+    fn test_recv() {
         let inq = udp_socket().unwrap();
         let outq = udp_socket().unwrap();
         inq.set_nonblocking(true).unwrap();
@@ -734,6 +873,66 @@ mod tests {
             assert_eq!(bufs[i].as_slice(), msgs[i].as_bytes());
         }
     }
+
+    #[test]
+    fn test_recv_to() {
+        let inq = udp_socket().unwrap();
+        let outq = udp_socket().unwrap();
+        inq.set_nonblocking(true).unwrap();
+        outq.set_nonblocking(true).unwrap();
+        set_recv_packet_info(&outq, true).unwrap();
+        inq.connect(outq.local_addr().unwrap()).unwrap();
+
+        let mut bio = BatchIo::new(1).unwrap();
+
+        let msg = "Hello".as_bytes();
+
+        let _ = inq.send(msg).unwrap();
+
+        let mut buf = Vec::with_capacity(64);
+        let mut results = Vec::new();
+
+        let n = bio.try_recv_buf_from_to_batch(&outq, std::iter::once(&mut buf), &mut results);
+        assert!(n.unwrap() == 1);
+
+        let res = results[0].as_ref().unwrap();
+        assert_eq!(res.0, msg.len());
+        assert_eq!(res.1, Some(inq.local_addr().unwrap()));
+        // NOTE: we don't have any way of testing the scope ID functionality as a unit test
+        assert_eq!(
+            res.2.map(|sa| sa.ip()),
+            Some(outq.local_addr().unwrap().ip())
+        );
+        assert_eq!(buf.as_slice(), msg);
+    }
+
+    #[test]
+    fn test_oversize_recv_to() {
+        let inq = udp_socket().unwrap();
+        let outq = udp_socket().unwrap();
+        inq.set_nonblocking(true).unwrap();
+        outq.set_nonblocking(true).unwrap();
+        inq.connect(outq.local_addr().unwrap()).unwrap();
+
+        let mut bio = BatchIo::new(1).unwrap();
+
+        let msg = [123u8; 128];
+
+        let _ = inq.send(&[123u8; 128]).unwrap();
+
+        let limit = 64;
+        let mut buf = Vec::with_capacity(64).limit(limit);
+        let mut results = Vec::new();
+
+        let n = bio.try_recv_buf_from_to_batch(&outq, std::iter::once(&mut buf), &mut results);
+        assert!(n.unwrap() == 1);
+
+        assert_eq!(results[0].as_ref().unwrap().0, msg.len());
+        assert_eq!(buf.get_ref().len(), limit);
+        assert_eq!(buf.get_ref().as_slice(), &msg[..limit]);
+    }
+
+    // NOTE: we don't have any way of really testing the "send_from" functionality as a unit test
 
     fn udp_socket() -> Result<UdpSocket> {
         UdpSocket::bind(std::net::SocketAddrV6::new(

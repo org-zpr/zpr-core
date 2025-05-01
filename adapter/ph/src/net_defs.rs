@@ -12,6 +12,8 @@ pub mod ethertype {
 
 pub const IPV6_ADDRESS_SIZE: usize = 16;
 
+/// "Flat" (non-enum) representation of an IPv4 or IPv6 address, used
+/// internally to represent ZPR addresses.
 #[derive(
     FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned, Copy, Clone, Hash, Debug, PartialEq, Eq,
 )]
@@ -167,6 +169,111 @@ impl From<&IpAddress> for IpAddr {
 impl std::fmt::Display for IpAddress {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         Ipv6Addr::from(*self).fmt(f)
+    }
+}
+
+/// Like `std::net::IpAddr`, but includes IPv6 scope ID field, needed to
+/// distinguish link-local addresses from one another.  Used to represent
+/// the portion of a substrate address (i.e. `std::net::SocketAddr`) needed
+/// for routing.
+#[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ScopedIpAddr {
+    V4(Ipv4Addr),
+    V6(ScopedIpv6Addr),
+}
+
+impl std::fmt::Display for ScopedIpAddr {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScopedIpAddr::V4(v4) => v4.fmt(fmt),
+            ScopedIpAddr::V6(v6) => v6.fmt(fmt),
+        }
+    }
+}
+
+impl From<IpAddr> for ScopedIpAddr {
+    fn from(addr: IpAddr) -> Self {
+        match addr {
+            IpAddr::V4(v4) => ScopedIpAddr::V4(v4),
+            IpAddr::V6(v6) => ScopedIpAddr::V6(v6.into()),
+        }
+    }
+}
+
+impl From<Ipv4Addr> for ScopedIpAddr {
+    fn from(addr: Ipv4Addr) -> Self {
+        ScopedIpAddr::V4(addr)
+    }
+}
+
+impl From<ScopedIpv6Addr> for ScopedIpAddr {
+    fn from(addr: ScopedIpv6Addr) -> Self {
+        ScopedIpAddr::V6(addr)
+    }
+}
+
+impl From<Ipv6Addr> for ScopedIpAddr {
+    fn from(addr: Ipv6Addr) -> Self {
+        ScopedIpAddr::V6(addr.into())
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ScopedIpv6Addr {
+    ip: Ipv6Addr,
+    scope_id: u32,
+}
+
+impl ScopedIpv6Addr {
+    pub fn new(ip: Ipv6Addr, scope_id: u32) -> Self {
+        Self { ip, scope_id }
+    }
+
+    pub fn ip(&self) -> &Ipv6Addr {
+        &self.ip
+    }
+
+    pub fn scope_id(&self) -> u32 {
+        self.scope_id
+    }
+
+    pub fn set_ip(&mut self, new_ip: Ipv6Addr) {
+        self.ip = new_ip
+    }
+
+    pub fn set_scope_id(&mut self, new_scope_id: u32) {
+        self.scope_id = new_scope_id
+    }
+}
+
+impl std::fmt::Display for ScopedIpv6Addr {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.ip.fmt(fmt)?;
+        if self.scope_id != 0 {
+            write!(fmt, "%{}", self.scope_id)?;
+        }
+        Ok(())
+    }
+}
+
+impl From<Ipv6Addr> for ScopedIpv6Addr {
+    fn from(ip: Ipv6Addr) -> Self {
+        Self { ip, scope_id: 0 }
+    }
+}
+
+pub trait SocketAddrExt {
+    fn scoped_ip(&self) -> ScopedIpAddr;
+}
+
+impl SocketAddrExt for std::net::SocketAddr {
+    fn scoped_ip(&self) -> ScopedIpAddr {
+        match self {
+            std::net::SocketAddr::V4(v4) => ScopedIpAddr::V4(*v4.ip()),
+            std::net::SocketAddr::V6(v6) => {
+                ScopedIpAddr::V6(ScopedIpv6Addr::new(*v6.ip(), v6.scope_id()))
+            }
+        }
     }
 }
 
