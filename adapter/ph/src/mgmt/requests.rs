@@ -178,11 +178,13 @@ pub async fn send_init_authentication_request(
 
 /// Send an AcquireZPRAddressRequest (TODO: not yet in RFC 6)
 ///
-/// All requested addresses must be same IP version.
 /// The `blob` is for bootstrap authentcation and can be empty.
 ///
 /// Once this returns the link_state should transition to RegisterAA
 /// as we wait for a grant.
+///
+/// ## Panics
+/// - Panics if all requested addresses are not the same IP version.
 pub async fn send_acquire_zpr_address_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
@@ -191,8 +193,7 @@ pub async fn send_acquire_zpr_address_request(
 ) -> Result<zdp::ResponseCode, ()> {
     // Copy the blob amd addrs for use in closure below.
     let blob_data = blob.unwrap_or_default();
-    let mut c_actor_addrs = Vec::new();
-    c_actor_addrs.extend_from_slice(actor_addrs);
+    let c_actor_addrs = actor_addrs.to_owned();
 
     let response = core::send_sync_non_flow_req(
         asm,
@@ -211,13 +212,21 @@ pub async fn send_acquire_zpr_address_request(
                 addr_count: c_actor_addrs.len() as u8,
             };
             hdr.write_to_buf(&mut req).unwrap();
-            if !blob_data.is_empty() {
-                req.put_slice(&blob_data);
-            }
+            req.put_slice(&blob_data);
             for addr in &c_actor_addrs {
                 match addr {
-                    IpAddr::V4(addr) => req.put(&addr.octets()[..]),
-                    IpAddr::V6(addr) => req.put(&addr.octets()[..]),
+                    IpAddr::V4(addr) => {
+                        if ip_version != zpr::L3Type::Ipv4 {
+                            panic!("attempt to send an IPv4 address with IPv6 type acquire zpr address packet")
+                        }
+                        req.put(&addr.octets()[..])
+                    },
+                    IpAddr::V6(addr) => {
+                        if ip_version != zpr::L3Type::Ipv6 {
+                            panic!("attempt to send an IPv6 address with IPv4 type acquire zpr address packet")
+                        }
+                        req.put(&addr.octets()[..])
+                    },
                 }
             }
         },
@@ -254,6 +263,9 @@ pub async fn send_acquire_zpr_address_request(
 ///
 /// Once this returns the link_state should transition from RegisterAA
 /// to (I think) Active.
+///
+/// ## Panics
+/// - Panics if all granted addresses are not the same IP version.
 pub async fn send_grant_zpr_address_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
@@ -283,8 +295,18 @@ pub async fn send_grant_zpr_address_request(
             hdr.write_to_buf(&mut req).unwrap();
             for addr in &c_actor_addrs {
                 match addr {
-                    IpAddr::V4(addr) => req.put(&addr.octets()[..]),
-                    IpAddr::V6(addr) => req.put(&addr.octets()[..]),
+                    IpAddr::V4(addr) => {
+                        if ip_version != zpr::L3Type::Ipv4 {
+                            panic!("attempt to send an IPv4 address with IPv6 type grant zpr address packet")
+                        }
+                        req.put(&addr.octets()[..])
+                    },
+                    IpAddr::V6(addr) => {
+                        if ip_version != zpr::L3Type::Ipv6 {
+                            panic!("attempt to send an IPv6 address with IPv4 type grant zpr address packet")
+                        }
+                        req.put(&addr.octets()[..])
+                    },
                 }
             }
         },
