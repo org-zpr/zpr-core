@@ -90,7 +90,7 @@ impl std::fmt::Display for L3Type {
 
 /// Trait for that from which an L3Type can be derived.
 #[allow(dead_code)]
-trait L3TypeDeriveable {
+pub trait L3TypeDeriveable {
     fn l3_type(&self) -> L3Type;
 }
 

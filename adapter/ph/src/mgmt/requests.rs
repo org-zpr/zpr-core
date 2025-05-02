@@ -14,7 +14,7 @@ use bytes::{Buf, BufMut};
 use std::net::IpAddr;
 use thiserror::Error;
 use tracing::*;
-use zpr;
+use zpr::{self, L3TypeDeriveable};
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 /// send a Key Management message (RFC 6.5 § 6.2.8)
@@ -203,7 +203,7 @@ pub async fn send_acquire_zpr_address_request(
             let ip_version = if c_actor_addrs.is_empty() {
                 zpr::L3Type::Ipv6 // whatever, doesn't matter since count is zero.
             } else {
-                c_actor_addrs[0].into()
+                c_actor_addrs[0].l3_type()
             };
             let hdr = zdp::ZdpAcquireZprAddressRequestHeader {
                 blob_len: (blob_data.len() as u16).into(),
@@ -273,7 +273,7 @@ pub async fn send_grant_zpr_address_request(
             let ip_version = if c_actor_addrs.is_empty() {
                 zpr::L3Type::Ipv6 // whatever, doesn't matter since count is zero.
             } else {
-                c_actor_addrs[0].into()
+                c_actor_addrs[0].l3_type()
             };
             let hdr = zdp::ZdpGrantZprAddressRequestHeader {
                 status_code,
