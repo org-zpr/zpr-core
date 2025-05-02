@@ -160,11 +160,7 @@ impl From<IpAddress> for IpAddr {
 
 impl From<&IpAddress> for IpAddr {
     fn from(addr: &IpAddress) -> Self {
-        if addr.is_v4() {
-            IpAddr::V4(addr.read_as_v4().into())
-        } else {
-            IpAddr::V6(addr.v6.into())
-        }
+        IpAddr::from(*addr)
     }
 }
 
