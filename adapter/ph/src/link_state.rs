@@ -488,9 +488,8 @@ impl LinkStateWrapper {
     }
 
     /// This is kicked off by [LinkEvent::ReceivedHelloResponse].
-    /// That event may be generated when:
-    /// - We have sent hello message ourselves [LinkStateWrapper::maybe_send_hello]
-    /// - We are handling a hello response [mgmt::handlers::handle_hello_response] off the management queue (never happens??).
+    /// That event may be generated when we have sent hello
+    /// message ourselves [LinkStateWrapper::maybe_send_hello]
     ///
     /// Update link state based on received hello response
     /// Transitions from Helloing to Registering Actor Address
@@ -681,7 +680,7 @@ impl LinkStateWrapper {
         true
     }
 
-    /// AcquireResponse is sent from a node to the adapter after adter sends
+    /// AcquireResponse is sent from a node to the adapter after adapter sends
     /// in the acquire zpr address message (which is essentially an auth message).
     /// The ACK of this means we are now waiting for a Grant message.
     ///
@@ -722,7 +721,7 @@ impl LinkStateWrapper {
                     drop(locked_fsm);
                     self.run_active(&asm)
                 } else {
-                    warn!(target: LINK_STATE, "Link {link_id} did not link the grant. Shutting down");
+                    warn!(target: LINK_STATE, "Link {link_id} did not ACK the grant. Shutting down");
                     locked_fsm.set_state(LinkState::Error);
                     drop(locked_fsm);
                     self.initiate_close(asm, TerminateReason::Other)
@@ -761,7 +760,7 @@ impl LinkStateWrapper {
                         asm.tun_ctl.set_carrier(true).unwrap();
                         debug!(
                             target: LINK_STATE,
-                            "Link {link_id} finished registering actor address: bcoming active"
+                            "Link {link_id} finished registering actor address: becoming active"
                         );
                         drop(locked_fsm);
                         self.run_active(asm)
@@ -831,7 +830,8 @@ impl LinkStateWrapper {
 
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
-            // NOTE: This is not exactly right, in general we can get an InitAuth at any time.
+            // NOTE: This is not exactly right, in general we can get an InitAuth at any time, though we
+            // may not want to act on it.
             (LinkType::AdapterToNode, LinkState::WaitForInitAuth) => {
                 debug!(target: LINK_STATE, "Link {link_id} received init auth.");
 
