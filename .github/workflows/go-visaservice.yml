@@ -6,6 +6,10 @@ name: Go-visaservice
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'visaservice/mods/**'
+      - 'visaservice/core/**'
+      - '.github/workflows/go-visaservice.yml'
   pull_request:
     paths:
       - 'visaservice/mods/**'

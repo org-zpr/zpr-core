@@ -3,6 +3,9 @@ name: Rust-cbpfrs
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'cbpf-rs/**'
+      - '.github/workflows/rust-cbpfrs.yml'
   pull_request:
     paths:
       - 'cbpf-rs/**'

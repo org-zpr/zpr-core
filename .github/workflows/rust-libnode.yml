@@ -3,10 +3,12 @@ name: Rust-node
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    paths: 
+    paths:
       - 'libnode/**'
-      - 'adapter/ph/**'
+      - '.github/workflows/rust-libnode.yml'
+  pull_request:
+    paths:
+      - 'libnode/**'
       - '.github/workflows/rust-libnode.yml'
 
 concurrency:

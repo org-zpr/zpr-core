@@ -3,6 +3,14 @@ name: Rust-adapter
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - 'adapter/ph/**'
+      - 'adapter/cli/**'
+      - 'zpr-ext/**'
+      - 'cslab/**'
+      - 'cbpf-rs/**'
+      - 'libnode/**'
+      - '.github/workflows/rust-adapter.yml'
   pull_request:
     paths:
       - 'adapter/ph/**'
