@@ -821,7 +821,7 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             // NOTE: This is not exactly right, in general we can get an InitAuth at any time, though we
-            // may not want to act on it.
+            // may not want to act on it and sometimes may be a protocol error.
             (LinkType::AdapterToNode, LinkState::WaitForInitAuth) => {
                 debug!(target: LINK_STATE, "Link {link_id} received init auth.");
 
