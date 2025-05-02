@@ -137,7 +137,7 @@ pub async fn send_init_authentication_request(
             }
         }
     } else {
-        payload = ZdpInitAuthenticationPayload::new_empty();
+        payload = ZdpInitAuthenticationPayload::default(); // empty
     }
     debug!(target: ZDP, "Link {link_id}: sending IntitAuthenticationRequest, flags: {flags:x?}");
     let response = core::send_sync_non_flow_req(

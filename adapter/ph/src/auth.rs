@@ -37,7 +37,7 @@ pub const BLOB_TYPE_AC: &str = "AC";
 pub const MAX_BLOB_AGE_SECONDS: u64 = 120; // 2 minutes
 
 /// This is the data payload in a [zdp::PacketType::InitAuthenticationRequest] packet.
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug)]
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug, Default)]
 #[repr(packed)]
 pub struct ZdpInitAuthenticationPayload {
     /// 8 bytes random data
@@ -217,14 +217,6 @@ impl ZdpInitAuthenticationPayload {
             nonce,
             ctime: ctime.into(),
             hmac: hmac.into(),
-        }
-    }
-
-    pub fn new_empty() -> Self {
-        ZdpInitAuthenticationPayload {
-            nonce: [0u8; 8],
-            ctime: 0.into(),
-            hmac: [0u8; 32],
         }
     }
 }

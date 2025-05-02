@@ -412,12 +412,8 @@ fn parse_acquire_zpr_address_request(
             warn!(target: ZDP, "packet too short for blob");
             return Err(HandleMgmtError::BadStructure);
         }
-
-        // TODO: Is this correct way to read buffer off packet?
-        let mut blob_buffer = Vec::with_capacity(blen);
-        blob_buffer.extend_from_slice(&pkt.body()[..blen]);
-        pkt.advance(blen);
-        match String::from_utf8(blob_buffer) {
+        let blob_buffer = pkt.copy_to_bytes(blen);
+        match String::from_utf8(blob_buffer.into()) {
             Ok(b) => {
                 blob = b;
             }
