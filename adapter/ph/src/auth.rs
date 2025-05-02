@@ -13,12 +13,15 @@ use openssl::pkey::{PKey, Private};
 use openssl::rand::rand_bytes;
 use openssl::rsa::Padding;
 use openssl::sign::Signer;
+use openssl::x509::X509;
 
 use base64::prelude::*;
 use thiserror::Error;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::pki::get_cn_from_cert;
 
 /// When a node signs a challenge for an adapter it uses this sort of key.
 pub const AUTH_KEY_SIZE_BYTES: usize = 32; // blake3 256bit key
@@ -135,8 +138,26 @@ impl ZdpAuthCodeBlob {
 
 impl ZdpSelfSignedBlob {
     /// The `challenge` field in the blob is a base64 encoded [zdp::ZdpInitAuthenticationPayload].
-    /// This extracts that data and checks it.
-    pub fn verify_blob_challenge(&self, key: &[u8; AUTH_KEY_SIZE_BYTES]) -> Result<(), AuthError> {
+    /// This extracts that data and checks that:
+    ///   - The CN in the provided `peer_cert` matches the CN in the blob.
+    ///   - The HMAC in the blob is valid for the provided `key`.
+    ///   - The blob is not older than `MAX_BLOB_AGE_SECONDS`.
+    pub fn verify_blob_challenge(
+        &self,
+        peer_cert: &X509,
+        key: &[u8; AUTH_KEY_SIZE_BYTES],
+    ) -> Result<(), AuthError> {
+        if let Some(link_cn) = get_cn_from_cert(peer_cert) {
+            if link_cn != self.cn {
+                return Err(AuthError::FormatError(format!(
+                    "CN mismatch: expected {link_cn} found {}",
+                    self.cn
+                )));
+            }
+        } else {
+            return Err(AuthError::FormatError("no CN in peer cert".to_string()));
+        }
+
         let payload_bytes = BASE64_STANDARD.decode(self.challenge.clone())?;
         if payload_bytes.len() != size_of::<ZdpInitAuthenticationPayload>() {
             return Err(AuthError::FormatError(format!(

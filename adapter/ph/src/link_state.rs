@@ -8,7 +8,6 @@ use crate::logging::targets::LINK_STATE;
 use crate::mgmt;
 use crate::mgmt::core::SyncReqError;
 use crate::net_defs::IpAddress;
-use crate::pki::get_cn_from_cert;
 use crate::sample_ring::SampleRing;
 use crate::special_peers;
 use crate::special_peers::SpecialPeerName;
@@ -638,7 +637,7 @@ impl LinkStateWrapper {
         link_id: LinkId,
         ss_blob: &ZdpSelfSignedBlob,
     ) -> bool {
-        // Now check that the in the presented blob matches the CN the peer used to establish link.
+        // Now check that the CN in the presented blob matches the CN the peer used to establish link.
         let Some(peer_state) = asm.peer_table.get(link_id) else {
             warn!(target: LINK_STATE, "Link {link_id} blob check failed: cannot find peer state entry");
             return false;
@@ -647,19 +646,10 @@ impl LinkStateWrapper {
             warn!(target: LINK_STATE, "Link {link_id} blob check failed: cannot find SA");
             return false;
         };
-        if let Some(ref peer_cert) = sa.peer_cert {
-            if let Some(link_cn) = get_cn_from_cert(peer_cert) {
-                if link_cn != ss_blob.cn {
-                    warn!(target: LINK_STATE, "Link {link_id} blob check failed: CN mismatch: expected {link_cn} found {}", ss_blob.cn);
-                    return false;
-                }
-            } else {
-                warn!(target: LINK_STATE, "Link {link_id} blob check failed: no CN in cert");
-                return false;
-            }
-        }
-
-        // Now make sure that the sender returned the exact challenge we sent.
+        let Some(ref peer_cert) = sa.peer_cert else {
+            warn!(target: LINK_STATE, "Link {link_id} no peer cert found, cannot validate blob");
+            return false;
+        };
         let key = asm.peer_table.inspect(link_id, {
             |peer| {
                 let mut key = [0u8; AUTH_KEY_SIZE_BYTES];
@@ -673,7 +663,7 @@ impl LinkStateWrapper {
         }
         let key = key.unwrap();
 
-        if let Err(e) = ss_blob.verify_blob_challenge(&key) {
+        if let Err(e) = ss_blob.verify_blob_challenge(peer_cert, &key) {
             warn!(target: LINK_STATE, "Link {link_id} challenge verification failed: {e}");
             return false;
         }
