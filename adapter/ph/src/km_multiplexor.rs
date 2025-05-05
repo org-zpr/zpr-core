@@ -5,7 +5,6 @@ use crate::km_noise::{KmNoise, NoiseKeypair};
 use crate::link_state::LinkEvent;
 use crate::logging::targets::{KEY_MGMT, LINK_STATE};
 use crate::mgmt::requests;
-use crate::net_defs;
 use crate::peer_table::KmHandle;
 use bytes::Bytes;
 use std::collections::HashMap;
@@ -342,6 +341,7 @@ mod test {
     use crate::km_testdata::test::*;
     use crate::link_state::LinkType;
     use crate::mgmt_processor_worker;
+    use crate::net_defs;
     use crate::peer_table;
     use base64::prelude::*;
     use std::net::{IpAddr, Ipv4Addr};

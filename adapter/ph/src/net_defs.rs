@@ -183,6 +183,7 @@ pub enum ScopedIpAddr {
 }
 
 impl ScopedIpAddr {
+    #[allow(dead_code)]
     pub fn ip(&self) -> IpAddr {
         match self {
             ScopedIpAddr::V4(v4) => IpAddr::V4(*v4),
@@ -246,10 +247,12 @@ impl ScopedIpv6Addr {
         self.scope_id
     }
 
+    #[allow(dead_code)]
     pub fn set_ip(&mut self, new_ip: Ipv6Addr) {
         self.ip = new_ip
     }
 
+    #[allow(dead_code)]
     pub fn set_scope_id(&mut self, new_scope_id: u32) {
         self.scope_id = new_scope_id
     }
