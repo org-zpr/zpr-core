@@ -9,7 +9,7 @@ use nix::poll;
 use std::net::UdpSocket;
 use std::sync::Arc;
 
-#[derive(Enum)]
+#[derive(Debug, Enum)]
 enum PollSlot {
     Substrate,
     Tun,

@@ -136,7 +136,7 @@ impl<U> ReturnQueue<U> {
 
         self.outstanding.fetch_sub(recvd);
 
-        if recvd > avail {
+        if avail > recvd {
             // It is likely that we ate the notification of these remaining items.
             // Re-post it.  (If we didn't eat it, this is harmless.)
             self.handle.notify.post();

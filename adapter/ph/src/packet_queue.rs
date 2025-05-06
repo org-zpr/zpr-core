@@ -95,9 +95,26 @@ impl<const BUFSIZE: usize> Receiver<BUFSIZE> {
     }
 
     pub fn try_recv(&mut self, pkt_buf: PacketBuffer) -> Result<Packet, TryRecvError> {
+        if !self.notify.consume() {
+            return Err(TryRecvError::Empty(pkt_buf));
+        }
+
+        let avail = self.recv.len();
+        if avail == 0 {
+            return Err(TryRecvError::Empty(pkt_buf));
+        }
+
         match self.recv.try_recv() {
-            Ok(buf) => Packet::deserialize_into(buf.as_slice(), pkt_buf)
-                .map_err(|pkt_buf| TryRecvError::Oversize(pkt_buf)),
+            Ok(buf) => {
+                if avail > 1 {
+                    // It is likely that we ate the notification of these remaining items.
+                    // Re-post it.  (If we didn't eat it, this is harmless.)
+                    self.notify.post();
+                }
+
+                Packet::deserialize_into(buf.as_slice(), pkt_buf)
+                    .map_err(|pkt_buf| TryRecvError::Oversize(pkt_buf))
+            }
             Err(mpsc::error::TryRecvError::Empty) => Err(TryRecvError::Empty(pkt_buf)),
             Err(mpsc::error::TryRecvError::Disconnected) => {
                 Err(TryRecvError::Disconnected(pkt_buf))
