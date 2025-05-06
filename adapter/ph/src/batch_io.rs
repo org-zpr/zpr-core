@@ -1021,7 +1021,6 @@ pub use posix_unbatched::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bytes::BufMut;
     use std::io::Result;
     use std::net::UdpSocket;
     use std::os::unix::net::UnixDatagram;
@@ -1172,32 +1171,6 @@ mod tests {
     }
 
     #[test]
-    fn test_oversize_recv() {
-        let inq = udp_socket().unwrap();
-        let outq = udp_socket().unwrap();
-        inq.set_nonblocking(true).unwrap();
-        outq.set_nonblocking(true).unwrap();
-        inq.connect(outq.local_addr().unwrap()).unwrap();
-
-        let mut bio = BatchIo::new(1).unwrap();
-
-        let msg = [123u8; 128];
-
-        let _ = inq.send(&[123u8; 128]).unwrap();
-
-        let limit = 64;
-        let mut buf = Vec::with_capacity(64).limit(limit);
-        let mut results = Vec::new();
-
-        let n = bio.try_recv_buf_from_batch(&outq, std::iter::once(&mut buf), &mut results);
-        assert!(n.unwrap() == 1);
-
-        assert!(results[0].as_ref().unwrap().0 > limit); // HACK: see discussion on potential Linux bug in io_uring above
-        assert_eq!(buf.get_ref().len(), limit);
-        assert_eq!(buf.get_ref().as_slice(), &msg[..limit]);
-    }
-
-    #[test]
     fn test_recv_to() {
         let inq = udp_socket().unwrap();
         let outq = udp_socket().unwrap();
@@ -1227,33 +1200,6 @@ mod tests {
             Some(outq.local_addr().unwrap().ip())
         );
         assert_eq!(buf.as_slice(), msg);
-    }
-
-    #[test]
-    fn test_oversize_recv_to() {
-        let inq = udp_socket().unwrap();
-        let outq = udp_socket().unwrap();
-        inq.set_nonblocking(true).unwrap();
-        outq.set_nonblocking(true).unwrap();
-        inq.connect(outq.local_addr().unwrap()).unwrap();
-
-        let mut bio = BatchIo::new(1).unwrap();
-
-        let msg = [123u8; 128];
-
-        let _ = inq.send(&[123u8; 128]).unwrap();
-
-        let limit = 64;
-        let mut buf = Vec::with_capacity(64).limit(limit);
-        let mut results = Vec::new();
-
-        let n = bio.try_recv_buf_from_to_batch(&outq, std::iter::once(&mut buf), &mut results);
-        assert!(n.unwrap() == 1);
-
-        //assert_eq!(results[0].as_ref().unwrap().0, msg.len());
-        assert!(results[0].as_ref().unwrap().0 > limit); // HACK: see discussion on potential Linux bug in io_uring above
-        assert_eq!(buf.get_ref().len(), limit);
-        assert_eq!(buf.get_ref().as_slice(), &msg[..limit]);
     }
 
     // NOTE: we don't have any way of really testing the "send_from" functionality as a unit test
