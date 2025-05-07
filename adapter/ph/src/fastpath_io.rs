@@ -1,4 +1,4 @@
-use crate::batch_io::BatchIo;
+use crate::batch_io::{self, BatchIo};
 use crate::config;
 use crate::counters::*;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
@@ -7,7 +7,6 @@ use crate::packet::{self, Packet};
 use crate::packet_queue;
 use crate::sys::{TunPi, ZprTun};
 use crate::zprtun;
-use bytes::Buf;
 use std::io::{ErrorKind, Result};
 use std::net::{SocketAddr, UdpSocket};
 use std::os::fd::{AsFd, BorrowedFd};
@@ -25,7 +24,7 @@ pub struct FastpathIo {
     /// temporary read result storage during I/O batch operations
     io_results: Vec<Result<usize>>,
     /// temporary recv result storage during I/O batch operations
-    recv_results: Vec<Result<(usize, Option<SocketAddr>, Option<net_defs::ScopedIpAddr>)>>,
+    recv_results: Vec<Result<batch_io::ReceivedPacket>>,
 }
 
 impl FastpathIo {
@@ -101,14 +100,16 @@ impl FastpathIo {
         // process packets
         for (pkt, result) in self.packets.drain(..).zip(self.recv_results.drain(..)) {
             let (mut sender, dest) = match result {
-                Ok((size, _sender, _dest)) if size > pkt.remaining() => {
+                Ok(res) if res.truncated => {
                     worker.drop_and_count(pkt, CounterType::DroppedOversize);
                     continue;
                 }
 
-                Ok((_size, sender, dest)) => (
-                    sender.expect("received from non-IP address, should not happen!"),
-                    dest.expect("unknown recipient, should not happen!"),
+                Ok(res) => (
+                    res.source
+                        .expect("received from non-IP address, should not happen!"),
+                    res.destination
+                        .expect("unknown recipient, should not happen!"),
                 ),
 
                 Err(err) => {

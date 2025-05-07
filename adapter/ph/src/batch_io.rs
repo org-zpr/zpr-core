@@ -5,11 +5,19 @@
 //! All these operations assume a file descriptor which has been set
 //! non-blocking, and they perform non-blocking I/O operations.
 
-use crate::net_defs::ScopedIpv6Addr;
+use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 use libc;
 use nix::sys::socket::{self, AddressFamily, SockaddrLike, SockaddrStorage};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::os::fd::{AsFd, AsRawFd};
+
+pub struct ReceivedPacket {
+    #[allow(dead_code)]
+    pub size: usize,
+    pub truncated: bool,
+    pub source: Option<SocketAddr>,
+    pub destination: Option<ScopedIpAddr>,
+}
 
 fn sockaddr_to_socket_addr(sa: SockaddrStorage) -> Option<SocketAddr> {
     match sa.family()? {
@@ -61,7 +69,7 @@ pub fn set_recv_packet_info(fd: &impl AsFd, enable: bool) -> std::io::Result<()>
 mod io_uring {
     //! io_uring(7)-based implementation.  Only available for Linux.
 
-    use super::sockaddr_to_socket_addr;
+    use super::{sockaddr_to_socket_addr, ReceivedPacket};
     use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
     use bytes::BufMut;
     use io_uring::{cqueue, opcode, squeue, types, IoUring};
@@ -300,9 +308,7 @@ mod io_uring {
         phantom: std::marker::PhantomData<&'a B>,
     }
 
-    impl<'a, B: BufMut> BatchOp<&'a mut B, &'a mut B, (usize, Option<SocketAddr>)>
-        for TryRecvBufFromBatchOp<'a, B>
-    {
+    impl<'a, B: BufMut> BatchOp<&'a mut B, &'a mut B, ReceivedPacket> for TryRecvBufFromBatchOp<'a, B> {
         fn new() -> Self {
             Self {
                 iovec_slab: Slab::new(),
@@ -327,33 +333,26 @@ mod io_uring {
                 msg_iovlen: 1,
                 msg_control: std::ptr::null_mut(),
                 msg_controllen: 0,
-                msg_flags: libc::MSG_TRUNC,
+                msg_flags: 0,
             });
 
             (opcode::RecvMsg::new(fd, msghdr_ref as *mut _).build(), buf)
         }
 
-        fn process_result(
-            &self,
-            idx: usize,
-            buf: &'a mut B,
-            mut amt: usize,
-        ) -> (usize, Option<SocketAddr>) {
-            if (self.msghdr_slab.get(idx).msg_flags & libc::MSG_TRUNC) != 0 {
-                // HACK: Linux bug maybe? despite MSG_TRUNC being set on entry,
-                // we don't get the actual size back here.  But we *do* at least get
-                // a MSG_TRUNC on output, so for now we fake a "too large" size.
-                amt = unsafe { self.msghdr_slab.get(idx).msg_iov.as_ref() }
-                    .unwrap()
-                    .iov_len
-                    + 1;
-            }
-
+        fn process_result(&self, idx: usize, buf: &'a mut B, size: usize) -> ReceivedPacket {
             // SAFETY: We know we've written the given number of bytes in the BufMut.
-            unsafe { buf.advance_mut(std::cmp::min(amt, buf.remaining_mut())) };
+            unsafe {
+                buf.advance_mut(size);
+            }
+            let truncated = (self.msghdr_slab.get(idx).msg_flags & libc::MSG_TRUNC) != 0;
             // SAFETY: We know the sockaddr is now filled.
-            let addr = sockaddr_to_socket_addr(unsafe { self.sockaddr_slab[idx].assume_init() });
-            (amt, addr)
+            let source = sockaddr_to_socket_addr(unsafe { self.sockaddr_slab[idx].assume_init() });
+            ReceivedPacket {
+                size,
+                truncated,
+                source,
+                destination: None,
+            }
         }
     }
 
@@ -365,8 +364,7 @@ mod io_uring {
         phantom: std::marker::PhantomData<&'a B>,
     }
 
-    impl<'a, B: BufMut>
-        BatchOp<&'a mut B, &'a mut B, (usize, Option<SocketAddr>, Option<ScopedIpAddr>)>
+    impl<'a, B: BufMut> BatchOp<&'a mut B, &'a mut B, ReceivedPacket>
         for TryRecvBufFromToBatchOp<'a, B>
     {
         fn new() -> Self {
@@ -395,37 +393,29 @@ mod io_uring {
                 msg_iovlen: 1,
                 msg_control: cmsg_ref.as_mut_ptr() as *mut libc::c_void,
                 msg_controllen: std::mem::size_of_val(cmsg_ref),
-                msg_flags: libc::MSG_TRUNC,
+                msg_flags: 0,
             });
 
             (opcode::RecvMsg::new(fd, msghdr_ref as *mut _).build(), buf)
         }
 
-        fn process_result(
-            &self,
-            idx: usize,
-            buf: &'a mut B,
-            mut amt: usize,
-        ) -> (usize, Option<SocketAddr>, Option<ScopedIpAddr>) {
-            if (self.msghdr_slab.get(idx).msg_flags & libc::MSG_TRUNC) != 0 {
-                // HACK: Linux bug maybe? despite MSG_TRUNC being set on entry,
-                // we don't get the actual size back here.  But we *do* at least get
-                // a MSG_TRUNC on output, so for now we fake a "too large" size.
-                amt = unsafe { self.msghdr_slab.get(idx).msg_iov.as_ref() }
-                    .unwrap()
-                    .iov_len
-                    + 1;
-            }
-
+        fn process_result(&self, idx: usize, buf: &'a mut B, size: usize) -> ReceivedPacket {
             // SAFETY: We know we've written the given number of bytes in the BufMut.
-            unsafe { buf.advance_mut(std::cmp::min(amt, buf.remaining_mut())) };
+            unsafe {
+                buf.advance_mut(size);
+            }
+            let truncated = (self.msghdr_slab.get(idx).msg_flags & libc::MSG_TRUNC) != 0;
             // SAFETY: We know the sockaddr is now filled.
-            let from_addr =
-                sockaddr_to_socket_addr(unsafe { self.sockaddr_slab[idx].assume_init() });
+            let source = sockaddr_to_socket_addr(unsafe { self.sockaddr_slab[idx].assume_init() });
             // SAFETY: We know the cmsgs are valid.
-            let to_addr = unsafe { cmsg_iter(self.msghdr_slab.get(idx)) }
+            let destination = unsafe { cmsg_iter(self.msghdr_slab.get(idx)) }
                 .find_map(|cmsg| unsafe { cmsg_to_scoped_ip_addr(cmsg.as_ptr()) });
-            (amt, from_addr, to_addr)
+            ReceivedPacket {
+                size,
+                truncated,
+                source,
+                destination,
+            }
         }
     }
 
@@ -622,7 +612,7 @@ mod io_uring {
             &mut self,
             fd: &impl AsFd,
             bufs: impl IntoIterator<Item = &'a mut B>,
-            results: &mut Vec<Result<(usize, Option<SocketAddr>)>>,
+            results: &mut Vec<Result<ReceivedPacket>>,
         ) -> Result<usize>
         where
             B: BufMut + 'a,
@@ -634,7 +624,7 @@ mod io_uring {
             &mut self,
             fd: &impl AsFd,
             bufs: impl IntoIterator<Item = &'a mut B>,
-            results: &mut Vec<Result<(usize, Option<SocketAddr>, Option<ScopedIpAddr>)>>,
+            results: &mut Vec<Result<ReceivedPacket>>,
         ) -> Result<usize>
         where
             B: BufMut + 'a,
@@ -927,7 +917,7 @@ mod posix_unbatched {
             &'a mut self,
             fd: &'a impl AsFd,
             bufs: impl IntoIterator<Item = &'a mut B>,
-            results: &'a mut Vec<Result<(usize, Option<SocketAddr>)>>,
+            results: &'a mut Vec<Result<ReceivedPacket>>,
         ) -> Result<usize>
         where
             B: BufMut + 'a,
@@ -944,14 +934,20 @@ mod posix_unbatched {
                         fd.as_raw_fd(),
                         std::slice::from_mut(&mut io_slice),
                         None,
-                        MsgFlags::MSG_TRUNC,
+                        MsgFlags::empty(),
                     )
                     .map_err(errno_to_error)?;
-                    let amt = recvmsg.bytes;
-                    let from_addr = recvmsg.address.and_then(sockaddr_to_socket_addr);
+                    let size = recvmsg.bytes;
+                    let truncated = recvmsg.flags.contains(socket::MsgFlags::MSG_TRUNC);
+                    let source = recvmsg.address.and_then(sockaddr_to_socket_addr);
                     // SAFETY: We know we've written the given number of bytes in the BufMut.
-                    unsafe { buf.advance_mut(std::cmp::min(amt, buf.remaining_mut())) };
-                    Ok((amt, from_addr))
+                    unsafe { buf.advance_mut(size) };
+                    Ok(ReceivedPacket {
+                        size,
+                        truncated,
+                        source,
+                        destination: None,
+                    })
                 },
                 fd,
                 bufs,
@@ -963,7 +959,7 @@ mod posix_unbatched {
             &'a mut self,
             fd: &'a impl AsFd,
             bufs: impl IntoIterator<Item = &'a mut B>,
-            results: &'a mut Vec<Result<(usize, Option<SocketAddr>, Option<ScopedIpAddr>)>>,
+            results: &'a mut Vec<Result<ReceivedPacket>>,
         ) -> Result<usize>
         where
             B: BufMut + 'a,
@@ -978,18 +974,24 @@ mod posix_unbatched {
                         fd.as_raw_fd(),
                         std::slice::from_mut(&mut io_slice),
                         Some(&mut self.cmsg_buffer),
-                        MsgFlags::MSG_TRUNC,
+                        MsgFlags::empty(),
                     )
                     .map_err(errno_to_error)?;
-                    let amt = recvmsg.bytes;
-                    let from_addr = recvmsg.address.and_then(sockaddr_to_socket_addr);
-                    let to_addr = recvmsg
+                    let size = recvmsg.bytes;
+                    let truncated = recvmsg.flags.contains(socket::MsgFlags::MSG_TRUNC);
+                    let source = recvmsg.address.and_then(sockaddr_to_socket_addr);
+                    let destination = recvmsg
                         .cmsgs()
                         .expect("cmsgs sizing error")
                         .find_map(cmsg_to_scoped_ip_addr);
                     // SAFETY: We know we've written the given number of bytes in the BufMut.
-                    unsafe { buf.advance_mut(std::cmp::min(amt, buf.remaining_mut())) };
-                    Ok((amt, from_addr, to_addr))
+                    unsafe { buf.advance_mut(size) };
+                    Ok(ReceivedPacket {
+                        size,
+                        truncated,
+                        source,
+                        destination,
+                    })
                 },
                 fd,
                 bufs,
@@ -1021,6 +1023,7 @@ pub use posix_unbatched::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::BufMut;
     use std::io::Result;
     use std::net::UdpSocket;
     use std::os::unix::net::UnixDatagram;
@@ -1164,10 +1167,39 @@ mod tests {
 
         for i in 0..nmsgs {
             let res = results[i].as_ref().unwrap();
-            assert_eq!(res.0, msgs[i].len());
-            assert_eq!(res.1, Some(sender));
+            assert_eq!(res.size, msgs[i].len());
+            assert!(!res.truncated);
+            assert_eq!(res.source, Some(sender));
             assert_eq!(bufs[i].as_slice(), msgs[i].as_bytes());
         }
+    }
+
+    #[test]
+    fn test_oversize_recv() {
+        let inq = udp_socket().unwrap();
+        let outq = udp_socket().unwrap();
+        inq.set_nonblocking(true).unwrap();
+        outq.set_nonblocking(true).unwrap();
+        inq.connect(outq.local_addr().unwrap()).unwrap();
+
+        let mut bio = BatchIo::new(1).unwrap();
+
+        let msg = [123u8; 128];
+
+        let _ = inq.send(&[123u8; 128]).unwrap();
+
+        let limit = 64;
+        let mut buf = Vec::with_capacity(64).limit(limit);
+        let mut results = Vec::new();
+
+        let n = bio.try_recv_buf_from_batch(&outq, std::iter::once(&mut buf), &mut results);
+        assert!(n.unwrap() == 1);
+
+        let res = results[0].as_ref().unwrap();
+        assert_eq!(res.size, limit);
+        assert!(res.truncated);
+        assert_eq!(buf.get_ref().len(), limit);
+        assert_eq!(buf.get_ref().as_slice(), &msg[..limit]);
     }
 
     #[test]
@@ -1192,14 +1224,43 @@ mod tests {
         assert!(n.unwrap() == 1);
 
         let res = results[0].as_ref().unwrap();
-        assert_eq!(res.0, msg.len());
-        assert_eq!(res.1, Some(inq.local_addr().unwrap()));
+        assert_eq!(res.size, msg.len());
+        assert!(!res.truncated);
+        assert_eq!(res.source, Some(inq.local_addr().unwrap()));
         // NOTE: we don't have any way of testing the scope ID functionality as a unit test
         assert_eq!(
-            res.2.map(|sa| sa.ip()),
+            res.destination.map(|sa| sa.ip()),
             Some(outq.local_addr().unwrap().ip())
         );
         assert_eq!(buf.as_slice(), msg);
+    }
+
+    #[test]
+    fn test_oversize_recv_to() {
+        let inq = udp_socket().unwrap();
+        let outq = udp_socket().unwrap();
+        inq.set_nonblocking(true).unwrap();
+        outq.set_nonblocking(true).unwrap();
+        inq.connect(outq.local_addr().unwrap()).unwrap();
+
+        let mut bio = BatchIo::new(1).unwrap();
+
+        let msg = [123u8; 128];
+
+        let _ = inq.send(&[123u8; 128]).unwrap();
+
+        let limit = 64;
+        let mut buf = Vec::with_capacity(64).limit(limit);
+        let mut results = Vec::new();
+
+        let n = bio.try_recv_buf_from_to_batch(&outq, std::iter::once(&mut buf), &mut results);
+        assert!(n.unwrap() == 1);
+
+        let res = results[0].as_ref().unwrap();
+        assert_eq!(res.size, limit);
+        assert!(res.truncated);
+        assert_eq!(buf.get_ref().len(), limit);
+        assert_eq!(buf.get_ref().as_slice(), &msg[..limit]);
     }
 
     // NOTE: we don't have any way of really testing the "send_from" functionality as a unit test
