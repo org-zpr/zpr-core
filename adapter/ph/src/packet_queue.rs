@@ -6,7 +6,7 @@
 //! * async mgmt (send) side
 //! * bounded queue
 
-use crate::packet::{Packet, PacketBuffer};
+use crate::packet::{self, Packet, PacketBuffer};
 use crate::sys::notify;
 use std::os::fd::BorrowedFd;
 use std::sync::Arc;
@@ -112,8 +112,15 @@ impl<const BUFSIZE: usize> Receiver<BUFSIZE> {
                     self.notify.post();
                 }
 
-                Packet::deserialize_into(buf.as_slice(), pkt_buf)
-                    .map_err(|pkt_buf| TryRecvError::Oversize(pkt_buf))
+                match Packet::deserialize_into(buf.as_slice(), pkt_buf) {
+                    Ok(pkt) => Ok(pkt),
+                    Err(packet::DeserializeError::BufferTooSmall(pkt_buf)) => {
+                        Err(TryRecvError::Oversize(pkt_buf))
+                    }
+                    Err(packet::DeserializeError::InvalidSerialization(_)) => {
+                        panic!("corrupt data in packet_queue")
+                    }
+                }
             }
             Err(mpsc::error::TryRecvError::Empty) => Err(TryRecvError::Empty(pkt_buf)),
             Err(mpsc::error::TryRecvError::Disconnected) => {
@@ -137,4 +144,129 @@ pub fn packet_queue<const BUFSIZE: usize>(depth: usize) -> (Sender<BUFSIZE>, Rec
             notify: notify_recv,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::BufMut;
+    use nix;
+
+    #[test]
+    fn test_empty_recv() {
+        let (_send, mut recv) = packet_queue::<256>(16);
+
+        assert_eq!(recv.len(), 0);
+        assert!(!poll(recv.poll_fd()));
+
+        match recv.try_recv(new_buf(256)).unwrap_err() {
+            TryRecvError::Empty(_) => (),
+            err => panic!("wrong error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn test_full_send() {
+        let (send, _recv) = packet_queue::<256>(1);
+        send.try_send(&new_pkt(256)).unwrap();
+        match send.try_send(&new_pkt(256)).unwrap_err() {
+            TrySendError::Full => (),
+            err => panic!("wrong error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn test_oversize_send() {
+        let (send, _recv) = packet_queue::<16>(1);
+
+        let mut send_pkt = new_pkt(256);
+        send_pkt.put("This is a packet larger than sixteen bytes".as_bytes());
+
+        match send.try_send(&send_pkt).unwrap_err() {
+            TrySendError::Oversize => (),
+            err => panic!("wrong error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn test_send_recv_one() {
+        let (send, mut recv) = packet_queue::<256>(16);
+
+        let mut send_pkt = new_pkt(256);
+        send_pkt.put("Hello!".as_bytes());
+        send.try_send(&send_pkt).unwrap();
+
+        assert_eq!(recv.len(), 1);
+        assert!(poll(recv.poll_fd()));
+
+        let recv_pkt = recv.try_recv(new_buf(256)).unwrap();
+        assert_eq!(recv_pkt, send_pkt);
+
+        assert_eq!(recv.len(), 0);
+        assert!(!poll(recv.poll_fd()));
+
+        match recv.try_recv(new_buf(256)).unwrap_err() {
+            TryRecvError::Empty(_) => (),
+            err => panic!("wrong error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn test_oversize_recv() {
+        let (send, mut recv) = packet_queue::<256>(16);
+
+        let mut send_pkt = new_pkt(256);
+        send_pkt.put("This is a packet larger than sixteen bytes".as_bytes());
+        send.try_send(&send_pkt).unwrap();
+
+        match recv.try_recv(new_buf(16)).unwrap_err() {
+            TryRecvError::Oversize(_) => (),
+            err => panic!("wrong error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn test_send_recv_many() {
+        let (send, mut recv) = packet_queue::<256>(16);
+
+        let mut send_pkts = Vec::new();
+
+        for _i in 0..16 {
+            let mut send_pkt = new_pkt(256);
+            send_pkt.put("Hello!".as_bytes());
+            send.try_send(&send_pkt).unwrap();
+            send_pkts.push(send_pkt);
+        }
+
+        for i in 0..16 {
+            assert_eq!(recv.len(), 16 - i);
+            assert!(poll(recv.poll_fd()));
+
+            let recv_pkt = recv.try_recv(new_buf(256)).unwrap();
+            assert_eq!(recv_pkt, send_pkts.pop().unwrap());
+        }
+
+        assert_eq!(recv.len(), 0);
+        assert!(!poll(recv.poll_fd()));
+
+        match recv.try_recv(new_buf(256)).unwrap_err() {
+            TryRecvError::Empty(_) => (),
+            err => panic!("wrong error: {err:?}"),
+        }
+    }
+
+    fn new_buf(size: usize) -> PacketBuffer {
+        let mut vec = Vec::with_capacity(size);
+        vec.resize(size, 0);
+        vec.into_boxed_slice()
+    }
+
+    fn new_pkt(size: usize) -> Packet {
+        Packet::new(new_buf(size), 0)
+    }
+
+    fn poll(fd: BorrowedFd<'_>) -> bool {
+        let mut pfd = nix::poll::PollFd::new(fd, nix::poll::PollFlags::POLLIN);
+        nix::poll::poll(std::slice::from_mut(&mut pfd), nix::poll::PollTimeout::ZERO).unwrap() > 0
+    }
 }
