@@ -1027,6 +1027,7 @@ mod tests {
     use std::io::Result;
     use std::net::UdpSocket;
     use std::os::unix::net::UnixDatagram;
+    use std::time::Duration;
 
     #[test]
     fn test_write() {
@@ -1034,7 +1035,8 @@ mod tests {
 
         let (inq, outq) = UnixDatagram::pair().unwrap();
         inq.set_nonblocking(true).unwrap();
-        outq.set_nonblocking(true).unwrap();
+        outq.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
 
         let nmsgs = 16;
 
@@ -1066,7 +1068,8 @@ mod tests {
     fn test_read() {
         let (inq, outq) = UnixDatagram::pair().unwrap();
         inq.set_nonblocking(true).unwrap();
-        outq.set_nonblocking(true).unwrap();
+        outq.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
 
         let nmsgs = 16;
 
@@ -1101,7 +1104,8 @@ mod tests {
         let inq = udp_socket().unwrap();
         let outq = udp_socket().unwrap();
         inq.set_nonblocking(true).unwrap();
-        outq.set_nonblocking(true).unwrap();
+        outq.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
 
         let nmsgs = 16;
 
@@ -1140,7 +1144,8 @@ mod tests {
         let inq = udp_socket().unwrap();
         let outq = udp_socket().unwrap();
         inq.set_nonblocking(true).unwrap();
-        outq.set_nonblocking(true).unwrap();
+        outq.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
         inq.connect(outq.local_addr().unwrap()).unwrap();
 
         let nmsgs = 16;
@@ -1179,7 +1184,8 @@ mod tests {
         let inq = udp_socket().unwrap();
         let outq = udp_socket().unwrap();
         inq.set_nonblocking(true).unwrap();
-        outq.set_nonblocking(true).unwrap();
+        outq.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
         inq.connect(outq.local_addr().unwrap()).unwrap();
 
         let mut bio = BatchIo::new(1).unwrap();
@@ -1207,7 +1213,8 @@ mod tests {
         let inq = udp_socket().unwrap();
         let outq = udp_socket().unwrap();
         inq.set_nonblocking(true).unwrap();
-        outq.set_nonblocking(true).unwrap();
+        outq.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
         set_recv_packet_info(&outq, true).unwrap();
         inq.connect(outq.local_addr().unwrap()).unwrap();
 
@@ -1240,7 +1247,8 @@ mod tests {
         let inq = udp_socket().unwrap();
         let outq = udp_socket().unwrap();
         inq.set_nonblocking(true).unwrap();
-        outq.set_nonblocking(true).unwrap();
+        outq.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
         inq.connect(outq.local_addr().unwrap()).unwrap();
 
         let mut bio = BatchIo::new(1).unwrap();
