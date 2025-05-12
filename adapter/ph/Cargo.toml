@@ -45,6 +45,7 @@ tokio-tun = { version = "0.11.5" }
 io-uring = { version = "0.7.4", optional = true }
 
 [dev-dependencies]
+futures = "0.3.31"
 rand = "0.8.5"
 serial_test = "3.2"
 

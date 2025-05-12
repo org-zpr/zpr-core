@@ -1175,6 +1175,7 @@ dependencies = [
  "dashmap",
  "enum-map",
  "enumset",
+ "futures",
  "hdrhistogram",
  "io-uring",
  "itertools",

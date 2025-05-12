@@ -53,11 +53,13 @@ impl<T> TwoWayReturnable<T> for T {
     }
 }
 
+#[derive(Debug)]
 pub enum TrySendError<T> {
     Full(T),
     Closed(T),
 }
 
+#[derive(Debug)]
 pub enum TryRecvReturnError {
     Empty,
     Disconnected,
@@ -158,8 +160,9 @@ pub struct Sender<T, U> {
 }
 
 impl<T, U> Sender<T, U> {
-    /// Try to send an item.  Note that it is possible for the queue
-    /// to appear full for the reason that there are outstanding returns.
+    /// Try to send an item.  Note that it is possible (but not guaranteed)
+    /// for the queue to appear full for the reason that there are
+    /// outstanding returns.
     pub fn try_send(&mut self, item: T) -> Result<(), TrySendError<T>> {
         match self
             .outgoing_q
@@ -263,4 +266,103 @@ impl<T, U: TwoWayReturnable<T>> Drop for ItemGuard<'_, T, U> {
 pub fn two_way_queue<T, U>(buffer: usize) -> (SenderFactory<T, U>, Receiver<T, U>) {
     let (outgoing_q, incoming_q) = mpsc::channel(buffer);
     (SenderFactory { outgoing_q }, Receiver { incoming_q })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::FutureExt;
+
+    #[test]
+    fn test_empty_recv() {
+        let (_send, mut recv) = two_way_queue::<usize, usize>(16);
+        assert!(recv.recv().now_or_never().is_none());
+    }
+
+    #[test]
+    fn test_closed_sender() {
+        let (send, mut recv) = two_way_queue::<usize, usize>(16);
+        drop(send);
+        assert!(recv.recv().now_or_never().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_full_send() {
+        let (send, _recv) = two_way_queue::<usize, usize>(1);
+        let mut send1 = send.make(&ReturnQueue::new());
+        send1.try_send(123).unwrap();
+        match send1.try_send(456).unwrap_err() {
+            TrySendError::Full(_) => (),
+            err => panic!("wrong error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn test_empty_returns() {
+        let mut retq = ReturnQueue::<()>::new();
+        assert!(!poll(retq.poll_fd()));
+        assert!(retq.try_recv_return().is_none());
+        let mut rets = Vec::new();
+        assert_eq!(retq.try_recv_many_returns(&mut rets, 16), 0);
+    }
+
+    #[test]
+    fn test_closed_recv() {
+        let (send, recv) = two_way_queue::<usize, usize>(16);
+        let mut send1 = send.make(&ReturnQueue::new());
+        drop(recv);
+        match send1.try_send(123).unwrap_err() {
+            TrySendError::Closed(_) => (),
+            err => panic!("wrong error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn test_send_recv_return_one() {
+        let mut retq = ReturnQueue::<usize>::new();
+        let (send, mut recv) = two_way_queue::<usize, usize>(16);
+        let mut send1 = send.make(&retq);
+
+        send1.try_send(123).unwrap();
+
+        let mut item = recv.recv().now_or_never().unwrap().unwrap();
+        assert_eq!(*item, 123);
+        *item = 456;
+        drop(item);
+
+        assert!(poll(retq.poll_fd()));
+        let ret_item = retq.try_recv_return().unwrap();
+        assert_eq!(ret_item, 456);
+        assert!(!poll(retq.poll_fd()));
+    }
+
+    #[test]
+    fn test_send_recv_return_many() {
+        let mut retq = ReturnQueue::<usize>::new();
+        let (send, mut recv) = two_way_queue::<usize, usize>(16);
+        let mut send1 = send.make(&retq);
+
+        for i in 0..16 {
+            send1.try_send(123 + i).unwrap();
+        }
+
+        for i in 0..16 {
+            let mut item = recv.recv().now_or_never().unwrap().unwrap();
+            assert_eq!(*item, 123 + i);
+            *item += 333;
+        }
+
+        for i in 0..16 {
+            assert!(poll(retq.poll_fd()));
+            let ret_item = retq.try_recv_return().unwrap();
+            assert_eq!(ret_item, 456 + i);
+        }
+
+        assert!(!poll(retq.poll_fd()));
+    }
+
+    fn poll(fd: BorrowedFd<'_>) -> bool {
+        let mut pfd = nix::poll::PollFd::new(fd, nix::poll::PollFlags::POLLIN);
+        nix::poll::poll(std::slice::from_mut(&mut pfd), nix::poll::PollTimeout::ZERO).unwrap() > 0
+    }
 }
