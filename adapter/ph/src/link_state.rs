@@ -163,7 +163,7 @@ pub enum LinkEvent {
 #[derive(Error, Debug)]
 pub enum LinkStateError {
     #[error("Got unexpected event {1} on state {0:?}")]
-    UnexpectedTransition(LinkState, String),
+    UnexpectedTransition(LinkState, &'static str),
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
     #[error("Link {0} does not exist in peer table")]
@@ -339,7 +339,7 @@ impl LinkStateWrapper {
         if locked_fsm.state != LinkState::Inactive {
             return Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "start".to_string(),
+                "Start",
             ));
         }
 
@@ -393,7 +393,7 @@ impl LinkStateWrapper {
         if locked_fsm.state != LinkState::Keying {
             return Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "keying done".to_string(),
+                "KeyingDone",
             ));
         }
 
@@ -404,7 +404,7 @@ impl LinkStateWrapper {
         let Some(sa) = peer_state.get_established_transport_association() else {
             return Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "keying done when SA not established".to_owned(),
+                "KeyingDone when SA not established",
             ));
         };
 
@@ -481,7 +481,7 @@ impl LinkStateWrapper {
             }
             (_, _) => Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "process hello request".to_string(),
+                "ReceivedHelloRequest",
             )),
         }
     }
@@ -529,7 +529,7 @@ impl LinkStateWrapper {
             }
             (_, _) => Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "process hello response".to_string(),
+                "ReceivedHelloRespone",
             )),
         }
     }
@@ -860,7 +860,7 @@ impl LinkStateWrapper {
             (_, _) => {
                 return Err(LinkStateError::UnexpectedTransition(
                     locked_fsm.state,
-                    "Discard unexpected init authentication".to_string(),
+                    "ReceivedInitAuth",
                 ));
             }
         }
@@ -980,7 +980,7 @@ impl LinkStateWrapper {
         if locked_fsm.state == LinkState::Inactive {
             Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "terminate".to_string(),
+                "ReceivedTerminateRequest",
             ))
         } else {
             locked_fsm.set_state(LinkState::Closing);
@@ -1105,7 +1105,7 @@ impl LinkStateWrapper {
             }
             _ => Err(LinkStateError::UnexpectedTransition(
                 state,
-                "terminate response".to_string(),
+                "ReceivedTerminateResponse",
             )),
         }
     }
