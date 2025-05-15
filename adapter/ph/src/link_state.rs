@@ -19,6 +19,7 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::sync::broadcast;
 use tokio::time::MissedTickBehavior;
 use tracing::*;
 use zpr::LinkId;
@@ -134,7 +135,7 @@ pub enum LinkState {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Clone, Debug, strum::IntoStaticStr)]
 pub enum LinkEvent {
     Start,
     KeyingDone,
@@ -149,6 +150,7 @@ pub enum LinkEvent {
     ReceivedGrantZprAddressRequest(Option<Vec<IpAddress>>), // granted_addrs, None means failure.
     ReceivedGrantResponse(ResponseCode),
 
+    ReceivedEchoResponse { sequence_number: u16 },
     ReceivedAuthorizeResponse, // from visa service
     ReceivedKeepAliveResponse,
     ReceivedTerminateRequest(TerminateReason),
@@ -237,10 +239,13 @@ impl LinkStateMachine {
     }
 }
 
+const LINK_STATE_EVENT_QUEUE_SIZE: usize = 16;
+
 pub struct LinkStateWrapper {
     id: LinkId, // set at constructor, never changes.
     link_type: LinkType,
     locked_fsm: Mutex<LinkStateMachine>,
+    events: broadcast::Sender<LinkEvent>,
     pub locked_data: Mutex<LinkData>,
 }
 
@@ -250,6 +255,7 @@ impl LinkStateWrapper {
             id: new_id,
             link_type: new_link_type,
             locked_fsm: Mutex::new(LinkStateMachine::new(new_id)),
+            events: broadcast::Sender::new(LINK_STATE_EVENT_QUEUE_SIZE),
             locked_data: Mutex::new(LinkData::new()),
         }
     }
@@ -294,6 +300,19 @@ impl LinkStateWrapper {
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
         debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id);
+
+        // Enqueue a copy of this event with any concurrent listening state machines.
+        // If there are none, avoid trying to do so we don't make a needless copy.
+        let listened_for;
+        if self.events.receiver_count() > 0 {
+            match self.events.send(event.clone()) {
+                Ok(n) => listened_for = n > 0,
+                Err(_) => listened_for = false,
+            }
+        } else {
+            listened_for = false;
+        }
+
         match event {
             LinkEvent::Start => self.start(asm),
             LinkEvent::KeyingDone => self.keying_done(asm),
@@ -326,6 +345,17 @@ impl LinkStateWrapper {
             LinkEvent::Close(code) => self.initiate_close(asm, code),
             LinkEvent::CloseDone => Ok(self.complete_close(asm)),
             LinkEvent::Error => self.process_error_response(asm),
+
+            ev => {
+                if listened_for {
+                    Ok(())
+                } else {
+                    Err(LinkStateError::UnexpectedTransition(
+                        self.locked_fsm.lock().unwrap().state,
+                        ev.into(),
+                    ))
+                }
+            }
         }
     }
 
