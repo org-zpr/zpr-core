@@ -40,7 +40,7 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest) (*actor.Actor, err
 		vs.log.Warn("unable to parse dock address for connect-via claim", "addr", cr.DockAddr)
 	}
 	// Then run through any connect policy lines.
-	_, _, err = vs.applyConnectPolicy(curpol, curmatcher, dockAddr, validatedActor)
+	_, _, err = vs.applyConnectPolicy(curmatcher, dockAddr, validatedActor)
 	if err != nil {
 		vs.log.WithError(err).Info("apply policy failed")
 		return nil, fmt.Errorf("apply policy failed: %w", err)
@@ -65,6 +65,17 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest) (*actor.Actor, err
 		vs.actorDB.AddAdapter(zprAddr, zprAddr, validatedActor)
 	}
 
+	// Log the provided services -- trying to figure out what to do with the adapter facing auth services.
+	for _, prov := range validatedActor.GetProvides() {
+		var stype string
+		if svc := curpol.ServiceByName(prov); svc != nil {
+			stype = svc.Type.String()
+		} else {
+			stype = "unknown"
+		}
+		vs.log.Info("new actor provices", "service", prov, "type", stype)
+	}
+
 	return validatedActor, nil
 }
 
@@ -74,7 +85,7 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest) (*actor.Actor, err
 // Returns the list of keys that matched along with other details.
 // The passed actor is almost certainly modified (in place).
 // The actor returned is the same pointer as the one passed in.
-func (vs *VSInst) applyConnectPolicy(_curpol *policy.Policy, matcher *policy.Matcher, dockZPRAddr netip.Addr, agnt *actor.Actor) (*actor.Actor, []string, error) {
+func (vs *VSInst) applyConnectPolicy(matcher *policy.Matcher, dockZPRAddr netip.Addr, agnt *actor.Actor) (*actor.Actor, []string, error) {
 	// Note passing of "configurator" here -- do we need that?
 	fs, err := policy.NewConnectState(agnt, vs, dockZPRAddr, vs.log)
 	if err != nil {

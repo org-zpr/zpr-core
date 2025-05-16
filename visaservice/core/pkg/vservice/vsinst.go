@@ -196,7 +196,7 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 			V:   vcf.VSAddr.String(),
 			Exp: time.Now().Add(vs.bootstrapAuthDuration),
 		}
-		authedClaims["zpr.adapter.cn"] = &actor.ClaimV{
+		authedClaims[actor.KAttrCN] = &actor.ClaimV{
 			V:   vcf.CN,
 			Exp: time.Now().Add(vs.bootstrapAuthDuration),
 		}

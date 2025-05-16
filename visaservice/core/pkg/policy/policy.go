@@ -6,7 +6,6 @@ import (
 	"crypto/rsa"
 	"crypto/sha512"
 	"crypto/x509"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -254,8 +253,6 @@ func (p *Policy) getConnectHashes() []string {
 func (p *Policy) createDatasourceHash() {
 
 	prefixes := make(map[string][]byte) // auth prefix -> hash of entity
-	nbuf := make([]byte, 4)
-
 	hasher := sha512.New()
 
 	// Get all the "external" services
@@ -266,11 +263,8 @@ func (p *Policy) createDatasourceHash() {
 		hasher.Write([]byte(s.Name))
 		hasher.Write([]byte(s.Prefix))
 		hasher.Write([]byte(s.Domain))
-		binary.BigEndian.PutUint32(nbuf[0:], uint32(s.QueryApiVersion))
-		hasher.Write(nbuf)
-		binary.BigEndian.PutUint32(nbuf[0:], uint32(s.ValidateApiVersion))
-		hasher.Write(nbuf[:4])
-		hasher.Write([]byte(s.Addr))
+		hasher.Write([]byte(s.QueryUri))
+		hasher.Write([]byte(s.ValidateUri))
 		prefixes[s.Prefix] = hasher.Sum(nil)
 
 		hasher.Reset()

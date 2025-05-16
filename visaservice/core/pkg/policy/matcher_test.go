@@ -8,16 +8,27 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vsx/polio"
 
 	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
-
-	"zpr.org/vsx/zpl/compiler"
-	"zpr.org/vsx/zpl/fs"
 )
+
+func mkClaim(val string, ttl time.Duration) *actor.ClaimV {
+	return &actor.ClaimV{
+		V:   val,
+		Exp: time.Now().Add(ttl),
+	}
+}
+
+func mkClaims(key, val string, ttl time.Duration) map[string]*actor.ClaimV {
+	m := make(map[string]*actor.ClaimV)
+	m[key] = mkClaim(val, ttl)
+	return m
+}
+
+/* DISABLED UNTIL WE SORT OUT COMPILER
 
 const mtpreamble = `
 zpl_format: 2
@@ -163,18 +174,6 @@ func MatchTrafficActors(m *policy.Matcher, td *snip.Traffic, src, dst *actor.Act
 	return m.MatchTraffic(td, mtSrc, mtDst)
 }
 
-func mkClaim(val string, ttl time.Duration) *actor.ClaimV {
-	return &actor.ClaimV{
-		V:   val,
-		Exp: time.Now().Add(ttl),
-	}
-}
-
-func mkClaims(key, val string, ttl time.Duration) map[string]*actor.ClaimV {
-	m := make(map[string]*actor.ClaimV)
-	m[key] = mkClaim(val, ttl)
-	return m
-}
 
 func TestSimpleTCPClientToServer(t *testing.T) {
 	pyml := mtpreamble + network + `
@@ -1282,6 +1281,8 @@ communications:
 	require.Contains(t, attrs, "zpr.adapter.cn")
 	require.Empty(t, state.Services)
 }
+
+*/
 
 // See https://github.com/org-zpr/zpr-core/issues/746
 func TestActorConnectUsingM3Policy(t *testing.T) {

@@ -12,13 +12,6 @@ import (
 )
 
 func TestAddRemoveService(t *testing.T) {
-	//addr := net.ParseIP("fc00:3001::1234")
-	// revoker := &TRevokingSvc{}
-	//pkey, err := rsa.GenerateKey(rand.Reader, 1024)
-	//require.Nil(t, err)
-
-	// a := auth.NewAuthenticator(logr.NewTestLogger(), snip.IPToZPRID(addr), 10*time.Minute, "node0", pkey)
-
 	dir := auth.NewDirectory(nil, logr.NewTestLogger())
 
 	require.False(t, dir.HasAuthPrefix("pfx1"))
@@ -29,30 +22,30 @@ func TestAddRemoveService(t *testing.T) {
 	svcAddr := netip.MustParseAddr("fc00:3001::5678")
 	feats := auth.DSFeatures{
 		SupportValidation: true,
-		SupportQuery:      true,
-		ValidationAPIVer:  1,
-		QueryAPIVer:       1,
+		SupportQuery:      false,
+		QueryUri:          "",
+		ValidationUri:     "zpr-validation2://[::1]:5001",
 	}
-	err := dir.AddService("svcpfx", "what_is_domain_for_anyway", svcAddr, 5001, &feats, 1)
+	err := dir.AddService("svcpfx", svcAddr, &feats, 1)
 	require.Nil(t, err)
 
 	require.Equal(t, 1, dir.Size())
 
 	// twice is ok
 	{
-		err = dir.AddService("svcpfx", "what_is_domain_for_anyway", svcAddr, 5001, &feats, 1)
+		err = dir.AddService("svcpfx", svcAddr, &feats, 1)
 		require.Nil(t, err)
 		require.Equal(t, 1, dir.Size())
 	}
 
 	// and this silently over writes
 	{
-		err = dir.AddService("svcpfx", "what_is_domain_for_anyway", svcAddr, 5005, &feats, 1)
+		err = dir.AddService("svcpfx", svcAddr, &feats, 1)
 		require.Nil(t, err)
 		require.Equal(t, 1, dir.Size())
 	}
 	{
-		err = dir.AddService("otherpfx", "what_is_domain_for_anyway", netip.MustParseAddr("fc00:3001::9abc"), 5001, &feats, 1)
+		err = dir.AddService("otherpfx", netip.MustParseAddr("fc00:3001::9abc"), &feats, 1)
 		require.Nil(t, err)
 		require.Equal(t, 2, dir.Size())
 	}
@@ -70,9 +63,9 @@ func TestAddRemoveService(t *testing.T) {
 	require.Equal(t, 0, dir.Size())
 	require.True(t, dir.Empty())
 
-	err = dir.AddService("svcpfx1", "dom1", svcAddr, 5001, &feats, 1)
+	err = dir.AddService("svcpfx1", svcAddr, &feats, 1)
 	require.Nil(t, err)
-	err = dir.AddService("svcpfx2", "dom2", svcAddr, 5001, &feats, 1)
+	err = dir.AddService("svcpfx2", svcAddr, &feats, 1)
 	require.Nil(t, err)
 
 	require.True(t, dir.HasAuthPrefix("svcpfx1"))
@@ -104,13 +97,13 @@ func TestRemoveServiceByContactAddr(t *testing.T) {
 	svcAddr := netip.MustParseAddr("fc00:3001::5678")
 	feats := auth.DSFeatures{
 		SupportValidation: true,
-		SupportQuery:      true,
-		ValidationAPIVer:  1,
-		QueryAPIVer:       1,
+		SupportQuery:      false,
+		QueryUri:          "",
+		ValidationUri:     "zpr-validation2://[::1]:5001",
 	}
 
 	for n := 0; n < 3; n++ {
-		err := dir.AddService(fmt.Sprintf("svcpfx%d", n+1), fmt.Sprintf("dom%d", n+1), svcAddr, uint16(5001+n), &feats, 1)
+		err := dir.AddService(fmt.Sprintf("svcpfx%d", n+1), svcAddr, &feats, 1)
 		require.Nil(t, err)
 	}
 
@@ -131,10 +124,10 @@ func TestRemoveServiceByContactAddr(t *testing.T) {
 	{
 		// Try again but add an alternate address too
 		for n := 0; n < 3; n++ {
-			err := dir.AddService(fmt.Sprintf("svcpfx%d", n+1), fmt.Sprintf("dom%d", n+1), svcAddr, uint16(5001+n), &feats, 1)
+			err := dir.AddService(fmt.Sprintf("svcpfx%d", n+1), svcAddr, &feats, 1)
 			require.Nil(t, err)
 		}
-		dir.AddService("svcpfx4", "dom4", netip.MustParseAddr("fc00:3001::aaaa"), 5001, &feats, 1)
+		dir.AddService("svcpfx4", netip.MustParseAddr("fc00:3001::aaaa"), &feats, 1)
 
 		require.True(t, dir.HasAuthPrefix("svcpfx1"))
 		require.True(t, dir.HasAuthPrefix("svcpfx2"))

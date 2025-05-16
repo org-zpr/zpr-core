@@ -383,7 +383,7 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 	{
 		claims := make(map[string]string)
 		claims[actor.KAttrEPID] = naddr.String()
-		claims["zpr.adapter.cn"] = nodeCert.Subject.CommonName
+		claims[actor.KAttrCN] = nodeCert.Subject.CommonName
 		claims[actor.KAttrRole] = "node" // does ApproveConnection set this?
 
 		blob := auth.NewZdpSelfSignedBlobUnsiged(nodeCert.Subject.CommonName, req.Challenge.ChallengeData)

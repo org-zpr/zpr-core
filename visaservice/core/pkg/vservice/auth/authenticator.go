@@ -5,8 +5,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,12 +51,12 @@ type Authenticator struct {
 	policy struct {
 		sync.RWMutex
 
-		configID uint64         // active configuration
-		version  string         // active policy
-		policy   *policy.Policy // is-a CertificateDB
-		//cdb           CertificateDB   // certs from active policy
-		localPrefixes map[string]bool // prefix -> TRUE (derived from policy)
-		validators    *Directory      // (derived from policy)
+		configID               uint64          // active configuration
+		version                string          // active policy
+		policy                 *policy.Policy  // is-a CertificateDB
+		localPrefixes          map[string]bool // prefix -> TRUE (derived from policy)
+		validators             *Directory      // (derived from policy)
+		authenticationServices []string        // list of authentication service names
 	}
 }
 
@@ -65,7 +65,6 @@ type ValidateResult struct {
 	DomainCredID string // Credential ID of the validation domain (if any)
 	Token        string // The JWT identity token
 	Attrs        map[string]*actor.ClaimV
-	//VResp        *zds.ValidateResponse // The Validate response
 }
 
 // NewAuthenticator
@@ -140,11 +139,18 @@ func (a *Authenticator) RemoveServiceByPrefix(pfx string) int {
 }
 
 // GetAuthEndpoint returns and "endponint" for the polio.service.
+// This is computed from the validate-uri.
+// TODO: We want the protocol name too (URI scheme).
 func getAuthEndpoint(svc *polio.Service) *snip.Endpoint {
-	if _, p, err := net.SplitHostPort(svc.Addr); err == nil {
-		if pn, err := strconv.Atoi(p); err == nil {
-			return snip.NewEndpoint(polio.AuthProtocol, uint16(pn))
-		}
+	if svc.ValidateUri == "" {
+		return nil
+	}
+	svcUrl, err := url.Parse(svc.ValidateUri)
+	if err != nil {
+		return nil
+	}
+	if pn, err := strconv.Atoi(svcUrl.Port()); err == nil {
+		return snip.NewEndpoint(polio.AuthProtocol, uint16(pn)) // TCP
 	}
 	return nil
 }
@@ -168,13 +174,20 @@ func (a *Authenticator) AddDatasourceProvider(service string, contactAddr netip.
 	}
 
 	features := DSFeatures{
-		SupportValidation: psvc.ValidateApiVersion > 0,
-		SupportQuery:      psvc.QueryApiVersion > 0,
-		ValidationAPIVer:  int(psvc.ValidateApiVersion),
-		QueryAPIVer:       int(psvc.QueryApiVersion),
+		SupportValidation: psvc.ValidateUri != "",
+		SupportQuery:      psvc.QueryUri != "",
+		ValidationUri:     psvc.ValidateUri,
+		QueryUri:          psvc.QueryUri,
+		TLSDomain:         psvc.Domain,
 	}
 
-	return a.policy.validators.AddService(psvc.GetPrefix(), psvc.GetDomain(), contactAddr, getAuthEndpoint(psvc).Port, &features, configID)
+	// TODO: Needs thought
+	// - What are we doing with the adapter facing service info?
+	return a.policy.validators.AddService(
+		psvc.GetPrefix(),
+		contactAddr,
+		&features,
+		configID)
 }
 
 // Authenticate - perform authentication at the node.
@@ -397,6 +410,8 @@ func (a *Authenticator) makeJWT(subject string, expiration time.Time, issuers, c
 // Note that the attributes passed in the request will have prefixes on them, and
 // the attributes in the response will too.
 func (a *Authenticator) Query(fedreq *zds.QueryRequest) (*zds.QueryResponse, error) {
+	return nil, fmt.Errorf("query not yet implemented")
+	/* OFF FOR NOW - not yet implemented for ref impl
 	var result *zds.QueryResponse
 
 	a.policy.RLock() // no policy update while doing a Query
@@ -456,6 +471,7 @@ func (a *Authenticator) Query(fedreq *zds.QueryRequest) (*zds.QueryResponse, err
 		return nil, errQueryFailed
 	}
 	return result, nil
+	*/
 }
 
 // isJWTRevoked check if the passed JWT has an id value (jti) that matches a revoked
@@ -588,6 +604,11 @@ func (a *Authenticator) setInternalPrefixes(pfxs []string) {
 	a.policy.localPrefixes = locals
 }
 
+// setAuthenticationServices sets the list of authentication service names from policy.
+func (a *Authenticator) setAuthenticationServices(services []string) {
+	a.policy.authenticationServices = services
+}
+
 // updateVStoreFromPolicy checks policy to see if there is an auth service defined.
 // If so, extract the certifiate and install it into the validator store.
 //
@@ -597,12 +618,22 @@ func (a *Authenticator) setInternalPrefixes(pfxs []string) {
 func (a *Authenticator) updateVStoreFromPolicy(p *polio.Policy) error {
 	extPrefixes := make(map[string]string) // prefix -> Name
 	var intPrefixes []string
+	var authServices []string
 
 	// This installs non-internal certificates.
 	for _, svc := range p.GetServices() {
-		if svc.Type == polio.SvcT_SVCT_AUTH {
+
+		switch svc.Type {
+		case polio.SvcT_SVCT_AUTH:
 			a.log.Info("found external prefix", "prefix", svc.Prefix)
 			extPrefixes[svc.Prefix] = svc.GetName()
+
+		case polio.SvcT_SVCT_ACTOR_AUTH:
+			a.log.Info("found actor authentication service", "prefix", svc.Name)
+			authServices = append(authServices, svc.Name)
+		}
+
+		if svc.Type == polio.SvcT_SVCT_AUTH {
 		}
 	}
 
@@ -628,5 +659,6 @@ func (a *Authenticator) updateVStoreFromPolicy(p *polio.Policy) error {
 
 	a.policy.validators.Pool = pool
 	a.setInternalPrefixes(intPrefixes)
+	a.setAuthenticationServices(authServices)
 	return nil
 }
