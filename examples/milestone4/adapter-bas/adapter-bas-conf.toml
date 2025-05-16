@@ -4,7 +4,7 @@ ca_file = "auth-ca.crt"
 certificate_file = "adapter-bas-noise.crt"
 private_key_file = "adapter-bas-noise.key"
 zpr_addr = [ "fd5a:5052:1::10" ] 
-self_addr = "0.0.0.0:5000"
+self_addr = "MUST_SET_SUBSTRATE_LOCAL_ADDR_HERE:5000"
 
 # use `sudo ./mktun.sh` to set this up
 tun_if = "tun9"
