@@ -77,7 +77,7 @@ pub fn build_connect_request(
         claims: Some(
             [
                 ("zpr.addr".to_owned(), addr.to_string()),
-                ("zpr.adapter.cn".to_owned(), cn),
+                ("device.zpr.adapter.cn".to_owned(), cn),
             ]
             .into(),
         ),
