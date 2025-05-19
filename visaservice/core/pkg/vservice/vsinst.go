@@ -19,7 +19,6 @@ import (
 	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsapi"
-	"zpr.org/vsx/polio"
 	"zpr.org/vsx/snio/vsio"
 )
 
@@ -183,9 +182,9 @@ func NewVSInst(vcf *VSIConfig) (*VSInst, error) {
 	visaServiceActor := actor.NewActorFromUnsubstantiatedClaims(nil)
 	{
 		visaServiceActor.SetProvides([]string{
-			polio.VisaServiceName,
-			fmt.Sprintf("/zpr/%s", polio.VisaServiceName),
-			fmt.Sprintf("/zpr/%s/admin", polio.VisaServiceName),
+			policy.VisaServiceName,
+			fmt.Sprintf("/zpr/%s", policy.VisaServiceName),
+			fmt.Sprintf("/zpr/%s/admin", policy.VisaServiceName),
 		})
 		authedClaims := make(map[string]*actor.ClaimV)
 		authedClaims[actor.KAttrVisaServiceAdapter] = &actor.ClaimV{

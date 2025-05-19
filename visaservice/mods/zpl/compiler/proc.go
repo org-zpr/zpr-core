@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"zpr.org/vsx/polio"
+	"zpr.org/vsx/zpl/defs"
 )
 
 // register_service(NAME, TYPE, ENDPOINTS_STRING)
@@ -32,7 +33,7 @@ func setFlag(ft polio.FlagT) *polio.Instruction {
 }
 
 func setCIDR(cidrstr string) *polio.Instruction {
-	return setSetConfigVal(polio.ConfKeyCIDR, cidrstr)
+	return setSetConfigVal(defs.ConfKeyCIDR, cidrstr)
 }
 
 func setSetConfigVal(name, value string) *polio.Instruction {
@@ -133,14 +134,14 @@ func equivalentArgs(a, b *polio.Argument) bool {
 
 func addProc(pp *polio.Proc, p *polio.Policy) uint32 {
 	if len(pp.Proc) == 0 {
-		return polio.NoProc
+		return defs.NoProc
 	}
 
 	// Each PROC is an array of Instructions. We want the the instructions sorted by OPCODE.
 	sort.Slice(pp.Proc, func(i, j int) bool {
 		if pp.Proc[i].GetOpcode() == pp.Proc[j].GetOpcode() {
 			// Just compare as strings.
-			return strings.Compare(pp.Proc[i].Pseudocode(), pp.Proc[j].Pseudocode()) < 0
+			return strings.Compare(PseudocodeForInstruction(pp.Proc[i]), PseudocodeForInstruction(pp.Proc[j])) < 0
 		}
 		return pp.Proc[i].GetOpcode() < pp.Proc[j].GetOpcode()
 	})
@@ -148,4 +149,54 @@ func addProc(pp *polio.Proc, p *polio.Policy) uint32 {
 	idx := len(p.Procs)
 	p.Procs = append(p.Procs, pp)
 	return uint32(idx)
+}
+
+// copied from core/policy/proc.go
+func Pseudocode(p *polio.Proc) string {
+	var buf strings.Builder
+	for i, instr := range p.GetProc() {
+		buf.WriteString(fmt.Sprintf("%0.3d: ", i))
+		writeInstruction(&buf, instr)
+		buf.WriteString("\n")
+	}
+	return buf.String()
+}
+
+// copied from core/policy/proc.go
+func PseudocodeForInstruction(i *polio.Instruction) string {
+	var buf strings.Builder
+	writeInstruction(&buf, i)
+	return buf.String()
+}
+
+// copied from core/policy/proc.go
+func writeInstruction(buf *strings.Builder, instr *polio.Instruction) {
+	buf.WriteString(fmt.Sprintf("%v (", instr.GetOpcode()))
+	for j, arg := range instr.GetArgs() {
+		if j > 0 {
+			buf.WriteString(", ")
+		}
+		switch av := arg.Arg.(type) {
+		case *polio.Argument_Ival:
+			buf.WriteString(fmt.Sprintf("%v", av.Ival))
+		case *polio.Argument_Uival:
+			buf.WriteString(fmt.Sprintf("%v", av.Uival))
+		case *polio.Argument_Strval:
+			buf.WriteString(fmt.Sprintf("%v", av.Strval))
+		case *polio.Argument_Flagval:
+			buf.WriteString(fmt.Sprintf("%v", av.Flagval))
+		case *polio.Argument_Svcval:
+			buf.WriteString(fmt.Sprintf("%v", av.Svcval))
+		case *polio.Argument_Insval:
+			// recurse!
+			writeInstruction(buf, av.Insval)
+		case *polio.Argument_Spval:
+			buf.WriteString(fmt.Sprintf("(%v, %v)", av.Spval.GetA(), av.Spval.GetB()))
+		case *polio.Argument_Bval:
+			buf.WriteString(fmt.Sprintf("%v", av.Bval))
+		default:
+			buf.WriteString(fmt.Sprintf("%v", arg.Arg))
+		}
+	}
+	buf.WriteString(")")
 }

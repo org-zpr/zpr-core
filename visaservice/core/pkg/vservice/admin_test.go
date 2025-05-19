@@ -16,6 +16,7 @@ import (
 
 	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/logr"
+	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vservice"
 
@@ -96,7 +97,7 @@ func compilePolicyToContainer(t *testing.T, pyaml string, privateKey *rsa.Privat
 	require.Nil(t, err)
 	require.NotNil(t, plcy)
 
-	pc, err := polio.ContainPolicy(plcy, privateKey)
+	pc, err := policy.ContainPolicy(plcy, privateKey)
 	require.Nil(t, err)
 	return pc
 }
@@ -390,7 +391,7 @@ func (suite *VSRunnerSuite) TestInstallPolicy() {
         `
 
 	bundle := new(vservice.PolicyBundle)
-	bundle.Format = fmt.Sprintf("base64;zip;%d", polio.SerialVersion)
+	bundle.Format = fmt.Sprintf("base64;zip;%d", policy.SerialVersion)
 
 	pc := compilePolicyToContainer(t, newpolicy, privateKey)
 	zdata, err := libvisa.Compress(pc)

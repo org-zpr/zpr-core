@@ -15,7 +15,6 @@ import (
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vs/pkg/vservice/auth"
-	"zpr.org/vsx/polio"
 )
 
 const BAS_CN = "bas.zpr.org"
@@ -32,7 +31,7 @@ func TestAuthenticateWithSelfSignedBlob(t *testing.T) {
 		authKey)
 
 	pfile := filepath.Join("testdata", "vs-auth-test.bin")
-	cp, err := polio.OpenContainedPolicyFile(pfile, nil)
+	cp, err := policy.OpenContainedPolicyFile(pfile, nil)
 	require.Nil(t, err)
 	polplcy := cp.Policy
 	plcy := policy.NewPolicyFromPol(polplcy, logr.NewTestLogger())

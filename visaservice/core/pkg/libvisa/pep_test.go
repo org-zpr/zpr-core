@@ -10,6 +10,7 @@ import (
 
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/libvisa"
+	"zpr.org/vs/pkg/policy"
 	"zpr.org/vsx/snio/vsio"
 
 	"zpr.org/vsx/polio"
@@ -48,9 +49,9 @@ func TestTCPPepCreate(t *testing.T) {
 	traffic.SrcAddr = netip.MustParseAddr("fc00:3001::8")
 	traffic.DstAddr = netip.MustParseAddr("fc00:3001::9")
 
-	var matchingPols []*polio.MatchedPolicy
+	var matchingPols []*policy.MatchedPolicy
 
-	p := new(polio.MatchedPolicy)
+	p := new(policy.MatchedPolicy)
 	p.FWD = true
 	matchingPols = append(matchingPols, p)
 
@@ -93,9 +94,9 @@ func TestTCPPepCreateWithBWLimit(t *testing.T) {
 	traffic.SrcAddr = netip.MustParseAddr("fc00:3001::8")
 	traffic.DstAddr = netip.MustParseAddr("fc00:3001::9")
 
-	var matchingPols []*polio.MatchedPolicy
+	var matchingPols []*policy.MatchedPolicy
 
-	p := new(polio.MatchedPolicy)
+	p := new(policy.MatchedPolicy)
 	p.FWD = true
 	p.CPol = &polio.CPolicy{
 		Constraints: []*polio.Constraint{makeBWConstraint(1000)},
@@ -120,9 +121,9 @@ func TestTCPPepCreateWithDataCap(t *testing.T) {
 	traffic.SrcAddr = netip.MustParseAddr("fc00:3001::8")
 	traffic.DstAddr = netip.MustParseAddr("fc00:3001::9")
 
-	var matchingPols []*polio.MatchedPolicy
+	var matchingPols []*policy.MatchedPolicy
 
-	p := new(polio.MatchedPolicy)
+	p := new(policy.MatchedPolicy)
 	p.FWD = true
 	p.CPol = &polio.CPolicy{
 		Constraints: []*polio.Constraint{makeDataCapConstraint(3000, 8000)}, // 3000 bytes over 8000 seconds
@@ -149,9 +150,9 @@ func TestTCPPepCreateWithDurationConstraint(t *testing.T) {
 	traffic.SrcAddr = netip.MustParseAddr("fc00:3001::8")
 	traffic.DstAddr = netip.MustParseAddr("fc00:3001::9")
 
-	var matchingPols []*polio.MatchedPolicy
+	var matchingPols []*policy.MatchedPolicy
 
-	p := new(polio.MatchedPolicy)
+	p := new(policy.MatchedPolicy)
 	p.FWD = true
 	p.CPol = &polio.CPolicy{
 		Constraints: []*polio.Constraint{makeDurationConstraint(8000)}, // 8000 seconds
@@ -175,9 +176,9 @@ func TestUDPPepCreate(t *testing.T) {
 	traffic.SrcAddr = netip.MustParseAddr("fc00:3001::8")
 	traffic.DstAddr = netip.MustParseAddr("fc00:3001::9")
 
-	var matchingPols []*polio.MatchedPolicy
+	var matchingPols []*policy.MatchedPolicy
 
-	p := new(polio.MatchedPolicy)
+	p := new(policy.MatchedPolicy)
 	p.FWD = true
 	matchingPols = append(matchingPols, p)
 
@@ -219,11 +220,11 @@ func TestICMPPepCreate(t *testing.T) {
 	traffic.ICMPType = 128 // echo-request
 	traffic.ICMPCode = 0
 
-	var matchingPols []*polio.MatchedPolicy
+	var matchingPols []*policy.MatchedPolicy
 
-	p := new(polio.MatchedPolicy)
+	p := new(policy.MatchedPolicy)
 	p.FWD = true
-	p.Metadata = &polio.MatchMetadata{
+	p.Metadata = &policy.MatchMetadata{
 		IcmpType:               polio.ICMPT_ICMPT_REQREP,
 		IcmpRequiresAntecedent: false,
 		IcmpAntecedent:         0,

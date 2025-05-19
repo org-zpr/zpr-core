@@ -7,7 +7,7 @@ import (
 	"time"
 
 	snip "zpr.org/vs/pkg/ip"
-	"zpr.org/vsx/polio"
+	"zpr.org/vs/pkg/policy"
 
 	"zpr.org/vsx/snio/vsio"
 )
@@ -32,7 +32,7 @@ type VisaBuilder struct {
 	destTether         netip.Addr
 	destContact        netip.Addr
 	traffic            *snip.Traffic
-	policies           []*polio.MatchedPolicy
+	policies           []*policy.MatchedPolicy
 	dynamicDataCapCBFn DataCapFunc
 	capKey             string
 	datacapRemain      uint64
@@ -143,7 +143,7 @@ func (b *VisaBuilder) WithExpiration(t time.Time) *VisaBuilder {
 	return b
 }
 
-func (b *VisaBuilder) WithTrafficAndPolicy(pkt *snip.Traffic, pol []*polio.MatchedPolicy) *VisaBuilder {
+func (b *VisaBuilder) WithTrafficAndPolicy(pkt *snip.Traffic, pol []*policy.MatchedPolicy) *VisaBuilder {
 	b.sourceContact = pkt.SrcAddr
 	b.destContact = pkt.DstAddr
 	b.traffic = pkt

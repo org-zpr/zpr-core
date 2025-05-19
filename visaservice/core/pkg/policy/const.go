@@ -1,4 +1,4 @@
-package polio
+package policy
 
 const (
 	ContainerVersion = uint32(1121)

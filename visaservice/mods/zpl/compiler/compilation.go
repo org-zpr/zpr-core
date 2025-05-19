@@ -5,6 +5,7 @@ import (
 	"net"
 
 	"zpr.org/vsx/polio"
+	"zpr.org/vsx/zpl/defs"
 	"zpr.org/vsx/zpl/doc"
 )
 
@@ -41,7 +42,7 @@ func NewCompilation(parsedDoc *doc.Doc, opts *CompileOpts) *Compilation {
 		ll:     ll,
 		parsed: parsedDoc,
 		policy: &polio.Policy{
-			SerialVersion: polio.SerialVersion,
+			SerialVersion: defs.SerialVersion,
 		},
 		nextCIDR:          1,
 		groups:            make(map[string]string),

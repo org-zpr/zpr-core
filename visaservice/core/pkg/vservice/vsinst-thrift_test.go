@@ -521,7 +521,7 @@ func TestThriftAuthorizeConnectRealRequest(t *testing.T) {
 		// not supported by the old ZPL compiler.
 
 		pfile := filepath.Join("auth", "testdata", "vs-auth-test.bin")
-		cp, err := polio.OpenContainedPolicyFile(pfile, nil)
+		cp, err := policy.OpenContainedPolicyFile(pfile, nil)
 		require.Nil(t, err)
 		polplcy := cp.Policy
 		plcy := policy.NewPolicyFromPol(polplcy, logr.NewTestLogger())

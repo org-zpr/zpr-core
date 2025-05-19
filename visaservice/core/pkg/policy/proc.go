@@ -1,12 +1,14 @@
-package polio
+package policy
 
 import (
 	fmt "fmt"
 	"strings"
+
+	"zpr.org/vsx/polio"
 )
 
 // Pseudocode return the procedure in a human readable "pseudocode" format.
-func (p *Proc) Pseudocode() string {
+func Pseudocode(p *polio.Proc) string {
 	var buf strings.Builder
 	for i, instr := range p.GetProc() {
 		buf.WriteString(fmt.Sprintf("%0.3d: ", i))
@@ -16,35 +18,35 @@ func (p *Proc) Pseudocode() string {
 	return buf.String()
 }
 
-func (i *Instruction) Pseudocode() string {
+func PseudocodeForInstruction(i *polio.Instruction) string {
 	var buf strings.Builder
 	writeInstruction(&buf, i)
 	return buf.String()
 }
 
-func writeInstruction(buf *strings.Builder, instr *Instruction) {
+func writeInstruction(buf *strings.Builder, instr *polio.Instruction) {
 	buf.WriteString(fmt.Sprintf("%v (", instr.GetOpcode()))
 	for j, arg := range instr.GetArgs() {
 		if j > 0 {
 			buf.WriteString(", ")
 		}
 		switch av := arg.Arg.(type) {
-		case *Argument_Ival:
+		case *polio.Argument_Ival:
 			buf.WriteString(fmt.Sprintf("%v", av.Ival))
-		case *Argument_Uival:
+		case *polio.Argument_Uival:
 			buf.WriteString(fmt.Sprintf("%v", av.Uival))
-		case *Argument_Strval:
+		case *polio.Argument_Strval:
 			buf.WriteString(fmt.Sprintf("%v", av.Strval))
-		case *Argument_Flagval:
+		case *polio.Argument_Flagval:
 			buf.WriteString(fmt.Sprintf("%v", av.Flagval))
-		case *Argument_Svcval:
+		case *polio.Argument_Svcval:
 			buf.WriteString(fmt.Sprintf("%v", av.Svcval))
-		case *Argument_Insval:
+		case *polio.Argument_Insval:
 			// recurse!
 			writeInstruction(buf, av.Insval)
-		case *Argument_Spval:
+		case *polio.Argument_Spval:
 			buf.WriteString(fmt.Sprintf("(%v, %v)", av.Spval.GetA(), av.Spval.GetB()))
-		case *Argument_Bval:
+		case *polio.Argument_Bval:
 			buf.WriteString(fmt.Sprintf("%v", av.Bval))
 		default:
 			buf.WriteString(fmt.Sprintf("%v", arg.Arg))

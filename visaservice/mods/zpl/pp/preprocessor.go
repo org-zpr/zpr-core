@@ -11,7 +11,6 @@ import (
 
 	"golang.org/x/exp/slices"
 
-	"zpr.org/vsx/polio"
 	"zpr.org/vsx/zpl/defs"
 	"zpr.org/vsx/zpl/doc"
 	"zpr.org/vsx/zpl/fs"
@@ -1381,7 +1380,7 @@ func (pps *PPState) makeVisaService(visaServiceAddress string) (*doc.Component, 
 	vs := pps.doc.Zpr.Visaservice
 	svc := &doc.Component{
 		ZplRef:   vs.ZplRef, // TODO: I can't remember what ZplRef is for...
-		ID:       doc.MustNewZplString(polio.VisaServiceName),
+		ID:       doc.MustNewZplString(defs.VisaServiceName),
 		Desc:     doc.MustNewZplString("visa service"),
 		Provider: vs.Provider,
 		// Auth:

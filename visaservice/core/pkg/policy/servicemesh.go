@@ -60,7 +60,7 @@ func NewServiceMeshFromPolicy(policy *polio.Policy) *ServiceMesh {
 			address:  host,
 			name:     authsvc.Name,
 			port:     portn,
-			protocol: polio.AuthProtocolName,
+			protocol: AuthProtocolName,
 			stype:    polio.SvcT_SVCT_AUTH,
 		})
 	}
@@ -78,7 +78,7 @@ func NewServiceMeshFromPolicy(policy *polio.Policy) *ServiceMesh {
 	}
 
 	for _, cpos := range policy.GetConnects() {
-		if cpos.Proc == polio.NoProc {
+		if cpos.Proc == NoProc {
 			continue
 		}
 		// See if an address is specified as an attribute.
@@ -132,7 +132,7 @@ func NewServiceMeshFromPolicy(policy *polio.Policy) *ServiceMesh {
 						if err != nil {
 							panic(fmt.Sprintf("servicemesh unable to parse protocol %v: %v", srec.protocol, err))
 						}
-						if cpol.HasScope(int(prot.Num()), srec.port) {
+						if HasScope(cpol, int(prot.Num()), srec.port) {
 							candidateServices = append(candidateServices, srec)
 						}
 					}
@@ -146,7 +146,7 @@ func NewServiceMeshFromPolicy(policy *polio.Policy) *ServiceMesh {
 				var hashes []string
 				for _, cons := range cpol.Constraints {
 					if cons != nil {
-						hashes = append(hashes, cons.HashHex())
+						hashes = append(hashes, HashHex(cons))
 					}
 				}
 				if len(hashes) > 0 {

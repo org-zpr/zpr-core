@@ -57,11 +57,11 @@ func NewPolicyFromPol(ppol *polio.Policy, log logr.Logger) *Policy {
 		bun: ppol,
 	}
 	p.cache.version = fmt.Sprintf("%v", ppol.GetPolicyVersion())
-	p.cache.maxVisaLifetime = ppol.GetMaxVisaLifetime()
+	p.cache.maxVisaLifetime = GetMaxVisaLifetime(ppol)
 	if p.cache.maxVisaLifetime == 0 {
 		log.Warn("[P] max visa lifetime is zero")
 	}
-	p.cache.defaultIntAuth = ppol.ExtractDefaultINTAuthority()
+	p.cache.defaultIntAuth = ExtractDefaultINTAuthority(ppol)
 	p.createDatasourceHash()
 	p.createTopologyHash()
 	p.cache.mesh = NewServiceMeshFromPolicy(ppol)
@@ -70,7 +70,7 @@ func NewPolicyFromPol(ppol *polio.Policy, log logr.Logger) *Policy {
 
 // Container signature should already have been checked.
 // Policy serial format should already have been checked.
-func NewPolicyFromContainer(pc *polio.ContainedPolicy, log logr.Logger) *Policy {
+func NewPolicyFromContainer(pc *ContainedPolicy, log logr.Logger) *Policy {
 	p := NewPolicyFromPol(pc.Policy, log)
 	p.container = pc.Container
 	return p
@@ -342,7 +342,7 @@ func (p *Policy) ListCertificateIDs() []uint32 {
 	if p.bun == nil {
 		return nil
 	}
-	return p.bun.ListCertificateIDs()
+	return ListCertificateIDs(p.bun)
 }
 
 // GetCertificate returns certificate asn1 data and its name, given its certificate ID.
@@ -350,14 +350,14 @@ func (p *Policy) GetCertificate(authID uint32) (*x509.Certificate, string, error
 	if p.bun == nil {
 		return nil, "", errors.New("empty policy")
 	}
-	return p.bun.GetCertificate(authID)
+	return GetCertificate(p.bun, authID)
 }
 
 func (p *Policy) ServiceByName(name string) *polio.Service {
 	if p.bun == nil {
 		return nil
 	}
-	return p.bun.ServiceByName(name)
+	return ServiceByName(p.bun, name)
 }
 
 // END CertificateDB interface

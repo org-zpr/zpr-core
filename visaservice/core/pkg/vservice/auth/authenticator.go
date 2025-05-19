@@ -143,7 +143,7 @@ func (a *Authenticator) RemoveServiceByPrefix(pfx string) int {
 func getAuthEndpoint(svc *polio.Service) *snip.Endpoint {
 	if _, p, err := net.SplitHostPort(svc.Addr); err == nil {
 		if pn, err := strconv.Atoi(p); err == nil {
-			return snip.NewEndpoint(polio.AuthProtocol, uint16(pn))
+			return snip.NewEndpoint(policy.AuthProtocol, uint16(pn))
 		}
 	}
 	return nil

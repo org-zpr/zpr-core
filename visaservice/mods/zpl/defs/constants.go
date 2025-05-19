@@ -22,3 +22,11 @@ const (
 	ProtocolTCP   uint8 = 0x6
 	ProtocolUDP   uint8 = 0x11
 )
+
+const (
+	VisaServiceName          = "$$zpr/visaservice"
+	SerialVersion            = 42
+	ConfKeyCIDR              = "cidr"
+	NoProc                   = uint32(0xFFFFFFFF)
+	CKMaxVisaLifetimeSeconds = uint32(1)
+)

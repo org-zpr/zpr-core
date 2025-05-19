@@ -146,7 +146,7 @@ func (c *Compilation) newConnectProc(as *AttrExprSet) (*polio.Proc, error) {
 		eps := strings.Join(p.Endpoints, ",")
 		cline = append(cline, registerService(p.Path, st, eps)) // register a service "path"
 
-		if p.ServiceID == polio.VisaServiceName {
+		if p.ServiceID == defs.VisaServiceName {
 			cline = append(cline, setFlag(polio.FlagT_F_VISASERVICE))
 		}
 	}
@@ -337,7 +337,7 @@ func (c *Compilation) getAttrExprSets(syslist []*doc.System) ([]*AttrExprSet, er
 					isVsDockingNode = true
 				}
 			} else {
-				isVsAdapter = comp.GetProvides() == polio.VisaServiceName
+				isVsAdapter = comp.GetProvides() == defs.VisaServiceName
 			}
 			compSets, err := c.getAttrExprSetForComponent(sID, comp, stype, isVsDockingNode, isVsAdapter)
 			if err != nil {
@@ -347,7 +347,7 @@ func (c *Compilation) getAttrExprSets(syslist []*doc.System) ([]*AttrExprSet, er
 			switch stype {
 			case PSvcTDef:
 				// TODO: Should the visa service be a special type?
-				if !strings.HasSuffix(sID, polio.VisaServiceName) {
+				if !strings.HasSuffix(sID, defs.VisaServiceName) {
 					defaultSvcCount++
 				}
 			case PSvcTDecorator:

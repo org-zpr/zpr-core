@@ -1,4 +1,4 @@
-package polio
+package policy
 
 import (
 	"crypto"
@@ -9,11 +9,12 @@ import (
 	"os"
 
 	"google.golang.org/protobuf/proto"
+	"zpr.org/vsx/polio"
 )
 
 type ContainedPolicy struct {
-	Policy    *Policy
-	Container *PolicyContainer // includes `Policy` in binary, signed form.
+	Policy    *polio.Policy
+	Container *polio.PolicyContainer // includes `Policy` in binary, signed form.
 }
 
 // If `pubKey` is non-nil, the signature is checked.
@@ -24,7 +25,7 @@ func OpenContainedPolicyFile(fname string, pubKey *rsa.PublicKey) (*ContainedPol
 	}
 
 	// Decode the policy to get the format version.
-	polc := &PolicyContainer{}
+	polc := &polio.PolicyContainer{}
 	if err := proto.Unmarshal(pdata, polc); err != nil {
 		return nil, fmt.Errorf("policy deserialization failed: %v", err)
 	}
@@ -45,7 +46,7 @@ func OpenContainedPolicyFile(fname string, pubKey *rsa.PublicKey) (*ContainedPol
 }
 
 // If `pubKey` is non-nil, the signature is checked.
-func OpenContainedPolicy(polc *PolicyContainer, pubKey *rsa.PublicKey) (*ContainedPolicy, error) {
+func OpenContainedPolicy(polc *polio.PolicyContainer, pubKey *rsa.PublicKey) (*ContainedPolicy, error) {
 	// This will be checked on install too, but we do it quickly here too.
 	pcy, err := ReleasePolicy(polc, pubKey)
 	if err != nil {
@@ -62,7 +63,7 @@ func OpenContainedPolicy(polc *PolicyContainer, pubKey *rsa.PublicKey) (*Contain
 
 // ContainPolicy wraps the policy in a signed container.
 // Use a nil key to skip signature.
-func ContainPolicy(p *Policy, key *rsa.PrivateKey) (*PolicyContainer, error) {
+func ContainPolicy(p *polio.Policy, key *rsa.PrivateKey) (*polio.PolicyContainer, error) {
 	var signature []byte
 	var err error
 	if p.GetSerialVersion() != SerialVersion {
@@ -98,7 +99,7 @@ func ContainPolicy(p *Policy, key *rsa.PrivateKey) (*PolicyContainer, error) {
 			return nil, err
 		}
 	}
-	return &PolicyContainer{
+	return &polio.PolicyContainer{
 		ContainerVersion: ContainerVersion,
 		Policy:           pbunData,
 		PolicyVersion:    p.GetPolicyVersion(),
@@ -111,14 +112,14 @@ func ContainPolicy(p *Policy, key *rsa.PrivateKey) (*PolicyContainer, error) {
 
 // ReleasePolicy unwraps a policy, also checks schema version. If `pubkey` is
 // non-nil checks signature.
-func ReleasePolicy(pc *PolicyContainer, pubkey *rsa.PublicKey) (*Policy, error) {
+func ReleasePolicy(pc *polio.PolicyContainer, pubkey *rsa.PublicKey) (*polio.Policy, error) {
 	if pubkey != nil {
 		hashed := sha256.Sum256(pc.Policy)
 		if err := rsa.VerifyPKCS1v15(pubkey, crypto.SHA256, hashed[:], pc.GetSignature()); err != nil {
 			return nil, err
 		}
 	}
-	polbun := &Policy{}
+	polbun := &polio.Policy{}
 	if err := proto.Unmarshal(pc.GetPolicy(), polbun); err != nil {
 		return nil, err
 	}

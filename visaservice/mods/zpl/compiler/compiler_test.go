@@ -158,23 +158,23 @@ func TestBasicCompile(t *testing.T) {
 			for _, attrExpr := range c.GetAttrExprs() {
 				aval := plcy.GetAttrKeyIndex()[attrExpr.Key]
 				if aval == "ca0.x509.cn" {
-					require.NotEqual(t, polio.NoProc, c.GetProc())
+					require.NotEqual(t, defs.NoProc, c.GetProc())
 					pr := plcy.GetProcs()[c.GetProc()]
 					// expectProc := "000: OP_Register (/mathiasland/n0.spacelaser.net, SVCT_DEF, TCP/8182)\n001: OP_SetFlag (F_NODE)\n002: OP_SetCfg (cidr, fc00:3001:0:1::/64)\n"
 					// expectProc := "000: OP_Register (/mathiasland/n0.spacelaser.net, SVCT_DEF, TCP/5002,TCP/8182)\n001: OP_SetFlag (F_NODE)\n002: OP_SetCfg (cidr, fc00:3001:0:1::/64)\n"
 					// expectProc := "000: OP_Register (/zpr/mathiasland/n0.spacelaser.net, SVCT_DEF, TCP/5002,TCP/8182)\n001: OP_SetFlag (F_NODE)\n002: OP_SetFlag (F_VISASERVICE)\n003: OP_SetCfg (cidr, fc00:3001:0:1::/64)\n"
 					expectProc := "000: OP_Register (/zpr/n0, SVCT_DEF, TCP/8182,TCP/8183)\n001: OP_SetFlag (F_NODE)\n002: OP_SetFlag (F_VS_DOCK)\n003: OP_SetCfg (cidr, fc00:3001:0:1::/64)\n"
-					require.Equal(t, expectProc, pr.Pseudocode())
+					require.Equal(t, expectProc, compiler.Pseudocode(pr))
 					matchedP += 1
 					isProvider = true
 					break
 				}
 				if aval == "ca0.fox" {
-					require.NotEqual(t, polio.NoProc, c.GetProc())
+					require.NotEqual(t, defs.NoProc, c.GetProc())
 					pr := plcy.GetProcs()[c.GetProc()]
 					expectProc := "000: OP_Register (/zpr/$$zpr/visaservice, SVCT_DEF, TCP/5002,TCP/8182)\n001: OP_SetFlag (F_VISASERVICE)\n"
 					matchedP++
-					require.Equal(t, expectProc, pr.Pseudocode())
+					require.Equal(t, expectProc, compiler.Pseudocode(pr))
 					matchedP += 1
 					isProvider = true
 					break
@@ -182,7 +182,7 @@ func TestBasicCompile(t *testing.T) {
 			}
 			if !isProvider {
 				// Not a provider? No proc.  Is this always true?
-				require.Equal(t, polio.NoProc, c.GetProc())
+				require.Equal(t, defs.NoProc, c.GetProc())
 			}
 		}
 		require.GreaterOrEqual(t, matchedP, 2, "failed to locate both of the provider connections (found %d)", matchedP)
@@ -721,12 +721,12 @@ func TestMultiServiceOneHost(t *testing.T) {
 	require.Nil(t, err)
 	require.NotNil(t, plcy)
 
-	serviceProcIdx := polio.NoProc
+	serviceProcIdx := defs.NoProc
 	for _, cc := range plcy.GetConnects() {
 		for _, aa := range cc.AttrExprs {
 			if plcy.GetAttrKeyIndex()[aa.Key] == defs.KAttrEPID {
 				if plcy.GetAttrValIndex()[aa.Val] == "fc00:3001:abd5:d0d:847a:9fd6:586:3836" {
-					if serviceProcIdx == polio.NoProc {
+					if serviceProcIdx == defs.NoProc {
 						serviceProcIdx = cc.GetProc()
 					} else {
 						// Should be just one match.
@@ -736,11 +736,11 @@ func TestMultiServiceOneHost(t *testing.T) {
 			}
 		}
 	}
-	require.NotEqual(t, polio.NoProc, serviceProcIdx)
+	require.NotEqual(t, defs.NoProc, serviceProcIdx)
 
 	// That one proc we extracted above must register two services:
 	require.Equal(t, "000: OP_Register (/zpr/mathiasland/foo1.spacelaser.net, SVCT_DEF, TCP/80)\n001: OP_Register (/zpr/mathiasland/foo2.spacelaser.net, SVCT_DEF, TCP/443)\n",
-		plcy.GetProcs()[serviceProcIdx].Pseudocode())
+		compiler.Pseudocode(plcy.GetProcs()[serviceProcIdx]))
 }
 
 func testPolicyCompiles(t *testing.T, ppyaml string) {
@@ -840,12 +840,12 @@ func TestAddServicesToNode(t *testing.T) {
 
 	require.Equal(t, 3, len(plcy.GetConnects())) // (1) the node, (2) the admin, (3) visa server adapter
 
-	serviceProcIdx := polio.NoProc
+	serviceProcIdx := defs.NoProc
 	for _, cc := range plcy.GetConnects() {
 		for _, aa := range cc.AttrExprs {
 			if plcy.GetAttrKeyIndex()[aa.Key] == defs.KAttrEPID {
 				if plcy.GetAttrValIndex()[aa.Val] == "fc00:3001:abd5:d0d:847a:9fd6:586:3836" {
-					if serviceProcIdx == polio.NoProc {
+					if serviceProcIdx == defs.NoProc {
 						serviceProcIdx = cc.GetProc()
 					} else {
 						// Should be just one match.
@@ -855,12 +855,12 @@ func TestAddServicesToNode(t *testing.T) {
 			}
 		}
 	}
-	require.NotEqual(t, polio.NoProc, serviceProcIdx)
+	require.NotEqual(t, defs.NoProc, serviceProcIdx)
 
 	// That one proc we extracted above must register all the services
 	require.Equal(t,
 		"000: OP_Register (/zpr/n0, SVCT_DEF, TCP/22,TCP/8000,TCP/8182,TCP/8183)\n001: OP_SetFlag (F_NODE)\n002: OP_SetFlag (F_VS_DOCK)\n003: OP_SetCfg (cidr, fc00:3001:0:1::/64)\n",
-		plcy.GetProcs()[serviceProcIdx].Pseudocode())
+		compiler.Pseudocode(plcy.GetProcs()[serviceProcIdx]))
 
 }
 
@@ -969,13 +969,13 @@ func TestAddServicesToHost(t *testing.T) {
 
 	require.Equal(t, 6, len(plcy.GetConnects())) // (1) the node, (2) the admin, (3) class A, (4) class B, (5) hostA, (6) vs adapter
 
-	serviceProcIdx := polio.NoProc
+	serviceProcIdx := defs.NoProc
 	for _, cc := range plcy.GetConnects() {
 		fmt.Printf(">> processing a policy connect: PROC: %x\n", cc.GetProc())
 		for _, aa := range cc.AttrExprs {
 			if plcy.GetAttrKeyIndex()[aa.Key] == defs.KAttrEPID {
 				if plcy.GetAttrValIndex()[aa.Val] == "fc00:3001:abd5:d0d:847a:9fd6:586:1000" {
-					if serviceProcIdx == polio.NoProc {
+					if serviceProcIdx == defs.NoProc {
 						serviceProcIdx = cc.GetProc()
 					} else {
 						// Should be just one match.
@@ -985,12 +985,12 @@ func TestAddServicesToHost(t *testing.T) {
 			}
 		}
 	}
-	require.NotEqual(t, polio.NoProc, serviceProcIdx)
+	require.NotEqual(t, defs.NoProc, serviceProcIdx)
 
 	// That one proc we extracted above must register all the services
 	require.Equal(t,
 		"000: OP_Register (/zpr/mathiasland/hostAhttp, SVCT_DEF, TCP/80)\n001: OP_Register (/zpr/mathiasland/hostAhttps, SVCT_DEF, TCP/443)\n002: OP_Register (/zpr/mathiasland/hostAssh, SVCT_DEF, TCP/22)\n",
-		plcy.GetProcs()[serviceProcIdx].Pseudocode())
+		compiler.Pseudocode(plcy.GetProcs()[serviceProcIdx]))
 }
 
 func TestAddServicesToHostUsingSubServices(t *testing.T) {
@@ -1084,13 +1084,13 @@ func TestAddServicesToHostUsingSubServices(t *testing.T) {
 
 	require.Equal(t, 6, len(plcy.GetConnects())) // (1) the node, (2) the admin, (3) class A, (4) class B, (5) hostA, (6) vs adapter
 
-	serviceProcIdx := polio.NoProc
+	serviceProcIdx := defs.NoProc
 	for _, cc := range plcy.GetConnects() {
 		fmt.Printf(">> processing a policy connect: PROC: %x\n", cc.GetProc())
 		for _, aa := range cc.AttrExprs {
 			if plcy.GetAttrKeyIndex()[aa.Key] == defs.KAttrEPID {
 				if plcy.GetAttrValIndex()[aa.Val] == "fc00:3001:abd5:d0d:847a:9fd6:586:1000" {
-					if serviceProcIdx == polio.NoProc {
+					if serviceProcIdx == defs.NoProc {
 						serviceProcIdx = cc.GetProc()
 					} else {
 						// Should be just one match.
@@ -1100,12 +1100,12 @@ func TestAddServicesToHostUsingSubServices(t *testing.T) {
 			}
 		}
 	}
-	require.NotEqual(t, polio.NoProc, serviceProcIdx)
+	require.NotEqual(t, defs.NoProc, serviceProcIdx)
 
 	// That one proc we extracted above must register all the services
 	require.Equal(t,
 		"000: OP_Register (/zpr/mathiasland/hostA, SVCT_DEF, TCP/22,TCP/443,TCP/80)\n",
-		plcy.GetProcs()[serviceProcIdx].Pseudocode())
+		compiler.Pseudocode(plcy.GetProcs()[serviceProcIdx]))
 }
 
 func TestDetectReferenceNodeInCommTree(t *testing.T) {
@@ -2555,8 +2555,47 @@ func TestNestedApply(t *testing.T) {
 	w3p := policyByService["/zpr/harryland/web3.service"][0]
 	require.Len(t, w3p.Conditions, 1)
 
-	require.Equal(t, "[zpr.authority, EQ, ca0]", plcy.StringifyCondition(w3p.Conditions[0]))
+	require.Equal(t, "[zpr.authority, EQ, ca0]", StringifyCondition(plcy, w3p.Conditions[0]))
 
+}
+
+// Given a condition from THIS policy `p`, return the condition in human readable form.
+// Copied from core/policy/helpers.go
+func StringifyCondition(p *polio.Policy, c *polio.Condition) string {
+	if len(c.AttrExprs) == 0 {
+		return "[]"
+	}
+	var attrCount = 0
+	var sb strings.Builder
+
+	for _, exp := range c.AttrExprs {
+		var kstr, valstr string
+		if k, ok := lookup(p.AttrKeyIndex, int(exp.Key)); ok {
+			kstr = k
+		} else {
+			kstr = fmt.Sprintf("<INVALID_%d>", exp.Key)
+		}
+
+		if v, ok := lookup(p.AttrValIndex, int(exp.Val)); ok {
+			valstr = v
+		} else {
+			valstr = fmt.Sprintf("<INVALID_%d>", exp.Val)
+		}
+		if attrCount > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(fmt.Sprintf("[%v, %v, %v]", kstr, exp.Op.String(), valstr))
+		attrCount++
+	}
+
+	return sb.String()
+}
+
+func lookup(inlist []string, index int) (string, bool) {
+	if index < 0 || index >= len(inlist) {
+		return "", false
+	}
+	return inlist[index], true
 }
 
 func TestAllowRestrictsDatasourcesInZprAuthority(t *testing.T) {

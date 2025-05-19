@@ -80,6 +80,16 @@ func CompileAndGenerateVisas(main string, store fs.FileStore, opts *CompileOpts)
 	return compileWithOpts(main, store, opts)
 }
 
+// NewMaxVisaLifetime create a ConfigSetting for max visa lifetime (seconds)
+func NewMaxVisaLifetime(d time.Duration) *polio.ConfigSetting {
+	return &polio.ConfigSetting{
+		Key: defs.CKMaxVisaLifetimeSeconds,
+		Val: &polio.ConfigSetting_U64V{
+			U64V: uint64(d / time.Second),
+		},
+	}
+}
+
 func compileWithOpts(main string, store fs.FileStore, opts *CompileOpts) (*polio.Policy, []*BootstrapVisaDescriptor, error) {
 	// Previous a lof of constants were plucked directly from the snet/cfg module.
 	// So old code assumes they are set.
@@ -141,7 +151,7 @@ func compileWithOpts(main string, store fs.FileStore, opts *CompileOpts) (*polio
 	}
 	// TODO: Settings
 	{
-		comp.policy.Config = append(comp.policy.Config, polio.NewMaxVisaLifetime(MaxVisaLifetime))
+		comp.policy.Config = append(comp.policy.Config, NewMaxVisaLifetime(MaxVisaLifetime))
 	}
 	if opts.Werror && comp.warnings > 0 {
 		return nil, nil, fmt.Errorf("compilation aborted due to too many warnings (try without -Werror)")

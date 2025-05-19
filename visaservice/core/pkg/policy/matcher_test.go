@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	snip "zpr.org/vs/pkg/ip"
-	"zpr.org/vsx/polio"
 
 	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/logr"
@@ -158,7 +157,7 @@ zpr:
 `
 
 // MatchTrafficActors helper to call matcher.MatchTraffic
-func MatchTrafficActors(m *policy.Matcher, td *snip.Traffic, src, dst *actor.Actor) ([]*polio.MatchedPolicy, error) {
+func MatchTrafficActors(m *policy.Matcher, td *snip.Traffic, src, dst *actor.Actor) ([]*policy.MatchedPolicy, error) {
 	mtSrc, mtDst := &policy.ActorInfo{src.GetAuthedClaims(), src.GetProvides()}, &policy.ActorInfo{dst.GetAuthedClaims(), dst.GetProvides()}
 	return m.MatchTraffic(td, mtSrc, mtDst)
 }
@@ -1286,7 +1285,7 @@ communications:
 // See https://github.com/org-zpr/zpr-core/issues/746
 func TestActorConnectUsingM3Policy(t *testing.T) {
 	pfile := filepath.Join("testdata", "oci-m3-full-access.bin")
-	cp, err := polio.OpenContainedPolicyFile(pfile, nil)
+	cp, err := policy.OpenContainedPolicyFile(pfile, nil)
 	require.Nil(t, err)
 	p := cp.Policy
 
