@@ -31,6 +31,7 @@ admin_attrs = [ [ "device.zpr.adapter.cn", "admin.zpr.org" ] ]
 
 [bootstrap]
 "bas.zpr.org" = "bas.zpr.org.pem"
+"vs.zpr" = "vs.zpr.pem"
 
 [protocols.ping]
 l4protocol = "iana.ICMP6"

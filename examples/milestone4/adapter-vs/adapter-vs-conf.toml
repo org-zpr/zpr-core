@@ -15,7 +15,7 @@ tun_if = "tun9"
 [adapter]
 node_addr = "10.0.0.21:5000"
 node_public_key_file = "node-noise-pub.pem"
-
+bootstrap_key = "adapter-vs-rsa.key"
 
 
 
