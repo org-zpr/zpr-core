@@ -7,13 +7,13 @@ on:
       - 'libnode/**'
       - 'visaservice/vs-client/**'
       - 'visaservice/vs-admin/**'
-      - '.github/workflows/rust-visaservice.yml'
+      - '.github/workflows/vs-tools.yml'
   pull_request:
     paths:
       - 'libnode/**'
       - 'visaservice/vs-client/**'
       - 'visaservice/vs-admin/**'
-      - '.github/workflows/rust-visaservice.yml'
+      - '.github/workflows/vs-tools.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,7 +28,7 @@ jobs:
     strategy:
       matrix:
         target: [vs-client, vs-admin]
-    uses: ./.github/workflows/rust-containerized-build-test.yml
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-containerized-build-test.yml@18db4a3e7ba9852e3cd4a330843742bd93406c48
     with:
       name: ${{ matrix.target }}
       path: ./visaservice/${{ matrix.target }}

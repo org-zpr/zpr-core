@@ -5,11 +5,11 @@ on:
     branches: [ "main" ]
     paths:
       - 'cbpf-rs/**'
-      - '.github/workflows/rust-cbpfrs.yml'
+      - '.github/workflows/cbpfrs.yml'
   pull_request:
     paths:
       - 'cbpf-rs/**'
-      - '.github/workflows/rust-cbpfrs.yml'
+      - '.github/workflows/cbpfrs.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,7 +21,7 @@ env:
 jobs:
   cbpf-build:
     name: CBPF
-    uses: ./.github/workflows/rust-build-test.yml
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@18db4a3e7ba9852e3cd4a330843742bd93406c48
     with:
       name: 'CBPF'
       path: './cbpf-rs'

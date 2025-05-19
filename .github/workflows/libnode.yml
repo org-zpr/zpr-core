@@ -5,11 +5,11 @@ on:
     branches: [ "main" ]
     paths:
       - 'libnode/**'
-      - '.github/workflows/rust-libnode.yml'
+      - '.github/workflows/libnode.yml'
   pull_request:
     paths:
       - 'libnode/**'
-      - '.github/workflows/rust-libnode.yml'
+      - '.github/workflows/libnode.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,7 +21,7 @@ env:
 jobs:
   libnode-build:
     name: Libnode
-    uses: ./.github/workflows/rust-containerized-build-test.yml
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-containerized-build-test.yml@18db4a3e7ba9852e3cd4a330843742bd93406c48
     with:
       name: Libnode
       path: ./libnode
