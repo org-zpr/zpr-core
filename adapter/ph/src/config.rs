@@ -6,10 +6,11 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::{self, Path, PathBuf};
 
 use base64::prelude::*;
+use openssl::pkey::PKey;
 use serde::Deserialize;
 
 use crate::assembly::PhMode;
-use crate::auth::RsaBootstrapAuth;
+use crate::auth::{OAuthRsa, RsaBootstrapAuth};
 use crate::pki;
 use crate::pki::{load_cert, load_noise_private_key, NOISE_KEY_LEN};
 
@@ -102,6 +103,9 @@ pub struct Config {
 
     /// Ignored for node, optional for adapter - Only set if the adapter is configured for bootstrap authentication.
     pub bootstrap: Option<RsaBootstrapAuth>,
+
+    /// If present this has key material for use during a zpr-oauthrsa authentication.
+    pub rsaoauth: Option<OAuthRsa>,
 }
 
 impl Config {
@@ -152,6 +156,7 @@ impl Config {
             let base_dir = config_file.config_path.parent().unwrap();
             config.set_from_globals(&config_file.global, base_dir)?;
             config.set_from_adapter(&config_file.adapter, base_dir)?;
+            config.set_from_authentication(&config_file.authentication, base_dir)?;
         }
         Ok(config)
     }
@@ -165,6 +170,7 @@ impl Config {
         if let Some(config_file) = config_file {
             let base_dir = config_file.config_path.parent().unwrap();
             config.set_from_globals(&config_file.global, base_dir)?;
+            config.set_from_authentication(&config_file.authentication, base_dir)?;
         }
         Ok(config)
     }
@@ -319,6 +325,38 @@ impl Config {
         Ok(())
     }
 
+    fn set_from_authentication(
+        &mut self,
+        config: &Option<AuthenticationConfigSection>,
+        base_dir: &Path,
+    ) -> Result<(), ArgsError> {
+        if let Some(config) = config {
+            if let Some(bas_key) = &config.bas_key {
+                let keyfile = if bas_key.is_relative() {
+                    base_dir.join(bas_key)
+                } else {
+                    bas_key.clone()
+                };
+                let pemdata = fs::read_to_string(&keyfile).map_err(|e| {
+                    ArgsError::PathError(format!(
+                        "failed to read bas_key file {}: {:?}",
+                        keyfile.display(),
+                        e
+                    ))
+                })?;
+                let priv_key = PKey::private_key_from_pem(&pemdata.as_bytes()).map_err(|e| {
+                    ArgsError::ParseError(format!(
+                        "failed to parse bas_key file {}: {:?}",
+                        keyfile.display(),
+                        e
+                    ))
+                })?;
+                self.rsaoauth = Some(OAuthRsa::new(&self.get_noise_cn()?, priv_key));
+            }
+        }
+        Ok(())
+    }
+
     // Overwrite our internal state with the values present in the CommonArgs (from command line)
     fn set_from_common(&mut self, common: &CommonArgs) -> Result<(), ArgsError> {
         if let Some(control_path) = &common.control_path {
@@ -417,6 +455,7 @@ impl Default for Config {
             zpr_addr: Vec::new(),
             node_public_key_file: None,
             bootstrap: None,
+            rsaoauth: None,
         }
     }
 }
@@ -429,6 +468,7 @@ pub struct AdapterConfig {
 
     pub global: GlobalConfigSection,
     pub adapter: AdapterConfigSection,
+    pub authentication: Option<AuthenticationConfigSection>,
 }
 
 // This describes the node configuration file TOML format.
@@ -438,6 +478,7 @@ pub struct NodeConfig {
     pub config_path: PathBuf,
 
     pub global: GlobalConfigSection,
+    pub authentication: Option<AuthenticationConfigSection>,
 }
 
 // Global section is shared by nodes and adapters.
@@ -460,6 +501,12 @@ pub struct AdapterConfigSection {
     pub node_addr: Option<SocketAddr>,
     pub node_public_key_file: Option<PathBuf>,
     pub bootstrap_key: Option<PathBuf>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct AuthenticationConfigSection {
+    // TODO move this here: pub bootstrap_key: Option<PathBuf>,
+    bas_key: Option<PathBuf>,
 }
 
 /// Configuration of data path & control plane topology.
