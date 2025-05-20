@@ -65,6 +65,7 @@ type ValidateResult struct {
 	DomainCredID string // Credential ID of the validation domain (if any)
 	Token        string // The JWT identity token
 	Attrs        map[string]*actor.ClaimV
+	Expiration   time.Time
 }
 
 // NewAuthenticator
@@ -173,10 +174,32 @@ func (a *Authenticator) AddDatasourceProvider(service string, contactAddr netip.
 		return fmt.Errorf("not an auth service: %v", service)
 	}
 
+	// In policy an auth service has URIs that use localhost since at policy time
+	// we don't know the actual address.  We rewrite them here.  The URIs also
+	// use our own custom SCHEMEs so we can use that to use different protocols
+	// for auth services.   Currently we only support "zpr-validation2" which is
+	// actually HTTPS using our special OAuth protocol (eg, what BAS provides).
+	urlp, err := url.Parse(psvc.ValidateUri)
+	if err != nil {
+		a.log.Error("failed to parse validate-uri stored in policy", "service", service, "uri", psvc.ValidateUri, "error", err)
+		return errors.New("policy error: invalid validate-uri")
+	}
+	if urlp.Scheme != "zpr-validation2" {
+		a.log.Error("invalid validate-uri scheme (expected zpr-validation2)", "service", service, "uri", psvc.ValidateUri)
+		return errors.New("policy error: invalid validate-uri scheme")
+
+	}
+	urlp.Scheme = "https"
+	urlp.Host = fmt.Sprintf("[%s]", contactAddr.String()) // Note IPv6
+	urlp.Path = "/token"
+	fixedValidateUri := urlp.String()
+
+	// TODO: Update this when we implement Query
+
 	features := DSFeatures{
 		SupportValidation: psvc.ValidateUri != "",
 		SupportQuery:      psvc.QueryUri != "",
-		ValidationUri:     psvc.ValidateUri,
+		ValidationUri:     fixedValidateUri,
 		QueryUri:          psvc.QueryUri,
 		TLSDomain:         psvc.Domain,
 	}
@@ -207,12 +230,11 @@ func (a *Authenticator) Authenticate(dsPrefix string, epID netip.Addr, blob Blob
 
 	var err error
 
-	a.policy.RLock() // No messing with policy while performing an authentication
-	defer a.policy.RUnlock()
-
+	a.policy.RLock()
 	if a.policy.version == "" {
 		return nil, errors.New("cannot authenticate because policy is not set")
 	}
+	a.policy.RUnlock()
 
 	// If prefix is our special BOOTSTRAP type, we check that we got a self-signed
 	// blob and validate the signature based on public key for the CN held in policy.
@@ -224,13 +246,10 @@ func (a *Authenticator) Authenticate(dsPrefix string, epID netip.Addr, blob Blob
 	// If prefix is unknown we just return error.
 
 	var vresponse *ValidateResult
-
-	switch dsPrefix {
-	case AUTH_PREFIX_BOOTSTRAP:
+	if dsPrefix == AUTH_PREFIX_BOOTSTRAP {
 		vresponse, err = a.authenticateSS(epID, blob, unauthClaims)
-
-	default:
-		return nil, fmt.Errorf("unknown authentication prefix: %v", dsPrefix)
+	} else {
+		vresponse, err = a.authenticateAC(dsPrefix, epID, blob, unauthClaims)
 	}
 
 	if err != nil {
@@ -295,6 +314,34 @@ func (a *Authenticator) Authenticate(dsPrefix string, epID netip.Addr, blob Blob
 	}, nil
 }
 
+func (a *Authenticator) authenticateAC(dsPrefix string, epID netip.Addr, blob Blob, _unauthClaims map[string]string) (*ValidateResult, error) {
+	acBlob, ok := blob.(*ZdpAuthCodeBlob)
+	if !ok {
+		return nil, fmt.Errorf("authentication failed: blob is not an auth-code blob")
+	}
+
+	a.policy.RLock()
+	vdators := a.policy.validators
+	configID := a.policy.configID
+	a.policy.RUnlock()
+
+	vres, err := vdators.Validate(dsPrefix, acBlob, a.loadRevocationData())
+	if err != nil {
+		return nil, err
+	}
+
+	// Hmm what do we do with unauthClaims?
+	// How to get expiration? Should come from auth service (exp value on a JWT??)
+	if epID.IsValid() {
+		vres.Attrs[actor.KAttrEPID] = actor.NewClaimV(epID.String(), vres.Expiration)
+	}
+	vres.Attrs[actor.KAttrAuthority] = actor.NewClaimV(dsPrefix, vres.Expiration)
+	vres.Attrs[actor.KAttrConfigID] = actor.NewClaimV(strconv.FormatUint(configID, 10), vres.Expiration)
+	vres.Attrs[actor.KAttrCN] = actor.NewClaimV(acBlob.ClientId, vres.Expiration)
+
+	return vres, nil
+}
+
 // TODO: Note that if authentication (based on key in policy) is successful, we will copy the
 // passed `epID` address here into the claims as a 'zpr.addr' claim. This is not quite correct
 // and we have not yet determined where we will make the address assignments.  For now the
@@ -320,7 +367,8 @@ func (a *Authenticator) authenticateSS(epID netip.Addr, blob Blob, unauthClaims 
 	expiration := time.Now().Add(a.MaxAuthDuration)
 
 	a.policy.RLock()
-	defer a.policy.RUnlock()
+	configID := a.policy.configID
+	a.policy.RUnlock()
 
 	// TODO: Should we integrate nodes with our bootstrap scheme?  For now presence of the node claim skips signature checking.
 
@@ -332,7 +380,9 @@ func (a *Authenticator) authenticateSS(epID netip.Addr, blob Blob, unauthClaims 
 	}
 
 	if !isNode {
+		a.policy.RLock()
 		pubkey, err := a.policy.policy.GetPublicKeyForCN(actorCN)
+		a.policy.RUnlock()
 		if err != nil {
 			return nil, fmt.Errorf("authentication failed: no public key found for CN %v", actorCN)
 		}
@@ -361,7 +411,7 @@ func (a *Authenticator) authenticateSS(epID netip.Addr, blob Blob, unauthClaims 
 		Exp: expiration,
 	}
 	attrs[actor.KAttrConfigID] = &actor.ClaimV{
-		V:   strconv.FormatUint(a.policy.configID, 10),
+		V:   strconv.FormatUint(configID, 10),
 		Exp: expiration,
 	}
 	attrs[actor.KAttrCN] = &actor.ClaimV{

@@ -33,6 +33,29 @@ func NewJTI() string {
 	return uuid.New().String()
 }
 
+func GetAllClaimsAsStrings(jwtStr string) (map[string]string, error) {
+	claims, err := jwtPayload(jwtStr)
+	if err != nil {
+		return nil, err
+	}
+	strClaims := make(map[string]string)
+	for k, v := range claims {
+		switch v.(type) {
+		case string:
+			strClaims[k] = v.(string)
+		case int:
+			strClaims[k] = fmt.Sprintf("%d", v.(int))
+		case int64:
+			strClaims[k] = fmt.Sprintf("%d", v.(int64))
+		case float64:
+			strClaims[k] = fmt.Sprintf("%f", v.(float64))
+		default:
+			strClaims[k] = fmt.Sprintf("%v", v)
+		}
+	}
+	return strClaims, nil
+}
+
 func GetStrClaimFromJWTStr(claim string, jwtStr string) string {
 	if jwtStr == "" {
 		return ""

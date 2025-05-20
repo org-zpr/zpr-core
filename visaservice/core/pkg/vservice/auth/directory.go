@@ -1,10 +1,17 @@
 package auth
 
 import (
+	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/netip"
+	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,12 +40,12 @@ type DSFeatures struct {
 	TLSDomain         string // optional TLS domain name
 }
 
-type OAuthValidateResponse struct{} // TODO
-type NewQueryResponse struct{}      // TODO
-
-func (vr *OAuthValidateResponse) GetToken() []byte {
-	return nil // TODO
+type OAuthValidateResponse struct {
+	AccessToken string // JWT
+	ExpiresIn   time.Duration
 }
+
+type NewQueryResponse struct{} // TODO
 
 func (f *DSFeatures) ShortStr() string {
 	if f.SupportValidation && f.SupportQuery {
@@ -131,7 +138,7 @@ func (vs *Directory) Validate(dsPrefix string, msg *ZdpAuthCodeBlob, revokes []*
 			return nil, err
 		}
 	}
-	resp, pfx, err := v.validate(pool, msg)
+	resp, err := v.validate(pool, msg)
 	if err != nil {
 		if errors.Is(err, ErrNotSupported) {
 			vs.mtx.Lock()
@@ -142,7 +149,7 @@ func (vs *Directory) Validate(dsPrefix string, msg *ZdpAuthCodeBlob, revokes []*
 	}
 	// The external service may succeed but the credential may be revoked.
 	// So need to check the JTI.
-	if jti := snauth.GetStrClaimFromJWTStr("jti", string(resp.GetToken())); jti != "" {
+	if jti := snauth.GetStrClaimFromJWTStr("jti", resp.AccessToken); jti != "" {
 		for _, cd := range revokes {
 			if cd.CType == snauth.CredIDTypeCertificate {
 				if cd.ID == jti {
@@ -152,16 +159,51 @@ func (vs *Directory) Validate(dsPrefix string, msg *ZdpAuthCodeBlob, revokes []*
 			}
 		}
 	}
+
+	expiration := time.Now().Add(resp.ExpiresIn)
+	exp := snauth.GetStrClaimFromJWTStr("exp", resp.AccessToken)
+	if exp != "" {
+		if expInt, err := strconv.ParseInt(exp, 10, 64); err == nil {
+			exptime := time.Unix(expInt, 0)
+			if exptime.Before(expiration) {
+				expiration = exptime // JWT is earlier than expiresIn so use that.
+			}
+		}
+	}
+
+	// ZPR allows setting attributes in tokens using claims with "zpra/"
+	claims := vs.parseZPRClaimsFromJWT(resp.AccessToken, expiration)
+
 	vres := &ValidateResult{
-		Prefix: pfx,
-		Token:  string(resp.GetToken()),
-		Attrs:  make(map[string]*actor.ClaimV), // TODO
+		Prefix:     dsPrefix,
+		Token:      string(resp.AccessToken),
+		Attrs:      claims,
+		Expiration: expiration,
 	}
 	// Add the key fingerprint for this domain auth to the response.
 	if domFinger != nil {
 		vres.DomainCredID = domFinger.String()
 	}
 	return vres, nil
+}
+
+// parseZPRClaimsFromJWT parses the ZPR special properties from the JWT and returns a map of claims.
+//
+// The ZPR properties start with "zpra/" and are attribute/value pairs.
+func (vs *Directory) parseZPRClaimsFromJWT(jwtStr string, expiration time.Time) map[string]*actor.ClaimV {
+	claims := make(map[string]*actor.ClaimV)
+	jwtClaims, err := snauth.GetAllClaimsAsStrings(jwtStr)
+	if err != nil {
+		vs.log.WithError(err).Error("failed to parse JWT claims", "jwt", jwtStr)
+		return nil
+	}
+	for jwtKey, jwtVal := range jwtClaims {
+		if strings.HasPrefix(jwtKey, "zpra/") {
+			keyv := strings.TrimPrefix(jwtKey, "zpra/")
+			claims[keyv] = actor.NewClaimV(jwtVal, expiration)
+		}
+	}
+	return claims
 }
 
 // QueryByPrefix may return ErrNotSupported if the datasource does not support query.
@@ -273,18 +315,71 @@ func (vs *Directory) HasAuthPrefix(p string) bool {
 	return found
 }
 
-// validate used to run the GRPC validation call.
-//
-// TODO: Now needs to run the oauth style check call to the auth service given an
-// auth-code type BLOB from an adapter.
-//
-// Returns the PREFIX along with the response.
-func (v *VLoc) validate(pool *x509.CertPool, checkBlob *ZdpAuthCodeBlob) (*OAuthValidateResponse, string, error) {
+// JSON struct returned from the oauth token request interface on an Authorization service.
+type AuthorizationToken struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    uint64 `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	Error        string `json:"error"`
+}
 
-	// We may need this for TLS.  (TBD)
-	// domain := v.Domain
+// TODO: Enable real checking of the auth service cert on TLS.
+// TODO: Not sure why we are using a CertPool and not just passing a certificate?
+func (v *VLoc) validate(cert *x509.CertPool, checkBlob *ZdpAuthCodeBlob) (*OAuthValidateResponse, error) {
 
-	return nil, v.Prefix, errors.New("not implemented")
+	tr := &http.Transport{
+		ResponseHeaderTimeout: 5 * time.Second,
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{
+		Transport: tr,
+		Timeout:   6 * time.Second,
+	}
+
+	// Post to try to get an authorization token.
+	// Need to send form-encoded data.
+	formData := url.Values{}
+	formData.Set("grant_type", "authorization_code")
+	formData.Set("code", checkBlob.Code)
+	formData.Set("client_id", checkBlob.ClientId)
+	formData.Set("redirect_url", "auth.zpr")
+
+	v.log.Info("contacting auth service for validation", "uri", v.validationUri, "client", checkBlob.ClientId)
+	resp, err := client.PostForm(v.validationUri, formData)
+	if err != nil {
+		// TODO: Not sure if error is set for non-200 responses...
+		v.log.WithError(err).Error("failed to contact auth service", "uri", v.validationUri, "service", v.Prefix)
+		return nil, fmt.Errorf("request for auth token failed")
+	}
+
+	defer resp.Body.Close()
+	jsonData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		v.log.WithError(err).Error("failed to read auth service response", "uri", v.validationUri, "service", v.Prefix)
+		return nil, fmt.Errorf("i/o error with auth service")
+	}
+	var tokenResp AuthorizationToken
+	if err = json.Unmarshal(jsonData, &tokenResp); err != nil {
+		v.log.WithError(err).Error("failed to parse auth service response", "uri", v.validationUri, "service", v.Prefix, "data", string(jsonData))
+		return nil, fmt.Errorf("failed to parse auth service response")
+	}
+	if resp.StatusCode != http.StatusOK || tokenResp.Error != "" {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("(%d) ", resp.StatusCode))
+		if tokenResp.Error != "" {
+			sb.WriteString(tokenResp.Error)
+		} else {
+			sb.WriteString("unknown error")
+		}
+		errMsg := sb.String()
+		v.log.Warn("auth service retruns error", "uri", v.validationUri, "service", v.Prefix, "code", resp.StatusCode, "message", errMsg)
+		return nil, fmt.Errorf("auth service denied token: %s", errMsg)
+	}
+	return &OAuthValidateResponse{
+		AccessToken: tokenResp.AccessToken,
+		ExpiresIn:   time.Duration(tokenResp.ExpiresIn) * time.Second,
+	}, nil
 }
 
 // query used to make a GRPC query call. Needs to be reworked with a new HTTPS api.

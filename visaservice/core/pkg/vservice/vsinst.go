@@ -40,11 +40,20 @@ type VSMsgType int
 
 const (
 	MTNodeRegister VSMsgType = iota + 1
+	MTApproveConnection
 )
 
 type VSMsg struct {
-	MsgType  VSMsgType
-	NodeAddr netip.Addr
+	MsgType        VSMsgType
+	NodeAddr       netip.Addr
+	ConnectRequest *vsapi.ConnectRequest // for MTApproveConnection
+	ReplyC         chan *VSMsgDone
+}
+
+type VSMsgDone struct {
+	MsgType VSMsgType
+	Err     error
+	Actor   *actor.Actor
 }
 
 // VSInst is an instance of distributed visa service
@@ -247,6 +256,8 @@ VS_RUNLOOP:
 				switch m.MsgType {
 				case MTNodeRegister:
 					vs.handleNodeRegister(m.NodeAddr)
+				case MTApproveConnection:
+					vs.handleApproveConnection(m.ConnectRequest, m.ReplyC)
 				}
 			}
 

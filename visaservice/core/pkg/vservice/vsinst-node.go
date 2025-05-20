@@ -247,6 +247,29 @@ func (vs *VSInst) handleNodeRegister(nodeAddr netip.Addr) {
 	}
 }
 
+// Runs on vstinst runloop - only one at a time though.
+func (vs *VSInst) handleApproveConnection(creq *vsapi.ConnectRequest, replyC chan *VSMsgDone) {
+	vs.log.Debug("handleApproveConnection starts")
+
+	doneMsg := VSMsgDone{
+		MsgType: MTApproveConnection,
+	}
+	approvedActor, err := vs.ApproveConnection(creq) // blocking
+	if err != nil {
+		doneMsg.Err = err
+	} else {
+		doneMsg.Actor = approvedActor
+	}
+
+	select {
+	case replyC <- &doneMsg: // ok
+	default:
+		vs.log.Warn("handleApproveConnection - reply channel is full, dropping result")
+	}
+
+	vs.log.Debug("handleApproveConnection completes")
+}
+
 // checkNodeVSSState checks the VSS state of all nodes and sends config and policy to nodes
 // which indicate they are out of sync.
 //
