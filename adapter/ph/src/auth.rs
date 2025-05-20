@@ -17,6 +17,7 @@ use openssl::sign::Signer;
 use openssl::x509::X509;
 
 use reqwest::header;
+use reqwest::redirect::Policy;
 use reqwest::tls::Certificate;
 use reqwest::StatusCode;
 
@@ -398,12 +399,11 @@ impl OAuthRsa {
         let der = tls_cert.to_der().unwrap();
         let tls_cert = Certificate::from_der(&der).unwrap();
 
-        let nonce = self.preauthorize(service_addr, &tls_cert).await?;
+        let nonce_buf = self.preauthorize(service_addr, &tls_cert).await?;
 
         // TODO: Get rid of all the unwraps
         let mut signer = Signer::new(MessageDigest::sha256(), &self.private_key).unwrap();
         signer.set_rsa_padding(Padding::PKCS1).unwrap();
-        let nonce_buf = BASE64_STANDARD.decode(nonce.as_bytes()).unwrap();
         signer.update(&nonce_buf).unwrap();
         let signature = signer.sign_to_vec().unwrap();
 
@@ -430,9 +430,9 @@ impl OAuthRsa {
         // TODO: I am using blocking here but if we end up in a place where we
         // can access a tokio runtime we should use async.
 
-        // If needed you can add danger_accept_invalid_certs(true) to the client builder.
         let cb = reqwest::ClientBuilder::new()
             .add_root_certificate(tls_cert.clone())
+            .danger_accept_invalid_certs(true) // TODO: Figure this TLS stuff out and get rid of this
             .timeout(std::time::Duration::from_secs(10));
         let client = cb.build().unwrap();
 
@@ -466,8 +466,11 @@ impl OAuthRsa {
             payload: BASE64_STANDARD.encode(payload),
         };
 
+        // Note client set to NOT follow redirects since that is how we get our response.
         let cb = reqwest::ClientBuilder::new()
             .add_root_certificate(tls_cert.clone())
+            .danger_accept_invalid_certs(true) // TODO: Figure this TLS stuff out and get rid of this
+            .redirect(Policy::none())
             .timeout(std::time::Duration::from_secs(10));
         let client = cb.build().unwrap();
 

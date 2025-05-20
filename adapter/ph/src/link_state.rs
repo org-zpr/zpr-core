@@ -177,7 +177,7 @@ pub enum LinkState {
 pub enum LinkEvent {
     Start,
     KeyingDone,
-    ReceivedHelloRequest,
+    ReceivedHelloRequest(IpAddress), // Actors ZPR address - TODO: implement AAAs
     ReceivedHelloResponse(ResponseCode),
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
@@ -340,7 +340,9 @@ impl LinkStateWrapper {
         match event {
             LinkEvent::Start => self.start(asm),
             LinkEvent::KeyingDone => self.keying_done(asm),
-            LinkEvent::ReceivedHelloRequest => self.process_hello_request(asm),
+            LinkEvent::ReceivedHelloRequest(peer_zpr_addr) => {
+                self.process_hello_request(asm, peer_zpr_addr)
+            }
             LinkEvent::ReceivedHelloResponse(code) => self.process_hello_response(asm, code),
 
             LinkEvent::ReceivedAcquireZprAddressRequest(addrs, blob) => {
@@ -488,7 +490,12 @@ impl LinkStateWrapper {
             let link_id = self.id;
             let task_asm = asm.clone();
             tokio::task::spawn_local(async move {
-                let status = mgmt::requests::send_hello_request(&task_asm, link_id).await?;
+                let status = mgmt::requests::send_hello_request(
+                    &task_asm,
+                    link_id,
+                    &task_asm.local_zpr_addresses,
+                )
+                .await?;
 
                 task_asm
                     .process_link_state_event(link_id, LinkEvent::ReceivedHelloResponse(status))
@@ -501,7 +508,11 @@ impl LinkStateWrapper {
     /// Update link state based on received hello request
     /// Transitions from Helloing to Registering Actor Address
     /// Does not generate any packets
-    fn process_hello_request(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+    fn process_hello_request(
+        &self,
+        asm: &Arc<Assembly>,
+        peer_zpr_addr: IpAddress,
+    ) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         let link_id = self.id;
         match (self.link_type, locked_fsm.state) {
@@ -513,6 +524,12 @@ impl LinkStateWrapper {
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
                 // Note that the node goes into RegisterAA while the adapter will go into WaitForInitAuth.
                 // Node is really waiting now for an Acquire Call.
+                locked_fsm.actor_addresses.push(peer_zpr_addr);
+                debug!(
+                    target: LINK_STATE,
+                    "Link {link_id} peer is using ZPR addr {}",
+                    peer_zpr_addr
+                );
                 locked_fsm.set_state(LinkState::RegisterAA);
                 debug!(
                     target: LINK_STATE,
@@ -623,6 +640,10 @@ impl LinkStateWrapper {
         }
         let requested_addr = addrs[0];
 
+        // We probably already know the address from hello.
+        // I'm assuming we won't be acquiring more ZPR addresses for this one peer so
+        // we will override the old one with this one.
+        locked_fsm.actor_addresses.clear();
         locked_fsm.actor_addresses.push(requested_addr);
         debug!(
             target: LINK_STATE,

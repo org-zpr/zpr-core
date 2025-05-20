@@ -220,20 +220,52 @@ pub async fn handle_terminate_indication(
 pub async fn handle_hello_request(
     asm: &Arc<Assembly>,
     seq_num: zpr::SeqNum,
-    pkt: Packet,
+    mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     debug!(target: ZDP, "Received Hello Request for link {ingress_link_id}");
 
+    let Ok(hdr) = zdp::ZdpHelloRequestHeader::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+    let bytes_needed = match hdr.ip_version {
+        zpr::L3Type::Ipv4 => 4,
+        zpr::L3Type::Ipv6 => 16,
+        _ => {
+            warn!(target: ZDP, "link {ingress_link_id}: invalid ip_version field");
+            return Err((HandleMgmtError::BadStructure, pkt));
+        }
+    };
+    if pkt.remaining() < bytes_needed {
+        warn!(target: ZDP, "link {ingress_link_id}: packet too short for actor address");
+        return Err((HandleMgmtError::BadStructure, pkt));
+    }
+    let actor_addr: IpAddress = match hdr.ip_version {
+        zpr::L3Type::Ipv4 => {
+            let Ok(addr_bytes) = <[u8; 4]>::read_from_buf(&mut pkt) else {
+                return Err((HandleMgmtError::BadStructure, pkt));
+            };
+            addr_bytes.into()
+        }
+        zpr::L3Type::Ipv6 => {
+            let Ok(addr_bytes) = <[u8; 16]>::read_from_buf(&mut pkt) else {
+                return Err((HandleMgmtError::BadStructure, pkt));
+            };
+            addr_bytes.into()
+        }
+        _ => panic!("unreachable - already handled this error above"),
+    };
+
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
 
-    hdr.status =
-        match asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest) {
-            Err(_) => zdp::ResponseCode::Other,
-            Ok(()) => zdp::ResponseCode::Success,
-        };
+    hdr.status = match asm
+        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest(actor_addr))
+    {
+        Err(_) => zdp::ResponseCode::Other,
+        Ok(()) => zdp::ResponseCode::Success,
+    };
 
     super::core::send_non_flow_mgmt_response(
         asm,
