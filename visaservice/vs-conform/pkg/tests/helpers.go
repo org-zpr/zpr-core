@@ -45,7 +45,7 @@ func findCommunicatingPair(policy *polio.Policy) (*CommunicatingPair, error) {
 		if connect.IsVisaService() {
 			continue
 		}
-		if !plc.ConnectRecHasSetAttr(connect, "zpr.adapter.cn") {
+		if !plc.ConnectRecHasSetAttr(connect, plc.KAttrCN) {
 			// We cannot self-auth without this
 			continue
 		}
@@ -154,7 +154,7 @@ func connectNodeAndGetApiKey(state *testfw.TestState) (string, error) {
 // include the `zpr.addr` attribute.
 func connectAdapter(node *mocks.Node, crec *plc.ConnectRec, dockAddr, zprAddr netip.Addr) (*vsapi.Actor, error) {
 	claims := make(map[string]string)
-	claims["zpr.adapter.cn"] = crec.CN
+	claims[plc.KAttrCN] = crec.CN
 	if crec.HasAddr() {
 		claims["zpr.addr"] = crec.Addr.String()
 	} else {
