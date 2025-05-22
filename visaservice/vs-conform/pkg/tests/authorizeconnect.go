@@ -10,7 +10,7 @@ import (
 type AuthorizeConnect struct{}
 
 func init() {
-	testfw.Register(&AuthorizeConnect{})
+	// testfw.Register(&AuthorizeConnect{}) // TODO: connect needs to use bootstrap
 }
 
 func (t *AuthorizeConnect) Name() string {
