@@ -1,6 +1,35 @@
 package vservice_test
 
 /* DISABLED UNTIL WE SORT OUT COMPILER
+import (
+	"bytes"
+	"crypto/rsa"
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"net/netip"
+	"os"
+	"testing"
+	"time"
+
+	"zpr.org/vs/pkg/libvisa"
+	"zpr.org/vs/pkg/logr"
+	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/snauth"
+	"zpr.org/vs/pkg/vservice"
+
+	"zpr.org/vsx/polio"
+	"zpr.org/vsx/zpl/compiler"
+	"zpr.org/vsx/zpl/fs"
+
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+
+	"google.golang.org/protobuf/proto"
+)
 
 const basic_policy_1 = `
         zpl_format: 2
@@ -69,7 +98,7 @@ func compilePolicyToContainer(t *testing.T, pyaml string, privateKey *rsa.Privat
 	require.Nil(t, err)
 	require.NotNil(t, plcy)
 
-	pc, err := polio.ContainPolicy(plcy, privateKey)
+	pc, err := policy.ContainPolicy(plcy, privateKey)
 	require.Nil(t, err)
 	return pc
 }
@@ -363,7 +392,7 @@ func (suite *VSRunnerSuite) TestInstallPolicy() {
         `
 
 	bundle := new(vservice.PolicyBundle)
-	bundle.Format = fmt.Sprintf("base64;zip;%d", polio.SerialVersion)
+	bundle.Format = fmt.Sprintf("base64;zip;%d", policy.SerialVersion)
 
 	pc := compilePolicyToContainer(t, newpolicy, privateKey)
 	zdata, err := libvisa.Compress(pc)

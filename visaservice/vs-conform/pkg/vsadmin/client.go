@@ -3,6 +3,9 @@ package vsadmin
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
@@ -18,6 +21,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
+
+const SerialVersion = 42
 
 type Client struct {
 	vsaddr netip.AddrPort
@@ -114,15 +119,15 @@ func (c *Client) deserializePolicy(format string, encap string) (*polio.Policy, 
 	if err != nil {
 		return nil, fmt.Errorf("invalid policy container version: %s: %w", formatParts[2], err)
 	}
-	if sver != polio.SerialVersion {
-		return nil, fmt.Errorf("unsupported policy container version: got %d, expect %d", sver, polio.SerialVersion)
+	if sver != SerialVersion {
+		return nil, fmt.Errorf("unsupported policy container version: got %d, expect %d", sver, SerialVersion)
 	}
 	pc, err := decompress(zdata)
 	if err != nil {
 		return nil, fmt.Errorf("decompress/unmarshal failed: %w", err)
 	}
 	c.zlog.Infow("policy container loaded", "version", pc.GetContainerVersion())
-	pol, err := polio.ReleasePolicy(pc, nil)
+	pol, err := ReleasePolicy(pc, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to release policy: %v", err)
 	}
@@ -318,4 +323,28 @@ func decompress(buf []byte) (*polio.PolicyContainer, error) {
 		return nil, err
 	}
 	return pc, nil
+}
+
+// ReleasePolicy unwraps a policy, also checks schema version. If `pubkey` is
+// non-nil checks signature.
+// Copied from core/policy/container.go
+func ReleasePolicy(pc *polio.PolicyContainer, pubkey *rsa.PublicKey) (*polio.Policy, error) {
+	if pubkey != nil {
+		hashed := sha256.Sum256(pc.Policy)
+		if err := rsa.VerifyPKCS1v15(pubkey, crypto.SHA256, hashed[:], pc.GetSignature()); err != nil {
+			return nil, err
+		}
+	}
+	polbun := &polio.Policy{}
+	if err := proto.Unmarshal(pc.GetPolicy(), polbun); err != nil {
+		return nil, err
+	}
+	if polbun.GetSerialVersion() != SerialVersion {
+		return nil, fmt.Errorf("schema version mismatch, got %d expected %d", polbun.GetSerialVersion(), SerialVersion)
+	}
+	// Restore fields that were omitted from the signature.
+	polbun.PolicyDate = pc.PolicyDate
+	polbun.PolicyRevision = pc.PolicyRevision
+	polbun.PolicyMetadata = pc.PolicyMetadata
+	return polbun, nil
 }

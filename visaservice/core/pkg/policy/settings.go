@@ -1,8 +1,10 @@
-package polio
+package policy
 
 import (
 	fmt "fmt"
 	"time"
+
+	"zpr.org/vsx/polio"
 )
 
 type CFKey uint32
@@ -27,25 +29,25 @@ func (k CFKey) Key() uint32 {
 }
 
 // NewMaxVisaLifetime create a ConfigSetting for max visa lifetime (seconds)
-func NewMaxVisaLifetime(d time.Duration) *ConfigSetting {
-	return &ConfigSetting{
+func NewMaxVisaLifetime(d time.Duration) *polio.ConfigSetting {
+	return &polio.ConfigSetting{
 		Key: CKMaxVisaLifetimeSeconds.Key(),
-		Val: &ConfigSetting_U64V{
+		Val: &polio.ConfigSetting_U64V{
 			U64V: uint64(d / time.Second),
 		},
 	}
 }
 
 // Stringify helper to convert a config "value" to a nice looking string.
-func (c *ConfigSetting) ValueString() string {
+func ValueString(c *polio.ConfigSetting) string {
 	switch v := c.GetVal().(type) {
-	case *ConfigSetting_Bv:
+	case *polio.ConfigSetting_Bv:
 		return fmt.Sprintf("%v", v.Bv)
-	case *ConfigSetting_Sv:
+	case *polio.ConfigSetting_Sv:
 		return fmt.Sprintf("%v", v.Sv)
-	case *ConfigSetting_U32V:
+	case *polio.ConfigSetting_U32V:
 		return fmt.Sprintf("%d", v.U32V)
-	case *ConfigSetting_U64V:
+	case *polio.ConfigSetting_U64V:
 		return fmt.Sprintf("%d", v.U64V)
 	default:
 		return fmt.Sprintf("?%v?", v)

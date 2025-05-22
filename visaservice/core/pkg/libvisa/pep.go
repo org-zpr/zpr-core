@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	snip "zpr.org/vs/pkg/ip"
+	"zpr.org/vs/pkg/policy"
 	"zpr.org/vsx/snio/vsio"
 
 	"zpr.org/vsx/polio"
@@ -72,7 +73,7 @@ type MatchInfo struct {
 }
 
 // initPEP use the traffic and policy to configure a visa PEP for matching.  Sets up PEP args, etc.
-func InitPEP(td *snip.Traffic, cpols []*polio.MatchedPolicy) (*VConfig, error) {
+func InitPEP(td *snip.Traffic, cpols []*policy.MatchedPolicy) (*VConfig, error) {
 	result := &VConfig{}
 	px, err := pepIdxForProto(td.Proto)
 	if err != nil {
@@ -130,7 +131,7 @@ func InitPEP(td *snip.Traffic, cpols []*polio.MatchedPolicy) (*VConfig, error) {
 		}
 
 	case PEPDockICMP:
-		var md *polio.MatchMetadata
+		var md *policy.MatchMetadata
 		for _, cp := range cpols { // Not sure if the metadata is on all matching policies.
 			if cp.Metadata != nil {
 				md = cp.Metadata
@@ -175,7 +176,7 @@ func InitPEP(td *snip.Traffic, cpols []*polio.MatchedPolicy) (*VConfig, error) {
 	return result, nil
 }
 
-func MaxDurationConstraintFromPolicies(cpols []*polio.MatchedPolicy) (dur time.Duration) {
+func MaxDurationConstraintFromPolicies(cpols []*policy.MatchedPolicy) (dur time.Duration) {
 	for _, cpol := range cpols {
 		for _, constraint := range cpol.CPol.GetConstraints() {
 			if c := constraint.GetDur(); c != nil {
@@ -189,7 +190,7 @@ func MaxDurationConstraintFromPolicies(cpols []*polio.MatchedPolicy) (dur time.D
 	return
 }
 
-func MaximalDataCapFromPolicies(cpols []*polio.MatchedPolicy) (cap *DataCap) {
+func MaximalDataCapFromPolicies(cpols []*policy.MatchedPolicy) (cap *DataCap) {
 	for _, cpol := range cpols {
 		for _, constraint := range cpol.CPol.GetConstraints() {
 			if c := constraint.GetCap(); c != nil {

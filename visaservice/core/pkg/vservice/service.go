@@ -19,8 +19,6 @@ import (
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
-
-	"zpr.org/vsx/polio"
 )
 
 type VisaService struct {
@@ -226,7 +224,7 @@ func (s *VisaService) GetPolicyAndConfig() (*policy.Policy, uint64) {
 // installPolicyFromFile installs a policy from a file.
 func (s *VisaService) installPolicyFromFile(fname string, pubkey *rsa.PublicKey) error {
 	s.log.Info("installing policy from file", "file", fname)
-	cp, err := polio.OpenContainedPolicyFile(fname, pubkey)
+	cp, err := policy.OpenContainedPolicyFile(fname, pubkey)
 	if err != nil {
 		return err
 	}
@@ -328,7 +326,7 @@ func (s *VisaService) removeActor(agnt *actor.Actor) {
 // Implements an interface needed by the admin service
 //
 // Returns (version, config_id, error)
-func (s *VisaService) InstallPolicy(cp *polio.ContainedPolicy) (string, uint64, error) {
+func (s *VisaService) InstallPolicy(cp *policy.ContainedPolicy) (string, uint64, error) {
 	s.log.Info("installing policy from admin")
 
 	if err := s.doInstallPolicy(cp); err != nil {
@@ -345,7 +343,7 @@ func (s *VisaService) InstallPolicy(cp *polio.ContainedPolicy) (string, uint64, 
 
 // doInstallPolicy actually install policy into all the visa service components, including
 // communicating with any nodes.
-func (s *VisaService) doInstallPolicy(cp *polio.ContainedPolicy) error {
+func (s *VisaService) doInstallPolicy(cp *policy.ContainedPolicy) error {
 	pp := policy.NewPolicyFromContainer(cp, s.log)
 	if pp.Size() == 0 {
 		return errors.New("policy is empty")

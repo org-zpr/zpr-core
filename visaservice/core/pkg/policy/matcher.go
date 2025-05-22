@@ -256,7 +256,7 @@ func (m *Matcher) getProcsIfNotIn(matchedPolicies []uint32, plist []uint32) []ui
 	var matchedProcs []uint32
 	for _, setx := range matchedPolicies {
 		cpol := m.policy.GetConnects()[setx]
-		if cpol.Proc != polio.NoProc {
+		if cpol.Proc != NoProc {
 			// Keep this proc to run if we don't already have it AND if it has not been run already.
 			keep := true
 			for _, j := range matchedProcs {
@@ -421,8 +421,8 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 	}
 	// If visaservice flag is set, create a "virtual" service entry.
 	if state.Visaservice {
-		actorProvides = append(actorProvides, polio.VisaServiceName)                         // TODO: compiler must prevent this from ever being defined.
-		actorProvides = append(actorProvides, fmt.Sprintf("/zpr/%s", polio.VisaServiceName)) // TODO: compiler must prevent this from ever being defined.
+		actorProvides = append(actorProvides, VisaServiceName)                         // TODO: compiler must prevent this from ever being defined.
+		actorProvides = append(actorProvides, fmt.Sprintf("/zpr/%s", VisaServiceName)) // TODO: compiler must prevent this from ever being defined.
 	}
 	state.Actor.SetProvides(actorProvides)
 
@@ -437,7 +437,7 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 // This does not pay any attention to TCP flags.
 //
 // Returns (LINE_REF, IS_FWD_MATCH, ERROR)
-func (m *Matcher) MatchTraffic(td *snip.Traffic, srcActor, dstActor *ActorInfo) (cpols []*polio.MatchedPolicy, err error) {
+func (m *Matcher) MatchTraffic(td *snip.Traffic, srcActor, dstActor *ActorInfo) (cpols []*MatchedPolicy, err error) {
 	polset := m.policiesForScope(td, srcActor, dstActor)
 	m.log.Debugf("[MX] MatchTraffic found %d candidate policies based on scope", len(polset))
 	if len(polset) == 0 {
@@ -514,8 +514,8 @@ POLICYLOOP:
 	return cpols, nil
 }
 
-func (m *Matcher) policiesForScope(td *snip.Traffic, srcActor, dstActor *ActorInfo) []*polio.MatchedPolicy {
-	var pset []*polio.MatchedPolicy
+func (m *Matcher) policiesForScope(td *snip.Traffic, srcActor, dstActor *ActorInfo) []*MatchedPolicy {
+	var pset []*MatchedPolicy
 
 	// HACK - The prototype compiler will allow for ICMPv4 and ICMPv6, but it always writes
 	//        the scope protocol as ICMPv6 since the prototype ZPL does not differentiate.
@@ -569,8 +569,8 @@ func (m *Matcher) policiesForScope(td *snip.Traffic, srcActor, dstActor *ActorIn
 
 // matchy try to match the traffic to the policy based on scope.
 // Return matched list could be empty, explanatory errors are sometimes returned.
-func (m *Matcher) matchy(td *snip.Traffic, isFWD bool, portIdx map[uint32][]int, dstActor *ActorInfo) ([]*polio.MatchedPolicy, error) {
-	var pset []*polio.MatchedPolicy
+func (m *Matcher) matchy(td *snip.Traffic, isFWD bool, portIdx map[uint32][]int, dstActor *ActorInfo) ([]*MatchedPolicy, error) {
+	var pset []*MatchedPolicy
 	var qPortVal uint32
 	switch td.Proto {
 	case snip.ProtocolTCP, snip.ProtocolUDP:
@@ -616,12 +616,12 @@ func (m *Matcher) matchy(td *snip.Traffic, isFWD bool, portIdx map[uint32][]int,
 					continue
 				}
 			}
-			pset = append(pset, &polio.MatchedPolicy{
+			pset = append(pset, &MatchedPolicy{
 				CPol: cpol,
 				FWD:  isFWD,
 			})
 		default:
-			pset = append(pset, &polio.MatchedPolicy{
+			pset = append(pset, &MatchedPolicy{
 				CPol: cpol,
 				FWD:  isFWD,
 			})
@@ -633,8 +633,8 @@ func (m *Matcher) matchy(td *snip.Traffic, isFWD bool, portIdx map[uint32][]int,
 	return nil, matchError // matchError may be nil
 }
 
-func (m *Matcher) icmpSpecialHandling(cpol *polio.CPolicy, qPortVal uint32, isFWD bool) *polio.MatchedPolicy {
-	var meta *polio.MatchMetadata
+func (m *Matcher) icmpSpecialHandling(cpol *polio.CPolicy, qPortVal uint32, isFWD bool) *MatchedPolicy {
+	var meta *MatchMetadata
 	// Special case for ICMP. If there are a pair of types (for request, response) then a forward query
 	// must only match on a request, and a reverse must match on a response.
 	keep := false
@@ -643,7 +643,7 @@ func (m *Matcher) icmpSpecialHandling(cpol *polio.CPolicy, qPortVal uint32, isFW
 			icmpScope := sc.GetIcmp()
 			if len(icmpScope.Codes) == 1 {
 				if icmpScope.Codes[0] == qPortVal {
-					meta = &polio.MatchMetadata{
+					meta = &MatchMetadata{
 						IcmpType: icmpScope.GetType(),
 					}
 					keep = true
@@ -652,7 +652,7 @@ func (m *Matcher) icmpSpecialHandling(cpol *polio.CPolicy, qPortVal uint32, isFW
 			} else if len(icmpScope.Codes) == 2 && icmpScope.Type == polio.ICMPT_ICMPT_REQREP {
 				if isFWD {
 					if icmpScope.Codes[0] == qPortVal {
-						meta = &polio.MatchMetadata{
+						meta = &MatchMetadata{
 							IcmpType: icmpScope.GetType(),
 						}
 						keep = true
@@ -660,7 +660,7 @@ func (m *Matcher) icmpSpecialHandling(cpol *polio.CPolicy, qPortVal uint32, isFW
 					}
 				} else {
 					if icmpScope.Codes[1] == qPortVal {
-						meta = &polio.MatchMetadata{
+						meta = &MatchMetadata{
 							IcmpType:               icmpScope.GetType(),
 							IcmpRequiresAntecedent: true,
 							IcmpAntecedent:         uint16(icmpScope.Codes[0]),
@@ -673,7 +673,7 @@ func (m *Matcher) icmpSpecialHandling(cpol *polio.CPolicy, qPortVal uint32, isFW
 				// must match one of the ports
 				for _, pn := range icmpScope.Codes {
 					if pn == qPortVal {
-						meta = &polio.MatchMetadata{
+						meta = &MatchMetadata{
 							IcmpType: icmpScope.GetType(),
 						}
 						keep = true
@@ -687,7 +687,7 @@ func (m *Matcher) icmpSpecialHandling(cpol *polio.CPolicy, qPortVal uint32, isFW
 		}
 	}
 	if keep {
-		return &polio.MatchedPolicy{
+		return &MatchedPolicy{
 			CPol:     cpol,
 			FWD:      isFWD,
 			Metadata: meta,

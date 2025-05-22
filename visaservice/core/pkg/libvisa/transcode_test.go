@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/libvisa"
+	"zpr.org/vs/pkg/policy"
 	"zpr.org/vsapi"
 	"zpr.org/vsx/polio"
 	"zpr.org/vsx/snio/vsio"
@@ -21,7 +22,7 @@ func TestVsioVisaToThrift(t *testing.T) {
 
 	traf := snip.NewTCPConnect(netip.MustParseAddr("fc00:3002::1"), 3000, netip.MustParseAddr("fc00:3002::2"), 80)
 
-	pol := polio.NewMinimalMatchedPolicy(6, 80, true)
+	pol := policy.NewMinimalMatchedPolicy(6, 80, true)
 	pol.CPol.Constraints = []*polio.Constraint{
 		{
 			Carg: &polio.Constraint_Bw{
@@ -45,7 +46,7 @@ func TestVsioVisaToThrift(t *testing.T) {
 		WithClientActorIdent("test-client").
 		WithSessionKeyAndEncoding([]byte("test-key"), libvisa.SKEv1).
 		WithIssuerID(12345).
-		WithTrafficAndPolicy(traf, []*polio.MatchedPolicy{pol}).Visa()
+		WithTrafficAndPolicy(traf, []*policy.MatchedPolicy{pol}).Visa()
 
 	// fake sign.
 	vsioVisa.Sig = &vsio.Signature{

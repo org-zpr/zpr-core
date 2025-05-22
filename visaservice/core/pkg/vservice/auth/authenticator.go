@@ -151,7 +151,7 @@ func getAuthEndpoint(svc *polio.Service) *snip.Endpoint {
 		return nil
 	}
 	if pn, err := strconv.Atoi(svcUrl.Port()); err == nil {
-		return snip.NewEndpoint(polio.AuthProtocol, uint16(pn)) // TCP
+		return snip.NewEndpoint(policy.AuthProtocol, uint16(pn)) // TCP
 	}
 	return nil
 }

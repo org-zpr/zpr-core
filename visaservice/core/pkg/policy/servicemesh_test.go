@@ -75,7 +75,7 @@ func TestIncludesWithConstraints(t *testing.T) {
 		},
 	}
 
-	m1.AddServiceWithConstraints(snip.ProtocolUDP, 88, "fc00:3001::100", "udp88", polio.SvcT_SVCT_DEF, []string{bwc1000.HashHex()})
+	m1.AddServiceWithConstraints(snip.ProtocolUDP, 88, "fc00:3001::100", "udp88", polio.SvcT_SVCT_DEF, []string{policy.HashHex(bwc1000)})
 	require.True(t, m1.Includes(m2))
 	require.False(t, m2.Includes(m1))
 
@@ -85,7 +85,7 @@ func TestIncludesWithConstraints(t *testing.T) {
 	require.False(t, m2.Includes(m1))
 
 	// m3 gets same service as m1 including constraint
-	m3.AddServiceWithConstraints(snip.ProtocolUDP, 88, "fc00:3001::100", "udp88", polio.SvcT_SVCT_DEF, []string{bwc1000.HashHex()})
+	m3.AddServiceWithConstraints(snip.ProtocolUDP, 88, "fc00:3001::100", "udp88", polio.SvcT_SVCT_DEF, []string{policy.HashHex(bwc1000)})
 	require.True(t, m1.Includes(m3))
 	require.True(t, m3.Includes(m1))
 	require.False(t, m3.Includes(m2))
@@ -171,7 +171,7 @@ func TestParsesConstraints(t *testing.T) {
 	m1 := policy.NewServiceMeshFromPolicy(p1)
 
 	m2 := policy.NewServiceMesh()
-	m2.AddServiceWithConstraints(snip.ProtocolUDP, 88, "fc00:3001::100", "udp88", polio.SvcT_SVCT_DEF, []string{bwc1000.HashHex()})
+	m2.AddServiceWithConstraints(snip.ProtocolUDP, 88, "fc00:3001::100", "udp88", polio.SvcT_SVCT_DEF, []string{policy.HashHex(bwc1000)})
 
 	require.True(t, m1.Includes(m2), "m1 should INCLUDE m2")
 	require.True(t, m2.Includes(m1), "m2 should INCLUDE m1")

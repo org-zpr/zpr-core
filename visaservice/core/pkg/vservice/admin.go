@@ -19,8 +19,6 @@ import (
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice/adb"
-
-	"zpr.org/vsx/polio"
 )
 
 // 'admin.go' implements the parts of the admin service applicable to the visa service.
@@ -63,7 +61,7 @@ type VisaDescriptor struct {
 // Visa Service API that admin service needs to do its job.
 type VSApi interface {
 	GetPolicyAndConfig() (*policy.Policy, uint64)
-	InstallPolicy(*polio.ContainedPolicy) (string, uint64, error) // returns (version, config_id, error)
+	InstallPolicy(*policy.ContainedPolicy) (string, uint64, error) // returns (version, config_id, error)
 	ListVisas() []*VisaDescriptor
 	ListAdapters() []*adb.HostRecordBrief
 	ListNodes() []*adb.NodeRecordBrief
@@ -215,7 +213,7 @@ func (svc *AdminService) handleInstallPolicy(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	expectFormat := fmt.Sprintf("base64;zip;%d", polio.SerialVersion)
+	expectFormat := fmt.Sprintf("base64;zip;%d", policy.SerialVersion)
 
 	if bundle.Format != expectFormat {
 		http.Error(w, "incompatible policy serialization schema", http.StatusBadRequest)
@@ -235,7 +233,7 @@ func (svc *AdminService) handleInstallPolicy(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "policy unmarshal failed", http.StatusBadRequest)
 		return
 	}
-	containedPol, err := polio.OpenContainedPolicy(polcont, svc.policyCheckingKey)
+	containedPol, err := policy.OpenContainedPolicy(polcont, svc.policyCheckingKey)
 	if err != nil {
 		svc.log.WithError(err).Error("admin service: failed to open policy container")
 		http.Error(w, "policy open failed", http.StatusBadRequest)
