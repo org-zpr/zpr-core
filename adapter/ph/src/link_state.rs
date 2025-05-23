@@ -6,7 +6,6 @@ use crate::km::ZPIPair;
 use crate::km_multiplexor;
 use crate::logging::targets::LINK_STATE;
 use crate::mgmt;
-use crate::mgmt::core::SyncReqError;
 use crate::net_defs::IpAddress;
 use crate::sample_ring::SampleRing;
 use crate::special_peers;
@@ -191,7 +190,6 @@ pub enum LinkStatus {
 pub struct LinkData {
     echo_success: u64, // Echo requests received response
     echo_timeout: u64, // Echo requests timed out
-    echo_failure: u64, // Echo requests failed for other reasons
     // TODO: configurable keep-alive period
     // For now, keep-alives are attempted every 3 seconds
     // Assuming no loss, 100 samples will store 5 minutes of latency data
@@ -203,7 +201,6 @@ impl LinkData {
         Self {
             echo_success: 0,
             echo_timeout: 0,
-            echo_failure: 0,
             latency_data: SampleRing::new(Duration::ZERO),
         }
     }
@@ -1160,6 +1157,7 @@ impl LinkStateWrapper {
     pub fn run_active(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
         let task_asm = asm.clone();
+        let task_events = self.events.clone();
         asm.counters[CounterType::PeerHandshakeSuccess].increment();
         debug!(target: LINK_STATE, "Link {link_id} entering active state");
         tokio::task::spawn_local(async move {
@@ -1175,33 +1173,54 @@ impl LinkStateWrapper {
                 if peer.link_state_machine.locked_fsm.lock().unwrap().state != LinkState::Active {
                     return;
                 }
-                let response = mgmt::requests::send_echo_request(&task_asm, link_id).await;
-                match response {
-                    Ok(()) => {
-                        let mut link_data = peer.link_state_machine.locked_data.lock().unwrap();
-                        link_data.echo_success += 1;
-                        link_data
-                            .latency_data
-                            .add(Instant::now().duration_since(start_time));
-                        consecutive_misses = 0;
-                    }
-                    Err(SyncReqError::Timeout) => {
-                        peer.link_state_machine
-                            .locked_data
-                            .lock()
-                            .unwrap()
-                            .echo_timeout += 1;
-                        consecutive_misses += 1;
-                    }
-                    Err(_) => {
-                        peer.link_state_machine
-                            .locked_data
-                            .lock()
-                            .unwrap()
-                            .echo_failure += 1;
-                        consecutive_misses += 1;
-                    }
+
+                let mut recv = task_events.subscribe();
+
+                let sent_seq_num = mgmt::requests::send_echo_request(&task_asm, link_id).await;
+                let expected_seq_num = (sent_seq_num & 0xffff) as u16;
+
+                let got_response =
+                    tokio::time::timeout(config::DEFAULT_REQUEST_RETRY_TIMER,
+                        async {
+                            loop {
+                                match recv.recv().await {
+                                    Ok(LinkEvent::ReceivedEchoResponse { sequence_number: recvd_seq_num }) => {
+                                        if recvd_seq_num == expected_seq_num {
+                                            break true;
+                                        } else {
+                                            debug!(target: LINK_STATE, "Link {link_id} saw echo response {recvd_seq_num} while waiting for {expected_seq_num}");
+                                        }
+                                    }
+
+                                    Ok(_) => (),
+
+                                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                                        debug!(target: LINK_STATE, "Link {link_id} lagged waiting for echo response (unexpected)");
+                                    }
+
+                                    Err(broadcast::error::RecvError::Closed) => {
+                                        break false;  // we'll exit next time through the loop
+                                    }
+                                }
+                            }
+                        }).await.unwrap_or(false);
+
+                drop(recv);
+
+                let mut link_data = peer.link_state_machine.locked_data.lock().unwrap();
+
+                if got_response {
+                    link_data.echo_success += 1;
+                    link_data
+                        .latency_data
+                        .add(Instant::now().duration_since(start_time));
+                    consecutive_misses = 0;
+                } else {
+                    link_data.echo_timeout += 1;
+                    consecutive_misses += 1;
                 }
+
+                drop(link_data);
 
                 if consecutive_misses >= config::DEFAULT_KEEP_ALIVE_RETRIES {
                     if task_asm
@@ -1289,7 +1308,6 @@ impl Display for LinkData {
         write!(f, "  Echo stats:\n")?;
         write!(f, "    Successes: {}\n", self.echo_success)?;
         write!(f, "    Timeouts: {}\n", self.echo_timeout)?;
-        write!(f, "    Other failures: {}\n", self.echo_failure)?;
         write!(
             f,
             "    Latency: Min {:?}, Max {:?}, Avg {average:?}\n",

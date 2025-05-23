@@ -77,16 +77,31 @@ pub async fn handle_echo_request(
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let _hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
+    hdr.sequence_number = ((seq_num & 0xffff) as u16).into();
 
-    super::core::send_non_flow_mgmt_response(
+    super::core::send_non_flow_mgmt(
         asm,
         ingress_link_id,
         zdp::ZdpPacketType::EchoResponse,
-        seq_num,
         rsp_pkt,
     )
     .await;
+
+    Ok(())
+}
+
+pub async fn handle_echo_response(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
+    let Ok(hdr) = zdp::ZdpEchoHeader::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+
+    let _ = asm.process_link_state_event(
+        pkt.metadata().ingress_link_id,
+        LinkEvent::ReceivedEchoResponse {
+            sequence_number: hdr.sequence_number.into(),
+        },
+    );
 
     Ok(())
 }

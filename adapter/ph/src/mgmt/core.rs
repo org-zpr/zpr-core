@@ -8,7 +8,6 @@ use crate::config;
 use crate::counters::CounterType;
 use crate::packet::Packet;
 use crate::zdp;
-use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
 use tracing::*;
@@ -39,8 +38,10 @@ pub async fn send_non_flow_mgmt(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     packet: Packet,
-) {
-    send_mgmt_helper(asm, link_id, packet_type, None, None, packet).await
+) -> zpr::SeqNum {
+    let seq_num = 0; // TODO, zpr-core/839
+    send_mgmt_helper(asm, link_id, packet_type, None, None, packet).await;
+    seq_num
 }
 
 /// Send a unidirectional per-flow management message on the given link.
@@ -227,7 +228,7 @@ async fn send_sync_req_helper(
                 drop(permit);
                 return match_received(asm, response.ok(), SyncReqError::LinkClosed, zdp_response_type);
             }
-            _ = sleep(Duration::from_secs(config::DEFAULT_REQUEST_RETRY_TIMER as u64)) => ()
+            _ = sleep(config::DEFAULT_REQUEST_RETRY_TIMER) => ()
         }
     }
 

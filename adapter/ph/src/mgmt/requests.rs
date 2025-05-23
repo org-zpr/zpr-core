@@ -6,7 +6,6 @@ use crate::auth::ZdpInitAuthenticationPayload;
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
-use crate::mgmt::core::SyncReqError;
 use crate::zdp;
 use crate::{assembly::Assembly, auth};
 
@@ -37,28 +36,16 @@ pub async fn send_key_management(
 
 #[allow(dead_code)]
 /// send a Discard message (RFC 6.5 § 6.3.1)
-pub async fn send_discard(asm: &Assembly, link_id: zpr::LinkId) {
+pub async fn send_discard(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
     let pkt = core::new_heap_packet();
-    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await;
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt).await
 }
 
-/// send an Echo Request and wait for the Response (RFC 6.5 § 6.3.2)
-pub async fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> Result<(), SyncReqError> {
-    let mut echo = core::send_sync_non_flow_req(
-        asm,
-        link_id,
-        zdp::ZdpPacketType::EchoRequest,
-        zdp::ZdpPacketType::EchoResponse,
-        move |_packet| {},
-    )
-    .await?;
-
-    // TODO: Break these apart
-    let Ok(_) = zdp::ZdpEchoHeader::read_from_buf(&mut echo) else {
-        core::count_event(asm, &mut echo, CounterType::BadStructure);
-        return Err(SyncReqError::ProtocolError);
-    };
-    Ok(())
+/// send an Echo Request (RFC 6.5 § 6.3.2)
+pub async fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
+    let mut pkt = core::new_heap_packet();
+    pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::EchoRequest, pkt).await
 }
 
 /// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
