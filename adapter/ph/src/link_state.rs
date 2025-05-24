@@ -922,7 +922,7 @@ impl LinkStateWrapper {
                 } else {
                     // Bootstrap not allowed or not configured.
                     locked_fsm.set_state(LinkState::RegisterAA);
-                    info!(target: LINK_STATE, "Link {link_id} received init auth **TIME TO TALK TO AUTH SERVICE**");
+                    info!(target: LINK_STATE, "Link {link_id} received init auth, time to talk to authentication service");
 
                     // TODO: Presumably we would get the ZPR address of the auth service
                     //       from our node somehow. What about the cert?
