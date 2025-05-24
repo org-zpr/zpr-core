@@ -22,6 +22,7 @@ dock_node = "node"
 admin_attrs = [ ["device.zpr.adapter.cn", "client.zpr.org"] ]
 
 [bootstrap]
+"vs" = "actorvs.pem"
 "adapter1" = "actor1.pem"
 "adapter2" = "actor2.pem"
 "adapter3" = "actor3.pem"
