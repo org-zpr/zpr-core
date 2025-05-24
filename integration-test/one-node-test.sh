@@ -118,6 +118,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --ca-file ca.crt \
   --certificate-file vs.zpr.crt \
   --private-key-file vs.zpr.key \
+  --bootstrap-key actorvs-rsa.key \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
   --node-public-key-file node.pubkey \
