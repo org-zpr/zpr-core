@@ -75,6 +75,7 @@ cp "$PREGEN/node-pubkey.pem" node.pubkey
 cp "$PREGEN/actor1-rsa.key" actor1-rsa.key
 cp "$PREGEN/actor2-rsa.key" actor2-rsa.key
 cp "$PREGEN/actor3-rsa.key" actor3-rsa.key
+cp "$PREGEN/actorvs-rsa.key" actor3-rsa.key
 
 emit_vs_config ca vs.zpr > vs-config.yaml
 
