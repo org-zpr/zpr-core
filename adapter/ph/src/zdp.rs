@@ -115,7 +115,6 @@ pub struct ZdpPerFlowHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpEchoHeader {
-    pub base_header: ZdpBaseHeader,
     pub sequence_number: U16, // Only used for the response
     pub additional_length: U16,
 }
