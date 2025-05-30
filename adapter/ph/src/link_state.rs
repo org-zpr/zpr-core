@@ -595,16 +595,12 @@ impl LinkStateWrapper {
             let link_id = self.id;
             let task_asm = asm.clone();
             tokio::task::spawn_local(async move {
-                let status = mgmt::requests::send_hello_request(
+                mgmt::requests::send_hello_request(
                     &task_asm,
                     link_id,
                     &task_asm.local_zpr_addresses,
                 )
-                .await?;
-
-                task_asm
-                    .process_link_state_event(link_id, LinkEvent::ReceivedHelloResponse(status))
-                    .map_err(|_| ())
+                .await
             });
         }
         // Otherwise, wait for the adapter to reach out

@@ -63,46 +63,24 @@ pub async fn send_hello_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
     actor_addrs: &[IpAddr],
-) -> Result<zdp::ResponseCode, ()> {
+) -> zpr::SeqNum {
     if actor_addrs.is_empty() {
         panic!("send_hello_request requires at least one local ZPR address");
     }
     let actor_addr = actor_addrs[0].to_owned();
-    let response = core::send_sync_non_flow_req(
-        asm,
-        link_id,
-        zdp::ZdpPacketType::HelloRequest,
-        zdp::ZdpPacketType::HelloResponse,
-        move |mut req| {
-            let hdr = zdp::ZdpHelloRequestHeader {
-                ip_version: actor_addr.l3_type(),
-            };
-            hdr.write_to_buf(&mut req).unwrap();
-            match actor_addr {
-                IpAddr::V4(addr) => req.put(&addr.octets()[..]),
-                IpAddr::V6(addr) => req.put(&addr.octets()[..]),
-            }
-        },
-    )
-    .await;
 
-    // TODO: Break these apart
-    match response {
-        Ok(mut hello_res) => {
-            let Ok(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut hello_res) else {
-                core::count_event(asm, &mut hello_res, CounterType::BadStructure);
-                return Err(());
-            };
-            let status = hdr.status;
-            debug!(target: ZDP, "Link {link_id}: received HelloResponse, status: {status:?}");
-            Ok(status)
-        }
+    let mut req = core::new_heap_packet();
 
-        Err(err) => {
-            warn!(target: ZDP, "Link {link_id}: error with HelloRequest: {err}");
-            Err(())
-        }
+    let hdr = zdp::ZdpHelloRequestHeader {
+        ip_version: actor_addr.l3_type(),
+    };
+    hdr.write_to_buf(&mut req).unwrap();
+    match actor_addr {
+        IpAddr::V4(addr) => req.put(&addr.octets()[..]),
+        IpAddr::V6(addr) => req.put(&addr.octets()[..]),
     }
+
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, req).await
 }
 
 /// Send Init Authentication (NOT YET IN RFC 6)

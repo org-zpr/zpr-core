@@ -234,7 +234,7 @@ pub async fn handle_terminate_indication(
 /// Reads the hello, fire a ReceivedHelloRequest event, and then sends a response.
 pub async fn handle_hello_request(
     asm: &Arc<Assembly>,
-    seq_num: zpr::SeqNum,
+    _seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
@@ -282,14 +282,28 @@ pub async fn handle_hello_request(
         Ok(()) => zdp::ResponseCode::Success,
     };
 
-    super::core::send_non_flow_mgmt_response(
+    super::core::send_non_flow_mgmt(
         asm,
         ingress_link_id,
         zdp::ZdpPacketType::HelloResponse,
-        seq_num,
         rsp_pkt,
     )
     .await;
+
+    Ok(())
+}
+
+pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
+    let Ok(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+
+    let link_id = pkt.metadata().ingress_link_id;
+    let status = hdr.status;
+    debug!(target: ZDP, "Link {link_id}: received HelloResponse, status: {status:?}");
+    let _ = asm
+        .process_link_state_event(link_id, LinkEvent::ReceivedHelloResponse(status))
+        .map_err(|_| ());
 
     Ok(())
 }

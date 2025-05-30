@@ -99,6 +99,8 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
 
             ZdpPacketType::HelloRequest => handlers::handle_hello_request(asm, seq_num, pkt).await,
 
+            ZdpPacketType::HelloResponse => handlers::handle_hello_response(asm, pkt).await,
+
             ZdpPacketType::InitAuthenticationRequest => {
                 handlers::handle_init_authentication_request(asm, seq_num, pkt).await
             }
