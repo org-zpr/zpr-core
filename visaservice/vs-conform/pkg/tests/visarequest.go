@@ -14,7 +14,7 @@ import (
 type VisaRequest struct{}
 
 func init() {
-	testfw.Register(&VisaRequest{})
+	// testfw.Register(&VisaRequest{})  // TODO: test needs to use bootstrap auth
 }
 
 func (t *VisaRequest) Name() string {

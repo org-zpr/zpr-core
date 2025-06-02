@@ -11,6 +11,8 @@ import (
 	"zpr.org/vsx/polio"
 )
 
+const KAttrCN = "device.zpr.adapter.cn"
+
 var zeroAddr = netip.Addr{}
 
 // ConnectRec is collection of useful bits of data from
@@ -48,7 +50,7 @@ func NewConnectRec(attrs map[string]*AExp) *ConnectRec {
 		if k == "zpr.addr" && kexp.Op == "EQ" {
 			rec.Addr = netip.MustParseAddr(kexp.Value)
 		}
-		if k == "zpr.adapter.cn" && kexp.Op == "EQ" {
+		if k == KAttrCN && kexp.Op == "EQ" {
 			rec.CN = kexp.Value
 		}
 	}
@@ -283,7 +285,7 @@ func CreateNodeActor(pol *polio.Policy, expires time.Duration) (*vsapi.Actor, er
 
 	claims := make(map[string]string)
 	if nodeCR.CN != "" {
-		claims["zpr.adapter.cn"] = nodeCR.CN
+		claims[KAttrCN] = nodeCR.CN
 	}
 
 	var provides []string
