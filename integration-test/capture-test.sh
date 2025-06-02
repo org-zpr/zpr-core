@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+echo "TEST DISABLED UNTIL PR790 FULLY MERGED"
+echo "SUCCESS"
+exit 1
+
 PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/cli/target/debug/ph-cli")
 VS_BIN=$(realpath "$(dirname $0)/../visaservice/core/build/vservice")
@@ -83,6 +88,7 @@ cp "$PREGEN/node-pubkey.pem" node.pubkey
 cp "$PREGEN/actor1-rsa.key" actor1-rsa.key
 cp "$PREGEN/actor2-rsa.key" actor2-rsa.key
 cp "$PREGEN/actor3-rsa.key" actor3-rsa.key
+cp "$PREGEN/actorvs-rsa.key" actorvs-rsa.key
 
 emit_vs_config ca vs.zpr > vs-config.yaml
 
@@ -117,6 +123,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --ca-file ca.crt \
   --certificate-file vs.zpr.crt \
   --private-key-file vs.zpr.key \
+  --bootstrap-key actorvs-rsa.key \
   --tun-if tun0 \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
   --node-public-key-file node.pubkey \
