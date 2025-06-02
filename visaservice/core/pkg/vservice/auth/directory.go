@@ -1,24 +1,24 @@
 package auth
 
 import (
-	"context"
+	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
+	"io"
+	"net/http"
 	"net/netip"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
 	"zpr.org/vsx/snio/zds"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/status"
 )
 
 const AuthServiceTimeout = 77 * time.Second
@@ -34,10 +34,18 @@ var (
 // DSFeatures for data source features
 type DSFeatures struct {
 	SupportValidation bool
-	ValidationAPIVer  int
+	ValidationUri     string
 	SupportQuery      bool
-	QueryAPIVer       int
+	QueryUri          string
+	TLSDomain         string // optional TLS domain name
 }
+
+type OAuthValidateResponse struct {
+	AccessToken string // JWT
+	ExpiresIn   time.Duration
+}
+
+type NewQueryResponse struct{} // TODO
 
 func (f *DSFeatures) ShortStr() string {
 	if f.SupportValidation && f.SupportQuery {
@@ -56,11 +64,12 @@ type VLoc struct {
 	configID      uint64 // Config ID when actor connected and was permitted to add itself
 	contactAddr   netip.Addr
 	Prefix        string // The data source prefix for this source
-	Domain        string // Must match the TLS cert
-	grpcPort      uint16 // connection port
+	Domain        string // Used for TLS (must match the TLS cert)
 	log           logr.Logger
 	allowQuery    bool
 	allowValidate bool
+	queryUri      string
+	validationUri string
 }
 
 // Directory manages a collection of (external) validators (ie, simplev)
@@ -109,59 +118,97 @@ func (vs *Directory) Size() int {
 // For authority type revocations we use the authority key fingerprint.
 //
 // Returns ErrNotSupported if domain (why not prefix?) does not support validate.
-func (vs *Directory) Validate(dsPrefix string, msg *zds.ValidateRequest, revokes []*snauth.CredID) (*ValidateResult, error) {
-	// TODO: This is old prototype valdation system
-	return nil, fmt.Errorf("external validation not supported")
-	/*
-		vs.mtx.RLock()
-		v, ok := vs.m[dsPrefix]
-		if ok && !v.allowValidate {
-			return nil, ErrNotSupported
-		}
-		vs.mtx.RUnlock()
-		if !ok {
-			return nil, errUnknownValidator
-		}
-		pool, domFinger, err := vs.certPoolForDomain(v.Domain, revokes)
+func (vs *Directory) Validate(dsPrefix string, msg *ZdpAuthCodeBlob, revokes []*snauth.CredID) (*ValidateResult, error) {
+	vs.mtx.RLock()
+	v, ok := vs.m[dsPrefix]
+	if ok && !v.allowValidate {
+		return nil, ErrNotSupported
+	}
+	vs.mtx.RUnlock()
+	if !ok {
+		return nil, errUnknownValidator
+	}
+
+	var err error
+	var pool *x509.CertPool
+	var domFinger *snauth.Fingerprint
+	if v.Domain != "" {
+		pool, domFinger, err = vs.certPoolForDomain(v.Domain, revokes)
 		if err != nil {
 			return nil, err
 		}
-		resp, pfx, err := v.validate(pool, msg)
-		if err != nil {
-			if errors.Is(err, ErrNotSupported) {
-				vs.mtx.Lock()
-				v.allowValidate = false
-				vs.mtx.Unlock()
-			}
-			return nil, err
+	}
+	resp, err := v.validate(pool, msg)
+	if err != nil {
+		if errors.Is(err, ErrNotSupported) {
+			vs.mtx.Lock()
+			v.allowValidate = false
+			vs.mtx.Unlock()
 		}
-		// The external service may succeed but the credential may be revoked.
-		// So need to check the JTI.
-		if jti := snauth.GetStrClaimFromJWTStr("jti", string(resp.GetToken())); jti != "" {
-			for _, cd := range revokes {
-				if cd.CType == snauth.CredIDTypeCertificate {
-					if cd.ID == jti {
-						vs.log.Info("auth fails due to revoked credential", "credential_id", cd.ID)
-						return nil, errAuthRevoked
-					}
+		return nil, err
+	}
+	// The external service may succeed but the credential may be revoked.
+	// So need to check the JTI.
+	if jti := snauth.GetStrClaimFromJWTStr("jti", resp.AccessToken); jti != "" {
+		for _, cd := range revokes {
+			if cd.CType == snauth.CredIDTypeCertificate {
+				if cd.ID == jti {
+					vs.log.Info("auth fails due to revoked credential", "credential_id", cd.ID)
+					return nil, errAuthRevoked
 				}
 			}
 		}
-		vres := &ValidateResult{
-			Prefix: pfx,
-			VResp:  resp,
+	}
+
+	expiration := time.Now().Add(resp.ExpiresIn)
+	exp := snauth.GetStrClaimFromJWTStr("exp", resp.AccessToken)
+	if exp != "" {
+		if expInt, err := strconv.ParseInt(exp, 10, 64); err == nil {
+			exptime := time.Unix(expInt, 0)
+			if exptime.Before(expiration) {
+				expiration = exptime // JWT is earlier than expiresIn so use that.
+			}
 		}
-		// Add the key fingerprint for this domain auth to the response.
-		if domFinger != nil {
-			vres.DomainCredID = domFinger.String()
+	}
+
+	// ZPR allows setting attributes in tokens using claims with "zpra/"
+	claims := vs.parseZPRClaimsFromJWT(resp.AccessToken, expiration)
+
+	vres := &ValidateResult{
+		Prefix:     dsPrefix,
+		Token:      string(resp.AccessToken),
+		Attrs:      claims,
+		Expiration: expiration,
+	}
+	// Add the key fingerprint for this domain auth to the response.
+	if domFinger != nil {
+		vres.DomainCredID = domFinger.String()
+	}
+	return vres, nil
+}
+
+// parseZPRClaimsFromJWT parses the ZPR special properties from the JWT and returns a map of claims.
+//
+// The ZPR properties start with "zpra/" and are attribute/value pairs.
+func (vs *Directory) parseZPRClaimsFromJWT(jwtStr string, expiration time.Time) map[string]*actor.ClaimV {
+	claims := make(map[string]*actor.ClaimV)
+	jwtClaims, err := snauth.GetAllClaimsAsStrings(jwtStr)
+	if err != nil {
+		vs.log.WithError(err).Error("failed to parse JWT claims", "jwt", jwtStr)
+		return nil
+	}
+	for jwtKey, jwtVal := range jwtClaims {
+		if strings.HasPrefix(jwtKey, "zpra/") {
+			keyv := strings.TrimPrefix(jwtKey, "zpra/")
+			claims[keyv] = actor.NewClaimV(jwtVal, expiration)
 		}
-		return vres, nil
-	*/
+	}
+	return claims
 }
 
 // QueryByPrefix may return ErrNotSupported if the datasource does not support query.
 // If prefix is unknown returns ErrUnknownPrefix
-func (vs *Directory) QueryByPrefix(pfx string, req *zds.QueryRequest, revokes []*snauth.CredID) (*zds.QueryResponse, error) {
+func (vs *Directory) QueryByPrefix(pfx string, req *zds.QueryRequest, revokes []*snauth.CredID) (*NewQueryResponse, error) {
 	vs.mtx.RLock()
 	vloc, ok := vs.m[pfx]
 	vs.mtx.RUnlock()
@@ -208,32 +255,27 @@ func (vs *Directory) certPoolForDomain(domain string, revokes []*snauth.CredID) 
 
 // AddLocalService registers the validation service
 // It is ok to add same service more than once (does not change underlying DB)
-func (vs *Directory) AddService(prefix, domain string, contactAddr netip.Addr, port uint16, features *DSFeatures, configID uint64) error {
+func (vs *Directory) AddService(prefix string, contactAddr netip.Addr, features *DSFeatures, configID uint64) error {
 	if !contactAddr.IsValid() || contactAddr.IsUnspecified() {
 		return errInvalidAddress
 	}
-	vs.log.Debug("AddService", "domain", domain)
+	vs.log.Debug("AddService", "prefix", prefix)
 	vs.mtx.Lock()
 	defer vs.mtx.Unlock()
-	if exist, found := vs.m[prefix]; found {
-		if exist.contactAddr == contactAddr && exist.Domain == domain && exist.grpcPort == port {
-			// Already there.
-			return nil
-		}
-		// Else we silently overwrite...
-	}
+
 	vs.log.Info("adding validations service",
-		"domain", domain, "prefix", prefix, "support", features.ShortStr(), "addr", contactAddr,
+		"prefix", prefix, "support", features.ShortStr(), "addr", contactAddr,
 		"configID", configID)
 	vs.m[prefix] = &VLoc{
 		configID:      configID,
 		contactAddr:   contactAddr,
 		Prefix:        prefix,
-		Domain:        domain,
-		grpcPort:      port,
 		log:           vs.log,
 		allowQuery:    features.SupportQuery,
 		allowValidate: features.SupportValidation,
+		queryUri:      features.QueryUri,
+		validationUri: features.ValidationUri,
+		Domain:        features.TLSDomain,
 	}
 	return nil
 }
@@ -273,116 +315,80 @@ func (vs *Directory) HasAuthPrefix(p string) bool {
 	return found
 }
 
-// validate makes the grpc call to validate the actor.  The message includes the
-// challenge that the node generated as well as the response from the entity.
-//
-// This is called on the VLoc for the stated domain. We send a validation
-// message to the node.
-//
-// Returns the PREFIX along with the response.
-func (v *VLoc) validate(pool *x509.CertPool, msg *zds.ValidateRequest) (*zds.ValidateResponse, string, error) {
-	domain := v.Domain
-
-	// Note -- let's try a few times to connect to the validator in order
-	//         to possibly give the first CA time to bring it up.
-
-	creds := credentials.NewClientTLSFromCert(pool, "")
-	// The gRPC call below dials a surenet private IP address which will not
-	// match the CN on the cert.  This next call sets the server name on the
-	// request to the auth domain which must be the CN on the cert.
-	if err := creds.OverrideServerName(domain); err != nil {
-		v.log.WithError(err).Error("OverrideServerName failed, validation fails")
-	}
-
-	// TODO: If cert match fails we should remove this validator.
-	var err error
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(creds),
-	}
-	cstr := fmt.Sprintf("[%v]:%d", v.contactAddr.String(), v.grpcPort)
-	v.log.Debug("opening grpc connection to validator", "conn", cstr)
-	var conn *grpc.ClientConn
-	for i := 0; i < 5; i++ {
-		if i > 0 {
-			time.Sleep(time.Duration(math.Exp2(float64(i))) * time.Second)
-		}
-		conn, err = grpc.Dial(cstr, opts...)
-		if err != nil {
-			v.log.WithError(err).Error("dial failed while attempting to contact validator")
-		} else {
-			break
-		}
-	}
-	if err != nil {
-		return nil, v.Prefix, err
-	}
-
-	cli := zds.NewZDSClient(conn)
-	defer conn.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), AuthServiceTimeout)
-	defer cancel()
-
-	for i := 0; i < 5; i++ {
-		if i > 0 {
-			time.Sleep(time.Duration(math.Exp2(float64(i))) * time.Second)
-		}
-		resp, err := cli.AValidate(ctx, msg)
-		if err != nil {
-			v.log.WithError(err).Error("validate RPC call failed")
-		} else {
-			// The VLoc manages the prefix.  Here we run through the claims and attach the
-			// correct prefix.
-			var pfxClaims []*zds.Attribute
-			for _, aKV := range resp.Attrs {
-				// An auth service should not be using its prefix (it used to -- this is a sanity check)
-				if strings.HasPrefix(aKV.Key, v.Prefix) {
-					v.log.DPanic("auth service should not return claim with prefix", "key", aKV.Key)
-				}
-				pfxClaims = append(pfxClaims, &zds.Attribute{
-					Key: fmt.Sprintf("%v.%v", v.Prefix, aKV.Key), // Now with prefix!
-					Val: aKV.Val,
-					Exp: aKV.Exp,
-				})
-			}
-			resp.Attrs = pfxClaims
-			return resp, v.Prefix, nil
-		}
-	}
-	return nil, v.Prefix, errValidateFail
+// JSON struct returned from the oauth token request interface on an Authorization service.
+type AuthorizationToken struct {
+	AccessToken  string `json:"access_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    uint64 `json:"expires_in"`
+	RefreshToken string `json:"refresh_token"`
+	Error        string `json:"error"`
 }
 
-func (v *VLoc) query(req *zds.QueryRequest, pool *x509.CertPool) (*zds.QueryResponse, error) {
-	creds := credentials.NewClientTLSFromCert(pool, "")
-	if err := creds.OverrideServerName(v.Domain); err != nil {
-		return nil, fmt.Errorf("override server name failed: %w", err)
-	}
-	var err error
-	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(creds),
-	}
-	cstr := fmt.Sprintf("[%v]:%d", v.contactAddr.String(), v.grpcPort)
-	v.log.Debug("opening grpc connection to data source", "conn", cstr)
-	conn, err := grpc.Dial(cstr, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("dial failed while attempting to contact validator: %w", err)
-	}
-	cli := zds.NewZDSClient(conn)
-	defer conn.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), AuthServiceTimeout)
-	defer cancel()
+// TODO: Enable real checking of the auth service cert on TLS.
+// TODO: Not sure why we are using a CertPool and not just passing a certificate?
+func (v *VLoc) validate(cert *x509.CertPool, checkBlob *ZdpAuthCodeBlob) (*OAuthValidateResponse, error) {
 
-	resp, err := cli.DQuery(ctx, req)
-	if err != nil {
-		if e, ok := status.FromError(err); ok {
-			switch e.Code() {
-			case codes.Unimplemented:
-				return nil, ErrNotSupported
-			}
-		}
-		return nil, err
+	tr := &http.Transport{
+		ResponseHeaderTimeout: 5 * time.Second,
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 	}
-	return resp, nil
+	client := &http.Client{
+		Transport: tr,
+		Timeout:   6 * time.Second,
+	}
+
+	// Post to try to get an authorization token.
+	// Need to send form-encoded data.
+	formData := url.Values{}
+	formData.Set("grant_type", "authorization_code")
+	formData.Set("code", checkBlob.Code)
+	formData.Set("client_id", checkBlob.ClientId)
+	formData.Set("redirect_url", "auth.zpr")
+
+	v.log.Info("contacting auth service for validation", "uri", v.validationUri, "client", checkBlob.ClientId)
+	resp, err := client.PostForm(v.validationUri, formData)
+	if err != nil {
+		// TODO: Not sure if error is set for non-200 responses...
+		v.log.WithError(err).Error("failed to contact auth service", "uri", v.validationUri, "service", v.Prefix)
+		return nil, fmt.Errorf("request for auth token failed")
+	}
+
+	defer resp.Body.Close()
+	jsonData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		v.log.WithError(err).Error("failed to read auth service response", "uri", v.validationUri, "service", v.Prefix)
+		return nil, fmt.Errorf("i/o error with auth service")
+	}
+	var tokenResp AuthorizationToken
+	if err = json.Unmarshal(jsonData, &tokenResp); err != nil {
+		v.log.WithError(err).Error("failed to parse auth service response", "uri", v.validationUri, "service", v.Prefix, "data", string(jsonData))
+		return nil, fmt.Errorf("failed to parse auth service response")
+	}
+	if resp.StatusCode != http.StatusOK || tokenResp.Error != "" {
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("(%d) ", resp.StatusCode))
+		if tokenResp.Error != "" {
+			sb.WriteString(tokenResp.Error)
+		} else {
+			sb.WriteString("unknown error")
+		}
+		errMsg := sb.String()
+		v.log.Warn("auth service retruns error", "uri", v.validationUri, "service", v.Prefix, "code", resp.StatusCode, "message", errMsg)
+		return nil, fmt.Errorf("auth service denied token: %s", errMsg)
+	}
+	return &OAuthValidateResponse{
+		AccessToken: tokenResp.AccessToken,
+		ExpiresIn:   time.Duration(tokenResp.ExpiresIn) * time.Second,
+	}, nil
+}
+
+// query used to make a GRPC query call. Needs to be reworked with a new HTTPS api.
+func (v *VLoc) query(req *zds.QueryRequest, pool *x509.CertPool) (*NewQueryResponse, error) {
+	//creds := credentials.NewClientTLSFromCert(pool, "")
+	//if err := creds.OverrideServerName(v.Domain); err != nil {
+	//	return nil, fmt.Errorf("override server name failed: %w", err)
+	//}
+	return nil, fmt.Errorf("not implemented")
 }
 
 // FilteredPool returns a CertPool with revoked certificates not included.

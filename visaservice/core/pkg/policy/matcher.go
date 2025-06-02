@@ -299,20 +299,20 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 	}
 
 	// Given the attributes, see what policies match.
-	matchedPolicies, err := m.matchAttrsToPolicies(state.Actor.GetAuthedClaims())
+	matchedPolicyIndexes, err := m.matchAttrsToPolicies(state.Actor.GetAuthedClaims())
 	if err != nil {
 		return nil, err
 	}
-	if len(matchedPolicies) == 0 {
+	if len(matchedPolicyIndexes) == 0 {
 		return nil, errNoMatch
 	}
 
-	for i, p := range matchedPolicies {
+	for _, pIdx := range matchedPolicyIndexes {
 		id := "unknown"
-		if pols := m.policy.GetPolicies(); len(pols) > int(p) {
-			id = pols[p].GetId()
+		if pols := m.policy.GetPolicies(); int(pIdx) < len(pols) {
+			id = pols[pIdx].GetId()
 		}
-		m.log.Debug(fmt.Sprintf("[MX] --> MatchConnect did match policy %d of %d", i+1, len(matchedPolicies)), "id", id)
+		m.log.Debug(fmt.Sprintf("[MX] --> MatchConnect did match policy %d of %d", pIdx+1, len(matchedPolicyIndexes)), "id", id)
 	}
 
 	var procsRan []uint32 // Matching connect PROCS (already ran)
@@ -329,8 +329,8 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 	state.Actor.SetAuthedClaim(actor.KAttrRole, &actor.ClaimV{V: "adapter", Exp: state.Actor.GetAuthExpires()})
 
 	for attrChanges > 0 {
-		matchedProcs := m.getProcsIfNotIn(matchedPolicies, procsRan)
-		m.log.Debug("[MX] -- MatchConnect actor matched", "policyCount", len(matchedPolicies), "procCount", len(matchedProcs))
+		matchedProcs := m.getProcsIfNotIn(matchedPolicyIndexes, procsRan)
+		m.log.Debug("[MX] -- MatchConnect actor matched", "policyCount", len(matchedPolicyIndexes), "procCount", len(matchedProcs))
 
 		for _, px := range matchedProcs {
 			proc := m.policy.GetProcs()[px]
@@ -365,20 +365,20 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 				return nil, err
 			}
 			// Add the policies if they are new to us.
-			prevMatchCount := len(matchedPolicies)
+			prevMatchCount := len(matchedPolicyIndexes)
 			for _, px := range morePolicies {
 				isNew := true
-				for _, i := range matchedPolicies {
+				for _, i := range matchedPolicyIndexes {
 					if i == px {
 						isNew = false
 						break
 					}
 				}
 				if isNew {
-					matchedPolicies = append(matchedPolicies, px)
+					matchedPolicyIndexes = append(matchedPolicyIndexes, px)
 				}
 			}
-			if prevMatchCount == len(matchedPolicies) {
+			if prevMatchCount == len(matchedPolicyIndexes) {
 				break // No change to policy set? We are done.
 			}
 		}
@@ -403,7 +403,7 @@ func (m *Matcher) MatchConnect(state *ConnectState) ([]string, error) {
 
 	// Get the list of unique actor keys that were used in matching a connect.
 	uniqs := make(map[string]bool)
-	for _, px := range matchedPolicies {
+	for _, px := range matchedPolicyIndexes {
 		for _, attrExpr := range m.policy.GetConnects()[px].GetAttrExprs() {
 			uniqs[m.policy.GetAttrKeyIndex()[attrExpr.Key]] = true
 		}

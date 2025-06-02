@@ -296,6 +296,8 @@ func (db *ActorDB) CloneNodesToBrief() []*NodeRecordBrief {
 	return list
 }
 
+// ActorAtContactAddr returns the actor record for the given address.
+// The only error condifition is if the actor is not found.
 func (db *ActorDB) ActorAtContactAddr(addr netip.Addr) (*actor.Actor, error) {
 	db.RLock()
 	defer db.RUnlock()

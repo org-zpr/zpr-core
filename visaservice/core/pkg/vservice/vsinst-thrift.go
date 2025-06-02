@@ -383,7 +383,7 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 	{
 		claims := make(map[string]string)
 		claims[actor.KAttrEPID] = naddr.String()
-		claims["zpr.adapter.cn"] = nodeCert.Subject.CommonName
+		claims[actor.KAttrCN] = nodeCert.Subject.CommonName
 		claims[actor.KAttrRole] = "node" // does ApproveConnection set this?
 
 		blob := auth.NewZdpSelfSignedBlobUnsiged(nodeCert.Subject.CommonName, req.Challenge.ChallengeData)
@@ -404,12 +404,14 @@ func (vs *VSInst) Authenticate(ctx context.Context, req *vsapi.NodeAuthRequest) 
 			Challenge:          nil,
 			ChallengeResponses: responses,
 		}
-		if realNodeActor, err = vs.ApproveConnection(&creq); err != nil {
+
+		realNodeActor, err = vs.asyncApproveConnection(&creq)
+		if err != nil {
 			vs.log.WithError(err).Warn("registration: ApproveConnection failed")
-			return "", fmt.Errorf("connection denied by policy")
-		} else {
-			vs.log.Info("registration: ApproveConnection successful", "actor", realNodeActor)
+			return "", fmt.Errorf("connection setup failed")
 		}
+
+		vs.log.Info("registration: ApproveConnection successful", "actor", realNodeActor)
 	}
 
 	// TODO: Need to fix this a bit. We used to rely on the nodes to keep the RAFT
@@ -516,7 +518,7 @@ func (vs *VSInst) AuthorizeConnect(ctx context.Context, key string, request *vsa
 	// credentials without checking.  I don't think we need or want that for ref-impl, but the arg is still
 	// there on the ApproveConnection function but we set it nil below.
 	var resp *vsapi.ConnectResponse
-	agnt, err := vs.ApproveConnection(request)
+	agnt, err := vs.asyncApproveConnection(request)
 	if err != nil {
 		strerr := err.Error()
 		resp = &vsapi.ConnectResponse{
@@ -621,4 +623,28 @@ func (vs *VSInst) RequestVisa(ctx context.Context, key string, srcTetherAddr []b
 	}
 
 	return vsResp, nil
+}
+
+const ApproveConnectionTimeout = 1 * time.Minute
+
+// ApproveConnection is long running and makes calls to various service.
+// We submit the task and wait for it to finish or we give up.
+func (vs *VSInst) asyncApproveConnection(creq *vsapi.ConnectRequest) (*actor.Actor, error) {
+	replyC := make(chan *VSMsgDone)
+	vs.vsMsgC <- &VSMsg{
+		MsgType:        MTApproveConnection,
+		ConnectRequest: creq,
+		ReplyC:         replyC,
+	}
+
+	select {
+	case doneMsg := <-replyC:
+		if doneMsg.Err != nil {
+			vs.log.WithError(doneMsg.Err).Warn("registration: ApproveConnection failed")
+			return nil, fmt.Errorf("connection denied")
+		}
+		return doneMsg.Actor, nil
+	case <-time.After(ApproveConnectionTimeout):
+		return nil, fmt.Errorf("connection setup timed out")
+	}
 }
