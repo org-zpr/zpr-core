@@ -14,6 +14,7 @@ use crate::zdp;
 use bytes::{Buf, BufMut};
 use std::num::NonZero;
 use std::sync::Arc;
+use thiserror::Error;
 use tracing::*;
 use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
@@ -22,8 +23,11 @@ use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 /// (It may be the case that the mgmt message itself indicates
 /// failure of a remote operation; modulo a parsing issue,
 /// handling such a message would still be considered successful.)
+#[derive(Debug, Error)]
 pub enum HandleMgmtError {
+    #[error("unknown packet type: {0}")]
     UnknownType(u8),
+    #[error("bad packet structure")]
     BadStructure,
 }
 

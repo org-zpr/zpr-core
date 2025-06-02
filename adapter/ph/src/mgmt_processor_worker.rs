@@ -1,6 +1,7 @@
 use crate::assembly::Assembly;
 use crate::counters::CounterType;
-use crate::logging::targets::ZDP;
+use crate::link_state::LinkEvent;
+use crate::logging::targets::{LINK_STATE, ZDP};
 use crate::mgmt;
 use crate::mgmt::handlers::{self, HandleMgmtError, HandleMgmtResult};
 use crate::packet::Packet;
@@ -34,7 +35,14 @@ pub async fn launch(
 
                 match handle_packet(&asm, pkt).await {
                     Ok(()) => (),
-                    Err((err, mut pkt)) => mgmt::core::count_event(&asm, &mut pkt, err.into()),
+                    Err((err, mut pkt)) => {
+                        let link_id = config.link_id.get();
+                        error!(target: ZDP, "Error handling packet received on link {link_id}: {err}");
+                        if let Err(e) = asm.process_link_state_event(link_id, LinkEvent::Error) {
+                            error!(target: LINK_STATE, "Error handling link error on link {link_id}: {e}");
+                        }
+                        mgmt::core::count_event(&asm, &mut pkt, err.into());
+                    }
                 }
             }
 
