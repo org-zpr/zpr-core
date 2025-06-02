@@ -67,10 +67,11 @@ message CPolicy {
 }
 
 enum SvcT {
-    SVCT_UNUSED    = 0;
-    SVCT_DEF       = 1;
-    SVCT_AUTH      = 2;
-    SVCT_DECORATOR = 3;
+    SVCT_UNUSED     = 0;
+    SVCT_DEF        = 1;
+    SVCT_AUTH       = 2; // visa service facing auth service
+    SVCT_DECORATOR  = 3;
+    SVCT_ACTOR_AUTH = 4; // actor facing auth service
 }
 
 
@@ -80,9 +81,8 @@ message Service {
     string name                 = 2; // service "provides" value
     string prefix               = 3; // datasource prefix
     string domain               = 4; // TLS domain
-    int32  query_api_version    = 5; // 0 means not support
-    int32  validate_api_version = 6; // 0 means not support
-    string addr                 = 7; // HOST:PORT (TCP is assumed and enforced by compiler)
+    string query_uri            = 5; // Empty, or needs an l7 protocol name and port.
+    string validate_uri         = 6; // Empty, or needs an l7 protocol name and port.
 }
 
 message Condition {
