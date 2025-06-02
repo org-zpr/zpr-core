@@ -22,7 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const SerialVersion = 42
+const SerialVersion = 43
 
 type Client struct {
 	vsaddr netip.AddrPort

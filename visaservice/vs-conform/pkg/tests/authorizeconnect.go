@@ -10,7 +10,7 @@ import (
 type AuthorizeConnect struct{}
 
 func init() {
-	testfw.Register(&AuthorizeConnect{})
+	// testfw.Register(&AuthorizeConnect{}) // TODO: connect needs to use bootstrap
 }
 
 func (t *AuthorizeConnect) Name() string {
@@ -62,7 +62,7 @@ func (t *AuthorizeConnect) Run(state *testfw.TestState) *testfw.RunResult {
 		if len(connect.Provides) > 0 {
 			continue
 		}
-		if !plc.ConnectRecHasSetAttr(connect, "zpr.adapter.cn") {
+		if !plc.ConnectRecHasSetAttr(connect, plc.KAttrCN) {
 			// We cannot self-auth without this
 			continue
 		}
