@@ -24,10 +24,11 @@ const (
 type SvcT int32
 
 const (
-	SvcT_SVCT_UNUSED    SvcT = 0
-	SvcT_SVCT_DEF       SvcT = 1
-	SvcT_SVCT_AUTH      SvcT = 2
-	SvcT_SVCT_DECORATOR SvcT = 3
+	SvcT_SVCT_UNUSED     SvcT = 0
+	SvcT_SVCT_DEF        SvcT = 1
+	SvcT_SVCT_AUTH       SvcT = 2 // visa service facing auth service
+	SvcT_SVCT_DECORATOR  SvcT = 3
+	SvcT_SVCT_ACTOR_AUTH SvcT = 4 // actor facing auth service
 )
 
 // Enum value maps for SvcT.
@@ -37,12 +38,14 @@ var (
 		1: "SVCT_DEF",
 		2: "SVCT_AUTH",
 		3: "SVCT_DECORATOR",
+		4: "SVCT_ACTOR_AUTH",
 	}
 	SvcT_value = map[string]int32{
-		"SVCT_UNUSED":    0,
-		"SVCT_DEF":       1,
-		"SVCT_AUTH":      2,
-		"SVCT_DECORATOR": 3,
+		"SVCT_UNUSED":     0,
+		"SVCT_DEF":        1,
+		"SVCT_AUTH":       2,
+		"SVCT_DECORATOR":  3,
+		"SVCT_ACTOR_AUTH": 4,
 	}
 )
 
@@ -784,16 +787,15 @@ func (x *CPolicy) GetConstraints() []*Constraint {
 }
 
 type Service struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	Type               SvcT                   `protobuf:"varint,1,opt,name=type,proto3,enum=polio.SvcT" json:"type,omitempty"`                                         // only "auth" is known at the moment.
-	Name               string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                                          // service "provides" value
-	Prefix             string                 `protobuf:"bytes,3,opt,name=prefix,proto3" json:"prefix,omitempty"`                                                      // datasource prefix
-	Domain             string                 `protobuf:"bytes,4,opt,name=domain,proto3" json:"domain,omitempty"`                                                      // TLS domain
-	QueryApiVersion    int32                  `protobuf:"varint,5,opt,name=query_api_version,json=queryApiVersion,proto3" json:"query_api_version,omitempty"`          // 0 means not support
-	ValidateApiVersion int32                  `protobuf:"varint,6,opt,name=validate_api_version,json=validateApiVersion,proto3" json:"validate_api_version,omitempty"` // 0 means not support
-	Addr               string                 `protobuf:"bytes,7,opt,name=addr,proto3" json:"addr,omitempty"`                                                          // HOST:PORT (TCP is assumed and enforced by compiler)
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          SvcT                   `protobuf:"varint,1,opt,name=type,proto3,enum=polio.SvcT" json:"type,omitempty"`                 // only "auth" is known at the moment.
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                                  // service "provides" value
+	Prefix        string                 `protobuf:"bytes,3,opt,name=prefix,proto3" json:"prefix,omitempty"`                              // datasource prefix
+	Domain        string                 `protobuf:"bytes,4,opt,name=domain,proto3" json:"domain,omitempty"`                              // TLS domain
+	QueryUri      string                 `protobuf:"bytes,5,opt,name=query_uri,json=queryUri,proto3" json:"query_uri,omitempty"`          // Empty, or needs an l7 protocol name and port.
+	ValidateUri   string                 `protobuf:"bytes,6,opt,name=validate_uri,json=validateUri,proto3" json:"validate_uri,omitempty"` // Empty, or needs an l7 protocol name and port.
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Service) Reset() {
@@ -854,23 +856,16 @@ func (x *Service) GetDomain() string {
 	return ""
 }
 
-func (x *Service) GetQueryApiVersion() int32 {
+func (x *Service) GetQueryUri() string {
 	if x != nil {
-		return x.QueryApiVersion
+		return x.QueryUri
 	}
-	return 0
+	return ""
 }
 
-func (x *Service) GetValidateApiVersion() int32 {
+func (x *Service) GetValidateUri() string {
 	if x != nil {
-		return x.ValidateApiVersion
-	}
-	return 0
-}
-
-func (x *Service) GetAddr() string {
-	if x != nil {
-		return x.Addr
+		return x.ValidateUri
 	}
 	return ""
 }
@@ -2180,15 +2175,14 @@ const file_policy_proto_rawDesc = "" +
 	"\n" +
 	"conditions\x18\x04 \x03(\v2\x10.polio.ConditionR\n" +
 	"conditions\x123\n" +
-	"\vconstraints\x18\x05 \x03(\v2\x11.polio.ConstraintR\vconstraints\"\xe0\x01\n" +
+	"\vconstraints\x18\x05 \x03(\v2\x11.polio.ConstraintR\vconstraints\"\xae\x01\n" +
 	"\aService\x12\x1f\n" +
 	"\x04type\x18\x01 \x01(\x0e2\v.polio.SvcTR\x04type\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06prefix\x18\x03 \x01(\tR\x06prefix\x12\x16\n" +
-	"\x06domain\x18\x04 \x01(\tR\x06domain\x12*\n" +
-	"\x11query_api_version\x18\x05 \x01(\x05R\x0fqueryApiVersion\x120\n" +
-	"\x14validate_api_version\x18\x06 \x01(\x05R\x12validateApiVersion\x12\x12\n" +
-	"\x04addr\x18\a \x01(\tR\x04addr\"J\n" +
+	"\x06domain\x18\x04 \x01(\tR\x06domain\x12\x1b\n" +
+	"\tquery_uri\x18\x05 \x01(\tR\bqueryUri\x12!\n" +
+	"\fvalidate_uri\x18\x06 \x01(\tR\vvalidateUri\"J\n" +
 	"\tCondition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12-\n" +
 	"\tattrExprs\x18\x02 \x03(\v2\x0f.polio.AttrExprR\tattrExprs\"\xa9\x01\n" +
@@ -2263,12 +2257,13 @@ const file_policy_proto_rawDesc = "" +
 	"\x03key\x18\x06 \x01(\fR\x03key\"J\n" +
 	"\x04Link\x12\x1b\n" +
 	"\tsource_id\x18\x01 \x01(\fR\bsourceId\x12%\n" +
-	"\x05terms\x18\x02 \x03(\v2\x0f.polio.NodeAddrR\x05terms*H\n" +
+	"\x05terms\x18\x02 \x03(\v2\x0f.polio.NodeAddrR\x05terms*]\n" +
 	"\x04SvcT\x12\x0f\n" +
 	"\vSVCT_UNUSED\x10\x00\x12\f\n" +
 	"\bSVCT_DEF\x10\x01\x12\r\n" +
 	"\tSVCT_AUTH\x10\x02\x12\x12\n" +
-	"\x0eSVCT_DECORATOR\x10\x03*;\n" +
+	"\x0eSVCT_DECORATOR\x10\x03\x12\x13\n" +
+	"\x0fSVCT_ACTOR_AUTH\x10\x04*;\n" +
 	"\x05ICMPT\x12\x10\n" +
 	"\fICMPT_UNUSED\x10\x00\x12\x10\n" +
 	"\fICMPT_REQREP\x10\x01\x12\x0e\n" +
