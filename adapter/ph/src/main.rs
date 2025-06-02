@@ -374,6 +374,7 @@ fn main() -> ExitCode {
         certx,
         system_start_time,
         bsauth: config.bootstrap,
+        rsauth: config.rsaoauth,
     });
 
     //

@@ -2,6 +2,7 @@
 //! when we need to join a ZPRnet but there are no authentication services
 //! attached yet.  Also includes other "auth" related functionality.
 
+use std::net::SocketAddr;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -14,6 +15,11 @@ use openssl::rand::rand_bytes;
 use openssl::rsa::Padding;
 use openssl::sign::Signer;
 use openssl::x509::X509;
+
+use reqwest::header;
+use reqwest::redirect::Policy;
+use reqwest::tls::Certificate;
+use reqwest::StatusCode;
 
 use base64::prelude::*;
 use thiserror::Error;
@@ -35,6 +41,9 @@ pub const BLOB_TYPE_AC: &str = "AC";
 /// When checking a challenge returned to a node by an adapter, it may
 /// be no older than this.
 pub const MAX_BLOB_AGE_SECONDS: u64 = 120; // 2 minutes
+
+/// Default port used by authentication services running the zpr-oauthrsa protocol.
+pub const DEFAULT_ZPR_OAUTH_RSA_PORT: u16 = 4000;
 
 /// This is the data payload in a [zdp::PacketType::InitAuthenticationRequest] packet.
 #[derive(Clone, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug, Default)]
@@ -69,7 +78,7 @@ pub struct ZdpSelfSignedBlob {
 /// message.
 ///
 /// Note that this passed around as JSON text encoded in base64.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ZdpAuthCodeBlob {
     pub blob_type: String, // "AC"
     pub code: String,
@@ -108,6 +117,9 @@ pub enum AuthError {
 
     #[error("Challenge Too Old")]
     ChallengeTooOld,
+
+    #[error("Authentication Error: {0}")]
+    AuthError(String),
 }
 
 #[derive(Debug)]
@@ -116,19 +128,15 @@ pub struct RsaBootstrapAuth {
     cn: String,
 }
 
-impl ZdpAuthCodeBlob {
-    /// Placeholder function that returns a fake AuthCode blob.
-    /// Returns base64 encoded JSON serialized [ZdpAuthCodeBlob].
-    pub fn new_fake() -> Self {
-        ZdpAuthCodeBlob {
-            blob_type: BLOB_TYPE_AC.to_string(),
-            code: "fake_auth_code".to_string(),
-            pkce: "fake_pkce".to_string(),
-            client_id: "fake_clientid".to_string(),
-            asa: "fake_asa".to_string(),
-        }
-    }
+/// OAuthRsa holds small amount of state needed to talk to a
+/// zpr-oauthrsa authentication service.
+#[derive(Debug)]
+pub struct OAuthRsa {
+    client_id: String,
+    private_key: PKey<Private>,
+}
 
+impl ZdpAuthCodeBlob {
     /// Gets the "encoded" form of the blob: base64 encoded JSON.
     pub fn encode(&self) -> String {
         let json_txt = serde_json::to_string(self).unwrap();
@@ -325,6 +333,191 @@ impl RsaBootstrapAuth {
         let json_txt = serde_json::to_string(&blob)?;
         let blob_str = BASE64_STANDARD.encode(&json_txt);
         Ok(blob_str)
+    }
+}
+
+/// Response json object to initial auth request from an actor
+/// from a zpr-oauthrsa authentication service.
+#[derive(Deserialize, Debug)]
+struct PreauthResp {
+    nonce: String,
+}
+
+/// Request json object from an actor to a zpr-oauthrsa authentication service.
+/// Includes the nonce from preauth step and the payload which is the RSA
+/// signature of the nonce.  The `client_id` must match one known to the
+/// authentication service (for now we are using CNs here).
+#[derive(Serialize, Debug)]
+struct AuthReq {
+    client_id: String,
+    nonce: String,
+    payload: String,
+}
+
+/// Implements the ZPR oauthrsa protocol.
+///
+/// Works like this:
+/// - Adapter sends a GET request to /preauthorize with form encoded params in query string
+///   of (response_type, client_id, scope, state).
+/// - Service returns json object with a "nonce" field, a base64 encoded byte buffer.
+/// - Adapter sends a POST to /authorize with a json object having fields: (client_id, nonce, payload).
+///   `nonce` is copied from the service response.  `payload`` is the bas64 encodeed signautre of
+///   the nonce using the adapters private RSA key.  The `client_id` (in the case of BAS) is
+///   the CN of the adapter.
+/// - The service response with an auth-code which will be part of a redirect `loaction` header.
+///   The format is `https://auth.zpr?code=<CODE>`).
+///
+/// Once we have an auth-code back from the authentication service we can construct the
+/// auth-code blob as:
+/// - blob_type: "AC"
+/// - code: "<CODE>" (the auth-code)
+/// - pkce: empty for now
+/// - client_id: the CN of the adapter
+/// - asa: The ZPR address of the authentication service
+///
+/// The blob should be passed to the Node which will forward it to the visa service.
+impl OAuthRsa {
+    /// Create a new OAuthRsa object.
+    /// - `client_id` is the adapter CN
+    /// - `private_key` is the RSA private key used to sign the nonce
+    pub fn new(client_id: &str, private_key: PKey<Private>) -> Self {
+        OAuthRsa {
+            client_id: client_id.to_string(),
+            private_key,
+        }
+    }
+
+    /// Performs the two calls to the authentication service and the signing of the nonce.
+    /// On success returns the auth-code blob.
+    /// - `service_addr` is the address of the authentication service
+    /// - `tls_cert` is the TLS certificate used by the authentication service///
+    pub async fn authenticate(
+        &self,
+        service_addr: SocketAddr,
+        tls_cert: X509,
+    ) -> Result<ZdpAuthCodeBlob, AuthError> {
+        let der = tls_cert.to_der().unwrap();
+        let tls_cert = Certificate::from_der(&der).unwrap();
+
+        let nonce_buf = self.preauthorize(service_addr, &tls_cert).await?;
+
+        // TODO: Get rid of all the unwraps
+        let mut signer = Signer::new(MessageDigest::sha256(), &self.private_key).unwrap();
+        signer.set_rsa_padding(Padding::PKCS1).unwrap();
+        signer.update(&nonce_buf).unwrap();
+        let signature = signer.sign_to_vec().unwrap();
+
+        let auth_code = self
+            .authorize(service_addr, &tls_cert, &nonce_buf, &signature)
+            .await?;
+
+        Ok(ZdpAuthCodeBlob {
+            blob_type: BLOB_TYPE_AC.to_string(),
+            code: auth_code,
+            pkce: String::new(),
+            client_id: self.client_id.clone(),
+            asa: service_addr.to_string(),
+        })
+    }
+
+    /// Call preauthorize function on authentication service.
+    /// Returns the nonce.
+    async fn preauthorize(
+        &self,
+        service_addr: SocketAddr,
+        tls_cert: &Certificate,
+    ) -> Result<Vec<u8>, AuthError> {
+        // TODO: I am using blocking here but if we end up in a place where we
+        // can access a tokio runtime we should use async.
+
+        let cb = reqwest::ClientBuilder::new()
+            .add_root_certificate(tls_cert.clone())
+            .danger_accept_invalid_certs(true) // TODO: Figure this TLS stuff out and get rid of this
+            .timeout(std::time::Duration::from_secs(10));
+        let client = cb.build().unwrap();
+
+        let resp = client
+            .get(format!("https://{}/preauthorize", service_addr))
+            .query(&[("response_type", "code"), ("client_id", &self.client_id)])
+            .send()
+            .await
+            .map_err(|e| AuthError::AuthError(format!("failed to send request: {}", e)))?;
+
+        let pa_resp: PreauthResp = resp
+            .json()
+            .await
+            .map_err(|e| AuthError::AuthError(format!("failed to parse response: {}", e)))?;
+
+        Ok(BASE64_STANDARD.decode(pa_resp.nonce.as_bytes())?)
+    }
+
+    /// Call the authorize function on the authentication service.
+    /// Returns the auth-code.
+    async fn authorize(
+        &self,
+        service_addr: SocketAddr,
+        tls_cert: &Certificate,
+        nonce: &[u8],
+        payload: &[u8],
+    ) -> Result<String, AuthError> {
+        let authreq = AuthReq {
+            client_id: self.client_id.clone(),
+            nonce: BASE64_STANDARD.encode(nonce),
+            payload: BASE64_STANDARD.encode(payload),
+        };
+
+        // Note client set to NOT follow redirects since that is how we get our response.
+        let cb = reqwest::ClientBuilder::new()
+            .add_root_certificate(tls_cert.clone())
+            .danger_accept_invalid_certs(true) // TODO: Figure this TLS stuff out and get rid of this
+            .redirect(Policy::none())
+            .timeout(std::time::Duration::from_secs(10));
+        let client = cb.build().unwrap();
+
+        let resp = client
+            .post(format!("https://{}/authorize", service_addr))
+            .json(&authreq)
+            .send()
+            .await
+            .map_err(|e| AuthError::AuthError(format!("failed to send POST request: {}", e)))?;
+
+        // Expect status code FOUND
+        if resp.status() != StatusCode::FOUND {
+            return Err(AuthError::AuthError(format!(
+                "failed to authorize: {}",
+                resp.status()
+            )));
+        }
+
+        // Now extract the auth-code from the location header.
+        if let Some(loc) = resp.headers().get(header::LOCATION) {
+            if let Ok(loc_str) = loc.to_str() {
+                if loc_str.contains("error") {
+                    // TODO: We could parse this URL and get error & error_description
+                    return Err(AuthError::AuthError(format!(
+                        "failed to authorize: {}",
+                        loc_str
+                    )));
+                }
+                if let Some(code) = loc_str.split("code=").nth(1) {
+                    return Ok(code.to_string());
+                } else {
+                    return Err(AuthError::AuthError(format!(
+                        "failed to find code in location header: {}",
+                        loc_str
+                    )));
+                }
+            } else {
+                return Err(AuthError::AuthError(format!(
+                    "failed to parse location header: {}",
+                    loc.to_str().unwrap_or("invalid utf8")
+                )));
+            }
+        } else {
+            return Err(AuthError::AuthError(
+                "failed to find location header in response".to_string(),
+            ));
+        }
     }
 }
 
