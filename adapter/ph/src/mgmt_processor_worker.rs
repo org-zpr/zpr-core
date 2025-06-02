@@ -93,6 +93,10 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                 handlers::handle_terminate_request(asm, seq_num, pkt).await
             }
 
+            ZdpPacketType::TerminateLinkResponse => {
+                handlers::handle_terminate_response(asm, pkt).await
+            }
+
             ZdpPacketType::TerminateLinkIndication => {
                 handlers::handle_terminate_indication(asm, seq_num, pkt).await
             }

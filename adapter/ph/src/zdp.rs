@@ -66,7 +66,6 @@ impl ZdpPacketType {
 
         match self {
             Self::BindActorAddressResponse
-            | Self::TerminateLinkResponse
             | Self::AcquireZprAddressResponse
             | Self::InitAuthenticationResponse
             | Self::GrantZprAddressResponse => true,

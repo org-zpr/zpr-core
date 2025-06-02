@@ -1314,7 +1314,7 @@ impl LinkStateWrapper {
         locked_fsm.set_state(LinkState::Closing);
         let task_asm = asm.clone();
         tokio::task::spawn_local(async move {
-            let _ = send_terminate_request(&task_asm, link_id, reason).await;
+            mgmt::requests::send_terminate_request(&task_asm, link_id, reason).await
         });
         Ok(())
     }
@@ -1521,25 +1521,6 @@ impl LinkStateWrapper {
             }
         });
         Ok(())
-    }
-}
-
-async fn send_terminate_request(
-    asm: &Arc<Assembly>,
-    link_id: LinkId,
-    reason: TerminateReason,
-) -> Result<(), LinkStateError> {
-    match mgmt::requests::send_terminate_request(&asm, link_id, reason).await {
-        Err(e) => {
-            warn!(target: LINK_STATE,
-                "Link {link_id} got error '{e:?}' when trying to shut down.  Shutting down anyway"
-            );
-            mgmt::requests::send_terminate_indication(asm, link_id, reason).await;
-            asm.process_link_state_event(link_id, LinkEvent::SentTerminate)
-        }
-        Ok(response) => {
-            asm.process_link_state_event(link_id, LinkEvent::ReceivedTerminateResponse(response))
-        }
     }
 }
 

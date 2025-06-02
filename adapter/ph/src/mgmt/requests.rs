@@ -303,44 +303,13 @@ pub async fn send_terminate_request<'a, 'pktbuf>(
     asm: &Assembly,
     link_id: zpr::LinkId,
     reason: zdp::TerminateReason,
-) -> Result<zdp::ResponseCode, ()> {
-    let response = core::send_sync_non_flow_req(
-        asm,
-        link_id,
-        zdp::ZdpPacketType::TerminateLinkRequest,
-        zdp::ZdpPacketType::TerminateLinkResponse,
-        move |mut req| {
-            zdp::ZdpTerminateLinkRequestHeader {
-                reason_code: reason,
-                data_len: 0,
-            }
-            .write_to_buf(&mut req)
-            .unwrap();
-        },
-    )
-    .await;
-
-    // TODO: Break these apart
-    match response {
-        Ok(mut terminate_res) => {
-            let Ok(hdr) = zdp::ZdpTerminateLinkResponseHeader::read_from_buf(&mut terminate_res)
-            else {
-                core::count_event(asm, &mut terminate_res, CounterType::BadStructure);
-                return Err(());
-            };
-            let resp_code = hdr.response_code;
-            debug!(
-                "Link {link_id}: received TerminateLinkResponse, status: {:?}",
-                resp_code
-            );
-            Ok(resp_code)
-        }
-
-        Err(err) => {
-            warn!("Link {link_id}: error with TerminateLinkResponse: {}", err);
-            Err(())
-        }
-    }
+) -> zpr::SeqNum {
+    let mut pkt = core::new_heap_packet();
+    pkt.push_header(&zdp::ZdpTerminateLinkRequestHeader {
+        reason_code: reason,
+        data_len: 0,
+    });
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::TerminateLinkRequest, pkt).await
 }
 
 /// send a Terminate Indication (RFC 6.5 § 6.3.3)
