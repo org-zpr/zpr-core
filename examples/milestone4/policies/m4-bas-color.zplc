@@ -1,0 +1,60 @@
+# -*- mode: toml -*-
+
+[resolver]
+order = ["hosts", "dns"]
+
+[resolver.hosts]
+"node0.zpr" = "fd5a:5052:90de::1"
+"node0.overlay" = "10.0.0.21" # 129.153.152.175
+
+[nodes."node.zpr.org"]
+key = "DNBguc3HqkzfLys68PWm2CnWSA/IhAIFiHFII9cFrFo="
+provider = [ ["device.zpr.adapter.cn", "node.zpr.org"]]
+zpr_address = "node0.zpr"
+interfaces = ["in1"]
+in1.netaddr = "node0.overlay:5000"
+
+[trusted_services.default]
+cert_path = "ca-cert.pem"
+
+[trusted_services.bas]
+api = "validation/2"
+client = "AuthService"
+cert_path = "bas-tls.crt"
+returns_attributes = [ "user.color", "user.bas_id" ]
+identity_attributes = ["user.bas_id"]
+provider = [ [ "device.zpr.adapter.cn", "bas.zpr.org" ] ]
+
+[visa_service]
+dock_node = "node.zpr.org"
+admin_attrs = [ [ "device.zpr.adapter.cn", "admin.zpr.org" ] ]
+
+[bootstrap]
+"bas.zpr.org" = "bas.zpr.org.pem"
+"vs.zpr" = "vs.zpr.pem"
+
+[protocols.ping]
+l4protocol = "iana.ICMP6"
+icmp_type = "request-response"
+icmp_codes = [ 128, 129 ]
+
+
+# Compiler expects to find a service named "<TS_NAME>"+"-vs" which has the details
+# for how the visa service should talk to the trusted service.
+# The BAS server sets of the VS service on port 3999.
+[services.bas-vs]
+protocol = "zpr-validation2"
+port = 3999
+
+# Adapter facing authentication service.
+# The BAS server sets up the client service on port 4000.
+[services.AuthService]
+protocol = "zpr-oauthrsa"
+port = 4000
+
+[services.AuthSvcPing]
+protocol = "ping"
+
+
+
+
