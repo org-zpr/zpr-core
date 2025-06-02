@@ -11,7 +11,7 @@ order = ["hosts", "dns"]
 
 [nodes."node.zpr.org"]
 key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w="
-provider = [ ["zpr.adapter.cn", "node.zpr.org"] ]
+provider = [ ["device.zpr.adapter.cn", "node.zpr.org"] ]
 zpr_address = "n0.zpr"
 interfaces = ["in1"]
 in1.netaddr = "n0.overlay:5000"
@@ -21,18 +21,18 @@ cert_path = "conform-ca-cert.pem"
 
 [visa_service]
 dock_node = "node.zpr.org"
-admin_attrs = [ ["zpr.adapter.cn", "client.zpr.org"] ]
+admin_attrs = [ ["device.zpr.adapter.cn", "client.zpr.org"] ]
 
 [protocols.http]
-protocol = "iana.TCP"
+l4protocol = "iana.TCP"
 port = 80
 
 [protocols.perf]
-protocol = "iana.TCP"
+l4protocol = "iana.TCP"
 port = 5056
 
 [protocols.ping]
-protocol = "iana.ICMP6"
+l4protocol = "iana.ICMP6"
 icmp_type = "request-response"
 icmp_codes = [ 128, 129 ]
 
