@@ -2,7 +2,7 @@ package policy
 
 import (
 	fmt "fmt"
-	"net"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -47,22 +47,28 @@ func NewServiceMeshFromPolicy(policy *polio.Policy) *ServiceMesh {
 
 	// services in use by port
 	for _, authsvc := range policy.GetServices() {
-		host, port, err := net.SplitHostPort(authsvc.Addr)
-		if err != nil {
-			panic(fmt.Sprintf("*ERR* bad/invalid auth service definition for %v: address format error: '%v'\n", authsvc.Name, authsvc.Addr))
+		for _, uri := range []string{authsvc.QueryUri, authsvc.ValidateUri} {
+			if uri == "" {
+				continue
+			}
+			svcUrl, err := url.Parse(uri)
+			if err != nil {
+				panic(fmt.Sprintf("*ERR* invalid URI found in auth service %v: '%v'\n", authsvc.Name, uri))
+			}
+			// Host is left over from prototype. Policy compiler sets host to "::1"
+			portn, err := strconv.Atoi(svcUrl.Port())
+			if err != nil {
+				panic(fmt.Sprintf("*ERR* invalid port on auth service in policy: %v", svcUrl))
+			}
+			skey := fmt.Sprintf("TCP:%d", portn)
+			mesh.services[skey] = append(mesh.services[skey], &ServiceRec{
+				address:  svcUrl.Hostname(),
+				name:     authsvc.Name,
+				port:     portn,
+				protocol: svcUrl.Scheme,
+				stype:    authsvc.Type, // polio.SvcT_SVCT_AUTH,
+			})
 		}
-		portn, err := strconv.Atoi(port)
-		if err != nil {
-			panic(fmt.Sprintf("*ERR* invalid port on auth service in policy: %v", authsvc.Addr))
-		}
-		skey := fmt.Sprintf("TCP:%d", portn)
-		mesh.services[skey] = append(mesh.services[skey], &ServiceRec{
-			address:  host,
-			name:     authsvc.Name,
-			port:     portn,
-			protocol: AuthProtocolName,
-			stype:    polio.SvcT_SVCT_AUTH,
-		})
 	}
 
 	// non auth services are "registered" through a procedure.

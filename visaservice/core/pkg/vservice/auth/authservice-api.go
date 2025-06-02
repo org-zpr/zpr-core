@@ -38,12 +38,6 @@ type AuthService interface {
 
 	// Tell the auth sub-system about a new policy for the configuration.  The Authenticate and
 	// Query functions will make use of the datasources in this policy.
-	//
-	// TODO: Ideally, the visa service is the only part of ZPR network keeping tabs on the
-	//       current policy.  AND, the visa service is also the only element that needs
-	//       to maintain a connection to the auth services.
-	// SetCurrentPolicy(configID uint64, p *policy.Policy) error
-
 	InstallPolicy(uint64, byte, *policy.Policy) // must install the policy under the given configuration.
 
 	ActivateConfiguration(uint64, byte) // deactivates all other configurations

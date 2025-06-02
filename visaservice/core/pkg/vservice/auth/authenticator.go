@@ -5,8 +5,8 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,12 +51,12 @@ type Authenticator struct {
 	policy struct {
 		sync.RWMutex
 
-		configID uint64         // active configuration
-		version  string         // active policy
-		policy   *policy.Policy // is-a CertificateDB
-		//cdb           CertificateDB   // certs from active policy
-		localPrefixes map[string]bool // prefix -> TRUE (derived from policy)
-		validators    *Directory      // (derived from policy)
+		configID               uint64          // active configuration
+		version                string          // active policy
+		policy                 *policy.Policy  // is-a CertificateDB
+		localPrefixes          map[string]bool // prefix -> TRUE (derived from policy)
+		validators             *Directory      // (derived from policy)
+		authenticationServices []string        // list of authentication service names
 	}
 }
 
@@ -65,7 +65,7 @@ type ValidateResult struct {
 	DomainCredID string // Credential ID of the validation domain (if any)
 	Token        string // The JWT identity token
 	Attrs        map[string]*actor.ClaimV
-	//VResp        *zds.ValidateResponse // The Validate response
+	Expiration   time.Time
 }
 
 // NewAuthenticator
@@ -140,11 +140,18 @@ func (a *Authenticator) RemoveServiceByPrefix(pfx string) int {
 }
 
 // GetAuthEndpoint returns and "endponint" for the polio.service.
+// This is computed from the validate-uri.
+// TODO: We want the protocol name too (URI scheme).
 func getAuthEndpoint(svc *polio.Service) *snip.Endpoint {
-	if _, p, err := net.SplitHostPort(svc.Addr); err == nil {
-		if pn, err := strconv.Atoi(p); err == nil {
-			return snip.NewEndpoint(policy.AuthProtocol, uint16(pn))
-		}
+	if svc.ValidateUri == "" {
+		return nil
+	}
+	svcUrl, err := url.Parse(svc.ValidateUri)
+	if err != nil {
+		return nil
+	}
+	if pn, err := strconv.Atoi(svcUrl.Port()); err == nil {
+		return snip.NewEndpoint(policy.AuthProtocol, uint16(pn)) // TCP
 	}
 	return nil
 }
@@ -167,14 +174,43 @@ func (a *Authenticator) AddDatasourceProvider(service string, contactAddr netip.
 		return fmt.Errorf("not an auth service: %v", service)
 	}
 
+	// In policy an auth service has URIs that use localhost since at policy time
+	// we don't know the actual address.  We rewrite them here.  The URIs also
+	// use our own custom SCHEMEs so we can use that to use different protocols
+	// for auth services.   Currently we only support "zpr-validation2" which is
+	// actually HTTPS using our special OAuth protocol (eg, what BAS provides).
+	urlp, err := url.Parse(psvc.ValidateUri)
+	if err != nil {
+		a.log.Error("failed to parse validate-uri stored in policy", "service", service, "uri", psvc.ValidateUri, "error", err)
+		return errors.New("policy error: invalid validate-uri")
+	}
+	if urlp.Scheme != "zpr-validation2" {
+		a.log.Error("invalid validate-uri scheme (expected zpr-validation2)", "service", service, "uri", psvc.ValidateUri)
+		return errors.New("policy error: invalid validate-uri scheme")
+
+	}
+	urlp.Scheme = "https"
+	urlp.Host = fmt.Sprintf("[%s]", contactAddr.String()) // Note IPv6
+	urlp.Path = "/token"
+	fixedValidateUri := urlp.String()
+
+	// TODO: Update this when we implement Query
+
 	features := DSFeatures{
-		SupportValidation: psvc.ValidateApiVersion > 0,
-		SupportQuery:      psvc.QueryApiVersion > 0,
-		ValidationAPIVer:  int(psvc.ValidateApiVersion),
-		QueryAPIVer:       int(psvc.QueryApiVersion),
+		SupportValidation: psvc.ValidateUri != "",
+		SupportQuery:      psvc.QueryUri != "",
+		ValidationUri:     fixedValidateUri,
+		QueryUri:          psvc.QueryUri,
+		TLSDomain:         psvc.Domain,
 	}
 
-	return a.policy.validators.AddService(psvc.GetPrefix(), psvc.GetDomain(), contactAddr, getAuthEndpoint(psvc).Port, &features, configID)
+	// TODO: Needs thought
+	// - What are we doing with the adapter facing service info?
+	return a.policy.validators.AddService(
+		psvc.GetPrefix(),
+		contactAddr,
+		&features,
+		configID)
 }
 
 // Authenticate - perform authentication at the node.
@@ -194,12 +230,11 @@ func (a *Authenticator) Authenticate(dsPrefix string, epID netip.Addr, blob Blob
 
 	var err error
 
-	a.policy.RLock() // No messing with policy while performing an authentication
-	defer a.policy.RUnlock()
-
+	a.policy.RLock()
 	if a.policy.version == "" {
 		return nil, errors.New("cannot authenticate because policy is not set")
 	}
+	a.policy.RUnlock()
 
 	// If prefix is our special BOOTSTRAP type, we check that we got a self-signed
 	// blob and validate the signature based on public key for the CN held in policy.
@@ -211,13 +246,10 @@ func (a *Authenticator) Authenticate(dsPrefix string, epID netip.Addr, blob Blob
 	// If prefix is unknown we just return error.
 
 	var vresponse *ValidateResult
-
-	switch dsPrefix {
-	case AUTH_PREFIX_BOOTSTRAP:
+	if dsPrefix == AUTH_PREFIX_BOOTSTRAP {
 		vresponse, err = a.authenticateSS(epID, blob, unauthClaims)
-
-	default:
-		return nil, fmt.Errorf("unknown authentication prefix: %v", dsPrefix)
+	} else {
+		vresponse, err = a.authenticateAC(dsPrefix, epID, blob, unauthClaims)
 	}
 
 	if err != nil {
@@ -282,6 +314,34 @@ func (a *Authenticator) Authenticate(dsPrefix string, epID netip.Addr, blob Blob
 	}, nil
 }
 
+func (a *Authenticator) authenticateAC(dsPrefix string, epID netip.Addr, blob Blob, _unauthClaims map[string]string) (*ValidateResult, error) {
+	acBlob, ok := blob.(*ZdpAuthCodeBlob)
+	if !ok {
+		return nil, fmt.Errorf("authentication failed: blob is not an auth-code blob")
+	}
+
+	a.policy.RLock()
+	vdators := a.policy.validators
+	configID := a.policy.configID
+	a.policy.RUnlock()
+
+	vres, err := vdators.Validate(dsPrefix, acBlob, a.loadRevocationData())
+	if err != nil {
+		return nil, err
+	}
+
+	// Hmm what do we do with unauthClaims?
+	// How to get expiration? Should come from auth service (exp value on a JWT??)
+	if epID.IsValid() {
+		vres.Attrs[actor.KAttrEPID] = actor.NewClaimV(epID.String(), vres.Expiration)
+	}
+	vres.Attrs[actor.KAttrAuthority] = actor.NewClaimV(dsPrefix, vres.Expiration)
+	vres.Attrs[actor.KAttrConfigID] = actor.NewClaimV(strconv.FormatUint(configID, 10), vres.Expiration)
+	vres.Attrs[actor.KAttrCN] = actor.NewClaimV(acBlob.ClientId, vres.Expiration)
+
+	return vres, nil
+}
+
 // TODO: Note that if authentication (based on key in policy) is successful, we will copy the
 // passed `epID` address here into the claims as a 'zpr.addr' claim. This is not quite correct
 // and we have not yet determined where we will make the address assignments.  For now the
@@ -307,7 +367,8 @@ func (a *Authenticator) authenticateSS(epID netip.Addr, blob Blob, unauthClaims 
 	expiration := time.Now().Add(a.MaxAuthDuration)
 
 	a.policy.RLock()
-	defer a.policy.RUnlock()
+	configID := a.policy.configID
+	a.policy.RUnlock()
 
 	// TODO: Should we integrate nodes with our bootstrap scheme?  For now presence of the node claim skips signature checking.
 
@@ -319,7 +380,9 @@ func (a *Authenticator) authenticateSS(epID netip.Addr, blob Blob, unauthClaims 
 	}
 
 	if !isNode {
+		a.policy.RLock()
 		pubkey, err := a.policy.policy.GetPublicKeyForCN(actorCN)
+		a.policy.RUnlock()
 		if err != nil {
 			return nil, fmt.Errorf("authentication failed: no public key found for CN %v", actorCN)
 		}
@@ -348,7 +411,7 @@ func (a *Authenticator) authenticateSS(epID netip.Addr, blob Blob, unauthClaims 
 		Exp: expiration,
 	}
 	attrs[actor.KAttrConfigID] = &actor.ClaimV{
-		V:   strconv.FormatUint(a.policy.configID, 10),
+		V:   strconv.FormatUint(configID, 10),
 		Exp: expiration,
 	}
 	attrs[actor.KAttrCN] = &actor.ClaimV{
@@ -397,6 +460,8 @@ func (a *Authenticator) makeJWT(subject string, expiration time.Time, issuers, c
 // Note that the attributes passed in the request will have prefixes on them, and
 // the attributes in the response will too.
 func (a *Authenticator) Query(fedreq *zds.QueryRequest) (*zds.QueryResponse, error) {
+	return nil, fmt.Errorf("query not yet implemented")
+	/* OFF FOR NOW - not yet implemented for ref impl
 	var result *zds.QueryResponse
 
 	a.policy.RLock() // no policy update while doing a Query
@@ -456,6 +521,7 @@ func (a *Authenticator) Query(fedreq *zds.QueryRequest) (*zds.QueryResponse, err
 		return nil, errQueryFailed
 	}
 	return result, nil
+	*/
 }
 
 // isJWTRevoked check if the passed JWT has an id value (jti) that matches a revoked
@@ -588,6 +654,11 @@ func (a *Authenticator) setInternalPrefixes(pfxs []string) {
 	a.policy.localPrefixes = locals
 }
 
+// setAuthenticationServices sets the list of authentication service names from policy.
+func (a *Authenticator) setAuthenticationServices(services []string) {
+	a.policy.authenticationServices = services
+}
+
 // updateVStoreFromPolicy checks policy to see if there is an auth service defined.
 // If so, extract the certifiate and install it into the validator store.
 //
@@ -597,12 +668,22 @@ func (a *Authenticator) setInternalPrefixes(pfxs []string) {
 func (a *Authenticator) updateVStoreFromPolicy(p *polio.Policy) error {
 	extPrefixes := make(map[string]string) // prefix -> Name
 	var intPrefixes []string
+	var authServices []string
 
 	// This installs non-internal certificates.
 	for _, svc := range p.GetServices() {
-		if svc.Type == polio.SvcT_SVCT_AUTH {
+
+		switch svc.Type {
+		case polio.SvcT_SVCT_AUTH:
 			a.log.Info("found external prefix", "prefix", svc.Prefix)
 			extPrefixes[svc.Prefix] = svc.GetName()
+
+		case polio.SvcT_SVCT_ACTOR_AUTH:
+			a.log.Info("found actor authentication service", "prefix", svc.Name)
+			authServices = append(authServices, svc.Name)
+		}
+
+		if svc.Type == polio.SvcT_SVCT_AUTH {
 		}
 	}
 
@@ -628,5 +709,6 @@ func (a *Authenticator) updateVStoreFromPolicy(p *polio.Policy) error {
 
 	a.policy.validators.Pool = pool
 	a.setInternalPrefixes(intPrefixes)
+	a.setAuthenticationServices(authServices)
 	return nil
 }

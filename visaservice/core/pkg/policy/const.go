@@ -2,7 +2,7 @@ package policy
 
 const (
 	ContainerVersion = uint32(1121)
-	SerialVersion    = 42 // Written to pol.Policy.SerialVersion
+	SerialVersion    = 43 // Written to pol.Policy.SerialVersion
 	ConfKeyCIDR      = "cidr"
 	NoProc           = uint32(0xFFFFFFFF)
 	NoHash           = uint32(0xFFFFFFFF)

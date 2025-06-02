@@ -3,6 +3,7 @@ package vservice
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 
 	"zpr.org/vs/pkg/actor"
@@ -40,7 +41,7 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest) (*actor.Actor, err
 		vs.log.Warn("unable to parse dock address for connect-via claim", "addr", cr.DockAddr)
 	}
 	// Then run through any connect policy lines.
-	_, _, err = vs.applyConnectPolicy(curpol, curmatcher, dockAddr, validatedActor)
+	_, _, err = vs.applyConnectPolicy(curmatcher, dockAddr, validatedActor)
 	if err != nil {
 		vs.log.WithError(err).Info("apply policy failed")
 		return nil, fmt.Errorf("apply policy failed: %w", err)
@@ -65,6 +66,17 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest) (*actor.Actor, err
 		vs.actorDB.AddAdapter(zprAddr, zprAddr, validatedActor)
 	}
 
+	// Log the provided services -- trying to figure out what to do with the adapter facing auth services.
+	for _, prov := range validatedActor.GetProvides() {
+		var stype string
+		if svc := curpol.ServiceByName(prov); svc != nil {
+			stype = svc.Type.String()
+		} else {
+			stype = "unknown"
+		}
+		vs.log.Info("new actor provides", "service", prov, "type", stype)
+	}
+
 	return validatedActor, nil
 }
 
@@ -74,7 +86,7 @@ func (vs *VSInst) ApproveConnection(cr *vsapi.ConnectRequest) (*actor.Actor, err
 // Returns the list of keys that matched along with other details.
 // The passed actor is almost certainly modified (in place).
 // The actor returned is the same pointer as the one passed in.
-func (vs *VSInst) applyConnectPolicy(_curpol *policy.Policy, matcher *policy.Matcher, dockZPRAddr netip.Addr, agnt *actor.Actor) (*actor.Actor, []string, error) {
+func (vs *VSInst) applyConnectPolicy(matcher *policy.Matcher, dockZPRAddr netip.Addr, agnt *actor.Actor) (*actor.Actor, []string, error) {
 	// Note passing of "configurator" here -- do we need that?
 	fs, err := policy.NewConnectState(agnt, vs, dockZPRAddr, vs.log)
 	if err != nil {
@@ -109,9 +121,6 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRe
 	if len(authBlobs) != 1 {
 		return nil, fmt.Errorf("exactly one authentication blob must be provided")
 	}
-	if authBlobs[0].GetBlobType() != auth.BlobT_SS {
-		return nil, fmt.Errorf("only SS type authentication blob is supported")
-	}
 
 	// The address assigned to the actor is either requested by the actor and propogated by the node
 	// into the actors claims, or it is assigned by the node, or it is not set at all (and must be set by policy).
@@ -141,7 +150,7 @@ func (vs *VSInst) validateCredentials(curpol *policy.Policy, cr *vsapi.ConnectRe
 
 		// Perform authentication.  Note `reqAddr` may be unset.
 		// Blocking call:
-		aok, err := vs.authr.Authenticate(authPrefix, reqAddr, blb, cr.Claims) // hmm, no prefix?
+		aok, err := vs.authr.Authenticate(authPrefix, reqAddr, blb, cr.Claims)
 		if err != nil {
 			vs.log.WithError(err).Warn("validate credentials: blob authentication failed", "prefix", authPrefix)
 			return nil, fmt.Errorf("authenticate failed for blob %d (%s): %w", i+1, authPrefix, err)
@@ -213,14 +222,42 @@ func (vs *VSInst) SelectValidateDSPrefix(curpol *policy.Policy, blob auth.Blob) 
 	if blob.GetBlobType() == auth.BlobT_SS {
 		return auth.AUTH_PREFIX_BOOTSTRAP, nil
 	}
-	// Not self-signed, then we use the ASA (which is a ZPR assigned address for the authentication)
-	// to figure out what service can validate the blob.
 
-	// TODO: This is all theoretical at the moment as we don't support a real auth service yet in ref impl.
-	//       So punting for now.
+	// The ASA is a ZPR IPv6 address of an authentication service.
 
-	// Need a function to return auth service given ASA.  (TODO)
-	return "", fmt.Errorf("non-self-signed blob not yet supported")
+	acBlob := blob.(*auth.ZdpAuthCodeBlob)
+
+	asaSockAddr, err := netip.ParseAddrPort(acBlob.Asa)
+	if err != nil {
+		return "", fmt.Errorf("invalid ASA socket address: '%v': %w", acBlob.Asa, err)
+	}
+
+	// The ASA addr will match a ZPR address assigned to the actor facing interface of an auth service.
+	// We will need to somehow associate that with the vs facing service.
+	// For now I assume that the same actor that registers one also registers the other.
+	// TODO: Needs more thought.
+
+	asaActor, err := vs.actorDB.ActorAtContactAddr(asaSockAddr.Addr())
+	if err != nil {
+		return "", fmt.Errorf("unable to locate actor for ASA address '%v': %w", asaSockAddr.Addr(), err)
+	}
+
+	// Now look up the auth service.
+	actorServices := asaActor.GetProvides()
+	var matched string
+	for _, sname := range curpol.GetVisaServiceValidationServiceNames() {
+		if slices.Contains(actorServices, sname) {
+			matched = sname
+		}
+	}
+	if matched == "" {
+		return "", fmt.Errorf("no matching VS auth service found for ASA address '%v'", asaSockAddr.Addr())
+	}
+	if svc := curpol.ServiceByName(matched); svc == nil {
+		return "", fmt.Errorf("no VS auth service found with name '%v'", matched)
+	} else {
+		return svc.GetPrefix(), nil
+	}
 }
 
 // Note that this is not a reversible operation.  Converting to vsapi.Actor

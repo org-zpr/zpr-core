@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/netip"
+	"slices"
 	"strings"
 	"time"
 
@@ -72,10 +73,57 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 		return nil, ErrVSMisconfigure
 	}
 
-	srcActor, dstActor, err := vs.endpointsForTraffic(pktData)
-	if err != nil {
+	srcActor, dstActor := vs.endpointsForTraffic(pktData)
+	if srcActor == nil && dstActor == nil {
+		vs.log.Info("visa denied: failed to resolve source and dest ZPR addresss", "source", pktData.SrcAddr, "dest", pktData.DstAddr)
 		vs.actorDB.Dump(vs.log) // For help debugging endpoint not found
-		return nil, err
+		return nil, ErrNoRouteToHost
+	}
+	if srcActor == nil || dstActor == nil {
+		// HACK: Until the node sends us a connect message when an actor connects
+		// but before they authenticate we have no knowledge of the that is about to
+		// try authenticating.  So for now we override policy and will allow any
+		// actor to talk to an installed authentication service.
+		var candidate *actor.Actor
+		var anonAddr netip.Addr
+		if srcActor == nil {
+			candidate = dstActor
+			anonAddr = pktData.SrcAddr
+		} else {
+			candidate = srcActor
+			anonAddr = pktData.DstAddr
+		}
+		var matchedSvc string
+		for _, sname := range curpol.GetActorAuthenticationServiceNames() {
+			if slices.Contains(candidate.GetProvides(), sname) {
+				vs.log.Info("allowing visa request from anon to auth service, overriding policy", "service", sname)
+				matchedSvc = sname
+				break
+			}
+		}
+		if matchedSvc == "" {
+			if srcActor == nil {
+				vs.log.Info("visa denied: failed to resolve source ZPR addresss", "source", pktData.SrcAddr)
+			} else {
+				vs.log.Info("visa denied: failed to resolve dest ZPR addresss", "dest", pktData.DstAddr)
+			}
+			return nil, ErrNoRouteToHost // oh well, we tried.
+		}
+		// Now we fabricate an anon actor for this visa.
+		expiration := time.Now().Add(5 * time.Minute)
+		anonActor := actor.EmptyActor()
+		claims := make(map[string]*actor.ClaimV)
+		claims[actor.KAttrEPID] = actor.NewClaimV(anonAddr.String(), expiration)
+		claims[actor.KAttrAuthority] = actor.NewClaimV("vs_hack_anon_to_auth", expiration)
+		claims[actor.KAttrRole] = actor.NewClaimV("adapter", expiration)
+		claims[actor.KAttrCN] = actor.NewClaimV(fmt.Sprintf("hack.%s.zpr", anonAddr), expiration)
+		anonActor.SetAuthenticated(claims, expiration, nil, nil, curConfigID)
+		if srcActor == nil {
+			srcActor = anonActor
+		} else {
+			dstActor = anonActor
+		}
+		vs.log.Debug("HACK: created anonymous actor for auth service", "actor", anonActor.String(), "service", matchedSvc)
 	}
 
 	// Do not issue a visa if either of the actors has expired.
@@ -356,18 +404,12 @@ func (vs *VSInst) computeVisaExpiration(maxVisaLifetime time.Duration, durationC
 
 // endpointsForTraffic locate the source and destination actors by using the directory
 // to see what actor is connected at each endpoint.
-func (vs *VSInst) endpointsForTraffic(pktData *snip.Traffic) (srcActor *actor.Actor, dstActor *actor.Actor, err error) {
+//
+// If we cannot find the actor in our actor database a nil entry is returned.
+func (vs *VSInst) endpointsForTraffic(pktData *snip.Traffic) (srcActor *actor.Actor, dstActor *actor.Actor) {
 	// Note that the visa service does not check for a route. The existence of an entry in the DirectoryService implies a route.
-	srcActor, err = vs.actorDB.ActorAtContactAddr(pktData.SrcAddr)
-	if err != nil {
-		vs.log.WithError(err).Info("visa denied: failed to resolve source ZPR address", "source", pktData.SrcAddr)
-		return nil, nil, ErrNoRouteToHost
-	}
-	dstActor, err = vs.actorDB.ActorAtContactAddr(pktData.DstAddr)
-	if err != nil {
-		vs.log.WithError(err).Info("visa denied: failed to resolve dest ZPR address", "dest", pktData.DstAddr)
-		return nil, nil, ErrNoRouteToHost
-	}
+	srcActor, _ = vs.actorDB.ActorAtContactAddr(pktData.SrcAddr)
+	dstActor, _ = vs.actorDB.ActorAtContactAddr(pktData.DstAddr)
 	return
 }
 

@@ -6,7 +6,6 @@ import (
 	"crypto/rsa"
 	"crypto/sha512"
 	"crypto/x509"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -147,7 +146,7 @@ func (p *Policy) ListLinks() []*polio.Link {
 	return p.bun.GetLinks()
 }
 
-// AuthServiceForPrefix return the auth service with the given prefix or nil.
+// AuthServiceForPrefix return the (visa-service facing) auth service with the given prefix or nil.
 func (p *Policy) AuthServiceForPrefix(pfx string) *polio.Service {
 	if p.bun == nil {
 		return nil
@@ -158,6 +157,34 @@ func (p *Policy) AuthServiceForPrefix(pfx string) *polio.Service {
 		}
 	}
 	return nil
+}
+
+// Returns the names of any actor authentication services in the policy.
+// Note does not mean that the services are on the ZPRnet.
+func (p *Policy) GetActorAuthenticationServiceNames() []string {
+	if p.bun == nil {
+		return nil
+	}
+	var authServices []string
+	for _, s := range p.bun.GetServices() {
+		if s.GetType() == polio.SvcT_SVCT_ACTOR_AUTH {
+			authServices = append(authServices, s.GetName())
+		}
+	}
+	return authServices
+}
+
+func (p *Policy) GetVisaServiceValidationServiceNames() []string {
+	if p.bun == nil {
+		return nil
+	}
+	var authServices []string
+	for _, s := range p.bun.GetServices() {
+		if s.GetType() == polio.SvcT_SVCT_AUTH {
+			authServices = append(authServices, s.GetName())
+		}
+	}
+	return authServices
 }
 
 // Lookup RSA public key for the given common name (CN).
@@ -254,8 +281,6 @@ func (p *Policy) getConnectHashes() []string {
 func (p *Policy) createDatasourceHash() {
 
 	prefixes := make(map[string][]byte) // auth prefix -> hash of entity
-	nbuf := make([]byte, 4)
-
 	hasher := sha512.New()
 
 	// Get all the "external" services
@@ -266,11 +291,8 @@ func (p *Policy) createDatasourceHash() {
 		hasher.Write([]byte(s.Name))
 		hasher.Write([]byte(s.Prefix))
 		hasher.Write([]byte(s.Domain))
-		binary.BigEndian.PutUint32(nbuf[0:], uint32(s.QueryApiVersion))
-		hasher.Write(nbuf)
-		binary.BigEndian.PutUint32(nbuf[0:], uint32(s.ValidateApiVersion))
-		hasher.Write(nbuf[:4])
-		hasher.Write([]byte(s.Addr))
+		hasher.Write([]byte(s.QueryUri))
+		hasher.Write([]byte(s.ValidateUri))
 		prefixes[s.Prefix] = hasher.Sum(nil)
 
 		hasher.Reset()
