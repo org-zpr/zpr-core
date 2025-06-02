@@ -21,7 +21,6 @@ require (
 	zpr.org/vsapi v0.2.0
 	zpr.org/vsx/polio v0.0.0-00010101000000-000000000000
 	zpr.org/vsx/snio v0.0.0-00010101000000-000000000000
-	zpr.org/vsx/zpl v0.0.0-00010101000000-000000000000
 )
 
 require (
@@ -44,4 +43,3 @@ replace zpr.org/vsx/polio => ../mods/polio
 
 replace zpr.org/vsx/snio => ../mods/snio
 
-replace zpr.org/vsx/zpl => ../mods/zpl

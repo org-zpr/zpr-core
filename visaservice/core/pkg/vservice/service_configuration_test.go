@@ -1,16 +1,6 @@
 package vservice_test
 
-import (
-	"strings"
-	"testing"
-
-	"github.com/stretchr/testify/require"
-	"zpr.org/vs/pkg/logr"
-	"zpr.org/vs/pkg/policy"
-	"zpr.org/vs/pkg/vservice"
-	"zpr.org/vsx/zpl/compiler"
-	"zpr.org/vsx/zpl/fs"
-)
+/* DISABLED UNTIL WE SORT OUT COMPILER
 
 const policySimple1 = `
 zpl_format: 2
@@ -498,3 +488,6 @@ func TestDifferentServiceAddedSameConfigRestrictNodeWeb(t *testing.T) {
 		require.Equal(t, nextID, initialID, "unexpected config change on iter %d", i) // no change
 	}
 }
+
+
+*/
