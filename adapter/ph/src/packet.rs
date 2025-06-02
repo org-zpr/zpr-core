@@ -249,6 +249,28 @@ impl std::fmt::Debug for PacketMetadata {
     }
 }
 
+impl PartialEq for PacketMetadata {
+    fn eq(&self, other: &Self) -> bool {
+        self.offset == other.offset
+            && self.len == other.len
+            && self.five_tuple == other.five_tuple
+            && self.ingress_lane_id == other.ingress_lane_id
+            && self.flags == other.flags
+            && self.ingress_link_id == other.ingress_link_id
+            && self.egress_link_id == other.egress_link_id
+            && self.ingress_stream_id == other.ingress_stream_id
+    }
+}
+
+impl Eq for PacketMetadata {}
+
+#[derive(Debug)]
+pub enum DeserializeError {
+    #[allow(dead_code)]
+    InvalidSerialization(PacketBuffer),
+    BufferTooSmall(PacketBuffer),
+}
+
 #[allow(dead_code)]
 impl Packet {
     pub const MIN_BODY_OFFSET: usize = size_of::<PacketMetadata>();
@@ -336,23 +358,30 @@ impl Packet {
         Ok(())
     }
 
-    /// Reconstitute a packet from its serialized form.
-    /// The reconstituted packet will have the same amount of headroom and tailroom
-    /// as the original packet, so long as the given packet buffer is of the same size.
-    /// If the given packet buffer cannot hold the deserialized packet, we return an error.
+    /// Reconstitute a packet from its serialized form.  The reconstituted
+    /// packet will have the same amount of headroom and tailroom as the
+    /// original packet, so long as the given packet buffer is of the same
+    /// size.  If either the source data is not a valid serialized packet,
+    /// or the given packet buffer cannot hold the deserialized packet, we
+    /// return an error.
     pub fn deserialize_into(
         mut src: impl buf::Buf,
         mut buf: PacketBuffer,
-    ) -> Result<Packet, PacketBuffer> {
+    ) -> Result<Packet, DeserializeError> {
         if src.remaining() < size_of::<PacketMetadata>() {
-            return Err(buf);
+            return Err(DeserializeError::InvalidSerialization(buf));
+        }
+
+        if buf.len() < size_of::<PacketMetadata>() {
+            return Err(DeserializeError::BufferTooSmall(buf));
         }
 
         src.copy_to_slice(&mut buf[..size_of::<PacketMetadata>()]);
-        let mut pkt = Self::try_new_with_existing_metadata(buf)?;
+        let mut pkt = Self::try_new_with_existing_metadata(buf)
+            .map_err(|buf| DeserializeError::BufferTooSmall(buf))?;
 
         if src.remaining() < pkt.metadata().len {
-            return Err(pkt.destroy());
+            return Err(DeserializeError::InvalidSerialization(pkt.destroy()));
         }
 
         src.copy_to_slice(pkt.body_mut());
@@ -581,6 +610,17 @@ impl std::fmt::Debug for Packet {
         writeln!(f, "===  End dumping packet info  ===\n")
     }
 }
+
+impl PartialEq for Packet {
+    fn eq(&self, other: &Self) -> bool {
+        // note the additional check of buf.len(), to ensure tailroom is equal
+        self.metadata() == other.metadata()
+            && self.buf.len() == other.buf.len()
+            && self.body() == other.body()
+    }
+}
+
+impl Eq for Packet {}
 
 #[cfg(test)]
 mod tests {

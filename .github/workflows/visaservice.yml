@@ -9,12 +9,12 @@ on:
     paths:
       - 'visaservice/mods/**'
       - 'visaservice/core/**'
-      - '.github/workflows/go-visaservice.yml'
+      - '.github/workflows/visaservice.yml'
   pull_request:
     paths:
       - 'visaservice/mods/**'
       - 'visaservice/core/**'
-      - '.github/workflows/go-visaservice.yml'
+      - '.github/workflows/visaservice.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

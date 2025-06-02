@@ -46,7 +46,7 @@ pub const MAX_BLOB_AGE_SECONDS: u64 = 120; // 2 minutes
 pub const DEFAULT_ZPR_OAUTH_RSA_PORT: u16 = 4000;
 
 /// This is the data payload in a [zdp::PacketType::InitAuthenticationRequest] packet.
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug, Default)]
+#[derive(Clone, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug, Default)]
 #[repr(packed)]
 pub struct ZdpInitAuthenticationPayload {
     /// 8 bytes random data
@@ -78,7 +78,7 @@ pub struct ZdpSelfSignedBlob {
 /// message.
 ///
 /// Note that this passed around as JSON text encoded in base64.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ZdpAuthCodeBlob {
     pub blob_type: String, // "AC"
     pub code: String,

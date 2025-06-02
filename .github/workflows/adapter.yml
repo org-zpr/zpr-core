@@ -10,7 +10,7 @@ on:
       - 'cslab/**'
       - 'cbpf-rs/**'
       - 'libnode/**'
-      - '.github/workflows/rust-adapter.yml'
+      - '.github/workflows/adapter.yml'
   pull_request:
     paths:
       - 'adapter/ph/**'
@@ -19,7 +19,7 @@ on:
       - 'cslab/**'
       - 'cbpf-rs/**'
       - 'libnode/**'
-      - '.github/workflows/rust-adapter.yml'
+      - '.github/workflows/adapter.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -33,7 +33,7 @@ jobs:
   # Build and upload ph
   build-ph:
     name: PH
-    uses: ./.github/workflows/rust-build-test.yml
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@18db4a3e7ba9852e3cd4a330843742bd93406c48
     with:
       name: 'ph'
       path: './adapter/ph'
@@ -43,7 +43,7 @@ jobs:
   # Build and upload ph-cli
   build-ph-cli:
     name: PH CLI
-    uses: ./.github/workflows/rust-build-test.yml
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@18db4a3e7ba9852e3cd4a330843742bd93406c48
     with:
       name: 'ph-cli'
       path: './adapter/cli'
@@ -56,7 +56,7 @@ jobs:
   test-ph:
     name: PH
     needs: [build-ph]
-    uses: ./.github/workflows/rust-test.yml
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@18db4a3e7ba9852e3cd4a330843742bd93406c48
     with:
       name: 'ph'
       path: './adapter/ph'
@@ -66,7 +66,7 @@ jobs:
   test-ph-cli:
     name: PH CLI
     needs: [build-ph-cli]
-    uses: ./.github/workflows/rust-test.yml
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@18db4a3e7ba9852e3cd4a330843742bd93406c48
     with:
       name: 'ph-cli'
       path: './adapter/cli'

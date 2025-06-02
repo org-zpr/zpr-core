@@ -20,6 +20,7 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::sync::broadcast;
 use tokio::time::MissedTickBehavior;
 use tracing::*;
 use zpr::LinkId;
@@ -173,7 +174,7 @@ pub enum LinkState {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Clone, Debug, strum::IntoStaticStr)]
 pub enum LinkEvent {
     Start,
     KeyingDone,
@@ -191,6 +192,7 @@ pub enum LinkEvent {
     AuthenticationSuccess(auth::ZdpAuthCodeBlob), // From an authentication service
     AuthenticationFailure,                        // From an authentication service
 
+    ReceivedEchoResponse { sequence_number: u16 },
     ReceivedAuthorizeResponse, // from visa service
     ReceivedKeepAliveResponse,
     ReceivedTerminateRequest(TerminateReason),
@@ -205,7 +207,7 @@ pub enum LinkEvent {
 #[derive(Error, Debug)]
 pub enum LinkStateError {
     #[error("Got unexpected event {1} on state {0:?}")]
-    UnexpectedTransition(LinkState, String),
+    UnexpectedTransition(LinkState, &'static str),
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
     #[error("Link {0} does not exist in peer table")]
@@ -279,10 +281,13 @@ impl LinkStateMachine {
     }
 }
 
+const LINK_STATE_EVENT_QUEUE_SIZE: usize = 16;
+
 pub struct LinkStateWrapper {
     id: LinkId, // set at constructor, never changes.
     link_type: LinkType,
     locked_fsm: Mutex<LinkStateMachine>,
+    events: broadcast::Sender<LinkEvent>,
     pub locked_data: Mutex<LinkData>,
 }
 
@@ -292,6 +297,7 @@ impl LinkStateWrapper {
             id: new_id,
             link_type: new_link_type,
             locked_fsm: Mutex::new(LinkStateMachine::new(new_id)),
+            events: broadcast::Sender::new(LINK_STATE_EVENT_QUEUE_SIZE),
             locked_data: Mutex::new(LinkData::new()),
         }
     }
@@ -337,6 +343,19 @@ impl LinkStateWrapper {
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
         debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id);
+
+        // Enqueue a copy of this event with any concurrent listening state machines.
+        // If there are none, avoid trying to do so we don't make a needless copy.
+        let listened_for;
+        if self.events.receiver_count() > 0 {
+            match self.events.send(event.clone()) {
+                Ok(n) => listened_for = n > 0,
+                Err(_) => listened_for = false,
+            }
+        } else {
+            listened_for = false;
+        }
+
         match event {
             LinkEvent::Start => self.start(asm),
             LinkEvent::KeyingDone => self.keying_done(asm),
@@ -377,6 +396,17 @@ impl LinkStateWrapper {
             LinkEvent::Close(code) => self.initiate_close(asm, code),
             LinkEvent::CloseDone => Ok(self.complete_close(asm)),
             LinkEvent::Error => self.process_error_response(asm),
+
+            ev => {
+                if listened_for {
+                    Ok(())
+                } else {
+                    Err(LinkStateError::UnexpectedTransition(
+                        self.locked_fsm.lock().unwrap().state,
+                        ev.into(),
+                    ))
+                }
+            }
         }
     }
 
@@ -390,7 +420,7 @@ impl LinkStateWrapper {
         if locked_fsm.state != LinkState::Inactive {
             return Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "start".to_string(),
+                "Start",
             ));
         }
 
@@ -444,7 +474,7 @@ impl LinkStateWrapper {
         if locked_fsm.state != LinkState::Keying {
             return Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "keying done".to_string(),
+                "KeyingDone",
             ));
         }
 
@@ -455,7 +485,7 @@ impl LinkStateWrapper {
         let Some(sa) = peer_state.get_established_transport_association() else {
             return Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "keying done when SA not established".to_owned(),
+                "KeyingDone when SA not established",
             ));
         };
 
@@ -547,7 +577,7 @@ impl LinkStateWrapper {
             }
             (_, _) => Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "process hello request".to_string(),
+                "ReceivedHelloRequest",
             )),
         }
     }
@@ -595,7 +625,7 @@ impl LinkStateWrapper {
             }
             (_, _) => Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "process hello response".to_string(),
+                "ReceivedHelloRespone",
             )),
         }
     }
@@ -940,7 +970,7 @@ impl LinkStateWrapper {
             (_, _) => {
                 return Err(LinkStateError::UnexpectedTransition(
                     locked_fsm.state,
-                    "Discard unexpected init authentication".to_string(),
+                    "ReceivedInitAuth",
                 ));
             }
         }
@@ -1136,7 +1166,7 @@ impl LinkStateWrapper {
         if locked_fsm.state == LinkState::Inactive {
             Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
-                "terminate".to_string(),
+                "ReceivedTerminateRequest",
             ))
         } else {
             locked_fsm.set_state(LinkState::Closing);
@@ -1261,7 +1291,7 @@ impl LinkStateWrapper {
             }
             _ => Err(LinkStateError::UnexpectedTransition(
                 state,
-                "terminate response".to_string(),
+                "ReceivedTerminateResponse",
             )),
         }
     }

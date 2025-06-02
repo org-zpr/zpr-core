@@ -65,21 +65,14 @@ impl ZdpPacketType {
         // so this logic becomes a simple range check
 
         match self {
-            Self::VisaHeraldResponse
-            | Self::VisaUpdateResponse
-            | Self::VisaRetractResponse
-            | Self::VisaDeacceptAcknowledgement
-            | Self::BindActorAddressResponse
-            | Self::UnbindActorAddressResponse
+            Self::BindActorAddressResponse
             | Self::AuthenticationResponse
             | Self::EchoResponse
             | Self::TerminateLinkResponse
             | Self::HelloResponse
-            | Self::ConfigurationResponse
             | Self::AcquireZprAddressResponse
             | Self::InitAuthenticationResponse
-            | Self::GrantZprAddressResponse
-            | Self::UnregisterActorAddressResponse => true,
+            | Self::GrantZprAddressResponse => true,
             _ => false,
         }
     }
