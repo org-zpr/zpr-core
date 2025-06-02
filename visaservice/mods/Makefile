@@ -1,6 +1,6 @@
 TOPTARGETS := all test
 
-MODULES = polio snio zpl
+MODULES = polio snio
 
 clean:
 	@echo "make mods/clean - NOP"
