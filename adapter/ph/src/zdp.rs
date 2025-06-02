@@ -67,8 +67,7 @@ impl ZdpPacketType {
         match self {
             Self::BindActorAddressResponse
             | Self::AcquireZprAddressResponse
-            | Self::InitAuthenticationResponse
-            | Self::GrantZprAddressResponse => true,
+            | Self::InitAuthenticationResponse => true,
             _ => false,
         }
     }
@@ -188,7 +187,7 @@ pub struct ZdpGrantZprAddressRequestHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpGrantZprAddressResponseHeader {
+pub struct ZdpGrantZprAddressResponse {
     pub status_code: ResponseCode,
 }
 

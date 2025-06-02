@@ -1105,7 +1105,7 @@ impl LinkStateWrapper {
         });
     }
 
-    /// Send the Grant message, if all goes well then fire off a ReceivedGrantResponse event.
+    /// Send the Grant message
     fn send_grant_zpr_address_request(&self, asm: &Arc<Assembly>, addrs: Vec<IpAddress>) {
         let link_id = self.id;
         let task_asm = asm.clone();
@@ -1117,28 +1117,13 @@ impl LinkStateWrapper {
             .collect::<Vec<_>>();
 
         tokio::task::spawn_local(async move {
-            let result = mgmt::requests::send_grant_zpr_address_request(
+            mgmt::requests::send_grant_zpr_address_request(
                 &task_asm,
                 link_id,
                 ResponseCode::Success,
                 &ipaddrs,
             )
-            .await;
-
-            if result.is_err() {
-                error!(target: LINK_STATE, "Link {link_id} failed to send grant zpr address");
-                if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::Error) {
-                    error!(target: LINK_STATE, "event handling error: {e}");
-                }
-            } else {
-                // Did send and got response.
-                if let Err(e) = task_asm.process_link_state_event(
-                    link_id,
-                    LinkEvent::ReceivedGrantResponse(result.unwrap()),
-                ) {
-                    error!(target: LINK_STATE, "event handling error: {e}");
-                }
-            }
+            .await
         });
     }
 

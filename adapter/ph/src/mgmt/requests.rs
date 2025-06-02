@@ -232,70 +232,50 @@ pub async fn send_grant_zpr_address_request(
     link_id: zpr::LinkId,
     status_code: zdp::ResponseCode,
     actor_addrs: &[IpAddr],
-) -> Result<zdp::ResponseCode, ()> {
-    let mut c_actor_addrs = Vec::new();
-    c_actor_addrs.extend_from_slice(actor_addrs);
-
+) -> zpr::SeqNum {
     info!(target: ZDP, "Link {link_id} - sending GrantZprAddressRequest, status: {status_code:?}");
-    let response = core::send_sync_non_flow_req(
+
+    let mut req = core::new_heap_packet();
+
+    let ip_version = if actor_addrs.is_empty() {
+        zpr::L3Type::Ipv6 // whatever, doesn't matter since count is zero.
+    } else {
+        actor_addrs[0].l3_type()
+    };
+    let hdr = zdp::ZdpGrantZprAddressRequestHeader {
+        status_code,
+        ip_version,
+        addr_count: actor_addrs.len() as u8,
+    };
+    hdr.write_to_buf(&mut req).unwrap();
+    for addr in actor_addrs {
+        match addr {
+            IpAddr::V4(addr) => {
+                if ip_version != zpr::L3Type::Ipv4 {
+                    panic!(
+                        "attempt to send an IPv4 address with IPv6 type grant zpr address packet"
+                    )
+                }
+                req.put(&addr.octets()[..])
+            }
+            IpAddr::V6(addr) => {
+                if ip_version != zpr::L3Type::Ipv6 {
+                    panic!(
+                        "attempt to send an IPv6 address with IPv4 type grant zpr address packet"
+                    )
+                }
+                req.put(&addr.octets()[..])
+            }
+        }
+    }
+
+    core::send_non_flow_mgmt(
         asm,
         link_id,
         zdp::ZdpPacketType::GrantZprAddressRequest,
-        zdp::ZdpPacketType::GrantZprAddressResponse,
-        move |mut req| {
-            let ip_version = if c_actor_addrs.is_empty() {
-                zpr::L3Type::Ipv6 // whatever, doesn't matter since count is zero.
-            } else {
-                c_actor_addrs[0].l3_type()
-            };
-            let hdr = zdp::ZdpGrantZprAddressRequestHeader {
-                status_code,
-                ip_version,
-                addr_count: c_actor_addrs.len() as u8,
-            };
-            hdr.write_to_buf(&mut req).unwrap();
-            for addr in &c_actor_addrs {
-                match addr {
-                    IpAddr::V4(addr) => {
-                        if ip_version != zpr::L3Type::Ipv4 {
-                            panic!("attempt to send an IPv4 address with IPv6 type grant zpr address packet")
-                        }
-                        req.put(&addr.octets()[..])
-                    },
-                    IpAddr::V6(addr) => {
-                        if ip_version != zpr::L3Type::Ipv6 {
-                            panic!("attempt to send an IPv6 address with IPv4 type grant zpr address packet")
-                        }
-                        req.put(&addr.octets()[..])
-                    },
-                }
-            }
-        },
+        req,
     )
-    .await;
-
-    match response {
-        Ok(mut rpkt) => {
-            let Ok(hdr) = zdp::ZdpGrantZprAddressResponseHeader::read_from_buf(&mut rpkt) else {
-                core::count_event(asm, &mut rpkt, CounterType::BadStructure);
-                return Err(());
-            };
-            let resp_code = hdr.status_code;
-            debug!(
-                "Link {link_id}: received GrantZprAddressResponse, status: {:?}",
-                resp_code
-            );
-            Ok(resp_code)
-        }
-
-        Err(err) => {
-            warn!(
-                "Link {link_id}: error with GrantZprAddressResponse: {}",
-                err
-            );
-            Err(())
-        }
-    }
+    .await
 }
 
 /// send a Terminate Request (RFC 6.5 § 6.3.3)

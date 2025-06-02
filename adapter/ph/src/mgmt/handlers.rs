@@ -403,7 +403,7 @@ pub async fn handle_acquire_zpr_address_request(
 /// If the request indicates a fail, we send the event with empty address list.
 pub async fn handle_grant_zpr_address_request(
     asm: &Arc<Assembly>,
-    seq_num: zpr::SeqNum,
+    _seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
@@ -456,17 +456,34 @@ pub async fn handle_grant_zpr_address_request(
 
     // Send an ACK.
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpGrantZprAddressResponseHeader>();
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpGrantZprAddressResponse>();
     hdr.status_code = status_code;
 
-    super::core::send_non_flow_mgmt_response(
+    super::core::send_non_flow_mgmt(
         asm,
         ingress_link_id,
         zdp::ZdpPacketType::GrantZprAddressResponse,
-        seq_num,
         rsp_pkt,
     )
     .await;
+    Ok(())
+}
+
+pub async fn handle_grant_zpr_address_response(
+    asm: &Arc<Assembly>,
+    mut pkt: Packet,
+) -> HandleMgmtResult {
+    let Ok(hdr) = zdp::ZdpGrantZprAddressResponse::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+
+    let link_id = pkt.metadata().ingress_link_id;
+    let resp_code = hdr.status_code;
+    debug!(target: ZDP, "Link {link_id}: received GrantZprAddressResponse, status: {resp_code:?}");
+    let _ = asm
+        .process_link_state_event(link_id, LinkEvent::ReceivedGrantResponse(resp_code))
+        .map_err(|_| ());
+
     Ok(())
 }
 
