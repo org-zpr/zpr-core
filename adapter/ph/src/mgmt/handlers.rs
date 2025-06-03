@@ -345,7 +345,7 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
 ///
 pub async fn handle_acquire_zpr_address_request(
     asm: &Arc<Assembly>,
-    seq_num: zpr::SeqNum,
+    _seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
@@ -361,14 +361,13 @@ pub async fn handle_acquire_zpr_address_request(
 
     // Send an ACK.
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpAcquireZprAddressResponseHeader>();
+    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpAcquireZprAddressResponse>();
     hdr.status_code = status_code;
 
-    super::core::send_non_flow_mgmt_response(
+    super::core::send_non_flow_mgmt(
         asm,
         ingress_link_id,
         zdp::ZdpPacketType::AcquireZprAddressResponse,
-        seq_num,
         rsp_pkt,
     )
     .await;
@@ -390,6 +389,24 @@ pub async fn handle_acquire_zpr_address_request(
     ) {
         error!(target: ZDP, "Link {ingress_link_id}: Failed to process ReceivedAcquireZprAddressRequest event: {:?}", e);
     }
+
+    Ok(())
+}
+
+pub async fn handle_acquire_zpr_address_response(
+    asm: &Arc<Assembly>,
+    mut pkt: Packet,
+) -> HandleMgmtResult {
+    let Ok(hdr) = zdp::ZdpAcquireZprAddressResponse::read_from_buf(&mut pkt) else {
+        return Err((HandleMgmtError::BadStructure, pkt));
+    };
+
+    let link_id = pkt.metadata().ingress_link_id;
+    let resp_code = hdr.status_code;
+    debug!("Link {link_id} Received AcquireZprAddressResponse, status: {resp_code:?}");
+    let _ = asm
+        .process_link_state_event(link_id, LinkEvent::ReceivedAcquireResponse(resp_code))
+        .map_err(|_| ());
 
     Ok(())
 }

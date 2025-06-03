@@ -150,72 +150,52 @@ pub async fn send_acquire_zpr_address_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
     actor_addrs: &[IpAddr],
-    blob: Option<Vec<u8>>,
-) -> Result<zdp::ResponseCode, ()> {
-    // Copy the blob amd addrs for use in closure below.
-    let blob_data = blob.unwrap_or_default();
-    let c_actor_addrs = actor_addrs.to_owned();
+    blob: Option<&[u8]>,
+) -> zpr::SeqNum {
+    let blob = blob.unwrap_or_default();
 
-    let response = core::send_sync_non_flow_req(
+    let mut req = core::new_heap_packet();
+
+    let ip_version = if actor_addrs.is_empty() {
+        zpr::L3Type::Ipv6 // whatever, doesn't matter since count is zero.
+    } else {
+        actor_addrs[0].l3_type()
+    };
+    let hdr = zdp::ZdpAcquireZprAddressRequestHeader {
+        blob_len: (blob.len() as u16).into(),
+        ip_version,
+        addr_count: actor_addrs.len() as u8,
+    };
+    hdr.write_to_buf(&mut req).unwrap();
+    req.put_slice(blob);
+    for addr in actor_addrs {
+        match addr {
+            IpAddr::V4(addr) => {
+                if ip_version != zpr::L3Type::Ipv4 {
+                    panic!(
+                        "attempt to send an IPv4 address with IPv6 type acquire zpr address packet"
+                    )
+                }
+                req.put(&addr.octets()[..])
+            }
+            IpAddr::V6(addr) => {
+                if ip_version != zpr::L3Type::Ipv6 {
+                    panic!(
+                        "attempt to send an IPv6 address with IPv4 type acquire zpr address packet"
+                    )
+                }
+                req.put(&addr.octets()[..])
+            }
+        }
+    }
+
+    core::send_non_flow_mgmt(
         asm,
         link_id,
         zdp::ZdpPacketType::AcquireZprAddressRequest,
-        zdp::ZdpPacketType::AcquireZprAddressResponse,
-        move |mut req| {
-            let ip_version = if c_actor_addrs.is_empty() {
-                zpr::L3Type::Ipv6 // whatever, doesn't matter since count is zero.
-            } else {
-                c_actor_addrs[0].l3_type()
-            };
-            let hdr = zdp::ZdpAcquireZprAddressRequestHeader {
-                blob_len: (blob_data.len() as u16).into(),
-                ip_version,
-                addr_count: c_actor_addrs.len() as u8,
-            };
-            hdr.write_to_buf(&mut req).unwrap();
-            req.put_slice(&blob_data);
-            for addr in &c_actor_addrs {
-                match addr {
-                    IpAddr::V4(addr) => {
-                        if ip_version != zpr::L3Type::Ipv4 {
-                            panic!("attempt to send an IPv4 address with IPv6 type acquire zpr address packet")
-                        }
-                        req.put(&addr.octets()[..])
-                    },
-                    IpAddr::V6(addr) => {
-                        if ip_version != zpr::L3Type::Ipv6 {
-                            panic!("attempt to send an IPv6 address with IPv4 type acquire zpr address packet")
-                        }
-                        req.put(&addr.octets()[..])
-                    },
-                }
-            }
-        },
+        req,
     )
-    .await;
-
-    match response {
-        Ok(mut rpkt) => {
-            let Ok(hdr) = zdp::ZdpAcquireZprAddressResponseHeader::read_from_buf(&mut rpkt) else {
-                core::count_event(asm, &mut rpkt, CounterType::BadStructure);
-                return Err(());
-            };
-            let resp_code = hdr.status_code;
-            debug!(
-                "Link {link_id} Received AcquireZprAddressResponse, status: {:?}",
-                resp_code
-            );
-            Ok(resp_code)
-        }
-
-        Err(err) => {
-            warn!(
-                "Link {link_id}: error with AcquireZprAddressResponse: {}",
-                err
-            );
-            Err(())
-        }
-    }
+    .await
 }
 
 /// Send an GrantZprAddressRequest (TODO: not yet in RFC 6)

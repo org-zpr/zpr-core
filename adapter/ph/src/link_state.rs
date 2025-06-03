@@ -1203,36 +1203,21 @@ impl LinkStateWrapper {
         Ok(())
     }
 
-    /// Send Acquire message, and if all goes well fire off a ReceivedAcquireResponse event.
+    /// Send Acquire message
     fn send_acquire_zpr_address_request(&self, asm: &Arc<Assembly>, blob: &str) {
         let link_id = self.id;
         let task_asm = asm.clone();
 
-        let blob_opt = Some(blob.as_bytes().to_vec());
+        let blob_opt = Some(blob.as_bytes().to_owned());
 
         tokio::task::spawn_local(async move {
-            let result = mgmt::requests::send_acquire_zpr_address_request(
+            mgmt::requests::send_acquire_zpr_address_request(
                 &task_asm,
                 link_id,
                 &task_asm.local_zpr_addresses,
-                blob_opt,
+                blob_opt.as_deref(),
             )
-            .await;
-
-            if result.is_err() {
-                error!(target: LINK_STATE, "Link {link_id} failed to send acquire zpr address");
-                if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::Error) {
-                    error!(target: LINK_STATE, "event handlinhg error {e}");
-                }
-            } else {
-                // Did send and got response.
-                if let Err(e) = task_asm.process_link_state_event(
-                    link_id,
-                    LinkEvent::ReceivedAcquireResponse(result.unwrap()),
-                ) {
-                    error!(target: LINK_STATE, "event handling error {e}");
-                }
-            }
+            .await
         });
     }
 

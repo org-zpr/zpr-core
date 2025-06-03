@@ -121,6 +121,10 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                 handlers::handle_acquire_zpr_address_request(asm, seq_num, pkt).await
             }
 
+            ZdpPacketType::AcquireZprAddressResponse => {
+                handlers::handle_acquire_zpr_address_response(asm, pkt).await
+            }
+
             ZdpPacketType::GrantZprAddressRequest => {
                 handlers::handle_grant_zpr_address_request(asm, seq_num, pkt).await
             }
