@@ -15,3 +15,37 @@ const (
 const (
 	KAttrActorAuthority = "authority" // Actor requested authority
 )
+
+type Namespace int
+
+const (
+	NsUser Namespace = iota + 1
+	NsDevice
+	NsService
+)
+
+func (n Namespace) String() string {
+	switch n {
+	case NsUser:
+		return "user"
+	case NsDevice:
+		return "device"
+	case NsService:
+		return "service"
+	default:
+		return "unknown"
+	}
+}
+
+func ParseNamespace(s string) (Namespace, bool) {
+	switch s {
+	case "user":
+		return NsUser, true
+	case "device":
+		return NsDevice, true
+	case "service":
+		return NsService, true
+	default:
+		return 0, false
+	}
+}

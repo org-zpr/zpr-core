@@ -25,6 +25,7 @@ func TestAddRemoveService(t *testing.T) {
 		SupportQuery:      false,
 		QueryUri:          "",
 		ValidationUri:     "zpr-validation2://[::1]:5001",
+		NsMap:             make(map[string]auth.AttrInfo),
 	}
 	err := dir.AddService("svcpfx", svcAddr, &feats, 1)
 	require.Nil(t, err)
@@ -100,6 +101,7 @@ func TestRemoveServiceByContactAddr(t *testing.T) {
 		SupportQuery:      false,
 		QueryUri:          "",
 		ValidationUri:     "zpr-validation2://[::1]:5001",
+		NsMap:             make(map[string]auth.AttrInfo),
 	}
 
 	for n := 0; n < 3; n++ {
