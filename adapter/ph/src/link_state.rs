@@ -159,6 +159,7 @@ pub enum LinkEvent {
     Close(TerminateReason),
     CloseDone,
     Error,
+    Timeout { logical_clock: u64 },
 }
 
 #[derive(Error, Debug)]
@@ -213,6 +214,9 @@ pub struct LinkStateMachine {
     silent: bool,
     actor_addresses: Vec<IpAddress>,
     last_state_change: std::time::Instant,
+    /// used to prevent A/B/A errors with timeouts
+    logical_clock: u64,
+    timeout_handle: Option<tokio::task::AbortHandle>,
 }
 
 impl LinkStateMachine {
@@ -224,6 +228,8 @@ impl LinkStateMachine {
             silent: false,
             actor_addresses: Default::default(),
             last_state_change: std::time::Instant::now(),
+            logical_clock: 0,
+            timeout_handle: None,
         }
     }
 
@@ -233,6 +239,51 @@ impl LinkStateMachine {
         }
         self.state = new_state;
         self.last_state_change = std::time::Instant::now();
+        self.cancel_timeout();
+    }
+
+    /// Schedule the given callback to be invoked asynchronously after the
+    /// specified duration.
+    ///
+    /// The callback will be passed the logical clock at which time the
+    /// timeout was set, and, after obtaining a lock on the state machine,
+    /// the callback should compare this value to the current logical clock
+    /// to determine whether it is still valid.
+    ///
+    /// Any existing callback is cancelled as with `cancel_timeout()`.
+    ///
+    /// The timeout will be canceled automatically at the next state change.
+    /// (Note that any call to `set_state()` will cancel the timeout, even
+    /// if the state does not actually change.)
+    pub fn set_timeout_callback(
+        &mut self,
+        duration: std::time::Duration,
+        callback: impl FnOnce(u64) + Send + 'static,
+    ) {
+        // cancel old timeout if present
+        self.cancel_timeout();
+
+        // launch new timeout tied to the current (new) logical clock
+        let logical_clock = self.logical_clock;
+        let jh = tokio::task::spawn(async move {
+            tokio::time::sleep(duration).await;
+            callback(logical_clock);
+        });
+
+        // store new timeout handle
+        self.timeout_handle = Some(jh.abort_handle());
+    }
+
+    /// Try to cancel any existing timeout.
+    ///
+    /// Any existing callback may or may not be invoked at a later time.  It
+    /// is the responsibility of the callback to ensure atomic behavior by
+    /// comparing the logical clock as detailed in `set_timeout_callback()`.
+    pub fn cancel_timeout(&mut self) {
+        // request to abort existing timeout task if present
+        self.timeout_handle.take().inspect(|h| h.abort());
+        // increment logical clock to avoid duplicate timeouts
+        self.logical_clock = self.logical_clock.wrapping_add(1);
     }
 }
 
@@ -265,6 +316,32 @@ impl LinkStateWrapper {
     pub fn is_ready(&self) -> bool {
         let locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.status == LinkStatus::Up && locked_fsm.state == LinkState::Active
+    }
+
+    /// Schedule a `Timeout` event to occur after the specified duration.
+    ///
+    /// Any existing timeout is canceled atomically.
+    ///
+    /// The timeout will also be canceled automatically and atomically at the next state change.
+    ///
+    /// The timeout may be cancelled manually using `LinkStateMachine::cancel_timeout()`.
+    /// It will be cancelled atomically.
+    #[allow(dead_code)]
+    fn set_timeout(
+        &self,
+        asm: &Arc<Assembly>,
+        locked_fsm: &mut tokio::sync::MutexGuard<'_, LinkStateMachine>,
+        duration: std::time::Duration,
+    ) {
+        let link_id = self.id;
+        let task_asm = asm.clone();
+        locked_fsm.set_timeout_callback(duration, move |logical_clock| {
+            if let Err(e) =
+                task_asm.process_link_state_event(link_id, LinkEvent::Timeout { logical_clock })
+            {
+                error!(target: LINK_STATE, "error handling timeout: {e}");
+            }
+        });
     }
 
     /// Takes lock, returns copy of addresses.
@@ -342,6 +419,7 @@ impl LinkStateWrapper {
             LinkEvent::Close(code) => self.initiate_close(asm, code),
             LinkEvent::CloseDone => Ok(self.complete_close(asm)),
             LinkEvent::Error => self.process_error_response(asm),
+            LinkEvent::Timeout { logical_clock } => self.process_timeout(asm, logical_clock),
 
             ev => {
                 if listened_for {
@@ -991,6 +1069,22 @@ impl LinkStateWrapper {
         self.initiate_close(&asm, TerminateReason::Other)
     }
 
+    fn process_timeout(
+        &self,
+        _asm: &Arc<Assembly>,
+        logical_clock: u64,
+    ) -> Result<(), LinkStateError> {
+        let locked_fsm = self.locked_fsm.lock().unwrap();
+        if logical_clock != locked_fsm.logical_clock {
+            // timeout was for some earlier state & we won the task abort race; ignore
+            return Ok(());
+        }
+
+        // handle the timeout...
+
+        Ok(())
+    }
+
     /// Validate a received shutdown request
     /// Does not transition
     /// Generates no packets
@@ -1314,5 +1408,95 @@ impl Display for LinkData {
             self.latency_data.get_min(),
             self.latency_data.get_max(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LinkState, LinkStateMachine};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+    use tokio::sync::oneshot;
+
+    #[tokio::test(start_paused = true)]
+    async fn timeout_test() {
+        let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
+        let (tx, rx) = oneshot::channel();
+
+        set_timeout(&sm, Duration::from_secs(5), tx);
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        assert!(rx.is_empty());
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        assert!(rx.await.is_ok());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timeout_explicit_cancel_test() {
+        let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
+        let (tx, rx) = oneshot::channel();
+
+        set_timeout(&sm, Duration::from_secs(5), tx);
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        sm.lock().unwrap().cancel_timeout();
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        assert!(rx.await.is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timeout_implicit_cancel_test() {
+        let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
+        let (tx, rx) = oneshot::channel();
+
+        set_timeout(&sm, Duration::from_secs(5), tx);
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        sm.lock().unwrap().set_state(LinkState::Keying);
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        assert!(rx.await.is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timeout_reschedule_test() {
+        let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
+        let (tx1, rx1) = oneshot::channel();
+        let (tx2, rx2) = oneshot::channel();
+
+        set_timeout(&sm, Duration::from_secs(5), tx1);
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        set_timeout(&sm, Duration::from_secs(5), tx2);
+
+        tokio::time::sleep(Duration::from_secs(4)).await;
+
+        assert!(rx1.await.is_err());
+        assert!(rx2.is_empty());
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        assert!(rx2.await.is_ok());
+    }
+
+    fn set_timeout(sm: &Arc<Mutex<LinkStateMachine>>, duration: Duration, tx: oneshot::Sender<()>) {
+        let sm_cb = sm.clone();
+        sm.lock()
+            .unwrap()
+            .set_timeout_callback(duration, move |lc| {
+                if sm_cb.lock().unwrap().logical_clock != lc {
+                    return;
+                }
+                tx.send(()).unwrap();
+            });
     }
 }
