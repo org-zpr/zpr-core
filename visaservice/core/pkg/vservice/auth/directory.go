@@ -37,7 +37,8 @@ type DSFeatures struct {
 	ValidationUri     string
 	SupportQuery      bool
 	QueryUri          string
-	TLSDomain         string // optional TLS domain name
+	TLSDomain         string              // optional TLS domain name
+	NsMap             map[string]AttrInfo // Namespace map for attributes
 }
 
 type OAuthValidateResponse struct {
@@ -59,6 +60,11 @@ func (f *DSFeatures) ShortStr() string {
 	}
 }
 
+type AttrInfo struct {
+	namespace actor.Namespace
+	identity  bool
+}
+
 // VLoc is a "Validation service LOCation"
 type VLoc struct {
 	configID      uint64 // Config ID when actor connected and was permitted to add itself
@@ -70,6 +76,7 @@ type VLoc struct {
 	allowValidate bool
 	queryUri      string
 	validationUri string
+	nsMap         map[string]AttrInfo // Namespace map for attributes
 }
 
 // Directory manages a collection of (external) validators (ie, simplev)
@@ -173,7 +180,24 @@ func (vs *Directory) Validate(dsPrefix string, msg *ZdpAuthCodeBlob, revokes []*
 	}
 
 	// ZPR allows setting attributes in tokens using claims with "zpra/"
-	claims := vs.parseZPRClaimsFromJWT(resp.AccessToken, expiration)
+	rawClaims := vs.parseZPRClaimsFromJWT(resp.AccessToken, expiration)
+
+	// The attribute from the service are mapped into namespaces using the
+	// attribute (returns & identity) information from the policy.  The claims
+	// returned above are raw, eg if the policy says the service returns "user.id"
+	// then the claim will have an "id" value in it (no namespace).
+	claims := make(map[string]*actor.ClaimV)
+	for attrName, cv := range rawClaims {
+		if info, found := v.nsMap[attrName]; found {
+			newName := fmt.Sprintf("%s.%s", info.namespace, attrName)
+			// TODO: For now ignoring identity bit
+			claims[newName] = cv
+		} else {
+			// Attribute from service not listed in policy, warn.
+			vs.log.Warn("attribute from trusted service not listed in policy",
+				"prefix", dsPrefix, "attr", fmt.Sprintf("%s:%s", attrName, cv.V))
+		}
+	}
 
 	vres := &ValidateResult{
 		Prefix:     dsPrefix,
@@ -260,10 +284,12 @@ func (vs *Directory) AddService(prefix string, contactAddr netip.Addr, features 
 	if !contactAddr.IsValid() || contactAddr.IsUnspecified() {
 		return errInvalidAddress
 	}
+	if features.NsMap == nil {
+		return fmt.Errorf("features.nsMap is nil for prefix %s", prefix)
+	}
 	vs.log.Debug("AddService", "prefix", prefix)
 	vs.mtx.Lock()
 	defer vs.mtx.Unlock()
-
 	vs.log.Info("adding validations service",
 		"prefix", prefix, "support", features.ShortStr(), "addr", contactAddr,
 		"configID", configID)
@@ -277,6 +303,7 @@ func (vs *Directory) AddService(prefix string, contactAddr netip.Addr, features 
 		queryUri:      features.QueryUri,
 		validationUri: features.ValidationUri,
 		Domain:        features.TLSDomain,
+		nsMap:         features.NsMap,
 	}
 	return nil
 }

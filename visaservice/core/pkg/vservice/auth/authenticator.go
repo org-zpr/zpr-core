@@ -194,6 +194,8 @@ func (a *Authenticator) AddDatasourceProvider(service string, contactAddr netip.
 	urlp.Path = "/token"
 	fixedValidateUri := urlp.String()
 
+	nsMap := a.createNamespaceMap(service, psvc.GetAttrs(), psvc.GetIdAttrs())
+
 	// TODO: Update this when we implement Query
 
 	features := DSFeatures{
@@ -202,6 +204,7 @@ func (a *Authenticator) AddDatasourceProvider(service string, contactAddr netip.
 		ValidationUri:     fixedValidateUri,
 		QueryUri:          psvc.QueryUri,
 		TLSDomain:         psvc.Domain,
+		NsMap:             nsMap,
 	}
 
 	// TODO: Needs thought
@@ -211,6 +214,52 @@ func (a *Authenticator) AddDatasourceProvider(service string, contactAddr netip.
 		contactAddr,
 		&features,
 		configID)
+}
+
+// createNamespaceMap creates a map of attribute keys to their namespaces and identity status based
+// on information held in policy for the trusted service.
+func (a *Authenticator) createNamespaceMap(service string, attrs []string, idAttrs []string) map[string]AttrInfo {
+	nsMap := make(map[string]AttrInfo)
+	for _, attrWithPfx := range attrs {
+		key, ns, ok := a.keyAndNsForAttr(attrWithPfx)
+		if !ok {
+			a.log.Warn("failed to parse prefix from attribute in policy", "attr", attrWithPfx, "service", service)
+			continue
+		}
+		nsMap[key] = AttrInfo{
+			namespace: ns,
+			identity:  false,
+		}
+	}
+	for _, attrWithPfx := range idAttrs {
+		key, ns, ok := a.keyAndNsForAttr(attrWithPfx)
+		if !ok {
+			a.log.Warn("failed to parse prefix from identity attribute in policy", "attr", attrWithPfx, "service", service)
+			continue
+		}
+		if ai, found := nsMap[key]; found {
+			// If we already have this key, just set the identity flag.
+			ai.identity = true
+			nsMap[key] = ai
+		} else {
+			nsMap[key] = AttrInfo{
+				namespace: ns,
+				identity:  true,
+			}
+		}
+	}
+	return nsMap
+}
+
+func (a *Authenticator) keyAndNsForAttr(attr string) (string, actor.Namespace, bool) {
+	pfxstr, rest, ok := strings.Cut(attr, ".")
+	if !ok {
+		return "", 0, false // no prefix
+	}
+	if pfx, ok := actor.ParseNamespace(pfxstr); ok {
+		return rest, pfx, true
+	}
+	return "", 0, false
 }
 
 // Authenticate - perform authentication at the node.
