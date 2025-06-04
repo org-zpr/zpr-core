@@ -18,7 +18,7 @@ import (
 	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vsx/snio/zds"
+	"zpr.org/vs/pkg/tsapi"
 )
 
 const AuthServiceTimeout = 77 * time.Second
@@ -208,7 +208,7 @@ func (vs *Directory) parseZPRClaimsFromJWT(jwtStr string, expiration time.Time) 
 
 // QueryByPrefix may return ErrNotSupported if the datasource does not support query.
 // If prefix is unknown returns ErrUnknownPrefix
-func (vs *Directory) QueryByPrefix(pfx string, req *zds.QueryRequest, revokes []*snauth.CredID) (*NewQueryResponse, error) {
+func (vs *Directory) QueryByPrefix(pfx string, req *tsapi.QueryRequest, revokes []*snauth.CredID) (*NewQueryResponse, error) {
 	vs.mtx.RLock()
 	vloc, ok := vs.m[pfx]
 	vs.mtx.RUnlock()
@@ -383,7 +383,7 @@ func (v *VLoc) validate(cert *x509.CertPool, checkBlob *ZdpAuthCodeBlob) (*OAuth
 }
 
 // query used to make a GRPC query call. Needs to be reworked with a new HTTPS api.
-func (v *VLoc) query(req *zds.QueryRequest, pool *x509.CertPool) (*NewQueryResponse, error) {
+func (v *VLoc) query(req *tsapi.QueryRequest, pool *x509.CertPool) (*NewQueryResponse, error) {
 	//creds := credentials.NewClientTLSFromCert(pool, "")
 	//if err := creds.OverrideServerName(v.Domain); err != nil {
 	//	return nil, fmt.Errorf("override server name failed: %w", err)

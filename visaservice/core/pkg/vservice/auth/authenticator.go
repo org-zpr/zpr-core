@@ -19,7 +19,7 @@ import (
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
-	"zpr.org/vsx/snio/zds"
+	"zpr.org/vs/pkg/tsapi"
 
 	"zpr.org/vsx/polio"
 )
@@ -459,7 +459,7 @@ func (a *Authenticator) makeJWT(subject string, expiration time.Time, issuers, c
 // Query runs an attribute query against datasources.
 // Note that the attributes passed in the request will have prefixes on them, and
 // the attributes in the response will too.
-func (a *Authenticator) Query(fedreq *zds.QueryRequest) (*zds.QueryResponse, error) {
+func (a *Authenticator) Query(fedreq *tsapi.QueryRequest) (*tsapi.QueryResponse, error) {
 	return nil, fmt.Errorf("query not yet implemented")
 	/* OFF FOR NOW - not yet implemented for ref impl
 	var result *zds.QueryResponse
