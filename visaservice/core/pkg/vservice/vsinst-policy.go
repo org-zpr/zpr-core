@@ -7,13 +7,13 @@ import (
 )
 
 // GetPolicyAndMatcher returns the current policy details.
-func (vs *VSInst) getPolicyMatcherConfig() (*policy.Policy, *policy.Matcher, uint64) {
+func (vs *VSInst) getPolicyMatcherConfig() (*policy.Policy, *policy.Matcher, int64) {
 	vs.plcy.RLock()
 	defer vs.plcy.RUnlock()
 	return vs.plcy.p, vs.plcy.matcher, vs.plcy.cid
 }
 
-func (vs *VSInst) getPolicyMatcherConfigHoldingLock() (*policy.Policy, *policy.Matcher, uint64) {
+func (vs *VSInst) getPolicyMatcherConfigHoldingLock() (*policy.Policy, *policy.Matcher, int64) {
 	return vs.plcy.p, vs.plcy.matcher, vs.plcy.cid
 }
 
@@ -29,7 +29,7 @@ func (vs *VSInst) getPolicy() *policy.Policy {
 //
 // deactivates all other configurations
 // implementation of policy.PolicyListener
-func (vs *VSInst) ActivateConfiguration(configID uint64, _ byte) {
+func (vs *VSInst) ActivateConfiguration(configID int64, _ byte) {
 	vs.plcy.RLock()
 	defer vs.plcy.RUnlock()
 	if configID != vs.plcy.cid {
@@ -52,7 +52,7 @@ func (vs *VSInst) ActivateConfiguration(configID uint64, _ byte) {
 //
 // must install the policy under the given configuration.
 // implementation of policy.PolicyListener
-func (vs *VSInst) InstallPolicy(configID uint64, _ byte, pol *policy.Policy) error {
+func (vs *VSInst) InstallPolicy(configID int64, _ byte, pol *policy.Policy) error {
 
 	vs.log.Info("installing policy to auth service")
 	vs.authr.InstallPolicy(configID, 0, pol)
@@ -60,7 +60,7 @@ func (vs *VSInst) InstallPolicy(configID uint64, _ byte, pol *policy.Policy) err
 	vs.plcy.Lock()
 
 	vs.log.Debug("new policy arrives for install")
-	var prevConfig uint64
+	var prevConfig int64
 	if p, _, cid := vs.getPolicyMatcherConfigHoldingLock(); p != nil {
 		prevConfig = cid
 	}

@@ -20,13 +20,12 @@ import (
 	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsapi"
-	"zpr.org/vsx/snio/vsio"
 	"zpr.org/vsx/snio/zds"
 )
 
 // renewEssentialVisasForCurrentConfig renews the visa-service visas found in our
 // store if they are not already on the current net-config.
-func (vs *VSInst) renewEssentialVisasForCurrentConfig(configID, policyID uint64) {
+func (vs *VSInst) renewEssentialVisasForCurrentConfig(configID int64, policyID uint64) {
 	var oldVisas []*vtableEnt
 
 	vs.vtable.mtx.RLock()
@@ -64,6 +63,7 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 	vs.log.Debug("RequestVisa starts", "zprSRC", pktData.SrcAddr, "zprDEST", pktData.DstAddr, "dport", pktData.DstPort)
 
 	curpol, curmatcher, curConfigID := vs.getPolicyMatcherConfig()
+
 	if curpol == nil || curmatcher == nil || curpol.IsEmpty() {
 		vs.log.Info("visa denied: nil or empty policy", "source", pktData.SrcAddr)
 		return nil, ErrDeniedByPolicy
@@ -269,14 +269,14 @@ func (vs *VSInst) doRequestVisa(ctx context.Context, tetherAddr netip.Addr, pktD
 	resp.Status = vsapi.StatusCode_SUCCESS
 
 	resp.Visa = &vsapi.VisaHop{
-		Visa:     libvisa.VsioVisaToThrift(vent.v),
+		Visa:     vent.v,
 		HopCount: int32(vs.hopCount),
-		IssuerID: int32(vent.v.IssuerId),
+		IssuerID: vent.v.IssuerID,
 	}
 
 	vs.visaCreated(vent.v, visaExpiration, pktData, expFlags.String(), tetherAddr)
 	if time.Until(visaExpiration) < (30 * time.Second) {
-		vs.log.Warn("visa with very short TTL", "visaID", vent.v.IssuerId, "TTL", time.Until(visaExpiration).String())
+		vs.log.Warn("visa with very short TTL", "visaID", vent.v.IssuerID, "TTL", time.Until(visaExpiration).String())
 	}
 	return resp, nil
 }
@@ -415,7 +415,7 @@ func (vs *VSInst) endpointsForTraffic(pktData *snip.Traffic) (srcActor *actor.Ac
 
 // inserVisaWithNewID first creates a new visa ID (based on our visa prefix, which is based on our node name),
 // then it updates the visaID field on the passed visa, and inserts the visa into our table.
-func (vs *VSInst) insertVisaWithNewID(v *vsio.Visa, isVSVisa bool, pktData *snip.Traffic) (*vtableEnt, error) {
+func (vs *VSInst) insertVisaWithNewID(v *vsapi.Visa, isVSVisa bool, pktData *snip.Traffic) (*vtableEnt, error) {
 	vs.vtable.mtx.Lock()
 
 	// always increasing.
@@ -424,13 +424,13 @@ func (vs *VSInst) insertVisaWithNewID(v *vsio.Visa, isVSVisa bool, pktData *snip
 		panic(fmt.Sprintf("max visa ID reached: %d", vID)) // TODO: solve this :)
 	}
 	vs.vtable.nextVisaID = vID + 1
-	v.IssuerId = (uint32(vs.nodeNumber) << 24) | vID
+	v.IssuerID = int32(((uint32(vs.nodeNumber) << 24) | vID) & 0x7FFFFFFF)
 	ve := &vtableEnt{
 		v:        v,
 		isVSVisa: isVSVisa,
 		pktData:  pktData,
 	}
-	vs.vtable.table[v.IssuerId] = ve
+	vs.vtable.table[uint32(v.IssuerID)] = ve
 	sz := len(vs.vtable.table)
 	// vs.dumpVisaTableHoldingLock("insertVisa")
 	vs.vtable.mtx.Unlock()
@@ -438,14 +438,14 @@ func (vs *VSInst) insertVisaWithNewID(v *vsio.Visa, isVSVisa bool, pktData *snip
 	return ve, nil
 }
 
-func (vs *VSInst) visaDenied(configID uint64, reason string, pktData *snip.Traffic, tetherAddr netip.Addr) {
+func (vs *VSInst) visaDenied(configID int64, reason string, pktData *snip.Traffic, tetherAddr netip.Addr) {
 	if vs.vlog != nil {
 		vs.vlog.LogVisaDenied(configID, pktData, reason, tetherAddr)
 	}
 	vs.log.Info("Visa denied", "flow", pktData.Flow(), "reason", reason)
 }
 
-func (vs *VSInst) visaCreated(visa *vsio.Visa, expires time.Time, pktData *snip.Traffic, explainer string, requestor netip.Addr) {
+func (vs *VSInst) visaCreated(visa *vsapi.Visa, expires time.Time, pktData *snip.Traffic, explainer string, requestor netip.Addr) {
 	if vs.vlog != nil {
 		vs.vlog.LogVisaCreated(visa, pktData, explainer, requestor)
 	}
@@ -543,7 +543,7 @@ func (vs *VSInst) revokeVisaByID(visaID uint64) error {
 		return ErrVisaNotFound
 	}
 	for _, vr := range revokes {
-		vs.vlog.LogVisaRevoked(uint64(vr.IssuerID), uint64(vr.Configuration))
+		vs.vlog.LogVisaRevoked(uint64(vr.IssuerID), vr.Configuration)
 	}
 	push := adb.PushItem{
 		Broadcast:   true,

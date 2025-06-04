@@ -41,7 +41,7 @@ func NewClaimV(value string, exp time.Time) *ClaimV {
 // Nobody but authentication services should look at or trust the unsubstantiated claims.
 type Actor struct {
 	authenticated bool
-	configID      uint64
+	configID      int64
 	authClaims    map[string]*ClaimV
 	authorityIDs  []string
 	authTokens    []string // JWTs
@@ -108,7 +108,7 @@ func (c *ClaimV) String() string {
 // Note that we expect that the auth services will include some sort of actor identifer
 // in the claims. We use the authenticated claims to create an actor HASH which is
 // assumed to be unique (in a ZPRnet).
-func (a *Actor) SetAuthenticated(authedClaims map[string]*ClaimV, expires time.Time, authorityIDs, tokens []string, configID uint64) {
+func (a *Actor) SetAuthenticated(authedClaims map[string]*ClaimV, expires time.Time, authorityIDs, tokens []string, configID int64) {
 	a.authClaims = make(map[string]*ClaimV)
 	for k, v := range authedClaims {
 		a.setAuthedClaimIgnoreHash(k, v)
@@ -129,12 +129,12 @@ func (a *Actor) GetAuthExpires() time.Time {
 }
 
 // Get configID in effect when this actor was authenticated.
-func (a *Actor) GetConfigID() uint64 {
+func (a *Actor) GetConfigID() int64 {
 	return a.configID
 }
 
 // Update the configID
-func (a *Actor) SetConfigID(id uint64) {
+func (a *Actor) SetConfigID(id int64) {
 	a.configID = id
 }
 

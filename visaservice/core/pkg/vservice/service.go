@@ -48,7 +48,7 @@ type VisaService struct {
 
 	policy struct { // current policy and configuration
 		sync.RWMutex
-		config uint64
+		config int64
 		policy *policy.Policy
 	}
 }
@@ -215,7 +215,7 @@ func (s *VisaService) run(adminPort uint16) error {
 }
 
 // Implements an interface needed by the admin service.
-func (s *VisaService) GetPolicyAndConfig() (*policy.Policy, uint64) {
+func (s *VisaService) GetPolicyAndConfig() (*policy.Policy, int64) {
 	s.policy.RLock()
 	defer s.policy.RUnlock()
 	return s.policy.policy, s.policy.config
@@ -326,7 +326,7 @@ func (s *VisaService) removeActor(agnt *actor.Actor) {
 // Implements an interface needed by the admin service
 //
 // Returns (version, config_id, error)
-func (s *VisaService) InstallPolicy(cp *policy.ContainedPolicy) (string, uint64, error) {
+func (s *VisaService) InstallPolicy(cp *policy.ContainedPolicy) (string, int64, error) {
 	s.log.Info("installing policy from admin")
 
 	if err := s.doInstallPolicy(cp); err != nil {
@@ -359,7 +359,7 @@ func (s *VisaService) doInstallPolicy(cp *policy.ContainedPolicy) error {
 }
 
 // computeVersionAndConfigID updates our policy state variables.
-func (s *VisaService) computeVersionConfigID(newPolicy *policy.Policy) (string, uint64, error) {
+func (s *VisaService) computeVersionConfigID(newPolicy *policy.Policy) (string, int64, error) {
 	s.policy.Lock()
 	defer s.policy.Unlock()
 
@@ -389,7 +389,7 @@ const (
 
 // The rather tricky job of determining if a proposed policy change requires a configuration change.
 // Capitalized so I can test it.
-func ComputeConfiguration(log logr.Logger, curPolicy *policy.Policy, curConfig uint64, proposedPolicy *policy.Policy) (uint64, error) {
+func ComputeConfiguration(log logr.Logger, curPolicy *policy.Policy, curConfig int64, proposedPolicy *policy.Policy) (int64, error) {
 
 	needsNewConfig := false
 
@@ -423,9 +423,9 @@ func ComputeConfiguration(log logr.Logger, curPolicy *policy.Policy, curConfig u
 
 checkdone:
 	if needsNewConfig {
-		var newStamp, counter uint64
+		var newStamp, counter int64
 		now := time.Now().UTC()
-		newStamp = (uint64(now.Year()) * configYearX) + (uint64(now.Month()) * configMonthX) + (uint64(now.Day()) * configDayX)
+		newStamp = int64((uint64(now.Year()) * configYearX) + (uint64(now.Month()) * configMonthX) + (uint64(now.Day()) * configDayX))
 		if newStamp/configDayX != curConfig/configDayX {
 			counter = 1
 		} else {

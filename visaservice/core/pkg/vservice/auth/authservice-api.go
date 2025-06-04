@@ -21,7 +21,7 @@ type AuthenticateOK struct {
 // The VisaService requires help from an authentication system.
 // AuthService also imlements policy.PolicyListener
 type AuthService interface {
-	AddDatasourceProvider(service string, contactAddr netip.Addr, configID uint64) error
+	AddDatasourceProvider(service string, contactAddr netip.Addr, configID int64) error
 	RemoveServiceByPrefix(string) int
 
 	// Run an authentication request using the current policy.
@@ -38,9 +38,9 @@ type AuthService interface {
 
 	// Tell the auth sub-system about a new policy for the configuration.  The Authenticate and
 	// Query functions will make use of the datasources in this policy.
-	InstallPolicy(uint64, byte, *policy.Policy) // must install the policy under the given configuration.
+	InstallPolicy(int64, byte, *policy.Policy) // must install the policy under the given configuration.
 
-	ActivateConfiguration(uint64, byte) // deactivates all other configurations
+	ActivateConfiguration(int64, byte) // deactivates all other configurations
 
 	// revoke by a KEY identifier
 	RevokeAuthority(string) error

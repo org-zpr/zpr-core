@@ -7,14 +7,14 @@ import (
 
 	"golang.org/x/net/context"
 	snip "zpr.org/vs/pkg/ip"
+	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vsapi"
-	"zpr.org/vsx/snio/vsio"
 )
 
 // Called by InstallPolicy
-func (vs *VSInst) installPolicyWithVisasForNodes(pp *policy.Policy, configID uint64) error {
+func (vs *VSInst) installPolicyWithVisasForNodes(pp *policy.Policy, configID int64) error {
 	errCount := 0
 	for _, nodeAddr := range vs.actorDB.GetNodeList() {
 		if err := vs.installPolicyWithVisasForNode(nodeAddr, pp, configID); err != nil {
@@ -28,7 +28,7 @@ func (vs *VSInst) installPolicyWithVisasForNodes(pp *policy.Policy, configID uin
 	return nil
 }
 
-func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.Policy, configID uint64) error {
+func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.Policy, configID int64) error {
 	var visas []*vsapi.VisaHop
 	var vssPort uint16
 
@@ -96,7 +96,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	if len(visas) > 0 {
 		var first_expire time.Time
 		for _, vh := range visas {
-			vt := vsio.VToTime(vh.Visa.Expires)
+			vt := libvisa.VToTime(vh.Visa.Expires)
 			if first_expire.IsZero() || first_expire.After(vt) {
 				first_expire = vt
 			}
@@ -128,7 +128,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 // If it completes, we update the LastXXX values in the peer record too.
 //
 // This does not use the push-buffer.
-func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID uint64, visas []*vsapi.VisaHop) error {
+func (vs *VSInst) updateNode(nodeAddr netip.Addr, policyVer uint64, configID int64, visas []*vsapi.VisaHop) error {
 	var serviceAddr string
 	var opErr error
 

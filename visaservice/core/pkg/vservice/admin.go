@@ -60,8 +60,8 @@ type VisaDescriptor struct {
 
 // Visa Service API that admin service needs to do its job.
 type VSApi interface {
-	GetPolicyAndConfig() (*policy.Policy, uint64)
-	InstallPolicy(*policy.ContainedPolicy) (string, uint64, error) // returns (version, config_id, error)
+	GetPolicyAndConfig() (*policy.Policy, int64)
+	InstallPolicy(*policy.ContainedPolicy) (string, int64, error) // returns (version, config_id, error)
 	ListVisas() []*VisaDescriptor
 	ListAdapters() []*adb.HostRecordBrief
 	ListNodes() []*adb.NodeRecordBrief
@@ -164,7 +164,7 @@ func (svc *AdminService) handleGetCurrentPolicy(w http.ResponseWriter, r *http.R
 
 	svc.log.Debug("admin server: fetch request processed successfully", "config", configID, "version", pcy.Version())
 	bundle := &PolicyBundle{
-		ConfigID:  configID,
+		ConfigID:  uint64(configID),
 		Version:   pcy.Version(),
 		Format:    fmt.Sprintf("base64;zip;%d", pcy.GetSerialVersion()),
 		Container: base64.StdEncoding.EncodeToString(zbuf),
@@ -181,7 +181,7 @@ func (svc *AdminService) handleListPolicies(w http.ResponseWriter, r *http.Reque
 	}
 	resp := []*PolicyListEntry{
 		{
-			ConfigId: configID,
+			ConfigId: uint64(configID),
 			Version:  pver,
 		},
 	}
@@ -247,7 +247,7 @@ func (svc *AdminService) handleInstallPolicy(w http.ResponseWriter, r *http.Requ
 	}
 
 	entry := &PolicyListEntry{
-		ConfigId: configID,
+		ConfigId: uint64(configID),
 		Version:  pversion,
 	}
 	w.Header().Add("Content-Type", "application/json")
