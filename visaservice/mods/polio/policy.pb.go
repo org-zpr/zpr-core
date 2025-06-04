@@ -794,6 +794,8 @@ type Service struct {
 	Domain        string                 `protobuf:"bytes,4,opt,name=domain,proto3" json:"domain,omitempty"`                              // TLS domain
 	QueryUri      string                 `protobuf:"bytes,5,opt,name=query_uri,json=queryUri,proto3" json:"query_uri,omitempty"`          // Empty, or needs an l7 protocol name and port.
 	ValidateUri   string                 `protobuf:"bytes,6,opt,name=validate_uri,json=validateUri,proto3" json:"validate_uri,omitempty"` // Empty, or needs an l7 protocol name and port.
+	Attrs         []string               `protobuf:"bytes,7,rep,name=attrs,proto3" json:"attrs,omitempty"`                                // Returns attribute keys (with domains)
+	IdAttrs       []string               `protobuf:"bytes,8,rep,name=id_attrs,json=idAttrs,proto3" json:"id_attrs,omitempty"`             // Identity attribute keys (with domains)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -868,6 +870,20 @@ func (x *Service) GetValidateUri() string {
 		return x.ValidateUri
 	}
 	return ""
+}
+
+func (x *Service) GetAttrs() []string {
+	if x != nil {
+		return x.Attrs
+	}
+	return nil
+}
+
+func (x *Service) GetIdAttrs() []string {
+	if x != nil {
+		return x.IdAttrs
+	}
+	return nil
 }
 
 type Condition struct {
@@ -2175,14 +2191,16 @@ const file_policy_proto_rawDesc = "" +
 	"\n" +
 	"conditions\x18\x04 \x03(\v2\x10.polio.ConditionR\n" +
 	"conditions\x123\n" +
-	"\vconstraints\x18\x05 \x03(\v2\x11.polio.ConstraintR\vconstraints\"\xae\x01\n" +
+	"\vconstraints\x18\x05 \x03(\v2\x11.polio.ConstraintR\vconstraints\"\xdf\x01\n" +
 	"\aService\x12\x1f\n" +
 	"\x04type\x18\x01 \x01(\x0e2\v.polio.SvcTR\x04type\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06prefix\x18\x03 \x01(\tR\x06prefix\x12\x16\n" +
 	"\x06domain\x18\x04 \x01(\tR\x06domain\x12\x1b\n" +
 	"\tquery_uri\x18\x05 \x01(\tR\bqueryUri\x12!\n" +
-	"\fvalidate_uri\x18\x06 \x01(\tR\vvalidateUri\"J\n" +
+	"\fvalidate_uri\x18\x06 \x01(\tR\vvalidateUri\x12\x14\n" +
+	"\x05attrs\x18\a \x03(\tR\x05attrs\x12\x19\n" +
+	"\bid_attrs\x18\b \x03(\tR\aidAttrs\"J\n" +
 	"\tCondition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12-\n" +
 	"\tattrExprs\x18\x02 \x03(\v2\x0f.polio.AttrExprR\tattrExprs\"\xa9\x01\n" +
