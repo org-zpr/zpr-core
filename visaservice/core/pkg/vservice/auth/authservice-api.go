@@ -6,7 +6,7 @@ import (
 
 	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsx/snio/zds"
+	"zpr.org/vs/pkg/tsapi"
 )
 
 // TODO: Also in zprn/auth/authenticateok.go
@@ -34,7 +34,7 @@ type AuthService interface {
 	// Query runs an attribute query against datasources.
 	// Note that the attributes passed in the request will have prefixes on them, and
 	// the attributes in the response will too.
-	Query(*zds.QueryRequest) (*zds.QueryResponse, error)
+	Query(*tsapi.QueryRequest) (*tsapi.QueryResponse, error)
 
 	// Tell the auth sub-system about a new policy for the configuration.  The Authenticate and
 	// Query functions will make use of the datasources in this policy.
