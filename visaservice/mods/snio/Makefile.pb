@@ -3,14 +3,11 @@ PROTOS := $(wildcard *.proto)
 PBGENS := $(PROTOS:.proto=.pb.go)
 
 all: $(PBGENS)
-	cd admin && $(MAKE) all
 	cd zds && $(MAKE) all
 	cd zds2 && $(MAKE) all
 	cd vsio && $(MAKE) all
 
 clean:
-	rm -f *.pb.go
-	cd admin && $(MAKE) clean
 	cd zds && $(MAKE) clean
 	cd zds2 && $(MAKE) clean
 	cd vsio && $(MAKE) clean
