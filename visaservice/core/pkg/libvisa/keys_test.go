@@ -5,7 +5,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"zpr.org/vs/pkg/libvisa"
-	"zpr.org/vsx/snio/vsio"
 )
 
 func TestEncodeDecode(t *testing.T) {
@@ -22,17 +21,8 @@ func TestSessionKeyEncodingFormat1(t *testing.T) {
 
 	skey := []byte("this is a session key")
 
-	visa := vsio.Visa{}
-
-	err := libvisa.EncodeKeysFormat1(skey, &visa)
+	inKey, outKey, err := libvisa.EncodeKeysFormat1(skey)
 	require.Nil(t, err)
-
-	plainEgress, err := libvisa.DecodeEgressKey(&visa, []byte("egress"))
-	require.Nil(t, err)
-	require.Equal(t, skey, plainEgress)
-
-	plainIngress, err := libvisa.DecodeIngressKey(&visa, []byte("ingress"))
-	require.Nil(t, err)
-	require.Equal(t, skey, plainIngress)
-
+	require.NotNil(t, inKey)
+	require.NotNil(t, outKey)
 }

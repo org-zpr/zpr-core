@@ -10,7 +10,8 @@ import (
 	"time"
 
 	snip "zpr.org/vs/pkg/ip"
-	"zpr.org/vsx/snio/vsio"
+	"zpr.org/vs/pkg/libvisa"
+	"zpr.org/vsapi"
 )
 
 type Vlog struct {
@@ -34,7 +35,7 @@ func (v *Vlog) Close() error {
 	return v.out.Close()
 }
 
-func (v *Vlog) LogVisaCreated(visa *vsio.Visa, pkt *snip.Traffic, explainer string, requestor netip.Addr) {
+func (v *Vlog) LogVisaCreated(visa *vsapi.Visa, pkt *snip.Traffic, explainer string, requestor netip.Addr) {
 	entry := newPermit(visa, pkt, explainer, requestor)
 	v.out.Write([]byte(entry))
 }
@@ -56,7 +57,7 @@ func (v *Vlog) LogVisaDenied(configID uint64, pkt *snip.Traffic, reason string, 
 	v.out.Write([]byte(entry))
 }
 
-func newPermit(visa *vsio.Visa, pkt *snip.Traffic, explainer string, requestor netip.Addr) string {
+func newPermit(visa *vsapi.Visa, pkt *snip.Traffic, explainer string, requestor netip.Addr) string {
 
 	var b strings.Builder
 
@@ -64,11 +65,11 @@ func newPermit(visa *vsio.Visa, pkt *snip.Traffic, explainer string, requestor n
 	b.WriteString("  ")
 	b.WriteString("PERMIT  ")
 	fmt.Fprintf(&b, "c:%d  ", visa.Configuration)
-	fmt.Fprintf(&b, "id:%d\n", visa.IssuerId)
+	fmt.Fprintf(&b, "id:%d\n", visa.IssuerID)
 
 	fmt.Fprintf(&b, "   %s -> %s\n", net.IP(visa.SourceContact).String(), net.IP(visa.DestContact).String())
 
-	exptime := vsio.VToTime(visa.Expires)
+	exptime := libvisa.VToTime(visa.Expires)
 	fmt.Fprintf(&b, "   %v exp %v (%v) [%v]\n", pkt.Flow(), exptime.Format(time.RFC3339), time.Until(exptime), explainer)
 
 	fmt.Fprintf(&b, "   requestor %v\n\n", requestor)

@@ -7,11 +7,9 @@ import (
 	"time"
 
 	"golang.org/x/net/ipv6"
-	"google.golang.org/protobuf/proto"
 
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsx/snio/vsio"
 
 	"zpr.org/vsx/polio"
 )
@@ -114,7 +112,7 @@ func InitPEP(td *snip.Traffic, cpols []*policy.MatchedPolicy) (*VConfig, error) 
 		matchy.SrcPort = td.SrcPort
 	}
 
-	var dockPEPArgs []byte
+	var dockPEPArgs interface{}
 
 	// invoke PEP first arg is always the PEP index
 	switch px {
@@ -172,7 +170,6 @@ func InitPEP(td *snip.Traffic, cpols []*policy.MatchedPolicy) (*VConfig, error) 
 
 	result.DockPEP = px
 	result.DockPEPArgs = dockPEPArgs
-	result.FwdPEP = 0
 	return result, nil
 }
 
@@ -220,8 +217,17 @@ func MaximalDataCapFromPolicies(cpols []*policy.MatchedPolicy) (cap *DataCap) {
 	return
 }
 
-func initUDP(m *MatchInfo) ([]byte, error) {
-	pepArgs := &vsio.PEPArgsUDP{
+type PEPArgsUDP struct {
+	SourceContactAddr []byte
+	DestContactAddr   []byte
+	SourcePort        uint32
+	DestPortMode      uint32 // 0=static, 1=req-port
+	DestPort          uint32
+	IcmpAllowed       []uint32 // ICMP types allowed if visa is active
+}
+
+func initUDP(m *MatchInfo) (*PEPArgsUDP, error) {
+	pepArgs := &PEPArgsUDP{
 		SourceContactAddr: m.ZPRSrc.AsSlice(),
 		DestContactAddr:   m.ZPRDst.AsSlice(),
 		SourcePort:        uint32(m.SrcPort),
@@ -232,15 +238,20 @@ func initUDP(m *MatchInfo) ([]byte, error) {
 	for _, icmpT := range ICMPAllowIfUDPVisa {
 		pepArgs.IcmpAllowed = append(pepArgs.IcmpAllowed, uint32(icmpT))
 	}
-	buf, pberr := proto.Marshal(pepArgs)
-	if pberr != nil {
-		return nil, fmt.Errorf("failed to marshal PEP args: %w", pberr)
-	}
-	return buf, nil
+	return pepArgs, nil
 }
 
-func initTCP(m *MatchInfo, isFWD bool) ([]byte, error) {
-	pepArgs := &vsio.PEPArgsTCP{
+type PEPArgsTCP struct {
+	SourceContactAddr []byte
+	DestContactAddr   []byte
+	SourcePort        uint32
+	DestPort          uint32
+	Server            bool     // TRUE if this is for server side dock.
+	IcmpAllowed       []uint32 // ICMP types allowed if visa is active
+}
+
+func initTCP(m *MatchInfo, isFWD bool) (*PEPArgsTCP, error) {
+	pepArgs := &PEPArgsTCP{
 		SourceContactAddr: m.ZPRSrc.AsSlice(),
 		DestContactAddr:   m.ZPRDst.AsSlice(),
 		SourcePort:        uint32(m.SrcPort),
@@ -250,16 +261,21 @@ func initTCP(m *MatchInfo, isFWD bool) ([]byte, error) {
 	for _, icmpT := range ICMPAllowIfTCPVisa {
 		pepArgs.IcmpAllowed = append(pepArgs.IcmpAllowed, uint32(icmpT))
 	}
-	buf, pberr := proto.Marshal(pepArgs)
-	if pberr != nil {
-		return nil, fmt.Errorf("failed to marshal PEP args: %w", pberr)
-	}
-	return buf, nil
+	return pepArgs, nil
+}
+
+type PEPArgsICMP struct {
+	SourceContactAddr []byte
+	DestContactAddr   []byte
+	IcmpTypeCode      uint32 // the allowed ICMP type and code in lower 16 bits
+	IcmpAntecedent    uint32 // use 0xFF for none
+	StateTimeoutMs    uint32 // timeout for state in milliseconds
+	OneShot           bool   // If we allow only on reply to a request
 }
 
 // initICMP `antecedent` is an ICMP type (no code)
-func initICMP(m *MatchInfo, reqRep bool, antecedent uint16) ([]byte, error) {
-	pepArgs := &vsio.PEPArgsICMP{
+func initICMP(m *MatchInfo, reqRep bool, antecedent uint16) (*PEPArgsICMP, error) {
+	pepArgs := &PEPArgsICMP{
 		SourceContactAddr: m.ZPRSrc.AsSlice(),
 		DestContactAddr:   m.ZPRDst.AsSlice(),
 		IcmpTypeCode:      uint32(m.TypeCode), // Actually just TYPE
@@ -267,9 +283,5 @@ func initICMP(m *MatchInfo, reqRep bool, antecedent uint16) ([]byte, error) {
 		StateTimeoutMs:    uint32(DefaultICMPTimeoutMS),
 		OneShot:           !reqRep,
 	}
-	buf, pberr := proto.Marshal(pepArgs)
-	if pberr != nil {
-		return nil, fmt.Errorf("failed to marshal PEP args: %w", pberr)
-	}
-	return buf, nil
+	return pepArgs, nil
 }

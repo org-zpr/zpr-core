@@ -7,10 +7,10 @@ import (
 
 	"golang.org/x/net/context"
 	snip "zpr.org/vs/pkg/ip"
+	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vsapi"
-	"zpr.org/vsx/snio/vsio"
 )
 
 // Called by InstallPolicy
@@ -96,7 +96,7 @@ func (vs *VSInst) installPolicyWithVisasForNode(nodeAddr netip.Addr, pp *policy.
 	if len(visas) > 0 {
 		var first_expire time.Time
 		for _, vh := range visas {
-			vt := vsio.VToTime(vh.Visa.Expires)
+			vt := libvisa.VToTime(vh.Visa.Expires)
 			if first_expire.IsZero() || first_expire.After(vt) {
 				first_expire = vt
 			}

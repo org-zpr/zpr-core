@@ -10,8 +10,7 @@ import (
 type VConfig struct {
 	Lifetime      time.Duration // Set if there is a duration constraint
 	DockPEP       uint32        // Dock PEP by index
-	DockPEPArgs   []byte        // marshalled PEP args
-	FwdPEP        uint32        // Forwarder PEP by index
+	DockPEPArgs   interface{}   // one of the PEPArgs* structs
 	BWLimit       bool          // yes or no
 	BitsPerSecond uint64        // If BWLimit is true, this is bits-per-second
 	DataCap       bool
