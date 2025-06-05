@@ -8,8 +8,7 @@ import (
 
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/policy"
-
-	"zpr.org/vsx/snio/vsio"
+	"zpr.org/vsapi"
 )
 
 type SessionKeyEncoding int
@@ -24,7 +23,7 @@ const (
 type DataCapFunc func(bool, *DataCap, string) (string, uint64, error)
 
 type VisaBuilder struct {
-	visaID             uint32
+	visaID             int32
 	netConfig          uint64
 	expiration         time.Time
 	sourceTether       netip.Addr
@@ -42,6 +41,14 @@ type VisaBuilder struct {
 	sessionKeyEncoding SessionKeyEncoding
 }
 
+type Constraints struct {
+	Bw              bool
+	BwLimitBps      uint64
+	DataCapId       string // empty for no datacap
+	DataCapBytes    uint64
+	DataCapAffinity netip.Addr // address of service actor
+}
+
 func NewVisaBuilder(netConfig uint64, sourceTether, destTether netip.Addr) *VisaBuilder {
 	return &VisaBuilder{
 		netConfig:    netConfig,
@@ -51,7 +58,7 @@ func NewVisaBuilder(netConfig uint64, sourceTether, destTether netip.Addr) *Visa
 	}
 }
 
-func (b *VisaBuilder) Visa() (*vsio.Visa, error) {
+func (b *VisaBuilder) Visa() (*vsapi.Visa, error) {
 	if b.visaID == 0 {
 		return nil, fmt.Errorf("visa ID not set")
 	}
@@ -64,7 +71,7 @@ func (b *VisaBuilder) Visa() (*vsio.Visa, error) {
 	if b.traffic == nil {
 		return nil, fmt.Errorf("traffic not set")
 	}
-	if b.policies == nil || len(b.policies) == 0 {
+	if len(b.policies) == 0 {
 		return nil, fmt.Errorf("policies not set")
 	}
 
@@ -73,7 +80,7 @@ func (b *VisaBuilder) Visa() (*vsio.Visa, error) {
 		return nil, err
 	}
 
-	cons := &vsio.Visa_Constraints{
+	cons := &Constraints{
 		Bw:         visaConfig.BWLimit,
 		BwLimitBps: visaConfig.BitsPerSecond,
 	}
@@ -108,31 +115,92 @@ func (b *VisaBuilder) Visa() (*vsio.Visa, error) {
 		if !b.fwd {
 			capAffinity = b.sourceTether
 		}
-		cons.DataCapAffinity = capAffinity.AsSlice()
+		cons.DataCapAffinity = capAffinity
 	}
-
-	visa := &vsio.Visa{
-		IssuerId:      b.visaID,
-		Configuration: b.netConfig,
-		Expires:       vsio.VToTimestamp(b.expiration),
+	visa := &vsapi.Visa{
+		IssuerID:      b.visaID,
+		Configuration: int64(b.netConfig),
+		Expires:       VToTimestamp(b.expiration),
 		Source:        b.sourceTether.AsSlice(),
 		Dest:          b.destTether.AsSlice(),
 		SourceContact: b.sourceContact.AsSlice(),
 		DestContact:   b.destContact.AsSlice(),
-		DockPep:       visaConfig.DockPEP,
-		DockPepArgs:   visaConfig.DockPEPArgs,
-		FwdPep:        visaConfig.FwdPEP, // TODO (probably needs args too)
-		Cons:          cons,
-		Sig:           nil, // TODO
 	}
-
+	switch visaConfig.DockPEP {
+	case PEPDockTCP:
+		visa.DockPep = vsapi.PEPIndex_TCP
+		var pargs *PEPArgsTCP
+		pargs = visaConfig.DockPEPArgs.(*PEPArgsTCP)
+		vsapiArgs := &vsapi.PEPArgsTCPUDP{
+			SourceContactAddr: pargs.SourceContactAddr,
+			DestContactAddr:   pargs.DestContactAddr,
+			SourcePort:        int32(pargs.SourcePort),
+			DestPort:          int32(pargs.DestPort),
+			Server:            pargs.Server,
+			IcmpAllowed:       make([]int32, len(pargs.IcmpAllowed)),
+		}
+		for i, v := range pargs.IcmpAllowed {
+			vsapiArgs.IcmpAllowed[i] = int32(v)
+		}
+		visa.TcpudpPepArgs_ = vsapiArgs
+	case PEPDockUDP:
+		visa.DockPep = vsapi.PEPIndex_UDP
+		var pargs *PEPArgsUDP
+		pargs = visaConfig.DockPEPArgs.(*PEPArgsUDP)
+		vsapiArgs := &vsapi.PEPArgsTCPUDP{
+			SourceContactAddr: pargs.SourceContactAddr,
+			DestContactAddr:   pargs.DestContactAddr,
+			SourcePort:        int32(pargs.SourcePort),
+			DestPort:          int32(pargs.DestPort),
+			Server:            pargs.DestPortMode == 0,
+			IcmpAllowed:       make([]int32, len(pargs.IcmpAllowed)),
+		}
+		for i, v := range pargs.IcmpAllowed {
+			vsapiArgs.IcmpAllowed[i] = int32(v)
+		}
+		visa.TcpudpPepArgs_ = vsapiArgs
+	case PEPDockICMP:
+		visa.DockPep = vsapi.PEPIndex_ICMP
+		var pargs *PEPArgsICMP
+		pargs = visaConfig.DockPEPArgs.(*PEPArgsICMP)
+		vsapiArgs := &vsapi.PEPArgsICMP{
+			SourceContactAddr: pargs.SourceContactAddr,
+			DestContactAddr:   pargs.DestContactAddr,
+			IcmpTypeCode:      int32(pargs.IcmpTypeCode),
+			IcmpAntecedent:    int32(pargs.IcmpAntecedent),
+			StateTimeoutMs:    int32(pargs.StateTimeoutMs),
+			OneShot:           pargs.OneShot,
+		}
+		visa.IcmpPepArgs_ = vsapiArgs
+	default:
+		panic(fmt.Sprintf("unknown dock pep: %v", visaConfig.DockPEP))
+	}
+	visa.Cons = &vsapi.Constraints{
+		Bw:                  cons.Bw,
+		BwLimitBps:          int64(cons.BwLimitBps),
+		DataCapID:           cons.DataCapId,
+		DataCapBytes:        int64(cons.DataCapBytes),
+		DataCapAffinityAddr: cons.DataCapAffinity.AsSlice(),
+	}
 	switch b.sessionKeyEncoding {
 	case SKEv1:
-		if err := EncodeKeysFormat1(b.sessionKey, visa); err != nil {
+		ingressKey, egressKey, err := EncodeKeysFormat1(b.sessionKey)
+		if err != nil {
 			return nil, fmt.Errorf("encode keys failed: %w", err)
+		}
+		visa.SessionKey = &vsapi.KeySet{
+			Format:     int32(1),
+			IngressKey: ingressKey,
+			EgressKey:  egressKey,
 		}
 	default:
 		return nil, fmt.Errorf("unknown session key encoding: %v", b.sessionKeyEncoding)
+	}
+
+	// TODO: Signature
+	visa.Sig = &vsapi.Signature{
+		Type:      int32(0),
+		Signature: []byte{0},
 	}
 
 	return visa, nil
@@ -175,7 +243,7 @@ func (b *VisaBuilder) WithSessionKeyAndEncoding(key []byte, ske SessionKeyEncodi
 	return b
 }
 
-func (b *VisaBuilder) WithIssuerID(id uint32) *VisaBuilder {
+func (b *VisaBuilder) WithIssuerID(id int32) *VisaBuilder {
 	b.visaID = id
 	return b
 }

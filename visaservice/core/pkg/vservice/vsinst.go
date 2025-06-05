@@ -14,12 +14,12 @@ import (
 
 	"zpr.org/vs/pkg/actor"
 	snip "zpr.org/vs/pkg/ip"
+	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/logr"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsapi"
-	"zpr.org/vsx/snio/vsio"
 )
 
 var (
@@ -114,7 +114,7 @@ type configRemoval struct {
 
 // vtableEnt is an entry in our visa table (VSInst.vtable)
 type vtableEnt struct {
-	v         *vsio.Visa
+	v         *vsapi.Visa
 	isVSVisa  bool          // TRUE if this is a visa for visa service access
 	pktData   *snip.Traffic // Packet descriptor used on visa request
 	successor uint32        // 0 means no successor
@@ -341,7 +341,7 @@ func (vs *VSInst) extendVisaServiceVisas() {
 	vs.vtable.mtx.RLock()
 	for _, ve := range vs.vtable.table {
 		if ve.isVSVisa && (ve.successor == 0) {
-			remain := time.Until(vsio.VToTime(ve.v.GetExpires()))
+			remain := time.Until(libvisa.VToTime(ve.v.GetExpires()))
 			if remain < VSVisaRenewalTime {
 				sourceAddr, _ := netip.AddrFromSlice(ve.v.Source)
 				agnt, err := vs.actorDB.ActorAtContactAddr(sourceAddr) // for a node contact_addr is visa "tether" addr.
@@ -372,10 +372,10 @@ func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration,
 			vs.log.WithError(err).Error("failed to re-request visa")
 		} else {
 			vs.vtable.mtx.Lock()
-			if rec, ok := vs.vtable.table[ve.v.GetIssuerId()]; ok {
+			if rec, ok := vs.vtable.table[uint32(ve.v.IssuerID)]; ok {
 				rec.successor = uint32(resp.Visa.IssuerID)
 			} else {
-				vs.log.Error("failed to locate predecessor visa in table", "issuerID", ve.v.GetIssuerId())
+				vs.log.Error("failed to locate predecessor visa in table", "issuerID", ve.v.IssuerID)
 			}
 			// vs.dumpVisaTableHoldingLock("rerequest")
 			vs.vtable.mtx.Unlock()
@@ -403,7 +403,7 @@ func (vs *VSInst) rerequestVisas(xvisas []*vtableEnt, minDuration time.Duration,
 func (vs *VSInst) removeExpiredVisas() {
 	vs.vtable.mtx.Lock()
 	defer vs.vtable.mtx.Unlock()
-	curTS := vsio.VTimeNow()
+	curTS := libvisa.VTimeNow()
 	for vid, vv := range vs.vtable.table {
 		if curTS > vv.v.GetExpires() {
 			vs.log.Info("visa has expired", "visaID", vid)
@@ -416,15 +416,16 @@ func (vs *VSInst) removeExpiredVisas() {
 // expireAllVisas is called when policy is updated.  Revokes and removes all visas under the
 // given network configuration.
 func (vs *VSInst) expireAllVisas(config uint64) {
+	configI64 := int64(config)
 	vs.vtable.mtx.Lock()
 	defer vs.vtable.mtx.Unlock()
 	count := 0
 	var revokes []*vsapi.VisaRevocation
 	for vID, ve := range vs.vtable.table {
-		if ve.v.Configuration == config {
+		if ve.v.Configuration == configI64 {
 			revokes = append(revokes, &vsapi.VisaRevocation{
 				IssuerID:      int32(vID),
-				Configuration: int64(config),
+				Configuration: configI64,
 			})
 			delete(vs.vtable.table, vID)
 			count++

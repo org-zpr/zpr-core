@@ -52,10 +52,10 @@ func (vc *VSSCli) SendNetworkPolicy(policyID uint64, configID uint64) error {
 	})
 }
 
-func (vc *VSSCli) SendRevocation(config_id uint64, issuer_id uint32) error {
+func (vc *VSSCli) SendRevocation(config_id int64, issuer_id uint32) error {
 	rev := vsapi.VisaRevocation{
 		IssuerID:      int32(issuer_id),
-		Configuration: int64(config_id),
+		Configuration: config_id,
 	}
 	return vc.withClient(func(client *vsapi.VisaSupportClient) error {
 		return client.RevokeVisas(context.Background(), []*vsapi.VisaRevocation{&rev})

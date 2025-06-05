@@ -4,9 +4,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/md5"
-	"fmt"
-
-	"zpr.org/vsx/snio/vsio"
 )
 
 const sessionKeyFormat = 1
@@ -21,48 +18,16 @@ var (
 // the ingress and egress docks.
 //
 // This encodes the `sessionKey` with the default secret keys for the ingress and egress nodes.
-func EncodeKeysFormat1(sessionKey []byte, v *vsio.Visa) error {
-	iKey, err := EncodeKey(sessionKey, IngressSecret)
+func EncodeKeysFormat1(sessionKey []byte) (iKey []byte, eKey []byte, err error) {
+	iKey, err = EncodeKey(sessionKey, IngressSecret)
 	if err != nil {
-		return err
+		return
 	}
-	eKey, err := EncodeKey(sessionKey, EgressSecret)
+	eKey, err = EncodeKey(sessionKey, EgressSecret)
 	if err != nil {
-		return err
+		return
 	}
-	if v.SessionKey == nil {
-		v.SessionKey = &vsio.Visa_KeySet{}
-	}
-	v.SessionKey.Format = 1
-	v.SessionKey.IngressKey = iKey
-	v.SessionKey.EgressKey = eKey
-	return nil
-}
-
-// DecodeIngressKey decodes session key encoded for the ingress node using the given `secret`.
-func DecodeIngressKey(v *vsio.Visa, secret []byte) ([]byte, error) {
-	keys := v.GetSessionKey()
-	if keys.GetFormat() != sessionKeyFormat {
-		return nil, fmt.Errorf("invalid session key format: %v", keys.GetFormat())
-	}
-	// Format 1:
-	//    md5 of the passphrase to produce 32 hex digit string
-	//    hex digit string (lowercase) is used as AES key
-
-	return DecodeKey(keys.GetIngressKey(), secret)
-}
-
-// DecodeEgressKey decodes the session key encoded for the egress node with the given `secret`.
-func DecodeEgressKey(v *vsio.Visa, secret []byte) ([]byte, error) {
-	keys := v.GetSessionKey()
-	if keys.GetFormat() != sessionKeyFormat {
-		return nil, fmt.Errorf("invalid session key format: %v", keys.GetFormat())
-	}
-	// Format 1:
-	//    md5 of the passphrase to produce 32 hex digit string
-	//    hex digit string (lowercase) is used as AES-128 key
-
-	return DecodeKey(keys.GetEgressKey(), secret)
+	return
 }
 
 func EncodeKey(sessionkey []byte, secret []byte) ([]byte, error) {

@@ -6,12 +6,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 
 	snip "zpr.org/vs/pkg/ip"
 	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/policy"
-	"zpr.org/vsx/snio/vsio"
 
 	"zpr.org/vsx/polio"
 )
@@ -65,12 +63,11 @@ func TestTCPPepCreate(t *testing.T) {
 	require.False(t, vc.DataCap)
 
 	require.Equal(t, uint32(libvisa.PEPDockTCP), vc.DockPEP)
-	require.Equal(t, uint32(0), vc.FwdPEP) // not used
 
 	require.NotEmpty(t, vc.DockPEPArgs)
 
-	var args vsio.PEPArgsTCP
-	require.Nil(t, proto.Unmarshal(vc.DockPEPArgs, &args))
+	args := vc.DockPEPArgs.(*libvisa.PEPArgsTCP)
+	require.NotNil(t, args)
 
 	// Since this is forward (client to server) and client is high numbered, the matcher will
 	// allow for any source port.
@@ -193,12 +190,11 @@ func TestUDPPepCreate(t *testing.T) {
 	require.False(t, vc.DataCap)
 
 	require.Equal(t, uint32(libvisa.PEPDockUDP), vc.DockPEP)
-	require.Equal(t, uint32(0), vc.FwdPEP) // not used
 
 	require.NotEmpty(t, vc.DockPEPArgs)
 
-	var args vsio.PEPArgsUDP
-	require.Nil(t, proto.Unmarshal(vc.DockPEPArgs, &args))
+	args := vc.DockPEPArgs.(*libvisa.PEPArgsUDP)
+	require.NotNil(t, args)
 
 	// Since this is forward (client to server) and client is high numbered, the matcher will
 	// allow for any source port.
@@ -242,12 +238,11 @@ func TestICMPPepCreate(t *testing.T) {
 	require.False(t, vc.DataCap)
 
 	require.Equal(t, uint32(libvisa.PEPDockICMP), vc.DockPEP)
-	require.Equal(t, uint32(0), vc.FwdPEP) // not used
 
 	require.NotEmpty(t, vc.DockPEPArgs)
 
-	var args vsio.PEPArgsICMP
-	require.Nil(t, proto.Unmarshal(vc.DockPEPArgs, &args))
+	args := vc.DockPEPArgs.(*libvisa.PEPArgsICMP)
+	require.NotNil(t, args)
 
 	require.Equal(t, traffic.DstAddr.AsSlice(), args.DestContactAddr)
 	require.Equal(t, traffic.SrcAddr.AsSlice(), args.SourceContactAddr)

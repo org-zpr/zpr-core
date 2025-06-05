@@ -1,4 +1,4 @@
-package vsio
+package libvisa
 
 import (
 	"time"
@@ -7,11 +7,6 @@ import (
 // VTimeNow returns current time stamp as millisconds since the EPOCH.
 func VTimeNow() int64 {
 	return VToTimestamp(time.Now())
-}
-
-// VExpired takes a visa and tells you if it is expired based on current clock time.
-func VExpired(v *Visa) bool {
-	return v.GetExpires() < VTimeNow()
 }
 
 // VToTimestamp return the "visa time" representation of the given time value, `t`.
@@ -25,4 +20,3 @@ func VToTime(ts int64) time.Time {
 	nanos := (ts % 1000) * 1000000
 	return time.Unix(secs, nanos)
 }
-
