@@ -122,6 +122,7 @@ func (vs *Directory) Validate(dsPrefix string, msg *ZdpAuthCodeBlob, revokes []*
 	vs.mtx.RLock()
 	v, ok := vs.m[dsPrefix]
 	if ok && !v.allowValidate {
+		vs.mtx.RUnlock()
 		return nil, ErrNotSupported
 	}
 	vs.mtx.RUnlock()

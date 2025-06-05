@@ -232,6 +232,7 @@ func (a *Authenticator) Authenticate(dsPrefix string, epID netip.Addr, blob Blob
 
 	a.policy.RLock()
 	if a.policy.version == "" {
+		a.policy.RUnlock()
 		return nil, errors.New("cannot authenticate because policy is not set")
 	}
 	a.policy.RUnlock()
