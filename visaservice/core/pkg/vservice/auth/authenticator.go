@@ -51,7 +51,7 @@ type Authenticator struct {
 	policy struct {
 		sync.RWMutex
 
-		configID               int64           // active configuration
+		configID               uint64          // active configuration
 		version                string          // active policy
 		policy                 *policy.Policy  // is-a CertificateDB
 		localPrefixes          map[string]bool // prefix -> TRUE (derived from policy)
@@ -96,7 +96,7 @@ func NewAuthenticator(mlog logr.Logger, ep netip.Addr, maxAuthLifetime time.Dura
 // Ignores `slot` arg.
 //
 // Implementation for policy.PolicyListener
-func (a *Authenticator) InstallPolicy(configID int64, _ byte, p *policy.Policy) {
+func (a *Authenticator) InstallPolicy(configID uint64, _ byte, p *policy.Policy) {
 	a.policy.Lock()
 	defer a.policy.Unlock()
 
@@ -122,7 +122,7 @@ func (a *Authenticator) InstallPolicy(configID int64, _ byte, p *policy.Policy) 
 //
 // deactivates all other configurations
 // Implementation for policy.PolicyListener
-func (a *Authenticator) ActivateConfiguration(id int64, _ byte) {
+func (a *Authenticator) ActivateConfiguration(id uint64, _ byte) {
 	a.policy.RLock()
 	defer a.policy.RUnlock()
 	if id != a.policy.configID {
@@ -162,7 +162,7 @@ func getAuthEndpoint(svc *polio.Service) *snip.Endpoint {
 // permitted to advertise the service.
 //
 // TODO: Needs configuration-ID attached.
-func (a *Authenticator) AddDatasourceProvider(service string, contactAddr netip.Addr, configID int64) error {
+func (a *Authenticator) AddDatasourceProvider(service string, contactAddr netip.Addr, configID uint64) error {
 	a.policy.RLock()
 	defer a.policy.RUnlock()
 
@@ -336,7 +336,7 @@ func (a *Authenticator) authenticateAC(dsPrefix string, epID netip.Addr, blob Bl
 		vres.Attrs[actor.KAttrEPID] = actor.NewClaimV(epID.String(), vres.Expiration)
 	}
 	vres.Attrs[actor.KAttrAuthority] = actor.NewClaimV(dsPrefix, vres.Expiration)
-	vres.Attrs[actor.KAttrConfigID] = actor.NewClaimV(strconv.FormatInt(configID, 10), vres.Expiration)
+	vres.Attrs[actor.KAttrConfigID] = actor.NewClaimV(strconv.FormatUint(configID, 10), vres.Expiration)
 	vres.Attrs[actor.KAttrCN] = actor.NewClaimV(acBlob.ClientId, vres.Expiration)
 
 	return vres, nil
@@ -411,7 +411,7 @@ func (a *Authenticator) authenticateSS(epID netip.Addr, blob Blob, unauthClaims 
 		Exp: expiration,
 	}
 	attrs[actor.KAttrConfigID] = &actor.ClaimV{
-		V:   strconv.FormatInt(configID, 10),
+		V:   strconv.FormatUint(configID, 10),
 		Exp: expiration,
 	}
 	attrs[actor.KAttrCN] = &actor.ClaimV{
@@ -636,7 +636,7 @@ func (a *Authenticator) loadRevocationData() []*snauth.CredID {
 }
 
 // ClearRevocationList should be called when a new policy is installed.
-func (a *Authenticator) clearRevocationList(forConfig int64, forPolicy string) {
+func (a *Authenticator) clearRevocationList(forConfig uint64, forPolicy string) {
 	a.rvkSvc.service.ProposeClearAllRevokes(fmt.Sprintf("%d%s", forConfig, forPolicy))
 }
 

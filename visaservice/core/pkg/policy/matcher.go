@@ -33,7 +33,7 @@ const ScratchValIdx = math.MaxUint32
 
 type Matcher struct {
 	log         logr.Logger
-	configID    int64
+	configID    uint64
 	keyMap      map[string]uint32 // attr-key -> key_code
 	valMap      map[string]uint32 // attr-value -> val_code
 	blankValIdx int
@@ -57,7 +57,7 @@ func (aa *ActorInfo) Provides(svcID string) bool {
 }
 
 // NewMatcher creates matcher.
-func NewMatcher(plcy *polio.Policy, netConfig int64, log logr.Logger) (*Matcher, error) {
+func NewMatcher(plcy *polio.Policy, netConfig uint64, log logr.Logger) (*Matcher, error) {
 	keyMap := make(map[string]uint32)
 	valMap := make(map[string]uint32)
 

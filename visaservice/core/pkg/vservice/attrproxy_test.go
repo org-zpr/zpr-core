@@ -26,11 +26,11 @@ func (s *TAuthSvc) RevokeAuthority(string) error                      { return n
 func (s *TAuthSvc) RevokeCredential(string) error                     { return nil }
 func (s *TAuthSvc) RevokeCN(string) error                             { return nil }
 func (s *TAuthSvc) ClearAllRevokes() uint32                           { return 0 }
-func (s *TAuthSvc) InstallPolicy(int64, byte, *policy.Policy)         {}
-func (s *TAuthSvc) ActivateConfiguration(int64, byte)                 {}
+func (s *TAuthSvc) InstallPolicy(uint64, byte, *policy.Policy)        {}
+func (s *TAuthSvc) ActivateConfiguration(uint64, byte)                {}
 func (s *TAuthSvc) RemoveServiceByPrefix(_ string) int                { return 0 }
 
-func (s *TAuthSvc) AddDatasourceProvider(_ string, _ netip.Addr, _ int64) error {
+func (s *TAuthSvc) AddDatasourceProvider(_ string, _ netip.Addr, _ uint64) error {
 	return nil
 }
 

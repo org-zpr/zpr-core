@@ -24,7 +24,7 @@ type DataCapFunc func(bool, *DataCap, string) (string, uint64, error)
 
 type VisaBuilder struct {
 	visaID             int32
-	netConfig          int64
+	netConfig          uint64
 	expiration         time.Time
 	sourceTether       netip.Addr
 	sourceContact      netip.Addr
@@ -49,7 +49,7 @@ type Constraints struct {
 	DataCapAffinity netip.Addr // address of service actor
 }
 
-func NewVisaBuilder(netConfig int64, sourceTether, destTether netip.Addr) *VisaBuilder {
+func NewVisaBuilder(netConfig uint64, sourceTether, destTether netip.Addr) *VisaBuilder {
 	return &VisaBuilder{
 		netConfig:    netConfig,
 		sourceTether: sourceTether,
@@ -119,7 +119,7 @@ func (b *VisaBuilder) Visa() (*vsapi.Visa, error) {
 	}
 	visa := &vsapi.Visa{
 		IssuerID:      b.visaID,
-		Configuration: b.netConfig,
+		Configuration: int64(b.netConfig),
 		Expires:       VToTimestamp(b.expiration),
 		Source:        b.sourceTether.AsSlice(),
 		Dest:          b.destTether.AsSlice(),

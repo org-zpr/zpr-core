@@ -42,10 +42,10 @@ func (vc *VSSCli) withClient(f ThriftCallF) error {
 }
 
 // `serviceAddr` is nodes vss service address in 'ADDR:PORT' form.
-func (vc *VSSCli) SendNetworkPolicy(policyID uint64, configID int64) error {
+func (vc *VSSCli) SendNetworkPolicy(policyID uint64, configID uint64) error {
 	pi := vsapi.PolicyInfo{
 		PolicyID: int64(policyID),
-		ConfigID: configID,
+		ConfigID: int64(configID),
 	}
 	return vc.withClient(func(client *vsapi.VisaSupportClient) error {
 		return client.NetworkPolicyInstalled(context.Background(), &pi)

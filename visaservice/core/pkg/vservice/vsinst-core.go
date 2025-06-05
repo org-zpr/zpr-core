@@ -25,13 +25,15 @@ import (
 
 // renewEssentialVisasForCurrentConfig renews the visa-service visas found in our
 // store if they are not already on the current net-config.
-func (vs *VSInst) renewEssentialVisasForCurrentConfig(configID int64, policyID uint64) {
+func (vs *VSInst) renewEssentialVisasForCurrentConfig(configID uint64, policyID uint64) {
 	var oldVisas []*vtableEnt
+
+	configIDi64 := int64(configID)
 
 	vs.vtable.mtx.RLock()
 	for _, ve := range vs.vtable.table {
 		if ve.isVSVisa {
-			if ve.v.Configuration != configID && ve.successor == 0 {
+			if ve.v.Configuration != configIDi64 && ve.successor == 0 {
 				oldVisas = append(oldVisas, ve)
 			}
 		}
@@ -438,7 +440,7 @@ func (vs *VSInst) insertVisaWithNewID(v *vsapi.Visa, isVSVisa bool, pktData *sni
 	return ve, nil
 }
 
-func (vs *VSInst) visaDenied(configID int64, reason string, pktData *snip.Traffic, tetherAddr netip.Addr) {
+func (vs *VSInst) visaDenied(configID uint64, reason string, pktData *snip.Traffic, tetherAddr netip.Addr) {
 	if vs.vlog != nil {
 		vs.vlog.LogVisaDenied(configID, pktData, reason, tetherAddr)
 	}
@@ -543,7 +545,7 @@ func (vs *VSInst) revokeVisaByID(visaID uint64) error {
 		return ErrVisaNotFound
 	}
 	for _, vr := range revokes {
-		vs.vlog.LogVisaRevoked(uint64(vr.IssuerID), vr.Configuration)
+		vs.vlog.LogVisaRevoked(uint64(vr.IssuerID), uint64(vr.Configuration))
 	}
 	push := adb.PushItem{
 		Broadcast:   true,

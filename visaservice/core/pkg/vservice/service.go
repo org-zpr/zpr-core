@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"os"
 	"sync"
@@ -48,7 +49,7 @@ type VisaService struct {
 
 	policy struct { // current policy and configuration
 		sync.RWMutex
-		config int64
+		config uint64
 		policy *policy.Policy
 	}
 }
@@ -215,7 +216,7 @@ func (s *VisaService) run(adminPort uint16) error {
 }
 
 // Implements an interface needed by the admin service.
-func (s *VisaService) GetPolicyAndConfig() (*policy.Policy, int64) {
+func (s *VisaService) GetPolicyAndConfig() (*policy.Policy, uint64) {
 	s.policy.RLock()
 	defer s.policy.RUnlock()
 	return s.policy.policy, s.policy.config
@@ -326,7 +327,7 @@ func (s *VisaService) removeActor(agnt *actor.Actor) {
 // Implements an interface needed by the admin service
 //
 // Returns (version, config_id, error)
-func (s *VisaService) InstallPolicy(cp *policy.ContainedPolicy) (string, int64, error) {
+func (s *VisaService) InstallPolicy(cp *policy.ContainedPolicy) (string, uint64, error) {
 	s.log.Info("installing policy from admin")
 
 	if err := s.doInstallPolicy(cp); err != nil {
@@ -359,7 +360,7 @@ func (s *VisaService) doInstallPolicy(cp *policy.ContainedPolicy) error {
 }
 
 // computeVersionAndConfigID updates our policy state variables.
-func (s *VisaService) computeVersionConfigID(newPolicy *policy.Policy) (string, int64, error) {
+func (s *VisaService) computeVersionConfigID(newPolicy *policy.Policy) (string, uint64, error) {
 	s.policy.Lock()
 	defer s.policy.Unlock()
 
@@ -389,7 +390,7 @@ const (
 
 // The rather tricky job of determining if a proposed policy change requires a configuration change.
 // Capitalized so I can test it.
-func ComputeConfiguration(log logr.Logger, curPolicy *policy.Policy, curConfig int64, proposedPolicy *policy.Policy) (int64, error) {
+func ComputeConfiguration(log logr.Logger, curPolicy *policy.Policy, curConfig uint64, proposedPolicy *policy.Policy) (uint64, error) {
 
 	needsNewConfig := false
 
@@ -423,9 +424,9 @@ func ComputeConfiguration(log logr.Logger, curPolicy *policy.Policy, curConfig i
 
 checkdone:
 	if needsNewConfig {
-		var newStamp, counter int64
+		var newStamp, counter uint64
 		now := time.Now().UTC()
-		newStamp = int64((uint64(now.Year()) * configYearX) + (uint64(now.Month()) * configMonthX) + (uint64(now.Day()) * configDayX))
+		newStamp = (uint64(now.Year()) * configYearX) + (uint64(now.Month()) * configMonthX) + (uint64(now.Day()) * configDayX)
 		if newStamp/configDayX != curConfig/configDayX {
 			counter = 1
 		} else {
@@ -433,6 +434,10 @@ checkdone:
 		}
 		newConfig := newStamp + counter
 		log.Info("bumping configuration", "old_config", curConfig, "new_config", newConfig)
+		if newConfig > math.MaxInt64 {
+			// TODO: problem to solve another day. Our vsapi visa struct only accepts int64.
+			panic("ran out of configuration ID numbers")
+		}
 		return newConfig, nil
 	}
 	// Else, keep config the same

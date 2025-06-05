@@ -40,7 +40,7 @@ func (v *Vlog) LogVisaCreated(visa *vsapi.Visa, pkt *snip.Traffic, explainer str
 	v.out.Write([]byte(entry))
 }
 
-func (v *Vlog) LogVisaRevoked(visaId uint64, configId int64) {
+func (v *Vlog) LogVisaRevoked(visaId uint64, configId uint64) {
 	var b strings.Builder
 
 	b.WriteString(time.Now().Format(time.RFC3339))
@@ -52,7 +52,7 @@ func (v *Vlog) LogVisaRevoked(visaId uint64, configId int64) {
 	v.out.Write([]byte(b.String()))
 }
 
-func (v *Vlog) LogVisaDenied(configID int64, pkt *snip.Traffic, reason string, requestor netip.Addr) {
+func (v *Vlog) LogVisaDenied(configID uint64, pkt *snip.Traffic, reason string, requestor netip.Addr) {
 	entry := newDeny(configID, pkt, reason, requestor)
 	v.out.Write([]byte(entry))
 }
@@ -77,7 +77,7 @@ func newPermit(visa *vsapi.Visa, pkt *snip.Traffic, explainer string, requestor 
 	return b.String()
 }
 
-func newDeny(configID int64, pkt *snip.Traffic, reason string, requestor netip.Addr) string {
+func newDeny(configID uint64, pkt *snip.Traffic, reason string, requestor netip.Addr) string {
 	var b strings.Builder
 
 	b.WriteString(time.Now().Format(time.RFC3339))

@@ -61,7 +61,7 @@ func (f *DSFeatures) ShortStr() string {
 
 // VLoc is a "Validation service LOCation"
 type VLoc struct {
-	configID      int64 // Config ID when actor connected and was permitted to add itself
+	configID      uint64 // Config ID when actor connected and was permitted to add itself
 	contactAddr   netip.Addr
 	Prefix        string // The data source prefix for this source
 	Domain        string // Used for TLS (must match the TLS cert)
@@ -255,7 +255,7 @@ func (vs *Directory) certPoolForDomain(domain string, revokes []*snauth.CredID) 
 
 // AddLocalService registers the validation service
 // It is ok to add same service more than once (does not change underlying DB)
-func (vs *Directory) AddService(prefix string, contactAddr netip.Addr, features *DSFeatures, configID int64) error {
+func (vs *Directory) AddService(prefix string, contactAddr netip.Addr, features *DSFeatures, configID uint64) error {
 	if !contactAddr.IsValid() || contactAddr.IsUnspecified() {
 		return errInvalidAddress
 	}

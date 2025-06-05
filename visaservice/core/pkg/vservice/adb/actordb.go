@@ -65,17 +65,17 @@ type PeerRecord struct {
 	State                struct {
 		Updating          bool
 		WantPolicyVer     uint64
-		WantConfigID      int64
-		LastPushConfigID  int64
+		WantConfigID      uint64
+		LastPushConfigID  uint64
 		LastPushPolicyVer uint64
-		LastSyncConfigID  int64 // used by the bring-node-into-policy-sync system
+		LastSyncConfigID  uint64 // used by the bring-node-into-policy-sync system
 		LastSyncPolicyVer uint64
 		LastSyncVisasExp  time.Time
 	}
 }
 
 type PeerSyncDetails struct {
-	ConfigID        int64
+	ConfigID        uint64
 	PolicyVersion   uint64
 	VisasExpiration time.Time
 }
@@ -440,7 +440,7 @@ func (db *ActorDB) GetPeerSyncDetails(nodeAddr netip.Addr) *PeerSyncDetails {
 	return nil
 }
 
-func (db *ActorDB) SetPeerSyncDetails(nodeAddr netip.Addr, polVersion uint64, configID int64, visasExpiration time.Time) error {
+func (db *ActorDB) SetPeerSyncDetails(nodeAddr netip.Addr, polVersion uint64, configID uint64, visasExpiration time.Time) error {
 	db.Lock()
 	defer db.Unlock()
 	if rec, ok := db.actorsV6toHr[nodeAddr.As16()]; ok {
@@ -520,7 +520,7 @@ func (db *ActorDB) IsNodeInSync(naddr netip.Addr) bool {
 	return false
 }
 
-func (db *ActorDB) SetPeerDesiredPolicyState(addr netip.Addr, policyVer uint64, configID int64) bool {
+func (db *ActorDB) SetPeerDesiredPolicyState(addr netip.Addr, policyVer uint64, configID uint64) bool {
 	db.Lock()
 	defer db.Unlock()
 	if rec, ok := db.actorsV6toHr[addr.As16()]; ok {
@@ -533,7 +533,7 @@ func (db *ActorDB) SetPeerDesiredPolicyState(addr netip.Addr, policyVer uint64, 
 	return false
 }
 
-func (db *ActorDB) SetPeerLastPolicyState(addr netip.Addr, policyVer uint64, configID int64) bool {
+func (db *ActorDB) SetPeerLastPolicyState(addr netip.Addr, policyVer uint64, configID uint64) bool {
 	db.Lock()
 	defer db.Unlock()
 	if rec, ok := db.actorsV6toHr[addr.As16()]; ok {

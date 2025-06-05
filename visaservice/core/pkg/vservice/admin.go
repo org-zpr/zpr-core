@@ -60,8 +60,8 @@ type VisaDescriptor struct {
 
 // Visa Service API that admin service needs to do its job.
 type VSApi interface {
-	GetPolicyAndConfig() (*policy.Policy, int64)
-	InstallPolicy(*policy.ContainedPolicy) (string, int64, error) // returns (version, config_id, error)
+	GetPolicyAndConfig() (*policy.Policy, uint64)
+	InstallPolicy(*policy.ContainedPolicy) (string, uint64, error) // returns (version, config_id, error)
 	ListVisas() []*VisaDescriptor
 	ListAdapters() []*adb.HostRecordBrief
 	ListNodes() []*adb.NodeRecordBrief

@@ -89,7 +89,7 @@ type VSInst struct {
 	plcy struct {
 		sync.RWMutex
 		p       *policy.Policy  // current policy
-		cid     int64           // current config ID
+		cid     uint64          // current config ID
 		matcher *policy.Matcher // extracted from current policy
 	}
 
@@ -108,7 +108,7 @@ type VSInst struct {
 
 // configRemoval to track when a net-config is supplanted.
 type configRemoval struct {
-	config  int64     // old net config ID
+	config  uint64    // old net config ID
 	removal time.Time // was supplanted at this time
 }
 
@@ -415,16 +415,17 @@ func (vs *VSInst) removeExpiredVisas() {
 
 // expireAllVisas is called when policy is updated.  Revokes and removes all visas under the
 // given network configuration.
-func (vs *VSInst) expireAllVisas(config int64) {
+func (vs *VSInst) expireAllVisas(config uint64) {
+	configI64 := int64(config)
 	vs.vtable.mtx.Lock()
 	defer vs.vtable.mtx.Unlock()
 	count := 0
 	var revokes []*vsapi.VisaRevocation
 	for vID, ve := range vs.vtable.table {
-		if ve.v.Configuration == config {
+		if ve.v.Configuration == configI64 {
 			revokes = append(revokes, &vsapi.VisaRevocation{
 				IssuerID:      int32(vID),
-				Configuration: int64(config),
+				Configuration: configI64,
 			})
 			delete(vs.vtable.table, vID)
 			count++
