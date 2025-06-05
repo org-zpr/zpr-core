@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"os"
 	"sync"
@@ -433,6 +434,10 @@ checkdone:
 		}
 		newConfig := newStamp + counter
 		log.Info("bumping configuration", "old_config", curConfig, "new_config", newConfig)
+		if newConfig > math.MaxInt64 {
+			// TODO: problem to solve another day. Our vsapi visa struct only accepts int64.
+			panic("ran out of configuration ID numbers")
+		}
 		return newConfig, nil
 	}
 	// Else, keep config the same
