@@ -188,10 +188,6 @@ pub async fn send_init_authentication_request(
             };
             let status = hdr.status_code;
             debug!(target: ZDP, "Link {link_id}: Received InitAuthenticationResponse, status: {status:?}");
-
-            // TODO: Can I somehow get the peers ZPR address from here?
-            debug!(target: ZDP, "Link {link_id} detected peer source address as {}", init_auth_res.metadata().get_src_address());
-
             Ok(status)
         }
 

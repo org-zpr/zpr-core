@@ -361,10 +361,10 @@ struct AuthReq {
 ///   of (response_type, client_id, scope, state).
 /// - Service returns json object with a "nonce" field, a base64 encoded byte buffer.
 /// - Adapter sends a POST to /authorize with a json object having fields: (client_id, nonce, payload).
-///   `nonce` is copied from the service response.  `payload`` is the bas64 encodeed signautre of
+///   `nonce` is copied from the service response.  `payload` is the base64 encoded signature of
 ///   the nonce using the adapters private RSA key.  The `client_id` (in the case of BAS) is
 ///   the CN of the adapter.
-/// - The service response with an auth-code which will be part of a redirect `loaction` header.
+/// - The service response with an auth-code which will be part of a redirect `location` header.
 ///   The format is `https://auth.zpr?code=<CODE>`).
 ///
 /// Once we have an auth-code back from the authentication service we can construct the
@@ -390,7 +390,7 @@ impl OAuthRsa {
     /// Performs the two calls to the authentication service and the signing of the nonce.
     /// On success returns the auth-code blob.
     /// - `service_addr` is the address of the authentication service
-    /// - `tls_cert` is the TLS certificate used by the authentication service///
+    /// - `tls_cert` is the TLS certificate used by the authentication service
     pub async fn authenticate(
         &self,
         service_addr: SocketAddr,
@@ -427,9 +427,6 @@ impl OAuthRsa {
         service_addr: SocketAddr,
         tls_cert: &Certificate,
     ) -> Result<Vec<u8>, AuthError> {
-        // TODO: I am using blocking here but if we end up in a place where we
-        // can access a tokio runtime we should use async.
-
         let cb = reqwest::ClientBuilder::new()
             .add_root_certificate(tls_cert.clone())
             .danger_accept_invalid_certs(true) // TODO: Figure this TLS stuff out and get rid of this
