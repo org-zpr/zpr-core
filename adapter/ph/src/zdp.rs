@@ -26,9 +26,9 @@ pub enum ZdpPacketType {
     BindActorAddressResponse = 12,
     UnbindActorAddressRequest = 13,
     UnbindActorAddressResponse = 14,
-    AuthenticationRequest = 15,
+    //AuthenticationRequest = 15,  // unused/deprecated
     SetPathMtu = 16,
-    AuthenticationResponse = 17,
+    //AuthenticationResponse = 17,  // unused/deprecated
     // Not flow-based
     ZprArp = 128,
     KeyManagement = 129,
@@ -66,7 +66,6 @@ impl ZdpPacketType {
 
         match self {
             Self::BindActorAddressResponse
-            | Self::AuthenticationResponse
             | Self::TerminateLinkResponse
             | Self::HelloResponse
             | Self::AcquireZprAddressResponse
