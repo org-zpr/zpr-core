@@ -259,6 +259,11 @@ pub struct LinkStateMachine {
     /// used to prevent A/B/A errors with timeouts
     logical_clock: u64,
     timeout_handle: Option<tokio::task::AbortHandle>,
+    /// Counter available for use by states which wish to count timeouts.
+    /// Reset to 0 on any state transition.
+    timeout_count: usize,
+    /// present only while in RegisterAA state; used for retransmits
+    auth_blob: Option<String>,
 }
 
 impl LinkStateMachine {
@@ -272,6 +277,8 @@ impl LinkStateMachine {
             last_state_change: std::time::Instant::now(),
             logical_clock: 0,
             timeout_handle: None,
+            timeout_count: 0,
+            auth_blob: None,
         }
     }
 
@@ -282,6 +289,8 @@ impl LinkStateMachine {
         self.state = new_state;
         self.last_state_change = std::time::Instant::now();
         self.cancel_timeout();
+        self.timeout_count = 0;
+        self.auth_blob = None;
     }
 
     /// Schedule the given callback to be invoked asynchronously after the
@@ -373,7 +382,7 @@ impl LinkStateWrapper {
     fn set_timeout(
         &self,
         asm: &Arc<Assembly>,
-        locked_fsm: &mut tokio::sync::MutexGuard<'_, LinkStateMachine>,
+        locked_fsm: &mut std::sync::MutexGuard<'_, LinkStateMachine>,
         duration: std::time::Duration,
     ) {
         let link_id = self.id;
@@ -946,8 +955,7 @@ impl LinkStateWrapper {
     /// use the address we saved in our state (from the original request).
     ///
     fn process_authorize_repsonse(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
-        let addrs = self.get_actor_addresses();
-        let locked_fsm = self.locked_fsm.lock().unwrap();
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {} // ok
@@ -960,10 +968,10 @@ impl LinkStateWrapper {
 
         // Send a Grant message, consume the response and then send in an event
         // indicating we got it (ReceivedGrantResponse).
-        drop(locked_fsm);
 
         // Will call back via ReceivedGrantResponse event if successful.
-        self.send_grant_zpr_address_request(asm, addrs);
+        self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses);
+        self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
         Ok(())
     }
 
@@ -1006,11 +1014,16 @@ impl LinkStateWrapper {
                     if let Some(bs) = asm.bsauth.as_ref() {
                         match bs.authenticate(&challenge) {
                             Ok(blobstr) => {
-                                locked_fsm.set_state(LinkState::RegisterAA);
-                                drop(locked_fsm);
                                 // The send function below will invoke a state event callback.
                                 // We staty in RegisterAA state until we get a grant.
                                 self.send_acquire_zpr_address_request(asm, &blobstr);
+                                locked_fsm.set_state(LinkState::RegisterAA);
+                                locked_fsm.auth_blob = Some(blobstr);
+                                self.set_timeout(
+                                    asm,
+                                    &mut locked_fsm,
+                                    config::DEFAULT_REQUEST_RETRY_TIMER,
+                                );
                             }
                             Err(e) => {
                                 error!(target: LINK_STATE, "Link {link_id} failed to self-authenticate: {e:?}");
@@ -1106,7 +1119,7 @@ impl LinkStateWrapper {
     }
 
     /// Send the Grant message
-    fn send_grant_zpr_address_request(&self, asm: &Arc<Assembly>, addrs: Vec<IpAddress>) {
+    fn send_grant_zpr_address_request(&self, asm: &Arc<Assembly>, addrs: &[IpAddress]) {
         let link_id = self.id;
         let task_asm = asm.clone();
 
@@ -1187,7 +1200,7 @@ impl LinkStateWrapper {
         blob: ZdpAuthCodeBlob,
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
-        let locked_fsm = self.locked_fsm.lock().unwrap();
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
         if locked_fsm.state != LinkState::RegisterAA {
             error!(
@@ -1197,9 +1210,11 @@ impl LinkStateWrapper {
             return Ok(());
         }
 
-        drop(locked_fsm);
         info!(target: LINK_STATE, "Link {link_id}: authentication success, client_id={}", blob.client_id);
-        self.send_acquire_zpr_address_request(asm, &blob.encode());
+        let blobstr = blob.encode();
+        self.send_acquire_zpr_address_request(asm, &blobstr);
+        locked_fsm.auth_blob = Some(blobstr);
+        self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
         Ok(())
     }
 
@@ -1232,18 +1247,61 @@ impl LinkStateWrapper {
 
     fn process_timeout(
         &self,
-        _asm: &Arc<Assembly>,
+        asm: &Arc<Assembly>,
         logical_clock: u64,
     ) -> Result<(), LinkStateError> {
-        let locked_fsm = self.locked_fsm.lock().unwrap();
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
         if logical_clock != locked_fsm.logical_clock {
             // timeout was for some earlier state & we won the task abort race; ignore
             return Ok(());
         }
 
         // handle the timeout...
+        match (self.link_type, locked_fsm.state) {
+            // all these states use timeout simply for retransmits
+            (LinkType::AdapterToNode, LinkState::RegisterAA)
+            | (LinkType::NodeToAdapter, LinkState::RegisterAA)
+            | (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {
+                locked_fsm.timeout_count += 1;
 
-        Ok(())
+                if locked_fsm.timeout_count >= config::DEFAULT_REQUEST_RETRY_COUNT {
+                    error!(target: LINK_STATE, "Link {} timed out in state {:?}", self.id, locked_fsm.state);
+                    drop(locked_fsm);
+                    return self.process_error_response(&asm);
+                }
+
+                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+                self.retransmit(asm, &mut locked_fsm);
+                Ok(())
+            }
+
+            (_, _) => Err(LinkStateError::InvalidOperation(
+                "Ignoring unexpected timeout".to_owned(),
+            )),
+        }
+    }
+
+    /// Invoked due to a state transition timeout while waiting for a reply; retransmits the associated request.
+    fn retransmit(
+        &self,
+        asm: &Arc<Assembly>,
+        locked_fsm: &mut std::sync::MutexGuard<'_, LinkStateMachine>,
+    ) {
+        match (self.link_type, locked_fsm.state) {
+            (LinkType::AdapterToNode, LinkState::RegisterAA) => {
+                self.send_acquire_zpr_address_request(asm, &locked_fsm.auth_blob.as_ref().unwrap())
+            }
+
+            (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
+                self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses)
+            }
+
+            (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {
+                self.send_init_authentication_request(asm)
+            }
+
+            (_, _) => (),
+        }
     }
 
     /// Validate a received shutdown request
