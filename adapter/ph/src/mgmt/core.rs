@@ -57,24 +57,6 @@ pub async fn send_per_flow_mgmt(
     send_mgmt_helper(asm, link_id, packet_type, Some(stream_id), None, packet).await
 }
 
-pub async fn send_non_flow_mgmt_response(
-    asm: &Assembly,
-    link_id: zpr::LinkId,
-    packet_type: zdp::ZdpPacketType,
-    sequence_number: zpr::SeqNum,
-    packet: Packet,
-) {
-    send_mgmt_helper(
-        asm,
-        link_id,
-        packet_type,
-        None,
-        Some(sequence_number),
-        packet,
-    )
-    .await
-}
-
 pub async fn send_per_flow_mgmt_response(
     asm: &Assembly,
     link_id: zpr::LinkId,
@@ -120,29 +102,6 @@ async fn send_mgmt_helper(
     asm.mgmt_substrate_egress
         .enqueue_packet(link_id, packet)
         .await;
-}
-
-/// Sender function for non-per flow request management packet.
-/// Requires the type of ZDP packet being sent as well as the type of the
-/// expected response packet.
-/// pkt_fn allows the function to create the proper body of the ZDP packet to send
-/// Returns the received packet without any ZdpHeader (just management response body) or an error
-pub async fn send_sync_non_flow_req(
-    asm: &Assembly,
-    link_id: zpr::LinkId,
-    zdp_request_type: zdp::ZdpPacketType,
-    zdp_response_type: zdp::ZdpPacketType,
-    pkt_fn: impl Fn(&mut Packet) + Send + 'static,
-) -> Result<Packet, SyncReqError> {
-    send_sync_req_helper(
-        asm,
-        link_id,
-        zdp_request_type,
-        zdp_response_type,
-        None,
-        pkt_fn,
-    )
-    .await
 }
 
 /// Sender function for per flow request management packet.
