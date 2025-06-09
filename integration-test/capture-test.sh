@@ -2,7 +2,7 @@
 set -euo pipefail
 PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/cli/target/debug/ph-cli")
-VS_BIN=$(realpath "$(dirname $0)/../visaservice/core/build/vservice")
+VS_BIN=$(realpath "$(dirname $0)/vservice")
 PREGEN=$(realpath "$(dirname $0)/pregen")
 
 source "$(dirname $0)/common_funcs.sh"
@@ -23,6 +23,11 @@ ACTOR_PROTOCOL="ipv6"
 NUM_ACTORS=2
 # Note: POLICY_BIN, NODE_ZPR_ADDR, VS_ZPR_ADDR, A_ZPR_ADDR, and B_ZPR_ADDR are defined by parsing the input arguments.
 source "$(dirname $0)/parse_arguments.sh"
+
+if [ ! -e "$VS_BIN" ]; then
+  echo "vservice binary not found, expected it at $VS_BIN"
+  exit 1
+fi
 
 NODE_SOCK=node.sock
 VS_SOCK=vs.sock
