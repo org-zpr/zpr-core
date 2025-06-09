@@ -11,7 +11,7 @@ use crate::sample_ring::SampleRing;
 use crate::special_peers;
 use crate::special_peers::SpecialPeerName;
 use crate::visa_mgmt;
-use crate::zdp::{ResponseCode, TerminateReason};
+use crate::zdp::{self, ResponseCode, TerminateReason};
 
 use openssl::x509::X509;
 use std::fmt::{Display, Formatter};
@@ -1057,10 +1057,48 @@ impl LinkStateWrapper {
     /// use for authentication.
     fn send_init_authentication_request(&self, asm: &Arc<Assembly>) {
         let link_id = self.id;
+
+        // TODO: Whether or not we are in bootstrap mode comes from visa service.  For now hardcoded ON.
+        let is_bootstrap = true;
+
+        let payload: auth::ZdpInitAuthenticationPayload;
+        let mut flags = 0u8;
+
+        if is_bootstrap {
+            flags |= zdp::init_authentication_flags::BOOTSTRAP_SUPPORT;
+
+            // TODO: Pretty sure I do not need `inspect_sync` below. The key is set at create time and not changed.
+            let key = asm.peer_table.inspect(link_id, {
+                |peer| {
+                    let mut key = [0u8; auth::AUTH_KEY_SIZE_BYTES];
+                    key[0..auth::AUTH_KEY_SIZE_BYTES]
+                        .copy_from_slice(&peer.auth_key[0..auth::AUTH_KEY_SIZE_BYTES]);
+                    key
+                }
+            });
+            match key {
+                Some(key) => payload = auth::ZdpInitAuthenticationPayload::new(&key),
+                None => {
+                    // TODO: Possibly we want to send the Init Authentication message anyway, but
+                    //       just not support bootstrap mode.
+                    error!(target: LINK_STATE, "unable to send Init Authentication: no auth key found for link {link_id}");
+                    if let Err(e) = asm.process_link_state_event(link_id, LinkEvent::Error) {
+                        error!(target: LINK_STATE, "event handling error: {e}");
+                    }
+                    return;
+                }
+            }
+        } else {
+            payload = auth::ZdpInitAuthenticationPayload::default(); // empty
+        }
+
         let task_asm = asm.clone();
 
         tokio::task::spawn_local(async move {
-            let result = mgmt::requests::send_init_authentication_request(&task_asm, link_id).await;
+            let result = mgmt::requests::send_init_authentication_request(
+                &task_asm, link_id, flags, payload,
+            )
+            .await;
             if result.is_err() {
                 error!(target: LINK_STATE, "Link {link_id} failed to send init-auth request");
                 if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::Error) {

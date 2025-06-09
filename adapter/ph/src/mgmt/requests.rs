@@ -1,8 +1,10 @@
 //! Management requests.
+//!
+//! No logic lives in here; this is just a simple API to send ZDP messages.
+
 #![allow(dead_code)]
 
 use super::core;
-use crate::auth::ZdpInitAuthenticationPayload;
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
@@ -117,37 +119,9 @@ pub async fn send_hello_request(
 pub async fn send_init_authentication_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
+    flags: u8,
+    payload: auth::ZdpInitAuthenticationPayload,
 ) -> Result<zdp::ResponseCode, ()> {
-    // TODO: Whether or not we are in bootstrap mode comes from visa service.  For now hardcoded ON.
-    let is_bootstrap = true;
-
-    let payload: auth::ZdpInitAuthenticationPayload;
-    let mut flags = 0u8;
-
-    if is_bootstrap {
-        flags |= zdp::init_authentication_flags::BOOTSTRAP_SUPPORT;
-
-        // TODO: Pretty sure I do not need `inspect_sync` below. The key is set at create time and not changed.
-        let key = asm.peer_table.inspect(link_id, {
-            |peer| {
-                let mut key = [0u8; auth::AUTH_KEY_SIZE_BYTES];
-                key[0..auth::AUTH_KEY_SIZE_BYTES]
-                    .copy_from_slice(&peer.auth_key[0..auth::AUTH_KEY_SIZE_BYTES]);
-                key
-            }
-        });
-        match key {
-            Some(key) => payload = ZdpInitAuthenticationPayload::new(&key),
-            None => {
-                // TODO: Possibly we want to send the Init Authentication message anyway, but
-                //       just not support bootstrap mode.
-                error!(target: ZDP, "unable to send Init Authentication: no auth key found for link {link_id}");
-                return Err(());
-            }
-        }
-    } else {
-        payload = ZdpInitAuthenticationPayload::default(); // empty
-    }
     debug!(target: ZDP, "Link {link_id}: sending IntitAuthenticationRequest, flags: {flags:x?}");
     let response = core::send_sync_non_flow_req(
         asm,
