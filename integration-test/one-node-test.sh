@@ -6,7 +6,7 @@ export RUST_BACKTRACE=1
 PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/cli/target/debug/ph-cli")
 VS_BIN=$(realpath "$(dirname $0)/vservice")
-VS_ADMIN_BIN=$(realpath "$(dirname $0)/../visaservice/vs-admin/target/debug/vs-admin")
+VS_ADMIN_BIN=$(realpath "$(dirname $0)/vs-admin")
 PREGEN=$(realpath "$(dirname $0)/pregen")
 
 source "$(dirname $0)/common_funcs.sh"
@@ -33,8 +33,11 @@ source "$(dirname $0)/parse_arguments.sh"
 if [ ! -e "$VS_BIN" ]; then
   echo "vservice binary not found, expected it at $VS_BIN"
   exit 1
+if
+if [ ! -e "$VS_ADMIN_BIN" ]; then
+  echo "vs-admin binary not found, expected it at $VS_BIN"
+  exit 1
 fi
-
 
 NODE_SOCK=node.sock
 VS_SOCK=vs.sock

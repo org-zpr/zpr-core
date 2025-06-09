@@ -125,7 +125,8 @@ jobs:
       with:
         repository: 'org-zpr/zpr-visaservice'
         tag: 'v0.1.0'
-        fileName: 'vservice'
+        fileName: 'release-linux-x86_64.tgz'
+        extract: true
         out-file-path: 'integration-test'
         token: ${{ secrets.ZPR_CICD_RO_TOKEN }}
 
@@ -184,7 +185,8 @@ jobs:
       with:
         repository: 'org-zpr/zpr-visaservice'
         tag: 'v0.1.0'
-        fileName: 'vservice'
+        fileName: 'release-linux-x86_64.tgz'
+        extract: true
         out-file-path: 'integration-test'
         token: ${{ secrets.ZPR_CICD_RO_TOKEN }}
 
