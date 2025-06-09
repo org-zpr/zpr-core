@@ -623,7 +623,6 @@ impl LinkStateWrapper {
                 Ok(())
             }
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
-                // Note that the node goes into RegisterAA while the adapter will go into WaitForInitAuth.
                 // Node is really waiting now for an Acquire Call.
                 locked_fsm.actor_addresses.push(peer_zpr_addr);
                 debug!(
@@ -631,7 +630,7 @@ impl LinkStateWrapper {
                     "Link {link_id} peer is using ZPR addr {}",
                     peer_zpr_addr
                 );
-                locked_fsm.set_state(LinkState::RegisterAA);
+                locked_fsm.set_state(LinkState::WaitForInitAuth);
                 debug!(
                     target: LINK_STATE,
                     "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
@@ -717,7 +716,7 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
         match (self.link_type, locked_fsm.state) {
-            (LinkType::NodeToAdapter, LinkState::RegisterAA) => {}
+            (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {}
 
             (_, _) => {
                 return Err(LinkStateError::InvalidOperation(
@@ -768,6 +767,8 @@ impl LinkStateWrapper {
                 }
             }
         }
+
+        locked_fsm.set_state(LinkState::RegisterAA);
 
         // Now we have verified our part of the blob, we can send to the visa service for checking the signature.
         match visa_mgmt::build_connect_request(asm, link_id, requested_addr, &blob) {
