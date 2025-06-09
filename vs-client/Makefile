@@ -13,7 +13,7 @@ build: libnode
 	cargo build
 
 libnode:
-	$(MAKE) -C ../../libnode
+	$(MAKE) -C ../libnode
 
 test:
 	cargo test
