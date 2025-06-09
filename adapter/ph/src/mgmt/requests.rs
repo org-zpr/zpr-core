@@ -99,42 +99,25 @@ pub async fn send_init_authentication_request(
     link_id: zpr::LinkId,
     flags: u8,
     payload: auth::ZdpInitAuthenticationPayload,
-) -> Result<zdp::ResponseCode, ()> {
+) -> zpr::SeqNum {
     debug!(target: ZDP, "Link {link_id}: sending IntitAuthenticationRequest, flags: {flags:x?}");
-    let response = core::send_sync_non_flow_req(
+
+    let mut req = core::new_heap_packet();
+
+    let hdr = zdp::ZdpInitAuthenticationRequestHeader {
+        flags,
+        data_len: (size_of::<auth::ZdpInitAuthenticationPayload>() as u16).into(),
+    };
+    hdr.write_to_buf(&mut req).unwrap();
+    payload.write_to_buf(&mut req).unwrap();
+
+    core::send_non_flow_mgmt(
         asm,
         link_id,
         zdp::ZdpPacketType::InitAuthenticationRequest,
-        zdp::ZdpPacketType::InitAuthenticationResponse,
-        move |mut req| {
-            let hdr = zdp::ZdpInitAuthenticationRequestHeader {
-                flags,
-                data_len: (size_of::<auth::ZdpInitAuthenticationPayload>() as u16).into(),
-            };
-            hdr.write_to_buf(&mut req).unwrap();
-            payload.write_to_buf(&mut req).unwrap();
-        },
+        req,
     )
-    .await;
-
-    match response {
-        Ok(mut init_auth_res) => {
-            let Ok(hdr) =
-                zdp::ZdpInitAuthenticationResponseHeader::read_from_buf(&mut init_auth_res)
-            else {
-                core::count_event(asm, &mut init_auth_res, CounterType::BadStructure);
-                return Err(());
-            };
-            let status = hdr.status_code;
-            debug!(target: ZDP, "Link {link_id}: Received InitAuthenticationResponse, status: {status:?}");
-            Ok(status)
-        }
-
-        Err(err) => {
-            warn!(target: ZDP, "Link {link_id}: error with InitAuthenticationRequest: {}", err);
-            Err(())
-        }
-    }
+    .await
 }
 
 /// Send an AcquireZPRAddressRequest (TODO: not yet in RFC 6)

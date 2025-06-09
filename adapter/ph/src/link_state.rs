@@ -467,7 +467,7 @@ impl LinkStateWrapper {
                 self.process_authentication_success(asm, blob)
             }
 
-            LinkEvent::ReceivedAuthorizeResponse => self.process_authorize_repsonse(asm),
+            LinkEvent::ReceivedAuthorizeResponse => self.process_authorize_response(asm),
 
             LinkEvent::ReceivedTerminateRequest(code) => self.process_terminate_request(asm, code),
             LinkEvent::ReceivedTerminateResponse(_) => self.process_terminate_response(asm),
@@ -644,8 +644,8 @@ impl LinkStateWrapper {
                     target: LINK_STATE,
                     "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
                 );
-                drop(locked_fsm);
                 self.send_init_authentication_request(asm);
+                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
                 Ok(())
             }
             (LinkType::AdapterToNode, _) => {
@@ -709,7 +709,7 @@ impl LinkStateWrapper {
         }
     }
 
-    /// The ZprAddressRequest is from adapter to node (furute: joining node to node).
+    /// The ZprAddressRequest is from adapter to node (future: joining node to node).
     /// Includes authentication blob from sender, as well as the requested addresses.
     /// Inclusion of requested addresses is temporary.
     ///
@@ -954,7 +954,7 @@ impl LinkStateWrapper {
     /// TODO: At some point this will need the ZPR address returned to it also.  For now we
     /// use the address we saved in our state (from the original request).
     ///
-    fn process_authorize_repsonse(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+    fn process_authorize_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
         match (self.link_type, locked_fsm.state) {
@@ -1105,16 +1105,8 @@ impl LinkStateWrapper {
         let task_asm = asm.clone();
 
         tokio::task::spawn_local(async move {
-            let result = mgmt::requests::send_init_authentication_request(
-                &task_asm, link_id, flags, payload,
-            )
-            .await;
-            if result.is_err() {
-                error!(target: LINK_STATE, "Link {link_id} failed to send init-auth request");
-                if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::Error) {
-                    error!(target: LINK_STATE, "event handling error: {e}");
-                }
-            }
+            mgmt::requests::send_init_authentication_request(&task_asm, link_id, flags, payload)
+                .await
         });
     }
 
@@ -1294,6 +1286,7 @@ impl LinkStateWrapper {
 
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
                 self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses)
+                //self.send_init_authentication_request(asm)  // FIXME
             }
 
             (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {

@@ -65,7 +65,7 @@ impl ZdpPacketType {
         // so this logic becomes a simple range check
 
         match self {
-            Self::BindActorAddressResponse | Self::InitAuthenticationResponse => true,
+            Self::BindActorAddressResponse => true,
             _ => false,
         }
     }
@@ -152,7 +152,7 @@ pub struct ZdpInitAuthenticationRequestHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpInitAuthenticationResponseHeader {
+pub struct ZdpInitAuthenticationResponse {
     pub status_code: ResponseCode,
 }
 
