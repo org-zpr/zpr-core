@@ -24,8 +24,5 @@ test:
 	go test -short $(PKG)/...
 
 
-.PHONY: protobuf
-protobuf:
-	$(MAKE) -f Makefile.pb all
 
 

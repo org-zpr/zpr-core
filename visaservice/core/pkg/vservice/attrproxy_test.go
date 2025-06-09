@@ -10,15 +10,15 @@ import (
 
 	"zpr.org/vs/pkg/actor"
 	"zpr.org/vs/pkg/policy"
+	"zpr.org/vs/pkg/tsapi"
 	"zpr.org/vs/pkg/vservice"
 	"zpr.org/vs/pkg/vservice/auth"
-	"zpr.org/vsx/snio/zds"
 )
 
 // An auth service
 type TAuthSvc struct {
 	QueryCallCount int
-	QueryResponses []*zds.QueryResponse
+	QueryResponses []*tsapi.QueryResponse
 }
 
 func (s *TAuthSvc) SetCurrentPolicy(_ uint64, _ *policy.Policy) error { return nil }
@@ -41,9 +41,9 @@ func (s *TAuthSvc) Authenticate(domain string,
 	return nil, fmt.Errorf("Authenticate not implemented")
 }
 
-func (s *TAuthSvc) Query(*zds.QueryRequest) (*zds.QueryResponse, error) {
+func (s *TAuthSvc) Query(*tsapi.QueryRequest) (*tsapi.QueryResponse, error) {
 	s.QueryCallCount++
-	var resp *zds.QueryResponse
+	var resp *tsapi.QueryResponse
 	if len(s.QueryResponses) > 0 {
 		resp, s.QueryResponses = s.QueryResponses[0], s.QueryResponses[1:]
 		return resp, nil
@@ -52,7 +52,7 @@ func (s *TAuthSvc) Query(*zds.QueryRequest) (*zds.QueryResponse, error) {
 	return nil, fmt.Errorf("query failed")
 }
 
-func attrsToMap(attrs []*zds.Attribute) map[string]*actor.ClaimV {
+func attrsToMap(attrs []*tsapi.Attribute) map[string]*actor.ClaimV {
 	am := make(map[string]*actor.ClaimV)
 	for _, a := range attrs {
 		am[a.Key] = &actor.ClaimV{
@@ -73,8 +73,8 @@ func TestQueryUsesCache(t *testing.T) {
 	{
 		exp := time.Now().Add(time.Hour).Unix()
 		svc.QueryResponses = append(svc.QueryResponses,
-			&zds.QueryResponse{
-				Attrs: []*zds.Attribute{
+			&tsapi.QueryResponse{
+				Attrs: []*tsapi.Attribute{
 					{Key: "foo", Val: "foo_val", Exp: exp},
 					{Key: "fee", Val: "fee_val", Exp: exp},
 					{Key: "fie", Val: "fie_val", Exp: exp},
@@ -82,15 +82,15 @@ func TestQueryUsesCache(t *testing.T) {
 				Ttl: 10000,
 			})
 		svc.QueryResponses = append(svc.QueryResponses,
-			&zds.QueryResponse{
-				Attrs: []*zds.Attribute{
+			&tsapi.QueryResponse{
+				Attrs: []*tsapi.Attribute{
 					{Key: "fox", Val: "foxy", Exp: exp},
 				},
 				Ttl: 10000,
 			})
 	}
 
-	req := &zds.QueryRequest{
+	req := &tsapi.QueryRequest{
 		TokenList: [][]byte{[]byte(ballons99Tok)},
 		AttrKeys:  []string{"foo", "fee", "fie"},
 	}
@@ -133,7 +133,7 @@ func TestQueryUsesCache(t *testing.T) {
 	}
 
 	// Here is a query that needs to go to service again for one of the keys.
-	req3 := &zds.QueryRequest{
+	req3 := &tsapi.QueryRequest{
 		TokenList: [][]byte{[]byte(ballons99Tok)},
 		AttrKeys:  []string{"foo", "fox"},
 	}

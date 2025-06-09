@@ -6,13 +6,13 @@ import (
 	"time"
 
 	"zpr.org/vs/pkg/snauth"
+	"zpr.org/vs/pkg/tsapi"
 	"zpr.org/vs/pkg/vservice/auth"
-	"zpr.org/vsx/snio/zds"
 )
 
 type AttrProxy struct {
 	authr auth.AuthService
-	cache map[string]map[string]*zds.Attribute // subject -> map_of_attrs
+	cache map[string]map[string]*tsapi.Attribute // subject -> map_of_attrs
 	mtx   sync.RWMutex
 }
 
@@ -20,7 +20,7 @@ func NewAttrProxy(svc auth.AuthService) *AttrProxy {
 	return &AttrProxy{
 		authr: svc,
 		mtx:   sync.RWMutex{},
-		cache: make(map[string]map[string]*zds.Attribute),
+		cache: make(map[string]map[string]*tsapi.Attribute),
 	}
 }
 
@@ -37,10 +37,10 @@ func (p *AttrProxy) Size() (subCount int, attrCount int) {
 
 // Query the auth service through the cache.
 // If the data source does not support Query interface, auth.ErrNotSupported is returned.
-func (p *AttrProxy) Query(now time.Time, req *zds.QueryRequest) (*zds.QueryResponse, error) {
+func (p *AttrProxy) Query(now time.Time, req *tsapi.QueryRequest) (*tsapi.QueryResponse, error) {
 
 	queryKeys := make(map[string]bool)
-	cacheHits := make(map[string]*zds.Attribute)
+	cacheHits := make(map[string]*tsapi.Attribute)
 	var subs []string // extracted from tokens
 
 	curTS := now.Unix()
@@ -83,14 +83,14 @@ func (p *AttrProxy) Query(now time.Time, req *zds.QueryRequest) (*zds.QueryRespo
 		}
 	}
 	var err error
-	var resp *zds.QueryResponse
+	var resp *tsapi.QueryResponse
 	if len(expired) == 0 {
 		// Nothing has expired? Great!
-		resp = &zds.QueryResponse{
+		resp = &tsapi.QueryResponse{
 			Ttl: 10000, // not sure this matters
 		}
 	} else {
-		missreq := &zds.QueryRequest{
+		missreq := &tsapi.QueryRequest{
 			TokenList: req.TokenList,
 			AttrKeys:  expired,
 		}
@@ -103,7 +103,7 @@ func (p *AttrProxy) Query(now time.Time, req *zds.QueryRequest) (*zds.QueryRespo
 		for _, sub := range subs { // Hmm, this multiple IDs thing is a little strange.
 			tokCache, ok := p.cache[sub]
 			if !ok {
-				tokCache = make(map[string]*zds.Attribute)
+				tokCache = make(map[string]*tsapi.Attribute)
 				p.cache[sub] = tokCache
 			}
 			for _, att := range resp.GetAttrs() {

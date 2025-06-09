@@ -17,10 +17,10 @@ import (
 	"zpr.org/vs/pkg/libvisa"
 	"zpr.org/vs/pkg/policy"
 	"zpr.org/vs/pkg/snauth"
+	"zpr.org/vs/pkg/tsapi"
 	"zpr.org/vs/pkg/vservice/adb"
 	"zpr.org/vs/pkg/vservice/auth"
 	"zpr.org/vsapi"
-	"zpr.org/vsx/snio/zds"
 )
 
 // renewEssentialVisasForCurrentConfig renews the visa-service visas found in our
@@ -496,7 +496,7 @@ func (vs *VSInst) checkAndUpdateAttrs(now time.Time, agnt *actor.Actor) (bool, m
 
 	var toks [][]byte
 	toks = append(toks, []byte(agnt.GetIdentity())) // TODO: what if there are multiple tokens on an actor?
-	qreq := &zds.QueryRequest{
+	qreq := &tsapi.QueryRequest{
 		TokenList: toks,
 		AttrKeys:  expired,
 	}

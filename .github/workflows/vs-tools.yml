@@ -28,7 +28,7 @@ jobs:
     strategy:
       matrix:
         target: [vs-client, vs-admin]
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-containerized-build-test.yml@18db4a3e7ba9852e3cd4a330843742bd93406c48
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-containerized-build-test.yml@c4bf03c27fc14ac08cdb1b8a8c49de91f21786a7
     with:
       name: ${{ matrix.target }}
       path: ./visaservice/${{ matrix.target }}
