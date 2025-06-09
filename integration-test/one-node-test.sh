@@ -33,9 +33,10 @@ source "$(dirname $0)/parse_arguments.sh"
 if [ ! -e "$VS_BIN" ]; then
   echo "vservice binary not found, expected it at $VS_BIN"
   exit 1
-if
+fi
+
 if [ ! -e "$VS_ADMIN_BIN" ]; then
-  echo "vs-admin binary not found, expected it at $VS_BIN"
+  echo "vs-admin binary not found, expected it at $VS_ADMIN_BIN"
   exit 1
 fi
 
