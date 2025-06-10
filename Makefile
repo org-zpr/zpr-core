@@ -20,7 +20,7 @@ info:
 	@echo
 
 
-it-so: deps adapter ph ph-cli visaservice
+it-so: deps adapter ph ph-cli
 
 it-gone:
 	cd adapter/ph && cargo clean
@@ -28,8 +28,6 @@ it-gone:
 	cd cbpf-rs && cargo clean
 	cd cslab && cargo clean
 	$(MAKE) -C libnode dist-clean
-	$(MAKE) -C visaservice/core dist-clean
-	$(MAKE) -C visaservice clean
 	rm -rf diagrams/output
 
 
@@ -39,7 +37,6 @@ test:
 	cd cbpf-rs && cargo test
 	cd cslab && cargo test
 	$(MAKE) -C libnode test
-	$(MAKE) -C visaservice test
 
 
 
@@ -67,10 +64,7 @@ cslab:
 zpr-ext:
 	cd zpr-ext && cargo build
 
-visaservice:
-	$(MAKE) -C visaservice all
 
-
-.PHONY: it-so it-gone test deps libnode ph ph-cli diagrams cbpf cslab zpr-ext visaservice
+.PHONY: it-so it-gone test deps libnode ph ph-cli diagrams cbpf cslab zpr-ext
 
 .DEFAULT_GOAL := info
