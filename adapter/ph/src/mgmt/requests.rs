@@ -427,6 +427,7 @@ pub async fn send_bind_actor_address_request(
     five_tuple: FiveTuple,
     packet_body: Vec<u8>,
 ) -> Result<zpr::StreamId, BindActorAddressError> {
+    info!(target: ZDP, "Link {link_id}: sending BindActorAddressRequest for {five_tuple} with compression mode {compression_mode} packet_body size {}", packet_body.len());
     let response = core::send_sync_per_flow_req(
         asm,
         link_id,
