@@ -18,11 +18,13 @@ use tracing::*;
 use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
+/// Indicates whether the mgmt message was handled successfully.
+/// (It may be the case that the mgmt message itself indicates
+/// failure of a remote operation; modulo a parsing issue,
+/// handling such a message would still be considered successful.)
 pub enum HandleMgmtError {
     UnknownType(u8),
     BadStructure,
-    LinkStateError,
-    NonSuccess(zdp::ResponseCode),
 }
 
 impl From<HandleMgmtError> for counters::CounterType {
@@ -30,8 +32,6 @@ impl From<HandleMgmtError> for counters::CounterType {
         match err {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,
             HandleMgmtError::BadStructure => Self::BadStructure,
-            HandleMgmtError::LinkStateError => Self::OtherError,
-            HandleMgmtError::NonSuccess(_code) => Self::OtherError,
         }
     }
 }
@@ -379,20 +379,28 @@ pub async fn handle_grant_zpr_address_request(
     let mut status_code = zdp::ResponseCode::Other;
 
     match parse_grant_zpr_address_request(&mut pkt) {
-        Ok(actor_addresses) => {
-            info!(target: ZDP,
-                "Received Grant Zpr Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
-            if asm
-                .process_link_state_event(
+        Ok(Ok(actor_addresses)) => {
+            if actor_addresses.is_empty() {
+                error!(target: ZDP, "Received Grant Zpr Address Request with no addresses");
+                let _ = asm.process_link_state_event(
                     ingress_link_id,
-                    LinkEvent::ReceivedGrantZprAddressRequest(Some(actor_addresses)),
-                )
-                .is_ok()
-            {
-                status_code = zdp::ResponseCode::Success;
+                    LinkEvent::ReceivedGrantZprAddressRequest(None),
+                );
+            } else {
+                info!(target: ZDP,
+                    "Received Grant Zpr Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
+                if asm
+                    .process_link_state_event(
+                        ingress_link_id,
+                        LinkEvent::ReceivedGrantZprAddressRequest(Some(actor_addresses)),
+                    )
+                    .is_ok()
+                {
+                    status_code = zdp::ResponseCode::Success;
+                }
             }
         }
-        Err(HandleMgmtError::NonSuccess(c)) => {
+        Ok(Err(c)) => {
             info!(target: ZDP, "Grant request indicates non-success; code: {:?}", c);
             if asm
                 .process_link_state_event(
@@ -516,7 +524,9 @@ fn parse_acquire_zpr_address_request(
 
 /// The grant is a message from a node to an adapter (future: or to a joining node).
 /// In includes the address (or addresses) we have been assigned to use.
-fn parse_grant_zpr_address_request(pkt: &mut Packet) -> Result<Vec<IpAddress>, HandleMgmtError> {
+fn parse_grant_zpr_address_request(
+    pkt: &mut Packet,
+) -> Result<Result<Vec<IpAddress>, zdp::ResponseCode>, HandleMgmtError> {
     let Ok(hdr) = zdp::ZdpGrantZprAddressRequestHeader::read_from_buf(pkt) else {
         return Err(HandleMgmtError::BadStructure);
     };
@@ -527,11 +537,7 @@ fn parse_grant_zpr_address_request(pkt: &mut Packet) -> Result<Vec<IpAddress>, H
 
     if hdr.status_code != zdp::ResponseCode::Success {
         warn!(target: ZDP, "Received Grant Zpr Address Request with non-success status code {:?}", hdr.status_code);
-        return Err(HandleMgmtError::NonSuccess(hdr.status_code));
-    }
-    if hdr.addr_count == 0 {
-        warn!(target: ZDP, "Received Grant Zpr Address Request with no addresses");
-        return Err(HandleMgmtError::LinkStateError);
+        return Ok(Err(hdr.status_code));
     }
 
     let mut actor_addresses = Vec::new();
@@ -568,7 +574,7 @@ fn parse_grant_zpr_address_request(pkt: &mut Packet) -> Result<Vec<IpAddress>, H
         }
         actor_addresses.push(addr);
     }
-    Ok(actor_addresses)
+    Ok(Ok(actor_addresses))
 }
 
 /// handle a Bind Actor Address Request (RFC 6.5 § 6.3.11)
