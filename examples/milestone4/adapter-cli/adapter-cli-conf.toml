@@ -1,6 +1,7 @@
 [global]
 name = "cli"
 ca_file = "auth-ca.crt"
+# cli.zpr.org
 certificate_file = "adapter-cli-noise.crt"
 private_key_file = "adapter-cli-noise.key"
 zpr_addr = [ "fd5a:5052:1::20" ] 

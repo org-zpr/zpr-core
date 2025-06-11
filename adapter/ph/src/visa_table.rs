@@ -252,6 +252,7 @@ impl VisaTable {
     }
 
     /// Insert a dummy visa (temporary functionality until visa bootstrapping works)
+    /// TODO: This is only used in tests we should remove this and also remove the Options from the Visa struct.
     pub fn insert_id(&mut self, visa_id: VisaId, expiration: DateTime<Utc>) {
         debug!(target: VISA_MGMT,
             "Dummy visa inserted into VisaTable ID: {visa_id}, Expiration: {}",
