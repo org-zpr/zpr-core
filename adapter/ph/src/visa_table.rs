@@ -11,6 +11,8 @@ use chrono::{DateTime, Utc};
 use libnode::vsapi;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
+use std::net::{IpAddr, Ipv6Addr};
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::*;
 use zpr::{ForwardingEntry, L3Type, VisaId};
@@ -211,6 +213,44 @@ impl VisaTable {
         }
     }
 
+    /// Create table and populate with two visas to allow for 2-way comms with the
+    /// VS-API.
+    ///
+    /// TODO: Note that the first thing the visa service does after connecting is
+    /// hand over visas just like this.  So we should have logic somewhere to get
+    /// rid of these.  Maybe?  We might need them again if for example we loose
+    /// contact with visa service and the visas it gives us expire.
+    pub fn new_with_vs_visas(node_addr: &IpAddr) -> Self {
+        // Right away the node wants to reach out to the visa service. So we need visas to match:
+        //  1) NODEADDR/any-port -> VISA_SERVICE/VS_PORT
+        //  2) VISA_SERVICE/VS_PORT -> NODEADDR/any-port (TODO: not great, really needs to check this is non-syn)
+
+        // Node ZPR address must be IPv6, right?
+        let node_zpr_addr = match node_addr {
+            IpAddr::V4(addr) => addr.to_ipv6_mapped(),
+            IpAddr::V6(addr) => addr.clone(),
+        };
+
+        // TODO: This is crazy since VS is always IPv6
+        let vs_zpr_addr = match zpr::VISA_SERVICE_ADDR {
+            IpAddr::V4(addr) => addr.to_ipv6_mapped(),
+            IpAddr::V6(addr) => addr,
+        };
+
+        let node2vs = make_tcp_visa(1, &node_zpr_addr, 0, &vs_zpr_addr, zpr::VISA_SERVICE_PORT);
+        let vs2node = make_tcp_visa(2, &vs_zpr_addr, zpr::VISA_SERVICE_PORT, &node_zpr_addr, 0);
+
+        let mut visa_table = Self::new();
+        visa_table
+            .insert_visa(node2vs)
+            .expect("Failed to insert node->vs visa into table");
+        visa_table
+            .insert_visa(vs2node)
+            .expect("Failed to insert visa->node visa into table");
+
+        visa_table
+    }
+
     /// Insert a dummy visa (temporary functionality until visa bootstrapping works)
     pub fn insert_id(&mut self, visa_id: VisaId, expiration: DateTime<Utc>) {
         debug!(target: VISA_MGMT,
@@ -332,6 +372,44 @@ impl VisaTable {
     }
 }
 
+fn make_tcp_visa(
+    visa_id: i32,
+    source: &Ipv6Addr,
+    source_port: u16,
+    dest: &Ipv6Addr,
+    dest_port: u16,
+) -> vsapi::Visa {
+    let pepargs = vsapi::PEPArgsTCPUDP {
+        source_contact_addr: Some(source.octets().to_vec()),
+        dest_contact_addr: Some(dest.octets().to_vec()),
+        source_port: Some(source_port as i32),
+        dest_port: Some(dest_port as i32),
+        server: Some(true),
+        icmp_allowed: None,
+    };
+    vsapi::Visa {
+        issuer_id: Some(visa_id),
+        configuration: Some(100),
+        expires: Some(
+            (SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+                + 10000) as i64,
+        ),
+        source: Some(source.octets().to_vec()),
+        dest: Some(dest.octets().to_vec()),
+        source_contact: Some(source.octets().to_vec()),
+        dest_contact: Some(dest.octets().to_vec()),
+        dock_pep: Some(vsapi::PEPIndex::TCP),
+        tcpudp_pep_args: Some(pepargs),
+        icmp_pep_args: None,
+        session_key: None,
+        cons: None,
+        sig: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,7 +422,6 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
     use std::num::NonZero;
     use std::sync::Arc;
-    use std::time::UNIX_EPOCH;
 
     #[tokio::test]
     async fn test_timeouts() {
@@ -452,9 +529,6 @@ mod tests {
         assert_eq!(0, peer_state.pft.len());
     }
 
-    use std::net::Ipv6Addr;
-    use std::time::SystemTime;
-
     #[tokio::test]
     async fn test_match_traffic() {
         let mut builder = TestAssemblyBuilder::new();
@@ -488,43 +562,5 @@ mod tests {
         let matched = visa_table.match_traffic(&traffic);
         assert!(matched.is_some());
         assert_eq!(matched.unwrap(), vec![1000]);
-    }
-
-    fn make_tcp_visa(
-        visa_id: i32,
-        source: &Ipv6Addr,
-        source_port: u16,
-        dest: &Ipv6Addr,
-        dest_port: u16,
-    ) -> vsapi::Visa {
-        let pepargs = vsapi::PEPArgsTCPUDP {
-            source_contact_addr: Some(source.octets().to_vec()),
-            dest_contact_addr: Some(dest.octets().to_vec()),
-            source_port: Some(source_port as i32),
-            dest_port: Some(dest_port as i32),
-            server: Some(true),
-            icmp_allowed: None,
-        };
-        vsapi::Visa {
-            issuer_id: Some(visa_id),
-            configuration: Some(100),
-            expires: Some(
-                (SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis()
-                    + 10000) as i64,
-            ),
-            source: Some(source.octets().to_vec()),
-            dest: Some(dest.octets().to_vec()),
-            source_contact: Some(source.octets().to_vec()),
-            dest_contact: Some(dest.octets().to_vec()),
-            dock_pep: Some(vsapi::PEPIndex::TCP),
-            tcpudp_pep_args: Some(pepargs),
-            icmp_pep_args: None,
-            session_key: None,
-            cons: None,
-            sig: None,
-        }
     }
 }

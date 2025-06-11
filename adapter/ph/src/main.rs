@@ -5,7 +5,7 @@ use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
 use std::io::ErrorKind;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::process;
 use std::process::ExitCode;
@@ -286,12 +286,16 @@ fn main() -> ExitCode {
         substrate_sockets.push(socket.into());
     }
 
+    let node_zpr_addr: IpAddr;
     if ph_mode == PhMode::Node {
         info!(
             target: STARTUP,
             "dock listening on {}",
             substrate_sockets[0].local_addr().unwrap()
         );
+        node_zpr_addr = config.zpr_addr[0].clone();
+    } else {
+        node_zpr_addr = "::0".parse().unwrap(); // only node uses this.
     }
 
     let (mgmt_substrate_inq, mgmt_substrate_outq) =
@@ -356,7 +360,9 @@ fn main() -> ExitCode {
         mgmt_substrate_egress: MgmtSubstrateEgress::new(mgmt_substrate_inq),
         actor_output_requeue: ActorOutputRequeue::new(actor_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
-        visa_table: tokio::sync::RwLock::new(visa_table::VisaTable::new()),
+        visa_table: tokio::sync::RwLock::new(visa_table::VisaTable::new_with_vs_visas(
+            &node_zpr_addr,
+        )),
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
         flow_control: FlowControl::new(),
