@@ -12,6 +12,10 @@ pub mod ethertype {
 
 pub const IPV6_ADDRESS_SIZE: usize = 16;
 
+pub const IPADDRESS_ZERO: IpAddress = IpAddress {
+    v6: [0; IPV6_ADDRESS_SIZE],
+};
+
 /// "Flat" (non-enum) representation of an IPv4 or IPv6 address, used
 /// internally to represent ZPR addresses.
 #[derive(
