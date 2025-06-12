@@ -12,10 +12,6 @@ pub mod ethertype {
 
 pub const IPV6_ADDRESS_SIZE: usize = 16;
 
-pub const IPADDRESS_ZERO: IpAddress = IpAddress {
-    v6: [0; IPV6_ADDRESS_SIZE],
-};
-
 /// "Flat" (non-enum) representation of an IPv4 or IPv6 address, used
 /// internally to represent ZPR addresses.
 #[derive(
@@ -27,6 +23,11 @@ pub struct IpAddress {
 }
 
 impl IpAddress {
+    /// All-zeros address
+    pub const UNSPECIFIED: Self = IpAddress {
+        v6: [0; IPV6_ADDRESS_SIZE],
+    };
+
     pub const fn new_from_v4(v4_address: [u8; 4]) -> Self {
         // Uses standard v4 to v6 conversion
         Self {

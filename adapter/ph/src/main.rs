@@ -5,7 +5,7 @@ use km_cert_exchange::KmCertExchange;
 use std::default::Default;
 use std::fs;
 use std::io::ErrorKind;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::Path;
 use std::process;
 use std::process::ExitCode;
@@ -295,7 +295,7 @@ fn main() -> ExitCode {
         );
         node_zpr_addr = config.zpr_addr[0].clone();
     } else {
-        node_zpr_addr = "::0".parse().unwrap(); // only node uses this.
+        node_zpr_addr = Ipv6Addr::UNSPECIFIED.into(); // only node uses this.
     }
 
     let (mgmt_substrate_inq, mgmt_substrate_outq) =

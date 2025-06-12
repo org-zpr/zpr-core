@@ -4,7 +4,7 @@
 
 use crate::defs::FiveTuple;
 use crate::logging::targets::VISA_MGMT;
-use crate::net_defs::{ip_number, IpAddress, IPADDRESS_ZERO};
+use crate::net_defs::{ip_number, IpAddress};
 use crate::peer_table;
 
 use chrono::{DateTime, Utc};
@@ -93,17 +93,17 @@ impl Visa {
         let src_addr = match &visa.source_contact {
             Some(src) => match IpAddress::try_from(src.clone()) {
                 Ok(addr) => addr,
-                Err(_) => IPADDRESS_ZERO,
+                Err(_) => IpAddress::UNSPECIFIED,
             },
-            None => IPADDRESS_ZERO,
+            None => IpAddress::UNSPECIFIED,
         };
 
         let dst_addr = match &visa.dest_contact {
             Some(dst) => match IpAddress::try_from(dst.clone()) {
                 Ok(addr) => addr,
-                Err(_) => IPADDRESS_ZERO,
+                Err(_) => IpAddress::UNSPECIFIED,
             },
-            None => IPADDRESS_ZERO,
+            None => IpAddress::UNSPECIFIED,
         };
 
         let l3_protocol = if src_addr.is_v4() {
@@ -174,12 +174,12 @@ impl Visa {
         }
 
         let visa_tuple = self.ftuple.as_ref().unwrap();
-        if visa_tuple.src_address != IPADDRESS_ZERO
+        if visa_tuple.src_address != IpAddress::UNSPECIFIED
             && visa_tuple.src_address != five_tuple.src_address
         {
             return false;
         }
-        if visa_tuple.dst_address != IPADDRESS_ZERO
+        if visa_tuple.dst_address != IpAddress::UNSPECIFIED
             && visa_tuple.dst_address != five_tuple.dst_address
         {
             return false;
