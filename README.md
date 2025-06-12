@@ -1,15 +1,16 @@
 # zpr-core
 Core ZPR components
 
-We are currently working towards Milestone 4.  
+We are currently working towards Milestone 4.
 - See the [current iteration and backlog](https://github.com/orgs/org-zpr/projects/1/views/3).
 - See the [roadmap](https://github.com/orgs/org-zpr/projects/3/views/6).
 
 
 ## Build Notes
 
-The thrift generated code comes from its own repository, you need to do a little
-configuration in order for the build system to download it:
+Tools and libraries are pulled in from multiple repositories.
+You need to do a little configuration in order for the build system
+to access them.
 
 Developers will have to either run `git config --global url.git@github.com:.insteadOf https://github.com/`
 (which ends up in ~/.gitconfig), (or configure a PAT and use git askpass like
@@ -29,10 +30,11 @@ that connect in and access the services.
 2. Create a "zpr" RSA keypair (used for signing policy and more)
 3. Create Noise keys and signed certificates for all adapters and the
    node.
-4. Create a configuration file for your node.
-5. Create a configuration file for your visa service and its adapter.
-6. Write a policy and compile it.
-7. Start up the node, the visa service and the visa service adapter.
+4. Create bootstrap keys for client adapters.
+5. Create a configuration file for your node.
+6. Create a configuration file for your visa service and its adapter.
+7. Write a policy and compile it.
+8. Start up the node, the visa service and the visa service adapter.
 
 ### Create a certificate authority keypair
 
@@ -67,8 +69,8 @@ openssl genrsa -out zpr-rsa-key.pem 2048
 openssl req -new -key zpr-rsa-key.pem -out zpr.csr
 ```
 
-Then use the authority created earlier to generate a certificate. Note that this 
-certificate will be used for signing policies and for using TLS on the admin 
+Then use the authority created earlier to generate a certificate. Note that this
+certificate will be used for signing policies and for using TLS on the admin
 interface so you need to add some extensions when you generate the certificate.
 
 Create a file named `sign.ext` and with these contents (replace the '*.zpr.org' with
@@ -105,8 +107,25 @@ Once you have private key (PEM) files, you need to create certificates as follow
 ./zpr-pki gensignedcert authority/auth-ca.crt authority/auth-ca.key \
   /CN=node.zpr.org 365 < node-noise-pub.pem >node-noise.crt
 ```
-Do that for all the NOISE keys you have. Note that the visa servcie NOISE certificate 
+Do that for all the NOISE keys you have. Note that the visa servcie NOISE certificate
 **must** use `vs.zpr` for its CN.
+
+
+### Create RSA keys for any clinet adapters
+
+Since we will not be setting up an authentication service, you must embed public keys for
+all client adapters (not nodes) in your policy.  In this tutorial the only explicit
+client adapter is the one for the visa service, to create that do this:
+
+```bash
+# Create the key
+openssl genrsa -out vs-zpr-rsa-key.pem 2048
+
+# Extrat the public key
+openssl rsa -pubout vs-zpr-rsa-key.pem -out vs-zpr-pubkey.pem
+```
+
+Repeat that operation for any other client adapters you have.
 
 
 ### Create a configuration file for your node.
@@ -139,13 +158,17 @@ Place the visa service configuration in a file named, `vs-config.yaml`.
 ```yaml
 adapter_cert: adapter-vs-noise.crt
 root_ca: auth-ca.crt
-disable_connect_validation: true
 vs_cert: zpr-rsa.crt
 vs_key: zpr-rsa-key.pem
 ```
 
 The adapter for the visa service needs to know the substrate address of the node
 which above we set to `129.6.7.1`.
+
+Due to [bug #837](https://github.com/org-zpr/zpr-core/issues/837) you must
+specify the local address of all adapters (and nodes).  So for this example
+we assume that the visa service adapter is a substrate address
+`129.6.7.2`.
 
 The visa service adapter configuration should go in `adapter-vs-conf.toml`:
 
@@ -156,12 +179,13 @@ ca_file = "auth-ca.crt"
 certificate_file = "adapter-vs-noise.crt"
 private_key_file = "adapter-vs-noise.key"
 zpr_addr = [ "fd5a:5052::1" ] # visa service well known addr
-self_addr = "0.0.0.0:5000"
+self_addr = "129.6.7.2:5000"
 tun_if = "tun9"
 
 [adapter]
 node_addr = "129.6.7.1:5000"
 node_public_key_file = "node-noise-pub.pem"
+bootstrap_key = "vs-zpr-rsa-key.pem"
 ```
 
 Note that the key and certificate files referenced in the configuration files
@@ -169,19 +193,20 @@ be present in the same directory as the configuration file.
 
 ### Write a policy and compile it.
 
-Here is a simple policy to let any adapter with a signed Noise key access 
-some serivce called a WebService.  
+Here is a simple policy to let any adapter with a signed Noise key access
+some serivce called a WebService.
 
 We assume:
 - WebService is connected using an adpater with `CN=web.zpr.org`.
+- WebService has a bootstrap public RSA key in `web-zpr-pubkey.pem`.
 - WebService is accessed using HTTP port 80.
 
 Create a file called `zpr-full-access.zpl` with these contents:
 
 ```
-Define adapter as a device with cn.
-Define WebService as a service with cn:'web.zpr.org'.
-Allow cn: adapter to access WebService.
+Define adapter as a device with 'zpr.adapter.cn'.
+Define WebService as a service with device.zpr.adapter.cn:'web.zpr.org'.
+Allow zpr.adapter.cn: adapters to access WebService.
 ```
 
 Then write a configuration file.
@@ -197,7 +222,7 @@ order = ["hosts", "dns"]
 
 [nodes."node"]
 key = "<node-public-noise-key-in-base64-here>"
-provider = [ ["zpr.adapter.cn", "node.zpr.org"]]
+provider = [ ["device.zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "node0.zpr"
 interfaces = ["in1"]
 in1.netaddr = "node0.overlay:5000"
@@ -207,10 +232,14 @@ cert_path = "ca-cert.pem"
 
 [visa_service]
 dock_node = "node"
-admin_attrs = [ [ "zpr.adapter.cn", "admin.zpr.org" ] ]
+admin_attrs = [ [ "device.zpr.adapter.cn", "admin.zpr.org" ] ]
+
+[bootstrap]
+"vs.zpr" = "vs-zpr-pubkey.pem"
+"web.zpr.org" = "web-zpr-pubkey.pem"
 
 [protocols.http]
-protocol = "iana.TCP"
+l4protocol = "iana.TCP"
 port = 80
 
 [services.WebService]
@@ -241,6 +270,14 @@ On host 2, in another termainal start the adapter:
 
 
 Now you can attach additional adapters and start up the "WebService".
+
+
+## Updates
+
++ June 12, 2025
+  + New **bootstrap** requirement and associated RSA key creation.
+  + Domain (eg, `device`, `user`, or `service`) now required for attribute keys.
+  + New `l4protocol` required in the configuration.
 
 
 ## License
