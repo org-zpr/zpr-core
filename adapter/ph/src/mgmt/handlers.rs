@@ -581,48 +581,43 @@ pub async fn handle_bind_actor_address_request(
         return Err((HandleMgmtError::BadStructure, pkt));
     };
 
-    // TODO: disallow bind requests between nodes
-
-    debug!(target: ZDP, "handlers.handle_bind_actor_address_request");
-
-    // read addresses (always present)
-    let src_address;
-    let dst_address;
-    match hdr.ip_version {
+    // The packet body now immediately follows the header
+    // Extract source/dest addresses and protocol from the IP header in the packet body.
+    // Does not advance the packet buffer position.
+    let body = pkt.body();
+    let (src_address, dst_address, ip_protocol) = match hdr.ip_version {
         zpr::L3Type::Ipv4 => {
-            let Ok(src_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
+            if body.len() < 20 {
                 return Err((HandleMgmtError::BadStructure, pkt));
-            };
-            src_address = src_addr.into();
-
-            let Ok(dst_addr) = <[u8; 4]>::read_from_buf(&mut pkt) else {
-                return Err((HandleMgmtError::BadStructure, pkt));
-            };
-            dst_address = dst_addr.into();
+            }
+            // IPv4 header: src @ 12..16, dst @ 16..20, protocol @ 9
+            let src_address = IpAddress::new_from_v4([body[12], body[13], body[14], body[15]]);
+            let dst_address = IpAddress::new_from_v4([body[16], body[17], body[18], body[19]]);
+            let ip_protocol = body[9];
+            (src_address, dst_address, ip_protocol)
         }
-
         zpr::L3Type::Ipv6 => {
-            let Ok(src_addr) = <[u8; 16]>::read_from_buf(&mut pkt) else {
+            if body.len() < 40 {
                 return Err((HandleMgmtError::BadStructure, pkt));
+            }
+            // IPv6 header: src @ 8..24, dst @ 24..40, next_header @ 6
+            let src_address = IpAddress {
+                v6: body[8..24].try_into().unwrap(),
             };
-            src_address = src_addr.into();
-
-            let Ok(dst_addr) = <[u8; 16]>::read_from_buf(&mut pkt) else {
-                return Err((HandleMgmtError::BadStructure, pkt));
+            let dst_address = IpAddress {
+                v6: body[24..40].try_into().unwrap(),
             };
-            dst_address = dst_addr.into();
+            let ip_protocol = body[6];
+            (src_address, dst_address, ip_protocol)
         }
-
         _ => {
             return Err((HandleMgmtError::BadStructure, pkt));
         }
     };
 
-    // read IP Protocol (always present)
-    if pkt.remaining() < 1 {
-        return Err((HandleMgmtError::BadStructure, pkt));
-    }
-    let ip_protocol = pkt.get_u8();
+    // TODO: disallow bind requests between nodes
+
+    debug!(target: ZDP, "handlers.handle_bind_actor_address_request");
 
     // Next in we have the entire packet that is triggering this bind request (well, up to
     // what will fit in our buffer).
