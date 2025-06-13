@@ -617,8 +617,6 @@ pub async fn handle_bind_actor_address_request(
 
     // TODO: disallow bind requests between nodes
 
-    debug!(target: ZDP, "handlers.handle_bind_actor_address_request");
-
     // Next in we have the entire packet that is triggering this bind request (well, up to
     // what will fit in our buffer).
     // So it will be a IPv6 or IPv4 header, and then the l4 header, etc.
@@ -871,12 +869,6 @@ pub async fn handle_bind_actor_address_request(
             }
         }
     }
-
-    debug!(
-        target: ZDP,
-        "Link {}: (handlers) *** sending BindActorAddressResponse ***",
-        ingress_link_id.get(),
-    );
 
     // respond to requestor
     super::core::send_per_flow_mgmt_response(
