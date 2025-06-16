@@ -12,10 +12,17 @@ use libnode::vsapi;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::net::{IpAddr, Ipv6Addr};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::*;
 use zpr::{ForwardingEntry, L3Type, VisaId};
+
+// TODO: Figure out correct value for this visa expiration
+const VS_VISAS_DURATION: Duration = Duration::from_secs(60 * 60 * 24); // 24 hours
+
+// TODO: This is a placeholder.  We need this in the visa struct but at the time when
+// we are creating these we don't have access to a valid configuration ID.
+const VS_VISAS_CONFIG_ID: i64 = 100;
 
 #[derive(Debug, Error)]
 pub enum VisaTableError {
@@ -184,6 +191,7 @@ impl Visa {
         {
             return false;
         }
+        // TODO: Explicitly set this (l3_type) in visa and also allow it to be set to 0?
         if visa_tuple.l3_type != five_tuple.l3_type {
             return false;
         }
@@ -237,8 +245,27 @@ impl VisaTable {
             IpAddr::V6(addr) => addr,
         };
 
-        let node2vs = make_tcp_visa(1, &node_zpr_addr, 0, &vs_zpr_addr, zpr::VISA_SERVICE_PORT);
-        let vs2node = make_tcp_visa(2, &vs_zpr_addr, zpr::VISA_SERVICE_PORT, &node_zpr_addr, 0);
+        let expires_ms = (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() + VS_VISAS_DURATION)
+            .as_millis() as i64;
+
+        let node2vs = make_tcp_visa(
+            1,
+            &node_zpr_addr,
+            0,
+            &vs_zpr_addr,
+            zpr::VISA_SERVICE_PORT,
+            expires_ms,
+            VS_VISAS_CONFIG_ID,
+        );
+        let vs2node = make_tcp_visa(
+            2,
+            &vs_zpr_addr,
+            zpr::VISA_SERVICE_PORT,
+            &node_zpr_addr,
+            0,
+            expires_ms,
+            VS_VISAS_CONFIG_ID,
+        );
 
         let mut visa_table = Self::new();
         visa_table
@@ -294,6 +321,8 @@ impl VisaTable {
     }
 
     /// Match traffic to a visa. Returns all matching visa IDs.
+    ///
+    /// TODO: This is linear search through all our visas -- we should create an index.
     pub fn match_traffic(&self, five_tuple: &FiveTuple) -> Option<Vec<VisaId>> {
         let mut matching_visas = Vec::new();
         for (visa_id, visa) in self.table.iter() {
@@ -379,6 +408,8 @@ fn make_tcp_visa(
     source_port: u16,
     dest: &Ipv6Addr,
     dest_port: u16,
+    configuration: i64,
+    expiration_ms: i64,
 ) -> vsapi::Visa {
     let pepargs = vsapi::PEPArgsTCPUDP {
         source_contact_addr: Some(source.octets().to_vec()),
@@ -390,14 +421,8 @@ fn make_tcp_visa(
     };
     vsapi::Visa {
         issuer_id: Some(visa_id),
-        configuration: Some(100),
-        expires: Some(
-            (SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
-                + 10000) as i64,
-        ),
+        configuration: Some(configuration),
+        expires: Some(expiration_ms),
         source: Some(source.octets().to_vec()),
         dest: Some(dest.octets().to_vec()),
         source_contact: Some(source.octets().to_vec()),
@@ -542,8 +567,12 @@ mod tests {
         let client2_addr: Ipv6Addr = "fd5a:5052:8::2".parse().unwrap();
         let service_addr: Ipv6Addr = "fd5a:5052:8::10".parse().unwrap();
 
-        let visa1 = make_tcp_visa(1000, &client1_addr, 0, &service_addr, 80);
-        let visa2 = make_tcp_visa(1001, &client2_addr, 0, &service_addr, 80);
+        let expires_ms = (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+            + Duration::from_millis(10000))
+        .as_millis() as i64;
+
+        let visa1 = make_tcp_visa(1000, &client1_addr, 0, &service_addr, 80, expires_ms, 100);
+        let visa2 = make_tcp_visa(1001, &client2_addr, 0, &service_addr, 80, expires_ms, 100);
 
         visa_table.insert_id(12345, DateTime::<Utc>::MAX_UTC);
 

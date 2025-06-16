@@ -584,6 +584,7 @@ pub async fn handle_bind_actor_address_request(
     // The packet body now immediately follows the header
     // Extract source/dest addresses and protocol from the IP header in the packet body.
     // Does not advance the packet buffer position.
+    // TODO: Could our own classifier.rs do this for us?
     let body = pkt.body();
     let (src_address, dst_address, ip_protocol) = match hdr.ip_version {
         zpr::L3Type::Ipv4 => {
@@ -615,7 +616,7 @@ pub async fn handle_bind_actor_address_request(
         }
     };
 
-    // TODO: disallow bind requests between nodes
+    // TODO: How do bind requests work between nodes?
 
     // Next in we have the entire packet that is triggering this bind request (well, up to
     // what will fit in our buffer).
