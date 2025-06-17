@@ -111,7 +111,7 @@ Do that for all the NOISE keys you have. Note that the visa servcie NOISE certif
 **must** use `vs.zpr` for its CN.
 
 
-### Create RSA keys for any clinet adapters
+### Create RSA keys for any client aidapters
 
 Since we will not be setting up an authentication service, you must embed public keys for
 all client adapters (not nodes) in your policy.  In this tutorial the only explicit
@@ -249,7 +249,7 @@ protocol = "http"
 To compile, use the compiler:
 
 ```bash
-zpc -k zpr-rsa-key.pem zpr-full-access.zpl
+zplc -k zpr-rsa-key.pem zpr-full-access.zpl
 
 # This will create the binary policy file, "zpr-full-access.bin"
 ```
