@@ -26,7 +26,7 @@ use zpr::LinkId;
 use zpr::ZPI_ENCRYPTED_HEADER_FLAG;
 
 // "fd5a:5052:1::10" TODO: needs to come from dock (which gets it from VS)
-const HARD_CODED_BAS_ADDR: Ipv6Addr = Ipv6Addr::new(0xfd5a, 0x5052, 0x1, 0, 0, 0, 0, 0x10);
+pub const HARD_CODED_BAS_ADDR: Ipv6Addr = Ipv6Addr::new(0xfd5a, 0x5052, 0x1, 0, 0, 0, 0, 0x10);
 
 // TODO: Not sure how we get these out or if we need them.
 const HARD_CODED_BAS_TLS_CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
@@ -178,7 +178,7 @@ pub enum LinkEvent {
     Start,
     KeyingDone,
     ReceivedHelloRequest(IpAddress), // Actors ZPR address - TODO: implement AAAs
-    ReceivedHelloResponse(ResponseCode),
+    ReceivedHelloResponse(ResponseCode, Option<Vec<SocketAddr>>), // (response code, ASA addresses)
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
 
@@ -237,6 +237,7 @@ pub struct LinkData {
     // For now, keep-alives are attempted every 3 seconds
     // Assuming no loss, 100 samples will store 5 minutes of latency data
     latency_data: SampleRing<Duration, 100>,
+    asa_addresses: Option<Vec<SocketAddr>>, // Addresses of ASA servers told to us by our peer, if any
 }
 
 impl LinkData {
@@ -245,6 +246,7 @@ impl LinkData {
             echo_success: 0,
             echo_timeout: 0,
             latency_data: SampleRing::new(Duration::ZERO),
+            asa_addresses: None,
         }
     }
 }
@@ -436,7 +438,9 @@ impl LinkStateWrapper {
             LinkEvent::ReceivedHelloRequest(peer_zpr_addr) => {
                 self.process_hello_request(asm, peer_zpr_addr)
             }
-            LinkEvent::ReceivedHelloResponse(code) => self.process_hello_response(asm, code),
+            LinkEvent::ReceivedHelloResponse(code, maybe_asa_addrs) => {
+                self.process_hello_response(asm, code, maybe_asa_addrs)
+            }
 
             LinkEvent::ReceivedAcquireZprAddressRequest(addrs, blob) => {
                 self.process_acquire_zpr_address_request(asm, addrs, blob)
@@ -664,6 +668,7 @@ impl LinkStateWrapper {
         &self,
         asm: &Arc<Assembly>,
         code: ResponseCode,
+        maybe_asa_addrs: Option<Vec<SocketAddr>>,
     ) -> Result<(), LinkStateError> {
         if code == ResponseCode::Other {
             // Received an error response.
@@ -675,6 +680,9 @@ impl LinkStateWrapper {
 
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::Helloing) => {
+                let mut link_data = self.locked_data.lock().unwrap();
+                link_data.asa_addresses = maybe_asa_addrs.clone();
+                drop(link_data);
                 locked_fsm.set_state(LinkState::WaitForInitAuth);
                 debug!(
                     target: LINK_STATE,
@@ -684,6 +692,9 @@ impl LinkStateWrapper {
                 Ok(())
             }
             (LinkType::NodeToNode, LinkState::Helloing) => {
+                let mut link_data = self.locked_data.lock().unwrap();
+                link_data.asa_addresses = maybe_asa_addrs.clone();
+                drop(link_data);
                 locked_fsm.set_state(LinkState::Active);
                 debug!(target: LINK_STATE, "Link {link_id} finished helloing.  Becoming active");
                 Ok(())
@@ -986,6 +997,9 @@ impl LinkStateWrapper {
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
 
+        // Grab a copy of our ASA addresses.
+        let asa_addrs = self.locked_data.lock().unwrap().asa_addresses.clone();
+
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             // NOTE: This is not exactly right, in general we can get an InitAuth at any time, though we
@@ -1025,11 +1039,10 @@ impl LinkStateWrapper {
                     locked_fsm.set_state(LinkState::RegisterAA);
                     info!(target: LINK_STATE, "Link {link_id} received init auth, time to talk to authentication service");
 
-                    // TODO: Presumably we would get the ZPR address of the auth service
-                    //       from our node somehow. What about the cert?
-                    if asm.rsauth.is_some() {
+                    // TODO: We get the ZPR address of the auth services from our node. What about the cert?
+                    if asm.rsauth.is_some() && asa_addrs.is_some() {
                         drop(locked_fsm);
-                        self.do_https_authenticate(asm);
+                        self.do_https_authenticate(asm, asa_addrs.unwrap());
                     } else {
                         error!(target: LINK_STATE, "Link {link_id} no auth service configured");
                         locked_fsm.set_state(LinkState::Error);
@@ -1144,13 +1157,22 @@ impl LinkStateWrapper {
     /// Run the HTTPS authentication process in a tokio task.
     /// - [LinkEvent::AuthenticationSuccess] on success
     /// - [LinkEvent::AuthenticationFailure] on failure
-    fn do_https_authenticate(&self, asm: &Arc<Assembly>) {
+    ///
+    /// TODO: Figure out what it means if there are multiple ASA addresses.
+    /// For now this uses the first address in the list.
+    fn do_https_authenticate(&self, asm: &Arc<Assembly>, asa_addrs: Vec<SocketAddr>) {
         let link_id = self.id;
 
-        let service_addr = SocketAddr::new(
-            IpAddr::V6(HARD_CODED_BAS_ADDR),
-            auth::DEFAULT_ZPR_OAUTH_RSA_PORT,
-        );
+        if asa_addrs.is_empty() {
+            error!(target: LINK_STATE, "Link {link_id}: no ASA addresses provided for authentication");
+            if let Err(e) = asm.process_link_state_event(link_id, LinkEvent::AuthenticationFailure)
+            {
+                error!(target: LINK_STATE, "Link {link_id}: event handling error {e}");
+            }
+            return;
+        }
+        let service_addr = asa_addrs[0];
+
         let tls_cert = X509::from_pem(HARD_CODED_BAS_TLS_CERT_PEM.as_bytes()).unwrap();
         let task_asm = asm.clone();
 

@@ -37,6 +37,8 @@ pub enum PhMode {
     Adapter,
 }
 
+pub const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
 /// Interface to full assembly of all stages.
 ///
 /// This is the "public interface" that all stages of the system use to talk

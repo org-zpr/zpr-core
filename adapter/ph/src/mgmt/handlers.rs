@@ -1,17 +1,19 @@
 //! Handlers for management requests.
 
 use crate::adapter_tables;
-use crate::assembly::{self, Assembly, PhMode};
+use crate::assembly::{self, Assembly, PhMode, VERSION};
 use crate::auth;
 use crate::config;
 use crate::counters;
 use crate::defs::*;
-use crate::link_state::LinkEvent;
+use crate::link_state::{LinkEvent, HARD_CODED_BAS_ADDR};
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::{ip_number, IpAddress};
 use crate::packet::Packet;
+use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
 use bytes::{Buf, BufMut};
+use std::net::{IpAddr, SocketAddr};
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
@@ -300,6 +302,17 @@ pub async fn handle_hello_request(
         Ok(()) => zdp::ResponseCode::Success,
     };
 
+    let policy_id: i64 = 0; // TODO: We get policy ID from visa service. Record that somewhere, access it here.
+    TlvEncoding::new_policy_id(policy_id).put(&mut rsp_pkt);
+    TlvEncoding::new_version(VERSION).put(&mut rsp_pkt);
+
+    // TODO: This info needs to come from the visa service
+    let service_addr = SocketAddr::new(
+        IpAddr::V6(HARD_CODED_BAS_ADDR),
+        auth::DEFAULT_ZPR_OAUTH_RSA_PORT,
+    );
+    TlvEncoding::new_asa(service_addr).put(&mut rsp_pkt);
+
     super::core::send_non_flow_mgmt(
         asm,
         ingress_link_id,
@@ -319,8 +332,51 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
     let link_id = pkt.metadata().ingress_link_id;
     let status = hdr.status;
     debug!(target: ZDP, "Link {link_id}: received HelloResponse, status: {status:?}");
+
+    // Following status are the TLVs.
+    // A tlv has a type (number) and a value.
+    let tlv_data =
+        tlv::parse_from_buf(&mut pkt).map_err(|_| (HandleMgmtError::BadStructure, pkt))?;
+    if let Some(ver) = tlv_data.get(&tlv::DataType::VERSION) {
+        info!(target: ZDP, "Link {link_id}: HelloResponse - peer version is : {}", ver[0]);
+    } else {
+        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include version");
+    }
+    if let Some(policy_id) = tlv_data.get(&tlv::DataType::POLICY_ID) {
+        info!(target: ZDP, "Link {link_id}: HelloResponse - peer policy ID is : {}", policy_id[0]);
+    } else {
+        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include policy ID");
+    }
+
+    let mut asa_addresses = Vec::<SocketAddr>::new();
+
+    if let Some(asa_entries) = tlv_data.get(&tlv::DataType::ASA) {
+        for asa_entry in asa_entries {
+            match asa_entry {
+                tlv::TlvValue::SocketAddr(sa) => {
+                    info!(target: ZDP, "Link {link_id}: HelloResponse includes ASA address:{sa}");
+                    asa_addresses.push(sa.clone());
+                }
+                _ => {
+                    warn!(target: ZDP, "Link {link_id}: HelloResponse ASA value type is wrong: {asa_entry:?}");
+                }
+            }
+        }
+    } else {
+        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include ASA TLV");
+    }
+
+    let maybe_asa_addrs = if asa_addresses.is_empty() {
+        None
+    } else {
+        Some(asa_addresses)
+    };
+
     let _ = asm
-        .process_link_state_event(link_id, LinkEvent::ReceivedHelloResponse(status))
+        .process_link_state_event(
+            link_id,
+            LinkEvent::ReceivedHelloResponse(status, maybe_asa_addrs),
+        )
         .map_err(|_| ());
 
     Ok(())

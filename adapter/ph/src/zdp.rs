@@ -3,7 +3,6 @@
 use open_enum::open_enum;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
-
 use zpr;
 
 #[open_enum]
@@ -133,10 +132,11 @@ pub struct ZdpHelloRequestHeader {
 #[repr(packed)]
 pub struct ZdpHelloResponseHeader {
     pub status: ResponseCode,
-    pub policy_id_len: u8,
-    // Policy ID
-    // Version info len
-    // Version info
+    // Followed by any nubmer of response TLVs.  The TLV
+    // format is:
+    //   - TLV type (u8)
+    //   - TLV length (u8)
+    //   - TLV value (variable length)
 }
 
 /// Bitflags for the [ZdpInitAuthenticationRequestHeader] flags field.
