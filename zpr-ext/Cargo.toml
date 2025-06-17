@@ -2,6 +2,7 @@
 name = "zpr-ext"
 version = "0.5.2"
 edition = "2021"
+license = "Apache-2.0"
 
 [dependencies]
 bytes = { version = "1.7.1", optional = true }
