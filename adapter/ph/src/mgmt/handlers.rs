@@ -89,8 +89,7 @@ pub async fn handle_echo_request(
         ingress_link_id,
         zdp::ZdpPacketType::EchoResponse,
         rsp_pkt,
-    )
-    .await;
+    );
 
     Ok(())
 }
@@ -162,8 +161,7 @@ pub async fn handle_init_authentication_request(
         ingress_link_id,
         zdp::ZdpPacketType::InitAuthenticationResponse,
         rsp_pkt,
-    )
-    .await;
+    );
 
     let _ = asm.process_link_state_event(
         ingress_link_id,
@@ -218,8 +216,7 @@ pub async fn handle_terminate_request(
         ingress_link_id,
         zdp::ZdpPacketType::TerminateLinkResponse,
         rsp_pkt,
-    )
-    .await;
+    );
 
     if response_code == zdp::ResponseCode::Success {
         let _ = asm.process_link_state_event(ingress_link_id, LinkEvent::SentTerminate);
@@ -319,8 +316,7 @@ pub async fn handle_hello_request(
         ingress_link_id,
         zdp::ZdpPacketType::HelloResponse,
         rsp_pkt,
-    )
-    .await;
+    );
 
     Ok(())
 }
@@ -383,8 +379,7 @@ pub async fn handle_acquire_zpr_address_request(
         ingress_link_id,
         zdp::ZdpPacketType::AcquireZprAddressResponse,
         rsp_pkt,
-    )
-    .await;
+    );
 
     // Now we can do our async prcessing of the acquire which will involve talking to
     // the visa service.
@@ -495,8 +490,7 @@ pub async fn handle_grant_zpr_address_request(
         ingress_link_id,
         zdp::ZdpPacketType::GrantZprAddressResponse,
         rsp_pkt,
-    )
-    .await;
+    );
     Ok(())
 }
 
@@ -965,8 +959,7 @@ pub async fn handle_bind_actor_address_request(
         ingress_tether_id,
         seq_num,
         rsp_pkt,
-    )
-    .await;
+    );
 
     Ok(())
 }

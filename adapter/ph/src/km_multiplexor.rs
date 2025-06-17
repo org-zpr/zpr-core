@@ -184,8 +184,7 @@ pub async fn launch_message_worker(
     mut msg_queue: mpsc::Receiver<KmLinkMsg<Bytes>>,
 ) {
     while let Some(km_buf_msg) = msg_queue.recv().await {
-        requests::send_key_management(&*asm, km_buf_msg.link_id, zpr::KM_ID_NOISE, &km_buf_msg.msg)
-            .await;
+        requests::send_key_management(&*asm, km_buf_msg.link_id, zpr::KM_ID_NOISE, &km_buf_msg.msg);
     }
 }
 

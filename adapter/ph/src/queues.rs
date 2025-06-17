@@ -86,6 +86,7 @@ impl MgmtSubstrateEgress {
     /// Blocks until the packet is in the hands of the fastpath.
     /// The packet is marked PRIORITY, which instructs the fastpath to
     /// ensure it eventually gets queued with the OS.
+    #[allow(dead_code)]
     pub async fn enqueue_packet(&self, link_id: zpr::LinkId, mut packet: Packet) {
         packet.metadata_mut().egress_link_id = link_id;
         packet.metadata_mut().flags |= packet::flags::PRIORITY;
@@ -98,7 +99,6 @@ impl MgmtSubstrateEgress {
     /// Try to enqueue the given packet to be egressed on the substrate.
     /// Returns said packet if there is no room in the queue.
     /// Unlike `enqueue_packet()`, the packet is not marked for any special processing.
-    #[allow(dead_code)]
     pub fn try_enqueue_packet(&self, link_id: zpr::LinkId, mut packet: Packet) -> bool {
         packet.metadata_mut().egress_link_id = link_id;
         match self.queue.try_send(&packet) {

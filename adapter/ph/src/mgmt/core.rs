@@ -33,31 +33,31 @@ pub fn count_event(
 
 /// Send a unidirectional non-flow management message on the given link.
 /// The packet should contain only the message body.
-pub async fn send_non_flow_mgmt(
+pub fn send_non_flow_mgmt(
     asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     packet: Packet,
 ) -> zpr::SeqNum {
     let seq_num = 0; // TODO, zpr-core/839
-    send_mgmt_helper(asm, link_id, packet_type, None, None, packet).await;
+    send_mgmt_helper(asm, link_id, packet_type, None, None, packet);
     seq_num
 }
 
 /// Send a unidirectional per-flow management message on the given link.
 /// The packet should contain only the message body.
 #[allow(dead_code)]
-pub async fn send_per_flow_mgmt(
+pub fn send_per_flow_mgmt(
     asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
     packet: Packet,
 ) {
-    send_mgmt_helper(asm, link_id, packet_type, Some(stream_id), None, packet).await
+    send_mgmt_helper(asm, link_id, packet_type, Some(stream_id), None, packet)
 }
 
-pub async fn send_per_flow_mgmt_response(
+pub fn send_per_flow_mgmt_response(
     asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
@@ -73,10 +73,9 @@ pub async fn send_per_flow_mgmt_response(
         Some(sequence_number),
         packet,
     )
-    .await
 }
 
-async fn send_mgmt_helper(
+fn send_mgmt_helper(
     asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
@@ -99,9 +98,12 @@ async fn send_mgmt_helper(
         hdr.sequence_number = (sequence_number as u16).into();
     }
 
-    asm.mgmt_substrate_egress
-        .enqueue_packet(link_id, packet)
-        .await;
+    // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
+    // In that case, just ignore the error; act as if the packet was dropped
+    // by the substrate due to congestion.
+    let _ = asm
+        .mgmt_substrate_egress
+        .try_enqueue_packet(link_id, packet);
 }
 
 /// Sender function for per flow request management packet.
@@ -179,8 +181,7 @@ async fn send_sync_req_helper(
             stream_id,
             Some(permit.seq_num()),
             packet,
-        )
-        .await;
+        );
 
         tokio::select! {
             response = &mut response_future => {

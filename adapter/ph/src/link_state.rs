@@ -601,16 +601,7 @@ impl LinkStateWrapper {
     fn maybe_send_hello(&self, asm: &Arc<Assembly>) {
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            let link_id = self.id;
-            let task_asm = asm.clone();
-            tokio::task::spawn_local(async move {
-                mgmt::requests::send_hello_request(
-                    &task_asm,
-                    link_id,
-                    &task_asm.local_zpr_addresses,
-                )
-                .await
-            });
+            mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
         }
         // Otherwise, wait for the adapter to reach out
     }
@@ -793,14 +784,11 @@ impl LinkStateWrapper {
                 // So pretend we are the visa service and handle our own authorization.
                 drop(locked_fsm);
 
-                let task_asm = asm.clone();
-                tokio::task::spawn_local(async move {
-                    if let Err(e) = task_asm
-                        .process_link_state_event(link_id, LinkEvent::ReceivedAuthorizeResponse)
-                    {
-                        error!(target: LINK_STATE, "Link {link_id} failed to process authorize response: {e}");
-                    }
-                });
+                if let Err(e) =
+                    asm.process_link_state_event(link_id, LinkEvent::ReceivedAuthorizeResponse)
+                {
+                    error!(target: LINK_STATE, "Link {link_id} failed to process authorize response: {e}");
+                }
 
                 Ok(())
             }
@@ -1102,34 +1090,23 @@ impl LinkStateWrapper {
             payload = auth::ZdpInitAuthenticationPayload::default(); // empty
         }
 
-        let task_asm = asm.clone();
-
-        tokio::task::spawn_local(async move {
-            mgmt::requests::send_init_authentication_request(&task_asm, link_id, flags, payload)
-                .await
-        });
+        mgmt::requests::send_init_authentication_request(asm, link_id, flags, payload);
     }
 
     /// Send the Grant message
     fn send_grant_zpr_address_request(&self, asm: &Arc<Assembly>, addrs: &[IpAddress]) {
-        let link_id = self.id;
-        let task_asm = asm.clone();
-
         // Convert the IpAddresses into IpAddrs
         let ipaddrs = addrs
             .iter()
             .map(|addr| IpAddr::from(addr))
             .collect::<Vec<_>>();
 
-        tokio::task::spawn_local(async move {
-            mgmt::requests::send_grant_zpr_address_request(
-                &task_asm,
-                link_id,
-                ResponseCode::Success,
-                &ipaddrs,
-            )
-            .await
-        });
+        mgmt::requests::send_grant_zpr_address_request(
+            asm,
+            self.id,
+            ResponseCode::Success,
+            &ipaddrs,
+        );
     }
 
     /// Run the HTTPS authentication process in a tokio task.
@@ -1212,20 +1189,12 @@ impl LinkStateWrapper {
 
     /// Send Acquire message
     fn send_acquire_zpr_address_request(&self, asm: &Arc<Assembly>, blob: &str) {
-        let link_id = self.id;
-        let task_asm = asm.clone();
-
-        let blob_opt = Some(blob.as_bytes().to_owned());
-
-        tokio::task::spawn_local(async move {
-            mgmt::requests::send_acquire_zpr_address_request(
-                &task_asm,
-                link_id,
-                &task_asm.local_zpr_addresses,
-                blob_opt.as_deref(),
-            )
-            .await
-        });
+        mgmt::requests::send_acquire_zpr_address_request(
+            asm,
+            self.id,
+            &asm.local_zpr_addresses,
+            Some(blob.as_bytes()),
+        );
     }
 
     fn process_error_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
@@ -1334,10 +1303,7 @@ impl LinkStateWrapper {
 
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.set_state(LinkState::Closing);
-        let task_asm = asm.clone();
-        tokio::task::spawn_local(async move {
-            mgmt::requests::send_terminate_request(&task_asm, link_id, reason).await
-        });
+        mgmt::requests::send_terminate_request(asm, self.id, reason);
         Ok(())
     }
 
@@ -1400,6 +1366,7 @@ impl LinkStateWrapper {
 
     /// Set a timer to attempt a link restart after a holddown period
     fn setup_restart(&self, asm: &Arc<Assembly>) {
+        // TODO: use timeout mechanism
         let link_id = self.id;
         let task_asm = asm.clone();
         tokio::task::spawn_local(async move {
@@ -1422,7 +1389,7 @@ impl LinkStateWrapper {
             .lock()
             .unwrap()
             .set_state(LinkState::Resetting);
-        mgmt::requests::send_terminate_indication(asm, link_id, TerminateReason::Reset).await;
+        mgmt::requests::send_terminate_indication(asm, link_id, TerminateReason::Reset);
         let _ = self.clean_up_link_state(asm).join_all().await;
     }
 
@@ -1482,7 +1449,7 @@ impl LinkStateWrapper {
 
                 let mut recv = task_events.subscribe();
 
-                let sent_seq_num = mgmt::requests::send_echo_request(&task_asm, link_id).await;
+                let sent_seq_num = mgmt::requests::send_echo_request(&task_asm, link_id);
                 let expected_seq_num = (sent_seq_num & 0xffff) as u16;
 
                 let got_response =
