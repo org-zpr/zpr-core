@@ -6,7 +6,7 @@ use crate::auth;
 use crate::config;
 use crate::counters;
 use crate::defs::*;
-use crate::link_state::{LinkEvent, HARD_CODED_BAS_ADDR};
+use crate::link_state::LinkEvent;
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::{ip_number, IpAddress};
 use crate::packet::Packet;
@@ -308,7 +308,7 @@ pub async fn handle_hello_request(
 
     // TODO: This info needs to come from the visa service
     let service_addr = SocketAddr::new(
-        IpAddr::V6(HARD_CODED_BAS_ADDR),
+        IpAddr::V6(auth::HARD_CODED_BAS_ADDR),
         auth::DEFAULT_ZPR_OAUTH_RSA_PORT,
     );
     TlvEncoding::new_asa(service_addr).put(&mut rsp_pkt);
