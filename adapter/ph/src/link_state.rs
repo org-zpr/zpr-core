@@ -1267,9 +1267,10 @@ impl LinkStateWrapper {
                 Ok(())
             }
 
-            (_, _) => Err(LinkStateError::InvalidOperation(
-                "Ignoring unexpected timeout".to_owned(),
-            )),
+            (_, _) => Err(LinkStateError::InvalidOperation(format!(
+                "Ignoring unexpected timeout in state {:?}",
+                locked_fsm.state
+            ))),
         }
     }
 
@@ -1286,7 +1287,6 @@ impl LinkStateWrapper {
 
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
                 self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses)
-                //self.send_init_authentication_request(asm)  // FIXME
             }
 
             (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {
