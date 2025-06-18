@@ -111,7 +111,7 @@ Do that for all the NOISE keys you have. Note that the visa servcie NOISE certif
 **must** use `vs.zpr` for its CN.
 
 
-### Create RSA keys for any client aidapters
+### Create RSA keys for any client adapters
 
 Since we will not be setting up an authentication service, you must embed public keys for
 all client adapters (not nodes) in your policy.  In this tutorial the only explicit
@@ -121,8 +121,8 @@ client adapter is the one for the visa service, to create that do this:
 # Create the key
 openssl genrsa -out vs-zpr-rsa-key.pem 2048
 
-# Extrat the public key
-openssl rsa -pubout vs-zpr-rsa-key.pem -out vs-zpr-pubkey.pem
+# Extract the public key
+openssl rsa -pubout -in vs-zpr-rsa-key.pem -out vs-zpr-pubkey.pem
 ```
 
 Repeat that operation for any other client adapters you have.
