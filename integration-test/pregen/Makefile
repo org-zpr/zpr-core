@@ -1,7 +1,7 @@
 ZPLC ?= zplc
 KEY := zpr-rsa-key.pem
 
-OBJS := conform-policy.bin v4-1node-2actor-ping.bin v4-1node-3actor-ping.bin v6-1node-2actor-ping.bin v6-1node-3actor-ping.bin
+OBJS := v4-1node-2actor-ping.bin v4-1node-3actor-ping.bin v6-1node-2actor-ping.bin v6-1node-3actor-ping.bin
 
 info:
 	@echo Makefile to help with compiling the ZPR policies

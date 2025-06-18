@@ -19,6 +19,10 @@ allow A2 to access A1Svc
 allow Node to access PingableVs
 allow Vs to access PingableNode
 
+note: Admin access to VS
+define VsAdmin as a device with zpr.adapter.cn:'client.zpr.org'
+allow VsAdmin to access VisaService
+
 
 
 

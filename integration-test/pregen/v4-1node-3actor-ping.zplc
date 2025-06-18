@@ -19,7 +19,6 @@ cert_path = "ca-cert.pem"
 
 [visa_service]
 dock_node = "node"
-admin_attrs = [ ["device.zpr.adapter.cn", "client.zpr.org"] ]
 
 [bootstrap]
 "vs" = "actorvs.pem"
