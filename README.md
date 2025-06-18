@@ -228,7 +228,7 @@ interfaces = ["in1"]
 in1.netaddr = "node0.overlay:5000"
 
 [trusted_services.default]
-cert_path = "ca-cert.pem"
+cert_path = "auth-ca.crt"
 
 [visa_service]
 dock_node = "node"
