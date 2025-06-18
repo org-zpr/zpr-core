@@ -84,7 +84,7 @@ FiCJxns37RAqhGyryo9L0cryIEPwerjtNoLxmg94rfdovRmY+pm+HokRbD4Vycw=
 "#;
 
 /// This is the data payload in a [zdp::PacketType::InitAuthenticationRequest] packet.
-#[derive(Clone, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Debug, Default)]
+#[derive(Clone, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned, Default)]
 #[repr(packed)]
 pub struct ZdpInitAuthenticationPayload {
     /// 8 bytes random data
@@ -95,6 +95,31 @@ pub struct ZdpInitAuthenticationPayload {
 
     /// blake3 hmac over nonce and ctime
     pub hmac: [u8; 32],
+}
+
+// Implement our own Debug to format the buffers in human friendly way.
+impl std::fmt::Debug for ZdpInitAuthenticationPayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let nonce_str = self
+            .nonce
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<String>>()
+            .join("");
+        let hmac_str = self
+            .hmac
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<String>>()
+            .join("");
+        write!(
+            f,
+            "ZdpInitAuthenticationPayload {{ nonce: [{}], ctime: {}, hmac: [{}] }}",
+            nonce_str,
+            self.ctime.get(),
+            hmac_str,
+        )
+    }
 }
 
 /// The "self signed" authentication BLOB which originates on an adatper and is

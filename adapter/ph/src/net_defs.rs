@@ -15,11 +15,22 @@ pub const IPV6_ADDRESS_SIZE: usize = 16;
 /// "Flat" (non-enum) representation of an IPv4 or IPv6 address, used
 /// internally to represent ZPR addresses.
 #[derive(
-    FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned, Copy, Clone, Hash, Debug, PartialEq, Eq,
+    FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned, Copy, Clone, Hash, PartialEq, Eq,
 )]
 #[repr(transparent)]
 pub struct IpAddress {
     pub v6: [u8; IPV6_ADDRESS_SIZE],
+}
+
+// Implement our own Debug in order to prety print addresses in logs.
+impl std::fmt::Debug for IpAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_v4() {
+            write!(f, "IpAddress(V4: {self})")
+        } else {
+            write!(f, "IpAddress(V6: {self})")
+        }
+    }
 }
 
 impl IpAddress {
