@@ -281,6 +281,7 @@ impl From<Ipv6Addr> for ScopedIpv6Addr {
 
 pub trait SocketAddrExt {
     fn scoped_ip(&self) -> ScopedIpAddr;
+    fn set_scoped_ip(&mut self, new_ip: ScopedIpAddr);
 }
 
 impl SocketAddrExt for std::net::SocketAddr {
@@ -289,6 +290,19 @@ impl SocketAddrExt for std::net::SocketAddr {
             std::net::SocketAddr::V4(v4) => ScopedIpAddr::V4(*v4.ip()),
             std::net::SocketAddr::V6(v6) => {
                 ScopedIpAddr::V6(ScopedIpv6Addr::new(*v6.ip(), v6.scope_id()))
+            }
+        }
+    }
+
+    fn set_scoped_ip(&mut self, new_ip: ScopedIpAddr) {
+        match new_ip {
+            ScopedIpAddr::V4(v4) => self.set_ip(v4.into()),
+            ScopedIpAddr::V6(sv6) => {
+                self.set_ip(sv6.ip.into());
+                match self {
+                    std::net::SocketAddr::V4(_) => panic!("should not happen"),
+                    std::net::SocketAddr::V6(v6) => v6.set_scope_id(sv6.scope_id),
+                }
             }
         }
     }

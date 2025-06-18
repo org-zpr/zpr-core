@@ -269,20 +269,56 @@ fn main() -> ExitCode {
             None,
         )
         .unwrap();
+
         socket.set_nonblocking(true).unwrap();
         batch_io::set_recv_packet_info(&socket, true).unwrap();
+
+        // SO_REUSEPORT allows us to open multiple sockets for the same 5-tuple
         socket.set_reuse_port(true).unwrap();
+
+        // First bind to our self address.
+        // If the port is unspecified, one will be selected by the OS.
+        // (The IP address may also be unspecified, but the OS will not select one here.)
         socket
             .bind(&socket2::SockAddr::from(config.self_addr))
             .expect(&format!(
                 "unable to bind to self_addr ({})",
                 config.self_addr
             ));
+
         if config.self_addr.port() == 0 {
+            // Update the port of our configured self address to match
+            // what the OS chose.  This ensures that all sockets we open share
+            // the same port.
             let port = socket.local_addr().unwrap().as_socket().unwrap().port();
             config.self_addr.set_port(port);
             info!(target: STARTUP, "assigned substrate UDP port {port}");
         }
+
+        if let Some(node_addr) = config.node_addr {
+            // If we are an adapter (and thus have a remote node address), connect to that here.
+            // We don't actually care that this sets the default destination (since we always
+            // set it when sending).  Rather, this forces the OS to choose a local address
+            // if we didn't specify one in the bind call above.
+            socket
+                .connect(&socket2::SockAddr::from(node_addr))
+                .expect(&format!("unable to connect to node_addr ({})", node_addr));
+
+            if config.self_addr.ip().is_unspecified() {
+                // Update the address of our configured self address to match
+                // what the OS chose.  This ensures that all sockets we open share
+                // the same port.
+                let addr = socket
+                    .local_addr()
+                    .unwrap()
+                    .as_socket()
+                    .unwrap()
+                    .scoped_ip();
+                config.self_addr.set_scoped_ip(addr);
+                info!(target: STARTUP, "assigned substrate address {addr}");
+            }
+        }
+
         substrate_sockets.push(socket.into());
     }
 
