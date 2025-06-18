@@ -111,7 +111,7 @@ Do that for all the NOISE keys you have. Note that the visa servcie NOISE certif
 **must** use `vs.zpr` for its CN.
 
 
-### Create RSA keys for any client aidapters
+### Create RSA keys for any client adapters
 
 Since we will not be setting up an authentication service, you must embed public keys for
 all client adapters (not nodes) in your policy.  In this tutorial the only explicit
@@ -121,7 +121,7 @@ client adapter is the one for the visa service, to create that do this:
 # Create the key
 openssl genrsa -out vs-zpr-rsa-key.pem 2048
 
-# Extrat the public key
+# Extract the public key
 openssl rsa -pubout vs-zpr-rsa-key.pem -out vs-zpr-pubkey.pem
 ```
 
@@ -165,10 +165,6 @@ vs_key: zpr-rsa-key.pem
 The adapter for the visa service needs to know the substrate address of the node
 which above we set to `129.6.7.1`.
 
-Due to [bug #837](https://github.com/org-zpr/zpr-core/issues/837) you must
-specify the local address of all adapters (and nodes).  So for this example
-we assume that the visa service adapter is a substrate address
-`129.6.7.2`.
 
 The visa service adapter configuration should go in `adapter-vs-conf.toml`:
 
@@ -179,7 +175,6 @@ ca_file = "auth-ca.crt"
 certificate_file = "adapter-vs-noise.crt"
 private_key_file = "adapter-vs-noise.key"
 zpr_addr = [ "fd5a:5052::1" ] # visa service well known addr
-self_addr = "129.6.7.2:5000"
 tun_if = "tun9"
 
 [adapter]
@@ -194,10 +189,10 @@ be present in the same directory as the configuration file.
 ### Write a policy and compile it.
 
 Here is a simple policy to let any adapter with a signed Noise key access
-some serivce called a WebService.
+some service called a WebService.
 
 We assume:
-- WebService is connected using an adpater with `CN=web.zpr.org`.
+- WebService is connected using an adapter with `CN=web.zpr.org`.
 - WebService has a bootstrap public RSA key in `web-zpr-pubkey.pem`.
 - WebService is accessed using HTTP port 80.
 
@@ -228,7 +223,7 @@ interfaces = ["in1"]
 in1.netaddr = "node0.overlay:5000"
 
 [trusted_services.default]
-cert_path = "ca-cert.pem"
+cert_path = "auth-ca.crt"
 
 [visa_service]
 dock_node = "node"
@@ -264,7 +259,7 @@ On host 2, in one terminal start the visa service:
 
     vserice -c /path/to/vs-config.yaml -p zpr-full-access.bin
 
-On host 2, in another termainal start the adapter:
+On host 2, in another terminal start the adapter:
 
     sudo adapter -c /path/to/adapter-vs-conf.toml
 
@@ -274,6 +269,8 @@ Now you can attach additional adapters and start up the "WebService".
 
 ## Updates
 
++ June 18, 2025
+  + No longer need to set `self_addr` in an adapter.
 + June 12, 2025
   + New **bootstrap** requirement and associated RSA key creation.
   + Domain (eg, `device`, `user`, or `service`) now required for attribute keys.

@@ -5,7 +5,6 @@ ca_file = "auth-ca.crt"
 certificate_file = "adapter-cli-noise.crt"
 private_key_file = "adapter-cli-noise.key"
 zpr_addr = [ "fd5a:5052:1::20" ] 
-self_addr = "192.168.6.175:5000"
 
 # use `sudo ./mktun.sh` to set this up
 tun_if = "tun9"
