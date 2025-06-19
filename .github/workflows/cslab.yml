@@ -21,7 +21,7 @@ env:
 jobs:
   cslab-build:
     name: Cslab
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@c4bf03c27fc14ac08cdb1b8a8c49de91f21786a7
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@3cb8cffcd752171c2f6c0717abebad3736baa78e
     with:
       name: 'Cslab'
       path: './cslab'
