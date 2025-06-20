@@ -8,6 +8,7 @@ use crate::logging::targets::*;
 use clap::{Args, Parser, Subcommand};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 /// Errors you may encounter when trying to parse command line or configuration
 /// file.
@@ -62,7 +63,7 @@ pub struct CommonArgs {
     /// For a node this is listen substrate address for dock,
     /// for adapter it is best to leave this at its default setting (0.0.0.0:0)
     ///
-    #[arg(short = 'a', long, value_name = "ADDR:PORT")]
+    #[arg(short = 'a', long, value_name = "ADDR:PORT", value_parser = parse_socket_addr_or_scoped_ip_addr)]
     pub self_addr: Option<SocketAddr>,
 
     /// Certificate of the Certificate Authority
@@ -111,7 +112,7 @@ pub enum Command {
         common: CommonArgs,
 
         /// Substrate address of the node to connect to
-        #[arg(long, short = 'N', value_name = "ADDR:PORT")]
+        #[arg(long, short = 'N', value_name = "ADDR:PORT", value_parser = parse_socket_addr_or_scoped_ip_addr)]
         node_addr: Option<SocketAddr>,
 
         /// PEM file holding the nodes noise public key
@@ -132,4 +133,42 @@ pub enum Command {
         #[command(flatten)]
         common: CommonArgs,
     },
+}
+
+fn parse_socket_addr_or_scoped_ip_addr(
+    s: &str,
+) -> Result<SocketAddr, Box<dyn std::error::Error + Send + Sync + 'static>> {
+    // First try to parse as a full socket address (IP + optional scope + port).
+    if let Ok(sa) = SocketAddr::from_str(s) {
+        return Ok(sa);
+    }
+
+    // Failing that, assume we have just IP + optional scope.  First parse the scope if any.
+    let addr_str;
+    let scope_id;
+    match s.split_once('%') {
+        Some((a, b)) => {
+            addr_str = a;
+            scope_id = u32::from_str(b).map_err(Box::new)?;
+        }
+
+        None => {
+            addr_str = s;
+            scope_id = 0;
+        }
+    }
+
+    // Now parse the address.
+    let addr = IpAddr::from_str(addr_str).map_err(Box::new)?;
+
+    // Create a socket address with port 0.
+    let mut sa = SocketAddr::new(addr, 0);
+
+    // Fill in the scope ID if the address is V6.
+    match &mut sa {
+        SocketAddr::V4(_) => (),
+        SocketAddr::V6(sa6) => sa6.set_scope_id(scope_id),
+    }
+
+    Ok(sa)
 }

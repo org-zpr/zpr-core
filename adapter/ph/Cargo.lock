@@ -3097,7 +3097,7 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "open-enum",
  "strum 0.26.3",

@@ -111,7 +111,6 @@ echo "Launching Node"
 sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   node \
   --control-path "$NODE_SOCK" \
-  --self-addr 0.0.0.0:12345 \
   --ca-file ca.crt \
   --certificate-file node.crt \
   --private-key-file node.key \
@@ -125,13 +124,13 @@ echo "Launching Adapters"
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --control-path "$VS_SOCK" \
-  --self-addr "$VS_SUBSTRATE_ADDR":0 \
+  --self-addr "$VS_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
   --certificate-file vs.zpr.crt \
   --private-key-file vs.zpr.key \
   --bootstrap-key actorvs-rsa.key \
   --tun-if tun0 \
-  --node-addr "$NODE_SUBSTRATE_ADDR_VS":12345 \
+  --node-addr "$NODE_SUBSTRATE_ADDR_VS" \
   --node-public-key-file node.pubkey \
   --zpr-addr "$VS_ZPR_ADDR" 2>&1 | tee adapter-vs.log | prefix_log zpr-vs &
 
@@ -140,26 +139,26 @@ sleep 5
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --control-path "$ADAPTER1_SOCK" \
-  --self-addr "$A_SUBSTRATE_ADDR":0 \
+  --self-addr "$A_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
   --certificate-file adapter1.crt \
   --private-key-file adapter1.key \
   --bootstrap-key actor1-rsa.key \
   --tun-if tun0 \
-  --node-addr "$NODE_SUBSTRATE_ADDR_A":12345 \
+  --node-addr "$NODE_SUBSTRATE_ADDR_A" \
   --node-public-key-file node.pubkey \
   --zpr-addr "$A_ZPR_ADDR" 2>&1 | tee adapter1.log | prefix_log zpr-a &
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --control-path "$ADAPTER2_SOCK" \
-  --self-addr "$B_SUBSTRATE_ADDR":0 \
+  --self-addr "$B_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
   --certificate-file adapter2.crt \
   --private-key-file adapter2.key \
   --bootstrap-key actor2-rsa.key \
   --tun-if tun0 \
-  --node-addr "$NODE_SUBSTRATE_ADDR_B":12345 \
+  --node-addr "$NODE_SUBSTRATE_ADDR_B" \
   --node-public-key-file node.pubkey \
   --zpr-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
 
@@ -169,13 +168,13 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
   sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
     adapter \
     --control-path "$ADAPTER3_SOCK" \
-    --self-addr "$C_SUBSTRATE_ADDR":0 \
+    --self-addr "$C_SUBSTRATE_ADDR" \
     --ca-file ca.crt \
     --certificate-file adapter3.crt \
     --private-key-file adapter3.key \
     --bootstrap-key actor3-rsa.key \
     --tun-if tun0 \
-    --node-addr "$NODE_SUBSTRATE_ADDR_C_ALT":12345 \
+    --node-addr "$NODE_SUBSTRATE_ADDR_C_ALT" \
     --node-public-key-file node.pubkey \
     --zpr-addr "$C_ZPR_ADDR" 2>&1 | tee adapter3.log | prefix_log zpr-c &
 fi

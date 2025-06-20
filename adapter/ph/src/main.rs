@@ -253,10 +253,20 @@ fn main() -> ExitCode {
     // open substrate sockets and mgmt substrate injection socket
     //
 
-    if ph_mode == PhMode::Node {
-        if config.self_addr.port() == 0 {
-            // TODO: Should we force setting a port when configuring a node?
-            warn!(target: STARTUP, "self_addr port is 0 which means dock listening port will be chosen by OS");
+    match ph_mode {
+        PhMode::Node => {
+            if config.self_addr.port() == 0 {
+                config.self_addr.set_port(zpr::DEFAULT_TETHER_PORT);
+                info!(target: STARTUP, "listening on default tether port {}", config.self_addr.port());
+            }
+        }
+
+        PhMode::Adapter => {
+            let node_addr = config.node_addr.as_mut().unwrap();
+            if node_addr.port() == 0 {
+                node_addr.set_port(zpr::DEFAULT_TETHER_PORT);
+                info!(target: STARTUP, "connecting to default tether port {}", node_addr.port());
+            }
         }
     }
 
