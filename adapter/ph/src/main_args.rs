@@ -6,7 +6,7 @@
 use crate::auth::AuthError;
 use crate::logging::targets::*;
 use clap::{Args, Parser, Subcommand};
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -143,32 +143,69 @@ fn parse_socket_addr_or_scoped_ip_addr(
         return Ok(sa);
     }
 
-    // Failing that, assume we have just IP + optional scope.  First parse the scope if any.
-    let addr_str;
-    let scope_id;
-    match s.split_once('%') {
-        Some((a, b)) => {
-            addr_str = a;
-            scope_id = u32::from_str(b).map_err(Box::new)?;
+    // Failing that, assume we have just IP.
+
+    if s.starts_with("[") && s.ends_with("]") {
+        // IPv6
+
+        let s = &s[1..s.len() - 1];
+
+        let addr_str;
+        let scope_id;
+        match s.split_once('%') {
+            Some((a, b)) => {
+                addr_str = a;
+                scope_id = u32::from_str(b).map_err(Box::new)?;
+            }
+
+            None => {
+                addr_str = s;
+                scope_id = 0;
+            }
         }
 
-        None => {
-            addr_str = s;
-            scope_id = 0;
+        Ok(SocketAddr::V6(SocketAddrV6::new(
+            Ipv6Addr::from_str(addr_str).map_err(Box::new)?,
+            0,
+            0,
+            scope_id,
+        )))
+    } else {
+        // IPv4
+        Ok(SocketAddr::V4(SocketAddrV4::new(
+            Ipv4Addr::from_str(s).map_err(Box::new)?,
+            0,
+        )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_socket_addr_or_scoped_ip_addr;
+    use std::net::SocketAddr;
+    use std::str::FromStr;
+
+    const SOCKET_ADDR_OR_SCOPED_IP_ADDR_PARSE_TEST_PAIRS: &[(&'static str, &'static str)] = &[
+        // (test string, SocketAddr equivalent)
+        ("12.34.56.78", "12.34.56.78:0"),
+        ("12.34.56.78:31415", "12.34.56.78:31415"),
+        ("[1234:5678::abcd]", "[1234:5678::abcd]:0"),
+        ("[1234:5678::abcd]:31415", "[1234:5678::abcd]:31415"),
+        ("[1234:5678::abcd%12]", "[1234:5678::abcd%12]:0"),
+        ("[1234:5678::abcd%12]:31415", "[1234:5678::abcd%12]:31415"),
+    ];
+
+    #[test]
+    fn socket_addr_or_scoped_ip_addr_parse_test() {
+        for (test, expected) in SOCKET_ADDR_OR_SCOPED_IP_ADDR_PARSE_TEST_PAIRS {
+            let exp = SocketAddr::from_str(expected);
+            if exp.is_err() {
+                panic!("BAD {expected}");
+            }
+            match parse_socket_addr_or_scoped_ip_addr(test) {
+                Ok(res) => assert_eq!(res, SocketAddr::from_str(expected).unwrap()),
+                Err(_) => panic!("parse failed on {test}"),
+            }
         }
     }
-
-    // Now parse the address.
-    let addr = IpAddr::from_str(addr_str).map_err(Box::new)?;
-
-    // Create a socket address with port 0.
-    let mut sa = SocketAddr::new(addr, 0);
-
-    // Fill in the scope ID if the address is V6.
-    match &mut sa {
-        SocketAddr::V4(_) => (),
-        SocketAddr::V6(sa6) => sa6.set_scope_id(scope_id),
-    }
-
-    Ok(sa)
 }
