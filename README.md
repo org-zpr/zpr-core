@@ -122,7 +122,7 @@ client adapter is the one for the visa service, to create that do this:
 openssl genrsa -out vs-zpr-rsa-key.pem 2048
 
 # Extract the public key
-openssl rsa -pubout vs-zpr-rsa-key.pem -out vs-zpr-pubkey.pem
+openssl rsa -pubout -in vs-zpr-rsa-key.pem -out vs-zpr-pubkey.pem
 ```
 
 Repeat that operation for any other client adapters you have.
