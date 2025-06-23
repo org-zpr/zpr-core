@@ -30,6 +30,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_NET_GIT_FETCH_WITH_CLI: true
+  VISA_SERVICE_RELEASE: v0.2.0
 
 jobs:
   # Build and upload ph
@@ -126,7 +127,7 @@ jobs:
       uses: robinraju/release-downloader@v1
       with:
         repository: 'org-zpr/zpr-visaservice'
-        tag: 'v0.1.0'
+        tag: "$VISA_SERVICE_RELEASE"
         fileName: 'release-linux-x86_64.tar.gz'
         extract: true
         out-file-path: 'integration-test'
@@ -186,7 +187,7 @@ jobs:
       uses: robinraju/release-downloader@v1
       with:
         repository: 'org-zpr/zpr-visaservice'
-        tag: 'v0.1.0'
+        tag: "$VISA_SERVICE_RELEASE"
         fileName: 'release-linux-x86_64.tar.gz'
         extract: true
         out-file-path: 'integration-test'
