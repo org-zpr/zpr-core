@@ -7,6 +7,7 @@ use crate::assembly::Assembly;
 use crate::config;
 use crate::counters::CounterType;
 use crate::packet::Packet;
+use crate::seq_nums;
 use crate::zdp;
 use thiserror::Error;
 use tokio::time::sleep;
@@ -39,8 +40,17 @@ pub fn send_non_flow_mgmt(
     packet_type: zdp::ZdpPacketType,
     packet: Packet,
 ) -> zpr::SeqNum {
-    let seq_num = 0; // TODO, zpr-core/839
-    send_mgmt_helper(asm, link_id, packet_type, None, None, packet);
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        // no more peer; packet will be dropped; return a dummy sequence number
+        return zpr::SeqNum::default();
+    };
+
+    let seq_num = peer_state.sn_gen.generate_seq_num();
+
+    drop(peer_state);
+
+    send_mgmt_helper(asm, link_id, packet_type, None, Some(seq_num), packet);
+
     seq_num
 }
 
@@ -94,8 +104,7 @@ fn send_mgmt_helper(
     hdr.packet_type = packet_type;
 
     if let Some(sequence_number) = sequence_number {
-        // uses only suffix of sequence number
-        hdr.sequence_number = (sequence_number as u16).into();
+        hdr.sequence_number = seq_nums::truncate_seq_num(sequence_number).into();
     }
 
     // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
@@ -199,7 +208,7 @@ async fn send_sync_req_helper(
     match_received(asm, response, SyncReqError::Timeout, zdp_response_type)
 }
 
-/// Determines whether the message recieved in response to the request is
+/// Determines whether the message received in response to the request is
 /// a) a packet and not an error, and b) the expected packet type
 // TODO: rename/move this
 fn match_received(

@@ -28,7 +28,7 @@ pub fn truncate_seq_num(sn: SeqNum) -> u16 {
     (sn & 0xFFFF) as u16
 }
 
-#[derive(Enum)]
+#[derive(Clone, Copy, Enum, strum::EnumIter)]
 pub enum SeqNumTrackerStat {
     /// how many packets were rejected due to being "too old" (and therefore possibly duplicates)
     TooOld,
@@ -69,12 +69,14 @@ impl SeqNumTracker {
 
     /// Query the highest sequence number seen so far.
     /// (Useful for explicitly synchronizing.)
+    #[allow(dead_code)]
     pub fn highest_seen(&self) -> SeqNum {
         self.highest_seen
     }
 
     /// Query the ratio of messages which have been missed
     /// within the reception window.
+    #[allow(dead_code)]
     pub fn drop_rate(&self) -> f32 {
         (self.window.count_zeros() as f32) / (Self::WINDOW_SIZE as f32)
     }
@@ -82,6 +84,7 @@ impl SeqNumTracker {
     /// Reinitialize the tracker such that the given sequence number
     /// is considered the latest seen, and all prior are considered
     /// already received also.
+    #[allow(dead_code)]
     pub fn resynchronize(&mut self, highest_seen: SeqNum) {
         self.highest_seen = highest_seen;
         self.window = u64::MAX;

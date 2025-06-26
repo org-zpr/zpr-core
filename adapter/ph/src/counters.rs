@@ -80,7 +80,8 @@ pub enum CounterType {
     QueueBackpressure,
     DroppedAwaitingBind,
     DroppedNop,           // normal, not an error drop
-    DroppedDuplicate,     // some sort of duplicate detected
+    DroppedTooOld,        // "old" management packet received (possible duplicate)
+    DroppedDuplicate,     // duplicate management packet detected
     DroppedNoSA,          // no security association on link
     InternalRoutingError, // a packet ended up somewhere it shouldn't have due to a coding error
 
@@ -88,6 +89,8 @@ pub enum CounterType {
     ActorSlowpath,    // exited fastpath from actor output, sent to mgmt
     BadMgmtResponse,
     UnexpectedMgmtResponse,
+    LostPacket,       // lost management packet detected
+    OutOfOrderPacket, // out-of-order management packet detected (and processed)
 
     UnknownPeer,
     PeerRemoved,
@@ -139,6 +142,7 @@ impl CounterType {
             // Packet drops
             Self::QueueBackpressure => "QueueBackpressure",
             Self::DroppedAwaitingBind => "Dropped Awaiting Bind",
+            Self::DroppedTooOld => "Dropped Too Old",
             Self::DroppedDuplicate => "Dropped Duplicate",
             Self::DroppedNop => "Dropped No Operation",
             Self::DroppedNoSA => "Dropped No Security Association",
@@ -149,6 +153,8 @@ impl CounterType {
             Self::ActorSlowpath => "Actor Slowpath",
             Self::BadMgmtResponse => "Bad Management Response",
             Self::UnexpectedMgmtResponse => "Unexpected Management Response",
+            Self::LostPacket => "Lost Packet",
+            Self::OutOfOrderPacket => "Out Of Order Packet",
 
             // Peer operation failures
             Self::UnknownPeer => "Unknown Peer",

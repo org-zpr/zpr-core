@@ -692,7 +692,7 @@ impl LinkStateWrapper {
 
             (_, _) => {
                 return Err(LinkStateError::InvalidOperation(
-                    "Discarded unsolicited register address request".to_string(),
+                    "Discarded unsolicited acquire ZPR address request".to_string(),
                 ))
             }
         }
@@ -822,11 +822,11 @@ impl LinkStateWrapper {
         let locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::RegisterAA) => {
-                debug!(target: LINK_STATE, "link {link_id} acquire ZDP address response (ACK) message recieved, code {:?}", code);
+                debug!(target: LINK_STATE, "link {link_id} acquire ZDP address response (ACK) message received, code {:?}", code);
                 Ok(())
             }
             (_, _) => Err(LinkStateError::InvalidOperation(
-                "Discarded unsolicited acquire zpr adress response".to_string(),
+                "Discarded unsolicited acquire zpr address response".to_string(),
             )),
         }
     }
@@ -856,7 +856,7 @@ impl LinkStateWrapper {
                 }
             }
             (_, _) => Err(LinkStateError::InvalidOperation(
-                "Discarded unsolicited authorize response".to_string(),
+                "Discarded unsolicited grant response".to_string(),
             )),
         }
     }

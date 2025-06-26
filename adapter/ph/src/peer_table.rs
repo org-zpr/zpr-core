@@ -6,6 +6,7 @@ use crate::link_state::{LinkStateWrapper, LinkType};
 use crate::net_defs::ScopedIpAddr;
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
+use crate::seq_nums::*;
 use crate::special_peers::*;
 use crate::sync_req;
 use bytes::Bytes;
@@ -37,6 +38,8 @@ pub struct PeerState {
     pub mgmt_processor: queues::MgmtProcessor,
     pub mgmt_processor_worker: task::JoinHandle<()>,
     pub auth_key: [u8; 32], // set in ::new and never changed.
+    pub sn_gen: SeqNumGenerator,
+    pub sn_track: Mutex<SeqNumTracker>,
     km_state: PeerKmState,
 }
 
@@ -97,6 +100,8 @@ impl PeerState {
             sync_req_state: sync_req::SyncReqState::new(),
             mgmt_processor,
             mgmt_processor_worker,
+            sn_gen: SeqNumGenerator::new(),
+            sn_track: Mutex::new(SeqNumTracker::new()),
             km_state: PeerKmState::new(),
             auth_key: key,
         }
@@ -398,6 +403,7 @@ impl VacantPeerTableEntry<'_> {
 pub mod test {
 
     use super::*;
+    use std::sync::Mutex;
 
     #[allow(dead_code)]
     pub fn create_dummy_peer_state(
@@ -417,6 +423,8 @@ pub mod test {
             sync_req_state: sync_req::SyncReqState::new(),
             mgmt_processor,
             mgmt_processor_worker: task::spawn(async {}),
+            sn_gen: SeqNumGenerator::new(),
+            sn_track: Mutex::new(SeqNumTracker::new()),
             km_state: PeerKmState::new(),
             auth_key: [42u8; AUTH_KEY_SIZE_BYTES],
         }
