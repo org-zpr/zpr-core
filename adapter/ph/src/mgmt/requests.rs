@@ -99,7 +99,7 @@ pub fn send_init_authentication_request(
     flags: u8,
     payload: auth::ZdpInitAuthenticationPayload,
 ) -> zpr::SeqNum {
-    debug!(target: ZDP, "Link {link_id}: sending IntitAuthenticationRequest, flags: {flags:x?}");
+    debug!(target: ZDP, "Link {link_id}: sending InitAuthenticationRequest, flags: {flags:x?}");
 
     let mut req = core::new_heap_packet();
 

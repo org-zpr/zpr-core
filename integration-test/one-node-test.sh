@@ -2,6 +2,7 @@
 set -euo pipefail
 
 export RUST_BACKTRACE=1
+DEBUG_TARGETS=${DEBUG_TARGETS:-none}
 
 PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/cli/target/debug/ph-cli")
@@ -110,6 +111,7 @@ echo "Launching Node"
 
 sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   node \
+  --debug "$DEBUG_TARGETS" \
   --control-path "$NODE_SOCK" \
   --ca-file ca.crt \
   --certificate-file node.crt \
@@ -123,6 +125,7 @@ echo "Launching Adapters"
 
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
+  --debug "$DEBUG_TARGETS" \
   --control-path "$VS_SOCK" \
   --self-addr "$VS_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
@@ -138,6 +141,7 @@ sleep 5
 
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
+  --debug "$DEBUG_TARGETS" \
   --control-path "$ADAPTER1_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
@@ -151,6 +155,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
+  --debug "$DEBUG_TARGETS" \
   --control-path "$ADAPTER2_SOCK" \
   --self-addr "$B_SUBSTRATE_ADDR" \
   --ca-file ca.crt \
@@ -167,6 +172,7 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
   # on this interface, to test that replies are still routed correctly.
   sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
     adapter \
+  --debug "$DEBUG_TARGETS" \
     --control-path "$ADAPTER3_SOCK" \
     --self-addr "$C_SUBSTRATE_ADDR" \
     --ca-file ca.crt \

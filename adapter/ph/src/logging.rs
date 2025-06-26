@@ -24,6 +24,7 @@ pub mod targets {
     // ultimately lies with a dependency of X).
 
     pub const ALL: &str = "all";
+    pub const NONE: &str = "none";
     pub const CAPTURE: &str = "capture";
     pub const DATAPATH: &str = "datapath";
     pub const FLOW_MGMT: &str = "flow_mgmt";
@@ -42,6 +43,7 @@ pub mod targets {
 
     pub const ALL_TARGETS: &[&str] = &[
         ALL,
+        NONE,
         CAPTURE,
         DATAPATH,
         FLOW_MGMT,
@@ -75,14 +77,20 @@ where
     for target in debug.into_iter() {
         if target == targets::ALL {
             targets = targets.with_default(Level::DEBUG);
+        } else if target == targets::NONE {
+            targets = targets.with_default(Level::INFO);
         } else {
             targets = targets.with_target(target, Level::DEBUG);
         }
     }
 
+    let debugged_targets = targets.clone();
+
     for target in quiet.into_iter() {
         if target == targets::ALL {
             targets = targets.with_default(Level::ERROR);
+        } else if target == targets::NONE {
+            targets = debugged_targets.clone();
         } else {
             targets = targets.with_target(target, Level::ERROR);
         }
