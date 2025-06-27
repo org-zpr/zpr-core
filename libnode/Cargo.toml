@@ -1,6 +1,6 @@
 [package]
 name = "libnode"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -13,5 +13,5 @@ thrift = "0.17.0"
 tokio = { version = "1.40.0", features = ["full"] }
 tokio-util = { version = "0.7.12", features = ["rt"] }
 tracing = "0.1.40"
-vsapi = { git = "https://github.com/org-zpr/zpr-vsapi-rs.git", tag = "v0.2.0" }
+vsapi = { git = "https://github.com/org-zpr/zpr-vsapi-rs.git", tag = "v0.4.1" }
 zpr = { path = "../zpr" }

@@ -14,7 +14,7 @@ use tracing::{debug, error, info};
 
 use crate::logging::targets::VSS_RPC;
 use vsapi::{
-    self, PolicyInfo, VisaHop, VisaRevocation, VisaSupportSyncHandler, VisaSupportSyncProcessor,
+    self, PolicyInfo, VisaHop, VisaRevocation, VisaSupportSyncHandler, VisaSupportSyncProcessor, ServicesList
 };
 
 /// Default port for the visa support service. Note that the visa support service
@@ -33,6 +33,9 @@ pub enum VSSMsg {
 
     /// Pushed visa revokcations from the visa service.
     PushedRevocation(VisaRevocation),
+
+    /// Pushed list of services. For now will be just Actor Authentication services.
+    PushedServices(ServicesList),
 }
 
 /// The VisaSupportHandlerImpl is a light wrapper around the thrift
@@ -117,5 +120,17 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
                 })?;
         }
         Ok(())
+    }
+
+    /// Accept the updates list of services from the visa service.  Creates a PushServices
+    /// message.
+    fn handle_services_update(&self, services: ServicesList) -> thrift::Result<()> {
+        debug!(target: VSS_RPC, "handle_services_update");
+        self.msg_chan_out
+            .blocking_send(VSSMsg::PushedServices(services))
+            .or_else(|e| {
+                error!(target: VSS_RPC, "failed to enque services message to node: {e}");
+                Err(thrift::Error::from("enqueue failed"))
+            })
     }
 }
