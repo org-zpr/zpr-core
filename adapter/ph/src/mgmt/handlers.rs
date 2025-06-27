@@ -323,7 +323,7 @@ pub async fn handle_hello_request(
             // If we have a list of services, include them in the response.
             // TODO: The ASA is set as a SocketAddr which doesn't feel quite right.  Maybe should be a URI.
             for authservice in &svclist.services {
-                if let Some(sa) = authservice.to_socket_addr() {
+                if let Some(sa) = authservice.get_socket_addr() {
                     TlvEncoding::new_asa(sa).put(&mut rsp_pkt);
                 } else {
                     warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - service {} has no valid ASA address", authservice.service_id);

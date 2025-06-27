@@ -75,9 +75,9 @@ impl TryFrom<vsapi::ServiceDescriptor> for ServiceDescriptor {
 }
 
 impl ServiceDescriptor {
-    /// Gently try to convert this ServiceDescriptor into a SocketAddr.
+    /// Gently try to extract a SocketAddr from this ServiceDescriptor.
     /// If there are any problems, None is returned.
-    pub fn to_socket_addr(&self) -> Option<std::net::SocketAddr> {
+    pub fn get_socket_addr(&self) -> Option<std::net::SocketAddr> {
         // To create a socket address we need a port, which is on the URI.
         let uri = match Url::parse(&self.service_uri) {
             Ok(u) => u,
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn test_service_descriptor_to_socket_addr_ipv4() {
         let descriptor = create_test_service_descriptor();
-        let socket_addr = descriptor.to_socket_addr();
+        let socket_addr = descriptor.get_socket_addr();
 
         assert!(socket_addr.is_some());
         let addr = socket_addr.unwrap();
@@ -246,7 +246,7 @@ mod tests {
     #[test]
     fn test_service_descriptor_to_socket_addr_ipv6() {
         let descriptor = create_test_service_descriptor_v6();
-        let socket_addr = descriptor.to_socket_addr();
+        let socket_addr = descriptor.get_socket_addr();
 
         assert!(socket_addr.is_some());
         let addr = socket_addr.unwrap();
@@ -260,7 +260,7 @@ mod tests {
         let mut descriptor = create_test_service_descriptor();
         descriptor.service_uri = "not-a-valid-uri".to_string();
 
-        let socket_addr = descriptor.to_socket_addr();
+        let socket_addr = descriptor.get_socket_addr();
         assert!(socket_addr.is_none());
     }
 
@@ -269,7 +269,7 @@ mod tests {
         let mut descriptor = create_test_service_descriptor();
         descriptor.service_uri = "https://example.com/auth".to_string(); // No port
 
-        let socket_addr = descriptor.to_socket_addr();
+        let socket_addr = descriptor.get_socket_addr();
         assert!(socket_addr.is_none());
     }
 
@@ -278,7 +278,7 @@ mod tests {
         let mut descriptor = create_test_service_descriptor();
         descriptor.service_uri = "http://example.com/auth".to_string(); // HTTP default port
 
-        let socket_addr = descriptor.to_socket_addr();
+        let socket_addr = descriptor.get_socket_addr();
         // This should return None because url.port() returns None for default ports
         assert!(socket_addr.is_none());
     }
@@ -288,7 +288,7 @@ mod tests {
         let mut descriptor = create_test_service_descriptor();
         descriptor.service_uri = "http://example.com:8080/auth".to_string();
 
-        let socket_addr = descriptor.to_socket_addr();
+        let socket_addr = descriptor.get_socket_addr();
         assert!(socket_addr.is_some());
         assert_eq!(socket_addr.unwrap().port(), 8080);
     }
