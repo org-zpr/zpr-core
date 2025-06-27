@@ -13,7 +13,7 @@ use crate::packet::Packet;
 use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
 use bytes::{Buf, BufMut};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
@@ -317,13 +317,22 @@ pub async fn handle_hello_request(
     TlvEncoding::new_policy_id(policy_id).put(&mut rsp_pkt);
     TlvEncoding::new_version(VERSION).put(&mut rsp_pkt);
 
-    // TODO: This info needs to come from the visa service
-    let service_addr = SocketAddr::new(
-        IpAddr::V6(auth::HARD_CODED_BAS_ADDR),
-        auth::DEFAULT_ZPR_OAUTH_RSA_PORT,
-    );
-    TlvEncoding::new_asa(service_addr).put(&mut rsp_pkt);
-
+    {
+        let svclist = asm.vs_auth_services.read().await;
+        if svclist.is_valid() {
+            // If we have a list of services, include them in the response.
+            // TODO: The ASA is set as a SocketAddr which doesn't feel quite right.  Maybe should be a URI.
+            for authservice in &svclist.services {
+                if let Some(sa) = authservice.to_socket_addr() {
+                    TlvEncoding::new_asa(sa).put(&mut rsp_pkt);
+                } else {
+                    warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - service {} has no valid ASA address", authservice.service_id);
+                }
+            }
+        } else {
+            warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - no valid auth services available");
+        }
+    }
     super::core::send_non_flow_mgmt(
         asm,
         ingress_link_id,

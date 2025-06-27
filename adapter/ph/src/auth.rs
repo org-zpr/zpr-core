@@ -2,7 +2,7 @@
 //! when we need to join a ZPRnet but there are no authentication services
 //! attached yet.  Also includes other "auth" related functionality.
 
-use std::net::{Ipv6Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -42,11 +42,6 @@ pub const BLOB_TYPE_AC: &str = "AC";
 /// be no older than this.
 pub const MAX_BLOB_AGE_SECONDS: u64 = 120; // 2 minutes
 
-/// Default port used by authentication services running the zpr-oauthrsa protocol.
-pub const DEFAULT_ZPR_OAUTH_RSA_PORT: u16 = 4000;
-
-// "fd5a:5052:1::10" TODO: needs to come from dock (which gets it from VS)
-pub const HARD_CODED_BAS_ADDR: Ipv6Addr = Ipv6Addr::new(0xfd5a, 0x5052, 0x1, 0, 0, 0, 0, 0x10);
 
 // TODO: Not sure how we get these out or if we need them.
 pub const HARD_CODED_BAS_TLS_CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----

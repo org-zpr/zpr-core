@@ -4,11 +4,16 @@ use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::VISA_MGMT;
 use crate::net_defs::IpAddress;
 use crate::visa_table;
+use crate::vs_types;
 use libnode::vsapi;
 use std::num::NonZero;
 use std::sync::Arc;
+use std::time::{Duration, UNIX_EPOCH};
 use tracing::*;
 use zpr::{LinkId, VisaId};
+
+
+
 
 pub fn authorize_connect(
     asm: &Arc<Assembly>,
@@ -191,4 +196,48 @@ pub async fn handle_revocation(
         .write()
         .await
         .revoke(&asm.peer_table, visa_id)
+}
+
+pub async fn handle_services_update(
+    asm: &Arc<Assembly>,
+    services: vsapi::ServicesList,
+) -> Result<(), visa_table::VisaTableError> {
+
+    let expiration = if let Some(unixts) = services.expiration {
+        UNIX_EPOCH + Duration::from_secs(unixts as u64)
+    } else {
+        error!(target: VISA_MGMT, "visa service sends services list with no expiration set");
+        UNIX_EPOCH // not present? Already expired then.
+    };
+
+    let mut vs_auth_services = Vec::new();
+
+    if let Some(services) = services.services {
+        debug!(target: VISA_MGMT, "received services update with {} entries", services.len());
+        for service in services {
+            if service.type_ != vsapi::ServiceType::ACTOR_AUTHENTICATION {
+                continue;
+            }
+            if service.address.is_none() {
+                error!(target: VISA_MGMT, "service descriptor with no address (id={}", service.service_id.unwrap_or_default());
+                continue;
+            }
+            match vs_types::ServiceDescriptor::try_from(service) {
+                Ok(sd) => {
+                    vs_auth_services.push(sd);
+                }
+                Err(e) => {
+                    error!(target: VISA_MGMT, "failed to parse vsapi service descriptor: {e}");
+                    continue;
+                }
+            }
+        }
+    } else {
+        // Got update with nothing.
+        debug!(target: VISA_MGMT, "received empty services update, clearing vs_auth_services");
+    }
+    // The update is always a complete replacement of the list of services, and may be empty.
+    let mut svcs = asm.vs_auth_services.write().await;
+    svcs.update(expiration, vs_auth_services);
+    Ok(())
 }
