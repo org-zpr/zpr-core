@@ -1,13 +1,13 @@
 # vs-client
 
-A toy client for the visa service. This is for playing with the visa service 
+A toy client for the visa service. This is for playing with the visa service
 API during development.
 
 
 
 ## Usage
 
-First start the visa service locally (ie, without ZPR running).  (Use 
+First start the visa service locally (ie, without ZPR running).  (Use
 something like `-l 127.0.0.1:31337`).
 
 Pass `-h` to get the list of available commands.
@@ -24,10 +24,10 @@ Try hello:
 Or authenticate, which will return an API key.
 
 ```bash
-./vs-client authenticate -s localhost:31337 -c flubber=rubber -c fee=flop --cert ./cert.pem --key ./key.pem
+./vs-client authenticate -s localhost:31337  --cert ./cert.pem --zpr-addr fd5a:90de::1 --node-name n0
 ```
 
-- you need a certificate and a private key.
+- you need a certificate, an address and a name.
 - use `-c` to pass claims.
 
 
@@ -44,7 +44,7 @@ Now you can de-register:
 
 ### Notes
 
-- In order to get full usage you may need to add some IP addresses to your 
+- In order to get full usage you may need to add some IP addresses to your
   local interface and/or use a specially crafted policy.
 
 
