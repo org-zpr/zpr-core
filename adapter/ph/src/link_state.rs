@@ -140,6 +140,7 @@ pub enum LinkEvent {
     KeyingDone,
     ReceivedHelloRequest(IpAddress), // Actors ZPR address - TODO: implement AAAs
     ReceivedHelloResponse(ResponseCode, Option<Vec<SocketAddr>>), // (response code, ASA addresses)
+    SentHelloResponse,
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
 
@@ -412,6 +413,8 @@ impl LinkStateWrapper {
                 self.process_hello_response(asm, code, maybe_asa_addrs)
             }
 
+            LinkEvent::SentHelloResponse => self.process_sent_hello_response(asm),
+
             LinkEvent::ReceivedAcquireZprAddressRequest(addrs, blob) => {
                 self.process_acquire_zpr_address_request(asm, addrs, blob)
             }
@@ -613,6 +616,35 @@ impl LinkStateWrapper {
             (_, _) => Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
                 "ReceivedHelloRequest",
+            )),
+        }
+    }
+
+    fn process_sent_hello_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        let link_id = self.id;
+        match (self.link_type, locked_fsm.state) {
+            // Node->Adapter - we are in helloing state until we have fired off our
+            // HelloResponse.  At that point we can send an init-auth request.
+            (LinkType::NodeToAdapter, LinkState::Helloing) => {
+                locked_fsm.set_state(LinkState::WaitForInitAuth);
+                self.send_init_authentication_request(asm);
+                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+                debug!(
+                    target: LINK_STATE,
+                    "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
+                );
+                Ok(())
+            }
+            (LinkType::AdapterToNode, _) => {
+                // Adapters should not be sending hello-response to a node.
+                Err(LinkStateError::InvalidOperation(
+                    "Adapter should not send hello-response".to_string(),
+                ))
+            }
+            (_, _) => Err(LinkStateError::UnexpectedTransition(
+                locked_fsm.state,
+                "SentHelloResponse",
             )),
         }
     }
@@ -936,6 +968,9 @@ impl LinkStateWrapper {
     }
 
     /// Handle an init-auth message from sender.
+    ///
+    /// This is a slow function that is called AFTER we send a reply to the
+    /// init-auth message.
     ///
     /// If this is bootstrap and we are configured for bootstrap we can self-authenticate
     /// and send in an AcquireZprAddressRequest.

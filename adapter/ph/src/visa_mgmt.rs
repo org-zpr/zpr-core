@@ -12,9 +12,6 @@ use std::time::{Duration, UNIX_EPOCH};
 use tracing::*;
 use zpr::{LinkId, VisaId};
 
-
-
-
 pub fn authorize_connect(
     asm: &Arc<Assembly>,
     link_id: LinkId,
@@ -202,7 +199,6 @@ pub async fn handle_services_update(
     asm: &Arc<Assembly>,
     services: vsapi::ServicesList,
 ) -> Result<(), visa_table::VisaTableError> {
-
     let expiration = if let Some(unixts) = services.expiration {
         if unixts == 0 {
             // 0 is a special case, meaning "no expiration"

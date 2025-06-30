@@ -3,10 +3,9 @@ use crate::net_defs::IpAddress;
 use libnode::vsapi;
 
 use std::convert::TryFrom;
-use std::time::SystemTime;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::time::SystemTime;
 use url::Url;
-
 
 /// A parsed [vsapi::ServicesList].  Note that all the services in here will be of
 /// type [vsapi::ServiceType::ACTOR_AUTHENTICATION].
@@ -48,7 +47,6 @@ impl AuthServicesList {
         !self.is_empty() && !self.is_expired()
     }
 }
-
 
 /// A parsed [vsapi::ServiceDescriptor] that we use to keep ASA records.
 #[derive(Debug, Clone)]
@@ -101,13 +99,11 @@ impl ServiceDescriptor {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
     use libnode::vsapi;
+    use std::time::Duration;
 
     // Helper function to create a test ServiceDescriptor
     fn create_test_service_descriptor() -> ServiceDescriptor {
@@ -200,9 +196,11 @@ mod tests {
         let descriptor = result.unwrap();
         assert_eq!(descriptor.service_id, "test-service");
         assert_eq!(descriptor.service_uri, "https://example.com:8443/auth");
-        assert_eq!(descriptor.zpr_address, IpAddress::new_from_v4([192, 168, 1, 100]));
+        assert_eq!(
+            descriptor.zpr_address,
+            IpAddress::new_from_v4([192, 168, 1, 100])
+        );
     }
-
 
     #[test]
     fn test_service_descriptor_try_from_no_address() {
@@ -215,7 +213,10 @@ mod tests {
 
         let result = ServiceDescriptor::try_from(vsapi_descriptor);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "vsapi::ServiceDescriptor address is empty");
+        assert_eq!(
+            result.unwrap_err(),
+            "vsapi::ServiceDescriptor address is empty"
+        );
     }
 
     #[test]
@@ -296,5 +297,4 @@ mod tests {
         assert!(socket_addr.is_some());
         assert_eq!(socket_addr.unwrap().port(), 8080);
     }
-
 }

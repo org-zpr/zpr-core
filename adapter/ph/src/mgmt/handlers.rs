@@ -341,6 +341,13 @@ pub async fn handle_hello_request(
         rsp_pkt,
     );
 
+    match asm.process_link_state_event(ingress_link_id, LinkEvent::SentHelloResponse) {
+        Err(e) => {
+            error!(target: ZDP, "Link {ingress_link_id}: Failed to process SentHelloResponse event: {:?}", e);
+        }
+        Ok(()) => (),
+    }
+
     Ok(())
 }
 

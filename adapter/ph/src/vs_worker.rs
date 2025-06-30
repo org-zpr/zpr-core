@@ -5,7 +5,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::*;
 
-
 // TODO: It might be nice to get a message here when we establlish a a node connection to
 // the VS API.  Then we could send a request for the services list.  Not a big deal until
 // we have more than one node. With one node, we are always going to get a push
