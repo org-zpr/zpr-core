@@ -150,3 +150,136 @@ impl SeqNumTracker {
         std::mem::take(&mut self.stats[stat])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{truncate_seq_num, SeqNumTracker};
+
+    #[test]
+    fn basic_tracking() {
+        let mut snt = SeqNumTracker::new();
+
+        for i in 0..5 {
+            assert_eq!(snt.process_seq_num(truncate_seq_num(i)), Some(i));
+        }
+
+        assert_eq!(snt.highest_seen(), 4);
+    }
+
+    #[test]
+    fn offset_sn() {
+        let mut snt = SeqNumTracker::new();
+
+        snt.resynchronize(0x123456); // wrap the truncated SN
+
+        for i in 0x123457..0x12345c {
+            assert_eq!(snt.process_seq_num(truncate_seq_num(i)), Some(i));
+        }
+
+        assert_eq!(snt.highest_seen(), 0x12345b);
+    }
+
+    #[test]
+    fn wrap_tsn() {
+        let mut snt = SeqNumTracker::new();
+
+        snt.resynchronize(0x12fffd); // wrap the truncated SN
+
+        for i in 0x12fffe..0x130003 {
+            assert_eq!(snt.process_seq_num(truncate_seq_num(i)), Some(i));
+        }
+
+        assert_eq!(snt.highest_seen(), 0x130002);
+    }
+
+    #[test]
+    fn too_old_basic() {
+        let mut snt = SeqNumTracker::new();
+
+        assert_eq!(snt.process_seq_num(0), Some(0));
+        assert_eq!(snt.process_seq_num(0xF000), None);
+        assert_eq!(snt.highest_seen(), 0);
+        assert_eq!(snt.process_seq_num(1), Some(1));
+    }
+
+    #[test]
+    fn too_old_wrapping() {
+        let mut snt = SeqNumTracker::new();
+        snt.resynchronize(0x15000);
+
+        assert_eq!(snt.process_seq_num(0x5001), Some(0x15001));
+        assert_eq!(snt.process_seq_num(0x3000), None);
+        assert_eq!(snt.highest_seen(), 0x15001);
+        assert_eq!(snt.process_seq_num(0xF000), None);
+        assert_eq!(snt.highest_seen(), 0x15001);
+        assert_eq!(snt.process_seq_num(0x5002), Some(0x15002));
+    }
+
+    #[test]
+    fn skip_basic() {
+        let mut snt = SeqNumTracker::new();
+
+        assert_eq!(snt.process_seq_num(0), Some(0));
+        assert_eq!(snt.process_seq_num(0x1000), Some(0x1000));
+        assert_eq!(snt.highest_seen(), 0x1000);
+        assert_eq!(snt.process_seq_num(0x1001), Some(0x1001));
+    }
+
+    #[test]
+    fn skip_wrapping() {
+        let mut snt = SeqNumTracker::new();
+        snt.resynchronize(0x9000);
+
+        assert_eq!(snt.process_seq_num(0x9001), Some(0x9001));
+        assert_eq!(snt.process_seq_num(0xB000), Some(0xB000));
+        assert_eq!(snt.highest_seen(), 0xB000);
+        assert_eq!(snt.process_seq_num(0x1000), Some(0x11000));
+        assert_eq!(snt.highest_seen(), 0x11000);
+    }
+
+    #[test]
+    fn out_of_order() {
+        let mut snt = SeqNumTracker::new();
+
+        assert_eq!(snt.process_seq_num(truncate_seq_num(0)), Some(0));
+        assert_eq!(snt.process_seq_num(truncate_seq_num(2)), Some(2));
+        assert_eq!(snt.process_seq_num(truncate_seq_num(1)), Some(1));
+        assert_eq!(snt.process_seq_num(truncate_seq_num(4)), Some(4));
+        assert_eq!(snt.process_seq_num(truncate_seq_num(3)), Some(3));
+        assert_eq!(snt.highest_seen(), 4);
+    }
+
+    #[test]
+    fn duplicate_basic() {
+        let mut snt = SeqNumTracker::new();
+
+        assert_eq!(snt.process_seq_num(0xFFFF), None);
+
+        for i in 0..5 {
+            assert_eq!(snt.process_seq_num(truncate_seq_num(i)), Some(i));
+        }
+
+        for i in 0..5 {
+            assert_eq!(snt.process_seq_num(truncate_seq_num(i)), None);
+            assert_eq!(snt.highest_seen(), 4);
+        }
+    }
+
+    #[test]
+    fn duplicate_skip() {
+        let mut snt = SeqNumTracker::new();
+
+        for i in 0..5 {
+            assert_eq!(snt.process_seq_num(truncate_seq_num(i)), Some(i));
+        }
+
+        assert_eq!(snt.process_seq_num(0x1000), Some(0x1000));
+
+        for i in 0..5 {
+            assert_eq!(
+                snt.process_seq_num(truncate_seq_num(0x1001 + i)),
+                Some(0x1001 + i)
+            );
+        }
+    }
+}
