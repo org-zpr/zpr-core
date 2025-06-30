@@ -236,6 +236,7 @@ pub async fn handle_services_update(
         // Got update with nothing.
         debug!(target: VISA_MGMT, "received empty services update, clearing vs_auth_services");
     }
+    debug!(target: VISA_MGMT, "updating auth services with {} entries", vs_auth_services.len());
     // The update is always a complete replacement of the list of services, and may be empty.
     let mut svcs = asm.vs_auth_services.write().await;
     svcs.update(expiration, vs_auth_services);
