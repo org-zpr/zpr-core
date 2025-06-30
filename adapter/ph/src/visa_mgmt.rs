@@ -204,10 +204,15 @@ pub async fn handle_services_update(
 ) -> Result<(), visa_table::VisaTableError> {
 
     let expiration = if let Some(unixts) = services.expiration {
-        UNIX_EPOCH + Duration::from_secs(unixts as u64)
+        if unixts == 0 {
+            // 0 is a special case, meaning "no expiration"
+            None
+        } else {
+            Some(UNIX_EPOCH + Duration::from_secs(unixts as u64))
+        }
     } else {
         error!(target: VISA_MGMT, "visa service sends services list with no expiration set");
-        UNIX_EPOCH // not present? Already expired then.
+        Some(UNIX_EPOCH) // not present? Already expired then.
     };
 
     let mut vs_auth_services = Vec::new();

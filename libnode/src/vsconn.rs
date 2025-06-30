@@ -119,7 +119,7 @@ impl VSConn {
     /// Create a new Visa Service Connection manager.
     ///
     /// - `node_actor` is the node's Actor representation.  See [new_node_actor] for a helper function to create this.
-    /// - `output_tx` is the channel to send output messages to the node.
+    /// - `output_tx` is the channel to send output messages to the node. The only message left is PING_SUCCESS.
     /// - `service_addr` is ADDR:PORT of the visa service (ADDR should be a ZPR address)
     /// - `node_cert_file` is the path to the node's signed (for now) EC certificate file
     /// - `node_zpr_addr` node ZPR address (not substrate address) as set by network admin

@@ -12,27 +12,31 @@ use url::Url;
 /// type [vsapi::ServiceType::ACTOR_AUTHENTICATION].
 #[derive(Debug, Clone)]
 pub struct AuthServicesList {
-    pub expiration: SystemTime,
+    pub expiration: Option<SystemTime>, // 0 value means "no expiration"
     pub services: Vec<ServiceDescriptor>,
 }
 
 impl Default for AuthServicesList {
     fn default() -> Self {
         AuthServicesList {
-            expiration: SystemTime::UNIX_EPOCH,
+            expiration: Some(SystemTime::UNIX_EPOCH),
             services: Vec::new(),
         }
     }
 }
 
 impl AuthServicesList {
-    pub fn update(&mut self, expiration: SystemTime, services: Vec<ServiceDescriptor>) {
+    pub fn update(&mut self, expiration: Option<SystemTime>, services: Vec<ServiceDescriptor>) {
         self.expiration = expiration;
         self.services = services;
     }
 
     pub fn is_expired(&self) -> bool {
-        SystemTime::now() >= self.expiration
+        if let Some(exp) = self.expiration {
+            SystemTime::now() >= exp
+        } else {
+            false
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -127,7 +131,7 @@ mod tests {
     #[test]
     fn test_auth_services_list_update() {
         let mut list = AuthServicesList::default();
-        let future_time = SystemTime::now() + Duration::from_secs(3600);
+        let future_time = Some(SystemTime::now() + Duration::from_secs(3600));
         let services = vec![create_test_service_descriptor()];
 
         list.update(future_time, services.clone());
@@ -142,12 +146,12 @@ mod tests {
         let mut list = AuthServicesList::default();
 
         // Test with past time
-        let past_time = SystemTime::now() - Duration::from_secs(3600);
+        let past_time = Some(SystemTime::now() - Duration::from_secs(3600));
         list.expiration = past_time;
         assert!(list.is_expired());
 
         // Test with future time
-        let future_time = SystemTime::now() + Duration::from_secs(3600);
+        let future_time = Some(SystemTime::now() + Duration::from_secs(3600));
         list.expiration = future_time;
         assert!(!list.is_expired());
     }
@@ -173,7 +177,7 @@ mod tests {
         assert!(!list.is_valid());
 
         // Non-empty and not expired
-        list.expiration = SystemTime::now() + Duration::from_secs(3600);
+        list.expiration = Some(SystemTime::now() + Duration::from_secs(3600));
         assert!(list.is_valid());
 
         // Empty but not expired
