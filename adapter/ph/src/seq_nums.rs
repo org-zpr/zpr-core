@@ -28,7 +28,7 @@ pub fn truncate_seq_num(sn: SeqNum) -> u16 {
     (sn & 0xFFFF) as u16
 }
 
-#[derive(Clone, Copy, Enum, strum::EnumIter)]
+#[derive(Clone, Copy, Debug, Enum, strum::EnumIter)]
 pub enum SeqNumTrackerStat {
     /// how many packets were rejected due to being "too old" (and therefore possibly duplicates)
     TooOld,
@@ -94,9 +94,17 @@ impl SeqNumTracker {
     /// reference sequence number, under the assumption that it is within a
     /// window centered on the highest seen value thus far.
     fn reify_seq_num_relative(reference: SeqNum, sn: u16) -> i64 {
-        (sn.wrapping_sub((reference & 0xFFFF) as u16)
-            .wrapping_add(0x8000) as i64)
-            - 0x8000
+        // We operate under the assumption that the difference between the
+        // true sequence number and `reference` is in the range [-2^15, 2^15).
+
+        // Under that assumption, we can subtract the truncated versions
+        // of both to produce a 16-bit 2s-complement value representing
+        // this difference.
+        let diff = sn.wrapping_sub((reference & 0xFFFF) as u16);
+
+        // Convert the 16-bit 2s-complement value into a 64-bit signed value,
+        // by adding 0x8000, casting to signed, and subtracting 0x8000.
+        (diff.wrapping_add(0x8000) as i64) - 0x8000
     }
 
     /// Process the truncated sequence number of a received packet.
@@ -121,11 +129,12 @@ impl SeqNumTracker {
             self.highest_seen = self.highest_seen.wrapping_add(offset as SeqNum);
 
             if offset >= Self::WINDOW_SIZE as i64 {
-                self.stats[SeqNumTrackerStat::Lost] += self.window.count_zeros() as u64;
+                self.stats[SeqNumTrackerStat::Lost] += (self.window.count_zeros() as u64)
+                    + ((offset as u64) - (Self::WINDOW_SIZE as u64));
                 self.window = 0;
             } else {
-                self.stats[SeqNumTrackerStat::Lost] +=
-                    (self.window >> ((Self::WINDOW_SIZE as i64) - offset)).count_zeros() as u64;
+                self.stats[SeqNumTrackerStat::Lost] += (offset as u64)
+                    - ((self.window >> ((Self::WINDOW_SIZE as i64) - offset)).count_ones() as u64);
                 self.window <<= offset;
             }
             self.window |= 1;
@@ -153,7 +162,12 @@ impl SeqNumTracker {
 
 #[cfg(test)]
 mod tests {
-    use super::{truncate_seq_num, SeqNumTracker};
+    use super::{truncate_seq_num, SeqNumTracker, SeqNumTrackerStat as Stat};
+    use enum_map::{enum_map, EnumMap};
+
+    fn fetch_reset_all_stats(snt: &mut SeqNumTracker) -> EnumMap<Stat, u64> {
+        EnumMap::from_fn(|s| snt.fetch_reset_stat(s))
+    }
 
     #[test]
     fn basic_tracking() {
@@ -164,6 +178,7 @@ mod tests {
         }
 
         assert_eq!(snt.highest_seen(), 4);
+        assert_eq!(fetch_reset_all_stats(&mut snt), enum_map! { _ => 0 });
     }
 
     #[test]
@@ -177,6 +192,7 @@ mod tests {
         }
 
         assert_eq!(snt.highest_seen(), 0x12345b);
+        assert_eq!(fetch_reset_all_stats(&mut snt), enum_map! { _ => 0 });
     }
 
     #[test]
@@ -190,6 +206,7 @@ mod tests {
         }
 
         assert_eq!(snt.highest_seen(), 0x130002);
+        assert_eq!(fetch_reset_all_stats(&mut snt), enum_map! { _ => 0 });
     }
 
     #[test]
@@ -200,6 +217,11 @@ mod tests {
         assert_eq!(snt.process_seq_num(0xF000), None);
         assert_eq!(snt.highest_seen(), 0);
         assert_eq!(snt.process_seq_num(1), Some(1));
+
+        assert_eq!(
+            fetch_reset_all_stats(&mut snt),
+            enum_map! { Stat::TooOld => 1, _ => 0 }
+        );
     }
 
     #[test]
@@ -213,6 +235,11 @@ mod tests {
         assert_eq!(snt.process_seq_num(0xF000), None);
         assert_eq!(snt.highest_seen(), 0x15001);
         assert_eq!(snt.process_seq_num(0x5002), Some(0x15002));
+
+        assert_eq!(
+            fetch_reset_all_stats(&mut snt),
+            enum_map! { Stat::TooOld => 2, _ => 0 }
+        );
     }
 
     #[test]
@@ -223,18 +250,30 @@ mod tests {
         assert_eq!(snt.process_seq_num(0x1000), Some(0x1000));
         assert_eq!(snt.highest_seen(), 0x1000);
         assert_eq!(snt.process_seq_num(0x1001), Some(0x1001));
+
+        // note, the 62 unreceived packets still in the new window aren't lost yet
+        assert_eq!(
+            fetch_reset_all_stats(&mut snt),
+            enum_map! { Stat::Lost => 0xFFF - 62, _ => 0 }
+        );
     }
 
     #[test]
     fn skip_wrapping() {
         let mut snt = SeqNumTracker::new();
-        snt.resynchronize(0x9000);
+        snt.resynchronize(0x8FFF);
 
-        assert_eq!(snt.process_seq_num(0x9001), Some(0x9001));
+        assert_eq!(snt.process_seq_num(0x9000), Some(0x9000));
         assert_eq!(snt.process_seq_num(0xB000), Some(0xB000));
         assert_eq!(snt.highest_seen(), 0xB000);
         assert_eq!(snt.process_seq_num(0x1000), Some(0x11000));
         assert_eq!(snt.highest_seen(), 0x11000);
+
+        // note, the 63 unreceived packets still in the new window aren't lost yet
+        assert_eq!(
+            fetch_reset_all_stats(&mut snt),
+            enum_map! { Stat::Lost => 0x7FFE - 63, _ => 0 }
+        );
     }
 
     #[test]
@@ -247,6 +286,11 @@ mod tests {
         assert_eq!(snt.process_seq_num(truncate_seq_num(4)), Some(4));
         assert_eq!(snt.process_seq_num(truncate_seq_num(3)), Some(3));
         assert_eq!(snt.highest_seen(), 4);
+
+        assert_eq!(
+            fetch_reset_all_stats(&mut snt),
+            enum_map! { Stat::OutOfOrder => 2, _ => 0 }
+        );
     }
 
     #[test]
@@ -263,6 +307,11 @@ mod tests {
             assert_eq!(snt.process_seq_num(truncate_seq_num(i)), None);
             assert_eq!(snt.highest_seen(), 4);
         }
+
+        assert_eq!(
+            fetch_reset_all_stats(&mut snt),
+            enum_map! { Stat::Duplicate => 6, _ => 0 }
+        );
     }
 
     #[test]
@@ -277,9 +326,101 @@ mod tests {
 
         for i in 0..5 {
             assert_eq!(
+                snt.process_seq_num(truncate_seq_num(0xfff - i)),
+                Some(0xfff - i)
+            );
+        }
+
+        for i in 0..5 {
+            assert_eq!(
                 snt.process_seq_num(truncate_seq_num(0x1001 + i)),
                 Some(0x1001 + i)
             );
         }
+
+        assert_eq!(
+            fetch_reset_all_stats(&mut snt),
+            enum_map! { Stat::Lost => 0x1000 - 63, Stat::OutOfOrder => 5, _ => 0 }
+        );
+    }
+
+    #[test]
+    fn test_clear_stats() {
+        let mut snt = SeqNumTracker::new();
+
+        // Out of order
+        snt.process_seq_num(1);
+        snt.process_seq_num(0);
+
+        // Duplicate
+        snt.process_seq_num(0);
+
+        // Too old
+        snt.process_seq_num(0xF000);
+
+        // Lose a packet
+        snt.process_seq_num(66);
+
+        assert_eq!(fetch_reset_all_stats(&mut snt), enum_map! { _ => 1 });
+        assert_eq!(fetch_reset_all_stats(&mut snt), enum_map! { _ => 0 });
+    }
+
+    #[test]
+    fn test_reify() {
+        assert_eq!(SeqNumTracker::reify_seq_num_relative(0x2000, 0x2000), 0);
+        assert_eq!(SeqNumTracker::reify_seq_num_relative(0x2000, 0x2001), 1);
+        assert_eq!(SeqNumTracker::reify_seq_num_relative(0x2000, 0x1FFF), -1);
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0x2000, 0x3000),
+            0x1000
+        );
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0x2000, 0x1000),
+            -0x1000
+        );
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0x2000, 0x9000),
+            0x7000
+        );
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0x2000, 0xF000),
+            -0x3000
+        );
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0x2000, 0xB000),
+            -0x7000
+        );
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0x2000, 0xA000),
+            -0x8000
+        );
+
+        assert_eq!(SeqNumTracker::reify_seq_num_relative(0xE000, 0xE000), 0);
+        assert_eq!(SeqNumTracker::reify_seq_num_relative(0xE000, 0xDFFF), -1);
+        assert_eq!(SeqNumTracker::reify_seq_num_relative(0xE000, 0xE001), 1);
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0xE000, 0xD000),
+            -0x1000
+        );
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0xE000, 0xF000),
+            0x1000
+        );
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0xE000, 0x7000),
+            -0x7000
+        );
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0xE000, 0x1000),
+            0x3000
+        );
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0xE000, 0x5000),
+            0x7000
+        );
+        assert_eq!(
+            SeqNumTracker::reify_seq_num_relative(0xE000, 0x6000),
+            -0x8000
+        );
     }
 }
