@@ -24,6 +24,7 @@ pub const DEFAULT_MESSAGE_HEADROOM: usize = 256;
 
 pub const DEFAULT_REQUEST_RETRY_COUNT: usize = 3;
 pub const DEFAULT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(1);
+pub const DEFAULT_TERMINATE_RESPONSE_TIMER: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub const ANCILLARY_BUFFER_SIZE: usize = 128;
 

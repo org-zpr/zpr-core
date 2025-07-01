@@ -1247,6 +1247,15 @@ impl LinkStateWrapper {
                 Ok(())
             }
 
+            (_, LinkState::Closing) => {
+                // This is a timeout while we are waiting for a terminate response post initiate close.
+                // Now we finish the job,
+                debug!(target: LINK_STATE, "Link {} received timeout waiting on terminate response, shutting down link", self.id);
+                drop(locked_fsm);
+                self.complete_close(asm);
+                Ok(())
+            }
+
             (_, _) => Err(LinkStateError::InvalidOperation(format!(
                 "Ignoring unexpected timeout in state {:?}",
                 locked_fsm.state
@@ -1304,6 +1313,7 @@ impl LinkStateWrapper {
     /// Initiate the shutdown of the link
     /// Transitions to Closing from any running state
     /// Generates a Terminate Request packet
+    /// Sets a timeout in case we do not get a terminate response.
     fn initiate_close(
         &self,
         asm: &Arc<Assembly>,
@@ -1314,6 +1324,11 @@ impl LinkStateWrapper {
 
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.set_state(LinkState::Closing);
+        self.set_timeout(
+            asm,
+            &mut locked_fsm,
+            config::DEFAULT_TERMINATE_RESPONSE_TIMER,
+        );
         mgmt::requests::send_terminate_request(asm, self.id, reason);
         Ok(())
     }
