@@ -231,7 +231,6 @@ impl VSClientI for VSClient {
             return Err(VSClientError::NoAPIKey);
         }
         let key = self.key.as_ref().unwrap();
-        self.cli.request_services(key.clone())
-            .map_err(|e| e.into())
+        self.cli.request_services(key.clone()).map_err(|e| e.into())
     }
 }

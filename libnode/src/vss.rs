@@ -14,7 +14,8 @@ use tracing::{debug, error, info};
 
 use crate::logging::targets::VSS_RPC;
 use vsapi::{
-    self, PolicyInfo, VisaHop, VisaRevocation, VisaSupportSyncHandler, VisaSupportSyncProcessor, ServicesList
+    self, PolicyInfo, ServicesList, VisaHop, VisaRevocation, VisaSupportSyncHandler,
+    VisaSupportSyncProcessor,
 };
 
 /// Default port for the visa support service. Note that the visa support service

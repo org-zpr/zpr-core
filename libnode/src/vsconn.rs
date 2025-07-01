@@ -38,7 +38,6 @@ type AuthorizeConnectResponse = Result<vsapi::ConnectResponse, VSClientError>;
 type DisconnectStatus = Result<(), VSClientError>;
 type RequestServicesResponse = Result<vsapi::ServicesResponse, VSClientError>;
 
-
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -49,9 +48,7 @@ enum VSCommand {
         oneshot::Sender<AuthorizeConnectResponse>,
     ),
     ActorDisconnect(IpAddr, oneshot::Sender<DisconnectStatus>), // takes a ZPR address assigned to the actor
-    RequestServices(
-        oneshot::Sender<RequestServicesResponse>,
-    ),
+    RequestServices(oneshot::Sender<RequestServicesResponse>),
 }
 
 // This will change a bit too. This is for output messages from the visa service. These are asynchronous
@@ -259,9 +256,7 @@ impl VSConn {
         }
     }
 
-    fn handle_request_services(
-        client: &mut Box<dyn VSClientI>,
-    ) -> RequestServicesResponse {
+    fn handle_request_services(client: &mut Box<dyn VSClientI>) -> RequestServicesResponse {
         match client.request_services() {
             Ok(sr) => Ok(sr),
             Err(e) => {
@@ -353,8 +348,7 @@ impl VSConnHandle {
     /// Perform async RequestServices request on the VS API.
     pub async fn request_services(&self) -> RequestServicesResponse {
         let (tx, rx) = oneshot::channel();
-        self.send_command(VSCommand::RequestServices(tx))
-            .await?;
+        self.send_command(VSCommand::RequestServices(tx)).await?;
         rx.await.map_err(|_| VSClientError::ConnClosed)?
     }
 }
@@ -600,12 +594,15 @@ s5JVZ48=
             }
             let response = vsapi::ServicesResponse {
                 services: Some(vsapi::ServicesList {
-                    expiration: Some(SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs() as i64 + 3600), // +1 hour
+                    expiration: Some(
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i64
+                            + 3600,
+                    ), // +1 hour
                     services: None,
-                })
+                }),
             };
             Ok(response)
         }
@@ -658,7 +655,6 @@ s5JVZ48=
         assert_eq!(get_counter(CounterT::Ping), 1);
     }
 
-
     #[tokio::test]
     async fn test_request_services() {
         let _lockval = RUN_LOCK.lock().unwrap();
@@ -707,8 +703,6 @@ s5JVZ48=
         assert_eq!(get_counter(CounterT::DeRegister), 1);
         assert_eq!(get_counter(CounterT::Ping), 1);
     }
-
-
 
     #[tokio::test]
     async fn test_visa_req_resp() {

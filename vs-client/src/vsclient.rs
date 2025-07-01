@@ -6,7 +6,7 @@ use thrift::transport::{TIoChannel, TTcpChannel};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::prelude::*;
-use std::net::{IpAddr, Ipv6Addr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::SystemTime;
 
 use chrono::DateTime;
@@ -327,7 +327,6 @@ pub fn request_visa(service: &str, apikey: &str, traffic: &TrafficDesc) -> thrif
     Ok(())
 }
 
-
 pub fn request_services(service: &str, apikey: &str) -> thrift::Result<()> {
     let mut client = newclient(service)?;
     match client.request_services(apikey.into()) {
@@ -339,15 +338,31 @@ pub fn request_services(service: &str, apikey: &str) -> thrift::Result<()> {
                     let local_dt = dt.with_timezone(&chrono::Local);
                     // Compute duration until expiration
                     let duration = local_dt - chrono::Local::now();
-                    println!("  Expiration: {} ~ {}", local_dt.format("%Y-%m-%d %H:%M:%S %Z"), hms(duration));
+                    println!(
+                        "  Expiration: {} ~ {}",
+                        local_dt.format("%Y-%m-%d %H:%M:%S %Z"),
+                        hms(duration)
+                    );
                 } else {
                     println!("  Expiration: *NONE*");
                 }
                 if let Some(sdescs) = svclist.services {
-                    println!("  {} Service{}{}", sdescs.len(), if sdescs.len() == 1 { "" } else { "s" }, if sdescs.is_empty() { "" } else { ":" });
+                    println!(
+                        "  {} Service{}{}",
+                        sdescs.len(),
+                        if sdescs.len() == 1 { "" } else { "s" },
+                        if sdescs.is_empty() { "" } else { ":" }
+                    );
                     for descriptor in sdescs {
-                        println!("    {:?}: {}", descriptor.type_, descriptor.service_id.unwrap_or("*NO_ID*".to_string()));
-                        println!("    URI: {}", descriptor.uri.unwrap_or("*NO_URI*".to_string()));
+                        println!(
+                            "    {:?}: {}",
+                            descriptor.type_,
+                            descriptor.service_id.unwrap_or("*NO_ID*".to_string())
+                        );
+                        println!(
+                            "    URI: {}",
+                            descriptor.uri.unwrap_or("*NO_URI*".to_string())
+                        );
                         if let Some(addr_bytes) = descriptor.address {
                             if addr_bytes.len() == 4 {
                                 // Parse an IPv4 address.
@@ -381,9 +396,7 @@ pub fn request_services(service: &str, apikey: &str) -> thrift::Result<()> {
         }
     }
     Ok(())
-
 }
-
 
 fn hms(duration: chrono::Duration) -> String {
     let hours = duration.num_hours();
