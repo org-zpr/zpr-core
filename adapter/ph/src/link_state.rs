@@ -1252,7 +1252,7 @@ impl LinkStateWrapper {
                 // Now we finish the job,
                 debug!(target: LINK_STATE, "Link {} received timeout waiting on terminate response, shutting down link", self.id);
                 drop(locked_fsm);
-                self.complete_close(asm);
+                self.clean_up_link_state(asm).detach_all();
                 Ok(())
             }
 
@@ -1333,7 +1333,9 @@ impl LinkStateWrapper {
         Ok(())
     }
 
-    /// Tear down link state
+    /// Tear down link state.
+    /// This sends notice to the visa service that we have lost an actor.
+    /// Sends a CloseDone event (which triggers [LinkStateWrapper::complete_close])
     fn clean_up_link_state(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
         let link_id = self.id;
         let mut join_set = tokio::task::JoinSet::new();
