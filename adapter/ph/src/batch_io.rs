@@ -6,8 +6,10 @@
 //! non-blocking, and they perform non-blocking I/O operations.
 
 use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
+use bytes::BufMut;
 use libc;
 use nix::sys::socket::{self, AddressFamily, SockaddrLike, SockaddrStorage};
+use std::io::Result;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::os::fd::{AsFd, AsRawFd};
 
@@ -65,11 +67,63 @@ pub fn set_recv_packet_info(fd: &impl AsFd, enable: bool) -> std::io::Result<()>
     }
 }
 
+pub trait BatchIoIntf {
+    fn try_write_batch<'a>(
+        &mut self,
+        fd: &impl AsFd,
+        bufs: impl IntoIterator<Item = &'a [u8]>,
+        results: &mut Vec<Result<usize>>,
+    ) -> Result<usize>;
+
+    fn try_read_buf_batch<'a, B>(
+        &mut self,
+        fd: &impl AsFd,
+        bufs: impl IntoIterator<Item = &'a mut B>,
+        results: &mut Vec<Result<usize>>,
+    ) -> Result<usize>
+    where
+        B: BufMut + 'a;
+
+    #[allow(dead_code)]
+    fn try_send_to_batch<'a>(
+        &mut self,
+        fd: &impl AsFd,
+        bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr)>,
+        results: &mut Vec<Result<usize>>,
+    ) -> Result<usize>;
+
+    fn try_send_to_from_batch<'a>(
+        &mut self,
+        fd: &impl AsFd,
+        bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
+        results: &mut Vec<Result<usize>>,
+    ) -> Result<usize>;
+
+    #[allow(dead_code)]
+    fn try_recv_buf_from_batch<'a, B>(
+        &mut self,
+        fd: &impl AsFd,
+        bufs: impl IntoIterator<Item = &'a mut B>,
+        results: &mut Vec<Result<ReceivedPacket>>,
+    ) -> Result<usize>
+    where
+        B: BufMut + 'a;
+
+    fn try_recv_buf_from_to_batch<'a, B>(
+        &mut self,
+        fd: &impl AsFd,
+        bufs: impl IntoIterator<Item = &'a mut B>,
+        results: &mut Vec<Result<ReceivedPacket>>,
+    ) -> Result<usize>
+    where
+        B: BufMut + 'a;
+}
+
 #[cfg(all(target_os = "linux", feature = "io-uring"))]
 mod io_uring {
     //! io_uring(7)-based implementation.  Only available for Linux.
 
-    use super::{sockaddr_to_socket_addr, ReceivedPacket};
+    use super::{sockaddr_to_socket_addr, BatchIoIntf, ReceivedPacket};
     use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
     use bytes::BufMut;
     use io_uring::{cqueue, opcode, squeue, types, IoUring};
@@ -566,8 +620,10 @@ mod io_uring {
 
             Ok(results.len() - results_base)
         }
+    }
 
-        pub fn try_write_batch<'a>(
+    impl BatchIoIntf for BatchIo {
+        fn try_write_batch<'a>(
             &mut self,
             fd: &impl AsFd,
             bufs: impl IntoIterator<Item = &'a [u8]>,
@@ -576,7 +632,7 @@ mod io_uring {
             self.do_batch_op(TryWriteBatchOp::new(), fd, bufs, results)
         }
 
-        pub fn try_read_buf_batch<'a, B>(
+        fn try_read_buf_batch<'a, B>(
             &mut self,
             fd: &impl AsFd,
             bufs: impl IntoIterator<Item = &'a mut B>,
@@ -588,8 +644,7 @@ mod io_uring {
             self.do_batch_op(TryReadBufBatchOp::new(), fd, bufs, results)
         }
 
-        #[allow(dead_code)]
-        pub fn try_send_to_batch<'a>(
+        fn try_send_to_batch<'a>(
             &mut self,
             fd: &impl AsFd,
             bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr)>,
@@ -598,7 +653,7 @@ mod io_uring {
             self.do_batch_op(TrySendToBatchOp::new(), fd, bufs, results)
         }
 
-        pub fn try_send_to_from_batch<'a>(
+        fn try_send_to_from_batch<'a>(
             &mut self,
             fd: &impl AsFd,
             bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
@@ -607,8 +662,7 @@ mod io_uring {
             self.do_batch_op(TrySendToFromBatchOp::new(), fd, bufs, results)
         }
 
-        #[allow(dead_code)]
-        pub fn try_recv_buf_from_batch<'a, B>(
+        fn try_recv_buf_from_batch<'a, B>(
             &mut self,
             fd: &impl AsFd,
             bufs: impl IntoIterator<Item = &'a mut B>,
@@ -620,7 +674,7 @@ mod io_uring {
             self.do_batch_op(TryRecvBufFromBatchOp::new(), fd, bufs, results)
         }
 
-        pub fn try_recv_buf_from_to_batch<'a, B>(
+        fn try_recv_buf_from_to_batch<'a, B>(
             &mut self,
             fd: &impl AsFd,
             bufs: impl IntoIterator<Item = &'a mut B>,
@@ -742,7 +796,6 @@ mod io_uring {
     }
 }
 
-#[cfg(not(all(target_os = "linux", feature = "io-uring")))]
 mod posix_unbatched {
     //! Unbatched implementation using POSIX primitives.
 
@@ -786,6 +839,7 @@ mod posix_unbatched {
     );
 
     impl BatchIo {
+        #[allow(dead_code)]
         pub fn new(_entries: usize) -> Result<Self> {
             Ok(Self {
                 cmsg_buffer: cmsg_space!(sockaddr_storage),
@@ -815,12 +869,14 @@ mod posix_unbatched {
 
             Ok(completed)
         }
+    }
 
-        pub fn try_write_batch<'a>(
-            &'a mut self,
-            fd: &'a impl AsFd,
+    impl BatchIoIntf for BatchIo {
+        fn try_write_batch<'a>(
+            &mut self,
+            fd: &impl AsFd,
             bufs: impl IntoIterator<Item = &'a [u8]>,
-            results: &'a mut Vec<Result<usize>>,
+            results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             Self::do_batch_op(
                 |fd, buf| unistd::write(fd, buf).map_err(errno_to_error),
@@ -830,11 +886,11 @@ mod posix_unbatched {
             )
         }
 
-        pub fn try_read_buf_batch<'a, B>(
-            &'a mut self,
-            fd: &'a impl AsFd,
+        fn try_read_buf_batch<'a, B>(
+            &mut self,
+            fd: &impl AsFd,
             bufs: impl IntoIterator<Item = &'a mut B>,
-            results: &'a mut Vec<Result<usize>>,
+            results: &mut Vec<Result<usize>>,
         ) -> Result<usize>
         where
             B: BufMut + 'a,
@@ -855,12 +911,11 @@ mod posix_unbatched {
             )
         }
 
-        #[allow(dead_code)]
-        pub fn try_send_to_batch<'a>(
-            &'a mut self,
-            fd: &'a impl AsFd,
+        fn try_send_to_batch<'a>(
+            &mut self,
+            fd: &impl AsFd,
             bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr)>,
-            results: &'a mut Vec<Result<usize>>,
+            results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             Self::do_batch_op(
                 |fd, (buf, addr)| {
@@ -878,11 +933,11 @@ mod posix_unbatched {
             )
         }
 
-        pub fn try_send_to_from_batch<'a>(
-            &'a mut self,
-            fd: &'a impl AsFd,
+        fn try_send_to_from_batch<'a>(
+            &mut self,
+            fd: &impl AsFd,
             bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
-            results: &'a mut Vec<Result<usize>>,
+            results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             Self::do_batch_op(
                 |fd, (buf, dst, src)| match src {
@@ -912,12 +967,11 @@ mod posix_unbatched {
             )
         }
 
-        #[allow(dead_code)]
-        pub fn try_recv_buf_from_batch<'a, B>(
-            &'a mut self,
-            fd: &'a impl AsFd,
+        fn try_recv_buf_from_batch<'a, B>(
+            &mut self,
+            fd: &impl AsFd,
             bufs: impl IntoIterator<Item = &'a mut B>,
-            results: &'a mut Vec<Result<ReceivedPacket>>,
+            results: &mut Vec<Result<ReceivedPacket>>,
         ) -> Result<usize>
         where
             B: BufMut + 'a,
@@ -955,11 +1009,11 @@ mod posix_unbatched {
             )
         }
 
-        pub fn try_recv_buf_from_to_batch<'a, B>(
-            &'a mut self,
-            fd: &'a impl AsFd,
+        fn try_recv_buf_from_to_batch<'a, B>(
+            &mut self,
+            fd: &impl AsFd,
             bufs: impl IntoIterator<Item = &'a mut B>,
-            results: &'a mut Vec<Result<ReceivedPacket>>,
+            results: &mut Vec<Result<ReceivedPacket>>,
         ) -> Result<usize>
         where
             B: BufMut + 'a,

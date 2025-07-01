@@ -1,4 +1,4 @@
-use crate::batch_io::{self, BatchIo};
+use crate::batch_io::{self, BatchIo, BatchIoIntf};
 use crate::config;
 use crate::counters::*;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
