@@ -1,4 +1,4 @@
-use crate::batch_io::{self, BatchIo, BatchIoIntf};
+use crate::batch_io::{self, BatchIo};
 use crate::config;
 use crate::counters::*;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
@@ -47,7 +47,9 @@ impl FastpathIo {
         }
 
         Self {
-            batch_io: BatchIo::new(config.batch_size).unwrap(),
+            batch_io: batch_io::default_engine()
+                .instantiate(config.batch_size)
+                .unwrap(),
             actor_tun,
             substrate_socket,
             requeue_outq,

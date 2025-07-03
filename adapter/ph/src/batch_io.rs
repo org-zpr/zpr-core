@@ -11,7 +11,7 @@ use libc;
 use nix::sys::socket::{self, AddressFamily, SockaddrLike, SockaddrStorage};
 use std::io::Result;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::os::fd::{AsFd, AsRawFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
 
 pub struct ReceivedPacket {
     #[allow(dead_code)]
@@ -67,63 +67,57 @@ pub fn set_recv_packet_info(fd: &impl AsFd, enable: bool) -> std::io::Result<()>
     }
 }
 
-pub trait BatchIoIntf {
+trait BatchIoImpl {
+    fn engine_name(&self) -> &'static str;
+
     fn try_write_batch<'a>(
         &mut self,
-        fd: &impl AsFd,
-        bufs: impl IntoIterator<Item = &'a [u8]>,
+        fd: BorrowedFd<'_>,
+        bufs: &mut dyn Iterator<Item = &'a [u8]>,
         results: &mut Vec<Result<usize>>,
     ) -> Result<usize>;
 
-    fn try_read_buf_batch<'a, B>(
+    fn try_read_buf_batch<'a>(
         &mut self,
-        fd: &impl AsFd,
-        bufs: impl IntoIterator<Item = &'a mut B>,
+        fd: BorrowedFd<'_>,
+        bufs: &mut dyn Iterator<Item = &'a mut dyn BufMut>,
         results: &mut Vec<Result<usize>>,
-    ) -> Result<usize>
-    where
-        B: BufMut + 'a;
+    ) -> Result<usize>;
 
-    #[allow(dead_code)]
     fn try_send_to_batch<'a>(
         &mut self,
-        fd: &impl AsFd,
-        bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr)>,
+        fd: BorrowedFd<'_>,
+        bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr)>,
         results: &mut Vec<Result<usize>>,
     ) -> Result<usize>;
 
     fn try_send_to_from_batch<'a>(
         &mut self,
-        fd: &impl AsFd,
-        bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
+        fd: BorrowedFd<'_>,
+        bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
         results: &mut Vec<Result<usize>>,
     ) -> Result<usize>;
 
-    #[allow(dead_code)]
-    fn try_recv_buf_from_batch<'a, B>(
+    fn try_recv_buf_from_batch<'a>(
         &mut self,
-        fd: &impl AsFd,
-        bufs: impl IntoIterator<Item = &'a mut B>,
+        fd: BorrowedFd<'_>,
+        bufs: &mut dyn Iterator<Item = &'a mut dyn BufMut>,
         results: &mut Vec<Result<ReceivedPacket>>,
-    ) -> Result<usize>
-    where
-        B: BufMut + 'a;
+    ) -> Result<usize>;
 
-    fn try_recv_buf_from_to_batch<'a, B>(
+    fn try_recv_buf_from_to_batch<'a>(
         &mut self,
-        fd: &impl AsFd,
-        bufs: impl IntoIterator<Item = &'a mut B>,
+        fd: BorrowedFd<'_>,
+        bufs: &mut dyn Iterator<Item = &'a mut dyn BufMut>,
         results: &mut Vec<Result<ReceivedPacket>>,
-    ) -> Result<usize>
-    where
-        B: BufMut + 'a;
+    ) -> Result<usize>;
 }
 
 #[cfg(all(target_os = "linux", feature = "io-uring"))]
 mod io_uring {
     //! io_uring(7)-based implementation.  Only available for Linux.
 
-    use super::{sockaddr_to_socket_addr, BatchIoIntf, ReceivedPacket};
+    use super::{sockaddr_to_socket_addr, BatchIoImpl, ReceivedPacket};
     use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
     use bytes::BufMut;
     use io_uring::{cqueue, opcode, squeue, types, IoUring};
@@ -132,10 +126,10 @@ mod io_uring {
     use std::io::Result;
     use std::mem::MaybeUninit;
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::fd::{AsFd, AsRawFd};
+    use std::os::fd::{AsRawFd, BorrowedFd};
     use std::ptr::NonNull;
 
-    pub const MAX_ENTRIES: usize = 1024;
+    const MAX_ENTRIES: usize = 1024;
 
     /// This is a very basic on-stack vector/slab.
     struct Slab<T> {
@@ -222,11 +216,11 @@ mod io_uring {
         }
     }
 
-    struct TryReadBufBatchOp<'a, B> {
-        phantom: std::marker::PhantomData<&'a B>,
+    struct TryReadBufBatchOp<'a> {
+        phantom: std::marker::PhantomData<&'a mut dyn BufMut>,
     }
 
-    impl<'a, B: BufMut> BatchOp<&'a mut B, &'a mut B, usize> for TryReadBufBatchOp<'a, B> {
+    impl<'a> BatchOp<&'a mut dyn BufMut, &'a mut dyn BufMut, usize> for TryReadBufBatchOp<'a> {
         fn new() -> Self {
             Self {
                 phantom: std::marker::PhantomData,
@@ -236,9 +230,9 @@ mod io_uring {
         fn build_op(
             &mut self,
             fd: types::Fd,
-            buf: &'a mut B,
+            buf: &'a mut dyn BufMut,
             _idx: usize,
-        ) -> (squeue::Entry, &'a mut B) {
+        ) -> (squeue::Entry, &'a mut dyn BufMut) {
             let chunk = buf.chunk_mut();
             (
                 opcode::Read::new(fd, chunk.as_mut_ptr(), chunk.len() as u32).build(),
@@ -246,7 +240,7 @@ mod io_uring {
             )
         }
 
-        fn process_result(&self, _idx: usize, buf: &'a mut B, amt: usize) -> usize {
+        fn process_result(&self, _idx: usize, buf: &'a mut dyn BufMut, amt: usize) -> usize {
             // SAFETY: We know we've written the given number of bytes in the BufMut.
             unsafe { buf.advance_mut(amt) };
             amt
@@ -355,14 +349,16 @@ mod io_uring {
         }
     }
 
-    struct TryRecvBufFromBatchOp<'a, B> {
+    struct TryRecvBufFromBatchOp<'a> {
         iovec_slab: Slab<libc::iovec>,
         sockaddr_slab: [MaybeUninit<SockaddrStorage>; MAX_ENTRIES],
         msghdr_slab: Slab<libc::msghdr>,
-        phantom: std::marker::PhantomData<&'a B>,
+        phantom: std::marker::PhantomData<&'a mut dyn BufMut>,
     }
 
-    impl<'a, B: BufMut> BatchOp<&'a mut B, &'a mut B, ReceivedPacket> for TryRecvBufFromBatchOp<'a, B> {
+    impl<'a> BatchOp<&'a mut dyn BufMut, &'a mut dyn BufMut, ReceivedPacket>
+        for TryRecvBufFromBatchOp<'a>
+    {
         fn new() -> Self {
             Self {
                 iovec_slab: Slab::new(),
@@ -375,9 +371,9 @@ mod io_uring {
         fn build_op(
             &mut self,
             fd: types::Fd,
-            buf: &'a mut B,
+            buf: &'a mut dyn BufMut,
             idx: usize,
-        ) -> (squeue::Entry, &'a mut B) {
+        ) -> (squeue::Entry, &'a mut dyn BufMut) {
             let iovec_ref = self.iovec_slab.push(buf_mut_as_iovec(buf));
             let sockaddr_ref = &mut self.sockaddr_slab[idx];
             let msghdr_ref = self.msghdr_slab.push(libc::msghdr {
@@ -393,7 +389,12 @@ mod io_uring {
             (opcode::RecvMsg::new(fd, msghdr_ref as *mut _).build(), buf)
         }
 
-        fn process_result(&self, idx: usize, buf: &'a mut B, size: usize) -> ReceivedPacket {
+        fn process_result(
+            &self,
+            idx: usize,
+            buf: &'a mut dyn BufMut,
+            size: usize,
+        ) -> ReceivedPacket {
             // SAFETY: We know we've written the given number of bytes in the BufMut.
             unsafe {
                 buf.advance_mut(size);
@@ -410,16 +411,16 @@ mod io_uring {
         }
     }
 
-    struct TryRecvBufFromToBatchOp<'a, B> {
+    struct TryRecvBufFromToBatchOp<'a> {
         iovec_slab: Slab<libc::iovec>,
         sockaddr_slab: [MaybeUninit<SockaddrStorage>; MAX_ENTRIES],
         cmsg_slab: [[u8; PKTINFO_CMSG_SPACE_NEEDED]; MAX_ENTRIES],
         msghdr_slab: Slab<libc::msghdr>,
-        phantom: std::marker::PhantomData<&'a B>,
+        phantom: std::marker::PhantomData<&'a mut dyn BufMut>,
     }
 
-    impl<'a, B: BufMut> BatchOp<&'a mut B, &'a mut B, ReceivedPacket>
-        for TryRecvBufFromToBatchOp<'a, B>
+    impl<'a> BatchOp<&'a mut dyn BufMut, &'a mut dyn BufMut, ReceivedPacket>
+        for TryRecvBufFromToBatchOp<'a>
     {
         fn new() -> Self {
             Self {
@@ -434,9 +435,9 @@ mod io_uring {
         fn build_op(
             &mut self,
             fd: types::Fd,
-            buf: &'a mut B,
+            buf: &'a mut dyn BufMut,
             idx: usize,
-        ) -> (squeue::Entry, &'a mut B) {
+        ) -> (squeue::Entry, &'a mut dyn BufMut) {
             let iovec_ref = self.iovec_slab.push(buf_mut_as_iovec(buf));
             let sockaddr_ref = &mut self.sockaddr_slab[idx];
             let cmsg_ref = &mut self.cmsg_slab[idx];
@@ -453,7 +454,12 @@ mod io_uring {
             (opcode::RecvMsg::new(fd, msghdr_ref as *mut _).build(), buf)
         }
 
-        fn process_result(&self, idx: usize, buf: &'a mut B, size: usize) -> ReceivedPacket {
+        fn process_result(
+            &self,
+            idx: usize,
+            buf: &'a mut dyn BufMut,
+            size: usize,
+        ) -> ReceivedPacket {
             // SAFETY: We know we've written the given number of bytes in the BufMut.
             unsafe {
                 buf.advance_mut(size);
@@ -481,6 +487,10 @@ mod io_uring {
     // (= oldest LTS release with EOL > end of 2025)
 
     impl BatchIo {
+        pub const ENGINE_NAME: &'static str = "io-uring";
+
+        pub const MAX_ENTRIES: usize = MAX_ENTRIES;
+
         pub fn new(entries: usize) -> Result<Self> {
             assert!(entries <= MAX_ENTRIES);
 
@@ -494,11 +504,11 @@ mod io_uring {
         fn do_batch_op<Item, State, Res>(
             &mut self,
             mut batch_op: impl BatchOp<Item, State, Res>,
-            fd: &impl AsFd,
-            items: impl IntoIterator<Item = Item>,
+            fd: BorrowedFd<'_>,
+            items: &mut dyn Iterator<Item = Item>,
             results: &mut Vec<Result<Res>>,
         ) -> Result<usize> {
-            let fd = types::Fd(fd.as_fd().as_raw_fd());
+            let fd = types::Fd(fd.as_raw_fd());
 
             let mut submitted = 0;
 
@@ -510,7 +520,7 @@ mod io_uring {
             let mut state_slab = Slab::new();
 
             // Enter the operations into the submission queue.
-            for item in items {
+            while let Some(item) = items.next() {
                 if submitted >= max_to_submit {
                     break;
                 }
@@ -622,32 +632,33 @@ mod io_uring {
         }
     }
 
-    impl BatchIoIntf for BatchIo {
+    impl BatchIoImpl for BatchIo {
+        fn engine_name(&self) -> &'static str {
+            Self::ENGINE_NAME
+        }
+
         fn try_write_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = &'a [u8]>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = &'a [u8]>,
             results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             self.do_batch_op(TryWriteBatchOp::new(), fd, bufs, results)
         }
 
-        fn try_read_buf_batch<'a, B>(
+        fn try_read_buf_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = &'a mut B>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = &'a mut dyn BufMut>,
             results: &mut Vec<Result<usize>>,
-        ) -> Result<usize>
-        where
-            B: BufMut + 'a,
-        {
+        ) -> Result<usize> {
             self.do_batch_op(TryReadBufBatchOp::new(), fd, bufs, results)
         }
 
         fn try_send_to_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr)>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr)>,
             results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             self.do_batch_op(TrySendToBatchOp::new(), fd, bufs, results)
@@ -655,34 +666,28 @@ mod io_uring {
 
         fn try_send_to_from_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
             results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             self.do_batch_op(TrySendToFromBatchOp::new(), fd, bufs, results)
         }
 
-        fn try_recv_buf_from_batch<'a, B>(
+        fn try_recv_buf_from_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = &'a mut B>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = &'a mut dyn BufMut>,
             results: &mut Vec<Result<ReceivedPacket>>,
-        ) -> Result<usize>
-        where
-            B: BufMut + 'a,
-        {
+        ) -> Result<usize> {
             self.do_batch_op(TryRecvBufFromBatchOp::new(), fd, bufs, results)
         }
 
-        fn try_recv_buf_from_to_batch<'a, B>(
+        fn try_recv_buf_from_to_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = &'a mut B>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = &'a mut dyn BufMut>,
             results: &mut Vec<Result<ReceivedPacket>>,
-        ) -> Result<usize>
-        where
-            B: BufMut + 'a,
-        {
+        ) -> Result<usize> {
             self.do_batch_op(TryRecvBufFromToBatchOp::new(), fd, bufs, results)
         }
     }
@@ -694,7 +699,7 @@ mod io_uring {
         }
     }
 
-    fn buf_mut_as_iovec(buf: &mut impl BufMut) -> libc::iovec {
+    fn buf_mut_as_iovec(buf: &mut dyn BufMut) -> libc::iovec {
         let chunk = buf.chunk_mut();
         libc::iovec {
             iov_base: chunk.as_mut_ptr() as *mut _,
@@ -809,11 +814,8 @@ mod posix_unbatched {
     use nix::unistd;
     use std::io::{IoSlice, IoSliceMut, Result};
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-    use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
+    use std::os::fd::{AsRawFd, BorrowedFd};
     use zpr_ext::std::mem::slice_assume_init_mut;
-
-    #[allow(dead_code)]
-    pub const MAX_ENTRIES: usize = 1024;
 
     pub struct BatchIo {
         cmsg_buffer: Vec<u8>,
@@ -839,7 +841,10 @@ mod posix_unbatched {
     );
 
     impl BatchIo {
-        #[allow(dead_code)]
+        pub const ENGINE_NAME: &'static str = "posix-unbatched";
+
+        pub const MAX_ENTRIES: usize = 1024;
+
         pub fn new(_entries: usize) -> Result<Self> {
             Ok(Self {
                 cmsg_buffer: cmsg_space!(sockaddr_storage),
@@ -848,13 +853,12 @@ mod posix_unbatched {
 
         fn do_batch_op<'a, Item, Res>(
             mut op: impl FnMut(BorrowedFd<'a>, Item) -> Result<Res>,
-            fd: &'a impl AsFd,
-            items: impl IntoIterator<Item = Item>,
+            fd: BorrowedFd<'a>,
+            items: &mut dyn Iterator<Item = Item>,
             results: &'a mut Vec<Result<Res>>,
         ) -> Result<usize> {
-            let fd = fd.as_fd();
             let mut completed = 0;
-            for item in items {
+            while let Some(item) = items.next() {
                 let res = op(fd, item);
                 if let Err(err) = res {
                     if completed == 0 {
@@ -871,11 +875,15 @@ mod posix_unbatched {
         }
     }
 
-    impl BatchIoIntf for BatchIo {
+    impl BatchIoImpl for BatchIo {
+        fn engine_name(&self) -> &'static str {
+            Self::ENGINE_NAME
+        }
+
         fn try_write_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = &'a [u8]>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = &'a [u8]>,
             results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             Self::do_batch_op(
@@ -886,15 +894,12 @@ mod posix_unbatched {
             )
         }
 
-        fn try_read_buf_batch<'a, B>(
+        fn try_read_buf_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = &'a mut B>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = &'a mut dyn BufMut>,
             results: &mut Vec<Result<usize>>,
-        ) -> Result<usize>
-        where
-            B: BufMut + 'a,
-        {
+        ) -> Result<usize> {
             Self::do_batch_op(
                 |fd, buf| {
                     // SAFETY: We will only be writing to the chunk.
@@ -913,8 +918,8 @@ mod posix_unbatched {
 
         fn try_send_to_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr)>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr)>,
             results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             Self::do_batch_op(
@@ -935,8 +940,8 @@ mod posix_unbatched {
 
         fn try_send_to_from_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
             results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             Self::do_batch_op(
@@ -967,15 +972,12 @@ mod posix_unbatched {
             )
         }
 
-        fn try_recv_buf_from_batch<'a, B>(
+        fn try_recv_buf_from_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = &'a mut B>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = &'a mut dyn BufMut>,
             results: &mut Vec<Result<ReceivedPacket>>,
-        ) -> Result<usize>
-        where
-            B: BufMut + 'a,
-        {
+        ) -> Result<usize> {
             Self::do_batch_op(
                 |fd, buf| {
                     // SAFETY: We will only be writing to the chunk.
@@ -1009,15 +1011,12 @@ mod posix_unbatched {
             )
         }
 
-        fn try_recv_buf_from_to_batch<'a, B>(
+        fn try_recv_buf_from_to_batch<'a>(
             &mut self,
-            fd: &impl AsFd,
-            bufs: impl IntoIterator<Item = &'a mut B>,
+            fd: BorrowedFd<'_>,
+            bufs: &mut dyn Iterator<Item = &'a mut dyn BufMut>,
             results: &mut Vec<Result<ReceivedPacket>>,
-        ) -> Result<usize>
-        where
-            B: BufMut + 'a,
-        {
+        ) -> Result<usize> {
             Self::do_batch_op(
                 |fd, buf| {
                     // SAFETY: We will only be writing to the chunk.
@@ -1069,10 +1068,147 @@ mod posix_unbatched {
     }
 }
 
-#[cfg(all(target_os = "linux", feature = "io-uring"))]
-pub use io_uring::*;
-#[cfg(not(all(target_os = "linux", feature = "io-uring")))]
-pub use posix_unbatched::*;
+macro_rules! bio {
+    ($m:tt) => {
+        BatchIoEngine {
+            engine_name: $m::BatchIo::ENGINE_NAME,
+            max_entries: $m::BatchIo::MAX_ENTRIES,
+            factory: |e| $m::BatchIo::new(e).map(|bio| Box::new(bio) as Box<dyn BatchIoImpl>),
+        }
+    };
+}
+
+const ENGINES: &[BatchIoEngine] = &[
+    #[cfg(all(target_os = "linux", feature = "io-uring"))]
+    bio!(io_uring),
+    bio!(posix_unbatched),
+];
+
+#[allow(dead_code)]
+pub fn engine_names() -> impl Iterator<Item = &'static str> {
+    ENGINES.iter().map(|e| e.engine_name)
+}
+
+#[allow(dead_code)]
+pub fn select_engine_by_name(name: &str) -> Option<&'static BatchIoEngine> {
+    ENGINES.iter().find(|e| e.engine_name == name)
+}
+
+pub fn default_engine() -> &'static BatchIoEngine {
+    // FIXME: choose based on support
+    &ENGINES[0]
+}
+
+pub struct BatchIoEngine {
+    engine_name: &'static str,
+    max_entries: usize,
+    factory: fn(usize) -> Result<Box<dyn BatchIoImpl>>,
+}
+
+impl BatchIoEngine {
+    #[allow(dead_code)]
+    pub fn engine_name(&self) -> &'static str {
+        self.engine_name
+    }
+
+    #[allow(dead_code)]
+    pub fn max_entries(&self) -> usize {
+        self.max_entries
+    }
+
+    pub fn instantiate(&self, entries: usize) -> Result<BatchIo> {
+        Ok(BatchIo((self.factory)(entries)?))
+    }
+}
+
+pub struct BatchIo(Box<dyn BatchIoImpl>);
+
+impl BatchIo {
+    #[allow(dead_code)]
+    pub fn engine_name(&self) -> &'static str {
+        self.0.engine_name()
+    }
+
+    pub fn try_write_batch<'a>(
+        &mut self,
+        fd: impl AsFd,
+        bufs: impl IntoIterator<Item = &'a [u8]>,
+        results: &mut Vec<Result<usize>>,
+    ) -> Result<usize> {
+        self.0
+            .try_write_batch(fd.as_fd(), &mut bufs.into_iter(), results)
+    }
+
+    pub fn try_read_buf_batch<'a, B>(
+        &mut self,
+        fd: impl AsFd,
+        bufs: impl IntoIterator<Item = &'a mut B>,
+        results: &mut Vec<Result<usize>>,
+    ) -> Result<usize>
+    where
+        B: BufMut + 'a,
+    {
+        self.0.try_read_buf_batch(
+            fd.as_fd(),
+            &mut bufs.into_iter().map(|b| b as &mut dyn BufMut),
+            results,
+        )
+    }
+
+    #[allow(dead_code)]
+    pub fn try_send_to_batch<'a>(
+        &mut self,
+        fd: impl AsFd,
+        bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr)>,
+        results: &mut Vec<Result<usize>>,
+    ) -> Result<usize> {
+        self.0
+            .try_send_to_batch(fd.as_fd(), &mut bufs.into_iter(), results)
+    }
+
+    pub fn try_send_to_from_batch<'a>(
+        &mut self,
+        fd: impl AsFd,
+        bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
+        results: &mut Vec<Result<usize>>,
+    ) -> Result<usize> {
+        self.0
+            .try_send_to_from_batch(fd.as_fd(), &mut bufs.into_iter(), results)
+    }
+
+    #[allow(dead_code)]
+    pub fn try_recv_buf_from_batch<'a, B>(
+        &mut self,
+        fd: impl AsFd,
+        bufs: impl IntoIterator<Item = &'a mut B>,
+        results: &mut Vec<Result<ReceivedPacket>>,
+    ) -> Result<usize>
+    where
+        B: BufMut + 'a,
+    {
+        self.0.try_recv_buf_from_batch(
+            fd.as_fd(),
+            &mut bufs.into_iter().map(|b| b as &mut dyn BufMut),
+            results,
+        )
+    }
+
+    pub fn try_recv_buf_from_to_batch<'a, B>(
+        &mut self,
+        fd: impl AsFd,
+        bufs: impl IntoIterator<Item = &'a mut B>,
+        results: &mut Vec<Result<ReceivedPacket>>,
+    ) -> Result<usize>
+    where
+        B: BufMut + 'a,
+    {
+        self.0.try_recv_buf_from_to_batch(
+            fd.as_fd(),
+            &mut bufs.into_iter().map(|b| b as &mut dyn BufMut),
+            results,
+        )
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1085,244 +1221,258 @@ mod tests {
 
     #[test]
     fn test_write() {
-        // FIXME: we need to test EAGAIN behavior... possibly by first filling queue, then draining a few
+        for engine in ENGINES {
+            // FIXME: we need to test EAGAIN behavior... possibly by first filling queue, then draining a few
 
-        let (inq, outq) = UnixDatagram::pair().unwrap();
-        inq.set_nonblocking(true).unwrap();
-        outq.set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
+            let (inq, outq) = UnixDatagram::pair().unwrap();
+            inq.set_nonblocking(true).unwrap();
+            outq.set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
 
-        let nmsgs = 16;
+            let nmsgs = 16;
 
-        let mut bio = BatchIo::new(2 * nmsgs).unwrap();
+            let mut bio = engine.instantiate(2 * nmsgs).unwrap();
 
-        let mut msgs = Vec::new();
+            let mut msgs = Vec::new();
 
-        for i in 0..nmsgs {
-            msgs.push(format!("This is message {i}"));
-        }
+            for i in 0..nmsgs {
+                msgs.push(format!("This is message {i}"));
+            }
 
-        let mut results = Vec::new();
+            let mut results = Vec::new();
 
-        let n = bio.try_write_batch(&inq, msgs.iter().map(|msg| msg.as_bytes()), &mut results);
-        assert!(n.unwrap() >= nmsgs);
+            let n = bio.try_write_batch(&inq, msgs.iter().map(|msg| msg.as_bytes()), &mut results);
+            assert!(n.unwrap() >= nmsgs);
 
-        for i in 0..nmsgs {
-            assert_eq!(*results[i].as_ref().unwrap(), msgs[i].len());
-        }
+            for i in 0..nmsgs {
+                assert_eq!(*results[i].as_ref().unwrap(), msgs[i].len());
+            }
 
-        let mut buf = [0u8; 256];
-        for i in 0..nmsgs {
-            let msg_size = outq.recv(&mut buf).unwrap();
-            assert_eq!(msgs[i].as_bytes(), &buf[..msg_size]);
+            let mut buf = [0u8; 256];
+            for i in 0..nmsgs {
+                let msg_size = outq.recv(&mut buf).unwrap();
+                assert_eq!(msgs[i].as_bytes(), &buf[..msg_size]);
+            }
         }
     }
 
     #[test]
     fn test_read() {
-        let (inq, outq) = UnixDatagram::pair().unwrap();
-        inq.set_nonblocking(true).unwrap();
-        outq.set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
+        for engine in ENGINES {
+            let (inq, outq) = UnixDatagram::pair().unwrap();
+            inq.set_nonblocking(true).unwrap();
+            outq.set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
 
-        let nmsgs = 16;
+            let nmsgs = 16;
 
-        let mut bio = BatchIo::new(2 * nmsgs).unwrap();
+            let mut bio = engine.instantiate(2 * nmsgs).unwrap();
 
-        let mut msgs = Vec::new();
+            let mut msgs = Vec::new();
 
-        for i in 0..nmsgs {
-            msgs.push(format!("This is message {i}"));
-        }
+            for i in 0..nmsgs {
+                msgs.push(format!("This is message {i}"));
+            }
 
-        for msg in &msgs {
-            let _ = inq.send(msg.as_bytes()).unwrap();
-        }
+            for msg in &msgs {
+                let _ = inq.send(msg.as_bytes()).unwrap();
+            }
 
-        let mut bufs = vec![Vec::with_capacity(64); 2 * nmsgs];
-        let mut results = Vec::new();
+            let mut bufs = vec![Vec::with_capacity(64); 2 * nmsgs];
+            let mut results = Vec::new();
 
-        let n = bio.try_read_buf_batch(&outq, bufs.iter_mut(), &mut results);
-        assert!(n.unwrap() >= nmsgs);
+            let n = bio.try_read_buf_batch(&outq, bufs.iter_mut(), &mut results);
+            assert!(n.unwrap() >= nmsgs);
 
-        for i in 0..nmsgs {
-            assert_eq!(*results[i].as_ref().unwrap(), msgs[i].len());
-            assert_eq!(bufs[i].as_slice(), msgs[i].as_bytes());
+            for i in 0..nmsgs {
+                assert_eq!(*results[i].as_ref().unwrap(), msgs[i].len());
+                assert_eq!(bufs[i].as_slice(), msgs[i].as_bytes());
+            }
         }
     }
 
     #[test]
     fn test_send() {
-        // FIXME: we need to test EAGAIN behavior... possibly by first filling queue, then draining a few
+        for engine in ENGINES {
+            // FIXME: we need to test EAGAIN behavior... possibly by first filling queue, then draining a few
 
-        let inq = udp_socket().unwrap();
-        let outq = udp_socket().unwrap();
-        inq.set_nonblocking(true).unwrap();
-        outq.set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
+            let inq = udp_socket().unwrap();
+            let outq = udp_socket().unwrap();
+            inq.set_nonblocking(true).unwrap();
+            outq.set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
 
-        let nmsgs = 16;
+            let nmsgs = 16;
 
-        let mut bio = BatchIo::new(2 * nmsgs).unwrap();
+            let mut bio = engine.instantiate(2 * nmsgs).unwrap();
 
-        let mut msgs = Vec::new();
+            let mut msgs = Vec::new();
 
-        for i in 0..nmsgs {
-            msgs.push(format!("This is message {i}"));
-        }
+            for i in 0..nmsgs {
+                msgs.push(format!("This is message {i}"));
+            }
 
-        let mut results = Vec::new();
+            let mut results = Vec::new();
 
-        let dest = outq.local_addr().unwrap();
+            let dest = outq.local_addr().unwrap();
 
-        let n = bio.try_send_to_batch(
-            &inq,
-            msgs.iter().map(|msg| (msg.as_bytes(), dest)),
-            &mut results,
-        );
-        assert!(n.unwrap() >= nmsgs);
+            let n = bio.try_send_to_batch(
+                &inq,
+                msgs.iter().map(|msg| (msg.as_bytes(), dest)),
+                &mut results,
+            );
+            assert!(n.unwrap() >= nmsgs);
 
-        for i in 0..nmsgs {
-            assert_eq!(*results[i].as_ref().unwrap(), msgs[i].len());
-        }
+            for i in 0..nmsgs {
+                assert_eq!(*results[i].as_ref().unwrap(), msgs[i].len());
+            }
 
-        let mut buf = [0u8; 256];
-        for i in 0..nmsgs {
-            let msg_size = outq.recv(&mut buf).unwrap();
-            assert_eq!(msgs[i].as_bytes(), &buf[..msg_size]);
+            let mut buf = [0u8; 256];
+            for i in 0..nmsgs {
+                let msg_size = outq.recv(&mut buf).unwrap();
+                assert_eq!(msgs[i].as_bytes(), &buf[..msg_size]);
+            }
         }
     }
 
     #[test]
     fn test_recv() {
-        let inq = udp_socket().unwrap();
-        let outq = udp_socket().unwrap();
-        inq.set_nonblocking(true).unwrap();
-        outq.set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
-        inq.connect(outq.local_addr().unwrap()).unwrap();
+        for engine in ENGINES {
+            let inq = udp_socket().unwrap();
+            let outq = udp_socket().unwrap();
+            inq.set_nonblocking(true).unwrap();
+            outq.set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            inq.connect(outq.local_addr().unwrap()).unwrap();
 
-        let nmsgs = 16;
+            let nmsgs = 16;
 
-        let mut bio = BatchIo::new(2 * nmsgs).unwrap();
+            let mut bio = engine.instantiate(2 * nmsgs).unwrap();
 
-        let mut msgs = Vec::new();
+            let mut msgs = Vec::new();
 
-        for i in 0..nmsgs {
-            msgs.push(format!("This is message {i}"));
-        }
+            for i in 0..nmsgs {
+                msgs.push(format!("This is message {i}"));
+            }
 
-        for msg in &msgs {
-            let _ = inq.send(msg.as_bytes()).unwrap();
-        }
+            for msg in &msgs {
+                let _ = inq.send(msg.as_bytes()).unwrap();
+            }
 
-        let mut bufs = vec![Vec::with_capacity(64); 2 * nmsgs];
-        let mut results = Vec::new();
+            let mut bufs = vec![Vec::with_capacity(64); 2 * nmsgs];
+            let mut results = Vec::new();
 
-        let n = bio.try_recv_buf_from_batch(&outq, bufs.iter_mut(), &mut results);
-        assert!(n.unwrap() >= nmsgs);
+            let n = bio.try_recv_buf_from_batch(&outq, bufs.iter_mut(), &mut results);
+            assert!(n.unwrap() >= nmsgs);
 
-        let sender = inq.local_addr().unwrap();
+            let sender = inq.local_addr().unwrap();
 
-        for i in 0..nmsgs {
-            let res = results[i].as_ref().unwrap();
-            assert_eq!(res.size, msgs[i].len());
-            assert!(!res.truncated);
-            assert_eq!(res.source, Some(sender));
-            assert_eq!(bufs[i].as_slice(), msgs[i].as_bytes());
+            for i in 0..nmsgs {
+                let res = results[i].as_ref().unwrap();
+                assert_eq!(res.size, msgs[i].len());
+                assert!(!res.truncated);
+                assert_eq!(res.source, Some(sender));
+                assert_eq!(bufs[i].as_slice(), msgs[i].as_bytes());
+            }
         }
     }
 
     #[test]
     fn test_oversize_recv() {
-        let inq = udp_socket().unwrap();
-        let outq = udp_socket().unwrap();
-        inq.set_nonblocking(true).unwrap();
-        outq.set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
-        inq.connect(outq.local_addr().unwrap()).unwrap();
+        for engine in ENGINES {
+            let inq = udp_socket().unwrap();
+            let outq = udp_socket().unwrap();
+            inq.set_nonblocking(true).unwrap();
+            outq.set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            inq.connect(outq.local_addr().unwrap()).unwrap();
 
-        let mut bio = BatchIo::new(1).unwrap();
+            let mut bio = engine.instantiate(1).unwrap();
 
-        let msg = [123u8; 128];
+            let msg = [123u8; 128];
 
-        let _ = inq.send(&[123u8; 128]).unwrap();
+            let _ = inq.send(&[123u8; 128]).unwrap();
 
-        let limit = 64;
-        let mut buf = Vec::with_capacity(64).limit(limit);
-        let mut results = Vec::new();
+            let limit = 64;
+            let mut buf = Vec::with_capacity(64).limit(limit);
+            let mut results = Vec::new();
 
-        let n = bio.try_recv_buf_from_batch(&outq, std::iter::once(&mut buf), &mut results);
-        assert!(n.unwrap() == 1);
+            let n = bio.try_recv_buf_from_batch(&outq, std::iter::once(&mut buf), &mut results);
+            assert!(n.unwrap() == 1);
 
-        let res = results[0].as_ref().unwrap();
-        assert_eq!(res.size, limit);
-        assert!(res.truncated);
-        assert_eq!(buf.get_ref().len(), limit);
-        assert_eq!(buf.get_ref().as_slice(), &msg[..limit]);
+            let res = results[0].as_ref().unwrap();
+            assert_eq!(res.size, limit);
+            assert!(res.truncated);
+            assert_eq!(buf.get_ref().len(), limit);
+            assert_eq!(buf.get_ref().as_slice(), &msg[..limit]);
+        }
     }
 
     #[test]
     fn test_recv_to() {
-        let inq = udp_socket().unwrap();
-        let outq = udp_socket().unwrap();
-        inq.set_nonblocking(true).unwrap();
-        outq.set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
-        set_recv_packet_info(&outq, true).unwrap();
-        inq.connect(outq.local_addr().unwrap()).unwrap();
+        for engine in ENGINES {
+            let inq = udp_socket().unwrap();
+            let outq = udp_socket().unwrap();
+            inq.set_nonblocking(true).unwrap();
+            outq.set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            set_recv_packet_info(&outq, true).unwrap();
+            inq.connect(outq.local_addr().unwrap()).unwrap();
 
-        let mut bio = BatchIo::new(1).unwrap();
+            let mut bio = engine.instantiate(1).unwrap();
 
-        let msg = "Hello".as_bytes();
+            let msg = "Hello".as_bytes();
 
-        let _ = inq.send(msg).unwrap();
+            let _ = inq.send(msg).unwrap();
 
-        let mut buf = Vec::with_capacity(64);
-        let mut results = Vec::new();
+            let mut buf = Vec::with_capacity(64);
+            let mut results = Vec::new();
 
-        let n = bio.try_recv_buf_from_to_batch(&outq, std::iter::once(&mut buf), &mut results);
-        assert!(n.unwrap() == 1);
+            let n = bio.try_recv_buf_from_to_batch(&outq, std::iter::once(&mut buf), &mut results);
+            assert!(n.unwrap() == 1);
 
-        let res = results[0].as_ref().unwrap();
-        assert_eq!(res.size, msg.len());
-        assert!(!res.truncated);
-        assert_eq!(res.source, Some(inq.local_addr().unwrap()));
-        // NOTE: we don't have any way of testing the scope ID functionality as a unit test
-        assert_eq!(
-            res.destination.map(|sa| sa.ip()),
-            Some(outq.local_addr().unwrap().ip())
-        );
-        assert_eq!(buf.as_slice(), msg);
+            let res = results[0].as_ref().unwrap();
+            assert_eq!(res.size, msg.len());
+            assert!(!res.truncated);
+            assert_eq!(res.source, Some(inq.local_addr().unwrap()));
+            // NOTE: we don't have any way of testing the scope ID functionality as a unit test
+            assert_eq!(
+                res.destination.map(|sa| sa.ip()),
+                Some(outq.local_addr().unwrap().ip())
+            );
+            assert_eq!(buf.as_slice(), msg);
+        }
     }
 
     #[test]
     fn test_oversize_recv_to() {
-        let inq = udp_socket().unwrap();
-        let outq = udp_socket().unwrap();
-        inq.set_nonblocking(true).unwrap();
-        outq.set_read_timeout(Some(Duration::from_millis(100)))
-            .unwrap();
-        inq.connect(outq.local_addr().unwrap()).unwrap();
+        for engine in ENGINES {
+            let inq = udp_socket().unwrap();
+            let outq = udp_socket().unwrap();
+            inq.set_nonblocking(true).unwrap();
+            outq.set_read_timeout(Some(Duration::from_millis(100)))
+                .unwrap();
+            inq.connect(outq.local_addr().unwrap()).unwrap();
 
-        let mut bio = BatchIo::new(1).unwrap();
+            let mut bio = engine.instantiate(1).unwrap();
 
-        let msg = [123u8; 128];
+            let msg = [123u8; 128];
 
-        let _ = inq.send(&[123u8; 128]).unwrap();
+            let _ = inq.send(&[123u8; 128]).unwrap();
 
-        let limit = 64;
-        let mut buf = Vec::with_capacity(64).limit(limit);
-        let mut results = Vec::new();
+            let limit = 64;
+            let mut buf = Vec::with_capacity(64).limit(limit);
+            let mut results = Vec::new();
 
-        let n = bio.try_recv_buf_from_to_batch(&outq, std::iter::once(&mut buf), &mut results);
-        assert!(n.unwrap() == 1);
+            let n = bio.try_recv_buf_from_to_batch(&outq, std::iter::once(&mut buf), &mut results);
+            assert!(n.unwrap() == 1);
 
-        let res = results[0].as_ref().unwrap();
-        assert_eq!(res.size, limit);
-        assert!(res.truncated);
-        assert_eq!(buf.get_ref().len(), limit);
-        assert_eq!(buf.get_ref().as_slice(), &msg[..limit]);
+            let res = results[0].as_ref().unwrap();
+            assert_eq!(res.size, limit);
+            assert!(res.truncated);
+            assert_eq!(buf.get_ref().len(), limit);
+            assert_eq!(buf.get_ref().as_slice(), &msg[..limit]);
+        }
     }
 
     // NOTE: we don't have any way of really testing the "send_from" functionality as a unit test
