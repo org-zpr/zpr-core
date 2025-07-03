@@ -342,21 +342,15 @@ pub async fn handle_hello_request(
             let aaa_address: IpAddress = asm.address_pool.lock().unwrap().get_aaa_address();
             debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {aaa_address}");
             TlvEncoding::new_aaa(aaa_address).put(&mut rsp_pkt);
-
-            // TODO: when a address is cleaned up, the address is returned to the pool.
-
             match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(aaa_address)) {
                 Err(e) => {
-                    // Unrecoverable?
-                    error!(target: ZDP, "Link {ingress_link_id}: Failed to process AssignedAAA event: {e}");
+                    // Highly improbable
+                    error!(target: ZDP, "Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
                 }
                 Ok(()) => ()
             }
         }
     }
-
-
-
     super::core::send_non_flow_mgmt(
         asm,
         ingress_link_id,

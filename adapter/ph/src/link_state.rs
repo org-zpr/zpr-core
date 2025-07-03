@@ -192,6 +192,7 @@ pub enum LinkStatus {
     Down,
 }
 
+/// Lives in a [LinkStateWrapper]
 pub struct LinkData {
     echo_success: u64, // Echo requests received response
     echo_timeout: u64, // Echo requests timed out
@@ -411,6 +412,9 @@ impl LinkStateWrapper {
             LinkEvent::ReceivedHelloRequest(peer_zpr_addr) => {
                 self.process_hello_request(asm, peer_zpr_addr)
             }
+            LinkEvent::AssignedAAA(addr) => {
+                self.process_assigned_aaa(asm, addr)
+            }
             LinkEvent::ReceivedHelloResponse(code, maybe_asa_addrs) => {
                 self.process_hello_response(asm, code, maybe_asa_addrs)
             }
@@ -618,6 +622,22 @@ impl LinkStateWrapper {
                 "ReceivedHelloRequest",
             )),
         }
+    }
+
+
+    /// This is called when we receive an AAA address assignment.
+    /// Does not generate an error.
+    fn process_assigned_aaa(
+        &self,
+        asm: &Arc<Assembly>,
+        aaa_addr: IpAddress,
+    ) -> Result<(), LinkStateError> {
+        // Just keep track of this for cleanup later.
+        let link_id = self.id;
+        debug!(target: LINK_STATE, "Link {link_id} assigned AAA address {aaa_addr}");
+        let mut link_data = self.locked_data.lock().unwrap();
+        link_data.aaa_address = Some(aaa_addr);
+        Ok(())
     }
 
     /// This is kicked off by [LinkEvent::ReceivedHelloResponse].
@@ -1298,6 +1318,14 @@ impl LinkStateWrapper {
         let link_id = self.id;
         let mut join_set = tokio::task::JoinSet::new();
         info!(target: LINK_STATE, "Link {link_id} is clearing its state");
+
+        let mut link_data = self.locked_data.lock().unwrap();
+        if let Some(aaa_addr) = link_data.aaa_address.take() {
+            match asm.address_pool.lock().unwrap().release_address(aaa_addr) {
+                Ok(_) => debug!(target: LINK_STATE, "Link {link_id} released AAA address {aaa_addr}"),
+                Err(e) => error!(target: LINK_STATE, "Failed to release AAA address {aaa_addr}: {e:?}")
+            };
+        }
 
         asm.peer_table.clear_peer_state(link_id);
 

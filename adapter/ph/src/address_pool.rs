@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 use openssl::rand::rand_bytes;
-use std::sync;
 use std::net::Ipv6Addr;
 use thiserror::Error;
 
@@ -9,8 +8,6 @@ use crate::net_defs::IpAddress;
 /// Maximum allowed AAA ID value (40 bits)
 const MAX_AAA_ID: u64 = 0xffffffffff;
 
-/// Maximum allowed node ID value (24 bits)
-const MAX_NODE_ID: u32 = 0xffffff;
 
 /// The base AAA address. This just has the constant 8 byte prefix.
 /// This will be followed by the node ID and then the AAA ID.
@@ -60,7 +57,7 @@ impl AddressPool {
     ///   - If the pool runs out of addresses, this function will panic.
     pub fn get_aaa_address(&mut self) -> IpAddress {
         let mut addr_bytes = [0u16; 8];
-        addr_bytes.copy_from_slice(&BASE_AAA_ADDRESS[..4]);
+        addr_bytes[..4].copy_from_slice(&BASE_AAA_ADDRESS[..4]);
         addr_bytes[4] = self.node_id[0];
 
         let this_id = if self.returns.is_empty() {
@@ -87,7 +84,7 @@ impl AddressPool {
 
 
     /// Return an address to the pool.
-    /// Currently only AAA addresses are supported.
+    /// Returns an error of the address is not an AAA address.
     pub fn release_address(&mut self, address: IpAddress) -> Result<(), AddressPoolError> {
         if address.v6[6] != 0x0a || address.v6[7] != 0xaa {
             return Err(AddressPoolError::InvalidAddress)
