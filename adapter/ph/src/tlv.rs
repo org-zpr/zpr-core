@@ -1,8 +1,10 @@
 use bytes::Buf;
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{Ipv4Addr, Ipv6Addr, IpAddr, SocketAddr};
 use thiserror::Error;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
+
+use crate::net_defs::IpAddress;
 
 const SOCKADDR_LEN_V4: u8 = 6; // 4 bytes for IPv4 + 2 bytes for port
 const SOCKADDR_LEN_V6: u8 = 18; // 16 bytes for IPv6 + 2 bytes for port
@@ -50,11 +52,19 @@ impl TlvEncoding {
     }
 
     /// Actor Authentication Address
+    /// TODO: Test v6 variant
     #[allow(dead_code)]
-    pub fn new_aaa(addr: Ipv4Addr) -> TlvEncoding {
-        TlvEncoding {
-            tlv_type: DataType::AAA,
-            value: TlvValue::Ipv4Addr(addr),
+    pub fn new_aaa(addr: IpAddress) -> TlvEncoding {
+        let ipa: IpAddr  = addr.into();
+        match ipa {
+            IpAddr::V4(ipa) => TlvEncoding {
+                tlv_type: DataType::AAA,
+                value: TlvValue::Ipv4Addr(ipa),
+            },
+            IpAddr::V6(ipa) => TlvEncoding {
+                tlv_type: DataType::AAA,
+                value: TlvValue::Ipv6Addr(ipa),
+            },
         }
     }
 

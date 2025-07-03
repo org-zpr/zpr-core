@@ -17,6 +17,7 @@ use tracing::*;
 
 mod adapter_manager_worker;
 mod adapter_tables;
+mod address_pool;
 mod admin_worker;
 mod assembly;
 mod auth;
@@ -73,6 +74,7 @@ mod zprtun;
 #[cfg(test)]
 mod km_testdata;
 
+use address_pool::AddressPool;
 use assembly::{Assembly, PhMode};
 use capture_worker::CaptureWorker;
 use fastpath::FastpathWorkerConfig;
@@ -429,6 +431,7 @@ fn main() -> ExitCode {
         system_start_time,
         bsauth: config.bootstrap,
         rsauth: config.rsaoauth,
+        address_pool: AddressPool::new(0), // TODO: Get node ID from node ZPR address
     });
 
     //

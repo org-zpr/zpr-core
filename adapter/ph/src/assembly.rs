@@ -1,4 +1,5 @@
 use crate::adapter_tables;
+use crate::address_pool::AddressPool;
 use crate::auth::{OAuthRsa, RsaBootstrapAuth};
 use crate::capture_worker::CaptureWorker;
 use crate::config;
@@ -95,6 +96,7 @@ pub struct Assembly {
     pub bsauth: Option<RsaBootstrapAuth>,
     pub rsauth: Option<OAuthRsa>,
     pub system_start_time: std::time::Instant,
+    pub address_pool: AddressPool,
 }
 
 #[derive(Debug, Error)]
@@ -461,6 +463,7 @@ pub mod test {
             system_start_time: std::time::Instant::now(),
             bsauth: None,
             rsauth: None,
+            address_pool: AddressPool::new(31337),
         }
     }
 }

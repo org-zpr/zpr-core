@@ -125,7 +125,6 @@ pub async fn launch_signal_worker(
                     KmSignal::SaEstablished(sa) => {
                         debug!(target: KEY_MGMT, "multiplexor: link {}: SA established (SEND_ZPIS: {}, RECV_ZPIS: {}",
                             linkmsg.link_id, sa.send_zpis, sa.recv_zpis);
-
                         match asm.peer_table.set_security_association(linkmsg.link_id, sa) {
                             Ok(_) => (),
                             Err(e) => {

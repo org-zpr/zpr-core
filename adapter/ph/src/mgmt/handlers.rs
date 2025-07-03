@@ -1,6 +1,6 @@
 //! Handlers for management requests.
 
-use crate::adapter_tables;
+use crate::{adapter_tables, special_peers};
 use crate::assembly::{self, Assembly, PhMode, VERSION};
 use crate::auth;
 use crate::config;
@@ -10,6 +10,7 @@ use crate::link_state::LinkEvent;
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::{ip_number, IpAddress};
 use crate::packet::Packet;
+use crate::special_peers::SpecialPeerName;
 use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
 use bytes::{Buf, BufMut};
@@ -323,6 +324,42 @@ pub async fn handle_hello_request(
         auth::DEFAULT_ZPR_OAUTH_RSA_PORT,
     );
     TlvEncoding::new_asa(service_addr).put(&mut rsp_pkt);
+
+    // An AAA address is required when we have an authentication service available.
+    // Special case- the visa service does not use an AAA address.
+    // Also the adapter may end up using bootstrap auth in which case it can ignore
+    // the AAA address.
+
+    // First check the CN on this link to see if it is the visa service.
+    let visa_service_link_id = asm.peer_table.lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
+    match visa_service_link_id {
+        Some(id) if id.get() == ingress_link_id => {
+            // This is the visa service, so we do not need an AAA address.
+            debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - no AAA address needed for visa service");
+        }
+        _ => {
+            // We need to include an AAA address.
+            let aaa_address: IpAddress = asm.address_pool.get_aaa_address();
+            debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {aaa_address}");
+            TlvEncoding::new_aaa(aaa_address).put(&mut rsp_pkt);
+            // TODO: when a address is cleaned up, the address is returned to the pool.
+            // In order to do that it needs to be in PeerState.
+            //   ...
+            //   And then can be returned in clear_peer_state
+            // OR, it needs to be in the link_state somewhere.
+            //
+            // Either way we need to return it from link_state.clean_up_link_state.
+            match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(aaa_address)) {
+                Err(e) => {
+                    // Unrecoverable?
+                    error!(target: ZDP, "Link {ingress_link_id}: Failed to process AssignedAAA event: {e}");
+                }
+                Ok(()) => ()
+            }
+        }
+    }
+
+
 
     super::core::send_non_flow_mgmt(
         asm,

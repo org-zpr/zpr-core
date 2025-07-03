@@ -13,7 +13,7 @@ use crate::special_peers::SpecialPeerName;
 use crate::visa_mgmt;
 use crate::zdp::{self, ResponseCode, TerminateReason};
 
-use openssl::x509::X509;
+use openssl::x509::{X509, X509Name};
 use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -139,6 +139,7 @@ pub enum LinkEvent {
     Start,
     KeyingDone,
     ReceivedHelloRequest(IpAddress), // Actors ZPR address - TODO: implement AAAs
+    AssignedAAA(IpAddress), // Assigned AAA address for this link
     ReceivedHelloResponse(ResponseCode, Option<Vec<SocketAddr>>), // (response code, ASA addresses)
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
@@ -199,6 +200,7 @@ pub struct LinkData {
     // Assuming no loss, 100 samples will store 5 minutes of latency data
     latency_data: SampleRing<Duration, 100>,
     asa_addresses: Option<Vec<SocketAddr>>, // Addresses of ASA servers told to us by our peer, if any
+    aaa_address: Option<IpAddress>, // AAA address assigned this link (if any)
 }
 
 impl LinkData {
@@ -208,6 +210,7 @@ impl LinkData {
             echo_timeout: 0,
             latency_data: SampleRing::new(Duration::ZERO),
             asa_addresses: None,
+            aaa_address: None,
         }
     }
 }
