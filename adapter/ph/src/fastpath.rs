@@ -5,6 +5,7 @@
 
 use crate::adapter_tables::AltEntry;
 use crate::assembly::{Assembly, PhMode};
+use crate::batch_io::BatchIoEngine;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
 use crate::counters::CounterType;
@@ -50,6 +51,7 @@ const ACTOR_PACKET_FLOW_TRACKER: std::sync::LazyLock<
 
 #[derive(Clone, Copy)]
 pub struct FastpathWorkerConfig {
+    pub batch_io_engine: &'static BatchIoEngine,
     pub buffer_count: usize,
     pub batch_size: usize,
 }

@@ -487,7 +487,7 @@ mod io_uring {
     // (= oldest LTS release with EOL > end of 2025)
 
     impl BatchIo {
-        pub const ENGINE_NAME: &'static str = "io-uring";
+        pub const ENGINE_NAME: &'static str = "io_uring";
 
         pub const MAX_ENTRIES: usize = MAX_ENTRIES;
 
@@ -841,7 +841,7 @@ mod posix_unbatched {
     );
 
     impl BatchIo {
-        pub const ENGINE_NAME: &'static str = "posix-unbatched";
+        pub const ENGINE_NAME: &'static str = "posix_unbatched";
 
         pub const MAX_ENTRIES: usize = 1024;
 
@@ -1084,21 +1084,33 @@ const ENGINES: &[BatchIoEngine] = &[
     bio!(posix_unbatched),
 ];
 
-#[allow(dead_code)]
+/// List of available engine names.  Does not include automatic selection.
 pub fn engine_names() -> impl Iterator<Item = &'static str> {
     ENGINES.iter().map(|e| e.engine_name)
 }
 
-#[allow(dead_code)]
+/// "Engine" name which indicates an engine should be selected automatically
+/// (as by `auto_select_engine()`).
+pub const AUTO_ENGINE_NAME: &'static str = "auto";
+
+/// Select an engine by name (as listed by `engine_names()`).
+/// Supplying `AUTO_ENGINE_NAME` will use automatic selection
+/// (as by `auto_select_engine()`).
 pub fn select_engine_by_name(name: &str) -> Option<&'static BatchIoEngine> {
-    ENGINES.iter().find(|e| e.engine_name == name)
+    if name == AUTO_ENGINE_NAME {
+        Some(auto_select_engine())
+    } else {
+        ENGINES.iter().find(|e| e.engine_name == name)
+    }
 }
 
-pub fn default_engine() -> &'static BatchIoEngine {
+/// Select the best engine which is available on the current system.
+pub fn auto_select_engine() -> &'static BatchIoEngine {
     // FIXME: choose based on support
     &ENGINES[0]
 }
 
+/// Represents an available batch I/O engine which may be instantiated.
 pub struct BatchIoEngine {
     engine_name: &'static str,
     max_entries: usize,
@@ -1106,16 +1118,19 @@ pub struct BatchIoEngine {
 }
 
 impl BatchIoEngine {
-    #[allow(dead_code)]
+    /// The name of this I/O engine.
     pub fn engine_name(&self) -> &'static str {
         self.engine_name
     }
 
+    /// The maximum number of entries per batch this I/O engine supports.
     #[allow(dead_code)]
     pub fn max_entries(&self) -> usize {
         self.max_entries
     }
 
+    /// Instantiate this batch I/O engine,
+    /// supporting the supplied number of entries per batch.
     pub fn instantiate(&self, entries: usize) -> Result<BatchIo> {
         Ok(BatchIo((self.factory)(entries)?))
     }

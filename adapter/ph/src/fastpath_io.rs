@@ -47,7 +47,8 @@ impl FastpathIo {
         }
 
         Self {
-            batch_io: batch_io::default_engine()
+            batch_io: config
+                .batch_io_engine
                 .instantiate(config.batch_size)
                 .unwrap(),
             actor_tun,

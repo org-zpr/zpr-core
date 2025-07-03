@@ -11,6 +11,7 @@ use serde::Deserialize;
 
 use crate::assembly::PhMode;
 use crate::auth::{OAuthRsa, RsaBootstrapAuth};
+use crate::batch_io;
 use crate::pki;
 use crate::pki::{load_cert, load_noise_private_key, NOISE_KEY_LEN};
 
@@ -55,6 +56,8 @@ impl ArgError for str {
         ArgsError::Missing(self.to_string())
     }
 }
+
+// CTP WORKING: move engine-select into here
 
 /// This config struct is loaded up from the command line args and used by the
 /// ph system to configure itself.  Do not create this directly,
@@ -106,6 +109,9 @@ pub struct Config {
 
     /// If present this has key material for use during a zpr-oauthrsa authentication.
     pub rsaoauth: Option<OAuthRsa>,
+
+    /// The batch I/O engine to use.
+    pub batch_io_engine: String,
 }
 
 impl Config {
@@ -286,6 +292,9 @@ impl Config {
         if let Some(quiet) = &config.quiet {
             self.quiet.extend(quiet.into_iter().cloned());
         }
+        if let Some(io_engine) = &config.io_engine {
+            self.batch_io_engine = io_engine.clone();
+        }
         Ok(())
     }
 
@@ -435,6 +444,8 @@ impl Config {
         self.debug.extend(common.debug.iter().cloned());
         self.quiet.extend(common.quiet.iter().cloned());
 
+        self.batch_io_engine = common.io_engine.clone();
+
         Ok(())
     }
 }
@@ -456,6 +467,7 @@ impl Default for Config {
             node_public_key_file: None,
             bootstrap: None,
             rsaoauth: None,
+            batch_io_engine: batch_io::AUTO_ENGINE_NAME.to_owned(),
         }
     }
 }
@@ -493,6 +505,7 @@ pub struct GlobalConfigSection {
     pub zpr_addr: Option<Vec<IpAddr>>,
     pub debug: Option<Vec<String>>,
     pub quiet: Option<Vec<String>>,
+    pub io_engine: Option<String>,
 }
 
 // Adapter only bits.
