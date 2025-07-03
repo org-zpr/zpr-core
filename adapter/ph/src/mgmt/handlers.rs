@@ -339,16 +339,12 @@ pub async fn handle_hello_request(
         }
         _ => {
             // We need to include an AAA address.
-            let aaa_address: IpAddress = asm.address_pool.get_aaa_address();
+            let aaa_address: IpAddress = asm.address_pool.lock().unwrap().get_aaa_address();
             debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {aaa_address}");
             TlvEncoding::new_aaa(aaa_address).put(&mut rsp_pkt);
+
             // TODO: when a address is cleaned up, the address is returned to the pool.
-            // In order to do that it needs to be in PeerState.
-            //   ...
-            //   And then can be returned in clear_peer_state
-            // OR, it needs to be in the link_state somewhere.
-            //
-            // Either way we need to return it from link_state.clean_up_link_state.
+
             match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(aaa_address)) {
                 Err(e) => {
                     // Unrecoverable?

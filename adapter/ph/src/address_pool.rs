@@ -27,17 +27,14 @@ pub enum AddressPoolError {
 
 
 /// A pool of addresses for the ZPR network. Only supports AAA addresses
-/// at the moment.
+/// at the moment.  Not thread safe.
 pub struct AddressPool {
     node_id: [u16; 2],
     first_aaa_id: u64,
-    state: sync::Mutex<StateData>,
-}
-
-struct StateData {
     next_aaa_id: u64,
     returns: VecDeque<u64>, // FIFO
 }
+
 
 impl AddressPool {
     /// `node_id` is the lower 24 bits of the passed value. If the value is larger
@@ -46,16 +43,11 @@ impl AddressPool {
         let mut initial = [0u8; 8];
         rand_bytes(&mut initial).unwrap();
         let first_aaa_id = u64::from_be_bytes(initial) & MAX_AAA_ID;
-
-        let state = sync::Mutex::new(StateData {
-            next_aaa_id: first_aaa_id,
-            returns: VecDeque::new(),
-        });
-
         AddressPool {
             node_id: [(node_id >> 16) as u16, (node_id & 0xFF) as u16],
             first_aaa_id,
-            state,
+            next_aaa_id: first_aaa_id,
+            returns: VecDeque::new(),
         }
     }
 
@@ -71,19 +63,16 @@ impl AddressPool {
         addr_bytes.copy_from_slice(&BASE_AAA_ADDRESS[..4]);
         addr_bytes[4] = self.node_id[0];
 
-
-        let mut state = self.state.lock().unwrap();
-
-        let this_id = if state.returns.is_empty() {
-            let aaa_id = state.next_aaa_id;
-            state.next_aaa_id = (state.next_aaa_id + 1) % MAX_AAA_ID;
+        let this_id = if self.returns.is_empty() {
+            let aaa_id = self.next_aaa_id;
+            self.next_aaa_id = (self.next_aaa_id + 1) % MAX_AAA_ID;
             if aaa_id == self.first_aaa_id {
                 panic!("ran out of AAA addresses");
             }
             aaa_id
         } else {
             // Reuse an address from the returns queue
-            state.returns.pop_front().unwrap()
+            self.returns.pop_front().unwrap()
         };
 
         // We use the bottom 40 bits of the ID as the last 40 bits of the IP address.
@@ -99,7 +88,7 @@ impl AddressPool {
 
     /// Return an address to the pool.
     /// Currently only AAA addresses are supported.
-    pub fn release_address(&self, address: IpAddress) -> Result<(), AddressPoolError> {
+    pub fn release_address(&mut self, address: IpAddress) -> Result<(), AddressPoolError> {
         if address.v6[6] != 0x0a || address.v6[7] != 0xaa {
             return Err(AddressPoolError::InvalidAddress)
         }
@@ -113,7 +102,7 @@ impl AddressPool {
         }
 
         // Return it to our queue.
-        self.state.lock().unwrap().returns.push_back(id);
+        self.returns.push_back(id);
         Ok(())
     }
 }
