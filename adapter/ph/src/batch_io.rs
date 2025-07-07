@@ -120,7 +120,7 @@ mod io_uring {
     use super::{sockaddr_to_socket_addr, BatchIoImpl, ReceivedPacket};
     use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
     use bytes::BufMut;
-    use io_uring::{cqueue, opcode, squeue, types, IoUring};
+    use io_uring::{cqueue, opcode, squeue, types, IoUring, Probe};
     use libc;
     use nix::sys::socket::{SockaddrLike, SockaddrStorage};
     use std::io::Result;
@@ -491,6 +491,29 @@ mod io_uring {
 
         pub const MAX_ENTRIES: usize = MAX_ENTRIES;
 
+        const REQUIRED_OPCODES: &[u8] = &[
+            opcode::AsyncCancel::CODE,
+            opcode::Write::CODE,
+            opcode::Read::CODE,
+            opcode::SendMsg::CODE,
+            opcode::RecvMsg::CODE,
+        ];
+
+        pub fn detect_support() -> bool {
+            let Ok(io_uring) = IoUring::new(1) else {
+                return false;
+            };
+
+            let mut probe = Probe::new();
+            if io_uring.submitter().register_probe(&mut probe).is_err() {
+                return false;
+            }
+
+            Self::REQUIRED_OPCODES
+                .iter()
+                .all(|&op| probe.is_supported(op))
+        }
+
         pub fn new(entries: usize) -> Result<Self> {
             assert!(entries <= MAX_ENTRIES);
 
@@ -845,6 +868,11 @@ mod posix_unbatched {
 
         pub const MAX_ENTRIES: usize = 1024;
 
+        pub fn detect_support() -> bool {
+            // theoretically always available
+            true
+        }
+
         pub fn new(_entries: usize) -> Result<Self> {
             Ok(Self {
                 cmsg_buffer: cmsg_space!(sockaddr_storage),
@@ -1074,6 +1102,7 @@ macro_rules! bio {
             engine_name: $m::BatchIo::ENGINE_NAME,
             max_entries: $m::BatchIo::MAX_ENTRIES,
             factory: |e| $m::BatchIo::new(e).map(|bio| Box::new(bio) as Box<dyn BatchIoImpl>),
+            detect_support: $m::BatchIo::detect_support,
         }
     };
 }
@@ -1106,8 +1135,10 @@ pub fn select_engine_by_name(name: &str) -> Option<&'static BatchIoEngine> {
 
 /// Select the best engine which is available on the current system.
 pub fn auto_select_engine() -> &'static BatchIoEngine {
-    // FIXME: choose based on support
-    &ENGINES[0]
+    ENGINES
+        .iter()
+        .find(|e| e.detect_support())
+        .expect("no supported I/O engines!")
 }
 
 /// Represents an available batch I/O engine which may be instantiated.
@@ -1115,6 +1146,7 @@ pub struct BatchIoEngine {
     engine_name: &'static str,
     max_entries: usize,
     factory: fn(usize) -> Result<Box<dyn BatchIoImpl>>,
+    detect_support: fn() -> bool,
 }
 
 impl BatchIoEngine {
@@ -1133,6 +1165,11 @@ impl BatchIoEngine {
     /// supporting the supplied number of entries per batch.
     pub fn instantiate(&self, entries: usize) -> Result<BatchIo> {
         Ok(BatchIo((self.factory)(entries)?))
+    }
+
+    /// Detect whether this engine is supported by the host environment.
+    pub fn detect_support(&self) -> bool {
+        (self.detect_support)()
     }
 }
 

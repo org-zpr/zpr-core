@@ -133,7 +133,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --private-key-file vs.zpr.key \
   --bootstrap-key actorvs-rsa.key \
   --tun-if tun0 \
-  --io-engine posix_unbatched \
+  --io-engine auto \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS" \
   --node-public-key-file node.pubkey \
   --zpr-addr "$VS_ZPR_ADDR" 2>&1 | tee adapter-vs.log | prefix_log zpr-vs &
@@ -165,7 +165,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --private-key-file adapter2.key \
   --bootstrap-key actor2-rsa.key \
   --tun-if tun0 \
-  --io-engine auto \
+  --io-engine posix_unbatched \
   --node-addr "$NODE_SUBSTRATE_ADDR_B" \
   --node-public-key-file node.pubkey \
   --zpr-addr "$B_ZPR_ADDR" 2>&1 | tee adapter2.log | prefix_log zpr-b &
