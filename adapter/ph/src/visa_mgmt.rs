@@ -220,7 +220,7 @@ pub async fn handle_services_update(
                 continue;
             }
             if service.address.is_none() {
-                error!(target: VISA_MGMT, "service descriptor with no address (id={}", service.service_id.unwrap_or_default());
+                error!(target: VISA_MGMT, "service descriptor with no address (id={})", service.service_id.unwrap_or_default());
                 continue;
             }
             match vs_types::ServiceDescriptor::try_from(service) {
