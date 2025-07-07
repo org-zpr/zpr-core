@@ -3,7 +3,6 @@ use crate::net_defs::IpAddress;
 use libnode::vsapi;
 
 use std::convert::TryFrom;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::SystemTime;
 use url::Url;
 
@@ -97,6 +96,7 @@ impl ServiceDescriptor {
 mod tests {
     use super::*;
     use libnode::vsapi;
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use std::time::Duration;
 
     // Helper function to create a test ServiceDescriptor
