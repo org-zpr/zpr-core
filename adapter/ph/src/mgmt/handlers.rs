@@ -318,7 +318,7 @@ pub async fn handle_hello_request(
     TlvEncoding::new_version(VERSION).put(&mut rsp_pkt);
 
     {
-        let svclist = asm.vs_auth_services.read().await;
+        let svclist = asm.vs_auth_services.read().unwrap();
         if svclist.is_valid() {
             // If we have a list of services, include them in the response.
             // TODO: The ASA is set as a SocketAddr which doesn't feel quite right.  Maybe should be a URI.

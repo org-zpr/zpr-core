@@ -239,7 +239,7 @@ pub async fn handle_services_update(
     }
     debug!(target: VISA_MGMT, "updating auth services with {} entries, expires at {expiration:?}", vs_auth_services.len());
     // The update is always a complete replacement of the list of services, and may be empty.
-    let mut svcs = asm.vs_auth_services.write().await;
+    let mut svcs = asm.vs_auth_services.write().unwrap();
     svcs.update(expiration, vs_auth_services);
     Ok(())
 }

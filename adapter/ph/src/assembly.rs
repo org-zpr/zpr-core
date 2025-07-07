@@ -67,7 +67,7 @@ pub struct Assembly {
     pub actor_output_requeue: ActorOutputRequeue,
 
     pub vsconn: Option<libnode::vsconn::VSConnHandle>, // present only on nodes
-    pub vs_auth_services: tokio::sync::RwLock<AuthServicesList>, // present only on nodes, may be empty, managed by visa service
+    pub vs_auth_services: std::sync::RwLock<AuthServicesList>, // present only on nodes, may be empty, managed by visa service
 
     pub visa_table: tokio::sync::RwLock<visa_table::VisaTable>, // Only for nodes
 
@@ -445,7 +445,7 @@ pub mod test {
             actor_output_requeue,
             vsconn,
             visa_table,
-            vs_auth_services: tokio::sync::RwLock::new(AuthServicesList::default()),
+            vs_auth_services: std::sync::RwLock::new(AuthServicesList::default()),
             capture_queue,
             capture_worker,
             flow_control,

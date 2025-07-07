@@ -413,7 +413,7 @@ fn main() -> ExitCode {
         visa_table: tokio::sync::RwLock::new(visa_table::VisaTable::new_with_vs_visas(
             &node_zpr_addr,
         )),
-        vs_auth_services: tokio::sync::RwLock::new(AuthServicesList::default()),
+        vs_auth_services: std::sync::RwLock::new(AuthServicesList::default()),
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
         flow_control: FlowControl::new(),
