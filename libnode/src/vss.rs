@@ -130,7 +130,7 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
         self.msg_chan_out
             .blocking_send(VSSMsg::PushedServices(services))
             .or_else(|e| {
-                error!(target: VSS_RPC, "failed to enque services message to node: {e}");
+                error!(target: VSS_RPC, "failed to enqueue services message to node: {e}");
                 Err(thrift::Error::from("enqueue failed"))
             })
     }
