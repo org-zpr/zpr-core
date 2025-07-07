@@ -89,13 +89,7 @@ impl ServiceDescriptor {
             Some(p) => p,
             None => return None, // No port in URI, so no SocketAddr for you
         };
-        if self.zpr_address.is_v4() {
-            let ip4 = Ipv4Addr::try_from(self.zpr_address).unwrap();
-            Some(std::net::SocketAddr::new(IpAddr::V4(ip4), port))
-        } else {
-            let ip6 = Ipv6Addr::try_from(self.zpr_address).unwrap();
-            Some(std::net::SocketAddr::new(IpAddr::V6(ip6), port))
-        }
+        Some(std::net::SocketAddr::new(self.zpr_address.into(), port))
     }
 }
 
