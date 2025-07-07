@@ -16,6 +16,9 @@ use crate::pki::{load_cert, load_noise_private_key, NOISE_KEY_LEN};
 
 use crate::main_args::{ArgsError, CommonArgs};
 
+/// Upper bound on number of active links (peers) that the PH can manage.
+pub const MAX_ACTIVE_LINKS: usize = 1024;
+
 /// Size of a packet buffer.
 pub const PACKET_BUFFER_SIZE: usize = 4096 * 3;
 

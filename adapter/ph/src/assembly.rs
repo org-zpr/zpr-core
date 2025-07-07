@@ -96,7 +96,7 @@ pub struct Assembly {
     pub bsauth: Option<RsaBootstrapAuth>,
     pub rsauth: Option<OAuthRsa>,
     pub system_start_time: std::time::Instant,
-    pub address_pool: std::sync::Mutex<AddressPool>,
+    pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only.
 }
 
 #[derive(Debug, Error)]
@@ -463,7 +463,7 @@ pub mod test {
             system_start_time: std::time::Instant::now(),
             bsauth: None,
             rsauth: None,
-            address_pool: std::sync::Mutex::new(AddressPool::new(31337)),
+            address_pool: std::sync::Mutex::new(None),
         }
     }
 }

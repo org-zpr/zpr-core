@@ -1,6 +1,6 @@
 //! Handlers for management requests.
 
-use crate::{adapter_tables, special_peers};
+use crate::adapter_tables;
 use crate::assembly::{self, Assembly, PhMode, VERSION};
 use crate::auth;
 use crate::config;
@@ -264,6 +264,9 @@ pub async fn handle_terminate_indication(
 
 /// handle a Hello Request (RFC 6.5 § 6.3.4)
 /// Reads the hello, fire a ReceivedHelloRequest event, and then sends a response.
+///
+/// ## Preconditions:
+/// - This adapter is running as a node.
 pub async fn handle_hello_request(
     asm: &Arc<Assembly>,
     _seq_num: zpr::SeqNum,
@@ -307,50 +310,77 @@ pub async fn handle_hello_request(
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
 
-    hdr.status = match asm
+    let mut response_status = match asm
         .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest(actor_addr))
     {
         Err(_) => zdp::ResponseCode::Other,
         Ok(()) => zdp::ResponseCode::Success,
     };
 
+    let mut aaa_address: Option<IpAddress> = None;
+
+    if response_status != zdp::ResponseCode::Success {
+        // Already failing!  Fall through to sending of response.
+        hdr.status = response_status;
+    } else {
+        // We need an AAA address if an authentication service is available and the connecting adapter
+        // is not fronting the visa service.
+
+        let is_visa_service = asm
+            .peer_table
+            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter)
+            .map_or(false, |id| id.get() == ingress_link_id);
+
+        let auth_service_avaialable = asm.rsauth.is_some();
+
+        if !is_visa_service && auth_service_avaialable {
+            // Then we need an AAA.
+            if let Some(pool) = asm.address_pool.lock().unwrap().as_mut() {
+                if let Ok(addr) = pool.get_aaa_address() {
+                    debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {addr}");
+                    aaa_address = Some(addr);
+
+                    // Store the AAA in the link memory so we can free it later.
+                    match asm
+                        .process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(addr))
+                    {
+                        Err(e) => {
+                            // Highly improbable
+                            error!(target: ZDP, "Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
+                        }
+                        Ok(()) => (),
+                    }
+                } else {
+                    // Uh oh, this is trouble. Need to fail the hello and shutdown the link.
+                    warn!(target: ZDP, "Link {ingress_link_id}: HelloRequest fails - no AAA address available");
+                    response_status = zdp::ResponseCode::Other;
+                }
+            } else {
+                // This is violation of precondition. If we are a node, we must have a pool.
+                panic!("adapter handling a hello-request has no address pool");
+            }
+        }
+    }
+
+    hdr.status = response_status;
+
+    // Policy ID and version are always included, even if not SUCCESS.
     let policy_id: i64 = 0; // TODO: We get policy ID from visa service. Record that somewhere, access it here.
     TlvEncoding::new_policy_id(policy_id).put(&mut rsp_pkt);
     TlvEncoding::new_version(VERSION).put(&mut rsp_pkt);
 
-    // TODO: This info needs to come from the visa service
-    let service_addr = SocketAddr::new(
-        IpAddr::V6(auth::HARD_CODED_BAS_ADDR),
-        auth::DEFAULT_ZPR_OAUTH_RSA_PORT,
-    );
-    TlvEncoding::new_asa(service_addr).put(&mut rsp_pkt);
-
-    // An AAA address is required when we have an authentication service available.
-    // Special case- the visa service does not use an AAA address.
-    // Also the adapter may end up using bootstrap auth in which case it can ignore
-    // the AAA address.
-
-    // First check the CN on this link to see if it is the visa service.
-    let visa_service_link_id = asm.peer_table.lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
-    match visa_service_link_id {
-        Some(id) if id.get() == ingress_link_id => {
-            // This is the visa service, so we do not need an AAA address.
-            debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - no AAA address needed for visa service");
-        }
-        _ => {
-            // We need to include an AAA address.
-            let aaa_address: IpAddress = asm.address_pool.lock().unwrap().get_aaa_address();
-            debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {aaa_address}");
-            TlvEncoding::new_aaa(aaa_address).put(&mut rsp_pkt);
-            match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(aaa_address)) {
-                Err(e) => {
-                    // Highly improbable
-                    error!(target: ZDP, "Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
-                }
-                Ok(()) => ()
-            }
+    if response_status == zdp::ResponseCode::Success {
+        // TODO: This info needs to come from the visa service
+        let service_addr = SocketAddr::new(
+            IpAddr::V6(auth::HARD_CODED_BAS_ADDR),
+            auth::DEFAULT_ZPR_OAUTH_RSA_PORT,
+        );
+        TlvEncoding::new_asa(service_addr).put(&mut rsp_pkt);
+        if let Some(aaa_addr) = aaa_address {
+            TlvEncoding::new_aaa(aaa_addr).put(&mut rsp_pkt);
         }
     }
+
     super::core::send_non_flow_mgmt(
         asm,
         ingress_link_id,
@@ -358,6 +388,20 @@ pub async fn handle_hello_request(
         rsp_pkt,
     );
 
+    // TODO: The framework within which this function is called does not allow us to
+    // returns an error back which would trigger a link shutdown.  So we do it manually
+    // and just return Ok() though things are not in fact OK.
+
+    if response_status != zdp::ResponseCode::Success {
+        // Kick off link shutdown
+        info!(target: ZDP, "Link {ingress_link_id}: HelloRequest processing failed, shutting down link");
+        match asm.process_link_state_event(ingress_link_id, LinkEvent::Error) {
+            Err(e) => {
+                error!(target: ZDP, "Link {ingress_link_id}: failed to process Error event: {e}");
+            }
+            Ok(()) => (),
+        }
+    }
     Ok(())
 }
 

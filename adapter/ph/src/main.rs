@@ -371,6 +371,7 @@ fn main() -> ExitCode {
 
     let mut vsconn;
     let vs_outq;
+    let mut maybe_aaa_pool = None;
 
     if ph_mode == PhMode::Node {
         let node_name = config::get_noise_cn(&config.certificate_file)
@@ -394,6 +395,17 @@ fn main() -> ExitCode {
             )
             .expect("error launching Visa Service connection manager"),
         );
+
+        // For the purposes of assigning AAA addresses, we take the bottom 24 bits of the nodes
+        // ZPR address as it's ID.
+        let node_id = match node_zpr_addr {
+            IpAddr::V4(addr) => u32::from_be_bytes(addr.octets()) & 0x00FFFFFF,
+            IpAddr::V6(addr) => {
+                u32::from_be_bytes(addr.octets()[12..16].try_into().unwrap()) & 0x00FFFFFF
+            }
+        };
+        info!(target: STARTUP, "node ID is {node_id:#010x}");
+        maybe_aaa_pool = Some(AddressPool::new(node_id));
     } else {
         vsconn = None;
         vs_outq = None;
@@ -431,7 +443,7 @@ fn main() -> ExitCode {
         system_start_time,
         bsauth: config.bootstrap,
         rsauth: config.rsaoauth,
-        address_pool: std::sync::Mutex::new(AddressPool::new(0)), // TODO: Get node ID from node ZPR address
+        address_pool: std::sync::Mutex::new(maybe_aaa_pool), // TODO: Get node ID from node ZPR address
     });
 
     //

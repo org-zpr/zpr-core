@@ -4,11 +4,11 @@ use crate::forwarding_tables::PeerForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
 use crate::net_defs::ScopedIpAddr;
-use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::seq_nums::*;
 use crate::special_peers::*;
 use crate::sync_req;
+use crate::{config, queues};
 use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
@@ -27,7 +27,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use zpr::{self, LinkId, SubstrateAddr, LINK_ID_UNKNOWN};
 
-const PEER_TABLE_SIZE: usize = 1024;
+const PEER_TABLE_SIZE: usize = config::MAX_ACTIVE_LINKS;
 
 pub struct PeerState {
     pub substrate_addr: SubstrateAddr,

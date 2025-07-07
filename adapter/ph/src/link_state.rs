@@ -13,7 +13,7 @@ use crate::special_peers::SpecialPeerName;
 use crate::visa_mgmt;
 use crate::zdp::{self, ResponseCode, TerminateReason};
 
-use openssl::x509::{X509, X509Name};
+use openssl::x509::X509;
 use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
@@ -139,7 +139,7 @@ pub enum LinkEvent {
     Start,
     KeyingDone,
     ReceivedHelloRequest(IpAddress), // Actors ZPR address - TODO: implement AAAs
-    AssignedAAA(IpAddress), // Assigned AAA address for this link
+    AssignedAAA(IpAddress),          // Assigned AAA address for this link
     ReceivedHelloResponse(ResponseCode, Option<Vec<SocketAddr>>), // (response code, ASA addresses)
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
@@ -201,7 +201,7 @@ pub struct LinkData {
     // Assuming no loss, 100 samples will store 5 minutes of latency data
     latency_data: SampleRing<Duration, 100>,
     asa_addresses: Option<Vec<SocketAddr>>, // Addresses of ASA servers told to us by our peer, if any
-    aaa_address: Option<IpAddress>, // AAA address assigned this link (if any)
+    aaa_address: Option<IpAddress>,         // AAA address assigned this link (if any)
 }
 
 impl LinkData {
@@ -412,9 +412,7 @@ impl LinkStateWrapper {
             LinkEvent::ReceivedHelloRequest(peer_zpr_addr) => {
                 self.process_hello_request(asm, peer_zpr_addr)
             }
-            LinkEvent::AssignedAAA(addr) => {
-                self.process_assigned_aaa(asm, addr)
-            }
+            LinkEvent::AssignedAAA(addr) => self.process_assigned_aaa(asm, addr),
             LinkEvent::ReceivedHelloResponse(code, maybe_asa_addrs) => {
                 self.process_hello_response(asm, code, maybe_asa_addrs)
             }
@@ -624,12 +622,11 @@ impl LinkStateWrapper {
         }
     }
 
-
     /// This is called when we receive an AAA address assignment.
     /// Does not generate an error.
     fn process_assigned_aaa(
         &self,
-        asm: &Arc<Assembly>,
+        _asm: &Arc<Assembly>,
         aaa_addr: IpAddress,
     ) -> Result<(), LinkStateError> {
         // Just keep track of this for cleanup later.
@@ -1321,10 +1318,16 @@ impl LinkStateWrapper {
 
         let mut link_data = self.locked_data.lock().unwrap();
         if let Some(aaa_addr) = link_data.aaa_address.take() {
-            match asm.address_pool.lock().unwrap().release_address(aaa_addr) {
-                Ok(_) => debug!(target: LINK_STATE, "Link {link_id} released AAA address {aaa_addr}"),
-                Err(e) => error!(target: LINK_STATE, "Failed to release AAA address {aaa_addr}: {e:?}")
-            };
+            if let Some(pool) = asm.address_pool.lock().unwrap().as_mut() {
+                match pool.release_address(aaa_addr) {
+                    Ok(_) => {
+                        debug!(target: LINK_STATE, "Link {link_id} released AAA address {aaa_addr}")
+                    }
+                    Err(e) => {
+                        error!(target: LINK_STATE, "Failed to release AAA address {aaa_addr}: {e:?}")
+                    }
+                };
+            }
         }
 
         asm.peer_table.clear_peer_state(link_id);
