@@ -561,17 +561,19 @@ impl LinkStateWrapper {
         debug!(target: LINK_STATE, "Link {link_id} finished keying.  Starting hello");
 
         locked_fsm.set_state(LinkState::Helloing);
-        drop(locked_fsm);
-        self.maybe_send_hello(asm);
-        Ok(())
-    }
 
-    fn maybe_send_hello(&self, asm: &Arc<Assembly>) {
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
+            let _seqnum =
+                mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
+            self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+            debug!(
+                target: LINK_STATE,
+                "Link {link_id} sent HelloRequest.  Waiting for other side to respond."
+            );
         }
-        // Otherwise, wait for the adapter to reach out
+        // Otherwise we are a node so wait for an adapter to reach out
+        Ok(())
     }
 
     /// Update link state based on received hello request
@@ -1233,7 +1235,8 @@ impl LinkStateWrapper {
             // all these states use timeout simply for retransmits
             (LinkType::AdapterToNode, LinkState::RegisterAA)
             | (LinkType::NodeToAdapter, LinkState::RegisterAA)
-            | (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {
+            | (LinkType::NodeToAdapter, LinkState::WaitForInitAuth)
+            | (LinkType::AdapterToNode, LinkState::Helloing) => {
                 locked_fsm.timeout_count += 1;
 
                 if locked_fsm.timeout_count >= config::DEFAULT_REQUEST_RETRY_COUNT {
@@ -1242,6 +1245,7 @@ impl LinkStateWrapper {
                     return self.process_error_response(&asm);
                 }
 
+                warn!(target: LINK_STATE, "Link {} timed out in state {:?}, retransmitting", self.id, locked_fsm.state);
                 self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
                 self.retransmit(asm, &mut locked_fsm);
                 Ok(())
@@ -1282,7 +1286,14 @@ impl LinkStateWrapper {
                 self.send_init_authentication_request(asm)
             }
 
-            (_, _) => (),
+            (LinkType::AdapterToNode, LinkState::Helloing) => {
+                mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
+            }
+
+            (_, _) => {
+                // Programming error
+                error!(target: LINK_STATE, "Link {} requests retansmit in state {:?}: not implemented", self.id, locked_fsm.state);
+            }
         }
     }
 
