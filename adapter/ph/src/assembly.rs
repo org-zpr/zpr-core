@@ -98,7 +98,7 @@ pub struct Assembly {
     pub bsauth: Option<RsaBootstrapAuth>,
     pub rsauth: Option<OAuthRsa>,
     pub system_start_time: std::time::Instant,
-    pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only.
+    pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
 }
 
 #[derive(Debug, Error)]

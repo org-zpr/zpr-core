@@ -30,6 +30,10 @@ use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 pub enum HandleMgmtError {
     #[error("unknown packet type: {0}")]
     UnknownType(u8),
+
+    #[error("message not permitted")]
+    MessageNotPermitted,
+
     #[error("bad packet structure")]
     BadStructure,
 }
@@ -39,6 +43,7 @@ impl From<HandleMgmtError> for counters::CounterType {
         match err {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,
             HandleMgmtError::BadStructure => Self::BadStructure,
+            HandleMgmtError::MessageNotPermitted => Self::OtherError,
         }
     }
 }
@@ -267,15 +272,16 @@ pub async fn handle_terminate_indication(
 /// handle a Hello Request (RFC 6.5 § 6.3.4)
 /// Reads the hello, fire a ReceivedHelloRequest event, and then sends a response.
 ///
-/// ## Preconditions:
-/// - This adapter is running as a node.
 pub async fn handle_hello_request(
     asm: &Arc<Assembly>,
     _seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
-
+    if asm.ph_mode != PhMode::Node {
+        warn!(target: ZDP, "Link {ingress_link_id} received Hello Request but not in node mode");
+        return Err((HandleMgmtError::MessageNotPermitted, pkt));
+    }
     debug!(target: ZDP, "Received Hello Request for link {ingress_link_id}");
 
     let Ok(hdr) = zdp::ZdpHelloRequestHeader::read_from_buf(&mut pkt) else {
@@ -349,8 +355,8 @@ pub async fn handle_hello_request(
                     Ok(()) => (),
                 }
             } else {
-                // This is violation of precondition. If we are a node, we must have a pool.
-                panic!("adapter handling a hello-request has no address pool");
+                // Programming error: if we are a node, we must have a pool.
+                panic!("adapter (node) handling a hello-request missing address pool");
             }
         }
     }
@@ -399,7 +405,7 @@ pub async fn handle_hello_request(
         }
     } else {
         // TODO: The framework within which this function is called does not allow us to
-        // returns an error back which would trigger a link shutdown.  So we do it manually
+        // return an error back which would trigger a link shutdown.  So we do it manually
         // and just return Ok() though things are not in fact OK.
         info!(target: ZDP, "Link {ingress_link_id}: HelloRequest processing failed, shutting down link");
         match asm.process_link_state_event(ingress_link_id, LinkEvent::Error) {

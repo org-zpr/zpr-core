@@ -52,7 +52,6 @@ impl TlvEncoding {
     }
 
     /// Actor Authentication Address
-    /// TODO: Test v6 variant
     #[allow(dead_code)]
     pub fn new_aaa(addr: IpAddress) -> TlvEncoding {
         let ipa: IpAddr = addr.into();
@@ -892,5 +891,147 @@ mod tests {
         // Test that Display formatting works correctly
         assert_eq!(format!("{}", tlv_v4), "192.168.1.1:8080");
         assert_eq!(format!("{}", tlv_v6), "[2001:db8::1]:443");
+    }
+
+    #[test]
+    fn test_new_aaa_ipv4_encoding() {
+        let mut buf = BytesMut::new();
+        let test_ipv4 = Ipv4Addr::new(192, 168, 1, 100);
+        let ip_address = IpAddress::from(test_ipv4);
+
+        // Create AAA TLV using new_aaa function
+        let aaa_encoding = TlvEncoding::new_aaa(ip_address);
+        aaa_encoding.put(&mut buf);
+
+        // Parse it back
+        let mut buf_reader = buf.as_ref();
+        let result = parse_from_buf(&mut buf_reader).unwrap();
+
+        // Verify the result
+        assert_eq!(result.len(), 1);
+        let values = result.get(&DataType::AAA).unwrap();
+        assert_eq!(values.len(), 1);
+        match &values[0] {
+            TlvValue::Ipv4Addr(addr) => assert_eq!(*addr, test_ipv4),
+            _ => panic!("Expected Ipv4Addr value for AAA created with new_aaa"),
+        }
+    }
+
+    #[test]
+    fn test_new_aaa_ipv6_encoding() {
+        let mut buf = BytesMut::new();
+        let test_ipv6 = Ipv6Addr::new(
+            0x2001, 0x0db8, 0x85a3, 0x0000, 0x0000, 0x8a2e, 0x0370, 0x7334,
+        );
+        let ip_address = IpAddress::from(test_ipv6);
+
+        // Create AAA TLV using new_aaa function
+        let aaa_encoding = TlvEncoding::new_aaa(ip_address);
+        aaa_encoding.put(&mut buf);
+
+        // Parse it back
+        let mut buf_reader = buf.as_ref();
+        let result = parse_from_buf(&mut buf_reader).unwrap();
+
+        // Verify the result
+        assert_eq!(result.len(), 1);
+        let values = result.get(&DataType::AAA).unwrap();
+        assert_eq!(values.len(), 1);
+        match &values[0] {
+            TlvValue::Ipv6Addr(addr) => assert_eq!(*addr, test_ipv6),
+            _ => panic!("Expected Ipv6Addr value for AAA created with new_aaa"),
+        }
+    }
+
+    #[test]
+    fn test_new_aaa_localhost_addresses() {
+        let mut buf = BytesMut::new();
+
+        // Test IPv4 localhost
+        let ipv4_localhost = IpAddress::from(Ipv4Addr::LOCALHOST);
+        let aaa_v4 = TlvEncoding::new_aaa(ipv4_localhost);
+        aaa_v4.put(&mut buf);
+
+        // Test IPv6 localhost
+        let ipv6_localhost = IpAddress::from(Ipv6Addr::LOCALHOST);
+        let aaa_v6 = TlvEncoding::new_aaa(ipv6_localhost);
+        aaa_v6.put(&mut buf);
+
+        // Parse both back
+        let mut buf_reader = buf.as_ref();
+        let result = parse_from_buf(&mut buf_reader).unwrap();
+
+        // Verify we have one TLV type with two values
+        assert_eq!(result.len(), 1);
+        let values = result.get(&DataType::AAA).unwrap();
+        assert_eq!(values.len(), 2);
+
+        // Check IPv4 localhost
+        match &values[0] {
+            TlvValue::Ipv4Addr(addr) => assert_eq!(*addr, Ipv4Addr::LOCALHOST),
+            _ => panic!("Expected Ipv4Addr value for IPv4 localhost AAA"),
+        }
+
+        // Check IPv6 localhost
+        match &values[1] {
+            TlvValue::Ipv6Addr(addr) => assert_eq!(*addr, Ipv6Addr::LOCALHOST),
+            _ => panic!("Expected Ipv6Addr value for IPv6 localhost AAA"),
+        }
+    }
+
+    #[test]
+    fn test_new_aaa_tlv_structure_ipv4() {
+        let mut buf = BytesMut::new();
+        let test_ipv4 = Ipv4Addr::new(10, 0, 0, 1);
+        let ip_address = IpAddress::from(test_ipv4);
+
+        // Create AAA TLV using new_aaa function
+        let aaa_encoding = TlvEncoding::new_aaa(ip_address);
+        aaa_encoding.put(&mut buf);
+
+        // Verify the buffer structure manually
+        let bytes = buf.as_ref();
+
+        // Check header
+        assert_eq!(bytes[0], DataType::AAA); // TLV type
+        assert_eq!(bytes[1], 4); // TLV length (4 bytes for IPv4)
+
+        // Check IPv4 address bytes (10.0.0.1)
+        assert_eq!(bytes[2], 10);
+        assert_eq!(bytes[3], 0);
+        assert_eq!(bytes[4], 0);
+        assert_eq!(bytes[5], 1);
+    }
+
+    #[test]
+    fn test_new_aaa_tlv_structure_ipv6() {
+        let mut buf = BytesMut::new();
+        let test_ipv6 = Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1);
+        let ip_address = IpAddress::from(test_ipv6);
+
+        // Create AAA TLV using new_aaa function
+        let aaa_encoding = TlvEncoding::new_aaa(ip_address);
+        aaa_encoding.put(&mut buf);
+
+        // Verify the buffer structure manually
+        let bytes = buf.as_ref();
+
+        // Check header
+        assert_eq!(bytes[0], DataType::AAA); // TLV type
+        assert_eq!(bytes[1], 16); // TLV length (16 bytes for IPv6)
+
+        // Check first few bytes of IPv6 address (2001:db8::1)
+        assert_eq!(bytes[2], 0x20);
+        assert_eq!(bytes[3], 0x01);
+        assert_eq!(bytes[4], 0x0d);
+        assert_eq!(bytes[5], 0xb8);
+
+        // Check that bytes 6-15 are zero (representing the compressed ::)
+        for i in 6..17 {
+            assert_eq!(bytes[i], 0);
+        }
+
+        // Check last byte is 1
+        assert_eq!(bytes[17], 1);
     }
 }

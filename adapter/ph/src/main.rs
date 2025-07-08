@@ -449,7 +449,7 @@ fn main() -> ExitCode {
         system_start_time,
         bsauth: config.bootstrap,
         rsauth: config.rsaoauth,
-        address_pool: std::sync::Mutex::new(maybe_aaa_pool), // TODO: Get node ID from node ZPR address
+        address_pool: std::sync::Mutex::new(maybe_aaa_pool),
     });
 
     //
