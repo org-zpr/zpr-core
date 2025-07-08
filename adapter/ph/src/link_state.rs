@@ -409,8 +409,8 @@ impl LinkStateWrapper {
         }
 
         match event {
-            LinkEvent::Start => self.start(asm),
-            LinkEvent::KeyingDone => self.keying_done(asm),
+            LinkEvent::Start => self.process_start(asm),
+            LinkEvent::KeyingDone => self.process_keying_done(asm),
             LinkEvent::ReceivedHelloRequest(peer_zpr_addr) => {
                 self.process_hello_request(asm, peer_zpr_addr)
             }
@@ -471,7 +471,7 @@ impl LinkStateWrapper {
     /// Start an inactive link/tether
     /// Transitions from Inactive -> Keying
     /// Will trigger key management messages to be sent if this is an adapter
-    fn start(&self, asm: &Assembly) -> Result<(), LinkStateError> {
+    fn process_start(&self, asm: &Assembly) -> Result<(), LinkStateError> {
         assert!(self.id != zpr::LINK_ID_UNKNOWN);
         let link_id = self.id;
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
@@ -523,10 +523,10 @@ impl LinkStateWrapper {
         }
     }
 
-    /// The Key Manager calls this when it is done initial keying
+    /// The Key Manager sends in the [LinkEvent::KeyingDone] event when it is done with initial keying.
     /// Transitions from Keying -> Helloing
     /// Will trigger a Hello to be sent if this is an adapter
-    fn keying_done(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+    fn process_keying_done(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         if locked_fsm.state != LinkState::Keying {
