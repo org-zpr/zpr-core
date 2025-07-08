@@ -75,6 +75,11 @@ impl AddressPool {
         IpAddress::new_from_std_v6(&addr)
     }
 
+    /// Returns the number of active AAA addresses in the pool.
+    pub fn len(&self) -> usize {
+        self.active.len()
+    }
+
     /// Return an address to the pool (by removing it from the active set).
     /// Returns an error of the address is not an AAA address.
     /// Not an error if address is not in the active set.
@@ -133,14 +138,14 @@ mod tests {
 
         // Get an address
         let addr = pool.get_aaa_address();
-        let initial_active_size = pool.active.len();
+        let initial_active_size = pool.len();
 
         // Should be able to release it without error
         let result = pool.release_address(addr);
         assert!(result.is_ok());
 
         // Pool should have gained one address back, active should have lost one
-        assert_eq!(pool.active.len(), initial_active_size - 1);
+        assert_eq!(pool.len(), initial_active_size - 1);
     }
 
     #[test]
@@ -226,7 +231,7 @@ mod tests {
         }
 
         assert_eq!(allocated_addresses.len(), 1000);
-        assert_eq!(pool.active.len(), 1000);
+        assert_eq!(pool.len(), 1000);
     }
 
     #[test]
@@ -268,13 +273,13 @@ mod tests {
         addr_bytes[15] = 0x9a;
 
         let non_active_addr = IpAddress { v6: addr_bytes };
-        let initial_active_size = pool.active.len();
+        let initial_active_size = pool.len();
 
         // Should succeed but not change pool sizes (address wasn't active)
         let result = pool.release_address(non_active_addr);
         assert!(result.is_ok());
 
-        assert_eq!(pool.active.len(), initial_active_size);
+        assert_eq!(pool.len(), initial_active_size);
     }
 
     #[test]
@@ -351,7 +356,7 @@ mod tests {
         assert_ne!(addr4, addr3);
 
         // Verify pool state
-        assert_eq!(pool.active.len(), 3); // addr1 (as addr3), addr2, addr4
+        assert_eq!(pool.len(), 3); // addr1 (as addr3), addr2, addr4
     }
 
     #[test]

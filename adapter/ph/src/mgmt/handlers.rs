@@ -334,7 +334,8 @@ pub async fn handle_hello_request(
             // Then we need an AAA.
             if let Some(pool) = asm.address_pool.lock().unwrap().as_mut() {
                 let addr = pool.get_aaa_address();
-                debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {addr}");
+                debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {addr} (active pool size: {})",
+                    pool.len());
                 aaa_address = Some(addr);
 
                 // Store the AAA in the link memory so we can free it later.
