@@ -310,7 +310,7 @@ pub async fn handle_hello_request(
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
 
-    let mut response_status = match asm
+    let response_status = match asm
         .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest(actor_addr))
     {
         Err(_) => zdp::ResponseCode::Other,
@@ -319,10 +319,7 @@ pub async fn handle_hello_request(
 
     let mut aaa_address: Option<IpAddress> = None;
 
-    if response_status != zdp::ResponseCode::Success {
-        // Already failing!  Fall through to sending of response.
-        hdr.status = response_status;
-    } else {
+    if response_status == zdp::ResponseCode::Success {
         // We need an AAA address if an authentication service is available and the connecting adapter
         // is not fronting the visa service.
 
@@ -336,24 +333,17 @@ pub async fn handle_hello_request(
         if !is_visa_service && auth_service_avaialable {
             // Then we need an AAA.
             if let Some(pool) = asm.address_pool.lock().unwrap().as_mut() {
-                if let Ok(addr) = pool.get_aaa_address() {
-                    debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {addr}");
-                    aaa_address = Some(addr);
+                let addr = pool.get_aaa_address();
+                debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {addr}");
+                aaa_address = Some(addr);
 
-                    // Store the AAA in the link memory so we can free it later.
-                    match asm
-                        .process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(addr))
-                    {
-                        Err(e) => {
-                            // Highly improbable
-                            error!(target: ZDP, "Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
-                        }
-                        Ok(()) => (),
+                // Store the AAA in the link memory so we can free it later.
+                match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(addr)) {
+                    Err(e) => {
+                        // Highly improbable
+                        error!(target: ZDP, "Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
                     }
-                } else {
-                    // Uh oh, this is trouble. Need to fail the hello and shutdown the link.
-                    warn!(target: ZDP, "Link {ingress_link_id}: HelloRequest fails - no AAA address available");
-                    response_status = zdp::ResponseCode::Other;
+                    Ok(()) => (),
                 }
             } else {
                 // This is violation of precondition. If we are a node, we must have a pool.

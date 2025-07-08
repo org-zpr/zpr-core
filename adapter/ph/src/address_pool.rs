@@ -7,16 +7,12 @@ use crate::config;
 use crate::net_defs::IpAddress;
 
 /// Maximum allowed AAA ID value (40 bits)
-const MAX_AAA_ID: u64 = 0xffffffffff;
-
-/// Maximum number of active AAA addresses. As currently implemented this is
-/// tied to the maximum number of active links on a ph.  This is because the
-/// link only returns its address to the pool when it is shut down.
 ///
-/// TODO: Better would be to return the address once the adapter gets a real
-///       ZPR address.  But we still do not know the mechanics for re-auth so
-///       we have this more naive implementation for now.
-const MAX_ACTIVE_AAA_ADDRESSES: usize = config::MAX_ACTIVE_LINKS;
+/// Note that since we generate the IDs randomly, we can support about
+/// one million active addresses until we get into collision issues from
+/// the birthday problem.
+/// That should be sufficient for the immediate future.
+const MAX_AAA_ID: u64 = 0xffffffffff;
 
 /// The base AAA address. This just has the constant 8 byte prefix.
 /// This will be followed by the node ID and then the AAA ID.
@@ -28,63 +24,46 @@ const BASE_AAA_ADDRESS: [u16; 8] = [
 pub enum AddressPoolError {
     #[error("invalid address")]
     InvalidAddress,
-
-    #[error("now more addresses available in the pool")]
-    AddressUnavailable,
 }
 
-/// A pool of addresses for the ZPR network. Only supports AAA addresses
+/// A "pool" of addresses for the ZPR network. Only supports AAA addresses
 /// at the moment.  Not thread safe.
 ///
 /// Each new address gets a unique 40-bit ID.
 ///
 pub struct AddressPool {
     node_id: [u16; 2],
-    pool: HashSet<u64>,
-    active: HashSet<u64>,
+    active: HashSet<u64>, // Holds 40-bit IDs of active addresses
 }
 
 impl AddressPool {
-    /// Creates the pool of AAA addresses.
+    /// Initialize the pool of AAA addresses.
     ///
     /// `node_id` is the lower 24 bits of the passed value. If the value is larger
     /// than 24 bits it will be truncated.
     pub fn new(node_id: u32) -> Self {
-        let mut pool = HashSet::with_capacity(MAX_ACTIVE_AAA_ADDRESSES);
-
-        let mut buf = [0u8; 8];
-        for _i in 0..MAX_ACTIVE_AAA_ADDRESSES {
-            rand_bytes(&mut buf).unwrap();
-            let mut id = u64::from_be_bytes(buf) & MAX_AAA_ID;
-            while !pool.insert(id) {
-                id = (id.wrapping_add(1)) % MAX_AAA_ID;
-            }
-        }
         AddressPool {
             node_id: [(node_id >> 8) as u16, (node_id & 0xFF) as u16],
-            pool,
-            active: HashSet::new(),
+            active: HashSet::with_capacity(config::MAX_ACTIVE_LINKS),
         }
     }
 
-    /// Get an available AAA address.
+    /// Returns a random AAA address that is not already in our active set,
+    /// before returning it is stored in our active set.
     ///
-    ///
-    /// ## Panics
-    ///   - If the pool runs out of addresses, this function will panic.
-    pub fn get_aaa_address(&mut self) -> Result<IpAddress, AddressPoolError> {
+    /// Caller should "return" the address when done with it by calling
+    /// [AddressPool::release_address].
+    pub fn get_aaa_address(&mut self) -> IpAddress {
         let mut addr_bytes = [0u16; 8];
         addr_bytes[..4].copy_from_slice(&BASE_AAA_ADDRESS[..4]);
         addr_bytes[4] = self.node_id[0];
 
-        if self.pool.is_empty() {
-            return Err(AddressPoolError::AddressUnavailable);
+        let mut buf = [0u8; 8];
+        rand_bytes(&mut buf).unwrap();
+        let mut this_id = u64::from_be_bytes(buf) & MAX_AAA_ID;
+        while !self.active.insert(this_id) {
+            this_id = (this_id.wrapping_add(1)) % MAX_AAA_ID;
         }
-
-        // remove an ID from the pool:
-        let this_id = self.pool.iter().next().cloned().unwrap();
-        self.pool.remove(&this_id);
-        self.active.insert(this_id);
 
         // We use the bottom 40 bits of the ID as the last 40 bits of the IP address.
 
@@ -93,10 +72,10 @@ impl AddressPool {
         addr_bytes[7] = (this_id & 0xFFFF) as u16;
 
         let addr = Ipv6Addr::from(addr_bytes);
-        Ok(IpAddress::new_from_std_v6(&addr))
+        IpAddress::new_from_std_v6(&addr)
     }
 
-    /// Return an address to the pool.
+    /// Return an address to the pool (by removing it from the active set).
     /// Returns an error of the address is not an AAA address.
     /// Not an error if address is not in the active set.
     pub fn release_address(&mut self, address: IpAddress) -> Result<(), AddressPoolError> {
@@ -123,11 +102,7 @@ impl AddressPool {
             return Err(AddressPoolError::InvalidAddress);
         }
 
-        if self.active.remove(&id) {
-            // If the address was active, we can return it to the pool.
-            self.pool.insert(id);
-        }
-        // If it wasn't active, we just ignore it.
+        let _present = self.active.remove(&id);
 
         Ok(())
     }
@@ -142,7 +117,7 @@ mod tests {
         let mut pool = AddressPool::new(0x123456);
 
         // Should be able to get an address without panicking
-        let addr = pool.get_aaa_address().unwrap();
+        let addr = pool.get_aaa_address();
 
         // Should be IPv6 (not IPv4-mapped)
         assert!(!addr.is_v4());
@@ -157,8 +132,7 @@ mod tests {
         let mut pool = AddressPool::new(0x123456);
 
         // Get an address
-        let addr = pool.get_aaa_address().unwrap();
-        let initial_pool_size = pool.pool.len();
+        let addr = pool.get_aaa_address();
         let initial_active_size = pool.active.len();
 
         // Should be able to release it without error
@@ -166,7 +140,6 @@ mod tests {
         assert!(result.is_ok());
 
         // Pool should have gained one address back, active should have lost one
-        assert_eq!(pool.pool.len(), initial_pool_size + 1);
         assert_eq!(pool.active.len(), initial_active_size - 1);
     }
 
@@ -180,16 +153,8 @@ mod tests {
         assert_eq!(pool.node_id[0], 0x1234); // (node_id >> 8) = 0x1234
         assert_eq!(pool.node_id[1], 0x56); // (node_id & 0xFF) = 0x56
 
-        // Check that pool is initialized with the correct number of addresses
-        assert_eq!(pool.pool.len(), MAX_ACTIVE_AAA_ADDRESSES);
-
         // Check that active set is empty initially
         assert!(pool.active.is_empty());
-
-        // All pool IDs should be within valid range
-        for &id in &pool.pool {
-            assert!(id <= MAX_AAA_ID);
-        }
     }
 
     #[test]
@@ -210,7 +175,7 @@ mod tests {
         let node_id = 0x123456u32;
         let mut pool = AddressPool::new(node_id);
 
-        let addr = pool.get_aaa_address().unwrap();
+        let addr = pool.get_aaa_address();
 
         // Check the base prefix (first 8 bytes should match BASE_AAA_ADDRESS)
         assert_eq!(addr.v6[0], 0xfd);
@@ -232,8 +197,8 @@ mod tests {
     fn test_get_aaa_address_uniqueness() {
         let mut pool = AddressPool::new(0x123456);
 
-        let addr1 = pool.get_aaa_address().unwrap();
-        let addr2 = pool.get_aaa_address().unwrap();
+        let addr1 = pool.get_aaa_address();
+        let addr2 = pool.get_aaa_address();
 
         // Addresses should be different (no duplicates possible)
         assert_ne!(addr1, addr2);
@@ -252,7 +217,7 @@ mod tests {
 
         // Allocate "many" addresses and ensure no duplicates
         for _ in 0..1000 {
-            let addr = pool.get_aaa_address().unwrap();
+            let addr = pool.get_aaa_address();
             assert!(
                 !allocated_addresses.contains(&addr),
                 "Duplicate address generated"
@@ -262,24 +227,6 @@ mod tests {
 
         assert_eq!(allocated_addresses.len(), 1000);
         assert_eq!(pool.active.len(), 1000);
-    }
-
-    #[test]
-    fn test_pool_exhaustion() {
-        let mut pool = AddressPool::new(0x123456);
-        let mut addresses = Vec::new();
-
-        // Allocate all available addresses
-        for _ in 0..MAX_ACTIVE_AAA_ADDRESSES {
-            addresses.push(pool.get_aaa_address().unwrap());
-        }
-
-        // Pool should be empty now
-        assert!(pool.pool.is_empty());
-        assert_eq!(pool.active.len(), MAX_ACTIVE_AAA_ADDRESSES);
-
-        let result = pool.get_aaa_address();
-        assert!(result.is_err(), "Should error out when pool is exhausted");
     }
 
     #[test]
@@ -321,14 +268,12 @@ mod tests {
         addr_bytes[15] = 0x9a;
 
         let non_active_addr = IpAddress { v6: addr_bytes };
-        let initial_pool_size = pool.pool.len();
         let initial_active_size = pool.active.len();
 
         // Should succeed but not change pool sizes (address wasn't active)
         let result = pool.release_address(non_active_addr);
         assert!(result.is_ok());
 
-        assert_eq!(pool.pool.len(), initial_pool_size);
         assert_eq!(pool.active.len(), initial_active_size);
     }
 
@@ -336,8 +281,7 @@ mod tests {
     fn test_multiple_releases_same_address() {
         let mut pool = AddressPool::new(0x123456);
 
-        let addr = pool.get_aaa_address().unwrap();
-        let initial_pool_size = pool.pool.len();
+        let addr = pool.get_aaa_address();
 
         // Release the same address multiple times
         pool.release_address(addr).unwrap();
@@ -345,7 +289,6 @@ mod tests {
         pool.release_address(addr).unwrap();
 
         // Should only be returned to pool once (no duplicates in pool)
-        assert_eq!(pool.pool.len(), initial_pool_size + 1);
         assert!(!pool.active.contains(&extract_id_from_address(&addr)));
     }
 
@@ -354,8 +297,8 @@ mod tests {
         let mut pool1 = AddressPool::new(0x111111);
         let mut pool2 = AddressPool::new(0x222222);
 
-        let addr1 = pool1.get_aaa_address().unwrap();
-        let addr2 = pool2.get_aaa_address().unwrap();
+        let addr1 = pool1.get_aaa_address();
+        let addr2 = pool2.get_aaa_address();
 
         // Addresses should be different due to different node IDs
         assert_ne!(addr1, addr2);
@@ -393,15 +336,15 @@ mod tests {
         let mut pool = AddressPool::new(0x123456);
 
         // Get some addresses
-        let addr1 = pool.get_aaa_address().unwrap();
-        let addr2 = pool.get_aaa_address().unwrap();
+        let addr1 = pool.get_aaa_address();
+        let addr2 = pool.get_aaa_address();
 
         // Release one
         pool.release_address(addr1).unwrap();
 
         // Get more addresses
-        let addr3 = pool.get_aaa_address().unwrap(); // usually will reuse addr1
-        let addr4 = pool.get_aaa_address().unwrap(); // Should be new
+        let addr3 = pool.get_aaa_address();
+        let addr4 = pool.get_aaa_address();
 
         assert_ne!(addr4, addr1);
         assert_ne!(addr4, addr2);
@@ -416,7 +359,7 @@ mod tests {
         let node_id = 0xABCDEF;
         let mut pool = AddressPool::new(node_id);
 
-        let addr = pool.get_aaa_address().unwrap();
+        let addr = pool.get_aaa_address();
 
         // Extract node_id from the address
         // pool.node_id[0] should be (0xABCDEF >> 8) = 0xABCD
@@ -431,23 +374,6 @@ mod tests {
         let addr_byte5 = u16::from_be_bytes([addr.v6[10], addr.v6[11]]);
         let node_id_part2 = (addr_byte5 >> 8) as u8;
         assert_eq!(node_id_part2, 0xEF);
-    }
-
-    #[test]
-    fn test_pool_uniqueness_at_creation() {
-        let pool = AddressPool::new(0x123456);
-
-        // Verify that all IDs in the pool are unique
-        assert_eq!(pool.pool.len(), MAX_ACTIVE_AAA_ADDRESSES);
-
-        // Convert to Vec and check for duplicates by comparing lengths
-        let ids: Vec<u64> = pool.pool.iter().cloned().collect();
-        let unique_ids: std::collections::HashSet<u64> = ids.iter().cloned().collect();
-        assert_eq!(
-            ids.len(),
-            unique_ids.len(),
-            "Pool should contain only unique IDs"
-        );
     }
 
     // Helper function to extract AAA ID from an address for testing

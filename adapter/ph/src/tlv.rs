@@ -1,6 +1,6 @@
 use bytes::Buf;
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, Ipv6Addr, IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use thiserror::Error;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 
@@ -55,7 +55,7 @@ impl TlvEncoding {
     /// TODO: Test v6 variant
     #[allow(dead_code)]
     pub fn new_aaa(addr: IpAddress) -> TlvEncoding {
-        let ipa: IpAddr  = addr.into();
+        let ipa: IpAddr = addr.into();
         match ipa {
             IpAddr::V4(ipa) => TlvEncoding {
                 tlv_type: DataType::AAA,
