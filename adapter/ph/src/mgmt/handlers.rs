@@ -425,36 +425,38 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
     // A tlv has a type (number) and a value.
     let tlv_data =
         tlv::parse_from_buf(&mut pkt).map_err(|_| (HandleMgmtError::BadStructure, pkt))?;
-    if let Some(ver) = tlv_data.get(&tlv::DataType::VERSION) {
-        info!(target: ZDP, "Link {link_id}: HelloResponse - peer version is : {}", ver[0]);
-    } else {
-        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include version");
-    }
-    if let Some(policy_id) = tlv_data.get(&tlv::DataType::POLICY_ID) {
-        info!(target: ZDP, "Link {link_id}: HelloResponse - peer policy ID is : {}", policy_id[0]);
-    } else {
-        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include policy ID");
-    }
 
     let mut asa_addresses = Vec::<SocketAddr>::new();
 
-    if let Some(asa_entries) = tlv_data.get(&tlv::DataType::ASA) {
-        for asa_entry in asa_entries {
-            match asa_entry {
-                tlv::TlvValue::SocketAddr(sa) => {
-                    info!(target: ZDP, "Link {link_id}: HelloResponse includes ASA address:{sa}");
-                    asa_addresses.push(sa.clone());
-                }
-                _ => {
-                    warn!(target: ZDP, "Link {link_id}: HelloResponse ASA value type is wrong: {asa_entry:?}");
+    for (tlv_type, tlv_value) in &tlv_data {
+        match tlv_type {
+            &tlv::DataType::VERSION => {
+                info!(target: ZDP, "Link {link_id}: HelloResponse - peer version is : {}", tlv_value[0]);
+            }
+            &tlv::DataType::POLICY_ID => {
+                info!(target: ZDP, "Link {link_id}: HelloResponse - peer policy ID is : {}", tlv_value[0]);
+            }
+            &tlv::DataType::ASA => {
+                for asa_entry in tlv_value {
+                    match asa_entry {
+                        tlv::TlvValue::SocketAddr(sa) => {
+                            info!(target: ZDP, "Link {link_id}: HelloResponse includes ASA address:{sa}");
+                            asa_addresses.push(sa.clone());
+                        }
+                        _ => {
+                            warn!(target: ZDP, "Link {link_id}: HelloResponse ASA value type is wrong: {asa_entry:?}");
+                        }
+                    }
                 }
             }
+            _ => {
+                info!(target: ZDP, "Link {link_id}: HelloResponse includes ignored TLV type: {tlv_type}");
+            }
         }
-    } else {
-        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include ASA TLV");
     }
 
     let maybe_asa_addrs = if asa_addresses.is_empty() {
+        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include ASA TLV");
         None
     } else {
         Some(asa_addresses)

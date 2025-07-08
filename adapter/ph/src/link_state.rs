@@ -590,7 +590,7 @@ impl LinkStateWrapper {
     /// Does not generate any packets
     fn process_hello_request(
         &self,
-        asm: &Arc<Assembly>,
+        _asm: &Arc<Assembly>,
         peer_zpr_addr: IpAddress,
     ) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
@@ -608,17 +608,7 @@ impl LinkStateWrapper {
                     "Link {link_id} peer is using ZPR addr {}",
                     peer_zpr_addr
                 );
-                // Node is really waiting for an init-auth-response, followed
-                // by the eventual acquire-zpr-address message.
-                // But we transition to that state once we get the zdp
-                // response to init-auth.
-                locked_fsm.set_state(LinkState::WaitForInitAuth);
-                debug!(
-                    target: LINK_STATE,
-                    "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
-                );
-                self.send_init_authentication_request(asm);
-                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+                // State transition processing happens in [LinkStateWrapper::process_sent_hello_response]
                 Ok(())
             }
             (LinkType::AdapterToNode, _) => {
