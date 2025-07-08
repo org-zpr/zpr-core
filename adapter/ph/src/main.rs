@@ -65,6 +65,7 @@ mod tun_ctl;
 mod two_way_queue;
 mod visa_mgmt;
 mod visa_table;
+mod vs_types;
 mod vs_worker;
 mod vss_worker;
 mod zdp;
@@ -87,6 +88,8 @@ use pki::load_noise_public_key;
 use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
+
+use crate::vs_types::AuthServicesList;
 
 /// Creates a nonblocking local socket pair suitable for transferring
 /// PACKET_BUFFER_SIZE-sized messages.
@@ -111,9 +114,11 @@ fn packet_buffer_socket_pair(
 
 fn main() -> ExitCode {
     let system_start_time = std::time::Instant::now();
+
     //
     // parse configuration from command line
     //
+
     let (ph_mode, mut config) = match main_argparse::argparse(None) {
         Ok((ph_mode, config)) => (ph_mode, config),
         Err(e) => {
@@ -425,6 +430,7 @@ fn main() -> ExitCode {
         visa_table: tokio::sync::RwLock::new(visa_table::VisaTable::new_with_vs_visas(
             &node_zpr_addr,
         )),
+        vs_auth_services: std::sync::RwLock::new(AuthServicesList::default()),
         capture_queue: Capture::new(cap_inq),
         capture_worker: CaptureWorker::new(),
         flow_control: FlowControl::new(),
@@ -494,6 +500,17 @@ fn main() -> ExitCode {
     js.spawn_local(km_multiplexor::launch_message_worker(asm.clone(), km_outq));
 
     //
+    // select batch I/O engine
+    //
+
+    let Some(batch_io_engine) = batch_io::select_engine_by_name(&config.batch_io_engine) else {
+        error!(target: STARTUP, "Unknown packet I/O engine {}", config.batch_io_engine);
+        return ExitCode::FAILURE;
+    };
+
+    info!(target: STARTUP, "Using packet I/O engine {}", batch_io_engine.engine_name());
+
+    //
     // start data path workers
     //
 
@@ -502,6 +519,7 @@ fn main() -> ExitCode {
     let mut mgmt_substrate_outq = Some(mgmt_substrate_outq); // only the first fastpath worker gets this
 
     let fastpath_worker_config = FastpathWorkerConfig {
+        batch_io_engine,
         buffer_count: asm.topology_config.buffer_count,
         batch_size: asm.topology_config.fastpath_batch_size,
     };

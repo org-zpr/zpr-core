@@ -1212,7 +1212,7 @@ checksum = "c19937216e9d3aa9956d9bb8dfc0b0c8beb6058fc4f7a4dc4d850edf86a237d6"
 
 [[package]]
 name = "libnode"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytes",
  "openssl",
@@ -1565,6 +1565,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "url",
  "zerocopy 0.8.9",
  "zpr",
  "zpr-ext",
@@ -2559,8 +2560,8 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vsapi"
-version = "0.2.0"
-source = "git+https://github.com/org-zpr/zpr-vsapi-rs.git?tag=v0.2.0#802c695e457845d2e7ade47c3a3b5ba037f377a4"
+version = "0.4.0"
+source = "git+https://github.com/org-zpr/zpr-vsapi-rs.git?tag=v0.4.1#2e41d0af057268d4b965b026a9b412dbe5483f99"
 dependencies = [
  "thrift",
 ]

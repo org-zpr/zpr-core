@@ -21,6 +21,12 @@ pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMsg>) {
                     error!(target: VISA_MGMT, "Error revoking visa: {e}");
                 }
             }
+            VSSMsg::PushedServices(services) => {
+                let result = visa_mgmt::handle_services_update(&asm, services);
+                if let Err(e) = result.await {
+                    error!(target: VISA_MGMT, "Error processing services update: {e}");
+                }
+            }
             _ => {
                 error!(target: VISA_MGMT, "received VSS message {msg}; ignoring! (unimplemented)");
             }

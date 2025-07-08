@@ -178,7 +178,7 @@ checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
 
 [[package]]
 name = "libnode"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytes",
  "openssl",
@@ -674,8 +674,8 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vsapi"
-version = "0.2.0"
-source = "git+https://github.com/org-zpr/zpr-vsapi-rs.git?tag=v0.2.0#802c695e457845d2e7ade47c3a3b5ba037f377a4"
+version = "0.4.0"
+source = "git+https://github.com/org-zpr/zpr-vsapi-rs.git?tag=v0.4.1#2e41d0af057268d4b965b026a9b412dbe5483f99"
 dependencies = [
  "thrift",
 ]
@@ -802,7 +802,7 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "open-enum",
  "strum",

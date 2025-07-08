@@ -465,7 +465,7 @@ impl KeyManagerStateMachine for KmNoise {
                 }
             }
             Err(e) => {
-                error!(target: KEY_MGMT, "noise: error handling handhsake message: {e:?}");
+                error!(target: KEY_MGMT, "noise: error handling handshake message: {e:?}");
                 self.state = KmSMState::Error;
                 self.hs_state = Some(hs);
                 return Err(KmError::HandshakeError);
@@ -540,7 +540,7 @@ impl KeyManagerStateMachine for KmNoise {
             && self.hs_sent_t.is_some()
             && Instant::now().duration_since(self.hs_sent_t.unwrap()) > HANDSHAKE_TIMEOUT
         {
-            error!(target: KEY_MGMT, "noise: handhsake timeout");
+            error!(target: KEY_MGMT, "noise: handshake timeout");
             self.hs_state = None;
             self.hs_sent_t = None;
             self.state = KmSMState::Error;

@@ -4,6 +4,7 @@
 //! and any config file, returning a PH configuration.
 
 use crate::auth::AuthError;
+use crate::batch_io;
 use crate::logging::targets::*;
 use clap::{Args, Parser, Subcommand};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
@@ -97,6 +98,10 @@ pub struct CommonArgs {
     /// Disable info & warnings for specified targets
     #[arg(long, short = 'q', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
     pub quiet: Vec<String>,
+
+    /// Which packet I/O engine to use
+    #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(std::iter::once(batch_io::AUTO_ENGINE_NAME).chain(batch_io::engine_names())), default_value_t = batch_io::AUTO_ENGINE_NAME.to_owned())]
+    pub io_engine: String,
 }
 
 #[derive(Subcommand, Debug)]

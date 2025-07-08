@@ -142,6 +142,7 @@ pub enum LinkEvent {
     ReceivedHelloRequest(IpAddress), // Actors ZPR address - TODO: implement AAAs
     AssignedAAA(IpAddress),          // Assigned AAA address for this link
     ReceivedHelloResponse(ResponseCode, Option<Vec<SocketAddr>>), // (response code, ASA addresses)
+    SentHelloResponse,
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
     ReceivedInitAuthResponse(ResponseCode),
@@ -419,6 +420,8 @@ impl LinkStateWrapper {
                 self.process_hello_response(asm, code, maybe_asa_addrs)
             }
 
+            LinkEvent::SentHelloResponse => self.process_sent_hello_response(asm),
+
             LinkEvent::ReceivedAcquireZprAddressRequest(addrs, blob) => {
                 self.process_acquire_zpr_address_request(asm, addrs, blob)
             }
@@ -567,17 +570,19 @@ impl LinkStateWrapper {
         debug!(target: LINK_STATE, "Link {link_id} finished keying.  Starting hello");
 
         locked_fsm.set_state(LinkState::Helloing);
-        drop(locked_fsm);
-        self.maybe_send_hello(asm);
-        Ok(())
-    }
 
-    fn maybe_send_hello(&self, asm: &Arc<Assembly>) {
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
+            let _seqnum =
+                mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
+            self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+            debug!(
+                target: LINK_STATE,
+                "Link {link_id} sent HelloRequest.  Waiting for other side to respond."
+            );
         }
-        // Otherwise, wait for the adapter to reach out
+        // Otherwise we are a node so wait for an adapter to reach out
+        Ok(())
     }
 
     /// Update link state based on received hello request
@@ -642,6 +647,35 @@ impl LinkStateWrapper {
         let mut link_data = self.locked_data.lock().unwrap();
         link_data.aaa_address = Some(aaa_addr);
         Ok(())
+    }
+
+    fn process_sent_hello_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        let link_id = self.id;
+        match (self.link_type, locked_fsm.state) {
+            // Node->Adapter - we are in helloing state until we have fired off our
+            // HelloResponse.  At that point we can send an init-auth request.
+            (LinkType::NodeToAdapter, LinkState::Helloing) => {
+                locked_fsm.set_state(LinkState::WaitForInitAuth);
+                self.send_init_authentication_request(asm);
+                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+                debug!(
+                    target: LINK_STATE,
+                    "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
+                );
+                Ok(())
+            }
+            (LinkType::AdapterToNode, _) => {
+                // Adapters should not be sending hello-response to a node.
+                Err(LinkStateError::InvalidOperation(
+                    "Adapter should not send hello-response".to_string(),
+                ))
+            }
+            (_, _) => Err(LinkStateError::UnexpectedTransition(
+                locked_fsm.state,
+                "SentHelloResponse",
+            )),
+        }
     }
 
     /// This is kicked off by [LinkEvent::ReceivedHelloResponse].
@@ -968,6 +1002,9 @@ impl LinkStateWrapper {
 
     /// Handle an init-auth message from sender.
     ///
+    /// This is a slow function that is called AFTER we send a reply to the
+    /// init-auth message.
+    ///
     /// If this is bootstrap and we are configured for bootstrap we can self-authenticate
     /// and send in an AcquireZprAddressRequest.
     ///
@@ -1270,7 +1307,8 @@ impl LinkStateWrapper {
             // all these states use timeout simply for retransmits
             (LinkType::AdapterToNode, LinkState::RegisterAA)
             | (LinkType::NodeToAdapter, LinkState::RegisterAA)
-            | (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {
+            | (LinkType::NodeToAdapter, LinkState::WaitForInitAuth)
+            | (LinkType::AdapterToNode, LinkState::Helloing) => {
                 locked_fsm.timeout_count += 1;
 
                 if locked_fsm.timeout_count >= config::DEFAULT_REQUEST_RETRY_COUNT {
@@ -1279,6 +1317,7 @@ impl LinkStateWrapper {
                     return self.process_error_response(&asm);
                 }
 
+                warn!(target: LINK_STATE, "Link {} timed out in state {:?}, retransmitting", self.id, locked_fsm.state);
                 self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
                 self.retransmit(asm, &mut locked_fsm);
                 Ok(())
@@ -1290,6 +1329,15 @@ impl LinkStateWrapper {
                 error!(target: LINK_STATE, "Link {} timed out in state {:?}", self.id, locked_fsm.state);
                 drop(locked_fsm);
                 return self.process_error_response(&asm);
+            }
+
+            (_, LinkState::Closing) => {
+                // This is a timeout while we are waiting for a terminate response post initiate close.
+                // Now we finish the job,
+                debug!(target: LINK_STATE, "Link {} received timeout waiting on terminate response, shutting down link", self.id);
+                drop(locked_fsm);
+                self.clean_up_link_state(asm).detach_all();
+                Ok(())
             }
 
             (_, _) => Err(LinkStateError::InvalidOperation(format!(
@@ -1318,6 +1366,11 @@ impl LinkStateWrapper {
                 self.send_init_authentication_request(asm)
             }
 
+            (LinkType::AdapterToNode, LinkState::Helloing) => {
+                mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
+            }
+
+            // Programming error!
             (_, _) => panic!(
                 "call to retransmit in state {:?} but not implemented",
                 locked_fsm.state
@@ -1352,6 +1405,7 @@ impl LinkStateWrapper {
     /// Initiate the shutdown of the link
     /// Transitions to Closing from any running state
     /// Generates a Terminate Request packet
+    /// Sets a timeout in case we do not get a terminate response.
     fn initiate_close(
         &self,
         asm: &Arc<Assembly>,
@@ -1362,11 +1416,18 @@ impl LinkStateWrapper {
 
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.set_state(LinkState::Closing);
+        self.set_timeout(
+            asm,
+            &mut locked_fsm,
+            config::DEFAULT_TERMINATE_RESPONSE_TIMER,
+        );
         mgmt::requests::send_terminate_request(asm, self.id, reason);
         Ok(())
     }
 
-    /// Tear down link state
+    /// Tear down link state.
+    /// This sends notice to the visa service that we have lost an actor.
+    /// Sends a CloseDone event (which triggers [LinkStateWrapper::complete_close])
     fn clean_up_link_state(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
         let link_id = self.id;
         let mut join_set = tokio::task::JoinSet::new();

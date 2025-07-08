@@ -36,6 +36,7 @@ pub struct VisaRequest {
 type VisaRequestResponse = Result<vsapi::VisaResponse, VSClientError>;
 type AuthorizeConnectResponse = Result<vsapi::ConnectResponse, VSClientError>;
 type DisconnectStatus = Result<(), VSClientError>;
+type RequestServicesResponse = Result<vsapi::ServicesResponse, VSClientError>;
 
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
@@ -47,6 +48,7 @@ enum VSCommand {
         oneshot::Sender<AuthorizeConnectResponse>,
     ),
     ActorDisconnect(IpAddr, oneshot::Sender<DisconnectStatus>), // takes a ZPR address assigned to the actor
+    RequestServices(oneshot::Sender<RequestServicesResponse>),
 }
 
 // This will change a bit too. This is for output messages from the visa service. These are asynchronous
@@ -114,7 +116,7 @@ impl VSConn {
     /// Create a new Visa Service Connection manager.
     ///
     /// - `node_actor` is the node's Actor representation.  See [new_node_actor] for a helper function to create this.
-    /// - `output_tx` is the channel to send output messages to the node.
+    /// - `output_tx` is the channel to send output messages to the node. The only message left is PING_SUCCESS.
     /// - `service_addr` is ADDR:PORT of the visa service (ADDR should be a ZPR address)
     /// - `node_cert_file` is the path to the node's signed (for now) EC certificate file
     /// - `node_zpr_addr` node ZPR address (not substrate address) as set by network admin
@@ -233,6 +235,7 @@ impl VSConn {
                         VSCommand::RequestVisa(req, resp_chan) => { let _ = resp_chan.send(Self::handle_request_visa(&mut client, req)); },
                         VSCommand::AuthorizeConnect(cr, resp_chan) => { let _ = resp_chan.send(Self::handle_authorize_connect(&mut client, cr)); },
                         VSCommand::ActorDisconnect(ipa, resp_chan) => { let _ = resp_chan.send(Self::handle_actor_disconnect(&mut client, ipa)); },
+                        VSCommand::RequestServices(resp_chan) => { let _ = resp_chan.send(Self::handle_request_services(&mut client)); },
                     }
                 }
             }
@@ -248,6 +251,16 @@ impl VSConn {
             Ok(vr) => Ok(vr),
             Err(e) => {
                 error!(target: VS_RPC, "failed to request visa: {e}");
+                Err(e)
+            }
+        }
+    }
+
+    fn handle_request_services(client: &mut Box<dyn VSClientI>) -> RequestServicesResponse {
+        match client.request_services() {
+            Ok(sr) => Ok(sr),
+            Err(e) => {
+                error!(target: VS_RPC, "failed to request services: {e}");
                 Err(e)
             }
         }
@@ -331,6 +344,13 @@ impl VSConnHandle {
             .await?;
         rx.await.map_err(|_| VSClientError::ConnClosed)?
     }
+
+    /// Perform async RequestServices request on the VS API.
+    pub async fn request_services(&self) -> RequestServicesResponse {
+        let (tx, rx) = oneshot::channel();
+        self.send_command(VSCommand::RequestServices(tx)).await?;
+        rx.await.map_err(|_| VSClientError::ConnClosed)?
+    }
 }
 
 #[cfg(test)]
@@ -409,6 +429,7 @@ s5JVZ48=
         ping_count: u32,
         de_register_count: u32,
         disconnect_count: u32,
+        request_services_count: u32,
         next_error: Option<VSClientError>,
     }
 
@@ -417,6 +438,7 @@ s5JVZ48=
         Ping,
         DeRegister,
         ActorDisconnect,
+        RequestServices,
     }
 
     static RUN_LOCK: Mutex<u32> = Mutex::new(0); // Each test holds this while running.
@@ -426,6 +448,7 @@ s5JVZ48=
         ping_count: 0,
         de_register_count: 0,
         disconnect_count: 0,
+        request_services_count: 0,
         next_error: None,
     });
 
@@ -435,6 +458,7 @@ s5JVZ48=
         test_state.ping_count = 0;
         test_state.de_register_count = 0;
         test_state.disconnect_count = 0;
+        test_state.request_services_count = 0;
         test_state.next_error = None;
     }
 
@@ -445,6 +469,7 @@ s5JVZ48=
             CounterT::Ping => test_state.ping_count,
             CounterT::DeRegister => test_state.de_register_count,
             CounterT::ActorDisconnect => test_state.disconnect_count,
+            CounterT::RequestServices => test_state.request_services_count,
         }
     }
 
@@ -455,6 +480,7 @@ s5JVZ48=
             CounterT::Ping => test_state.ping_count += 1,
             CounterT::DeRegister => test_state.de_register_count += 1,
             CounterT::ActorDisconnect => test_state.disconnect_count += 1,
+            CounterT::RequestServices => test_state.request_services_count += 1,
         }
     }
 
@@ -560,6 +586,26 @@ s5JVZ48=
             }
             Ok(())
         }
+
+        fn request_services(&mut self) -> Result<vsapi::ServicesResponse, VSClientError> {
+            incr(CounterT::RequestServices);
+            if let Some(e) = take_next_error() {
+                return Err(e);
+            }
+            let response = vsapi::ServicesResponse {
+                services: Some(vsapi::ServicesList {
+                    expiration: Some(
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as i64
+                            + 3600,
+                    ), // +1 hour
+                    services: None,
+                }),
+            };
+            Ok(response)
+        }
     }
 
     fn testvscli_factory(_service_addr: &str) -> Result<Box<dyn VSClientI>, VSClientError> {
@@ -605,6 +651,55 @@ s5JVZ48=
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         assert_eq!(get_counter(CounterT::Auth), 1);
+        assert_eq!(get_counter(CounterT::DeRegister), 1);
+        assert_eq!(get_counter(CounterT::Ping), 1);
+    }
+
+    #[tokio::test]
+    async fn test_request_services() {
+        let _lockval = RUN_LOCK.lock().unwrap();
+        reset_state();
+        let certfile = TempFile::new_pem(CERT_DATA);
+
+        let node_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+
+        let (tx, mut _rx) = mpsc::channel(8);
+
+        let mut claims = BTreeMap::new();
+        claims.insert(String::from("foo"), String::from("fee"));
+        let agnt = new_node_actor(node_addr, "n0", &claims);
+
+        let mut conn = VSConn::new(
+            agnt,
+            tx,
+            "127.0.0.1:0",
+            certfile.get_path(),
+            node_addr,
+            None,
+        )
+        .unwrap();
+
+        conn.set_client_factory(testvscli_factory);
+        let conn_h = conn.handle();
+
+        let ctoken = CancellationToken::new();
+        let vs_tok = ctoken.clone();
+        tokio::spawn(async move {
+            let _ = conn.run(vs_tok).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let _svc_resp = conn_h.request_services().await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        ctoken.cancel(); // stop the vs
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(get_counter(CounterT::Auth), 1);
+        assert_eq!(get_counter(CounterT::RequestServices), 1);
         assert_eq!(get_counter(CounterT::DeRegister), 1);
         assert_eq!(get_counter(CounterT::Ping), 1);
     }

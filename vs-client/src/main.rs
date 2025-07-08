@@ -129,6 +129,15 @@ enum Commands {
         )]
         udp: Option<String>,
     },
+    #[command()]
+    /// Call the visa service request-services function.
+    Requestservices {
+        #[arg(short, long, value_name = "HOST:PORT", default_value_t = String::from(DEFAULT_SERVICE))]
+        service: String,
+
+        #[arg(short, long, value_name = "APIKEY")]
+        apikey: String,
+    },
     /// Start a visa support service server in the foreground
     #[command()]
     Runvss {
@@ -271,6 +280,17 @@ fn main() {
                 println!("Either TCP or UDP traffic description must be provided");
             }
         },
+        Some(Commands::Requestservices { service, apikey }) => {
+            match vsclient::request_services(&service, &apikey) {
+                Ok(_) => {
+                    println!("Requestservices command executed successfully");
+                }
+                Err(e) => {
+                    println!("Error: {:?}", e);
+                }
+            }
+        }
+        // Start the visa support service server
         Some(Commands::Runvss { zpr_addr, vss_port }) => {
             match vssd::run_vss(SocketAddr::new(zpr_addr, vss_port)) {
                 Ok(_) => {

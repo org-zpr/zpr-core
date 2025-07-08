@@ -52,6 +52,7 @@ pub trait VSClientI: Send {
         req: vsapi::ConnectRequest,
     ) -> Result<vsapi::ConnectResponse, VSClientError>;
     fn actor_disconnect(&mut self, actor_zpr_addr: IpAddr) -> Result<(), VSClientError>;
+    fn request_services(&mut self) -> Result<vsapi::ServicesResponse, VSClientError>;
 }
 
 /// Wrapper on top of the the THRIFT generated code.
@@ -223,5 +224,13 @@ impl VSClientI for VSClient {
             Ok(_) => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn request_services(&mut self) -> Result<vsapi::ServicesResponse, VSClientError> {
+        if self.key.is_none() {
+            return Err(VSClientError::NoAPIKey);
+        }
+        let key = self.key.as_ref().unwrap();
+        self.cli.request_services(key.clone()).map_err(|e| e.into())
     }
 }

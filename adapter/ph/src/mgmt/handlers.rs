@@ -14,7 +14,7 @@ use crate::special_peers::SpecialPeerName;
 use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
 use bytes::{Buf, BufMut};
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
@@ -363,12 +363,21 @@ pub async fn handle_hello_request(
     TlvEncoding::new_version(VERSION).put(&mut rsp_pkt);
 
     if response_status == zdp::ResponseCode::Success {
-        // TODO: This info needs to come from the visa service
-        let service_addr = SocketAddr::new(
-            IpAddr::V6(auth::HARD_CODED_BAS_ADDR),
-            auth::DEFAULT_ZPR_OAUTH_RSA_PORT,
-        );
-        TlvEncoding::new_asa(service_addr).put(&mut rsp_pkt);
+        let svclist = asm.vs_auth_services.read().unwrap();
+        if svclist.is_valid() {
+            // If we have a list of services, include them in the response.
+            // TODO: The ASA is set as a SocketAddr which doesn't feel quite right.  Maybe should be a URI.
+            for authservice in &svclist.services {
+                if let Some(sa) = authservice.get_socket_addr() {
+                    debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - adding ASA address: {sa}");
+                    TlvEncoding::new_asa(sa).put(&mut rsp_pkt);
+                } else {
+                    warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - service {} has no valid ASA address", authservice.service_id);
+                }
+            }
+        } else {
+            warn!(target: ZDP, "Link {ingress_link_id}: HelloResponse - no valid auth services available");
+        }
         if let Some(aaa_addr) = aaa_address {
             TlvEncoding::new_aaa(aaa_addr).put(&mut rsp_pkt);
         }
@@ -381,12 +390,17 @@ pub async fn handle_hello_request(
         rsp_pkt,
     );
 
-    // TODO: The framework within which this function is called does not allow us to
-    // returns an error back which would trigger a link shutdown.  So we do it manually
-    // and just return Ok() though things are not in fact OK.
-
-    if response_status != zdp::ResponseCode::Success {
-        // Kick off link shutdown
+    if response_status == zdp::ResponseCode::Success {
+        match asm.process_link_state_event(ingress_link_id, LinkEvent::SentHelloResponse) {
+            Err(e) => {
+                error!(target: ZDP, "Link {ingress_link_id}: Failed to process SentHelloResponse event: {:?}", e);
+            }
+            Ok(()) => (),
+        }
+    } else {
+        // TODO: The framework within which this function is called does not allow us to
+        // returns an error back which would trigger a link shutdown.  So we do it manually
+        // and just return Ok() though things are not in fact OK.
         info!(target: ZDP, "Link {ingress_link_id}: HelloRequest processing failed, shutting down link");
         match asm.process_link_state_event(ingress_link_id, LinkEvent::Error) {
             Err(e) => {
