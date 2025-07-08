@@ -130,6 +130,7 @@ pub enum LinkState {
     Active,
     RegisterAA, // aka acquiring ZPR address
     WaitForInitAuth,
+    WaitForAcquireZprAddress,
     Error,
 }
 
@@ -143,6 +144,7 @@ pub enum LinkEvent {
     ReceivedHelloResponse(ResponseCode, Option<Vec<SocketAddr>>), // (response code, ASA addresses)
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
+    ReceivedInitAuthResponse(ResponseCode),
 
     ReceivedAcquireZprAddressRequest(Option<Vec<IpAddress>>, String), // (requested_addrs, auth_blob)
     ReceivedAcquireResponse(ResponseCode),
@@ -426,6 +428,8 @@ impl LinkStateWrapper {
                 self.process_init_auth(asm, bootstrap_flag, challenge)
             }
 
+            LinkEvent::ReceivedInitAuthResponse(code) => self.process_init_auth_response(asm, code),
+
             LinkEvent::ReceivedGrantZprAddressRequest(addrs) => {
                 self.process_grant_zpr_address_request(asm, addrs)
             }
@@ -593,13 +597,16 @@ impl LinkStateWrapper {
                 Ok(())
             }
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
-                // Node is really waiting now for an Acquire Call.
                 locked_fsm.actor_addresses.push(peer_zpr_addr);
                 debug!(
                     target: LINK_STATE,
                     "Link {link_id} peer is using ZPR addr {}",
                     peer_zpr_addr
                 );
+                // Node is really waiting for an init-auth-response, followed
+                // by the eventual acquire-zpr-address message.
+                // But we transition to that state once we get the zdp
+                // response to init-auth.
                 locked_fsm.set_state(LinkState::WaitForInitAuth);
                 debug!(
                     target: LINK_STATE,
@@ -663,6 +670,7 @@ impl LinkStateWrapper {
                 let mut link_data = self.locked_data.lock().unwrap();
                 link_data.asa_addresses = maybe_asa_addrs.clone();
                 drop(link_data);
+                // The adatper is really waiting for an init-auth-request.
                 locked_fsm.set_state(LinkState::WaitForInitAuth);
                 debug!(
                     target: LINK_STATE,
@@ -696,8 +704,11 @@ impl LinkStateWrapper {
     /// Includes authentication blob from sender, as well as the requested addresses.
     /// Inclusion of requested addresses is temporary.
     ///
+    /// A Node expects this message from an adapter sometime after sending it an
+    /// init-authentication message.
+    ///
     /// This will call off to visa service for checking.
-    /// Results comes back through a RecievedAuthorizeResponse event.
+    /// Results comes back through a ReceivedAuthorizeResponse event.
     fn process_acquire_zpr_address_request(
         &self,
         asm: &Arc<Assembly>,
@@ -708,7 +719,7 @@ impl LinkStateWrapper {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
         match (self.link_type, locked_fsm.state) {
-            (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {}
+            (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {}
 
             (_, _) => {
                 return Err(LinkStateError::InvalidOperation(
@@ -1045,6 +1056,40 @@ impl LinkStateWrapper {
         Ok(())
     }
 
+    /// The node sends init-authentication to the adapter, the response only serves to
+    /// clear our retry timer.  The adapter will in the meantime take care of doing
+    /// whatever authentication it needs to and will eventually send us an acquire-zpr-address
+    /// message with the authentication results (blob).
+    fn process_init_auth_response(
+        &self,
+        asm: &Arc<Assembly>,
+        response_code: ResponseCode,
+    ) -> Result<(), LinkStateError> {
+        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        match (self.link_type, locked_fsm.state) {
+            (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {
+                debug!(target: LINK_STATE, "Link {} received init auth response with code {:?}", self.id, response_code);
+                if response_code == ResponseCode::Success {
+                    locked_fsm.set_state(LinkState::WaitForAcquireZprAddress);
+                    // In this state we are waiting on the adapter to perform authentication and
+                    // that may involve external services and could be quite slow relative to a
+                    // straightforward ZDP response.  So, we set a longer timeout.  We do not retransmit
+                    // anything... if we do not get auth within a reasonable amount of time we shut down
+                    // the link.
+                    self.set_timeout(asm, &mut locked_fsm, config::ACTOR_AUTHENTICATION_TIMEOUT);
+                    Ok(())
+                } else {
+                    error!(target: LINK_STATE, "Link {} received init auth response with non-success response {:?}", self.id, response_code);
+                    drop(locked_fsm);
+                    self.initiate_close(asm, TerminateReason::Other)
+                }
+            }
+            (_, _) => Err(LinkStateError::InvalidOperation(
+                "Discarded unsolicited init auth response".to_string(),
+            )),
+        }
+    }
+
     /// Send off the Inti-Authentication message with a blob that the receiver could
     /// use for authentication.
     fn send_init_authentication_request(&self, asm: &Arc<Assembly>) {
@@ -1239,6 +1284,14 @@ impl LinkStateWrapper {
                 Ok(())
             }
 
+            (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
+                // This is a timeout while waiting for the adapter to authenticate.
+                // Timeout here means we give up on the link.
+                error!(target: LINK_STATE, "Link {} timed out in state {:?}", self.id, locked_fsm.state);
+                drop(locked_fsm);
+                return self.process_error_response(&asm);
+            }
+
             (_, _) => Err(LinkStateError::InvalidOperation(format!(
                 "Ignoring unexpected timeout in state {:?}",
                 locked_fsm.state
@@ -1265,7 +1318,10 @@ impl LinkStateWrapper {
                 self.send_init_authentication_request(asm)
             }
 
-            (_, _) => (),
+            (_, _) => panic!(
+                "call to retransmit in state {:?} but not implemented",
+                locked_fsm.state
+            ),
         }
     }
 

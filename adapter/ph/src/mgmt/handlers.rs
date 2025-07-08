@@ -115,7 +115,7 @@ pub async fn handle_echo_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
 /// TODO: Not yet in RFC 6
 ///
 /// Message from node requesting authentication.
-///
+/// Sends a [zdp::ZdpInitAuthenticationResponse] back.
 ///
 pub async fn handle_init_authentication_request(
     asm: &Arc<Assembly>,
@@ -174,8 +174,10 @@ pub async fn handle_init_authentication_request(
     Ok(())
 }
 
+/// Process the InitAuthenticationResponse message.
+/// Just inform the link_state that we got this.
 pub async fn handle_init_authentication_response(
-    _asm: &Arc<Assembly>,
+    asm: &Arc<Assembly>,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpInitAuthenticationResponse::read_from_buf(&mut pkt) else {
@@ -185,7 +187,7 @@ pub async fn handle_init_authentication_response(
     let link_id = pkt.metadata().ingress_link_id;
     let status = hdr.status_code;
     debug!(target: ZDP, "Link {link_id}: Received InitAuthenticationResponse, status: {status:?}");
-
+    let _ = asm.process_link_state_event(link_id, LinkEvent::ReceivedInitAuthResponse(status));
     Ok(())
 }
 
