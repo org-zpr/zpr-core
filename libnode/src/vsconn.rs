@@ -73,13 +73,7 @@ pub struct VSConn {
 /// Helper function to create a basic node actor. Probably only useful for early versions
 /// of the node.  In the future the node will create it's own actor datastructure and
 /// had it to [VSConn::new].
-pub fn new_node_actor(
-    node_addr: IpAddr,
-    node_name: &str,
-    claims: &BTreeMap<String, String>,
-) -> vsapi::Actor {
-    let provides = vec![format!("/zpr/{}", node_name)];
-
+pub fn new_node_actor(node_addr: IpAddr, claims: &BTreeMap<String, String>) -> vsapi::Actor {
     // In prototype, the node zpr address is the same as its tether address. May not be true going forward.
     let zaddr_bytes = match node_addr {
         IpAddr::V4(a) => a.octets().to_vec(),
@@ -105,7 +99,7 @@ pub fn new_node_actor(
         zpr_addr: Some(zaddr_bytes),
         tether_addr: Some(taddr_bytes),
         ident: Some(String::from("ident-not-generated")), // TODO
-        provides: Some(provides),
+        provides: None,
     }
 }
 
@@ -624,7 +618,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_actor(node_addr, "n0", &claims);
+        let agnt = new_node_actor(node_addr, &claims);
 
         let mut conn = VSConn::new(
             agnt,
@@ -667,7 +661,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_actor(node_addr, "n0", &claims);
+        let agnt = new_node_actor(node_addr, &claims);
 
         let mut conn = VSConn::new(
             agnt,
@@ -716,7 +710,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_actor(node_addr, "n0", &claims);
+        let agnt = new_node_actor(node_addr, &claims);
 
         let mut conn = VSConn::new(
             agnt,
@@ -805,7 +799,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_actor(node_addr, "n0", &claims);
+        let agnt = new_node_actor(node_addr, &claims);
 
         let mut conn = VSConn::new(
             agnt,
@@ -903,7 +897,7 @@ s5JVZ48=
 
         let mut claims = BTreeMap::new();
         claims.insert(String::from("foo"), String::from("fee"));
-        let agnt = new_node_actor(node_addr, "n0", &claims);
+        let agnt = new_node_actor(node_addr, &claims);
 
         let mut conn = VSConn::new(
             agnt,

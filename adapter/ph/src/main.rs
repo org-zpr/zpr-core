@@ -378,10 +378,9 @@ fn main() -> ExitCode {
     if ph_mode == PhMode::Node {
         let node_name = config::get_noise_cn(&config.certificate_file)
             .expect("unable to determine node name: cannot parse CN");
-        info!(target: STARTUP, "node name is \"{node_name}\"");
+        info!(target: STARTUP, "node CN is \"{node_name}\"");
 
-        let node_actor =
-            libnode::vsconn::new_node_actor(config.zpr_addr[0], &node_name, &Default::default());
+        let node_actor = libnode::vsconn::new_node_actor(config.zpr_addr[0], &Default::default());
 
         let (vs_inq, vs_outq_inner) = mpsc::channel(topology_config.vs_queue_size);
         vs_outq = Some(vs_outq_inner);
