@@ -103,12 +103,7 @@ impl AddressPool {
             address.v6[14],
             address.v6[15],
         ]);
-        if id >= MAX_AAA_ID {
-            return Err(AddressPoolError::InvalidAddress);
-        }
-
         let _present = self.active.remove(&id);
-
         Ok(())
     }
 }
@@ -316,24 +311,22 @@ mod tests {
     }
 
     #[test]
-    fn test_release_address_with_invalid_large_id() {
+    fn test_release_address_with_valid_large_id() {
         let mut pool = AddressPool::new(0x123456);
 
         // Create an address with an ID that's too large
         let mut addr_bytes = [0u8; 16];
         addr_bytes[0..8].copy_from_slice(&[0xfd, 0x5a, 0x50, 0x52, 0x00, 0x00, 0x0a, 0xaa]);
 
-        // Set all bytes to 0xFF to create an ID > MAX_AAA_ID
+        // Set all bytes to 0xFF to create an ID of MAX_AAA_ID
         addr_bytes[11] = 0xFF;
         addr_bytes[12] = 0xFF;
         addr_bytes[13] = 0xFF;
         addr_bytes[14] = 0xFF;
         addr_bytes[15] = 0xFF;
 
-        let invalid_addr = IpAddress { v6: addr_bytes };
-        let result = pool.release_address(invalid_addr);
-
-        assert!(matches!(result, Err(AddressPoolError::InvalidAddress)));
+        let ret_addr = IpAddress { v6: addr_bytes };
+        let _result = pool.release_address(ret_addr).unwrap();
     }
 
     #[test]

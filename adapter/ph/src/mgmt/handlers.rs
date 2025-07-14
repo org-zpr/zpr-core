@@ -350,7 +350,7 @@ pub async fn handle_hello_request(
                 match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(addr)) {
                     Err(e) => {
                         // Highly improbable
-                        error!(target: ZDP, "Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
+                        panic!("Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
                     }
                     Ok(()) => (),
                 }
@@ -396,18 +396,22 @@ pub async fn handle_hello_request(
         rsp_pkt,
     );
 
-    if response_status == zdp::ResponseCode::Success {
+    let close_link = if response_status == zdp::ResponseCode::Success {
         match asm.process_link_state_event(ingress_link_id, LinkEvent::SentHelloResponse) {
             Err(e) => {
                 error!(target: ZDP, "Link {ingress_link_id}: Failed to process SentHelloResponse event: {:?}", e);
+                true
             }
-            Ok(()) => (),
+            Ok(()) => false,
         }
     } else {
         // TODO: The framework within which this function is called does not allow us to
         // return an error back which would trigger a link shutdown.  So we do it manually
         // and just return Ok() though things are not in fact OK.
         info!(target: ZDP, "Link {ingress_link_id}: HelloRequest processing failed, shutting down link");
+        true
+    };
+    if close_link {
         match asm.process_link_state_event(ingress_link_id, LinkEvent::Error) {
             Err(e) => {
                 error!(target: ZDP, "Link {ingress_link_id}: failed to process Error event: {e}");
@@ -415,6 +419,7 @@ pub async fn handle_hello_request(
             Ok(()) => (),
         }
     }
+
     Ok(())
 }
 
