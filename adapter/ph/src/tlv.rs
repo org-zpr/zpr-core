@@ -52,7 +52,6 @@ impl TlvEncoding {
     }
 
     /// Actor Authentication Address
-    #[allow(dead_code)]
     pub fn new_aaa(addr: IpAddress) -> TlvEncoding {
         let ipa: IpAddr = addr.into();
         match ipa {

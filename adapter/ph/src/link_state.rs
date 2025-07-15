@@ -141,7 +141,7 @@ pub enum LinkEvent {
     KeyingDone,
     ReceivedHelloRequest(IpAddress), // Actors ZPR address - TODO: implement AAAs
     AssignedAAA(IpAddress),          // Assigned AAA address for this link
-    ReceivedHelloResponse(ResponseCode, Option<Vec<SocketAddr>>), // (response code, ASA addresses)
+    ReceivedHelloResponse(ResponseCode, IpAddress, Option<Vec<SocketAddr>>), // (response code, AAA address, ASA addresses)
     SentHelloResponse,
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
@@ -416,8 +416,8 @@ impl LinkStateWrapper {
                 self.process_hello_request(asm, peer_zpr_addr)
             }
             LinkEvent::AssignedAAA(addr) => self.process_assigned_aaa(asm, addr),
-            LinkEvent::ReceivedHelloResponse(code, maybe_asa_addrs) => {
-                self.process_hello_response(asm, code, maybe_asa_addrs)
+            LinkEvent::ReceivedHelloResponse(code, aaa_addr, maybe_asa_addrs) => {
+                self.process_hello_response(asm, code, aaa_addr, maybe_asa_addrs)
             }
 
             LinkEvent::SentHelloResponse => self.process_sent_hello_response(asm),
@@ -679,6 +679,7 @@ impl LinkStateWrapper {
         &self,
         asm: &Arc<Assembly>,
         code: ResponseCode,
+        aaa_addr: IpAddress,
         maybe_asa_addrs: Option<Vec<SocketAddr>>,
     ) -> Result<(), LinkStateError> {
         if code == ResponseCode::Other {
@@ -693,8 +694,14 @@ impl LinkStateWrapper {
             (LinkType::AdapterToNode, LinkState::Helloing) => {
                 let mut link_data = self.locked_data.lock().unwrap();
                 link_data.asa_addresses = maybe_asa_addrs.clone();
+
+                // On the node side, the aaa_address link_data field is used to keep track of the
+                // AAA we handed out to the peer.  On the client-adapter side, we hold the AAA
+                // we got from the node in there.
+                link_data.aaa_address = Some(aaa_addr);
                 drop(link_data);
-                // The adatper is really waiting for an init-auth-request.
+
+                // The adapter is waiting for an init-auth-request.
                 locked_fsm.set_state(LinkState::WaitForInitAuth);
                 debug!(
                     target: LINK_STATE,
@@ -998,10 +1005,6 @@ impl LinkStateWrapper {
     /// If this is bootstrap and we are configured for bootstrap we can self-authenticate
     /// and send in an AcquireZprAddressRequest.
     ///
-    /// TODO: If we are not configured for bootstrap then we need to kick off actor
-    /// authentication somehow.  FOR NOW in this case we just proceed, sending in a
-    /// "fake" address request.
-    ///
     /// For now we must be in WaitForInitAuth to accept this message.
     /// We transition to RegisterAA if we successfully self-auth, otherwise we go to
     /// error and shutdown the link.
@@ -1013,8 +1016,11 @@ impl LinkStateWrapper {
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
 
-        // Grab a copy of our ASA addresses.
-        let asa_addrs = self.locked_data.lock().unwrap().asa_addresses.clone();
+        // Grab a copy of our ASA, AAA addresses.
+        let data = self.locked_data.lock().unwrap();
+        let asa_addrs = data.asa_addresses.clone();
+        let aaa_addr = data.aaa_address.clone();
+        drop(data);
 
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
@@ -1063,6 +1069,15 @@ impl LinkStateWrapper {
                     // TODO: We get the ZPR address of the auth services from our node. What about the cert?
                     if asm.rsauth.is_some() && asa_addrs.is_some() {
                         drop(locked_fsm);
+
+                        // If we have not configured our TUN interface with our AAA address or if the
+                        // TUN has the wrong address on it, we fix that up now.
+                        //
+                        // TODO: If we are re-authenticating would we need to use an AAA address? We would already
+                        //       have a ZPR address.
+
+                        panic!("TODO - configure or check configuration of TUN now!");
+
                         self.do_https_authenticate(asm, asa_addrs.unwrap());
                     } else {
                         error!(target: LINK_STATE, "Link {link_id} no auth service configured");
