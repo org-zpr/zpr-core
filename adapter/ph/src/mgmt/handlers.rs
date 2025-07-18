@@ -362,37 +362,28 @@ pub async fn handle_hello_request(
     let mut aaa_address: Option<IpAddress> = None;
 
     if response_status == zdp::ResponseCode::Success {
-        // We need an AAA address if an authentication service is available and the connecting adapter
-        // is not fronting the visa service.
+        // Technically we do not need to supply an AAA address to an adapter fronting the visa service,
+        // or if we do not have an external authentication service available.  For simplicity we just
+        // always hand one out.
+        if let Some(pool) = asm.address_pool.lock().unwrap().as_mut() {
+            let addr = pool.get_aaa_address();
+            debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {addr} (active pool size: {})",
+                pool.len());
+            aaa_address = Some(addr);
 
-        let is_visa_service = asm
-            .peer_table
-            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter)
-            .map_or(false, |id| id.get() == ingress_link_id);
-
-        let auth_service_avaialable = asm.rsauth.is_some();
-
-        if !is_visa_service && auth_service_avaialable {
-            // Then we need an AAA.
-            if let Some(pool) = asm.address_pool.lock().unwrap().as_mut() {
-                let addr = pool.get_aaa_address();
-                debug!(target: ZDP, "Link {ingress_link_id}: HelloResponse - allocated AAA address: {addr} (active pool size: {})",
-                    pool.len());
-                aaa_address = Some(addr);
-
-                // Store the AAA in the link memory so we can free it later.
-                match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(addr)) {
-                    Err(e) => {
-                        // Highly improbable
-                        panic!("Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
-                    }
-                    Ok(()) => (),
+            // Store the AAA in the link memory so we can free it later.
+            match asm.process_link_state_event(ingress_link_id, LinkEvent::AssignedAAA(addr)) {
+                Err(e) => {
+                    // Highly improbable
+                    panic!("Link {ingress_link_id}: failed to process AssignedAAA event: {e}");
                 }
-            } else {
-                // Programming error: if we are a node, we must have a pool.
-                panic!("adapter (node) handling a hello-request missing address pool");
+                Ok(()) => (),
             }
+        } else {
+            // Programming error: if we are a node, we must have a pool.
+            panic!("adapter (node) handling a hello-request missing address pool");
         }
+
     }
 
     hdr.status = response_status;
