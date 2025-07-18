@@ -105,7 +105,7 @@ pub struct Config {
     /// Required for adapter - the node dock address on substrate.
     pub node_addr: Option<SocketAddr>,
 
-    /// Required for node and adapter - the local ZPR actor address(s).
+    /// Required for node, optional for adapter - the ZPR address (no port) of the adapter.
     pub zpr_addr: Vec<IpAddr>,
 
     /// Required for adapter - the path to the PEM file containing the nodes noise public key (not a certificate).
@@ -226,10 +226,12 @@ impl Config {
         } else {
             return Err("private_key_file or noise_private_key".arg_missing());
         }
-        if self.zpr_addr.is_empty() {
-            return Err("zpr_addr".arg_missing());
-        }
         match mode {
+            PhMode::Node => {
+                if self.zpr_addr.is_empty() {
+                    return Err("zpr_addr".arg_missing());
+                }
+            }
             PhMode::Adapter => {
                 if self.node_addr.is_none() {
                     return Err("node_addr".arg_missing());
@@ -242,9 +244,6 @@ impl Config {
                         &self.node_public_key_file.as_ref().unwrap(),
                     )?;
                 }
-            }
-            PhMode::Node => {
-                // nothing node specific to check
             }
         }
         Ok(())

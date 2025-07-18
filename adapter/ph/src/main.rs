@@ -230,11 +230,13 @@ fn main() -> ExitCode {
     // open TUN devices and actor requeue sockets
     //
 
-    // HACK: If we are using a new TUN (requirement on MAC I think), we will set the address.
-    let tun_addr = if !config.zpr_addr.is_empty() && config.tun_if.is_none() {
+    // If a zpr_addr is supplied we use it on the TUN.  Otherwise we hand the TUN create code a
+    // local address which we never use.
+    // TODO: Can we create a TUN with no address on it?
+    let tun_addr = if !config.zpr_addr.is_empty() {
         Some(config.zpr_addr[0].clone())
     } else {
-        None
+        Some(Ipv6Addr::new(0xfc00, 0x5a, 0x50, 0x52, 0, 0, 0, 1).into())
     };
 
     let tun_devs: Vec<_> = match ZprTun::new_mq(

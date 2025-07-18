@@ -204,6 +204,10 @@ impl Tun {
         Ok(tundev)
     }
 
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     // Post create configuration based on the builder.
     fn configure(&mut self, config: &Builder) -> Result<(), TunError> {
         let mtu: Option<u16>;

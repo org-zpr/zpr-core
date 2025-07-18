@@ -1066,24 +1066,43 @@ impl LinkStateWrapper {
                     locked_fsm.set_state(LinkState::RegisterAA);
                     info!(target: LINK_STATE, "Link {link_id} received init auth, time to talk to authentication service");
 
-                    // TODO: We get the ZPR address of the auth services from our node. What about the cert?
-                    if asm.rsauth.is_some() && asa_addrs.is_some() {
-                        drop(locked_fsm);
-
-                        // If we have not configured our TUN interface with our AAA address or if the
-                        // TUN has the wrong address on it, we fix that up now.
-                        //
-                        // TODO: If we are re-authenticating would we need to use an AAA address? We would already
-                        //       have a ZPR address.
-
-                        panic!("TODO - configure or check configuration of TUN now!");
-
-                        self.do_https_authenticate(asm, asa_addrs.unwrap());
-                    } else {
-                        error!(target: LINK_STATE, "Link {link_id} no auth service configured");
+                    // In order to authenticate, we need an ASA address to talk to and an
+                    // AAA address to talk from.
+                    if aaa_addr.is_none() {
+                        error!(target: LINK_STATE, "Link {link_id} unable to perform auth: no AAA address configured");
                         locked_fsm.set_state(LinkState::Error);
                         drop(locked_fsm);
                         return self.initiate_close(asm, TerminateReason::Other);
+                    }
+                    if asa_addrs.is_none() {
+                        error!(target: LINK_STATE, "Link {link_id} unable to perform auth: no ASA address configured");
+                        locked_fsm.set_state(LinkState::Error);
+                        drop(locked_fsm);
+                        return self.initiate_close(asm, TerminateReason::Other);
+                    }
+                    if asm.rsauth.is_none() {
+                        error!(target: LINK_STATE, "Link {link_id} unable to perform auth: no RSA external auth service configured");
+                        locked_fsm.set_state(LinkState::Error);
+                        drop(locked_fsm);
+                        return self.initiate_close(asm, TerminateReason::Other);
+                    }
+                    // ELSE we are good to go!
+                    drop(locked_fsm);
+
+                    // If we have not configured our TUN interface with our AAA address or if the
+                    // TUN has the wrong address on it, we fix that up now.
+                    //
+                    // TODO: If we are re-authenticating would we need to use an AAA address? We would already
+                    //       have a ZPR address.
+                    //
+                    // TODO: We get the ZPR address of the auth services (ASA) from our node. What about the cert?
+                    //
+                    match asm.tun_ctl.set_zpr_address(aaa_addr.unwrap().into()) {
+                        Ok(_) => self.do_https_authenticate(asm, asa_addrs.unwrap()),
+                        Err(e) => {
+                            error!(target: LINK_STATE, "Link {link_id} failed to configure TUN with AAA address: {e}");
+                            return self.initiate_close(asm, TerminateReason::Other);
+                        }
                     }
                 }
             }

@@ -379,6 +379,9 @@ pub mod test {
         fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
             Ok(())
         }
+        fn set_zpr_address(&self, _addr: IpAddr) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     impl TestAssemblyBuilder {

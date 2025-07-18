@@ -55,6 +55,13 @@ impl ZprTun {
         Ok(())
     }
 
+    pub fn set_zpr_address(&self, addr: IpAddr) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "set_zpr_address not implemented on linux",
+        ))
+    }
+
     #[allow(dead_code)]
     pub fn set_address(&mut self, _addr: IpAddr) -> std::result::Result<(), ZprTunError> {
         // This needs work -- the linux tun API only allows address to be set at construction time.
