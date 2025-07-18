@@ -233,8 +233,15 @@ fn main() -> ExitCode {
     // If a zpr_addr is supplied we use it on the TUN.  Otherwise we hand the TUN create code a
     // local address which we never use.
     // TODO: Can we create a TUN with no address on it?
+
+    // TODO: Currently on linux we cannot configure a TUN interface with an IPv6 address.
+    // So if you set tun_if in the config we assume TUN is there and has a static ZPR address.
     let tun_addr = if !config.zpr_addr.is_empty() {
-        Some(config.zpr_addr[0].clone())
+        if config.tun_if.is_none() {
+            Some(config.zpr_addr[0].clone())
+        } else {
+            None
+        }
     } else {
         Some(Ipv6Addr::new(0xfc00, 0x5a, 0x50, 0x52, 0, 0, 0, 1).into())
     };
