@@ -6,10 +6,10 @@ use tracing::*;
 use crate::logging::targets::NET_OS;
 use crate::sys::macos::tun;
 use crate::zprtun::ZprTunError;
-use std::process::Command;
 use crate::zprtun::ZPRNET_PREFIX_LEN;
+use std::process::Command;
 
-pub struct ZprTun{
+pub struct ZprTun {
     inner: tun::Tun,
     mtx: std::sync::Mutex<()>,
 }
@@ -59,7 +59,10 @@ impl ZprTun {
     }
 
     pub fn set_zpr_address(&self, addr: IpAddr) -> std::io::Result<()> {
-        let mtx = self.mtx.lock().map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Mutex lock failed"))?;
+        let mtx = self
+            .mtx
+            .lock()
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Mutex lock failed"))?;
 
         // Check if we already have this address.
         info!(target: NET_OS, "XXX Checking address on our TUN device ...TODO");
@@ -78,13 +81,18 @@ impl ZprTun {
                 ));
             }
             IpAddr::V6(ipv6) => {
-                c.arg("inet6").arg(format!("{}/{}", ipv6.to_string(), ZPRNET_PREFIX_LEN));
+                c.arg("inet6")
+                    .arg(format!("{}/{}", ipv6.to_string(), ZPRNET_PREFIX_LEN));
             }
         }
         c.arg("alias");
 
-        c.status()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to set ZPR address: {e}")))?;
+        c.status().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to set ZPR address: {e}"),
+            )
+        })?;
 
         drop(mtx);
         Ok(())

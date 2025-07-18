@@ -1,7 +1,7 @@
 use crate::sys::ZprTun;
 use std::io::Result;
-use std::sync::Arc;
 use std::net::IpAddr;
+use std::sync::Arc;
 
 /// This interface provides shared access to the TUN device for controlling
 /// its state.  Its API is limited to restrict coupling of the full system

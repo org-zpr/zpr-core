@@ -1,9 +1,12 @@
-use crate::zprtun::ZprTunError;
 use nix::ioctl_write_ptr;
 use std::io::Result;
 use std::net::IpAddr;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use tokio_tun::{Tun, TunBuilder};
+use tracing::*;
+
+use crate::logging::targets::NET_OS;
+use crate::zprtun::ZprTunError;
 
 // from /usr/include/linux/if_tun.h
 ioctl_write_ptr!(tun_set_carrier, b'T', 226, libc::c_int);
@@ -38,7 +41,7 @@ impl ZprTun {
             match addr {
                 IpAddr::V4(ipa) => bldr = bldr.address(ipa),
                 IpAddr::V6(_) => {
-                    return Err(ZprTunError::PlatformError("IPv6 not supported".to_string()))
+                    warn!(target:NET_OS, "IPv6 address on TUN at create time not supported on linux, ignoring");
                 }
             }
         }

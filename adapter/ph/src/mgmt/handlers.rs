@@ -10,7 +10,6 @@ use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::{ip_number, IpAddress};
 use crate::packet::Packet;
-use crate::special_peers::SpecialPeerName;
 use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
 use bytes::{Buf, BufMut};
@@ -383,7 +382,6 @@ pub async fn handle_hello_request(
             // Programming error: if we are a node, we must have a pool.
             panic!("adapter (node) handling a hello-request missing address pool");
         }
-
     }
 
     hdr.status = response_status;
