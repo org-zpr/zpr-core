@@ -27,6 +27,7 @@ impl DataType {
     pub const VERSION: TlvType = 2;
     pub const AAA: TlvType = 3; // Actor Authentication Address - temporary address actor may use for authentication
     pub const ASA: TlvType = 4; // Authentication Service SocketAddress
+    pub const STATIC_ADDR: TlvType = 5; // Static Address - used for static address requests from an adapter
 }
 
 /// TlvEncoding is a designed to be an easy way to create and write TLV data
@@ -66,6 +67,24 @@ impl TlvEncoding {
             },
         }
     }
+
+    pub fn new_static_addr(addr: IpAddress) -> TlvEncoding {
+        Self::new_static_addr_std(addr.into())
+    }
+
+    pub fn new_static_addr_std(ipa: IpAddr) -> TlvEncoding {
+        match ipa {
+            IpAddr::V4(ipa) => TlvEncoding {
+                tlv_type: DataType::STATIC_ADDR,
+                value: TlvValue::Ipv4Addr(ipa),
+            },
+            IpAddr::V6(ipa) => TlvEncoding {
+                tlv_type: DataType::STATIC_ADDR,
+                value: TlvValue::Ipv6Addr(ipa),
+            },
+        }
+    }
+
 
     /// Authentication Service Address
     pub fn new_asa(sock_addr: SocketAddr) -> TlvEncoding {
@@ -228,7 +247,7 @@ pub fn parse_from_buf(
                     .or_insert_with(Vec::new)
                     .push(TlvValue::Str(ver_str.to_string()));
             }
-            DataType::AAA => {
+            DataType::AAA | DataType::STATIC_ADDR => {
                 let addr_val = parse_address_value(buf, tlv_length)?;
                 tlv_map
                     .entry(tlv_type)
@@ -918,6 +937,31 @@ mod tests {
     }
 
     #[test]
+    fn test_new_static_addr_encoding_ipv4() {
+        let mut buf = BytesMut::new();
+        let test_ipv4 = Ipv4Addr::new(192, 168, 1, 100);
+        let ip_address = IpAddress::from(test_ipv4);
+
+        // Create STATIC_ADDR TLV using new_static_addr function
+        let static_encoding = TlvEncoding::new_static_addr(ip_address);
+        static_encoding.put(&mut buf);
+
+        // Parse it back
+        let mut buf_reader = buf.as_ref();
+        let result = parse_from_buf(&mut buf_reader).unwrap();
+
+        // Verify the result
+        assert_eq!(result.len(), 1);
+        let values = result.get(&DataType::STATIC_ADDR).unwrap();
+        assert_eq!(values.len(), 1);
+        match &values[0] {
+            TlvValue::Ipv4Addr(addr) => assert_eq!(*addr, test_ipv4),
+            _ => panic!("Expected Ipv4Addr value for STATIC_ADDR created with new_static_addr"),
+        }
+    }
+
+
+    #[test]
     fn test_new_aaa_ipv6_encoding() {
         let mut buf = BytesMut::new();
         let test_ipv6 = Ipv6Addr::new(
@@ -940,6 +984,32 @@ mod tests {
         match &values[0] {
             TlvValue::Ipv6Addr(addr) => assert_eq!(*addr, test_ipv6),
             _ => panic!("Expected Ipv6Addr value for AAA created with new_aaa"),
+        }
+    }
+
+    #[test]
+    fn test_new_static_addr_encoding_ipv6() {
+        let mut buf = BytesMut::new();
+        let test_ipv6 = Ipv6Addr::new(
+            0x2001, 0x0db8, 0x85a3, 0x0000, 0x0000, 0x8a2e, 0x0370, 0x7334,
+        );
+        let ip_address = IpAddress::from(test_ipv6);
+
+        // Create STATIC_ADDR TLV using new_static_addr function
+        let static_encoding = TlvEncoding::new_static_addr(ip_address);
+        static_encoding.put(&mut buf);
+
+        // Parse it back
+        let mut buf_reader = buf.as_ref();
+        let result = parse_from_buf(&mut buf_reader).unwrap();
+
+        // Verify the result
+        assert_eq!(result.len(), 1);
+        let values = result.get(&DataType::STATIC_ADDR).unwrap();
+        assert_eq!(values.len(), 1);
+        match &values[0] {
+            TlvValue::Ipv6Addr(addr) => assert_eq!(*addr, test_ipv6),
+            _ => panic!("Expected Ipv6Addr value for STATIC_ADDR created with new_static_addr"),
         }
     }
 

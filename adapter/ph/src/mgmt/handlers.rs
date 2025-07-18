@@ -284,36 +284,51 @@ pub async fn handle_hello_request(
     }
     debug!(target: ZDP, "Received Hello Request for link {ingress_link_id}");
 
-    let Ok(hdr) = zdp::ZdpHelloRequestHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
-    };
-    let bytes_needed = match hdr.ip_version {
-        zpr::L3Type::Ipv4 => 4,
-        zpr::L3Type::Ipv6 => 16,
-        _ => {
-            warn!(target: ZDP, "link {ingress_link_id}: invalid ip_version field");
+    let tlv_data = match tlv::parse_from_buf(&mut pkt) {
+        Ok(data) => data,
+        Err(_) => {
+            error!(target: ZDP, "Link {ingress_link_id}: Failed to parse HelloRequest TLV data");
             return Err((HandleMgmtError::BadStructure, pkt));
         }
     };
-    if pkt.remaining() < bytes_needed {
-        warn!(target: ZDP, "link {ingress_link_id}: packet too short for actor address");
+
+    let mut static_addresses = Vec::<IpAddress>::new();
+
+    for (tlv_type, tlv_value) in &tlv_data {
+        match tlv_type {
+            &tlv::DataType::STATIC_ADDR => {
+                for static_entry in tlv_value {
+                    match static_entry {
+                        tlv::TlvValue::Ipv4Addr(addr) => {
+                            debug!(target: ZDP, "Link {ingress_link_id}: HelloRequest includes static IPv4 address: {addr}");
+                            static_addresses.push(addr.to_owned().into());
+                        }
+                        tlv::TlvValue::Ipv6Addr(addr) => {
+                            debug!(target: ZDP, "Link {ingress_link_id}: HelloRequest includes static IPv6 address: {addr}");
+                            static_addresses.push(addr.to_owned().into());
+                        }
+                        _ => {
+                            warn!(target: ZDP, "Link {ingress_link_id}: HelloRequest static address value type is wrong: {static_entry:?}");
+                        }
+                    }
+                }
+            }
+            _ => {
+                info!(target: ZDP, "Link {ingress_link_id}: HelloRequest includes ignored TLV type: {tlv_type}");
+            }
+        }
+    }
+
+    // TODO: Add support for multiple addresses on same actor?
+    // TODO: For now address is required. But with the AAA stuff coming soon this requirement goes away.
+    if static_addresses.is_empty() {
+        error!(target: ZDP, "Link {ingress_link_id}: HelloRequest did not include static address TLV");
         return Err((HandleMgmtError::BadStructure, pkt));
     }
-    let actor_addr: IpAddress = match hdr.ip_version {
-        zpr::L3Type::Ipv4 => {
-            let Ok(addr_bytes) = <[u8; 4]>::read_from_buf(&mut pkt) else {
-                return Err((HandleMgmtError::BadStructure, pkt));
-            };
-            addr_bytes.into()
-        }
-        zpr::L3Type::Ipv6 => {
-            let Ok(addr_bytes) = <[u8; 16]>::read_from_buf(&mut pkt) else {
-                return Err((HandleMgmtError::BadStructure, pkt));
-            };
-            addr_bytes.into()
-        }
-        _ => panic!("unreachable - already handled this error above"),
-    };
+    if static_addresses.len() > 1 {
+        warn!(target: ZDP, "Link {ingress_link_id}: HelloRequest includes multiple static address requests, only the first one will be used");
+    }
+    let actor_addr = static_addresses.remove(0);
 
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();

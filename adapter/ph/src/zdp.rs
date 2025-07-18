@@ -118,12 +118,6 @@ pub struct ZdpReportHeader {
     pub report_data_length: U16,
 }
 
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
-pub struct ZdpHelloRequestHeader {
-    pub ip_version: zpr::L3Type,
-    // Followed in memory by the IP address.
-}
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
