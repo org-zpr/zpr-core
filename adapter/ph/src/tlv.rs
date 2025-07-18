@@ -68,10 +68,13 @@ impl TlvEncoding {
         }
     }
 
+    /// Actor requested static address for an adapter.
+    #[allow(dead_code)]
     pub fn new_static_addr(addr: IpAddress) -> TlvEncoding {
         Self::new_static_addr_std(addr.into())
     }
 
+    /// Actor requested static address for an adapter.
     pub fn new_static_addr_std(ipa: IpAddr) -> TlvEncoding {
         match ipa {
             IpAddr::V4(ipa) => TlvEncoding {
@@ -84,7 +87,6 @@ impl TlvEncoding {
             },
         }
     }
-
 
     /// Authentication Service Address
     pub fn new_asa(sock_addr: SocketAddr) -> TlvEncoding {
@@ -959,7 +961,6 @@ mod tests {
             _ => panic!("Expected Ipv4Addr value for STATIC_ADDR created with new_static_addr"),
         }
     }
-
 
     #[test]
     fn test_new_aaa_ipv6_encoding() {

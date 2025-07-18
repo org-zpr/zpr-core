@@ -8,9 +8,9 @@ use super::core;
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
+use crate::tlv::TlvEncoding;
 use crate::zdp;
 use crate::{assembly::Assembly, auth};
-use crate::tlv::TlvEncoding;
 
 use bytes::{Buf, BufMut};
 use std::net::IpAddr;
