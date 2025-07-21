@@ -8,6 +8,7 @@ use super::core;
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
+use crate::tlv::TlvEncoding;
 use crate::zdp;
 use crate::{assembly::Assembly, auth};
 
@@ -51,36 +52,20 @@ pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
 
 /// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
 ///
-/// Augmented temporarily with an actors local ZPR addresses.  In future these
-/// will be handed out to the adapter by the dock (first an AAA then a real one).
+/// Originally this was used to send the pre-configured ZPR address of the
+/// remote adapter into the node.  This is no longer necessary.
 ///
-/// Note we only use the first address in the list.
-///
-/// ## Panics
-/// - If address list is empty.
+/// TODO: Remove the addrs parameter.
 pub fn send_hello_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
     actor_addrs: &[IpAddr],
 ) -> zpr::SeqNum {
-    // XXX HACK until the TLV stuff is merged in which lets us send nothing.
-    let actor_addr = if actor_addrs.is_empty() {
-        Ipv6Addr::UNSPECIFIED.into()
-    } else {
-        actor_addrs[0].to_owned()
-    };
-
     let mut req = core::new_heap_packet();
-
-    let hdr = zdp::ZdpHelloRequestHeader {
-        ip_version: actor_addr.l3_type(),
-    };
-    hdr.write_to_buf(&mut req).unwrap();
-    match actor_addr {
-        IpAddr::V4(addr) => req.put(&addr.octets()[..]),
-        IpAddr::V6(addr) => req.put(&addr.octets()[..]),
+    for addr in actor_addrs {
+        let tlv = TlvEncoding::new_static_addr_std(addr.to_owned());
+        tlv.put(&mut req);
     }
-
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, req)
 }
 

@@ -120,13 +120,6 @@ pub struct ZdpReportHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpHelloRequestHeader {
-    pub ip_version: zpr::L3Type,
-    // Followed in memory by the IP address.
-}
-
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
 pub struct ZdpHelloResponseHeader {
     pub status: ResponseCode,
     // Followed by any nubmer of response TLVs.  The TLV
