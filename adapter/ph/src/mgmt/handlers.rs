@@ -332,6 +332,8 @@ pub async fn handle_hello_request(
         warn!(target: ZDP, "link {ingress_link_id}: packet too short for actor address");
         return Err((HandleMgmtError::BadStructure, pkt));
     }
+    // TODO: Why do we need an address in HelloRequest?
+    // Note that we send a requested address in AcquireZPRAddress too.
     let actor_addr: IpAddress = match hdr.ip_version {
         zpr::L3Type::Ipv4 => {
             let Ok(addr_bytes) = <[u8; 4]>::read_from_buf(&mut pkt) else {
@@ -348,12 +350,20 @@ pub async fn handle_hello_request(
         _ => panic!("unreachable - already handled this error above"),
     };
 
+    // XXX TODO - Once we have TLV support we get requested addresses from that.
+    let opt_actor_addr = if actor_addr == IpAddress::UNSPECIFIED {
+        None // Our hack for "no address requested"
+    } else {
+        Some(actor_addr)
+    };
+
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
 
-    let response_status = match asm
-        .process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest(actor_addr))
-    {
+    let response_status = match asm.process_link_state_event(
+        ingress_link_id,
+        LinkEvent::ReceivedHelloRequest(opt_actor_addr),
+    ) {
         Err(_) => zdp::ResponseCode::Other,
         Ok(()) => zdp::ResponseCode::Success,
     };

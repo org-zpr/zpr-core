@@ -12,7 +12,7 @@ use crate::zdp;
 use crate::{assembly::Assembly, auth};
 
 use bytes::{Buf, BufMut};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use thiserror::Error;
 use tracing::*;
 use zpr::{self, L3TypeDeriveable};
@@ -63,10 +63,12 @@ pub fn send_hello_request(
     link_id: zpr::LinkId,
     actor_addrs: &[IpAddr],
 ) -> zpr::SeqNum {
-    if actor_addrs.is_empty() {
-        panic!("send_hello_request requires at least one local ZPR address");
-    }
-    let actor_addr = actor_addrs[0].to_owned();
+    // XXX HACK until the TLV stuff is merged in which lets us send nothing.
+    let actor_addr = if actor_addrs.is_empty() {
+        Ipv6Addr::UNSPECIFIED.into()
+    } else {
+        actor_addrs[0].to_owned()
+    };
 
     let mut req = core::new_heap_packet();
 

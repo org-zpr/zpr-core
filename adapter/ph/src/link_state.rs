@@ -139,8 +139,8 @@ pub enum LinkState {
 pub enum LinkEvent {
     Start,
     KeyingDone,
-    ReceivedHelloRequest(IpAddress), // Actors ZPR address - TODO: implement AAAs
-    AssignedAAA(IpAddress),          // Assigned AAA address for this link
+    ReceivedHelloRequest(Option<IpAddress>), // May include a request for a specific ZPR address
+    AssignedAAA(IpAddress),                  // Assigned AAA address for this link
     ReceivedHelloResponse(ResponseCode, IpAddress, Option<Vec<SocketAddr>>), // (response code, AAA address, ASA addresses)
     SentHelloResponse,
 
@@ -157,7 +157,7 @@ pub enum LinkEvent {
     AuthenticationFailure,                        // From an authentication service
 
     ReceivedEchoResponse { sequence_number: u16 },
-    ReceivedAuthorizeResponse, // from visa service
+    ReceivedAuthorizeResponse(IpAddress), // from visa service
     ReceivedKeepAliveResponse,
     ReceivedTerminateRequest(TerminateReason),
     ReceivedTerminateResponse(ResponseCode),
@@ -205,6 +205,7 @@ pub struct LinkData {
     latency_data: SampleRing<Duration, 100>,
     asa_addresses: Option<Vec<SocketAddr>>, // Addresses of ASA servers told to us by our peer, if any
     aaa_address: Option<IpAddress>,         // AAA address assigned this link (if any)
+    requested_addresses: Vec<IpAddress>,    // Addresses requested by the peer, if any
 }
 
 impl LinkData {
@@ -215,6 +216,7 @@ impl LinkData {
             latency_data: SampleRing::new(Duration::ZERO),
             asa_addresses: None,
             aaa_address: None,
+            requested_addresses: Vec::new(),
         }
     }
 }
@@ -224,7 +226,7 @@ pub struct LinkStateMachine {
     state: LinkState,
     status: LinkStatus,
     silent: bool,
-    actor_addresses: Vec<IpAddress>,
+    actor_addresses: Vec<IpAddress>, // actual assigned actor addresses (not set until AcquireZPRAddress stage)
     last_state_change: std::time::Instant,
     /// used to prevent A/B/A errors with timeouts
     logical_clock: u64,
@@ -412,8 +414,8 @@ impl LinkStateWrapper {
         match event {
             LinkEvent::Start => self.process_start(asm),
             LinkEvent::KeyingDone => self.process_keying_done(asm),
-            LinkEvent::ReceivedHelloRequest(peer_zpr_addr) => {
-                self.process_hello_request(asm, peer_zpr_addr)
+            LinkEvent::ReceivedHelloRequest(peer_zpr_addr_req) => {
+                self.process_hello_request(asm, peer_zpr_addr_req)
             }
             LinkEvent::AssignedAAA(addr) => self.process_assigned_aaa(asm, addr),
             LinkEvent::ReceivedHelloResponse(code, aaa_addr, maybe_asa_addrs) => {
@@ -444,7 +446,9 @@ impl LinkStateWrapper {
                 self.process_authentication_success(asm, blob)
             }
 
-            LinkEvent::ReceivedAuthorizeResponse => self.process_authorize_response(asm),
+            LinkEvent::ReceivedAuthorizeResponse(zpr_addr) => {
+                self.process_authorize_response(asm, zpr_addr)
+            }
 
             LinkEvent::ReceivedTerminateRequest(code) => self.process_terminate_request(asm, code),
             LinkEvent::ReceivedTerminateResponse(_) => self.process_terminate_response(asm),
@@ -591,7 +595,7 @@ impl LinkStateWrapper {
     fn process_hello_request(
         &self,
         _asm: &Arc<Assembly>,
-        peer_zpr_addr: IpAddress,
+        peer_requested_zpr_addr: Option<IpAddress>,
     ) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         let link_id = self.id;
@@ -602,12 +606,18 @@ impl LinkStateWrapper {
                 Ok(())
             }
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
-                locked_fsm.actor_addresses.push(peer_zpr_addr);
-                debug!(
-                    target: LINK_STATE,
-                    "Link {link_id} peer is using ZPR addr {}",
-                    peer_zpr_addr
-                );
+                if let Some(req_addr) = peer_requested_zpr_addr {
+                    self.locked_data
+                        .lock()
+                        .unwrap()
+                        .requested_addresses
+                        .push(req_addr);
+                    debug!(
+                        target: LINK_STATE,
+                        "Link {link_id} peer requests ZPR addr {}",
+                        req_addr
+                    );
+                }
                 // State transition processing happens in [LinkStateWrapper::process_sent_hello_response]
                 Ok(())
             }
@@ -759,29 +769,34 @@ impl LinkStateWrapper {
             }
         }
 
-        if addrs.is_none() {
-            warn!(target: LINK_STATE, "Link {link_id} received acquire request with no addresses");
-            drop(locked_fsm);
-            return self.process_error_response(asm);
-        }
-        let addrs = addrs.unwrap();
+        // TODO: Reconcile this logic with the HelloRequest logic that also
+        //       passes requested addresses. The requested addresses from HELLO
+        //       are saved in our link data.  Why do we need to pass an address
+        //       in HelloRequest?
 
-        // TODO: For now there can be at most one address.
-        if addrs.len() > 1 {
-            warn!(target: LINK_STATE, "Link {link_id} received acquire request with multiple addresses");
-            drop(locked_fsm);
-            return self.process_error_response(asm);
-        }
-        let requested_addr = addrs[0];
+        // The client adapter may already be configured with an address. It will then
+        // be up to the visa service to decide if that is allowed.  If no address is
+        // passed here we expect the visa service to assign an address.
+        //
+        let requested_addr = match addrs {
+            Some(addr) => {
+                if addr.len() == 1 {
+                    addr[0]
+                } else if addr.is_empty() {
+                    IpAddress::UNSPECIFIED
+                } else {
+                    // If we have multiple addresses, we cannot handle that. (yet?)
+                    warn!(target: LINK_STATE, "Link {link_id} received acquire request with multiple addresses");
+                    drop(locked_fsm);
+                    return self.process_error_response(asm);
+                }
+            }
+            None => IpAddress::UNSPECIFIED,
+        };
 
-        // We probably already know the address from hello.
-        // I'm assuming we won't be acquiring more ZPR addresses for this one peer so
-        // we will override the old one with this one.
-        locked_fsm.actor_addresses.clear();
-        locked_fsm.actor_addresses.push(requested_addr);
         debug!(
             target: LINK_STATE,
-            "Link {link_id} received acquire addr request for actor ({requested_addr})."
+            "Link {link_id} received acquire addr request for actor (requested_addr = {requested_addr})."
         );
 
         // A self-signed blob needs to be checked before we forward it on.
@@ -812,15 +827,16 @@ impl LinkStateWrapper {
             }
 
             Ok(None) => {
-                debug!(target: LINK_STATE, "skipping visa service authorize call, authorizing ourselves");
+                debug!(target: LINK_STATE, "skipping visa service authorize call, authorizing ourselves (requested_addr = {requested_addr})");
 
                 // Need to send a grant here anyway to "turn on" the adapter (and outselves)
                 // So pretend we are the visa service and handle our own authorization.
                 drop(locked_fsm);
 
-                if let Err(e) =
-                    asm.process_link_state_event(link_id, LinkEvent::ReceivedAuthorizeResponse)
-                {
+                if let Err(e) = asm.process_link_state_event(
+                    link_id,
+                    LinkEvent::ReceivedAuthorizeResponse(requested_addr),
+                ) {
                     error!(target: LINK_STATE, "Link {link_id} failed to process authorize response: {e}");
                 }
 
@@ -946,6 +962,14 @@ impl LinkStateWrapper {
                     Some(addrs) => {
                         // TODO: In future we will take addresses from here and configure TUN.
                         info!(target: LINK_STATE, "Link {link_id} granted ZPR addresses {:?}, becoming ACTIVE", addrs);
+
+                        if let Err(e) = asm.tun_ctl.set_zpr_address(addrs[0].into()) {
+                            warn!(target: LINK_STATE, "Link {link_id} failed to set ZPR address: {e}");
+                            locked_fsm.set_state(LinkState::Error);
+                            drop(locked_fsm);
+                            return self.initiate_close(asm, TerminateReason::Other);
+                        }
+
                         locked_fsm.set_state(LinkState::Active);
                         asm.tun_ctl.set_carrier(true).unwrap();
                         debug!(
@@ -973,11 +997,21 @@ impl LinkStateWrapper {
     /// This is the event handler fro the return path from the visa service AUTHORIZE operation.
     /// This needs to trigger sending of the Grant Address message.
     ///
+    /// This is only called for SUCCESSFUL responses (unsuccessful responses trigger a link error).
+    ///
     /// TODO: At some point this will need the ZPR address returned to it also.  For now we
     /// use the address we saved in our state (from the original request).
     ///
-    fn process_authorize_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+    fn process_authorize_response(
+        &self,
+        asm: &Arc<Assembly>,
+        zpr_addr: IpAddress,
+    ) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
+
+        locked_fsm.actor_addresses.clear();
+        locked_fsm.actor_addresses.push(zpr_addr);
+        info!(target: LINK_STATE, "Link {} received authorize response with ZPR address {}", self.id, zpr_addr);
 
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {} // ok
@@ -1470,6 +1504,7 @@ impl LinkStateWrapper {
                 };
             }
         }
+        drop(link_data);
 
         asm.peer_table.clear_peer_state(link_id);
 
