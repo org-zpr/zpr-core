@@ -573,8 +573,7 @@ impl LinkStateWrapper {
 
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            let _seqnum =
-                mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
+            let _seqnum = mgmt::requests::send_hello_request(asm, self.id);
             self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
             debug!(
                 target: LINK_STATE,
@@ -1409,7 +1408,7 @@ impl LinkStateWrapper {
             }
 
             (LinkType::AdapterToNode, LinkState::Helloing) => {
-                mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
+                mgmt::requests::send_hello_request(asm, self.id);
             }
 
             // Programming error!

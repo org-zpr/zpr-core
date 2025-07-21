@@ -8,7 +8,6 @@ use super::core;
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
-use crate::tlv::TlvEncoding;
 use crate::zdp;
 use crate::{assembly::Assembly, auth};
 
@@ -55,17 +54,8 @@ pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
 /// Originally this was used to send the pre-configured ZPR address of the
 /// remote adapter into the node.  This is no longer necessary.
 ///
-/// TODO: Remove the addrs parameter.
-pub fn send_hello_request(
-    asm: &Assembly,
-    link_id: zpr::LinkId,
-    actor_addrs: &[IpAddr],
-) -> zpr::SeqNum {
-    let mut req = core::new_heap_packet();
-    for addr in actor_addrs {
-        let tlv = TlvEncoding::new_static_addr_std(addr.to_owned());
-        tlv.put(&mut req);
-    }
+pub fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
+    let req = core::new_heap_packet();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, req)
 }
 
