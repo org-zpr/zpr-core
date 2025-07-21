@@ -325,55 +325,21 @@ pub async fn handle_hello_request(
         }
     };
 
-    let mut static_addresses = Vec::<IpAddress>::new();
-
+    // We just emit the TLV stuff to log but do not use any of it.
     for (tlv_type, tlv_value) in &tlv_data {
-        match tlv_type {
-            &tlv::DataType::STATIC_ADDR => {
-                for static_entry in tlv_value {
-                    match static_entry {
-                        tlv::TlvValue::Ipv4Addr(addr) => {
-                            debug!(target: ZDP, "Link {ingress_link_id}: HelloRequest includes static IPv4 address: {addr}");
-                            static_addresses.push(addr.to_owned().into());
-                        }
-                        tlv::TlvValue::Ipv6Addr(addr) => {
-                            debug!(target: ZDP, "Link {ingress_link_id}: HelloRequest includes static IPv6 address: {addr}");
-                            static_addresses.push(addr.to_owned().into());
-                        }
-                        _ => {
-                            warn!(target: ZDP, "Link {ingress_link_id}: HelloRequest static address value type is wrong: {static_entry:?}");
-                        }
-                    }
-                }
-            }
-            _ => {
-                info!(target: ZDP, "Link {ingress_link_id}: HelloRequest includes ignored TLV type: {tlv_type}");
-            }
-        }
+        info!(
+            "Link {ingress_link_id}: HelloRequest includes TLV type: {tlv_type} => {tlv_value:?}"
+        );
     }
-
-    if static_addresses.len() > 1 {
-        warn!(target: ZDP, "Link {ingress_link_id}: HelloRequest includes multiple static address requests, only the first one will be used");
-    }
-
-    // XXX TODO - Once we have TLV support we get requested addresses from that.
-    let opt_actor_addr =
-        if static_addresses.is_empty() || static_addresses[0] == IpAddress::UNSPECIFIED {
-            None // Our hack for "no address requested"
-        } else {
-            Some(static_addresses[0])
-        };
 
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpHelloResponseHeader>();
 
-    let response_status = match asm.process_link_state_event(
-        ingress_link_id,
-        LinkEvent::ReceivedHelloRequest(opt_actor_addr),
-    ) {
-        Err(_) => zdp::ResponseCode::Other,
-        Ok(()) => zdp::ResponseCode::Success,
-    };
+    let response_status =
+        match asm.process_link_state_event(ingress_link_id, LinkEvent::ReceivedHelloRequest) {
+            Err(_) => zdp::ResponseCode::Other,
+            Ok(()) => zdp::ResponseCode::Success,
+        };
 
     let mut aaa_address: Option<IpAddress> = None;
 

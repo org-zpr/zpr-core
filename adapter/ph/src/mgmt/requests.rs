@@ -13,7 +13,7 @@ use crate::zdp;
 use crate::{assembly::Assembly, auth};
 
 use bytes::{Buf, BufMut};
-use std::net::{IpAddr, Ipv6Addr};
+use std::net::IpAddr;
 use thiserror::Error;
 use tracing::*;
 use zpr::{self, L3TypeDeriveable};

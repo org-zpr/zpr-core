@@ -139,8 +139,8 @@ pub enum LinkState {
 pub enum LinkEvent {
     Start,
     KeyingDone,
-    ReceivedHelloRequest(Option<IpAddress>), // May include a request for a specific ZPR address
-    AssignedAAA(IpAddress),                  // Assigned AAA address for this link
+    ReceivedHelloRequest,
+    AssignedAAA(IpAddress), // Assigned AAA address for this link
     ReceivedHelloResponse(ResponseCode, IpAddress, Option<Vec<SocketAddr>>), // (response code, AAA address, ASA addresses)
     SentHelloResponse,
 
@@ -205,7 +205,6 @@ pub struct LinkData {
     latency_data: SampleRing<Duration, 100>,
     asa_addresses: Option<Vec<SocketAddr>>, // Addresses of ASA servers told to us by our peer, if any
     aaa_address: Option<IpAddress>,         // AAA address assigned this link (if any)
-    requested_addresses: Vec<IpAddress>,    // Addresses requested by the peer, if any
 }
 
 impl LinkData {
@@ -216,7 +215,6 @@ impl LinkData {
             latency_data: SampleRing::new(Duration::ZERO),
             asa_addresses: None,
             aaa_address: None,
-            requested_addresses: Vec::new(),
         }
     }
 }
@@ -414,9 +412,7 @@ impl LinkStateWrapper {
         match event {
             LinkEvent::Start => self.process_start(asm),
             LinkEvent::KeyingDone => self.process_keying_done(asm),
-            LinkEvent::ReceivedHelloRequest(peer_zpr_addr_req) => {
-                self.process_hello_request(asm, peer_zpr_addr_req)
-            }
+            LinkEvent::ReceivedHelloRequest => self.process_hello_request(asm),
             LinkEvent::AssignedAAA(addr) => self.process_assigned_aaa(asm, addr),
             LinkEvent::ReceivedHelloResponse(code, aaa_addr, maybe_asa_addrs) => {
                 self.process_hello_response(asm, code, aaa_addr, maybe_asa_addrs)
@@ -592,11 +588,7 @@ impl LinkStateWrapper {
     /// Update link state based on received hello request
     /// Transitions from Helloing to Registering Actor Address
     /// Does not generate any packets
-    fn process_hello_request(
-        &self,
-        _asm: &Arc<Assembly>,
-        peer_requested_zpr_addr: Option<IpAddress>,
-    ) -> Result<(), LinkStateError> {
+    fn process_hello_request(&self, _asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         let link_id = self.id;
         match (self.link_type, locked_fsm.state) {
@@ -606,18 +598,10 @@ impl LinkStateWrapper {
                 Ok(())
             }
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
-                if let Some(req_addr) = peer_requested_zpr_addr {
-                    self.locked_data
-                        .lock()
-                        .unwrap()
-                        .requested_addresses
-                        .push(req_addr);
-                    debug!(
-                        target: LINK_STATE,
-                        "Link {link_id} peer requests ZPR addr {}",
-                        req_addr
-                    );
-                }
+                debug!(
+                    target: LINK_STATE,
+                    "Link {link_id} received hello request",
+                );
                 // State transition processing happens in [LinkStateWrapper::process_sent_hello_response]
                 Ok(())
             }
