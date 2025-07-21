@@ -100,11 +100,10 @@ impl SeqNumTracker {
         // Under that assumption, we can subtract the truncated versions
         // of both to produce a 16-bit 2s-complement value representing
         // this difference.
-        let diff = sn.wrapping_sub((reference & 0xFFFF) as u16);
+        let diff = sn.wrapping_sub(reference as u16);
 
-        // Convert the 16-bit 2s-complement value into a 64-bit signed value,
-        // by adding 0x8000, casting to signed, and subtracting 0x8000.
-        (diff.wrapping_add(0x8000) as i64) - 0x8000
+        // Convert the 16-bit 2s-complement value into a 64-bit signed value.
+        (diff as i16) as i64
     }
 
     /// Process the truncated sequence number of a received packet.
