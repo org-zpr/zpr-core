@@ -14,6 +14,7 @@ use chrono::DateTime;
 use crate::traffic_parser::TrafficDesc;
 use vsapi::{TVisaServiceSyncClient, VisaServiceSyncClient};
 
+use libnode::claims;
 use libnode::m2;
 use libnode::vsapi;
 
@@ -167,15 +168,19 @@ pub fn authorize_connect(
 
     // In initial version of the connect messaging with visa service the following
     // claims must be set:
-    //   - "zpr.adapater.cn" set to the CN in the noise certificate presented by the adapter.
+    //   - "device.zpr.adapter.cn" set to the CN in the noise certificate presented by the adapter.
     //   - "zpr.addr" the ZPR contact address in use by the adapter.
-    if !attrs.contains_key("zpr.adapter.cn") {
-        return Err(thrift::Error::from(
-            "missing required claim 'zpr.adapter.cn'",
-        ));
+    if !attrs.contains_key(claims::KATTR_CN) {
+        return Err(thrift::Error::from(format!(
+            "missing required claim {}",
+            claims::KATTR_CN
+        )));
     }
-    if !attrs.contains_key("zpr.addr") {
-        return Err(thrift::Error::from("missing required claim 'zpr.addr'"));
+    if !attrs.contains_key(claims::KATTR_EPID) {
+        return Err(thrift::Error::from(format!(
+            "missing required claim {}",
+            claims::KATTR_EPID
+        )));
     }
 
     let cid = rand::random::<u16>() as i32;
