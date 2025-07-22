@@ -286,7 +286,7 @@ impl LinkStateMachine {
 
         // launch new timeout tied to the current (new) logical clock
         let logical_clock = self.logical_clock;
-        let jh = tokio::task::spawn(async move {
+        let jh = tokio::task::spawn_local(async move {
             tokio::time::sleep(duration).await;
             callback(logical_clock);
         });
@@ -1701,75 +1701,92 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use tokio::sync::oneshot;
+    use tokio::task::LocalSet;
 
     #[tokio::test(start_paused = true)]
     async fn timeout_test() {
-        let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
-        let (tx, rx) = oneshot::channel();
+        LocalSet::new()
+            .run_until(async {
+                let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
+                let (tx, rx) = oneshot::channel();
 
-        set_timeout(&sm, Duration::from_secs(5), tx);
+                set_timeout(&sm, Duration::from_secs(5), tx);
 
-        tokio::time::sleep(Duration::from_secs(4)).await;
+                tokio::time::sleep(Duration::from_secs(4)).await;
 
-        assert!(rx.is_empty());
+                assert!(rx.is_empty());
 
-        tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
 
-        assert!(rx.await.is_ok());
+                assert!(rx.await.is_ok());
+            })
+            .await
     }
 
     #[tokio::test(start_paused = true)]
     async fn timeout_explicit_cancel_test() {
-        let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
-        let (tx, rx) = oneshot::channel();
+        LocalSet::new()
+            .run_until(async {
+                let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
+                let (tx, rx) = oneshot::channel();
 
-        set_timeout(&sm, Duration::from_secs(5), tx);
+                set_timeout(&sm, Duration::from_secs(5), tx);
 
-        tokio::time::sleep(Duration::from_secs(4)).await;
+                tokio::time::sleep(Duration::from_secs(4)).await;
 
-        sm.lock().unwrap().cancel_timeout();
+                sm.lock().unwrap().cancel_timeout();
 
-        tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
 
-        assert!(rx.await.is_err());
+                assert!(rx.await.is_err());
+            })
+            .await
     }
 
     #[tokio::test(start_paused = true)]
     async fn timeout_implicit_cancel_test() {
-        let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
-        let (tx, rx) = oneshot::channel();
+        LocalSet::new()
+            .run_until(async {
+                let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
+                let (tx, rx) = oneshot::channel();
 
-        set_timeout(&sm, Duration::from_secs(5), tx);
+                set_timeout(&sm, Duration::from_secs(5), tx);
 
-        tokio::time::sleep(Duration::from_secs(4)).await;
+                tokio::time::sleep(Duration::from_secs(4)).await;
 
-        sm.lock().unwrap().set_state(LinkState::Keying);
+                sm.lock().unwrap().set_state(LinkState::Keying);
 
-        tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
 
-        assert!(rx.await.is_err());
+                assert!(rx.await.is_err());
+            })
+            .await
     }
 
     #[tokio::test(start_paused = true)]
     async fn timeout_reschedule_test() {
-        let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
-        let (tx1, rx1) = oneshot::channel();
-        let (tx2, rx2) = oneshot::channel();
+        LocalSet::new()
+            .run_until(async {
+                let sm = Arc::new(Mutex::new(LinkStateMachine::new(1)));
+                let (tx1, rx1) = oneshot::channel();
+                let (tx2, rx2) = oneshot::channel();
 
-        set_timeout(&sm, Duration::from_secs(5), tx1);
+                set_timeout(&sm, Duration::from_secs(5), tx1);
 
-        tokio::time::sleep(Duration::from_secs(4)).await;
+                tokio::time::sleep(Duration::from_secs(4)).await;
 
-        set_timeout(&sm, Duration::from_secs(5), tx2);
+                set_timeout(&sm, Duration::from_secs(5), tx2);
 
-        tokio::time::sleep(Duration::from_secs(4)).await;
+                tokio::time::sleep(Duration::from_secs(4)).await;
 
-        assert!(rx1.await.is_err());
-        assert!(rx2.is_empty());
+                assert!(rx1.await.is_err());
+                assert!(rx2.is_empty());
 
-        tokio::time::sleep(Duration::from_secs(2)).await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
 
-        assert!(rx2.await.is_ok());
+                assert!(rx2.await.is_ok());
+            })
+            .await
     }
 
     fn set_timeout(sm: &Arc<Mutex<LinkStateMachine>>, duration: Duration, tx: oneshot::Sender<()>) {
