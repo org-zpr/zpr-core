@@ -1,3 +1,4 @@
+pub mod claims;
 pub mod errors;
 pub mod logging;
 pub mod m2;

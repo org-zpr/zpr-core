@@ -15,6 +15,7 @@ use tokio::time::{self, Duration};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info};
 
+use crate::claims;
 use crate::errors::{VSClientError, VSError};
 use crate::logging::targets::VS_RPC;
 use crate::vscli::{self, VSClientI};
@@ -90,7 +91,7 @@ pub fn new_node_actor(node_addr: IpAddr, claims: &BTreeMap<String, String>) -> v
     for (k, v) in claims {
         augmented_claims.insert(k.clone(), v.clone());
     }
-    augmented_claims.insert(String::from("zpr.addr"), node_addr.to_string());
+    augmented_claims.insert(claims::KATTR_EPID.into(), node_addr.to_string());
 
     vsapi::Actor {
         actor_type: Some(vsapi::ActorType::NODE),
