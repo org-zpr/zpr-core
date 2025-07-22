@@ -82,6 +82,7 @@ use fastpath::FastpathWorkerConfig;
 use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
+use libnode::claims;
 use logging::targets::STARTUP;
 use net_defs::SocketAddrExt;
 use pki::load_noise_public_key;
@@ -392,7 +393,27 @@ fn main() -> ExitCode {
             .expect("unable to determine node name: cannot parse CN");
         info!(target: STARTUP, "node CN is \"{node_name}\"");
 
-        let node_actor = libnode::vsconn::new_node_actor(config.zpr_addr[0], &Default::default());
+        // For the purposes of assigning AAA addresses, we take the bottom 24 bits of the nodes
+        // ZPR address as it's ID.
+        let node_id = match node_zpr_addr {
+            IpAddr::V4(addr) => u32::from_be_bytes(addr.octets()) & 0x00FFFFFF,
+            IpAddr::V6(addr) => {
+                u32::from_be_bytes(addr.octets()[12..16].try_into().unwrap()) & 0x00FFFFFF
+            }
+        };
+        let aaa_pool = AddressPool::new(node_id);
+        info!(target: STARTUP, "node ID is {node_id:#010x}, AAA net is {}", aaa_pool.get_prefix());
+
+        let mut node_actor =
+            libnode::vsconn::new_node_actor(config.zpr_addr[0], &Default::default());
+
+        node_actor
+            .attrs
+            .as_mut()
+            .unwrap()
+            .insert(claims::KATTR_AAA_NET.into(), aaa_pool.get_prefix());
+
+        maybe_aaa_pool = Some(aaa_pool);
 
         let (vs_inq, vs_outq_inner) = mpsc::channel(topology_config.vs_queue_size);
         vs_outq = Some(vs_outq_inner);
@@ -408,17 +429,6 @@ fn main() -> ExitCode {
             )
             .expect("error launching Visa Service connection manager"),
         );
-
-        // For the purposes of assigning AAA addresses, we take the bottom 24 bits of the nodes
-        // ZPR address as it's ID.
-        let node_id = match node_zpr_addr {
-            IpAddr::V4(addr) => u32::from_be_bytes(addr.octets()) & 0x00FFFFFF,
-            IpAddr::V6(addr) => {
-                u32::from_be_bytes(addr.octets()[12..16].try_into().unwrap()) & 0x00FFFFFF
-            }
-        };
-        info!(target: STARTUP, "node ID is {node_id:#010x}");
-        maybe_aaa_pool = Some(AddressPool::new(node_id));
     } else {
         vsconn = None;
         vs_outq = None;
@@ -431,7 +441,7 @@ fn main() -> ExitCode {
     let asm = Arc::new(Assembly {
         ph_mode,
         topology_config,
-        local_zpr_addresses: config.zpr_addr,
+        local_zpr_addresses: std::sync::RwLock::new(config.zpr_addr),
         mgmt_substrate_egress: MgmtSubstrateEgress::new(mgmt_substrate_inq),
         actor_output_requeue: ActorOutputRequeue::new(actor_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
@@ -589,7 +599,7 @@ fn main() -> ExitCode {
         let (vss_inq, vss_outq) = mpsc::channel(asm.topology_config.vss_queue_size);
 
         let vss_addr =
-            std::net::SocketAddr::new(asm.local_zpr_addresses[0], libnode::vss::DEFAULT_VSS_PORT);
+            std::net::SocketAddr::new(asm.get_local_dock_addr(), libnode::vss::DEFAULT_VSS_PORT);
 
         js.spawn_blocking(move || libnode::vss::start_vss_server(vss_inq, vss_addr));
 

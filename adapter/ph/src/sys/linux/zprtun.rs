@@ -127,12 +127,8 @@ impl ZprTun {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub fn set_address(&mut self, _addr: IpAddr) -> std::result::Result<(), ZprTunError> {
-        // This needs work -- the linux tun API only allows address to be set at construction time.
-        Err(ZprTunError::PlatformError(
-            "cannot set TUN address after creation".to_string(),
-        ))
+    pub fn clear_zpr_address(&self, _addr: IpAddr) -> Result<()> {
+        panic!("clear_zpr_address not implemented for ZprTun on linux");
     }
 }
 

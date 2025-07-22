@@ -5,7 +5,7 @@ use crate::logging::targets::VISA_MGMT;
 use crate::net_defs::{IpAddress, IPV6_ADDRESS_SIZE};
 use crate::visa_table;
 use crate::vs_types;
-use libnode::vsapi;
+use libnode::{claims, vsapi};
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::num::NonZero;
@@ -112,15 +112,15 @@ pub fn build_connect_request(
 
     let mut claims = BTreeMap::new();
     if addr != IpAddress::UNSPECIFIED {
-        claims.insert("zpr.addr".to_owned(), addr.to_string());
+        claims.insert(claims::KATTR_EPID.into(), addr.to_string());
     }
-    claims.insert("device.zpr.adapter.cn".to_owned(), cn);
+    claims.insert(claims::KATTR_CN.into(), cn);
 
     // issue an Authorize Connect Request to the visa service for this adapter
     let connect_req = libnode::vsapi::ConnectRequest {
         connection_id: Some(123), // unused
         dock_addr: Some(
-            IpAddress::new_from_std(&asm.local_zpr_addresses[0])
+            IpAddress::new_from_std(&asm.get_local_dock_addr())
                 .v6
                 .to_vec(),
         ),

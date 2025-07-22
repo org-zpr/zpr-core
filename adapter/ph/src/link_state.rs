@@ -224,7 +224,10 @@ pub struct LinkStateMachine {
     state: LinkState,
     status: LinkStatus,
     silent: bool,
-    actor_addresses: Vec<IpAddress>, // actual assigned actor addresses (not set until AcquireZPRAddress stage)
+
+    /// On a node, actual assigned actor addresses to remote PEER.
+    actor_addresses: Vec<IpAddress>,
+
     last_state_change: std::time::Instant,
     /// used to prevent A/B/A errors with timeouts
     logical_clock: u64,
@@ -368,11 +371,16 @@ impl LinkStateWrapper {
 
     /// Takes lock, returns copy of addresses.
     /// Will hang if you already have fsm lock!
+    ///
+    /// This returns the address assigned to the remote peer on this link.
+    /// Designed to be used in a NODE context.
+    ///
     pub fn get_actor_addresses(&self) -> Vec<IpAddress> {
         let locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.actor_addresses.clone()
     }
 
+    /// Used in a NODE context only.
     fn deregister_actor_addresses(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
         let mut join_set = tokio::task::JoinSet::new();
 
@@ -946,12 +954,32 @@ impl LinkStateWrapper {
                         // TODO: In future we will take addresses from here and configure TUN.
                         info!(target: LINK_STATE, "Link {link_id} granted ZPR addresses {:?}, becoming ACTIVE", addrs);
 
+                        let data = self.locked_data.lock().unwrap();
+                        if let Some(aaa_addr) = data.aaa_address {
+                            match asm.tun_ctl.clear_zpr_address(aaa_addr.into()) {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    warn!(target: LINK_STATE, "Link {link_id} failed to clear AAA address: {e}");
+                                    // continue...
+                                }
+                            }
+                        }
+                        // I keep the aaa address around... TODO: should we clear it?
+                        drop(data);
+
+                        if addrs.len() > 1 {
+                            warn!(target: LINK_STATE, "Link {link_id} multiple addresses in Grant ZPR Address not supported: using first one only");
+                        }
+
                         if let Err(e) = asm.tun_ctl.set_zpr_address(addrs[0].into()) {
                             warn!(target: LINK_STATE, "Link {link_id} failed to set ZPR address: {e}");
                             locked_fsm.set_state(LinkState::Error);
                             drop(locked_fsm);
                             return self.initiate_close(asm, TerminateReason::Other);
                         }
+
+                        // Update the global view of our ZPR addresses.
+                        asm.set_local_zpr_addrs(addrs);
 
                         locked_fsm.set_state(LinkState::Active);
                         asm.tun_ctl.set_carrier(true).unwrap();
@@ -979,6 +1007,8 @@ impl LinkStateWrapper {
 
     /// This is the event handler fro the return path from the visa service AUTHORIZE operation.
     /// This needs to trigger sending of the Grant Address message.
+    ///
+    /// This is happengin on a NODE.
     ///
     /// This is only called for SUCCESSFUL responses (unsuccessful responses trigger a link error).
     ///
@@ -1060,7 +1090,12 @@ impl LinkStateWrapper {
                             Ok(blobstr) => {
                                 // The send function below will invoke a state event callback.
                                 // We staty in RegisterAA state until we get a grant.
-                                self.send_acquire_zpr_address_request(asm, &blobstr);
+                                let requested_addrs = asm.get_local_zpr_addrs_std();
+                                self.send_acquire_zpr_address_request(
+                                    asm,
+                                    &requested_addrs,
+                                    &blobstr,
+                                );
                                 locked_fsm.set_state(LinkState::RegisterAA);
                                 locked_fsm.auth_blob = Some(blobstr);
                                 self.set_timeout(
@@ -1307,18 +1342,24 @@ impl LinkStateWrapper {
 
         info!(target: LINK_STATE, "Link {link_id}: authentication success, client_id={}", blob.client_id);
         let blobstr = blob.encode();
-        self.send_acquire_zpr_address_request(asm, &blobstr);
+        let requested_addrs = asm.get_local_zpr_addrs_std();
+        self.send_acquire_zpr_address_request(asm, &requested_addrs, &blobstr);
         locked_fsm.auth_blob = Some(blobstr);
         self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
         Ok(())
     }
 
     /// Send Acquire message
-    fn send_acquire_zpr_address_request(&self, asm: &Arc<Assembly>, blob: &str) {
+    fn send_acquire_zpr_address_request(
+        &self,
+        asm: &Arc<Assembly>,
+        requesting_addrs: &[IpAddr],
+        blob: &str,
+    ) {
         mgmt::requests::send_acquire_zpr_address_request(
             asm,
             self.id,
-            &asm.local_zpr_addresses,
+            requesting_addrs,
             Some(blob.as_bytes()),
         );
     }
@@ -1396,7 +1437,12 @@ impl LinkStateWrapper {
     ) {
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::RegisterAA) => {
-                self.send_acquire_zpr_address_request(asm, &locked_fsm.auth_blob.as_ref().unwrap())
+                let requested_addrs = asm.get_local_zpr_addrs_std();
+                self.send_acquire_zpr_address_request(
+                    asm,
+                    &requested_addrs,
+                    &locked_fsm.auth_blob.as_ref().unwrap(),
+                )
             }
 
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {

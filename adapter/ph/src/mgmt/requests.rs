@@ -97,6 +97,10 @@ pub fn send_init_authentication_request(
 
 /// Send an AcquireZPRAddressRequest (TODO: not yet in RFC 6)
 ///
+/// The `actor_addrs` is a list of addresses that this sender is
+/// requesting.  It will be up to the visa service to determine
+/// the correct address(es) to grant.
+///
 /// The `blob` is for bootstrap authentcation and can be empty.
 ///
 /// Once this returns the link_state should transition to RegisterAA

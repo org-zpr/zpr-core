@@ -504,12 +504,12 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
 
     // AAA is required.
     if aaa_address.is_none() {
-        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include AAA TLV");
+        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include AAA");
         return Err((HandleMgmtError::BadStructure, pkt));
     }
 
     let maybe_asa_addrs = if asa_addresses.is_empty() {
-        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include ASA TLV");
+        warn!(target: ZDP, "Link {link_id}: HelloResponse did not include ASA");
         None
     } else {
         Some(asa_addresses)
