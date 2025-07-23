@@ -68,7 +68,7 @@ impl VSClient {
         let i_prot = TBinaryInputProtocol::new(TFramedReadTransport::new(i_chan), true);
         let o_prot = TBinaryOutputProtocol::new(TFramedWriteTransport::new(o_chan), true);
 
-        debug!(target: VS_RPC, "XXX VSClient.new creating VisaServiceSyncClient");
+        debug!(target: VS_RPC, "VSClient.new creating VisaServiceSyncClient");
         let tcli = vsapi::VisaServiceSyncClient::new(i_prot, o_prot);
 
         Ok(VSClient {
@@ -156,7 +156,7 @@ impl VSClientI for VSClient {
             return Err(VSClientError::NoAPIKey);
         }
         let key = self.key.as_ref().unwrap();
-        debug!(target: VS_RPC, "sending PING to {}", self.service);
+        trace!(target: VS_RPC, "sending PING to {}", self.service);
         match self.cli.ping(key.clone()) {
             Ok(result) => Ok(result),
             Err(e) => Err(e.into()),
