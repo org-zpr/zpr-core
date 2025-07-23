@@ -9,6 +9,8 @@ use crate::zprtun::ZprTunError;
 use crate::zprtun::ZPRNET_PREFIX_LEN;
 use std::process::Command;
 
+const COMMAND_IFCONFIG: &str = "/sbin/ifconfig";
+
 pub struct ZprTun {
     inner: tun::Tun,
     mtx: std::sync::Mutex<()>,
@@ -64,14 +66,12 @@ impl ZprTun {
             .lock()
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Mutex lock failed"))?;
 
-        // Check if we already have this address.
-        info!(target: NET_OS, "XXX Checking address on our TUN device ...TODO");
+        if self.has_address(addr)? {
+            debug!(target: NET_OS, "set_address: address {addr} already set on TUN device {}", self.inner.get_name());
+            return Ok(());
+        }
 
-        // TODO: Check to see if we already have this address set.
-
-        info!(target: NET_OS, "XXX Setting ZPR address on our TUN device: {addr} ...TODO");
-
-        let mut c = Command::new("/sbin/ifconfig");
+        let mut c = Command::new(COMMAND_IFCONFIG);
         c.arg(self.inner.get_name());
         match addr {
             IpAddr::V4(_ipv4) => {
@@ -86,34 +86,90 @@ impl ZprTun {
             }
         }
         c.arg("alias");
-
-        c.status().map_err(|e| {
-            std::io::Error::new(
+        debug!(target: NET_OS, "{:?}", c);
+        let output = c.output()?;
+        if !output.status.success() {
+            return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("Failed to set ZPR address: {e}"),
-            )
-        })?;
-
+                format!(
+                    "{COMMAND_IFCONFIG} failed to set address on {}: {}",
+                    self.inner.get_name(),
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            ));
+        }
         drop(mtx);
         Ok(())
     }
 
-    // Should be called while holding the mutex.
-    pub fn get_zpr_address(&self) -> std::io::Result<Option<IpAddr>> {
-        info!(target: NET_OS, "XXX asking system for ADDR on tun interface {}", self.inner.get_name());
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "get_zpr_address is not supported on macOS",
-        ))
+
+    pub fn clear_zpr_address(&self, addr: IpAddr) -> std::io::Result<()> {
+        if !self.has_address(addr)? {
+            debug!(target: NET_OS, "clear_address: address {addr} not set on TUN device {}", self.inner.get_name());
+            return Ok(());
+        }
+
+        let mut c = Command::new(COMMAND_IFCONFIG);
+        c.arg(self.inner.get_name());
+        match addr {
+            IpAddr::V4(_ipv4) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "set_zpr_address with IPv4 is not supported on macOS",
+                ));
+            }
+            IpAddr::V6(ipv6) => {
+                c.arg("inet6")
+                    .arg(format!("{}/{}", ipv6.to_string(), ZPRNET_PREFIX_LEN));
+            }
+        }
+        c.arg("-alias"); // <-- note the MINUS here
+        debug!(target: NET_OS, "{:?}", c);
+        let output = c.output()?;
+        if !output.status.success() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "{COMMAND_IFCONFIG} failed to clear addresses {} on {}: {}",
+                    addr,
+                    self.inner.get_name(),
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            ));
+        }
+        Ok(())
     }
 
-    // Should be called while holding the mutex.
-    pub fn clear_zpr_address(&self) -> std::io::Result<()> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "clear_zpr_address is not supported on macOS",
-        ))
+
+    fn has_address(&self, addr: IpAddr) -> std::io::Result<bool> {
+        let mut c = Command::new(COMMAND_IFCONFIG);
+        c.arg("addr")
+            .arg("show")
+            .arg("dev")
+            .arg(self.inner.get_name());
+        debug!(target: NET_OS, "{:?}", c);
+        let output = c.output()?;
+
+        // If interface is there, the output will be something like:
+        //
+        // utun2: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 2000
+	    //         inet6 fe80::e9b0:1972:d221:2196%utun2 prefixlen 64 scopeid 0x11
+	    //         nd6 options=201<PERFORMNUD,DAD>
+        if !output.status.success() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "{COMMAND_IFCONFIG} failed to show addresses for {}: {}",
+                    self.inner.get_name(),
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            ));
+        }
+        // Just look for the pattern "inet6 <addr>" in the output.
+        let out_str = String::from_utf8_lossy(&output.stdout);
+        Ok(out_str.contains(&format!("inet6 {}", addr)))
     }
+
 }
 
 impl AsFd for ZprTun {
