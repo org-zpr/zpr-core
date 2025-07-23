@@ -68,43 +68,10 @@ impl ZprTun {
     }
 
     pub fn set_zpr_address(&self, addr: IpAddr) -> std::io::Result<()> {
-        let mut c = Command::new(COMMAND_IP);
-        c.arg("addr")
-            .arg("show")
-            .arg("dev")
-            .arg(self.ifname.clone());
-        debug!(target: NET_OS, "{:?}", c);
-        let output = c.output()?;
-
-        // If interface is there, the output will be something like:
-        //
-        // 5: tun9: <NO-CARRIER,POINTOPOINT,MULTICAST,NOARP,UP> mtu 1400 qdisc mq state DOWN group default qlen 500
-        //     link/none
-        //     inet6 fd5a:5052:90de::1/32 scope global
-        //        valid_lft forever preferred_lft forever
-        //     inet6 fe80::bffd:4029:e0fa:806b/64 scope link stable-privacy
-        //        valid_lft forever preferred_lft forever
-
-        // If address is already on the interface we are done.
-        if !output.status.success() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!(
-                    "{COMMAND_IP} failed to show addresses for {}: {}",
-                    self.ifname,
-                    String::from_utf8_lossy(&output.stderr)
-                ),
-            ));
-        }
-        // Just look for the pattern "inet6 <addr>" in the output.
-        let out_str = String::from_utf8_lossy(&output.stdout);
-        if out_str.contains(&format!("inet6 {}", addr)) {
-            debug!(target: NET_OS, "ZPR address {addr} already set on TUN device {}", self.ifname);
+        if self.has_address(addr)? {
+            debug!(target: NET_OS, "set_address: address {addr} already set on TUN device {}", self.ifname);
             return Ok(());
         }
-
-        // TODO: Remove any existing fd5a:: address from the interface before adding new one.
-
         let mut c = Command::new(COMMAND_IP);
         c.arg("addr")
             .arg("add")
@@ -124,11 +91,84 @@ impl ZprTun {
                 ),
             ));
         }
+
+        // Set UP also:
+        let mut c = Command::new(COMMAND_IP);
+        c.arg("link").arg("set").arg(&self.ifname).arg("up");
+        debug!(target: NET_OS, "{:?}", c);
+        let output = c.output()?;
+        if !output.status.success() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "{COMMAND_IP} failed to set link up for {}: {}",
+                    self.ifname,
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            ));
+        }
         Ok(())
     }
 
-    pub fn clear_zpr_address(&self, _addr: IpAddr) -> Result<()> {
-        panic!("clear_zpr_address not implemented for ZprTun on linux");
+    pub fn clear_zpr_address(&self, addr: IpAddr) -> Result<()> {
+        if !self.has_address(addr)? {
+            debug!(target: NET_OS, "clear_address: address {addr} not set on TUN device {}", self.ifname);
+            return Ok(());
+        }
+
+        let mut c = Command::new(COMMAND_IP);
+        c.arg("addr")
+            .arg("del")
+            .arg(format!("{}/{}", addr, ZPRNET_PREFIX_LEN))
+            .arg("dev")
+            .arg(&self.ifname);
+        debug!(target: NET_OS, "{:?}", c);
+        let output = c.output()?;
+        if !output.status.success() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "{COMMAND_IP} failed to clear addresses {} on {}: {}",
+                    addr,
+                    self.ifname,
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    fn has_address(&self, addr: IpAddr) -> std::io::Result<bool> {
+        let mut c = Command::new(COMMAND_IP);
+        c.arg("addr")
+            .arg("show")
+            .arg("dev")
+            .arg(self.ifname.clone());
+        debug!(target: NET_OS, "{:?}", c);
+        let output = c.output()?;
+
+        // If interface is there, the output will be something like:
+        //
+        // 5: tun9: <NO-CARRIER,POINTOPOINT,MULTICAST,NOARP,UP> mtu 1400 qdisc mq state DOWN group default qlen 500
+        //     link/none
+        //     inet6 fd5a:5052:90de::1/32 scope global
+        //        valid_lft forever preferred_lft forever
+        //     inet6 fe80::bffd:4029:e0fa:806b/64 scope link stable-privacy
+        //        valid_lft forever preferred_lft forever
+
+        if !output.status.success() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!(
+                    "{COMMAND_IP} failed to show addresses for {}: {}",
+                    self.ifname,
+                    String::from_utf8_lossy(&output.stderr)
+                ),
+            ));
+        }
+        // Just look for the pattern "inet6 <addr>" in the output.
+        let out_str = String::from_utf8_lossy(&output.stdout);
+        Ok(out_str.contains(&format!("inet6 {}", addr)))
     }
 }
 

@@ -10,12 +10,15 @@ pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMsg>) {
     while let Some(msg) = queue.recv().await {
         match msg {
             VSSMsg::PushedVisa(visa) => {
+                let visa_id = visa.issuer_id.unwrap_or_default();
+                debug!(target: VISA_MGMT, "Received pushed visa, id={visa_id}");
                 let result = visa_mgmt::parse_visa(&asm, visa);
                 if let Err(e) = result.await {
-                    error!(target: VISA_MGMT, "Error inserting visa: {e}");
+                    error!(target: VISA_MGMT, "Error inserting visa {visa_id}: {e}");
                 }
             }
             VSSMsg::PushedRevocation(revocation) => {
+                debug!(target: VISA_MGMT, "Received pushed revocation, id={}", revocation.issuer_id.unwrap());
                 let result = visa_mgmt::handle_revocation(&asm, revocation);
                 if let Err(e) = result.await {
                     error!(target: VISA_MGMT, "Error revoking visa: {e}");

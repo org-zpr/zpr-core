@@ -289,7 +289,7 @@ impl LinkStateMachine {
 
         // launch new timeout tied to the current (new) logical clock
         let logical_clock = self.logical_clock;
-        let jh = tokio::task::spawn(async move {
+        let jh = tokio::task::spawn_local(async move {
             tokio::time::sleep(duration).await;
             callback(logical_clock);
         });
@@ -373,11 +373,19 @@ impl LinkStateWrapper {
     /// Will hang if you already have fsm lock!
     ///
     /// This returns the address assigned to the remote peer on this link.
-    /// Designed to be used in a NODE context.
+    /// Designed to be used in a NODE context.  Also includes the AAA address (if present)
     ///
     pub fn get_actor_addresses(&self) -> Vec<IpAddress> {
-        let locked_fsm = self.locked_fsm.lock().unwrap();
-        locked_fsm.actor_addresses.clone()
+        let mut addr_list = Vec::new();
+
+        addr_list.extend(self.locked_fsm.lock().unwrap().actor_addresses.iter());
+
+        match self.locked_data.lock().unwrap().aaa_address.as_ref() {
+            Some(aaa_addr) => addr_list.push(aaa_addr.clone()),
+            None => (),
+        }
+
+        addr_list
     }
 
     /// Used in a NODE context only.
@@ -403,7 +411,12 @@ impl LinkStateWrapper {
         asm: &Arc<Assembly>,
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
-        debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id);
+        match event {
+            LinkEvent::ReceivedEchoResponse { sequence_number: _ } => {
+                trace!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id)
+            }
+            _ => debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id),
+        }
 
         // Enqueue a copy of this event with any concurrent listening state machines.
         // If there are none, avoid trying to do so we don't make a needless copy.
@@ -1074,7 +1087,8 @@ impl LinkStateWrapper {
             // NOTE: This is not exactly right, in general we can get an InitAuth at any time, though we
             // may not want to act on it and sometimes may be a protocol error.
             (LinkType::AdapterToNode, LinkState::WaitForInitAuth) => {
-                debug!(target: LINK_STATE, "Link {link_id} received init auth.");
+                debug!(target: LINK_STATE, "Link {link_id} received init auth (bootstrap_supported: {}, bootstrap_configured: {})",
+                    bootstrap, asm.bsauth.is_some());
 
                 // If we can do bootstrap and it is allowed, then do that.
                 if bootstrap && asm.bsauth.is_some() {
@@ -1101,7 +1115,7 @@ impl LinkStateWrapper {
                                 self.set_timeout(
                                     asm,
                                     &mut locked_fsm,
-                                    config::DEFAULT_REQUEST_RETRY_TIMER,
+                                    config::DEFAULT_VS_REQUEST_RETRY_TIMER,
                                 );
                             }
                             Err(e) => {
@@ -1150,7 +1164,10 @@ impl LinkStateWrapper {
                     // TODO: We get the ZPR address of the auth services (ASA) from our node. What about the cert?
                     //
                     match asm.tun_ctl.set_zpr_address(aaa_addr.unwrap().into()) {
-                        Ok(_) => self.do_https_authenticate(asm, asa_addrs.unwrap()),
+                        Ok(_) => {
+                            asm.tun_ctl.set_carrier(true).unwrap();
+                            self.do_https_authenticate(asm, asa_addrs.unwrap());
+                        }
                         Err(e) => {
                             error!(target: LINK_STATE, "Link {link_id} failed to configure TUN with AAA address: {e}");
                             return self.initiate_close(asm, TerminateReason::Other);
@@ -1293,11 +1310,8 @@ impl LinkStateWrapper {
                 }
                 return;
             };
-
             let event = match rsauth.authenticate(service_addr, tls_cert).await {
                 Ok(blob) => LinkEvent::AuthenticationSuccess(blob),
-                // TODO: Handler of the event needs to do this
-                // self.send_acquire_zpr_address_request(asm, &blob.encode());
                 Err(e) => {
                     error!(target: LINK_STATE, "Link {link_id} failed to authenticate with auth service: {e:?}");
                     LinkEvent::AuthenticationFailure
@@ -1345,7 +1359,7 @@ impl LinkStateWrapper {
         let requested_addrs = asm.get_local_zpr_addrs_std();
         self.send_acquire_zpr_address_request(asm, &requested_addrs, &blobstr);
         locked_fsm.auth_blob = Some(blobstr);
-        self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+        self.set_timeout(asm, &mut locked_fsm, config::VS_AUTHENTICATION_TIMEOUT);
         Ok(())
     }
 
