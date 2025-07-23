@@ -88,6 +88,7 @@ use pki::load_noise_public_key;
 use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
+use zpr_ext::socket2::SockAddrExt;
 
 use crate::vs_types::AuthServicesList;
 
@@ -315,15 +316,16 @@ fn main() -> ExitCode {
         }
 
         if let Some(node_addr) = config.node_addr {
-            // If we are an adapter (and thus have a remote node address), connect to that here.
-            // We don't actually care that this sets the default destination (since we always
-            // set it when sending).  Rather, this forces the OS to choose a local address
-            // if we didn't specify one in the bind call above.
-            socket
-                .connect(&socket2::SockAddr::from(node_addr))
-                .expect(&format!("unable to connect to node_addr ({})", node_addr));
-
             if config.self_addr.ip().is_unspecified() {
+                // If we are an adapter (and thus have a remote node address),
+                // but we don't have a specified self address (and thus did not
+                // specify one in the bind call above), temporarily connect to
+                // the remote node address to forcee the OS to choose a local
+                // address.
+                socket
+                    .connect(&socket2::SockAddr::from(node_addr))
+                    .expect(&format!("unable to connect to node_addr ({})", node_addr));
+
                 // Update the address of our configured self address to match
                 // what the OS chose.  This ensures that all sockets we open share
                 // the same port.
@@ -335,6 +337,14 @@ fn main() -> ExitCode {
                     .scoped_ip();
                 config.self_addr.set_scoped_ip(addr);
                 info!(target: STARTUP, "assigned substrate address {addr}");
+
+                // Now drop the connection.  We will still specify it manually
+                // for each packet sent (and it's an error to do both).
+                match socket.connect(&socket2::SockAddr::new_unspec()) {
+                    Ok(()) => (),
+                    Err(err) if err.raw_os_error() == Some(libc::EAFNOSUPPORT) => (),
+                    res => res.expect("unable to disconnect socket"),
+                }
             }
         }
 
