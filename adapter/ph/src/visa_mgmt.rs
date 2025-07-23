@@ -31,7 +31,7 @@ pub fn authorize_connect(
             Ok(cr) => match cr.status {
                 Some(vsapi::StatusCode::SUCCESS) => {
                     if let Some(actor) = cr.actor {
-                        info!(target: VISA_MGMT, "link {link_id} authorized");
+                        info!(target: VISA_MGMT, "link {link_id}: VS authorize_connect returns SUCCESS");
                         if actor.zpr_addr.is_none() {
                             // Really this is a bug in visa service I think.
                             error!(target: VISA_MGMT, "link {link_id} authorized, but no zpr address present in actor");
@@ -65,7 +65,7 @@ pub fn authorize_connect(
                 Some(vsapi::StatusCode::FAIL) => {
                     warn!(
                         target: VISA_MGMT,
-                        "link {link_id} authorization rejected: {}",
+                        "link {link_id}: VS authorize_connect FAILED: {}",
                         cr.reason.unwrap_or("(no reason given)".to_owned())
                     );
                     let _ignore_error =
@@ -74,7 +74,7 @@ pub fn authorize_connect(
                 _ => {
                     warn!(
                         target: VISA_MGMT,
-                        "link {link_id} authorization failed with unexpected status: {:?}",
+                        "link {link_id}: VS authorize_connect failed with unexpected status: {:?}",
                         cr.status
                     );
                     let _ignore_error =
@@ -83,7 +83,7 @@ pub fn authorize_connect(
             },
 
             Err(err) => {
-                warn!(target: VISA_MGMT, "link {link_id} authorization failed with error: {err}");
+                warn!(target: VISA_MGMT, "link {link_id}: VS authorize_connect failed with error: {err}");
                 let _ignore_error = task_asm.process_link_state_event(link_id, LinkEvent::Error);
             }
         }
