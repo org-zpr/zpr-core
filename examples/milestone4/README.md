@@ -10,24 +10,25 @@ Demonstrate bootstrap and BAS.
 
 Now the VS should know about the BAS authentication service.
 
-(TODO: Ideally everybody re-auths with it)
-
 Now start the cli-adapter.
-- Node should send a init-auth???
-- Can we manually try to RSA auth with BAS?
-- Not quite sure what should happen here (need to see the diagram)
-
-- But somehow the adapter needs to run the RSA auth with BAS which
-  returns a BLOB to adapter, which sends that BLOB to the node,
-  which sends that BLOB to the visa service, 
-  which then sends an OAUTH token-request to the BAS
-  which then returns a JWT to the visa service that includes our
-  "user.color" attribute.
-  Visa service then accepts the auth.
-  Node sends the ZPR-ADDR message to the adapter.
-
 - At this point adapter should be able to PING the BAS thanks to the
   user.color=red attribute.
+
+
+Can we incorporate the DOCKER set up for this demo?  Maybe we
+configure a setup with a node, a vs and a bas.  Then we can 
+connect a service into that, and then the client into that too.
+
+
+## addressing improvements
+
+An adapter no longer is required to have a preconfigured ZPR address.
+It should be best practice to just start an adapter and let the ZPR
+network assign an address.  In that case do not manually create a tun
+interface and do not set the zpr_addr in the config.
+
+For the demo, only the node and vs need static addresses.
+
 
 
 
