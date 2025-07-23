@@ -1053,7 +1053,7 @@ impl LinkStateWrapper {
 
         // Will call back via ReceivedGrantResponse event if successful.
         self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses);
-        self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+        self.set_timeout(asm, &mut locked_fsm, config::GRANT_REQUEST_RETRY_TIMER);
         Ok(())
     }
 
@@ -1115,7 +1115,7 @@ impl LinkStateWrapper {
                                 self.set_timeout(
                                     asm,
                                     &mut locked_fsm,
-                                    config::DEFAULT_VS_REQUEST_RETRY_TIMER,
+                                    config::VS_REQUEST_RETRY_TIMER,
                                 );
                             }
                             Err(e) => {
@@ -1406,6 +1406,7 @@ impl LinkStateWrapper {
             | (LinkType::NodeToAdapter, LinkState::WaitForInitAuth)
             | (LinkType::AdapterToNode, LinkState::Helloing) => {
                 locked_fsm.timeout_count += 1;
+                let retries = locked_fsm.timeout_count as u32;
 
                 if locked_fsm.timeout_count >= config::DEFAULT_REQUEST_RETRY_COUNT {
                     error!(target: LINK_STATE, "Link {} timed out in state {:?}", self.id, locked_fsm.state);
@@ -1413,8 +1414,15 @@ impl LinkStateWrapper {
                     return self.process_error_response(&asm);
                 }
 
-                warn!(target: LINK_STATE, "Link {} timed out in state {:?}, retransmitting", self.id, locked_fsm.state);
-                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+                warn!(target: LINK_STATE, "Link {} timed out in state {:?}, retransmitting (retry={retries})", self.id, locked_fsm.state);
+
+                // Note that different messages have different original timeouts and that information is
+                // lost by the time we get here.  Here I am just doing a pretty naive back off strategy.
+                self.set_timeout(
+                    asm,
+                    &mut locked_fsm,
+                    config::DEFAULT_REQUEST_RETRY_TIMER * retries,
+                );
                 self.retransmit(asm, &mut locked_fsm);
                 Ok(())
             }

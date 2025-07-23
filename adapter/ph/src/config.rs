@@ -31,7 +31,10 @@ pub const DEFAULT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration
 pub const DEFAULT_TERMINATE_RESPONSE_TIMER: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Slightly longer when we need VS to do something for us.
-pub const DEFAULT_VS_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(2);
+pub const VS_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Grant requires reconfiguring TUN, so longer.
+pub const GRANT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// How long to wait for an actor to finish out of band authentication.
 pub const ACTOR_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);

@@ -622,45 +622,28 @@ pub async fn handle_grant_zpr_address_request(
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
-    let mut status_code = zdp::ResponseCode::Success; // only not success if parsing fails.
-    let processing_result: Result<(), LinkStateError>;
-
-    match parse_grant_zpr_address_request(&mut pkt) {
+    let (grant_event_payload, status_code) = match parse_grant_zpr_address_request(&mut pkt) {
         Ok(Ok(actor_addresses)) => {
             if actor_addresses.is_empty() {
                 error!(target: ZDP, "Received Grant Zpr Address Request with no addresses");
-                processing_result = asm.process_link_state_event(
-                    ingress_link_id,
-                    LinkEvent::ReceivedGrantZprAddressRequest(None),
-                );
+                (None, zdp::ResponseCode::Other)
             } else {
                 info!(target: ZDP,
                     "Received Grant Zpr Address Request for link {} with addresses {:?}", ingress_link_id, actor_addresses);
-                processing_result = asm.process_link_state_event(
-                    ingress_link_id,
-                    LinkEvent::ReceivedGrantZprAddressRequest(Some(actor_addresses)),
-                );
+                (Some(actor_addresses), zdp::ResponseCode::Success)
             }
         }
         Ok(Err(c)) => {
             info!(target: ZDP, "Grant request indicates non-success; code: {:?}", c);
-            processing_result = asm.process_link_state_event(
-                ingress_link_id,
-                LinkEvent::ReceivedGrantZprAddressRequest(None),
-            );
+            (None, zdp::ResponseCode::Success)
         }
         Err(_) => {
             error!(target: ZDP, "Failed to parse Grant Zpr Address Request message, grant fails.");
-            // Need to tell state machine.
-            processing_result = asm.process_link_state_event(
-                ingress_link_id,
-                LinkEvent::ReceivedGrantZprAddressRequest(None),
-            );
-            status_code = zdp::ResponseCode::Other;
+            (None, zdp::ResponseCode::Other)
         }
-    }
+    };
 
-    // Send an ACK.
+    // Since processing the grant is time consuming, send an ACK now.
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpGrantZprAddressResponse>();
     hdr.status_code = status_code;
@@ -670,6 +653,11 @@ pub async fn handle_grant_zpr_address_request(
         ingress_link_id,
         zdp::ZdpPacketType::GrantZprAddressResponse,
         rsp_pkt,
+    );
+
+    let processing_result = asm.process_link_state_event(
+        ingress_link_id,
+        LinkEvent::ReceivedGrantZprAddressRequest(grant_event_payload),
     );
 
     // If we got an error from the state machine, send an error back into it.
