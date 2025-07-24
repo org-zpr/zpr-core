@@ -10,6 +10,9 @@ pub mod std;
 #[cfg(feature = "bytes")]
 pub mod bytes;
 
+#[cfg(feature = "socket2")]
+pub mod socket2;
+
 #[cfg(feature = "tokio")]
 pub mod tokio;
 

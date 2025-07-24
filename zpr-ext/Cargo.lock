@@ -333,6 +333,7 @@ dependencies = [
  "bytes",
  "libc",
  "nix",
+ "socket2",
  "tokio",
  "zerocopy",
 ]
