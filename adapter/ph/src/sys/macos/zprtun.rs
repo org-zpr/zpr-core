@@ -143,18 +143,15 @@ impl ZprTun {
 
     fn has_address(&self, addr: IpAddr) -> std::io::Result<bool> {
         let mut c = Command::new(COMMAND_IFCONFIG);
-        c.arg("addr")
-            .arg("show")
-            .arg("dev")
-            .arg(self.inner.get_name());
+        c.arg(self.inner.get_name());
         debug!(target: NET_OS, "{:?}", c);
         let output = c.output()?;
 
         // If interface is there, the output will be something like:
         //
         // utun2: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 2000
-	    //         inet6 fe80::e9b0:1972:d221:2196%utun2 prefixlen 64 scopeid 0x11
-	    //         nd6 options=201<PERFORMNUD,DAD>
+        //         inet6 fe80::e9b0:1972:d221:2196%utun2 prefixlen 64 scopeid 0x11
+        //         nd6 options=201<PERFORMNUD,DAD>
         if !output.status.success() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
