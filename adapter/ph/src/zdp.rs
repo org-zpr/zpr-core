@@ -190,6 +190,7 @@ pub enum TerminateReason {
     BadSequenceNumber = 1,
     RequestTimedOut = 2,
     Reset = 3,
+    Shutdown = 4, // quell any restart behavior
 }
 
 /// Terminate Link Indication (§ 6.3.3)

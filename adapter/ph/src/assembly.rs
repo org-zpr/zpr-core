@@ -22,11 +22,13 @@ use crate::special_peers::SpecialPeerName;
 use crate::tun_ctl::TunCtl;
 use crate::visa_table;
 use crate::vs_types::AuthServicesList;
+use crate::zdp::TerminateReason;
 
 use enum_map::EnumMap;
 use km_noise::NoiseKeypair;
 use std::net::IpAddr;
 use std::num::NonZero;
+use std::panic;
 use std::result::Result;
 use std::sync::Arc;
 use thiserror::Error;
@@ -120,20 +122,74 @@ impl Assembly {
 
     /// Graceful shutdown routine.  Not guaranteed to be called
     pub async fn shutdown(self: &Arc<Self>) {
+        if self.ph_mode == PhMode::Node {
+            self.shutdown_node().await
+        } else {
+            self.shutdown_adapter().await
+        }
+    }
+
+    // The node quickly sends Terminate Indications
+    async fn shutdown_node(self: &Arc<Self>) {
         // Probably not worth blocking for this
         let peer_ids = self.peer_ids.lock().unwrap().clone();
-        let vs_peer = self
-            .peer_table
-            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
-        for peer_id in peer_ids {
-            if vs_peer.is_none() || peer_id != vs_peer.unwrap().get() {
-                // This should be a short block and must be blocked on,
-                // otherwise the messages won't get sent
-                self.reset_peer(peer_id).await;
+
+        if self.ph_mode == PhMode::Node {
+            let vs_peer = self
+                .peer_table
+                .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
+            for peer_id in peer_ids {
+                if vs_peer.is_none() || peer_id != vs_peer.unwrap().get() {
+                    // This should be a short block and must be blocked on,
+                    // otherwise the messages won't get sent
+                    self.reset_peer(peer_id).await;
+                }
+            }
+            if let Some(vs_peer) = vs_peer {
+                self.reset_peer(vs_peer.get()).await;
             }
         }
-        if let Some(vs_peer) = vs_peer {
-            self.reset_peer(vs_peer.get()).await;
+    }
+
+    // The adapter sends a more policy Terminate Request.
+    async fn shutdown_adapter(self: &Arc<Self>) {
+        let mut join_set = tokio::task::JoinSet::new();
+
+        // Probably not worth blocking for this
+        let peer_ids = self.peer_ids.lock().unwrap().clone();
+
+        for peer_id in peer_ids {
+            if let Some(peer) = self.peer_table.get(peer_id) {
+                if let Err(e) = peer
+                    .link_state_machine
+                    .process_event(self, LinkEvent::Close(TerminateReason::Shutdown))
+                {
+                    error!(target: PEER_MGMT, "Failed to nicely close peer {peer_id}: {e}");
+                    // So try harder...
+                    self.reset_peer(peer_id).await;
+                }
+            }
+        }
+        let spawn_self = self.clone();
+        join_set.spawn_local(async move {
+            let mut peer_ids = spawn_self.peer_ids.lock().unwrap().clone();
+            info!(
+                "Waiting for {} peer{} to disconnect...",
+                peer_ids.len(),
+                if peer_ids.len() == 1 { "" } else { "s" }
+            );
+            while !peer_ids.is_empty() {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                peer_ids = spawn_self.peer_ids.lock().unwrap().clone();
+            }
+        });
+
+        while let Some(res) = join_set.join_next().await {
+            match res {
+                Ok(_) => (),
+                Err(err) if err.is_panic() => panic::resume_unwind(err.into_panic()),
+                Err(e) => error!("unexpected error during shutdown: {e}"),
+            }
         }
     }
 
@@ -197,7 +253,14 @@ impl Assembly {
 
     /// Caled from `LinkStateWrapper::complete_close`.`
     pub fn drop_peer(self: &Arc<Self>, link_id: LinkId) {
-        debug!(target: PEER_MGMT, "Removing peer {link_id}");
+        let vs_link_id = self
+            .peer_table
+            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
+        if vs_link_id.is_some() && link_id == vs_link_id.unwrap().get() {
+            debug!(target: PEER_MGMT, "Removing peer {link_id} [VISA SERVICE]");
+        } else {
+            debug!(target: PEER_MGMT, "Removing peer {link_id}");
+        }
         self.peer_table.remove(link_id);
         self.peer_ids.lock().unwrap().retain(|id| *id != link_id);
         info!(target: PEER_MGMT, "Removed peer {link_id}");
@@ -217,6 +280,9 @@ impl Assembly {
             if let Some(vsconn) = self.vsconn.as_ref() {
                 if let Err(e) = vsconn.stop(true).await {
                     error!(target: PEER_MGMT, "stop command to VSConn failed: {e}");
+                } else {
+                    // Let VSConn runloop process/send the command.
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                 }
             }
         }
