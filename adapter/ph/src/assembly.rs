@@ -195,6 +195,7 @@ impl Assembly {
         Ok(entry.insert(peer_state))
     }
 
+    /// Caled from `LinkStateWrapper::complete_close`.`
     pub fn drop_peer(self: &Arc<Self>, link_id: LinkId) {
         debug!(target: PEER_MGMT, "Removing peer {link_id}");
         self.peer_table.remove(link_id);
@@ -202,7 +203,23 @@ impl Assembly {
         info!(target: PEER_MGMT, "Removed peer {link_id}");
     }
 
+    /// Part of graceful shutdown (or administrative link shutdown).
+    ///
+    /// Reset peer at given link.
+    ///
+    /// Calls down to `LinkStateWrapper::reset` which will ultimately end up calling back
+    /// here to [Assembly::drop_peer].
     pub async fn reset_peer(self: &Arc<Self>, link_id: LinkId) {
+        let vs_link_id = self
+            .peer_table
+            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
+        if vs_link_id.is_some() && link_id == vs_link_id.unwrap().get() {
+            if let Some(vsconn) = self.vsconn.as_ref() {
+                if let Err(e) = vsconn.stop(true).await {
+                    error!(target: PEER_MGMT, "stop command to VSConn failed: {e}");
+                }
+            }
+        }
         if let Some(peer) = self.peer_table.get(link_id) {
             peer.link_state_machine.reset(self).await;
         }

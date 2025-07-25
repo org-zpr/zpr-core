@@ -373,19 +373,28 @@ impl LinkStateWrapper {
         locked_fsm.actor_addresses.clone()
     }
 
+    /// Tell the VS that this actor has disconnected.  If we are the special VS peer
+    /// then attempt to deregister from the VS and then stop the VSConn run loop.
     fn deregister_actor_addresses(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
         let mut join_set = tokio::task::JoinSet::new();
-
         let vs_id = asm
             .peer_table
             .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
         if vs_id.is_some() && vs_id.unwrap().get() == self.id {
-            return join_set;
-        }
-
-        for addr in self.locked_fsm.lock().unwrap().actor_addresses.drain(..) {
-            debug!(target: LINK_STATE, "Deregistering {addr}");
-            join_set.spawn_local(visa_mgmt::actor_disconnect(asm.clone(), addr));
+            let spawn_asm = asm.clone();
+            join_set.spawn_local(async move {
+                if let Some(vsconn) = spawn_asm.vsconn.as_ref() {
+                    debug!(target: LINK_STATE, "deregister of VS peer detected, now deregistering from VS and stopping VSConn");
+                    if let Err(e) = vsconn.stop(true).await {
+                        error!(target: LINK_STATE, "stop command to VSConn failed: {e}");
+                    }
+                }
+            });
+        } else {
+            for addr in self.locked_fsm.lock().unwrap().actor_addresses.drain(..) {
+                debug!(target: LINK_STATE, "Deregistering {addr}");
+                join_set.spawn_local(visa_mgmt::actor_disconnect(asm.clone(), addr));
+            }
         }
         join_set
     }
