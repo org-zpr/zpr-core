@@ -1107,7 +1107,7 @@ impl LinkStateWrapper {
                                 self.set_timeout(
                                     asm,
                                     &mut locked_fsm,
-                                    config::VS_REQUEST_RETRY_TIMER,
+                                    config::VS_GRANT_REQUEST_RETRY_TIMER,
                                 );
                             }
                             Err(e) => {
@@ -1727,11 +1727,14 @@ impl LinkStateWrapper {
                 } else {
                     link_data.echo_timeout += 1;
                     consecutive_misses += 1;
+                    debug!(target: LINK_STATE, "Link {link_id} did not receive echo response (timeouts {}, with {} consecutive)",
+                        link_data.echo_timeout, consecutive_misses);
                 }
 
                 drop(link_data);
 
                 if consecutive_misses >= config::DEFAULT_KEEP_ALIVE_RETRIES {
+                    error!(target: LINK_STATE, "Link {link_id} failed to respond to keep-alive messages ({} consecutive misses)", consecutive_misses);
                     if task_asm
                         .process_link_state_event(
                             link_id,

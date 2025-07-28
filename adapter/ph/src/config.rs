@@ -30,8 +30,9 @@ pub const DEFAULT_REQUEST_RETRY_COUNT: usize = 3;
 pub const DEFAULT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(1);
 pub const DEFAULT_TERMINATE_RESPONSE_TIMER: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Slightly longer when we need VS to do something for us.
-pub const VS_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(2);
+/// Slightly longer -- asking visa service to grant an address
+/// means it may have to do a lot of work to verify auth.
+pub const VS_GRANT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// Grant requires reconfiguring TUN, so longer.
 pub const GRANT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(5);
