@@ -259,7 +259,9 @@ fn main() -> ExitCode {
         }
     };
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(tun_devs[0].clone()));
-    tun_ctl.set_carrier(false).unwrap();
+
+    // Node must be set ON (adapter will be turned on as part of finishing hello)
+    tun_ctl.set_carrier(ph_mode == PhMode::Node).unwrap();
 
     let mut actor_requeue_inqs = Vec::new();
     let mut actor_requeue_outqs = Vec::new();
