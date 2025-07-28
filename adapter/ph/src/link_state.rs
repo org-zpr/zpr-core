@@ -773,11 +773,6 @@ impl LinkStateWrapper {
             }
         }
 
-        // TODO: Reconcile this logic with the HelloRequest logic that also
-        //       passes requested addresses. The requested addresses from HELLO
-        //       are saved in our link data.  Why do we need to pass an address
-        //       in HelloRequest?
-
         // The client adapter may already be configured with an address. It will then
         // be up to the visa service to decide if that is allowed.  If no address is
         // passed here we expect the visa service to assign an address.
@@ -1024,9 +1019,6 @@ impl LinkStateWrapper {
     /// This is happengin on a NODE.
     ///
     /// This is only called for SUCCESSFUL responses (unsuccessful responses trigger a link error).
-    ///
-    /// TODO: At some point this will need the ZPR address returned to it also.  For now we
-    /// use the address we saved in our state (from the original request).
     ///
     fn process_authorize_response(
         &self,
