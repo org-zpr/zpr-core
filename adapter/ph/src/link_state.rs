@@ -932,6 +932,11 @@ impl LinkStateWrapper {
                     self.initiate_close(asm, TerminateReason::Other)
                 }
             }
+            (LinkType::NodeToAdapter, LinkState::Active) => {
+                // Assume this is just a retransmit.
+                debug!(target: LINK_STATE, "Link {link_id} received unsolicited grant response while already in active, ignoring");
+                Ok(())
+            }
             (_, _) => Err(LinkStateError::InvalidOperation(
                 "Discarded unsolicited grant response".to_string(),
             )),
@@ -1007,6 +1012,11 @@ impl LinkStateWrapper {
                     }
                 }
             }
+            (LinkType::AdapterToNode, LinkState::Active) => {
+                // Assume this is just a retransmit.
+                debug!(target: LINK_STATE, "Link {link_id} received unsolicited Grant ZPR Address request while already in active, ignoring");
+                Ok(())
+            }
             (_, _) => Err(LinkStateError::InvalidOperation(
                 "Discarded unsolicited Grant Zpr Address request".to_string(),
             )),
@@ -1019,6 +1029,8 @@ impl LinkStateWrapper {
     /// This is happengin on a NODE.
     ///
     /// This is only called for SUCCESSFUL responses (unsuccessful responses trigger a link error).
+    ///
+    /// Does not change state. Remains in [LinkState::RegisterAA].
     ///
     fn process_authorize_response(
         &self,
