@@ -314,7 +314,7 @@ impl LinkStateMachine {
 const LINK_STATE_EVENT_QUEUE_SIZE: usize = 16;
 
 pub struct LinkStateWrapper {
-    id: LinkId, // set at constructor, never changes.
+    pub id: LinkId, // set at constructor, never changes.
     link_type: LinkType,
     locked_fsm: Mutex<LinkStateMachine>,
     events: broadcast::Sender<LinkEvent>,
@@ -483,10 +483,17 @@ impl LinkStateWrapper {
                 if listened_for {
                     Ok(())
                 } else {
-                    Err(LinkStateError::UnexpectedTransition(
-                        self.locked_fsm.lock().unwrap().state,
-                        ev.into(),
-                    ))
+                    // TODO: See issue ( https://github.com/org-zpr/zpr-core/issues/930 ).
+                    // In practice this error happens fairly regularly.
+                    if matches!(ev, LinkEvent::ReceivedEchoResponse { .. }) {
+                        warn!(target: LINK_STATE, "received echo-response with listened_for=false, continuing...");
+                        Ok(())
+                    } else {
+                        Err(LinkStateError::UnexpectedTransition(
+                            self.locked_fsm.lock().unwrap().state,
+                            ev.into(),
+                        ))
+                    }
                 }
             }
         }
