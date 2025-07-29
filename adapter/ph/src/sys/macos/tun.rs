@@ -3,8 +3,11 @@ use std::ffi::CStr;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::AsFd;
-use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
+use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::ptr;
+use nix::fcntl::{fcntl, FcntlArg, OFlag};
+
+
 
 use thiserror::Error;
 use tracing::*;
@@ -210,6 +213,11 @@ impl Tun {
 
     // Post create configuration based on the builder.
     fn configure(&mut self, config: &Builder) -> Result<(), TunError> {
+        // Set to non-blocking
+        if let Err(err) = Tun::set_raw_fd_nonblocking(self.tun_fd.as_raw_fd()) {
+            return Err(TunError::IOError(std::io::Error::from(err)));
+        }
+
         let mtu: Option<u16>;
         if let Some(addr) = config.address {
             let prefix_len = config.prefix_len.unwrap_or(ZPRNET_PREFIX_LEN);
@@ -310,7 +318,23 @@ impl Tun {
             Ok(())
         }
     }
+
+
+    fn set_raw_fd_nonblocking(fd: RawFd) -> nix::Result<()> {
+        // Get the current file status flags
+        let flags = fcntl(fd, FcntlArg::F_GETFL)?;
+
+        // Add the O_NONBLOCK flag to the existing flags
+        let mut new_flags = OFlag::from_bits_truncate(flags);
+        new_flags.insert(OFlag::O_NONBLOCK);
+
+        // Set the new flags
+        fcntl(fd, FcntlArg::F_SETFL(new_flags))?;
+        Ok(())
+    }
 }
+
+
 
 #[derive(Debug)]
 pub struct Builder {
