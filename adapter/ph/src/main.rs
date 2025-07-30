@@ -350,6 +350,26 @@ fn main() -> ExitCode {
                 config.self_addr.set_scoped_ip(addr);
                 info!(target: STARTUP, "assigned substrate address {addr}");
 
+                // On Linux, dropping the connection (below) also drops the bind,
+                // so open a temp socket here to hold ownership of the local port.
+                #[cfg(target_os = "linux")]
+                let temp_socket;
+                #[cfg(target_os = "linux")]
+                {
+                    temp_socket = socket2::Socket::new(
+                        socket2::Domain::for_address(config.self_addr),
+                        socket2::Type::DGRAM,
+                        None,
+                    )
+                    .unwrap();
+
+                    temp_socket.set_reuse_port(true).unwrap();
+
+                    temp_socket
+                        .bind(&socket2::SockAddr::from(config.self_addr))
+                        .unwrap();
+                }
+
                 // Now drop the connection.  We will still specify it manually
                 // for each packet sent (and it's an error to do both).
                 match socket.connect(&socket2::SockAddr::new_unspec()) {
@@ -357,6 +377,21 @@ fn main() -> ExitCode {
                     Err(err) if err.raw_os_error() == Some(libc::EAFNOSUPPORT) => (),
                     res => res.expect("unable to disconnect socket"),
                 }
+
+                // Disconnecting above weirdly also drops the local-address binding!
+                // (Possible Linux bug?)  So now we need to re-bind.
+                // Enable on Linux only, because this does not seem to be needed
+                // and also does not work on macOS.
+                #[cfg(target_os = "linux")]
+                socket
+                    .bind(&socket2::SockAddr::from(config.self_addr))
+                    .expect(&format!(
+                        "unable to re-bind to self_addr ({})",
+                        config.self_addr
+                    ));
+
+                // Now the temp socket will go out of scope and close;
+                // we've re-bound no longer need it.
             }
         }
 
