@@ -102,7 +102,6 @@ impl ZprTun {
         Ok(())
     }
 
-
     pub fn clear_zpr_address(&self, addr: IpAddr) -> std::io::Result<()> {
         if !self.has_address(addr)? {
             debug!(target: NET_OS, "clear_address: address {addr} not set on TUN device {}", self.inner.get_name());
@@ -140,7 +139,6 @@ impl ZprTun {
         Ok(())
     }
 
-
     fn has_address(&self, addr: IpAddr) -> std::io::Result<bool> {
         let mut c = Command::new(COMMAND_IFCONFIG);
         c.arg(self.inner.get_name());
@@ -166,7 +164,6 @@ impl ZprTun {
         let out_str = String::from_utf8_lossy(&output.stdout);
         Ok(out_str.contains(&format!("inet6 {}", addr)))
     }
-
 }
 
 impl AsFd for ZprTun {

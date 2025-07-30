@@ -1,3 +1,4 @@
+use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::{ioctl_readwrite, ioctl_write_ptr};
 use std::ffi::CStr;
 use std::mem;
@@ -5,9 +6,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::ptr;
-use nix::fcntl::{fcntl, FcntlArg, OFlag};
-
-
 
 use thiserror::Error;
 use tracing::*;
@@ -319,7 +317,6 @@ impl Tun {
         }
     }
 
-
     fn set_raw_fd_nonblocking(fd: RawFd) -> nix::Result<()> {
         // Get the current file status flags
         let flags = fcntl(fd, FcntlArg::F_GETFL)?;
@@ -333,8 +330,6 @@ impl Tun {
         Ok(())
     }
 }
-
-
 
 #[derive(Debug)]
 pub struct Builder {
