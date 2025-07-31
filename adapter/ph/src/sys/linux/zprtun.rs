@@ -67,7 +67,7 @@ impl ZprTun {
         Ok(())
     }
 
-    pub fn set_zpr_address(&self, addr: IpAddr) -> std::io::Result<()> {
+    pub fn add_address(&self, addr: IpAddr) -> std::io::Result<()> {
         if self.has_address(addr)? {
             debug!(target: NET_OS, "set_address: address {addr} already set on TUN device {}", self.ifname);
             return Ok(());
@@ -110,7 +110,7 @@ impl ZprTun {
         Ok(())
     }
 
-    pub fn clear_zpr_address(&self, addr: IpAddr) -> Result<()> {
+    pub fn clear_address(&self, addr: IpAddr) -> Result<()> {
         if !self.has_address(addr)? {
             debug!(target: NET_OS, "clear_address: address {addr} not set on TUN device {}", self.ifname);
             return Ok(());

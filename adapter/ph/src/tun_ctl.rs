@@ -12,11 +12,11 @@ pub trait TunCtl: Sync {
     /// interface itself and is used by the kernel to make routing decisions.
     fn set_carrier(&self, carrier: bool) -> Result<()>;
 
-    /// Adds the ZPR address of the TUN device.
-    fn set_zpr_address(&self, addr: IpAddr) -> Result<()>;
+    /// Adds an IP address of the TUN device.
+    fn add_address(&self, addr: IpAddr) -> Result<()>;
 
-    /// Clear a ZPR address from the TUN device.  Does not error if address is not set to begin with.
-    fn clear_zpr_address(&self, addr: IpAddr) -> Result<()>;
+    /// Clear an IP address from the TUN device.  Does not error if address is not set to begin with.
+    fn clear_address(&self, addr: IpAddr) -> Result<()>;
 }
 
 /// Canonical implementation of the `TunCtl` interface, just a thin wrapper
@@ -35,10 +35,10 @@ impl TunCtl for TunCtlImpl {
     fn set_carrier(&self, carrier: bool) -> Result<()> {
         self.tun.set_carrier(carrier)
     }
-    fn set_zpr_address(&self, addr: IpAddr) -> Result<()> {
-        self.tun.set_zpr_address(addr)
+    fn add_address(&self, addr: IpAddr) -> Result<()> {
+        self.tun.add_address(addr)
     }
-    fn clear_zpr_address(&self, addr: IpAddr) -> Result<()> {
-        self.tun.clear_zpr_address(addr)
+    fn clear_address(&self, addr: IpAddr) -> Result<()> {
+        self.tun.clear_address(addr)
     }
 }

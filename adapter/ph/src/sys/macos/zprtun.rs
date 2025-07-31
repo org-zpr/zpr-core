@@ -60,7 +60,7 @@ impl ZprTun {
         Ok(())
     }
 
-    pub fn set_zpr_address(&self, addr: IpAddr) -> std::io::Result<()> {
+    pub fn add_address(&self, addr: IpAddr) -> std::io::Result<()> {
         let mtx = self
             .mtx
             .lock()
@@ -77,7 +77,7 @@ impl ZprTun {
             IpAddr::V4(_ipv4) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Unsupported,
-                    "set_zpr_address with IPv4 is not supported on macOS",
+                    "add_address with IPv4 is not supported on macOS",
                 ));
             }
             IpAddr::V6(ipv6) => {
@@ -102,7 +102,7 @@ impl ZprTun {
         Ok(())
     }
 
-    pub fn clear_zpr_address(&self, addr: IpAddr) -> std::io::Result<()> {
+    pub fn clear_address(&self, addr: IpAddr) -> std::io::Result<()> {
         if !self.has_address(addr)? {
             debug!(target: NET_OS, "clear_address: address {addr} not set on TUN device {}", self.inner.get_name());
             return Ok(());
@@ -114,7 +114,7 @@ impl ZprTun {
             IpAddr::V4(_ipv4) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Unsupported,
-                    "set_zpr_address with IPv4 is not supported on macOS",
+                    "clear_address with IPv4 is not supported on macOS",
                 ));
             }
             IpAddr::V6(ipv6) => {
