@@ -139,6 +139,12 @@ impl ZprTun {
     }
 
     fn has_address(&self, addr: IpAddr) -> std::io::Result<bool> {
+        if addr.is_ipv4() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "has_address with IPv4 is not supported on linux",
+            ));
+        }
         let mut c = Command::new(COMMAND_IP);
         c.arg("addr")
             .arg("show")
@@ -166,9 +172,9 @@ impl ZprTun {
                 ),
             ));
         }
-        // Just look for the pattern "inet6 <addr>" in the output.
+        // Just look for the pattern "inet6 <addr>" + "/" in the output.
         let out_str = String::from_utf8_lossy(&output.stdout);
-        Ok(out_str.contains(&format!("inet6 {}", addr)))
+        Ok(out_str.contains(&format!("inet6 {}/", addr)))
     }
 }
 
