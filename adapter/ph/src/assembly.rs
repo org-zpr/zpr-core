@@ -18,6 +18,7 @@ use crate::net_defs::{self, IpAddress, ScopedIpAddr};
 use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
+use crate::rcu;
 use crate::special_peers::SpecialPeerName;
 use crate::tun_ctl::TunCtl;
 use crate::visa_table;
@@ -64,7 +65,7 @@ pub struct Assembly {
     /// Note that these are not our real ZPR addresses until we are granted a ZPR address.
     /// If there is a static ZPR address present in the configuration it is set here in main.
     /// Various get_ and set_ functions are defined for this below.
-    pub local_zpr_addresses: std::sync::RwLock<Vec<IpAddr>>,
+    pub local_zpr_addresses: rcu::RcuBox<Vec<IpAddr>>,
 
     pub mgmt_substrate_egress: MgmtSubstrateEgress,
     pub actor_output_requeue: ActorOutputRequeue,
@@ -154,14 +155,13 @@ impl Assembly {
         T: Into<IpAddr>,
     {
         let addrs: Vec<IpAddr> = addrs.into_iter().map(|a| a.into()).collect();
-        let mut local_zpr_addresses = self.local_zpr_addresses.write().unwrap();
-        *local_zpr_addresses = addrs;
+        self.local_zpr_addresses.write(addrs);
     }
 
     /// Get a copy of the local ZPR addresses. May be empty on an adapter until we
     /// have been granted a ZPR address.
     pub fn get_local_zpr_addrs_std(&self) -> Vec<IpAddr> {
-        self.local_zpr_addresses.read().unwrap().clone()
+        self.local_zpr_addresses.get().clone()
     }
 
     /// Node only: the "dock address" is the first local ZPR address.
@@ -173,7 +173,7 @@ impl Assembly {
     /// in a more static way to avoid taking the read lock since we need this
     /// value on every visa request.
     pub fn get_local_dock_addr(&self) -> IpAddr {
-        let lza = self.local_zpr_addresses.read().unwrap();
+        let lza = self.local_zpr_addresses.get();
         if lza.is_empty() {
             std::net::Ipv6Addr::UNSPECIFIED.into()
         } else {
@@ -281,7 +281,7 @@ impl Assembly {
     /// Temporary? function to find a link based on the actor address
     pub fn find_egress_link(&self, actor_addr: IpAddress) -> Option<NonZero<LinkId>> {
         // First check the local actor addresses to see if it's a locally-destined packet
-        for addr in self.local_zpr_addresses.read().unwrap().iter() {
+        for addr in self.local_zpr_addresses.get().iter() {
             if actor_addr == (*addr).into() {
                 return Some(NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap());
             }
@@ -485,7 +485,7 @@ pub mod test {
         Assembly {
             ph_mode,
             topology_config,
-            local_zpr_addresses: std::sync::RwLock::new(local_zpr_addresses),
+            local_zpr_addresses: rcu::RcuBox::new(local_zpr_addresses),
             mgmt_substrate_egress,
             actor_output_requeue,
             vsconn,
