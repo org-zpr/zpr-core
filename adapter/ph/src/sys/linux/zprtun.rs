@@ -48,7 +48,9 @@ impl ZprTun {
             match addr {
                 IpAddr::V4(ipa) => bldr = bldr.address(ipa),
                 IpAddr::V6(_) => {
-                    warn!(target:NET_OS, "IPv6 address on TUN at create time not supported on linux, ignoring");
+                    return Err(ZprTunError::PlatformError(
+                        "IPv6 address on TUN at create time not supported on linux".into(),
+                    ));
                 }
             }
         }
