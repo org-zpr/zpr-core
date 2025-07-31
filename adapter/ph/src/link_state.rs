@@ -976,6 +976,7 @@ impl LinkStateWrapper {
 
                         let data = self.locked_data.lock().unwrap();
                         if let Some(aaa_addr) = data.aaa_address {
+                            drop(data);
                             // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
                             match asm
                                 .tun_ctl
@@ -987,9 +988,10 @@ impl LinkStateWrapper {
                                     // continue...
                                 }
                             }
+                        } else {
+                            drop(data);
                         }
                         // I keep the aaa address around... TODO: should we clear it?
-                        drop(data);
 
                         if addrs.len() > 1 {
                             warn!(target: LINK_STATE, "Link {link_id} multiple addresses in Grant ZPR Address not supported: using first one only");
