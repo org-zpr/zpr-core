@@ -11,7 +11,10 @@ use thiserror::Error;
 use tracing::*;
 
 use crate::logging::targets::NET_OS;
-use crate::zprtun::{DEFAULT_TUN_MTU, ZPRNET_PREFIX_LEN};
+use crate::zprtun::DEFAULT_TUN_MTU;
+
+/// If not set in builder, this is default prefix len used for TUN device address.
+const DEFAULT_PREFIX_LEN: u8 = 32;
 
 use libc::{
     self, c_char, c_int, c_uint, c_void, ctl_info, ifreq, sockaddr, sockaddr_in, sockaddr_in6,
@@ -218,7 +221,7 @@ impl Tun {
 
         let mtu: Option<u16>;
         if let Some(addr) = config.address {
-            let prefix_len = config.prefix_len.unwrap_or(ZPRNET_PREFIX_LEN);
+            let prefix_len = config.prefix_len.unwrap_or(DEFAULT_PREFIX_LEN);
             if prefix_len > 128 {
                 return Err(TunError::InvalidPrefixLen);
             }

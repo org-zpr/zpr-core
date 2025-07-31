@@ -7,7 +7,7 @@ use tokio_tun::{Tun, TunBuilder};
 use tracing::*;
 
 use crate::logging::targets::NET_OS;
-use crate::zprtun::{ZprTunError, ZPRNET_PREFIX_LEN};
+use crate::zprtun::ZprTunError;
 
 const COMMAND_IP: &str = "/usr/sbin/ip";
 
@@ -67,7 +67,7 @@ impl ZprTun {
         Ok(())
     }
 
-    pub fn add_address(&self, addr: IpAddr) -> std::io::Result<()> {
+    pub fn add_address(&self, addr: IpAddr, prefix_len: u8) -> std::io::Result<()> {
         if self.has_address(addr)? {
             debug!(target: NET_OS, "set_address: address {addr} already set on TUN device {}", self.ifname);
             return Ok(());
@@ -75,7 +75,7 @@ impl ZprTun {
         let mut c = Command::new(COMMAND_IP);
         c.arg("addr")
             .arg("add")
-            .arg(format!("{}/{}", addr, ZPRNET_PREFIX_LEN))
+            .arg(format!("{}/{}", addr, prefix_len))
             .arg("dev")
             .arg(&self.ifname);
         debug!(target: NET_OS, "{:?}", c);
@@ -110,7 +110,7 @@ impl ZprTun {
         Ok(())
     }
 
-    pub fn clear_address(&self, addr: IpAddr) -> Result<()> {
+    pub fn clear_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()> {
         if !self.has_address(addr)? {
             debug!(target: NET_OS, "clear_address: address {addr} not set on TUN device {}", self.ifname);
             return Ok(());
@@ -119,7 +119,7 @@ impl ZprTun {
         let mut c = Command::new(COMMAND_IP);
         c.arg("addr")
             .arg("del")
-            .arg(format!("{}/{}", addr, ZPRNET_PREFIX_LEN))
+            .arg(format!("{}/{}", addr, prefix_len))
             .arg("dev")
             .arg(&self.ifname);
         debug!(target: NET_OS, "{:?}", c);

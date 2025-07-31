@@ -13,10 +13,10 @@ pub trait TunCtl: Sync {
     fn set_carrier(&self, carrier: bool) -> Result<()>;
 
     /// Adds an IP address of the TUN device.
-    fn add_address(&self, addr: IpAddr) -> Result<()>;
+    fn add_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()>;
 
     /// Clear an IP address from the TUN device.  Does not error if address is not set to begin with.
-    fn clear_address(&self, addr: IpAddr) -> Result<()>;
+    fn clear_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()>;
 }
 
 /// Canonical implementation of the `TunCtl` interface, just a thin wrapper
@@ -35,10 +35,10 @@ impl TunCtl for TunCtlImpl {
     fn set_carrier(&self, carrier: bool) -> Result<()> {
         self.tun.set_carrier(carrier)
     }
-    fn add_address(&self, addr: IpAddr) -> Result<()> {
-        self.tun.add_address(addr)
+    fn add_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()> {
+        self.tun.add_address(addr, prefix_len)
     }
-    fn clear_address(&self, addr: IpAddr) -> Result<()> {
-        self.tun.clear_address(addr)
+    fn clear_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()> {
+        self.tun.clear_address(addr, prefix_len)
     }
 }

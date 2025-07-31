@@ -976,7 +976,10 @@ impl LinkStateWrapper {
 
                         let data = self.locked_data.lock().unwrap();
                         if let Some(aaa_addr) = data.aaa_address {
-                            match asm.tun_ctl.clear_address(aaa_addr.into()) {
+                            match asm
+                                .tun_ctl
+                                .clear_address(aaa_addr.into(), zpr::ZPRNET_PREFIX_LEN)
+                            {
                                 Ok(()) => {}
                                 Err(e) => {
                                     warn!(target: LINK_STATE, "Link {link_id} failed to clear AAA address: {e}");
@@ -991,7 +994,10 @@ impl LinkStateWrapper {
                             warn!(target: LINK_STATE, "Link {link_id} multiple addresses in Grant ZPR Address not supported: using first one only");
                         }
 
-                        if let Err(e) = asm.tun_ctl.add_address(addrs[0].into()) {
+                        if let Err(e) = asm
+                            .tun_ctl
+                            .add_address(addrs[0].into(), zpr::ZPRNET_PREFIX_LEN)
+                        {
                             warn!(target: LINK_STATE, "Link {link_id} failed to set ZPR address: {e}");
                             locked_fsm.set_state(LinkState::Error);
                             drop(locked_fsm);
@@ -1174,7 +1180,10 @@ impl LinkStateWrapper {
                     //
                     // TODO: We get the ZPR address of the auth services (ASA) from our node. What about the cert?
                     //
-                    match asm.tun_ctl.add_address(aaa_addr.unwrap().into()) {
+                    match asm
+                        .tun_ctl
+                        .add_address(aaa_addr.unwrap().into(), zpr::ZPRNET_PREFIX_LEN)
+                    {
                         Ok(_) => {
                             asm.tun_ctl.set_carrier(true).unwrap();
                             self.do_https_authenticate(asm, asa_addrs.unwrap());

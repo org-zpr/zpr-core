@@ -424,10 +424,10 @@ pub mod test {
         fn set_carrier(&self, _carrier: bool) -> std::io::Result<()> {
             Ok(())
         }
-        fn add_address(&self, _addr: IpAddr) -> std::io::Result<()> {
+        fn add_address(&self, _addr: IpAddr, _prefix_len: u8) -> std::io::Result<()> {
             Ok(())
         }
-        fn clear_address(&self, _addr: IpAddr) -> std::io::Result<()> {
+        fn clear_address(&self, _addr: IpAddr, _prefix_len: u8) -> std::io::Result<()> {
             Ok(())
         }
     }

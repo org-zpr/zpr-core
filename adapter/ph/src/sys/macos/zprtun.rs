@@ -6,7 +6,6 @@ use tracing::*;
 use crate::logging::targets::NET_OS;
 use crate::sys::macos::tun;
 use crate::zprtun::ZprTunError;
-use crate::zprtun::ZPRNET_PREFIX_LEN;
 use std::process::Command;
 
 const COMMAND_IFCONFIG: &str = "/sbin/ifconfig";
@@ -60,7 +59,7 @@ impl ZprTun {
         Ok(())
     }
 
-    pub fn add_address(&self, addr: IpAddr) -> std::io::Result<()> {
+    pub fn add_address(&self, addr: IpAddr, prefix_len: u8) -> std::io::Result<()> {
         let mtx = self
             .mtx
             .lock()
@@ -82,7 +81,7 @@ impl ZprTun {
             }
             IpAddr::V6(ipv6) => {
                 c.arg("inet6")
-                    .arg(format!("{}/{}", ipv6.to_string(), ZPRNET_PREFIX_LEN));
+                    .arg(format!("{}/{}", ipv6.to_string(), prefix_len));
             }
         }
         c.arg("alias");
@@ -102,7 +101,7 @@ impl ZprTun {
         Ok(())
     }
 
-    pub fn clear_address(&self, addr: IpAddr) -> std::io::Result<()> {
+    pub fn clear_address(&self, addr: IpAddr, prefix_len: u8) -> std::io::Result<()> {
         if !self.has_address(addr)? {
             debug!(target: NET_OS, "clear_address: address {addr} not set on TUN device {}", self.inner.get_name());
             return Ok(());
@@ -119,7 +118,7 @@ impl ZprTun {
             }
             IpAddr::V6(ipv6) => {
                 c.arg("inet6")
-                    .arg(format!("{}/{}", ipv6.to_string(), ZPRNET_PREFIX_LEN));
+                    .arg(format!("{}/{}", ipv6.to_string(), prefix_len));
             }
         }
         c.arg("-alias"); // <-- note the MINUS here

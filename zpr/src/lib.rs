@@ -9,6 +9,9 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 /// Substrate Address
 pub type SubstrateAddr = std::net::SocketAddr;
 
+/// Default prefix length for local tun IPv6 ZPR addresses.
+pub const ZPRNET_PREFIX_LEN: u8 = 32;
+
 /// ZPR Parameter Index
 pub type Zpi = u8;
 
