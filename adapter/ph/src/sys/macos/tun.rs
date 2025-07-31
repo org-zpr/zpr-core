@@ -8,7 +8,6 @@ use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::ptr;
 
 use thiserror::Error;
-use tracing::*;
 
 use crate::logging::targets::NET_OS;
 use crate::zprtun::DEFAULT_TUN_MTU;
@@ -199,8 +198,6 @@ impl Tun {
                 name: tun_name_str,
             }
         };
-        info!(target: NET_OS, "TUN device created: {}", tundev.name);
-
         tundev.configure(config)?;
 
         // TODO: Set interface UP? Not required? Seems like kernel sets it to UP already.

@@ -1,6 +1,7 @@
 use std::net::IpAddr;
 use std::os::fd::{AsFd, BorrowedFd};
 
+// TODO: This logging is used to debug the use of local commands for TUN address management. Remove once we use syscalls.
 use tracing::*;
 
 use crate::logging::targets::NET_OS;
@@ -66,7 +67,6 @@ impl ZprTun {
             .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Mutex lock failed"))?;
 
         if self.has_address(addr)? {
-            debug!(target: NET_OS, "set_address: address {addr} already set on TUN device {}", self.inner.get_name());
             return Ok(());
         }
 
@@ -103,7 +103,6 @@ impl ZprTun {
 
     pub fn clear_address(&self, addr: IpAddr, prefix_len: u8) -> std::io::Result<()> {
         if !self.has_address(addr)? {
-            debug!(target: NET_OS, "clear_address: address {addr} not set on TUN device {}", self.inner.get_name());
             return Ok(());
         }
 
