@@ -63,7 +63,7 @@ pub struct Assembly {
 
     /// Note that these are not our real ZPR addresses until we are granted a ZPR address.
     /// If there is a static ZPR address present in the configuration it is set here in main.
-    /// Varioous get_ and set_ functions are defined for this below.
+    /// Various get_ and set_ functions are defined for this below.
     pub local_zpr_addresses: std::sync::RwLock<Vec<IpAddr>>,
 
     pub mgmt_substrate_egress: MgmtSubstrateEgress,
@@ -149,27 +149,19 @@ impl Assembly {
     /// Update the local ZPR addresses of this node or adapter. Though presumably
     /// this is called only on an adapter as a nodes addresses are currently set
     /// through configuration or command line args.
-    pub fn set_local_zpr_addrs_std(&self, addrs: Vec<IpAddr>) {
+    pub fn set_local_zpr_addrs<T>(&self, addrs: impl IntoIterator<Item = T>)
+    where
+        T: Into<IpAddr>,
+    {
+        let addrs: Vec<IpAddr> = addrs.into_iter().map(|a| a.into()).collect();
         let mut local_zpr_addresses = self.local_zpr_addresses.write().unwrap();
         *local_zpr_addresses = addrs;
-    }
-
-    /// Update the local ZPR addresses of this node or adapter. Though presumably
-    /// this is called only on an adapter as a nodes addresses are currently set
-    /// through configuration or command line args.
-    pub fn set_local_zpr_addrs(&self, addrs: Vec<IpAddress>) {
-        self.set_local_zpr_addrs_std(addrs.into_iter().map(|a| a.into()).collect());
     }
 
     /// Get a copy of the local ZPR addresses. May be empty on an adapter until we
     /// have been granted a ZPR address.
     pub fn get_local_zpr_addrs_std(&self) -> Vec<IpAddr> {
-        self.local_zpr_addresses
-            .read()
-            .unwrap()
-            .iter()
-            .map(|a| a.clone())
-            .collect()
+        self.local_zpr_addresses.read().unwrap().clone()
     }
 
     /// Node only: the "dock address" is the first local ZPR address.
