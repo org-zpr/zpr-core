@@ -261,6 +261,7 @@ fn main() -> ExitCode {
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(tun_devs[0].clone()));
 
     // Node must be set ON (adapter will be turned on as part of finishing hello)
+    // TODO: There is more subtlety here, see issue ( https://github.com/org-zpr/zpr-core/issues/937 )
     tun_ctl.set_carrier(ph_mode == PhMode::Node).unwrap();
 
     let mut actor_requeue_inqs = Vec::new();
