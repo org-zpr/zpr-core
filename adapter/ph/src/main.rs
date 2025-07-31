@@ -245,7 +245,7 @@ fn main() -> ExitCode {
             None
         }
     } else {
-        Some(Ipv6Addr::new(0xfc00, 0x5a, 0x50, 0x52, 0, 0, 0, 1).into())
+        Some(zpr::ZPR_TEMP_LOCAL_ADDRESS.into())
     };
 
     let tun_devs: Vec<_> = match ZprTun::new_mq(
