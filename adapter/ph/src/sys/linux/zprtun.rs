@@ -193,7 +193,7 @@ impl ZprTun {
         }
         // First look for the pattern "inet6 <addr>" + "/" in the output.
         let out_str = String::from_utf8_lossy(&output.stdout);
-        if out_str.contains(&format!("inet6 {}", addr)) {
+        if out_str.contains(&format!("inet6 {}/", addr)) {
             return Ok(true);
         }
         // Otherwise see if it is followed by a space.
