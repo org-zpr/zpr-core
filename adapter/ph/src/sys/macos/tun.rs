@@ -1,3 +1,4 @@
+use crate::zprtun::DEFAULT_TUN_MTU;
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::{ioctl_readwrite, ioctl_write_ptr};
 use std::ffi::CStr;
@@ -6,11 +7,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::ptr;
-
 use thiserror::Error;
-
-use crate::logging::targets::NET_OS;
-use crate::zprtun::DEFAULT_TUN_MTU;
 
 /// If not set in builder, this is default prefix len used for TUN device address.
 const DEFAULT_PREFIX_LEN: u8 = 32;
@@ -218,7 +215,7 @@ impl Tun {
 
         let mtu: Option<u16>;
         if let Some(addr) = config.address {
-            let prefix_len = config.prefix_len.unwrap_or(DEFAULT_PREFIX_LEN);
+            let prefix_len = config.prefix_len.unwrap_or(DEFAULT_PREFIX_LEN as usize);
             if prefix_len > 128 {
                 return Err(TunError::InvalidPrefixLen);
             }
