@@ -976,6 +976,7 @@ impl LinkStateWrapper {
 
                         let data = self.locked_data.lock().unwrap();
                         if let Some(aaa_addr) = data.aaa_address {
+                            // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
                             match asm
                                 .tun_ctl
                                 .clear_address(aaa_addr.into(), zpr::ZPRNET_PREFIX_LEN)
@@ -994,6 +995,7 @@ impl LinkStateWrapper {
                             warn!(target: LINK_STATE, "Link {link_id} multiple addresses in Grant ZPR Address not supported: using first one only");
                         }
 
+                        // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
                         if let Err(e) = asm
                             .tun_ctl
                             .add_address(addrs[0].into(), zpr::ZPRNET_PREFIX_LEN)
@@ -1180,6 +1182,7 @@ impl LinkStateWrapper {
                     //
                     // TODO: We get the ZPR address of the auth services (ASA) from our node. What about the cert?
                     //
+                    // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
                     match asm
                         .tun_ctl
                         .add_address(aaa_addr.unwrap().into(), zpr::ZPRNET_PREFIX_LEN)
