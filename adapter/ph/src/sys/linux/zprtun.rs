@@ -19,6 +19,7 @@ ioctl_write_ptr!(tun_set_carrier, b'T', 226, libc::c_int);
 pub struct ZprTun {
     ifname: String,
     owned_fd: OwnedFd,
+    mtx: std::sync::Mutex<()>, // Used for single threaded operation when using the `ip` command.
 }
 
 impl From<Tun> for ZprTun {
@@ -29,6 +30,7 @@ impl From<Tun> for ZprTun {
             owned_fd: (unsafe { BorrowedFd::borrow_raw(tun.as_raw_fd()) })
                 .try_clone_to_owned()
                 .unwrap(),
+            mtx: std::sync::Mutex::new(()),
         }
     }
 }
@@ -72,6 +74,10 @@ impl ZprTun {
     }
 
     pub fn add_address(&self, addr: IpAddr, prefix_len: u8) -> std::io::Result<()> {
+        let mtx = self
+            .mtx
+            .lock()
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Mutex lock failed"))?;
         if self.has_address(addr)? {
             return Ok(());
         }
@@ -110,10 +116,16 @@ impl ZprTun {
                 ),
             ));
         }
+        drop(mtx);
         Ok(())
     }
 
     pub fn clear_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()> {
+        let mtx = self
+            .mtx
+            .lock()
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Mutex lock failed"))?;
+
         if !self.has_address(addr)? {
             return Ok(());
         }
@@ -137,9 +149,11 @@ impl ZprTun {
                 ),
             ));
         }
+        drop(mtx);
         Ok(())
     }
 
+    // Should be called while holding the mutex.
     fn has_address(&self, addr: IpAddr) -> std::io::Result<bool> {
         if addr.is_ipv4() {
             return Err(std::io::Error::new(
@@ -163,6 +177,9 @@ impl ZprTun {
         //        valid_lft forever preferred_lft forever
         //     inet6 fe80::bffd:4029:e0fa:806b/64 scope link stable-privacy
         //        valid_lft forever preferred_lft forever
+        //
+        // In our tests mode it can look like:
+        //     inet6 fd5a:5052::1 peer fd5a:5052::2/128 scope global
 
         if !output.status.success() {
             return Err(std::io::Error::new(
@@ -174,9 +191,13 @@ impl ZprTun {
                 ),
             ));
         }
-        // Just look for the pattern "inet6 <addr>" + "/" in the output.
+        // First look for the pattern "inet6 <addr>" + "/" in the output.
         let out_str = String::from_utf8_lossy(&output.stdout);
-        Ok(out_str.contains(&format!("inet6 {}/", addr)))
+        if out_str.contains(&format!("inet6 {}", addr)) {
+            return Ok(true);
+        }
+        // Otherwise see if it is followed by a space.
+        Ok(out_str.contains(&format!("inet6 {} ", addr)))
     }
 }
 
