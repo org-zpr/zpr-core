@@ -22,16 +22,16 @@ use crate::zdp_ll;
 use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
+use classifier::{IPv4Header, IPv6Header};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
+use zpr::L3Type;
 use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
-use zpr::L3Type;
-use classifier::{IPv6Header, IPv4Header};
 
 /// Simple function used on an adapter to forward actor packets to the the tether and vice-versa.
 const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {
@@ -343,7 +343,7 @@ impl FastpathWorker {
     pub fn forward(&mut self, mut pkt: Packet) {
         let egress_link_id;
         let egress_stream_id;
-        
+
         let mut ttl_expired = false;
 
         match self.asm.ph_mode {
@@ -369,8 +369,7 @@ impl FastpathWorker {
                 // TODO: policy enforcement
 
                 ttl_expired = decrement_ttl(&mut pkt);
-                
-                
+
                 egress_link_id = pep.next_hop.0;
                 egress_stream_id = pep.next_hop.1;
             }
@@ -847,27 +846,27 @@ fn decrement_ttl(pkt: &mut Packet) -> bool {
     match pkt.metadata().get_l3_type() {
         L3Type::Ipv4 => {
             let body = pkt.body_mut();
-            
+
             let header_bytes = &mut body[..size_of::<IPv4Header>()];
             let ipv4_header = IPv4Header::mut_from_bytes(header_bytes).unwrap();
             ipv4_header.ttl -= 1;
             match ipv4_header.ttl {
                 0 => true,
-                _ => false
+                _ => false,
             }
-        },
+        }
         L3Type::Ipv6 => {
             let body = pkt.body_mut();
-            
+
             let header_bytes = &mut body[..size_of::<IPv6Header>()];
             let ipv6_header = IPv6Header::mut_from_bytes(header_bytes).unwrap();
             ipv6_header.hop_limit -= 1;
             match ipv6_header.hop_limit {
                 0 => true,
-                _ => false
+                _ => false,
             }
-        },
-        _ => false
+        }
+        _ => false,
     }
 }
 
@@ -946,7 +945,7 @@ mod test {
 
         pkt.metadata_mut().set_l3_type(L3Type::Ipv4);
         let body = pkt.body_mut();
-            
+
         let header_bytes = &mut body[..size_of::<IPv4Header>()];
         let ipv4_header = IPv4Header::mut_from_bytes(header_bytes).unwrap();
         ipv4_header.ttl = 3;
@@ -973,11 +972,11 @@ mod test {
 
         pkt.metadata_mut().set_l3_type(L3Type::Ipv4);
         let body = pkt.body_mut();
-            
+
         let header_bytes = &mut body[..size_of::<IPv4Header>()];
         let ipv4_header = IPv4Header::mut_from_bytes(header_bytes).unwrap();
         ipv4_header.ttl = 1;
-        
+
         assert!(ipv4_header.ttl == 1);
 
         let result = decrement_ttl(&mut pkt);
@@ -1000,7 +999,7 @@ mod test {
 
         pkt.metadata_mut().set_l3_type(L3Type::Ipv6);
         let body = pkt.body_mut();
-            
+
         let header_bytes = &mut body[..size_of::<IPv6Header>()];
         let ipv6_header = IPv6Header::mut_from_bytes(header_bytes).unwrap();
         ipv6_header.hop_limit = 3;
@@ -1027,7 +1026,7 @@ mod test {
 
         pkt.metadata_mut().set_l3_type(L3Type::Ipv6);
         let body = pkt.body_mut();
-            
+
         let header_bytes = &mut body[..size_of::<IPv6Header>()];
         let ipv6_header = IPv6Header::mut_from_bytes(header_bytes).unwrap();
         ipv6_header.hop_limit = 1;
@@ -1043,6 +1042,4 @@ mod test {
         assert!(result == true);
         assert!(new_ipv6_header.hop_limit == 0);
     }
-
 }
-
