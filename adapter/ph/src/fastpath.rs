@@ -374,10 +374,10 @@ impl FastpathWorker {
                 egress_stream_id = pep.next_hop.1;
             }
         }
-
         if ttl_expired == true {
-            self.drop_and_count(pkt, CounterType::TtlExpired);
-            return;
+            // TODO uncomment when decrement is conditional
+            // self.drop_and_count(pkt, CounterType::TtlExpired);
+            // return;
         }
 
         if egress_link_id == zpr::LOCAL_ACTOR_LINK_ID {
@@ -841,6 +841,7 @@ fn set_flowinfo(substrate_addr: &mut zpr::SubstrateAddr, flowinfo: u32) {
     }
 }
 
+/// Decrement the ttl of a ZDP packet, if the ZDP packet is an IP packet
 fn decrement_ttl(pkt: &mut Packet) -> bool {
     // decrement TTL
     match pkt.metadata().get_l3_type() {
@@ -849,7 +850,10 @@ fn decrement_ttl(pkt: &mut Packet) -> bool {
 
             let header_bytes = &mut body[..size_of::<IPv4Header>()];
             let ipv4_header = IPv4Header::mut_from_bytes(header_bytes).unwrap();
-            ipv4_header.ttl -= 1;
+            // TODO remove when conditional decrement
+            if ipv4_header.ttl != 0 {
+                ipv4_header.ttl -= 1;
+            }
             match ipv4_header.ttl {
                 0 => true,
                 _ => false,
@@ -860,7 +864,10 @@ fn decrement_ttl(pkt: &mut Packet) -> bool {
 
             let header_bytes = &mut body[..size_of::<IPv6Header>()];
             let ipv6_header = IPv6Header::mut_from_bytes(header_bytes).unwrap();
-            ipv6_header.hop_limit -= 1;
+            // TODO remove when conditional decrement
+            if ipv6_header.hop_limit != 0 {
+                ipv6_header.hop_limit -= 1;
+            }
             match ipv6_header.hop_limit {
                 0 => true,
                 _ => false,
