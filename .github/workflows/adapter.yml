@@ -110,7 +110,7 @@ jobs:
         echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
         go env -w GOPRIVATE="github.com/org-zpr/*"
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v5
       with:
         pattern: ph-*${{ matrix.os }}
         merge-multiple: true
@@ -170,7 +170,7 @@ jobs:
         echo "GIT_ASKPASS=$HOME/.git-askpass" >> "$GITHUB_ENV"
         go env -w GOPRIVATE="github.com/org-zpr/*"
 
-    - uses: actions/download-artifact@v4
+    - uses: actions/download-artifact@v5
       with:
         pattern: ph-*${{ matrix.os }}
         merge-multiple: true
