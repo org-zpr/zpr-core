@@ -519,13 +519,11 @@ mod tests {
         let pep1 = PftPep {
             next_hop: zpr::ForwardingEntry(link_id, 1),
             visa_id: visa1,
-            ttl_check: false,
         };
 
         let pep2 = PftPep {
             next_hop: zpr::ForwardingEntry(link_id, 2),
             visa_id: visa2,
-            ttl_check: false,
         };
 
         let peer_state = asm

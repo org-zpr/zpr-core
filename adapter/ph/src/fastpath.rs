@@ -262,6 +262,13 @@ impl FastpathWorker {
             }
         }
 
+        let ttl_expired = decrement_ttl(&mut pkt);
+        if ttl_expired == true {
+            error!(target: DATAPATH,"Packet dropped becuase TTL reached 0");
+            self.drop_and_count(pkt, CounterType::TtlExpired);
+            return;
+        }
+
         self.actor_output_post_classify(pkt, /* allow_bind_request */ true);
     }
 
@@ -344,8 +351,6 @@ impl FastpathWorker {
         let egress_link_id;
         let egress_stream_id;
 
-        let mut ttl_expired = false;
-
         match self.asm.ph_mode {
             PhMode::Adapter => {
                 egress_link_id = adapter_next_hop_link(pkt.metadata().ingress_link_id);
@@ -368,10 +373,6 @@ impl FastpathWorker {
 
                 // TODO: policy enforcement
 
-                if pep.ttl_check {
-                    ttl_expired = decrement_ttl(&mut pkt);
-                }
-
                 egress_link_id = pep.next_hop.0;
                 egress_stream_id = pep.next_hop.1;
             }
@@ -380,12 +381,6 @@ impl FastpathWorker {
         if egress_link_id == zpr::LOCAL_ACTOR_LINK_ID {
             self.actor_input(egress_stream_id, pkt);
         } else {
-            if ttl_expired == true {
-                error!(target: DATAPATH,"Packet dropped becuase TTL reached 0");
-                self.drop_and_count(pkt, CounterType::TtlExpired);
-                return;
-            }
-
             let per_flow_hdr = pkt.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
             per_flow_hdr.stream_id = egress_stream_id.into();
 

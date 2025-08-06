@@ -344,7 +344,6 @@ impl Assembly {
         let pep = forwarding_tables::PftPep {
             next_hop: zpr::ForwardingEntry(egress_link_id.get(), egress_tether_id),
             visa_id: visa_id,
-            ttl_check: egress_link_id.get() != zpr::LOCAL_ACTOR_LINK_ID,
         };
 
         let Some(ingress_peer_state) = self.peer_table.get(ingress_link_id.get()) else {

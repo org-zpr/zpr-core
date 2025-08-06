@@ -19,7 +19,6 @@ const PEER_FORWARDING_TABLE_SIZE: usize = 1 << 20; // 1 million
 pub struct PftPep {
     pub next_hop: ForwardingEntry,
     pub visa_id: VisaId,
-    pub ttl_check: bool,
 }
 
 pub struct PeerForwardingTable {
