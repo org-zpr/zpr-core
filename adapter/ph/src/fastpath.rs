@@ -379,6 +379,7 @@ impl FastpathWorker {
             self.actor_input(egress_stream_id, pkt);
         } else {
             if ttl_expired == true {
+                error!(target: DATAPATH,"Packet dropped becuase TTL reached 0");
                 self.drop_and_count(pkt, CounterType::TtlExpired);
                 return;
             }
