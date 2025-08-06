@@ -368,7 +368,9 @@ impl FastpathWorker {
 
                 // TODO: policy enforcement
 
-                ttl_expired = decrement_ttl(&mut pkt);
+                if pep.ttl_check {
+                    ttl_expired = decrement_ttl(&mut pkt);
+                }
 
                 egress_link_id = pep.next_hop.0;
                 egress_stream_id = pep.next_hop.1;
