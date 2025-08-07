@@ -8,7 +8,7 @@ use crate::assembly::{Assembly, PhMode};
 use crate::batch_io::BatchIoEngine;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
-use crate::counters::CounterType;
+use crate::counters::{Aggregate, CounterType, Counters};
 use crate::defs::Direction;
 use crate::km::{Codec, KmTransportSA};
 use crate::km_noise::NOISE_PADLEN;
@@ -69,6 +69,7 @@ pub struct FastpathWorker {
     pub worker_index: usize,
     pub asm: Arc<Assembly>,
     pub buffers: Vec<PacketBuffer>,
+    pub batch_counters: Counters,
 
     pub return_q: two_way_queue::ReturnQueue<PacketBuffer>,
     pub adapter_manager: AdapterManager,
@@ -86,12 +87,14 @@ impl FastpathWorker {
         let return_q = two_way_queue::ReturnQueue::new();
         let adapter_manager = asm.adapter_manager_factory.make(&return_q);
         let mgmt_dispatch = asm.mgmt_dispatch_factory.make(&return_q);
+        let batch_counters = Default::default();
 
         Self {
             config,
             worker_index,
             asm,
             buffers,
+            batch_counters,
 
             return_q,
             adapter_manager,
@@ -107,7 +110,7 @@ impl FastpathWorker {
         let reason = reason.into();
         debug!(target: DATAPATH, "dropping packet because {reason}");
         self.buffers.push(pkt.destroy());
-        self.asm.counters[reason].increment();
+        self.batch_counters[reason].increment();
     }
 
     pub fn get_fresh_packets(&mut self, n: usize, dest: &mut Vec<Packet>) -> usize {
@@ -166,7 +169,7 @@ impl FastpathWorker {
                 interface_addr,
                 pkt,
             ) {
-                Ok(()) => self.asm.counters[CounterType::DispatchedToMgmt].increment(),
+                Ok(()) => self.batch_counters[CounterType::DispatchedToMgmt].increment(),
                 Err(TryEnqueueError::Full(pkt)) => {
                     self.drop_and_count(pkt, CounterType::QueueBackpressure)
                 }
@@ -197,7 +200,7 @@ impl FastpathWorker {
             // (instead of this silly code to restore it?)
             *pkt.alloc_zeroed_header() = base_hdr;
             match self.mgmt_dispatch.try_dispatch_mgmt_packet_with_link(pkt) {
-                Ok(()) => self.asm.counters[CounterType::DispatchedToMgmt].increment(),
+                Ok(()) => self.batch_counters[CounterType::DispatchedToMgmt].increment(),
                 Err(TryEnqueueError::Full(pkt)) => {
                     self.drop_and_count(pkt, CounterType::QueueBackpressure)
                 }
@@ -224,7 +227,7 @@ impl FastpathWorker {
             self.worker_index,
         ) {
             if old_index != self.worker_index {
-                self.asm.counters[CounterType::ActorPacketsOutOfOrder].increment();
+                self.batch_counters[CounterType::ActorPacketsOutOfOrder].increment();
             }
         }
 
@@ -293,7 +296,7 @@ impl FastpathWorker {
 
                 // issue bind request
                 match self.adapter_manager.try_request_tether_id(pkt) {
-                    Ok(()) => self.asm.counters[CounterType::ActorSlowpath].increment(),
+                    Ok(()) => self.batch_counters[CounterType::ActorSlowpath].increment(),
                     Err(TryEnqueueError::Full(pkt)) => {
                         self.drop_and_count(pkt, CounterType::QueueBackpressure)
                     }
@@ -467,6 +470,11 @@ impl FastpathWorker {
 
     pub fn substrate_egress_packets_queued(&self) -> bool {
         !self.substrate_egress_q.is_empty()
+    }
+
+    pub fn aggregate(&mut self) {
+        self.asm.counters.aggregate(&self.batch_counters);
+        self.batch_counters.clear()
     }
 }
 
