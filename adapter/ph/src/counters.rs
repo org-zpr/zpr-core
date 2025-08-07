@@ -196,6 +196,28 @@ impl fmt::Display for CounterType {
     }
 }
 
+// pub trait Reset {
+//     fn reset(&mut self);
+// }
+
+pub trait Aggregate {
+    fn aggregate(&self, batch_counters: &Counters);
+}
+
+// impl Reset for Counters {
+//     fn reset(&mut self) {
+//         self.clear()
+//     }
+// }
+
+impl Aggregate for Counters {
+    fn aggregate(&self, batch_counters: &Counters) {
+        for (counter_type, count) in batch_counters.iter() {
+            self[counter_type].increase_by(count.get_count());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -257,5 +279,82 @@ mod tests {
         assert_eq!(counter.get_count(), 975467);
         counter.decrease_by(4543);
         assert_eq!(counter.get_count(), 970924);
+    }
+
+    #[test]
+    fn test_aggregate() {
+        let counters: Counters = Default::default();
+        assert_eq!(counters[CounterType::DroppedOversize].get_count(), 0);
+
+        let mut counters_batch: Counters = Default::default();
+        counters_batch[CounterType::DroppedOversize].increase_by(5);
+        assert_eq!(counters_batch[CounterType::DroppedOversize].get_count(), 5);
+        assert_eq!(counters[CounterType::DroppedOversize].get_count(), 0);
+
+        counters[CounterType::DroppedOversize].increment();
+        counters.aggregate(&counters_batch);
+        assert_eq!(counters[CounterType::DroppedOversize].get_count(), 6);
+        assert_eq!(counters_batch[CounterType::DroppedOversize].get_count(), 5);
+
+        counters_batch.clear();
+        assert_eq!(counters[CounterType::DroppedOversize].get_count(), 6);
+        assert_eq!(counters_batch[CounterType::DroppedOversize].get_count(), 0);
+    }
+
+    #[test]
+    fn test_aggregate_multiples() {
+        let counters: Counters = Default::default();
+        let mut counters_batch: Counters = Default::default();
+
+        counters[CounterType::InPacksRec].increase_by(2);
+        counters[CounterType::QueueBackpressure].increase_by(8);
+        counters[CounterType::DispatchedToMgmt].increase_by(75);
+        counters[CounterType::UnknownZpi].increase_by(4);
+        counters[CounterType::TtlExpired].increase_by(2);
+
+        assert_eq!(counters[CounterType::InPacksRec].get_count(), 2);
+        assert_eq!(counters[CounterType::QueueBackpressure].get_count(), 8);
+        assert_eq!(counters[CounterType::DispatchedToMgmt].get_count(), 75);
+        assert_eq!(counters[CounterType::UnknownZpi].get_count(), 4);
+        assert_eq!(counters[CounterType::TtlExpired].get_count(), 2);
+
+        counters_batch[CounterType::DroppedOversize].increase_by(28);
+        counters_batch[CounterType::QueueBackpressure].increase_by(12);
+        counters_batch[CounterType::DispatchedToMgmt].increase_by(65);
+        counters_batch[CounterType::UnknownPeer].increase_by(4);
+        counters_batch[CounterType::OtherError].increase_by(1);
+
+        assert_eq!(counters_batch[CounterType::DroppedOversize].get_count(), 28);
+        assert_eq!(
+            counters_batch[CounterType::QueueBackpressure].get_count(),
+            12
+        );
+        assert_eq!(
+            counters_batch[CounterType::DispatchedToMgmt].get_count(),
+            65
+        );
+        assert_eq!(counters_batch[CounterType::UnknownPeer].get_count(), 4);
+        assert_eq!(counters_batch[CounterType::OtherError].get_count(), 1);
+
+        counters.aggregate(&counters_batch);
+        counters_batch.clear();
+
+        assert_eq!(counters[CounterType::InPacksRec].get_count(), 2);
+        assert_eq!(counters[CounterType::QueueBackpressure].get_count(), 20);
+        assert_eq!(counters[CounterType::DispatchedToMgmt].get_count(), 140);
+        assert_eq!(counters[CounterType::UnknownZpi].get_count(), 4);
+        assert_eq!(counters[CounterType::TtlExpired].get_count(), 2);
+        assert_eq!(counters[CounterType::DroppedOversize].get_count(), 28);
+        assert_eq!(counters[CounterType::UnknownPeer].get_count(), 4);
+        assert_eq!(counters[CounterType::OtherError].get_count(), 1);
+
+        assert_eq!(counters_batch[CounterType::DroppedOversize].get_count(), 0);
+        assert_eq!(
+            counters_batch[CounterType::QueueBackpressure].get_count(),
+            0
+        );
+        assert_eq!(counters_batch[CounterType::DispatchedToMgmt].get_count(), 0);
+        assert_eq!(counters_batch[CounterType::UnknownPeer].get_count(), 0);
+        assert_eq!(counters_batch[CounterType::OtherError].get_count(), 0);
     }
 }
