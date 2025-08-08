@@ -8,7 +8,7 @@ use crate::assembly::{Assembly, PhMode};
 use crate::batch_io::BatchIoEngine;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
-use crate::counters::{Aggregate, CounterType, Counters};
+use crate::counters::{Aggregate, BatchCounters, CounterType, Counters, Increment};
 use crate::defs::Direction;
 use crate::km::{Codec, KmTransportSA};
 use crate::km_noise::NOISE_PADLEN;
@@ -69,7 +69,7 @@ pub struct FastpathWorker {
     pub worker_index: usize,
     pub asm: Arc<Assembly>,
     pub buffers: Vec<PacketBuffer>,
-    pub batch_counters: Counters,
+    pub batch_counters: BatchCounters,
 
     pub return_q: two_way_queue::ReturnQueue<PacketBuffer>,
     pub adapter_manager: AdapterManager,
@@ -110,7 +110,7 @@ impl FastpathWorker {
         let reason = reason.into();
         debug!(target: DATAPATH, "dropping packet because {reason}");
         self.buffers.push(pkt.destroy());
-        self.batch_counters[reason].increment();
+        self.batch_counters.increment(reason);
     }
 
     pub fn get_fresh_packets(&mut self, n: usize, dest: &mut Vec<Packet>) -> usize {
@@ -169,7 +169,7 @@ impl FastpathWorker {
                 interface_addr,
                 pkt,
             ) {
-                Ok(()) => self.batch_counters[CounterType::DispatchedToMgmt].increment(),
+                Ok(()) => self.batch_counters.increment(CounterType::DispatchedToMgmt),
                 Err(TryEnqueueError::Full(pkt)) => {
                     self.drop_and_count(pkt, CounterType::QueueBackpressure)
                 }
@@ -200,7 +200,7 @@ impl FastpathWorker {
             // (instead of this silly code to restore it?)
             *pkt.alloc_zeroed_header() = base_hdr;
             match self.mgmt_dispatch.try_dispatch_mgmt_packet_with_link(pkt) {
-                Ok(()) => self.batch_counters[CounterType::DispatchedToMgmt].increment(),
+                Ok(()) => self.batch_counters.increment(CounterType::DispatchedToMgmt),
                 Err(TryEnqueueError::Full(pkt)) => {
                     self.drop_and_count(pkt, CounterType::QueueBackpressure)
                 }
@@ -227,7 +227,8 @@ impl FastpathWorker {
             self.worker_index,
         ) {
             if old_index != self.worker_index {
-                self.batch_counters[CounterType::ActorPacketsOutOfOrder].increment();
+                self.batch_counters
+                    .increment(CounterType::ActorPacketsOutOfOrder);
             }
         }
 
@@ -296,7 +297,7 @@ impl FastpathWorker {
 
                 // issue bind request
                 match self.adapter_manager.try_request_tether_id(pkt) {
-                    Ok(()) => self.batch_counters[CounterType::ActorSlowpath].increment(),
+                    Ok(()) => self.batch_counters.increment(CounterType::ActorSlowpath),
                     Err(TryEnqueueError::Full(pkt)) => {
                         self.drop_and_count(pkt, CounterType::QueueBackpressure)
                     }

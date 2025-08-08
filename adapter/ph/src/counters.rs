@@ -1,11 +1,15 @@
 //! Atomic performance counters.
 
 use enum_map::{Enum, EnumMap};
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Array of the system's performance counters.
 pub type Counters = EnumMap<CounterType, Counter>;
+
+/// Hash map to do batch counting in the fastpath
+pub type BatchCounters = HashMap<CounterType, Counter>;
 
 /// Implement counter type. Uses Atomic values, ensuring saftey for values in
 /// multi-thread environment.
@@ -58,7 +62,7 @@ impl Default for Counter {
 
 /// Allows for easy access to name of each counter as well as index in
 /// counters array
-#[derive(Debug, Enum, Copy, Clone)]
+#[derive(Debug, Enum, Copy, Clone, Eq, Hash, PartialEq)]
 pub enum CounterType {
     InPacksRec,
     InPacksDrop,
@@ -196,25 +200,51 @@ impl fmt::Display for CounterType {
     }
 }
 
-// pub trait Reset {
-//     fn reset(&mut self);
-// }
-
 pub trait Aggregate {
-    fn aggregate(&self, batch_counters: &Counters);
+    fn aggregate(&self, batch_counters: &BatchCounters);
 }
 
-// impl Reset for Counters {
-//     fn reset(&mut self) {
-//         self.clear()
-//     }
-// }
-
 impl Aggregate for Counters {
-    fn aggregate(&self, batch_counters: &Counters) {
+    fn aggregate(&self, batch_counters: &BatchCounters) {
         for (counter_type, count) in batch_counters.iter() {
-            self[counter_type].increase_by(count.get_count());
+            self[*counter_type].increase_by(count.get_count());
         }
+    }
+}
+
+pub trait Increment {
+    fn increment(&mut self, reason: CounterType);
+}
+
+pub trait IncreaseBy {
+    fn increase_by(&mut self, reason: CounterType, amount: u64);
+}
+
+impl Increment for BatchCounters {
+    fn increment(&mut self, reason: CounterType) {
+        let curr_val = self.get(&reason);
+        let new_val = Counter::new();
+        match curr_val {
+            Some(count) => {
+                new_val.set(count.get_count() + 1);
+            }
+            None => new_val.set(1),
+        };
+        self.insert(reason, new_val);
+    }
+}
+
+impl IncreaseBy for BatchCounters {
+    fn increase_by(&mut self, reason: CounterType, amount: u64) {
+        let curr_val = self.get(&reason);
+        let new_val = Counter::new();
+        match curr_val {
+            Some(count) => {
+                new_val.set(count.get_count() + amount);
+            }
+            None => new_val.set(amount),
+        };
+        self.insert(reason, new_val);
     }
 }
 
@@ -282,29 +312,47 @@ mod tests {
     }
 
     #[test]
-    fn test_aggregate() {
+    fn test_aggregate_increment() {
         let counters: Counters = Default::default();
         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 0);
 
-        let mut counters_batch: Counters = Default::default();
-        counters_batch[CounterType::DroppedOversize].increase_by(5);
-        assert_eq!(counters_batch[CounterType::DroppedOversize].get_count(), 5);
+        let mut counters_batch: BatchCounters = Default::default();
+        counters_batch.increment(CounterType::DroppedOversize);
+        assert_eq!(counters_batch[&CounterType::DroppedOversize].get_count(), 1);
+        assert_eq!(counters[CounterType::DroppedOversize].get_count(), 0);
+
+        counters[CounterType::DroppedOversize].increment();
+        counters.aggregate(&counters_batch);
+        assert_eq!(counters[CounterType::DroppedOversize].get_count(), 2);
+        assert_eq!(counters_batch[&CounterType::DroppedOversize].get_count(), 1);
+
+        counters_batch.clear();
+        assert_eq!(counters[CounterType::DroppedOversize].get_count(), 2);
+    }
+
+    #[test]
+    fn test_aggregate_increase_by() {
+        let counters: Counters = Default::default();
+        assert_eq!(counters[CounterType::DroppedOversize].get_count(), 0);
+
+        let mut counters_batch: BatchCounters = Default::default();
+        counters_batch.increase_by(CounterType::DroppedOversize, 5);
+        assert_eq!(counters_batch[&CounterType::DroppedOversize].get_count(), 5);
         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 0);
 
         counters[CounterType::DroppedOversize].increment();
         counters.aggregate(&counters_batch);
         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 6);
-        assert_eq!(counters_batch[CounterType::DroppedOversize].get_count(), 5);
+        assert_eq!(counters_batch[&CounterType::DroppedOversize].get_count(), 5);
 
         counters_batch.clear();
         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 6);
-        assert_eq!(counters_batch[CounterType::DroppedOversize].get_count(), 0);
     }
 
     #[test]
     fn test_aggregate_multiples() {
         let counters: Counters = Default::default();
-        let mut counters_batch: Counters = Default::default();
+        let mut counters_batch: BatchCounters = Default::default();
 
         counters[CounterType::InPacksRec].increase_by(2);
         counters[CounterType::QueueBackpressure].increase_by(8);
@@ -318,23 +366,26 @@ mod tests {
         assert_eq!(counters[CounterType::UnknownZpi].get_count(), 4);
         assert_eq!(counters[CounterType::TtlExpired].get_count(), 2);
 
-        counters_batch[CounterType::DroppedOversize].increase_by(28);
-        counters_batch[CounterType::QueueBackpressure].increase_by(12);
-        counters_batch[CounterType::DispatchedToMgmt].increase_by(65);
-        counters_batch[CounterType::UnknownPeer].increase_by(4);
-        counters_batch[CounterType::OtherError].increase_by(1);
+        counters_batch.increase_by(CounterType::DroppedOversize, 28);
+        counters_batch.increase_by(CounterType::QueueBackpressure, 12);
+        counters_batch.increase_by(CounterType::DispatchedToMgmt, 65);
+        counters_batch.increase_by(CounterType::UnknownPeer, 4);
+        counters_batch.increase_by(CounterType::OtherError, 1);
 
-        assert_eq!(counters_batch[CounterType::DroppedOversize].get_count(), 28);
         assert_eq!(
-            counters_batch[CounterType::QueueBackpressure].get_count(),
+            counters_batch[&CounterType::DroppedOversize].get_count(),
+            28
+        );
+        assert_eq!(
+            counters_batch[&CounterType::QueueBackpressure].get_count(),
             12
         );
         assert_eq!(
-            counters_batch[CounterType::DispatchedToMgmt].get_count(),
+            counters_batch[&CounterType::DispatchedToMgmt].get_count(),
             65
         );
-        assert_eq!(counters_batch[CounterType::UnknownPeer].get_count(), 4);
-        assert_eq!(counters_batch[CounterType::OtherError].get_count(), 1);
+        assert_eq!(counters_batch[&CounterType::UnknownPeer].get_count(), 4);
+        assert_eq!(counters_batch[&CounterType::OtherError].get_count(), 1);
 
         counters.aggregate(&counters_batch);
         counters_batch.clear();
@@ -347,14 +398,5 @@ mod tests {
         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 28);
         assert_eq!(counters[CounterType::UnknownPeer].get_count(), 4);
         assert_eq!(counters[CounterType::OtherError].get_count(), 1);
-
-        assert_eq!(counters_batch[CounterType::DroppedOversize].get_count(), 0);
-        assert_eq!(
-            counters_batch[CounterType::QueueBackpressure].get_count(),
-            0
-        );
-        assert_eq!(counters_batch[CounterType::DispatchedToMgmt].get_count(), 0);
-        assert_eq!(counters_batch[CounterType::UnknownPeer].get_count(), 0);
-        assert_eq!(counters_batch[CounterType::OtherError].get_count(), 0);
     }
 }
