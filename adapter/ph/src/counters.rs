@@ -216,6 +216,7 @@ pub trait Increment {
     fn increment(&mut self, reason: CounterType);
 }
 
+#[allow(dead_code)]
 pub trait IncreaseBy {
     fn increase_by(&mut self, reason: CounterType, amount: u64);
 }

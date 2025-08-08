@@ -8,7 +8,7 @@ use crate::assembly::{Assembly, PhMode};
 use crate::batch_io::BatchIoEngine;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
-use crate::counters::{Aggregate, BatchCounters, CounterType, Counters, Increment};
+use crate::counters::{Aggregate, BatchCounters, CounterType, Increment};
 use crate::defs::Direction;
 use crate::km::{Codec, KmTransportSA};
 use crate::km_noise::NOISE_PADLEN;
