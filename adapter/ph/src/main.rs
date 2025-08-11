@@ -82,6 +82,7 @@ use fastpath::FastpathWorkerConfig;
 use flow_control::FlowControl;
 use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
+use libnode::claims;
 use logging::targets::STARTUP;
 use net_defs::SocketAddrExt;
 use pki::load_noise_public_key;
@@ -231,11 +232,20 @@ fn main() -> ExitCode {
     // open TUN devices and actor requeue sockets
     //
 
-    // HACK: If we are using a new TUN (requirement on MAC I think), we will set the address.
-    let tun_addr = if !config.zpr_addr.is_empty() && config.tun_if.is_none() {
-        Some(config.zpr_addr[0].clone())
+    // If a zpr_addr is supplied we use it on the TUN.  Otherwise we hand the TUN create code a
+    // local address which we never use.
+    // TODO: Can we create a TUN with no address on it?
+
+    // TODO: Currently on linux we cannot configure a TUN interface with an IPv6 address.
+    // So if you set tun_if in the config we assume TUN is there and has a static ZPR address.
+    let tun_addr = if !config.zpr_addr.is_empty() {
+        if config.tun_if.is_none() {
+            Some(config.zpr_addr[0].clone())
+        } else {
+            None
+        }
     } else {
-        None
+        Some(zpr::ZPR_TEMP_LOCAL_ADDRESS.into())
     };
 
     let tun_devs: Vec<_> = match ZprTun::new_mq(
@@ -249,7 +259,10 @@ fn main() -> ExitCode {
         }
     };
     let tun_ctl = Box::new(tun_ctl::TunCtlImpl::new(tun_devs[0].clone()));
-    tun_ctl.set_carrier(false).unwrap();
+
+    // Node must be set ON (adapter will be turned on as part of finishing hello)
+    // TODO: There is more subtlety here, see issue ( https://github.com/org-zpr/zpr-core/issues/937 )
+    tun_ctl.set_carrier(ph_mode == PhMode::Node).unwrap();
 
     let mut actor_requeue_inqs = Vec::new();
     let mut actor_requeue_outqs = Vec::new();
@@ -338,6 +351,26 @@ fn main() -> ExitCode {
                 config.self_addr.set_scoped_ip(addr);
                 info!(target: STARTUP, "assigned substrate address {addr}");
 
+                // On Linux, dropping the connection (below) also drops the bind,
+                // so open a temp socket here to hold ownership of the local port.
+                #[cfg(target_os = "linux")]
+                let temp_socket;
+                #[cfg(target_os = "linux")]
+                {
+                    temp_socket = socket2::Socket::new(
+                        socket2::Domain::for_address(config.self_addr),
+                        socket2::Type::DGRAM,
+                        None,
+                    )
+                    .unwrap();
+
+                    temp_socket.set_reuse_port(true).unwrap();
+
+                    temp_socket
+                        .bind(&socket2::SockAddr::from(config.self_addr))
+                        .unwrap();
+                }
+
                 // Now drop the connection.  We will still specify it manually
                 // for each packet sent (and it's an error to do both).
                 match socket.connect(&socket2::SockAddr::new_unspec()) {
@@ -345,6 +378,21 @@ fn main() -> ExitCode {
                     Err(err) if err.raw_os_error() == Some(libc::EAFNOSUPPORT) => (),
                     res => res.expect("unable to disconnect socket"),
                 }
+
+                // Disconnecting above weirdly also drops the local-address binding!
+                // (Possible Linux bug?)  So now we need to re-bind.
+                // Enable on Linux only, because this does not seem to be needed
+                // and also does not work on macOS.
+                #[cfg(target_os = "linux")]
+                socket
+                    .bind(&socket2::SockAddr::from(config.self_addr))
+                    .expect(&format!(
+                        "unable to re-bind to self_addr ({})",
+                        config.self_addr
+                    ));
+
+                // Now the temp socket will go out of scope and close;
+                // we've re-bound no longer need it.
             }
         }
 
@@ -393,7 +441,27 @@ fn main() -> ExitCode {
             .expect("unable to determine node name: cannot parse CN");
         info!(target: STARTUP, "node CN is \"{node_name}\"");
 
-        let node_actor = libnode::vsconn::new_node_actor(config.zpr_addr[0], &Default::default());
+        // For the purposes of assigning AAA addresses, we take the bottom 24 bits of the nodes
+        // ZPR address as it's ID.
+        let node_id = match node_zpr_addr {
+            IpAddr::V4(addr) => u32::from_be_bytes(addr.octets()) & 0x00FFFFFF,
+            IpAddr::V6(addr) => {
+                u32::from_be_bytes(addr.octets()[12..16].try_into().unwrap()) & 0x00FFFFFF
+            }
+        };
+        let aaa_pool = AddressPool::new(node_id);
+        info!(target: STARTUP, "node ID is {node_id:#010x}, AAA net is {}", aaa_pool.get_prefix());
+
+        let mut node_actor =
+            libnode::vsconn::new_node_actor(config.zpr_addr[0], &Default::default());
+
+        node_actor
+            .attrs
+            .as_mut()
+            .unwrap()
+            .insert(claims::KATTR_AAA_NET.into(), aaa_pool.get_prefix());
+
+        maybe_aaa_pool = Some(aaa_pool);
 
         let (vs_inq, vs_outq_inner) = mpsc::channel(topology_config.vs_queue_size);
         vs_outq = Some(vs_outq_inner);
@@ -409,17 +477,6 @@ fn main() -> ExitCode {
             )
             .expect("error launching Visa Service connection manager"),
         );
-
-        // For the purposes of assigning AAA addresses, we take the bottom 24 bits of the nodes
-        // ZPR address as it's ID.
-        let node_id = match node_zpr_addr {
-            IpAddr::V4(addr) => u32::from_be_bytes(addr.octets()) & 0x00FFFFFF,
-            IpAddr::V6(addr) => {
-                u32::from_be_bytes(addr.octets()[12..16].try_into().unwrap()) & 0x00FFFFFF
-            }
-        };
-        info!(target: STARTUP, "node ID is {node_id:#010x}");
-        maybe_aaa_pool = Some(AddressPool::new(node_id));
     } else {
         vsconn = None;
         vs_outq = None;
@@ -432,7 +489,7 @@ fn main() -> ExitCode {
     let asm = Arc::new(Assembly {
         ph_mode,
         topology_config,
-        local_zpr_addresses: config.zpr_addr,
+        local_zpr_addresses: rcu::RcuBox::new(config.zpr_addr),
         mgmt_substrate_egress: MgmtSubstrateEgress::new(mgmt_substrate_inq),
         actor_output_requeue: ActorOutputRequeue::new(actor_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
@@ -590,7 +647,7 @@ fn main() -> ExitCode {
         let (vss_inq, vss_outq) = mpsc::channel(asm.topology_config.vss_queue_size);
 
         let vss_addr =
-            std::net::SocketAddr::new(asm.local_zpr_addresses[0], libnode::vss::DEFAULT_VSS_PORT);
+            std::net::SocketAddr::new(asm.get_local_dock_addr(), libnode::vss::DEFAULT_VSS_PORT);
 
         js.spawn_blocking(move || libnode::vss::start_vss_server(vss_inq, vss_addr));
 

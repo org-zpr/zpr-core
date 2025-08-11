@@ -1,5 +1,6 @@
 use crate::sys::ZprTun;
 use std::io::Result;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 /// This interface provides shared access to the TUN device for controlling
@@ -10,6 +11,12 @@ pub trait TunCtl: Sync {
     /// (I.e. whether we are passing packets.)  This is reflected on the
     /// interface itself and is used by the kernel to make routing decisions.
     fn set_carrier(&self, carrier: bool) -> Result<()>;
+
+    /// Adds an IP address of the TUN device.
+    fn add_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()>;
+
+    /// Clear an IP address from the TUN device.  Does not error if address is not set to begin with.
+    fn clear_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()>;
 }
 
 /// Canonical implementation of the `TunCtl` interface, just a thin wrapper
@@ -27,5 +34,11 @@ impl TunCtlImpl {
 impl TunCtl for TunCtlImpl {
     fn set_carrier(&self, carrier: bool) -> Result<()> {
         self.tun.set_carrier(carrier)
+    }
+    fn add_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()> {
+        self.tun.add_address(addr, prefix_len)
+    }
+    fn clear_address(&self, addr: IpAddr, prefix_len: u8) -> Result<()> {
+        self.tun.clear_address(addr, prefix_len)
     }
 }

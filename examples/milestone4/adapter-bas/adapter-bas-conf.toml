@@ -3,10 +3,6 @@ name = "bas"
 ca_file = "auth-ca.crt"
 certificate_file = "adapter-bas-noise.crt"
 private_key_file = "adapter-bas-noise.key"
-zpr_addr = [ "fd5a:5052:1::10" ] 
-
-# use `sudo ./mktun.sh` to set this up
-tun_if = "tun9"
 
 
 [adapter]

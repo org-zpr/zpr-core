@@ -87,7 +87,7 @@ pub struct CommonArgs {
     #[arg(long, short = 'i', value_name = "DEVICE")]
     pub tun_if: Option<String>,
 
-    /// ZPR address (no port) of the adapter (must match your TUN address)
+    /// ZPR address (no port) of the adapter (must match your TUN address if it has one)
     #[arg(long, short = 'z')]
     pub zpr_addr: Option<Vec<IpAddr>>,
 

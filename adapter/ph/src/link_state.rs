@@ -140,9 +140,9 @@ pub enum LinkState {
 pub enum LinkEvent {
     Start,
     KeyingDone,
-    ReceivedHelloRequest(IpAddress), // Actors ZPR address - TODO: implement AAAs
-    AssignedAAA(IpAddress),          // Assigned AAA address for this link
-    ReceivedHelloResponse(ResponseCode, Option<Vec<SocketAddr>>), // (response code, ASA addresses)
+    ReceivedHelloRequest,
+    AssignedAAA(IpAddress), // Assigned AAA address for this link
+    ReceivedHelloResponse(ResponseCode, IpAddress, Option<Vec<SocketAddr>>), // (response code, AAA address, ASA addresses)
     SentHelloResponse,
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
@@ -158,7 +158,7 @@ pub enum LinkEvent {
     AuthenticationFailure,                        // From an authentication service
 
     ReceivedEchoResponse { sequence_number: u16 },
-    ReceivedAuthorizeResponse, // from visa service
+    ReceivedAuthorizeResponse(IpAddress), // from visa service
     ReceivedKeepAliveResponse,
     ReceivedTerminateRequest(TerminateReason),
     ReceivedTerminateResponse(ResponseCode),
@@ -225,7 +225,10 @@ pub struct LinkStateMachine {
     state: LinkState,
     status: LinkStatus,
     silent: bool,
+
+    /// On a node, actual assigned actor addresses to remote PEER.
     actor_addresses: Vec<IpAddress>,
+
     last_state_change: std::time::Instant,
     /// used to prevent A/B/A errors with timeouts
     logical_clock: u64,
@@ -314,7 +317,7 @@ impl LinkStateMachine {
 const LINK_STATE_EVENT_QUEUE_SIZE: usize = 16;
 
 pub struct LinkStateWrapper {
-    id: LinkId, // set at constructor, never changes.
+    pub id: LinkId, // set at constructor, never changes.
     link_type: LinkType,
     locked_fsm: Mutex<LinkStateMachine>,
     events: broadcast::Sender<LinkEvent>,
@@ -371,12 +374,25 @@ impl LinkStateWrapper {
 
     /// Takes lock, returns copy of addresses.
     /// Will hang if you already have fsm lock!
+    ///
+    /// This returns the address assigned to the remote peer on this link.
+    /// Designed to be used in a NODE context.  Also includes the AAA address (if present)
+    ///
     pub fn get_actor_addresses(&self) -> Vec<IpAddress> {
-        let locked_fsm = self.locked_fsm.lock().unwrap();
-        locked_fsm.actor_addresses.clone()
+        let mut addr_list = Vec::new();
+
+        addr_list.extend(self.locked_fsm.lock().unwrap().actor_addresses.iter());
+
+        match self.locked_data.lock().unwrap().aaa_address.as_ref() {
+            Some(aaa_addr) => addr_list.push(aaa_addr.clone()),
+            None => (),
+        }
+
+        addr_list
     }
 
     /// Tell the VS that this actor has disconnected.
+    /// Used in a NODE context only.
     fn deregister_actor_addresses(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
         let mut join_set = tokio::task::JoinSet::new();
         let vs_id = asm
@@ -397,7 +413,12 @@ impl LinkStateWrapper {
         asm: &Arc<Assembly>,
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
-        debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id);
+        match event {
+            LinkEvent::ReceivedEchoResponse { sequence_number: _ } => {
+                trace!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id)
+            }
+            _ => debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id),
+        }
 
         // Enqueue a copy of this event with any concurrent listening state machines.
         // If there are none, avoid trying to do so we don't make a needless copy.
@@ -414,12 +435,10 @@ impl LinkStateWrapper {
         match event {
             LinkEvent::Start => self.process_start(asm),
             LinkEvent::KeyingDone => self.process_keying_done(asm),
-            LinkEvent::ReceivedHelloRequest(peer_zpr_addr) => {
-                self.process_hello_request(asm, peer_zpr_addr)
-            }
+            LinkEvent::ReceivedHelloRequest => self.process_hello_request(asm),
             LinkEvent::AssignedAAA(addr) => self.process_assigned_aaa(asm, addr),
-            LinkEvent::ReceivedHelloResponse(code, maybe_asa_addrs) => {
-                self.process_hello_response(asm, code, maybe_asa_addrs)
+            LinkEvent::ReceivedHelloResponse(code, aaa_addr, maybe_asa_addrs) => {
+                self.process_hello_response(asm, code, aaa_addr, maybe_asa_addrs)
             }
 
             LinkEvent::SentHelloResponse => self.process_sent_hello_response(asm),
@@ -446,7 +465,9 @@ impl LinkStateWrapper {
                 self.process_authentication_success(asm, blob)
             }
 
-            LinkEvent::ReceivedAuthorizeResponse => self.process_authorize_response(asm),
+            LinkEvent::ReceivedAuthorizeResponse(zpr_addr) => {
+                self.process_authorize_response(asm, zpr_addr)
+            }
 
             LinkEvent::ReceivedTerminateRequest(code) => self.process_terminate_request(asm, code),
             LinkEvent::ReceivedTerminateResponse(_) => self.process_terminate_response(asm),
@@ -464,10 +485,17 @@ impl LinkStateWrapper {
                 if listened_for {
                     Ok(())
                 } else {
-                    Err(LinkStateError::UnexpectedTransition(
-                        self.locked_fsm.lock().unwrap().state,
-                        ev.into(),
-                    ))
+                    // TODO: See issue ( https://github.com/org-zpr/zpr-core/issues/930 ).
+                    // In practice this error happens fairly regularly.
+                    if matches!(ev, LinkEvent::ReceivedEchoResponse { .. }) {
+                        warn!(target: LINK_STATE, "received echo-response with listened_for=false, continuing...");
+                        Ok(())
+                    } else {
+                        Err(LinkStateError::UnexpectedTransition(
+                            self.locked_fsm.lock().unwrap().state,
+                            ev.into(),
+                        ))
+                    }
                 }
             }
         }
@@ -575,8 +603,7 @@ impl LinkStateWrapper {
 
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            let _seqnum =
-                mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
+            let _seqnum = mgmt::requests::send_hello_request(asm, self.id);
             self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
             debug!(
                 target: LINK_STATE,
@@ -590,11 +617,7 @@ impl LinkStateWrapper {
     /// Update link state based on received hello request
     /// Transitions from Helloing to Registering Actor Address
     /// Does not generate any packets
-    fn process_hello_request(
-        &self,
-        _asm: &Arc<Assembly>,
-        peer_zpr_addr: IpAddress,
-    ) -> Result<(), LinkStateError> {
+    fn process_hello_request(&self, _asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         let link_id = self.id;
         match (self.link_type, locked_fsm.state) {
@@ -604,11 +627,9 @@ impl LinkStateWrapper {
                 Ok(())
             }
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
-                locked_fsm.actor_addresses.push(peer_zpr_addr);
                 debug!(
                     target: LINK_STATE,
-                    "Link {link_id} peer is using ZPR addr {}",
-                    peer_zpr_addr
+                    "Link {link_id} received hello request",
                 );
                 // State transition processing happens in [LinkStateWrapper::process_sent_hello_response]
                 Ok(())
@@ -681,6 +702,7 @@ impl LinkStateWrapper {
         &self,
         asm: &Arc<Assembly>,
         code: ResponseCode,
+        aaa_addr: IpAddress,
         maybe_asa_addrs: Option<Vec<SocketAddr>>,
     ) -> Result<(), LinkStateError> {
         if code == ResponseCode::Other {
@@ -695,8 +717,14 @@ impl LinkStateWrapper {
             (LinkType::AdapterToNode, LinkState::Helloing) => {
                 let mut link_data = self.locked_data.lock().unwrap();
                 link_data.asa_addresses = maybe_asa_addrs.clone();
+
+                // On the node side, the aaa_address link_data field is used to keep track of the
+                // AAA we handed out to the peer.  On the client-adapter side, we hold the AAA
+                // we got from the node in there.
+                link_data.aaa_address = Some(aaa_addr);
                 drop(link_data);
-                // The adatper is really waiting for an init-auth-request.
+
+                // The adapter is waiting for an init-auth-request.
                 locked_fsm.set_state(LinkState::WaitForInitAuth);
                 debug!(
                     target: LINK_STATE,
@@ -754,29 +782,29 @@ impl LinkStateWrapper {
             }
         }
 
-        if addrs.is_none() {
-            warn!(target: LINK_STATE, "Link {link_id} received acquire request with no addresses");
-            drop(locked_fsm);
-            return self.process_error_response(asm);
-        }
-        let addrs = addrs.unwrap();
+        // The client adapter may already be configured with an address. It will then
+        // be up to the visa service to decide if that is allowed.  If no address is
+        // passed here we expect the visa service to assign an address.
+        //
+        let requested_addr = match addrs {
+            Some(addr) => {
+                if addr.len() == 1 {
+                    addr[0]
+                } else if addr.is_empty() {
+                    IpAddress::UNSPECIFIED
+                } else {
+                    // If we have multiple addresses, we cannot handle that. (yet?)
+                    warn!(target: LINK_STATE, "Link {link_id} received acquire request with multiple addresses");
+                    drop(locked_fsm);
+                    return self.process_error_response(asm);
+                }
+            }
+            None => IpAddress::UNSPECIFIED,
+        };
 
-        // TODO: For now there can be at most one address.
-        if addrs.len() > 1 {
-            warn!(target: LINK_STATE, "Link {link_id} received acquire request with multiple addresses");
-            drop(locked_fsm);
-            return self.process_error_response(asm);
-        }
-        let requested_addr = addrs[0];
-
-        // We probably already know the address from hello.
-        // I'm assuming we won't be acquiring more ZPR addresses for this one peer so
-        // we will override the old one with this one.
-        locked_fsm.actor_addresses.clear();
-        locked_fsm.actor_addresses.push(requested_addr);
         debug!(
             target: LINK_STATE,
-            "Link {link_id} received acquire addr request for actor ({requested_addr})."
+            "Link {link_id} received acquire addr request for actor (requested_addr = {requested_addr})."
         );
 
         // A self-signed blob needs to be checked before we forward it on.
@@ -807,15 +835,16 @@ impl LinkStateWrapper {
             }
 
             Ok(None) => {
-                debug!(target: LINK_STATE, "skipping visa service authorize call, authorizing ourselves");
+                debug!(target: LINK_STATE, "skipping visa service authorize call, authorizing ourselves (requested_addr = {requested_addr})");
 
                 // Need to send a grant here anyway to "turn on" the adapter (and outselves)
                 // So pretend we are the visa service and handle our own authorization.
                 drop(locked_fsm);
 
-                if let Err(e) =
-                    asm.process_link_state_event(link_id, LinkEvent::ReceivedAuthorizeResponse)
-                {
+                if let Err(e) = asm.process_link_state_event(
+                    link_id,
+                    LinkEvent::ReceivedAuthorizeResponse(requested_addr),
+                ) {
                     error!(target: LINK_STATE, "Link {link_id} failed to process authorize response: {e}");
                 }
 
@@ -912,6 +941,11 @@ impl LinkStateWrapper {
                     self.initiate_close(asm, TerminateReason::Other)
                 }
             }
+            (LinkType::NodeToAdapter, LinkState::Active) => {
+                // Assume this is just a retransmit.
+                debug!(target: LINK_STATE, "Link {link_id} received unsolicited grant response while already in active, ignoring");
+                Ok(())
+            }
             (_, _) => Err(LinkStateError::InvalidOperation(
                 "Discarded unsolicited grant response".to_string(),
             )),
@@ -941,6 +975,44 @@ impl LinkStateWrapper {
                     Some(addrs) => {
                         // TODO: In future we will take addresses from here and configure TUN.
                         info!(target: LINK_STATE, "Link {link_id} granted ZPR addresses {:?}, becoming ACTIVE", addrs);
+
+                        let data = self.locked_data.lock().unwrap();
+                        if let Some(aaa_addr) = data.aaa_address {
+                            drop(data);
+                            // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
+                            match asm
+                                .tun_ctl
+                                .clear_address(aaa_addr.into(), zpr::ZPRNET_PREFIX_LEN)
+                            {
+                                Ok(()) => {}
+                                Err(e) => {
+                                    warn!(target: LINK_STATE, "Link {link_id} failed to clear AAA address: {e}");
+                                    // continue...
+                                }
+                            }
+                        } else {
+                            drop(data);
+                        }
+                        // I keep the aaa address around... TODO: should we clear it?
+
+                        if addrs.len() > 1 {
+                            warn!(target: LINK_STATE, "Link {link_id} multiple addresses in Grant ZPR Address not supported: using first one only");
+                        }
+
+                        // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
+                        if let Err(e) = asm
+                            .tun_ctl
+                            .add_address(addrs[0].into(), zpr::ZPRNET_PREFIX_LEN)
+                        {
+                            warn!(target: LINK_STATE, "Link {link_id} failed to set ZPR address: {e}");
+                            locked_fsm.set_state(LinkState::Error);
+                            drop(locked_fsm);
+                            return self.initiate_close(asm, TerminateReason::Other);
+                        }
+
+                        // Update the global view of our ZPR addresses.
+                        asm.set_local_zpr_addrs(addrs);
+
                         locked_fsm.set_state(LinkState::Active);
                         asm.tun_ctl.set_carrier(true).unwrap();
                         debug!(
@@ -959,6 +1031,11 @@ impl LinkStateWrapper {
                     }
                 }
             }
+            (LinkType::AdapterToNode, LinkState::Active) => {
+                // Assume this is just a retransmit.
+                debug!(target: LINK_STATE, "Link {link_id} received unsolicited Grant ZPR Address request while already in active, ignoring");
+                Ok(())
+            }
             (_, _) => Err(LinkStateError::InvalidOperation(
                 "Discarded unsolicited Grant Zpr Address request".to_string(),
             )),
@@ -968,11 +1045,22 @@ impl LinkStateWrapper {
     /// This is the event handler fro the return path from the visa service AUTHORIZE operation.
     /// This needs to trigger sending of the Grant Address message.
     ///
-    /// TODO: At some point this will need the ZPR address returned to it also.  For now we
-    /// use the address we saved in our state (from the original request).
+    /// This is happengin on a NODE.
     ///
-    fn process_authorize_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
+    /// This is only called for SUCCESSFUL responses (unsuccessful responses trigger a link error).
+    ///
+    /// Does not change state. Remains in [LinkState::RegisterAA].
+    ///
+    fn process_authorize_response(
+        &self,
+        asm: &Arc<Assembly>,
+        zpr_addr: IpAddress,
+    ) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
+
+        locked_fsm.actor_addresses.clear();
+        locked_fsm.actor_addresses.push(zpr_addr);
+        info!(target: LINK_STATE, "Link {} received authorize response with ZPR address {}", self.id, zpr_addr);
 
         match (self.link_type, locked_fsm.state) {
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {} // ok
@@ -988,7 +1076,7 @@ impl LinkStateWrapper {
 
         // Will call back via ReceivedGrantResponse event if successful.
         self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses);
-        self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+        self.set_timeout(asm, &mut locked_fsm, config::GRANT_REQUEST_RETRY_TIMER);
         Ok(())
     }
 
@@ -999,10 +1087,6 @@ impl LinkStateWrapper {
     ///
     /// If this is bootstrap and we are configured for bootstrap we can self-authenticate
     /// and send in an AcquireZprAddressRequest.
-    ///
-    /// TODO: If we are not configured for bootstrap then we need to kick off actor
-    /// authentication somehow.  FOR NOW in this case we just proceed, sending in a
-    /// "fake" address request.
     ///
     /// For now we must be in WaitForInitAuth to accept this message.
     /// We transition to RegisterAA if we successfully self-auth, otherwise we go to
@@ -1015,15 +1099,19 @@ impl LinkStateWrapper {
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
 
-        // Grab a copy of our ASA addresses.
-        let asa_addrs = self.locked_data.lock().unwrap().asa_addresses.clone();
+        // Grab a copy of our ASA, AAA addresses.
+        let data = self.locked_data.lock().unwrap();
+        let asa_addrs = data.asa_addresses.clone();
+        let aaa_addr = data.aaa_address.clone();
+        drop(data);
 
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
             // NOTE: This is not exactly right, in general we can get an InitAuth at any time, though we
             // may not want to act on it and sometimes may be a protocol error.
             (LinkType::AdapterToNode, LinkState::WaitForInitAuth) => {
-                debug!(target: LINK_STATE, "Link {link_id} received init auth.");
+                debug!(target: LINK_STATE, "Link {link_id} received init auth (bootstrap_supported: {}, bootstrap_configured: {})",
+                    bootstrap, asm.bsauth.is_some());
 
                 // If we can do bootstrap and it is allowed, then do that.
                 if bootstrap && asm.bsauth.is_some() {
@@ -1039,13 +1127,18 @@ impl LinkStateWrapper {
                             Ok(blobstr) => {
                                 // The send function below will invoke a state event callback.
                                 // We staty in RegisterAA state until we get a grant.
-                                self.send_acquire_zpr_address_request(asm, &blobstr);
+                                let requested_addrs = asm.get_local_zpr_addrs_std();
+                                self.send_acquire_zpr_address_request(
+                                    asm,
+                                    &requested_addrs,
+                                    &blobstr,
+                                );
                                 locked_fsm.set_state(LinkState::RegisterAA);
                                 locked_fsm.auth_blob = Some(blobstr);
                                 self.set_timeout(
                                     asm,
                                     &mut locked_fsm,
-                                    config::DEFAULT_REQUEST_RETRY_TIMER,
+                                    config::VS_GRANT_REQUEST_RETRY_TIMER,
                                 );
                             }
                             Err(e) => {
@@ -1062,15 +1155,50 @@ impl LinkStateWrapper {
                     locked_fsm.set_state(LinkState::RegisterAA);
                     info!(target: LINK_STATE, "Link {link_id} received init auth, time to talk to authentication service");
 
-                    // TODO: We get the ZPR address of the auth services from our node. What about the cert?
-                    if asm.rsauth.is_some() && asa_addrs.is_some() {
-                        drop(locked_fsm);
-                        self.do_https_authenticate(asm, asa_addrs.unwrap());
-                    } else {
-                        error!(target: LINK_STATE, "Link {link_id} no auth service configured");
+                    // In order to authenticate, we need an ASA address to talk to and an
+                    // AAA address to talk from.
+                    if aaa_addr.is_none() {
+                        error!(target: LINK_STATE, "Link {link_id} unable to perform auth: no AAA address configured");
                         locked_fsm.set_state(LinkState::Error);
                         drop(locked_fsm);
                         return self.initiate_close(asm, TerminateReason::Other);
+                    }
+                    if asa_addrs.is_none() {
+                        error!(target: LINK_STATE, "Link {link_id} unable to perform auth: no ASA address configured");
+                        locked_fsm.set_state(LinkState::Error);
+                        drop(locked_fsm);
+                        return self.initiate_close(asm, TerminateReason::Other);
+                    }
+                    if asm.rsauth.is_none() {
+                        error!(target: LINK_STATE, "Link {link_id} unable to perform auth: no RSA external auth service configured");
+                        locked_fsm.set_state(LinkState::Error);
+                        drop(locked_fsm);
+                        return self.initiate_close(asm, TerminateReason::Other);
+                    }
+                    // ELSE we are good to go!
+                    drop(locked_fsm);
+
+                    // If we have not configured our TUN interface with our AAA address or if the
+                    // TUN has the wrong address on it, we fix that up now.
+                    //
+                    // TODO: If we are re-authenticating would we need to use an AAA address? We would already
+                    //       have a ZPR address.
+                    //
+                    // TODO: We get the ZPR address of the auth services (ASA) from our node. What about the cert?
+                    //
+                    // TODO: deal with the potential i/o blocking here ( https://github.com/org-zpr/zpr-core/issues/938 )
+                    match asm
+                        .tun_ctl
+                        .add_address(aaa_addr.unwrap().into(), zpr::ZPRNET_PREFIX_LEN)
+                    {
+                        Ok(_) => {
+                            asm.tun_ctl.set_carrier(true).unwrap();
+                            self.do_https_authenticate(asm, asa_addrs.unwrap());
+                        }
+                        Err(e) => {
+                            error!(target: LINK_STATE, "Link {link_id} failed to configure TUN with AAA address: {e}");
+                            return self.initiate_close(asm, TerminateReason::Other);
+                        }
                     }
                 }
             }
@@ -1209,11 +1337,8 @@ impl LinkStateWrapper {
                 }
                 return;
             };
-
             let event = match rsauth.authenticate(service_addr, tls_cert).await {
                 Ok(blob) => LinkEvent::AuthenticationSuccess(blob),
-                // TODO: Handler of the event needs to do this
-                // self.send_acquire_zpr_address_request(asm, &blob.encode());
                 Err(e) => {
                     error!(target: LINK_STATE, "Link {link_id} failed to authenticate with auth service: {e:?}");
                     LinkEvent::AuthenticationFailure
@@ -1258,18 +1383,24 @@ impl LinkStateWrapper {
 
         info!(target: LINK_STATE, "Link {link_id}: authentication success, client_id={}", blob.client_id);
         let blobstr = blob.encode();
-        self.send_acquire_zpr_address_request(asm, &blobstr);
+        let requested_addrs = asm.get_local_zpr_addrs_std();
+        self.send_acquire_zpr_address_request(asm, &requested_addrs, &blobstr);
         locked_fsm.auth_blob = Some(blobstr);
-        self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+        self.set_timeout(asm, &mut locked_fsm, config::VS_AUTHENTICATION_TIMEOUT);
         Ok(())
     }
 
     /// Send Acquire message
-    fn send_acquire_zpr_address_request(&self, asm: &Arc<Assembly>, blob: &str) {
+    fn send_acquire_zpr_address_request(
+        &self,
+        asm: &Arc<Assembly>,
+        requesting_addrs: &[IpAddr],
+        blob: &str,
+    ) {
         mgmt::requests::send_acquire_zpr_address_request(
             asm,
             self.id,
-            &asm.local_zpr_addresses,
+            requesting_addrs,
             Some(blob.as_bytes()),
         );
     }
@@ -1302,6 +1433,7 @@ impl LinkStateWrapper {
             | (LinkType::NodeToAdapter, LinkState::WaitForInitAuth)
             | (LinkType::AdapterToNode, LinkState::Helloing) => {
                 locked_fsm.timeout_count += 1;
+                let retries = locked_fsm.timeout_count as u32;
 
                 if locked_fsm.timeout_count >= config::DEFAULT_REQUEST_RETRY_COUNT {
                     error!(target: LINK_STATE, "Link {} timed out in state {:?}", self.id, locked_fsm.state);
@@ -1309,8 +1441,15 @@ impl LinkStateWrapper {
                     return self.process_error_response(&asm);
                 }
 
-                warn!(target: LINK_STATE, "Link {} timed out in state {:?}, retransmitting", self.id, locked_fsm.state);
-                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+                warn!(target: LINK_STATE, "Link {} timed out in state {:?}, retransmitting (retry={retries})", self.id, locked_fsm.state);
+
+                // Note that different messages have different original timeouts and that information is
+                // lost by the time we get here.  Here I am just doing a pretty naive back off strategy.
+                self.set_timeout(
+                    asm,
+                    &mut locked_fsm,
+                    config::DEFAULT_REQUEST_RETRY_TIMER * retries,
+                );
                 self.retransmit(asm, &mut locked_fsm);
                 Ok(())
             }
@@ -1347,7 +1486,12 @@ impl LinkStateWrapper {
     ) {
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::RegisterAA) => {
-                self.send_acquire_zpr_address_request(asm, &locked_fsm.auth_blob.as_ref().unwrap())
+                let requested_addrs = asm.get_local_zpr_addrs_std();
+                self.send_acquire_zpr_address_request(
+                    asm,
+                    &requested_addrs,
+                    &locked_fsm.auth_blob.as_ref().unwrap(),
+                )
             }
 
             (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
@@ -1359,7 +1503,7 @@ impl LinkStateWrapper {
             }
 
             (LinkType::AdapterToNode, LinkState::Helloing) => {
-                mgmt::requests::send_hello_request(asm, self.id, &asm.local_zpr_addresses);
+                mgmt::requests::send_hello_request(asm, self.id);
             }
 
             // Programming error!
@@ -1697,11 +1841,14 @@ impl LinkStateWrapper {
                 } else {
                     link_data.echo_timeout += 1;
                     consecutive_misses += 1;
+                    debug!(target: LINK_STATE, "Link {link_id} did not receive echo response (timeouts {}, with {} consecutive)",
+                        link_data.echo_timeout, consecutive_misses);
                 }
 
                 drop(link_data);
 
                 if consecutive_misses >= config::DEFAULT_KEEP_ALIVE_RETRIES {
+                    error!(target: LINK_STATE, "Link {link_id} failed to respond to keep-alive messages ({} consecutive misses)", consecutive_misses);
                     if task_asm
                         .process_link_state_event(
                             link_id,

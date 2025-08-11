@@ -9,6 +9,9 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 /// Substrate Address
 pub type SubstrateAddr = std::net::SocketAddr;
 
+/// Default prefix length for local tun IPv6 ZPR addresses.
+pub const ZPRNET_PREFIX_LEN: u8 = 32;
+
 /// ZPR Parameter Index
 pub type Zpi = u8;
 
@@ -162,6 +165,7 @@ pub const VISA_SERVICE_DN: &[u8] = &dn_cn_der!(VISA_SERVICE_CN);
 // Well-known addresses.
 
 pub const ZPR_INTERNAL_NETWORK: Ipv6Addr = Ipv6Addr::new(0xfd5a, 0x5052, 0, 0, 0, 0, 0, 0);
+pub const ZPR_TEMP_LOCAL_ADDRESS: Ipv6Addr = Ipv6Addr::new(0xfc00, 0x5a, 0x50, 0x52, 0, 0, 0, 1);
 
 pub const DEFAULT_TETHER_PORT: u16 = 5000;
 pub const DEFAULT_LINK_PORT: u16 = 5001;

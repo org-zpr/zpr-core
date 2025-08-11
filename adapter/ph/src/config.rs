@@ -30,8 +30,18 @@ pub const DEFAULT_REQUEST_RETRY_COUNT: usize = 3;
 pub const DEFAULT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(1);
 pub const DEFAULT_TERMINATE_RESPONSE_TIMER: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// Slightly longer -- asking visa service to grant an address
+/// means it may have to do a lot of work to verify auth.
+pub const VS_GRANT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Grant requires reconfiguring TUN, so longer.
+pub const GRANT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// How long to wait for an actor to finish out of band authentication.
 pub const ACTOR_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// How long to wait when we expect the VS to have to talk to external auth services.
+pub const VS_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 pub const ANCILLARY_BUFFER_SIZE: usize = 128;
 
@@ -105,7 +115,7 @@ pub struct Config {
     /// Required for adapter - the node dock address on substrate.
     pub node_addr: Option<SocketAddr>,
 
-    /// Required for node and adapter - the local ZPR actor address(s).
+    /// Required for node, optional for adapter - the ZPR address (no port) of the adapter.
     pub zpr_addr: Vec<IpAddr>,
 
     /// Required for adapter - the path to the PEM file containing the nodes noise public key (not a certificate).
@@ -226,10 +236,12 @@ impl Config {
         } else {
             return Err("private_key_file or noise_private_key".arg_missing());
         }
-        if self.zpr_addr.is_empty() {
-            return Err("zpr_addr".arg_missing());
-        }
         match mode {
+            PhMode::Node => {
+                if self.zpr_addr.is_empty() {
+                    return Err("zpr_addr".arg_missing());
+                }
+            }
             PhMode::Adapter => {
                 if self.node_addr.is_none() {
                     return Err("node_addr".arg_missing());
@@ -242,9 +254,6 @@ impl Config {
                         &self.node_public_key_file.as_ref().unwrap(),
                     )?;
                 }
-            }
-            PhMode::Node => {
-                // nothing node specific to check
             }
         }
         Ok(())

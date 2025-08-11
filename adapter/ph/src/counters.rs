@@ -114,6 +114,8 @@ pub enum CounterType {
     VisaRequestDenied,
     VisaRequestError,
 
+    TtlExpired,
+
     #[cfg(debug_assertions)]
     ActorPacketsOutOfOrder,
 }
@@ -179,6 +181,8 @@ impl CounterType {
             Self::VisaRequestSuccess => "Visa Request Success",
             Self::VisaRequestDenied => "Visa Request Denied",
             Self::VisaRequestError => "Visa Request Error",
+
+            Self::TtlExpired => "TTL Reached 0",
 
             #[cfg(debug_assertions)]
             Self::ActorPacketsOutOfOrder => "Actor Packets Out-Of-Order",

@@ -55,7 +55,7 @@ const MSG_BUF_SIZE: usize = 4096;
 
 /// Will transition to error state if we are handshake initator and do not get
 /// a handshake response within this time.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 
 const NOISE_NONCE_LEN: usize = 8;
 pub const NOISE_PADLEN: usize = 16 + NOISE_NONCE_LEN; // 16 byte tag + 8 byte nonce

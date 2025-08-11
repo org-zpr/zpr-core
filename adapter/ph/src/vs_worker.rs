@@ -1,5 +1,5 @@
 use crate::assembly::Assembly;
-use crate::logging::targets::VISA_MGMT;
+use libnode::logging::targets::VS_RPC;
 use libnode::vsconn::VSOutput;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -14,7 +14,7 @@ pub async fn launch(_asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSOutput>) {
     while let Some(msg) = queue.recv().await {
         match msg {
             VSOutput::PingSuccess(config_id, policy_version) => {
-                debug!(target: VISA_MGMT, "visa service is alive (config_id: {config_id}, policy_version: {policy_version})");
+                trace!(target: VS_RPC, "visa service is alive (config_id: {config_id}, policy_version: {policy_version})");
             }
         }
     }

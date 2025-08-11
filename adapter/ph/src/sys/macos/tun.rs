@@ -1,16 +1,16 @@
+use crate::zprtun::DEFAULT_TUN_MTU;
+use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::{ioctl_readwrite, ioctl_write_ptr};
 use std::ffi::CStr;
 use std::mem;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::os::fd::AsFd;
-use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd};
+use std::os::unix::io::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::ptr;
-
 use thiserror::Error;
-use tracing::*;
 
-use crate::logging::targets::NET_OS;
-use crate::zprtun::{DEFAULT_TUN_MTU, ZPRNET_PREFIX_LEN};
+/// If not set in builder, this is default prefix len used for TUN device address.
+const DEFAULT_PREFIX_LEN: u8 = 32;
 
 use libc::{
     self, c_char, c_int, c_uint, c_void, ctl_info, ifreq, sockaddr, sockaddr_in, sockaddr_in6,
@@ -195,8 +195,6 @@ impl Tun {
                 name: tun_name_str,
             }
         };
-        info!(target: NET_OS, "TUN device created: {}", tundev.name);
-
         tundev.configure(config)?;
 
         // TODO: Set interface UP? Not required? Seems like kernel sets it to UP already.
@@ -204,11 +202,20 @@ impl Tun {
         Ok(tundev)
     }
 
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     // Post create configuration based on the builder.
     fn configure(&mut self, config: &Builder) -> Result<(), TunError> {
+        // Set to non-blocking
+        if let Err(err) = Tun::set_raw_fd_nonblocking(self.tun_fd.as_raw_fd()) {
+            return Err(TunError::IOError(std::io::Error::from(err)));
+        }
+
         let mtu: Option<u16>;
         if let Some(addr) = config.address {
-            let prefix_len = config.prefix_len.unwrap_or(ZPRNET_PREFIX_LEN);
+            let prefix_len = config.prefix_len.unwrap_or(DEFAULT_PREFIX_LEN as usize);
             if prefix_len > 128 {
                 return Err(TunError::InvalidPrefixLen);
             }
@@ -305,6 +312,19 @@ impl Tun {
             }
             Ok(())
         }
+    }
+
+    fn set_raw_fd_nonblocking(fd: RawFd) -> nix::Result<()> {
+        // Get the current file status flags
+        let flags = fcntl(fd, FcntlArg::F_GETFL)?;
+
+        // Add the O_NONBLOCK flag to the existing flags
+        let mut new_flags = OFlag::from_bits_truncate(flags);
+        new_flags.insert(OFlag::O_NONBLOCK);
+
+        // Set the new flags
+        fcntl(fd, FcntlArg::F_SETFL(new_flags))?;
+        Ok(())
     }
 }
 

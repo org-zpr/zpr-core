@@ -22,12 +22,14 @@ use crate::zdp_ll;
 use crate::{compress, km};
 use blake3;
 use bytes::{Buf, BufMut};
+use classifier::{IPv4Header, IPv6Header};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
+use zpr::L3Type;
 use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
 
@@ -258,6 +260,13 @@ impl FastpathWorker {
                 self.drop_and_count(pkt, CounterType::InPacksDrop);
                 return;
             }
+        }
+
+        let ttl_expired = decrement_ttl(&mut pkt);
+        if ttl_expired == true {
+            error!(target: DATAPATH,"Packet dropped becuase TTL reached 0");
+            self.drop_and_count(pkt, CounterType::TtlExpired);
+            return;
         }
 
         self.actor_output_post_classify(pkt, /* allow_bind_request */ true);
@@ -830,6 +839,44 @@ fn set_flowinfo(substrate_addr: &mut zpr::SubstrateAddr, flowinfo: u32) {
     }
 }
 
+/// Decrement the ttl of a ZDP packet, if the ZDP packet is an IP packet
+/// Returns true if ttl reaches zero and false otherwise, to indicate whether
+/// the packet should be discarded
+fn decrement_ttl(pkt: &mut Packet) -> bool {
+    // decrement TTL
+    match pkt.metadata().get_l3_type() {
+        L3Type::Ipv4 => {
+            let body = pkt.body_mut();
+
+            let header_bytes = &mut body[..size_of::<IPv4Header>()];
+            let ipv4_header = IPv4Header::mut_from_bytes(header_bytes).unwrap();
+            // TODO remove when conditional decrement
+            if ipv4_header.ttl > 0 {
+                ipv4_header.ttl -= 1;
+            }
+            match ipv4_header.ttl {
+                0 => true,
+                _ => false,
+            }
+        }
+        L3Type::Ipv6 => {
+            let body = pkt.body_mut();
+
+            let header_bytes = &mut body[..size_of::<IPv6Header>()];
+            let ipv6_header = IPv6Header::mut_from_bytes(header_bytes).unwrap();
+            // TODO remove when conditional decrement
+            if ipv6_header.hop_limit > 0 {
+                ipv6_header.hop_limit -= 1;
+            }
+            match ipv6_header.hop_limit {
+                0 => true,
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod test {
 
@@ -893,5 +940,113 @@ mod test {
 
         let res = decrypt_hmac(wrong_key, &mut pkt);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_ipv4_ttl_reduction() {
+        let mut buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let offset = Packet::MIN_BODY_OFFSET + 123;
+        let data = [5; 50].as_slice();
+        buf[offset..offset + 50].copy_from_slice(data);
+        let mut pkt = Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET + 123, 50);
+
+        pkt.metadata_mut().set_l3_type(L3Type::Ipv4);
+        let body = pkt.body_mut();
+
+        let header_bytes = &mut body[..size_of::<IPv4Header>()];
+        let ipv4_header = IPv4Header::mut_from_bytes(header_bytes).unwrap();
+        ipv4_header.ttl = 3;
+
+        assert!(ipv4_header.ttl == 3);
+
+        let result = decrement_ttl(&mut pkt);
+
+        let new_body = pkt.body_mut();
+        let new_header_bytes = &mut new_body[..size_of::<IPv4Header>()];
+        let new_ipv4_header = IPv4Header::mut_from_bytes(new_header_bytes).unwrap();
+
+        assert!(result == false);
+        assert!(new_ipv4_header.ttl == 2);
+    }
+
+    #[test]
+    fn test_ipv4_ttl_reduction_with_destroy() {
+        let mut buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let offset = Packet::MIN_BODY_OFFSET + 123;
+        let data = [5; 50].as_slice();
+        buf[offset..offset + 50].copy_from_slice(data);
+        let mut pkt = Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET + 123, 50);
+
+        pkt.metadata_mut().set_l3_type(L3Type::Ipv4);
+        let body = pkt.body_mut();
+
+        let header_bytes = &mut body[..size_of::<IPv4Header>()];
+        let ipv4_header = IPv4Header::mut_from_bytes(header_bytes).unwrap();
+        ipv4_header.ttl = 1;
+
+        assert!(ipv4_header.ttl == 1);
+
+        let result = decrement_ttl(&mut pkt);
+
+        let new_body = pkt.body_mut();
+        let new_header_bytes = &mut new_body[..size_of::<IPv4Header>()];
+        let new_ipv4_header = IPv4Header::mut_from_bytes(new_header_bytes).unwrap();
+
+        assert!(result == true);
+        assert!(new_ipv4_header.ttl == 0);
+    }
+
+    #[test]
+    fn test_ipv6_ttl_reduction() {
+        let mut buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let offset = Packet::MIN_BODY_OFFSET + 123;
+        let data = [5; 50].as_slice();
+        buf[offset..offset + 50].copy_from_slice(data);
+        let mut pkt = Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET + 123, 50);
+
+        pkt.metadata_mut().set_l3_type(L3Type::Ipv6);
+        let body = pkt.body_mut();
+
+        let header_bytes = &mut body[..size_of::<IPv6Header>()];
+        let ipv6_header = IPv6Header::mut_from_bytes(header_bytes).unwrap();
+        ipv6_header.hop_limit = 3;
+
+        assert!(ipv6_header.hop_limit == 3);
+
+        let result = decrement_ttl(&mut pkt);
+
+        let new_body = pkt.body_mut();
+        let new_header_bytes = &mut new_body[..size_of::<IPv6Header>()];
+        let new_ipv6_header = IPv6Header::mut_from_bytes(new_header_bytes).unwrap();
+
+        assert!(result == false);
+        assert!(new_ipv6_header.hop_limit == 2);
+    }
+
+    #[test]
+    fn test_ipv6_ttl_reduction_with_destroy() {
+        let mut buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let offset = Packet::MIN_BODY_OFFSET + 123;
+        let data = [5; 50].as_slice();
+        buf[offset..offset + 50].copy_from_slice(data);
+        let mut pkt = Packet::new_with_existing_data(buf, Packet::MIN_BODY_OFFSET + 123, 50);
+
+        pkt.metadata_mut().set_l3_type(L3Type::Ipv6);
+        let body = pkt.body_mut();
+
+        let header_bytes = &mut body[..size_of::<IPv6Header>()];
+        let ipv6_header = IPv6Header::mut_from_bytes(header_bytes).unwrap();
+        ipv6_header.hop_limit = 1;
+
+        assert!(ipv6_header.hop_limit == 1);
+
+        let result = decrement_ttl(&mut pkt);
+
+        let new_body = pkt.body_mut();
+        let new_header_bytes = &mut new_body[..size_of::<IPv6Header>()];
+        let new_ipv6_header = IPv6Header::mut_from_bytes(new_header_bytes).unwrap();
+
+        assert!(result == true);
+        assert!(new_ipv6_header.hop_limit == 0);
     }
 }

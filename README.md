@@ -19,6 +19,18 @@ the runners now do). Also, anyone developing Golang will have to set `go env -w 
 goes away.
 
 
+### What needs to be built?
+
+To run the ZPRnet you need at least:
+
+* The packet handler (called `ph`) which can run as either a **node** or an **adapter**.
+  * Find that in this repo under `adapter/ph`.
+* The Visa Service (called `vservice`)
+  * In the [zpr-visaservice repo](https://github.com/org-zpr/zpr-visaservice)
+* If you do not have a compiled policy you need the ZPL compiler (called `zplc`)
+  * In the [zpr-compiler repo](https://github.com/org-zpr/zpr-compiler)
+
+
 ## How to setup a ZPRnet
 
 A minimal ZPRnet has a node and a visa service. You will probably also
@@ -251,17 +263,49 @@ zplc -k zpr-rsa-key.pem zpr-full-access.zpl
 
 ### Start up the node, the visa service and the visa service adapter.
 
-Assuming you have three separate hosts for this.  On host 1 start the node:
+Assuming you have three separate hosts for this. The node should be run
+on a Linux host but other platforms may work.  This assumes Linux.  Note
+that for any node or adapter where the ZPR address is specified in the
+config file, and you are running on Linux, you must manually configure
+the network TUN interface to work around a known bug in the Linux
+TUN library we are using.
 
-    sudo node -c /path/to/node-conf.toml
+So to prepare the Linux host to run the node, first set up the tun.
+In the config file above we set the name to `tun9` so we set that up
+here:
 
-On host 2, in one terminal start the visa service:
+```bash
+sudo ip tuntap add name tun9 mode tun multi_queue
+sudo ip link set tun9 mtu 1400
+sudo addr add fd5a:5052:90de::1/32 dev tun9
+sudo ip link set tun9 up
+```
 
-    vserice -c /path/to/vs-config.yaml -p zpr-full-access.bin
+The binary also expects to be able to access directory `/var/run/zpr`, so:
 
-On host 2, in another terminal start the adapter:
+    sudo mkdir /var/run/zpr
 
-    sudo adapter -c /path/to/adapter-vs-conf.toml
+Then you can start the node:
+
+    sudo ph node -c /path/to/node-conf.toml
+
+If the visa service is also running on linux as this guide assumes, then we
+need to configure its TUN interface similar to what we did for the node.
+
+```bash
+sudo ip tuntap add name tun9 mode tun multi_queue
+sudo ip link set tun9 mtu 1400
+sudo addr add fd5a:5052::1/32 dev tun9
+sudo ip link set tun9 up
+```
+
+Now start the visa service:
+
+    vsevrice -c /path/to/vs-config.yaml -p zpr-full-access.bin
+
+On the visa service host, in another terminal start the adapter:
+
+    sudo ph adapter -c /path/to/adapter-vs-conf.toml
 
 
 Now you can attach additional adapters and start up the "WebService".
@@ -269,6 +313,9 @@ Now you can attach additional adapters and start up the "WebService".
 
 ## Updates
 
++ July 31, 2025
+  + Removed reference to the runners.
+  + Add details about setting up TUN interface.
 + June 18, 2025
   + No longer need to set `self_addr` in an adapter.
 + June 12, 2025

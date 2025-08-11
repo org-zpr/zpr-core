@@ -20,6 +20,8 @@ const BASE_AAA_ADDRESS: [u16; 8] = [
     0xfd5a, 0x5052, 0x0000, 0x0aaa, 0x0000, 0x0000, 0x0000, 0x0000,
 ];
 
+const PREFIX_LEN: u8 = 64; // The prefix length for the AAA network.
+
 #[derive(Debug, Error)]
 pub enum AddressPoolError {
     #[error("invalid address")]
@@ -46,6 +48,18 @@ impl AddressPool {
             node_id: [(node_id >> 8) as u16, (node_id & 0xFF) as u16],
             active: HashSet::with_capacity(config::MAX_ACTIVE_LINKS),
         }
+    }
+
+    /// Returns the network used by this pool.
+    /// For example, "fd5a:5052::/64".
+    ///
+    /// The lower 40 its is the AAA ID.
+    pub fn get_prefix(&self) -> String {
+        let mut net_bytes = [0u16; 8];
+        net_bytes[..8].copy_from_slice(&BASE_AAA_ADDRESS[..8]);
+        net_bytes[4] = self.node_id[0];
+        net_bytes[5] = self.node_id[1] << 8; // The lower 8 bits of the node ID
+        format!("{}/{PREFIX_LEN}", Ipv6Addr::from(net_bytes))
     }
 
     /// Returns a random AAA address that is not already in our active set,
@@ -372,6 +386,14 @@ mod tests {
         let addr_byte5 = u16::from_be_bytes([addr.v6[10], addr.v6[11]]);
         let node_id_part2 = (addr_byte5 >> 8) as u8;
         assert_eq!(node_id_part2, 0xEF);
+    }
+
+    #[test]
+    fn test_get_prefix() {
+        let node_id = 0x123456;
+        let pool = AddressPool::new(node_id);
+        let prefix = pool.get_prefix();
+        assert_eq!(prefix, "fd5a:5052:0:aaa:1234:5600::/64");
     }
 
     // Helper function to extract AAA ID from an address for testing

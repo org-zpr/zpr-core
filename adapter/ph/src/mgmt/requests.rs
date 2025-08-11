@@ -8,7 +8,6 @@ use super::core;
 use crate::counters::CounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
-use crate::tlv::TlvEncoding;
 use crate::zdp;
 use crate::{assembly::Assembly, auth};
 
@@ -52,21 +51,11 @@ pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
 
 /// send a Hello Request and wait for the Response (RFC 6.5 § 6.3.4)
 ///
-/// Until we get AAA working, you must pass the actors configured ZPR
-/// address here as the `actor_addrs` parameter.  Once AAA is working,
-/// the `actor_addrs` parameter will be used to send a request for a
-/// specific static address to the node and it will be optional.
+/// Originally this was used to send the pre-configured ZPR address of the
+/// remote adapter into the node.  This is no longer necessary.
 ///
-pub fn send_hello_request(
-    asm: &Assembly,
-    link_id: zpr::LinkId,
-    actor_addrs: &[IpAddr],
-) -> zpr::SeqNum {
-    let mut req = core::new_heap_packet();
-    for addr in actor_addrs {
-        let tlv = TlvEncoding::new_static_addr_std(addr.to_owned());
-        tlv.put(&mut req);
-    }
+pub fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
+    let req = core::new_heap_packet();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, req)
 }
 
@@ -107,6 +96,10 @@ pub fn send_init_authentication_request(
 }
 
 /// Send an AcquireZPRAddressRequest (TODO: not yet in RFC 6)
+///
+/// The `actor_addrs` is a list of addresses that this sender is
+/// requesting.  It will be up to the visa service to determine
+/// the correct address(es) to grant.
 ///
 /// The `blob` is for bootstrap authentcation and can be empty.
 ///

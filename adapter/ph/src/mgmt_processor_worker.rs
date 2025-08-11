@@ -100,12 +100,25 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
         seq_num = sn;
     }
 
-    debug!(
-        target: ZDP,
-        "Link {}: handling mgmt message type {:?} seq_num {seq_num}",
-        pkt.metadata().ingress_link_id,
-        base_hdr.packet_type,
-    );
+    match base_hdr.packet_type {
+        ZdpPacketType::EchoRequest | ZdpPacketType::EchoResponse => {
+            trace!(
+                target: ZDP,
+                "Link {}: handling mgmt message type {:?} seq_num {seq_num}",
+                pkt.metadata().ingress_link_id,
+                base_hdr.packet_type,
+
+            );
+        }
+        _ => {
+            debug!(
+                target: ZDP,
+                "Link {}: handling mgmt message type {:?} seq_num {seq_num}",
+                pkt.metadata().ingress_link_id,
+                base_hdr.packet_type,
+            );
+        }
+    }
 
     if base_hdr.packet_type.is_per_flow() {
         let Ok(per_flow_hdr) = ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
