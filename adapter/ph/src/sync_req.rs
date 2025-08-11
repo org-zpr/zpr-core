@@ -79,7 +79,7 @@ impl SyncReqState {
         }
     }
 
-    pub async fn acquire_permit(&self) -> Permit {
+    pub async fn acquire_permit(&self) -> Permit<'_> {
         let mut window_state = self.window_state.lock().await;
         let seq_num = window_state.next_seq_num;
         window_state.next_seq_num += 1;
