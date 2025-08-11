@@ -172,7 +172,6 @@ fn fastpath_main(mut worker: FastpathWorker, mut io: FastpathIo) {
             // read from socket
             io.process_substrate_socket_in(&mut worker);
         }
-
-        worker.aggregate();
+        worker.aggregate()
     }
 }

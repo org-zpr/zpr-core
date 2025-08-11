@@ -241,7 +241,11 @@ async fn echo(_asm: &Assembly) -> String {
 
 async fn counters(asm: &Assembly) -> String {
     let mut counts: String = String::new();
-    for (key, &ref value) in &asm.counters {
+    for (key, &ref value) in &asm.counters.management {
+        let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
+    }
+
+    for (key, &ref value) in &asm.counters.fastpath {
         let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
     }
 
@@ -251,7 +255,10 @@ async fn counters(asm: &Assembly) -> String {
 }
 
 async fn counters_reset(asm: &Assembly) -> String {
-    for value in asm.counters.values() {
+    for value in asm.counters.management.values() {
+        value.reset();
+    }
+    for value in asm.counters.fastpath.values() {
         value.reset();
     }
 

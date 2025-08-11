@@ -5,7 +5,7 @@
 #![allow(dead_code)]
 
 use super::core;
-use crate::counters::CounterType;
+use crate::counters::ManagementCounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
 use crate::zdp;
@@ -291,7 +291,7 @@ pub async fn send_bind_actor_address_request(
     match response {
         Ok((tether_id, mut resp)) => {
             let Ok(hdr) = zdp::ZdpBindActorAddressResponseHeader::read_from_buf(&mut resp) else {
-                core::count_event(asm, &mut resp, CounterType::BadStructure);
+                core::count_event(asm, &mut resp, ManagementCounterType::BadStructure);
                 return Err(BindActorAddressError::BadStructure);
             };
 
@@ -300,12 +300,12 @@ pub async fn send_bind_actor_address_request(
 
                 zdp::ResponseCode::Other => {
                     if hdr.info_len as usize > resp.remaining() {
-                        core::count_event(asm, &mut resp, CounterType::BadStructure);
+                        core::count_event(asm, &mut resp, ManagementCounterType::BadStructure);
                         return Err(BindActorAddressError::BadStructure);
                     }
 
                     let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
-                        core::count_event(asm, &mut resp, CounterType::BadStructure);
+                        core::count_event(asm, &mut resp, ManagementCounterType::BadStructure);
                         return Err(BindActorAddressError::BadStructure);
                     };
                     let msg: Box<str> = msg.into();
@@ -314,7 +314,7 @@ pub async fn send_bind_actor_address_request(
                 }
 
                 _ => {
-                    core::count_event(asm, &mut resp, CounterType::BadStructure);
+                    core::count_event(asm, &mut resp, ManagementCounterType::BadStructure);
                     Err(BindActorAddressError::BadStructure)
                 }
             }

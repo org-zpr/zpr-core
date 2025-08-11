@@ -1,5 +1,5 @@
 use crate::assembly::Assembly;
-use crate::counters::{CounterType, Counters};
+use crate::counters::{ManagementCounterType, ManagementCounters};
 use crate::link_state::LinkEvent;
 use crate::logging::targets::{LINK_STATE, ZDP};
 use crate::mgmt;
@@ -31,7 +31,7 @@ pub async fn launch(
                 // Drop packets which are intended for a link other than the one we are assigned to,
                 // since processing them here will violate concurrency assumptions.
                 if pkt.metadata().ingress_link_id != config.link_id.get() {
-                    mgmt::core::count_event(&asm, &mut pkt, CounterType::InternalRoutingError);
+                    mgmt::core::count_event(&asm, &mut pkt, ManagementCounterType::InternalRoutingError);
                     continue;
                 }
 
@@ -75,13 +75,13 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
         let maybe_seq_num;
         {
             let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
-                mgmt::core::count_event(asm, &mut pkt, CounterType::PeerRemoved);
+                mgmt::core::count_event(asm, &mut pkt, ManagementCounterType::PeerRemoved);
                 return Ok(());
             };
 
             let mut sn_track = peer_state.sn_track.lock().unwrap();
             maybe_seq_num = sn_track.process_seq_num(truncated_seq_num);
-            count_seq_num_tracker_stats(&asm.counters, &mut sn_track);
+            count_seq_num_tracker_stats(&asm.counters.management, &mut sn_track);
         }
 
         let Some(sn) = maybe_seq_num else {
@@ -199,19 +199,19 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
 }
 
 /// Maps a `SeqnumTrackerStat` to a `CounterType`.
-fn seq_num_tracker_stat_to_counter(sn_stat: SeqNumTrackerStat) -> CounterType {
+fn seq_num_tracker_stat_to_counter(sn_stat: SeqNumTrackerStat) -> ManagementCounterType {
     match sn_stat {
-        SeqNumTrackerStat::TooOld => CounterType::DroppedTooOld,
-        SeqNumTrackerStat::Duplicate => CounterType::DroppedDuplicate,
-        SeqNumTrackerStat::Lost => CounterType::LostPacket,
-        SeqNumTrackerStat::OutOfOrder => CounterType::OutOfOrderPacket,
+        SeqNumTrackerStat::TooOld => ManagementCounterType::DroppedTooOld,
+        SeqNumTrackerStat::Duplicate => ManagementCounterType::DroppedDuplicate,
+        SeqNumTrackerStat::Lost => ManagementCounterType::LostPacket,
+        SeqNumTrackerStat::OutOfOrder => ManagementCounterType::OutOfOrderPacket,
     }
 }
 
 /// Pulls stats delta from `SeqNumTracker` and feeds them into the global counters.
-fn count_seq_num_tracker_stats(counters: &Counters, sn_track: &mut SeqNumTracker) {
+fn count_seq_num_tracker_stats(mgmt_counters: &ManagementCounters, sn_track: &mut SeqNumTracker) {
     for stat in SeqNumTrackerStat::iter() {
-        counters[seq_num_tracker_stat_to_counter(stat)]
+        mgmt_counters[seq_num_tracker_stat_to_counter(stat)]
             .increase_by(sn_track.fetch_reset_stat(stat));
     }
 }

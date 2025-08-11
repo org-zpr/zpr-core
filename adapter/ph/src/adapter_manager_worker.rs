@@ -1,6 +1,6 @@
 use crate::adapter_tables::{AltEntry, AltPep};
 use crate::assembly::{Assembly, PhMode};
-use crate::counters::CounterType;
+use crate::counters::ManagementCounterType;
 use crate::logging::targets::FLOW_MGMT;
 use crate::mgmt;
 use crate::packet::{Packet, PacketBuffer};
@@ -37,7 +37,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
     // if there's already an entry, this is a duplicate request
     // (NOTE: we should be the only ones modifying this table!)
     if asm.alt.get(five_tuple).is_some() {
-        mgmt::core::count_event(asm, &mut pkt, CounterType::DroppedAwaitingBind);
+        mgmt::core::count_event(asm, &mut pkt, ManagementCounterType::DroppedAwaitingBind);
         return;
     }
 
@@ -51,7 +51,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
 
     if dock_link_id != zpr::LINK_ID_UNKNOWN && !asm.is_link_ready(dock_link_id) {
         debug!(target: FLOW_MGMT, "Link {dock_link_id} is not ready to receive traffic yet");
-        mgmt::core::count_event(asm, &mut pkt, CounterType::DroppedNoSA);
+        mgmt::core::count_event(asm, &mut pkt, ManagementCounterType::DroppedNoSA);
         return;
     }
 
@@ -129,7 +129,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
                 Ok(()) => (),
                 Err(TryEnqueueError::Full(_pkt)) => {
                     debug!(target: FLOW_MGMT, "Requeue backpressure on bind of {five_tuple}, dropping initial packet");
-                    asm.counters[CounterType::QueueBackpressure].increment();
+                    asm.counters.management[ManagementCounterType::QueueBackpressure].increment();
                 }
             }
         }

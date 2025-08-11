@@ -1,5 +1,5 @@
 use crate::assembly::Assembly;
-use crate::counters::CounterType;
+use crate::counters::ManagementCounterType;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::VISA_MGMT;
 use crate::net_defs::{IpAddress, IPV6_ADDRESS_SIZE};
@@ -183,26 +183,26 @@ pub async fn parse_visa(
     visa: vsapi::VisaHop,
 ) -> Result<(VisaId, NonZero<LinkId>), visa_table::VisaTableError> {
     let Some(visa) = visa.visa else {
-        asm.counters[CounterType::VisaRequestError].increment();
+        asm.counters.management[ManagementCounterType::VisaRequestError].increment();
         error!(target: VISA_MGMT, "visa request error: Could not parse visa");
         return Err(visa_table::VisaTableError::ParseError("all".into()));
     };
     // for now, just pull the destination address tether to set up forwarding
     let Some(octets) = visa.dest.clone() else {
-        asm.counters[CounterType::VisaRequestError].increment();
+        asm.counters.management[ManagementCounterType::VisaRequestError].increment();
         error!(target: VISA_MGMT, "visa request error: Could not parse visa");
         return Err(visa_table::VisaTableError::ParseError(
             "destination address".into(),
         ));
     };
     let Ok(addr) = IpAddress::try_from(octets) else {
-        asm.counters[CounterType::VisaRequestError].increment();
+        asm.counters.management[ManagementCounterType::VisaRequestError].increment();
         return Err(visa_table::VisaTableError::ParseError(
             "destination address".into(),
         ));
     };
     let Some(link_id) = asm.find_egress_link(addr) else {
-        asm.counters[CounterType::VisaRequestError].increment();
+        asm.counters.management[ManagementCounterType::VisaRequestError].increment();
         return Err(visa_table::VisaTableError::DestNotFound(addr));
     };
     let visa_id = asm.visa_table.write().await.insert_visa(visa)?;

@@ -37,7 +37,7 @@ pub enum HandleMgmtError {
     BadStructure,
 }
 
-impl From<HandleMgmtError> for counters::CounterType {
+impl From<HandleMgmtError> for counters::ManagementCounterType {
     fn from(err: HandleMgmtError) -> Self {
         match err {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,

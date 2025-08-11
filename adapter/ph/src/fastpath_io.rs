@@ -104,7 +104,7 @@ impl FastpathIo {
         for (pkt, result) in self.packets.drain(..).zip(self.recv_results.drain(..)) {
             let (mut sender, dest) = match result {
                 Ok(res) if res.truncated => {
-                    worker.drop_and_count(pkt, CounterType::DroppedOversize);
+                    worker.drop_and_count(pkt, FastpathCounterType::DroppedOversize);
                     continue;
                 }
 
@@ -137,7 +137,7 @@ impl FastpathIo {
             // we do not want -- only the 5-tuple.  So clear it.
             clear_flowinfo(&mut sender);
 
-            worker.asm.counters[CounterType::InPacksRec].increment();
+            worker.asm.counters.fastpath[FastpathCounterType::InPacksRec].increment();
             worker.substrate_ingress(&sender, &dest, pkt);
         }
     }
@@ -184,18 +184,18 @@ impl FastpathIo {
                 let pi = TunPi::read_pi(&mut pkt);
                 if pi.strip || !is_ip(pi) {
                     // packet was too large or non-IP; drop
-                    worker.drop_and_count(pkt, CounterType::OutPacksDrop);
+                    worker.drop_and_count(pkt, FastpathCounterType::OutPacksDrop);
                     continue;
                 }
             } else {
                 // No packet info, permit IP and IPv6 only (for now?)
                 if pkt.body()[0] >> 4 != 4 && pkt.body()[0] >> 4 != 6 {
-                    worker.drop_and_count(pkt, CounterType::OutPacksDrop);
+                    worker.drop_and_count(pkt, FastpathCounterType::OutPacksDrop);
                     continue;
                 }
             }
 
-            worker.asm.counters[CounterType::OutPacksRec].increment();
+            worker.asm.counters.fastpath[FastpathCounterType::OutPacksRec].increment();
             worker.actor_output(pkt);
         }
     }
@@ -207,7 +207,7 @@ impl FastpathIo {
             &mut self.requeue_outq,
             worker.config.batch_size,
             |worker, pkt| {
-                worker.asm.counters[CounterType::RequeuedPacketsReceived].increment();
+                worker.asm.counters.fastpath[FastpathCounterType::RequeuedPacketsReceived].increment();
                 worker.actor_output_post_classify(pkt, /* allow_bind_request */ false);
             },
         );
@@ -220,7 +220,7 @@ impl FastpathIo {
             &mut self.mgmt_substrate_outq,
             worker.config.batch_size,
             |worker, pkt| {
-                worker.asm.counters[CounterType::MgmtPacketsSent].increment();
+                worker.asm.counters.fastpath[FastpathCounterType::MgmtPacketsSent].increment();
                 worker.substrate_egress(pkt);
             },
         );
@@ -275,9 +275,9 @@ impl FastpathIo {
                 Err(err) => panic!("unrecoverable TUN error: {}", err),
             }
         }
-        worker.asm.counters[CounterType::InPacksSent]
+        worker.asm.counters.fastpath[FastpathCounterType::InPacksSent]
             .increase_by((worker.actor_input_q.len() - dropped) as u64);
-        worker.asm.counters[CounterType::InPacksDrop].increase_by(dropped as u64);
+        worker.asm.counters.fastpath[FastpathCounterType::InPacksDrop].increase_by(dropped as u64);
 
         // Return buffers to buffer stack.
         worker
@@ -333,9 +333,9 @@ impl FastpathIo {
 
         // Now all un-sent priority packets are at the head of the queue.
 
-        worker.asm.counters[CounterType::OutPacksSent]
+        worker.asm.counters.fastpath[FastpathCounterType::OutPacksSent]
             .increase_by((worker.substrate_egress_q.len() - dropped - retained) as u64);
-        worker.asm.counters[CounterType::OutPacksDrop].increase_by(dropped as u64);
+        worker.asm.counters.fastpath[FastpathCounterType::OutPacksDrop].increase_by(dropped as u64);
 
         // Return buffers to buffer stack, except for un-sent priority packets, which are retained for next time.
         worker.buffers.extend(

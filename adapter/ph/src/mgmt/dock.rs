@@ -1,5 +1,5 @@
 use crate::assembly::{AddRouteError, Assembly};
-use crate::counters::CounterType;
+use crate::counters::ManagementCounterType;
 use crate::defs::FiveTuple;
 use crate::logging::targets::FLOW_MGMT;
 use crate::visa_mgmt;
@@ -62,7 +62,7 @@ pub async fn bind_actor_address(
                 );
             }
             Err(VisaTableError::ParseError(field)) => {
-                asm.counters[CounterType::VisaRequestError].increment();
+                asm.counters.management[ManagementCounterType::VisaRequestError].increment();
                 error!(target: FLOW_MGMT, "visa request matching error: {field}");
                 return Err(BindActorAddressError::ParseError(field));
             }
@@ -75,7 +75,7 @@ pub async fn bind_actor_address(
                 );
             }
             Err(VisaTableError::DestNotFound(addr)) => {
-                asm.counters[CounterType::VisaRequestError].increment();
+                asm.counters.management[ManagementCounterType::VisaRequestError].increment();
                 error!(target: FLOW_MGMT, "visa request matching error: destination address {addr} not found so no egress link");
                 return Err(BindActorAddressError::ParseError(
                     "destination address not found",
@@ -99,7 +99,7 @@ pub async fn bind_actor_address(
             packet: packet_body.clone(),
         };
 
-        asm.counters[CounterType::VisaRequested].increment();
+        asm.counters.management[ManagementCounterType::VisaRequested].increment();
         match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
             Ok(vsapi::VisaResponse {
                 status: Some(vsapi::StatusCode::SUCCESS),
@@ -107,7 +107,7 @@ pub async fn bind_actor_address(
                 ..
             }) => {
                 let Some(visa) = visa else {
-                    asm.counters[CounterType::VisaRequestError].increment();
+                    asm.counters.management[ManagementCounterType::VisaRequestError].increment();
                     error!(target: FLOW_MGMT, "visa request error: Could not parse visa");
                     return Err(BindActorAddressError::ParseError("Could not parse visa"));
                 };
@@ -124,7 +124,7 @@ pub async fn bind_actor_address(
                     egress_link_id,
                     visa_id,
                 });
-                asm.counters[CounterType::VisaRequestSuccess].increment();
+                asm.counters.management[ManagementCounterType::VisaRequestSuccess].increment();
                 debug!(
                     target: FLOW_MGMT,
                     "visa request succeeds, egress_link_id = {egress_link_id}"
@@ -132,13 +132,13 @@ pub async fn bind_actor_address(
             }
 
             Ok(resp) => {
-                asm.counters[CounterType::VisaRequestDenied].increment();
+                asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
                 debug!(target: FLOW_MGMT, "visa request rejected: {resp:?}");
                 return Err(BindActorAddressError::PolicyError);
             }
 
             Err(err) => {
-                asm.counters[CounterType::VisaRequestError].increment();
+                asm.counters.management[ManagementCounterType::VisaRequestError].increment();
                 error!(target: FLOW_MGMT, "visa request error: {err}");
                 return Err(BindActorAddressError::PolicyError);
             }

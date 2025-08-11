@@ -8,7 +8,7 @@ use crate::assembly::{Assembly, PhMode};
 use crate::batch_io::BatchIoEngine;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
-use crate::counters::{Aggregate, BatchCounters, CounterType, Increment};
+use crate::counters::{FastpathCounters, FastpathCounterType, Aggregate};
 use crate::defs::Direction;
 use crate::km::{Codec, KmTransportSA};
 use crate::km_noise::NOISE_PADLEN;
@@ -69,7 +69,7 @@ pub struct FastpathWorker {
     pub worker_index: usize,
     pub asm: Arc<Assembly>,
     pub buffers: Vec<PacketBuffer>,
-    pub batch_counters: BatchCounters,
+    pub batch_counters: FastpathCounters,
 
     pub return_q: two_way_queue::ReturnQueue<PacketBuffer>,
     pub adapter_manager: AdapterManager,
@@ -106,11 +106,11 @@ impl FastpathWorker {
     }
 
     /// Drop a packet and count the drop with the given reason.
-    pub fn drop_and_count(&mut self, pkt: Packet, reason: impl Into<CounterType>) {
+    pub fn drop_and_count(&mut self, pkt: Packet, reason: impl Into<FastpathCounterType>) {
         let reason = reason.into();
         debug!(target: DATAPATH, "dropping packet because {reason}");
         self.buffers.push(pkt.destroy());
-        self.batch_counters.increment(reason);
+        self.batch_counters[reason].increment();
     }
 
     pub fn get_fresh_packets(&mut self, n: usize, dest: &mut Vec<Packet>) -> usize {
@@ -142,7 +142,7 @@ impl FastpathWorker {
 
         // Read, but do not remove the ZPI header
         let Ok((zpi_hdr, _)) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
-            self.drop_and_count(pkt, CounterType::BadStructure);
+            self.drop_and_count(pkt, FastpathCounterType::BadStructure);
             return;
         };
 
@@ -157,7 +157,7 @@ impl FastpathWorker {
 
         // now pop the ZPI off the packet. We've already checked it.
         if zdp::ZdpZpiHeader::read_from_buf(&mut pkt).is_err() {
-            self.drop_and_count(pkt, CounterType::BadStructure);
+            self.drop_and_count(pkt, FastpathCounterType::BadStructure);
             return;
         }
 
@@ -169,16 +169,16 @@ impl FastpathWorker {
                 interface_addr,
                 pkt,
             ) {
-                Ok(()) => self.batch_counters.increment(CounterType::DispatchedToMgmt),
+                Ok(()) => self.batch_counters[FastpathCounterType::DispatchedToMgmt].increment(),
                 Err(TryEnqueueError::Full(pkt)) => {
-                    self.drop_and_count(pkt, CounterType::QueueBackpressure)
+                    self.drop_and_count(pkt, FastpathCounterType::QueueBackpressure)
                 }
             }
             return;
         }
 
         let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
-            return self.drop_and_count(pkt, CounterType::BadStructure);
+            return self.drop_and_count(pkt, FastpathCounterType::BadStructure);
         };
 
         // In ZPI zero only KM messages are allowed (well, and ZPR ARP which we don't support yet)
@@ -190,7 +190,7 @@ impl FastpathWorker {
                 pkt.metadata().ingress_link_id,
                 base_hdr.packet_type
             );
-            self.drop_and_count(pkt, CounterType::OtherError);
+            self.drop_and_count(pkt, FastpathCounterType::OtherError);
             return;
         }
 
@@ -200,16 +200,16 @@ impl FastpathWorker {
             // (instead of this silly code to restore it?)
             *pkt.alloc_zeroed_header() = base_hdr;
             match self.mgmt_dispatch.try_dispatch_mgmt_packet_with_link(pkt) {
-                Ok(()) => self.batch_counters.increment(CounterType::DispatchedToMgmt),
+                Ok(()) => self.batch_counters[FastpathCounterType::DispatchedToMgmt].increment(),
                 Err(TryEnqueueError::Full(pkt)) => {
-                    self.drop_and_count(pkt, CounterType::QueueBackpressure)
+                    self.drop_and_count(pkt, FastpathCounterType::QueueBackpressure)
                 }
             }
             return;
         }
 
         let Ok(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
-            return self.drop_and_count(pkt, CounterType::BadStructure);
+            return self.drop_and_count(pkt, FastpathCounterType::BadStructure);
         };
 
         let ingress_stream_id: zpr::StreamId = per_flow_hdr.stream_id.into();
@@ -227,8 +227,7 @@ impl FastpathWorker {
             self.worker_index,
         ) {
             if old_index != self.worker_index {
-                self.batch_counters
-                    .increment(CounterType::ActorPacketsOutOfOrder);
+                self.batch_counters[FastpathCounterType::ActorPacketsOutOfOrder].increment();
             }
         }
 
@@ -245,7 +244,7 @@ impl FastpathWorker {
         let classification = match classifier::classify(&mut pkt) {
             Ok(cls) => cls,
             Err(_why) => {
-                self.drop_and_count(pkt, CounterType::InPacksDrop);
+                self.drop_and_count(pkt, FastpathCounterType::InPacksDrop);
                 return;
             }
         };
@@ -255,13 +254,13 @@ impl FastpathWorker {
 
             ClassifierResult::FirstFragment | ClassifierResult::SubsequentFragment => {
                 // TODO: handle fragments!
-                self.drop_and_count(pkt, CounterType::InPacksDrop);
+                self.drop_and_count(pkt, FastpathCounterType::InPacksDrop);
                 return;
             }
 
             ClassifierResult::NonIP => {
                 // should never happen; TUN doesn't deal in non-IP
-                self.drop_and_count(pkt, CounterType::InPacksDrop);
+                self.drop_and_count(pkt, FastpathCounterType::InPacksDrop);
                 return;
             }
         }
@@ -269,7 +268,7 @@ impl FastpathWorker {
         let ttl_expired = decrement_ttl(&mut pkt);
         if ttl_expired == true {
             error!(target: DATAPATH,"Packet dropped becuase TTL reached 0");
-            self.drop_and_count(pkt, CounterType::TtlExpired);
+            self.drop_and_count(pkt, FastpathCounterType::TtlExpired);
             return;
         }
 
@@ -291,15 +290,15 @@ impl FastpathWorker {
                 if !allow_bind_request {
                     // avoid the (all-but purely theoretical) chance of a packet loop,
                     // when this is initiated due to a requeue from bind setup code
-                    self.drop_and_count(pkt, CounterType::OtherError);
+                    self.drop_and_count(pkt, FastpathCounterType::OtherError);
                     return;
                 }
 
                 // issue bind request
                 match self.adapter_manager.try_request_tether_id(pkt) {
-                    Ok(()) => self.batch_counters.increment(CounterType::ActorSlowpath),
+                    Ok(()) => self.batch_counters[FastpathCounterType::ActorSlowpath].increment(),
                     Err(TryEnqueueError::Full(pkt)) => {
-                        self.drop_and_count(pkt, CounterType::QueueBackpressure)
+                        self.drop_and_count(pkt, FastpathCounterType::QueueBackpressure)
                     }
                 }
 
@@ -346,7 +345,7 @@ impl FastpathWorker {
             self.forward(pkt);
         } else {
             // Bind request pending; drop this packet
-            self.drop_and_count(pkt, CounterType::DroppedAwaitingBind);
+            self.drop_and_count(pkt, FastpathCounterType::DroppedAwaitingBind);
         }
     }
 
@@ -365,13 +364,13 @@ impl FastpathWorker {
                 let Some(ingress_peer_state) =
                     self.asm.peer_table.get(pkt.metadata().ingress_link_id)
                 else {
-                    self.drop_and_count(pkt, CounterType::UnknownPeer);
+                    self.drop_and_count(pkt, FastpathCounterType::UnknownPeer);
                     return;
                 };
 
                 let Some(pep) = ingress_peer_state.pft.get(pkt.metadata().ingress_stream_id) else {
                     drop(ingress_peer_state);
-                    self.drop_and_count(pkt, CounterType::UnknownStreamId);
+                    self.drop_and_count(pkt, FastpathCounterType::UnknownStreamId);
                     return;
                 };
 
@@ -406,7 +405,7 @@ impl FastpathWorker {
     ) {
         // extract A2A MAC
         let Ok(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
-            self.drop_and_count(pkt, CounterType::BadStructure);
+            self.drop_and_count(pkt, FastpathCounterType::BadStructure);
             return;
         };
 
@@ -417,7 +416,7 @@ impl FastpathWorker {
         let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: checksum may be shorter depending on A2A SA
 
         if pkt.body().len() < a2a_mac_size {
-            self.drop_and_count(pkt, CounterType::BadStructure);
+            self.drop_and_count(pkt, FastpathCounterType::BadStructure);
             return;
         }
         let mut a2a_mac = [0u8; zdp::ZDP_A2A_MAC_SIZE];
@@ -426,7 +425,7 @@ impl FastpathWorker {
 
         // lookup PEP in DLT and expand compressed packet
         let Some(pep) = self.asm.dlt.get(tether_id) else {
-            self.drop_and_count(pkt, CounterType::UnknownStreamId);
+            self.drop_and_count(pkt, FastpathCounterType::UnknownStreamId);
             return;
         };
 
@@ -436,7 +435,7 @@ impl FastpathWorker {
         // TODO: use actual A2A SAID & keyed hash
         if blake3::hash(pkt.body()).as_bytes()[..a2a_mac_size] != a2a_mac[..a2a_mac_size] {
             drop(pep);
-            return self.drop_and_count(pkt, CounterType::MicvFailure);
+            return self.drop_and_count(pkt, FastpathCounterType::MicvFailure);
         }
 
         // queue decapsulated packet for send to actor
@@ -451,12 +450,12 @@ impl FastpathWorker {
         let (dest_sa, src_intf) = match substrate_egress_common(&self.asm, link_id, &mut pkt) {
             Ok(Some((dest_sa, src_intf))) => (dest_sa, src_intf),
             Ok(None) => {
-                self.drop_and_count(pkt, CounterType::PeerRemoved);
+                self.drop_and_count(pkt, FastpathCounterType::PeerRemoved);
                 return;
             }
             Err(err) => {
                 error!(target: DATAPATH, "egress: link {link_id}: encryption error: {err}");
-                self.drop_and_count(pkt, CounterType::EncryptionFailure);
+                self.drop_and_count(pkt, FastpathCounterType::EncryptionFailure);
                 return;
             }
         };
@@ -474,8 +473,8 @@ impl FastpathWorker {
     }
 
     pub fn aggregate(&mut self) {
-        self.asm.counters.aggregate(&self.batch_counters);
-        self.batch_counters.clear()
+        self.asm.counters.fastpath.aggregate(&self.batch_counters);
+        self.batch_counters.clear();
     }
 }
 
@@ -543,15 +542,15 @@ pub fn maybe_capture_batch<'a>(
 
     match dir {
         Direction::Inbound => {
-            asm.counters[CounterType::InCapPacksWrite].increase_by(num_captured as u64);
-            asm.counters[CounterType::InCapPacksDrop].increase_by(num_dropped as u64);
-            asm.counters[CounterType::InCapPacksFilt].increase_by(num_filtered as u64);
+            asm.counters.fastpath[FastpathCounterType::InCapPacksWrite].increase_by(num_captured as u64);
+            asm.counters.fastpath[FastpathCounterType::InCapPacksDrop].increase_by(num_dropped as u64);
+            asm.counters.fastpath[FastpathCounterType::InCapPacksFilt].increase_by(num_filtered as u64);
         }
 
         Direction::Outbound => {
-            asm.counters[CounterType::OutCapPacksWrite].increase_by(num_captured as u64);
-            asm.counters[CounterType::OutCapPacksDrop].increase_by(num_dropped as u64);
-            asm.counters[CounterType::OutCapPacksFilt].increase_by(num_filtered as u64);
+            asm.counters.fastpath[FastpathCounterType::OutCapPacksWrite].increase_by(num_captured as u64);
+            asm.counters.fastpath[FastpathCounterType::OutCapPacksDrop].increase_by(num_dropped as u64);
+            asm.counters.fastpath[FastpathCounterType::OutCapPacksFilt].increase_by(num_filtered as u64);
         }
     }
 }
@@ -606,7 +605,7 @@ enum DecryptError {
     BadChecksum,
 }
 
-impl From<DecryptError> for CounterType {
+impl From<DecryptError> for FastpathCounterType {
     fn from(value: DecryptError) -> Self {
         match value {
             DecryptError::BadStructure => Self::BadStructure,

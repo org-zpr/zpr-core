@@ -5,7 +5,7 @@
 
 use crate::assembly::Assembly;
 use crate::config;
-use crate::counters::CounterType;
+use crate::counters::ManagementCounterType;
 use crate::packet::Packet;
 use crate::seq_nums;
 use crate::zdp;
@@ -26,10 +26,10 @@ pub fn new_heap_packet() -> Packet {
 pub fn count_event(
     asm: &Assembly,
     _pkt: &mut Packet, // for later support of per-packet event recording
-    event: CounterType,
+    event: ManagementCounterType,
 ) {
     debug!(target: crate::logging::targets::MGMT_EVENTS, "packet event {event}");
-    asm.counters[event].increment();
+    asm.counters.management[event].increment();
 }
 
 /// Send a unidirectional non-flow management message on the given link.
@@ -220,7 +220,7 @@ fn match_received(
     match response {
         Some((pkt_type, mut pkt)) => {
             if pkt_type != zdp_response_type {
-                count_event(asm, &mut pkt, CounterType::BadMgmtResponse);
+                count_event(asm, &mut pkt, ManagementCounterType::BadMgmtResponse);
                 return Err(SyncReqError::ProtocolError);
             }
             return Ok(pkt);

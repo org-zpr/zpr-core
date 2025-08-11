@@ -1,7 +1,7 @@
 use crate::assembly::Assembly;
 use crate::auth::{self, DecodedBlob, ZdpAuthCodeBlob, ZdpSelfSignedBlob, AUTH_KEY_SIZE_BYTES};
 use crate::config;
-use crate::counters::CounterType;
+use crate::counters::ManagementCounterType;
 use crate::km::ZPIPair;
 use crate::km_multiplexor;
 use crate::logging::targets::LINK_STATE;
@@ -1405,7 +1405,7 @@ impl LinkStateWrapper {
 
     fn process_error_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
-        asm.counters[CounterType::PeerHandshakeFailure].increment();
+        asm.counters.management[ManagementCounterType::PeerHandshakeFailure].increment();
         warn!(target: LINK_STATE, "Link {link_id} bringup failed at state {:?}",
             self.locked_fsm.lock().unwrap().state);
 
@@ -1700,7 +1700,7 @@ impl LinkStateWrapper {
         let link_id = self.id;
         let task_asm = asm.clone();
         let task_events = self.events.clone();
-        asm.counters[CounterType::PeerHandshakeSuccess].increment();
+        asm.counters.management[ManagementCounterType::PeerHandshakeSuccess].increment();
         debug!(target: LINK_STATE, "Link {link_id} entering active state");
         tokio::task::spawn_local(async move {
             let mut interval = tokio::time::interval(config::DEFAULT_KEEP_ALIVE_PERIOD);
