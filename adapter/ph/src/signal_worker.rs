@@ -48,11 +48,18 @@ pub async fn launch(asm: Arc<Assembly>) {
 fn emit_counts(counters: &Counters, uptime: std::time::Duration) {
     println!("{:>42}\n", "*** Counters ***");
     println!("{:>34}: {:?}", "Uptime", uptime);
+    println!("\n");
+    println!("{:>42}\n", "*** Management Counters ***");
     for (key, ref value) in &counters.management {
         println!("{:>34}: {}", key.name(), value.get_count());
     }
-    for (key, ref value) in &counters.fastpath {
-        println!("{:>34}: {}", key.name(), value.get_count());
+    for (i, fastpath) in counters.fastpaths.lock().unwrap().iter().enumerate() {
+        println!("\n");
+        let message = format!("*** Fastpath #{} Counters ***", i);
+        println!("{:>42}\n", message);
+        for (key, ref value) in fastpath {
+            println!("{:>34}: {}", key.name(), value.get_count());
+        }
     }
 }
 

@@ -3,6 +3,7 @@
 use enum_map::{Enum, EnumMap};
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
 // Counters used in the fastpath
 pub type FastpathCounters = EnumMap<FastpathCounterType, Counter>;
@@ -10,9 +11,13 @@ pub type ManagementCounters = EnumMap<ManagementCounterType, Counter>;
 
 /// Struct of the system's performance counters. Broken into
 /// counters used in fastpath and those used for management
+// TODO the only way I could figure out to allow the fastpaths
+// to be able to push a new FastpathCounters to the asm was 
+// to make fastpaths a mutex, but it is less efficient, and I 
+// don't think it is necessary, but had to do to appease the compiler
 #[derive(Default)]
 pub struct Counters {
-    pub fastpath: FastpathCounters,
+    pub fastpaths: Mutex<Vec<FastpathCounters>>,
     pub management: ManagementCounters,
 }
 
@@ -239,6 +244,7 @@ impl fmt::Display for ManagementCounterType {
     }
 }
 
+// TODO could also impl aggregate as a function of Counters
 pub trait Aggregate {
     fn aggregate(&self, batches: &FastpathCounters);
 }
@@ -314,92 +320,223 @@ mod tests {
         assert_eq!(counter.get_count(), 970924);
     }
 
-    //     #[test]
-    //     fn test_aggregate_increment() {
-    //         let counters: Counters = Default::default();
-    //         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 0);
+    #[test]
+    fn test_aggregate_increment() {
+        let counters: Counters = Default::default();
+        counters.fastpaths.lock().unwrap().push(FastpathCounters::default());
 
-    //         let mut counters_batch: BatchCounters = Default::default();
-    //         counters_batch.increment(CounterType::DroppedOversize);
-    //         assert_eq!(counters_batch[&CounterType::DroppedOversize].get_count(), 1);
-    //         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 0);
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
+            0
+        );
 
-    //         counters[CounterType::DroppedOversize].increment();
-    //         counters.aggregate(&counters_batch);
-    //         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 2);
-    //         assert_eq!(counters_batch[&CounterType::DroppedOversize].get_count(), 1);
+        let mut counters_batch: FastpathCounters = Default::default();
+        counters_batch[FastpathCounterType::InPacksRec].increment();
+        assert_eq!(
+            counters_batch[FastpathCounterType::InPacksRec].get_count(),
+            1
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
+            0
+        );
 
-    //         counters_batch.clear();
-    //         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 2);
-    //     }
+        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].increment();
+        counters.fastpaths.lock().unwrap()[0].aggregate(&counters_batch);
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
+            2
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::InPacksRec].get_count(),
+            1
+        );
 
-    //     #[test]
-    //     fn test_aggregate_increase_by() {
-    //         let counters: Counters = Default::default();
-    //         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 0);
+        counters_batch.clear();
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
+            2
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::InPacksRec].get_count(),
+            0
+        );
+    }
 
-    //         let mut counters_batch: BatchCounters = Default::default();
-    //         counters_batch.increase_by(CounterType::DroppedOversize, 5);
-    //         assert_eq!(counters_batch[&CounterType::DroppedOversize].get_count(), 5);
-    //         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 0);
+    #[test]
+    fn test_aggregate_increase_by() {
+        let counters: Counters = Default::default();
+        counters.fastpaths.lock().unwrap().push(FastpathCounters::default());
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
+            0
+        );
 
-    //         counters[CounterType::DroppedOversize].increment();
-    //         counters.aggregate(&counters_batch);
-    //         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 6);
-    //         assert_eq!(counters_batch[&CounterType::DroppedOversize].get_count(), 5);
+        let mut counters_batch: FastpathCounters = Default::default();
+        counters_batch[FastpathCounterType::InPacksRec].increase_by(53);
+        assert_eq!(
+            counters_batch[FastpathCounterType::InPacksRec].get_count(),
+            53
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
+            0
+        );
 
-    //         counters_batch.clear();
-    //         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 6);
-    //     }
+        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].increase_by(654);
+        counters.fastpaths.lock().unwrap()[0].aggregate(&counters_batch);
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
+            707
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::InPacksRec].get_count(),
+            53
+        );
 
-    //     #[test]
-    //     fn test_aggregate_multiples() {
-    //         let counters: Counters = Default::default();
-    //         let mut counters_batch: BatchCounters = Default::default();
+        counters_batch.clear();
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
+            707
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::InPacksRec].get_count(),
+            0
+        );
+    }
 
-    //         counters[CounterType::InPacksRec].increase_by(2);
-    //         counters[CounterType::QueueBackpressure].increase_by(8);
-    //         counters[CounterType::DispatchedToMgmt].increase_by(75);
-    //         counters[CounterType::UnknownZpi].increase_by(4);
-    //         counters[CounterType::TtlExpired].increase_by(2);
+    #[test]
+    fn test_aggregate_multiples() {
+        let counters: Counters = Default::default();
+        counters.fastpaths.lock().unwrap().push(FastpathCounters::default());
+        let mut counters_batch: FastpathCounters = Default::default();
 
-    //         assert_eq!(counters[CounterType::InPacksRec].get_count(), 2);
-    //         assert_eq!(counters[CounterType::QueueBackpressure].get_count(), 8);
-    //         assert_eq!(counters[CounterType::DispatchedToMgmt].get_count(), 75);
-    //         assert_eq!(counters[CounterType::UnknownZpi].get_count(), 4);
-    //         assert_eq!(counters[CounterType::TtlExpired].get_count(), 2);
+        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].increase_by(2);
+        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::QueueBackpressure].increase_by(8);
+        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::DispatchedToMgmt].increase_by(75);
+        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::UnknownZpi].increase_by(4);
+        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::TtlExpired].increase_by(2);
+        counters.management[ManagementCounterType::QueueBackpressure].increase_by(432);
+        counters.management[ManagementCounterType::UnexpectedMgmtResponse].increase_by(54);
 
-    //         counters_batch.increase_by(CounterType::DroppedOversize, 28);
-    //         counters_batch.increase_by(CounterType::QueueBackpressure, 12);
-    //         counters_batch.increase_by(CounterType::DispatchedToMgmt, 65);
-    //         counters_batch.increase_by(CounterType::UnknownPeer, 4);
-    //         counters_batch.increase_by(CounterType::OtherError, 1);
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
+            2
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::QueueBackpressure].get_count(),
+            8
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::DispatchedToMgmt].get_count(),
+            75
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::UnknownZpi].get_count(),
+            4
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::TtlExpired].get_count(),
+            2
+        );
+        assert_eq!(
+            counters.management[ManagementCounterType::QueueBackpressure].get_count(),
+            432
+        );
+        assert_eq!(
+            counters.management[ManagementCounterType::UnexpectedMgmtResponse].get_count(),
+            54
+        );
 
-    //         assert_eq!(
-    //             counters_batch[&CounterType::DroppedOversize].get_count(),
-    //             28
-    //         );
-    //         assert_eq!(
-    //             counters_batch[&CounterType::QueueBackpressure].get_count(),
-    //             12
-    //         );
-    //         assert_eq!(
-    //             counters_batch[&CounterType::DispatchedToMgmt].get_count(),
-    //             65
-    //         );
-    //         assert_eq!(counters_batch[&CounterType::UnknownPeer].get_count(), 4);
-    //         assert_eq!(counters_batch[&CounterType::OtherError].get_count(), 1);
+        counters_batch[FastpathCounterType::DroppedOversize].increase_by(28);
+        counters_batch[FastpathCounterType::QueueBackpressure].increase_by(12);
+        counters_batch[FastpathCounterType::DispatchedToMgmt].increase_by(65);
+        counters_batch[FastpathCounterType::UnknownPeer].increase_by(4);
+        counters_batch[FastpathCounterType::OtherError].increase_by(1);
 
-    //         counters.aggregate(&counters_batch);
-    //         counters_batch.clear();
+        assert_eq!(
+            counters_batch[FastpathCounterType::DroppedOversize].get_count(),
+            28
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::QueueBackpressure].get_count(),
+            12
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::DispatchedToMgmt].get_count(),
+            65
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::UnknownPeer].get_count(),
+            4
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::OtherError].get_count(),
+            1
+        );
 
-    //         assert_eq!(counters[CounterType::InPacksRec].get_count(), 2);
-    //         assert_eq!(counters[CounterType::QueueBackpressure].get_count(), 20);
-    //         assert_eq!(counters[CounterType::DispatchedToMgmt].get_count(), 140);
-    //         assert_eq!(counters[CounterType::UnknownZpi].get_count(), 4);
-    //         assert_eq!(counters[CounterType::TtlExpired].get_count(), 2);
-    //         assert_eq!(counters[CounterType::DroppedOversize].get_count(), 28);
-    //         assert_eq!(counters[CounterType::UnknownPeer].get_count(), 4);
-    //         assert_eq!(counters[CounterType::OtherError].get_count(), 1);
-    //     }
+        counters.fastpaths.lock().unwrap()[0].aggregate(&counters_batch);
+        counters_batch.clear();
+
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
+            2
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::QueueBackpressure].get_count(),
+            20
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::DispatchedToMgmt].get_count(),
+            140
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::UnknownZpi].get_count(),
+            4
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::TtlExpired].get_count(),
+            2
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::DroppedOversize].get_count(),
+            28
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::UnknownPeer].get_count(),
+            4
+        );
+        assert_eq!(
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::OtherError].get_count(),
+            1
+        );
+        assert_eq!(
+            counters.management[ManagementCounterType::QueueBackpressure].get_count(),
+            432
+        );
+        assert_eq!(
+            counters.management[ManagementCounterType::UnexpectedMgmtResponse].get_count(),
+            54
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::DroppedOversize].get_count(),
+            0
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::QueueBackpressure].get_count(),
+            0
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::DispatchedToMgmt].get_count(),
+            0
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::UnknownPeer].get_count(),
+            0
+        );
+        assert_eq!(
+            counters_batch[FastpathCounterType::OtherError].get_count(),
+            0
+        );
+    }
 }

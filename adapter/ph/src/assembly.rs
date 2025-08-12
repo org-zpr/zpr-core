@@ -23,7 +23,6 @@ use crate::special_peers::SpecialPeerName;
 use crate::tun_ctl::TunCtl;
 use crate::visa_table;
 use crate::vs_types::AuthServicesList;
-
 use km_noise::NoiseKeypair;
 use std::net::IpAddr;
 use std::num::NonZero;
