@@ -95,6 +95,10 @@ pub struct CommonArgs {
     #[arg(long, short = 'd', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
     pub debug: Vec<String>,
 
+    /// Enable verbose logging which includes trace values
+    #[arg(long, short = 'v')]
+    pub verbose: bool,
+
     /// Disable info & warnings for specified targets
     #[arg(long, short = 'q', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
     pub quiet: Vec<String>,
