@@ -65,6 +65,7 @@ pub mod targets {
 fn create_target_filter<T>(
     debug: impl IntoIterator<Item = T>,
     quiet: impl IntoIterator<Item = T>,
+    verbose: &bool,
 ) -> Targets
 where
     String: From<T>,
@@ -74,14 +75,31 @@ where
 
     targets = targets.with_default(Level::INFO);
 
+    let lvl = match verbose {
+        false => Level::DEBUG,
+        true => Level::TRACE,
+    };
+
+    let mut empty = true;
+
     for target in debug.into_iter() {
+        empty = false;
         if target == targets::ALL {
-            targets = targets.with_default(Level::DEBUG);
+            targets = targets.with_default(lvl);
         } else if target == targets::NONE {
-            targets = targets.with_default(Level::INFO);
+            if lvl == Level::TRACE {
+                targets = targets.with_default(lvl);
+            } else {
+                targets = targets.with_default(Level::INFO);
+            }
         } else {
-            targets = targets.with_target(target, Level::DEBUG);
+            targets = targets.with_target(target, lvl);
         }
+    }
+
+    // Prints trace level debugging even if user did not use --debug flag
+    if empty && lvl == Level::TRACE {
+        targets = targets.with_default(lvl);
     }
 
     let debugged_targets = targets.clone();
@@ -102,6 +120,10 @@ where
 pub fn initialize(config: &config::Config) {
     tracing_subscriber::registry()
         .with(fmt::layer())
-        .with(create_target_filter(&config.debug, &config.quiet))
+        .with(create_target_filter(
+            &config.debug,
+            &config.quiet,
+            &config.verbose,
+        ))
         .init();
 }

@@ -109,6 +109,9 @@ pub struct Config {
     /// Enable debug logging for specified targets, or ALL
     pub debug: Vec<String>,
 
+    /// Enable trace logging for targets specified by the debug flag
+    pub verbose: bool,
+
     /// Disable info & warnings for specified targets, or ALL
     pub quiet: Vec<String>,
 
@@ -305,6 +308,9 @@ impl Config {
         if let Some(debug) = &config.debug {
             self.debug.extend(debug.into_iter().cloned());
         }
+        if let Some(verbose) = &config.verbose {
+            self.verbose = verbose.clone();
+        }
         if let Some(quiet) = &config.quiet {
             self.quiet.extend(quiet.into_iter().cloned());
         }
@@ -460,6 +466,8 @@ impl Config {
         self.debug.extend(common.debug.iter().cloned());
         self.quiet.extend(common.quiet.iter().cloned());
 
+        self.verbose = common.verbose.clone();
+
         self.batch_io_engine = common.io_engine.clone();
 
         Ok(())
@@ -477,6 +485,7 @@ impl Default for Config {
             private_key_data: None,
             tun_if: None,
             debug: Vec::new(),
+            verbose: false,
             quiet: Vec::new(),
             node_addr: None,
             zpr_addr: Vec::new(),
@@ -520,6 +529,7 @@ pub struct GlobalConfigSection {
     pub tun_if: Option<String>,
     pub zpr_addr: Option<Vec<IpAddr>>,
     pub debug: Option<Vec<String>>,
+    pub verbose: Option<bool>,
     pub quiet: Option<Vec<String>>,
     pub io_engine: Option<String>,
 }
