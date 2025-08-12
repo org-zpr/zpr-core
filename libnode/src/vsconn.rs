@@ -43,6 +43,7 @@ type RequestServicesResponse = Result<vsapi::ServicesResponse, VSClientError>;
 #[derive(Debug)]
 #[allow(dead_code)]
 enum VSCommand {
+    Stop(bool), // Stop the run loop, optionally de-register from the visa service first.
     RequestVisa(VisaRequest, oneshot::Sender<VisaRequestResponse>),
     AuthorizeConnect(
         vsapi::ConnectRequest,
@@ -177,6 +178,10 @@ impl VSConn {
     ///
     /// This little run loop is fairly basic: all requests of the visa service run one at a time and
     /// in order.
+    ///
+    /// There are two quick ways to stop the run loop:
+    /// - Cancel the passed `ctok` token, which also attempts to first de-register from the visa service.
+    /// - Send a [VSCommand::Stop] command, which optionally attempts to de-register from the visa service.
     pub async fn run(&mut self, ctok: CancellationToken) -> Result<(), VSError> {
         info!(target: VS_RPC, "VSConn::run starts");
 
@@ -189,6 +194,7 @@ impl VSConn {
         self.initialize(&mut client)?;
         debug!(target: VS_RPC, "initialize completed successfully");
 
+        let mut deregister_at_exit = true;
         let mut interval = time::interval(PING_INTERVAL);
         let mut ping_errors = 0;
         loop {
@@ -217,15 +223,17 @@ impl VSConn {
                 }
                 _ = ctok.cancelled() => {
                     info!(target: VS_RPC, "VSConn::run cancelled");
-                    if let Err(e) = client.de_register() {
-                        error!(target: VS_RPC, "failed to de-register: {e}");
-                    }
                     break;
                 }
 
                 // Handle one of the "async" requests.
                 Some(cmd) = self.cmd_rx.recv() => {
                     match cmd {
+                        VSCommand::Stop(de_register) => {
+                            info!(target: VS_RPC, "VSConn::run received stop command");
+                            deregister_at_exit = de_register;
+                            break;
+                        },
                         // send errors simply mean requestor ignored reply; ignore them
                         VSCommand::RequestVisa(req, resp_chan) => { let _ = resp_chan.send(Self::handle_request_visa(&mut client, req)); },
                         VSCommand::AuthorizeConnect(cr, resp_chan) => { let _ = resp_chan.send(Self::handle_authorize_connect(&mut client, cr)); },
@@ -233,6 +241,11 @@ impl VSConn {
                         VSCommand::RequestServices(resp_chan) => { let _ = resp_chan.send(Self::handle_request_services(&mut client)); },
                     }
                 }
+            }
+        } // loop
+        if deregister_at_exit {
+            if let Err(e) = client.de_register() {
+                error!(target: VS_RPC, "failed to de-register: {e}");
             }
         }
         Ok(())
@@ -345,6 +358,11 @@ impl VSConnHandle {
         let (tx, rx) = oneshot::channel();
         self.send_command(VSCommand::RequestServices(tx)).await?;
         rx.await.map_err(|_| VSClientError::ConnClosed)?
+    }
+
+    /// Stop the VSConn run loop, optionally try to send a deregister message first.
+    pub async fn stop(&self, and_deregister: bool) -> Result<(), VSClientError> {
+        self.send_command(VSCommand::Stop(and_deregister)).await
     }
 }
 
@@ -648,6 +666,56 @@ s5JVZ48=
         assert_eq!(get_counter(CounterT::Auth), 1);
         assert_eq!(get_counter(CounterT::DeRegister), 1);
         assert_eq!(get_counter(CounterT::Ping), 1);
+    }
+
+    #[tokio::test]
+    async fn test_stop_command_stops_run_loop() {
+        let _lockval = RUN_LOCK.lock().unwrap();
+        reset_state();
+        let certfile = TempFile::new_pem(CERT_DATA);
+
+        let node_addr = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1));
+
+        let (tx, mut _rx) = mpsc::channel(8);
+
+        let mut claims = BTreeMap::new();
+        claims.insert(String::from("foo"), String::from("fee"));
+        let agnt = new_node_actor(node_addr, &claims);
+
+        let mut conn = VSConn::new(
+            agnt,
+            tx,
+            "127.0.0.1:0",
+            certfile.get_path(),
+            node_addr,
+            None,
+        )
+        .unwrap();
+
+        conn.set_client_factory(testvscli_factory);
+        let conn_handle = conn.handle();
+
+        let ctoken = CancellationToken::new();
+        let vs_tok = ctoken.clone();
+
+        // Spawn the run loop in a separate task
+        let run_task = tokio::spawn(async move { conn.run(vs_tok).await });
+
+        // Give the run loop a moment to start
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Send the Stop command
+        let _ = conn_handle.cmd_tx.send(VSCommand::Stop(true)).await;
+
+        // Wait for the run loop to exit
+        match timeout(Duration::from_millis(500), run_task).await {
+            Ok(res) => {
+                assert!(res.is_ok(), "Run loop did not exit cleanly");
+            }
+            Err(_) => {
+                panic!("Run loop did not stop after Stop command (timeout)");
+            }
+        }
     }
 
     #[tokio::test]

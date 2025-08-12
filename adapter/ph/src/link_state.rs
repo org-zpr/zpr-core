@@ -17,6 +17,7 @@ use openssl::x509::X509;
 use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::broadcast;
@@ -237,6 +238,7 @@ pub struct LinkStateMachine {
     timeout_count: usize,
     /// present only while in RegisterAA state; used for retransmits
     auth_blob: Option<String>,
+    shutting_down: bool, // only ever goes from False -> True once
 }
 
 impl LinkStateMachine {
@@ -252,6 +254,7 @@ impl LinkStateMachine {
             timeout_handle: None,
             timeout_count: 0,
             auth_blob: None,
+            shutting_down: false,
         }
     }
 
@@ -388,17 +391,16 @@ impl LinkStateWrapper {
         addr_list
     }
 
+    /// Tell the VS that this actor has disconnected.
     /// Used in a NODE context only.
     fn deregister_actor_addresses(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
         let mut join_set = tokio::task::JoinSet::new();
-
         let vs_id = asm
             .peer_table
             .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
         if vs_id.is_some() && vs_id.unwrap().get() == self.id {
             return join_set;
         }
-
         for addr in self.locked_fsm.lock().unwrap().actor_addresses.drain(..) {
             debug!(target: LINK_STATE, "Deregistering {addr}");
             join_set.spawn_local(visa_mgmt::actor_disconnect(asm.clone(), addr));
@@ -1512,27 +1514,71 @@ impl LinkStateWrapper {
         }
     }
 
-    /// Validate a received shutdown request
-    /// Does not transition
-    /// Generates no packets
+    /// Validate a received terminate request
+    /// May generate a thrift message (over TUN) to the visa service.
+    ///
+    /// Unless we are inactive, this transitions to closing. The state machine is now
+    /// stuck waiting for a SentTerminate event which triggers `clean_up_link_state`.
+    ///
+    /// Returns Ok unless this is in a state that cannot handle this message.
     fn process_terminate_request(
         &self,
-        _asm: &Assembly,
+        asm: &Arc<Assembly>,
         reason: TerminateReason,
     ) -> Result<(), LinkStateError> {
         let link_id = self.id;
         info!(target: LINK_STATE,
-            "Received shutdown request on link {link_id} for reason {reason:?}"
+            "Received terminate request on link {link_id} for reason {reason:?}"
         );
+
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        if locked_fsm.state == LinkState::Inactive {
-            Err(LinkStateError::UnexpectedTransition(
+
+        match (self.link_type, locked_fsm.state) {
+            (_, LinkState::Inactive) => Err(LinkStateError::UnexpectedTransition(
                 locked_fsm.state,
                 "ReceivedTerminateRequest",
-            ))
-        } else {
-            locked_fsm.set_state(LinkState::Closing);
-            Ok(())
+            )),
+
+            (ltype, _lstate) => {
+                if ltype == LinkType::NodeToAdapter {
+                    // If this was from our special friend, the visa service adapter, then de-register.
+                    // TODO: The de-register message never makes it across before link closes.
+                    self.disconnect_visa_service_client(asm, true);
+                }
+                locked_fsm.set_state(LinkState::Closing);
+                Ok(())
+            }
+        }
+    }
+
+    /// Nodes only. Check if this is the link to the adapter in front of the visa service
+    /// and if so try to de-register this node from the VS and also stop the VSConn.
+    ///
+    /// If the link is still working then this can also try to send a polite
+    /// "de-register" message to the visa service before we shut off our
+    /// VSConn processor.
+    fn disconnect_visa_service_client(&self, asm: &Arc<Assembly>, deregister: bool) {
+        if self.link_type != LinkType::NodeToAdapter {
+            panic!("disconnect_visa_service_client called on non node->adapter link");
+        }
+        let vs_id = asm
+            .peer_table
+            .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
+        if vs_id.is_some() && vs_id.unwrap().get() == self.id {
+            if let Some(vsconn) = asm.vsconn.as_ref() {
+                let spawn_hndl = vsconn.clone();
+                tokio::task::spawn_local(async move {
+                    debug!(target: LINK_STATE, "deregister of VS peer detected, stopping VSConn (deregister:{deregister})");
+                    if let Err(e) = spawn_hndl.stop(deregister).await {
+                        error!(target: LINK_STATE, "stop command to VSConn failed: {e}");
+                    }
+                });
+            }
+            // Ideally, we would wait for the VSConn to send the deregister message.
+            // In practice what happens here is that the link shuts down before the
+            // VSConn message can be sent.
+            // TODO: Maybe add a new state? Or figure out better way to handle this cleanup.
+            thread::sleep(Duration::from_millis(500));
         }
     }
 
@@ -1550,6 +1596,16 @@ impl LinkStateWrapper {
 
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         locked_fsm.set_state(LinkState::Closing);
+        if reason == TerminateReason::Shutdown {
+            locked_fsm.shutting_down = true
+        }
+
+        if self.link_type == LinkType::NodeToAdapter {
+            self.disconnect_visa_service_client(asm, true);
+        }
+
+        // If this timeout fires, we end up going to `clean_up_link_state`.
+        // If we get a response to our terminate we also go to `clean_up_link_state`.
         self.set_timeout(
             asm,
             &mut locked_fsm,
@@ -1565,40 +1621,52 @@ impl LinkStateWrapper {
     fn clean_up_link_state(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {
         let link_id = self.id;
         let mut join_set = tokio::task::JoinSet::new();
-        info!(target: LINK_STATE, "Link {link_id} is clearing its state");
 
-        let mut link_data = self.locked_data.lock().unwrap();
-        if let Some(aaa_addr) = link_data.aaa_address.take() {
-            if let Some(pool) = asm.address_pool.lock().unwrap().as_mut() {
-                match pool.release_address(aaa_addr) {
-                    Ok(_) => {
-                        debug!(target: LINK_STATE, "Link {link_id} released AAA address {aaa_addr}")
+        let locked_fsm = self.locked_fsm.lock().unwrap();
+
+        match locked_fsm.state {
+            LinkState::Closing | LinkState::Resetting => {
+                drop(locked_fsm);
+                info!(target: LINK_STATE, "Link {link_id} is clearing its state");
+
+                let mut link_data = self.locked_data.lock().unwrap();
+                if let Some(aaa_addr) = link_data.aaa_address.take() {
+                    if let Some(pool) = asm.address_pool.lock().unwrap().as_mut() {
+                        match pool.release_address(aaa_addr) {
+                            Ok(_) => {
+                                debug!(target: LINK_STATE, "Link {link_id} released AAA address {aaa_addr}")
+                            }
+                            Err(e) => {
+                                error!(target: LINK_STATE, "Failed to release AAA address {aaa_addr}: {e:?}")
+                            }
+                        };
                     }
-                    Err(e) => {
-                        error!(target: LINK_STATE, "Failed to release AAA address {aaa_addr}: {e:?}")
+                }
+
+                asm.peer_table.clear_peer_state(link_id);
+
+                match self.link_type {
+                    LinkType::AdapterToNode => asm.tun_ctl.set_carrier(false).unwrap(),
+                    LinkType::NodeToAdapter => join_set = self.deregister_actor_addresses(asm),
+                    _ => {}
+                }
+
+                let task_asm = asm.clone();
+                join_set.spawn_local(async move {
+                    // NOTE: Any mgmt messages MUST have been sent before this is called
+                    km_multiplexor::drop_link(&task_asm, link_id).await;
+
+                    if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::CloseDone)
+                    {
+                        error!(target: LINK_STATE, "Error shutting down link {link_id}: {e:?}");
                     }
-                };
+                });
+            }
+            _ => {
+                // Unexpcted call.
+                warn!(target: LINK_STATE, "cannot clean_up_link_state in state {:?}", locked_fsm.state);
             }
         }
-        drop(link_data);
-
-        asm.peer_table.clear_peer_state(link_id);
-
-        match self.link_type {
-            LinkType::AdapterToNode => asm.tun_ctl.set_carrier(false).unwrap(),
-            LinkType::NodeToAdapter => join_set = self.deregister_actor_addresses(asm),
-            _ => {}
-        }
-
-        let task_asm = asm.clone();
-        join_set.spawn_local(async move {
-            // NOTE: Any mgmt messages MUST have been sent before this is called
-            km_multiplexor::drop_link(&task_asm, link_id).await;
-
-            if let Err(e) = task_asm.process_link_state_event(link_id, LinkEvent::CloseDone) {
-                error!(target: LINK_STATE, "Error shutting down link {link_id}: {e:?}");
-            }
-        });
         join_set
     }
 
@@ -1621,8 +1689,13 @@ impl LinkStateWrapper {
                 locked_fsm.silent = false;
                 locked_fsm.set_state(LinkState::Inactive);
                 info!("Link {link_id} has fully shut down");
-                drop(locked_fsm);
-                self.setup_restart(asm);
+                if !locked_fsm.shutting_down {
+                    drop(locked_fsm);
+                    self.setup_restart(asm);
+                } else {
+                    drop(locked_fsm);
+                    asm.drop_peer(link_id); // buh bye!
+                }
             }
             _ => {
                 error!(
@@ -1662,13 +1735,16 @@ impl LinkStateWrapper {
         let _ = self.clean_up_link_state(asm).join_all().await;
     }
 
-    /// Handle a terminate response packet
+    /// Handle a terminate response packet.
+    /// This means we sent a terminate request and set a timeout. Timeout is cancelled here
+    /// before we proceed with shutting down the link.
     fn process_terminate_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
         info!(target: LINK_STATE,"Received terminate response for link {link_id}");
         let state = self.locked_fsm.lock().unwrap().state;
         match state {
             LinkState::Closing => {
+                self.locked_fsm.lock().unwrap().cancel_timeout();
                 self.clean_up_link_state(asm).detach_all();
                 Ok(())
             }
@@ -1679,6 +1755,8 @@ impl LinkStateWrapper {
         }
     }
 
+    /// Peer has sent a terminate-indication message.
+    /// Peer has shut down or shutting down so don't expect it to be there anymore.
     fn process_terminate_indication(
         &self,
         asm: &Arc<Assembly>,
@@ -1692,6 +1770,9 @@ impl LinkStateWrapper {
             .lock()
             .unwrap()
             .set_state(LinkState::Closing);
+        if self.link_type == LinkType::NodeToAdapter {
+            self.disconnect_visa_service_client(asm, true);
+        }
         self.clean_up_link_state(asm).detach_all();
         Ok(())
     }

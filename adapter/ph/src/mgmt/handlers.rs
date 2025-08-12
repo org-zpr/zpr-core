@@ -229,6 +229,10 @@ pub async fn handle_init_authentication_response(
 }
 
 /// handle a Terminate Request (RFC 6.5 § 6.3.3)
+///
+/// Sends [LinkEvent::ReceivedTerminateRequest] into the link state machine.
+/// Sends a ZdpTerminateResponse message back to the sender.
+/// Sends a [LinkEvent::SentTerminate] event into the link state machine.
 pub async fn handle_terminate_request(
     asm: &Arc<Assembly>,
     _seq_num: zpr::SeqNum,
@@ -260,10 +264,9 @@ pub async fn handle_terminate_request(
         rsp_pkt,
     );
 
-    if response_code == zdp::ResponseCode::Success {
-        let _ignore_errors =
-            asm.process_link_state_event(ingress_link_id, LinkEvent::SentTerminate);
-    }
+    // Tell state machine we sent a TerminateLinkResponse. This will trigger `clean_up_link_state`.
+    let _ = asm.process_link_state_event(ingress_link_id, LinkEvent::SentTerminate);
+
     Ok(())
 }
 
