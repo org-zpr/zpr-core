@@ -88,7 +88,11 @@ impl FastpathWorker {
         let adapter_manager = asm.adapter_manager_factory.make(&return_q);
         let mgmt_dispatch = asm.mgmt_dispatch_factory.make(&return_q);
         let batch_counters = Default::default();
-        asm.counters.fastpaths.lock().unwrap().push(FastpathCounters::default());
+        asm.counters
+            .fastpaths
+            .lock()
+            .unwrap()
+            .push(FastpathCounters::default());
 
         Self {
             config,
@@ -154,7 +158,12 @@ impl FastpathWorker {
         }
 
         // Watch out -- may not be secure
-        maybe_capture(&self.asm, Direction::Inbound, &mut pkt, &self.batch_counters);
+        maybe_capture(
+            &self.asm,
+            Direction::Inbound,
+            &mut pkt,
+            &self.batch_counters,
+        );
 
         // now pop the ZPI off the packet. We've already checked it.
         if zdp::ZdpZpiHeader::read_from_buf(&mut pkt).is_err() {
@@ -448,18 +457,19 @@ impl FastpathWorker {
     pub fn substrate_egress(&mut self, mut pkt: Packet) {
         let link_id = pkt.metadata().egress_link_id;
 
-        let (dest_sa, src_intf) = match substrate_egress_common(&self.asm, link_id, &mut pkt, &self.batch_counters) {
-            Ok(Some((dest_sa, src_intf))) => (dest_sa, src_intf),
-            Ok(None) => {
-                self.drop_and_count(pkt, FastpathCounterType::PeerRemoved);
-                return;
-            }
-            Err(err) => {
-                error!(target: DATAPATH, "egress: link {link_id}: encryption error: {err}");
-                self.drop_and_count(pkt, FastpathCounterType::EncryptionFailure);
-                return;
-            }
-        };
+        let (dest_sa, src_intf) =
+            match substrate_egress_common(&self.asm, link_id, &mut pkt, &self.batch_counters) {
+                Ok(Some((dest_sa, src_intf))) => (dest_sa, src_intf),
+                Ok(None) => {
+                    self.drop_and_count(pkt, FastpathCounterType::PeerRemoved);
+                    return;
+                }
+                Err(err) => {
+                    error!(target: DATAPATH, "egress: link {link_id}: encryption error: {err}");
+                    self.drop_and_count(pkt, FastpathCounterType::EncryptionFailure);
+                    return;
+                }
+            };
 
         // queue packet for send via substrate
         self.substrate_egress_q.push(QueuedEgressPacket {
@@ -474,7 +484,8 @@ impl FastpathWorker {
     }
 
     pub fn aggregate(&mut self) {
-        self.asm.counters.fastpaths.lock().unwrap()[self.worker_index].aggregate(&self.batch_counters);
+        self.asm.counters.fastpaths.lock().unwrap()[self.worker_index]
+            .aggregate(&self.batch_counters);
         self.batch_counters.clear();
     }
 }
@@ -488,7 +499,12 @@ pub fn encap_zpi(_asm: &Assembly, _link_id: zpr::LinkId, zpi: zpr::Zpi, pkt: &mu
 /// The packet must be a complete ZDP message.
 /// Despite the &mut borrow, the packet will return materially unchanged.
 /// (It will have a link-layer header temporarily added to it.)
-pub fn maybe_capture(asm: &Assembly, dir: Direction, pkt: &mut Packet, batch_counters: &FastpathCounters,) {
+pub fn maybe_capture(
+    asm: &Assembly,
+    dir: Direction,
+    pkt: &mut Packet,
+    batch_counters: &FastpathCounters,
+) {
     maybe_capture_batch(asm, dir, [pkt], batch_counters)
 }
 
@@ -544,21 +560,15 @@ pub fn maybe_capture_batch<'a>(
 
     match dir {
         Direction::Inbound => {
-            batch_counters[FastpathCounterType::InCapPacksWrite]
-                .increase_by(num_captured as u64);
-            batch_counters[FastpathCounterType::InCapPacksDrop]
-                .increase_by(num_dropped as u64);
-            batch_counters[FastpathCounterType::InCapPacksFilt]
-                .increase_by(num_filtered as u64);
+            batch_counters[FastpathCounterType::InCapPacksWrite].increase_by(num_captured as u64);
+            batch_counters[FastpathCounterType::InCapPacksDrop].increase_by(num_dropped as u64);
+            batch_counters[FastpathCounterType::InCapPacksFilt].increase_by(num_filtered as u64);
         }
 
         Direction::Outbound => {
-            batch_counters[FastpathCounterType::OutCapPacksWrite]
-                .increase_by(num_captured as u64);
-            batch_counters[FastpathCounterType::OutCapPacksDrop]
-                .increase_by(num_dropped as u64);
-            batch_counters[FastpathCounterType::OutCapPacksFilt]
-                .increase_by(num_filtered as u64);
+            batch_counters[FastpathCounterType::OutCapPacksWrite].increase_by(num_captured as u64);
+            batch_counters[FastpathCounterType::OutCapPacksDrop].increase_by(num_dropped as u64);
+            batch_counters[FastpathCounterType::OutCapPacksFilt].increase_by(num_filtered as u64);
         }
     }
 }

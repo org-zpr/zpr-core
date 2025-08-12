@@ -262,7 +262,7 @@ async fn counters_reset(asm: &Assembly) -> String {
     for value in asm.counters.management.values() {
         value.reset();
     }
-    
+
     for fastpath in asm.counters.fastpaths.lock().unwrap().iter() {
         for value in fastpath.values() {
             value.reset();

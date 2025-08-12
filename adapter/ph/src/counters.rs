@@ -12,8 +12,8 @@ pub type ManagementCounters = EnumMap<ManagementCounterType, Counter>;
 /// Struct of the system's performance counters. Broken into
 /// counters used in fastpath and those used for management
 // TODO the only way I could figure out to allow the fastpaths
-// to be able to push a new FastpathCounters to the asm was 
-// to make fastpaths a mutex, but it is less efficient, and I 
+// to be able to push a new FastpathCounters to the asm was
+// to make fastpaths a mutex, but it is less efficient, and I
 // don't think it is necessary, but had to do to appease the compiler
 #[derive(Default)]
 pub struct Counters {
@@ -323,7 +323,11 @@ mod tests {
     #[test]
     fn test_aggregate_increment() {
         let counters: Counters = Default::default();
-        counters.fastpaths.lock().unwrap().push(FastpathCounters::default());
+        counters
+            .fastpaths
+            .lock()
+            .unwrap()
+            .push(FastpathCounters::default());
 
         assert_eq!(
             counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
@@ -366,7 +370,11 @@ mod tests {
     #[test]
     fn test_aggregate_increase_by() {
         let counters: Counters = Default::default();
-        counters.fastpaths.lock().unwrap().push(FastpathCounters::default());
+        counters
+            .fastpaths
+            .lock()
+            .unwrap()
+            .push(FastpathCounters::default());
         assert_eq!(
             counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
             0
@@ -408,12 +416,18 @@ mod tests {
     #[test]
     fn test_aggregate_multiples() {
         let counters: Counters = Default::default();
-        counters.fastpaths.lock().unwrap().push(FastpathCounters::default());
+        counters
+            .fastpaths
+            .lock()
+            .unwrap()
+            .push(FastpathCounters::default());
         let mut counters_batch: FastpathCounters = Default::default();
 
         counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].increase_by(2);
-        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::QueueBackpressure].increase_by(8);
-        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::DispatchedToMgmt].increase_by(75);
+        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::QueueBackpressure]
+            .increase_by(8);
+        counters.fastpaths.lock().unwrap()[0][FastpathCounterType::DispatchedToMgmt]
+            .increase_by(75);
         counters.fastpaths.lock().unwrap()[0][FastpathCounterType::UnknownZpi].increase_by(4);
         counters.fastpaths.lock().unwrap()[0][FastpathCounterType::TtlExpired].increase_by(2);
         counters.management[ManagementCounterType::QueueBackpressure].increase_by(432);
@@ -424,11 +438,13 @@ mod tests {
             2
         );
         assert_eq!(
-            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::QueueBackpressure].get_count(),
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::QueueBackpressure]
+                .get_count(),
             8
         );
         assert_eq!(
-            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::DispatchedToMgmt].get_count(),
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::DispatchedToMgmt]
+                .get_count(),
             75
         );
         assert_eq!(
@@ -483,11 +499,13 @@ mod tests {
             2
         );
         assert_eq!(
-            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::QueueBackpressure].get_count(),
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::QueueBackpressure]
+                .get_count(),
             20
         );
         assert_eq!(
-            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::DispatchedToMgmt].get_count(),
+            counters.fastpaths.lock().unwrap()[0][FastpathCounterType::DispatchedToMgmt]
+                .get_count(),
             140
         );
         assert_eq!(
