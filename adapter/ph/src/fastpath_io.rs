@@ -207,7 +207,8 @@ impl FastpathIo {
             &mut self.requeue_outq,
             worker.config.batch_size,
             |worker, pkt| {
-                worker.asm.counters.fastpath[FastpathCounterType::RequeuedPacketsReceived].increment();
+                worker.asm.counters.fastpath[FastpathCounterType::RequeuedPacketsReceived]
+                    .increment();
                 worker.actor_output_post_classify(pkt, /* allow_bind_request */ false);
             },
         );

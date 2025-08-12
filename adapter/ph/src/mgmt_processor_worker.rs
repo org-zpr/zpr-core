@@ -31,7 +31,11 @@ pub async fn launch(
                 // Drop packets which are intended for a link other than the one we are assigned to,
                 // since processing them here will violate concurrency assumptions.
                 if pkt.metadata().ingress_link_id != config.link_id.get() {
-                    mgmt::core::count_event(&asm, &mut pkt, ManagementCounterType::InternalRoutingError);
+                    mgmt::core::count_event(
+                        &asm,
+                        &mut pkt,
+                        ManagementCounterType::InternalRoutingError,
+                    );
                     continue;
                 }
 

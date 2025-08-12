@@ -8,7 +8,7 @@ use crate::assembly::{Assembly, PhMode};
 use crate::batch_io::BatchIoEngine;
 use crate::classifier::{self, ClassifierResult};
 use crate::config;
-use crate::counters::{FastpathCounters, FastpathCounterType, Aggregate};
+use crate::counters::{Aggregate, FastpathCounterType, FastpathCounters};
 use crate::defs::Direction;
 use crate::km::{Codec, KmTransportSA};
 use crate::km_noise::NOISE_PADLEN;
@@ -542,15 +542,21 @@ pub fn maybe_capture_batch<'a>(
 
     match dir {
         Direction::Inbound => {
-            asm.counters.fastpath[FastpathCounterType::InCapPacksWrite].increase_by(num_captured as u64);
-            asm.counters.fastpath[FastpathCounterType::InCapPacksDrop].increase_by(num_dropped as u64);
-            asm.counters.fastpath[FastpathCounterType::InCapPacksFilt].increase_by(num_filtered as u64);
+            asm.counters.fastpath[FastpathCounterType::InCapPacksWrite]
+                .increase_by(num_captured as u64);
+            asm.counters.fastpath[FastpathCounterType::InCapPacksDrop]
+                .increase_by(num_dropped as u64);
+            asm.counters.fastpath[FastpathCounterType::InCapPacksFilt]
+                .increase_by(num_filtered as u64);
         }
 
         Direction::Outbound => {
-            asm.counters.fastpath[FastpathCounterType::OutCapPacksWrite].increase_by(num_captured as u64);
-            asm.counters.fastpath[FastpathCounterType::OutCapPacksDrop].increase_by(num_dropped as u64);
-            asm.counters.fastpath[FastpathCounterType::OutCapPacksFilt].increase_by(num_filtered as u64);
+            asm.counters.fastpath[FastpathCounterType::OutCapPacksWrite]
+                .increase_by(num_captured as u64);
+            asm.counters.fastpath[FastpathCounterType::OutCapPacksDrop]
+                .increase_by(num_dropped as u64);
+            asm.counters.fastpath[FastpathCounterType::OutCapPacksFilt]
+                .increase_by(num_filtered as u64);
         }
     }
 }
