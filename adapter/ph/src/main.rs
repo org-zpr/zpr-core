@@ -9,7 +9,7 @@ use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::Path;
 use std::process;
 use std::process::ExitCode;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -134,7 +134,7 @@ fn main() -> ExitCode {
     // set up logging
     //
 
-    logging::initialize(&config);
+    logging::initialize(&config.logging);
 
     info!(target: STARTUP, "starting with PID {}", process::id());
 
@@ -516,7 +516,10 @@ fn main() -> ExitCode {
         bsauth: config.bootstrap,
         rsauth: config.rsaoauth,
         address_pool: std::sync::Mutex::new(maybe_aaa_pool),
+        logging: Mutex::new(config.logging),
     });
+
+    println!("{:?}", asm.logging.lock().unwrap()); 
 
     //
     // create a Tokio "local set" to schedule all our management workers on

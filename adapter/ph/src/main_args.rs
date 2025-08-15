@@ -3,6 +3,7 @@
 //! The main entry point is [crate::main_argparse::argparse] which will parse the command line arguments
 //! and any config file, returning a PH configuration.
 
+use tracing::Level;
 use crate::auth::AuthError;
 use crate::batch_io;
 use crate::logging::targets::*;
@@ -91,17 +92,21 @@ pub struct CommonArgs {
     #[arg(long, short = 'z')]
     pub zpr_addr: Option<Vec<IpAddr>>,
 
-    /// Enable debug logging for specified targets
-    #[arg(long, short = 'd', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
-    pub debug: Vec<String>,
+    // /// Enable debug logging for specified targets
+    // #[arg(long, short = 'd', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
+    // pub debug: Vec<String>,
 
-    /// Enable verbose logging which includes trace values
-    #[arg(long, short = 'v')]
-    pub verbose: bool,
+    // /// Enable verbose logging which includes trace values
+    // #[arg(long, short = 'v')]
+    // pub verbose: bool,
 
-    /// Disable info & warnings for specified targets
-    #[arg(long, short = 'q', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
-    pub quiet: Vec<String>,
+    // /// Disable info & warnings for specified targets
+    // #[arg(long, short = 'q', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
+    // pub quiet: Vec<String>,
+
+    /// Log levels
+    #[arg(long, short = 'l', value_parser = parse_key_val)]
+    pub logging: Vec<(String, String)>,
 
     /// Which packet I/O engine to use
     #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(std::iter::once(batch_io::AUTO_ENGINE_NAME).chain(batch_io::engine_names())), default_value_t = batch_io::AUTO_ENGINE_NAME.to_owned())]
@@ -185,6 +190,14 @@ fn parse_socket_addr_or_scoped_ip_addr(
             Ipv4Addr::from_str(s).map_err(Box::new)?,
             0,
         )))
+    }
+}
+
+fn parse_key_val(s: &str) -> Result<(String, String), String> {
+    let key_val: Vec<&str> = s.splitn(2, "=").collect();
+    match key_val.len() {
+        2 => Ok((key_val[0].to_string(), key_val[1].to_string())),
+        _ => Err(format!("Invalid key-value pair")),
     }
 }
 

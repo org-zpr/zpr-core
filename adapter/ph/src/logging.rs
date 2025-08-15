@@ -1,6 +1,5 @@
 //! Logging-related stuff.
 
-use crate::config;
 use tracing::Level;
 use tracing_subscriber::filter::targets::Targets;
 use tracing_subscriber::{fmt, prelude::*};
@@ -63,9 +62,7 @@ pub mod targets {
 }
 
 fn create_target_filter<T>(
-    debug: impl IntoIterator<Item = T>,
-    quiet: impl IntoIterator<Item = T>,
-    verbose: &bool,
+    logging_vec: &Vec<(String, String)>
 ) -> Targets
 where
     String: From<T>,
@@ -75,55 +72,81 @@ where
 
     targets = targets.with_default(Level::INFO);
 
-    let lvl = match verbose {
-        false => Level::DEBUG,
-        true => Level::TRACE,
-    };
+    // let lvl = match verbose {
+    //     false => Level::DEBUG,
+    //     true => Level::TRACE,
+    // };
 
-    let mut empty = true;
+    // let mut empty = true;
 
-    for target in debug.into_iter() {
-        empty = false;
-        if target == targets::ALL {
-            targets = targets.with_default(lvl);
-        } else if target == targets::NONE {
-            if lvl == Level::TRACE {
-                targets = targets.with_default(lvl);
-            } else {
-                targets = targets.with_default(Level::INFO);
-            }
-        } else {
-            targets = targets.with_target(target, lvl);
-        }
-    }
+    // for target in debug.into_iter() {
+    //     empty = false;
+    //     if target == targets::ALL {
+    //         targets = targets.with_default(lvl);
+    //     } else if target == targets::NONE {
+    //         if lvl == Level::TRACE {
+    //             targets = targets.with_default(lvl);
+    //         } else {
+    //             targets = targets.with_default(Level::INFO);
+    //         }
+    //     } else {
+    //         targets = targets.with_target(target, lvl);
+    //     }
+    // }
 
-    // Prints trace level debugging even if user did not use --debug flag
-    if empty && lvl == Level::TRACE {
-        targets = targets.with_default(lvl);
-    }
+    // // Prints trace level debugging even if user did not use --debug flag
+    // if empty && lvl == Level::TRACE {
+    //     targets = targets.with_default(lvl);
+    // }
 
-    let debugged_targets = targets.clone();
+    // let debugged_targets = targets.clone();
 
-    for target in quiet.into_iter() {
-        if target == targets::ALL {
-            targets = targets.with_default(Level::ERROR);
-        } else if target == targets::NONE {
-            targets = debugged_targets.clone();
-        } else {
-            targets = targets.with_target(target, Level::ERROR);
-        }
-    }
+    // for target in quiet.into_iter() {
+    //     if target == targets::ALL {
+    //         targets = targets.with_default(Level::ERROR);
+    //     } else if target == targets::NONE {
+    //         targets = debugged_targets.clone();
+    //     } else {
+    //         targets = targets.with_target(target, Level::ERROR);
+    //     }
+    // }
 
     targets
 }
-
-pub fn initialize(config: &config::Config) {
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(create_target_filter(
-            &config.debug,
-            &config.quiet,
-            &config.verbose,
-        ))
-        .init();
+pub fn initialize(logging_vec: &Vec<(String, String)>) {
+    // tracing_subscriber::registry()
+    //     .with(fmt::layer())
+    //     .with(create_target_filter(debug, quiet, verbose))
+    //     .init();
 }
+// pub fn initialize(
+//     debug: &Vec<String>,
+//     quiet: &Vec<String>,
+//     verbose: &bool,
+// ) -> reload::Handle<fmt::Layer<Registry>, Registry> {
+//     let (reload_layer, reload_handle) = reload::Layer::new(fmt::layer());
+//     tracing_subscriber::registry()
+//         .with(reload_layer)
+//         .with(create_target_filter(debug, quiet, verbose))
+//         .init();
+//     // let filtered_layer = fmt::Layer::default().with_filter(create_target_filter(debug, quiet, verbose));
+//     // let (filtered_layer, reload_handle) = reload::Layer::new(filtered_layer);
+//     // tracing_subscriber::registry()
+//     //     .with(filtered_layer)
+//     //     .init();
+
+//     reload_handle
+// }
+
+// pub fn reload(
+//     debug: &Vec<String>,
+//     quiet: &Vec<String>,
+//     verbose: &bool,
+//     reload_handle: &reload::Handle<fmt::Layer<Registry>, Registry>,
+// ) {
+//     let new_targets = fmt::layer().with_filter(create_target_filter(debug, quiet, verbose));
+//     // reload_handle.reload(new_targets).expect("failed to load new targets");
+
+//     // reload_handle.modify(create_target_filter(debug, quiet, verbose));
+
+// }

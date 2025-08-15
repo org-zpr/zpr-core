@@ -29,7 +29,7 @@ use std::net::IpAddr;
 use std::num::NonZero;
 use std::panic;
 use std::result::Result;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::*;
 use zpr::{self, LinkId, SubstrateAddr, VisaId};
@@ -102,6 +102,7 @@ pub struct Assembly {
     pub rsauth: Option<OAuthRsa>,
     pub system_start_time: std::time::Instant,
     pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
+    pub logging: Mutex<Vec<(String, String)>>,
 }
 
 #[derive(Debug, Error)]

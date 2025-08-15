@@ -8,6 +8,7 @@
 use crate::assembly::Assembly;
 use crate::config;
 use crate::link_state::{LinkEvent, LinkState};
+use crate::logging;
 use crate::logging::targets::RPC;
 use crate::test_packet::TestPacketMetrics;
 use crate::zdp::TerminateReason;
@@ -220,6 +221,78 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                     }
                     Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
                 },
+                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
+            },
+            Ok(RpcCommands::SetDebug) => match vec_message.len() {
+                1 => {
+                    // This case the user provided no input to the debug flag
+                    // assumes the user wanted to see "all" debug messages
+                    let mut new_vec: Vec<String> = Vec::new(); // TODO refactor into function, lots of repeated code here
+                    // asm.debug.lock().unwrap().clear();
+                    // asm.debug.lock().unwrap().append(&mut new_vec);
+                    new_vec.push("all".to_string());
+                    buf_writer.write_all("OK\n".as_bytes()).await?
+                }
+                _ => {
+                    let mut new_vec: Vec<String> = Vec::new();
+                    for (i, elem) in vec_message.iter().enumerate() {
+                        if i != 1 {
+                            new_vec.push(elem.to_string());
+                        }
+                    }
+                    // asm.debug.lock().unwrap().clear();
+                    // asm.debug.lock().unwrap().append(&mut new_vec);
+
+                    // logging::reload(
+                    //     &asm.debug.lock().unwrap(),
+                    //     &asm.quiet.lock().unwrap(),
+                    //     &asm.verbose.lock().unwrap(),
+                    //     &asm.reload_handle
+                    // );
+
+                    let mut debug_print = new_vec.join("X");
+                    debug_print = format!("{}\n", debug_print);
+                    buf_writer.write_all(debug_print.as_bytes()).await?;
+                    buf_writer.write_all("OK\n".as_bytes()).await?
+                }
+            },
+            Ok(RpcCommands::SetQuiet) => match vec_message.len() {
+                1 => {
+                    // This case the user provided no input to the debug flag
+                    // assumes the user wanted to quiet "all" messages
+                    let mut new_vec: Vec<String> = Vec::new();
+                    new_vec.push("all".to_string());
+                    // asm.quiet.lock().unwrap().clear();
+                    // asm.quiet.lock().unwrap().append(&mut new_vec);
+                    buf_writer.write_all("OK\n".as_bytes()).await?
+                }
+                _ => {
+                    let mut new_vec: Vec<String> = Vec::new();
+                    for (i, elem) in vec_message.iter().enumerate() {
+                        if i != 1 {
+                            new_vec.push(elem.to_string());
+                        }
+                    }
+                    // asm.quiet.lock().unwrap().clear();
+                    // asm.quiet.lock().unwrap().append(&mut new_vec);
+
+                    let mut quiet_print = new_vec.join("X");
+                    quiet_print = format!("{}\n", quiet_print);
+                    buf_writer.write_all(quiet_print.as_bytes()).await?;
+                    buf_writer.write_all("OK\n".as_bytes()).await?
+                }
+            },
+            Ok(RpcCommands::SetTrace) => match vec_message.len() {
+                1 => {
+                    // This case the user provided no input to the debug flag
+                    // assumes the user wanted to quiet "all" messages
+                    // *asm.verbose.lock().unwrap() = true;
+                    buf_writer.write_all("OK\n".as_bytes()).await?
+                }
+                2 => {
+                    // *asm.verbose.lock().unwrap() = vec_message[1].parse().unwrap();
+                    buf_writer.write_all("OK\n".as_bytes()).await?
+                }
                 _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
             },
             _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
