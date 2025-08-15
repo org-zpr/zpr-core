@@ -92,7 +92,6 @@ impl FastpathWorker {
         {
             let mut fastpaths_vec = asm.counters.fastpaths.lock().unwrap();
             while fastpaths_vec.len() <= worker_index {
-                println!("VEC LEN: {}, IDX: {}\n", fastpaths_vec.len(), worker_index);
                 fastpaths_vec.push(FastpathCounters::default());
             }
         }
