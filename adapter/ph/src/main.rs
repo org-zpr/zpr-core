@@ -134,7 +134,7 @@ fn main() -> ExitCode {
     // set up logging
     //
 
-    logging::initialize(&config.logging);
+    logging::initialize(&mut config.logging);
 
     info!(target: STARTUP, "starting with PID {}", process::id());
 
@@ -518,9 +518,6 @@ fn main() -> ExitCode {
         address_pool: std::sync::Mutex::new(maybe_aaa_pool),
         logging: Mutex::new(config.logging),
     });
-
-    println!("{:?}", asm.logging.lock().unwrap()); 
-
     //
     // create a Tokio "local set" to schedule all our management workers on
     //

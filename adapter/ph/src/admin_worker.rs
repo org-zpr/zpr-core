@@ -228,8 +228,8 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                     // This case the user provided no input to the debug flag
                     // assumes the user wanted to see "all" debug messages
                     let mut new_vec: Vec<String> = Vec::new(); // TODO refactor into function, lots of repeated code here
-                    // asm.debug.lock().unwrap().clear();
-                    // asm.debug.lock().unwrap().append(&mut new_vec);
+                                                               // asm.debug.lock().unwrap().clear();
+                                                               // asm.debug.lock().unwrap().append(&mut new_vec);
                     new_vec.push("all".to_string());
                     buf_writer.write_all("OK\n".as_bytes()).await?
                 }

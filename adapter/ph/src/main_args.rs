@@ -3,7 +3,6 @@
 //! The main entry point is [crate::main_argparse::argparse] which will parse the command line arguments
 //! and any config file, returning a PH configuration.
 
-use tracing::Level;
 use crate::auth::AuthError;
 use crate::batch_io;
 use crate::logging::targets::*;
@@ -11,6 +10,7 @@ use clap::{Args, Parser, Subcommand};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::path::PathBuf;
 use std::str::FromStr;
+use tracing::Level;
 
 /// Errors you may encounter when trying to parse command line or configuration
 /// file.
@@ -103,9 +103,8 @@ pub struct CommonArgs {
     // /// Disable info & warnings for specified targets
     // #[arg(long, short = 'q', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
     // pub quiet: Vec<String>,
-
     /// Log levels
-    #[arg(long, short = 'l', value_parser = parse_key_val)]
+    #[arg(long, short = 'l', value_delimiter = ' ', num_args = 1.., value_parser = parse_key_val)]
     pub logging: Vec<(String, String)>,
 
     /// Which packet I/O engine to use
@@ -194,7 +193,7 @@ fn parse_socket_addr_or_scoped_ip_addr(
 }
 
 fn parse_key_val(s: &str) -> Result<(String, String), String> {
-    let key_val: Vec<&str> = s.splitn(2, "=").collect();
+    let key_val: Vec<&str> = s.split("=").collect();
     match key_val.len() {
         2 => Ok((key_val[0].to_string(), key_val[1].to_string())),
         _ => Err(format!("Invalid key-value pair")),

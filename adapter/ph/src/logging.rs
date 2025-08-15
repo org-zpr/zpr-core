@@ -2,7 +2,7 @@
 
 use tracing::Level;
 use tracing_subscriber::filter::targets::Targets;
-use tracing_subscriber::{fmt, prelude::*};
+use tracing_subscriber::{filter, fmt, prelude::*, reload};
 
 /// Target of a log message, for filtering.
 pub mod targets {
@@ -61,92 +61,39 @@ pub mod targets {
     ];
 }
 
-fn create_target_filter<T>(
-    logging_vec: &Vec<(String, String)>
-) -> Targets
-where
-    String: From<T>,
-    T: for<'a> std::cmp::PartialEq<&'a str>,
-{
+fn create_target_filter(logging_vec: &mut Vec<(String, String)>) -> Targets {
     let mut targets = Targets::new();
+    logging_vec.sort();
 
-    targets = targets.with_default(Level::INFO);
+    let default_lvl: Level = match logging_vec[0].0.as_str() {
+        targets::ALL => get_level(logging_vec[0].1.as_str()),
+        _ => Level::INFO,
+    };
 
-    // let lvl = match verbose {
-    //     false => Level::DEBUG,
-    //     true => Level::TRACE,
-    // };
+    println!("DEFAULT: {:?}", default_lvl);
+    targets = targets.with_default(default_lvl);
+    
+    for elem in logging_vec {
 
-    // let mut empty = true;
-
-    // for target in debug.into_iter() {
-    //     empty = false;
-    //     if target == targets::ALL {
-    //         targets = targets.with_default(lvl);
-    //     } else if target == targets::NONE {
-    //         if lvl == Level::TRACE {
-    //             targets = targets.with_default(lvl);
-    //         } else {
-    //             targets = targets.with_default(Level::INFO);
-    //         }
-    //     } else {
-    //         targets = targets.with_target(target, lvl);
-    //     }
-    // }
-
-    // // Prints trace level debugging even if user did not use --debug flag
-    // if empty && lvl == Level::TRACE {
-    //     targets = targets.with_default(lvl);
-    // }
-
-    // let debugged_targets = targets.clone();
-
-    // for target in quiet.into_iter() {
-    //     if target == targets::ALL {
-    //         targets = targets.with_default(Level::ERROR);
-    //     } else if target == targets::NONE {
-    //         targets = debugged_targets.clone();
-    //     } else {
-    //         targets = targets.with_target(target, Level::ERROR);
-    //     }
-    // }
+        targets = targets.with_target(elem.0.clone(), get_level(elem.1.as_str()));
+    }    
 
     targets
 }
-pub fn initialize(logging_vec: &Vec<(String, String)>) {
-    // tracing_subscriber::registry()
-    //     .with(fmt::layer())
-    //     .with(create_target_filter(debug, quiet, verbose))
-    //     .init();
+
+pub fn initialize(logging_vec: &mut Vec<(String, String)>) {
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(create_target_filter(logging_vec))
+        .init();
 }
-// pub fn initialize(
-//     debug: &Vec<String>,
-//     quiet: &Vec<String>,
-//     verbose: &bool,
-// ) -> reload::Handle<fmt::Layer<Registry>, Registry> {
-//     let (reload_layer, reload_handle) = reload::Layer::new(fmt::layer());
-//     tracing_subscriber::registry()
-//         .with(reload_layer)
-//         .with(create_target_filter(debug, quiet, verbose))
-//         .init();
-//     // let filtered_layer = fmt::Layer::default().with_filter(create_target_filter(debug, quiet, verbose));
-//     // let (filtered_layer, reload_handle) = reload::Layer::new(filtered_layer);
-//     // tracing_subscriber::registry()
-//     //     .with(filtered_layer)
-//     //     .init();
 
-//     reload_handle
-// }
-
-// pub fn reload(
-//     debug: &Vec<String>,
-//     quiet: &Vec<String>,
-//     verbose: &bool,
-//     reload_handle: &reload::Handle<fmt::Layer<Registry>, Registry>,
-// ) {
-//     let new_targets = fmt::layer().with_filter(create_target_filter(debug, quiet, verbose));
-//     // reload_handle.reload(new_targets).expect("failed to load new targets");
-
-//     // reload_handle.modify(create_target_filter(debug, quiet, verbose));
-
-// }
+fn get_level(level: &str) -> Level {
+    match level {
+        "DEBUG" => Level::DEBUG,
+        "TRACE" => Level::TRACE,
+        "WARN" => Level::WARN,
+        "ERROR" => Level::ERROR,
+        _ => Level::INFO,
+    }
+}
