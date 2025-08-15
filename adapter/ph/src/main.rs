@@ -245,7 +245,12 @@ fn main() -> ExitCode {
             None
         }
     } else {
-        Some(zpr::ZPR_TEMP_LOCAL_ADDRESS.into())
+        // TODO: If linux then do not bother setting the temp address since it will fail because ipv6.
+        if cfg!(target_os = "linux") {
+            None
+        } else {
+            Some(zpr::ZPR_TEMP_LOCAL_ADDRESS.into())
+        }
     };
 
     let tun_devs: Vec<_> = match ZprTun::new_mq(
