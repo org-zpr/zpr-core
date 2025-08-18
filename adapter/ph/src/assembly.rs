@@ -25,6 +25,7 @@ use crate::visa_table;
 use crate::vs_types::AuthServicesList;
 use crate::zdp::TerminateReason;
 use km_noise::NoiseKeypair;
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::num::NonZero;
 use std::panic;
@@ -32,9 +33,9 @@ use std::result::Result;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::*;
-use zpr::{self, LinkId, SubstrateAddr, VisaId};
 use tracing_subscriber::filter::targets::Targets;
 use tracing_subscriber::{filter, fmt, reload, Registry};
+use zpr::{self, LinkId, SubstrateAddr, VisaId};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {
@@ -104,8 +105,9 @@ pub struct Assembly {
     pub rsauth: Option<OAuthRsa>,
     pub system_start_time: std::time::Instant,
     pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
-    pub logging: Mutex<Vec<(String, String)>>,
-    pub reload_handle: reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>
+    pub logging: Mutex<HashMap<String, String>>,
+    pub reload_handle:
+        reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,
 }
 
 #[derive(Debug, Error)]

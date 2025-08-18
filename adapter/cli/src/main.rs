@@ -84,7 +84,10 @@ enum Commands {
     /// Change link state
     Link(LinkArgs),
     /// Change the log level of a node or adapter
-    ChangeLogging(LogArgs),
+    Logging {
+        #[arg(required = true)]
+        logs: String,
+    },
     /// Exit the CLI
     Quit,
 }
@@ -137,23 +140,6 @@ enum LinkCommands {
     Stop { id: u32 },
     /// Reset a link.  It will require a configure before starting again
     Reset { id: u32 },
-}
-
-#[derive(Debug, Args)]
-#[command(flatten_help = true)]
-struct LogArgs {
-    #[command(subcommand)]
-    command: LogCommands,
-}
-
-#[derive(Debug, Subcommand)]
-enum LogCommands {
-    /// Show a link's status
-    Debug { debug: Vec<String> },
-    /// Configure a link
-    Trace { trace: bool },
-    /// Start a link
-    Quiet { quiet: Vec<String> },
 }
 
 fn main() -> std::io::Result<()> {
@@ -238,7 +224,7 @@ fn process_command(command: Commands, socket: &str) -> std::io::Result<bool> {
             frequency,
         } => handle_perf_sample(duration, frequency, &socket)?,
         Commands::Link(link) => handle_link_command(link, &socket)?,
-        Commands::ChangeLogging(log_args) => handle_change_log(log_args, &socket)?,
+        Commands::Logging { logs } => basic_command!(RpcCommands::SetLogging, socket, logs)?,
         Commands::Quit => return Ok(true),
     }
 
@@ -445,22 +431,22 @@ fn handle_link_command(link_args: LinkArgs, socket: &str) -> std::io::Result<()>
     Ok(())
 }
 
-fn handle_change_log(log_args: LogArgs, socket: &str) -> std::io::Result<()> {
-    match log_args.command {
-        LogCommands::Debug { debug } => {
-            let debug_string = debug.join(" ");
-            println!("{}", debug_string);
-            basic_command!(RpcCommands::SetDebug, socket, debug_string)?
-        }
-        LogCommands::Trace { trace } => basic_command!(RpcCommands::SetTrace, socket, trace)?,
-        LogCommands::Quiet { quiet } => {
-            let quiet_string = quiet.join("_");
-            basic_command!(RpcCommands::SetQuiet, socket, quiet_string)?
-        }
-    };
+// fn handle_change_log(log_args: LogArgs, socket: &str) -> std::io::Result<()> {
+//     match log_args.command {
+//         LogCommands::Debug { debug } => {
+//             let debug_string = debug.join(" ");
+//             println!("{}", debug_string);
+//             basic_command!(RpcCommands::SetDebug, socket, debug_string)?
+//         }
+//         LogCommands::Trace { trace } => basic_command!(RpcCommands::SetTrace, socket, trace)?,
+//         LogCommands::Quiet { quiet } => {
+//             let quiet_string = quiet.join("_");
+//             basic_command!(RpcCommands::SetQuiet, socket, quiet_string)?
+//         }
+//     };
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 /// Uses combination of pcap and cbpf-rs libraries to serialize program
 /// into the following format:

@@ -223,77 +223,31 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                 },
                 _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
             },
-            Ok(RpcCommands::SetDebug) => match vec_message.len() {
-                1 => {
-                    // This case the user provided no input to the debug flag
-                    // assumes the user wanted to see "all" debug messages
-                    let mut new_vec: Vec<String> = Vec::new(); // TODO refactor into function, lots of repeated code here
-                                                               // asm.debug.lock().unwrap().clear();
-                                                               // asm.debug.lock().unwrap().append(&mut new_vec);
-                    new_vec.push("all".to_string());
-                    buf_writer.write_all("OK\n".as_bytes()).await?
-                }
+            Ok(RpcCommands::SetLogging) => match vec_message.len() {
+                1 => buf_writer.write_all("ERR\n".as_bytes()).await?,
                 _ => {
-                    let mut new_vec: Vec<String> = Vec::new();
-                    for (i, elem) in vec_message.iter().enumerate() {
-                        if i != 1 {
-                            new_vec.push(elem.to_string());
+                    for elem in vec_message.iter().skip(1) {
+                        buf_writer.write_all(elem.as_bytes()).await?;
+                        let key_val: Vec<&str> = elem.split("=").collect();
+                        match key_val.len() {
+                            2 => {
+                                asm.logging
+                                    .lock()
+                                    .unwrap()
+                                    .insert(key_val[0].to_string(), key_val[1].to_string());
+                            }
+                            _ => {
+                                buf_writer
+                                    .write_all("ERR Unkno0wn log value ignored\n".as_bytes())
+                                    .await?
+                            }
                         }
                     }
-                    // asm.debug.lock().unwrap().clear();
-                    // asm.debug.lock().unwrap().append(&mut new_vec);
 
-                    // logging::reload(
-                    //     &asm.debug.lock().unwrap(),
-                    //     &asm.quiet.lock().unwrap(),
-                    //     &asm.verbose.lock().unwrap(),
-                    //     &asm.reload_handle
-                    // );
+                    logging::reload_filter(&asm.reload_handle, &asm.logging.lock().unwrap());
 
-                    let mut debug_print = new_vec.join("X");
-                    debug_print = format!("{}\n", debug_print);
-                    buf_writer.write_all(debug_print.as_bytes()).await?;
                     buf_writer.write_all("OK\n".as_bytes()).await?
                 }
-            },
-            Ok(RpcCommands::SetQuiet) => match vec_message.len() {
-                1 => {
-                    // This case the user provided no input to the debug flag
-                    // assumes the user wanted to quiet "all" messages
-                    let mut new_vec: Vec<String> = Vec::new();
-                    new_vec.push("all".to_string());
-                    // asm.quiet.lock().unwrap().clear();
-                    // asm.quiet.lock().unwrap().append(&mut new_vec);
-                    buf_writer.write_all("OK\n".as_bytes()).await?
-                }
-                _ => {
-                    let mut new_vec: Vec<String> = Vec::new();
-                    for (i, elem) in vec_message.iter().enumerate() {
-                        if i != 1 {
-                            new_vec.push(elem.to_string());
-                        }
-                    }
-                    // asm.quiet.lock().unwrap().clear();
-                    // asm.quiet.lock().unwrap().append(&mut new_vec);
-
-                    let mut quiet_print = new_vec.join("X");
-                    quiet_print = format!("{}\n", quiet_print);
-                    buf_writer.write_all(quiet_print.as_bytes()).await?;
-                    buf_writer.write_all("OK\n".as_bytes()).await?
-                }
-            },
-            Ok(RpcCommands::SetTrace) => match vec_message.len() {
-                1 => {
-                    // This case the user provided no input to the debug flag
-                    // assumes the user wanted to quiet "all" messages
-                    // *asm.verbose.lock().unwrap() = true;
-                    buf_writer.write_all("OK\n".as_bytes()).await?
-                }
-                2 => {
-                    // *asm.verbose.lock().unwrap() = vec_message[1].parse().unwrap();
-                    buf_writer.write_all("OK\n".as_bytes()).await?
-                }
-                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
             },
             _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
         };

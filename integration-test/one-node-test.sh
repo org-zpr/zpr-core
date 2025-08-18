@@ -3,7 +3,7 @@ set -euo pipefail
 
 export RUST_BACKTRACE=1
 # DEBUG_TARGETS=${DEBUG_TARGETS:-none}
-DEBUG_TARGETS=$"link_state=TRACE all=DEBUG zdp=INFO"
+DEBUG_TARGETS=$"all=WARN visa_mgmt=INFO"
 
 PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/cli/target/debug/ph-cli")
@@ -203,7 +203,7 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
 fi
 echo "Carrier has arrived."
 # This sleep solves a display issue because magic
-sleep 1
+sleep 100
 
 #
 # Run test

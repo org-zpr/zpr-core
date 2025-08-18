@@ -1,5 +1,6 @@
 //! Logging-related stuff.
 
+use std::collections::HashMap;
 use tracing::Level;
 use tracing_subscriber::filter::targets::Targets;
 use tracing_subscriber::{filter, fmt, prelude::*, reload, Registry};
@@ -42,7 +43,6 @@ pub mod targets {
 
     pub const ALL_TARGETS: &[&str] = &[
         ALL,
-        NONE,
         CAPTURE,
         DATAPATH,
         FLOW_MGMT,
@@ -61,19 +61,18 @@ pub mod targets {
     ];
 }
 
-fn create_target_filter(logging_vec: &mut Vec<(String, String)>) -> Targets {
+fn create_target_filter(logging_map: &HashMap<String, String>) -> Targets {
     let mut targets = Targets::new();
-    logging_vec.sort();
 
-    let default_lvl: Level = match logging_vec[0].0.as_str() {
-        targets::ALL => get_level(logging_vec[0].1.as_str()),
-        _ => Level::INFO,
+    let default_lvl: Level = match logging_map.get(targets::ALL) {
+        Some(value) => get_level(value.as_str()),
+        None => Level::INFO,
     };
 
     println!("DEFAULT: {:?}", default_lvl);
     targets = targets.with_default(default_lvl);
 
-    for elem in logging_vec {
+    for elem in logging_map.iter() {
         targets = targets.with_target(elem.0.clone(), get_level(elem.1.as_str()));
     }
 
@@ -82,12 +81,20 @@ fn create_target_filter(logging_vec: &mut Vec<(String, String)>) -> Targets {
 
 pub fn initialize(
     logging_vec: &mut Vec<(String, String)>,
-) -> reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry> {
+) -> (
+    reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,
+    HashMap<String, String>,
+) {
+    let mut logging_map = HashMap::new();
+    for elem in logging_vec {
+        logging_map.insert(elem.0.clone(), elem.1.clone());
+    }
+
     let (reload_layer, reload_handle) =
-        reload::Layer::new(fmt::layer().with_filter(create_target_filter(logging_vec)));
+        reload::Layer::new(fmt::layer().with_filter(create_target_filter(&logging_map)));
     tracing_subscriber::registry().with(reload_layer).init();
     // reload_handle.modify(|filter| *filter.filter_mut() = (create_target_filter(logging_vec))).unwrap();
-    reload_handle
+    (reload_handle, logging_map)
 }
 
 pub fn reload_filter(
@@ -95,10 +102,10 @@ pub fn reload_filter(
         filter::Filtered<fmt::Layer<Registry>, Targets, Registry>,
         Registry,
     >,
-    logging_vec: &mut Vec<(String, String)>,
+    logging_map: &HashMap<String, String>,
 ) {
     reload_handle
-        .modify(|filter| *filter.filter_mut() = create_target_filter(logging_vec))
+        .modify(|filter| *filter.filter_mut() = create_target_filter(logging_map))
         .unwrap();
 }
 
@@ -108,6 +115,7 @@ fn get_level(level: &str) -> Level {
         "TRACE" => Level::TRACE,
         "WARN" => Level::WARN,
         "ERROR" => Level::ERROR,
+        "OFF" => Level::ERROR,
         _ => Level::INFO,
     }
 }

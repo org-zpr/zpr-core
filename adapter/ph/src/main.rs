@@ -133,8 +133,9 @@ fn main() -> ExitCode {
     //
     // set up logging
     //
+    println!("LOGGING CONFIG: {:?}", config.logging);
 
-    let reload_handle = logging::initialize(&mut config.logging);
+    let (reload_handle, logging_map) = logging::initialize(&mut config.logging);
 
     info!(target: STARTUP, "starting with PID {}", process::id());
 
@@ -521,7 +522,7 @@ fn main() -> ExitCode {
         bsauth: config.bootstrap,
         rsauth: config.rsaoauth,
         address_pool: std::sync::Mutex::new(maybe_aaa_pool),
-        logging: Mutex::new(config.logging),
+        logging: Mutex::new(logging_map),
         reload_handle,
     });
     //
