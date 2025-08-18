@@ -223,6 +223,17 @@ mod rcu_impl {
                 .swap(epoch::Owned::new(new_value), Ordering::AcqRel, &guard);
             // SAFETY: `old_value` is now unreachable
             unsafe {
+                // Note on ordering:
+                //
+                // We assume/hope `defer_destroy()` synchronizes-with
+                // `pin()`.  (They are not documented to do so, but I think
+                // it is a safe assumption.) So, in the case that the
+                // `pin()` of a `get()` occurs _after_ this step, but
+                // _before_ we implicitly unpin (and thus execute the
+                // destructor), the above swap is visible to the load in
+                // `get()`.  (Else, the load would see the pre-swap value,
+                // and a subsequent dereference thereof might occur after we
+                // have unpinned and thus triggered the destructor.)
                 guard.defer_destroy(old_value);
             }
         }
@@ -239,6 +250,7 @@ mod rcu_impl {
             };
             // SAFETY: `old_value` is now unreachable
             unsafe {
+                // See note on ordering in write().
                 guard.defer_destroy(old_value);
             }
             Ok(())
