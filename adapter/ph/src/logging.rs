@@ -2,7 +2,7 @@
 
 use tracing::Level;
 use tracing_subscriber::filter::targets::Targets;
-use tracing_subscriber::{filter, fmt, prelude::*, reload};
+use tracing_subscriber::{filter, fmt, prelude::*, reload, Registry};
 
 /// Target of a log message, for filtering.
 pub mod targets {
@@ -14,7 +14,7 @@ pub mod targets {
     // log target should be X, since the message is reporting on behalf of
     // an action in X.  (But if Y itself logs the result, it should do so
     // under target Y.) This helps provide a complete picture to someone
-    // debugging X why X is behaving in a certain way, without needing to
+    // debugging X why X is behaving in a   vbg way, without needing to
     // also enable logging for Y (and all other APIs which X happens to use).
 
     // More succinctly, the "golden rule" here is, if someone is trying to
@@ -72,20 +72,34 @@ fn create_target_filter(logging_vec: &mut Vec<(String, String)>) -> Targets {
 
     println!("DEFAULT: {:?}", default_lvl);
     targets = targets.with_default(default_lvl);
-    
-    for elem in logging_vec {
 
+    for elem in logging_vec {
         targets = targets.with_target(elem.0.clone(), get_level(elem.1.as_str()));
-    }    
+    }
 
     targets
 }
 
-pub fn initialize(logging_vec: &mut Vec<(String, String)>) {
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(create_target_filter(logging_vec))
-        .init();
+pub fn initialize(
+    logging_vec: &mut Vec<(String, String)>,
+) -> reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry> {
+    let (reload_layer, reload_handle) =
+        reload::Layer::new(fmt::layer().with_filter(create_target_filter(logging_vec)));
+    tracing_subscriber::registry().with(reload_layer).init();
+    // reload_handle.modify(|filter| *filter.filter_mut() = (create_target_filter(logging_vec))).unwrap();
+    reload_handle
+}
+
+pub fn reload_filter(
+    reload_handle: &reload::Handle<
+        filter::Filtered<fmt::Layer<Registry>, Targets, Registry>,
+        Registry,
+    >,
+    logging_vec: &mut Vec<(String, String)>,
+) {
+    reload_handle
+        .modify(|filter| *filter.filter_mut() = create_target_filter(logging_vec))
+        .unwrap();
 }
 
 fn get_level(level: &str) -> Level {
@@ -97,3 +111,24 @@ fn get_level(level: &str) -> Level {
         _ => Level::INFO,
     }
 }
+
+// fn create_subscriber(logging_vec: &mut Vec<(String, String)>) {
+//     let mut layers = Vec::new();
+//     let mut handlers = Vec::new();
+
+//     for target in targets::ALL_TARGETS.iter() {
+//         let mut targets = Targets::new();
+//         targets = targets.with_target(*target, Level::INFO);
+//         let (reload_layer, reload_handle) = reload::Layer::new(fmt::layer().with_filter(targets));
+//         layers.push(reload_layer);
+//         handlers.push(reload_handle);
+//     }
+
+//     tracing_subscriber::registry().with(layers).init();
+
+//     let mut targets = Targets::new();
+//     targets = targets.with_target("all", Level::INFO);
+//     handlers[0]
+//         .modify(|filter| *filter.filter_mut() = (create_target_filter(logging_vec)))
+//         .unwrap();
+// }

@@ -33,6 +33,8 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::*;
 use zpr::{self, LinkId, SubstrateAddr, VisaId};
+use tracing_subscriber::filter::targets::Targets;
+use tracing_subscriber::{filter, fmt, reload, Registry};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {
@@ -103,6 +105,7 @@ pub struct Assembly {
     pub system_start_time: std::time::Instant,
     pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
     pub logging: Mutex<Vec<(String, String)>>,
+    pub reload_handle: reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>
 }
 
 #[derive(Debug, Error)]

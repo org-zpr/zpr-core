@@ -5,12 +5,10 @@
 
 use crate::auth::AuthError;
 use crate::batch_io;
-use crate::logging::targets::*;
 use clap::{Args, Parser, Subcommand};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::path::PathBuf;
 use std::str::FromStr;
-use tracing::Level;
 
 /// Errors you may encounter when trying to parse command line or configuration
 /// file.
