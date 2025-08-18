@@ -88,11 +88,13 @@ impl FastpathWorker {
         let adapter_manager = asm.adapter_manager_factory.make(&return_q);
         let mgmt_dispatch = asm.mgmt_dispatch_factory.make(&return_q);
         let batch_counters = Default::default();
-        asm.counters
-            .fastpaths
-            .lock()
-            .unwrap()
-            .push(FastpathCounters::default());
+
+        {
+            let mut fastpaths_vec = asm.counters.fastpaths.lock().unwrap();
+            while fastpaths_vec.len() <= worker_index {
+                fastpaths_vec.push(FastpathCounters::default());
+            }
+        }
 
         Self {
             config,
