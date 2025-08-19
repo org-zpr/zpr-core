@@ -106,7 +106,7 @@ pub struct Assembly {
     pub rsauth: Option<OAuthRsa>,
     pub system_start_time: std::time::Instant,
     pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
-    
+
     pub logging: Mutex<HashMap<String, String>>,
     pub reload_handle:
         reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,

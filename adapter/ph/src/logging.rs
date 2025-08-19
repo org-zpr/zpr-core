@@ -80,7 +80,7 @@ fn create_target_filter(logging_map: &HashMap<String, String>) -> Targets {
 }
 
 /// Creates the tracing_subscriber and the initial hashmap
-/// Returns the reload handler, which allows the filters to be 
+/// Returns the reload handler, which allows the filters to be
 /// changed at runtime and the hashmap with the current targets
 /// and levels
 pub fn initialize(
