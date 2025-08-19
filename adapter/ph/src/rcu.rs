@@ -38,10 +38,12 @@ mod rcu_impl {
     use std::sync::{RwLock, RwLockReadGuard};
 
     /// An RCU-protected box.
-    pub struct RcuBox<T>(RwLock<T>);
+    pub struct RcuBox<T: 'static>(RwLock<T>);
+    // Note, the `'static` bound on `T` here and in `RcuGuard`
+    // are both due to the `aarc` implementation.
 
     /// A protected reference to the item in an RCU-protected box.
-    pub struct RcuGuard<'a, T>(RwLockReadGuard<'a, T>);
+    pub struct RcuGuard<'a, T: 'static>(RwLockReadGuard<'a, T>);
     // Note, `RcuGuard`'s drop glue has lifetime `'a` due to `RwLockReadGuard`.
 
     impl<T> std::ops::Deref for RcuGuard<'_, T> {
@@ -104,9 +106,9 @@ mod rcu_impl {
 mod rcu_impl {
     use std::sync::{Arc, Mutex};
 
-    pub struct RcuBox<T>(Mutex<Arc<T>>);
+    pub struct RcuBox<T: 'static>(Mutex<Arc<T>>);
 
-    pub struct RcuGuard<'a, T> {
+    pub struct RcuGuard<'a, T: 'static> {
         phantom: std::marker::PhantomData<&'a T>,
         arc: Arc<T>,
     }
@@ -170,9 +172,9 @@ mod rcu_impl {
     use std::marker::PhantomData;
     use std::sync::atomic::Ordering;
 
-    pub struct RcuBox<T>(epoch::Atomic<T>);
+    pub struct RcuBox<T: 'static>(epoch::Atomic<T>);
 
-    pub struct RcuGuard<'a, T> {
+    pub struct RcuGuard<'a, T: 'static> {
         guard: epoch::Guard,
         ptr: *const T,
         phantom: PhantomData<&'a T>,
@@ -258,26 +260,22 @@ mod rcu_impl {
     }
 }
 
-// NOTE: `rcu-aarc` doesn't actually compile because of the requirement that
-// the contained type has static lifetime.  However -- I think we *could* work
-// with this constraint in most cases if we change type annotations
-// in some places, so I'm keeping it around for now.
 #[cfg(all(feature = "rcu-aarc", not(doc)))]
 mod rcu_impl {
     use std::sync::Mutex;
 
     pub struct RcuBox<T: 'static>(aarc::AtomicArc<T>, Mutex<()>);
 
-    pub struct RcuGuard<'a, T> {
+    pub struct RcuGuard<'a, T: 'static> {
+        guard: aarc::Guard<T>,
         phantom: std::marker::PhantomData<&'a T>,
-        snapshot: aarc::Snapshot<T>,
     }
 
     impl<T> std::ops::Deref for RcuGuard<'_, T> {
         type Target = T;
 
         fn deref(&self) -> &Self::Target {
-            self.snapshot.deref()
+            self.guard.deref()
         }
     }
 
@@ -287,20 +285,22 @@ mod rcu_impl {
         }
 
         pub fn inspect<U>(&self, f: impl FnOnce(&T) -> U) -> U {
-            f(&*self.0.load::<aarc::Snapshot<_>>().unwrap())
+            // SAFETY: we always store a value in the AtomicArc
+            f(&*unsafe { self.0.load().unwrap_unchecked() })
         }
 
         pub fn get(&self) -> RcuGuard<'_, T> {
             RcuGuard {
+                // SAFETY: we always store a value in the AtomicArc
+                guard: unsafe { self.0.load().unwrap_unchecked() },
                 phantom: std::marker::PhantomData,
-                snapshot: self.0.load::<aarc::Snapshot<_>>().unwrap(),
             }
         }
 
         pub fn write(&self, new_value: T) {
             // NOTE: it's not clear from aarc docs in which threads GC is allowed;
             // if in `load()` threads, this would be a deal-breaker
-            self.0.store(Some(&std::sync::Arc::new(new_value)))
+            self.0.store(Some(&aarc::Arc::new(new_value)))
         }
 
         pub fn update(&self, f: impl Fn(&T) -> Option<T>) -> Result<(), ()> {
@@ -354,7 +354,7 @@ impl<T> From<T> for RcuBox<T> {
 }
 
 /// `RcuGuard` for an `Option` value known to be `Some`.
-pub struct RcuOptionGuard<'a, T>(RcuGuard<'a, Option<T>>);
+pub struct RcuOptionGuard<'a, T: 'static>(RcuGuard<'a, Option<T>>);
 
 impl<T> std::ops::Deref for RcuOptionGuard<'_, T> {
     type Target = T;
@@ -389,7 +389,7 @@ impl<'a, T> TryFrom<RcuGuard<'a, Option<T>>> for RcuOptionGuard<'a, T> {
 }
 
 /// `RcuGuard` for an `RcuCslab` entry known to be present.
-pub struct RcuCslabEntryGuard<'a, T> {
+pub struct RcuCslabEntryGuard<'a, T: 'static> {
     guard: RcuGuard<'a, cslab::RcuCslabReader<T>>,
     key: usize,
 }
