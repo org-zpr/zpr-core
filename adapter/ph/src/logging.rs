@@ -24,7 +24,6 @@ pub mod targets {
     // ultimately lies with a dependency of X).
 
     pub const ALL: &str = "all";
-    pub const NONE: &str = "none";
     pub const CAPTURE: &str = "capture";
     pub const DATAPATH: &str = "datapath";
     pub const FLOW_MGMT: &str = "flow_mgmt";
@@ -41,6 +40,7 @@ pub mod targets {
 
     pub use libnode::logging::targets::*;
 
+    #[allow(dead_code)]
     pub const ALL_TARGETS: &[&str] = &[
         ALL,
         CAPTURE,
@@ -61,6 +61,7 @@ pub mod targets {
     ];
 }
 
+/// Creates the filter for the specified targets
 fn create_target_filter(logging_map: &HashMap<String, String>) -> Targets {
     let mut targets = Targets::new();
 
@@ -69,7 +70,6 @@ fn create_target_filter(logging_map: &HashMap<String, String>) -> Targets {
         None => Level::INFO,
     };
 
-    println!("DEFAULT: {:?}", default_lvl);
     targets = targets.with_default(default_lvl);
 
     for elem in logging_map.iter() {
@@ -79,6 +79,10 @@ fn create_target_filter(logging_map: &HashMap<String, String>) -> Targets {
     targets
 }
 
+/// Creates the tracing_subscriber and the initial hashmap
+/// Returns the reload handler, which allows the filters to be 
+/// changed at runtime and the hashmap with the current targets
+/// and levels
 pub fn initialize(
     logging_vec: &mut Vec<(String, String)>,
 ) -> (
@@ -93,10 +97,11 @@ pub fn initialize(
     let (reload_layer, reload_handle) =
         reload::Layer::new(fmt::layer().with_filter(create_target_filter(&logging_map)));
     tracing_subscriber::registry().with(reload_layer).init();
-    // reload_handle.modify(|filter| *filter.filter_mut() = (create_target_filter(logging_vec))).unwrap();
+
     (reload_handle, logging_map)
 }
 
+/// Creates a new filter and updates the existing Layer
 pub fn reload_filter(
     reload_handle: &reload::Handle<
         filter::Filtered<fmt::Layer<Registry>, Targets, Registry>,
@@ -109,6 +114,7 @@ pub fn reload_filter(
         .unwrap();
 }
 
+/// Gets the log level from a string
 fn get_level(level: &str) -> Level {
     match level {
         "DEBUG" => Level::DEBUG,
@@ -119,24 +125,3 @@ fn get_level(level: &str) -> Level {
         _ => Level::INFO,
     }
 }
-
-// fn create_subscriber(logging_vec: &mut Vec<(String, String)>) {
-//     let mut layers = Vec::new();
-//     let mut handlers = Vec::new();
-
-//     for target in targets::ALL_TARGETS.iter() {
-//         let mut targets = Targets::new();
-//         targets = targets.with_target(*target, Level::INFO);
-//         let (reload_layer, reload_handle) = reload::Layer::new(fmt::layer().with_filter(targets));
-//         layers.push(reload_layer);
-//         handlers.push(reload_handle);
-//     }
-
-//     tracing_subscriber::registry().with(layers).init();
-
-//     let mut targets = Targets::new();
-//     targets = targets.with_target("all", Level::INFO);
-//     handlers[0]
-//         .modify(|filter| *filter.filter_mut() = (create_target_filter(logging_vec)))
-//         .unwrap();
-// }

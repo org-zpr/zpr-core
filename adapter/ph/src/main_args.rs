@@ -90,18 +90,7 @@ pub struct CommonArgs {
     #[arg(long, short = 'z')]
     pub zpr_addr: Option<Vec<IpAddr>>,
 
-    // /// Enable debug logging for specified targets
-    // #[arg(long, short = 'd', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
-    // pub debug: Vec<String>,
-
-    // /// Enable verbose logging which includes trace values
-    // #[arg(long, short = 'v')]
-    // pub verbose: bool,
-
-    // /// Disable info & warnings for specified targets
-    // #[arg(long, short = 'q', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
-    // pub quiet: Vec<String>,
-    /// Log levels
+    /// Set log level for various targets
     #[arg(long, short = 'l', value_delimiter = ' ', num_args = 1.., value_parser = parse_key_val)]
     pub logging: Vec<(String, String)>,
 
@@ -193,7 +182,7 @@ fn parse_socket_addr_or_scoped_ip_addr(
 fn parse_key_val(s: &str) -> Result<(String, String), String> {
     let key_val: Vec<&str> = s.split("=").collect();
     match key_val.len() {
-        2 => Ok((key_val[0].to_string(), key_val[1].to_string())),
+        2 => Ok((key_val[0].to_string(), key_val[1].to_uppercase())),
         _ => Err(format!("Invalid key-value pair")),
     }
 }

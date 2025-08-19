@@ -2,8 +2,7 @@
 set -euo pipefail
 
 export RUST_BACKTRACE=1
-# DEBUG_TARGETS=${DEBUG_TARGETS:-none}
-DEBUG_TARGETS=$"all=WARN visa_mgmt=INFO"
+DEBUG_TARGETS=${DEBUG_TARGETS:-all=INFO}
 
 PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/cli/target/debug/ph-cli")

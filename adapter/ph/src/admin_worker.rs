@@ -228,13 +228,14 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                 _ => {
                     for elem in vec_message.iter().skip(1) {
                         buf_writer.write_all(elem.as_bytes()).await?;
+                        buf_writer.write_all(" ".as_bytes()).await?;
                         let key_val: Vec<&str> = elem.split("=").collect();
                         match key_val.len() {
                             2 => {
                                 asm.logging
                                     .lock()
                                     .unwrap()
-                                    .insert(key_val[0].to_string(), key_val[1].to_string());
+                                    .insert(key_val[0].to_string(), key_val[1].to_uppercase());
                             }
                             _ => {
                                 buf_writer
@@ -246,7 +247,7 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
 
                     logging::reload_filter(&asm.reload_handle, &asm.logging.lock().unwrap());
 
-                    buf_writer.write_all("OK\n".as_bytes()).await?
+                    buf_writer.write_all("\nOK\n".as_bytes()).await?
                 }
             },
             _ => buf_writer.write_all("ERR\n".as_bytes()).await?,

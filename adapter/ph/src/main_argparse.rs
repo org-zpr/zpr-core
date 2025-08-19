@@ -208,8 +208,8 @@ mod test {
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
         zpr_addr = [ "10.0.0.1" ]
-        debug = [ "capture" ]
-        quiet = [ "all" ]
+        logging = [ ["zdp", "INFO"] ]
+
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -242,11 +242,9 @@ mod test {
         );
         assert_eq!(config.global.tun_if, Some("tun23".to_string()));
         assert_eq!(
-            config.global.debug,
-            Some(Vec::from(["capture".to_string()]))
+            config.global.logging,
+            Some(Vec::from([("zdp".to_string(), "INFO".to_string())]))
         );
-        assert_eq!(config.global.quiet, Some(Vec::from(["all".to_string()])));
-
         assert_eq!(
             config.adapter.node_addr,
             Some(SocketAddr::new(
@@ -276,8 +274,8 @@ mod test {
         certificate_file = "tests/certificate.pem"
         private_key_file = "tests/private_key.pem"
         tun_if = "tun23"
-        debug = [ "flow_mgmt" ]
-        quiet = [ "rpc" ]
+        logging = [ ["all", "TRACE"] ]
+
         "#;
 
         let tmpfile = TempFile::new_toml(&tomltxt);
@@ -306,10 +304,9 @@ mod test {
         );
         assert_eq!(config.global.tun_if, Some("tun23".to_string()));
         assert_eq!(
-            config.global.debug,
-            Some(Vec::from(["flow_mgmt".to_string()]))
+            config.global.logging,
+            Some(Vec::from([("all".to_string(), "TRACE".to_string())]))
         );
-        assert_eq!(config.global.quiet, Some(Vec::from(["rpc".to_string()])));
     }
 
     #[test]
@@ -324,8 +321,8 @@ mod test {
         private_key_file = "$PKFILE"
         tun_if = "tun23"
         zpr_addr = [ "10.0.0.1" ]
-        debug = [ "link_state" ]
-        quiet = [ "startup" ]
+        logging = [ ["link_state", "DEBUG"] ]
+
 
         [adapter]
         node_addr = "192.168.0.2:5000"
@@ -366,8 +363,10 @@ mod test {
             format!("file://{}", pk_file.get_path().display())
         );
         assert_eq!(config.tun_if, Some("tun23".to_string()));
-        assert_eq!(config.debug, Vec::from(["link_state".to_string()]));
-        assert_eq!(config.quiet, Vec::from(["startup".to_string()]));
+        assert_eq!(
+            config.logging,
+            Vec::from([("link_state".to_string(), "DEBUG".to_string())])
+        );
 
         assert_eq!(
             config.node_addr,
@@ -516,10 +515,8 @@ mod test {
             "192.168.0.1:12345",
             "--tun-if",
             "tun23",
-            "-d",
-            "peer_mgmt",
-            "-q",
-            "reporting",
+            "-l",
+            "peer_mgmt=DEBUG zdp=TRACE",
         ];
 
         let (pmode, config) = argparse(Some(args)).unwrap();
@@ -538,8 +535,13 @@ mod test {
             format!("file://{}", pk_file.get_path().display())
         );
         assert_eq!(config.tun_if, Some("tun23".to_string()));
-        assert_eq!(config.debug, Vec::from(["peer_mgmt".to_string()]));
-        assert_eq!(config.quiet, Vec::from(["reporting".to_string()]));
+        assert_eq!(
+            config.logging,
+            Vec::from([
+                ("peer_mgmt".to_string(), "DEBUG".to_string()),
+                ("zdp".to_string(), "TRACE".to_string())
+            ])
+        );
 
         assert_eq!(
             config.node_addr,
@@ -607,8 +609,7 @@ mod test {
             format!("file://{}", pk_file.get_path().display())
         );
         assert!(config.tun_if.is_none());
-        assert!(config.debug.is_empty());
-        assert!(config.quiet.is_empty());
+        assert!(config.logging.is_empty());
 
         assert_eq!(
             config.node_addr,
@@ -670,8 +671,7 @@ mod test {
             format!("file://{}", pk_file.get_path().display())
         );
         assert!(config.tun_if.is_none());
-        assert!(config.debug.is_empty());
-        assert!(config.quiet.is_empty());
+        assert!(config.logging.is_empty());
     }
 
     #[test]
@@ -716,8 +716,7 @@ mod test {
             format!("file://{}", pk_file_fname)
         );
         assert!(config.tun_if.is_none());
-        assert!(config.debug.is_empty());
-        assert!(config.quiet.is_empty());
+        assert!(config.logging.is_empty());
     }
 
     #[test]

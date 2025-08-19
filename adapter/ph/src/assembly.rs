@@ -34,7 +34,8 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::*;
 use tracing_subscriber::filter::targets::Targets;
-use tracing_subscriber::{filter, fmt, reload, Registry};
+#[allow(unused_imports)]
+use tracing_subscriber::{filter, fmt, reload, Layer, Registry};
 use zpr::{self, LinkId, SubstrateAddr, VisaId};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -105,6 +106,7 @@ pub struct Assembly {
     pub rsauth: Option<OAuthRsa>,
     pub system_start_time: std::time::Instant,
     pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
+    
     pub logging: Mutex<HashMap<String, String>>,
     pub reload_handle:
         reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,
@@ -495,6 +497,10 @@ pub mod test {
         pub adapter_manager_factory: Option<AdapterManagerFactory>,
         pub km_state: Option<KmState>,
         pub system_start_time: Option<std::time::Instant>,
+        pub logging: Option<Mutex<HashMap<String, String>>>,
+        pub reload_handle: Option<
+            reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,
+        >,
     }
 
     #[allow(dead_code)]
@@ -568,6 +574,14 @@ pub mod test {
             let (km_tx, _km_rx) = mpsc::channel(1);
             KmState::new(km_tx, km_sig_tx)
         });
+        let logging = builder
+            .logging
+            .unwrap_or_else(|| Mutex::new(HashMap::default()));
+        let reload_handle = builder.reload_handle.unwrap_or_else(|| {
+            let (_reload_layer, reload_handle) =
+                reload::Layer::new(fmt::layer().with_filter(Targets::new()));
+            reload_handle
+        });
 
         Assembly {
             ph_mode,
@@ -597,6 +611,8 @@ pub mod test {
             bsauth: None,
             rsauth: None,
             address_pool: std::sync::Mutex::new(None),
+            logging,
+            reload_handle,
         }
     }
 }
