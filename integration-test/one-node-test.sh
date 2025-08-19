@@ -202,7 +202,7 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
 fi
 echo "Carrier has arrived."
 # This sleep solves a display issue because magic
-sleep 100
+sleep 1
 
 #
 # Run test
