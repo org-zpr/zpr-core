@@ -10,6 +10,7 @@ use crate::config;
 use crate::link_state::{LinkEvent, LinkState};
 use crate::logging;
 use crate::logging::targets::RPC;
+use crate::logging::{levels, targets};
 use crate::test_packet::TestPacketMetrics;
 use crate::zdp::TerminateReason;
 use cbpf_rs;
@@ -232,14 +233,24 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                         let key_val: Vec<&str> = elem.split("=").collect();
                         match key_val.len() {
                             2 => {
-                                asm.logging
-                                    .lock()
-                                    .unwrap()
-                                    .insert(key_val[0].to_string(), key_val[1].to_uppercase());
+                                if targets::ALL_TARGETS.contains(&key_val[0])
+                                    && levels::ALL_LEVELS
+                                        .contains(&key_val[1].to_uppercase().as_str())
+                                {
+                                    asm.logging
+                                        .lock()
+                                        .unwrap()
+                                        .insert(key_val[0].to_string(), key_val[1].to_uppercase());
+                                    buf_writer.write_all("applied\n".as_bytes()).await?
+                                } else {
+                                    buf_writer
+                                        .write_all("ERR: Unknown log value\n".as_bytes())
+                                        .await?
+                                }
                             }
                             _ => {
                                 buf_writer
-                                    .write_all("ERR Unkno0wn log value ignored\n".as_bytes())
+                                    .write_all("ERR Unknown log value ignored\n".as_bytes())
                                     .await?
                             }
                         }

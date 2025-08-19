@@ -133,8 +133,6 @@ fn main() -> ExitCode {
     //
     // set up logging
     //
-    println!("LOGGING CONFIG: {:?}", config.logging);
-
     let (reload_handle, logging_map) = logging::initialize(&mut config.logging);
 
     info!(target: STARTUP, "starting with PID {}", process::id());

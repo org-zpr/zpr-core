@@ -15,7 +15,7 @@ pub mod targets {
     // log target should be X, since the message is reporting on behalf of
     // an action in X.  (But if Y itself logs the result, it should do so
     // under target Y.) This helps provide a complete picture to someone
-    // debugging X why X is behaving in a   vbg way, without needing to
+    // debugging X why X is behaving in a certain way, without needing to
     // also enable logging for Y (and all other APIs which X happens to use).
 
     // More succinctly, the "golden rule" here is, if someone is trying to
@@ -40,7 +40,6 @@ pub mod targets {
 
     pub use libnode::logging::targets::*;
 
-    #[allow(dead_code)]
     pub const ALL_TARGETS: &[&str] = &[
         ALL,
         CAPTURE,
@@ -59,6 +58,18 @@ pub mod targets {
         VSS_RPC,
         ZDP,
     ];
+}
+
+pub mod levels {
+
+    pub const OFF: &str = "OFF";
+    pub const ERROR: &str = "ERROR";
+    pub const WARN: &str = "WARN";
+    pub const INFO: &str = "INFO";
+    pub const DEBUG: &str = "DEBUG";
+    pub const TRACE: &str = "TRACE";
+
+    pub const ALL_LEVELS: &[&str] = &[ERROR, WARN, INFO, DEBUG, TRACE];
 }
 
 /// Creates the filter for the specified targets
@@ -115,13 +126,15 @@ pub fn reload_filter(
 }
 
 /// Gets the log level from a string
+/// This is highly permissive, but the only information that will be passed
+/// in will one of levels::ALL_LEVELS, so it is less permissive than it seems
 fn get_level(level: &str) -> Level {
     match level {
-        "DEBUG" => Level::DEBUG,
-        "TRACE" => Level::TRACE,
-        "WARN" => Level::WARN,
-        "ERROR" => Level::ERROR,
-        "OFF" => Level::ERROR,
+        levels::DEBUG => Level::DEBUG,
+        levels::TRACE => Level::TRACE,
+        levels::WARN => Level::WARN,
+        levels::OFF => Level::ERROR,
+        levels::ERROR => Level::ERROR,
         _ => Level::INFO,
     }
 }
