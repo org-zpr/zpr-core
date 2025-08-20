@@ -168,7 +168,7 @@ pub fn authorize_connect(
 
     // In initial version of the connect messaging with visa service the following
     // claims must be set:
-    //   - "device.zpr.adapter.cn" set to the CN in the noise certificate presented by the adapter.
+    //   - "endpoint.zpr.adapter.cn" set to the CN in the noise certificate presented by the adapter.
     //   - "zpr.addr" the ZPR contact address in use by the adapter.
     if !attrs.contains_key(claims::KATTR_CN) {
         return Err(thrift::Error::from(format!(

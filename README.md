@@ -211,8 +211,8 @@ We assume:
 Create a file called `zpr-full-access.zpl` with these contents:
 
 ```
-Define adapter as a device with 'zpr.adapter.cn'.
-Define WebService as a service with device.zpr.adapter.cn:'web.zpr.org'.
+Define adapter as an endpoint with 'zpr.adapter.cn'.
+Define WebService as a service with endpoint.zpr.adapter.cn:'web.zpr.org'.
 Allow zpr.adapter.cn: adapters to access WebService.
 ```
 
@@ -229,7 +229,7 @@ order = ["hosts", "dns"]
 
 [nodes."node"]
 key = "<node-public-noise-key-in-base64-here>"
-provider = [ ["device.zpr.adapter.cn", "node.zpr.org"]]
+provider = [ ["endpoint.zpr.adapter.cn", "node.zpr.org"]]
 zpr_address = "node0.zpr"
 interfaces = ["in1"]
 in1.netaddr = "node0.overlay:5000"
@@ -239,7 +239,7 @@ cert_path = "auth-ca.crt"
 
 [visa_service]
 dock_node = "node"
-admin_attrs = [ [ "device.zpr.adapter.cn", "admin.zpr.org" ] ]
+admin_attrs = [ [ "endpoint.zpr.adapter.cn", "admin.zpr.org" ] ]
 
 [bootstrap]
 "vs.zpr" = "vs-zpr-pubkey.pem"
@@ -313,6 +313,8 @@ Now you can attach additional adapters and start up the "WebService".
 
 ## Updates
 
++ Aug 20, 2025
+  + `device` class renamed to `endpoint`.
 + July 31, 2025
   + Removed reference to the runners.
   + Add details about setting up TUN interface.
@@ -320,7 +322,7 @@ Now you can attach additional adapters and start up the "WebService".
   + No longer need to set `self_addr` in an adapter.
 + June 12, 2025
   + New **bootstrap** requirement and associated RSA key creation.
-  + Domain (eg, `device`, `user`, or `service`) now required for attribute keys.
+  + Domain (eg, `endpoint`, `user`, or `service`) now required for attribute keys.
   + New `l4protocol` required in the configuration.
 
 
