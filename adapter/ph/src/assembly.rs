@@ -563,10 +563,9 @@ pub mod test {
             KmState::new(km_tx, km_sig_tx)
         });
         let config = builder.config.unwrap_or_else(|| {
-            let config = <config::Config as std::default::Default>::default(); 
+            let config = <config::Config as std::default::Default>::default();
             std::sync::RwLock::new(config)
         });
-
 
         Assembly {
             ph_mode,
