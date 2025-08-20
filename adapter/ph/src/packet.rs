@@ -9,7 +9,7 @@
 use crate::defs::*;
 use crate::net_defs::*;
 use bytes::buf;
-use libc;
+extern crate libc;
 use std::mem::size_of;
 use zerocopy::*;
 use zpr;
