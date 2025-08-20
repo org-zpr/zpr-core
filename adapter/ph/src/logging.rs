@@ -69,7 +69,7 @@ pub mod levels {
     pub const DEBUG: &str = "DEBUG";
     pub const TRACE: &str = "TRACE";
 
-    pub const ALL_LEVELS: &[&str] = &[ERROR, WARN, INFO, DEBUG, TRACE];
+    pub const ALL_LEVELS: &[&str] = &[ERROR, WARN, INFO, DEBUG, TRACE, OFF];
 }
 
 /// Creates the filter for the specified targets
