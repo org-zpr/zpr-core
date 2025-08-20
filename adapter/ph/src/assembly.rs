@@ -1,6 +1,5 @@
 use crate::adapter_tables;
 use crate::address_pool::AddressPool;
-use crate::auth::{OAuthRsa, RsaBootstrapAuth};
 use crate::capture_worker::CaptureWorker;
 use crate::config;
 use crate::counters::*;
@@ -98,10 +97,10 @@ pub struct Assembly {
     pub self_noise_keypair: Option<NoiseKeypair>,
     pub peer_noise_keypair: Option<NoiseKeypair>,
     pub certx: Option<KmCertExchange>,
-    pub bsauth: Option<RsaBootstrapAuth>,
-    pub rsauth: Option<OAuthRsa>,
     pub system_start_time: std::time::Instant,
     pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
+
+    pub config: std::sync::RwLock<config::Config>,
 }
 
 #[derive(Debug, Error)]

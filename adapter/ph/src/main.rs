@@ -161,14 +161,15 @@ fn main() -> ExitCode {
         peer_noise_keypair = None;
         self_noise_keypair = Some(NoiseKeypair::new(private_key));
     } else {
-        let public_key =
-            match load_noise_public_key(&Path::new(&config.node_public_key_file.unwrap())) {
-                Ok(key) => key,
-                Err(e) => {
-                    error!(target: STARTUP, "failed to load node public key file: {e:?}");
-                    return ExitCode::FAILURE;
-                }
-            };
+        let public_key = match load_noise_public_key(&Path::new(
+            &config.node_public_key_file.clone().unwrap(),
+        )) {
+            Ok(key) => key,
+            Err(e) => {
+                error!(target: STARTUP, "failed to load node public key file: {e:?}");
+                return ExitCode::FAILURE;
+            }
+        };
         peer_noise_keypair = Some(NoiseKeypair {
             public: public_key,
             private: [0u8; 32], // unknown
@@ -254,7 +255,7 @@ fn main() -> ExitCode {
     };
 
     let tun_devs: Vec<_> = match ZprTun::new_mq(
-        config.tun_if,
+        config.tun_if.clone(),
         topology_config.fastpath_concurrency,
         tun_addr,
     ) {
@@ -494,7 +495,7 @@ fn main() -> ExitCode {
     let asm = Arc::new(Assembly {
         ph_mode,
         topology_config,
-        local_zpr_addresses: rcu::RcuBox::new(config.zpr_addr),
+        local_zpr_addresses: rcu::RcuBox::new(config.zpr_addr.clone()),
         mgmt_substrate_egress: MgmtSubstrateEgress::new(mgmt_substrate_inq),
         actor_output_requeue: ActorOutputRequeue::new(actor_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
@@ -518,9 +519,8 @@ fn main() -> ExitCode {
         peer_noise_keypair,
         certx,
         system_start_time,
-        bsauth: config.bootstrap,
-        rsauth: config.rsaoauth,
         address_pool: std::sync::Mutex::new(maybe_aaa_pool),
+        config: std::sync::RwLock::new(config),
     });
 
     //
@@ -545,8 +545,8 @@ fn main() -> ExitCode {
     if ph_mode == PhMode::Adapter {
         let dsid = asm
             .start_tether(
-                config.node_addr.as_ref().unwrap(),
-                &config.self_addr.scoped_ip(),
+                asm.config.read().unwrap().node_addr.as_ref().unwrap(),
+                &asm.config.read().unwrap().self_addr.scoped_ip(),
                 link_state::LinkType::AdapterToNode,
             )
             .unwrap();
@@ -574,8 +574,10 @@ fn main() -> ExitCode {
     // select batch I/O engine
     //
 
-    let Some(batch_io_engine) = batch_io::select_engine_by_name(&config.batch_io_engine) else {
-        error!(target: STARTUP, "Unknown packet I/O engine {}", config.batch_io_engine);
+    let Some(batch_io_engine) =
+        batch_io::select_engine_by_name(&asm.config.read().unwrap().batch_io_engine)
+    else {
+        error!(target: STARTUP, "Unknown packet I/O engine {}", asm.config.read().unwrap().batch_io_engine);
         return ExitCode::FAILURE;
     };
 
