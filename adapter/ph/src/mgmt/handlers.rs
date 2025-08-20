@@ -9,6 +9,7 @@ use crate::defs::*;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::{ip_number, IpAddress};
+use crate::packet;
 use crate::packet::Packet;
 use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
@@ -117,6 +118,7 @@ pub async fn handle_echo_request(
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
     let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
     hdr.sequence_number = ((seq_num & 0xffff) as u16).into();
+    rsp_pkt.metadata_mut().flags |= packet::flags::CONFIRM;
 
     super::core::send_non_flow_mgmt(
         asm,
