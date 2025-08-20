@@ -243,7 +243,7 @@ impl PacketMetadata {
 
     pub fn get_confirm_flag(&self) -> libc::c_int {
         match self.flags & flags::CONFIRM != 0 {
-            true => libc::MSG_CONFIRM,
+            true => 0x800,
             false => 0,
         }
     }
@@ -915,7 +915,7 @@ mod tests {
         let mut pkt = Packet::new(buf, 0);
         pkt.metadata_mut().flags |= flags::CONFIRM;
 
-        assert_eq!(pkt.metadata().get_confirm_flag(), libc::MSG_CONFIRM);
+        assert_eq!(pkt.metadata().get_confirm_flag(), 0x800);
     }
 
     #[test]
