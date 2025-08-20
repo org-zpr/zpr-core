@@ -488,6 +488,7 @@ pub mod test {
         pub adapter_manager_factory: Option<AdapterManagerFactory>,
         pub km_state: Option<KmState>,
         pub system_start_time: Option<std::time::Instant>,
+        pub config: Option<std::sync::RwLock<config::Config>>,
     }
 
     #[allow(dead_code)]
@@ -561,6 +562,11 @@ pub mod test {
             let (km_tx, _km_rx) = mpsc::channel(1);
             KmState::new(km_tx, km_sig_tx)
         });
+        let config = builder.config.unwrap_or_else(|| {
+            let config = <config::Config as std::default::Default>::default(); 
+            std::sync::RwLock::new(config)
+        });
+
 
         Assembly {
             ph_mode,
@@ -587,9 +593,8 @@ pub mod test {
             peer_noise_keypair: None,
             certx: None,
             system_start_time: std::time::Instant::now(),
-            bsauth: None,
-            rsauth: None,
             address_pool: std::sync::Mutex::new(None),
+            config,
         }
     }
 }
