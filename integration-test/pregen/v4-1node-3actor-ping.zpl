@@ -1,5 +1,5 @@
-Note: three adapters: they can ping each other
-Note: One node, one visa service: they can ping each other
+# three adapters: they can ping each other
+# One node, one visa service: they can ping each other
 
 define adapter as an endpoint with zpr.adapter.cn
 
@@ -27,7 +27,7 @@ allow A3 to access A2Svc
 allow Node to access PingableVs
 allow Vs to access PingableNode
 
-note: Admin access to VS
+# Admin access to VS
 define VsAdmin as an adapter with zpr.adapter.cn:'client.zpr.org'
 allow VsAdmin to access VisaService
 
