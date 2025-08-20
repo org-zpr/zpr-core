@@ -253,7 +253,7 @@ async fn counters(asm: &Assembly) -> String {
         }
     }
 
-    let _ = write!(&mut counts, "Uptime: {:?}\n", asm.get_uptime());
+    let _ = write!(&mut counts, "Uptime: {} s\n", asm.get_uptime());
 
     counts
 }

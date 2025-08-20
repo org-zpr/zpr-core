@@ -117,8 +117,10 @@ pub enum AddRouteError {
 }
 
 impl Assembly {
-    pub fn get_uptime(&self) -> std::time::Duration {
-        std::time::Instant::now().duration_since(self.system_start_time)
+    pub fn get_uptime(&self) -> f32 {
+        std::time::Instant::now()
+            .duration_since(self.system_start_time)
+            .as_secs_f32()
     }
 
     /// Graceful shutdown routine.  Not guaranteed to be called
