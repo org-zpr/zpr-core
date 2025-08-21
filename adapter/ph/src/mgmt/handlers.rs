@@ -120,8 +120,6 @@ pub async fn handle_echo_request(
     hdr.sequence_number = ((seq_num & 0xffff) as u16).into();
     rsp_pkt.metadata_mut().flags |= packet::flags::CONFIRM;
 
-    println!("PACKET!! {:?}", rsp_pkt.metadata().get_confirm_flag());
-
     super::core::send_non_flow_mgmt(
         asm,
         ingress_link_id,

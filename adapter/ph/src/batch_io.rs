@@ -270,7 +270,6 @@ mod io_uring {
         ) -> (squeue::Entry, ()) {
             let iovec_ref = self.iovec_slab.push(slice_as_iovec(buf));
             let sockaddr_ref = self.sockaddr_slab.push(SockaddrStorage::from(addr));
-            println!("FLAGS io: {flags}");
 
             let msghdr_ref = self.msghdr_slab.push(libc::msghdr {
                 msg_name: sockaddr_ref as *mut _ as *mut libc::c_void,
@@ -279,10 +278,15 @@ mod io_uring {
                 msg_iovlen: 1,
                 msg_control: std::ptr::null_mut(),
                 msg_controllen: 0,
-                msg_flags: flags,
+                msg_flags: 0,
             });
 
-            (opcode::SendMsg::new(fd, msghdr_ref as *const _).build(), ())
+            (
+                opcode::SendMsg::new(fd, msghdr_ref as *const _)
+                    .flags(flags as u32)
+                    .build(),
+                (),
+            )
         }
 
         fn process_result(&self, _idx: usize, (): (), amt: usize) -> usize {
@@ -324,7 +328,6 @@ mod io_uring {
             let sockaddr_ref = self.sockaddr_slab.push(SockaddrStorage::from(dst_addr));
 
             let cmsg_ref = self.cmsg_slab.push([0u8; PKTINFO_CMSG_SPACE_NEEDED]);
-            println!("FLAGS io from: {flags}");
 
             let msghdr_ref = self.msghdr_slab.push(libc::msghdr {
                 msg_name: sockaddr_ref as *mut _ as *mut libc::c_void,
@@ -333,7 +336,7 @@ mod io_uring {
                 msg_iovlen: 1,
                 msg_control: cmsg_ref as *mut _ as *mut libc::c_void,
                 msg_controllen: std::mem::size_of_val(cmsg_ref),
-                msg_flags: flags,
+                msg_flags: 0,
             });
 
             match src_addr {
@@ -351,7 +354,12 @@ mod io_uring {
                 }
             }
 
-            (opcode::SendMsg::new(fd, msghdr_ref as *const _).build(), ())
+            (
+                opcode::SendMsg::new(fd, msghdr_ref as *const _)
+                    .flags(flags as u32)
+                    .build(),
+                (),
+            )
         }
 
         fn process_result(&self, _idx: usize, (): (), amt: usize) -> usize {
@@ -964,8 +972,6 @@ mod posix_unbatched {
         ) -> Result<usize> {
             Self::do_batch_op(
                 |fd, (buf, addr, flags)| {
-                    println!("FLAGS posix: {flags}");
-
                     socket::sendto(
                         fd.as_raw_fd(),
                         buf,
@@ -991,8 +997,6 @@ mod posix_unbatched {
             Self::do_batch_op(
                 |fd, (buf, dst, src, flags)| match src {
                     Some(src) => {
-                        println!("FLAGS posix from some: {flags}");
-
                         scoped_ip_addr_to_cmsg!(cmsg: &src);
                         socket::sendmsg(
                             fd.as_raw_fd(),
@@ -1004,16 +1008,13 @@ mod posix_unbatched {
                         .map_err(errno_to_error)
                     }
 
-                    None => {
-                        println!("FLAGS posix from none: {flags}");
-                        socket::sendto(
-                            fd.as_raw_fd(),
-                            buf,
-                            &SockaddrStorage::from(dst),
-                            MsgFlags::from_bits_retain(flags),
-                        )
-                        .map_err(errno_to_error)
-                    }
+                    None => socket::sendto(
+                        fd.as_raw_fd(),
+                        buf,
+                        &SockaddrStorage::from(dst),
+                        MsgFlags::from_bits_retain(flags),
+                    )
+                    .map_err(errno_to_error),
                 },
                 fd,
                 bufs,
