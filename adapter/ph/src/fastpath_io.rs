@@ -293,10 +293,14 @@ impl FastpathIo {
             .batch_io
             .try_send_to_from_batch(
                 &self.substrate_socket,
-                worker
-                    .substrate_egress_q
-                    .iter()
-                    .map(|pkt| (pkt.pkt.body(), pkt.dst, Some(pkt.src), pkt.pkt.metadata().get_confirm_flag())),
+                worker.substrate_egress_q.iter().map(|pkt| {
+                    (
+                        pkt.pkt.body(),
+                        pkt.dst,
+                        Some(pkt.src),
+                        pkt.pkt.metadata().get_confirm_flag(),
+                    )
+                }),
                 &mut self.io_results,
             )
             .expect("unrecoverable I/O error");
