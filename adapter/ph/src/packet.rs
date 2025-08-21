@@ -241,11 +241,17 @@ impl PacketMetadata {
         &self.five_tuple
     }
 
+    #[cfg(target_os = "linux")]
     pub fn get_confirm_flag(&self) -> libc::c_int {
         match self.flags & flags::CONFIRM != 0 {
-            true => 0x800,
+            true => libc::MSG_CONFIRM,
             false => 0,
         }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub fn get_confirm_flag(&self) -> libc::c_int {
+        0
     }
 }
 
@@ -910,12 +916,22 @@ mod tests {
     }
 
     #[test]
-    fn get_msg_confirm_test() {
+    #[cfg(target_os = "linux")]
+    fn get_msg_confirm_test_linux() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
         let mut pkt = Packet::new(buf, 0);
         pkt.metadata_mut().flags |= flags::CONFIRM;
 
-        assert_eq!(pkt.metadata().get_confirm_flag(), 0x800);
+        assert_eq!(pkt.metadata().get_confirm_flag(), libc::MSG_CONFIRM);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn get_msg_confirm_test_linux() {
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 0);
+        pkt.metadata_mut().flags |= flags::CONFIRM;
+
+        assert_eq!(pkt.metadata().get_confirm_flag(), 0x000);
     }
 
     #[test]

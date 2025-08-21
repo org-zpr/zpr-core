@@ -87,14 +87,14 @@ trait BatchIoImpl {
     fn try_send_to_batch<'a>(
         &mut self,
         fd: BorrowedFd<'_>,
-        bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr)>,
+        bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr, libc::c_int)>,
         results: &mut Vec<Result<usize>>,
     ) -> Result<usize>;
 
     fn try_send_to_from_batch<'a>(
         &mut self,
         fd: BorrowedFd<'_>,
-        bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
+        bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>, libc::c_int)>,
         results: &mut Vec<Result<usize>>,
     ) -> Result<usize>;
 
@@ -253,7 +253,7 @@ mod io_uring {
         msghdr_slab: Slab<libc::msghdr>,
     }
 
-    impl BatchOp<(&[u8], SocketAddr), (), usize> for TrySendToBatchOp {
+    impl BatchOp<(&[u8], SocketAddr, libc::c_int), (), usize> for TrySendToBatchOp {
         fn new() -> Self {
             Self {
                 iovec_slab: Slab::new(),
@@ -265,11 +265,13 @@ mod io_uring {
         fn build_op(
             &mut self,
             fd: types::Fd,
-            (buf, addr): (&[u8], SocketAddr),
+            (buf, addr, flags): (&[u8], SocketAddr, libc::c_int),
             _idx: usize,
         ) -> (squeue::Entry, ()) {
             let iovec_ref = self.iovec_slab.push(slice_as_iovec(buf));
             let sockaddr_ref = self.sockaddr_slab.push(SockaddrStorage::from(addr));
+            println!("FLAGS io: {flags}");
+
             let msghdr_ref = self.msghdr_slab.push(libc::msghdr {
                 msg_name: sockaddr_ref as *mut _ as *mut libc::c_void,
                 msg_namelen: sockaddr_ref.len(),
@@ -277,7 +279,7 @@ mod io_uring {
                 msg_iovlen: 1,
                 msg_control: std::ptr::null_mut(),
                 msg_controllen: 0,
-                msg_flags: 0,
+                msg_flags: flags,
             });
 
             (opcode::SendMsg::new(fd, msghdr_ref as *const _).build(), ())
@@ -295,7 +297,9 @@ mod io_uring {
         msghdr_slab: Slab<libc::msghdr>,
     }
 
-    impl BatchOp<(&[u8], SocketAddr, Option<ScopedIpAddr>), (), usize> for TrySendToFromBatchOp {
+    impl BatchOp<(&[u8], SocketAddr, Option<ScopedIpAddr>, libc::c_int), (), usize>
+        for TrySendToFromBatchOp
+    {
         fn new() -> Self {
             Self {
                 iovec_slab: Slab::new(),
@@ -308,13 +312,19 @@ mod io_uring {
         fn build_op(
             &mut self,
             fd: types::Fd,
-            (buf, dst_addr, src_addr): (&[u8], SocketAddr, Option<ScopedIpAddr>),
+            (buf, dst_addr, src_addr, flags): (
+                &[u8],
+                SocketAddr,
+                Option<ScopedIpAddr>,
+                libc::c_int,
+            ),
             _idx: usize,
         ) -> (squeue::Entry, ()) {
             let iovec_ref = self.iovec_slab.push(slice_as_iovec(buf));
             let sockaddr_ref = self.sockaddr_slab.push(SockaddrStorage::from(dst_addr));
 
             let cmsg_ref = self.cmsg_slab.push([0u8; PKTINFO_CMSG_SPACE_NEEDED]);
+            println!("FLAGS io from: {flags}");
 
             let msghdr_ref = self.msghdr_slab.push(libc::msghdr {
                 msg_name: sockaddr_ref as *mut _ as *mut libc::c_void,
@@ -323,7 +333,7 @@ mod io_uring {
                 msg_iovlen: 1,
                 msg_control: cmsg_ref as *mut _ as *mut libc::c_void,
                 msg_controllen: std::mem::size_of_val(cmsg_ref),
-                msg_flags: 0,
+                msg_flags: flags,
             });
 
             match src_addr {
@@ -681,7 +691,7 @@ mod io_uring {
         fn try_send_to_batch<'a>(
             &mut self,
             fd: BorrowedFd<'_>,
-            bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr)>,
+            bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr, libc::c_int)>,
             results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             self.do_batch_op(TrySendToBatchOp::new(), fd, bufs, results)
@@ -690,7 +700,9 @@ mod io_uring {
         fn try_send_to_from_batch<'a>(
             &mut self,
             fd: BorrowedFd<'_>,
-            bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
+            bufs: &mut dyn Iterator<
+                Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>, libc::c_int),
+            >,
             results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             self.do_batch_op(TrySendToFromBatchOp::new(), fd, bufs, results)
@@ -947,16 +959,18 @@ mod posix_unbatched {
         fn try_send_to_batch<'a>(
             &mut self,
             fd: BorrowedFd<'_>,
-            bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr)>,
+            bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr, libc::c_int)>,
             results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             Self::do_batch_op(
-                |fd, (buf, addr)| {
+                |fd, (buf, addr, flags)| {
+                    println!("FLAGS posix: {flags}");
+
                     socket::sendto(
                         fd.as_raw_fd(),
                         buf,
                         &SockaddrStorage::from(addr),
-                        MsgFlags::empty(),
+                        MsgFlags::from_bits_retain(flags),
                     )
                     .map_err(errno_to_error)
                 },
@@ -969,30 +983,37 @@ mod posix_unbatched {
         fn try_send_to_from_batch<'a>(
             &mut self,
             fd: BorrowedFd<'_>,
-            bufs: &mut dyn Iterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
+            bufs: &mut dyn Iterator<
+                Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>, libc::c_int),
+            >,
             results: &mut Vec<Result<usize>>,
         ) -> Result<usize> {
             Self::do_batch_op(
-                |fd, (buf, dst, src)| match src {
+                |fd, (buf, dst, src, flags)| match src {
                     Some(src) => {
+                        println!("FLAGS posix from some: {flags}");
+
                         scoped_ip_addr_to_cmsg!(cmsg: &src);
                         socket::sendmsg(
                             fd.as_raw_fd(),
                             &[IoSlice::new(buf)],
                             &[cmsg],
-                            MsgFlags::empty(),
+                            MsgFlags::from_bits_retain(flags),
                             Some(&SockaddrStorage::from(dst)),
                         )
                         .map_err(errno_to_error)
                     }
 
-                    None => socket::sendto(
-                        fd.as_raw_fd(),
-                        buf,
-                        &SockaddrStorage::from(dst),
-                        MsgFlags::empty(),
-                    )
-                    .map_err(errno_to_error),
+                    None => {
+                        println!("FLAGS posix from none: {flags}");
+                        socket::sendto(
+                            fd.as_raw_fd(),
+                            buf,
+                            &SockaddrStorage::from(dst),
+                            MsgFlags::from_bits_retain(flags),
+                        )
+                        .map_err(errno_to_error)
+                    }
                 },
                 fd,
                 bufs,
@@ -1211,7 +1232,7 @@ impl BatchIo {
     pub fn try_send_to_batch<'a>(
         &mut self,
         fd: impl AsFd,
-        bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr)>,
+        bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, libc::c_int)>,
         results: &mut Vec<Result<usize>>,
     ) -> Result<usize> {
         self.0
@@ -1221,7 +1242,7 @@ impl BatchIo {
     pub fn try_send_to_from_batch<'a>(
         &mut self,
         fd: impl AsFd,
-        bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>)>,
+        bufs: impl IntoIterator<Item = (&'a [u8], SocketAddr, Option<ScopedIpAddr>, libc::c_int)>,
         results: &mut Vec<Result<usize>>,
     ) -> Result<usize> {
         self.0
@@ -1370,7 +1391,7 @@ mod tests {
 
             let n = bio.try_send_to_batch(
                 &inq,
-                msgs.iter().map(|msg| (msg.as_bytes(), dest)),
+                msgs.iter().map(|msg| (msg.as_bytes(), dest, 0x000)),
                 &mut results,
             );
             assert!(n.unwrap() >= nmsgs);

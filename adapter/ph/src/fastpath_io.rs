@@ -296,7 +296,7 @@ impl FastpathIo {
                 worker
                     .substrate_egress_q
                     .iter()
-                    .map(|pkt| (pkt.pkt.body(), pkt.dst, Some(pkt.src))),
+                    .map(|pkt| (pkt.pkt.body(), pkt.dst, Some(pkt.src), pkt.pkt.metadata().get_confirm_flag())),
                 &mut self.io_results,
             )
             .expect("unrecoverable I/O error");
