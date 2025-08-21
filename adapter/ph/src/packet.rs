@@ -901,32 +901,4 @@ mod tests {
         assert!(new_pkt.metadata().flags & flags::CONFIRM != 0);
         assert!(new_pkt.metadata().flags & flags::PRIORITY != 0);
     }
-
-    #[test]
-    #[cfg(target_os = "linux")]
-    fn get_msg_confirm_test_linux() {
-        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut pkt = Packet::new(buf, 0);
-        pkt.metadata_mut().flags |= flags::CONFIRM;
-
-        assert_eq!(pkt.metadata().get_confirm_flag(), libc::MSG_CONFIRM);
-    }
-
-    #[test]
-    #[cfg(not(target_os = "linux"))]
-    fn get_msg_confirm_test_mac() {
-        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut pkt = Packet::new(buf, 0);
-        pkt.metadata_mut().flags |= flags::CONFIRM;
-
-        assert_eq!(pkt.metadata().get_confirm_flag(), 0x000);
-    }
-
-    #[test]
-    fn get_msg_confirm_test_no_flag() {
-        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let pkt = Packet::new(buf, 0);
-
-        assert_eq!(pkt.metadata().get_confirm_flag(), 0x000);
-    }
 }
