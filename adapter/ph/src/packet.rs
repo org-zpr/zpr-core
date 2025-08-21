@@ -925,8 +925,9 @@ mod tests {
         assert_eq!(pkt.metadata().get_confirm_flag(), libc::MSG_CONFIRM);
     }
 
+    #[test]
     #[cfg(not(target_os = "linux"))]
-    fn get_msg_confirm_test_linux() {
+    fn get_msg_confirm_test_mac() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
         let mut pkt = Packet::new(buf, 0);
         pkt.metadata_mut().flags |= flags::CONFIRM;
