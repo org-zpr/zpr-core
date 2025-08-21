@@ -359,7 +359,7 @@ impl FastpathIo {
     }
 
     #[cfg(not(target_os = "linux"))]
-    fn get_confirm_flag(pkt: &Packet) -> libc::c_int {
+    fn get_confirm_flag(_pkt: &Packet) -> libc::c_int {
         0
     }
 }
