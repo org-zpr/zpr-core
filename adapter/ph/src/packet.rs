@@ -240,19 +240,6 @@ impl PacketMetadata {
     pub fn five_tuple(&self) -> &FiveTuple {
         &self.five_tuple
     }
-
-    #[cfg(target_os = "linux")]
-    pub fn get_confirm_flag(&self) -> libc::c_int {
-        match self.flags & flags::CONFIRM != 0 {
-            true => libc::MSG_CONFIRM,
-            false => 0,
-        }
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    pub fn get_confirm_flag(&self) -> libc::c_int {
-        0
-    }
 }
 
 impl std::fmt::Debug for PacketMetadata {

@@ -3,7 +3,7 @@ use crate::config;
 use crate::counters::*;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::net_defs;
-use crate::packet::{self, Packet};
+use crate::packet::{self, flags, Packet};
 use crate::packet_queue;
 use crate::sys::{TunPi, ZprTun};
 use crate::zprtun;
@@ -298,7 +298,7 @@ impl FastpathIo {
                         pkt.pkt.body(),
                         pkt.dst,
                         Some(pkt.src),
-                        pkt.pkt.metadata().get_confirm_flag(),
+                        Self::get_confirm_flag(&pkt.pkt),
                     )
                 }),
                 &mut self.io_results,
@@ -348,6 +348,19 @@ impl FastpathIo {
                 .drain(retained..)
                 .map(|pkt| pkt.pkt.destroy()),
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    fn get_confirm_flag(pkt: &Packet) -> libc::c_int {
+        match pkt.metadata().flags & flags::CONFIRM != 0 {
+            true => libc::MSG_CONFIRM,
+            false => 0,
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn get_confirm_flag(pkt: &Packet) -> libc::c_int {
+        0
     }
 }
 
