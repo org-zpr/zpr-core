@@ -65,7 +65,7 @@ pub struct Assembly {
     pub ph_mode: PhMode,
     pub topology_config: config::TopologyConfig,
 
-    /// Note that these are not our real ZPR addresses until we are granted a ZPR address.
+    /// Note that zpr addressed in config are not our real ZPR addresses until we are granted a ZPR address.
     /// If there is a static ZPR address present in the configuration it is set here in main.
     /// Various get_ and set_ functions are defined for this below.
     pub local_zpr_addresses: rcu::RcuBox<Vec<IpAddr>>,
@@ -104,7 +104,7 @@ pub struct Assembly {
     pub system_start_time: std::time::Instant,
     pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
 
-    pub config: std::sync::RwLock<config::Config>,
+    pub config: rcu::RcuBox<config::Config>,
     pub logging: Mutex<HashMap<String, String>>,
     pub reload_handle:
         reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,
@@ -495,12 +495,12 @@ pub mod test {
         pub adapter_manager_factory: Option<AdapterManagerFactory>,
         pub km_state: Option<KmState>,
         pub system_start_time: Option<std::time::Instant>,
-        pub config: Option<std::sync::RwLock<config::Config>>,
+        pub config: Option<rcu::RcuBox<config::Config>>,
         pub logging: Option<Mutex<HashMap<String, String>>>,
         pub reload_handle: Option<
             reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,
         >,
-  }
+    }
 
     #[allow(dead_code)]
     struct DummyTunCtlImpl;
@@ -525,12 +525,12 @@ pub mod test {
     pub fn create_assembly(builder: TestAssemblyBuilder) -> Assembly {
         let ph_mode = builder.ph_mode.unwrap_or(PhMode::Adapter);
         let topology_config = builder.topology_config.unwrap_or_default();
-        let local_zpr_addresses = builder
-            .local_zpr_addresses
-            .unwrap_or(Vec::from([IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]));
         let mgmt_substrate_egress = builder
             .mgmt_substrate_egress
             .unwrap_or_else(|| MgmtSubstrateEgress::new(packet_queue::packet_queue(1).0));
+        let local_zpr_addresses = builder
+            .local_zpr_addresses
+            .unwrap_or(Vec::from([IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]));
         let actor_output_requeue = builder
             .actor_output_requeue
             .unwrap_or_else(|| ActorOutputRequeue::new(Vec::new()));
@@ -575,7 +575,8 @@ pub mod test {
         });
         let config = builder.config.unwrap_or_else(|| {
             let config = <config::Config as std::default::Default>::default();
-            std::sync::RwLock::new(config)
+            rcu::RcuBox::new(config)
+        });
         let logging = builder
             .logging
             .unwrap_or_else(|| Mutex::new(HashMap::default()));

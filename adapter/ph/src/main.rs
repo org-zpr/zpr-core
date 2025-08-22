@@ -519,7 +519,7 @@ fn main() -> ExitCode {
         certx,
         system_start_time,
         address_pool: std::sync::Mutex::new(maybe_aaa_pool),
-        config: std::sync::RwLock::new(config),
+        config: rcu::RcuBox::new(config),
         logging: Mutex::new(logging_map),
         reload_handle,
     });
@@ -545,8 +545,8 @@ fn main() -> ExitCode {
     if ph_mode == PhMode::Adapter {
         let dsid = asm
             .start_tether(
-                asm.config.read().unwrap().node_addr.as_ref().unwrap(),
-                &asm.config.read().unwrap().self_addr.scoped_ip(),
+                asm.config.get().node_addr.as_ref().unwrap(),
+                &asm.config.get().self_addr.scoped_ip(),
                 link_state::LinkType::AdapterToNode,
             )
             .unwrap();
@@ -574,10 +574,9 @@ fn main() -> ExitCode {
     // select batch I/O engine
     //
 
-    let Some(batch_io_engine) =
-        batch_io::select_engine_by_name(&asm.config.read().unwrap().batch_io_engine)
+    let Some(batch_io_engine) = batch_io::select_engine_by_name(&asm.config.get().batch_io_engine)
     else {
-        error!(target: STARTUP, "Unknown packet I/O engine {}", asm.config.read().unwrap().batch_io_engine);
+        error!(target: STARTUP, "Unknown packet I/O engine {}", asm.config.get().batch_io_engine);
         return ExitCode::FAILURE;
     };
 

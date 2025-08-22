@@ -1111,10 +1111,10 @@ impl LinkStateWrapper {
             // may not want to act on it and sometimes may be a protocol error.
             (LinkType::AdapterToNode, LinkState::WaitForInitAuth) => {
                 debug!(target: LINK_STATE, "Link {link_id} received init auth (bootstrap_supported: {}, bootstrap_configured: {})",
-                    bootstrap, asm.config.read().unwrap().bootstrap.is_some());
+                    bootstrap, asm.config.get().bootstrap.is_some());
 
                 // If we can do bootstrap and it is allowed, then do that.
-                if bootstrap && asm.config.read().unwrap().bootstrap.is_some() {
+                if bootstrap && asm.config.get().bootstrap.is_some() {
                     if challenge.is_none() {
                         error!(target: LINK_STATE, "Link {link_id} received init auth with no challenge");
                         locked_fsm.set_state(LinkState::Error);
@@ -1122,7 +1122,7 @@ impl LinkStateWrapper {
                         return self.initiate_close(asm, TerminateReason::Other);
                     }
                     let challenge = challenge.unwrap();
-                    if let Some(bs) = asm.config.read().unwrap().bootstrap.as_ref() {
+                    if let Some(bs) = asm.config.get().bootstrap.as_ref() {
                         match bs.authenticate(&challenge) {
                             Ok(blobstr) => {
                                 // The send function below will invoke a state event callback.
@@ -1169,7 +1169,7 @@ impl LinkStateWrapper {
                         drop(locked_fsm);
                         return self.initiate_close(asm, TerminateReason::Other);
                     }
-                    if asm.config.read().unwrap().rsaoauth.is_none() {
+                    if asm.config.get().rsaoauth.is_none() {
                         error!(target: LINK_STATE, "Link {link_id} unable to perform auth: no RSA external auth service configured");
                         locked_fsm.set_state(LinkState::Error);
                         drop(locked_fsm);
@@ -1328,7 +1328,7 @@ impl LinkStateWrapper {
         let task_asm = asm.clone();
 
         tokio::task::spawn_local(async move {
-            let binding = task_asm.config.read().unwrap();
+            let binding = task_asm.config.get();
             let Some(rsauth) = binding.rsaoauth.as_ref() else {
                 error!(target: LINK_STATE, "Link {link_id}: auth requested but no auth service configured");
                 if let Err(e) =
