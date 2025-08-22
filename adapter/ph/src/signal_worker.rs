@@ -45,9 +45,14 @@ pub async fn launch(asm: Arc<Assembly>) {
     }
 }
 
-fn emit_counts(counters: &Counters, uptime: f32) {
+fn emit_counts(counters: &Counters, uptime: std::time::Duration) {
     println!("{:>42}\n", "*** Counters ***");
-    println!("{:>34}: {} s", "Uptime", uptime);
+    println!(
+        "{:>34}: {}.{} s",
+        "Uptime",
+        uptime.as_secs(),
+        uptime.subsec_millis()
+    );
     println!("\n");
     println!("{:>42}\n", "*** Management Counters ***");
     for (key, ref value) in &counters.management {
