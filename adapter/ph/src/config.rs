@@ -107,10 +107,7 @@ pub struct Config {
     pub tun_if: Option<String>,
 
     /// Enable debug logging for specified targets, or ALL
-    pub debug: Vec<String>,
-
-    /// Disable info & warnings for specified targets, or ALL
-    pub quiet: Vec<String>,
+    pub logging: Vec<(String, String)>,
 
     /// Required for adapter - the node dock address on substrate.
     pub node_addr: Option<SocketAddr>,
@@ -302,11 +299,8 @@ impl Config {
         if let Some(actor_addr) = &config.zpr_addr {
             self.zpr_addr.extend(&*actor_addr);
         }
-        if let Some(debug) = &config.debug {
-            self.debug.extend(debug.into_iter().cloned());
-        }
-        if let Some(quiet) = &config.quiet {
-            self.quiet.extend(quiet.into_iter().cloned());
+        if let Some(logging) = &config.logging {
+            self.logging.extend(logging.into_iter().cloned());
         }
         if let Some(io_engine) = &config.io_engine {
             self.batch_io_engine = io_engine.clone();
@@ -457,8 +451,7 @@ impl Config {
             self.zpr_addr.extend(addrs);
         }
 
-        self.debug.extend(common.debug.iter().cloned());
-        self.quiet.extend(common.quiet.iter().cloned());
+        self.logging.extend(common.logging.iter().cloned());
 
         self.batch_io_engine = common.io_engine.clone();
 
@@ -476,8 +469,7 @@ impl Default for Config {
             private_key_file: None,
             private_key_data: None,
             tun_if: None,
-            debug: Vec::new(),
-            quiet: Vec::new(),
+            logging: Vec::new(),
             node_addr: None,
             zpr_addr: Vec::new(),
             node_public_key_file: None,
@@ -519,8 +511,7 @@ pub struct GlobalConfigSection {
     pub private_key_file: Option<PathBuf>,
     pub tun_if: Option<String>,
     pub zpr_addr: Option<Vec<IpAddr>>,
-    pub debug: Option<Vec<String>>,
-    pub quiet: Option<Vec<String>>,
+    pub logging: Option<Vec<(String, String)>>,
     pub io_engine: Option<String>,
 }
 

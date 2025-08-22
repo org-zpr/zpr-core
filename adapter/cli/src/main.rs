@@ -83,6 +83,11 @@ enum Commands {
     Capture(CaptureArgs),
     /// Change link state
     Link(LinkArgs),
+    /// Change the log level of a node or adapter
+    Logging {
+        #[arg(required = true)]
+        logs: Vec<String>,
+    },
     /// Exit the CLI
     Quit,
 }
@@ -219,6 +224,7 @@ fn process_command(command: Commands, socket: &str) -> std::io::Result<bool> {
             frequency,
         } => handle_perf_sample(duration, frequency, &socket)?,
         Commands::Link(link) => handle_link_command(link, &socket)?,
+        Commands::Logging { logs } => handle_logging(logs, &socket)?,
         Commands::Quit => return Ok(true),
     }
 
@@ -421,6 +427,18 @@ fn handle_link_command(link_args: LinkArgs, socket: &str) -> std::io::Result<()>
         LinkCommands::Stop { id } => basic_command!(RpcCommands::StopLink, socket, id)?,
         LinkCommands::Reset { id } => basic_command!(RpcCommands::ResetLink, socket, id)?,
     }
+
+    Ok(())
+}
+
+fn handle_logging(vec: Vec<String>, socket: &str) -> std::io::Result<()> {
+    let mut new_str = String::new();
+
+    for elem in vec {
+        new_str = format!("{} {}", new_str, elem);
+    }
+
+    basic_command!(RpcCommands::SetLogging, socket, new_str)?;
 
     Ok(())
 }

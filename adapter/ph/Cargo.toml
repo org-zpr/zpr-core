@@ -5,7 +5,7 @@ edition = "2021"
 license = "Apache-2.0"
 
 [dependencies]
-aarc = { version = "0.2.1", optional = true }
+aarc = { version = "0.3", optional = true }
 arrayref = { version = "0.3.7" }
 base64 = "0.22.1"
 blake3 = { version = "1.5.4" }
@@ -20,7 +20,7 @@ dashmap = { version = "6.0.1" }
 enum-map = { version = "2.7.3" }
 enumset = "1.1.5"
 hdrhistogram = { version = "7.5.4" }
-libc = { version = "0.2.171" }
+libc = { version = "0.2.175" }
 libnode = { path = "../../libnode" }
 itertools = "0.14"
 nix = { version = "0.29.0", features = ["fs", "ioctl", "net", "poll", "uio"] }

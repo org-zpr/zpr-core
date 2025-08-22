@@ -1,9 +1,9 @@
 //! Logging-related stuff.
 
-use crate::config;
+use std::collections::HashMap;
 use tracing::Level;
 use tracing_subscriber::filter::targets::Targets;
-use tracing_subscriber::{fmt, prelude::*};
+use tracing_subscriber::{filter, fmt, prelude::*, reload, Registry};
 
 /// Target of a log message, for filtering.
 pub mod targets {
@@ -24,7 +24,6 @@ pub mod targets {
     // ultimately lies with a dependency of X).
 
     pub const ALL: &str = "all";
-    pub const NONE: &str = "none";
     pub const CAPTURE: &str = "capture";
     pub const DATAPATH: &str = "datapath";
     pub const FLOW_MGMT: &str = "flow_mgmt";
@@ -43,7 +42,6 @@ pub mod targets {
 
     pub const ALL_TARGETS: &[&str] = &[
         ALL,
-        NONE,
         CAPTURE,
         DATAPATH,
         FLOW_MGMT,
@@ -62,46 +60,81 @@ pub mod targets {
     ];
 }
 
-fn create_target_filter<T>(
-    debug: impl IntoIterator<Item = T>,
-    quiet: impl IntoIterator<Item = T>,
-) -> Targets
-where
-    String: From<T>,
-    T: for<'a> std::cmp::PartialEq<&'a str>,
-{
+pub mod levels {
+
+    pub const OFF: &str = "OFF";
+    pub const ERROR: &str = "ERROR";
+    pub const WARN: &str = "WARN";
+    pub const INFO: &str = "INFO";
+    pub const DEBUG: &str = "DEBUG";
+    pub const TRACE: &str = "TRACE";
+
+    pub const ALL_LEVELS: &[&str] = &[ERROR, WARN, INFO, DEBUG, TRACE, OFF];
+}
+
+/// Creates the filter for the specified targets
+fn create_target_filter(logging_map: &HashMap<String, String>) -> Targets {
     let mut targets = Targets::new();
 
-    targets = targets.with_default(Level::INFO);
+    let default_lvl: Level = match logging_map.get(targets::ALL) {
+        Some(value) => get_level(value.as_str()),
+        None => Level::INFO,
+    };
 
-    for target in debug.into_iter() {
-        if target == targets::ALL {
-            targets = targets.with_default(Level::DEBUG);
-        } else if target == targets::NONE {
-            targets = targets.with_default(Level::INFO);
-        } else {
-            targets = targets.with_target(target, Level::DEBUG);
-        }
-    }
+    targets = targets.with_default(default_lvl);
 
-    let debugged_targets = targets.clone();
-
-    for target in quiet.into_iter() {
-        if target == targets::ALL {
-            targets = targets.with_default(Level::ERROR);
-        } else if target == targets::NONE {
-            targets = debugged_targets.clone();
-        } else {
-            targets = targets.with_target(target, Level::ERROR);
-        }
+    for elem in logging_map.iter() {
+        targets = targets.with_target(elem.0.clone(), get_level(elem.1.as_str()));
     }
 
     targets
 }
 
-pub fn initialize(config: &config::Config) {
-    tracing_subscriber::registry()
-        .with(fmt::layer())
-        .with(create_target_filter(&config.debug, &config.quiet))
-        .init();
+/// Creates the tracing_subscriber and the initial hashmap
+/// Returns the reload handler, which allows the filters to be
+/// changed at runtime and the hashmap with the current targets
+/// and levels
+pub fn initialize(
+    logging_vec: &mut Vec<(String, String)>,
+) -> (
+    reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,
+    HashMap<String, String>,
+) {
+    let mut logging_map = HashMap::new();
+    for elem in logging_vec {
+        logging_map.insert(elem.0.clone(), elem.1.clone());
+    }
+
+    let (reload_layer, reload_handle) =
+        reload::Layer::new(fmt::layer().with_filter(create_target_filter(&logging_map)));
+    tracing_subscriber::registry().with(reload_layer).init();
+
+    (reload_handle, logging_map)
+}
+
+/// Creates a new filter and updates the existing Layer
+pub fn reload_filter(
+    reload_handle: &reload::Handle<
+        filter::Filtered<fmt::Layer<Registry>, Targets, Registry>,
+        Registry,
+    >,
+    logging_map: &HashMap<String, String>,
+) {
+    reload_handle
+        .modify(|filter| *filter.filter_mut() = create_target_filter(logging_map))
+        .unwrap();
+}
+
+/// Gets the log level from a string
+/// This is highly permissive, but the only information that will be passed
+/// in will one of levels::ALL_LEVELS, so it is less permissive than it seems
+fn get_level(level: &str) -> Level {
+    match level {
+        levels::DEBUG => Level::DEBUG,
+        levels::TRACE => Level::TRACE,
+        levels::WARN => Level::WARN,
+        levels::OFF => Level::ERROR,
+        levels::ERROR => Level::ERROR,
+        _ => Level::INFO,
+    }
 }

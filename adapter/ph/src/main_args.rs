@@ -5,7 +5,7 @@
 
 use crate::auth::AuthError;
 use crate::batch_io;
-use crate::logging::targets::*;
+use crate::logging::{levels, targets};
 use clap::{Args, Parser, Subcommand};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::path::PathBuf;
@@ -91,13 +91,21 @@ pub struct CommonArgs {
     #[arg(long, short = 'z')]
     pub zpr_addr: Option<Vec<IpAddr>>,
 
-    /// Enable debug logging for specified targets
-    #[arg(long, short = 'd', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
-    pub debug: Vec<String>,
-
-    /// Disable info & warnings for specified targets
-    #[arg(long, short = 'q', value_parser = clap::builder::PossibleValuesParser::new(ALL_TARGETS))]
-    pub quiet: Vec<String>,
+    /// Set log level using key value pairs: <target>=<LEVEL>
+    /// The options for targets are:
+    ///     all, capture, datapath, flow_mgmt, link_state,
+    ///     mgmt_events, net_os, peer_mgmt, reporting, rpc,
+    ///     startup, visa_mgmt, zdp
+    /// The options for levels are:
+    ///     OFF, ERROR, WARN, INFO, DEBUG, TRACE
+    /// You can include as many key-value pairs as you want. If you do multiple
+    /// pairs with the same key, the last last pair will be the one considered.
+    /// If you include a pair with the target all, you can still set the level
+    /// for individual targets
+    /// --logging zdp=TRACE link_state=TRACE all=DEBUG would set all the targets
+    /// to the DEBUG level, except zdp and link_state, which would be set to TRACE
+    #[arg(long, short = 'l', value_delimiter = ' ', num_args = 1.., value_parser = parse_key_val, verbatim_doc_comment)]
+    pub logging: Vec<(String, String)>,
 
     /// Which packet I/O engine to use
     #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(std::iter::once(batch_io::AUTO_ENGINE_NAME).chain(batch_io::engine_names())), default_value_t = batch_io::AUTO_ENGINE_NAME.to_owned())]
@@ -181,6 +189,22 @@ fn parse_socket_addr_or_scoped_ip_addr(
             Ipv4Addr::from_str(s).map_err(Box::new)?,
             0,
         )))
+    }
+}
+
+fn parse_key_val(s: &str) -> Result<(String, String), String> {
+    let key_val: Vec<&str> = s.split("=").collect();
+    match key_val.len() {
+        2 => {
+            if targets::ALL_TARGETS.contains(&key_val[0])
+                && levels::ALL_LEVELS.contains(&key_val[1].to_uppercase().as_str())
+            {
+                return Ok((key_val[0].to_string(), key_val[1].to_uppercase()));
+            } else {
+                return Err(format!("Invalid key-value pair"));
+            }
+        }
+        _ => Err(format!("Invalid key-value pair")),
     }
 }
 

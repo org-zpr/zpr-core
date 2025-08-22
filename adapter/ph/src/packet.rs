@@ -9,6 +9,7 @@
 use crate::defs::*;
 use crate::net_defs::*;
 use bytes::buf;
+extern crate libc;
 use std::mem::size_of;
 use zerocopy::*;
 use zpr;
@@ -184,7 +185,9 @@ pub mod flags {
     use super::PacketFlags;
 
     /// Packets marked `PRIORITY` are not dropped on egress queue backpressure.
-    pub const PRIORITY: PacketFlags = 1;
+    pub const PRIORITY: PacketFlags = 1; // 1b
+
+    pub const CONFIRM: PacketFlags = 2; // 10b
 }
 
 #[allow(dead_code)]
@@ -862,5 +865,40 @@ mod tests {
         let mut pkt = Packet::new(buf, 0);
         pkt.put_u64(0x0102030405060708u64);
         pkt.shrink_by(10);
+    }
+
+    #[test]
+    fn set_confirm_flag() {
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut pkt = Packet::new(buf, 0);
+
+        assert!(pkt.metadata().flags & flags::CONFIRM == 0);
+        assert!(pkt.metadata().flags & flags::PRIORITY == 0);
+
+        pkt.metadata_mut().flags |= flags::CONFIRM;
+
+        assert!(pkt.metadata().flags & flags::CONFIRM != 0);
+        assert!(pkt.metadata().flags & flags::PRIORITY == 0);
+
+        pkt.metadata_mut().flags |= flags::PRIORITY;
+
+        assert!(pkt.metadata().flags & flags::CONFIRM != 0);
+        assert!(pkt.metadata().flags & flags::PRIORITY != 0);
+
+        let new_buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut new_pkt = Packet::new(new_buf, 0);
+
+        assert!(new_pkt.metadata().flags & flags::CONFIRM == 0);
+        assert!(new_pkt.metadata().flags & flags::PRIORITY == 0);
+
+        new_pkt.metadata_mut().flags |= flags::PRIORITY;
+
+        assert!(new_pkt.metadata().flags & flags::CONFIRM == 0);
+        assert!(new_pkt.metadata().flags & flags::PRIORITY != 0);
+
+        new_pkt.metadata_mut().flags |= flags::CONFIRM;
+
+        assert!(new_pkt.metadata().flags & flags::CONFIRM != 0);
+        assert!(new_pkt.metadata().flags & flags::PRIORITY != 0);
     }
 }

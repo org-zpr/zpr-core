@@ -38,10 +38,12 @@ mod rcu_impl {
     use std::sync::{RwLock, RwLockReadGuard};
 
     /// An RCU-protected box.
-    pub struct RcuBox<T>(RwLock<T>);
+    pub struct RcuBox<T: 'static>(RwLock<T>);
+    // Note, the `'static` bound on `T` here and in `RcuGuard`
+    // are both due to the `aarc` implementation.
 
     /// A protected reference to the item in an RCU-protected box.
-    pub struct RcuGuard<'a, T>(RwLockReadGuard<'a, T>);
+    pub struct RcuGuard<'a, T: 'static>(RwLockReadGuard<'a, T>);
     // Note, `RcuGuard`'s drop glue has lifetime `'a` due to `RwLockReadGuard`.
 
     impl<T> std::ops::Deref for RcuGuard<'_, T> {
@@ -104,9 +106,9 @@ mod rcu_impl {
 mod rcu_impl {
     use std::sync::{Arc, Mutex};
 
-    pub struct RcuBox<T>(Mutex<Arc<T>>);
+    pub struct RcuBox<T: 'static>(Mutex<Arc<T>>);
 
-    pub struct RcuGuard<'a, T> {
+    pub struct RcuGuard<'a, T: 'static> {
         phantom: std::marker::PhantomData<&'a T>,
         arc: Arc<T>,
     }
@@ -167,13 +169,15 @@ mod rcu_impl {
 #[cfg(all(feature = "rcu-crossbeam-epoch", not(doc)))]
 mod rcu_impl {
     use crossbeam_epoch as epoch;
+    use std::marker::PhantomData;
     use std::sync::atomic::Ordering;
 
-    pub struct RcuBox<T>(epoch::Atomic<T>);
+    pub struct RcuBox<T: 'static>(epoch::Atomic<T>);
 
-    pub struct RcuGuard<'a, T> {
+    pub struct RcuGuard<'a, T: 'static> {
         guard: epoch::Guard,
-        atomic: &'a epoch::Atomic<T>,
+        ptr: *const T,
+        phantom: PhantomData<&'a T>,
     }
 
     impl<T> Drop for RcuGuard<'_, T> {
@@ -185,9 +189,9 @@ mod rcu_impl {
         type Target = T;
 
         fn deref(&self) -> &Self::Target {
-            let ptr = self.atomic.load(Ordering::Acquire, &self.guard);
+            // SAFETY: we know we have the associated guard for the lifetime of the returned ref
             // SAFETY: we only allow readers to access "live" values
-            unsafe { ptr.deref() }
+            unsafe { self.ptr.as_ref().unwrap_unchecked() }
         }
     }
 
@@ -205,9 +209,12 @@ mod rcu_impl {
         }
 
         pub fn get(&self) -> RcuGuard<'_, T> {
+            let guard = epoch::pin();
+            let ptr = self.0.load(Ordering::Acquire, &guard).as_raw();
             RcuGuard {
-                guard: epoch::pin(),
-                atomic: &self.0,
+                guard,
+                ptr,
+                phantom: PhantomData,
             }
         }
 
@@ -218,6 +225,17 @@ mod rcu_impl {
                 .swap(epoch::Owned::new(new_value), Ordering::AcqRel, &guard);
             // SAFETY: `old_value` is now unreachable
             unsafe {
+                // Note on ordering:
+                //
+                // We assume/hope `defer_destroy()` synchronizes-with
+                // `pin()`.  (They are not documented to do so, but I think
+                // it is a safe assumption.) So, in the case that the
+                // `pin()` of a `get()` occurs _after_ this step, but
+                // _before_ we implicitly unpin (and thus execute the
+                // destructor), the above swap is visible to the load in
+                // `get()`.  (Else, the load would see the pre-swap value,
+                // and a subsequent dereference thereof might occur after we
+                // have unpinned and thus triggered the destructor.)
                 guard.defer_destroy(old_value);
             }
         }
@@ -234,6 +252,7 @@ mod rcu_impl {
             };
             // SAFETY: `old_value` is now unreachable
             unsafe {
+                // See note on ordering in write().
                 guard.defer_destroy(old_value);
             }
             Ok(())
@@ -241,26 +260,22 @@ mod rcu_impl {
     }
 }
 
-// NOTE: `rcu-aarc` doesn't actually compile because of the requirement that
-// the contained type has static lifetime.  However -- I think we *could* work
-// with this constraint in most cases if we change type annotations
-// in some places, so I'm keeping it around for now.
 #[cfg(all(feature = "rcu-aarc", not(doc)))]
 mod rcu_impl {
     use std::sync::Mutex;
 
     pub struct RcuBox<T: 'static>(aarc::AtomicArc<T>, Mutex<()>);
 
-    pub struct RcuGuard<'a, T> {
+    pub struct RcuGuard<'a, T: 'static> {
+        guard: aarc::Guard<T>,
         phantom: std::marker::PhantomData<&'a T>,
-        snapshot: aarc::Snapshot<T>,
     }
 
     impl<T> std::ops::Deref for RcuGuard<'_, T> {
         type Target = T;
 
         fn deref(&self) -> &Self::Target {
-            self.snapshot.deref()
+            self.guard.deref()
         }
     }
 
@@ -270,20 +285,22 @@ mod rcu_impl {
         }
 
         pub fn inspect<U>(&self, f: impl FnOnce(&T) -> U) -> U {
-            f(&*self.0.load::<aarc::Snapshot<_>>().unwrap())
+            // SAFETY: we always store a value in the AtomicArc
+            f(&*unsafe { self.0.load().unwrap_unchecked() })
         }
 
         pub fn get(&self) -> RcuGuard<'_, T> {
             RcuGuard {
+                // SAFETY: we always store a value in the AtomicArc
+                guard: unsafe { self.0.load().unwrap_unchecked() },
                 phantom: std::marker::PhantomData,
-                snapshot: self.0.load::<aarc::Snapshot<_>>().unwrap(),
             }
         }
 
         pub fn write(&self, new_value: T) {
             // NOTE: it's not clear from aarc docs in which threads GC is allowed;
             // if in `load()` threads, this would be a deal-breaker
-            self.0.store(Some(&std::sync::Arc::new(new_value)))
+            self.0.store(Some(&aarc::Arc::new(new_value)))
         }
 
         pub fn update(&self, f: impl Fn(&T) -> Option<T>) -> Result<(), ()> {
@@ -337,7 +354,7 @@ impl<T> From<T> for RcuBox<T> {
 }
 
 /// `RcuGuard` for an `Option` value known to be `Some`.
-pub struct RcuOptionGuard<'a, T>(RcuGuard<'a, Option<T>>);
+pub struct RcuOptionGuard<'a, T: 'static>(RcuGuard<'a, Option<T>>);
 
 impl<T> std::ops::Deref for RcuOptionGuard<'_, T> {
     type Target = T;
@@ -372,7 +389,7 @@ impl<'a, T> TryFrom<RcuGuard<'a, Option<T>>> for RcuOptionGuard<'a, T> {
 }
 
 /// `RcuGuard` for an `RcuCslab` entry known to be present.
-pub struct RcuCslabEntryGuard<'a, T> {
+pub struct RcuCslabEntryGuard<'a, T: 'static> {
     guard: RcuGuard<'a, cslab::RcuCslabReader<T>>,
     key: usize,
 }
@@ -398,5 +415,25 @@ impl<T> RcuBox<cslab::RcuCslabReader<T>> {
         } else {
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RcuBox;
+
+    #[test]
+    fn guard_pins_value() {
+        let rcu = RcuBox::new(true);
+        std::thread::scope(|s| {
+            let guard = rcu.get();
+            // this unsynchronized spawn+sleep is very silly but needed
+            // because some RCU impls deadlock if a write is issued
+            // while a guard is held (hence making this test vacuously true
+            // by disallowing this scheduling)
+            s.spawn(|| rcu.write(false));
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            assert!(*guard);
+        });
     }
 }

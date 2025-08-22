@@ -8,7 +8,9 @@
 use crate::assembly::Assembly;
 use crate::config;
 use crate::link_state::{LinkEvent, LinkState};
+use crate::logging;
 use crate::logging::targets::RPC;
+use crate::logging::{levels, targets};
 use crate::test_packet::TestPacketMetrics;
 use crate::zdp::TerminateReason;
 use cbpf_rs;
@@ -221,6 +223,43 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                     Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
                 },
                 _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
+            },
+            Ok(RpcCommands::SetLogging) => match vec_message.len() {
+                1 => buf_writer.write_all("ERR\n".as_bytes()).await?,
+                _ => {
+                    for elem in vec_message.iter().skip(1) {
+                        buf_writer.write_all(elem.as_bytes()).await?;
+                        buf_writer.write_all(" ".as_bytes()).await?;
+                        let key_val: Vec<&str> = elem.split("=").collect();
+                        match key_val.len() {
+                            2 => {
+                                if targets::ALL_TARGETS.contains(&key_val[0])
+                                    && levels::ALL_LEVELS
+                                        .contains(&key_val[1].to_uppercase().as_str())
+                                {
+                                    asm.logging
+                                        .lock()
+                                        .unwrap()
+                                        .insert(key_val[0].to_string(), key_val[1].to_uppercase());
+                                    buf_writer.write_all("applied\n".as_bytes()).await?
+                                } else {
+                                    buf_writer
+                                        .write_all("ERR: Unknown log value\n".as_bytes())
+                                        .await?
+                                }
+                            }
+                            _ => {
+                                buf_writer
+                                    .write_all("ERR Unknown log value ignored\n".as_bytes())
+                                    .await?
+                            }
+                        }
+                    }
+
+                    logging::reload_filter(&asm.reload_handle, &asm.logging.lock().unwrap());
+
+                    buf_writer.write_all("\nOK\n".as_bytes()).await?
+                }
             },
             _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
         };

@@ -24,13 +24,17 @@ use crate::visa_table;
 use crate::vs_types::AuthServicesList;
 use crate::zdp::TerminateReason;
 use km_noise::NoiseKeypair;
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::num::NonZero;
 use std::panic;
 use std::result::Result;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tracing::*;
+use tracing_subscriber::filter::targets::Targets;
+#[allow(unused_imports)]
+use tracing_subscriber::{filter, fmt, reload, Layer, Registry};
 use zpr::{self, LinkId, SubstrateAddr, VisaId};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -101,6 +105,9 @@ pub struct Assembly {
     pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
 
     pub config: std::sync::RwLock<config::Config>,
+    pub logging: Mutex<HashMap<String, String>>,
+    pub reload_handle:
+        reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,
 }
 
 #[derive(Debug, Error)]
@@ -489,7 +496,11 @@ pub mod test {
         pub km_state: Option<KmState>,
         pub system_start_time: Option<std::time::Instant>,
         pub config: Option<std::sync::RwLock<config::Config>>,
-    }
+        pub logging: Option<Mutex<HashMap<String, String>>>,
+        pub reload_handle: Option<
+            reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,
+        >,
+  }
 
     #[allow(dead_code)]
     struct DummyTunCtlImpl;
@@ -565,6 +576,13 @@ pub mod test {
         let config = builder.config.unwrap_or_else(|| {
             let config = <config::Config as std::default::Default>::default();
             std::sync::RwLock::new(config)
+        let logging = builder
+            .logging
+            .unwrap_or_else(|| Mutex::new(HashMap::default()));
+        let reload_handle = builder.reload_handle.unwrap_or_else(|| {
+            let (_reload_layer, reload_handle) =
+                reload::Layer::new(fmt::layer().with_filter(Targets::new()));
+            reload_handle
         });
 
         Assembly {
@@ -594,6 +612,8 @@ pub mod test {
             system_start_time: std::time::Instant::now(),
             address_pool: std::sync::Mutex::new(None),
             config,
+            logging,
+            reload_handle,
         }
     }
 }

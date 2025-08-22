@@ -3,7 +3,6 @@ use crate::config;
 use crate::counters::*;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
 use crate::net_defs;
-use crate::packet::{self, Packet};
 use crate::packet_queue;
 use crate::sys::{TunPi, ZprTun};
 use crate::zprtun;
@@ -11,6 +10,9 @@ use std::io::{ErrorKind, Result};
 use std::net::{SocketAddr, UdpSocket};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::sync::Arc;
+
+#[allow(unused_imports)]
+use crate::packet::{self, flags, Packet};
 
 pub struct FastpathIo {
     batch_io: BatchIo,
@@ -293,10 +295,14 @@ impl FastpathIo {
             .batch_io
             .try_send_to_from_batch(
                 &self.substrate_socket,
-                worker
-                    .substrate_egress_q
-                    .iter()
-                    .map(|pkt| (pkt.pkt.body(), pkt.dst, Some(pkt.src))),
+                worker.substrate_egress_q.iter().map(|pkt| {
+                    (
+                        pkt.pkt.body(),
+                        pkt.dst,
+                        Some(pkt.src),
+                        Self::get_confirm_flag(&pkt.pkt),
+                    )
+                }),
                 &mut self.io_results,
             )
             .expect("unrecoverable I/O error");
@@ -344,6 +350,19 @@ impl FastpathIo {
                 .drain(retained..)
                 .map(|pkt| pkt.pkt.destroy()),
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    fn get_confirm_flag(pkt: &Packet) -> libc::c_int {
+        match pkt.metadata().flags & flags::CONFIRM != 0 {
+            true => libc::MSG_CONFIRM,
+            false => 0,
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn get_confirm_flag(_pkt: &Packet) -> libc::c_int {
+        0
     }
 }
 

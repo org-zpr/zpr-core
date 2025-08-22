@@ -4,9 +4,12 @@ version = 4
 
 [[package]]
 name = "aarc"
-version = "0.2.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afe0fed346d4329c60bb25a742281e3a3af3fc7c41bdd137d059072ec20101db"
+checksum = "f43bb13fcadecc8e69cf89529e4a9ba701ce9b5c2682603b3af7a7f7e7ed0a5a"
+dependencies = [
+ "fast-smr",
+]
 
 [[package]]
 name = "addr2line"
@@ -617,6 +620,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "fast-smr"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61eeb63a0bb07980704258c3e31c217978c26f553ce9d03738ef5988c661c4db"
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1206,9 +1215,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.171"
+version = "0.2.175"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c19937216e9d3aa9956d9bb8dfc0b0c8beb6058fc4f7a4dc4d850edf86a237d6"
+checksum = "6a82ae493e598baaea5209805c49bbf2ea7de956d50d7da0da1164f9c6d28543"
 
 [[package]]
 name = "libnode"
