@@ -4,14 +4,16 @@
 //! with a '-' on the command line
 
 use cbpf_rs;
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, shells::Bash};
 use ctrlc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
+use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
-use std::io::{BufReader, Error, IoSlice};
+use std::io::{BufReader, BufWriter, Error, IoSlice};
 use std::net::Shutdown;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
@@ -20,6 +22,7 @@ use std::thread::sleep;
 use std::time::Duration;
 use zpr::rpc_commands::RpcCommands;
 use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
+
 const ANCILLARY_BUFFER_SIZE: usize = 128;
 
 macro_rules! basic_command {
@@ -43,6 +46,10 @@ struct CmdlineArgs {
     /// Path to the Packet Handler's management socket
     #[arg(long, short = 'p', default_value = "/var/run/zpr/ph.sock")]
     socket: String,
+
+    // Path to the generations file you want to create
+    #[arg(long, short = 'g')]
+    generate: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -145,6 +152,12 @@ enum LinkCommands {
 fn main() -> std::io::Result<()> {
     let args = CmdlineArgs::parse();
     let socket = args.socket.clone();
+
+    if let Some(file_name) = args.generate.clone() {
+        let file = File::create(file_name)?;
+        let writer = BufWriter::new(file);
+        generate_completion(writer);
+    }
 
     if let Some(command) = args.command {
         process_command(command, &socket).map(|_| {})
@@ -464,6 +477,15 @@ fn serialize(program: &str) -> String {
     }
     let _ = serialized_program.pop(); // removes trailing comma at end of string
     serialized_program
+}
+
+fn generate_completion<W: std::io::Write>(mut writer: BufWriter<W>) {
+    generate(
+        Bash,
+        &mut CmdlineArgs::command(),
+        CmdlineArgs::command().get_name().to_string(),
+        &mut writer,
+    );
 }
 
 struct CtrlcHandle {

@@ -1,0 +1,15 @@
+How to generate Bash completion script 
+
+Compile the program using cargo build
+
+Run the program using the generate flag and the path to the file you want to create:
+
+./target/debug/ph-cli --generate ph-cli.bash
+
+Run 'source ./ph-cli.bash' (this will only work for your session, if you want it to be permanent, you can add it to /etc/bash_completion.d or put source ./ph-cli.bash in your .bashrc or .bash_profile
+
+Now run the program 
+
+target/debug/ph-cli
+
+And you can tab complete command line arguments 
