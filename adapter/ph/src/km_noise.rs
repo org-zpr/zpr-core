@@ -540,7 +540,7 @@ impl KeyManagerStateMachine for KmNoise {
             && self.hs_sent_t.is_some()
             && Instant::now().duration_since(self.hs_sent_t.unwrap()) > HANDSHAKE_TIMEOUT
         {
-            error!(target: KEY_MGMT, "noise: handshake timeout");
+            error!(target: KEY_MGMT, "noise: handshake timeout - node-adapter connection failed");
             self.hs_state = None;
             self.hs_sent_t = None;
             self.state = KmSMState::Error;
