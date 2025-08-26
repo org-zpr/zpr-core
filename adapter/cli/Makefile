@@ -16,4 +16,9 @@ test:
 .PHONY: clean
 clean:
 	cargo clean
+	rm -r extensions
+
+.PHONY: generate
+generate:
+	./target/debug/ph-cli --generate
 

@@ -5,10 +5,11 @@
 
 use cbpf_rs;
 use clap::{Args, CommandFactory, Parser, Subcommand};
-use clap_complete::{generate, shells::Bash};
+use clap_complete::{generate, shells::Shell};
 use ctrlc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
+use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io;
@@ -49,7 +50,7 @@ struct CmdlineArgs {
 
     // Path to the generations file you want to create
     #[arg(long, short = 'g')]
-    generate: Option<String>,
+    generate: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -153,10 +154,8 @@ fn main() -> std::io::Result<()> {
     let args = CmdlineArgs::parse();
     let socket = args.socket.clone();
 
-    if let Some(file_name) = args.generate.clone() {
-        let file = File::create(file_name)?;
-        let writer = BufWriter::new(file);
-        generate_completion(writer);
+    if args.generate {
+        let _ = generate_completion();
     }
 
     if let Some(command) = args.command {
@@ -479,15 +478,39 @@ fn serialize(program: &str) -> String {
     serialized_program
 }
 
-fn generate_completion<W: std::io::Write>(mut writer: BufWriter<W>) {
-    generate(
-        Bash,
-        &mut CmdlineArgs::command(),
-        CmdlineArgs::command().get_name().to_string(),
-        &mut writer,
-    );
+fn generate_completion() -> Result<(), Box<dyn std::error::Error>> {
+    let exts: Vec<&str> = Vec::from(["sh", "elv", "fish", "ps1", "zsh"]);
+    println!("Hello {:?}", exts);
+
+    fs::create_dir("extensions")?;
+
+    for extension in exts {
+        println!("generating {extension}");
+
+        let path = format!("extensions/completion.{}", extension);
+        let file = File::create(path)?;
+        let mut writer = BufWriter::new(file);
+        generate(
+            get_shell(extension).unwrap(),
+            &mut CmdlineArgs::command(),
+            CmdlineArgs::command().get_name().to_string(),
+            &mut writer,
+        );
+    }
+
+    Ok(())
 }
 
+fn get_shell(ext: &str) -> Result<Shell, &str> {
+    match ext {
+        "sh" => Ok(Shell::Bash),
+        "elv" => Ok(Shell::Elvish),
+        "fish" => Ok(Shell::Fish),
+        "ps1" => Ok(Shell::PowerShell),
+        "zsh" => Ok(Shell::Zsh),
+        _ => Err("No shell found"),
+    }
+}
 struct CtrlcHandle {
     wait: Mutex<bool>,
     cv: Condvar,
