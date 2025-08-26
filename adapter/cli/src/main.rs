@@ -9,9 +9,7 @@ use clap_complete::{generate, shells::Shell};
 use ctrlc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
-use std::fs;
-use std::fs::File;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter, Error, IoSlice};
@@ -155,7 +153,7 @@ fn main() -> std::io::Result<()> {
     let socket = args.socket.clone();
 
     if args.generate {
-        let _ = generate_completion();
+        return generate_completion();
     }
 
     if let Some(command) = args.command {
@@ -478,16 +476,11 @@ fn serialize(program: &str) -> String {
     serialized_program
 }
 
-fn generate_completion() -> Result<(), Box<dyn std::error::Error>> {
+fn generate_completion() -> std::io::Result<()> {
     let exts: Vec<&str> = Vec::from(["sh", "elv", "fish", "ps1", "zsh"]);
-    println!("Hello {:?}", exts);
-
-    fs::create_dir("extensions")?;
 
     for extension in exts {
-        println!("generating {extension}");
-
-        let path = format!("extensions/completion.{}", extension);
+        let path = format!("extensions/ph-cli.{}", extension);
         let file = File::create(path)?;
         let mut writer = BufWriter::new(file);
         generate(
