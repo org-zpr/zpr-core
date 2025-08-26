@@ -23,9 +23,7 @@ TARGET_DIR = extensions
 
 .PHONY: generate
 generate:
-	@if [ -d "$(TARGET_DIR)" ] ; then rm -r "$(TARGET_DIR)" ; fi
-	mkdir "$(TARGET_DIR)"
-	./target/debug/ph-cli --generate
+	./target/debug/ph-cli --generate $(TARGET_DIR)
 	
 	@echo "\nInstallation of the completion script depends on your shell"
 	@echo "\nBash: Source the file in your .bashrc or .bash_profile, or copy the file into one of the bash completions folders"
