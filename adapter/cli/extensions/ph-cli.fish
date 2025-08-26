@@ -1,6 +1,6 @@
 # Print an optspec for argparse to handle cmd's options that are independent of any subcommand.
 function __fish_ph_cli_global_optspecs
-	string join \n p/socket= g/generate h/help V/version
+	string join \n p/socket= g/generate= h/help V/version
 end
 
 function __fish_ph_cli_needs_command
@@ -25,7 +25,7 @@ function __fish_ph_cli_using_subcommand
 end
 
 complete -c ph-cli -n "__fish_ph_cli_needs_command" -s p -l socket -d 'Path to the Packet Handler\'s management socket' -r
-complete -c ph-cli -n "__fish_ph_cli_needs_command" -s g -l generate
+complete -c ph-cli -n "__fish_ph_cli_needs_command" -s g -l generate -r
 complete -c ph-cli -n "__fish_ph_cli_needs_command" -s h -l help -d 'Print help'
 complete -c ph-cli -n "__fish_ph_cli_needs_command" -s V -l version -d 'Print version'
 complete -c ph-cli -n "__fish_ph_cli_needs_command" -f -a "echo"

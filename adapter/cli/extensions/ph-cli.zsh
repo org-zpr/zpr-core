@@ -17,8 +17,8 @@ _ph-cli() {
     _arguments "${_arguments_options[@]}" : \
 '-p+[Path to the Packet Handler'\''s management socket]:SOCKET:_default' \
 '--socket=[Path to the Packet Handler'\''s management socket]:SOCKET:_default' \
-'-g[]' \
-'--generate[]' \
+'-g+[]:GENERATE:_default' \
+'--generate=[]:GENERATE:_default' \
 '-h[Print help]' \
 '--help[Print help]' \
 '-V[Print version]' \

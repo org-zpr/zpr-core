@@ -9,7 +9,7 @@ use clap_complete::{generate, shells::Shell};
 use ctrlc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
-use std::fs::{File, OpenOptions};
+use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
 use std::io::prelude::*;
 use std::io::{BufReader, BufWriter, Error, IoSlice};
@@ -48,7 +48,7 @@ struct CmdlineArgs {
 
     // Path to the generations file you want to create
     #[arg(long, short = 'g')]
-    generate: bool,
+    generate: Option<String>,
 }
 
 #[derive(Parser, Debug)]
@@ -152,8 +152,10 @@ fn main() -> std::io::Result<()> {
     let args = CmdlineArgs::parse();
     let socket = args.socket.clone();
 
-    if args.generate {
-        return generate_completion();
+    if let Some(path) = args.generate.clone() {
+        if path != "NO_INPUT".to_string() {
+            return generate_completion(path);
+        }
     }
 
     if let Some(command) = args.command {
@@ -476,12 +478,14 @@ fn serialize(program: &str) -> String {
     serialized_program
 }
 
-fn generate_completion() -> std::io::Result<()> {
+fn generate_completion(path: String) -> std::io::Result<()> {
     let exts: Vec<&str> = Vec::from(["sh", "elv", "fish", "ps1", "zsh"]);
 
+    create_dir_all(&path)?;
+
     for extension in exts {
-        let path = format!("extensions/ph-cli.{}", extension);
-        let file = File::create(path)?;
+        let formatted_path = format!("{path}/ph-cli.{extension}");
+        let file = File::create(formatted_path)?;
         let mut writer = BufWriter::new(file);
         generate(
             get_shell(extension).unwrap(),
