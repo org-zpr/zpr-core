@@ -16,13 +16,12 @@ test:
 .PHONY: clean
 clean:
 	cargo clean
-	rm -r extensions
 
 # Create the completion scripts for the CLI
-TARGET_DIR = extensions
+TARGET_DIR = completions
 
-.PHONY: generate
-generate:
+.PHONY: completions
+completions:
 	./target/debug/ph-cli --generate $(TARGET_DIR)
 	
 	@echo "\nInstallation of the completion script depends on your shell"
@@ -32,4 +31,8 @@ generate:
 	@echo "\nFish: Copy the file into ~/.config/fish/completions/"
 	@echo "\nPowerShell: Use 'Import-Module' to add the script to your user profile"
 
+
+.PHONY: clean-completions
+clean-completions:
+	rm -r $(TARGET_DIR)
 
