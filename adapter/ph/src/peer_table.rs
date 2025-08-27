@@ -1,14 +1,16 @@
 #![allow(dead_code)]
 use crate::auth::AUTH_KEY_SIZE_BYTES;
+use crate::config;
 use crate::forwarding_tables::PeerForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
 use crate::net_defs::ScopedIpAddr;
+use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::seq_nums::*;
 use crate::special_peers::*;
 use crate::sync_req;
-use crate::{config, queues};
+use crate::zdpr;
 use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
@@ -21,7 +23,7 @@ use std::sync::atomic::{self, Ordering};
 use std::sync::Mutex;
 use std::sync::MutexGuard;
 use thiserror::Error;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tokio::task;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -40,6 +42,9 @@ pub struct PeerState {
     pub auth_key: [u8; 32], // set in ::new and never changed.
     pub sn_gen: SeqNumGenerator,
     pub sn_track: Mutex<SeqNumTracker>,
+    pub zdpr_send: Mutex<zdpr::Sender<crate::packet::Packet>>,
+    pub zdpr_recv: Mutex<zdpr::Receiver>,
+    pub zdpr_retry_timer_reset: Notify,
     km_state: PeerKmState,
 }
 
@@ -100,10 +105,15 @@ impl PeerState {
             sync_req_state: sync_req::SyncReqState::new(),
             mgmt_processor,
             mgmt_processor_worker,
+            auth_key: key,
             sn_gen: SeqNumGenerator::new(),
             sn_track: Mutex::new(SeqNumTracker::new()),
+            zdpr_send: Mutex::new(zdpr::Sender::new()),
+            zdpr_recv: Mutex::new(zdpr::Receiver::new(
+                config::DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE,
+            )),
+            zdpr_retry_timer_reset: Notify::new(),
             km_state: PeerKmState::new(),
-            auth_key: key,
         }
     }
 
@@ -423,10 +433,15 @@ pub mod test {
             sync_req_state: sync_req::SyncReqState::new(),
             mgmt_processor,
             mgmt_processor_worker: task::spawn(async {}),
+            auth_key: [42u8; AUTH_KEY_SIZE_BYTES],
             sn_gen: SeqNumGenerator::new(),
             sn_track: Mutex::new(SeqNumTracker::new()),
+            zdpr_send: Mutex::new(zdpr::Sender::new()),
+            zdpr_recv: Mutex::new(zdpr::Receiver::new(
+                config::DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE,
+            )),
+            zdpr_retry_timer_reset: Notify::new(),
             km_state: PeerKmState::new(),
-            auth_key: [42u8; AUTH_KEY_SIZE_BYTES],
         }
     }
 }
