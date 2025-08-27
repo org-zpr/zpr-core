@@ -479,16 +479,22 @@ fn serialize(program: &str) -> String {
 }
 
 fn generate_completion(path: String) -> std::io::Result<()> {
-    let exts: Vec<&str> = Vec::from(["sh", "elv", "fish", "ps1", "zsh"]);
+    let shells_exts: Vec<(Shell, &str)> = Vec::from([
+        (Shell::Bash, "sh"),
+        (Shell::Elvish, "elv"),
+        (Shell::Fish, "fish"),
+        (Shell::PowerShell, "ps1"),
+        (Shell::Zsh, "zsh"),
+    ]);
 
     create_dir_all(&path)?;
 
-    for extension in exts {
+    for (shell, extension) in shells_exts {
         let formatted_path = format!("{path}/ph-cli.{extension}");
         let file = File::create(formatted_path)?;
         let mut writer = BufWriter::new(file);
         generate(
-            get_shell(extension).unwrap(),
+            shell,
             &mut CmdlineArgs::command(),
             CmdlineArgs::command().get_name().to_string(),
             &mut writer,
@@ -498,16 +504,6 @@ fn generate_completion(path: String) -> std::io::Result<()> {
     Ok(())
 }
 
-fn get_shell(ext: &str) -> Result<Shell, &str> {
-    match ext {
-        "sh" => Ok(Shell::Bash),
-        "elv" => Ok(Shell::Elvish),
-        "fish" => Ok(Shell::Fish),
-        "ps1" => Ok(Shell::PowerShell),
-        "zsh" => Ok(Shell::Zsh),
-        _ => Err("No shell found"),
-    }
-}
 struct CtrlcHandle {
     wait: Mutex<bool>,
     cv: Condvar,
