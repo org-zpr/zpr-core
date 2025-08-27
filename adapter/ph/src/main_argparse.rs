@@ -4,11 +4,8 @@
 //! and any config file, returning a PH configuration. See [crate::config::Config] for
 //! more details on the configuration.
 
-use clap::{CommandFactory, Parser};
-use clap_complete::{generate, shells::Shell};
+use clap::Parser;
 use std::fs;
-use std::fs::{create_dir_all, File};
-use std::io::BufWriter;
 use std::io::Read;
 use std::path::Path;
 
@@ -62,10 +59,6 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
 
             config = Config::new_for_adapter(config_file, &common)?;
 
-            if let Some(path) = common.generate {
-                generate_completion(path)?;
-            }
-
             // fold in the optional, adapter specific command line args:
             if let Some(node_addr) = node_addr {
                 config.node_addr = Some(node_addr);
@@ -117,10 +110,6 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
                 None => None,
             };
             config = Config::new_for_node(config_file, &common)?;
-
-            if let Some(path) = common.generate {
-                generate_completion(path)?;
-            }
         }
     }
     if let Err(e) = config.check_valid(ph_mode) {
@@ -154,32 +143,6 @@ where
         }
     };
     Ok(ac)
-}
-
-fn generate_completion(path: String) -> std::io::Result<()> {
-    let shells_exts: Vec<(Shell, &str)> = Vec::from([
-        (Shell::Bash, "sh"),
-        (Shell::Elvish, "elv"),
-        (Shell::Fish, "fish"),
-        (Shell::PowerShell, "ps1"),
-        (Shell::Zsh, "zsh"),
-    ]);
-
-    create_dir_all(&path)?;
-
-    for (shell, extension) in shells_exts {
-        let formatted_path = format!("{path}/ph-cli.{extension}");
-        let file = File::create(formatted_path)?;
-        let mut writer = BufWriter::new(file);
-        generate(
-            shell,
-            &mut Control::command(),
-            Control::command().get_name().to_string(),
-            &mut writer,
-        );
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

@@ -43,7 +43,7 @@ zpr = { path = "../../zpr" }
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "zerocopy"] }
 serde_json = "1.0.140"
 url = "2.5.4"
-clap_complete = { version = "4.5.57" }
+clap_complete = { version = "4.5.57", optional = true}
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-tun = { version = "0.11.5" }
@@ -62,8 +62,17 @@ rcu-rwlock = []
 rcu-mutex-arc = []
 rcu-crossbeam-epoch = ["dep:crossbeam-epoch"]
 rcu-aarc = ["dep:aarc"]
+complete = ["clap_complete"]
 
 [profile.dev]
 
 [profile.release]
 panic="abort"
+
+[[bin]]
+name = "ph"
+path = "src/main.rs"
+[[bin]]
+name = "generate_completions"
+path = "src/generate_completions.rs"
+required-features = ["complete"]
