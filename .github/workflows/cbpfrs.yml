@@ -21,7 +21,7 @@ env:
 jobs:
   cbpf-build:
     name: CBPF
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@3cb8cffcd752171c2f6c0717abebad3736baa78e
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@5d31fdcf9d46936101472ad36a739214efe86e93
     with:
       name: 'CBPF'
       path: './cbpf-rs'
