@@ -110,10 +110,6 @@ pub struct CommonArgs {
     /// Which packet I/O engine to use
     #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(std::iter::once(batch_io::AUTO_ENGINE_NAME).chain(batch_io::engine_names())), default_value_t = batch_io::AUTO_ENGINE_NAME.to_owned())]
     pub io_engine: String,
-
-    // Path to the generations file you want to create
-    #[arg(long, short = 'g')]
-    pub generate: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
