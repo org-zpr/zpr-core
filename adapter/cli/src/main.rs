@@ -152,7 +152,7 @@ fn main() -> std::io::Result<()> {
     let args = CmdlineArgs::parse();
     let socket = args.socket.clone();
 
-    if let Some(path) = args.generate.clone() {
+    if let Some(path) = args.generate {
         if path != "NO_INPUT".to_string() {
             return generate_completion(path);
         }
