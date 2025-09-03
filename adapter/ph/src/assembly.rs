@@ -65,11 +65,6 @@ pub struct Assembly {
     pub ph_mode: PhMode,
     pub topology_config: config::TopologyConfig,
 
-    /// Note that zpr addressed in config are not our real ZPR addresses until we are granted a ZPR address.
-    /// If there is a static ZPR address present in the configuration it is set here in main.
-    /// Various get_ and set_ functions are defined for this below.
-    pub local_zpr_addresses: rcu::RcuBox<Vec<IpAddr>>,
-
     pub mgmt_substrate_egress: MgmtSubstrateEgress,
     pub actor_output_requeue: ActorOutputRequeue,
 
@@ -104,6 +99,9 @@ pub struct Assembly {
     pub system_start_time: std::time::Instant,
     pub address_pool: std::sync::Mutex<Option<AddressPool>>, // Nodes only (and required for nodes)
 
+    /// Note that zpr addressed in config are not our real ZPR addresses until we are granted a ZPR address.
+    /// If there is a static ZPR address present in the configuration it is set here in main.
+    /// Various get_ and set_ functions are defined for this below.
     pub config: rcu::RcuBox<config::Config>,
     pub logging: Mutex<HashMap<String, String>>,
     pub reload_handle:
@@ -215,13 +213,15 @@ impl Assembly {
         T: Into<IpAddr>,
     {
         let addrs: Vec<IpAddr> = addrs.into_iter().map(|a| a.into()).collect();
+        // self.config.update(move |cfg| { config::Config {zpr_addr: addrs .. cfg.clone() } });
+
         self.local_zpr_addresses.write(addrs);
     }
 
     /// Get a copy of the local ZPR addresses. May be empty on an adapter until we
     /// have been granted a ZPR address.
     pub fn get_local_zpr_addrs_std(&self) -> Vec<IpAddr> {
-        self.local_zpr_addresses.get().clone()
+        self.config.get().zpr_addr.clone()
     }
 
     /// Node only: the "dock address" is the first local ZPR address.
@@ -233,7 +233,7 @@ impl Assembly {
     /// in a more static way to avoid taking the read lock since we need this
     /// value on every visa request.
     pub fn get_local_dock_addr(&self) -> IpAddr {
-        let lza = self.local_zpr_addresses.get();
+        let lza = &self.config.get().zpr_addr;
         if lza.is_empty() {
             std::net::Ipv6Addr::UNSPECIFIED.into()
         } else {
@@ -368,7 +368,7 @@ impl Assembly {
     /// Temporary? function to find a link based on the actor address
     pub fn find_egress_link(&self, actor_addr: IpAddress) -> Option<NonZero<LinkId>> {
         // First check the local actor addresses to see if it's a locally-destined packet
-        for addr in self.local_zpr_addresses.get().iter() {
+        for addr in self.config.get().zpr_addr.iter() {
             if actor_addr == (*addr).into() {
                 return Some(NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap());
             }
