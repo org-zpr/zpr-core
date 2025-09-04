@@ -26,7 +26,7 @@ jobs:
     strategy:
       matrix:
         target: [vs-client]
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-containerized-build-test.yml@3cb8cffcd752171c2f6c0717abebad3736baa78e
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-containerized-build-test.yml@5b48a89e4fba1551d44f052d5495bc0083939aa6
     with:
       name: ${{ matrix.target }}
       path: ./${{ matrix.target }}
