@@ -467,7 +467,6 @@ pub mod test {
     use crate::config::TopologyConfig;
     use crate::packet_queue;
     use crate::two_way_queue;
-    use std::net::Ipv4Addr;
     use tokio::sync::mpsc;
 
     #[allow(dead_code)]
@@ -526,9 +525,6 @@ pub mod test {
         let mgmt_substrate_egress = builder
             .mgmt_substrate_egress
             .unwrap_or_else(|| MgmtSubstrateEgress::new(packet_queue::packet_queue(1).0));
-        let local_zpr_addresses = builder
-            .local_zpr_addresses
-            .unwrap_or(Vec::from([IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))]));
         let actor_output_requeue = builder
             .actor_output_requeue
             .unwrap_or_else(|| ActorOutputRequeue::new(Vec::new()));
@@ -587,7 +583,6 @@ pub mod test {
         Assembly {
             ph_mode,
             topology_config,
-            local_zpr_addresses: rcu::RcuBox::new(local_zpr_addresses),
             mgmt_substrate_egress,
             actor_output_requeue,
             vsconn,
