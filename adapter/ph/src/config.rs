@@ -79,7 +79,7 @@ impl ArgError for str {
 /// This config struct is loaded up from the command line args and used by the
 /// ph system to configure itself.  Do not create this directly,
 /// use [crate::main_argparse::argparse].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Config {
     /// Path to the unix domain socket for the control interface.
     pub control_path: PathBuf,
@@ -96,11 +96,11 @@ pub struct Config {
 
     /// Path to a PEM file containing the noise private key, if specified.
     /// One of either `private_key_file` or `private_key_data` must be specified.
-    private_key_file: Option<PathBuf>,
+    pub private_key_file: Option<PathBuf>,
 
     /// The noise private key data, base64 encoded. User has option to set this through an environment variable.
     /// One of either `private_key_file` or `private_key_data` must be specified.
-    private_key_data: Option<String>,
+    pub private_key_data: Option<String>,
 
     /// Optionally specify the name of the TUN interface to use. In most cases this
     /// should be left as None so that the kernal can pick a free one.

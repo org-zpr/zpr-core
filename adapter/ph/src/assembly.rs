@@ -213,9 +213,7 @@ impl Assembly {
         T: Into<IpAddr>,
     {
         let addrs: Vec<IpAddr> = addrs.into_iter().map(|a| a.into()).collect();
-        // self.config.update(move |cfg| { config::Config {zpr_addr: addrs .. cfg.clone() } });
-
-        self.local_zpr_addresses.write(addrs);
+        self.config.update(move |cfg| { Some(config::Config {zpr_addr: addrs.clone(), .. cfg.clone() }) }).unwrap();
     }
 
     /// Get a copy of the local ZPR addresses. May be empty on an adapter until we

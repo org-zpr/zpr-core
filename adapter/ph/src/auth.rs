@@ -179,7 +179,7 @@ pub enum AuthError {
     AuthError(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RsaBootstrapAuth {
     pkey: PKey<Private>,
     cn: String,
@@ -187,7 +187,7 @@ pub struct RsaBootstrapAuth {
 
 /// OAuthRsa holds small amount of state needed to talk to a
 /// zpr-oauthrsa authentication service.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OAuthRsa {
     client_id: String,
     private_key: PKey<Private>,
