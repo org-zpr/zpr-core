@@ -99,6 +99,7 @@ echo "Launching Visa Service"
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$VS_BIN" \
     -c vs-config.yaml \
     -p "$PREGEN/$POLICY_BIN" \
+    -pp "tmp.pid" \
     --listen_addr "[$VS_ZPR_ADDR]":5002 2>&1 | tee vs.log | prefix_log vs &
 
 sleep 2
