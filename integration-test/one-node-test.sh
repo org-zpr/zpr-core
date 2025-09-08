@@ -63,7 +63,6 @@ pushd "$TMPDIR" > /dev/null
 
 echo "Setting up network"
 
-
 #
 # Prepare for test
 #
