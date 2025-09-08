@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+DEBUG_TARGETS=${DEBUG_TARGETS:-all=INFO}
+
 PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/cli/target/debug/ph-cli")
 VS_BIN=$(realpath "$(dirname $0)/vservice")
@@ -108,6 +111,7 @@ sleep 2
 #
 sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   node \
+  --logging "$DEBUG_TARGETS" \
   --control-path "$NODE_SOCK" \
   --self-addr 0.0.0.0:12345 \
   --ca-file ca.crt \
@@ -118,6 +122,7 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
 
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
+  --logging "$DEBUG_TARGETS" \
   --control-path "$VS_SOCK" \
   --self-addr "$VS_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
@@ -133,6 +138,7 @@ sleep 2
 
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
+  --logging "$DEBUG_TARGETS" \
   --control-path "$ADAPTER1_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
@@ -146,6 +152,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
 
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
+  --logging "$DEBUG_TARGETS" \
   --control-path "$ADAPTER2_SOCK" \
   --self-addr "$B_SUBSTRATE_ADDR":0 \
   --ca-file ca.crt \
@@ -160,6 +167,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
 if [[ "$NUM_ACTORS" -ge 3 ]]; then
   sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
     adapter \
+    --logging "$DEBUG_TARGETS" \
     --control-path "$ADAPTER3_SOCK" \
     --self-addr "$C_SUBSTRATE_ADDR":0 \
     --ca-file ca.crt \

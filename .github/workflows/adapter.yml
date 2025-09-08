@@ -197,6 +197,9 @@ jobs:
         out-file-path: 'integration-test'
         token: ${{ secrets.ZPR_CICD_RO_TOKEN }}
 
+    - name: Set env
+      run: |
+        echo "DEBUG_TARGETS=all=DEBUG" >> $GITHUB_ENV
 
     - name: Capture Test
       timeout-minutes: 10

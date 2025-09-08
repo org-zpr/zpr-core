@@ -175,7 +175,7 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
   # on this interface, to test that replies are still routed correctly.
   sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
     adapter \
-  --logging "$DEBUG_TARGETS" \
+    --logging "$DEBUG_TARGETS" \
     --control-path "$ADAPTER3_SOCK" \
     --self-addr "$C_SUBSTRATE_ADDR" \
     --ca-file ca.crt \
