@@ -135,7 +135,7 @@ jobs:
     
     - name: Set env
       run: |
-        echo "DEBUG_TARGETS=\"all=DEBUG\"" >> $GITHUB_ENV
+        echo "DEBUG_TARGETS=all=DEBUG" >> $GITHUB_ENV
     
     - name: One Node v6 Test
       timeout-minutes: 10
