@@ -140,7 +140,7 @@ jobs:
     - name: One Node v6 Test
       timeout-minutes: 10
       run: |
-        echo "DEBUG_TARGETS=all=DEBUG" >> $GITHUB_ENV
+        echo "DEBUG_TARGETS=\"all=DEBUG\"" >> $GITHUB_ENV
         ZPR_TEST_VERBOSE=1 integration-test/one-node-v6-test.sh
 
   capture-integration-test:
