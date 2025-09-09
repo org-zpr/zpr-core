@@ -259,7 +259,7 @@ impl PeerTable {
         Ok(())
     }
 
-    /// At some point shortly after the link security assocaition is initialized, the [crate::km_multiplexor] will
+    /// At some point shortly after the link security association is initialized, the [crate::km_multiplexor] will
     /// stash its handle in here.
     ///
     /// Only possible error is if there is no entry in the table under the `link_id`.
@@ -271,7 +271,7 @@ impl PeerTable {
         Ok(())
     }
 
-    /// After this, [PeerTable::is_security_assocaition_established] will return false for the link until
+    /// After this, [PeerTable::is_security_association_established] will return false for the link until
     /// a call to [PeerTable::set_security_association].
     pub fn clear_security_association(&self, link_id: LinkId) -> Result<(), PeerUpdateError> {
         let entry = self
@@ -281,10 +281,10 @@ impl PeerTable {
         Ok(())
     }
 
-    /// Check if a security assocaition is estabolished for the link.
-    /// False returned here means that either the assocaition is not established, or
+    /// Check if a security association is estabolished for the link.
+    /// False returned here means that either the association is not established, or
     /// that there is no link found under the ID.
-    pub fn is_security_assocaition_established(&self, link_id: LinkId) -> bool {
+    pub fn is_security_association_established(&self, link_id: LinkId) -> bool {
         if let Some(entry) = self.get(link_id) {
             return entry.km_state.transport_sa.get().is_some();
         }

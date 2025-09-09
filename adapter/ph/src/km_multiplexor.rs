@@ -473,7 +473,7 @@ mod test {
                 {
                     assert!(!asm
                         .peer_table
-                        .is_security_assocaition_established(adapter_link_id))
+                        .is_security_association_established(adapter_link_id))
                 }
 
                 // Pretend to be a node and send back a valid reply.
@@ -515,7 +515,7 @@ mod test {
                 {
                     assert!(asm
                         .peer_table
-                        .is_security_assocaition_established(adapter_link_id))
+                        .is_security_association_established(adapter_link_id))
                 }
 
                 drop_link(&asm, adapter_link_id).await;
