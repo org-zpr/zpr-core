@@ -126,6 +126,7 @@ pub enum ManagementCounterType {
     UnexpectedMgmtResponse,
     LostPacket,       // lost management packet detected
     OutOfOrderPacket, // out-of-order management packet detected (and processed)
+    ResentPacket,
 
     UnknownPeer,
     PeerRemoved,
@@ -211,6 +212,7 @@ impl ManagementCounterType {
             Self::UnexpectedMgmtResponse => "Unexpected Management Response",
             Self::LostPacket => "Lost Packet",
             Self::OutOfOrderPacket => "Out Of Order Packet",
+            Self::ResentPacket => "Resent Packet",
 
             // Peer operation failures
             Self::UnknownPeer => "Management Unknown Peer",

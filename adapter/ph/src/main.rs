@@ -71,6 +71,7 @@ mod vss_worker;
 mod zdp;
 mod zdp_ll;
 mod zdpr;
+mod zdpr_worker;
 mod zprtun;
 
 #[cfg(test)]

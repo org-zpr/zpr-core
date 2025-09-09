@@ -41,7 +41,7 @@ pub const TINY_MESSAGE_HEADROOM: usize = 64;
 pub const DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE: usize = 32;
 
 pub const DEFAULT_REQUEST_RETRY_COUNT: usize = 3;
-pub const DEFAULT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(1);
+pub const DEFAULT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_millis(400);
 pub const DEFAULT_TERMINATE_RESPONSE_TIMER: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Slightly longer -- asking visa service to grant an address

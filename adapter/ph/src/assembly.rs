@@ -23,6 +23,7 @@ use crate::tun_ctl::TunCtl;
 use crate::visa_table;
 use crate::vs_types::AuthServicesList;
 use crate::zdp::TerminateReason;
+use crate::zdpr_worker;
 use km_noise::NoiseKeypair;
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -294,7 +295,11 @@ impl Assembly {
                 mgmt_processor_worker::launch(worker_config, self.clone(), q)
             });
 
-        Ok(entry.insert(peer_state))
+        let link_id = entry.insert(peer_state);
+
+        tokio::task::spawn_local(zdpr_worker::launch(self.clone(), link_id.get()));
+
+        Ok(link_id)
     }
 
     /// Caled from `LinkStateWrapper::complete_close`.`

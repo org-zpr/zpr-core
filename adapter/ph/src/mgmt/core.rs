@@ -14,6 +14,7 @@ use std::task::{Context, Poll};
 use thiserror::Error;
 use tokio::time::sleep;
 use tracing::*;
+use zerocopy::FromBytes;
 use zpr;
 use zpr_ext::zerocopy::FromBytesExt;
 
@@ -44,6 +45,14 @@ pub fn count_event(
 ) {
     debug!(target: crate::logging::targets::MGMT_EVENTS, "packet event {event}");
     asm.counters.management[event].increment();
+}
+
+pub fn count_events(asm: &Assembly, event: ManagementCounterType, count: u64) {
+    if count == 0 {
+        return;
+    }
+    debug!(target: crate::logging::targets::MGMT_EVENTS, "packet event {event} ({count})");
+    asm.counters.management[event].increase_by(count);
 }
 
 /// Send a unidirectional non-flow management message on the given link.
@@ -113,7 +122,7 @@ pub fn send_acknowledgement(asm: &Assembly, link_id: zpr::LinkId, sequence_numbe
     // by the substrate due to congestion.
     let _ = asm
         .mgmt_substrate_egress
-        .try_enqueue_packet(link_id, packet);
+        .try_enqueue_packet(link_id, &mut packet);
 }
 
 #[allow(dead_code)]
@@ -333,7 +342,29 @@ fn send_mgmt_helper(
     // by the substrate due to congestion.
     let _ = asm
         .mgmt_substrate_egress
-        .try_enqueue_packet(link_id, packet);
+        .try_enqueue_packet(link_id, &mut packet);
+}
+
+/// Used to send packets as instructed by ZDPR mechanism.
+///
+/// Simply fills in the assigned sequence number (which is
+/// a no-op for retries), and forwards to the fastpath.
+pub fn build_and_egress_packets<'a>(
+    asm: &Assembly,
+    link_id: zpr::LinkId,
+    packets: impl Iterator<Item = (zpr::SeqNum, &'a mut Packet)>,
+) {
+    packets.for_each(|(seq_num, packet)| {
+        let (hdr, _) = zdp::ZdpBaseHeader::mut_from_prefix(packet.body_mut()).unwrap();
+        hdr.sequence_number = zdpr::truncate_seq_num(seq_num).into();
+
+        // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
+        // In that case, just ignore the error; act as if the packet was dropped
+        // by the substrate due to congestion.
+        let _ = asm
+            .mgmt_substrate_egress
+            .try_enqueue_packet(link_id, packet);
+    });
 }
 
 /// Sender function for per flow request management packet.
