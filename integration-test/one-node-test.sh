@@ -237,7 +237,7 @@ fi
 for SOCK in "$NODE_SOCK" "$VS_SOCK" "$ADAPTER1_SOCK" "$ADAPTER2_SOCK"
 do
 	# TODO: test also with encrypted actor traffic
-	APOOO=$(counters "$SOCK" | awk -F': ' '$1 == "Actor Packets Out-Of-Order" { print $2 }')
+	APOOO=$(counters "$SOCK" | awk -F': ' '$1 == "Actor Packets Out-Of-Order" { apooo += $2 } END { print apooo }')
 	if (( APOOO != 0 ))
 	then
 		echo "$(basename "$SOCK"): ERROR: found actor packets out-of-order: $APOOO"
