@@ -256,6 +256,10 @@ impl ZdpKeyManagementHeader {
     pub fn is_experiment(&self) -> bool {
         self.message_type.get() == zpr::KM_ID_EXPERIMENTAL
     }
+
+    pub fn is_null(&self) -> bool {
+        self.message_type.get() == zpr::KM_ID_NULL
+    }
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]

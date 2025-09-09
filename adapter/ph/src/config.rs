@@ -4,6 +4,7 @@ use std::env;
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{self, Path, PathBuf};
+use zpr;
 
 use base64::prelude::*;
 use openssl::pkey::PKey;
@@ -126,6 +127,9 @@ pub struct Config {
 
     /// The batch I/O engine to use.
     pub batch_io_engine: String,
+
+    /// Type of key manager implementation
+    pub km_implementation: zpr::KmId,
 }
 
 impl Config {
@@ -455,6 +459,23 @@ impl Config {
 
         self.batch_io_engine = common.io_engine.clone();
 
+        self.km_implementation = match common.km_implementation.as_str() {
+            "noise" => zpr::KM_ID_NOISE,
+            "null" => zpr::KM_ID_NULL,
+            oth => {
+                return Err(ArgsError::ParseError(format!(
+                    "Unknown key management implementation: {oth}"
+                )))
+            }
+        };
+
+        if self.km_implementation == zpr::KM_ID_NOISE {
+            println!("NOISE!!!");
+        }
+        if self.km_implementation == zpr::KM_ID_NULL {
+            println!("NULL!!!")
+        }
+
         Ok(())
     }
 }
@@ -476,6 +497,7 @@ impl Default for Config {
             bootstrap: None,
             rsaoauth: None,
             batch_io_engine: batch_io::AUTO_ENGINE_NAME.to_owned(),
+            km_implementation: zpr::KM_ID_NOISE,
         }
     }
 }
