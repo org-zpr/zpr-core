@@ -21,7 +21,7 @@ env:
 jobs:
   libnode-build:
     name: Libnode
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-containerized-build-test.yml@3cb8cffcd752171c2f6c0717abebad3736baa78e
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-containerized-build-test.yml@b9b1a41fe4fdee44c4970cc473b79c266bdf89f5
     with:
       name: Libnode
       path: ./libnode
