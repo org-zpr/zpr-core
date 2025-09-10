@@ -72,7 +72,7 @@ const DEFAULT_WORKER_CONCURRENCY: usize = 4;
 const DEFAULT_WORKER_CONCURRENCY: usize = 1;
 
 pub const DEFAULT_KEEP_ALIVE_PERIOD: std::time::Duration = std::time::Duration::from_secs(3);
-pub const DEFAULT_KEEP_ALIVE_RETRIES: usize = 3;
+pub const DEFAULT_KEEP_ALIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 pub const DEFAULT_LINK_RESTART_HOLDDOWN: std::time::Duration = std::time::Duration::from_secs(5);
 

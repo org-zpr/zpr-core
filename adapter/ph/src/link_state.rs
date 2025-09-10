@@ -157,7 +157,6 @@ pub enum LinkEvent {
     AuthenticationSuccess(auth::ZdpAuthCodeBlob), // From an authentication service
     AuthenticationFailure,                        // From an authentication service
 
-    ReceivedEchoResponse,
     ReceivedAuthorizeResponse(IpAddress), // from visa service
     ReceivedKeepAliveResponse,
     ReceivedTerminateRequest(TerminateReason),
@@ -413,12 +412,7 @@ impl LinkStateWrapper {
         asm: &Arc<Assembly>,
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
-        match event {
-            LinkEvent::ReceivedEchoResponse => {
-                trace!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id)
-            }
-            _ => debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id),
-        }
+        debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id);
 
         // Enqueue a copy of this event with any concurrent listening state machines.
         // If there are none, avoid trying to do so we don't make a needless copy.
@@ -481,21 +475,15 @@ impl LinkStateWrapper {
             LinkEvent::Error => self.process_error_response(asm),
             LinkEvent::Timeout { logical_clock } => self.process_timeout(asm, logical_clock),
 
+            #[allow(unreachable_patterns)]
             ev => {
                 if listened_for {
                     Ok(())
                 } else {
-                    // TODO: See issue ( https://github.com/org-zpr/zpr-core/issues/930 ).
-                    // In practice this error happens fairly regularly.
-                    if matches!(ev, LinkEvent::ReceivedEchoResponse) {
-                        warn!(target: LINK_STATE, "received echo-response with listened_for=false, continuing...");
-                        Ok(())
-                    } else {
-                        Err(LinkStateError::UnexpectedTransition(
-                            self.locked_fsm.lock().unwrap().state,
-                            ev.into(),
-                        ))
-                    }
+                    Err(LinkStateError::UnexpectedTransition(
+                        self.locked_fsm.lock().unwrap().state,
+                        ev.into(),
+                    ))
                 }
             }
         }
@@ -1789,13 +1777,11 @@ impl LinkStateWrapper {
     pub fn run_active(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let link_id = self.id;
         let task_asm = asm.clone();
-        let task_events = self.events.clone();
         asm.counters.management[ManagementCounterType::PeerHandshakeSuccess].increment();
         debug!(target: LINK_STATE, "Link {link_id} entering active state");
         tokio::task::spawn_local(async move {
             let mut interval = tokio::time::interval(config::DEFAULT_KEEP_ALIVE_PERIOD);
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            let mut consecutive_misses = 0;
             while task_asm.is_link_ready(link_id) {
                 interval.tick().await;
                 let start_time = Instant::now();
@@ -1806,36 +1792,13 @@ impl LinkStateWrapper {
                     return;
                 }
 
-                let mut recv = task_events.subscribe();
+                let echo_ack = tokio::time::timeout(
+                    config::DEFAULT_KEEP_ALIVE_TIMEOUT,
+                    mgmt::requests::send_echo_request(&task_asm, link_id).acked(),
+                )
+                .await;
 
-                if mgmt::requests::send_echo_request(&task_asm, link_id)
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
-
-                let got_response =
-                    tokio::time::timeout(config::DEFAULT_REQUEST_RETRY_TIMER,
-                        async {
-                            loop {
-                                match recv.recv().await {
-                                    Ok(LinkEvent::ReceivedEchoResponse) => break true,
-
-                                    Ok(_) => (),
-
-                                    Err(broadcast::error::RecvError::Lagged(_)) => {
-                                        debug!(target: LINK_STATE, "Link {link_id} lagged waiting for echo response (unexpected)");
-                                    }
-
-                                    Err(broadcast::error::RecvError::Closed) => {
-                                        break false;  // we'll exit next time through the loop
-                                    }
-                                }
-                            }
-                        }).await.unwrap_or(false);
-
-                drop(recv);
+                let got_response = matches!(echo_ack, Ok(Ok(())));
 
                 let mut link_data = peer.link_state_machine.locked_data.lock().unwrap();
 
@@ -1844,18 +1807,14 @@ impl LinkStateWrapper {
                     link_data
                         .latency_data
                         .add(Instant::now().duration_since(start_time));
-                    consecutive_misses = 0;
                 } else {
                     link_data.echo_timeout += 1;
-                    consecutive_misses += 1;
-                    debug!(target: LINK_STATE, "Link {link_id} did not receive echo response (timeouts {}, with {} consecutive)",
-                        link_data.echo_timeout, consecutive_misses);
                 }
 
                 drop(link_data);
 
-                if consecutive_misses >= config::DEFAULT_KEEP_ALIVE_RETRIES {
-                    error!(target: LINK_STATE, "Link {link_id} failed to respond to keep-alive messages ({} consecutive misses)", consecutive_misses);
+                if !got_response {
+                    error!(target: LINK_STATE, "Link {link_id} failed to respond to keep-alive messages");
                     if task_asm
                         .process_link_state_event(
                             link_id,

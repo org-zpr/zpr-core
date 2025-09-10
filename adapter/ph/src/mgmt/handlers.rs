@@ -9,7 +9,6 @@ use crate::defs::*;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::{ip_number, IpAddress};
-use crate::packet;
 use crate::packet::Packet;
 use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
@@ -121,29 +120,8 @@ pub async fn handle_discard(_asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResu
 }
 
 /// handle an Echo Request message (RFC 6.5 § 6.3.2)
-pub async fn handle_echo_request(asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResult {
-    let ingress_link_id = pkt.metadata().ingress_link_id;
-    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    rsp_pkt.metadata_mut().flags |= packet::flags::CONFIRM;
-
-    super::core::send_non_flow_mgmt(
-        asm,
-        ingress_link_id,
-        zdp::ZdpPacketType::EchoResponse,
-        rsp_pkt,
-    )
-    .await?;
-
-    Ok(())
-}
-
-pub async fn handle_echo_response(asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResult {
-    let _ = dispatch_link_state_event_or_error(
-        asm,
-        pkt.metadata().ingress_link_id,
-        LinkEvent::ReceivedEchoResponse,
-    );
-
+pub async fn handle_echo_request(_asm: &Arc<Assembly>, _pkt: Packet) -> HandleMgmtResult {
+    // we simply rely on the ZDPR ACK
     Ok(())
 }
 
