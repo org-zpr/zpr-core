@@ -6,7 +6,7 @@
 use crate::assembly::Assembly;
 use crate::config;
 use crate::counters::ManagementCounterType;
-use crate::packet::Packet;
+use crate::packet::{self, Packet};
 use crate::zdp;
 use crate::zdpr;
 use std::task::{Context, Poll};
@@ -91,10 +91,12 @@ pub fn send_per_flow_mgmt_response(
     )
 }
 
-#[allow(dead_code)]
 pub fn send_acknowledgement(asm: &Assembly, link_id: zpr::LinkId, sequence_number: zpr::SeqNum) {
     // TODO: just allocate this on the stack, pending #985.
     let mut packet = new_tiny_heap_packet();
+
+    // let the OS know we're ACKing data from the peer
+    packet.metadata_mut().flags |= packet::flags::CONFIRM;
 
     let hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
     hdr.packet_type = zdp::ZdpPacketType::Acknowledgement;
@@ -188,7 +190,6 @@ impl<'a> Sent<'a> {
     }
 
     /// Returns a future which waits for this packet to be acked (after it is sent).
-    #[allow(dead_code)]
     pub fn acked(self) -> SentAndAcked<'a> {
         SentAndAcked(self)
     }

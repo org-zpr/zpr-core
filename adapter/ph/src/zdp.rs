@@ -11,7 +11,7 @@ use zpr;
 pub enum ZdpPacketType {
     // Flow-based
     TransitPacket = 0,
-    Unused = 1,
+    Unused1 = 1,
     DestinationUnreachable = 2,
     VisaHeraldRequest = 3,
     VisaHeraldResponse = 4,
@@ -34,7 +34,7 @@ pub enum ZdpPacketType {
     KeyManagement = 129,
     Discard = 130,
     EchoRequest = 131,
-    EchoResponse = 132,
+    Unused132 = 132,
     TerminateLinkRequest = 133,
     TerminateLinkResponse = 134,
     TerminateLinkIndication = 135,
