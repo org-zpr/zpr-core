@@ -7,16 +7,16 @@ use std::sync::Arc;
 use std::time;
 use std::time::Duration;
 
-pub struct NullKeyManager {
+pub struct KmNull {
     state: KmSMState,
     settings: KmSettings,
     hello_t: time::Instant,
     initiate: bool,
 }
 
-impl NullKeyManager {
-    pub fn new(initiate: bool) -> NullKeyManager {
-        NullKeyManager {
+impl KmNull {
+    pub fn new(initiate: bool) -> KmNull {
+        KmNull {
             state: KmSMState::Configuring,
             settings: KmSettings {
                 zdp_km_type: zpr::KM_ID_NULL,
@@ -56,7 +56,7 @@ impl Codec for NullCodec {
     }
 }
 
-impl KeyManagerStateMachine for NullKeyManager {
+impl KeyManagerStateMachine for KmNull {
     fn get_settings(&self) -> KmSettings {
         self.settings.clone()
     }
@@ -65,10 +65,13 @@ impl KeyManagerStateMachine for NullKeyManager {
         self.state.clone()
     }
 
+    // TODO reset, handle_message and tick are taken directly from the
+    // now deprecated km_xor, not sure if they are unnecessarily complicated
+    // for the null implementation
     fn reset(&mut self) -> Result<Option<Bytes>, KmError> {
         self.state = KmSMState::Configuring;
         if self.initiate {
-            let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
+            let handshake = Bytes::from_static(&[1, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
             self.hello_t = time::Instant::now();
             Ok(Some(handshake))
         } else {
@@ -82,7 +85,7 @@ impl KeyManagerStateMachine for NullKeyManager {
             self.state = KmSMState::Transport(KmTransportSA::new_with_codec(codec));
             if !self.initiate {
                 // Did not initiate, so send a reply back.
-                let handshake_reply = Bytes::from_static(&[0, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD
+                let handshake_reply = Bytes::from_static(&[1, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD
                 return Ok(Some(handshake_reply));
             }
         }
@@ -95,7 +98,7 @@ impl KeyManagerStateMachine for NullKeyManager {
             && self.hello_t.elapsed() > Duration::from_secs(5)
         {
             // too long, send another hello.
-            let handshake = Bytes::from_static(&[0, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
+            let handshake = Bytes::from_static(&[1, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
             self.hello_t = time::Instant::now();
             return Ok(Some(handshake));
         }

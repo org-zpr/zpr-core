@@ -9,6 +9,8 @@
 //! parsing key management ZDP messages.
 
 use crate::config;
+use crate::km_noise::KmNoise;
+use crate::km_null::KmNull;
 use crate::logging::targets::KEY_MGMT;
 use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
@@ -26,6 +28,11 @@ use tokio_util::sync::CancellationToken;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
+
+pub enum KmType {
+    NoiseKm(KmNoise),
+    NullKm(KmNull),
+}
 
 #[derive(Debug, Error)]
 #[allow(dead_code)]

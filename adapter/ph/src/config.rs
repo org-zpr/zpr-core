@@ -129,7 +129,7 @@ pub struct Config {
     pub batch_io_engine: String,
 
     /// Type of key manager implementation
-    pub km_implementation: zpr::KmId,
+    pub km_impl: zpr::KmId,
 }
 
 impl Config {
@@ -459,7 +459,7 @@ impl Config {
 
         self.batch_io_engine = common.io_engine.clone();
 
-        self.km_implementation = match common.km_implementation.as_str() {
+        self.km_impl = match common.km_impl.as_str() {
             "noise" => zpr::KM_ID_NOISE,
             "null" => zpr::KM_ID_NULL,
             oth => {
@@ -469,10 +469,10 @@ impl Config {
             }
         };
 
-        if self.km_implementation == zpr::KM_ID_NOISE {
+        if self.km_impl == zpr::KM_ID_NOISE {
             println!("NOISE!!!");
         }
-        if self.km_implementation == zpr::KM_ID_NULL {
+        if self.km_impl == zpr::KM_ID_NULL {
             println!("NULL!!!")
         }
 
@@ -497,7 +497,7 @@ impl Default for Config {
             bootstrap: None,
             rsaoauth: None,
             batch_io_engine: batch_io::AUTO_ENGINE_NAME.to_owned(),
-            km_implementation: zpr::KM_ID_NOISE,
+            km_impl: zpr::KM_ID_NOISE,
         }
     }
 }

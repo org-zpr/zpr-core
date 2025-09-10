@@ -126,10 +126,10 @@ fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
         return;
     };
 
-    if !km_hdr.is_noise() {
+    if !km_hdr.is_noise() && !km_hdr.is_null() {
         error!(
             target: KEY_MGMT,
-            "KeyManagement packet not using NOISE - type is {}",
+            "KeyManagement packet not using NOISE or NULL - type is {}",
             km_hdr.message_type
         );
         core::count_event(asm, pkt, ManagementCounterType::OtherError);

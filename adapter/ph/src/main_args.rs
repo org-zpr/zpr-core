@@ -112,7 +112,7 @@ pub struct CommonArgs {
     pub io_engine: String,
 
     #[arg(long, default_value = "noise")]
-    pub km_implementation: String,
+    pub km_impl: String,
 }
 
 #[derive(Subcommand, Debug)]
