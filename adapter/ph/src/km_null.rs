@@ -32,6 +32,12 @@ impl KmNull {
 
 struct NullCodec;
 
+impl NullCodec {
+    fn new() -> NullCodec {
+        NullCodec {}
+    }
+}
+
 impl Codec for NullCodec {
     fn encrypt_transport_stateless(
         self: &Self,
@@ -41,6 +47,7 @@ impl Codec for NullCodec {
         for i in 0..payload.len() {
             message[i] = payload[i];
         }
+
         Ok(payload.len())
     }
 
@@ -71,7 +78,7 @@ impl KeyManagerStateMachine for KmNull {
     fn reset(&mut self) -> Result<Option<Bytes>, KmError> {
         self.state = KmSMState::Configuring;
         if self.initiate {
-            let handshake = Bytes::from_static(&[1, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
+            let handshake = Bytes::from_static(&[2; 32]);
             self.hello_t = time::Instant::now();
             Ok(Some(handshake))
         } else {
@@ -85,10 +92,20 @@ impl KeyManagerStateMachine for KmNull {
             self.state = KmSMState::Transport(KmTransportSA::new_with_codec(codec));
             if !self.initiate {
                 // Did not initiate, so send a reply back.
-                let handshake_reply = Bytes::from_static(&[1, 255, 0, 12, 8, 7, 6, 5, 4, 3, 2, 1]); // TYPE | LEN | PAYLOAD
+                let handshake_reply = Bytes::from_static(&[2; 32]);
                 return Ok(Some(handshake_reply));
             }
         }
+        let codec = Arc::new(NullCodec::new());
+
+        self.state = KmSMState::Transport(KmTransportSA::new(
+            ZPIPair::new(2, 2),
+            ZPIPair::new(2, 2),
+            [2; 32],
+            [2; 32],
+            codec,
+            None,
+        ));
         Ok(None)
     }
 
@@ -98,7 +115,7 @@ impl KeyManagerStateMachine for KmNull {
             && self.hello_t.elapsed() > Duration::from_secs(5)
         {
             // too long, send another hello.
-            let handshake = Bytes::from_static(&[1, 255, 0, 12, 1, 2, 3, 4, 5, 6, 7, 8]); // TYPE | LEN | PAYLOAD
+            let handshake = Bytes::from_static(&[2; 32]);
             self.hello_t = time::Instant::now();
             return Ok(Some(handshake));
         }

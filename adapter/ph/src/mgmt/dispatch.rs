@@ -153,6 +153,7 @@ fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
                 return;
             }
         };
+        return;
     }
 
     error!(
