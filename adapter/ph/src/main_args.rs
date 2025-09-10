@@ -104,6 +104,8 @@ pub struct CommonArgs {
     /// for individual targets
     /// --logging zdp=TRACE link_state=TRACE all=DEBUG would set all the targets
     /// to the DEBUG level, except zdp and link_state, which would be set to TRACE
+    /// When setting the target 'all' you can also omit the target. i.e.
+    /// --logging all=DEBUG zdp=TRACE is the same as --logging DEBUG zdp=TRACE
     #[arg(long, short = 'l', value_delimiter = ' ', num_args = 1.., value_parser = parse_key_val, verbatim_doc_comment)]
     pub logging: Vec<(String, String)>,
 
@@ -200,6 +202,13 @@ fn parse_key_val(s: &str) -> Result<(String, String), String> {
                 && levels::ALL_LEVELS.contains(&key_val[1].to_uppercase().as_str())
             {
                 return Ok((key_val[0].to_string(), key_val[1].to_uppercase()));
+            } else {
+                return Err(format!("Invalid key-value pair"));
+            }
+        }
+        1 => {
+            if levels::ALL_LEVELS.contains(&key_val[0].to_uppercase().as_str()) {
+                return Ok(("all".to_string(), key_val[0].to_uppercase()));
             } else {
                 return Err(format!("Invalid key-value pair"));
             }
