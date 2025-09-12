@@ -113,6 +113,9 @@ pub struct CommonArgs {
 
     #[arg(long, default_value = "noise")]
     pub km_impl: String,
+
+    #[arg(long)]
+    pub cn: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]

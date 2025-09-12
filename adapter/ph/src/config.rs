@@ -130,6 +130,8 @@ pub struct Config {
 
     /// Type of key manager implementation
     pub km_impl: zpr::KmId,
+
+    pub cn: Option<String>,
 }
 
 impl Config {
@@ -476,6 +478,10 @@ impl Config {
             println!("NULL!!!")
         }
 
+        if let Some(cn) = &common.cn {
+            self.cn = Some(cn.clone())
+        }
+
         Ok(())
     }
 }
@@ -498,6 +504,7 @@ impl Default for Config {
             rsaoauth: None,
             batch_io_engine: batch_io::AUTO_ENGINE_NAME.to_owned(),
             km_impl: zpr::KM_ID_NOISE,
+            cn: None,
         }
     }
 }

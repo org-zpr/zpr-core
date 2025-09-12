@@ -827,6 +827,10 @@ impl LinkStateWrapper {
 
         locked_fsm.set_state(LinkState::RegisterAA);
 
+        debug!(
+            target: LINK_STATE,
+            "About to build connect request"
+        );
         // Now we have verified our part of the blob, we can send to the visa service for checking the signature.
         match visa_mgmt::build_connect_request(asm, link_id, requested_addr, &blob) {
             Ok(Some(conn_req)) => {
@@ -870,10 +874,7 @@ impl LinkStateWrapper {
             warn!(target: LINK_STATE, "Link {link_id} blob check failed: cannot find SA");
             return false;
         };
-        let Some(ref peer_cert) = sa.peer_cert else {
-            warn!(target: LINK_STATE, "Link {link_id} no peer cert found, cannot validate blob");
-            return false;
-        };
+        
         let key = asm.peer_table.inspect(link_id, {
             |peer| {
                 let mut key = [0u8; AUTH_KEY_SIZE_BYTES];
@@ -886,7 +887,15 @@ impl LinkStateWrapper {
             return false;
         }
         let key = key.unwrap();
-
+        
+        if asm.config.get().km_impl == zpr::KM_ID_NULL {
+            return true;
+        }
+        
+        let Some(ref peer_cert) = sa.peer_cert else {
+            warn!(target: LINK_STATE, "Link {link_id} no peer cert found, cannot validate blob");
+            return false;
+        };
         if let Err(e) = ss_blob.verify_blob_challenge(peer_cert, &key) {
             warn!(target: LINK_STATE, "Link {link_id} challenge verification failed: {e}");
             return false;

@@ -73,7 +73,7 @@ pub const KM_ID_IKEV2: KmId = 1;
 pub const KM_ID_NOISE: KmId = 2;
 
 /// Key Management Identifier indicating Null algorithm.
-pub const KM_ID_NULL: KmId = 3;
+pub const KM_ID_NULL: KmId = 0;
 
 /// ZPR actor packet L3 type (RFC 6.5 § 6.3.11)
 #[open_enum]

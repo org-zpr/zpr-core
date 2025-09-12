@@ -59,7 +59,7 @@ impl Codec for NullCodec {
         for i in 0..payload.len() {
             message[i] = payload[i];
         }
-        Ok(message.len())
+        Ok(payload.len())
     }
 }
 
@@ -78,7 +78,7 @@ impl KeyManagerStateMachine for KmNull {
     fn reset(&mut self) -> Result<Option<Bytes>, KmError> {
         self.state = KmSMState::Configuring;
         if self.initiate {
-            let handshake = Bytes::from_static(&[2; 32]);
+            let handshake = Bytes::from_static(&[1u8]);
             self.hello_t = time::Instant::now();
             Ok(Some(handshake))
         } else {
@@ -88,24 +88,21 @@ impl KeyManagerStateMachine for KmNull {
 
     fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KmError> {
         if self.state == KmSMState::Configuring {
-            let codec = Arc::new(NullCodec {});
-            self.state = KmSMState::Transport(KmTransportSA::new_with_codec(codec));
+            let codec = Arc::new(NullCodec::new());
+            self.state = KmSMState::Transport(KmTransportSA::new(
+                ZPIPair::new(1, 2),
+                ZPIPair::new(1, 2),
+                [2u8; 32],
+                [2u8; 32],
+                codec,
+                None,
+            ));
             if !self.initiate {
                 // Did not initiate, so send a reply back.
-                let handshake_reply = Bytes::from_static(&[2; 32]);
+                let handshake_reply = Bytes::from_static(&[1u8]);
                 return Ok(Some(handshake_reply));
             }
         }
-        let codec = Arc::new(NullCodec::new());
-
-        self.state = KmSMState::Transport(KmTransportSA::new(
-            ZPIPair::new(2, 2),
-            ZPIPair::new(2, 2),
-            [2; 32],
-            [2; 32],
-            codec,
-            None,
-        ));
         Ok(None)
     }
 
@@ -115,7 +112,7 @@ impl KeyManagerStateMachine for KmNull {
             && self.hello_t.elapsed() > Duration::from_secs(5)
         {
             // too long, send another hello.
-            let handshake = Bytes::from_static(&[2; 32]);
+            let handshake = Bytes::from_static(&[2u8; 32]);
             self.hello_t = time::Instant::now();
             return Ok(Some(handshake));
         }
