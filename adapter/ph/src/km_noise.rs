@@ -372,6 +372,9 @@ impl Codec for NullCodec {
         payload: &[u8],
         message: &mut [u8],
     ) -> Result<usize, EncryptionError> {
+        if message.len() < payload.len() {
+            return Err(EncryptionError::ParseError);
+        }
         for i in 0..payload.len() {
             message[i] = payload[i];
         }
@@ -384,6 +387,9 @@ impl Codec for NullCodec {
         payload: &[u8],
         message: &mut [u8],
     ) -> Result<usize, DecryptionError> {
+        if message.len() < payload.len() {
+            return Err(DecryptionError::ParseError);
+        }
         for i in 0..payload.len() {
             message[i] = payload[i];
         }
@@ -1159,5 +1165,31 @@ mod test {
         assert!(node_sa.send_hmac_key != [0u8; HMAC_KEY_LEN]);
 
         ctok.cancel()
+    }
+
+    #[test]
+    fn test_null_encrypt() {
+        let null_codec = NullCodec::new();
+
+        let payload = [2u8; 32];
+        let mut message = [0u8; 32];
+
+        let len = null_codec.encrypt_transport_stateless(&payload, &mut message);
+
+        assert_eq!(len.unwrap(), 32);
+        assert_eq!(message, payload);
+    }
+
+    #[test]
+    fn test_null_decrypt() {
+        let null_codec = NullCodec::new();
+
+        let payload = [2u8; 32];
+        let mut message = [0u8; 32];
+
+        let len = null_codec.decrypt_transport_stateless(&payload, &mut message);
+
+        assert_eq!(len.unwrap(), 32);
+        assert_eq!(message, payload);
     }
 }
