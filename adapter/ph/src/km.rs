@@ -618,7 +618,7 @@ impl KeyManager {
         inmsg: Bytes,
         link_id: zpr::LinkId,
         km_buffers_out: &mpsc::Sender<KmLinkMsg<Bytes>>,
-        km_impl: zpr::KmId
+        km_impl: zpr::KmId,
     ) -> KmResult<()> {
         let resp: Option<Bytes>;
         {
@@ -880,7 +880,11 @@ pub trait KeyManagerStateMachine: Send + Sync {
     /// Process an inbound KM message.
     /// May produce an output message.
     /// May transition internal state.
-    fn handle_message(self: &mut Self, message: &[u8], km_impl: zpr::KmId) -> Result<Option<Bytes>, KmError>;
+    fn handle_message(
+        self: &mut Self,
+        message: &[u8],
+        km_impl: zpr::KmId,
+    ) -> Result<Option<Bytes>, KmError>;
 
     /// Optional outbound KM message
     /// May transition internal state
@@ -973,7 +977,11 @@ mod test {
             Ok(None)
         }
 
-        fn handle_message(&mut self, _message: &[u8]) -> Result<Option<Bytes>, KmError> {
+        fn handle_message(
+            &mut self,
+            _message: &[u8],
+            _km_impl: zpr::KmId,
+        ) -> Result<Option<Bytes>, KmError> {
             let mut internals = self.shared.state.lock().unwrap();
             internals.handle_count += 1;
             Ok(None)
@@ -998,7 +1006,7 @@ mod test {
         let (_km_tx, km_rx) = mpsc::channel(16);
         let sp_ctok = ctok.clone();
         tokio::spawn(async move {
-            let _ = km.start(sp_ctok, tx, sig_tx, km_rx).await;
+            let _ = km.start(sp_ctok, tx, sig_tx, km_rx, zpr::KM_ID_NOISE).await;
         });
 
         yield_now().await;
@@ -1022,7 +1030,7 @@ mod test {
 
         let sp_ctok = ctok.clone();
         tokio::spawn(async move {
-            let _ = km.start(sp_ctok, tx, sig_tx, km_rx).await;
+            let _ = km.start(sp_ctok, tx, sig_tx, km_rx, zpr::KM_ID_NOISE).await;
         });
 
         sleep(Duration::from_millis(900)).await;
@@ -1048,7 +1056,9 @@ mod test {
 
         let (km_tx, km_rx) = mpsc::channel(16);
         tokio::spawn(async move {
-            let _ = sp_km.start(sp_ctok, tx, sig_tx, km_rx).await;
+            let _ = sp_km
+                .start(sp_ctok, tx, sig_tx, km_rx, zpr::KM_ID_NOISE)
+                .await;
         });
         yield_now().await;
 
@@ -1074,7 +1084,9 @@ mod test {
         let mut sp_km = km.clone();
         let (km_tx, km_rx) = mpsc::channel(16);
         tokio::spawn(async move {
-            let _ = sp_km.start(sp_ctok, tx, sig_tx, km_rx).await;
+            let _ = sp_km
+                .start(sp_ctok, tx, sig_tx, km_rx, zpr::KM_ID_NOISE)
+                .await;
         });
         yield_now().await;
 

@@ -286,7 +286,7 @@ fn add_noise_link(
     let spawn_sig_tx = asm.km_state.km_sig_tx.clone();
 
     let (km_tx, km_rx) = mpsc::channel(asm.topology_config.km_link_queue_size);
-    let km_impl =  asm.config.get().km_impl.clone();
+    let km_impl = asm.config.get().km_impl.clone();
     let sph = tokio::spawn(async move {
         match spawn_mgr
             .start(spawn_ctok, spawn_km_tx, spawn_sig_tx, km_rx, km_impl)
@@ -475,15 +475,16 @@ mod test {
                 };
 
                 // Since we have a "raw" responder, we can just pass the payload (no ZDP headers have been added).
-                let handshake_reply = match responder.handle_message(&handshake_req) {
-                    Ok(Some(m)) => m,
-                    Ok(None) => {
-                        panic!("expected handshake-1 message, got nothing!");
-                    }
-                    Err(e) => {
-                        panic!("responder handle_message failed on handshake-req: {:?}", e);
-                    }
-                };
+                let handshake_reply =
+                    match responder.handle_message(&handshake_req, zpr::KM_ID_NOISE) {
+                        Ok(Some(m)) => m,
+                        Ok(None) => {
+                            panic!("expected handshake-1 message, got nothing!");
+                        }
+                        Err(e) => {
+                            panic!("responder handle_message failed on handshake-req: {:?}", e);
+                        }
+                    };
 
                 // Now send the reply back into our link.
                 handle_inbound_km_msg(&asm, adapter_link_id, &handshake_reply).unwrap();

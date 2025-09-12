@@ -874,7 +874,7 @@ impl LinkStateWrapper {
             warn!(target: LINK_STATE, "Link {link_id} blob check failed: cannot find SA");
             return false;
         };
-        
+
         let key = asm.peer_table.inspect(link_id, {
             |peer| {
                 let mut key = [0u8; AUTH_KEY_SIZE_BYTES];
@@ -887,7 +887,7 @@ impl LinkStateWrapper {
             return false;
         }
         let key = key.unwrap();
-        
+
         let Some(ref peer_cert) = sa.peer_cert else {
             warn!(target: LINK_STATE, "Link {link_id} no peer cert found, cannot validate blob");
             return false;
