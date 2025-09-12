@@ -888,10 +888,6 @@ impl LinkStateWrapper {
         }
         let key = key.unwrap();
         
-        if asm.config.get().km_impl == zpr::KM_ID_NULL {
-            return true;
-        }
-        
         let Some(ref peer_cert) = sa.peer_cert else {
             warn!(target: LINK_STATE, "Link {link_id} no peer cert found, cannot validate blob");
             return false;

@@ -37,7 +37,6 @@ mod km;
 mod km_cert_exchange;
 mod km_multiplexor;
 mod km_noise;
-mod km_null;
 mod link_state;
 mod logging;
 mod main_argparse;

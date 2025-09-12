@@ -9,8 +9,6 @@
 //! parsing key management ZDP messages.
 
 use crate::config;
-use crate::km_noise::KmNoise;
-use crate::km_null::KmNull;
 use crate::logging::targets::KEY_MGMT;
 use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
@@ -28,11 +26,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
-
-pub enum KmType {
-    NoiseKm(KmNoise),
-    NullKm(KmNull),
-}
 
 #[derive(Debug, Error)]
 #[allow(dead_code)]
@@ -325,6 +318,7 @@ impl KeyManager {
         km_buffers_out: mpsc::Sender<KmLinkMsg<Bytes>>,
         km_signals_out: mpsc::Sender<KmLinkMsg<KmSignal>>,
         mut km_messages_in: mpsc::Receiver<Bytes>,
+        km_impl: zpr::KmId,
     ) -> KmResult<()> {
         let tick_interval: Duration;
         let link_id;
@@ -362,7 +356,7 @@ impl KeyManager {
                 }
 
                 Some(inmsg) = km_messages_in.recv() => {
-                    match self.dispatch_km_message(inmsg, link_id, &km_buffers_out).await {
+                    match self.dispatch_km_message(inmsg, link_id, &km_buffers_out, km_impl).await {
                         Ok(_) => {}
                         Err(e) => {
                             return Err(e);
@@ -624,11 +618,12 @@ impl KeyManager {
         inmsg: Bytes,
         link_id: zpr::LinkId,
         km_buffers_out: &mpsc::Sender<KmLinkMsg<Bytes>>,
+        km_impl: zpr::KmId
     ) -> KmResult<()> {
         let resp: Option<Bytes>;
         {
             let mut state = self.shared.state.lock().unwrap();
-            resp = match state.statemachine.handle_message(&inmsg) {
+            resp = match state.statemachine.handle_message(&inmsg, km_impl) {
                 Ok(h) => h,
                 Err(e) => {
                     error!(target: KEY_MGMT, "failed to handle key manager message: {e}");
@@ -885,7 +880,7 @@ pub trait KeyManagerStateMachine: Send + Sync {
     /// Process an inbound KM message.
     /// May produce an output message.
     /// May transition internal state.
-    fn handle_message(self: &mut Self, message: &[u8]) -> Result<Option<Bytes>, KmError>;
+    fn handle_message(self: &mut Self, message: &[u8], km_impl: zpr::KmId) -> Result<Option<Bytes>, KmError>;
 
     /// Optional outbound KM message
     /// May transition internal state

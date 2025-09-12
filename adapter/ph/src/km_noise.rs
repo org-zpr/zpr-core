@@ -358,6 +358,39 @@ impl Codec for NoiseCodec {
     }
 }
 
+struct NullCodec;
+
+impl NullCodec {
+    fn new() -> NullCodec {
+        NullCodec {}
+    }
+}
+
+impl Codec for NullCodec {
+    fn encrypt_transport_stateless(
+        self: &Self,
+        payload: &[u8],
+        message: &mut [u8],
+    ) -> Result<usize, EncryptionError> {
+        for i in 0..payload.len() {
+            message[i] = payload[i];
+        }
+
+        Ok(payload.len())
+    }
+
+    fn decrypt_transport_stateless(
+        self: &Self,
+        payload: &[u8],
+        message: &mut [u8],
+    ) -> Result<usize, DecryptionError> {
+        for i in 0..payload.len() {
+            message[i] = payload[i];
+        }
+        Ok(payload.len())
+    }
+}
+
 impl KeyManagerStateMachine for KmNoise {
     fn get_settings(&self) -> KmSettings {
         self.settings.clone()
@@ -430,7 +463,7 @@ impl KeyManagerStateMachine for KmNoise {
     //
     // Initiator will only get a handshake-reply msg, to which no reply is sent.
     // Responder will only get a handshake-request msg (and return a reply).
-    fn handle_message(&mut self, message: &[u8]) -> Result<Option<Bytes>, KmError> {
+    fn handle_message(&mut self, message: &[u8], km_impl: zpr::KmId) -> Result<Option<Bytes>, KmError> {
         if self.state != KmSMState::Configuring {
             error!(
                 target: KEY_MGMT,
@@ -513,7 +546,12 @@ impl KeyManagerStateMachine for KmNoise {
             };
             match hs.into_stateless_transport_mode() {
                 Ok(t) => {
-                    let codec = Arc::new(NoiseCodec::new(t));
+                    
+                    let codec: Arc<dyn Codec> = match km_impl {
+                        zpr::KM_ID_NOISE => Arc::new(NoiseCodec::new(t)),
+                        zpr::KM_ID_NULL => Arc::new(NullCodec::new()),
+                        _ => return Err(KmError::HandshakeError),
+                    };
                     self.state = KmSMState::Transport(KmTransportSA::new(
                         send_zpis,
                         self.recv_zpis,

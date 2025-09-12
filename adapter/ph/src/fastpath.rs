@@ -660,12 +660,6 @@ fn decrypt_null(pkt: &mut Packet) -> Result<(), DecryptError> {
 
 /// Check and remove the link-2-link HMAC on the (presumed) transit packet.
 fn decrypt_hmac(recv_hmac_key: [u8; 32], pkt: &mut Packet) -> Result<(), DecryptError> {
-    println!(
-        "pkt len: {}, zdp mac size: {}",
-        pkt.body().len(),
-        zdp::ZDP_PACKET_MAC_SIZE
-    );
-
     if pkt.body().len() < zdp::ZDP_PACKET_MAC_SIZE {
         println!("HERE7");
 

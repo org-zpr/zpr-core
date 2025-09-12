@@ -127,7 +127,6 @@ echo "Launching Adapters"
 sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --km-impl null \
-  --cn vs.zpr \
   --logging "$DEBUG_TARGETS" \
   --control-path "$VS_SOCK" \
   --self-addr "$VS_SUBSTRATE_ADDR" \
@@ -146,7 +145,6 @@ sleep 5
 sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --km-impl null \
-  --cn adapter1 \
   --logging "$DEBUG_TARGETS" \
   --control-path "$ADAPTER1_SOCK" \
   --self-addr "$A_SUBSTRATE_ADDR" \
@@ -163,7 +161,6 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
 sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   adapter \
   --km-impl null \
-  --cn adapter2 \
   --logging "$DEBUG_TARGETS" \
   --control-path "$ADAPTER2_SOCK" \
   --self-addr "$B_SUBSTRATE_ADDR" \
@@ -183,7 +180,6 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
   sudo -E ip netns exec zpr-c sudo -E -u "$ZPR_USER" "$PH_BIN" \
     adapter \
     --km-impl null \
-    --cn adapter3 \
     --logging "$DEBUG_TARGETS" \
     --control-path "$ADAPTER3_SOCK" \
     --self-addr "$C_SUBSTRATE_ADDR" \

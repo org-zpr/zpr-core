@@ -1,9 +1,7 @@
 use crate::assembly::Assembly;
-use crate::km::KmType::{NoiseKm, NullKm};
 use crate::km::*;
 use crate::km_cert_exchange::KmCertExchange;
 use crate::km_noise::{KmNoise, NoiseKeypair};
-use crate::km_null::KmNull;
 use crate::link_state::LinkEvent;
 use crate::logging::targets::{KEY_MGMT, LINK_STATE};
 use crate::mgmt::requests;
@@ -214,28 +212,19 @@ pub fn add_adapter_link(
     peer_noise_key: [u8; 32],
     certx: KmCertExchange,
 ) -> Result<(), KmSetupError> {
-    match asm.config.get().km_impl {
-        zpr::KM_ID_NOISE => {
-            let noise = match KmNoise::new(
-                true,
-                Some(peer_noise_key.into()),
-                Some(local_noise_key),
-                recv_zpis,
-                certx,
-            ) {
-                Ok(n) => n,
-                Err(e) => {
-                    return Err(KmSetupError::InitializationError(e));
-                }
-            };
-            return add_km_link(asm, link_id, NoiseKm(noise));
+    let noise = match KmNoise::new(
+        true,
+        Some(peer_noise_key.into()),
+        Some(local_noise_key),
+        recv_zpis,
+        certx,
+    ) {
+        Ok(n) => n,
+        Err(e) => {
+            return Err(KmSetupError::InitializationError(e));
         }
-        zpr::KM_ID_NULL => {
-            let n = KmNull::new(true);
-            return add_km_link(asm, link_id, NullKm(n));
-        }
-        _ => return Err(KmSetupError::UnknownKmType),
-    }
+    };
+    add_noise_link(asm, link_id, noise)
 }
 
 /// Creates a new KeyManager for the link from a node to an adapter and starts its state machine.  A node link waits for a
@@ -252,20 +241,11 @@ pub fn add_node_link(
     local_noise_key: NoiseKeypair,
     certx: KmCertExchange,
 ) -> Result<(), KmSetupError> {
-    match asm.config.get().km_impl {
-        zpr::KM_ID_NOISE => {
-            let noise = match KmNoise::new(false, None, Some(local_noise_key), recv_zpis, certx) {
-                Ok(n) => n,
-                Err(e) => return Err(KmSetupError::InitializationError(e)),
-            };
-            return add_km_link(asm, link_id, NoiseKm(noise));
-        }
-        zpr::KM_ID_NULL => {
-            let n = KmNull::new(true);
-            return add_km_link(asm, link_id, NullKm(n));
-        }
-        _ => return Err(KmSetupError::UnknownKmType),
-    }
+    let noise = match KmNoise::new(false, None, Some(local_noise_key), recv_zpis, certx) {
+        Ok(n) => n,
+        Err(e) => return Err(KmSetupError::InitializationError(e)),
+    };
+    add_noise_link(asm, link_id, noise)
 }
 
 /// Remove all state for this link, invalidating the SA and stopping the Key Manager.
@@ -286,11 +266,12 @@ pub async fn drop_link(asm: &Arc<Assembly>, link_id: zpr::LinkId) {
 }
 
 // Completes the add_*_link functions above.
-fn add_km_link(asm: &Assembly, link_id: zpr::LinkId, km: KmType) -> Result<(), KmSetupError> {
-    let mgr = match km {
-        NoiseKm(noise) => KeyManager::new(link_id, Box::new(noise)),
-        NullKm(null) => KeyManager::new(link_id, Box::new(null)),
-    };
+fn add_noise_link(
+    asm: &Assembly,
+    link_id: zpr::LinkId,
+    noise: KmNoise,
+) -> Result<(), KmSetupError> {
+    let mgr = KeyManager::new(link_id, Box::new(noise));
 
     // Link must already have a table entry
     assert!(
@@ -305,10 +286,10 @@ fn add_km_link(asm: &Assembly, link_id: zpr::LinkId, km: KmType) -> Result<(), K
     let spawn_sig_tx = asm.km_state.km_sig_tx.clone();
 
     let (km_tx, km_rx) = mpsc::channel(asm.topology_config.km_link_queue_size);
-
+    let km_impl =  asm.config.get().km_impl.clone();
     let sph = tokio::spawn(async move {
         match spawn_mgr
-            .start(spawn_ctok, spawn_km_tx, spawn_sig_tx, km_rx)
+            .start(spawn_ctok, spawn_km_tx, spawn_sig_tx, km_rx, km_impl)
             .await
         {
             Ok(_) => (),
