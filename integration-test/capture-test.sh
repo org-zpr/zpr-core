@@ -245,6 +245,16 @@ do
 	sudo kill -SIGTERM "$pid"
 	sleep 1
 done
+
+for pid in $(get_vservice)
+do
+    echo
+    echo "Terminating $pid"
+    sleep 1
+    sudo kill -SIGINT "$pid"
+    sleep 1
+done
+
 stty sane || true
 
 #

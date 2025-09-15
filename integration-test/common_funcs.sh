@@ -191,11 +191,17 @@ function countdown() {
 
 # Get all descendant PIDs whose name matches a specific list
 function get_descendants() {
-    exenames="(ph|node|adapter|vservice)"
+    exenames="(ph|node|adapter)"
     regex="$exenames\(([0-9]+)\)"
     echo $(pstree -pT "$$" | egrep -o "$regex" | sed -E "s/$regex/\2/")
 }
 
+# Get all descendant PIDs whose name matches a specific list
+function get_vservice() {
+    exenames="(vservice)"
+    regex="$exenames\(([0-9]+)\)"
+    echo $(pstree -pT "$$" | egrep -o "$regex" | sed -E "s/$regex/\2/")
+}
 
 # Takes one arg- filepath relative to TMPDIR
 function emitlog() {
