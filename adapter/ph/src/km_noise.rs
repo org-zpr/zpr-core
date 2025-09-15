@@ -375,9 +375,7 @@ impl Codec for NullCodec {
         if message.len() < payload.len() {
             return Err(EncryptionError::ParseError);
         }
-        for i in 0..payload.len() {
-            message[i] = payload[i];
-        }
+        message[..payload.len()].copy_from_slice(&payload);
 
         Ok(payload.len())
     }
@@ -390,9 +388,8 @@ impl Codec for NullCodec {
         if message.len() < payload.len() {
             return Err(DecryptionError::ParseError);
         }
-        for i in 0..payload.len() {
-            message[i] = payload[i];
-        }
+        message[..payload.len()].copy_from_slice(&payload);
+
         Ok(payload.len())
     }
 }

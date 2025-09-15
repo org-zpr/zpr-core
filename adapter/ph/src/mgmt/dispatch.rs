@@ -126,41 +126,40 @@ fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
         return;
     };
 
-    // TOOD change this
-    if (km_hdr.is_noise() && asm.config.get().km_impl == zpr::KM_ID_NOISE)
-        || (km_hdr.is_null() && asm.config.get().km_impl == zpr::KM_ID_NULL)
+    if (km_hdr.is_noise() && asm.config.get().km_impl != zpr::KM_ID_NOISE)
+        || (km_hdr.is_null() && asm.config.get().km_impl != zpr::KM_ID_NULL)
     {
-        let km_msg_len = usize::from(km_hdr.message_length);
-        if pkt.remaining() < km_msg_len {
-            error!(target: KEY_MGMT, "KeyManagement packet arrived with truncated payload");
-            core::count_event(asm, pkt, ManagementCounterType::BadStructure);
-            return;
-        }
-
-        match km_multiplexor::handle_inbound_km_msg(
-            asm,
-            pkt.metadata().ingress_link_id,
-            &pkt.body()[..km_msg_len],
-        ) {
-            Ok(()) => (),
-            Err(e) => {
-                error!(
-                    target: KEY_MGMT,
-                    "key management handling failed on link {}: {e:?}",
-                    pkt.metadata().ingress_link_id,
-                );
-                core::count_event(asm, pkt, ManagementCounterType::OtherError);
-                return;
-            }
-        };
+        error!(
+            target: KEY_MGMT,
+            "KeyManagement packet type does not match KM implementation - type is {}",
+            km_hdr.message_type
+        );
+        core::count_event(asm, pkt, ManagementCounterType::OtherError);
         return;
     }
 
-    error!(
-        target: KEY_MGMT,
-        "KeyManagement packet type does not match KM implementation - type is {}",
-        km_hdr.message_type
-    );
-    core::count_event(asm, pkt, ManagementCounterType::OtherError);
+    let km_msg_len = usize::from(km_hdr.message_length);
+    if pkt.remaining() < km_msg_len {
+        error!(target: KEY_MGMT, "KeyManagement packet arrived with truncated payload");
+        core::count_event(asm, pkt, ManagementCounterType::BadStructure);
+        return;
+    }
+
+    match km_multiplexor::handle_inbound_km_msg(
+        asm,
+        pkt.metadata().ingress_link_id,
+        &pkt.body()[..km_msg_len],
+    ) {
+        Ok(()) => (),
+        Err(e) => {
+            error!(
+                target: KEY_MGMT,
+                "key management handling failed on link {}: {e:?}",
+                pkt.metadata().ingress_link_id,
+            );
+            core::count_event(asm, pkt, ManagementCounterType::OtherError);
+            return;
+        }
+    };
     return;
 }

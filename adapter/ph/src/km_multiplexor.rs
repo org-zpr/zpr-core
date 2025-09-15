@@ -286,7 +286,7 @@ fn add_noise_link(
     let spawn_sig_tx = asm.km_state.km_sig_tx.clone();
 
     let (km_tx, km_rx) = mpsc::channel(asm.topology_config.km_link_queue_size);
-    let km_impl = asm.config.get().km_impl.clone();
+    let km_impl = asm.config.get().km_impl;
     let sph = tokio::spawn(async move {
         match spawn_mgr
             .start(spawn_ctok, spawn_km_tx, spawn_sig_tx, km_rx, km_impl)
