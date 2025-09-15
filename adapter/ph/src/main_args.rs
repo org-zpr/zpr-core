@@ -111,6 +111,7 @@ pub struct CommonArgs {
     #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(std::iter::once(batch_io::AUTO_ENGINE_NAME).chain(batch_io::engine_names())), default_value_t = batch_io::AUTO_ENGINE_NAME.to_owned())]
     pub io_engine: String,
 
+    /// Current supported implementations: noise (default), null
     #[arg(long, default_value = "noise")]
     pub km_impl: String,
 }

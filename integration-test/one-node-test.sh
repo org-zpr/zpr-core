@@ -3,6 +3,7 @@ set -euo pipefail
 
 export RUST_BACKTRACE=1
 DEBUG_TARGETS=${DEBUG_TARGETS:-all=INFO}
+KM_IMPL=${KM_IMPL:-noise}
 
 PH_BIN=$(realpath "$(dirname $0)/../adapter/ph/target/debug/ph")
 PH_DEBUG_BIN=$(realpath "$(dirname $0)/../adapter/cli/target/debug/ph-cli")
@@ -116,6 +117,7 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --ca-file ca.crt \
   --certificate-file node.crt \
   --private-key-file node.key \
+  --km-impl "$KM_IMPL" \
   --tun-if tun0 \
   --zpr-addr "$NODE_ZPR_ADDR" 2>&1 | tee node.log | prefix_log zpr-node &
 
@@ -132,6 +134,7 @@ sudo -E ip netns exec zpr-vs sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --certificate-file vs.zpr.crt \
   --private-key-file vs.zpr.key \
   --bootstrap-key actorvs-rsa.key \
+  --km-impl "$KM_IMPL" \
   --tun-if tun0 \
   --io-engine auto \
   --node-addr "$NODE_SUBSTRATE_ADDR_VS" \
@@ -149,6 +152,7 @@ sudo -E ip netns exec zpr-a sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --certificate-file adapter1.crt \
   --private-key-file adapter1.key \
   --bootstrap-key actor1-rsa.key \
+  --km-impl "$KM_IMPL" \
   --tun-if tun0 \
   --io-engine io_uring \
   --node-addr "$NODE_SUBSTRATE_ADDR_A" \
@@ -164,6 +168,7 @@ sudo -E ip netns exec zpr-b sudo -E -u "$ZPR_USER" "$PH_BIN" \
   --certificate-file adapter2.crt \
   --private-key-file adapter2.key \
   --bootstrap-key actor2-rsa.key \
+  --km-impl "$KM_IMPL" \
   --tun-if tun0 \
   --io-engine posix_unbatched \
   --node-addr "$NODE_SUBSTRATE_ADDR_B" \
@@ -182,6 +187,7 @@ if [[ "$NUM_ACTORS" -ge 3 ]]; then
     --certificate-file adapter3.crt \
     --private-key-file adapter3.key \
     --bootstrap-key actor3-rsa.key \
+    --km-impl "$KM_IMPL" \
     --tun-if tun0 \
     --node-addr "$NODE_SUBSTRATE_ADDR_C_ALT" \
     --node-public-key-file node.pubkey \
