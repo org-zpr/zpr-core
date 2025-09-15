@@ -149,7 +149,6 @@ impl FastpathWorker {
 
         // Read, but do not remove the ZPI header
         let Ok((zpi_hdr, _)) = zdp::ZdpZpiHeader::read_from_prefix(&pkt.body()) else {
-            println!("HERE1");
             self.drop_and_count(pkt, FastpathCounterType::BadStructure);
             return;
         };
@@ -170,7 +169,6 @@ impl FastpathWorker {
 
         // now pop the ZPI off the packet. We've already checked it.
         if zdp::ZdpZpiHeader::read_from_buf(&mut pkt).is_err() {
-            println!("HERE2");
             self.drop_and_count(pkt, FastpathCounterType::BadStructure);
             return;
         }
@@ -192,8 +190,6 @@ impl FastpathWorker {
         }
 
         let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(&mut pkt) else {
-            println!("HERE3");
-
             return self.drop_and_count(pkt, FastpathCounterType::BadStructure);
         };
 
@@ -225,7 +221,6 @@ impl FastpathWorker {
         }
 
         let Ok(per_flow_hdr) = zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
-            println!("HERE4");
             return self.drop_and_count(pkt, FastpathCounterType::BadStructure);
         };
 
@@ -422,8 +417,6 @@ impl FastpathWorker {
     ) {
         // extract A2A MAC
         let Ok(a2a_hdr) = zdp::ZdpA2aHeader::read_from_buf(&mut pkt) else {
-            println!("HERE5");
-
             self.drop_and_count(pkt, FastpathCounterType::BadStructure);
             return;
         };
@@ -435,8 +428,6 @@ impl FastpathWorker {
         let a2a_mac_size = zdp::ZDP_A2A_MAC_SIZE; // TODO: checksum may be shorter depending on A2A SA
 
         if pkt.body().len() < a2a_mac_size {
-            println!("HERE6");
-
             self.drop_and_count(pkt, FastpathCounterType::BadStructure);
             return;
         }
@@ -661,8 +652,6 @@ fn decrypt_null(pkt: &mut Packet) -> Result<(), DecryptError> {
 /// Check and remove the link-2-link HMAC on the (presumed) transit packet.
 fn decrypt_hmac(recv_hmac_key: [u8; 32], pkt: &mut Packet) -> Result<(), DecryptError> {
     if pkt.body().len() < zdp::ZDP_PACKET_MAC_SIZE {
-        println!("HERE7");
-
         return Err(DecryptError::BadStructure);
     }
 
@@ -688,14 +677,10 @@ fn decrypt_full(
     pkt: &mut Packet,
 ) -> Result<(), DecryptError> {
     if pkt.body().len() < 1 {
-        println!("HERE8");
-
         return Err(DecryptError::BadStructure);
     }
     let encr_len = pkt.body().len() - 1;
     if encr_len < padlen {
-        println!("HERE9");
-
         return Err(DecryptError::BadStructure);
     }
 
