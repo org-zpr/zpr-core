@@ -29,7 +29,7 @@ completions:
 	@echo "\nZsh: There are several ways, including using oh-my-zsh, the zsh_completions package, or creating a symlink to your completions file in the ~/.local/share/zsh/site-functions/ then adding that to your fpath"
 	@echo "\nElvish: 'Use' the file in ~/.config/elvish/rc.elv"
 	@echo "\nFish: Copy the file into ~/.config/fish/completions/"
-	@echo "\nPowerShell: Use 'Import-Module' to add the script to your user profile"
+	@echo "\nPowerShell: Use 'Import-Module' to add the script to your user profile\n"
 
 .PHONY: clean-completions
 clean-completions:

@@ -14,4 +14,15 @@ cbpf-rs = { path = "../../cbpf-rs", features = ['pcap'] }
 shlex = { version = "1.3.0" }
 zpr = { path = "../../zpr" }
 zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "zerocopy"] }
-clap_complete = { version = "4.5.57" }
+clap_complete = { version = "4.5.57", optional = true}
+
+[features]
+complete = ["clap_complete"]
+
+[[bin]]
+name = "ph-cli"
+path = "src/main.rs"
+[[bin]]
+name = "generate_completions"
+path = "src/generate_completions.rs"
+required-features = ["complete"]

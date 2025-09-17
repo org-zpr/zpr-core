@@ -2,17 +2,20 @@
 //! Note: at this moment the program can only handle one-word commands, so
 //! when a command is multiple words, this program assumes the spaces are replaced
 //! with a '-' on the command line
+mod main_args;
 
+use crate::main_args::{
+    CaptureCommands, CliCommand, CmdlineArgs, Commands, LinkArgs, LinkCommands,
+};
 use cbpf_rs;
-use clap::{Args, CommandFactory, Parser, Subcommand};
-use clap_complete::{generate, shells::Shell};
+use clap::Parser;
 use ctrlc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
-use std::fs::{create_dir_all, File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
-use std::io::{BufReader, BufWriter, Error, IoSlice};
+use std::io::{BufReader, Error, IoSlice};
 use std::net::Shutdown;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
@@ -36,127 +39,9 @@ macro_rules! basic_command {
     };
 }
 
-#[derive(Parser, Debug)]
-#[command(version, about = "This program controls the RPC calls to the ZPR Packet Handler\nRun without a command to enter CLI mode", long_about = None)]
-struct CmdlineArgs {
-    #[command(subcommand)]
-    command: Option<Commands>,
-
-    /// Path to the Packet Handler's management socket
-    #[arg(long, short = 'p', default_value = "/var/run/zpr/ph.sock")]
-    socket: String,
-
-    // Path to the generations file you want to create
-    #[arg(long, short = 'g')]
-    generate: Option<String>,
-}
-
-#[derive(Parser, Debug)]
-#[command(multicall = true)]
-struct CliCommand {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    Echo,
-    /// Display or reset counters
-    Counters {
-        #[arg(long, short = 'r')]
-        /// Reset counters
-        reset: bool,
-    },
-    #[command(arg_required_else_help = true)]
-    /// Connect to the Packet Handler for periodic counter updates
-    Watch {
-        #[arg(required = true)]
-        /// How frequently to receive updates
-        interval: u64,
-    },
-    #[command(arg_required_else_help = true)]
-    /// Start performance sampling (currently not functional)
-    PerfSample {
-        #[arg(required = true)]
-        /// How long the sampling should run
-        duration: u64,
-
-        #[arg(required = true)]
-        /// How frequently packets should be injected
-        frequency: u64,
-    },
-    /// Set up or tear down packet captures
-    Capture(CaptureArgs),
-    /// Change link state
-    Link(LinkArgs),
-    /// Change the log level of a node or adapter
-    Logging {
-        #[arg(required = true)]
-        logs: Vec<String>,
-    },
-    /// Exit the CLI
-    Quit,
-}
-
-#[derive(Debug, Args)]
-#[command(flatten_help = true)]
-struct CaptureArgs {
-    #[command(subcommand)]
-    command: CaptureCommands,
-}
-
-#[derive(Debug, Subcommand)]
-enum CaptureCommands {
-    #[command(arg_required_else_help = true)]
-    /// Set a capture file
-    SetFile { file_path: String },
-    /// Close a capture file
-    CloseFile,
-    /// Set a BPF to filter captured packets
-    SetProgram { program: Option<String> },
-    /// Delete any set BPF
-    DeleteProgram,
-    /// Flush any outstanding packets to the capture file
-    FlushFile,
-    #[command(arg_required_else_help = true)]
-    /// Create a temporary packet capture
-    Sequence {
-        file_path: String,
-        duration: u64,
-        program: Option<String>,
-    },
-}
-
-#[derive(Debug, Args)]
-#[command(flatten_help = true)]
-struct LinkArgs {
-    #[command(subcommand)]
-    command: LinkCommands,
-}
-
-#[derive(Debug, Subcommand)]
-enum LinkCommands {
-    /// Show a link's status
-    Show { id: Option<u32> },
-    /// Configure a link
-    Configure { id: u32 },
-    /// Start a link
-    Start { id: u32 },
-    /// Stop a link
-    Stop { id: u32 },
-    /// Reset a link.  It will require a configure before starting again
-    Reset { id: u32 },
-}
-
 fn main() -> std::io::Result<()> {
     let args = CmdlineArgs::parse();
     let socket = args.socket.clone();
-
-    if let Some(path) = args.generate {
-        if path != "NO_INPUT".to_string() {
-            return generate_completion(path);
-        }
-    }
 
     if let Some(command) = args.command {
         process_command(command, &socket).map(|_| {})
@@ -476,32 +361,6 @@ fn serialize(program: &str) -> String {
     }
     let _ = serialized_program.pop(); // removes trailing comma at end of string
     serialized_program
-}
-
-fn generate_completion(path: String) -> std::io::Result<()> {
-    let shells_exts: Vec<(Shell, &str)> = Vec::from([
-        (Shell::Bash, "sh"),
-        (Shell::Elvish, "elv"),
-        (Shell::Fish, "fish"),
-        (Shell::PowerShell, "ps1"),
-        (Shell::Zsh, "zsh"),
-    ]);
-
-    create_dir_all(&path)?;
-
-    for (shell, extension) in shells_exts {
-        let formatted_path = format!("{path}/ph-cli.{extension}");
-        let file = File::create(formatted_path)?;
-        let mut writer = BufWriter::new(file);
-        generate(
-            shell,
-            &mut CmdlineArgs::command(),
-            CmdlineArgs::command().get_name().to_string(),
-            &mut writer,
-        );
-    }
-
-    Ok(())
 }
 
 struct CtrlcHandle {
