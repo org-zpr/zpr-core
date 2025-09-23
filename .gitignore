@@ -1,1 +1,4 @@
 .vscode/
+integration-test/vs-admin
+integration-test/vservice
+integration-test/pregen/zplc
