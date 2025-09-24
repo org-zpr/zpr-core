@@ -63,6 +63,10 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
             handle_key_management(asm, pkt);
         }
 
+        Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::Acknowledgement => {
+            handle_acknowledgement(asm, pkt)
+        }
+
         Ok((base_hdr, _)) if base_hdr.packet_type.is_response() => handle_response(asm, pkt),
 
         _ => {
@@ -80,6 +84,43 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
                 }
             }
         }
+    }
+}
+
+fn handle_acknowledgement(asm: &Assembly, pkt: &mut Packet) {
+    let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(pkt) else {
+        core::count_event(asm, pkt, ManagementCounterType::BadStructure);
+        return;
+    };
+
+    let sn = base_hdr.sequence_number.get();
+    let ingress_link_id = pkt.metadata().ingress_link_id;
+
+    let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
+        core::count_event(asm, pkt, ManagementCounterType::PeerRemoved);
+        return;
+    };
+    let mut sender = peer_state.zdpr_send.lock().unwrap();
+
+    let seq_num = sender.reify_seq_num(sn);
+    sender.process_ack(seq_num);
+
+    // If at this point (after processing the ACK) we should not have our
+    // retry timer running (because all outstanding packets have been
+    // ACKed), we may be liable to restart the timer after possibly sending
+    // unblocked packets.
+    let old_retry_needed = sender.retry_needed();
+
+    // We may now be unblocked and may have been blocked before;
+    // try to send queued packets.
+    while sender.unblock_needed() {
+        let sn_pkt = sender.enqueue_next_blocked_packet();
+        core::build_and_egress_packets(asm, ingress_link_id, std::iter::once(sn_pkt));
+    }
+
+    if sender.retry_needed() && !old_retry_needed {
+        // We should activate / restart our retry timer.
+        peer_state.zdpr_retry_timer_reset.notify_one();
     }
 }
 
