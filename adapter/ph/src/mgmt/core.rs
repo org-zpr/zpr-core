@@ -9,6 +9,7 @@ use crate::counters::ManagementCounterType;
 use crate::packet::Packet;
 use crate::seq_nums;
 use crate::zdp;
+use crate::zdpr;
 use thiserror::Error;
 use tokio::time::sleep;
 use tracing::*;
@@ -16,10 +17,22 @@ use zpr;
 use zpr_ext::zerocopy::FromBytesExt;
 
 /// Helper to allocate a new Packet with default parameters from the heap.
+/// The packet is sized to fit most outbound management traffic, but
+/// is not necessarily large enough to fit any arbitrary jumbo packet.
 pub fn new_heap_packet() -> Packet {
     Packet::new(
-        Box::new([0u8; config::PACKET_BUFFER_SIZE]),
+        Box::new([0u8; config::SMALL_PACKET_BUFFER_SIZE]),
         config::DEFAULT_MESSAGE_HEADROOM,
+    )
+}
+
+/// Helper to allocate a new Packet suitable only for bodyless messages.
+/// Since the only such messages right now are ACKs, and those are only
+/// generated from within this module, this is private for now.
+fn new_tiny_heap_packet() -> Packet {
+    Packet::new(
+        Box::new([0u8; config::TINY_PACKET_BUFFER_SIZE]),
+        config::TINY_MESSAGE_HEADROOM,
     )
 }
 
@@ -83,6 +96,23 @@ pub fn send_per_flow_mgmt_response(
         Some(sequence_number),
         packet,
     )
+}
+
+#[allow(dead_code)]
+pub fn send_acknowledgement(asm: &Assembly, link_id: zpr::LinkId, sequence_number: zpr::SeqNum) {
+    // TODO: just allocate this on the stack, pending #985.
+    let mut packet = new_tiny_heap_packet();
+
+    let hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+    hdr.packet_type = zdp::ZdpPacketType::Acknowledgement;
+    hdr.sequence_number = zdpr::truncate_seq_num(sequence_number).into();
+
+    // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
+    // In that case, just ignore the error; act as if the packet was dropped
+    // by the substrate due to congestion.
+    let _ = asm
+        .mgmt_substrate_egress
+        .try_enqueue_packet(link_id, packet);
 }
 
 fn send_mgmt_helper(

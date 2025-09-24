@@ -28,6 +28,7 @@ pub enum ZdpPacketType {
     //AuthenticationRequest = 15,  // unused/deprecated
     SetPathMtu = 16,
     //AuthenticationResponse = 17,  // unused/deprecated
+
     // Not flow-based
     ZprArp = 128,
     KeyManagement = 129,
@@ -50,6 +51,8 @@ pub enum ZdpPacketType {
     InitAuthenticationResponse = 147, // TODO: add to RFC 6
     GrantZprAddressRequest = 148,     // TODO: add to RFC 6
     GrantZprAddressResponse = 149,    // TODO: add to RFC 6
+
+    Acknowledgement = 255,
 }
 
 pub const ZDP_PACKET_TYPE_NON_FLOW_FLAG: u8 = 0x80;

@@ -24,8 +24,19 @@ pub const MAX_ACTIVE_LINKS: usize = 1024;
 /// Size of a packet buffer.
 pub const PACKET_BUFFER_SIZE: usize = 4096 * 3;
 
+/// Size of a "small" packet buffer, suitable for most outbound management traffic.
+pub const SMALL_PACKET_BUFFER_SIZE: usize = 2048;
+
+/// Size of a "tiny" packet buffer, suitable for packets with no bodies (e.g. acks).
+/// Note, this is not large enough for `DEFAULT_MESSAGE_HEADROOM`; use
+/// with `TINY_MESSAGE_HEADROOM` instead.
+pub const TINY_PACKET_BUFFER_SIZE: usize = 256;
+
 /// Size of headroom necessary for most messages.
 pub const DEFAULT_MESSAGE_HEADROOM: usize = 256;
+
+/// Size of headroom suitable for "tiny" (bodyless) messages.
+pub const TINY_MESSAGE_HEADROOM: usize = 64;
 
 pub const DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE: usize = 32;
 
@@ -76,8 +87,6 @@ impl ArgError for str {
         ArgsError::Missing(self.to_string())
     }
 }
-
-// CTP WORKING: move engine-select into here
 
 /// This config struct is loaded up from the command line args and used by the
 /// ph system to configure itself.  Do not create this directly,
