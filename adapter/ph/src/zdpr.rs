@@ -327,32 +327,20 @@ impl<Pkt> Sender<Pkt> {
 
         if -offset >= self.blocked.len() as i64 {
             // already sent
-
-            if -offset >= (self.blocked.len() + self.sent.len()) as i64 {
-                let idx =
-                    (self.blocked.len() as i64 + self.sent.len() as i64 + offset - 1) as usize;
-                self.sent[idx] = None;
-                if idx == 0 {
-                    self.clean_sent_queue();
-                }
-            }
-
-            None
-        } else {
-            // still blocked
-
-            let idx = (self.blocked.len() as i64 + offset - 1) as usize;
-
-            let (pkt, waker) = self.blocked[idx].take()?;
-
-            if idx == 0 {
-                self.clean_blocked_queue();
-            }
-
-            // TODO: move wake up to caller? to minimize time under lock
-            waker.wake();
-            Some(pkt)
+            return None;
         }
+
+        let idx = (self.blocked.len() as i64 + offset - 1) as usize;
+
+        let (pkt, waker) = self.blocked[idx].take()?;
+
+        if idx == 0 {
+            self.clean_blocked_queue();
+        }
+
+        // TODO: move wake up to caller? to minimize time under lock
+        waker.wake();
+        Some(pkt)
     }
 
     /// Expand a truncated sequence number to a full sequence number,
@@ -375,7 +363,7 @@ impl<Pkt> Sender<Pkt> {
             return None;
         }
 
-        self.sent[(-offset) as usize]
+        self.sent[(self.sent.len() as i64 + offset - 1) as usize]
     }
 
     /// Process a received acknowledgement of the given sequence number.
