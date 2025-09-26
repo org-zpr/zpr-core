@@ -3,6 +3,7 @@
 use crate::assembly::Assembly;
 use crate::counters::*;
 use crate::logging::targets::STARTUP;
+use itertools::Itertools;
 use std::sync::Arc;
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::task::spawn_local;
@@ -54,16 +55,40 @@ fn emit_counts(counters: &Counters, uptime: std::time::Duration) {
         uptime.subsec_millis()
     );
     println!("\n");
-    println!("{:>42}\n", "*** Management Counters ***");
-    for (key, ref value) in &counters.management {
-        println!("{:>34}: {}", key.name(), value.get_count());
+    println!("{:>47}\n", "*** Management Counters ***");
+
+    for ((key1, value1), (key2, value2)) in counters.management.iter().tuples() {
+        println!(
+            "{:>34}: {:<6} {:>34}: {}",
+            key1.name(),
+            value1.get_count(),
+            key2.name(),
+            value2.get_count()
+        );
     }
+    if counters.management.len() % 2 != 0 {
+        if let Some((key, value)) = counters.management.iter().last() {
+            println!("{:>34}: {}", key.name(), value.get_count());
+        }
+    }
+
     for (i, fastpath) in counters.fastpaths.lock().unwrap().iter().enumerate() {
         println!("\n");
         let message = format!("*** Fastpath #{} Counters ***", i);
-        println!("{:>42}\n", message);
-        for (key, ref value) in fastpath {
-            println!("{:>34}: {}", key.name(), value.get_count());
+        println!("{:>47}\n", message);
+        for ((key1, value1), (key2, value2)) in fastpath.iter().tuples() {
+            println!(
+                "{:>34}: {:<6} {:>34}: {}",
+                key1.name(),
+                value1.get_count(),
+                key2.name(),
+                value2.get_count()
+            );
+        }
+        if fastpath.len() % 2 != 0 {
+            if let Some((key, value)) = fastpath.iter().last() {
+                println!("{:>34}: {}", key.name(), value.get_count());
+            }
         }
     }
 }
