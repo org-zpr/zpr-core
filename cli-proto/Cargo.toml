@@ -1,0 +1,8 @@
+[package]
+name = "cli-proto"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+capnp = "0.21"
+capnp-rpc = "0.21"

@@ -14,6 +14,7 @@ use crate::logging::{levels, targets};
 use crate::test_packet::TestPacketMetrics;
 use crate::zdp::TerminateReason;
 use cbpf_rs;
+use cli_proto::cli_capnp;
 use core::future::Future;
 use hdrhistogram::Histogram;
 use std::f64::consts::SQRT_2;

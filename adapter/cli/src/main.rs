@@ -7,8 +7,10 @@ mod main_args;
 use crate::main_args::{
     CaptureCommands, CliCommand, CmdlineArgs, Commands, LinkArgs, LinkCommands,
 };
+
 use cbpf_rs;
 use clap::Parser;
+use cli_proto::cli_capnp;
 use ctrlc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
