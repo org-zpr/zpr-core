@@ -75,7 +75,10 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
                 return;
             };
 
+            pkt.metadata_mut().seq_num = 0; // TODO, get from ZDPR (upcoming PR)
+
             let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
+
             match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
                 Ok(()) => (),
                 Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {

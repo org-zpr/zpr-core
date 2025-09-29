@@ -54,7 +54,6 @@ mod pki;
 mod queues;
 mod rcu;
 mod sample_ring;
-mod seq_nums;
 mod signal_worker;
 mod special_peers;
 mod sync_req;

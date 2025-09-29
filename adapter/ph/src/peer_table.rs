@@ -7,7 +7,6 @@ use crate::link_state::{LinkStateWrapper, LinkType};
 use crate::net_defs::ScopedIpAddr;
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
-use crate::seq_nums::*;
 use crate::special_peers::*;
 use crate::sync_req;
 use crate::zdpr;
@@ -40,8 +39,6 @@ pub struct PeerState {
     pub mgmt_processor: queues::MgmtProcessor,
     pub mgmt_processor_worker: task::JoinHandle<()>,
     pub auth_key: [u8; 32], // set in ::new and never changed.
-    pub sn_gen: SeqNumGenerator,
-    pub sn_track: Mutex<SeqNumTracker>,
     pub zdpr_send: Mutex<zdpr::Sender<crate::packet::Packet>>,
     pub zdpr_recv: Mutex<zdpr::Receiver>,
     pub zdpr_retry_timer_reset: Notify,
@@ -106,8 +103,6 @@ impl PeerState {
             mgmt_processor,
             mgmt_processor_worker,
             auth_key: key,
-            sn_gen: SeqNumGenerator::new(),
-            sn_track: Mutex::new(SeqNumTracker::new()),
             zdpr_send: Mutex::new(zdpr::Sender::new()),
             zdpr_recv: Mutex::new(zdpr::Receiver::new(
                 config::DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE,
@@ -434,8 +429,6 @@ pub mod test {
             mgmt_processor,
             mgmt_processor_worker: task::spawn(async {}),
             auth_key: [42u8; AUTH_KEY_SIZE_BYTES],
-            sn_gen: SeqNumGenerator::new(),
-            sn_track: Mutex::new(SeqNumTracker::new()),
             zdpr_send: Mutex::new(zdpr::Sender::new()),
             zdpr_recv: Mutex::new(zdpr::Receiver::new(
                 config::DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE,

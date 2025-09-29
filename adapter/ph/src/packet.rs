@@ -177,6 +177,9 @@ pub struct PacketMetadata {
 
     /// which stream ID this packet is associated with
     pub ingress_stream_id: zpr::StreamId,
+
+    /// expanded sequence number of this packet
+    pub seq_num: zpr::SeqNum,
 }
 
 pub type PacketFlags = u8;

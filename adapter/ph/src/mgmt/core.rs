@@ -7,7 +7,6 @@ use crate::assembly::Assembly;
 use crate::config;
 use crate::counters::ManagementCounterType;
 use crate::packet::Packet;
-use crate::seq_nums;
 use crate::zdp;
 use crate::zdpr;
 use std::task::{Context, Poll};
@@ -329,15 +328,6 @@ fn send_mgmt_helper(
 
     let hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
     hdr.packet_type = packet_type;
-
-    let Some(peer_state) = asm.peer_table.get(link_id) else {
-        // no more peer; packet will be dropped
-        return;
-    };
-    let seq_num = peer_state.sn_gen.generate_seq_num();
-    drop(peer_state);
-
-    hdr.sequence_number = seq_nums::truncate_seq_num(seq_num).into();
 
     // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
     // In that case, just ignore the error; act as if the packet was dropped
