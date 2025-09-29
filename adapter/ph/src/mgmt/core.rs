@@ -329,12 +329,29 @@ fn send_mgmt_helper(
     let hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
     hdr.packet_type = packet_type;
 
-    // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
-    // In that case, just ignore the error; act as if the packet was dropped
-    // by the substrate due to congestion.
-    let _ = asm
-        .mgmt_substrate_egress
-        .try_enqueue_packet(link_id, &mut packet);
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        return;
+    };
+    let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
+
+    let old_retry_needed = zdpr_send.retry_needed();
+
+    match zdpr_send.enqueue_packet(packet) {
+        zdpr::EnqueueResult::Sent(seq_num, pkt) => {
+            build_and_egress_packets(asm, link_id, std::iter::once((seq_num, pkt)));
+
+            debug_assert!(
+                zdpr_send.retry_needed(),
+                "sent packet but not signalled for retry"
+            );
+            if !old_retry_needed {
+                // This packet should activate / restart our retry timer.
+                peer_state.zdpr_retry_timer_reset.notify_one();
+            }
+        }
+
+        zdpr::EnqueueResult::Queued(_packet_id) => (),
+    }
 }
 
 /// Used to send packets as instructed by ZDPR mechanism.

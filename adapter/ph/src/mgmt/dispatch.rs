@@ -2,7 +2,7 @@
 
 use super::core;
 use crate::assembly::Assembly;
-use crate::counters::ManagementCounterType;
+use crate::counters::{ManagementCounterType, ManagementCounters};
 use crate::km_multiplexor;
 use crate::link_state::LinkType;
 use crate::logging::targets::{KEY_MGMT, ZDP};
@@ -10,9 +10,11 @@ use crate::net_defs;
 use crate::packet::Packet;
 use crate::queues;
 use crate::zdp;
+use crate::zdpr;
 use bytes::Buf;
 use std::sync::Arc;
-use tracing::error;
+use strum::IntoEnumIterator;
+use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
 use zpr_ext::zerocopy::FromBytesExt;
@@ -67,26 +69,45 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
             handle_acknowledgement(asm, pkt)
         }
 
-        Ok((base_hdr, _)) if base_hdr.packet_type.is_response() => handle_response(asm, pkt),
-
-        _ => {
+        Ok((base_hdr, _)) => {
             let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
                 core::count_event(asm, pkt, ManagementCounterType::PeerRemoved);
                 return;
             };
 
-            pkt.metadata_mut().seq_num = 0; // TODO, get from ZDPR (upcoming PR)
+            let is_response = base_hdr.packet_type.is_response();
 
-            let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
+            // expand sequence number and store in packet metadata
+            let mut receiver = peer_state.zdpr_recv.lock().unwrap();
+            let seq_num = receiver.reify_seq_num(base_hdr.sequence_number.get());
+            pkt.metadata_mut().seq_num = seq_num;
 
-            match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
-                Ok(()) => (),
-                Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {
-                    core::count_event(asm, pkt, ManagementCounterType::QueueBackpressure);
-                    return;
+            // determine packet disposition per ZDPR mechanism
+            let disp = receiver.process_packet(seq_num);
+            count_zdpr_receiver_stats(&asm.counters.management, &mut receiver);
+            drop(receiver);
+
+            if disp.should_ack() {
+                core::send_acknowledgement(&asm, pkt.metadata().ingress_link_id, seq_num);
+            }
+
+            if disp.should_process() {
+                if is_response {
+                    handle_response(asm, pkt)
+                } else {
+                    let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
+                    match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
+                        Ok(()) => (),
+                        Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {
+                            core::count_event(asm, pkt, ManagementCounterType::QueueBackpressure);
+                            return;
+                        }
+                    }
                 }
             }
         }
+
+        Err(_) => core::count_event(asm, pkt, ManagementCounterType::BadStructure),
     }
 }
 
@@ -211,4 +232,22 @@ fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
         }
     };
     return;
+}
+
+/// Maps a `zdpr::ReceiverStat` to a `CounterType`.
+fn zdpr_receiver_stat_to_counter(sn_stat: zdpr::ReceiverStat) -> ManagementCounterType {
+    match sn_stat {
+        zdpr::ReceiverStat::TooOld => ManagementCounterType::DroppedTooOld,
+        zdpr::ReceiverStat::Duplicate => ManagementCounterType::DroppedDuplicate,
+        zdpr::ReceiverStat::TooNew => ManagementCounterType::DroppedTooNew,
+        zdpr::ReceiverStat::OutOfOrder => ManagementCounterType::OutOfOrderPacket,
+    }
+}
+
+/// Pulls stats delta from `zdpr::Receiver` and feeds them into the global counters.
+fn count_zdpr_receiver_stats(mgmt_counters: &ManagementCounters, receiver: &mut zdpr::Receiver) {
+    for stat in zdpr::ReceiverStat::iter() {
+        mgmt_counters[zdpr_receiver_stat_to_counter(stat)]
+            .increase_by(receiver.fetch_reset_stat(stat));
+    }
 }
