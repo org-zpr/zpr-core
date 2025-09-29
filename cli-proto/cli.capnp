@@ -3,7 +3,7 @@
 # I considered making success also take text, for future extensibility, but
 # none of the current commands need info on success
 struct SuccessOrError {
-    result :union {
+    union {
         success @0 :Void;
         error @1 :Text;
     }
