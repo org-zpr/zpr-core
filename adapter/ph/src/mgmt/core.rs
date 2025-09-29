@@ -354,6 +354,8 @@ pub fn build_and_egress_packets<'a>(
     link_id: zpr::LinkId,
     packets: impl Iterator<Item = (zpr::SeqNum, &'a mut Packet)>,
 ) {
+    let mut dropped_backpressure = 0;
+
     packets.for_each(|(seq_num, packet)| {
         let (hdr, _) = zdp::ZdpBaseHeader::mut_from_prefix(packet.body_mut()).unwrap();
         hdr.sequence_number = zdpr::truncate_seq_num(seq_num).into();
@@ -361,10 +363,19 @@ pub fn build_and_egress_packets<'a>(
         // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
         // In that case, just ignore the error; act as if the packet was dropped
         // by the substrate due to congestion.
-        let _ = asm
+        if !asm
             .mgmt_substrate_egress
-            .try_enqueue_packet(link_id, packet);
+            .try_enqueue_packet(link_id, packet)
+        {
+            dropped_backpressure += 1;
+        }
     });
+
+    count_events(
+        asm,
+        ManagementCounterType::QueueBackpressure,
+        dropped_backpressure,
+    );
 }
 
 /// Sender function for per flow request management packet.
