@@ -1,11 +1,11 @@
-use crate::logging::targets::ZDP;
+#![allow(dead_code)]
+
 use crate::packet::Packet;
 use crate::zdp;
 use std::future::Future;
 use std::sync::Mutex as StdMutex;
 use tokio::sync::oneshot;
 use tokio::sync::{Mutex as TokioMutex, MutexGuard as TokioMutexGuard};
-use tracing::debug;
 use zpr;
 
 pub struct SyncReqState {
@@ -108,14 +108,15 @@ impl SyncReqState {
         self.listener_state.lock().unwrap().response_listener = None;
     }
 
-    pub fn forward_response(&self, seq_num: zpr::SeqNum, response: Response) -> Result<(), Packet> {
+    pub fn forward_response(&self, _txn_id: u16, response: Response) -> Result<(), Packet> {
         let listener = &mut self.listener_state.lock().unwrap().response_listener;
         match listener {
-            Some((expected_seq_num, _)) => {
-                if seq_num != *expected_seq_num {
+            Some((_expected_seq_num, _)) => {
+                // TODO FIXME this entire file needs to be rewritten
+                /*if seq_num != *expected_seq_num {
                     debug!(target: ZDP, "expected seq num {} got {}", expected_seq_num, seq_num);
                     return Err(response.1);
-                }
+                }*/
 
                 match listener.take().unwrap().1.send(response) {
                     Ok(()) => Ok(()),

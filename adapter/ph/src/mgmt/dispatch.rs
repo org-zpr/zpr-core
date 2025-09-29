@@ -131,7 +131,12 @@ fn handle_response(asm: &Assembly, pkt: &mut Packet) {
     };
 
     let packet_type = base_hdr.packet_type;
-    let seq_num = base_hdr.sequence_number.get() as u64; // TODO: reconstitute full seq num given expected seq num state
+
+    let Ok(txn_hdr) = zdp::ZdpTransactionHeader::read_from_buf(pkt) else {
+        core::count_event(asm, pkt, ManagementCounterType::BadStructure);
+        return;
+    };
+    let txn_id = txn_hdr.transaction_id.get();
 
     assert!(
         packet_type.is_response(),
@@ -148,7 +153,7 @@ fn handle_response(asm: &Assembly, pkt: &mut Packet) {
     let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
     match peer_state
         .sync_req_state
-        .forward_response(seq_num, (packet_type, mgmt_pkt))
+        .forward_response(txn_id, (packet_type, mgmt_pkt))
     {
         Ok(()) => (),
         Err(_mgmt_pkt) => {

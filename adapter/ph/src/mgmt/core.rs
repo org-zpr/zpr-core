@@ -62,19 +62,8 @@ pub fn send_non_flow_mgmt(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     packet: Packet,
-) -> zpr::SeqNum {
-    let Some(peer_state) = asm.peer_table.get(link_id) else {
-        // no more peer; packet will be dropped; return a dummy sequence number
-        return zpr::SeqNum::default();
-    };
-
-    let seq_num = peer_state.sn_gen.generate_seq_num();
-
-    drop(peer_state);
-
-    send_mgmt_helper(asm, link_id, packet_type, None, Some(seq_num), packet);
-
-    seq_num
+) {
+    send_mgmt_helper(asm, link_id, packet_type, None, None, packet)
 }
 
 /// Send a unidirectional per-flow management message on the given link.
@@ -95,7 +84,7 @@ pub fn send_per_flow_mgmt_response(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
-    sequence_number: zpr::SeqNum,
+    txn_id: u16,
     packet: Packet,
 ) {
     send_mgmt_helper(
@@ -103,7 +92,7 @@ pub fn send_per_flow_mgmt_response(
         link_id,
         packet_type,
         Some(stream_id),
-        Some(sequence_number),
+        Some(txn_id),
         packet,
     )
 }
@@ -320,9 +309,12 @@ fn send_mgmt_helper(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     stream_id: Option<zpr::StreamId>,
-    sequence_number: Option<zpr::SeqNum>,
+    txn_id: Option<u16>,
     mut packet: Packet,
 ) {
+    assert_ne!(packet_type, zdp::ZdpPacketType::KeyManagement);
+    assert_eq!(stream_id.is_some(), packet_type.is_per_flow());
+
     debug_assert_eq!(stream_id.is_some(), packet_type.is_per_flow());
 
     if let Some(stream_id) = stream_id {
@@ -330,12 +322,22 @@ fn send_mgmt_helper(
         per_flow_hdr.stream_id = stream_id.into();
     }
 
+    if let Some(txn_id) = txn_id {
+        let txn_hdr = packet.alloc_zeroed_header::<zdp::ZdpTransactionHeader>();
+        txn_hdr.transaction_id = txn_id.into();
+    }
+
     let hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
     hdr.packet_type = packet_type;
 
-    if let Some(sequence_number) = sequence_number {
-        hdr.sequence_number = seq_nums::truncate_seq_num(sequence_number).into();
-    }
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        // no more peer; packet will be dropped
+        return;
+    };
+    let seq_num = peer_state.sn_gen.generate_seq_num();
+    drop(peer_state);
+
+    hdr.sequence_number = seq_nums::truncate_seq_num(seq_num).into();
 
     // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
     // In that case, just ignore the error; act as if the packet was dropped
@@ -451,7 +453,7 @@ async fn send_sync_req_helper(
             link_id,
             zdp_request_type,
             stream_id,
-            Some(permit.seq_num()),
+            Some(permit.seq_num() as u16),
             packet,
         );
 

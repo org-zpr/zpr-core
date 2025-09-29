@@ -109,15 +109,9 @@ pub async fn handle_discard(_asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResu
 }
 
 /// handle an Echo Request message (RFC 6.5 § 6.3.2)
-pub async fn handle_echo_request(
-    asm: &Arc<Assembly>,
-    seq_num: zpr::SeqNum,
-    pkt: Packet,
-) -> HandleMgmtResult {
+pub async fn handle_echo_request(asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
-    hdr.sequence_number = ((seq_num & 0xffff) as u16).into();
     rsp_pkt.metadata_mut().flags |= packet::flags::CONFIRM;
 
     super::core::send_non_flow_mgmt(
@@ -130,17 +124,11 @@ pub async fn handle_echo_request(
     Ok(())
 }
 
-pub async fn handle_echo_response(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
-    let Ok(hdr) = zdp::ZdpEchoHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
-    };
-
+pub async fn handle_echo_response(asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResult {
     let _ = dispatch_link_state_event_or_error(
         asm,
         pkt.metadata().ingress_link_id,
-        LinkEvent::ReceivedEchoResponse {
-            sequence_number: hdr.sequence_number.into(),
-        },
+        LinkEvent::ReceivedEchoResponse,
     );
 
     Ok(())
@@ -153,7 +141,6 @@ pub async fn handle_echo_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
 ///
 pub async fn handle_init_authentication_request(
     asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
@@ -235,11 +222,7 @@ pub async fn handle_init_authentication_response(
 /// Sends [LinkEvent::ReceivedTerminateRequest] into the link state machine.
 /// Sends a ZdpTerminateResponse message back to the sender.
 /// Sends a [LinkEvent::SentTerminate] event into the link state machine.
-pub async fn handle_terminate_request(
-    asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
-    mut pkt: Packet,
-) -> HandleMgmtResult {
+pub async fn handle_terminate_request(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     let Ok(hdr) = zdp::ZdpTerminateLinkRequestHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
@@ -288,11 +271,7 @@ pub async fn handle_terminate_response(asm: &Arc<Assembly>, mut pkt: Packet) -> 
 }
 
 /// handle a Terminate Indication (RFC 6.5 § 6.3.3)
-pub async fn handle_terminate_indication(
-    asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
-    mut pkt: Packet,
-) -> HandleMgmtResult {
+pub async fn handle_terminate_indication(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     let Ok(hdr) = zdp::ZdpTerminateLinkIndicationHeader::read_from_buf(&mut pkt) else {
         return Err((HandleMgmtError::BadStructure, pkt));
@@ -310,11 +289,7 @@ pub async fn handle_terminate_indication(
 /// handle a Hello Request (RFC 6.5 § 6.3.4)
 /// Reads the hello, fire a ReceivedHelloRequest event, and then sends a response.
 ///
-pub async fn handle_hello_request(
-    asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
-    mut pkt: Packet,
-) -> HandleMgmtResult {
+pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     if asm.ph_mode != PhMode::Node {
         warn!(target: ZDP, "Link {ingress_link_id} received Hello Request but not in node mode");
@@ -548,7 +523,6 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
 ///
 pub async fn handle_acquire_zpr_address_request(
     asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
@@ -622,7 +596,6 @@ pub async fn handle_acquire_zpr_address_response(
 /// If the request indicates a fail, we send the event with empty address list.
 pub async fn handle_grant_zpr_address_request(
     asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
@@ -835,7 +808,7 @@ fn parse_grant_zpr_address_request(
 /// handle a Bind Actor Address Request (RFC 6.5 § 6.3.11)
 pub async fn handle_bind_actor_address_request(
     asm: &Arc<Assembly>,
-    seq_num: zpr::SeqNum,
+    txn_id: u16,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpBindActorAddressRequestHeader::read_from_buf(&mut pkt) else {
@@ -1138,7 +1111,7 @@ pub async fn handle_bind_actor_address_request(
         ingress_link_id.get(),
         zdp::ZdpPacketType::BindActorAddressResponse,
         ingress_tether_id,
-        seq_num,
+        txn_id,
         rsp_pkt,
     );
 

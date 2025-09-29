@@ -135,7 +135,11 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
             ZdpPacketType::TransitPacket => panic!("unexpected Transit Packet in management path"),
 
             ZdpPacketType::BindActorAddressRequest => {
-                handlers::handle_bind_actor_address_request(asm, seq_num, pkt).await
+                let Ok(txn_hdr) = ZdpTransactionHeader::read_from_buf(&mut pkt) else {
+                    return Err((HandleMgmtError::BadStructure, pkt));
+                };
+                handlers::handle_bind_actor_address_request(asm, txn_hdr.transaction_id.into(), pkt)
+                    .await
             }
 
             packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),
@@ -146,7 +150,7 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
 
             ZdpPacketType::Discard => handlers::handle_discard(asm, pkt).await,
 
-            ZdpPacketType::EchoRequest => handlers::handle_echo_request(asm, seq_num, pkt).await,
+            ZdpPacketType::EchoRequest => handlers::handle_echo_request(asm, pkt).await,
 
             ZdpPacketType::EchoResponse => handlers::handle_echo_response(asm, pkt).await,
 
@@ -155,7 +159,7 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
             }
 
             ZdpPacketType::TerminateLinkRequest => {
-                handlers::handle_terminate_request(asm, seq_num, pkt).await
+                handlers::handle_terminate_request(asm, pkt).await
             }
 
             ZdpPacketType::TerminateLinkResponse => {
@@ -163,15 +167,15 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
             }
 
             ZdpPacketType::TerminateLinkIndication => {
-                handlers::handle_terminate_indication(asm, seq_num, pkt).await
+                handlers::handle_terminate_indication(asm, pkt).await
             }
 
-            ZdpPacketType::HelloRequest => handlers::handle_hello_request(asm, seq_num, pkt).await,
+            ZdpPacketType::HelloRequest => handlers::handle_hello_request(asm, pkt).await,
 
             ZdpPacketType::HelloResponse => handlers::handle_hello_response(asm, pkt).await,
 
             ZdpPacketType::InitAuthenticationRequest => {
-                handlers::handle_init_authentication_request(asm, seq_num, pkt).await
+                handlers::handle_init_authentication_request(asm, pkt).await
             }
 
             ZdpPacketType::InitAuthenticationResponse => {
@@ -179,7 +183,7 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
             }
 
             ZdpPacketType::AcquireZprAddressRequest => {
-                handlers::handle_acquire_zpr_address_request(asm, seq_num, pkt).await
+                handlers::handle_acquire_zpr_address_request(asm, pkt).await
             }
 
             ZdpPacketType::AcquireZprAddressResponse => {
@@ -187,7 +191,7 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
             }
 
             ZdpPacketType::GrantZprAddressRequest => {
-                handlers::handle_grant_zpr_address_request(asm, seq_num, pkt).await
+                handlers::handle_grant_zpr_address_request(asm, pkt).await
             }
 
             ZdpPacketType::GrantZprAddressResponse => {

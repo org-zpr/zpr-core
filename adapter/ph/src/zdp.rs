@@ -110,6 +110,12 @@ pub struct ZdpPerFlowHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
+pub struct ZdpTransactionHeader {
+    pub transaction_id: U16,
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
 pub struct ZdpEchoHeader {
     pub sequence_number: U16, // Only used for the response
     pub additional_length: U16,
