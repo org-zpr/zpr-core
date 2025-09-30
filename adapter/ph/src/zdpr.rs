@@ -16,10 +16,10 @@ use std::collections::VecDeque;
 use std::task::{Context, Poll, Waker};
 use zpr::SeqNum;
 
-/// Reify the truncated sequence number into an offset relative to the
-/// reference sequence number, under the assumption that it is within a
-/// window centered on the highest seen value thus far.
-fn reify_seq_num_relative(reference: SeqNum, sn: u16) -> i64 {
+/// Reify the truncated sequence number relative to the reference sequence
+/// number, under the assumption that it is within a window centered on the
+/// highest seen value thus far.
+fn reify_seq_num(reference: SeqNum, sn: u16) -> SeqNum {
     // We operate under the assumption that the difference between the
     // true sequence number and `reference` is in the range [-2^15, 2^15).
 
@@ -28,8 +28,9 @@ fn reify_seq_num_relative(reference: SeqNum, sn: u16) -> i64 {
     // this difference.
     let diff = sn.wrapping_sub(reference as u16);
 
-    // Convert the 16-bit 2s-complement value into a 64-bit signed value.
-    (diff as i16) as i64
+    // Convert the 16-bit 2s-complement value into a 64-bit signed value
+    // and add back to the reference.
+    reference.wrapping_add_signed((diff as i16) as i64)
 }
 
 /// Truncate a sequence number to 16 bits for sending over the ether.
@@ -346,8 +347,7 @@ impl<Pkt> Sender<Pkt> {
     /// Expand a truncated sequence number to a full sequence number,
     /// with reference to the most recently sent packet.
     pub fn reify_seq_num(&self, sn: u16) -> SeqNum {
-        self.last_sent
-            .wrapping_add_signed(reify_seq_num_relative(self.last_sent, sn))
+        reify_seq_num(self.last_sent, sn)
     }
 
     /// Lookup the sequence number of a packet which had been queued
@@ -615,8 +615,7 @@ impl Receiver {
 
     /// Reify the truncated sequence number into a full sequence number.
     pub fn reify_seq_num(&self, sn: u16) -> SeqNum {
-        self.highest_seen
-            .wrapping_add_signed(reify_seq_num_relative(self.highest_seen, sn))
+        reify_seq_num(self.highest_seen, sn)
     }
 
     fn oldest_unrecvd_offset(&self) -> i64 {
@@ -669,29 +668,29 @@ impl Receiver {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::reify_seq_num_relative;
+mod global_tests {
+    use super::reify_seq_num;
 
     #[test]
     fn test_reify() {
-        assert_eq!(reify_seq_num_relative(0x2000, 0x2000), 0);
-        assert_eq!(reify_seq_num_relative(0x2000, 0x2001), 1);
-        assert_eq!(reify_seq_num_relative(0x2000, 0x1FFF), -1);
-        assert_eq!(reify_seq_num_relative(0x2000, 0x3000), 0x1000);
-        assert_eq!(reify_seq_num_relative(0x2000, 0x1000), -0x1000);
-        assert_eq!(reify_seq_num_relative(0x2000, 0x9000), 0x7000);
-        assert_eq!(reify_seq_num_relative(0x2000, 0xF000), -0x3000);
-        assert_eq!(reify_seq_num_relative(0x2000, 0xB000), -0x7000);
-        assert_eq!(reify_seq_num_relative(0x2000, 0xA000), -0x8000);
+        assert_eq!(reify_seq_num(0x12342000, 0x2000), 0x12342000);
+        assert_eq!(reify_seq_num(0x12342000, 0x2001), 0x12342001);
+        assert_eq!(reify_seq_num(0x12342000, 0x1FFF), 0x12341FFF);
+        assert_eq!(reify_seq_num(0x12342000, 0x3000), 0x12343000);
+        assert_eq!(reify_seq_num(0x12342000, 0x1000), 0x12341000);
+        assert_eq!(reify_seq_num(0x12342000, 0x9000), 0x12349000);
+        assert_eq!(reify_seq_num(0x12342000, 0xF000), 0x1233F000);
+        assert_eq!(reify_seq_num(0x12342000, 0xB000), 0x1233B000);
+        assert_eq!(reify_seq_num(0x12342000, 0xA000), 0x1233A000);
 
-        assert_eq!(reify_seq_num_relative(0xE000, 0xE000), 0);
-        assert_eq!(reify_seq_num_relative(0xE000, 0xDFFF), -1);
-        assert_eq!(reify_seq_num_relative(0xE000, 0xE001), 1);
-        assert_eq!(reify_seq_num_relative(0xE000, 0xD000), -0x1000);
-        assert_eq!(reify_seq_num_relative(0xE000, 0xF000), 0x1000);
-        assert_eq!(reify_seq_num_relative(0xE000, 0x7000), -0x7000);
-        assert_eq!(reify_seq_num_relative(0xE000, 0x1000), 0x3000);
-        assert_eq!(reify_seq_num_relative(0xE000, 0x5000), 0x7000);
-        assert_eq!(reify_seq_num_relative(0xE000, 0x6000), -0x8000);
+        assert_eq!(reify_seq_num(0x1234E000, 0xE000), 0x1234E000);
+        assert_eq!(reify_seq_num(0x1234E000, 0xDFFF), 0x1234DFFF);
+        assert_eq!(reify_seq_num(0x1234E000, 0xE001), 0x1234E001);
+        assert_eq!(reify_seq_num(0x1234E000, 0xD000), 0x1234D000);
+        assert_eq!(reify_seq_num(0x1234E000, 0xF000), 0x1234F000);
+        assert_eq!(reify_seq_num(0x1234E000, 0x7000), 0x12347000);
+        assert_eq!(reify_seq_num(0x1234E000, 0x1000), 0x12351000);
+        assert_eq!(reify_seq_num(0x1234E000, 0x5000), 0x12355000);
+        assert_eq!(reify_seq_num(0x1234E000, 0x6000), 0x12346000);
     }
 }
