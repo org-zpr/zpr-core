@@ -13,7 +13,7 @@
 
 use enum_map::{Enum, EnumMap};
 use std::collections::VecDeque;
-use std::task::{Context, Poll, Waker};
+use std::task::{ready, Context, Poll, Waker};
 use zpr::SeqNum;
 
 /// Reify the truncated sequence number relative to the reference sequence
@@ -271,10 +271,9 @@ impl<Pkt> Sender<Pkt> {
     /// Implementation of `Future::poll` to wait for acknowledgement
     /// of a given packet which may not yet be sent.
     pub fn poll_send_and_ack(&mut self, cx: &mut Context<'_>, id: QueuedPacketId) -> Poll<()> {
-        match self.poll_send(cx, id) {
-            Poll::Ready(Some(sn)) => self.poll_ack(cx, sn),
-            Poll::Ready(None) => Poll::Ready(()),
-            Poll::Pending => Poll::Pending,
+        match ready!(self.poll_send(cx, id)) {
+            Some(sn) => self.poll_ack(cx, sn),
+            None => Poll::Ready(()),
         }
     }
 
@@ -296,7 +295,7 @@ impl<Pkt> Sender<Pkt> {
     /// should therefore schedule a timer to retry sending packets if one is
     /// not already scheduled.
     pub fn enqueue_packet(&mut self, packet: Pkt) -> EnqueueResult<'_, Pkt> {
-        if self.is_blocked() {
+        if self.is_blocked() || self.has_blocked_packets() {
             self.last_enqueued = self.last_enqueued.wrapping_add(1);
             self.blocked
                 .push_back(Some((packet, Waker::noop().clone())));
@@ -450,9 +449,9 @@ impl<Pkt> Sender<Pkt> {
         !self.unacked.is_empty()
     }
 
-    /// Retrieve the list of packets which need to be retried,
-    /// and mark them as having been retried.  The caller
-    /// should send each packet returned (recreating it using the
+    /// Retrieve the list of packets which need to be retried.
+    ///
+    /// The caller should send each packet returned (recreating it using the
     /// provided sequence number if required).
     pub fn retry_packets(&mut self) -> impl Iterator<Item = (SeqNum, &mut Pkt)> {
         let sn_base = self
@@ -649,7 +648,7 @@ impl Receiver {
             return Disposition::AckAndProcess;
         }
 
-        if (self.recvd >> -offset) & 1 != 0 {
+        if (self.recvd >> -offset) & 1 == 0 {
             // Old, but within our window.  Accept and mark.
             self.stats[ReceiverStat::OutOfOrder] += 1;
             self.recvd |= 1 << -offset;
