@@ -73,6 +73,7 @@ mod zdp_ll;
 mod zdpr;
 mod zdpr_worker;
 mod zprtun;
+mod admin_worker2;
 
 #[cfg(test)]
 mod km_testdata;
@@ -564,7 +565,8 @@ fn main() -> ExitCode {
     js.spawn_local(signal_worker::launch(asm.clone()));
     js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq));
     js.spawn_local(adapter_manager_worker::launch(asm.clone(), am_outq));
-    js.spawn_local(admin_worker::launch(asm.clone(), control_socket));
+    // js.spawn_local(admin_worker::launch(asm.clone(), control_socket.clone()));
+    js.spawn_local(admin_worker2::launch(asm.clone(), control_socket.clone()));
     js.spawn_local(km_multiplexor::launch_signal_worker(
         asm.clone(),
         km_sig_outq,

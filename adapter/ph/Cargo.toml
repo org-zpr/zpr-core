@@ -34,7 +34,7 @@ socket2 = { version = "0.5.7" }
 strum = { version = "0.27.1", features = ["derive"] }
 thiserror = "1.0.65"
 tokio = { version = "1.37.0", features = ["full"] }
-tokio-util = { version = "0.7.11", features = ["rt"] }
+tokio-util = { version = "0.7.11", features = ["rt", "compat"] }
 toml = "0.8.19"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
@@ -44,6 +44,9 @@ zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "ze
 serde_json = "1.0.140"
 url = "2.5.4"
 clap_complete = { version = "4.5.57", optional = true}
+cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.1.0" }
+capnp = "0.21"
+capnp-rpc = "0.21"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio-tun = { version = "0.11.5" }

@@ -24,6 +24,8 @@ use std::thread::sleep;
 use std::time::Duration;
 use zpr::rpc_commands::RpcCommands;
 use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
+use tokio_util::compat::*;
+use cli_proto::cli_capnp as cli;
 
 const ANCILLARY_BUFFER_SIZE: usize = 128;
 
@@ -39,9 +41,25 @@ macro_rules! basic_command {
     };
 }
 
-fn main() -> std::io::Result<()> {
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
     let args = CmdlineArgs::parse();
     let socket = args.socket.clone();
+
+   let sock = tokio::net::TcpStream::connect(("localhost", 12345)).await?;
+    sock.set_nodelay(true)?;
+    let (reader, writer) = sock.into_split();
+
+    let network = capnp_rpc::twoparty::VatNetwork::new(
+            tokio::io::BufReader::new(reader).compat(),
+            tokio::io::BufWriter::new(writer).compat_write(),
+            capnp_rpc::rpc_twoparty_capnp::Side::Client,
+            capnp::message::ReaderOptions::new()
+        );
+
+    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+
+    let service: cli::cmd_line_inter::Client = rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
 
     if let Some(command) = args.command {
         process_command(command, &socket).map(|_| {})
