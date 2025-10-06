@@ -603,7 +603,7 @@ impl LinkStateWrapper {
 
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            mgmt::requests::send_hello_request(asm, self.id);
+            mgmt::requests::send_hello_request(asm, self.id).enqueue();
             self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
             debug!(
                 target: LINK_STATE,
@@ -1291,7 +1291,7 @@ impl LinkStateWrapper {
             payload = auth::ZdpInitAuthenticationPayload::default(); // empty
         }
 
-        mgmt::requests::send_init_authentication_request(asm, link_id, flags, payload);
+        mgmt::requests::send_init_authentication_request(asm, link_id, flags, payload).enqueue();
     }
 
     /// Send the Grant message
@@ -1307,7 +1307,8 @@ impl LinkStateWrapper {
             self.id,
             ResponseCode::Success,
             &ipaddrs,
-        );
+        )
+        .enqueue();
     }
 
     /// Run the HTTPS authentication process in a tokio task.
@@ -1408,7 +1409,8 @@ impl LinkStateWrapper {
             self.id,
             requesting_addrs,
             Some(blob.as_bytes()),
-        );
+        )
+        .enqueue();
     }
 
     fn process_error_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
@@ -1509,7 +1511,7 @@ impl LinkStateWrapper {
             }
 
             (LinkType::AdapterToNode, LinkState::Helloing) => {
-                mgmt::requests::send_hello_request(asm, self.id);
+                mgmt::requests::send_hello_request(asm, self.id).enqueue();
             }
 
             // Programming error!
@@ -1617,7 +1619,7 @@ impl LinkStateWrapper {
             &mut locked_fsm,
             config::DEFAULT_TERMINATE_RESPONSE_TIMER,
         );
-        mgmt::requests::send_terminate_request(asm, self.id, reason);
+        mgmt::requests::send_terminate_request(asm, self.id, reason).enqueue();
         Ok(())
     }
 
@@ -1738,7 +1740,7 @@ impl LinkStateWrapper {
             .lock()
             .unwrap()
             .set_state(LinkState::Resetting);
-        mgmt::requests::send_terminate_indication(asm, link_id, TerminateReason::Reset);
+        mgmt::requests::send_terminate_indication(asm, link_id, TerminateReason::Reset).enqueue();
         let _ = self.clean_up_link_state(asm).join_all().await;
     }
 
@@ -1806,7 +1808,12 @@ impl LinkStateWrapper {
 
                 let mut recv = task_events.subscribe();
 
-                mgmt::requests::send_echo_request(&task_asm, link_id);
+                if mgmt::requests::send_echo_request(&task_asm, link_id)
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
 
                 let got_response =
                     tokio::time::timeout(config::DEFAULT_REQUEST_RETRY_TIMER,

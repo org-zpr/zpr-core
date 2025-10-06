@@ -36,6 +36,9 @@ pub enum HandleMgmtError {
 
     #[error("bad packet structure")]
     BadStructure,
+
+    #[error("link closed")]
+    LinkClosed,
 }
 
 impl From<HandleMgmtError> for counters::ManagementCounterType {
@@ -44,6 +47,15 @@ impl From<HandleMgmtError> for counters::ManagementCounterType {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,
             HandleMgmtError::BadStructure => Self::BadStructure,
             HandleMgmtError::MessageNotPermitted => Self::OtherError,
+            HandleMgmtError::LinkClosed => Self::OtherError,
+        }
+    }
+}
+
+impl From<super::core::MgmtSendError> for HandleMgmtError {
+    fn from(err: super::core::MgmtSendError) -> Self {
+        match err {
+            super::core::MgmtSendError::LinkClosed => HandleMgmtError::LinkClosed,
         }
     }
 }
@@ -119,7 +131,8 @@ pub async fn handle_echo_request(asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmt
         ingress_link_id,
         zdp::ZdpPacketType::EchoResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     Ok(())
 }
@@ -185,7 +198,8 @@ pub async fn handle_init_authentication_request(
         ingress_link_id,
         zdp::ZdpPacketType::InitAuthenticationResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     let _ = dispatch_link_state_event_or_error(
         asm,
@@ -247,7 +261,8 @@ pub async fn handle_terminate_request(asm: &Arc<Assembly>, mut pkt: Packet) -> H
         ingress_link_id,
         zdp::ZdpPacketType::TerminateLinkResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     // Tell state machine we sent a TerminateLinkResponse. This will trigger `clean_up_link_state`.
     let _ = asm.process_link_state_event(ingress_link_id, LinkEvent::SentTerminate);
@@ -380,7 +395,8 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
         ingress_link_id,
         zdp::ZdpPacketType::HelloResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     let close_link = if response_status == zdp::ResponseCode::Success {
         match asm.process_link_state_event(ingress_link_id, LinkEvent::SentHelloResponse) {
@@ -546,7 +562,8 @@ pub async fn handle_acquire_zpr_address_request(
         ingress_link_id,
         zdp::ZdpPacketType::AcquireZprAddressResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     // Now we can do our async prcessing of the acquire which will involve talking to
     // the visa service.
@@ -631,7 +648,8 @@ pub async fn handle_grant_zpr_address_request(
         ingress_link_id,
         zdp::ZdpPacketType::GrantZprAddressResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     let processing_result = asm.process_link_state_event(
         ingress_link_id,
@@ -1113,7 +1131,8 @@ pub async fn handle_bind_actor_address_request(
         ingress_tether_id,
         txn_id,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     Ok(())
 }
