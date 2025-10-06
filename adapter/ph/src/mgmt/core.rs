@@ -109,6 +109,10 @@ pub fn send_acknowledgement(asm: &Assembly, link_id: zpr::LinkId, sequence_numbe
         .try_enqueue_packet(link_id, &mut packet);
 }
 
+pub enum MgmtSendError {
+    LinkClosed,
+}
+
 #[allow(dead_code)]
 enum PacketId {
     Sent(zpr::SeqNum),
@@ -198,7 +202,7 @@ impl<'a> Drop for Sent<'a> {
 }
 
 impl<'a> std::future::Future for Sent<'a> {
-    type Output = Result<Acked<'a>, ()>;
+    type Output = Result<Acked<'a>, MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.packet_id {
@@ -210,7 +214,7 @@ impl<'a> std::future::Future for Sent<'a> {
 
             PacketId::Queued(packet_id) => {
                 let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
-                    return Poll::Ready(Err(()));
+                    return Poll::Ready(Err(MgmtSendError::LinkClosed));
                 };
 
                 let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
@@ -240,7 +244,7 @@ pub struct Acked<'a> {
 }
 
 impl<'a> std::future::Future for Acked<'a> {
-    type Output = Result<(), ()>;
+    type Output = Result<(), MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let Some(seq_num) = self.seq_num else {
@@ -248,7 +252,7 @@ impl<'a> std::future::Future for Acked<'a> {
         };
 
         let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
-            return Poll::Ready(Err(()));
+            return Poll::Ready(Err(MgmtSendError::LinkClosed));
         };
 
         let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
@@ -281,11 +285,11 @@ impl<'a> SentAndAcked<'a> {
 }
 
 impl<'a> std::future::Future for SentAndAcked<'a> {
-    type Output = Result<(), ()>;
+    type Output = Result<(), MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let Some(peer_state) = self.0.asm.peer_table.get(self.0.link_id) else {
-            return Poll::Ready(Err(()));
+            return Poll::Ready(Err(MgmtSendError::LinkClosed));
         };
 
         let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
