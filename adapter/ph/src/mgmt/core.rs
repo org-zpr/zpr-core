@@ -11,7 +11,6 @@ use crate::zdp;
 use crate::zdpr;
 use std::task::{Context, Poll};
 use thiserror::Error;
-use tokio::time::sleep;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
@@ -439,6 +438,7 @@ pub enum SyncReqError {
     LinkClosed,
     #[error("protocol error")]
     ProtocolError,
+    #[allow(dead_code)]
     #[error("timeout")]
     Timeout,
 }
@@ -470,37 +470,31 @@ async fn send_sync_req_helper(
     let Some(peer_state) = asm.peer_table.get(link_id) else {
         return Err(SyncReqError::LinkClosed);
     };
+    // CTP FIXME: we don't need permits anymore
     let permit = peer_state.sync_req_state.acquire_permit().await;
-    let mut response_future = peer_state.sync_req_state.install_response_listener(&permit);
+    let response_future = peer_state.sync_req_state.install_response_listener(&permit);
 
-    for _i in 0..=config::DEFAULT_REQUEST_RETRY_COUNT {
-        let mut packet = new_heap_packet();
-        pkt_fn(&mut packet);
+    let mut packet = new_heap_packet();
+    pkt_fn(&mut packet);
 
-        send_mgmt_helper(
-            asm,
-            link_id,
-            zdp_request_type,
-            stream_id,
-            Some(permit.seq_num() as u16),
-            packet,
-        )
-        .await?;
+    send_mgmt_helper(
+        asm,
+        link_id,
+        zdp_request_type,
+        stream_id,
+        Some(permit.seq_num() as u16),
+        packet,
+    )
+    .await?;
 
-        tokio::select! {
-            response = &mut response_future => {
-                drop(permit);
-                return match_received(asm, response.ok(), SyncReqError::LinkClosed, zdp_response_type);
-            }
-            _ = sleep(config::DEFAULT_REQUEST_RETRY_TIMER) => ()
-        }
-    }
-
-    peer_state.sync_req_state.clear_response_listener(&permit);
-    let response = response_future.hangup();
+    let response = response_future.await;
     drop(permit);
-
-    match_received(asm, response, SyncReqError::Timeout, zdp_response_type)
+    return match_received(
+        asm,
+        response.ok(),
+        SyncReqError::LinkClosed,
+        zdp_response_type,
+    );
 }
 
 /// Determines whether the message received in response to the request is
