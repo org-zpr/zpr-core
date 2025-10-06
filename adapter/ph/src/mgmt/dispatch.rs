@@ -39,7 +39,7 @@ pub fn dispatch_mgmt_packet_with_addr(
                 .start_tether(&peer_sa, &interface_addr, LinkType::NodeToAdapter)
                 .ok()
             else {
-                core::count_event(asm, pkt, ManagementCounterType::UnknownPeer);
+                core::count_event(asm, ManagementCounterType::UnknownPeer);
                 return;
             };
 
@@ -48,7 +48,7 @@ pub fn dispatch_mgmt_packet_with_addr(
             handle_key_management(asm, pkt);
         }
         _ => {
-            core::count_event(asm, pkt, ManagementCounterType::UnknownPeer);
+            core::count_event(asm, ManagementCounterType::UnknownPeer);
             return;
         }
     }
@@ -71,7 +71,7 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
 
         Ok((base_hdr, _)) => {
             let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
-                core::count_event(asm, pkt, ManagementCounterType::PeerRemoved);
+                core::count_event(asm, ManagementCounterType::PeerRemoved);
                 return;
             };
 
@@ -99,7 +99,7 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
                     match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
                         Ok(()) => (),
                         Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {
-                            core::count_event(asm, pkt, ManagementCounterType::QueueBackpressure);
+                            core::count_event(asm, ManagementCounterType::QueueBackpressure);
                             return;
                         }
                     }
@@ -107,13 +107,13 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
             }
         }
 
-        Err(_) => core::count_event(asm, pkt, ManagementCounterType::BadStructure),
+        Err(_) => core::count_event(asm, ManagementCounterType::BadStructure),
     }
 }
 
 fn handle_acknowledgement(asm: &Assembly, pkt: &mut Packet) {
     let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(pkt) else {
-        core::count_event(asm, pkt, ManagementCounterType::BadStructure);
+        core::count_event(asm, ManagementCounterType::BadStructure);
         return;
     };
 
@@ -121,7 +121,7 @@ fn handle_acknowledgement(asm: &Assembly, pkt: &mut Packet) {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
-        core::count_event(asm, pkt, ManagementCounterType::PeerRemoved);
+        core::count_event(asm, ManagementCounterType::PeerRemoved);
         return;
     };
     let mut sender = peer_state.zdpr_send.lock().unwrap();
@@ -150,14 +150,14 @@ fn handle_acknowledgement(asm: &Assembly, pkt: &mut Packet) {
 
 fn handle_response(asm: &Assembly, pkt: &mut Packet) {
     let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(pkt) else {
-        core::count_event(asm, pkt, ManagementCounterType::BadStructure);
+        core::count_event(asm, ManagementCounterType::BadStructure);
         return;
     };
 
     let packet_type = base_hdr.packet_type;
 
     let Ok(txn_hdr) = zdp::ZdpTransactionHeader::read_from_buf(pkt) else {
-        core::count_event(asm, pkt, ManagementCounterType::BadStructure);
+        core::count_event(asm, ManagementCounterType::BadStructure);
         return;
     };
     let txn_id = txn_hdr.transaction_id.get();
@@ -170,7 +170,7 @@ fn handle_response(asm: &Assembly, pkt: &mut Packet) {
     // Gets the designated sender, attempts to send the response, if not drops
     // the packet and increments corresponding counter
     let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
-        core::count_event(asm, pkt, ManagementCounterType::UnexpectedMgmtResponse);
+        core::count_event(asm, ManagementCounterType::UnexpectedMgmtResponse);
         return;
     };
 
@@ -181,7 +181,7 @@ fn handle_response(asm: &Assembly, pkt: &mut Packet) {
     {
         Ok(()) => (),
         Err(_mgmt_pkt) => {
-            core::count_event(asm, pkt, ManagementCounterType::UnexpectedMgmtResponse);
+            core::count_event(asm, ManagementCounterType::UnexpectedMgmtResponse);
             return;
         }
     }
@@ -192,7 +192,7 @@ fn handle_response(asm: &Assembly, pkt: &mut Packet) {
 fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
     let Ok(km_hdr) = zdp::ZdpKeyManagementHeader::read_from_buf(pkt) else {
         error!(target: ZDP, "KeyManagement packet arrived with unparseable header");
-        core::count_event(asm, pkt, ManagementCounterType::BadStructure);
+        core::count_event(asm, ManagementCounterType::BadStructure);
         return;
     };
 
@@ -204,14 +204,14 @@ fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
             "KeyManagement packet type does not match KM implementation - type is {}",
             km_hdr.message_type
         );
-        core::count_event(asm, pkt, ManagementCounterType::OtherError);
+        core::count_event(asm, ManagementCounterType::OtherError);
         return;
     }
 
     let km_msg_len = usize::from(km_hdr.message_length);
     if pkt.remaining() < km_msg_len {
         error!(target: KEY_MGMT, "KeyManagement packet arrived with truncated payload");
-        core::count_event(asm, pkt, ManagementCounterType::BadStructure);
+        core::count_event(asm, ManagementCounterType::BadStructure);
         return;
     }
 
@@ -227,7 +227,7 @@ fn handle_key_management(asm: &Arc<Assembly>, pkt: &mut Packet) {
                 "key management handling failed on link {}: {e:?}",
                 pkt.metadata().ingress_link_id,
             );
-            core::count_event(asm, pkt, ManagementCounterType::OtherError);
+            core::count_event(asm, ManagementCounterType::OtherError);
             return;
         }
     };

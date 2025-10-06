@@ -25,27 +25,23 @@ pub async fn launch(
 ) {
     while let Some(msg) = queue.recv().await {
         match msg {
-            MgmtProcessorMessage::Packet(mut pkt) => {
+            MgmtProcessorMessage::Packet(pkt) => {
                 // Drop packets which are intended for a link other than the one we are assigned to,
                 // since processing them here will violate concurrency assumptions.
                 if pkt.metadata().ingress_link_id != config.link_id.get() {
-                    mgmt::core::count_event(
-                        &asm,
-                        &mut pkt,
-                        ManagementCounterType::InternalRoutingError,
-                    );
+                    mgmt::core::count_event(&asm, ManagementCounterType::InternalRoutingError);
                     continue;
                 }
 
                 match handle_packet(&asm, pkt).await {
                     Ok(()) => (),
-                    Err((err, mut pkt)) => {
+                    Err(err) => {
                         let link_id = config.link_id.get();
                         error!(target: ZDP, "Error handling packet received on link {link_id}: {err}");
                         if let Err(e) = asm.process_link_state_event(link_id, LinkEvent::Error) {
                             error!(target: LINK_STATE, "Error handling link error on link {link_id}: {e}");
                         }
-                        mgmt::core::count_event(&asm, &mut pkt, err.into());
+                        mgmt::core::count_event(&asm, err.into());
                     }
                 }
             }
@@ -57,7 +53,7 @@ pub async fn launch(
 
 async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let Ok(base_hdr) = ZdpBaseHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
 
     let seq_num = pkt.metadata().seq_num;
@@ -84,7 +80,7 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
 
     if base_hdr.packet_type.is_per_flow() {
         let Ok(per_flow_hdr) = ZdpPerFlowHeader::read_from_buf(&mut pkt) else {
-            return Err((HandleMgmtError::BadStructure, pkt));
+            return Err(HandleMgmtError::BadStructure);
         };
 
         pkt.metadata_mut().ingress_stream_id = per_flow_hdr.stream_id.into();
@@ -94,13 +90,13 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
 
             ZdpPacketType::BindActorAddressRequest => {
                 let Ok(txn_hdr) = ZdpTransactionHeader::read_from_buf(&mut pkt) else {
-                    return Err((HandleMgmtError::BadStructure, pkt));
+                    return Err(HandleMgmtError::BadStructure);
                 };
                 handlers::handle_bind_actor_address_request(asm, txn_hdr.transaction_id.into(), pkt)
                     .await
             }
 
-            packet_type => Err((HandleMgmtError::UnknownType(packet_type.0), pkt)),
+            packet_type => Err(HandleMgmtError::UnknownType(packet_type.0)),
         }
     } else {
         match base_hdr.packet_type {
@@ -158,7 +154,7 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
 
             packet_type => {
                 warn!("unhandled mgmt packet type {:?}", packet_type);
-                Err((HandleMgmtError::UnknownType(packet_type.0), pkt))
+                Err(HandleMgmtError::UnknownType(packet_type.0))
             }
         }
     }

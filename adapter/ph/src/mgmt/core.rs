@@ -37,11 +37,7 @@ fn new_tiny_heap_packet() -> Packet {
     )
 }
 
-pub fn count_event(
-    asm: &Assembly,
-    _pkt: &mut Packet, // for later support of per-packet event recording
-    event: ManagementCounterType,
-) {
+pub fn count_event(asm: &Assembly, event: ManagementCounterType) {
     debug!(target: crate::logging::targets::MGMT_EVENTS, "packet event {event}");
     asm.counters.management[event].increment();
 }
@@ -490,9 +486,9 @@ fn match_received(
     zdp_response_type: zdp::ZdpPacketType,
 ) -> Result<Packet, SyncReqError> {
     match response {
-        Some((pkt_type, mut pkt)) => {
+        Some((pkt_type, pkt)) => {
             if pkt_type != zdp_response_type {
-                count_event(asm, &mut pkt, ManagementCounterType::BadMgmtResponse);
+                count_event(asm, ManagementCounterType::BadMgmtResponse);
                 return Err(SyncReqError::ProtocolError);
             }
             return Ok(pkt);
