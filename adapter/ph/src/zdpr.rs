@@ -473,9 +473,18 @@ impl<Pkt> Sender<Pkt> {
     }
 
     /// Destructs this object, returning all currently queued packets for
-    /// disposal by the caller.
-    pub fn destruct(self) -> impl Iterator<Item = Pkt> {
-        self.unacked
+    /// disposal by the caller.  Also wakes all wakers.
+    ///
+    /// (Note that wakers are automatically woken on drop also.)
+    pub fn destruct(mut self) -> impl Iterator<Item = Pkt> {
+        self.destruct_internal()
+    }
+
+    fn destruct_internal(&mut self) -> impl Iterator<Item = Pkt> {
+        let unacked = std::mem::take(&mut self.unacked);
+        let blocked = std::mem::take(&mut self.blocked);
+
+        unacked
             .into_iter()
             .filter_map(|pkt| {
                 pkt.map(|(pkt, waker)| {
@@ -483,7 +492,7 @@ impl<Pkt> Sender<Pkt> {
                     pkt
                 })
             })
-            .chain(self.blocked.into_iter().filter_map(|pkt| {
+            .chain(blocked.into_iter().filter_map(|pkt| {
                 pkt.map(|(pkt, waker)| {
                     waker.wake();
                     pkt
@@ -521,6 +530,12 @@ impl<Pkt> Sender<Pkt> {
                 }
             }
         }
+    }
+}
+
+impl<Pkt> Drop for Sender<Pkt> {
+    fn drop(&mut self) {
+        self.destruct_internal().for_each(drop);
     }
 }
 
