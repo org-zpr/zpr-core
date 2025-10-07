@@ -96,6 +96,8 @@ pub struct Config {
     /// Path to the unix domain socket for the control interface.
     pub control_path: PathBuf,
 
+    pub capture_path: PathBuf,
+
     /// Source address for our UDP substrate socket. For an adapter this should (always?) be `0.0.0.0:0`.
     /// For a node this is the nodes dock listening address.
     pub self_addr: SocketAddr,
@@ -228,6 +230,16 @@ impl Config {
                 Err(e) => return Err(e),
             }
         }
+        if self.capture_path.to_str().unwrap().is_empty() {
+            return Err("capture_path".arg_missing());
+        }
+        // For capture path, the parent dir must exist or there will be an error later.
+        if let Some(parent) = self.capture_path.parent() {
+            match check_file_exists("capture socket parent directory", parent) {
+                Ok(_) => {}
+                Err(e) => return Err(e),
+            }
+        }
         if self.ca_file.to_str().unwrap().is_empty() {
             return Err("ca_file".arg_missing());
         }
@@ -282,6 +294,13 @@ impl Config {
                 self.control_path = base_dir.join(control_path);
             } else {
                 self.control_path = control_path.clone();
+            }
+        }
+        if let Some(capture_path) = &config.capture_path {
+            if capture_path.is_relative() {
+                self.capture_path = base_dir.join(capture_path);
+            } else {
+                self.capture_path = capture_path.clone();
             }
         }
         if let Some(self_addr) = &config.self_addr {
@@ -406,6 +425,19 @@ impl Config {
                 self.control_path = cp;
             }
         }
+        if let Some(capture_path) = &common.capture_path {
+            let cp = PathBuf::from(capture_path);
+            if cp.is_relative() {
+                self.capture_path = path::absolute(cp).or_else(|e| {
+                    Err(ArgsError::PathError(format!(
+                        "path error for capture_path: {:?}",
+                        e
+                    )))
+                })?;
+            } else {
+                self.capture_path = cp;
+            }
+        }
         if let Some(self_addr) = &common.self_addr {
             self.self_addr = *self_addr;
         }
@@ -488,6 +520,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             control_path: get_data_home().join("control.sock"),
+            capture_path: get_data_home().join("capture.sock"),
             self_addr: SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0),
             ca_file: PathBuf::from(""),
             certificate_file: PathBuf::from(""),
@@ -531,6 +564,7 @@ pub struct NodeConfig {
 #[derive(Deserialize, Debug, Clone)]
 pub struct GlobalConfigSection {
     pub control_path: Option<PathBuf>,
+    pub capture_path: Option<PathBuf>,
     pub self_addr: Option<SocketAddr>,
     pub ca_file: Option<PathBuf>,
     pub certificate_file: Option<PathBuf>,

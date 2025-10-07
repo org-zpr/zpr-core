@@ -9,6 +9,10 @@ pub struct CmdlineArgs {
     /// Path to the Packet Handler's management socket
     #[arg(long, short = 'p', default_value = "/var/run/zpr/ph.sock")]
     pub socket: String,
+
+    /// Path to the Packet Handler's management socket
+    #[arg(long, short = 'c')]
+    pub cap_socket: Option<String>,
 }
 
 #[derive(Parser, Debug)]

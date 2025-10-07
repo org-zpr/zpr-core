@@ -4,71 +4,47 @@
 //! with a '-' on the command line
 mod main_args;
 
-use crate::main_args::{
-    CaptureCommands, CliCommand, CmdlineArgs, Commands, LinkArgs, LinkCommands,
-};
+use crate::main_args::{CaptureCommands, CliCommand, CmdlineArgs, Commands, LinkCommands};
+use capnp_rpc::twoparty::VatId;
 use cbpf_rs;
 use clap::Parser;
-use ctrlc;
+use cli_proto::cli_capnp as cli;
+use cli_proto::cli_capnp::cmd_line_inter as svc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
 use std::fs::OpenOptions;
 use std::io;
 use std::io::prelude::*;
 use std::io::{BufReader, Error, IoSlice};
-use std::net::Shutdown;
 use std::os::fd::AsFd;
 use std::os::unix::net::UnixStream;
-use std::sync::{Arc, Condvar, Mutex};
-use std::thread::sleep;
-use std::time::Duration;
+use tokio::time::{sleep, Duration};
+use tokio_util::compat::*;
 use zpr::rpc_commands::RpcCommands;
 use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
-use tokio_util::compat::*;
-use cli_proto::cli_capnp as cli;
 
+#[allow(unused_imports)]
+use ctrlc;
+#[allow(unused_imports)]
+use std::sync::{Arc, Condvar, Mutex};
+
+#[allow(dead_code)]
 const ANCILLARY_BUFFER_SIZE: usize = 128;
 
-macro_rules! basic_command {
-    ($comm:expr, $socket:ident) => {
-        basic_call_response_0($comm, $socket)
-    };
-    ($comm:expr, $socket:ident, $arg:tt) => {
-        basic_call_response_1($comm, $socket, $arg)
-    };
-    ($comm:expr, $socket:ident, $arg1:tt, $arg2:tt) => {
-        basic_call_response_2($comm, $socket, $arg1, $arg2)
-    };
-}
-
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<(), capnp::Error> {
     let args = CmdlineArgs::parse();
     let socket = args.socket.clone();
-
-   let sock = tokio::net::TcpStream::connect(("localhost", 12345)).await?;
-    sock.set_nodelay(true)?;
-    let (reader, writer) = sock.into_split();
-
-    let network = capnp_rpc::twoparty::VatNetwork::new(
-            tokio::io::BufReader::new(reader).compat(),
-            tokio::io::BufWriter::new(writer).compat_write(),
-            capnp_rpc::rpc_twoparty_capnp::Side::Client,
-            capnp::message::ReaderOptions::new()
-        );
-
-    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
-
-    let service: cli::cmd_line_inter::Client = rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+    let cap_socket = args.cap_socket.clone();
 
     if let Some(command) = args.command {
-        process_command(command, &socket).map(|_| {})
+        process_command(command, &socket, cap_socket).await.map(|_| {})
     } else {
-        run_cli(&socket)
+        run_cli(&socket, cap_socket).await
     }
 }
 
-fn run_cli(socket: &str) -> std::io::Result<()> {
+async fn run_cli(socket: &str, cap_socket: Option<String>) -> Result<(), capnp::Error> {
     loop {
         print!("> ");
         io::stdout().flush()?;
@@ -78,178 +54,574 @@ fn run_cli(socket: &str) -> std::io::Result<()> {
                 println!("Goodbye!");
                 return Ok(());
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                println!("{}", e);
+                return Err(capnp::Error::failed("Failed to read line".to_string()));
+            }
             Ok(_) => {
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
                 }
 
-                match parse_and_exec(line, socket) {
+                match parse_and_exec(line, socket, cap_socket.clone()).await {
                     Ok(quit) => {
                         if quit {
                             return Ok(());
                         }
                     }
-                    Err(err) => {
-                        println!("Failed to parse command \"{}\".  Error: {}", line, err);
-                    }
+                    Err(err) => match err.extra {
+                        // Quits the program if the specified port is not open
+                        ref val if *val == "No such file or directory (os error 2)".to_string() => {
+                            return Err(err)
+                        }
+                        _ => println!("Failed to parse command \"{}\".  Error: {}", line, err),
+                    },
                 }
             }
         }
     }
 }
 
-fn parse_and_exec(line: &str, socket: &str) -> std::io::Result<bool> {
+async fn parse_and_exec(line: &str, socket: &str, cap_socket: Option<String>) -> Result<bool, capnp::Error> {
     let args = shlex::split(line).ok_or(Error::other("Invalid quoting"))?;
     let cli = CliCommand::try_parse_from(args).map_err(|e| Error::other(e.to_string()))?;
 
-    process_command(cli.command, socket)
+    process_command(cli.command, socket, cap_socket).await
 }
 
-fn process_command(command: Commands, socket: &str) -> std::io::Result<bool> {
+async fn process_command(command: Commands, socket: &str, cap_socket: Option<String>) -> Result<bool, capnp::Error> {
+    // TODO handle error can't find sock here - need to change location because this was moved
+    let sock = tokio::net::UnixStream::connect(socket).await?;
+    let (reader, writer) = sock.into_split();
+
+    let network = capnp_rpc::twoparty::VatNetwork::new(
+        tokio::io::BufReader::new(reader).compat(),
+        tokio::io::BufWriter::new(writer).compat_write(),
+        capnp_rpc::rpc_twoparty_capnp::Side::Client,
+        capnp::message::ReaderOptions::new(),
+    );
+
+    let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+
+    let service: cli::cmd_line_inter::Client =
+        rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+
     // Commands that don't need any additional data can be sent right here, those
     // with extra info get sent in their handler funcs
     match command {
-        Commands::Echo => basic_command!(RpcCommands::Echo, socket)?,
+        Commands::Echo => echo_task(service, rpc_system).await?,
         Commands::Counters { reset } => {
             if reset {
-                basic_command!(RpcCommands::CountersReset, socket)?
+                counters_reset_task(service, rpc_system).await?
             } else {
-                basic_command!(RpcCommands::Counters, socket)?
+                counters_task(service, rpc_system).await?
             }
         }
         Commands::Capture(capture) => match capture.command {
-            CaptureCommands::SetFile { file_path } => handle_set_capture_file(file_path, socket)?,
-            CaptureCommands::CloseFile => basic_command!(RpcCommands::CloseCaptureFile, socket)?,
-            CaptureCommands::FlushFile => basic_command!(RpcCommands::FlushCaptureFile, socket)?,
-            CaptureCommands::SetProgram { program } => handle_set_capture_program(program, socket)?,
+            CaptureCommands::SetFile { file_path } => {
+                handle_set_capture_file(file_path, cap_socket)?
+            }
+            CaptureCommands::CloseFile => close_capture_file_task(service, rpc_system).await?,
+            CaptureCommands::FlushFile => flush_capture_file_task(service, rpc_system).await?,
+            CaptureCommands::SetProgram { program } => {
+                set_capture_program_task(service, rpc_system, program).await?
+            }
             CaptureCommands::DeleteProgram => {
-                basic_command!(RpcCommands::DeleteCaptureProgram, socket)?
+                delete_capture_program_task(service, rpc_system).await?
             }
             CaptureCommands::Sequence {
                 file_path,
                 duration,
                 program,
-            } => handle_capture_sequence(file_path, duration, program, &socket)?,
+            } => capture_sequence_task(service, rpc_system, file_path, duration, program).await?,
         },
-        Commands::Watch { interval } => handle_watch(interval, &socket)?,
+        Commands::Watch { interval } => watch_task(service, rpc_system, interval).await?,
         Commands::PerfSample {
             duration,
             frequency,
-        } => handle_perf_sample(duration, frequency, &socket)?,
-        Commands::Link(link) => handle_link_command(link, &socket)?,
-        Commands::Logging { logs } => handle_logging(logs, &socket)?,
+        } => perf_sample_task(service, rpc_system, duration, frequency).await?,
+        Commands::Link(link) => match link.command {
+            LinkCommands::Show { id: None } => show_link_summary_task(service, rpc_system).await?,
+            LinkCommands::Show { id: Some(id) } => show_link_task(service, rpc_system, id).await?,
+            LinkCommands::Configure { id } => configure_link_task(service, rpc_system, id).await?,
+            LinkCommands::Start { id } => start_link_task(service, rpc_system, id).await?,
+            LinkCommands::Stop { id } => stop_link_task(service, rpc_system, id).await?,
+            LinkCommands::Reset { id } => reset_link_task(service, rpc_system, id).await?,
+        },
+        Commands::Logging { logs } => change_logging_task(service, rpc_system, logs).await?,
         Commands::Quit => return Ok(true),
     }
 
     Ok(false)
 }
 
-fn basic_call_response_0(comm: RpcCommands, socket: &str) -> std::io::Result<()> {
-    let command_str = format!("{}\n", comm);
-    basic_call_response_impl(&command_str, socket)
+// TODO combine no arg tasks into one func w/ closure
+async fn echo_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+) -> Result<(), capnp::Error> {
+    // TODO perhaps make the localset around the whole match?
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+
+            let request = service.echo_request();
+
+            request.send().promise.await?;
+            println!("Echo received");
+
+            Ok(())
+        })
+        .await
 }
 
-fn basic_call_response_1<T: std::fmt::Display>(
-    comm: RpcCommands,
-    socket: &str,
-    arg: T,
-) -> std::io::Result<()> {
-    let command_str = format!("{} {}\n", comm, arg);
-    basic_call_response_impl(&command_str, socket)
+async fn counters_reset_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+
+            let request = service.reset_counters_request();
+
+            request.send().promise.await?;
+            println!("Counters Reset");
+
+            Ok(())
+        })
+        .await
 }
 
-fn basic_call_response_2<T1: std::fmt::Display, T2: std::fmt::Display>(
-    comm: RpcCommands,
-    socket: &str,
-    arg1: T1,
-    arg2: T2,
-) -> std::io::Result<()> {
-    let command_str = format!("{} {} {}\n", comm, arg1, arg2);
-    basic_call_response_impl(&command_str, socket)
+async fn counters_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+
+            let request = service.counters_request();
+
+            let response = request.send().promise.await?;
+            let results = response.get()?;
+            println!("Counters Reset");
+            println!("{}", results.get_counts()?.to_str()?);
+
+            Ok(())
+        })
+        .await
 }
 
-/// Handles basic call and response with the rpc_worker in the ph. Sends a string
-/// to the specified socket, reads and prints the response
-/// Opens and closes UnixStream
-/// Can be used directly in main for commands that don't have to send any additional data
-/// with the command, and can be invoked in helper functions for commands that require
-/// extra information to be send once a string with all the information to be sent is created.
-fn basic_call_response_impl(comm: &str, socket: &str) -> std::io::Result<()> {
-    let terminated_comm = comm.to_owned() + "\n";
-    let stream = &mut UnixStream::connect(socket).unwrap();
-    stream.write_all(terminated_comm.as_bytes())?;
-    stream.flush()?;
-    let mut response = String::new();
-    stream.read_to_string(&mut response)?;
-    println!("{response}");
+// TODO determine if possible to send FD through capnp or by some side channel
+#[allow(dead_code)]
+async fn set_capture_file_task(
+    _service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+    _file_path: String,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
 
-    Ok(())
+            // let mut request = service.set_capture_file_request();
+            // request
+            //     .get()
+            //     .init_file_path(file_path.len() as u32)
+            //     .push_str(&file_path);
+
+            // let response = request.send().promise.await?;
+            // let results = response.get()?;
+            // match results.get_result()?.which()? {
+            //     cli_proto::cli_capnp::success_or_error::Which::Success(_) => {
+            //         println!("Capture file set")
+            //     }
+            //     cli_proto::cli_capnp::success_or_error::Which::Error(e) => {
+            //         let result = e.unwrap().get_txt()?.to_string()?;
+            //         return Err(capnp::Error::failed(result));
+            //     }
+            // };
+            Ok(())
+        })
+        .await
 }
 
-/// Repeatedly opens UnixStream to make connection with PH, requests COUNTERS data,
-/// and prints the differences between the counts currently and the counts at the
-/// last sample
-/// Requires how many seconds to wait between samples
-// TODO should we also be handling ctrl+c in this function?
-fn handle_watch(interval: u64, socket: &str) -> std::io::Result<()> {
-    let mut values: Vec<u64> = Vec::new();
-    let sleep_time = Duration::new(interval, 0);
-    let mut first_run = true;
+async fn close_capture_file_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
 
-    loop {
-        let stream = &mut UnixStream::connect(socket).unwrap();
-        stream.write_all(format!("{}\n", RpcCommands::Counters).as_bytes())?;
-        stream.flush()?;
-        let mut response = String::new();
-        stream.read_to_string(&mut response)?;
-        stream.shutdown(Shutdown::Both)?;
+            let request = service.close_capture_file_request();
 
-        // Split up the long string with all the counts and words into a vector
-        // with each line as a different index of the vector
-        let counts: Vec<&str> = response.split('\n').collect(); // Split the messages
+            request.send().promise.await?;
+            println!("Capture file closed and capture program deleted");
 
-        if first_run {
-            values.resize(counts.len(), 0);
+            Ok(())
+        })
+        .await
+}
+
+async fn flush_capture_file_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+
+            let request = service.flush_capture_file_request();
+
+            request.send().promise.await?;
+            println!("Capture file flushed");
+
+            Ok(())
+        })
+        .await
+}
+
+/// Converts capture program into serialized format so that the RPC worker doesn't
+/// need to use the pcap library, and can just have knowledge of the serialized
+/// format and use exclusively cbpf-rs
+// TODO change parameters of set cap prog to take the actual bpf vals instead of string
+async fn set_capture_program_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+    program: Option<String>,
+) -> Result<(), capnp::Error> {
+    // Ensures that a program has properly been provided before sending message because
+    // there is no default program
+
+    match program {
+        Some(program) => {
+            tokio::task::LocalSet::new()
+                .run_until(async move {
+                    tokio::task::spawn_local(system);
+                    let serialized_program = serialize(&program);
+                    let mut request = service.set_capture_program_request();
+                    request
+                        .get()
+                        .init_program(serialized_program.len() as u32)
+                        .push_str(&serialized_program);
+
+                    let response = request.send().promise.await?;
+                    let results = response.get()?;
+                    match results.get_result()?.which()? {
+                        cli_proto::cli_capnp::success_or_error::Which::Success(_) => {
+                            println!("Capture program set")
+                        }
+                        cli_proto::cli_capnp::success_or_error::Which::Error(e) => {
+                            let result = e.unwrap().get_txt()?.to_string()?;
+                            println!("{result}");
+                            return Err(capnp::Error::failed(result));
+                        }
+                    };
+                    Ok(())
+                })
+                .await
         }
-
-        // TODO error checking, make sure actually got a message back, and that it's the correct message
-        for (n, count) in counts[1..].iter().enumerate() {
-            // split up the individual lines to get the count from the end and convert to u64
-            let one_line: Vec<&str> = count.split(':').collect();
-            match one_line[0] {
-                "OK" => break,
-                "Uptime" => println!("Uptime: {}", one_line[1]),
-                _ => {
-                    let mut num: String = one_line[1].to_string();
-                    num.remove(0);
-                    let num_packets: u64 = num.parse().unwrap();
-
-                    // calculate difference between current pkt nums and previous pkt nums
-                    let difference = num_packets - values[n];
-
-                    println!("{} increased by: {}", one_line[0], difference);
-                    values[n] = num_packets; // store new packet counts
-                }
-            }
-        }
-
-        first_run = false;
-        sleep(sleep_time);
+        // TODO probably not the best form to simply create a capnpn error out of other errors...
+        // perhaps create a cutom error type enum
+        // Or maybe this doesn't need to be an error - user could be able to continue putting in
+        // info after they do an incorrect prog, same if invalid program above
+        None => Err(capnp::Error::failed("No capture program set".to_string())),
     }
 }
 
-fn handle_perf_sample(duration: u64, frequency: u64, socket: &str) -> std::io::Result<()> {
-    basic_command!(RpcCommands::PerfSample, socket, duration, frequency)?;
+async fn delete_capture_program_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+) -> Result<(), capnp::Error> {
+    // TODO perhaps make the localset around the whole match?
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
 
+            let request = service.delete_capture_program_request();
+
+            request.send().promise.await?;
+            println!("Capture program deleted");
+
+            Ok(())
+        })
+        .await
+}
+
+async fn capture_sequence_task(
+    _service: svc::Client,
+    _system: capnp_rpc::RpcSystem<VatId>,
+    _file_path: String,
+    _time: u64,
+    _program: Option<String>,
+) -> Result<(), capnp::Error> {
+    // TODO
+    println!("Unimplemented");
     Ok(())
+}
+
+async fn watch_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+    interval: u64,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+
+            let mut values: Vec<u64> = Vec::new();
+            let sleep_time = Duration::new(interval, 0);
+            let mut first_run = true;
+
+            loop {
+                let request = service.counters_request();
+                let response = request.send().promise.await?;
+                let results = response.get()?.get_counts()?.to_string()?;
+
+                // Split up the long string with all the counts and words into a vector
+                // with each line as a different index of the vector
+                let counts: Vec<&str> = results.split('\n').collect(); // Split the messages
+
+                if first_run {
+                    values.resize(counts.len(), 0);
+                }
+
+                // TODO error checking, make sure actually got a message back, and that it's the correct message
+                for (n, count) in counts[0..].iter().enumerate() {
+                    // split up the individual lines to get the count from the end and convert to u64
+                    println!("line: {count}");
+                    let one_line: Vec<&str> = count.split(':').collect();
+                    match one_line[0] {
+                        "OK" => break,
+                        "Uptime" => println!("\nUptime: {}", one_line[1]),
+                        "Management counts" => println!("\nManagement counts:"),
+                        "Fastpath counts" => println!("\nFastpath counts: {}", one_line[1]),
+                        "" => (),
+                        _ => {
+                            let mut num: String = one_line[1].to_string();
+                            num.remove(0);
+                            let num_packets: u64 = num.parse().unwrap();
+
+                            // calculate difference between current pkt nums and previous pkt nums
+                            let difference = num_packets - values[n];
+
+                            println!("{} increased by: {}", one_line[0], difference);
+                            values[n] = num_packets; // store new packet counts
+                        }
+                    }
+                }
+
+                first_run = false;
+                sleep(sleep_time).await;
+            }
+        })
+        .await
+}
+
+async fn perf_sample_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+    duration: u64,
+    frequency: u64,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+            let mut request = service.perf_sample_request();
+            request.get().set_duration_secs(duration);
+            request.get().set_frequency_per_sec(frequency);
+
+            let response = request.send().promise.await?;
+            let results = response.get()?;
+            println!("{}", results.get_result()?.to_str()?);
+
+            Ok(())
+        })
+        .await
+}
+
+async fn show_link_summary_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+            let request = service.show_link_summary_request();
+
+            let response = request.send().promise.await?;
+            let results = response.get()?;
+            println!("{}", results.get_summary()?.to_str()?);
+
+            Ok(())
+        })
+        .await
+}
+
+async fn show_link_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+    id: u32,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+            let mut request = service.show_link_request();
+            request.get().set_id(id);
+
+            let response = request.send().promise.await?;
+            let results = response.get()?;
+            println!("{}", results.get_result()?.to_str()?);
+
+            Ok(())
+        })
+        .await
+}
+
+async fn configure_link_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+    id: u32,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+            let mut request = service.show_link_request();
+            request.get().set_id(id);
+
+            request.send().promise.await?;
+            println!("Command currently unsupported");
+
+            Ok(())
+        })
+        .await
+}
+
+async fn start_link_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+    id: u32,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+            let mut request = service.start_link_request();
+            request.get().set_id(id);
+
+            let response = request.send().promise.await?;
+            let results = response.get()?;
+            match results.get_result()?.which()? {
+                cli_proto::cli_capnp::success_or_error::Which::Success(_) => {
+                    println!("Link {id} started")
+                }
+                cli_proto::cli_capnp::success_or_error::Which::Error(e) => {
+                    let result = e.unwrap().get_txt()?.to_string()?;
+                    println!("{result}");
+                    return Err(capnp::Error::failed(result));
+                }
+            };
+
+            Ok(())
+        })
+        .await
+}
+
+async fn stop_link_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+    id: u32,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+            let mut request = service.stop_link_request();
+            request.get().set_id(id);
+
+            let response = request.send().promise.await?;
+            let results = response.get()?;
+            match results.get_result()?.which()? {
+                cli_proto::cli_capnp::success_or_error::Which::Success(_) => {
+                    println!("CLink {id} stopped")
+                }
+                cli_proto::cli_capnp::success_or_error::Which::Error(e) => {
+                    let result = e.unwrap().get_txt()?.to_string()?;
+                    println!("{result}");
+                    return Err(capnp::Error::failed(result));
+                }
+            };
+
+            Ok(())
+        })
+        .await
+}
+
+async fn reset_link_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+    id: u32,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+            let mut request = service.reset_link_request();
+            request.get().set_id(id);
+
+            request.send().promise.await?;
+            println!("Link reset");
+
+            Ok(())
+        })
+        .await
+}
+
+async fn change_logging_task(
+    service: svc::Client,
+    system: capnp_rpc::RpcSystem<VatId>,
+    logs: Vec<String>,
+) -> Result<(), capnp::Error> {
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            tokio::task::spawn_local(system);
+            // TODO convert logging to take a List instead of a string
+            let mut log_str = String::new();
+
+            for elem in logs {
+                log_str = format!("{} {}", log_str, elem);
+            }
+
+            let mut request = service.change_logging_request();
+            request
+                .get()
+                .init_logs(log_str.len() as u32)
+                .push_str(&log_str);
+
+            let response = request.send().promise.await?;
+            let results = response.get()?.get_result()?;
+            if results.has_applied() {
+                println!("Applied: {:?}", results.get_applied()?);
+            }
+            if results.has_ignored() {
+                println!("Ignored: {:?}", results.get_ignored()?);
+            }
+
+            Ok(())
+        })
+        .await
 }
 
 /// Opens a capture file, sends a message to the RPC worker to prepare to receive
 /// the file descriptor, upon receiving correct response, sends the fd as
 /// ancillary data, and awaits response again.
-fn handle_set_capture_file(file_path: String, socket: &str) -> std::io::Result<()> {
+#[allow(dead_code)]
+fn handle_set_capture_file(file_path: String, cap_socket: Option<String>) -> std::io::Result<()> {
+    if cap_socket.is_none() {
+        return Err(Error::other("No capture file socket")); 
+    }
+
+    let socket: &str = &cap_socket.unwrap();
+
     let file = OpenOptions::new()
         .write(true)
         .create(true)
@@ -295,68 +667,26 @@ fn handle_set_capture_file(file_path: String, socket: &str) -> std::io::Result<(
 
 /// Opens capture file, sets appropriate capture program, waits a designated
 /// amount of time, then closes the capture file (which also deletes the program)
-fn handle_capture_sequence(
-    file_path: String,
-    time: u64,
-    program: Option<String>,
-    socket: &str,
-) -> std::io::Result<()> {
-    let sleep_time = Duration::new(time, 0);
-    handle_set_capture_file(file_path, socket)?;
-    handle_set_capture_program(program, socket)?;
+// fn handle_capture_sequence(
+//     file_path: String,
+//     time: u64,
+//     program: Option<String>,
+//     socket: &str,
+// ) -> std::io::Result<()> {
+//     let sleep_time = Duration::new(time, 0);
+//     handle_set_capture_file(file_path, socket)?;
+//     handle_set_capture_program(program, socket)?;
 
-    let handler = Arc::new(CtrlcHandle::new());
-    let ctrlc_handler = handler.clone();
-    // Will set wait to false in CtrlcHandler if ctrl+c is pressed
-    ctrlc::set_handler(move || ctrlc_handler.set_false()).unwrap();
-    handler.timed_wait(sleep_time);
+//     let handler = Arc::new(CtrlcHandle::new());
+//     let ctrlc_handler = handler.clone();
+//     // Will set wait to false in CtrlcHandler if ctrl+c is pressed
+//     ctrlc::set_handler(move || ctrlc_handler.set_false()).unwrap();
+//     handler.timed_wait(sleep_time);
 
-    basic_command!(RpcCommands::CloseCaptureFile, socket)?;
+//     basic_command!(RpcCommands::CloseCaptureFile, socket)?;
 
-    Ok(())
-}
-
-/// Converts capture program into serialized format so that the RPC worker doesn't
-/// need to use the pcap library, and can just have knowledge of the serialized
-/// format and use exclusively cbpf-rs
-fn handle_set_capture_program(program: Option<String>, socket: &str) -> std::io::Result<()> {
-    // Ensures that a program has properly been provided before sending message because
-    // there is no default program
-    match program {
-        Some(program) => {
-            let serialized_program = serialize(&program);
-            basic_call_response_1(RpcCommands::SetCaptureProgram, &socket, serialized_program)?;
-        }
-        None => (),
-    };
-
-    Ok(())
-}
-
-fn handle_link_command(link_args: LinkArgs, socket: &str) -> std::io::Result<()> {
-    match link_args.command {
-        LinkCommands::Show { id: None } => basic_command!(RpcCommands::ShowLink, socket)?,
-        LinkCommands::Show { id: Some(id) } => basic_command!(RpcCommands::ShowLink, socket, id)?,
-        LinkCommands::Configure { id } => basic_command!(RpcCommands::ConfigureLink, socket, id)?,
-        LinkCommands::Start { id } => basic_command!(RpcCommands::StartLink, socket, id)?,
-        LinkCommands::Stop { id } => basic_command!(RpcCommands::StopLink, socket, id)?,
-        LinkCommands::Reset { id } => basic_command!(RpcCommands::ResetLink, socket, id)?,
-    }
-
-    Ok(())
-}
-
-fn handle_logging(vec: Vec<String>, socket: &str) -> std::io::Result<()> {
-    let mut new_str = String::new();
-
-    for elem in vec {
-        new_str = format!("{} {}", new_str, elem);
-    }
-
-    basic_command!(RpcCommands::SetLogging, socket, new_str)?;
-
-    Ok(())
-}
+//     Ok(())
+// }
 
 /// Uses combination of pcap and cbpf-rs libraries to serialize program
 /// into the following format:
@@ -381,11 +711,13 @@ fn serialize(program: &str) -> String {
     serialized_program
 }
 
+#[allow(dead_code)]
 struct CtrlcHandle {
     wait: Mutex<bool>,
     cv: Condvar,
 }
 
+#[allow(dead_code)]
 impl CtrlcHandle {
     pub fn new() -> Self {
         Self {

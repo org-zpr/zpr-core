@@ -14,12 +14,15 @@ use crate::logging::{levels, targets};
 use crate::test_packet::TestPacketMetrics;
 use crate::zdp::TerminateReason;
 use cbpf_rs;
+use cli_proto::cli_capnp as cli;
+use cli_proto::cli_capnp::cmd_line_inter as svc;
 use core::future::Future;
 use hdrhistogram::Histogram;
 use std::f64::consts::SQRT_2;
 use std::fmt::Write;
 use std::io::Error;
 use std::io::IoSliceMut;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -29,293 +32,423 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::oneshot::error::RecvError;
 use tokio::task::JoinSet;
 use tokio::time::interval;
+use tokio_util::compat::*;
 use tracing::error;
 use zpr::rpc_commands::RpcCommands;
 use zpr::LinkId;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
+use tracing::*;
 
-pub async fn launch(asm: Arc<Assembly>, socket: Arc<UnixListener>) {
-    let mut set = JoinSet::<Result<(), Error>>::new();
+pub async fn launch_capnp(
+    asm: Arc<Assembly>,
+    listener: UnixListener,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // let listener = tokio::net::UnixListener::bind(path)?;
 
-    // Continuously looks for a connection to the socket, allows for concurrent connections
-    loop {
-        tokio::select! {
-            // Collecting state of completed task ensures that return code doesn't
-            // just sit in JoinSet forever
-            Some(ret) = set.join_next() =>
-                match ret {
-                    Ok(Ok(())) => (),
-                    Ok(Err(err)) => error!(target: RPC, "Handle Connection Failed: {err}"),
-                    Err(err) => error!(target: RPC, "join_next panicked: {err}")
-                },
-            accepted = socket.accept() =>
-                match accepted {
-                    Ok((stream, _addr)) => {
-                        set.spawn_local(handle_connection(asm.clone(), stream));
-                    },
-                    Err(_e) => {
-                        error!(target: RPC, "Connection failed");
-                    }
+    tokio::task::LocalSet::new()
+        .run_until(async move {
+            loop {
+
+                let (sock, _addr) = listener.accept().await?;
+                // TODO add connect info to log
+                // println!("Connect from {addr:?}");
+                let (reader, writer) = sock.into_split();
+                let network = capnp_rpc::twoparty::VatNetwork::new(
+                    tokio::io::BufReader::new(reader).compat(),
+                    tokio::io::BufWriter::new(writer).compat_write(),
+                    capnp_rpc::rpc_twoparty_capnp::Side::Server,
+                    capnp::message::ReaderOptions::new(),
+                );
+
+                let service: svc::Client =
+                    capnp_rpc::new_client(AdminServiceImpl { asm: asm.clone() });
+
+                let rpc_system =
+                    capnp_rpc::RpcSystem::new(Box::new(network), Some(service.clone().client));
+                tokio::task::spawn_local(async move {
+                    let err = rpc_system.await;
+                    err
+                });
             }
-        }
-    }
+        })
+        .await
 }
 
-async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::io::Result<()> {
-    let mut str_message = String::new();
-
-    let split_buf = stream.split(); // split stream into read/write streams
-    let mut buf_reader = BufReader::new(split_buf.0);
-    let mut buf_writer = BufWriter::new(split_buf.1);
-    buf_reader.read_line(&mut str_message).await?;
-
-    let last_let = str_message.pop(); // Removes \n from end of string
-    if last_let != Some('\n') {
-        // close stream then skip the rest of the loop and moves to next iteration
-        buf_writer.shutdown().await?;
-    } else {
-        buf_writer.write("Message Received\n".as_bytes()).await?;
-
-        // Separate command from any other information associated with the command
-        let vec_message: Vec<&str> = str_message.split_whitespace().collect();
-        match RpcCommands::from_str(vec_message[0]) {
-            Ok(RpcCommands::CountersReset) => {
-                buf_writer
-                    .write_all(counters_reset(&asm).await.as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            Ok(RpcCommands::Counters) => {
-                buf_writer
-                    .write_all(counters(&asm).await.as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            Ok(RpcCommands::Echo) => {
-                buf_writer.write_all(echo(&asm).await.as_bytes()).await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            // PERF SAMPLE <DURATION> <FREQUENCY>
-            Ok(RpcCommands::PerfSample) => match vec_message.len() {
-                3 => {
-                    buf_writer
-                        .write_all(
-                            perf_sample(&asm, vec_message[1], vec_message[2])
-                                .await
-                                .as_bytes(),
-                        )
-                        .await?;
-                    buf_writer.write_all("OK\n".as_bytes()).await?
-                }
-                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
-            },
-            // SET-CAPTURE-FILE <file_path>
-            Ok(RpcCommands::SetCaptureFile) => {
-                // Tell debug tool we're ready for the ancillary data
-                buf_writer.write_all("SEND ANCILLARY\n".as_bytes()).await?;
-                buf_writer.flush().await?;
-
-                // Receive ancillary data
-                let mut ancillary_buffer = [0; config::ANCILLARY_BUFFER_SIZE];
-                let mut ancillary = SocketAncillary::new(&mut ancillary_buffer);
-                let mut buf = [0; 1]; // Must receive data sent with ancillary data
-                let bufs = &mut [IoSliceMut::new(&mut buf)][..];
-                buf_reader
-                    .into_inner()
-                    .as_ref()
-                    .recv_vectored_with_ancillary(bufs, &mut ancillary)
-                    .await?;
-
-                // Set capture file using ancillary data
-                buf_writer
-                    .write_all(set_capture_file(&asm, ancillary).await.as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            Ok(RpcCommands::FlushCaptureFile) => {
-                buf_writer
-                    .write_all(flush_capture_file(&asm).await.as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            Ok(RpcCommands::CloseCaptureFile) => {
-                buf_writer
-                    .write_all(close_capture_file(&asm).await.as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            // SET-CAPTURE-PROGRAM <program>
-            Ok(RpcCommands::SetCaptureProgram) => {
-                buf_writer
-                    .write_all(set_capture_program(&asm, str_message).as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            Ok(RpcCommands::DeleteCaptureProgram) => {
-                buf_writer
-                    .write_all(delete_capture_program(&asm).as_bytes())
-                    .await?;
-                buf_writer.write_all("OK\n".as_bytes()).await?
-            }
-            Ok(RpcCommands::ShowLink) => match vec_message.len() {
-                1 => {
-                    buf_writer
-                        .write_all(show_link_summary(&asm.clone()).as_bytes())
-                        .await?;
-                    buf_writer.write_all("OK\n".as_bytes()).await?
-                }
-                2 => match vec_message[1].parse::<u32>() {
-                    Ok(link_id) => {
-                        buf_writer
-                            .write_all(show_link(&asm.clone(), link_id).as_bytes())
-                            .await?;
-                        buf_writer.write_all("OK\n".as_bytes()).await?
-                    }
-                    Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
-                },
-                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
-            },
-            Ok(RpcCommands::ConfigureLink) => match vec_message.len() {
-                2 => match vec_message[1].parse::<u32>() {
-                    Ok(link_id) => {
-                        buf_writer
-                            .write_all(configure_link(&asm.clone(), link_id).as_bytes())
-                            .await?;
-                        buf_writer.write_all("OK\n".as_bytes()).await?
-                    }
-                    Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
-                },
-                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
-            },
-            Ok(RpcCommands::StartLink) => match vec_message.len() {
-                2 => match vec_message[1].parse::<u32>() {
-                    Ok(link_id) => {
-                        buf_writer
-                            .write_all(start_link(&asm.clone(), link_id).as_bytes())
-                            .await?;
-                        buf_writer.write_all("OK\n".as_bytes()).await?
-                    }
-                    Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
-                },
-                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
-            },
-            Ok(RpcCommands::StopLink) => match vec_message.len() {
-                2 => match vec_message[1].parse::<u32>() {
-                    Ok(link_id) => {
-                        buf_writer
-                            .write_all(stop_link(&asm.clone(), link_id).as_bytes())
-                            .await?;
-                        buf_writer.write_all("OK\n".as_bytes()).await?
-                    }
-                    Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
-                },
-                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
-            },
-            Ok(RpcCommands::ResetLink) => match vec_message.len() {
-                2 => match vec_message[1].parse::<u32>() {
-                    Ok(link_id) => {
-                        buf_writer
-                            .write_all(reset_link(&asm.clone(), link_id).await.as_bytes())
-                            .await?;
-                        buf_writer.write_all("OK\n".as_bytes()).await?
-                    }
-                    Err(_) => buf_writer.write_all("ERR\n".as_bytes()).await?,
-                },
-                _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
-            },
-            Ok(RpcCommands::SetLogging) => match vec_message.len() {
-                1 => buf_writer.write_all("ERR\n".as_bytes()).await?,
-                _ => {
-                    for elem in vec_message.iter().skip(1) {
-                        buf_writer.write_all(elem.as_bytes()).await?;
-                        buf_writer.write_all(" ".as_bytes()).await?;
-                        let key_val: Vec<&str> = elem.split("=").collect();
-                        match key_val.len() {
-                            2 => {
-                                if targets::ALL_TARGETS.contains(&key_val[0])
-                                    && levels::ALL_LEVELS
-                                        .contains(&key_val[1].to_uppercase().as_str())
-                                {
-                                    asm.logging
-                                        .lock()
-                                        .unwrap()
-                                        .insert(key_val[0].to_string(), key_val[1].to_uppercase());
-                                    buf_writer.write_all("applied\n".as_bytes()).await?
-                                } else {
-                                    buf_writer
-                                        .write_all("ERR: Unknown log value\n".as_bytes())
-                                        .await?
-                                }
-                            }
-                            _ => {
-                                buf_writer
-                                    .write_all("ERR Unknown log value ignored\n".as_bytes())
-                                    .await?
-                            }
-                        }
-                    }
-
-                    logging::reload_filter(&asm.reload_handle, &asm.logging.lock().unwrap());
-
-                    buf_writer.write_all("\nOK\n".as_bytes()).await?
-                }
-            },
-            _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
-        };
-
-        buf_writer.flush().await?;
-        buf_writer.shutdown().await?;
-    }
-
-    Ok(())
+pub async fn launch(asm: Arc<Assembly>, listener: UnixListener) {
+    match launch_capnp(asm.clone(), listener).await {
+        Ok(()) => println!("SUCCESS"), // TODO remove this print
+        Err(e) => println!("ERROR {}", e),
+    };
 }
 
-// Management functions for RPC worker, along with helper functions for the
-// management funcs
-
-async fn echo(_asm: &Assembly) -> String {
-    String::from("echo\n")
+struct AdminServiceImpl {
+    asm: Arc<Assembly>,
 }
 
-async fn counters(asm: &Assembly) -> String {
-    let mut counts: String = String::new();
-    let _ = write!(&mut counts, "Management counts:\n");
-    for (key, &ref value) in &asm.counters.management {
-        let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
+impl svc::Server for AdminServiceImpl {
+    fn echo(
+        &mut self,
+        _: svc::EchoParams,
+        _: svc::EchoResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        capnp::capability::Promise::from_future(async move {
+            // TODO add logging here and in the other commands
+            Ok(())
+        })
     }
 
-    for (i, fastpath) in asm.counters.fastpaths.lock().unwrap().iter().enumerate() {
-        let _ = write!(&mut counts, "Fastpath #{} counts:\n", i);
-        for (key, &ref value) in fastpath {
+    fn reset_counters(
+        &mut self,
+        _: svc::ResetCountersParams,
+        _: svc::ResetCountersResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+
+        capnp::capability::Promise::from_future(async move {
+            for value in task_asm.counters.management.values() {
+                value.reset();
+            }
+
+            for fastpath in task_asm.counters.fastpaths.lock().unwrap().iter() {
+                for value in fastpath.values() {
+                    value.reset();
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    fn counters(
+        &mut self,
+        _: svc::CountersParams,
+        mut results: svc::CountersResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let mut counts: String = String::new();
+        let _ = write!(&mut counts, "Management counts:\n");
+        for (key, &ref value) in &self.asm.counters.management {
             let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
         }
-    }
 
-    let _ = write!(
-        &mut counts,
-        "Uptime: {}.{} s\n",
-        asm.get_uptime().as_secs(),
-        asm.get_uptime().subsec_millis()
-    );
-
-    counts
-}
-
-async fn counters_reset(asm: &Assembly) -> String {
-    for value in asm.counters.management.values() {
-        value.reset();
-    }
-
-    for fastpath in asm.counters.fastpaths.lock().unwrap().iter() {
-        for value in fastpath.values() {
-            value.reset();
+        for (i, fastpath) in self
+            .asm
+            .counters
+            .fastpaths
+            .lock()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            let _ = write!(&mut counts, "Fastpath counts: #{}\n", i);
+            for (key, &ref value) in fastpath {
+                let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
+            }
         }
+
+        let _ = write!(
+            &mut counts,
+            "Uptime: {}.{} s\n",
+            self.asm.get_uptime().as_secs(),
+            self.asm.get_uptime().subsec_millis()
+        );
+        capnp::capability::Promise::from_future(async move {
+            let mut results_builder = results.get();
+            results_builder.set_counts(counts);
+
+            Ok(())
+        })
     }
 
-    String::from("counters_reset\n")
+    fn set_capture_file(
+        &mut self,
+        _: svc::SetCaptureFileParams,
+        _: svc::SetCaptureFileResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        ::capnp::capability::Promise::err(::capnp::Error::unimplemented(
+            "method cmd_line_inter::Server::set_capture_file not implemented".to_string(),
+        ))
+    }
+
+    fn close_capture_file(
+        &mut self,
+        _: svc::CloseCaptureFileParams,
+        _: svc::CloseCaptureFileResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+        capnp::capability::Promise::from_future(async move {
+            let _ = task_asm.capture_worker.close_capture_file().await;
+            task_asm.flow_control.delete_program();
+
+            Ok(())
+        })
+    }
+
+    fn flush_capture_file(
+        &mut self,
+        _: svc::FlushCaptureFileParams,
+        _: svc::FlushCaptureFileResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+        capnp::capability::Promise::from_future(async move {
+            let _ = task_asm.capture_worker.flush_capture_file().await;
+
+            Ok(())
+        })
+    }
+
+    fn set_capture_program(
+        &mut self,
+        params: svc::SetCaptureProgramParams,
+        mut results: svc::SetCaptureProgramResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+        capnp::capability::Promise::from_future(async move {
+            let program = params.get()?.get_program()?.to_str()?;
+            // Splits the rest of the string into the various instructions
+            let mut serialized_program: Vec<&str> = program.split(',').collect();
+            let mut insn_vec = Vec::new();
+            serialized_program.remove(0); // removes number of programs from beginning of vector
+
+            // Creates a vector of BpfInsns
+            for insn in serialized_program {
+                let split_insn: Vec<&str> = insn.split_whitespace().collect();
+                let bpf_insn = cbpf_rs::BpfInsn {
+                    code: split_insn[0].parse().unwrap(),
+                    jt: split_insn[1].parse().unwrap(),
+                    jf: split_insn[2].parse().unwrap(),
+                    k: split_insn[3].parse().unwrap(),
+                };
+                insn_vec.push(bpf_insn);
+            }
+
+            let results_builder = results.get().init_result();
+
+            match cbpf_rs::BpfProgram::validate(&insn_vec) {
+                Ok(final_program) => {
+                    task_asm.flow_control.set_program(final_program);
+                    let mut success_builder = results_builder.init_success();
+                    success_builder.set_none(());
+                }
+                _ => {
+                    let error_builder = results_builder.init_error();
+                    error_builder
+                        .init_txt("Invalid program".len() as u32)
+                        .push_str(&"Invalid program");
+                }
+            }
+
+            Ok(())
+        })
+    }
+
+    fn delete_capture_program(
+        &mut self,
+        _: svc::DeleteCaptureProgramParams,
+        _: svc::DeleteCaptureProgramResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+        capnp::capability::Promise::from_future(async move {
+            task_asm.flow_control.delete_program();
+
+            Ok(())
+        })
+    }
+
+    fn perf_sample(
+        &mut self,
+        _: svc::PerfSampleParams,
+        mut results: svc::PerfSampleResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        capnp::capability::Promise::from_future(async move {
+            let results_builder = results.get();
+            let response = format!("Not currently supported");
+            results_builder
+                .init_result(response.len() as u32)
+                .push_str(&response);
+
+            Ok(())
+        })
+    }
+
+    fn show_link_summary(
+        &mut self,
+        _: svc::ShowLinkSummaryParams,
+        mut results: svc::ShowLinkSummaryResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+        capnp::capability::Promise::from_future(async move {
+            let results_builder = results.get();
+            let mut response: String = String::new();
+            let _ = write!(&mut response, "Link summary:\n");
+
+            for id in task_asm.peer_ids.lock().unwrap().clone() {
+                let _ = write!(
+                    &mut response,
+                    "  {id}: {}\n",
+                    get_link_summary(&task_asm, id)
+                );
+            }
+
+            results_builder
+                .init_summary(response.len() as u32)
+                .push_str(&response);
+
+            Ok(())
+        })
+    }
+
+    fn show_link(
+        &mut self,
+        params: svc::ShowLinkParams,
+        mut results: svc::ShowLinkResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+        capnp::capability::Promise::from_future(async move {
+            let id = params.get()?.get_id();
+
+            let results_builder = results.get();
+            let response = match task_asm.peer_table.get(id) {
+                Some(peer) => {
+                    let lsm = &peer.link_state_machine;
+
+                    format!(
+                        "Link {id} info:\nSubstrate Address: {}\n{}",
+                        peer.substrate_addr, lsm,
+                    )
+                }
+                None => format!("No such link {id}\n"),
+            };
+
+            results_builder
+                .init_result(response.len() as u32)
+                .push_str(&response);
+
+            Ok(())
+        })
+    }
+
+    fn configure_link(
+        &mut self,
+        _: svc::ConfigureLinkParams,
+        _: svc::ConfigureLinkResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        capnp::capability::Promise::from_future(async move { Ok(()) })
+    }
+
+    fn start_link(
+        &mut self,
+        params: svc::StartLinkParams,
+        mut results: svc::StartLinkResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+        capnp::capability::Promise::from_future(async move {
+            let id = params.get()?.get_id();
+            let results_builder = results.get().init_result();
+
+            match task_asm.process_link_state_event(id, LinkEvent::Start) {
+                Ok(_) => {
+                    let mut success_builder = results_builder.init_success();
+                    success_builder.set_none(());
+                }
+                Err(e) => {
+                    let resp = format!("Failed to start link {}: {:?}\n", id, e);
+                    let error_builder = results_builder.init_error();
+                    error_builder.init_txt(resp.len() as u32).push_str(&resp);
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn stop_link(
+        &mut self,
+        params: svc::StopLinkParams,
+        mut results: svc::StopLinkResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+        capnp::capability::Promise::from_future(async move {
+            let id = params.get()?.get_id();
+            let results_builder = results.get().init_result();
+
+            match task_asm.process_link_state_event(id, LinkEvent::Close(TerminateReason::Other)) {
+                Ok(_) => {
+                    let mut success_builder = results_builder.init_success();
+                    success_builder.set_none(());
+                }
+                Err(e) => {
+                    let resp = format!("Failed to stop link {}: {:?}\n", id, e);
+                    let error_builder = results_builder.init_error();
+                    error_builder.init_txt(resp.len() as u32).push_str(&resp);
+                }
+            }
+            Ok(())
+        })
+    }
+
+    fn reset_link(
+        &mut self,
+        params: svc::ResetLinkParams,
+        _: svc::ResetLinkResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+        capnp::capability::Promise::from_future(async move {
+            let id = params.get()?.get_id();
+
+            task_asm.reset_peer(id).await;
+            Ok(())
+        })
+    }
+
+    fn change_logging(
+        &mut self,
+        params: svc::ChangeLoggingParams,
+        mut results: svc::ChangeLoggingResults,
+    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let task_asm = self.asm.clone();
+        capnp::capability::Promise::from_future(async move {
+            let log_state = params.get()?.get_logs()?.to_str()?;
+            let log_vec: Vec<&str> = log_state.split_whitespace().collect();
+            let mut applied: Vec<String> = Vec::new();
+            let mut ignored: Vec<String> = Vec::new();
+            for elem in log_vec.iter() {
+                let key_val: Vec<&str> = elem.split("=").collect();
+                match key_val.len() {
+                    2 => {
+                        if targets::ALL_TARGETS.contains(&key_val[0])
+                            && levels::ALL_LEVELS.contains(&key_val[1].to_uppercase().as_str())
+                        {
+                            task_asm
+                                .logging
+                                .lock()
+                                .unwrap()
+                                .insert(key_val[0].to_string(), key_val[1].to_uppercase());
+                            applied.push(elem.to_string());
+                        } else {
+                            ignored.push(elem.to_string());
+                        }
+                    }
+                    _ => {
+                        ignored.push(elem.to_string());
+                    }
+                }
+            }
+            logging::reload_filter(&task_asm.reload_handle, &task_asm.logging.lock().unwrap());
+
+            let mut results_builder = results.get().init_result();
+            if applied.len() > 0 {
+                let _ = results_builder.set_applied(applied.as_slice());
+            }
+            if ignored.len() > 0 {
+                let _ = results_builder.set_ignored(ignored.as_slice());
+            }
+
+            Ok(())
+        })
+    }
 }
 
+// This code will eventually be removed and the logic moved into perf_sample above
 /// Performs a performance sample on the PH by measuring the queue depths and the
 /// packet latencies throughout the system. Requires the duration of the
 /// sample as well as the number of samples per second.
@@ -483,55 +616,7 @@ async fn set_capture_file(asm: &Assembly, ancillary: SocketAncillary<'_>) -> Str
     }
 }
 
-async fn flush_capture_file(asm: &Assembly) -> String {
-    let _ = asm.capture_worker.flush_capture_file().await;
-
-    String::from("Capture file flushed\n")
-}
-
-async fn close_capture_file(asm: &Assembly) -> String {
-    let _ = asm.capture_worker.close_capture_file().await;
-    asm.flow_control.delete_program();
-
-    String::from("Capture file closed and capture program deleted\n")
-}
-
-/// Expects the entire string message sent to RPC worker, including the command
-fn set_capture_program(asm: &Assembly, str_message: String) -> String {
-    // Removes the command from the beginning of the str
-    let (_command, program) = str_message.split_once(' ').unwrap();
-    // Splits the rest of the string into the various instructions
-    let mut serialized_program: Vec<&str> = program.split(',').collect();
-    let mut insn_vec = Vec::new();
-    serialized_program.remove(0); // removes number of programs from beginning of vector
-
-    // Creates a vector of BpfInsns
-    for insn in serialized_program {
-        let split_insn: Vec<&str> = insn.split_whitespace().collect();
-        let bpf_insn = cbpf_rs::BpfInsn {
-            code: split_insn[0].parse().unwrap(),
-            jt: split_insn[1].parse().unwrap(),
-            jf: split_insn[2].parse().unwrap(),
-            k: split_insn[3].parse().unwrap(),
-        };
-        insn_vec.push(bpf_insn);
-    }
-
-    let mut return_message = format!("Program: {program} set\n");
-    match cbpf_rs::BpfProgram::validate(&insn_vec) {
-        Ok(final_program) => asm.flow_control.set_program(final_program),
-        _ => return_message = format!("Invalid program received, program not set\n"),
-    }
-
-    return_message
-}
-
-fn delete_capture_program(asm: &Assembly) -> String {
-    asm.flow_control.delete_program();
-
-    String::from("Program deleted\n")
-}
-
+// Helper for show_link_summary
 fn get_link_summary(asm: &Arc<Assembly>, link_id: LinkId) -> String {
     match asm.peer_table.get(link_id) {
         Some(peer) => format!(
@@ -541,53 +626,4 @@ fn get_link_summary(asm: &Arc<Assembly>, link_id: LinkId) -> String {
         ),
         None => format!("Unconfigured"),
     }
-}
-
-fn show_link_summary(asm: &Arc<Assembly>) -> String {
-    let mut links: String = String::new();
-    let _ = write!(&mut links, "Link summary:\n");
-
-    for id in asm.peer_ids.lock().unwrap().clone() {
-        let _ = write!(&mut links, "  {id}: {}\n", get_link_summary(asm, id));
-    }
-
-    links
-}
-
-fn show_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
-    match asm.peer_table.get(link_id) {
-        Some(peer) => {
-            let lsm = &peer.link_state_machine;
-
-            format!(
-                "Link {link_id} info:
-  Substrate Address: {}\n{}",
-                peer.substrate_addr, lsm,
-            )
-        }
-        None => format!("No such link {link_id}\n"),
-    }
-}
-
-fn configure_link(_asm: &Arc<Assembly>, _link_id: LinkId) -> String {
-    format!("Command currently unsupported\n")
-}
-
-fn start_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
-    match asm.process_link_state_event(link_id, LinkEvent::Start) {
-        Ok(_) => format!("Link {} started\n", link_id),
-        Err(e) => format!("Failed to start link {}: {:?}\n", link_id, e),
-    }
-}
-
-fn stop_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
-    match asm.process_link_state_event(link_id, LinkEvent::Close(TerminateReason::Other)) {
-        Ok(_) => format!("Link {} stopped\n", link_id),
-        Err(e) => format!("Failed to stop link {}: {:?}\n", link_id, e),
-    }
-}
-
-async fn reset_link(asm: &Arc<Assembly>, link_id: LinkId) -> String {
-    asm.reset_peer(link_id).await;
-    format!("Link {} reset\n", link_id)
 }

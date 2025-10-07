@@ -19,7 +19,8 @@ capnp = "0.21"
 capnp-rpc = "0.21"
 tokio = { version = "1.37.0", features = ["macros", "rt", "rt-multi-thread", "io-util", "time", "net"] }
 tokio-util = { version = "0.7.11", features = ["compat"] }
-cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.1.0" }
+cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.1.1" }
+# cli-proto = { path = "../../../zpr-admin-api-rs" }
 
 [features]
 complete = ["clap_complete"]

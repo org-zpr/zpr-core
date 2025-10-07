@@ -33,6 +33,7 @@ if [ ! -e "$VS_BIN" ]; then
 fi
 
 NODE_SOCK=node.sock
+NODE_CAP_SOCK=cap.sock
 VS_SOCK=vs.sock
 ADAPTER1_SOCK=adapter1.sock
 ADAPTER2_SOCK=adapter2.sock
@@ -48,10 +49,10 @@ function set_program() {
   SOCKET=$1
   FILE_NAME=$2
   PROGRAM=$3
-  "$PH_DEBUG_BIN" -p "$SOCKET" capture set-file "$FILE_NAME"
+  "$PH_DEBUG_BIN" -p "$SOCKET" -c "$NODE_CAP_SOCK" capture set-file "$FILE_NAME"
 
   if [ "$PROGRAM" != "None" ]; then
-    "$PH_DEBUG_BIN" -p "$SOCKET" capture set-program "$PROGRAM"
+    "$PH_DEBUG_BIN" -p "$SOCKET" -c "$NODE_CAP_SOCK" capture set-program "$PROGRAM"
   fi
 }
 
@@ -113,6 +114,7 @@ sudo -E ip netns exec zpr-node sudo -E -u "$ZPR_USER" "$PH_BIN" \
   node \
   --logging "$DEBUG_TARGETS" \
   --control-path "$NODE_SOCK" \
+  --capture-path "$NODE_CAP_SOCK" \
   --self-addr 0.0.0.0:12345 \
   --ca-file ca.crt \
   --certificate-file node.crt \

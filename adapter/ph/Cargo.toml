@@ -44,7 +44,8 @@ zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "ze
 serde_json = "1.0.140"
 url = "2.5.4"
 clap_complete = { version = "4.5.57", optional = true}
-cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.1.0" }
+cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.1.1" }
+# cli-proto = { path = "../../../zpr-admin-api-rs" }
 capnp = "0.21"
 capnp-rpc = "0.21"
 

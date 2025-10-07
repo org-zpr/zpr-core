@@ -18,6 +18,7 @@ use tracing::*;
 mod adapter_manager_worker;
 mod adapter_tables;
 mod address_pool;
+mod set_capture_file_worker;
 mod admin_worker;
 mod assembly;
 mod auth;
@@ -73,7 +74,6 @@ mod zdp_ll;
 mod zdpr;
 mod zdpr_worker;
 mod zprtun;
-mod admin_worker2;
 
 #[cfg(test)]
 mod km_testdata;
@@ -226,10 +226,23 @@ fn main() -> ExitCode {
             }
         })
         .unwrap();
-    let control_socket = Arc::new(
-        UnixListener::bind(&config.control_path).expect("failed to bind to control socket"),
-    );
+    let control_socket = 
+        UnixListener::bind(&config.control_path).expect("failed to bind to control socket");
     info!(target: STARTUP, "control socket bound to {:?}", config.control_path);
+
+    fs::remove_file(&config.capture_path)
+        .or_else(|e| {
+            if e.kind() == ErrorKind::NotFound {
+                Ok(())
+            } else {
+                Err(e)
+            }
+        })
+        .unwrap();
+    let capture_socket = Arc::new(
+        UnixListener::bind(&config.capture_path).expect("failed to bind to capture socket"),
+    );
+    info!(target: STARTUP, "capture socket bound to {:?}", config.capture_path);
 
     //
     // open TUN devices and actor requeue sockets
@@ -565,8 +578,11 @@ fn main() -> ExitCode {
     js.spawn_local(signal_worker::launch(asm.clone()));
     js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq));
     js.spawn_local(adapter_manager_worker::launch(asm.clone(), am_outq));
-    // js.spawn_local(admin_worker::launch(asm.clone(), control_socket.clone()));
-    js.spawn_local(admin_worker2::launch(asm.clone(), control_socket.clone()));
+    js.spawn_local(set_capture_file_worker::launch(asm.clone(), capture_socket.clone()));
+    js.spawn_local(admin_worker::launch(
+        asm.clone(),
+        control_socket
+    ));
     js.spawn_local(km_multiplexor::launch_signal_worker(
         asm.clone(),
         km_sig_outq,

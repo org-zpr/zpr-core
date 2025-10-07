@@ -61,6 +61,9 @@ pub struct CommonArgs {
     #[arg(long, value_name = "DOMAIN_SOCKET_PATH")]
     pub control_path: Option<String>,
 
+    #[arg(long, value_name = "CAPTURE_FILE_SOCKET_PATH")]
+    pub capture_path: Option<String>,
+
     /// For a node this is listen substrate address for dock,
     /// for adapter it is best to leave this at its default setting (0.0.0.0:0)
     ///
