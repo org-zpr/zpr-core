@@ -31,13 +31,13 @@ pub async fn launch(
 }
 
 // RFC 6.5 § 6.3.11
-async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
+async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
     let five_tuple = pkt.metadata().five_tuple();
 
     // if there's already an entry, this is a duplicate request
     // (NOTE: we should be the only ones modifying this table!)
     if asm.alt.get(five_tuple).is_some() {
-        mgmt::core::count_event(asm, &mut pkt, ManagementCounterType::DroppedAwaitingBind);
+        mgmt::core::count_event(asm, ManagementCounterType::DroppedAwaitingBind);
         return;
     }
 
@@ -51,7 +51,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, mut pkt: Packet) {
 
     if dock_link_id != zpr::LINK_ID_UNKNOWN && !asm.is_link_ready(dock_link_id) {
         debug!(target: FLOW_MGMT, "Link {dock_link_id} is not ready to receive traffic yet");
-        mgmt::core::count_event(asm, &mut pkt, ManagementCounterType::DroppedNoSA);
+        mgmt::core::count_event(asm, ManagementCounterType::DroppedNoSA);
         return;
     }
 

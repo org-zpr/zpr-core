@@ -157,7 +157,7 @@ pub enum LinkEvent {
     AuthenticationSuccess(auth::ZdpAuthCodeBlob), // From an authentication service
     AuthenticationFailure,                        // From an authentication service
 
-    ReceivedEchoResponse { sequence_number: u16 },
+    ReceivedEchoResponse,
     ReceivedAuthorizeResponse(IpAddress), // from visa service
     ReceivedKeepAliveResponse,
     ReceivedTerminateRequest(TerminateReason),
@@ -414,7 +414,7 @@ impl LinkStateWrapper {
         event: LinkEvent,
     ) -> Result<(), LinkStateError> {
         match event {
-            LinkEvent::ReceivedEchoResponse { sequence_number: _ } => {
+            LinkEvent::ReceivedEchoResponse => {
                 trace!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id)
             }
             _ => debug!(target: LINK_STATE, "Link {}: *EVENT* {event:?}", self.id),
@@ -487,7 +487,7 @@ impl LinkStateWrapper {
                 } else {
                     // TODO: See issue ( https://github.com/org-zpr/zpr-core/issues/930 ).
                     // In practice this error happens fairly regularly.
-                    if matches!(ev, LinkEvent::ReceivedEchoResponse { .. }) {
+                    if matches!(ev, LinkEvent::ReceivedEchoResponse) {
                         warn!(target: LINK_STATE, "received echo-response with listened_for=false, continuing...");
                         Ok(())
                     } else {
@@ -603,7 +603,7 @@ impl LinkStateWrapper {
 
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
-            let _seqnum = mgmt::requests::send_hello_request(asm, self.id);
+            mgmt::requests::send_hello_request(asm, self.id).enqueue();
             self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
             debug!(
                 target: LINK_STATE,
@@ -1291,7 +1291,7 @@ impl LinkStateWrapper {
             payload = auth::ZdpInitAuthenticationPayload::default(); // empty
         }
 
-        mgmt::requests::send_init_authentication_request(asm, link_id, flags, payload);
+        mgmt::requests::send_init_authentication_request(asm, link_id, flags, payload).enqueue();
     }
 
     /// Send the Grant message
@@ -1307,7 +1307,8 @@ impl LinkStateWrapper {
             self.id,
             ResponseCode::Success,
             &ipaddrs,
-        );
+        )
+        .enqueue();
     }
 
     /// Run the HTTPS authentication process in a tokio task.
@@ -1408,7 +1409,8 @@ impl LinkStateWrapper {
             self.id,
             requesting_addrs,
             Some(blob.as_bytes()),
-        );
+        )
+        .enqueue();
     }
 
     fn process_error_response(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
@@ -1509,7 +1511,7 @@ impl LinkStateWrapper {
             }
 
             (LinkType::AdapterToNode, LinkState::Helloing) => {
-                mgmt::requests::send_hello_request(asm, self.id);
+                mgmt::requests::send_hello_request(asm, self.id).enqueue();
             }
 
             // Programming error!
@@ -1617,7 +1619,7 @@ impl LinkStateWrapper {
             &mut locked_fsm,
             config::DEFAULT_TERMINATE_RESPONSE_TIMER,
         );
-        mgmt::requests::send_terminate_request(asm, self.id, reason);
+        mgmt::requests::send_terminate_request(asm, self.id, reason).enqueue();
         Ok(())
     }
 
@@ -1694,7 +1696,7 @@ impl LinkStateWrapper {
             (LinkState::Closing, _) => {
                 locked_fsm.silent = false;
                 locked_fsm.set_state(LinkState::Inactive);
-                info!("Link {link_id} has fully shut down");
+                info!(target: LINK_STATE, "Link {link_id} has fully shut down");
                 if !locked_fsm.shutting_down {
                     drop(locked_fsm);
                     self.setup_restart(asm);
@@ -1705,6 +1707,7 @@ impl LinkStateWrapper {
             }
             _ => {
                 error!(
+                    target: LINK_STATE,
                     "Link {link_id} tried to close from state {:?}",
                     locked_fsm.state
                 );
@@ -1737,7 +1740,7 @@ impl LinkStateWrapper {
             .lock()
             .unwrap()
             .set_state(LinkState::Resetting);
-        mgmt::requests::send_terminate_indication(asm, link_id, TerminateReason::Reset);
+        mgmt::requests::send_terminate_indication(asm, link_id, TerminateReason::Reset).enqueue();
         let _ = self.clean_up_link_state(asm).join_all().await;
     }
 
@@ -1805,21 +1808,19 @@ impl LinkStateWrapper {
 
                 let mut recv = task_events.subscribe();
 
-                let sent_seq_num = mgmt::requests::send_echo_request(&task_asm, link_id);
-                let expected_seq_num = (sent_seq_num & 0xffff) as u16;
+                if mgmt::requests::send_echo_request(&task_asm, link_id)
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
 
                 let got_response =
                     tokio::time::timeout(config::DEFAULT_REQUEST_RETRY_TIMER,
                         async {
                             loop {
                                 match recv.recv().await {
-                                    Ok(LinkEvent::ReceivedEchoResponse { sequence_number: recvd_seq_num }) => {
-                                        if recvd_seq_num == expected_seq_num {
-                                            break true;
-                                        } else {
-                                            debug!(target: LINK_STATE, "Link {link_id} saw echo response {recvd_seq_num} while waiting for {expected_seq_num}");
-                                        }
-                                    }
+                                    Ok(LinkEvent::ReceivedEchoResponse) => break true,
 
                                     Ok(_) => (),
 

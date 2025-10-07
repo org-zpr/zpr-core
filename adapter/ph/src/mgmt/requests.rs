@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use super::core;
+use super::core::{self, Sent};
 use crate::counters::ManagementCounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
@@ -19,12 +19,7 @@ use zpr::{self, L3TypeDeriveable};
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 /// send a Key Management message (RFC 6.5 § 6.2.8)
-pub fn send_key_management(
-    asm: &Assembly,
-    link_id: zpr::LinkId,
-    km_id: zpr::KmId,
-    payload: &[u8],
-) -> zpr::SeqNum {
+pub fn send_key_management(asm: &Assembly, link_id: zpr::LinkId, km_id: zpr::KmId, payload: &[u8]) {
     let mut pkt = core::new_heap_packet();
 
     let km_hdr = pkt.alloc_zeroed_header::<zdp::ZdpKeyManagementHeader>();
@@ -33,17 +28,23 @@ pub fn send_key_management(
 
     pkt.put(payload);
 
-    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::KeyManagement, pkt)
+    let hdr = pkt.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+    hdr.packet_type = zdp::ZdpPacketType::KeyManagement;
+
+    // bypass ZDPR
+    let _ = asm
+        .mgmt_substrate_egress
+        .try_enqueue_packet(link_id, &mut pkt);
 }
 
 /// send a Discard message (RFC 6.5 § 6.3.1)
-pub fn send_discard(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
+pub fn send_discard(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
     let pkt = core::new_heap_packet();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt)
 }
 
 /// send an Echo Request (RFC 6.5 § 6.3.2)
-pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
+pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
     pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::EchoRequest, pkt)
@@ -54,7 +55,7 @@ pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
 /// Originally this was used to send the pre-configured ZPR address of the
 /// remote adapter into the node.  This is no longer necessary.
 ///
-pub fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> zpr::SeqNum {
+pub fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
     let req = core::new_heap_packet();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, req)
 }
@@ -75,7 +76,7 @@ pub fn send_init_authentication_request(
     link_id: zpr::LinkId,
     flags: u8,
     payload: auth::ZdpInitAuthenticationPayload,
-) -> zpr::SeqNum {
+) -> Sent<'_> {
     debug!(target: ZDP, "Link {link_id}: sending InitAuthenticationRequest, flags: {flags:x?}");
 
     let mut req = core::new_heap_packet();
@@ -108,12 +109,12 @@ pub fn send_init_authentication_request(
 ///
 /// ## Panics
 /// - Panics if all requested addresses are not the same IP version.
-pub fn send_acquire_zpr_address_request(
-    asm: &Assembly,
+pub fn send_acquire_zpr_address_request<'a>(
+    asm: &'a Assembly,
     link_id: zpr::LinkId,
-    actor_addrs: &[IpAddr],
-    blob: Option<&[u8]>,
-) -> zpr::SeqNum {
+    actor_addrs: &'_ [IpAddr],
+    blob: Option<&'_ [u8]>,
+) -> Sent<'a> {
     let blob = blob.unwrap_or_default();
 
     let mut req = core::new_heap_packet();
@@ -168,12 +169,12 @@ pub fn send_acquire_zpr_address_request(
 ///
 /// ## Panics
 /// - Panics if all granted addresses are not the same IP version.
-pub fn send_grant_zpr_address_request(
-    asm: &Assembly,
+pub fn send_grant_zpr_address_request<'a>(
+    asm: &'a Assembly,
     link_id: zpr::LinkId,
     status_code: zdp::ResponseCode,
-    actor_addrs: &[IpAddr],
-) -> zpr::SeqNum {
+    actor_addrs: &'_ [IpAddr],
+) -> Sent<'a> {
     info!(target: ZDP, "Link {link_id} - sending GrantZprAddressRequest, status: {status_code:?}");
 
     let mut req = core::new_heap_packet();
@@ -223,7 +224,7 @@ pub fn send_terminate_request<'a, 'pktbuf>(
     asm: &Assembly,
     link_id: zpr::LinkId,
     reason: zdp::TerminateReason,
-) -> zpr::SeqNum {
+) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
     pkt.push_header(&zdp::ZdpTerminateLinkRequestHeader {
         reason_code: reason,
@@ -237,7 +238,7 @@ pub fn send_terminate_indication<'a, 'pktbuf>(
     asm: &Assembly,
     link_id: zpr::LinkId,
     reason: zdp::TerminateReason,
-) -> zpr::SeqNum {
+) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
     let hdr = pkt.alloc_zeroed_header::<zdp::ZdpTerminateLinkIndicationHeader>();
     hdr.reason_code = reason;
@@ -291,7 +292,7 @@ pub async fn send_bind_actor_address_request(
     match response {
         Ok((tether_id, mut resp)) => {
             let Ok(hdr) = zdp::ZdpBindActorAddressResponseHeader::read_from_buf(&mut resp) else {
-                core::count_event(asm, &mut resp, ManagementCounterType::BadStructure);
+                core::count_event(asm, ManagementCounterType::BadStructure);
                 return Err(BindActorAddressError::BadStructure);
             };
 
@@ -300,12 +301,12 @@ pub async fn send_bind_actor_address_request(
 
                 zdp::ResponseCode::Other => {
                     if hdr.info_len as usize > resp.remaining() {
-                        core::count_event(asm, &mut resp, ManagementCounterType::BadStructure);
+                        core::count_event(asm, ManagementCounterType::BadStructure);
                         return Err(BindActorAddressError::BadStructure);
                     }
 
                     let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
-                        core::count_event(asm, &mut resp, ManagementCounterType::BadStructure);
+                        core::count_event(asm, ManagementCounterType::BadStructure);
                         return Err(BindActorAddressError::BadStructure);
                     };
                     let msg: Box<str> = msg.into();
@@ -314,7 +315,7 @@ pub async fn send_bind_actor_address_request(
                 }
 
                 _ => {
-                    core::count_event(asm, &mut resp, ManagementCounterType::BadStructure);
+                    core::count_event(asm, ManagementCounterType::BadStructure);
                     Err(BindActorAddressError::BadStructure)
                 }
             }
@@ -325,7 +326,7 @@ pub async fn send_bind_actor_address_request(
 }
 
 /// send a Report message (RFC 6.5 § 6.3.13)
-pub fn send_report(asm: &Assembly, link_id: zpr::LinkId, report: &str) -> zpr::SeqNum {
+pub fn send_report<'a>(asm: &'a Assembly, link_id: zpr::LinkId, report: &'_ str) -> Sent<'a> {
     // TODO this condition will need to be adjusted when we have complete ZPR packets
     // with the information at the end of the packet at well
     /*if packet::PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < report.len() {

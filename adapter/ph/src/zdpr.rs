@@ -13,13 +13,13 @@
 
 use enum_map::{Enum, EnumMap};
 use std::collections::VecDeque;
-use std::task::{Context, Poll, Waker};
+use std::task::{ready, Context, Poll, Waker};
 use zpr::SeqNum;
 
-/// Reify the truncated sequence number into an offset relative to the
-/// reference sequence number, under the assumption that it is within a
-/// window centered on the highest seen value thus far.
-fn reify_seq_num_relative(reference: SeqNum, sn: u16) -> i64 {
+/// Reify the truncated sequence number relative to the reference sequence
+/// number, under the assumption that it is within a window centered on the
+/// highest seen value thus far.
+fn reify_seq_num(reference: SeqNum, sn: u16) -> SeqNum {
     // We operate under the assumption that the difference between the
     // true sequence number and `reference` is in the range [-2^15, 2^15).
 
@@ -28,8 +28,9 @@ fn reify_seq_num_relative(reference: SeqNum, sn: u16) -> i64 {
     // this difference.
     let diff = sn.wrapping_sub(reference as u16);
 
-    // Convert the 16-bit 2s-complement value into a 64-bit signed value.
-    (diff as i16) as i64
+    // Convert the 16-bit 2s-complement value into a 64-bit signed value
+    // and add back to the reference.
+    reference.wrapping_add_signed((diff as i16) as i64)
 }
 
 /// Truncate a sequence number to 16 bits for sending over the ether.
@@ -201,7 +202,9 @@ impl<Pkt> Sender<Pkt> {
         !self.blocked.is_empty()
     }
 
-    /// Returns whether the given queued packet has been sent.
+    /// Returns whether the given non-cancelled queued packet has been sent.
+    ///
+    /// Result is undefined if packet has been cancelled.
     pub fn is_sent(&self, id: QueuedPacketId) -> bool {
         let offset = id.wrapping_sub(self.last_enqueued) as i64;
         -offset >= self.blocked.len() as i64
@@ -270,10 +273,9 @@ impl<Pkt> Sender<Pkt> {
     /// Implementation of `Future::poll` to wait for acknowledgement
     /// of a given packet which may not yet be sent.
     pub fn poll_send_and_ack(&mut self, cx: &mut Context<'_>, id: QueuedPacketId) -> Poll<()> {
-        match self.poll_send(cx, id) {
-            Poll::Ready(Some(sn)) => self.poll_ack(cx, sn),
-            Poll::Ready(None) => Poll::Ready(()),
-            Poll::Pending => Poll::Pending,
+        match ready!(self.poll_send(cx, id)) {
+            Some(sn) => self.poll_ack(cx, sn),
+            None => Poll::Ready(()),
         }
     }
 
@@ -295,7 +297,7 @@ impl<Pkt> Sender<Pkt> {
     /// should therefore schedule a timer to retry sending packets if one is
     /// not already scheduled.
     pub fn enqueue_packet(&mut self, packet: Pkt) -> EnqueueResult<'_, Pkt> {
-        if self.is_blocked() {
+        if self.is_blocked() || self.has_blocked_packets() {
             self.last_enqueued = self.last_enqueued.wrapping_add(1);
             self.blocked
                 .push_back(Some((packet, Waker::noop().clone())));
@@ -346,14 +348,16 @@ impl<Pkt> Sender<Pkt> {
     /// Expand a truncated sequence number to a full sequence number,
     /// with reference to the most recently sent packet.
     pub fn reify_seq_num(&self, sn: u16) -> SeqNum {
-        self.last_sent
-            .wrapping_add_signed(reify_seq_num_relative(self.last_sent, sn))
+        reify_seq_num(self.last_sent, sn)
     }
 
     /// Lookup the sequence number of a packet which had been queued
     /// and has now been sent.
     ///
-    /// If the packet has already been acknowledged, `None` is returned.
+    /// If the packet has already been acknowledged `None` is returned.
+    ///
+    /// Panics if the packet has not yet been sent (check `is_sent()` before calling).
+    /// Result is undefined if packet has been cancelled.
     pub fn lookup_seq_num(&self, id: QueuedPacketId) -> Option<SeqNum> {
         let offset = id.wrapping_sub(self.last_enqueued) as i64 + self.blocked.len() as i64;
         assert!(offset <= 0, "lookup of packet which has not yet been sent");
@@ -450,9 +454,9 @@ impl<Pkt> Sender<Pkt> {
         !self.unacked.is_empty()
     }
 
-    /// Retrieve the list of packets which need to be retried,
-    /// and mark them as having been retried.  The caller
-    /// should send each packet returned (recreating it using the
+    /// Retrieve the list of packets which need to be retried.
+    ///
+    /// The caller should send each packet returned (recreating it using the
     /// provided sequence number if required).
     pub fn retry_packets(&mut self) -> impl Iterator<Item = (SeqNum, &mut Pkt)> {
         let sn_base = self
@@ -615,8 +619,7 @@ impl Receiver {
 
     /// Reify the truncated sequence number into a full sequence number.
     pub fn reify_seq_num(&self, sn: u16) -> SeqNum {
-        self.highest_seen
-            .wrapping_add_signed(reify_seq_num_relative(self.highest_seen, sn))
+        reify_seq_num(self.highest_seen, sn)
     }
 
     fn oldest_unrecvd_offset(&self) -> i64 {
@@ -650,7 +653,7 @@ impl Receiver {
             return Disposition::AckAndProcess;
         }
 
-        if (self.recvd >> -offset) & 1 != 0 {
+        if (self.recvd >> -offset) & 1 == 0 {
             // Old, but within our window.  Accept and mark.
             self.stats[ReceiverStat::OutOfOrder] += 1;
             self.recvd |= 1 << -offset;
@@ -669,29 +672,554 @@ impl Receiver {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::reify_seq_num_relative;
+mod global_tests {
+    use super::reify_seq_num;
 
     #[test]
     fn test_reify() {
-        assert_eq!(reify_seq_num_relative(0x2000, 0x2000), 0);
-        assert_eq!(reify_seq_num_relative(0x2000, 0x2001), 1);
-        assert_eq!(reify_seq_num_relative(0x2000, 0x1FFF), -1);
-        assert_eq!(reify_seq_num_relative(0x2000, 0x3000), 0x1000);
-        assert_eq!(reify_seq_num_relative(0x2000, 0x1000), -0x1000);
-        assert_eq!(reify_seq_num_relative(0x2000, 0x9000), 0x7000);
-        assert_eq!(reify_seq_num_relative(0x2000, 0xF000), -0x3000);
-        assert_eq!(reify_seq_num_relative(0x2000, 0xB000), -0x7000);
-        assert_eq!(reify_seq_num_relative(0x2000, 0xA000), -0x8000);
+        assert_eq!(reify_seq_num(0x12342000, 0x2000), 0x12342000);
+        assert_eq!(reify_seq_num(0x12342000, 0x2001), 0x12342001);
+        assert_eq!(reify_seq_num(0x12342000, 0x1FFF), 0x12341FFF);
+        assert_eq!(reify_seq_num(0x12342000, 0x3000), 0x12343000);
+        assert_eq!(reify_seq_num(0x12342000, 0x1000), 0x12341000);
+        assert_eq!(reify_seq_num(0x12342000, 0x9000), 0x12349000);
+        assert_eq!(reify_seq_num(0x12342000, 0xF000), 0x1233F000);
+        assert_eq!(reify_seq_num(0x12342000, 0xB000), 0x1233B000);
+        assert_eq!(reify_seq_num(0x12342000, 0xA000), 0x1233A000);
 
-        assert_eq!(reify_seq_num_relative(0xE000, 0xE000), 0);
-        assert_eq!(reify_seq_num_relative(0xE000, 0xDFFF), -1);
-        assert_eq!(reify_seq_num_relative(0xE000, 0xE001), 1);
-        assert_eq!(reify_seq_num_relative(0xE000, 0xD000), -0x1000);
-        assert_eq!(reify_seq_num_relative(0xE000, 0xF000), 0x1000);
-        assert_eq!(reify_seq_num_relative(0xE000, 0x7000), -0x7000);
-        assert_eq!(reify_seq_num_relative(0xE000, 0x1000), 0x3000);
-        assert_eq!(reify_seq_num_relative(0xE000, 0x5000), 0x7000);
-        assert_eq!(reify_seq_num_relative(0xE000, 0x6000), -0x8000);
+        assert_eq!(reify_seq_num(0x1234E000, 0xE000), 0x1234E000);
+        assert_eq!(reify_seq_num(0x1234E000, 0xDFFF), 0x1234DFFF);
+        assert_eq!(reify_seq_num(0x1234E000, 0xE001), 0x1234E001);
+        assert_eq!(reify_seq_num(0x1234E000, 0xD000), 0x1234D000);
+        assert_eq!(reify_seq_num(0x1234E000, 0xF000), 0x1234F000);
+        assert_eq!(reify_seq_num(0x1234E000, 0x7000), 0x12347000);
+        assert_eq!(reify_seq_num(0x1234E000, 0x1000), 0x12351000);
+        assert_eq!(reify_seq_num(0x1234E000, 0x5000), 0x12355000);
+        assert_eq!(reify_seq_num(0x1234E000, 0x6000), 0x12346000);
+    }
+}
+
+#[cfg(test)]
+mod sender_tests {
+    use super::{EnqueueResult::*, QueuedPacketId, Sender};
+    use std::sync::{atomic, Arc};
+    use std::task::{Context, Wake};
+
+    struct TestWaker {
+        woken: atomic::AtomicBool,
+    }
+
+    impl TestWaker {
+        pub fn new() -> Arc<Self> {
+            Arc::new(Self {
+                woken: atomic::AtomicBool::new(false),
+            })
+        }
+
+        /// fetch and clear the woken flag
+        pub fn woken(&self) -> bool {
+            self.woken.swap(false, atomic::Ordering::Relaxed)
+        }
+    }
+
+    impl Wake for TestWaker {
+        fn wake(self: Arc<Self>) {
+            self.woken.store(true, atomic::Ordering::Relaxed);
+        }
+    }
+
+    fn assert_quiesced<Pkt>(send: &Sender<Pkt>) {
+        assert!(!send.is_blocked());
+        assert!(!send.has_blocked_packets());
+        assert!(!send.unblock_needed());
+        assert!(!send.retry_needed());
+    }
+
+    fn retry_packets_cloned_sorted<Pkt: Clone>(send: &mut Sender<Pkt>) -> Vec<(zpr::SeqNum, Pkt)> {
+        let mut retry_packets: Vec<_> = send
+            .retry_packets()
+            .map(|(sn, pkt)| (sn, pkt.clone()))
+            .collect();
+        retry_packets.sort_by_key(|(sn, _pkt)| *sn);
+        retry_packets
+    }
+
+    fn enqueue_packet_expect_sent<Pkt>(
+        send: &mut Sender<Pkt>,
+        body: Pkt,
+    ) -> (zpr::SeqNum, &mut Pkt) {
+        let Sent(sn, pkt) = send.enqueue_packet(body) else {
+            panic!("packet blocked");
+        };
+        (sn, pkt)
+    }
+
+    fn enqueue_packet_expect_sent_with_sn<Pkt>(
+        send: &mut Sender<Pkt>,
+        body: Pkt,
+        expected_sn: zpr::SeqNum,
+    ) -> &mut Pkt {
+        let (sn, pkt) = enqueue_packet_expect_sent(send, body);
+        assert_eq!(sn, expected_sn);
+        pkt
+    }
+
+    fn enqueue_packet_expect_queued<Pkt>(send: &mut Sender<Pkt>, body: Pkt) -> QueuedPacketId {
+        let Queued(id) = send.enqueue_packet(body) else {
+            panic!("packet sent");
+        };
+        id
+    }
+
+    #[test]
+    fn test_initially_quiesced() {
+        let mut send: Sender<()> = Sender::new();
+        assert_quiesced(&send);
+        assert_eq!(send.retry_packets().count(), 0);
+        assert_eq!(send.destruct().count(), 0);
+    }
+
+    #[test]
+    fn test_basic_send_ack() {
+        let mut send: Sender<_> = Sender::new();
+
+        for i in 0..=2 {
+            let sn = i;
+            let body = 100 + i;
+            assert_eq!(
+                *enqueue_packet_expect_sent_with_sn(&mut send, body, sn),
+                body
+            );
+            assert!(!send.is_acked(sn));
+
+            let pkt = send.process_ack(sn).unwrap();
+            assert_eq!(pkt, body);
+            assert!(send.is_acked(sn));
+        }
+
+        assert_quiesced(&send);
+    }
+
+    #[test]
+    fn test_window_and_queueing() {
+        let mut send: Sender<_> = Sender::new();
+        send.adjust_window_size(3);
+
+        // fill the window
+        for i in 0..=2 {
+            let body = 100 + i;
+            assert!(!send.is_blocked());
+            assert_eq!(
+                *enqueue_packet_expect_sent_with_sn(&mut send, body, i),
+                body
+            );
+            assert!(!send.has_blocked_packets());
+        }
+
+        assert!(send.is_blocked());
+
+        // this send should block
+        assert!(matches!(send.enqueue_packet(103), Queued(_)));
+        assert!(send.has_blocked_packets());
+        assert!(!send.unblock_needed());
+
+        // ACK 3rd packet, should still be blocked
+        assert_eq!(send.process_ack(2).unwrap(), 102);
+        assert!(send.is_blocked());
+        assert!(send.has_blocked_packets());
+        assert!(!send.unblock_needed());
+        assert!(!send.is_acked(0));
+        assert!(!send.is_acked(1));
+        assert!(send.is_acked(2));
+
+        // this send should still block
+        assert!(matches!(send.enqueue_packet(104), Queued(_)));
+
+        // ACK 1st packet, should unblock one packet despite 3rd being acked
+        assert_eq!(send.process_ack(0).unwrap(), 100);
+        assert!(!send.is_blocked());
+        assert!(send.has_blocked_packets());
+        assert!(send.unblock_needed());
+        assert!(send.is_acked(0));
+        assert!(!send.is_acked(1));
+        assert!(send.is_acked(2));
+
+        // this send should still block (we haven't performed unblock yet)
+        assert!(matches!(send.enqueue_packet(105), Queued(_)));
+
+        // unblock 4th packet; should leave us blocked again (2nd is still unacked)
+        let (sn, pkt) = send.enqueue_next_blocked_packet();
+        assert_eq!(sn, 3);
+        assert_eq!(*pkt, 103);
+        assert!(send.is_blocked());
+        assert!(send.has_blocked_packets());
+        assert!(!send.unblock_needed());
+        assert!(send.is_acked(0));
+        assert!(!send.is_acked(1));
+        assert!(send.is_acked(2));
+        assert!(!send.is_acked(3));
+
+        // ACK 2nd packet, should unblock 5 and 6 (3rd is acked, 4th unblocked)
+        assert_eq!(send.process_ack(1).unwrap(), 101);
+        assert!(!send.is_blocked());
+        assert!(send.has_blocked_packets());
+        assert!(send.unblock_needed());
+        assert!(send.is_acked(0));
+        assert!(send.is_acked(1));
+        assert!(send.is_acked(2));
+        assert!(!send.is_acked(3));
+
+        // unblock 5th packet, should leave us ready to send 6th
+        let (sn, pkt) = send.enqueue_next_blocked_packet();
+        assert_eq!(sn, 4);
+        assert_eq!(*pkt, 104);
+        assert!(!send.is_blocked());
+        assert!(send.has_blocked_packets());
+        assert!(send.unblock_needed());
+        assert!(send.is_acked(1));
+        assert!(send.is_acked(2));
+        assert!(!send.is_acked(3));
+        assert!(!send.is_acked(4));
+
+        // unblock 6th packet, should leave us blocked
+        let (sn, pkt) = send.enqueue_next_blocked_packet();
+        assert_eq!(sn, 5);
+        assert_eq!(*pkt, 105);
+        assert!(send.is_blocked());
+        assert!(!send.has_blocked_packets());
+        assert!(!send.unblock_needed());
+        assert!(send.is_acked(2));
+        assert!(!send.is_acked(3));
+        assert!(!send.is_acked(4));
+        assert!(!send.is_acked(5));
+
+        // ACK 4th packet
+        assert_eq!(send.process_ack(3).unwrap(), 103);
+        assert!(!send.is_blocked());
+        assert!(send.is_acked(2));
+        assert!(send.is_acked(3));
+        assert!(!send.is_acked(4));
+        assert!(!send.is_acked(5));
+
+        // this send should not block
+        assert!(matches!(send.enqueue_packet(106), Sent(_, _)));
+        assert!(!send.is_acked(6));
+
+        // ACK the remainder
+        for i in 4..=6 {
+            assert_eq!(send.process_ack(i), Some(100 + i));
+            assert!(send.is_acked(i));
+        }
+
+        assert!(send.is_acked(0));
+
+        assert_quiesced(&send);
+    }
+
+    #[test]
+    fn test_duplicate_ack() {
+        let mut send: Sender<_> = Sender::new();
+        send.adjust_window_size(3);
+
+        for i in 0..=2 {
+            enqueue_packet_expect_sent_with_sn(&mut send, (), i);
+        }
+
+        assert!(send.process_ack(1).is_some());
+        assert!(send.process_ack(1).is_none());
+
+        assert!(send.process_ack(2).is_some());
+        assert!(send.process_ack(0).is_some());
+
+        assert!(send.process_ack(2).is_none());
+
+        enqueue_packet_expect_sent_with_sn(&mut send, (), 3);
+
+        assert!(send.process_ack(0).is_none());
+
+        assert!(send.process_ack(3).is_some());
+
+        assert_quiesced(&send);
+    }
+
+    #[test]
+    fn test_retries() {
+        let mut send: Sender<_> = Sender::new();
+        send.adjust_window_size(4);
+
+        assert!(!send.retry_needed());
+
+        for i in 0..=2 {
+            enqueue_packet_expect_sent_with_sn(&mut send, 100 + i, i);
+        }
+
+        // test no packets acked
+        assert!(send.retry_needed());
+        assert_eq!(
+            &retry_packets_cloned_sorted(&mut send),
+            &[(0, 100), (1, 101), (2, 102)]
+        );
+
+        // test one packet acked
+        send.process_ack(1);
+        assert!(send.retry_needed());
+        assert_eq!(
+            &retry_packets_cloned_sorted(&mut send),
+            &[(0, 100), (2, 102)]
+        );
+
+        // test new packet
+        enqueue_packet_expect_sent_with_sn(&mut send, 103, 3);
+        assert!(send.retry_needed());
+        assert_eq!(
+            &retry_packets_cloned_sorted(&mut send),
+            &[(0, 100), (2, 102), (3, 103)]
+        );
+
+        // test blocked packet
+        assert!(matches!(send.enqueue_packet(104), Queued(_)));
+        assert_eq!(
+            &retry_packets_cloned_sorted(&mut send),
+            &[(0, 100), (2, 102), (3, 103)]
+        );
+
+        // test acked new packet
+        send.process_ack(0);
+        send.process_ack(3);
+        assert!(send.retry_needed());
+        assert_eq!(&retry_packets_cloned_sorted(&mut send), &[(2, 102)]);
+
+        // test unblocked packet
+        send.enqueue_next_blocked_packet();
+        assert!(send.retry_needed());
+        assert_eq!(
+            &retry_packets_cloned_sorted(&mut send),
+            &[(2, 102), (4, 104)]
+        );
+
+        // test all acked
+        send.process_ack(2);
+        send.process_ack(4);
+        assert!(!send.retry_needed());
+        assert!(retry_packets_cloned_sorted(&mut send).is_empty());
+
+        assert_quiesced(&send);
+    }
+
+    #[test]
+    fn test_cancel_and_lookup() {
+        let mut send: Sender<_> = Sender::new();
+        send.adjust_window_size(3);
+
+        for i in 0..=2 {
+            enqueue_packet_expect_sent_with_sn(&mut send, 100 + i, i);
+        }
+
+        let id3 = enqueue_packet_expect_queued(&mut send, 103);
+        let id4 = enqueue_packet_expect_queued(&mut send, 104);
+        let id5 = enqueue_packet_expect_queued(&mut send, 105);
+        let id6 = enqueue_packet_expect_queued(&mut send, 106);
+
+        assert!(!send.is_sent(id3));
+        assert!(!send.is_sent(id4));
+        assert!(!send.is_sent(id5));
+        assert!(!send.is_sent(id6));
+
+        // cancel a packet
+        assert_eq!(send.cancel_packet(id4), Some(104));
+
+        // unblock a non-cancelled packet
+        assert_eq!(send.process_ack(0), Some(100));
+        assert!(send.unblock_needed());
+        let (sn3, pkt3) = send.enqueue_next_blocked_packet();
+        assert_eq!(sn3, 3);
+        assert_eq!(*pkt3, 103);
+        assert!(send.is_sent(id3));
+        assert_eq!(send.lookup_seq_num(id3), Some(3));
+
+        // try to cancel a now-sent packet
+        assert_eq!(send.cancel_packet(id3), None);
+        assert!(send.is_sent(id3));
+        assert_eq!(send.lookup_seq_num(id3), Some(3));
+
+        // unblock the next packet, which is after a cancelled packet
+        assert_eq!(send.process_ack(1), Some(101));
+        assert!(send.unblock_needed());
+        let (sn5, pkt5) = send.enqueue_next_blocked_packet();
+        assert_eq!(sn5, 4);
+        assert_eq!(*pkt5, 105);
+        assert!(send.is_sent(id5));
+        assert_eq!(send.lookup_seq_num(id5), Some(4));
+
+        assert_eq!(send.process_ack(2), Some(102));
+
+        // cancel the last packet, which is currently blocked
+        assert!(send.has_blocked_packets());
+        assert!(send.unblock_needed());
+        assert_eq!(send.cancel_packet(id6), Some(106));
+        assert!(!send.has_blocked_packets());
+        assert!(!send.unblock_needed());
+
+        assert_eq!(send.process_ack(3), Some(103));
+        assert_eq!(send.process_ack(4), Some(105));
+        assert!(send.is_sent(id3));
+        assert!(send.is_sent(id5));
+        assert_eq!(send.lookup_seq_num(id3), None);
+        assert_eq!(send.lookup_seq_num(id5), None);
+
+        assert_quiesced(&send);
+    }
+
+    #[test]
+    fn test_polls() {
+        let mut send: Sender<_> = Sender::new();
+        send.adjust_window_size(3);
+
+        // wait for ack on packet 0
+        let tw0 = TestWaker::new();
+        let wk0 = tw0.clone().into();
+        let mut cx0 = Context::from_waker(&wk0);
+        let (sn0, _) = enqueue_packet_expect_sent(&mut send, ());
+        assert!(send.poll_ack(&mut cx0, sn0).is_pending());
+
+        // packet 1 immediately acked
+        let tw1 = TestWaker::new();
+        let wk1 = tw1.clone().into();
+        let mut cx1 = Context::from_waker(&wk1);
+        let (sn1, _) = enqueue_packet_expect_sent(&mut send, ());
+        send.process_ack(sn1);
+        assert!(send.poll_ack(&mut cx1, sn1).is_ready());
+
+        // wait for ack on packet 2
+        let tw2 = TestWaker::new();
+        let wk2 = tw2.clone().into();
+        let mut cx2 = Context::from_waker(&wk2);
+        let (sn2, _) = enqueue_packet_expect_sent(&mut send, ());
+        assert!(send.poll_ack(&mut cx2, sn2).is_pending());
+
+        // wait for send on packet 3
+        let tw3 = TestWaker::new();
+        let wk3 = tw3.clone().into();
+        let mut cx3 = Context::from_waker(&wk3);
+        let id3 = enqueue_packet_expect_queued(&mut send, ());
+        assert!(send.poll_send(&mut cx3, id3).is_pending());
+
+        // wait for send and ack on packet 4
+        let tw4 = TestWaker::new();
+        let wk4 = tw4.clone().into();
+        let mut cx4 = Context::from_waker(&wk4);
+        let id4 = enqueue_packet_expect_queued(&mut send, ());
+        assert!(send.poll_send_and_ack(&mut cx4, id4).is_pending());
+
+        // ack packet 0
+        tw0.woken();
+        send.process_ack(sn0);
+        assert!(tw0.woken());
+        assert!(send.poll_ack(&mut cx0, sn0).is_ready());
+
+        // send packet 3
+        tw3.woken();
+        let (sn3, _) = send.enqueue_next_blocked_packet();
+        assert!(tw3.woken());
+        assert!(send.poll_send(&mut cx3, id3).is_ready());
+
+        // send packet 4
+        let (sn4, _) = send.enqueue_next_blocked_packet();
+        assert!(send.poll_send_and_ack(&mut cx4, id4).is_pending());
+
+        // ack packet 4
+        tw4.woken();
+        send.process_ack(sn4);
+        assert!(tw4.woken());
+        assert!(send.poll_send_and_ack(&mut cx4, id4).is_ready());
+
+        // queue but don't poll packets 5 and 6
+        let tw5 = TestWaker::new();
+        let wk5 = tw5.clone().into();
+        let mut cx5 = Context::from_waker(&wk5);
+        let id5 = enqueue_packet_expect_queued(&mut send, ());
+
+        let tw6 = TestWaker::new();
+        let wk6 = tw6.clone().into();
+        let mut cx6 = Context::from_waker(&wk6);
+        let id6 = enqueue_packet_expect_queued(&mut send, ());
+
+        // ack packet 2
+        tw2.woken();
+        send.process_ack(sn2);
+        assert!(tw2.woken());
+        assert!(send.poll_ack(&mut cx2, sn2).is_ready());
+
+        // send packet 5 then poll
+        send.process_ack(sn3);
+        let (sn5, _) = send.enqueue_next_blocked_packet();
+        assert!(send.poll_send(&mut cx5, id5).is_ready());
+
+        // send and ack packet 6, then poll
+        let (sn6, _) = send.enqueue_next_blocked_packet();
+        send.process_ack(sn6);
+        assert!(send.poll_send_and_ack(&mut cx6, id6).is_ready());
+
+        send.process_ack(sn5);
+
+        assert_quiesced(&send);
+    }
+}
+
+#[cfg(test)]
+mod receiver_tests {
+    use super::{Disposition::*, Receiver};
+
+    #[test]
+    fn test_in_order() {
+        let mut recv = Receiver::new(1);
+        assert!(matches!(recv.process_packet(0), AckAndProcess));
+        assert!(matches!(recv.process_packet(1), AckAndProcess));
+        assert!(matches!(recv.process_packet(2), AckAndProcess));
+        assert!(matches!(recv.process_packet(3), AckAndProcess));
+        assert!(matches!(recv.process_packet(4), AckAndProcess));
+    }
+
+    #[test]
+    fn test_out_of_order_within_window() {
+        let mut recv = Receiver::new(3);
+        assert!(matches!(recv.process_packet(2), AckAndProcess));
+        assert!(matches!(recv.process_packet(0), AckAndProcess));
+        assert!(matches!(recv.process_packet(3), AckAndProcess));
+        assert!(matches!(recv.process_packet(1), AckAndProcess));
+        assert!(matches!(recv.process_packet(6), AckAndProcess));
+    }
+
+    #[test]
+    fn test_out_of_order_ahead_of_window() {
+        let mut recv = Receiver::new(3);
+        assert!(matches!(recv.process_packet(3), Ignore));
+        assert!(matches!(recv.process_packet(3), Ignore));
+        assert!(matches!(recv.process_packet(0), AckAndProcess));
+        assert!(matches!(recv.process_packet(3), AckAndProcess));
+        assert!(matches!(recv.process_packet(4), Ignore));
+    }
+
+    #[test]
+    fn duplicate_within_window() {
+        let mut recv = Receiver::new(3);
+        assert!(matches!(recv.process_packet(0), AckAndProcess));
+        assert!(matches!(recv.process_packet(2), AckAndProcess));
+        assert!(matches!(recv.process_packet(0), AckDoNotProcess));
+        assert!(matches!(recv.process_packet(2), AckDoNotProcess));
+        assert!(matches!(recv.process_packet(1), AckAndProcess));
+        assert!(matches!(recv.process_packet(1), AckDoNotProcess));
+    }
+
+    #[test]
+    fn duplicate_behind_window() {
+        let mut recv = Receiver::new(1);
+        assert!(matches!(recv.process_packet(0), AckAndProcess));
+        assert!(matches!(recv.process_packet(1), AckAndProcess));
+        assert!(matches!(recv.process_packet(2), AckAndProcess));
+        assert!(matches!(recv.process_packet(3), AckAndProcess));
+        assert!(matches!(recv.process_packet(0), Ignore));
+        assert!(matches!(recv.process_packet(4), AckAndProcess));
+        assert!(matches!(recv.process_packet(1), Ignore));
     }
 }

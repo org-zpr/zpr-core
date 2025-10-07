@@ -36,6 +36,9 @@ pub enum HandleMgmtError {
 
     #[error("bad packet structure")]
     BadStructure,
+
+    #[error("link closed")]
+    LinkClosed,
 }
 
 impl From<HandleMgmtError> for counters::ManagementCounterType {
@@ -44,11 +47,20 @@ impl From<HandleMgmtError> for counters::ManagementCounterType {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,
             HandleMgmtError::BadStructure => Self::BadStructure,
             HandleMgmtError::MessageNotPermitted => Self::OtherError,
+            HandleMgmtError::LinkClosed => Self::OtherError,
         }
     }
 }
 
-pub type HandleMgmtResult = Result<(), (HandleMgmtError, Packet)>;
+impl From<super::core::MgmtSendError> for HandleMgmtError {
+    fn from(err: super::core::MgmtSendError) -> Self {
+        match err {
+            super::core::MgmtSendError::LinkClosed => HandleMgmtError::LinkClosed,
+        }
+    }
+}
+
+pub type HandleMgmtResult = Result<(), HandleMgmtError>;
 
 /// Fire an event into the given link state machine. If there is an event handler error
 /// it will be returned but only after we try to send in an ERROR event which should
@@ -80,7 +92,7 @@ fn dispatch_link_state_event_or_error(
 /// handle a Report message (RFC 6.5 § 6.3.13)
 pub async fn handle_report(_asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpReportHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
 
     // TODO handle protocol errors i.e. if the body is shorter
@@ -109,15 +121,9 @@ pub async fn handle_discard(_asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResu
 }
 
 /// handle an Echo Request message (RFC 6.5 § 6.3.2)
-pub async fn handle_echo_request(
-    asm: &Arc<Assembly>,
-    seq_num: zpr::SeqNum,
-    pkt: Packet,
-) -> HandleMgmtResult {
+pub async fn handle_echo_request(asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
-    hdr.sequence_number = ((seq_num & 0xffff) as u16).into();
     rsp_pkt.metadata_mut().flags |= packet::flags::CONFIRM;
 
     super::core::send_non_flow_mgmt(
@@ -125,22 +131,17 @@ pub async fn handle_echo_request(
         ingress_link_id,
         zdp::ZdpPacketType::EchoResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     Ok(())
 }
 
-pub async fn handle_echo_response(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
-    let Ok(hdr) = zdp::ZdpEchoHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
-    };
-
+pub async fn handle_echo_response(asm: &Arc<Assembly>, pkt: Packet) -> HandleMgmtResult {
     let _ = dispatch_link_state_event_or_error(
         asm,
         pkt.metadata().ingress_link_id,
-        LinkEvent::ReceivedEchoResponse {
-            sequence_number: hdr.sequence_number.into(),
-        },
+        LinkEvent::ReceivedEchoResponse,
     );
 
     Ok(())
@@ -153,13 +154,12 @@ pub async fn handle_echo_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
 ///
 pub async fn handle_init_authentication_request(
     asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     let Ok(hdr) = zdp::ZdpInitAuthenticationRequestHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
     let is_bootstrap = hdr.flags & zdp::init_authentication_flags::BOOTSTRAP_SUPPORT != 0;
 
@@ -168,20 +168,20 @@ pub async fn handle_init_authentication_request(
     if is_bootstrap {
         if hdr.data_len == 0 {
             warn!(target: ZDP, "Received Init Authentication with bootstrap support but no payload");
-            return Err((HandleMgmtError::BadStructure, pkt));
+            return Err(HandleMgmtError::BadStructure);
         }
         if hdr.data_len < size_of::<auth::ZdpInitAuthenticationPayload>() as u16 {
             warn!(target: ZDP, "Received Init Authentication with unexpected payload size {}", hdr.data_len);
-            return Err((HandleMgmtError::BadStructure, pkt));
+            return Err(HandleMgmtError::BadStructure);
         }
         if pkt.remaining() < usize::from(hdr.data_len) {
             warn!(target: ZDP, "packet too short for payload");
-            return Err((HandleMgmtError::BadStructure, pkt));
+            return Err(HandleMgmtError::BadStructure);
         }
         debug!(target: ZDP, "Received Init Authentication +bootstrap for link {ingress_link_id}");
 
         let Ok(payload) = auth::ZdpInitAuthenticationPayload::read_from_buf(&mut pkt) else {
-            return Err((HandleMgmtError::BadStructure, pkt));
+            return Err(HandleMgmtError::BadStructure);
         };
         challenge_opt = Some(payload);
     } else {
@@ -198,7 +198,8 @@ pub async fn handle_init_authentication_request(
         ingress_link_id,
         zdp::ZdpPacketType::InitAuthenticationResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     let _ = dispatch_link_state_event_or_error(
         asm,
@@ -216,7 +217,7 @@ pub async fn handle_init_authentication_response(
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpInitAuthenticationResponse::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
 
     let link_id = pkt.metadata().ingress_link_id;
@@ -235,14 +236,10 @@ pub async fn handle_init_authentication_response(
 /// Sends [LinkEvent::ReceivedTerminateRequest] into the link state machine.
 /// Sends a ZdpTerminateResponse message back to the sender.
 /// Sends a [LinkEvent::SentTerminate] event into the link state machine.
-pub async fn handle_terminate_request(
-    asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
-    mut pkt: Packet,
-) -> HandleMgmtResult {
+pub async fn handle_terminate_request(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     let Ok(hdr) = zdp::ZdpTerminateLinkRequestHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
 
     info!(target: ZDP, "Received Terminate Request for link {ingress_link_id}");
@@ -264,7 +261,8 @@ pub async fn handle_terminate_request(
         ingress_link_id,
         zdp::ZdpPacketType::TerminateLinkResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     // Tell state machine we sent a TerminateLinkResponse. This will trigger `clean_up_link_state`.
     let _ = asm.process_link_state_event(ingress_link_id, LinkEvent::SentTerminate);
@@ -274,7 +272,7 @@ pub async fn handle_terminate_request(
 
 pub async fn handle_terminate_response(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpTerminateLinkResponseHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
 
     let link_id = pkt.metadata().ingress_link_id;
@@ -288,14 +286,10 @@ pub async fn handle_terminate_response(asm: &Arc<Assembly>, mut pkt: Packet) -> 
 }
 
 /// handle a Terminate Indication (RFC 6.5 § 6.3.3)
-pub async fn handle_terminate_indication(
-    asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
-    mut pkt: Packet,
-) -> HandleMgmtResult {
+pub async fn handle_terminate_indication(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     let Ok(hdr) = zdp::ZdpTerminateLinkIndicationHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
 
     debug!(target: ZDP, "Received Terminate Indication for link {ingress_link_id}");
@@ -310,15 +304,11 @@ pub async fn handle_terminate_indication(
 /// handle a Hello Request (RFC 6.5 § 6.3.4)
 /// Reads the hello, fire a ReceivedHelloRequest event, and then sends a response.
 ///
-pub async fn handle_hello_request(
-    asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
-    mut pkt: Packet,
-) -> HandleMgmtResult {
+pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
     if asm.ph_mode != PhMode::Node {
         warn!(target: ZDP, "Link {ingress_link_id} received Hello Request but not in node mode");
-        return Err((HandleMgmtError::MessageNotPermitted, pkt));
+        return Err(HandleMgmtError::MessageNotPermitted);
     }
     debug!(target: ZDP, "Received Hello Request for link {ingress_link_id}");
 
@@ -326,7 +316,7 @@ pub async fn handle_hello_request(
         Ok(data) => data,
         Err(_) => {
             error!(target: ZDP, "Link {ingress_link_id}: Failed to parse HelloRequest TLV data");
-            return Err((HandleMgmtError::BadStructure, pkt));
+            return Err(HandleMgmtError::BadStructure);
         }
     };
 
@@ -405,7 +395,8 @@ pub async fn handle_hello_request(
         ingress_link_id,
         zdp::ZdpPacketType::HelloResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     let close_link = if response_status == zdp::ResponseCode::Success {
         match asm.process_link_state_event(ingress_link_id, LinkEvent::SentHelloResponse) {
@@ -436,7 +427,7 @@ pub async fn handle_hello_request(
 
 pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpHelloResponseHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
 
     let link_id = pkt.metadata().ingress_link_id;
@@ -449,7 +440,7 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
         Ok(data) => data,
         Err(e) => {
             error!(target: ZDP, "Link {link_id}: HelloResponse - failed to parse TLVs: {:?}", e);
-            return Err((HandleMgmtError::BadStructure, pkt));
+            return Err(HandleMgmtError::BadStructure);
         }
     };
 
@@ -474,7 +465,7 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
                         }
                         _ => {
                             warn!(target: ZDP, "Link {link_id}: HelloResponse ASA value type is wrong: {asa_entry:?}");
-                            return Err((HandleMgmtError::BadStructure, pkt));
+                            return Err(HandleMgmtError::BadStructure);
                         }
                     }
                 }
@@ -483,7 +474,7 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
                 for aaa_entry in tlv_value {
                     if aaa_address.is_some() {
                         warn!(target: ZDP, "Link {link_id}: HelloResponse includes multiple AAA addresses");
-                        return Err((HandleMgmtError::BadStructure, pkt));
+                        return Err(HandleMgmtError::BadStructure);
                     }
                     match aaa_entry {
                         tlv::TlvValue::Ipv4Addr(ipa) => {
@@ -496,7 +487,7 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
                         }
                         _ => {
                             warn!(target: ZDP, "Link {link_id}: HelloResponse AAA value type is wrong: {aaa_entry:?}");
-                            return Err((HandleMgmtError::BadStructure, pkt));
+                            return Err(HandleMgmtError::BadStructure);
                         }
                     }
                 }
@@ -510,7 +501,7 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
     // AAA is required.
     if aaa_address.is_none() {
         warn!(target: ZDP, "Link {link_id}: HelloResponse did not include AAA");
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     }
 
     let maybe_asa_addrs = if asa_addresses.is_empty() {
@@ -548,7 +539,6 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
 ///
 pub async fn handle_acquire_zpr_address_request(
     asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
@@ -572,7 +562,8 @@ pub async fn handle_acquire_zpr_address_request(
         ingress_link_id,
         zdp::ZdpPacketType::AcquireZprAddressResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     // Now we can do our async prcessing of the acquire which will involve talking to
     // the visa service.
@@ -599,7 +590,7 @@ pub async fn handle_acquire_zpr_address_response(
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpAcquireZprAddressResponse::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
 
     let link_id = pkt.metadata().ingress_link_id;
@@ -622,7 +613,6 @@ pub async fn handle_acquire_zpr_address_response(
 /// If the request indicates a fail, we send the event with empty address list.
 pub async fn handle_grant_zpr_address_request(
     asm: &Arc<Assembly>,
-    _seq_num: zpr::SeqNum,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
@@ -658,7 +648,8 @@ pub async fn handle_grant_zpr_address_request(
         ingress_link_id,
         zdp::ZdpPacketType::GrantZprAddressResponse,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     let processing_result = asm.process_link_state_event(
         ingress_link_id,
@@ -678,7 +669,7 @@ pub async fn handle_grant_zpr_address_response(
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpGrantZprAddressResponse::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
 
     let link_id = pkt.metadata().ingress_link_id;
@@ -835,11 +826,11 @@ fn parse_grant_zpr_address_request(
 /// handle a Bind Actor Address Request (RFC 6.5 § 6.3.11)
 pub async fn handle_bind_actor_address_request(
     asm: &Arc<Assembly>,
-    seq_num: zpr::SeqNum,
+    txn_id: u16,
     mut pkt: Packet,
 ) -> HandleMgmtResult {
     let Ok(hdr) = zdp::ZdpBindActorAddressRequestHeader::read_from_buf(&mut pkt) else {
-        return Err((HandleMgmtError::BadStructure, pkt));
+        return Err(HandleMgmtError::BadStructure);
     };
 
     // The packet body now immediately follows the header
@@ -850,7 +841,7 @@ pub async fn handle_bind_actor_address_request(
     let (src_address, dst_address, ip_protocol) = match hdr.ip_version {
         zpr::L3Type::Ipv4 => {
             if body.len() < 20 {
-                return Err((HandleMgmtError::BadStructure, pkt));
+                return Err(HandleMgmtError::BadStructure);
             }
             // IPv4 header: src @ 12..16, dst @ 16..20, protocol @ 9
             let src_address = IpAddress::new_from_v4([body[12], body[13], body[14], body[15]]);
@@ -860,7 +851,7 @@ pub async fn handle_bind_actor_address_request(
         }
         zpr::L3Type::Ipv6 => {
             if body.len() < 40 {
-                return Err((HandleMgmtError::BadStructure, pkt));
+                return Err(HandleMgmtError::BadStructure);
             }
             // IPv6 header: src @ 8..24, dst @ 24..40, next_header @ 6
             let src_address = IpAddress {
@@ -873,7 +864,7 @@ pub async fn handle_bind_actor_address_request(
             (src_address, dst_address, ip_protocol)
         }
         _ => {
-            return Err((HandleMgmtError::BadStructure, pkt));
+            return Err(HandleMgmtError::BadStructure);
         }
     };
 
@@ -892,28 +883,28 @@ pub async fn handle_bind_actor_address_request(
         zpr::L3Type::Ipv4 => {
             if pkt.remaining() < 20 {
                 // minimum IPv4 header size
-                return Err((HandleMgmtError::BadStructure, pkt));
+                return Err(HandleMgmtError::BadStructure);
             }
             let ihl = pkt.body()[0] & 0x0f; // Internet Header Length
             if ihl < 5 {
-                return Err((HandleMgmtError::BadStructure, pkt));
+                return Err(HandleMgmtError::BadStructure);
             }
             let hdrlen = (ihl as usize) * 4; // header length in bytes
             if pkt.remaining() < hdrlen {
-                return Err((HandleMgmtError::BadStructure, pkt));
+                return Err(HandleMgmtError::BadStructure);
             }
             pkt.advance(hdrlen); // skip IPv4 header
         }
         zpr::L3Type::Ipv6 => {
             if pkt.remaining() < 40 {
                 // IPv6 header size
-                return Err((HandleMgmtError::BadStructure, pkt));
+                return Err(HandleMgmtError::BadStructure);
             }
             pkt.advance(40); // skip IPv6 header
         }
         _ => {
             warn!(target: ZDP, "Link {}: unsupported ip_version value {}", pkt.metadata().ingress_link_id, hdr.ip_version);
-            return Err((HandleMgmtError::BadStructure, pkt));
+            return Err(HandleMgmtError::BadStructure);
         }
     }
     // At this point our packet buffer is set to the start of whatever is after the
@@ -922,7 +913,7 @@ pub async fn handle_bind_actor_address_request(
         ip_number::TCP | ip_number::UDP => {
             // read TCP/UDP header
             if pkt.remaining() < 4 {
-                return Err((HandleMgmtError::BadStructure, pkt));
+                return Err(HandleMgmtError::BadStructure);
             }
             src_port = pkt.get_u16();
             dst_port = pkt.get_u16();
@@ -930,7 +921,7 @@ pub async fn handle_bind_actor_address_request(
         ip_number::ICMP | ip_number::IPV6_ICMP => {
             // Just stuff the TYPE value into both source and dest.
             if pkt.remaining() < 2 {
-                return Err((HandleMgmtError::BadStructure, pkt));
+                return Err(HandleMgmtError::BadStructure);
             }
             let icmp_type = pkt.get_u8();
             src_port = icmp_type.into();
@@ -938,7 +929,7 @@ pub async fn handle_bind_actor_address_request(
         }
         _ => {
             warn!(target: ZDP, "Link {}: unsupported IP protocol {}", pkt.metadata().ingress_link_id, ip_protocol);
-            return Err((HandleMgmtError::BadStructure, pkt));
+            return Err(HandleMgmtError::BadStructure);
         }
     }
 
@@ -1138,9 +1129,10 @@ pub async fn handle_bind_actor_address_request(
         ingress_link_id.get(),
         zdp::ZdpPacketType::BindActorAddressResponse,
         ingress_tether_id,
-        seq_num,
+        txn_id,
         rsp_pkt,
-    );
+    )
+    .await?;
 
     Ok(())
 }

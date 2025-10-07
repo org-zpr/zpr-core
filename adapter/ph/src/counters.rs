@@ -118,13 +118,13 @@ pub enum ManagementCounterType {
     DroppedAwaitingBind,
     DroppedNop,           // normal, not an error drop
     DroppedTooOld,        // "old" management packet received (possible duplicate)
+    DroppedTooNew,        // "too new" management packet received (likely protocol error)
     DroppedDuplicate,     // duplicate management packet detected
     DroppedNoSA,          // no security association on link
     InternalRoutingError, // a packet ended up somewhere it shouldn't have due to a coding error
 
     BadMgmtResponse,
     UnexpectedMgmtResponse,
-    LostPacket,       // lost management packet detected
     OutOfOrderPacket, // out-of-order management packet detected (and processed)
     ResentPacket,
 
@@ -202,6 +202,7 @@ impl ManagementCounterType {
             Self::QueueBackpressure => "Management QueueBackpressure",
             Self::DroppedAwaitingBind => "Management Dropped Awaiting Bind",
             Self::DroppedTooOld => "Dropped Too Old",
+            Self::DroppedTooNew => "Dropped Too New",
             Self::DroppedDuplicate => "Dropped Duplicate",
             Self::DroppedNop => "Dropped No Operation",
             Self::DroppedNoSA => "Dropped No Security Association",
@@ -210,7 +211,6 @@ impl ManagementCounterType {
             // Management packets
             Self::BadMgmtResponse => "Bad Management Response",
             Self::UnexpectedMgmtResponse => "Unexpected Management Response",
-            Self::LostPacket => "Lost Packet",
             Self::OutOfOrderPacket => "Out Of Order Packet",
             Self::ResentPacket => "Resent Packet",
 

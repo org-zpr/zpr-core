@@ -7,7 +7,6 @@ use crate::assembly::Assembly;
 use crate::config;
 use crate::counters::ManagementCounterType;
 use crate::packet::Packet;
-use crate::seq_nums;
 use crate::zdp;
 use crate::zdpr;
 use std::task::{Context, Poll};
@@ -38,11 +37,7 @@ fn new_tiny_heap_packet() -> Packet {
     )
 }
 
-pub fn count_event(
-    asm: &Assembly,
-    _pkt: &mut Packet, // for later support of per-packet event recording
-    event: ManagementCounterType,
-) {
+pub fn count_event(asm: &Assembly, event: ManagementCounterType) {
     debug!(target: crate::logging::targets::MGMT_EVENTS, "packet event {event}");
     asm.counters.management[event].increment();
 }
@@ -62,19 +57,8 @@ pub fn send_non_flow_mgmt(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     packet: Packet,
-) -> zpr::SeqNum {
-    let Some(peer_state) = asm.peer_table.get(link_id) else {
-        // no more peer; packet will be dropped; return a dummy sequence number
-        return zpr::SeqNum::default();
-    };
-
-    let seq_num = peer_state.sn_gen.generate_seq_num();
-
-    drop(peer_state);
-
-    send_mgmt_helper(asm, link_id, packet_type, None, Some(seq_num), packet);
-
-    seq_num
+) -> Sent<'_> {
+    send_mgmt_helper(asm, link_id, packet_type, None, None, packet)
 }
 
 /// Send a unidirectional per-flow management message on the given link.
@@ -86,7 +70,7 @@ pub fn send_per_flow_mgmt(
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
     packet: Packet,
-) {
+) -> Sent<'_> {
     send_mgmt_helper(asm, link_id, packet_type, Some(stream_id), None, packet)
 }
 
@@ -95,15 +79,15 @@ pub fn send_per_flow_mgmt_response(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
-    sequence_number: zpr::SeqNum,
+    txn_id: u16,
     packet: Packet,
-) {
+) -> Sent<'_> {
     send_mgmt_helper(
         asm,
         link_id,
         packet_type,
         Some(stream_id),
-        Some(sequence_number),
+        Some(txn_id),
         packet,
     )
 }
@@ -123,6 +107,10 @@ pub fn send_acknowledgement(asm: &Assembly, link_id: zpr::LinkId, sequence_numbe
     let _ = asm
         .mgmt_substrate_egress
         .try_enqueue_packet(link_id, &mut packet);
+}
+
+pub enum MgmtSendError {
+    LinkClosed,
 }
 
 #[allow(dead_code)]
@@ -182,7 +170,7 @@ impl<'a> Sent<'a> {
                 let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
                     return Err(Acked {
                         asm: self.asm,
-                        link_id: zpr::LINK_ID_UNKNOWN, // guard against memory order shenanigans
+                        link_id: zpr::LINK_ID_UNKNOWN,
                         seq_num: None,
                     });
                 };
@@ -214,7 +202,7 @@ impl<'a> Drop for Sent<'a> {
 }
 
 impl<'a> std::future::Future for Sent<'a> {
-    type Output = Result<Acked<'a>, ()>;
+    type Output = Result<Acked<'a>, MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.packet_id {
@@ -226,7 +214,7 @@ impl<'a> std::future::Future for Sent<'a> {
 
             PacketId::Queued(packet_id) => {
                 let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
-                    return Poll::Ready(Err(()));
+                    return Poll::Ready(Err(MgmtSendError::LinkClosed));
                 };
 
                 let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
@@ -256,7 +244,7 @@ pub struct Acked<'a> {
 }
 
 impl<'a> std::future::Future for Acked<'a> {
-    type Output = Result<(), ()>;
+    type Output = Result<(), MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let Some(seq_num) = self.seq_num else {
@@ -264,7 +252,7 @@ impl<'a> std::future::Future for Acked<'a> {
         };
 
         let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
-            return Poll::Ready(Err(()));
+            return Poll::Ready(Err(MgmtSendError::LinkClosed));
         };
 
         let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
@@ -297,11 +285,11 @@ impl<'a> SentAndAcked<'a> {
 }
 
 impl<'a> std::future::Future for SentAndAcked<'a> {
-    type Output = Result<(), ()>;
+    type Output = Result<(), MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let Some(peer_state) = self.0.asm.peer_table.get(self.0.link_id) else {
-            return Poll::Ready(Err(()));
+            return Poll::Ready(Err(MgmtSendError::LinkClosed));
         };
 
         let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
@@ -320,9 +308,12 @@ fn send_mgmt_helper(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     stream_id: Option<zpr::StreamId>,
-    sequence_number: Option<zpr::SeqNum>,
+    txn_id: Option<u16>,
     mut packet: Packet,
-) {
+) -> Sent<'_> {
+    assert_ne!(packet_type, zdp::ZdpPacketType::KeyManagement);
+    assert_eq!(stream_id.is_some(), packet_type.is_per_flow());
+
     debug_assert_eq!(stream_id.is_some(), packet_type.is_per_flow());
 
     if let Some(stream_id) = stream_id {
@@ -330,19 +321,51 @@ fn send_mgmt_helper(
         per_flow_hdr.stream_id = stream_id.into();
     }
 
+    if let Some(txn_id) = txn_id {
+        let txn_hdr = packet.alloc_zeroed_header::<zdp::ZdpTransactionHeader>();
+        txn_hdr.transaction_id = txn_id.into();
+    }
+
     let hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
     hdr.packet_type = packet_type;
 
-    if let Some(sequence_number) = sequence_number {
-        hdr.sequence_number = seq_nums::truncate_seq_num(sequence_number).into();
-    }
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        return Sent {
+            asm,
+            link_id: zpr::LINK_ID_UNKNOWN,
+            packet_id: PacketId::Queued(0), // will not be used due to unknown link ID
+        };
+    };
+    let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
 
-    // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
-    // In that case, just ignore the error; act as if the packet was dropped
-    // by the substrate due to congestion.
-    let _ = asm
-        .mgmt_substrate_egress
-        .try_enqueue_packet(link_id, &mut packet);
+    let old_retry_needed = zdpr_send.retry_needed();
+
+    match zdpr_send.enqueue_packet(packet) {
+        zdpr::EnqueueResult::Sent(seq_num, pkt) => {
+            build_and_egress_packets(asm, link_id, std::iter::once((seq_num, pkt)));
+
+            debug_assert!(
+                zdpr_send.retry_needed(),
+                "sent packet but not signalled for retry"
+            );
+            if !old_retry_needed {
+                // This packet should activate / restart our retry timer.
+                peer_state.zdpr_retry_timer_reset.notify_one();
+            }
+
+            Sent {
+                asm,
+                link_id,
+                packet_id: PacketId::Sent(seq_num),
+            }
+        }
+
+        zdpr::EnqueueResult::Queued(packet_id) => Sent {
+            asm,
+            link_id,
+            packet_id: PacketId::Queued(packet_id),
+        },
+    }
 }
 
 /// Used to send packets as instructed by ZDPR mechanism.
@@ -354,6 +377,8 @@ pub fn build_and_egress_packets<'a>(
     link_id: zpr::LinkId,
     packets: impl Iterator<Item = (zpr::SeqNum, &'a mut Packet)>,
 ) {
+    let mut dropped_backpressure = 0;
+
     packets.for_each(|(seq_num, packet)| {
         let (hdr, _) = zdp::ZdpBaseHeader::mut_from_prefix(packet.body_mut()).unwrap();
         hdr.sequence_number = zdpr::truncate_seq_num(seq_num).into();
@@ -361,10 +386,19 @@ pub fn build_and_egress_packets<'a>(
         // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
         // In that case, just ignore the error; act as if the packet was dropped
         // by the substrate due to congestion.
-        let _ = asm
+        if !asm
             .mgmt_substrate_egress
-            .try_enqueue_packet(link_id, packet);
+            .try_enqueue_packet(link_id, packet)
+        {
+            dropped_backpressure += 1;
+        }
     });
+
+    count_events(
+        asm,
+        ManagementCounterType::QueueBackpressure,
+        dropped_backpressure,
+    );
 }
 
 /// Sender function for per flow request management packet.
@@ -409,6 +443,14 @@ pub enum SyncReqError {
     Timeout,
 }
 
+impl From<super::core::MgmtSendError> for SyncReqError {
+    fn from(err: super::core::MgmtSendError) -> Self {
+        match err {
+            super::core::MgmtSendError::LinkClosed => SyncReqError::LinkClosed,
+        }
+    }
+}
+
 /// Helper for send management request function
 /// Requires the type of ZDP packet being sent as well as the type of the
 /// expected response packet. The Option determines whether the function is helping the per-flow or
@@ -440,9 +482,10 @@ async fn send_sync_req_helper(
             link_id,
             zdp_request_type,
             stream_id,
-            Some(permit.seq_num()),
+            Some(permit.seq_num() as u16),
             packet,
-        );
+        )
+        .await?;
 
         tokio::select! {
             response = &mut response_future => {
@@ -470,9 +513,9 @@ fn match_received(
     zdp_response_type: zdp::ZdpPacketType,
 ) -> Result<Packet, SyncReqError> {
     match response {
-        Some((pkt_type, mut pkt)) => {
+        Some((pkt_type, pkt)) => {
             if pkt_type != zdp_response_type {
-                count_event(asm, &mut pkt, ManagementCounterType::BadMgmtResponse);
+                count_event(asm, ManagementCounterType::BadMgmtResponse);
                 return Err(SyncReqError::ProtocolError);
             }
             return Ok(pkt);
