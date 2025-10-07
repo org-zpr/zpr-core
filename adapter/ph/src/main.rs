@@ -18,7 +18,6 @@ use tracing::*;
 mod adapter_manager_worker;
 mod adapter_tables;
 mod address_pool;
-mod set_capture_file_worker;
 mod admin_worker;
 mod assembly;
 mod auth;
@@ -56,6 +55,7 @@ mod queues;
 mod rcu;
 mod sample_ring;
 mod seq_nums;
+mod set_capture_file_worker;
 mod signal_worker;
 mod special_peers;
 mod sync_req;
@@ -226,7 +226,7 @@ fn main() -> ExitCode {
             }
         })
         .unwrap();
-    let control_socket = 
+    let control_socket =
         UnixListener::bind(&config.control_path).expect("failed to bind to control socket");
     info!(target: STARTUP, "control socket bound to {:?}", config.control_path);
 
@@ -578,11 +578,11 @@ fn main() -> ExitCode {
     js.spawn_local(signal_worker::launch(asm.clone()));
     js.spawn_local(mgmt_dispatch_worker::launch(asm.clone(), md_outq));
     js.spawn_local(adapter_manager_worker::launch(asm.clone(), am_outq));
-    js.spawn_local(set_capture_file_worker::launch(asm.clone(), capture_socket.clone()));
-    js.spawn_local(admin_worker::launch(
+    js.spawn_local(set_capture_file_worker::launch(
         asm.clone(),
-        control_socket
+        capture_socket.clone(),
     ));
+    js.spawn_local(admin_worker::launch(asm.clone(), control_socket));
     js.spawn_local(km_multiplexor::launch_signal_worker(
         asm.clone(),
         km_sig_outq,

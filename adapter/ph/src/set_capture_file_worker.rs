@@ -2,7 +2,6 @@
 //! with the socket, performs action based on received command
 //! To avoid excess parsing, the command must not have spaces
 
-
 use crate::assembly::Assembly;
 use crate::config;
 use crate::logging::targets::RPC;
@@ -86,7 +85,7 @@ async fn handle_connection(asm: Arc<Assembly>, mut stream: UnixStream) -> std::i
                     .write_all(set_capture_file(&asm, ancillary).await.as_bytes())
                     .await?;
                 buf_writer.write_all("OK\n".as_bytes()).await?
-            },
+            }
             _ => buf_writer.write_all("ERR\n".as_bytes()).await?,
         };
 

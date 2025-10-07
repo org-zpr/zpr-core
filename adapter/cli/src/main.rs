@@ -38,7 +38,9 @@ async fn main() -> Result<(), capnp::Error> {
     let cap_socket = args.cap_socket.clone();
 
     if let Some(command) = args.command {
-        process_command(command, &socket, cap_socket).await.map(|_| {})
+        process_command(command, &socket, cap_socket)
+            .await
+            .map(|_| {})
     } else {
         run_cli(&socket, cap_socket).await
     }
@@ -83,14 +85,22 @@ async fn run_cli(socket: &str, cap_socket: Option<String>) -> Result<(), capnp::
     }
 }
 
-async fn parse_and_exec(line: &str, socket: &str, cap_socket: Option<String>) -> Result<bool, capnp::Error> {
+async fn parse_and_exec(
+    line: &str,
+    socket: &str,
+    cap_socket: Option<String>,
+) -> Result<bool, capnp::Error> {
     let args = shlex::split(line).ok_or(Error::other("Invalid quoting"))?;
     let cli = CliCommand::try_parse_from(args).map_err(|e| Error::other(e.to_string()))?;
 
     process_command(cli.command, socket, cap_socket).await
 }
 
-async fn process_command(command: Commands, socket: &str, cap_socket: Option<String>) -> Result<bool, capnp::Error> {
+async fn process_command(
+    command: Commands,
+    socket: &str,
+    cap_socket: Option<String>,
+) -> Result<bool, capnp::Error> {
     // TODO handle error can't find sock here - need to change location because this was moved
     let sock = tokio::net::UnixStream::connect(socket).await?;
     let (reader, writer) = sock.into_split();
@@ -617,7 +627,7 @@ async fn change_logging_task(
 #[allow(dead_code)]
 fn handle_set_capture_file(file_path: String, cap_socket: Option<String>) -> std::io::Result<()> {
     if cap_socket.is_none() {
-        return Err(Error::other("No capture file socket")); 
+        return Err(Error::other("No capture file socket"));
     }
 
     let socket: &str = &cap_socket.unwrap();

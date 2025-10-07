@@ -34,11 +34,11 @@ use tokio::task::JoinSet;
 use tokio::time::interval;
 use tokio_util::compat::*;
 use tracing::error;
+use tracing::*;
 use zpr::rpc_commands::RpcCommands;
 use zpr::LinkId;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
-use tracing::*;
 
 pub async fn launch_capnp(
     asm: Arc<Assembly>,
@@ -49,7 +49,6 @@ pub async fn launch_capnp(
     tokio::task::LocalSet::new()
         .run_until(async move {
             loop {
-
                 let (sock, _addr) = listener.accept().await?;
                 // TODO add connect info to log
                 // println!("Connect from {addr:?}");
