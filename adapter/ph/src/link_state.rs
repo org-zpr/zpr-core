@@ -2,7 +2,7 @@ use crate::assembly::Assembly;
 use crate::auth::{self, DecodedBlob, ZdpAuthCodeBlob, ZdpSelfSignedBlob, AUTH_KEY_SIZE_BYTES};
 use crate::config;
 use crate::counters::ManagementCounterType;
-use crate::km::ZPIPair;
+use crate::km::{PeerCertificate, ZPIPair};
 use crate::km_multiplexor;
 use crate::logging::targets::LINK_STATE;
 use crate::mgmt;
@@ -581,17 +581,42 @@ impl LinkStateWrapper {
         };
 
         if let Some(ref peer_cert) = sa.peer_cert {
-            info!(target: LINK_STATE, "Link {link_id} has name {:?}", peer_cert.subject_name());
-            // assign special-peer name if this peer is special
-            for name in
-                special_peers::special_peer_names_from_x509_subject_name(peer_cert.subject_name())
-            {
-                match asm.peer_table.assign_special_name(name, link_id) {
-                    Ok(()) => {
-                        info!(target: LINK_STATE, "Link {link_id} assigned special name {name:?}")
+            match peer_cert {
+                PeerCertificate::Unverified(cert) => {
+                    warn!(target: LINK_STATE, "Link {link_id} has unverified name {:?}", cert.subject_name());
+
+                    // Nodes should accept unverified certs from adapters.
+                    // Nodes should not accept unverified certs from other nodes.
+                    // Adapters should not accept unverified certs from nodes.
+                    match self.link_type {
+                        LinkType::AdapterToNode => {
+                            return Err(LinkStateError::InvalidOperation(
+                                "adapter received unverified certificate from node".to_string(),
+                            ))
+                        }
+                        LinkType::NodeToAdapter => (), // OK
+                        LinkType::NodeToNode => {
+                            return Err(LinkStateError::InvalidOperation(
+                                "node received unverified certificate from peer node".to_string(),
+                            ))
+                        }
+                        _ => (),
                     }
-                    Err(_) => {
-                        warn!(target: LINK_STATE, "Unable to assign link {link_id} special name {name:?}")
+                }
+                PeerCertificate::Verified(cert) => {
+                    info!(target: LINK_STATE, "Link {link_id} has verified name {:?}", cert.subject_name());
+                    // assign special-peer name if this peer is special
+                    for name in special_peers::special_peer_names_from_x509_subject_name(
+                        cert.subject_name(),
+                    ) {
+                        match asm.peer_table.assign_special_name(name, link_id) {
+                            Ok(()) => {
+                                info!(target: LINK_STATE, "Link {link_id} assigned special name {name:?}")
+                            }
+                            Err(_) => {
+                                warn!(target: LINK_STATE, "Unable to assign link {link_id} special name {name:?}")
+                            }
+                        }
                     }
                 }
             }
@@ -892,7 +917,7 @@ impl LinkStateWrapper {
             warn!(target: LINK_STATE, "Link {link_id} no peer cert found, cannot validate blob");
             return false;
         };
-        if let Err(e) = ss_blob.verify_blob_challenge(peer_cert, &key) {
+        if let Err(e) = ss_blob.verify_blob_challenge(peer_cert.get_cert(), &key) {
             warn!(target: LINK_STATE, "Link {link_id} challenge verification failed: {e}");
             return false;
         }

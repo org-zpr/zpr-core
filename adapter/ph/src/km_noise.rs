@@ -40,7 +40,6 @@ use base64::prelude::*;
 use bytes::{BufMut, Bytes, BytesMut};
 use curve25519_dalek::montgomery::MontgomeryPoint;
 use openssl::rand::rand_bytes;
-use openssl::x509::X509;
 use std::fmt::{self, Display, Formatter};
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -83,7 +82,7 @@ pub struct KmNoise {
     recv_zpis: ZPIPair,
     send_zpis: Option<ZPIPair>,
     certx: KmCertExchange,
-    peer_cert: Option<X509>, // result of key exchange
+    peer_cert: Option<PeerCertificate>, // result of key exchange
 }
 
 /// Holds a noise keypair.
@@ -598,6 +597,7 @@ impl KeyManagerStateMachine for KmNoise {
 mod test {
     use super::*;
 
+    use openssl::x509::X509;
     use tokio::sync::mpsc;
     use tokio::task::yield_now;
     use tokio::time::timeout;
@@ -771,7 +771,10 @@ mod test {
             };
 
             // Responder has initiator's cert
-            assert_eq!(r_transport.peer_cert.unwrap(), actual_i_cert);
+            assert_eq!(
+                r_transport.peer_cert.unwrap(),
+                PeerCertificate::Verified(actual_i_cert)
+            );
         }
 
         {
@@ -783,7 +786,10 @@ mod test {
             };
 
             // Initiator has responder's cert
-            assert_eq!(i_transport.peer_cert.unwrap(), actual_r_cert);
+            assert_eq!(
+                i_transport.peer_cert.unwrap(),
+                PeerCertificate::Verified(actual_r_cert)
+            );
         }
     }
 

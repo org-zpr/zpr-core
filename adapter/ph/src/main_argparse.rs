@@ -37,6 +37,7 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
 
     match control.command {
         Command::Adapter {
+            name,
             config_file,
             common,
             node_addr,
@@ -60,6 +61,9 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
             config = Config::new_for_adapter(config_file, &common)?;
 
             // fold in the optional, adapter specific command line args:
+            if let Some(cn) = name {
+                config.name = cn;
+            }
             if let Some(node_addr) = node_addr {
                 config.node_addr = Some(node_addr);
             }
@@ -357,7 +361,7 @@ mod test {
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 1)), 12345)
         );
         assert_eq!(config.ca_file, ca_file.get_path());
-        assert_eq!(config.certificate_file, cert_file.get_path());
+        assert_eq!(config.certificate_file, Some(cert_file.get_path().into()));
         assert_eq!(
             config.noise_private_key_source(),
             format!("file://{}", pk_file.get_path().display())
@@ -529,7 +533,7 @@ mod test {
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(192, 168, 0, 1)), 12345)
         );
         assert_eq!(config.ca_file, ca_file.get_path());
-        assert_eq!(config.certificate_file, cert_file.get_path());
+        assert_eq!(config.certificate_file, Some(cert_file.get_path().into()));
         assert_eq!(
             config.noise_private_key_source(),
             format!("file://{}", pk_file.get_path().display())
@@ -603,7 +607,7 @@ mod test {
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
         );
         assert_eq!(config.ca_file, ca_file.get_path());
-        assert_eq!(config.certificate_file, cert_file.get_path());
+        assert_eq!(config.certificate_file, Some(cert_file.get_path().into()));
         assert_eq!(
             config.noise_private_key_source(),
             format!("file://{}", pk_file.get_path().display())
@@ -665,7 +669,7 @@ mod test {
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
         );
         assert_eq!(config.ca_file, ca_file.get_path());
-        assert_eq!(config.certificate_file, cert_file.get_path());
+        assert_eq!(config.certificate_file, Some(cert_file.get_path().into()));
         assert_eq!(
             config.noise_private_key_source(),
             format!("file://{}", pk_file.get_path().display())
@@ -710,7 +714,10 @@ mod test {
             SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0)
         );
         assert_eq!(config.ca_file, PathBuf::from(&ca_file_fname));
-        assert_eq!(config.certificate_file, PathBuf::from(&cert_file_fname));
+        assert_eq!(
+            config.certificate_file,
+            Some(PathBuf::from(&cert_file_fname))
+        );
         assert_eq!(
             config.noise_private_key_source(),
             format!("file://{}", pk_file_fname)

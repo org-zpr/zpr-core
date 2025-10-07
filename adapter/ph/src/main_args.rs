@@ -123,6 +123,11 @@ pub enum Command {
     /// Start the handler in adapter mode
     #[command()]
     Adapter {
+        /// Optional unless you are running an adapter without a manually configured noise key. In that
+        /// case this must be set to the desired link key CN value.
+        #[arg(long, value_name = "NAME")]
+        name: Option<String>,
+
         /// Path to adapter configuration file (any options specified on command line will override configuration file)
         #[arg(long, short = 'c', value_name = "PATH")]
         config_file: Option<PathBuf>,
