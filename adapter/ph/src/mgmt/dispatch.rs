@@ -17,6 +17,7 @@ use strum::IntoEnumIterator;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
+use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::FromBytesExt;
 
 /// Dispatch a management packet for a link that hasn't been established yet
@@ -35,16 +36,26 @@ pub fn dispatch_mgmt_packet_with_addr(
 
             // TODO: once we have multi-node, how do we know whether this is a link or a
             // tether?
-            let Some(ingress_link_id) = asm
-                .start_tether(&peer_sa, &interface_addr, LinkType::NodeToAdapter)
-                .ok()
-            else {
-                core::count_event(asm, ManagementCounterType::UnknownPeer);
-                return;
-            };
 
-            pkt.metadata_mut().ingress_link_id = ingress_link_id.get();
+            // It is possible we are processing a queue of messages and we have already set up a
+            // tether for this source.  So before trying to start a tether check if we already have one.
+            let mut ingress_link_id = asm
+                .peer_table
+                .lookup_peer(&peer_sa, &interface_addr)
+                .unwrap_or_zero();
 
+            if ingress_link_id == zpr::LINK_ID_UNKNOWN {
+                let Some(i_link_id) = asm
+                    .start_tether(&peer_sa, &interface_addr, LinkType::NodeToAdapter)
+                    .ok()
+                else {
+                    core::count_event(asm, ManagementCounterType::UnknownPeer);
+                    return;
+                };
+                ingress_link_id = i_link_id.get();
+            }
+
+            pkt.metadata_mut().ingress_link_id = ingress_link_id;
             handle_key_management(asm, pkt);
         }
         _ => {
