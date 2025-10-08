@@ -11,7 +11,6 @@ use crate::zdp;
 use crate::zdpr;
 use std::task::{Context, Poll};
 use thiserror::Error;
-use tokio::time::sleep;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
@@ -57,7 +56,7 @@ pub fn send_non_flow_mgmt(
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
     packet: Packet,
-) {
+) -> Sent<'_> {
     send_mgmt_helper(asm, link_id, packet_type, None, None, packet)
 }
 
@@ -70,7 +69,7 @@ pub fn send_per_flow_mgmt(
     packet_type: zdp::ZdpPacketType,
     stream_id: zpr::StreamId,
     packet: Packet,
-) {
+) -> Sent<'_> {
     send_mgmt_helper(asm, link_id, packet_type, Some(stream_id), None, packet)
 }
 
@@ -81,7 +80,7 @@ pub fn send_per_flow_mgmt_response(
     stream_id: zpr::StreamId,
     txn_id: u16,
     packet: Packet,
-) {
+) -> Sent<'_> {
     send_mgmt_helper(
         asm,
         link_id,
@@ -107,6 +106,10 @@ pub fn send_acknowledgement(asm: &Assembly, link_id: zpr::LinkId, sequence_numbe
     let _ = asm
         .mgmt_substrate_egress
         .try_enqueue_packet(link_id, &mut packet);
+}
+
+pub enum MgmtSendError {
+    LinkClosed,
 }
 
 #[allow(dead_code)]
@@ -166,7 +169,7 @@ impl<'a> Sent<'a> {
                 let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
                     return Err(Acked {
                         asm: self.asm,
-                        link_id: zpr::LINK_ID_UNKNOWN, // guard against memory order shenanigans
+                        link_id: zpr::LINK_ID_UNKNOWN,
                         seq_num: None,
                     });
                 };
@@ -198,7 +201,7 @@ impl<'a> Drop for Sent<'a> {
 }
 
 impl<'a> std::future::Future for Sent<'a> {
-    type Output = Result<Acked<'a>, ()>;
+    type Output = Result<Acked<'a>, MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.packet_id {
@@ -210,7 +213,7 @@ impl<'a> std::future::Future for Sent<'a> {
 
             PacketId::Queued(packet_id) => {
                 let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
-                    return Poll::Ready(Err(()));
+                    return Poll::Ready(Err(MgmtSendError::LinkClosed));
                 };
 
                 let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
@@ -240,7 +243,7 @@ pub struct Acked<'a> {
 }
 
 impl<'a> std::future::Future for Acked<'a> {
-    type Output = Result<(), ()>;
+    type Output = Result<(), MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let Some(seq_num) = self.seq_num else {
@@ -248,7 +251,7 @@ impl<'a> std::future::Future for Acked<'a> {
         };
 
         let Some(peer_state) = self.asm.peer_table.get(self.link_id) else {
-            return Poll::Ready(Err(()));
+            return Poll::Ready(Err(MgmtSendError::LinkClosed));
         };
 
         let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
@@ -281,11 +284,11 @@ impl<'a> SentAndAcked<'a> {
 }
 
 impl<'a> std::future::Future for SentAndAcked<'a> {
-    type Output = Result<(), ()>;
+    type Output = Result<(), MgmtSendError>;
 
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let Some(peer_state) = self.0.asm.peer_table.get(self.0.link_id) else {
-            return Poll::Ready(Err(()));
+            return Poll::Ready(Err(MgmtSendError::LinkClosed));
         };
 
         let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
@@ -306,7 +309,7 @@ fn send_mgmt_helper(
     stream_id: Option<zpr::StreamId>,
     txn_id: Option<u16>,
     mut packet: Packet,
-) {
+) -> Sent<'_> {
     assert_ne!(packet_type, zdp::ZdpPacketType::KeyManagement);
     assert_eq!(stream_id.is_some(), packet_type.is_per_flow());
 
@@ -326,7 +329,11 @@ fn send_mgmt_helper(
     hdr.packet_type = packet_type;
 
     let Some(peer_state) = asm.peer_table.get(link_id) else {
-        return;
+        return Sent {
+            asm,
+            link_id: zpr::LINK_ID_UNKNOWN,
+            packet_id: PacketId::Queued(0), // will not be used due to unknown link ID
+        };
     };
     let mut zdpr_send = peer_state.zdpr_send.lock().unwrap();
 
@@ -344,9 +351,19 @@ fn send_mgmt_helper(
                 // This packet should activate / restart our retry timer.
                 peer_state.zdpr_retry_timer_reset.notify_one();
             }
+
+            Sent {
+                asm,
+                link_id,
+                packet_id: PacketId::Sent(seq_num),
+            }
         }
 
-        zdpr::EnqueueResult::Queued(_packet_id) => (),
+        zdpr::EnqueueResult::Queued(packet_id) => Sent {
+            asm,
+            link_id,
+            packet_id: PacketId::Queued(packet_id),
+        },
     }
 }
 
@@ -421,8 +438,17 @@ pub enum SyncReqError {
     LinkClosed,
     #[error("protocol error")]
     ProtocolError,
+    #[allow(dead_code)]
     #[error("timeout")]
     Timeout,
+}
+
+impl From<super::core::MgmtSendError> for SyncReqError {
+    fn from(err: super::core::MgmtSendError) -> Self {
+        match err {
+            super::core::MgmtSendError::LinkClosed => SyncReqError::LinkClosed,
+        }
+    }
 }
 
 /// Helper for send management request function
@@ -444,36 +470,31 @@ async fn send_sync_req_helper(
     let Some(peer_state) = asm.peer_table.get(link_id) else {
         return Err(SyncReqError::LinkClosed);
     };
+    // CTP FIXME: we don't need permits anymore
     let permit = peer_state.sync_req_state.acquire_permit().await;
-    let mut response_future = peer_state.sync_req_state.install_response_listener(&permit);
+    let response_future = peer_state.sync_req_state.install_response_listener(&permit);
 
-    for _i in 0..=config::DEFAULT_REQUEST_RETRY_COUNT {
-        let mut packet = new_heap_packet();
-        pkt_fn(&mut packet);
+    let mut packet = new_heap_packet();
+    pkt_fn(&mut packet);
 
-        send_mgmt_helper(
-            asm,
-            link_id,
-            zdp_request_type,
-            stream_id,
-            Some(permit.seq_num() as u16),
-            packet,
-        );
+    send_mgmt_helper(
+        asm,
+        link_id,
+        zdp_request_type,
+        stream_id,
+        Some(permit.seq_num() as u16),
+        packet,
+    )
+    .await?;
 
-        tokio::select! {
-            response = &mut response_future => {
-                drop(permit);
-                return match_received(asm, response.ok(), SyncReqError::LinkClosed, zdp_response_type);
-            }
-            _ = sleep(config::DEFAULT_REQUEST_RETRY_TIMER) => ()
-        }
-    }
-
-    peer_state.sync_req_state.clear_response_listener(&permit);
-    let response = response_future.hangup();
+    let response = response_future.await;
     drop(permit);
-
-    match_received(asm, response, SyncReqError::Timeout, zdp_response_type)
+    return match_received(
+        asm,
+        response.ok(),
+        SyncReqError::LinkClosed,
+        zdp_response_type,
+    );
 }
 
 /// Determines whether the message received in response to the request is

@@ -4,7 +4,7 @@
 
 #![allow(dead_code)]
 
-use super::core;
+use super::core::{self, Sent};
 use crate::counters::ManagementCounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
@@ -38,13 +38,13 @@ pub fn send_key_management(asm: &Assembly, link_id: zpr::LinkId, km_id: zpr::KmI
 }
 
 /// send a Discard message (RFC 6.5 § 6.3.1)
-pub fn send_discard(asm: &Assembly, link_id: zpr::LinkId) {
+pub fn send_discard(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
     let pkt = core::new_heap_packet();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::Discard, pkt)
 }
 
 /// send an Echo Request (RFC 6.5 § 6.3.2)
-pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) {
+pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
     pkt.alloc_zeroed_header::<zdp::ZdpEchoHeader>();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::EchoRequest, pkt)
@@ -55,7 +55,7 @@ pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) {
 /// Originally this was used to send the pre-configured ZPR address of the
 /// remote adapter into the node.  This is no longer necessary.
 ///
-pub fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) {
+pub fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
     let req = core::new_heap_packet();
     core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, req)
 }
@@ -76,7 +76,7 @@ pub fn send_init_authentication_request(
     link_id: zpr::LinkId,
     flags: u8,
     payload: auth::ZdpInitAuthenticationPayload,
-) {
+) -> Sent<'_> {
     debug!(target: ZDP, "Link {link_id}: sending InitAuthenticationRequest, flags: {flags:x?}");
 
     let mut req = core::new_heap_packet();
@@ -109,12 +109,12 @@ pub fn send_init_authentication_request(
 ///
 /// ## Panics
 /// - Panics if all requested addresses are not the same IP version.
-pub fn send_acquire_zpr_address_request(
-    asm: &Assembly,
+pub fn send_acquire_zpr_address_request<'a>(
+    asm: &'a Assembly,
     link_id: zpr::LinkId,
-    actor_addrs: &[IpAddr],
-    blob: Option<&[u8]>,
-) {
+    actor_addrs: &'_ [IpAddr],
+    blob: Option<&'_ [u8]>,
+) -> Sent<'a> {
     let blob = blob.unwrap_or_default();
 
     let mut req = core::new_heap_packet();
@@ -169,12 +169,12 @@ pub fn send_acquire_zpr_address_request(
 ///
 /// ## Panics
 /// - Panics if all granted addresses are not the same IP version.
-pub fn send_grant_zpr_address_request(
-    asm: &Assembly,
+pub fn send_grant_zpr_address_request<'a>(
+    asm: &'a Assembly,
     link_id: zpr::LinkId,
     status_code: zdp::ResponseCode,
-    actor_addrs: &[IpAddr],
-) {
+    actor_addrs: &'_ [IpAddr],
+) -> Sent<'a> {
     info!(target: ZDP, "Link {link_id} - sending GrantZprAddressRequest, status: {status_code:?}");
 
     let mut req = core::new_heap_packet();
@@ -224,7 +224,7 @@ pub fn send_terminate_request<'a, 'pktbuf>(
     asm: &Assembly,
     link_id: zpr::LinkId,
     reason: zdp::TerminateReason,
-) {
+) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
     pkt.push_header(&zdp::ZdpTerminateLinkRequestHeader {
         reason_code: reason,
@@ -238,7 +238,7 @@ pub fn send_terminate_indication<'a, 'pktbuf>(
     asm: &Assembly,
     link_id: zpr::LinkId,
     reason: zdp::TerminateReason,
-) {
+) -> Sent<'_> {
     let mut pkt = core::new_heap_packet();
     let hdr = pkt.alloc_zeroed_header::<zdp::ZdpTerminateLinkIndicationHeader>();
     hdr.reason_code = reason;
@@ -326,7 +326,7 @@ pub async fn send_bind_actor_address_request(
 }
 
 /// send a Report message (RFC 6.5 § 6.3.13)
-pub fn send_report(asm: &Assembly, link_id: zpr::LinkId, report: &str) {
+pub fn send_report<'a>(asm: &'a Assembly, link_id: zpr::LinkId, report: &'_ str) -> Sent<'a> {
     // TODO this condition will need to be adjusted when we have complete ZPR packets
     // with the information at the end of the packet at well
     /*if packet::PACKET_BUFFER_MAX_BODY_SIZE - config::DEFAULT_MESSAGE_HEADROOM < report.len() {

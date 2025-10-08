@@ -17,6 +17,7 @@ use strum::IntoEnumIterator;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
+use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::FromBytesExt;
 
 /// Dispatch a management packet for a link that hasn't been established yet
@@ -35,16 +36,27 @@ pub fn dispatch_mgmt_packet_with_addr(
 
             // TODO: once we have multi-node, how do we know whether this is a link or a
             // tether?
-            let Some(ingress_link_id) = asm
-                .start_tether(&peer_sa, &interface_addr, LinkType::NodeToAdapter)
-                .ok()
-            else {
-                core::count_event(asm, ManagementCounterType::UnknownPeer);
-                return;
-            };
 
-            pkt.metadata_mut().ingress_link_id = ingress_link_id.get();
+            // It is possible we are processing a queue of messages and we have already set up a
+            // tether for this source.  So before trying to start a tether check if we already have one.
 
+            let mut ingress_link_id = asm
+                .peer_table
+                .lookup_peer(&peer_sa, &interface_addr)
+                .unwrap_or_zero();
+
+            if ingress_link_id == zpr::LINK_ID_UNKNOWN {
+                let Some(i_link_id) = asm
+                    .start_tether(&peer_sa, &interface_addr, LinkType::NodeToAdapter)
+                    .ok()
+                else {
+                    core::count_event(asm, ManagementCounterType::UnknownPeer);
+                    return;
+                };
+                ingress_link_id = i_link_id.get();
+            }
+
+            pkt.metadata_mut().ingress_link_id = ingress_link_id;
             handle_key_management(asm, pkt);
         }
         _ => {
@@ -249,5 +261,57 @@ fn count_zdpr_receiver_stats(mgmt_counters: &ManagementCounters, receiver: &mut 
     for stat in zdpr::ReceiverStat::iter() {
         mgmt_counters[zdpr_receiver_stat_to_counter(stat)]
             .increase_by(receiver.fetch_reset_stat(stat));
+    }
+}
+
+#[cfg(test)]
+mod test {
+
+    use super::*;
+    use crate::assembly::test::{create_assembly, TestAssemblyBuilder};
+    use crate::config::PACKET_BUFFER_SIZE;
+    use crate::km_cert_exchange::KmCertExchange;
+    use crate::km_noise::NoiseKeypair;
+    use crate::km_testdata::test::*;
+    use std::net::Ipv4Addr;
+    use tokio::task::LocalSet;
+
+    // Ensure that this old issue is fixed:
+    // https://github.com/org-zpr/zpr-core/issues/929
+    #[tokio::test]
+    async fn test_duplicate_no_tether_packet_no_crash() {
+        let mut asm = create_assembly(TestAssemblyBuilder::new());
+        asm.self_noise_keypair = Some(NoiseKeypair::generate());
+        asm.certx = Some(KmCertExchange::new_from_pem(ADAPTER_CERT_DATA, CA_CERT_DATA).unwrap());
+        let aasm = Arc::new(asm);
+
+        let buf1 = Box::new([0u8; PACKET_BUFFER_SIZE]);
+        let mut pkt1 = Packet::new(buf1, 64);
+
+        // write ZDP base header
+        let hdr = pkt1.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+        hdr.packet_type = zdp::ZdpPacketType::KeyManagement;
+        hdr.sequence_number = 1u16.into();
+
+        let buf2 = Box::new([0u8; PACKET_BUFFER_SIZE]);
+        let mut pkt2 = Packet::new(buf2, 64);
+
+        let hdr = pkt2.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+        hdr.packet_type = zdp::ZdpPacketType::KeyManagement;
+        hdr.sequence_number = 1u16.into();
+
+        let peer_sa = zpr::SubstrateAddr::from(([127, 0, 0, 1], 1234));
+        let int_addr = net_defs::ScopedIpAddr::V4(Ipv4Addr::new(127, 0, 0, 1).into());
+
+        let local = LocalSet::new();
+        local
+            .run_until(async move {
+                dispatch_mgmt_packet_with_addr(&aasm, peer_sa, int_addr, &mut pkt1);
+                dispatch_mgmt_packet_with_addr(&aasm, peer_sa, int_addr, &mut pkt2);
+            })
+            .await;
+
+        // If we get here we didn't crash!
+        assert!(true);
     }
 }
