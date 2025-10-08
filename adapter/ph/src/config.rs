@@ -199,8 +199,6 @@ impl Config {
             config.set_from_adapter(&config_file.adapter, base_dir)?;
             config.set_from_authentication(&config_file.authentication, base_dir)?;
         }
-        // If a noise key is not set, generate one.
-
         Ok(config)
     }
 
