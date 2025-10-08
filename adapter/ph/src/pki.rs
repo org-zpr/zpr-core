@@ -188,9 +188,6 @@ pub fn generate_self_signed_noise_cert(
 
     // Set the issuer name (for a self-signed cert, this is also the subject)
     let mut name = X509Name::builder()?;
-    name.append_entry_by_text("C", "US")?; // Country
-    name.append_entry_by_text("ST", "MA")?; // State or Province
-    name.append_entry_by_text("O", "ZPR")?; // Organization
     name.append_entry_by_text("CN", cn)?; // Common Name (e.g., domain name or IP)
     let name = name.build();
     builder.set_subject_name(&name)?;
@@ -223,6 +220,7 @@ pub fn generate_self_signed_noise_cert(
 
 #[cfg(test)]
 mod test {
+
     use super::*;
 
     #[test]
@@ -254,5 +252,13 @@ n5ystfC9RDOzkrR8ICLvoWBQ52ctmNH3oWs1p1DT3uL6k3QMnNlejIkUqAY51aI=
         assert!(cns.is_some());
         let cns = cns.unwrap();
         assert_eq!(cns, "bas.zpr.org".to_string());
+    }
+
+    #[test]
+    fn test_that_self_signed_cert_encodes_cn() {
+        let keypair = NoiseKeypair::generate();
+        let self_signed_cert = generate_self_signed_noise_cert("foo.zpr", &keypair).unwrap();
+        let cn = get_cn_from_cert(&self_signed_cert).unwrap();
+        assert_eq!(cn, "foo.zpr".to_string());
     }
 }

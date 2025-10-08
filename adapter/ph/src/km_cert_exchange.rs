@@ -196,9 +196,9 @@ impl KmCertExchange {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::km_noise::derive_public_key;
+    use crate::km_noise::{derive_public_key, NoiseKeypair};
     use crate::km_testdata::test::*;
-    use crate::pki::NOISE_KEY_LEN;
+    use crate::pki::{generate_self_signed_noise_cert, NOISE_KEY_LEN};
     use base64::prelude::*;
     use bytes::BytesMut;
 
@@ -269,5 +269,42 @@ mod test {
             }
             Err(e) => panic!("unexpected error: {:?}", e),
         };
+    }
+
+    #[test]
+    fn test_km_cert_with_self_signed() {
+        let keypair = NoiseKeypair::generate();
+
+        let self_signed_cert = generate_self_signed_noise_cert("foo.zpl", &keypair).unwrap();
+        let self_signed_cert_pem = self_signed_cert.to_pem().unwrap();
+        let self_signed_cert_pem_str = String::from_utf8(self_signed_cert_pem).unwrap();
+
+        let adapter_exchanger =
+            KmCertExchange::new_from_pem(&self_signed_cert_pem_str, CA_CERT_DATA).unwrap();
+
+        let mut buffer = BytesMut::with_capacity(MSG_BUF_SIZE);
+        //let mut buffer = [0u8; MSG_BUF_SIZE];
+        match adapter_exchanger.write_payload(&mut buffer) {
+            Ok(()) => (),
+            Err(e) => {
+                panic!("Error creating payload: {:?}", e)
+            }
+        };
+        assert!(buffer.len() > 100);
+
+        // Now a node will accept the payload and check the clients cert and signature.
+        // Returning its key fingerprint and a signature.
+        let node_exchanger = KmCertExchange::new_from_pem(NODE_CERT_DATA, CA_CERT_DATA).unwrap();
+
+        let i_cert = match node_exchanger.process_payload(&buffer[..buffer.len()], &keypair.public)
+        {
+            Ok(c) => c,
+            Err(e) => {
+                panic!("Error processing payload: {:?}", e)
+            }
+        };
+
+        // Node emits the initiator cert on success:
+        assert_eq!(PeerCertificate::Unverified(self_signed_cert), i_cert);
     }
 }
