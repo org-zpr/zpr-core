@@ -46,32 +46,26 @@ pub async fn launch_capnp(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // let listener = tokio::net::UnixListener::bind(path)?;
 
-    tokio::task::LocalSet::new()
-        .run_until(async move {
-            loop {
-                let (sock, _addr) = listener.accept().await?;
-                // TODO add connect info to log
-                // println!("Connect from {addr:?}");
-                let (reader, writer) = sock.into_split();
-                let network = capnp_rpc::twoparty::VatNetwork::new(
-                    tokio::io::BufReader::new(reader).compat(),
-                    tokio::io::BufWriter::new(writer).compat_write(),
-                    capnp_rpc::rpc_twoparty_capnp::Side::Server,
-                    capnp::message::ReaderOptions::new(),
-                );
+    loop {
+        let (sock, _addr) = listener.accept().await?;
+        // TODO add connect info to log
+        // println!("Connect from {addr:?}");
+        let (reader, writer) = sock.into_split();
+        let network = capnp_rpc::twoparty::VatNetwork::new(
+            tokio::io::BufReader::new(reader).compat(),
+            tokio::io::BufWriter::new(writer).compat_write(),
+            capnp_rpc::rpc_twoparty_capnp::Side::Server,
+            capnp::message::ReaderOptions::new(),
+        );
 
-                let service: svc::Client =
-                    capnp_rpc::new_client(AdminServiceImpl { asm: asm.clone() });
+        let service: svc::Client = capnp_rpc::new_client(AdminServiceImpl { asm: asm.clone() });
 
-                let rpc_system =
-                    capnp_rpc::RpcSystem::new(Box::new(network), Some(service.clone().client));
-                tokio::task::spawn_local(async move {
-                    let err = rpc_system.await;
-                    err
-                });
-            }
-        })
-        .await
+        let rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), Some(service.clone().client));
+        tokio::task::spawn_local(async move {
+            let err = rpc_system.await;
+            err
+        });
+    }
 }
 
 pub async fn launch(asm: Arc<Assembly>, listener: UnixListener) {
@@ -91,10 +85,8 @@ impl svc::Server for AdminServiceImpl {
         _: svc::EchoParams,
         _: svc::EchoResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        capnp::capability::Promise::from_future(async move {
-            // TODO add logging here and in the other commands
-            Ok(())
-        })
+        // TODO add logging here and in the other commands
+        capnp::capability::Promise::ok(())
     }
 
     fn reset_counters(
@@ -102,21 +94,17 @@ impl svc::Server for AdminServiceImpl {
         _: svc::ResetCountersParams,
         _: svc::ResetCountersResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        let task_asm = self.asm.clone();
+        for value in self.asm.counters.management.values() {
+            value.reset();
+        }
 
-        capnp::capability::Promise::from_future(async move {
-            for value in task_asm.counters.management.values() {
+        for fastpath in self.asm.counters.fastpaths.lock().unwrap().iter() {
+            for value in fastpath.values() {
                 value.reset();
             }
+        }
 
-            for fastpath in task_asm.counters.fastpaths.lock().unwrap().iter() {
-                for value in fastpath.values() {
-                    value.reset();
-                }
-            }
-
-            Ok(())
-        })
+        capnp::capability::Promise::ok(())
     }
 
     fn counters(
@@ -151,12 +139,10 @@ impl svc::Server for AdminServiceImpl {
             self.asm.get_uptime().as_secs(),
             self.asm.get_uptime().subsec_millis()
         );
-        capnp::capability::Promise::from_future(async move {
-            let mut results_builder = results.get();
-            results_builder.set_counts(counts);
+        let mut results_builder = results.get();
+        results_builder.set_counts(counts);
 
-            Ok(())
-        })
+        capnp::capability::Promise::ok(())
     }
 
     fn set_capture_file(
@@ -213,10 +199,14 @@ impl svc::Server for AdminServiceImpl {
             for insn in serialized_program {
                 let split_insn: Vec<&str> = insn.split_whitespace().collect();
                 let bpf_insn = cbpf_rs::BpfInsn {
-                    code: split_insn[0].parse().unwrap(),
-                    jt: split_insn[1].parse().unwrap(),
-                    jf: split_insn[2].parse().unwrap(),
-                    k: split_insn[3].parse().unwrap(),
+                    // code: split_insn[0].parse().unwrap(),
+                    // jt: split_insn[1].parse().unwrap(),
+                    // jf: split_insn[2].parse().unwrap(),
+                    // k: split_insn[3].parse().unwrap(),
+                    code: 0,
+                    jt: 0,
+                    jf: 0,
+                    k: 0,
                 };
                 insn_vec.push(bpf_insn);
             }
@@ -230,10 +220,8 @@ impl svc::Server for AdminServiceImpl {
                     success_builder.set_none(());
                 }
                 _ => {
-                    let error_builder = results_builder.init_error();
-                    error_builder
-                        .init_txt("Invalid program".len() as u32)
-                        .push_str(&"Invalid program");
+                    let mut error_builder = results_builder.init_error();
+                    error_builder.set_txt("Invalid program")
                 }
             }
 
@@ -246,12 +234,8 @@ impl svc::Server for AdminServiceImpl {
         _: svc::DeleteCaptureProgramParams,
         _: svc::DeleteCaptureProgramResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        let task_asm = self.asm.clone();
-        capnp::capability::Promise::from_future(async move {
-            task_asm.flow_control.delete_program();
-
-            Ok(())
-        })
+        self.asm.flow_control.delete_program();
+        capnp::capability::Promise::ok(())
     }
 
     fn perf_sample(
@@ -259,15 +243,9 @@ impl svc::Server for AdminServiceImpl {
         _: svc::PerfSampleParams,
         mut results: svc::PerfSampleResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        capnp::capability::Promise::from_future(async move {
-            let results_builder = results.get();
-            let response = format!("Not currently supported");
-            results_builder
-                .init_result(response.len() as u32)
-                .push_str(&response);
-
-            Ok(())
-        })
+        let mut results_builder = results.get();
+        results_builder.set_result("Not currently supported");
+        capnp::capability::Promise::ok(())
     }
 
     fn show_link_summary(
@@ -275,26 +253,21 @@ impl svc::Server for AdminServiceImpl {
         _: svc::ShowLinkSummaryParams,
         mut results: svc::ShowLinkSummaryResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        let task_asm = self.asm.clone();
-        capnp::capability::Promise::from_future(async move {
-            let results_builder = results.get();
-            let mut response: String = String::new();
-            let _ = write!(&mut response, "Link summary:\n");
+        let mut results_builder = results.get();
+        let mut response: String = String::new();
+        let _ = write!(&mut response, "Link summary:\n");
 
-            for id in task_asm.peer_ids.lock().unwrap().clone() {
-                let _ = write!(
-                    &mut response,
-                    "  {id}: {}\n",
-                    get_link_summary(&task_asm, id)
-                );
-            }
+        for id in self.asm.peer_ids.lock().unwrap().clone() {
+            let _ = write!(
+                &mut response,
+                "  {id}: {}\n",
+                get_link_summary(&self.asm, id)
+            );
+        }
 
-            results_builder
-                .init_summary(response.len() as u32)
-                .push_str(&response);
+        results_builder.set_summary(response);
 
-            Ok(())
-        })
+        capnp::capability::Promise::ok(())
     }
 
     fn show_link(
@@ -306,7 +279,7 @@ impl svc::Server for AdminServiceImpl {
         capnp::capability::Promise::from_future(async move {
             let id = params.get()?.get_id();
 
-            let results_builder = results.get();
+            let mut results_builder = results.get();
             let response = match task_asm.peer_table.get(id) {
                 Some(peer) => {
                     let lsm = &peer.link_state_machine;
@@ -319,9 +292,7 @@ impl svc::Server for AdminServiceImpl {
                 None => format!("No such link {id}\n"),
             };
 
-            results_builder
-                .init_result(response.len() as u32)
-                .push_str(&response);
+            results_builder.set_result(response);
 
             Ok(())
         })
@@ -332,7 +303,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::ConfigureLinkParams,
         _: svc::ConfigureLinkResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        capnp::capability::Promise::from_future(async move { Ok(()) })
+        capnp::capability::Promise::ok(())
     }
 
     fn start_link(
@@ -352,8 +323,8 @@ impl svc::Server for AdminServiceImpl {
                 }
                 Err(e) => {
                     let resp = format!("Failed to start link {}: {:?}\n", id, e);
-                    let error_builder = results_builder.init_error();
-                    error_builder.init_txt(resp.len() as u32).push_str(&resp);
+                    let mut error_builder = results_builder.init_error();
+                    error_builder.set_txt(resp);
                 }
             }
             Ok(())
@@ -377,8 +348,8 @@ impl svc::Server for AdminServiceImpl {
                 }
                 Err(e) => {
                     let resp = format!("Failed to stop link {}: {:?}\n", id, e);
-                    let error_builder = results_builder.init_error();
-                    error_builder.init_txt(resp.len() as u32).push_str(&resp);
+                    let mut error_builder = results_builder.init_error();
+                    error_builder.set_txt(resp);
                 }
             }
             Ok(())
