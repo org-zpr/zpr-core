@@ -9,7 +9,7 @@ use tokio::select;
 use tokio::time;
 
 pub async fn launch(asm: Arc<Assembly>, link_id: zpr::LinkId) {
-    let mut retry_interval = time::interval(config::DEFAULT_REQUEST_RETRY_TIMER);
+    let mut retry_interval = time::interval(config::DEFAULT_ZDPR_RETRY_TIMER);
     retry_interval.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
     loop {
