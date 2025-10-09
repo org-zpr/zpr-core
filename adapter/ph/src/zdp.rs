@@ -49,8 +49,8 @@ pub enum ZdpPacketType {
     Report = 145,
     InitAuthenticationRequest = 146, // TODO: add to RFC 6
     Unused147 = 147,
-    GrantZprAddressRequest = 148,  // TODO: add to RFC 6
-    GrantZprAddressResponse = 149, // TODO: add to RFC 6
+    GrantZprAddressRequest = 148, // TODO: add to RFC 6
+    Unused149 = 149,
 
     Acknowledgement = 255,
 }
@@ -171,12 +171,6 @@ pub struct ZdpGrantZprAddressRequestHeader {
     pub addr_count: u8,
     // Followed in memory by:
     //  - IP addresses (addr_count * IP address size bytes)
-}
-
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
-pub struct ZdpGrantZprAddressResponse {
-    pub status_code: ResponseCode,
 }
 
 #[open_enum]
