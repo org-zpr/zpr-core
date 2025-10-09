@@ -40,16 +40,17 @@ pub const TINY_MESSAGE_HEADROOM: usize = 64;
 
 pub const DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE: usize = 32;
 
-pub const DEFAULT_REQUEST_RETRY_COUNT: usize = 3;
-pub const DEFAULT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_millis(400);
-pub const DEFAULT_TERMINATE_RESPONSE_TIMER: std::time::Duration = std::time::Duration::from_secs(1);
+pub const DEFAULT_ZDPR_RETRY_TIMER: std::time::Duration = std::time::Duration::from_millis(400);
+
+pub const DEFAULT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+pub const DEFAULT_TERMINATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Slightly longer -- asking visa service to grant an address
 /// means it may have to do a lot of work to verify auth.
-pub const VS_GRANT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(20);
+pub const VS_GRANT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Grant requires reconfiguring TUN, so longer.
-pub const GRANT_REQUEST_RETRY_TIMER: std::time::Duration = std::time::Duration::from_secs(5);
+pub const GRANT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// How long to wait for an actor to finish out of band authentication.
 pub const ACTOR_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);

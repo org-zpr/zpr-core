@@ -563,7 +563,7 @@ impl LinkStateWrapper {
         // IF this is an adapter, it's expected to issue the hello
         if self.link_type == LinkType::AdapterToNode {
             mgmt::requests::send_hello_request(asm, self.id).enqueue();
-            self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+            self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_TIMEOUT);
             debug!(
                 target: LINK_STATE,
                 "Link {link_id} sent HelloRequest.  Waiting for other side to respond."
@@ -630,7 +630,7 @@ impl LinkStateWrapper {
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
                 locked_fsm.set_state(LinkState::WaitForInitAuth);
                 self.send_init_authentication_request(asm);
-                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_RETRY_TIMER);
+                self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_TIMEOUT);
                 debug!(
                     target: LINK_STATE,
                     "Link {link_id} finished helloing.  Waiting for other side to respond to init-auth"
@@ -1040,7 +1040,7 @@ impl LinkStateWrapper {
 
         // Will call back via ReceivedGrantResponse event if successful.
         self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses);
-        self.set_timeout(asm, &mut locked_fsm, config::GRANT_REQUEST_RETRY_TIMER);
+        self.set_timeout(asm, &mut locked_fsm, config::GRANT_REQUEST_TIMEOUT);
         Ok(())
     }
 
@@ -1102,7 +1102,7 @@ impl LinkStateWrapper {
                                 self.set_timeout(
                                     asm,
                                     &mut locked_fsm,
-                                    config::VS_GRANT_REQUEST_RETRY_TIMER,
+                                    config::VS_GRANT_REQUEST_TIMEOUT,
                                 );
                             }
                             Err(e) => {
@@ -1386,7 +1386,7 @@ impl LinkStateWrapper {
         asm: &Arc<Assembly>,
         logical_clock: u64,
     ) -> Result<(), LinkStateError> {
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
+        let locked_fsm = self.locked_fsm.lock().unwrap();
         if logical_clock != locked_fsm.logical_clock {
             // timeout was for some earlier state & we won the task abort race; ignore
             return Ok(());
@@ -1394,35 +1394,11 @@ impl LinkStateWrapper {
 
         // handle the timeout...
         match (self.link_type, locked_fsm.state) {
-            // all these states use timeout simply for retransmits
             (LinkType::AdapterToNode, LinkState::RegisterAA)
             | (LinkType::NodeToAdapter, LinkState::RegisterAA)
             | (LinkType::NodeToAdapter, LinkState::WaitForInitAuth)
-            | (LinkType::AdapterToNode, LinkState::Helloing) => {
-                locked_fsm.timeout_count += 1;
-                let retries = locked_fsm.timeout_count as u32;
-
-                if locked_fsm.timeout_count >= config::DEFAULT_REQUEST_RETRY_COUNT {
-                    error!(target: LINK_STATE, "Link {} timed out in state {:?}", self.id, locked_fsm.state);
-                    drop(locked_fsm);
-                    return self.process_error_response(&asm);
-                }
-
-                warn!(target: LINK_STATE, "Link {} timed out in state {:?}, retransmitting (retry={retries})", self.id, locked_fsm.state);
-
-                // Note that different messages have different original timeouts and that information is
-                // lost by the time we get here.  Here I am just doing a pretty naive back off strategy.
-                self.set_timeout(
-                    asm,
-                    &mut locked_fsm,
-                    config::DEFAULT_REQUEST_RETRY_TIMER * retries,
-                );
-                self.retransmit(asm, &mut locked_fsm);
-                Ok(())
-            }
-
-            (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
-                // This is a timeout while waiting for the adapter to authenticate.
+            | (LinkType::AdapterToNode, LinkState::Helloing)
+            | (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
                 // Timeout here means we give up on the link.
                 error!(target: LINK_STATE, "Link {} timed out in state {:?}", self.id, locked_fsm.state);
                 drop(locked_fsm);
@@ -1442,42 +1418,6 @@ impl LinkStateWrapper {
                 "Ignoring unexpected timeout in state {:?}",
                 locked_fsm.state
             ))),
-        }
-    }
-
-    /// Invoked due to a state transition timeout while waiting for a reply; retransmits the associated request.
-    fn retransmit(
-        &self,
-        asm: &Arc<Assembly>,
-        locked_fsm: &mut std::sync::MutexGuard<'_, LinkStateMachine>,
-    ) {
-        match (self.link_type, locked_fsm.state) {
-            (LinkType::AdapterToNode, LinkState::RegisterAA) => {
-                let requested_addrs = asm.get_local_zpr_addrs_std();
-                self.send_acquire_zpr_address_request(
-                    asm,
-                    &requested_addrs,
-                    &locked_fsm.auth_blob.as_ref().unwrap(),
-                )
-            }
-
-            (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
-                self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses)
-            }
-
-            (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {
-                self.send_init_authentication_request(asm)
-            }
-
-            (LinkType::AdapterToNode, LinkState::Helloing) => {
-                mgmt::requests::send_hello_request(asm, self.id).enqueue();
-            }
-
-            // Programming error!
-            (_, _) => panic!(
-                "call to retransmit in state {:?} but not implemented",
-                locked_fsm.state
-            ),
         }
     }
 
@@ -1573,11 +1513,7 @@ impl LinkStateWrapper {
 
         // If this timeout fires, we end up going to `clean_up_link_state`.
         // If we get a response to our terminate we also go to `clean_up_link_state`.
-        self.set_timeout(
-            asm,
-            &mut locked_fsm,
-            config::DEFAULT_TERMINATE_RESPONSE_TIMER,
-        );
+        self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_TERMINATE_TIMEOUT);
         mgmt::requests::send_terminate_request(asm, self.id, reason).enqueue();
         Ok(())
     }
