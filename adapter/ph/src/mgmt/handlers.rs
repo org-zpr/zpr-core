@@ -167,45 +167,12 @@ pub async fn handle_init_authentication_request(
         challenge_opt = None;
     }
 
-    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpInitAuthenticationResponse>();
-    hdr.status_code = zdp::ResponseCode::Success;
-
-    super::core::send_non_flow_mgmt(
-        asm,
-        ingress_link_id,
-        zdp::ZdpPacketType::InitAuthenticationResponse,
-        rsp_pkt,
-    )
-    .await?;
-
     let _ = dispatch_link_state_event_or_error(
         asm,
         ingress_link_id,
         LinkEvent::ReceivedInitAuth((is_bootstrap, challenge_opt)),
     );
 
-    Ok(())
-}
-
-/// Process the InitAuthenticationResponse message.
-/// Just inform the link_state that we got this.
-pub async fn handle_init_authentication_response(
-    asm: &Arc<Assembly>,
-    mut pkt: Packet,
-) -> HandleMgmtResult {
-    let Ok(hdr) = zdp::ZdpInitAuthenticationResponse::read_from_buf(&mut pkt) else {
-        return Err(HandleMgmtError::BadStructure);
-    };
-
-    let link_id = pkt.metadata().ingress_link_id;
-    let status = hdr.status_code;
-    debug!(target: ZDP, "Link {link_id}: Received InitAuthenticationResponse, status: {status:?}");
-    let _ = dispatch_link_state_event_or_error(
-        asm,
-        link_id,
-        LinkEvent::ReceivedInitAuthResponse(status),
-    );
     Ok(())
 }
 
