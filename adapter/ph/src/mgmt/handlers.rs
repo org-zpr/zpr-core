@@ -488,37 +488,14 @@ pub async fn handle_acquire_zpr_address_request(
 ) -> HandleMgmtResult {
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
-    let mut status_code = zdp::ResponseCode::Other;
-
-    let parse_res = parse_acquire_zpr_address_request(&mut pkt);
-    if parse_res.is_ok() {
-        status_code = zdp::ResponseCode::Success; // parse OK
-    } else {
-        warn!(target: ZDP, "Link {ingress_link_id} Failed to parse Acquire Zpr Address Request message");
-    }
-
-    // Send an ACK.
-    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
-    let hdr = rsp_pkt.alloc_zeroed_header::<zdp::ZdpAcquireZprAddressResponse>();
-    hdr.status_code = status_code;
-
-    super::core::send_non_flow_mgmt(
-        asm,
-        ingress_link_id,
-        zdp::ZdpPacketType::AcquireZprAddressResponse,
-        rsp_pkt,
-    )
-    .await?;
+    let Ok((actor_addresses, blob)) = parse_acquire_zpr_address_request(&mut pkt) else {
+        error!(target: ZDP, "Link {ingress_link_id} Failed to parse Acquire Zpr Address Request message");
+        return Err(HandleMgmtError::BadStructure);
+    };
 
     // Now we can do our async prcessing of the acquire which will involve talking to
     // the visa service.
 
-    let (actor_addresses, blob) = match parse_res {
-        Ok((actor_addresses, blob)) => (actor_addresses, blob),
-        Err(_) => {
-            return Ok(()); // this only happens if we fail to parse the blob above
-        }
-    };
     debug!(target: ZDP, "Link {}: received Acquire ZPR Address Request for link with addresses {:?}", ingress_link_id, actor_addresses);
 
     let _ = dispatch_link_state_event_or_error(
@@ -527,25 +504,6 @@ pub async fn handle_acquire_zpr_address_request(
         LinkEvent::ReceivedAcquireZprAddressRequest(actor_addresses, blob),
     );
 
-    Ok(())
-}
-
-pub async fn handle_acquire_zpr_address_response(
-    asm: &Arc<Assembly>,
-    mut pkt: Packet,
-) -> HandleMgmtResult {
-    let Ok(hdr) = zdp::ZdpAcquireZprAddressResponse::read_from_buf(&mut pkt) else {
-        return Err(HandleMgmtError::BadStructure);
-    };
-
-    let link_id = pkt.metadata().ingress_link_id;
-    let resp_code = hdr.status_code;
-    debug!("Link {link_id} Received AcquireZprAddressResponse, status: {resp_code:?}");
-    let _ = dispatch_link_state_event_or_error(
-        asm,
-        link_id,
-        LinkEvent::ReceivedAcquireResponse(resp_code),
-    );
     Ok(())
 }
 

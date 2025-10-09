@@ -148,7 +148,6 @@ pub enum LinkEvent {
     ReceivedInitAuthAck,
 
     ReceivedAcquireZprAddressRequest(Option<Vec<IpAddress>>, String), // (requested_addrs, auth_blob)
-    ReceivedAcquireResponse(ResponseCode),
 
     ReceivedGrantZprAddressRequest(Option<Vec<IpAddress>>), // granted_addrs, None means failure.
     ReceivedGrantResponse(ResponseCode),
@@ -422,7 +421,6 @@ impl LinkStateWrapper {
             LinkEvent::ReceivedAcquireZprAddressRequest(addrs, blob) => {
                 self.process_acquire_zpr_address_request(asm, addrs, blob)
             }
-            LinkEvent::ReceivedAcquireResponse(code) => self.process_acquire_response(asm, code),
 
             LinkEvent::ReceivedInitAuth((bootstrap_flag, challenge)) => {
                 self.process_init_auth(asm, bootstrap_flag, challenge)
@@ -881,29 +879,6 @@ impl LinkStateWrapper {
             return false;
         }
         true
-    }
-
-    /// AcquireResponse is sent from a node to the adapter after adapter sends
-    /// in the acquire zpr address message (which is essentially an auth message).
-    /// The ACK of this means we are now waiting for a Grant message.
-    ///
-    /// No state change. No messages.
-    fn process_acquire_response(
-        &self,
-        _asm: &Arc<Assembly>,
-        code: ResponseCode,
-    ) -> Result<(), LinkStateError> {
-        let link_id = self.id;
-        let locked_fsm = self.locked_fsm.lock().unwrap();
-        match (self.link_type, locked_fsm.state) {
-            (LinkType::AdapterToNode, LinkState::RegisterAA) => {
-                debug!(target: LINK_STATE, "link {link_id} acquire ZDP address response (ACK) message received, code {:?}", code);
-                Ok(())
-            }
-            (_, _) => Err(LinkStateError::InvalidOperation(
-                "Discarded unsolicited acquire zpr address response".to_string(),
-            )),
-        }
     }
 
     /// A grant response is just an ACK of a ZPR address grant message.
