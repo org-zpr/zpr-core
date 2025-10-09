@@ -42,8 +42,8 @@ pub enum ZdpPacketType {
     HelloResponse = 137,
     ConfigurationRequest = 138,
     ConfigurationResponse = 139,
-    AcquireZprAddressRequest = 140,  // TODO: add to RFC 6
-    AcquireZprAddressResponse = 142, // TODO: add to RFC 6
+    AcquireZprAddressRequest = 140, // TODO: add to RFC 6
+    Unused142 = 142,
     UnregisterActorAddressRequest = 143,
     UnregisterActorAddressResponse = 144,
     Report = 145,
@@ -165,12 +165,6 @@ pub struct ZdpAcquireZprAddressRequestHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
-pub struct ZdpAcquireZprAddressResponse {
-    pub status_code: ResponseCode,
-}
-
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
 pub struct ZdpGrantZprAddressRequestHeader {
     pub status_code: ResponseCode,
     pub ip_version: zpr::L3Type, // Length of address determined by IP type
@@ -190,7 +184,7 @@ pub struct ZdpGrantZprAddressResponse {
 #[repr(u8)]
 pub enum TerminateReason {
     Other = 0,
-    BadSequenceNumber = 1,
+    Unused1 = 1,
     RequestTimedOut = 2,
     Reset = 3,
     Shutdown = 4, // quell any restart behavior
