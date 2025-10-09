@@ -138,10 +138,6 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                 handlers::handle_grant_zpr_address_request(asm, pkt).await
             }
 
-            ZdpPacketType::GrantZprAddressResponse => {
-                handlers::handle_grant_zpr_address_response(asm, pkt).await
-            }
-
             packet_type => {
                 warn!("unhandled mgmt packet type {:?}", packet_type);
                 Err(HandleMgmtError::UnknownType(packet_type.0))

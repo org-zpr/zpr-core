@@ -150,7 +150,6 @@ pub enum LinkEvent {
     ReceivedAcquireZprAddressRequest(Option<Vec<IpAddress>>, String), // (requested_addrs, auth_blob)
 
     ReceivedGrantZprAddressRequest(Option<Vec<IpAddress>>), // granted_addrs, None means failure.
-    ReceivedGrantResponse(ResponseCode),
 
     AuthenticationSuccess(auth::ZdpAuthCodeBlob), // From an authentication service
     AuthenticationFailure,                        // From an authentication service
@@ -431,8 +430,6 @@ impl LinkStateWrapper {
             LinkEvent::ReceivedGrantZprAddressRequest(addrs) => {
                 self.process_grant_zpr_address_request(asm, addrs)
             }
-            LinkEvent::ReceivedGrantResponse(code) => self.process_grant_response(asm, code),
-
             LinkEvent::AuthenticationFailure => self.process_authentication_failure(asm),
 
             LinkEvent::AuthenticationSuccess(blob) => {
@@ -881,41 +878,6 @@ impl LinkStateWrapper {
         true
     }
 
-    /// A grant response is just an ACK of a ZPR address grant message.
-    /// For now only expected from an adapter to a a node.
-    /// If status is OK means the link is addressed and up on sender side.
-    fn process_grant_response(
-        &self,
-        asm: &Arc<Assembly>,
-        code: ResponseCode,
-    ) -> Result<(), LinkStateError> {
-        let link_id = self.id;
-        let mut locked_fsm = self.locked_fsm.lock().unwrap();
-        match (self.link_type, locked_fsm.state) {
-            (LinkType::NodeToAdapter, LinkState::RegisterAA) => {
-                if code == ResponseCode::Success {
-                    locked_fsm.set_state(LinkState::Active);
-                    debug!(target: LINK_STATE, "Link {link_id} has ACKd the grant.  Becoming active");
-                    drop(locked_fsm);
-                    self.run_active(&asm)
-                } else {
-                    warn!(target: LINK_STATE, "Link {link_id} did not ACK the grant. Shutting down");
-                    locked_fsm.set_state(LinkState::Error);
-                    drop(locked_fsm);
-                    self.initiate_close(asm, TerminateReason::Other)
-                }
-            }
-            (LinkType::NodeToAdapter, LinkState::Active) => {
-                // Assume this is just a retransmit.
-                debug!(target: LINK_STATE, "Link {link_id} received unsolicited grant response while already in active, ignoring");
-                Ok(())
-            }
-            (_, _) => Err(LinkStateError::InvalidOperation(
-                "Discarded unsolicited grant response".to_string(),
-            )),
-        }
-    }
-
     /// Grant ZPR Address message is from a node to an adapter and includes the
     /// result of authentication verification.
     ///
@@ -1009,11 +971,11 @@ impl LinkStateWrapper {
     /// This is the event handler fro the return path from the visa service AUTHORIZE operation.
     /// This needs to trigger sending of the Grant Address message.
     ///
-    /// This is happengin on a NODE.
+    /// This is happening on a NODE.
     ///
     /// This is only called for SUCCESSFUL responses (unsuccessful responses trigger a link error).
     ///
-    /// Does not change state. Remains in [LinkState::RegisterAA].
+    /// Transitions to [LinkState::Active].  (Adapter will terminate the link if it doesn't like our grant.)
     ///
     fn process_authorize_response(
         &self,
@@ -1022,8 +984,6 @@ impl LinkStateWrapper {
     ) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
 
-        locked_fsm.actor_addresses.clear();
-        locked_fsm.actor_addresses.push(zpr_addr);
         info!(target: LINK_STATE, "Link {} received authorize response with ZPR address {}", self.id, zpr_addr);
 
         match (self.link_type, locked_fsm.state) {
@@ -1035,13 +995,18 @@ impl LinkStateWrapper {
             }
         }
 
+        locked_fsm.actor_addresses.clear();
+        locked_fsm.actor_addresses.push(zpr_addr);
+
         // Send a Grant message, consume the response and then send in an event
         // indicating we got it (ReceivedGrantResponse).
 
         // Will call back via ReceivedGrantResponse event if successful.
         self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses);
+        locked_fsm.set_state(LinkState::Active);
         self.set_timeout(asm, &mut locked_fsm, config::GRANT_REQUEST_TIMEOUT);
-        Ok(())
+        debug!(target: LINK_STATE, "Link {} has ACKd the grant.  Becoming active", self.id);
+        self.run_active(&asm)
     }
 
     /// Handle an init-auth message from sender.
@@ -1330,7 +1295,7 @@ impl LinkStateWrapper {
 
     /// Callback via the AuthenticationSuccess event.
     ///
-    /// We exepect to be in the RegisterAA state.
+    /// We expect to be in the RegisterAA state.
     ///
     /// TODO: Should we have a state to represent waiting-for-authentication?
     fn process_authentication_success(
@@ -1397,7 +1362,6 @@ impl LinkStateWrapper {
         // handle the timeout...
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::RegisterAA)
-            | (LinkType::NodeToAdapter, LinkState::RegisterAA)
             | (LinkType::AdapterToNode, LinkState::Helloing)
             | (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
                 // Timeout here means we give up on the link.
