@@ -220,7 +220,7 @@ impl Config {
     // Check that the required bits are present based on mode.
     // Also checks that the various files exist.
     pub fn check_valid(&self, mode: PhMode) -> Result<(), ArgsError> {
-        if self.control_path.to_str().unwrap().is_empty() {
+        if self.control_path.as_os_str().is_empty() {
             return Err("control_path".arg_missing());
         }
         // For control path, the parent dir must exist or there will be an error later.
@@ -230,7 +230,7 @@ impl Config {
                 Err(e) => return Err(e),
             }
         }
-        if self.capture_path.to_str().unwrap().is_empty() {
+        if self.capture_path.as_os_str().is_empty() {
             return Err("capture_path".arg_missing());
         }
         // For capture path, the parent dir must exist or there will be an error later.

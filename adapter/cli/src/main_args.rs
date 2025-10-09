@@ -22,7 +22,7 @@ pub struct CliCommand {
     pub command: Commands,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, PartialEq)]
 pub enum Commands {
     Echo,
     /// Display or reset counters
@@ -62,14 +62,14 @@ pub enum Commands {
     Quit,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, PartialEq)]
 #[command(flatten_help = true)]
 pub struct CaptureArgs {
     #[command(subcommand)]
     pub command: CaptureCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, PartialEq)]
 pub enum CaptureCommands {
     #[command(arg_required_else_help = true)]
     /// Set a capture file
@@ -91,14 +91,14 @@ pub enum CaptureCommands {
     },
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Args, PartialEq)]
 #[command(flatten_help = true)]
 pub struct LinkArgs {
     #[command(subcommand)]
     pub command: LinkCommands,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Subcommand, PartialEq)]
 pub enum LinkCommands {
     /// Show a link's status
     Show { id: Option<u32> },
