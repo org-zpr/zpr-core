@@ -13,7 +13,7 @@ use crate::logging::targets::KEY_MGMT;
 use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
 use bytes::{BufMut, Bytes};
-use openssl::x509::X509;
+use openssl::x509::{X509NameRef, X509};
 use std::fmt;
 use std::fmt::Debug;
 use std::future::Future;
@@ -91,6 +91,30 @@ pub enum DecryptionError {
     DecryptFailed,
 }
 
+/// The key exchange process always swaps certificates, but they may or may not
+/// be signed by our trusted CA. In particular, adapters may create self-signed
+/// certificates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PeerCertificate {
+    Verified(X509),
+    Unverified(X509),
+}
+
+impl PeerCertificate {
+    pub fn get_cert(&self) -> &X509 {
+        match self {
+            PeerCertificate::Verified(cert) => cert,
+            PeerCertificate::Unverified(cert) => cert,
+        }
+    }
+    pub fn subject_name(&self) -> &X509NameRef {
+        match self {
+            PeerCertificate::Verified(cert) => cert.subject_name(),
+            PeerCertificate::Unverified(cert) => cert.subject_name(),
+        }
+    }
+}
+
 // Copying of off std::io::Result
 pub type KmResult<T> = Result<T, KmError>;
 
@@ -162,8 +186,8 @@ pub struct KmTransportSA {
     /// This is a pointer to the encode/decode functions associated with the current SA.
     pub codec: Arc<dyn Codec>,
 
-    /// If we got (and validated) a certificate from our peer, it is stored here.
-    pub peer_cert: Option<X509>,
+    /// If we got a certificate from our peer, it is stored here.
+    pub peer_cert: Option<PeerCertificate>,
 }
 
 // Does not check the codec.
@@ -651,7 +675,7 @@ impl KmTransportSA {
         send_key: [u8; 32],
         recv_key: [u8; 32],
         codec: Arc<dyn Codec>,
-        peer_cert: Option<X509>,
+        peer_cert: Option<PeerCertificate>,
     ) -> KmTransportSA {
         KmTransportSA {
             sa_id: 0,

@@ -3,11 +3,17 @@
 use std::fs;
 use std::path::Path;
 
-use openssl::pkey::PKey;
-use openssl::x509::X509;
+use openssl::asn1::Asn1Time;
+use openssl::bn::{BigNum, MsbOption};
+use openssl::hash::MessageDigest;
+use openssl::pkey::{Id, PKey};
+use openssl::rsa::Rsa;
+use openssl::x509::{extension::KeyUsage, X509Name, X509};
+
 use thiserror::Error;
 use tracing::error;
 
+use crate::km_noise::NoiseKeypair;
 use crate::logging::targets::KEY_MGMT; // TODO: eliminate logging from this module
 
 const PEM_BEGIN_CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----";
@@ -157,8 +163,64 @@ pub fn get_cn_from_cert(cert: &X509) -> Option<String> {
     None
 }
 
+pub fn generate_self_signed_noise_cert(
+    cn: &str,
+    keypair: &NoiseKeypair,
+) -> Result<X509, Box<dyn std::error::Error>> {
+    if cn.is_empty() {
+        return Err("CN (common name) must be non-empty".into());
+    }
+    // Generate a new RSA private key
+    let rsa = Rsa::generate(2048)?;
+    let pkey = PKey::from_rsa(rsa)?;
+
+    // Create an X509 certificate builder
+    let mut builder = X509::builder()?;
+
+    // Set the version of the certificate (V3)
+    builder.set_version(2)?;
+
+    // Set the serial number
+    let mut serial = BigNum::new()?;
+    serial.rand(128, MsbOption::MAYBE_ZERO, true)?;
+    let serial_asn1 = serial.to_asn1_integer()?;
+    builder.set_serial_number(&serial_asn1)?;
+
+    // Set the issuer name (for a self-signed cert, this is also the subject)
+    let mut name = X509Name::builder()?;
+    name.append_entry_by_text("CN", cn)?; // Common Name (e.g., domain name or IP)
+    let name = name.build();
+    builder.set_subject_name(&name)?;
+    builder.set_issuer_name(&name)?; // Self-signed
+
+    // Set the validity period
+    let not_before = Asn1Time::days_from_now(0)?;
+    let not_after = Asn1Time::days_from_now(365)?; // Valid for 1 year
+    builder.set_not_before(&not_before)?;
+    builder.set_not_after(&not_after)?;
+
+    let x_key_usage = KeyUsage::new()
+        .digital_signature()
+        .key_encipherment()
+        .build()?;
+    builder.append_extension(x_key_usage)?;
+
+    // Set the public key
+    let ssl_pubkey = PKey::public_key_from_raw_bytes(&keypair.public, Id::X25519)?;
+    builder.set_pubkey(&ssl_pubkey)?;
+
+    // Sign the certificate with the private key
+    builder.sign(&pkey, MessageDigest::sha256())?;
+
+    // Build the certificate
+    let cert = builder.build();
+
+    Ok(cert)
+}
+
 #[cfg(test)]
 mod test {
+
     use super::*;
 
     #[test]
@@ -190,5 +252,13 @@ n5ystfC9RDOzkrR8ICLvoWBQ52ctmNH3oWs1p1DT3uL6k3QMnNlejIkUqAY51aI=
         assert!(cns.is_some());
         let cns = cns.unwrap();
         assert_eq!(cns, "bas.zpr.org".to_string());
+    }
+
+    #[test]
+    fn test_that_self_signed_cert_encodes_cn() {
+        let keypair = NoiseKeypair::generate();
+        let self_signed_cert = generate_self_signed_noise_cert("foo.zpr", &keypair).unwrap();
+        let cn = get_cn_from_cert(&self_signed_cert).unwrap();
+        assert_eq!(cn, "foo.zpr".to_string());
     }
 }

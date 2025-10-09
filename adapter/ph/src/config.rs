@@ -93,6 +93,10 @@ impl ArgError for str {
 /// use [crate::main_argparse::argparse].
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Name of this node or adapter. If no signed certificate is available this is used as the CN.
+    /// This has no meaning for nodes.
+    pub name: String,
+
     /// Path to the unix domain socket for the control interface.
     pub control_path: PathBuf,
 
@@ -106,14 +110,14 @@ pub struct Config {
     pub ca_file: PathBuf,
 
     /// Path to a PEM file containing the signed certificate listing the noise public key.
-    pub certificate_file: PathBuf,
+    pub certificate_file: Option<PathBuf>,
 
     /// Path to a PEM file containing the noise private key, if specified.
-    /// One of either `private_key_file` or `private_key_data` must be specified.
+    /// For a node, one of either `private_key_file` or `private_key_data` must be specified.
     pub private_key_file: Option<PathBuf>,
 
     /// The noise private key data, base64 encoded. User has option to set this through an environment variable.
-    /// One of either `private_key_file` or `private_key_data` must be specified.
+    /// For a node, one of either `private_key_file` or `private_key_data` must be specified.
     pub private_key_data: Option<String>,
 
     /// Optionally specify the name of the TUN interface to use. In most cases this
@@ -146,7 +150,8 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn get_noise_private_key_data(&self) -> Result<[u8; NOISE_KEY_LEN], ArgsError> {
+    /// If private noise key is specified through config or args, return it here.
+    pub fn get_noise_private_key_data(&self) -> Result<Option<[u8; NOISE_KEY_LEN]>, ArgsError> {
         if let Some(ref b64data) = self.private_key_data {
             let key_data: [u8; NOISE_KEY_LEN] = match BASE64_STANDARD.decode(b64data) {
                 Ok(data) => data
@@ -158,14 +163,15 @@ impl Config {
                     )))
                 }
             };
-            return Ok(key_data);
+            return Ok(Some(key_data));
         }
         if let Some(ref pkf) = self.private_key_file {
-            return load_noise_private_key(&pkf).map_err(|e| {
+            let pk = load_noise_private_key(&pkf).map_err(|e| {
                 ArgsError::ParseError(format!("failed to load private key from file: {e:?}"))
-            });
+            })?;
+            return Ok(Some(pk));
         }
-        Err("neither private_key_file nor noise_private_key specified".arg_missing())
+        Ok(None)
     }
 
     pub fn noise_private_key_source(&self) -> String {
@@ -212,9 +218,13 @@ impl Config {
         Ok(config)
     }
 
-    /// Parse the `certificate_file` (a noise certificate) and return the CN value found within.
+    /// If we have a `certificate_file` use that to figure out our CN.
+    /// Otherwise we return the `global.name` value.
     pub fn get_noise_cn(&self) -> Result<String, ArgsError> {
-        return get_noise_cn(&self.certificate_file);
+        match self.certificate_file.as_ref() {
+            None => Ok(self.name.clone()),
+            Some(f) => get_noise_cn(&f),
+        }
     }
 
     // Check that the required bits are present based on mode.
@@ -244,10 +254,9 @@ impl Config {
             return Err("ca_file".arg_missing());
         }
         check_file_exists("certificate authority file", &self.ca_file)?;
-        if self.certificate_file.to_str().unwrap().is_empty() {
-            return Err("certificate_file".arg_missing());
+        if let Some(ref cf) = self.certificate_file {
+            check_file_exists("certificate file", cf)?;
         }
-        check_file_exists("certificate file", &self.certificate_file)?;
         if let Some(ref pkf) = self.private_key_file {
             if pkf.to_str().unwrap().is_empty() {
                 return Err("private_key_file".arg_missing());
@@ -257,13 +266,17 @@ impl Config {
             if pkd.is_empty() {
                 return Err("private_key_data".arg_missing());
             }
-        } else {
-            return Err("private_key_file or noise_private_key".arg_missing());
         }
         match mode {
             PhMode::Node => {
                 if self.zpr_addr.is_empty() {
                     return Err("zpr_addr".arg_missing());
+                }
+                if self.certificate_file.is_none() {
+                    return Err("certificate_file".arg_missing());
+                }
+                if self.private_key_file.is_none() && self.private_key_data.is_none() {
+                    return Err("private_key_file or noise_private_key".arg_missing());
                 }
             }
             PhMode::Adapter => {
@@ -277,6 +290,15 @@ impl Config {
                         "node public key file",
                         &self.node_public_key_file.as_ref().unwrap(),
                     )?;
+                }
+                if self.private_key_file.is_none()
+                    && self.private_key_data.is_none()
+                    && self.name.is_empty()
+                {
+                    return Err(
+                        "adapter name must be set to CN when not using explicit link keys"
+                            .arg_missing(),
+                    );
                 }
             }
         }
@@ -315,9 +337,9 @@ impl Config {
         }
         if let Some(certificate_file) = &config.certificate_file {
             if certificate_file.is_relative() {
-                self.certificate_file = base_dir.join(certificate_file);
+                self.certificate_file = Some(base_dir.join(certificate_file));
             } else {
-                self.certificate_file = certificate_file.clone();
+                self.certificate_file = Some(certificate_file.clone());
             }
         }
         if let Some(private_key_file) = &config.private_key_file {
@@ -349,6 +371,9 @@ impl Config {
         config: &AdapterConfigSection,
         base_dir: &Path,
     ) -> Result<(), ArgsError> {
+        if let Some(cn) = &config.name {
+            self.name = cn.clone();
+        }
         if let Some(node_addr) = &config.node_addr {
             self.node_addr = Some(*node_addr);
         }
@@ -457,14 +482,15 @@ impl Config {
         if let Some(certificate_file) = &common.certificate_file {
             let cf = PathBuf::from(certificate_file);
             if cf.is_relative() {
-                self.certificate_file = fs::canonicalize(cf).or_else(|e| {
+                let cfile = fs::canonicalize(cf).or_else(|e| {
                     Err(ArgsError::PathError(format!(
                         "path error for certificate_file: {:?}",
                         e
                     )))
                 })?;
+                self.certificate_file = Some(cfile);
             } else {
-                self.certificate_file = cf;
+                self.certificate_file = Some(cf);
             }
         }
         if common.private_key_file.is_some() && common.noise_private_key.is_some() {
@@ -519,11 +545,12 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            name: String::new(),
             control_path: get_data_home().join("control.sock"),
             capture_path: get_data_home().join("capture.sock"),
             self_addr: SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0),
             ca_file: PathBuf::from(""),
-            certificate_file: PathBuf::from(""),
+            certificate_file: None,
             private_key_file: None,
             private_key_data: None,
             tun_if: None,
@@ -578,6 +605,7 @@ pub struct GlobalConfigSection {
 // Adapter only bits.
 #[derive(Deserialize, Debug, Clone)]
 pub struct AdapterConfigSection {
+    pub name: Option<String>,
     pub node_addr: Option<SocketAddr>,
     pub node_public_key_file: Option<PathBuf>,
     pub bootstrap_key: Option<PathBuf>,

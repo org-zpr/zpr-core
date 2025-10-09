@@ -87,7 +87,7 @@ use km_noise::NoiseKeypair;
 use libnode::claims;
 use logging::targets::STARTUP;
 use net_defs::SocketAddrExt;
-use pki::load_noise_public_key;
+use pki::{generate_self_signed_noise_cert, load_cert, load_noise_public_key};
 use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
@@ -147,7 +147,7 @@ fn main() -> ExitCode {
     let peer_noise_keypair;
     let certx;
 
-    let private_key = match config.get_noise_private_key_data() {
+    let maybe_private_key = match config.get_noise_private_key_data() {
         Ok(key) => key,
         Err(e) => {
             error!(
@@ -159,8 +159,14 @@ fn main() -> ExitCode {
         }
     };
     if ph_mode == PhMode::Node {
+        // In node mode a private key is required -- since client adapters use the public key to verify the node.
+        let Some(private_key) = maybe_private_key else {
+            // Note that this is already checked in the config code, so this should be redundant.
+            error!(target: STARTUP, "nodes require a noise private key to be specified");
+            return ExitCode::FAILURE;
+        };
         peer_noise_keypair = None;
-        self_noise_keypair = Some(NoiseKeypair::new(private_key));
+        self_noise_keypair = NoiseKeypair::new(private_key);
     } else {
         let public_key = match load_noise_public_key(&Path::new(
             &config.node_public_key_file.clone().unwrap(),
@@ -175,16 +181,41 @@ fn main() -> ExitCode {
             public: public_key,
             private: [0u8; 32], // unknown
         });
-        self_noise_keypair = Some(NoiseKeypair::new(private_key));
+        self_noise_keypair = match maybe_private_key {
+            Some(private_key) => NoiseKeypair::new(private_key),
+            None => NoiseKeypair::generate(),
+        };
     }
 
-    certx = match KmCertExchange::new_from_paths(&config.certificate_file, &config.ca_file) {
-        Ok(certx) => Some(certx),
+    // Set up key exchange.
+    //
+    // If we have a signed certificate, use that.  Otherwise we create a self-signed cert
+    // and insert our CN (`name` from config) and our self_noise_keypair public key.
+
+    let self_cert = match &config.certificate_file {
+        None => match generate_self_signed_noise_cert(&config.name, &self_noise_keypair) {
+            Ok(cert) => cert,
+            Err(e) => {
+                error!(target: STARTUP, "failed to generate self-signed certificate: {e:?}");
+                return ExitCode::FAILURE;
+            }
+        },
+        Some(ref cert_path) => match load_cert(cert_path) {
+            Ok(cert) => cert,
+            Err(e) => {
+                error!(target: STARTUP, "failed to load certificate from {:?}: {e:?}", cert_path);
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+    let ca_cert = match load_cert(&config.ca_file) {
+        Ok(cert) => cert,
         Err(e) => {
-            error!(target: STARTUP, "failed to initialize key exchange: {e:?}");
+            error!(target: STARTUP, "failed to load CA certificate from {:?}: {e:?}", config.ca_file);
             return ExitCode::FAILURE;
         }
     };
+    certx = KmCertExchange::new(self_cert, ca_cert);
 
     //
     // instantiate bounded resources (queues and buffers)
@@ -457,7 +488,8 @@ fn main() -> ExitCode {
     let mut maybe_aaa_pool = None;
 
     if ph_mode == PhMode::Node {
-        let node_name = config::get_noise_cn(&config.certificate_file)
+        // Note that config parsing code ensures that IF node THEN certificate_file is set.
+        let node_name = config::get_noise_cn(config.certificate_file.as_ref().unwrap())
             .expect("unable to determine node name: cannot parse CN");
         info!(target: STARTUP, "node CN is \"{node_name}\"");
 
@@ -491,7 +523,7 @@ fn main() -> ExitCode {
                 node_actor,
                 vs_inq,
                 &SocketAddr::new(zpr::VISA_SERVICE_ADDR, zpr::VISA_SERVICE_PORT).to_string(),
-                &config.certificate_file,
+                config.certificate_file.as_ref().unwrap(),
                 config.zpr_addr[0],
                 None,
             )
@@ -528,9 +560,9 @@ fn main() -> ExitCode {
         mgmt_dispatch_factory: MgmtDispatchFactory::new(md_inq_factory),
         adapter_manager_factory: AdapterManagerFactory::new(am_inq_factory),
         km_state: KmState::new(km_inq, km_sig_inq),
-        self_noise_keypair,
+        self_noise_keypair: Some(self_noise_keypair),
         peer_noise_keypair,
-        certx,
+        certx: Some(certx),
         system_start_time,
         address_pool: std::sync::Mutex::new(maybe_aaa_pool),
         config: rcu::RcuBox::new(config),
