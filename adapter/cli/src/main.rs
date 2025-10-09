@@ -143,9 +143,6 @@ async fn process_command(
         capnp::message::ReaderOptions::new(),
     );
 
-
-
-
     let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
 
     let service: cli::cmd_line_inter::Client =
