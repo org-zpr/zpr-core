@@ -145,7 +145,7 @@ pub enum LinkEvent {
     SentHelloResponse,
 
     ReceivedInitAuth((bool, Option<auth::ZdpInitAuthenticationPayload>)), // (bootstrap_flag, challenge)
-    ReceivedInitAuthResponse(ResponseCode),
+    ReceivedInitAuthAck,
 
     ReceivedAcquireZprAddressRequest(Option<Vec<IpAddress>>, String), // (requested_addrs, auth_blob)
     ReceivedAcquireResponse(ResponseCode),
@@ -348,7 +348,6 @@ impl LinkStateWrapper {
     ///
     /// The timeout may be cancelled manually using `LinkStateMachine::cancel_timeout()`.
     /// It will be cancelled atomically.
-    #[allow(dead_code)]
     fn set_timeout(
         &self,
         asm: &Arc<Assembly>,
@@ -429,7 +428,7 @@ impl LinkStateWrapper {
                 self.process_init_auth(asm, bootstrap_flag, challenge)
             }
 
-            LinkEvent::ReceivedInitAuthResponse(code) => self.process_init_auth_response(asm, code),
+            LinkEvent::ReceivedInitAuthAck => self.process_init_auth_ack(asm),
 
             LinkEvent::ReceivedGrantZprAddressRequest(addrs) => {
                 self.process_grant_zpr_address_request(asm, addrs)
@@ -653,8 +652,9 @@ impl LinkStateWrapper {
             // Node->Adapter - we are in helloing state until we have fired off our
             // HelloResponse.  At that point we can send an init-auth request.
             (LinkType::NodeToAdapter, LinkState::Helloing) => {
-                locked_fsm.set_state(LinkState::WaitForInitAuth);
+                locked_fsm.set_state(LinkState::WaitForAcquireZprAddress);
                 self.send_init_authentication_request(asm);
+                // short timeout until we at least get the ACK
                 self.set_timeout(asm, &mut locked_fsm, config::DEFAULT_REQUEST_TIMEOUT);
                 debug!(
                     target: LINK_STATE,
@@ -1202,36 +1202,25 @@ impl LinkStateWrapper {
         Ok(())
     }
 
-    /// The node sends init-authentication to the adapter, the response only serves to
-    /// clear our retry timer.  The adapter will in the meantime take care of doing
+    /// The node sends init-authentication to the adapter, we await the ACK to
+    /// clear our timeout.  The adapter will in the meantime take care of doing
     /// whatever authentication it needs to and will eventually send us an acquire-zpr-address
     /// message with the authentication results (blob).
-    fn process_init_auth_response(
-        &self,
-        asm: &Arc<Assembly>,
-        response_code: ResponseCode,
-    ) -> Result<(), LinkStateError> {
+    fn process_init_auth_ack(&self, asm: &Arc<Assembly>) -> Result<(), LinkStateError> {
         let mut locked_fsm = self.locked_fsm.lock().unwrap();
         match (self.link_type, locked_fsm.state) {
-            (LinkType::NodeToAdapter, LinkState::WaitForInitAuth) => {
-                debug!(target: LINK_STATE, "Link {} received init auth response with code {:?}", self.id, response_code);
-                if response_code == ResponseCode::Success {
-                    locked_fsm.set_state(LinkState::WaitForAcquireZprAddress);
-                    // In this state we are waiting on the adapter to perform authentication and
-                    // that may involve external services and could be quite slow relative to a
-                    // straightforward ZDP response.  So, we set a longer timeout.  We do not retransmit
-                    // anything... if we do not get auth within a reasonable amount of time we shut down
-                    // the link.
-                    self.set_timeout(asm, &mut locked_fsm, config::ACTOR_AUTHENTICATION_TIMEOUT);
-                    Ok(())
-                } else {
-                    error!(target: LINK_STATE, "Link {} received init auth response with non-success response {:?}", self.id, response_code);
-                    drop(locked_fsm);
-                    self.initiate_close(asm, TerminateReason::Other)
-                }
+            (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
+                debug!(target: LINK_STATE, "Link {} received init auth ack", self.id);
+                // Now we are waiting on the adapter to perform authentication and
+                // that may involve external services and could be quite slow relative to a
+                // straightforward ZDP response.  So, we set a longer timeout.  We do not retransmit
+                // anything... if we do not get auth within a reasonable amount of time we shut down
+                // the link.
+                self.set_timeout(asm, &mut locked_fsm, config::ACTOR_AUTHENTICATION_TIMEOUT);
+                Ok(())
             }
             (_, _) => Err(LinkStateError::InvalidOperation(
-                "Discarded unsolicited init auth response".to_string(),
+                "Discarded unsolicited init auth ack".to_string(),
             )),
         }
     }
@@ -1275,7 +1264,20 @@ impl LinkStateWrapper {
             payload = auth::ZdpInitAuthenticationPayload::default(); // empty
         }
 
-        mgmt::requests::send_init_authentication_request(asm, link_id, flags, payload).enqueue();
+        let task_asm = asm.clone();
+        tokio::task::spawn_local(async move {
+            if mgmt::requests::send_init_authentication_request(&task_asm, link_id, flags, payload)
+                .acked()
+                .await
+                .is_err()
+            {
+                // link was terminated
+                return;
+            }
+            // ignore error here, it just means we've moved on to another state and got the ACK (very) late
+            let _ = task_asm.process_link_state_event(link_id, LinkEvent::ReceivedInitAuthAck);
+            return;
+        });
     }
 
     /// Send the Grant message
@@ -1421,7 +1423,6 @@ impl LinkStateWrapper {
         match (self.link_type, locked_fsm.state) {
             (LinkType::AdapterToNode, LinkState::RegisterAA)
             | (LinkType::NodeToAdapter, LinkState::RegisterAA)
-            | (LinkType::NodeToAdapter, LinkState::WaitForInitAuth)
             | (LinkType::AdapterToNode, LinkState::Helloing)
             | (LinkType::NodeToAdapter, LinkState::WaitForAcquireZprAddress) => {
                 // Timeout here means we give up on the link.

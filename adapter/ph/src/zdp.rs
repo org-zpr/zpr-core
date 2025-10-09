@@ -47,10 +47,10 @@ pub enum ZdpPacketType {
     UnregisterActorAddressRequest = 143,
     UnregisterActorAddressResponse = 144,
     Report = 145,
-    InitAuthenticationRequest = 146,  // TODO: add to RFC 6
-    InitAuthenticationResponse = 147, // TODO: add to RFC 6
-    GrantZprAddressRequest = 148,     // TODO: add to RFC 6
-    GrantZprAddressResponse = 149,    // TODO: add to RFC 6
+    InitAuthenticationRequest = 146, // TODO: add to RFC 6
+    Unused147 = 147,
+    GrantZprAddressRequest = 148,  // TODO: add to RFC 6
+    GrantZprAddressResponse = 149, // TODO: add to RFC 6
 
     Acknowledgement = 255,
 }
@@ -150,12 +150,6 @@ pub struct ZdpInitAuthenticationRequestHeader {
     pub flags: u8,
     pub data_len: U16,
     // Followed by challenge payload, eg ZdpInitAuthenticationPayload below.
-}
-
-#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
-#[repr(packed)]
-pub struct ZdpInitAuthenticationResponse {
-    pub status_code: ResponseCode,
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
