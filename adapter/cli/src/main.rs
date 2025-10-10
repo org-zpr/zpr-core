@@ -129,7 +129,7 @@ async fn process_command(
     cap_socket: Option<&str>,
 ) -> Result<bool, CliError> {
     // Must quit immediately otherwise you get an error if the port is no longer open
-    if command == Commands::Quit {
+    if matches!(command, Commands::Quit) {
         return Ok(true);
     }
 
@@ -346,7 +346,6 @@ async fn watch_task(service: svc::Client, interval: u64) -> Result<(), CliError>
         // TODO error checking, make sure actually got a message back, and that it's the correct message
         for (n, count) in counts[0..].iter().enumerate() {
             // split up the individual lines to get the count from the end and convert to u64
-            println!("line: {count}");
             let one_line: Vec<&str> = count.split(':').collect();
             match one_line[0] {
                 "OK" => break,
