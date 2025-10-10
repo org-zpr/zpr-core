@@ -54,9 +54,17 @@ pub enum Commands {
     /// Change link state
     Link(LinkArgs),
     /// Change the log level of a node or adapter
+    /// Format: logging [<level>=<target>]*
+    /// There must be at least level, target pair
+    /// The options for targets are:
+    ///     all, capture, datapath, flow_mgmt, link_state,
+    ///     mgmt_events, net_os, peer_mgmt, reporting, rpc,
+    ///     startup, visa_mgmt, zdp
+    /// The options for levels are:
+    ///     OFF, ERROR, WARN, INFO, DEBUG, TRACE
     Logging {
-        #[arg(required = true)]
-        logs: Vec<String>,
+        #[arg(required = true, value_delimiter = ' ', num_args = 1.., value_parser = parse_key_val, verbatim_doc_comment)]
+        logs: Vec<(String, String)>,
     },
     /// Exit the CLI
     Quit,
@@ -110,4 +118,17 @@ pub enum LinkCommands {
     Stop { id: u32 },
     /// Reset a link.  It will require a configure before starting again
     Reset { id: u32 },
+}
+
+fn parse_key_val(s: &str) -> Result<(String, String), String> {
+    let key_val: Vec<&str> = s.split("=").collect();
+    match key_val.len() {
+        2 => {
+            return Ok((key_val[0].to_string(), key_val[1].to_uppercase()));
+        }
+        1 => {
+            return Ok(("all".to_string(), key_val[0].to_uppercase()));
+        }
+        _ => Err(format!("Invalid key-value pair")),
+    }
 }

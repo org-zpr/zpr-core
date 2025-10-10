@@ -112,35 +112,47 @@ impl svc::Server for AdminServiceImpl {
         _: svc::CountersParams,
         mut results: svc::CountersResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        let mut results_builder = results.get().init_counts();
+
         let mut counts: String = String::new();
         let _ = write!(&mut counts, "Management counts:\n");
-        for (key, &ref value) in &self.asm.counters.management {
-            let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
+
+        let mut counters_builder = results_builder
+            .reborrow()
+            .init_management()
+            .init_counters(self.asm.counters.management.len() as u32);
+
+        for (i, (key, &ref value)) in self.asm.counters.management.iter().enumerate() {
+            let mut counter = counters_builder.reborrow().get(i as u32);
+            counter.set_name(key.name());
+            counter.set_val(value.get_count());
         }
 
-        for (i, fastpath) in self
-            .asm
-            .counters
-            .fastpaths
-            .lock()
-            .unwrap()
-            .iter()
-            .enumerate()
         {
-            let _ = write!(&mut counts, "Fastpath counts: #{}\n", i);
-            for (key, &ref value) in fastpath {
-                let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
+            let fastpaths = self.asm.counters.fastpaths.lock().unwrap();
+
+            // Initialize builder for list of fastpaths
+            let mut fastpaths_builder = results_builder
+                .reborrow()
+                .init_fastpaths(fastpaths.len() as u32);
+            for (i, fastpath) in fastpaths.iter().enumerate() {
+                // Initialize builder for individual fastpath and set its ID
+                let mut fastpath_builder = fastpaths_builder.reborrow().get(i as u32);
+                fastpath_builder.set_id(i as u32);
+
+                // Set counters
+                let mut counters_builder = fastpath_builder.init_counters(fastpath.len() as u32);
+                for (i, (key, &ref value)) in fastpath.iter().enumerate() {
+                    let mut counter = counters_builder.reborrow().get(i as u32);
+                    counter.set_name(key.name());
+                    counter.set_val(value.get_count());
+                    let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
+                }
             }
         }
 
-        let _ = write!(
-            &mut counts,
-            "Uptime: {}.{} s\n",
-            self.asm.get_uptime().as_secs(),
-            self.asm.get_uptime().subsec_millis()
-        );
-        let mut results_builder = results.get();
-        results_builder.set_counts(counts);
+        results_builder.set_uptime_sec(self.asm.get_uptime().as_secs());
+        results_builder.set_uptime_subsec_ms(self.asm.get_uptime().subsec_millis());
 
         capnp::capability::Promise::ok(())
     }
@@ -189,20 +201,16 @@ impl svc::Server for AdminServiceImpl {
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
-            let program = params.get()?.get_program()?.to_str()?;
-            // Splits the rest of the string into the various instructions
-            let mut serialized_program: Vec<&str> = program.split(',').collect();
-            let mut insn_vec = Vec::new();
-            serialized_program.remove(0); // removes number of programs from beginning of vector
+            let programs = params.get()?.get_program()?;
 
-            // Creates a vector of BpfInsns
-            for insn in serialized_program {
-                let split_insn: Vec<&str> = insn.split_whitespace().collect();
+            let mut insn_vec = Vec::new();
+
+            for program in programs.iter() {
                 let bpf_insn = cbpf_rs::BpfInsn {
-                    code: split_insn[0].parse().unwrap(),
-                    jt: split_insn[1].parse().unwrap(),
-                    jf: split_insn[2].parse().unwrap(),
-                    k: split_insn[3].parse().unwrap(),
+                    code: program.get_code(),
+                    jt: program.get_jt(),
+                    jf: program.get_jf(),
+                    k: program.get_k(),
                 };
                 insn_vec.push(bpf_insn);
             }
@@ -249,19 +257,17 @@ impl svc::Server for AdminServiceImpl {
         _: svc::ShowLinkSummaryParams,
         mut results: svc::ShowLinkSummaryResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        let mut results_builder = results.get();
-        let mut response: String = String::new();
-        let _ = write!(&mut response, "Link summary:\n");
+        {
+            let peer_ids = self.asm.peer_ids.lock().unwrap();
+            let mut results_builder = results.get().init_summary(peer_ids.len() as u32);
 
-        for id in self.asm.peer_ids.lock().unwrap().clone() {
-            let _ = write!(
-                &mut response,
-                "  {id}: {}\n",
-                get_link_summary(&self.asm, id)
-            );
+            for (i, id) in peer_ids.iter().enumerate() {
+                results_builder.set(
+                    i as u32,
+                    format!("  {id}: {}", get_link_summary(&self.asm, *id)),
+                );
+            }
         }
-
-        results_builder.set_summary(response);
 
         capnp::capability::Promise::ok(())
     }
@@ -373,32 +379,27 @@ impl svc::Server for AdminServiceImpl {
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
-            let log_state = params.get()?.get_logs()?.to_str()?;
-            let log_vec: Vec<&str> = log_state.split_whitespace().collect();
+            let log_state = params.get()?.get_logs()?;
+            // let log_vec: Vec<&str> = log_state.split_whitespace().collect();
             let mut applied: Vec<String> = Vec::new();
             let mut ignored: Vec<String> = Vec::new();
-            for elem in log_vec.iter() {
-                let key_val: Vec<&str> = elem.split("=").collect();
-                match key_val.len() {
-                    2 => {
-                        if targets::ALL_TARGETS.contains(&key_val[0])
-                            && levels::ALL_LEVELS.contains(&key_val[1].to_uppercase().as_str())
-                        {
-                            task_asm
-                                .logging
-                                .lock()
-                                .unwrap()
-                                .insert(key_val[0].to_string(), key_val[1].to_uppercase());
-                            applied.push(elem.to_string());
-                        } else {
-                            ignored.push(elem.to_string());
-                        }
-                    }
-                    _ => {
-                        ignored.push(elem.to_string());
-                    }
+            for log in log_state.iter() {
+                let target = log.get_v0()?.to_str()?;
+                let level = log.get_v1()?.to_str()?;
+                if targets::ALL_TARGETS.contains(&target)
+                    && levels::ALL_LEVELS.contains(&level.to_uppercase().as_str())
+                {
+                    task_asm
+                        .logging
+                        .lock()
+                        .unwrap()
+                        .insert(target.to_string(), level.to_uppercase());
+                    applied.push(format!("{}={}", target, level));
+                } else {
+                    ignored.push(format!("{}={}", target, level));
                 }
             }
+
             logging::reload_filter(&task_asm.reload_handle, &task_asm.logging.lock().unwrap());
 
             let mut results_builder = results.get().init_result();
