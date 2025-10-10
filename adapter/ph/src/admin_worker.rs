@@ -201,7 +201,7 @@ impl svc::Server for AdminServiceImpl {
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
-            let programs = params.get()?.get_program()?;
+            let programs = params.get()?.get_program()?.get_bpf_prog()?;
 
             let mut insn_vec = Vec::new();
 
@@ -384,8 +384,8 @@ impl svc::Server for AdminServiceImpl {
             let mut applied: Vec<String> = Vec::new();
             let mut ignored: Vec<String> = Vec::new();
             for log in log_state.iter() {
-                let target = log.get_v0()?.to_str()?;
-                let level = log.get_v1()?.to_str()?;
+                let target = log.get_level()?.to_str()?;
+                let level = log.get_target()?.to_str()?;
                 if targets::ALL_TARGETS.contains(&target)
                     && levels::ALL_LEVELS.contains(&level.to_uppercase().as_str())
                 {
