@@ -129,7 +129,7 @@ async fn process_command(
     cap_socket: Option<&str>,
 ) -> Result<bool, CliError> {
     // Must quit immediately otherwise you get an error if the port is no longer open
-    if command == Commands::Quit {
+    if matches!(command, Commands::Quit) {
         return Ok(true);
     }
 
