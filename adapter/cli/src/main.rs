@@ -306,7 +306,10 @@ async fn set_capture_program_task(
             let instructions: &[pcap::BpfInstruction] = program.get_instructions();
 
             let mut request = service.set_capture_program_request();
-            let mut program_request = request.get().init_program().init_bpf_prog(instructions.len() as u32);
+            let mut program_request = request
+                .get()
+                .init_program()
+                .init_bpf_prog(instructions.len() as u32);
 
             for (i, instruction) in instructions.iter().enumerate() {
                 let insn: &cbpf_rs::BpfInsn = instruction.borrow();
@@ -509,16 +512,18 @@ async fn reset_link_task(service: svc::Client, id: u32) -> Result<(), CliError> 
     Ok(())
 }
 
-async fn change_logging_task(service: svc::Client, logs: Vec<(String, String)>) -> Result<(), CliError> {
+async fn change_logging_task(
+    service: svc::Client,
+    logs: Vec<(String, String)>,
+) -> Result<(), CliError> {
     // TODO convert logging to take a List instead of a string
     let mut request = service.change_logging_request();
     let mut log_builder = request.get().init_logs(logs.len() as u32);
-    
+
     for (i, log) in logs.iter().enumerate() {
         let mut tuple_builder = log_builder.reborrow().get(i as u32);
         tuple_builder.set_level(log.0.clone());
         tuple_builder.set_target(log.1.clone())
-
     }
 
     let response = request.send().promise.await?;
