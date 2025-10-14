@@ -82,7 +82,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::EchoParams,
         _: svc::EchoResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        info!(target: RPC, "Echo procedure initiated");
+        debug!(target: RPC, "Echo procedure initiated");
         capnp::capability::Promise::ok(())
     }
 
@@ -110,7 +110,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::CountersParams,
         mut results: svc::CountersResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        info!(target: RPC, "Counters procedure initiated");
+        debug!(target: RPC, "Counters procedure initiated");
         let mut results_builder = results.get().init_counts();
 
         let mut counters_builder = results_builder
