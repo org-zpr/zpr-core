@@ -522,8 +522,8 @@ async fn change_logging_task(
 
     for (i, log) in logs.iter().enumerate() {
         let mut tuple_builder = log_builder.reborrow().get(i as u32);
-        tuple_builder.set_level(log.0.clone());
-        tuple_builder.set_target(log.1.clone())
+        tuple_builder.set_level(&log.0);
+        tuple_builder.set_target(&log.1);
     }
 
     let response = request.send().promise.await?;
