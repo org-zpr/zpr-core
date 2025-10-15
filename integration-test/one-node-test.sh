@@ -11,6 +11,10 @@ VS_BIN=$(realpath "$(dirname $0)/vservice")
 VS_ADMIN_BIN=$(realpath "$(dirname $0)/vs-admin")
 PREGEN=$(realpath "$(dirname $0)/pregen")
 
+# netem parameters to configure on all links; e.g. "loss random 10%"
+# blank for no netem
+NETEM_PARAMS=${NETEM_PARAMS:-}
+
 source "$(dirname $0)/common_funcs.sh"
 
 ZPR_USER=$USER
@@ -72,6 +76,9 @@ echo "Setting up network"
 destroy_network
 
 create_network
+if [ -n "$NETEM_PARAMS" ]
+then configure_netem $NETEM_PARAMS  # split on whitespace
+fi
 
 create_ca_key_and_cert ca
 create_actor_key_and_cert ca vs.zpr
@@ -205,12 +212,12 @@ fi
 #
 
 echo "Wait for TUN carrier..."
-wait_for 5 check_carrier zpr-node tun0 || { echo "FAILURE"; exit 1; }
-wait_for 5 check_carrier zpr-vs tun0 || { echo "FAILURE"; exit 1; }
-wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
-wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
+wait_for 15 check_carrier zpr-node tun0 || { echo "FAILURE"; exit 1; }
+wait_for 15 check_carrier zpr-vs tun0 || { echo "FAILURE"; exit 1; }
+wait_for 15 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
+wait_for 15 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
 if [[ "$NUM_ACTORS" -ge 3 ]]; then
-  wait_for 5 check_carrier zpr-c tun0 || { echo "FAILURE"; exit 1; }
+  wait_for 15 check_carrier zpr-c tun0 || { echo "FAILURE"; exit 1; }
 fi
 echo "Carrier has arrived."
 # This sleep solves a display issue because magic

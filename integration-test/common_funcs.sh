@@ -109,6 +109,14 @@ function create_network() {
   sudo ip -n zpr-c addr add "$C_ZPR_ADDR" peer "$ZPR_SUBNET" dev tun0
 }
 
+function configure_netem() {
+  echo "Configuring netem $@" > /dev/stderr
+  for NIC in vs a b c
+  do
+    sudo tc -n zpr-node qdisc add dev veth-zpr-"$NIC" root netem "$@"
+  done
+}
+
 function destroy_network() {
   sudo ip netns delete zpr-node 2> /dev/null || true
   sudo ip netns delete zpr-vs 2> /dev/null || true
