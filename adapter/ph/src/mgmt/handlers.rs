@@ -3,9 +3,9 @@
 use crate::adapter_tables;
 use crate::assembly::{self, Assembly, PhMode, VERSION};
 use crate::auth;
+use crate::classifier;
 use crate::config;
 use crate::counters;
-use crate::defs::*;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::{ip_number, IpAddress};
@@ -704,116 +704,39 @@ pub async fn handle_bind_actor_address_request(
         return Err(HandleMgmtError::BadStructure);
     };
 
-    // The packet body now immediately follows the header
-    // Extract source/dest addresses and protocol from the IP header in the packet body.
-    // Does not advance the packet buffer position.
-    // TODO: Could our own classifier.rs do this for us?
-    let body = pkt.body();
-    let (src_address, dst_address, ip_protocol) = match hdr.ip_version {
-        zpr::L3Type::Ipv4 => {
-            if body.len() < 20 {
-                return Err(HandleMgmtError::BadStructure);
-            }
-            // IPv4 header: src @ 12..16, dst @ 16..20, protocol @ 9
-            let src_address = IpAddress::new_from_v4([body[12], body[13], body[14], body[15]]);
-            let dst_address = IpAddress::new_from_v4([body[16], body[17], body[18], body[19]]);
-            let ip_protocol = body[9];
-            (src_address, dst_address, ip_protocol)
-        }
-        zpr::L3Type::Ipv6 => {
-            if body.len() < 40 {
-                return Err(HandleMgmtError::BadStructure);
-            }
-            // IPv6 header: src @ 8..24, dst @ 24..40, next_header @ 6
-            let src_address = IpAddress {
-                v6: body[8..24].try_into().unwrap(),
-            };
-            let dst_address = IpAddress {
-                v6: body[24..40].try_into().unwrap(),
-            };
-            let ip_protocol = body[6];
-            (src_address, dst_address, ip_protocol)
-        }
-        _ => {
+    let classification = match classifier::classify(&mut pkt) {
+        Ok(cls) => cls,
+        Err(_why) => {
             return Err(HandleMgmtError::BadStructure);
         }
     };
 
-    // TODO: How do bind requests work between nodes?
+    match classification {
+        classifier::ClassifierResult::OK => (),
+        classifier::ClassifierResult::UnclassifiedL4 => {
+            warn!(target: ZDP, "Link {}: unsupported IP protocol {}", pkt.metadata().ingress_link_id, pkt.metadata().get_l4_protocol());
+            return Err(HandleMgmtError::BadStructure);
+        }
+        _ => {
+            return Err(HandleMgmtError::BadStructure);
+        }
+    }
 
-    // Next in we have the entire packet that is triggering this bind request (well, up to
-    // what will fit in our buffer).
-    // So it will be a IPv6 or IPv4 header, and then the l4 header, etc.
+    // This step is likely not strictly necessary, the original format set the src and dst
+    // port to be the same when using ICMP or IPV6_ICMP, which classifier::classify does not
+    // so this keeps it in line
+    match pkt.metadata().get_l4_protocol() {
+        ip_number::ICMP | ip_number::IPV6_ICMP => {
+            let metadata = pkt.metadata_mut();
+            metadata.set_dst_port(metadata.get_src_port_hbo());
+        }
+        _ => (),
+    }
+    let five_tuple = *pkt.metadata().five_tuple();
 
     let packet_body: Vec<u8> = pkt.body().to_vec(); // copy to send to visa service
 
-    let src_port: u16;
-    let dst_port: u16;
-
-    match hdr.ip_version {
-        zpr::L3Type::Ipv4 => {
-            if pkt.remaining() < 20 {
-                // minimum IPv4 header size
-                return Err(HandleMgmtError::BadStructure);
-            }
-            let ihl = pkt.body()[0] & 0x0f; // Internet Header Length
-            if ihl < 5 {
-                return Err(HandleMgmtError::BadStructure);
-            }
-            let hdrlen = (ihl as usize) * 4; // header length in bytes
-            if pkt.remaining() < hdrlen {
-                return Err(HandleMgmtError::BadStructure);
-            }
-            pkt.advance(hdrlen); // skip IPv4 header
-        }
-        zpr::L3Type::Ipv6 => {
-            if pkt.remaining() < 40 {
-                // IPv6 header size
-                return Err(HandleMgmtError::BadStructure);
-            }
-            pkt.advance(40); // skip IPv6 header
-        }
-        _ => {
-            warn!(target: ZDP, "Link {}: unsupported ip_version value {}", pkt.metadata().ingress_link_id, hdr.ip_version);
-            return Err(HandleMgmtError::BadStructure);
-        }
-    }
-    // At this point our packet buffer is set to the start of whatever is after the
-    // IP header.
-    match ip_protocol {
-        ip_number::TCP | ip_number::UDP => {
-            // read TCP/UDP header
-            if pkt.remaining() < 4 {
-                return Err(HandleMgmtError::BadStructure);
-            }
-            src_port = pkt.get_u16();
-            dst_port = pkt.get_u16();
-        }
-        ip_number::ICMP | ip_number::IPV6_ICMP => {
-            // Just stuff the TYPE value into both source and dest.
-            if pkt.remaining() < 2 {
-                return Err(HandleMgmtError::BadStructure);
-            }
-            let icmp_type = pkt.get_u8();
-            src_port = icmp_type.into();
-            dst_port = icmp_type.into();
-        }
-        _ => {
-            warn!(target: ZDP, "Link {}: unsupported IP protocol {}", pkt.metadata().ingress_link_id, ip_protocol);
-            return Err(HandleMgmtError::BadStructure);
-        }
-    }
-
     let compression_mode = hdr.compression_mode;
-
-    let five_tuple = FiveTuple::new(
-        hdr.ip_version,
-        src_address,
-        dst_address,
-        ip_protocol,
-        src_port,
-        dst_port,
-    );
 
     let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
         // who sent this??

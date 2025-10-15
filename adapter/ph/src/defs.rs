@@ -26,6 +26,7 @@ pub struct FiveTuple {
 }
 
 impl FiveTuple {
+    #[allow(dead_code)]
     pub fn new(
         l3_type: zpr::L3Type,
         src_address: net_defs::IpAddress,
