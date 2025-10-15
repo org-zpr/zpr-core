@@ -1004,7 +1004,6 @@ impl LinkStateWrapper {
         // Will call back via ReceivedGrantResponse event if successful.
         self.send_grant_zpr_address_request(asm, &locked_fsm.actor_addresses);
         locked_fsm.set_state(LinkState::Active);
-        self.set_timeout(asm, &mut locked_fsm, config::GRANT_REQUEST_TIMEOUT);
         debug!(target: LINK_STATE, "Link {} has ACKd the grant.  Becoming active", self.id);
         self.run_active(&asm)
     }
