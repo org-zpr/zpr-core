@@ -129,6 +129,16 @@ pub struct ZdpReportHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
+pub struct ZdpHelloRequestHeader {
+    // Followed by any nubmer of request TLVs.  The TLV
+    // format is:
+    //   - TLV type (u8)
+    //   - TLV length (u8)
+    //   - TLV value (variable length)
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
 pub struct ZdpHelloResponseHeader {
     pub status: ResponseCode,
     // Followed by any nubmer of response TLVs.  The TLV

@@ -267,9 +267,16 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
 
     // We just emit the TLV stuff to log but do not use any of it.
     for (tlv_type, tlv_value) in &tlv_data {
-        info!(
-            "Link {ingress_link_id}: HelloRequest includes TLV type: {tlv_type} => {tlv_value:?}"
-        );
+        match *tlv_type {
+            tlv::DataType::WINDOW_SIZE => {
+                process_window_size_tlv(&asm, ingress_link_id, "HelloRequest", tlv_value)?;
+            }
+            _ => {
+                info!(
+                    "Link {ingress_link_id}: HelloRequest includes ignored TLV type: {tlv_type} => {tlv_value:?}"
+                );
+            }
+        }
     }
 
     let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
@@ -313,6 +320,7 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
     let policy_id: i64 = 0; // TODO: We get policy ID from visa service. Record that somewhere, access it here.
     TlvEncoding::new_policy_id(policy_id).put(&mut rsp_pkt);
     TlvEncoding::new_version(VERSION).put(&mut rsp_pkt);
+    super::helpers::put_window_size_tlv(&asm, ingress_link_id, &mut rsp_pkt);
 
     if response_status == zdp::ResponseCode::Success {
         let svclist = asm.vs_auth_services.read().unwrap();
@@ -398,6 +406,9 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
             &tlv::DataType::VERSION => {
                 info!(target: ZDP, "Link {link_id}: HelloResponse - peer version is : {}", tlv_value[0]);
             }
+            &tlv::DataType::WINDOW_SIZE => {
+                process_window_size_tlv(&asm, link_id, "HelloResponse", tlv_value)?;
+            }
             &tlv::DataType::POLICY_ID => {
                 info!(target: ZDP, "Link {link_id}: HelloResponse - peer policy ID is : {}", tlv_value[0]);
             }
@@ -462,6 +473,36 @@ pub async fn handle_hello_response(asm: &Arc<Assembly>, mut pkt: Packet) -> Hand
         LinkEvent::ReceivedHelloResponse(status, aaa_address.unwrap(), maybe_asa_addrs),
     );
 
+    Ok(())
+}
+
+fn process_window_size_tlv(
+    asm: &Assembly,
+    link_id: zpr::LinkId,
+    message_name: &str,
+    tlv_value: &[tlv::TlvValue],
+) -> HandleMgmtResult {
+    for window_size_entry in tlv_value {
+        match window_size_entry {
+            tlv::TlvValue::U16(window_size) => {
+                if *window_size < 1 {
+                    warn!(target: ZDP, "Link {link_id}: {message_name} window size is invalid: {window_size}");
+                } else {
+                    info!(target: ZDP, "Link {link_id}: Applying window size {window_size} from {message_name}");
+                    asm.peer_table.inspect(link_id, |ps| {
+                        ps.zdpr_send
+                            .lock()
+                            .unwrap()
+                            .adjust_window_size(*window_size as usize)
+                    });
+                }
+            }
+            _ => {
+                warn!(target: ZDP, "Link {link_id}: {message_name} window size type is wrong: {window_size_entry:?}");
+                return Err(HandleMgmtError::BadStructure);
+            }
+        }
+    }
     Ok(())
 }
 
