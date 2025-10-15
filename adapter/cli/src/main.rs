@@ -33,14 +33,16 @@ const ANCILLARY_BUFFER_SIZE: usize = 128;
 
 #[derive(Error, Debug)]
 enum CliError {
-    #[error("protocol error: {0}")]
+    #[error("Protocol error: {0}")]
     ProtocolError(#[from] capnp::Error),
     #[error("OS error: {0}")]
     OsError(#[from] std::io::Error),
-    #[error("parse error: {0}")]
+    #[error("Parse error: {0}")]
     ParseError(String),
     #[error("RPC error: {0}")]
     RpcError(String),
+    #[error("Pcap error: {0}")]
+    CaptureError(#[from] pcap::Error),
 }
 
 // thiserror does not propagate From implementations up
@@ -175,7 +177,10 @@ async fn process_command(
                         file_path,
                         duration,
                         program,
-                    } => capture_sequence_task(service, file_path, duration, program).await?,
+                    } => {
+                        capture_sequence_task(service, file_path, duration, program, cap_socket)
+                            .await?
+                    }
                 },
                 Commands::Watch { interval } => watch_task(service, interval).await?,
                 Commands::PerfSample {
@@ -301,8 +306,8 @@ async fn set_capture_program_task(
     // there is no default program
     match program {
         Some(program) => {
-            let capture = Capture::dead(Linktype::USER0).unwrap();
-            let program = capture.compile(&program, true).unwrap();
+            let capture = Capture::dead(Linktype::USER0)?;
+            let program = capture.compile(&program, true)?;
             let instructions: &[pcap::BpfInstruction] = program.get_instructions();
 
             let mut request = service.set_capture_program_request();
@@ -348,13 +353,26 @@ async fn delete_capture_program_task(service: svc::Client) -> Result<(), CliErro
 }
 
 async fn capture_sequence_task(
-    _service: svc::Client,
-    _file_path: String,
-    _time: u64,
-    _program: Option<String>,
+    service: svc::Client,
+    file_path: String,
+    time: u64,
+    program: Option<String>,
+    cap_socket: Option<&str>,
 ) -> Result<(), CliError> {
-    // TODO
-    println!("Unimplemented");
+    let sleep_time = Duration::new(time, 0);
+    handle_set_capture_file(file_path, cap_socket)?;
+    set_capture_program_task(service.clone(), program).await?;
+
+    let handler = Arc::new(CtrlcHandle::new());
+    let ctrlc_handler = handler.clone();
+
+    // Will set wait to false in CtrlcHandler if ctrl+c is pressed
+    ctrlc::set_handler(move || ctrlc_handler.set_false()).unwrap();
+
+    handler.timed_wait(sleep_time);
+
+    close_capture_file_task(service).await?;
+
     Ok(())
 }
 
