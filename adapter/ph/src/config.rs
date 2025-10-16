@@ -49,9 +49,6 @@ pub const DEFAULT_TERMINATE_TIMEOUT: std::time::Duration = std::time::Duration::
 /// means it may have to do a lot of work to verify auth.
 pub const VS_GRANT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Grant requires reconfiguring TUN, so longer.
-pub const GRANT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-
 /// How long to wait for an actor to finish out of band authentication.
 pub const ACTOR_AUTHENTICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 

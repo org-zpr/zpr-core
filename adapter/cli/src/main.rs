@@ -33,14 +33,16 @@ const ANCILLARY_BUFFER_SIZE: usize = 128;
 
 #[derive(Error, Debug)]
 enum CliError {
-    #[error("protocol error: {0}")]
+    #[error("Protocol error: {0}")]
     ProtocolError(#[from] capnp::Error),
     #[error("OS error: {0}")]
     OsError(#[from] std::io::Error),
-    #[error("parse error: {0}")]
+    #[error("Parse error: {0}")]
     ParseError(String),
     #[error("RPC error: {0}")]
     RpcError(String),
+    #[error("Pcap error: {0}")]
+    CaptureError(#[from] pcap::Error),
 }
 
 // thiserror does not propagate From implementations up
@@ -175,7 +177,10 @@ async fn process_command(
                         file_path,
                         duration,
                         program,
-                    } => capture_sequence_task(service, file_path, duration, program).await?,
+                    } => {
+                        capture_sequence_task(service, file_path, duration, program, cap_socket)
+                            .await?
+                    }
                 },
                 Commands::Watch { interval } => watch_task(service, interval).await?,
                 Commands::PerfSample {
@@ -222,9 +227,28 @@ async fn counters_task(service: svc::Client) -> Result<(), CliError> {
     let request = service.counters_request();
 
     let response = request.send().promise.await?;
-    let results = response.get()?;
-    println!("Counters Reset");
-    println!("{}", results.get_counts()?.to_str()?);
+    let results = response.get()?.get_counts()?;
+
+    let management = results.get_management()?;
+    let fastpaths = results.get_fastpaths()?;
+    let uptime_sec = results.get_uptime_sec();
+    let uptime_subsec_ms = results.get_uptime_subsec_ms();
+
+    println!("Management counts:");
+    let counters = management.get_counters()?;
+    for counter in counters.iter() {
+        println!("{}: {}", counter.get_name()?.to_str()?, counter.get_val());
+    }
+
+    for fastpath in fastpaths.iter() {
+        println!("\nFastpath #{} counts:", fastpath.get_id());
+        let counters = fastpath.get_counters()?;
+        for counter in counters.iter() {
+            println!("{}: {}", counter.get_name()?.to_str()?, counter.get_val());
+        }
+    }
+
+    println!("\nUptime: {uptime_sec}.{uptime_subsec_ms}");
 
     Ok(())
 }
@@ -280,12 +304,26 @@ async fn set_capture_program_task(
 ) -> Result<(), CliError> {
     // Ensures that a program has properly been provided before sending message because
     // there is no default program
-
     match program {
         Some(program) => {
-            let serialized_program = serialize(&program);
+            let capture = Capture::dead(Linktype::USER0)?;
+            let program = capture.compile(&program, true)?;
+            let instructions: &[pcap::BpfInstruction] = program.get_instructions();
+
             let mut request = service.set_capture_program_request();
-            request.get().set_program(serialized_program);
+            let mut program_request = request
+                .get()
+                .init_program()
+                .init_bpf_prog(instructions.len() as u32);
+
+            for (i, instruction) in instructions.iter().enumerate() {
+                let insn: &cbpf_rs::BpfInsn = instruction.borrow();
+                let mut insn_builder = program_request.reborrow().get(i as u32);
+                insn_builder.set_code(insn.code);
+                insn_builder.set_jt(insn.jt);
+                insn_builder.set_jf(insn.jf);
+                insn_builder.set_k(insn.k);
+            }
 
             let response = request.send().promise.await?;
             let results = response.get()?;
@@ -315,55 +353,74 @@ async fn delete_capture_program_task(service: svc::Client) -> Result<(), CliErro
 }
 
 async fn capture_sequence_task(
-    _service: svc::Client,
-    _file_path: String,
-    _time: u64,
-    _program: Option<String>,
+    service: svc::Client,
+    file_path: String,
+    time: u64,
+    program: Option<String>,
+    cap_socket: Option<&str>,
 ) -> Result<(), CliError> {
-    // TODO
-    println!("Unimplemented");
+    let sleep_time = Duration::new(time, 0);
+    handle_set_capture_file(file_path, cap_socket)?;
+    set_capture_program_task(service.clone(), program).await?;
+
+    let handler = Arc::new(CtrlcHandle::new());
+    let ctrlc_handler = handler.clone();
+
+    // Will set wait to false in CtrlcHandler if ctrl+c is pressed
+    ctrlc::set_handler(move || ctrlc_handler.set_false()).unwrap();
+
+    handler.timed_wait(sleep_time);
+
+    close_capture_file_task(service).await?;
+
     Ok(())
 }
 
 async fn watch_task(service: svc::Client, interval: u64) -> Result<(), CliError> {
-    let mut values: Vec<u64> = Vec::new();
+    let mut mgmt_values: Vec<u64> = Vec::new();
+    let mut fastpaths_values: Vec<Vec<u64>> = Vec::new();
+
     let sleep_time = Duration::new(interval, 0);
     let mut first_run = true;
 
     loop {
         let request = service.counters_request();
         let response = request.send().promise.await?;
-        let results = response.get()?.get_counts()?.to_string()?;
+        let results = response.get()?.get_counts()?;
 
-        // Split up the long string with all the counts and words into a vector
-        // with each line as a different index of the vector
-        let counts: Vec<&str> = results.split('\n').collect(); // Split the messages
+        let management = results.get_management()?;
+        let fastpaths = results.get_fastpaths()?;
 
+        // Set initial counts to 0
         if first_run {
-            values.resize(counts.len(), 0);
+            mgmt_values.resize(management.get_counters()?.len() as usize, 0);
+            fastpaths_values.resize(fastpaths.len() as usize, Vec::new());
+            for (i, fastpath) in fastpaths.reborrow().iter().enumerate() {
+                fastpaths_values[i].resize(fastpath.get_counters()?.len() as usize, 0)
+            }
         }
 
-        // TODO error checking, make sure actually got a message back, and that it's the correct message
-        for (n, count) in counts[0..].iter().enumerate() {
-            // split up the individual lines to get the count from the end and convert to u64
-            let one_line: Vec<&str> = count.split(':').collect();
-            match one_line[0] {
-                "OK" => break,
-                "Uptime" => println!("\nUptime: {}", one_line[1]),
-                "Management counts" => println!("\nManagement counts:"),
-                "Fastpath counts" => println!("\nFastpath counts: {}", one_line[1]),
-                "" => (),
-                _ => {
-                    let mut num: String = one_line[1].to_string();
-                    num.remove(0);
-                    let num_packets: u64 = num.parse().unwrap();
+        println!("Increases in management counts:");
+        let counters = management.get_counters()?;
+        for (i, counter) in counters.iter().enumerate() {
+            println!(
+                "{}: {}",
+                counter.get_name()?.to_str()?,
+                counter.get_val() - mgmt_values[i]
+            );
+            mgmt_values[i] = counter.get_val();
+        }
 
-                    // calculate difference between current pkt nums and previous pkt nums
-                    let difference = num_packets - values[n];
-
-                    println!("{} increased by: {}", one_line[0], difference);
-                    values[n] = num_packets; // store new packet counts
-                }
+        for (i, fastpath) in fastpaths.iter().enumerate() {
+            println!("\nIncreases in Fastpath #{} counts:", fastpath.get_id());
+            let counters = fastpath.get_counters()?;
+            for (j, counter) in counters.iter().enumerate() {
+                println!(
+                    "{}: {}",
+                    counter.get_name()?.to_str()?,
+                    counter.get_val() - fastpaths_values[i][j]
+                );
+                fastpaths_values[i][j] = counter.get_val();
             }
         }
 
@@ -393,7 +450,11 @@ async fn show_link_summary_task(service: svc::Client) -> Result<(), CliError> {
 
     let response = request.send().promise.await?;
     let results = response.get()?;
-    println!("{}", results.get_summary()?.to_str()?);
+    let summaries = results.get_summary()?;
+    println!("Link summary:");
+    for summary in summaries.iter() {
+        println!("{}", summary?.to_str()?)
+    }
 
     Ok(())
 }
@@ -469,16 +530,19 @@ async fn reset_link_task(service: svc::Client, id: u32) -> Result<(), CliError> 
     Ok(())
 }
 
-async fn change_logging_task(service: svc::Client, logs: Vec<String>) -> Result<(), CliError> {
+async fn change_logging_task(
+    service: svc::Client,
+    logs: Vec<(String, String)>,
+) -> Result<(), CliError> {
     // TODO convert logging to take a List instead of a string
-    let mut log_str = String::new();
-
-    for elem in logs {
-        log_str = format!("{} {}", log_str, elem);
-    }
-
     let mut request = service.change_logging_request();
-    request.get().set_logs(log_str);
+    let mut log_builder = request.get().init_logs(logs.len() as u32);
+
+    for (i, log) in logs.iter().enumerate() {
+        let mut tuple_builder = log_builder.reborrow().get(i as u32);
+        tuple_builder.set_level(&log.0);
+        tuple_builder.set_target(&log.1);
+    }
 
     let response = request.send().promise.await?;
     let results = response.get()?.get_result()?;
@@ -568,29 +632,6 @@ fn handle_set_capture_file(file_path: String, cap_socket: Option<&str>) -> Resul
 
 //     Ok(())
 // }
-
-/// Uses combination of pcap and cbpf-rs libraries to serialize program
-/// into the following format:
-/// <number of instructions>,code1 jt1 jf1 k1,code2 jt2 jf2 k2,...,coden jtn jfn kn
-fn serialize(program: &str) -> String {
-    use std::fmt::Write;
-
-    let capture = Capture::dead(Linktype::USER0).unwrap();
-    let program = capture.compile(program, true).unwrap();
-    let instructions: &[pcap::BpfInstruction] = program.get_instructions();
-    let mut serialized_program = format!("{},", instructions.len());
-
-    for instruction in instructions {
-        let insn: &cbpf_rs::BpfInsn = instruction.borrow();
-        let _ = write!(
-            &mut serialized_program,
-            "{} {} {} {},",
-            insn.code, insn.jt, insn.jf, insn.k
-        );
-    }
-    let _ = serialized_program.pop(); // removes trailing comma at end of string
-    serialized_program
-}
 
 #[allow(dead_code)]
 struct CtrlcHandle {

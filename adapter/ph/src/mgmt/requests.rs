@@ -56,8 +56,10 @@ pub fn send_echo_request(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
 /// remote adapter into the node.  This is no longer necessary.
 ///
 pub fn send_hello_request(asm: &Assembly, link_id: zpr::LinkId) -> Sent<'_> {
-    let req = core::new_heap_packet();
-    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, req)
+    let mut pkt = core::new_heap_packet();
+    pkt.alloc_zeroed_header::<zdp::ZdpHelloRequestHeader>();
+    super::helpers::put_window_size_tlv(asm, link_id, &mut pkt);
+    core::send_non_flow_mgmt(asm, link_id, zdp::ZdpPacketType::HelloRequest, pkt)
 }
 
 /// Send Init Authentication (NOT YET IN RFC 6)

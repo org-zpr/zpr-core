@@ -28,6 +28,7 @@ impl DataType {
     pub const AAA: TlvType = 3; // Actor Authentication Address - temporary address actor may use for authentication
     pub const ASA: TlvType = 4; // Authentication Service SocketAddress
     pub const STATIC_ADDR: TlvType = 5; // Static Address - used for static address requests from an adapter
+    pub const WINDOW_SIZE: TlvType = 6;
 }
 
 /// TlvEncoding is a designed to be an easy way to create and write TLV data
@@ -95,9 +96,17 @@ impl TlvEncoding {
         }
     }
 
+    pub fn new_window_size(window_size: u16) -> TlvEncoding {
+        TlvEncoding {
+            tlv_type: DataType::WINDOW_SIZE,
+            value: TlvValue::U16(window_size),
+        }
+    }
+
     /// Write this encoding to the buffer, advancing the buffer position.
     pub fn put(&self, buf: &mut dyn bytes::BufMut) {
         match &self.value {
+            TlvValue::U16(v) => put_u16(buf, self.tlv_type, *v),
             TlvValue::I64(v) => put_i64(buf, self.tlv_type, *v),
             TlvValue::Str(v) => put_str(buf, self.tlv_type, v),
             TlvValue::Ipv6Addr(v) => put_ipv6addr(buf, self.tlv_type, v),
@@ -109,6 +118,7 @@ impl TlvEncoding {
 
 #[derive(Clone, Debug)]
 pub enum TlvValue {
+    U16(u16),
     I64(i64),
     Str(String),
     Ipv6Addr(Ipv6Addr),
@@ -119,11 +129,12 @@ pub enum TlvValue {
 impl std::fmt::Display for TlvValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            TlvValue::U16(v) => write!(f, "{v}"),
             TlvValue::I64(v) => write!(f, "{v}"),
             TlvValue::Str(v) => write!(f, "{v}"),
             TlvValue::Ipv6Addr(v) => write!(f, "{v}"),
             TlvValue::Ipv4Addr(v) => write!(f, "{v}"),
-            TlvValue::SocketAddr(v) => write!(f, "{}", v),
+            TlvValue::SocketAddr(v) => write!(f, "{v}"),
         }
     }
 }
@@ -135,6 +146,15 @@ struct TLVHdr {
     pub tlv_type: TlvType,
     pub tlv_length: u8,
     // Followed by tlv_length bytes of value
+}
+
+fn put_u16(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, value: u16) {
+    let hdr = TLVHdr {
+        tlv_type,
+        tlv_length: 2, // Length of u16 is always 2 bytes
+    };
+    buf.put_slice(&hdr.as_bytes());
+    buf.put_u16(value);
 }
 
 fn put_i64(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, value: i64) {
@@ -284,6 +304,16 @@ pub fn parse_from_buf(
                     }
                 }
             }
+            DataType::WINDOW_SIZE => {
+                if tlv_length != 2 {
+                    return Err(TlvError::BadStructure);
+                }
+                let value = buf.get_u16();
+                tlv_map
+                    .entry(tlv_type)
+                    .or_insert_with(Vec::new)
+                    .push(TlvValue::U16(value));
+            }
             _ => {
                 // For unknown types, just skip the value.
                 buf.advance(tlv_length as usize);
@@ -320,6 +350,28 @@ mod tests {
     use super::*;
     use bytes::{BufMut, BytesMut};
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn test_put_and_parse_u16() {
+        let mut buf = BytesMut::new();
+        let test_value = 0x1234_u16;
+
+        // Write the TLV
+        put_u16(&mut buf, DataType::WINDOW_SIZE, test_value);
+
+        // Parse it back
+        let mut buf_reader = buf.as_ref();
+        let result = parse_from_buf(&mut buf_reader).unwrap();
+
+        // Verify the result
+        assert_eq!(result.len(), 1);
+        let values = result.get(&DataType::WINDOW_SIZE).unwrap();
+        assert_eq!(values.len(), 1);
+        match &values[0] {
+            TlvValue::U16(value) => assert_eq!(*value, test_value),
+            _ => panic!("Expected U16 value for WINDOW_SIZE"),
+        }
+    }
 
     #[test]
     fn test_put_and_parse_i64() {

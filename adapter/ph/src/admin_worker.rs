@@ -44,12 +44,9 @@ pub async fn launch_capnp(
     asm: Arc<Assembly>,
     listener: UnixListener,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // let listener = tokio::net::UnixListener::bind(path)?;
-
     loop {
         let (sock, _addr) = listener.accept().await?;
-        // TODO add connect info to log
-        // println!("Connect from {addr:?}");
+
         let (reader, writer) = sock.into_split();
         let network = capnp_rpc::twoparty::VatNetwork::new(
             tokio::io::BufReader::new(reader).compat(),
@@ -70,8 +67,8 @@ pub async fn launch_capnp(
 
 pub async fn launch(asm: Arc<Assembly>, listener: UnixListener) {
     match launch_capnp(asm.clone(), listener).await {
-        Ok(()) => println!("SUCCESS"), // TODO remove this print
-        Err(e) => println!("ERROR {}", e),
+        Ok(()) => (),
+        Err(e) => error!(target: RPC, "RPC System error: {}", e),
     };
 }
 
@@ -85,7 +82,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::EchoParams,
         _: svc::EchoResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        // TODO add logging here and in the other commands
+        debug!(target: RPC, "Echo procedure initiated");
         capnp::capability::Promise::ok(())
     }
 
@@ -94,6 +91,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::ResetCountersParams,
         _: svc::ResetCountersResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Reset counters procedure initiated");
         for value in self.asm.counters.management.values() {
             value.reset();
         }
@@ -112,35 +110,44 @@ impl svc::Server for AdminServiceImpl {
         _: svc::CountersParams,
         mut results: svc::CountersResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        let mut counts: String = String::new();
-        let _ = write!(&mut counts, "Management counts:\n");
-        for (key, &ref value) in &self.asm.counters.management {
-            let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
+        debug!(target: RPC, "Counters procedure initiated");
+        let mut results_builder = results.get().init_counts();
+
+        let mut counters_builder = results_builder
+            .reborrow()
+            .init_management()
+            .init_counters(self.asm.counters.management.len() as u32);
+
+        for (i, (key, &ref value)) in self.asm.counters.management.iter().enumerate() {
+            let mut counter = counters_builder.reborrow().get(i as u32);
+            counter.set_name(key.name());
+            counter.set_val(value.get_count());
         }
 
-        for (i, fastpath) in self
-            .asm
-            .counters
-            .fastpaths
-            .lock()
-            .unwrap()
-            .iter()
-            .enumerate()
         {
-            let _ = write!(&mut counts, "Fastpath counts: #{}\n", i);
-            for (key, &ref value) in fastpath {
-                let _ = write!(&mut counts, "{}: {}\n", key, value.get_count());
+            let fastpaths = self.asm.counters.fastpaths.lock().unwrap();
+
+            // Initialize builder for list of fastpaths
+            let mut fastpaths_builder = results_builder
+                .reborrow()
+                .init_fastpaths(fastpaths.len() as u32);
+            for (i, fastpath) in fastpaths.iter().enumerate() {
+                // Initialize builder for individual fastpath and set its ID
+                let mut fastpath_builder = fastpaths_builder.reborrow().get(i as u32);
+                fastpath_builder.set_id(i as u32);
+
+                // Set counters
+                let mut counters_builder = fastpath_builder.init_counters(fastpath.len() as u32);
+                for (i, (key, &ref value)) in fastpath.iter().enumerate() {
+                    let mut counter = counters_builder.reborrow().get(i as u32);
+                    counter.set_name(key.name());
+                    counter.set_val(value.get_count());
+                }
             }
         }
 
-        let _ = write!(
-            &mut counts,
-            "Uptime: {}.{} s\n",
-            self.asm.get_uptime().as_secs(),
-            self.asm.get_uptime().subsec_millis()
-        );
-        let mut results_builder = results.get();
-        results_builder.set_counts(counts);
+        results_builder.set_uptime_sec(self.asm.get_uptime().as_secs());
+        results_builder.set_uptime_subsec_ms(self.asm.get_uptime().subsec_millis());
 
         capnp::capability::Promise::ok(())
     }
@@ -150,6 +157,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::SetCaptureFileParams,
         _: svc::SetCaptureFileResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Set capture file procedure initiated");
         ::capnp::capability::Promise::err(::capnp::Error::unimplemented(
             "method cmd_line_inter::Server::set_capture_file not implemented".to_string(),
         ))
@@ -160,6 +168,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::CloseCaptureFileParams,
         _: svc::CloseCaptureFileResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Close capture file procedure initiated");
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
             let _ = task_asm.capture_worker.close_capture_file().await;
@@ -174,6 +183,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::FlushCaptureFileParams,
         _: svc::FlushCaptureFileResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Flush capture file procedure initiated");
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
             let _ = task_asm.capture_worker.flush_capture_file().await;
@@ -187,22 +197,27 @@ impl svc::Server for AdminServiceImpl {
         params: svc::SetCaptureProgramParams,
         mut results: svc::SetCaptureProgramResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Set capture program procedure initiated");
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
-            let program = params.get()?.get_program()?.to_str()?;
-            // Splits the rest of the string into the various instructions
-            let mut serialized_program: Vec<&str> = program.split(',').collect();
-            let mut insn_vec = Vec::new();
-            serialized_program.remove(0); // removes number of programs from beginning of vector
+            let programs = params.get()?.get_program()?.get_bpf_prog()?;
 
-            // Creates a vector of BpfInsns
-            for insn in serialized_program {
-                let split_insn: Vec<&str> = insn.split_whitespace().collect();
+            let mut insn_vec = Vec::new();
+
+            for program in programs.iter() {
+                debug!(
+                    target: RPC,
+                    "Capture program values: code: {}, jt: {}, jf: {}, k: {}",
+                    program.get_code(),
+                    program.get_jt(),
+                    program.get_jf(),
+                    program.get_k()
+                );
                 let bpf_insn = cbpf_rs::BpfInsn {
-                    code: split_insn[0].parse().unwrap(),
-                    jt: split_insn[1].parse().unwrap(),
-                    jf: split_insn[2].parse().unwrap(),
-                    k: split_insn[3].parse().unwrap(),
+                    code: program.get_code(),
+                    jt: program.get_jt(),
+                    jf: program.get_jf(),
+                    k: program.get_k(),
                 };
                 insn_vec.push(bpf_insn);
             }
@@ -230,6 +245,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::DeleteCaptureProgramParams,
         _: svc::DeleteCaptureProgramResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Delete capture program procedure initiated");
         self.asm.flow_control.delete_program();
         capnp::capability::Promise::ok(())
     }
@@ -239,6 +255,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::PerfSampleParams,
         mut results: svc::PerfSampleResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Perf sample procedure initiated");
         let mut results_builder = results.get();
         results_builder.set_result("Not currently supported");
         capnp::capability::Promise::ok(())
@@ -249,19 +266,18 @@ impl svc::Server for AdminServiceImpl {
         _: svc::ShowLinkSummaryParams,
         mut results: svc::ShowLinkSummaryResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        let mut results_builder = results.get();
-        let mut response: String = String::new();
-        let _ = write!(&mut response, "Link summary:\n");
+        info!(target: RPC, "Show link summary procedure initiated");
+        {
+            let peer_ids = self.asm.peer_ids.lock().unwrap();
+            let mut results_builder = results.get().init_summary(peer_ids.len() as u32);
 
-        for id in self.asm.peer_ids.lock().unwrap().clone() {
-            let _ = write!(
-                &mut response,
-                "  {id}: {}\n",
-                get_link_summary(&self.asm, id)
-            );
+            for (i, id) in peer_ids.iter().enumerate() {
+                results_builder.set(
+                    i as u32,
+                    format!("  {id}: {}", get_link_summary(&self.asm, *id)),
+                );
+            }
         }
-
-        results_builder.set_summary(response);
 
         capnp::capability::Promise::ok(())
     }
@@ -271,9 +287,11 @@ impl svc::Server for AdminServiceImpl {
         params: svc::ShowLinkParams,
         mut results: svc::ShowLinkResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Show link procedure initiated");
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
             let id = params.get()?.get_id();
+            debug!(target: RPC, "Show link id {id} requested");
 
             let mut results_builder = results.get();
             let response = match task_asm.peer_table.get(id) {
@@ -299,6 +317,7 @@ impl svc::Server for AdminServiceImpl {
         _: svc::ConfigureLinkParams,
         _: svc::ConfigureLinkResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Configure link procedure initiated");
         capnp::capability::Promise::ok(())
     }
 
@@ -307,9 +326,12 @@ impl svc::Server for AdminServiceImpl {
         params: svc::StartLinkParams,
         mut results: svc::StartLinkResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Start link procedure initiated");
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
             let id = params.get()?.get_id();
+            debug!(target: RPC, "Start link id {id} requested");
+
             let results_builder = results.get().init_result();
 
             match task_asm.process_link_state_event(id, LinkEvent::Start) {
@@ -332,9 +354,12 @@ impl svc::Server for AdminServiceImpl {
         params: svc::StopLinkParams,
         mut results: svc::StopLinkResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Stop link procedure initiated");
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
             let id = params.get()?.get_id();
+            debug!(target: RPC, "Stop link id {id} requested");
+
             let results_builder = results.get().init_result();
 
             match task_asm.process_link_state_event(id, LinkEvent::Close(TerminateReason::Other)) {
@@ -357,9 +382,11 @@ impl svc::Server for AdminServiceImpl {
         params: svc::ResetLinkParams,
         _: svc::ResetLinkResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Reset link procedure initiated");
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
             let id = params.get()?.get_id();
+            debug!(target: RPC, "Reset link id {id} requested");
 
             task_asm.reset_peer(id).await;
             Ok(())
@@ -371,34 +398,32 @@ impl svc::Server for AdminServiceImpl {
         params: svc::ChangeLoggingParams,
         mut results: svc::ChangeLoggingResults,
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+        info!(target: RPC, "Change logging procedure initiated");
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
-            let log_state = params.get()?.get_logs()?.to_str()?;
-            let log_vec: Vec<&str> = log_state.split_whitespace().collect();
+            let log_state = params.get()?.get_logs()?;
+            // let log_vec: Vec<&str> = log_state.split_whitespace().collect();
             let mut applied: Vec<String> = Vec::new();
             let mut ignored: Vec<String> = Vec::new();
-            for elem in log_vec.iter() {
-                let key_val: Vec<&str> = elem.split("=").collect();
-                match key_val.len() {
-                    2 => {
-                        if targets::ALL_TARGETS.contains(&key_val[0])
-                            && levels::ALL_LEVELS.contains(&key_val[1].to_uppercase().as_str())
-                        {
-                            task_asm
-                                .logging
-                                .lock()
-                                .unwrap()
-                                .insert(key_val[0].to_string(), key_val[1].to_uppercase());
-                            applied.push(elem.to_string());
-                        } else {
-                            ignored.push(elem.to_string());
-                        }
-                    }
-                    _ => {
-                        ignored.push(elem.to_string());
-                    }
+            for log in log_state.iter() {
+                let target = log.get_level()?.to_str()?;
+                let level = log.get_target()?.to_str()?;
+                if targets::ALL_TARGETS.contains(&target)
+                    && levels::ALL_LEVELS.contains(&level.to_uppercase().as_str())
+                {
+                    task_asm
+                        .logging
+                        .lock()
+                        .unwrap()
+                        .insert(target.to_string(), level.to_uppercase());
+                    applied.push(format!("{}={}", target, level));
+                    debug!(target: RPC, "Logging pair: {target}={level} applied");
+                } else {
+                    ignored.push(format!("{}={}", target, level));
+                    debug!(target: RPC, "Logging pair: {target}={level} ignored");
                 }
             }
+
             logging::reload_filter(&task_asm.reload_handle, &task_asm.logging.lock().unwrap());
 
             let mut results_builder = results.get().init_result();
@@ -560,10 +585,12 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
 // Takes in ancillary data, extracts the file descriptor, and creates a file using the
 // fd
 async fn set_capture_file(asm: &Assembly, ancillary: SocketAncillary<'_>) -> String {
+    info!(target: RPC, "Setting capture file");
     // Get the ancillary data
     let anc_message = ancillary.into_messages().nth(0).unwrap();
     // Get the SCM rights from the ancillary data
     if let AncillaryData::ScmRights(mut scm_rights) = anc_message.unwrap() {
+        debug!(target: RPC, "SCM Rights exist");
         // See if there's actually data in the scm_rights, if yes try to open a
         // capture file, otherwise report failure to open file
         match scm_rights.nth(0) {
@@ -571,13 +598,23 @@ async fn set_capture_file(asm: &Assembly, ancillary: SocketAncillary<'_>) -> Str
                 let std_file = std::fs::File::from(fd.try_into_owned().unwrap()); // tokio::fs::File doesn't implement From<OwnedFd>
                 let tokio_file = File::from(std_file);
                 match asm.capture_worker.open_capture_file(tokio_file).await {
-                    Ok(()) => format!("Capture file opened\n"),
-                    Err(err) => format!("Error opening Capture file: {}\n", err),
+                    Ok(()) => {
+                        debug!(target: RPC, "Capture file opened");
+                        format!("Capture file opened\n")
+                    }
+                    Err(err) => {
+                        debug!(target: RPC, "Error opening Capture file: {}\n", err);
+                        format!("Error opening Capture file: {}\n", err)
+                    }
                 }
             }
-            None => format!("Error opening Capture file: no ancillary data received\n"),
+            None => {
+                debug!(target: RPC, "Error opening Capture file: no ancillary data received\n");
+                format!("Error opening Capture file: no ancillary data received\n")
+            }
         }
     } else {
+        debug!(target: RPC, "Error opening Capture file: no ancillary data received\n");
         format!("Error opening Capture file: no ancillary data received\n")
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "ph"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -44,8 +44,7 @@ zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "ze
 serde_json = "1.0.140"
 url = "2.5.4"
 clap_complete = { version = "4.5.57", optional = true}
-cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.1.2" }
-# cli-proto = { path = "../../../zpr-admin-api-rs" }
+cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.2.0" }
 capnp = { version = "0.21" }
 capnp-rpc = { version = "0.21" }
 

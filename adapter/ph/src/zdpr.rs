@@ -684,6 +684,10 @@ impl Receiver {
     pub fn fetch_reset_stat(&mut self, stat: ReceiverStat) -> u64 {
         std::mem::take(&mut self.stats[stat])
     }
+
+    pub fn window_size(&self) -> usize {
+        self.window_size
+    }
 }
 
 #[cfg(test)]

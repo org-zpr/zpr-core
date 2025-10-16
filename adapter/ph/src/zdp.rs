@@ -117,7 +117,6 @@ pub struct ZdpTransactionHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpEchoHeader {
-    pub sequence_number: U16, // Only used for the response
     pub additional_length: U16,
 }
 
@@ -125,6 +124,16 @@ pub struct ZdpEchoHeader {
 #[repr(packed)]
 pub struct ZdpReportHeader {
     pub report_data_length: U16,
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpHelloRequestHeader {
+    // Followed by any nubmer of request TLVs.  The TLV
+    // format is:
+    //   - TLV type (u8)
+    //   - TLV length (u8)
+    //   - TLV value (variable length)
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
