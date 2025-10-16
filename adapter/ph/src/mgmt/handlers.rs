@@ -265,7 +265,7 @@ pub async fn handle_hello_request(asm: &Arc<Assembly>, mut pkt: Packet) -> Handl
         }
     };
 
-    // We just emit the TLV stuff to log but do not use any of it.
+    // We just emit the TLV stuff to log but only use window size.
     for (tlv_type, tlv_value) in &tlv_data {
         match *tlv_type {
             tlv::DataType::WINDOW_SIZE => {

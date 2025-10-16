@@ -151,7 +151,7 @@ struct TLVHdr {
 fn put_u16(buf: &mut dyn bytes::BufMut, tlv_type: TlvType, value: u16) {
     let hdr = TLVHdr {
         tlv_type,
-        tlv_length: 2, // Length of u16 is always 8 bytes
+        tlv_length: 2, // Length of u16 is always 2 bytes
     };
     buf.put_slice(&hdr.as_bytes());
     buf.put_u16(value);
