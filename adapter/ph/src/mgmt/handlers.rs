@@ -8,7 +8,7 @@ use crate::config;
 use crate::counters;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
-use crate::net_defs::{ip_number, IpAddress};
+use crate::net_defs::IpAddress;
 use crate::packet::Packet;
 use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
@@ -763,16 +763,6 @@ pub async fn handle_bind_actor_address_request(
         }
     }
 
-    // This step is likely not strictly necessary, the original format set the src and dst
-    // port to be the same when using ICMP or IPV6_ICMP, which classifier::classify does not
-    // so this keeps it in line
-    match pkt.metadata().get_l4_protocol() {
-        ip_number::ICMP | ip_number::IPV6_ICMP => {
-            let metadata = pkt.metadata_mut();
-            metadata.set_dst_port(metadata.get_src_port_hbo());
-        }
-        _ => (),
-    }
     let five_tuple = *pkt.metadata().five_tuple();
 
     let packet_body: Vec<u8> = pkt.body().to_vec(); // copy to send to visa service
