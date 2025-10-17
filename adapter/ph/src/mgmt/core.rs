@@ -98,9 +98,11 @@ pub fn send_acknowledgement(asm: &Assembly, link_id: zpr::LinkId, sequence_numbe
     // let the OS know we're ACKing data from the peer
     packet.metadata_mut().flags |= packet::flags::CONFIRM;
 
-    let hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
-    hdr.packet_type = zdp::ZdpPacketType::Acknowledgement;
-    hdr.sequence_number = zdpr::truncate_seq_num(sequence_number).into();
+    let mgmt_hdr = packet.alloc_zeroed_header::<zdp::ZdpMgmtHeader>();
+    mgmt_hdr.sequence_number = zdpr::truncate_seq_num(sequence_number).into();
+
+    let base_hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+    base_hdr.packet_type = zdp::ZdpPacketType::Acknowledgement;
 
     // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
     // In that case, just ignore the error; act as if the packet was dropped
@@ -326,8 +328,11 @@ fn send_mgmt_helper(
         txn_hdr.transaction_id = txn_id.into();
     }
 
-    let hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
-    hdr.packet_type = packet_type;
+    let _mgmt_hdr = packet.alloc_zeroed_header::<zdp::ZdpMgmtHeader>();
+    // sequence_number is chosen and filled in upon egress, if the packet is not cancelled
+
+    let base_hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
+    base_hdr.packet_type = packet_type;
 
     let Some(peer_state) = asm.peer_table.get(link_id) else {
         return Sent {
@@ -380,8 +385,11 @@ pub fn build_and_egress_packets<'a>(
     let mut dropped_backpressure = 0;
 
     packets.for_each(|(seq_num, packet)| {
-        let (hdr, _) = zdp::ZdpBaseHeader::mut_from_prefix(packet.body_mut()).unwrap();
-        hdr.sequence_number = zdpr::truncate_seq_num(seq_num).into();
+        let (mgmt_hdr, _) = zdp::ZdpMgmtHeader::mut_from_prefix(
+            &mut packet.body_mut()[std::mem::size_of::<zdp::ZdpBaseHeader>()..],
+        )
+        .unwrap();
+        mgmt_hdr.sequence_number = zdpr::truncate_seq_num(seq_num).into();
 
         // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
         // In that case, just ignore the error; act as if the packet was dropped
@@ -457,8 +465,8 @@ impl From<super::core::MgmtSendError> for SyncReqError {
 /// expected response packet. The Option determines whether the function is helping the per-flow or
 /// non-per flow sender.
 /// pkt_fn allows the function to create the proper body of the ZDP packet to send
-/// Returns the received packet without the ZdpBaseHeader, but still any other Zdp header information
-/// not included in the ZdpBaseHeader, or an error
+/// Returns the received packet without the ZdpBaseHeader or ZdpMgmtHeader, but still any other
+/// Zdp header information not included in these headers, or an error
 async fn send_sync_req_helper(
     asm: &Assembly,
     link_id: zpr::LinkId,

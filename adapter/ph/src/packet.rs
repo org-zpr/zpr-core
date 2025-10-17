@@ -128,11 +128,14 @@ use zpr::L3Type;
 ///     let msg_len = payload.len() as u16;
 ///     report_hdr.report_data_length = msg_len.into();
 ///
-///     // Next the ZdpHeader. No need to set values that are zero since
+///     // Next the ZdpMgmtHeader.
+///     let mgmt_hdr = pkt.alloc_zeroed_header::<ZdpMgmtHeader>();
+///     mgmt_hdr.sequence_number = 22.into();
+///
+///     // Next the ZdpBaseHeader. No need to set values that are zero since
 ///     // the `alloc` function returns zero'd memory.
-///     let zdp_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
-///     zdp_hdr.packet_type = ZdpPacketType::Report;
-///     zdp_hdr.sequence_number = 22.into();
+///     let base_hdr = pkt.alloc_zeroed_header::<ZdpBaseHeader>();
+///     base_hdr.packet_type = ZdpPacketType::Report;
 ///
 ///     // Finally the ZpiHeader
 ///     let zpi_hdr = pkt.alloc_zeroed_header::<ZdpZpiHeader>().zpi = 5;

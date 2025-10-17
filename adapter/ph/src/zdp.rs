@@ -71,6 +71,16 @@ impl ZdpPacketType {
             _ => false,
         }
     }
+
+    /// Only "management" packets have a `ZdpMgmtHeader`.
+    ///
+    /// "Management" packets are everything except transit, ARP, and KM packets.
+    pub fn is_mgmt(self) -> bool {
+        matches!(
+            self,
+            Self::TransitPacket | Self::ZprArp | Self::KeyManagement
+        )
+    }
 }
 
 #[open_enum]
@@ -92,6 +102,11 @@ pub struct ZdpZpiHeader {
 pub struct ZdpBaseHeader {
     pub packet_type: ZdpPacketType,
     pub excess_length: u8,
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpMgmtHeader {
     pub sequence_number: U16,
 }
 
@@ -275,5 +290,6 @@ pub const ZDP_A2A_MAC_SIZE: usize = 8;
 /// This HMAC is tacked on to the end of the packet (following the A2A HMAC).
 pub const ZDP_PACKET_MAC_SIZE: usize = 8;
 
-const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 4);
+const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 2);
+const _: () = assert!(core::mem::size_of::<ZdpMgmtHeader>() == 2);
 const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);

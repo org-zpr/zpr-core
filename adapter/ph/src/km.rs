@@ -1129,7 +1129,6 @@ mod test {
         let hdr = ZdpBaseHeader {
             packet_type: ZdpPacketType::EchoRequest,
             excess_length: 0u8,
-            sequence_number: 0u16.into(),
         };
         let buf = Box::new([0u8; PACKET_BUFFER_SIZE]);
         let mut pkt = Packet::new(buf, 64);
@@ -1159,7 +1158,6 @@ mod test {
 
         assert!(encr_hdr.packet_type == hdr.packet_type);
         assert!(encr_hdr.excess_length == hdr.excess_length);
-        assert!(encr_hdr.sequence_number == hdr.sequence_number);
     }
 
     #[tokio::test]
@@ -1172,7 +1170,6 @@ mod test {
         let hdr = ZdpBaseHeader {
             packet_type: ZdpPacketType::EchoRequest,
             excess_length: 0u8,
-            sequence_number: 0u16.into(),
         };
         //let hbytes = hdr.as_bytes();
         //pkt.body_mut()[0..hbytes.len()].copy_from_slice(&hbytes);
@@ -1208,6 +1205,5 @@ mod test {
 
         assert!(encr_hdr.packet_type == hdr.packet_type);
         assert!(encr_hdr.excess_length == hdr.excess_length);
-        assert!(encr_hdr.sequence_number == hdr.sequence_number);
     }
 }

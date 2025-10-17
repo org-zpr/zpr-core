@@ -78,10 +78,13 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
         }
 
         Ok((base_hdr, _)) if base_hdr.packet_type == zdp::ZdpPacketType::Acknowledgement => {
+            pkt.advance(std::mem::size_of::<zdp::ZdpBaseHeader>());
             handle_acknowledgement(asm, pkt)
         }
 
-        Ok((base_hdr, _)) => {
+        Ok((base_hdr, rest)) => {
+            let (mgmt_hdr, _) = zdp::ZdpMgmtHeader::ref_from_prefix(rest).unwrap();
+
             let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
                 core::count_event(asm, ManagementCounterType::PeerRemoved);
                 return;
@@ -91,7 +94,7 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
 
             // expand sequence number and store in packet metadata
             let mut receiver = peer_state.zdpr_recv.lock().unwrap();
-            let seq_num = receiver.reify_seq_num(base_hdr.sequence_number.get());
+            let seq_num = receiver.reify_seq_num(mgmt_hdr.sequence_number.get());
             pkt.metadata_mut().seq_num = seq_num;
 
             // determine packet disposition per ZDPR mechanism
@@ -124,12 +127,12 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
 }
 
 fn handle_acknowledgement(asm: &Assembly, pkt: &mut Packet) {
-    let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(pkt) else {
+    let Ok(mgmt_hdr) = zdp::ZdpMgmtHeader::read_from_buf(pkt) else {
         core::count_event(asm, ManagementCounterType::BadStructure);
         return;
     };
 
-    let sn = base_hdr.sequence_number.get();
+    let sn = mgmt_hdr.sequence_number.get();
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
@@ -167,6 +170,11 @@ fn handle_response(asm: &Assembly, pkt: &mut Packet) {
     };
 
     let packet_type = base_hdr.packet_type;
+
+    let Ok(_mgmt_hdr) = zdp::ZdpMgmtHeader::read_from_buf(pkt) else {
+        core::count_event(asm, ManagementCounterType::BadStructure);
+        return;
+    };
 
     let Ok(txn_hdr) = zdp::ZdpTransactionHeader::read_from_buf(pkt) else {
         core::count_event(asm, ManagementCounterType::BadStructure);
@@ -291,14 +299,12 @@ mod test {
         // write ZDP base header
         let hdr = pkt1.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
         hdr.packet_type = zdp::ZdpPacketType::KeyManagement;
-        hdr.sequence_number = 1u16.into();
 
         let buf2 = Box::new([0u8; PACKET_BUFFER_SIZE]);
         let mut pkt2 = Packet::new(buf2, 64);
 
         let hdr = pkt2.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
         hdr.packet_type = zdp::ZdpPacketType::KeyManagement;
-        hdr.sequence_number = 1u16.into();
 
         let peer_sa = zpr::SubstrateAddr::from(([127, 0, 0, 1], 1234));
         let int_addr = net_defs::ScopedIpAddr::V4(Ipv4Addr::new(127, 0, 0, 1).into());

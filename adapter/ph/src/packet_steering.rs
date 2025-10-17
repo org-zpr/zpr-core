@@ -71,7 +71,7 @@ mod os_impl {
                 // eBPF programs (see <https://github.com/torvalds/linux/blob/master/net/core/sock_reuseport.c#L595-L598>).
                 // (`[SKF_AD_RXHASH]` just reads as 0!)
 
-                // [0] load ZPI and packet type
+                // [0] load ZPI (upper 8 bits) and packet type (lower 8 bits)
                 sf {
                     code: LD | H | ABS,
                     jt: 0,
@@ -81,12 +81,12 @@ mod os_impl {
                 // [1] if packet is encrypted, or packet is non-flow, fall back to hash
                 sf {
                     code: JMP | JSET | K,
-                    jt: 3,
+                    jt: 5,
                     jf: 0,
                     k: ((zpr::ZPI_ENCRYPTED_HEADER_FLAG as u32) << 8)
                         | zdp::ZDP_PACKET_TYPE_NON_FLOW_FLAG as u32,
                 },
-                // [2] load stream ID
+                // [2] load stream ID, assuming this is a transit packet (no MgmtHeader)
                 sf {
                     code: LD | W | ABS,
                     jt: 0,
@@ -96,21 +96,39 @@ mod os_impl {
                         + offset_of!(zdp::ZdpPerFlowHeader, stream_id))
                         as u32,
                 },
-                // [3] modulo # of queues
+                // [3] if this is in fact a transit packet, we're good, else...
+                sf {
+                    code: JMP | JEQ | K,
+                    jt: 1,
+                    jf: 0,
+                    k: zdp::ZdpPacketType::TransitPacket.0 as u32,
+                },
+                // [4] this is a mgmt packet, reload stream ID from the correct location (after MgmtHeader)
+                sf {
+                    code: LD | W | ABS,
+                    jt: 0,
+                    jf: 0,
+                    k: (size_of::<zdp::ZdpZpiHeader>()
+                        + size_of::<zdp::ZdpBaseHeader>()
+                        + size_of::<zdp::ZdpMgmtHeader>()
+                        + offset_of!(zdp::ZdpPerFlowHeader, stream_id))
+                        as u32,
+                },
+                // [5] modulo # of queues
                 sf {
                     code: ALU | MOD | K,
                     jt: 0,
                     jf: 0,
                     k: num_queues as u32,
                 },
-                // [4] return as selected queue #
+                // [6] return as selected queue #
                 sf {
                     code: RET | A,
                     jt: 0,
                     jf: 0,
                     k: 0,
                 },
-                // [5] return huge value to force fallback to hash-based steering
+                // [7] return huge value to force fallback to hash-based steering
                 sf {
                     code: RET | K,
                     jt: 0,

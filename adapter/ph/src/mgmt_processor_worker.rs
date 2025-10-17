@@ -56,6 +56,10 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
         return Err(HandleMgmtError::BadStructure);
     };
 
+    let Ok(_mgmt_hdr) = ZdpMgmtHeader::read_from_buf(&mut pkt) else {
+        return Err(HandleMgmtError::BadStructure);
+    };
+
     let seq_num = pkt.metadata().seq_num;
 
     match base_hdr.packet_type {
