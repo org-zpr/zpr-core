@@ -5,12 +5,13 @@ Installation instructions for Lua dissectors
 - When the new window pops up, click folders
 - Find where it says 'Personal Lua Plugins' and copy the path it shows under Location
 - Copy both the zdp dissector and the link layer header dissector into that folder
+- Restart Wireshark
 - In the Wireshark menu bar again, click Edit -> Preferences
 - In the preferences window, expand the Protocols section
 - Scroll until you find DLT_USER
 - Edit the Encapsulations Table
 - Click the plus button to add a new user
-- Set the Payload protocol to zdp, the Header size to 1, adn the Header protocol to zdp_link_p2p
+- Set the Payload dissector to zdp, the Header size to 1, and the Header protocol to zdp_link_p2p
 - Set the trailer size to 0 and leave the Trailer protocol blank
 - Click OK to add the User 0 profile, and you're done.
 

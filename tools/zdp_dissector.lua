@@ -9,10 +9,10 @@ excess_len = ProtoField.uint8("zdp.excess_len", "Excess Length", base.DEC)
 seq_num = ProtoField.uint16("zdp.seq_num", "Sequence Number", base.DEC)
 stream_id = ProtoField.uint32("zdp.streamid", "Stream ID", base.DEC)
 pad = ProtoField.bytes("zdp.pad", "Pad")
-mac_addr = ProtoField.uint32("zdp.mac", "MAC", base.DEC)
+hmac = ProtoField.bytes("zdp.mac", "MAC")
 a2a_said = ProtoField.uint8("zdp.a2a_said", "A2A SAID", base.DEC)
 agent_packet = ProtoField.bytes("zdp.agent_packet", "Agent Packet")
-a2a_mac = ProtoField.uint32("zdp.a2a_mac", "A2A MAC", base.DEC)
+a2a_mac = ProtoField.uint64("zdp.a2a_mac", "A2A MAC", base.DEC)
 management_packet = ProtoField.bytes("zdp.management", "Management Packet")
 
 -- Agent Packet Headers
@@ -28,8 +28,11 @@ hop_limit = ProtoField.uint8("zdp.hop_limit", "Hop Limit", base.DEC)
 ip_options = ProtoField.bytes("zdp.ip_options", "IP Options")
 
 -- Management Data
-mbz = ProtoField.bytes("zdp.mbz", "Must Be Zero")
+trans_id = ProtoField.uint16("zdp.trans_id", "Transaction ID", base.DEC)
 adl = ProtoField.uint16("zdp.adl", "Additional Data Length", base.DEC)
+reason_code = ProtoField.uint8("zdp.reason_code", "Reason Code", base.DEC)
+response_code = ProtoField.uint8("zdp.response_code", "Response Code", base.DEC)
+data_length = ProtoField.uint8("zdp.data_length", "Data Length", base.DEC)
 aditional_data = ProtoField.bytes("zdp.additional", "Optional Additional Data")
 req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
 ip_protocol_present = ProtoField.uint8("zdp.protocol_present", "IP Protocol Present", base.DEC)
@@ -45,94 +48,151 @@ info_len = ProtoField.uint8("zdp.info_len", "Information Length", base.DEC)
 status_info = ProtoField.bytes("zdp.status_info", "Optional Additional Status Information")
 
 zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
-                     mac_addr, a2a_said, agent_packet, a2a_mac, management_packet, ip_version,
-                     ihl, dscp, frag_id, frag_offset, ttl, tc, fl, hop_limit, ip_options, mbz,
+                     hmac, a2a_said, agent_packet, a2a_mac, management_packet, ip_version,
+                     ihl, dscp, frag_id, frag_offset, ttl, tc, fl, hop_limit, ip_options, trans_id,
                      adl, aditional_data, req_seq_num, ip_protocol_present, source_port_present, 
                      destination_port_present, source_addr, dest_addr, ip_protocol, source_info, 
-                     dest_info, status_code, info_len, status_info }
+                     dest_info, status_code, info_len, status_info, reason_code, response_code, data_length }
 
-TRANSIT_NON_AGENT_DATA = 22
-IP_NON_AGENT_DATA = 29
-STREAM_MGMT_NON_AGENT_DATA = 11
-MGMT_NON_AGENT_DATA = 7
+-- Lengths of fields when using Noise Encryption
+ZPI = 1
+TYPE = 1
+EXCESS_LEN = 1
+EXCESS_LEN_START = ZPI + TYPE
+SEQ_NUM = 2
+STREAM_ID = 4
+KEY_NOISE_PAD = 0
+HMAC = 0
+A2A_SAID = 1
+A2A_MAC = 8 -- Not sure what the MAC-algorithm-specified-size is (RFC17.2 § 4.2.6.1), but believe zdp.rs 262 specifies
+TRANSIT_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID + KEY_NOISE_PAD + HMAC + A2A_SAID + A2A_MAC
+PKT_START = TRANSIT_NON_AGENT_DATA - A2A_MAC
+DSCP = 1
+FRAG_ID = 2
+FRAG_OFFSET = 2
+TTL = 1
+HOP_LIMIT = 1
+PER_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID
+NON_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM
+TRANS_ID = 0
+ADL = 2
+RESPONSE_CODE = 1
+REASON_CODE = 1
+DL = 1
 
 function zdp_proto.dissector(buffer, pinfo, tree)
     length = buffer:len()
     if length == 0 then return end
+    
+    local curr_pos = 0
 
     pinfo.cols.protocol = zdp_proto.name
-    -- TODO look into adding to a subtree from a funciton, this "main" function 
+    -- TODO look into adding to a subtree from a function, this "main" function 
     -- is rather long, and is doing many things    
     local zdp_header_subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
-    zdp_header_subtree:add(zpi_val, buffer(0, 1))
+    zdp_header_subtree:add(zpi_val, buffer(curr_pos, ZPI))
+    curr_pos = curr_pos + ZPI
 
-    local type = buffer(1, 1):uint()
+    local type = buffer(curr_pos, TYPE):uint()
     local type_name = get_type_name(type)
-    zdp_header_subtree:add(zdp_type, buffer(1, 1)):append_text(" (" .. type_name .. ")")
+    zdp_header_subtree:add(zdp_type, buffer(curr_pos, TYPE)):append_text(" (" .. type_name .. ")")
     pinfo.cols.info = type_name
-    zdp_header_subtree:add(excess_len, buffer(2, 1))
-    zdp_header_subtree:add(seq_num, buffer(3, 2))
+    curr_pos = curr_pos + TYPE
 
-    local real_len = length - buffer(2,1):uint() 
+    zdp_header_subtree:add(excess_len, buffer(curr_pos, EXCESS_LEN))
+    curr_pos = curr_pos + EXCESS_LEN
+    zdp_header_subtree:add(seq_num, buffer(curr_pos, SEQ_NUM))
+    curr_pos = curr_pos + SEQ_NUM
+
+    local real_len = length - buffer(EXCESS_LEN_START, EXCESS_LEN):uint() 
     -- Perform different dissections depending on type of packet
     if type == 0 then 
         -- Transit Packet
-        zdp_header_subtree:add(stream_id, buffer(5, 4))
-        -- zdp_header_subtree:add(pad, buffer(9, 8))
-        zdp_header_subtree:add(a2a_said, buffer(9, 1))
-        zdp_header_subtree:add(agent_packet, buffer(10, real_len - TRANSIT_NON_AGENT_DATA))
-        zdp_header_subtree:add(a2a_mac, buffer(real_len - 12, 8))
-        zdp_header_subtree:add(mac_addr, buffer(real_len - 8, 4))
+        zdp_header_subtree:add(stream_id, buffer(curr_pos, STREAM_ID))
+        curr_pos = curr_pos + STREAM_ID
+        if KEY_NOISE_PAD ~= 0 then     
+            zdp_header_subtree:add(pad, buffer(curr_pos, KEY_NOISE_PAD))
+            curr_pos = curr_pos + KEY_NOISE_PAD
+        end
+        if HMAC ~= 0 then 
+            zdp_header_subtree:add(hmac, buffer(curr_pos, HMAC))
+            curr_pos = curr_pos + HMAC
+        end
+        zdp_header_subtree:add(a2a_said, buffer(curr_pos, A2A_SAID))
+        curr_pos = curr_pos + A2A_SAID
+        zdp_header_subtree:add(agent_packet, buffer(curr_pos, real_len - TRANSIT_NON_AGENT_DATA))
+        -- zdp_header_subtree:add(compressed_pkt, buffer(curr_pos, 5))
+        zdp_header_subtree:add(a2a_mac, buffer(real_len - A2A_MAC, A2A_MAC))
 
         local agent_header_subtree = tree:add(zdp_proto, buffer(), "Compressed Agent Packet Header Data")
-        local v4_v6 = get_first_four(buffer(10, 1):uint())
+        local v4_v6 = get_first_four(buffer(PKT_START, 1):uint())
         agent_header_subtree:add(ip_version, v4_v6)
+        
+        curr_pos = PKT_START
+        -- No updates to this section RE size/position of values, assuming they stayed the same for now
+        -- Just want to get this somewhat working first
         if v4_v6 == 4 then
-            local ihl_val = get_back_four(buffer(10, 1):uint())
+            -- TODO since the curr_pos always has to get incremented, perhaps make a func that both adds to tree and increments curr_pos
+            local ihl_val = get_back_four(buffer(PKT_START, 1):uint())
             agent_header_subtree:add(ihl, ihl_val)
-            agent_header_subtree:add(dscp, buffer(11, 1))
-            agent_header_subtree:add(frag_id, buffer(12, 2))
-            agent_header_subtree:add(frag_offset, buffer(14, 2))
-            agent_header_subtree:add(ttl, buffer(16, 1))
-            if ihl_val > 5 then
-                local options_len = ihl_val - ((ihl_val - 5) * 4)
-                agent_header_subtree:add(ip_options, buffer(17, options_len))
-                -- pass ip options to an options dissector here (I could not find an existing IP options dissector)
-            else
-                -- Should really be passed to a custom compressed TCP packet dissector
-                -- Perhaps forwarding to the TCP dissector should be commented out for the demo, as it will
-                -- not show accurate information about the packets. 
-                Dissector.get("tcp"):call(buffer(17, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
-            end
+            curr_pos = curr_pos + 1
+            agent_header_subtree:add(dscp, buffer(curr_pos, DSCP))
+            curr_pos = curr_pos + DSCP
+            agent_header_subtree:add(frag_id, buffer(curr_pos, FRAG_ID))
+            curr_pos = curr_pos + FRAG_ID
+            agent_header_subtree:add(frag_offset, buffer(curr_pos, FRAG_OFFSET))
+            curr_pos = curr_pos + FRAG_OFFSET
+            agent_header_subtree:add(ttl, buffer(curr_pos, TTL))
+            curr_pos = curr_pos + TTL
+
+            -- Commented this out due to comment below - TCP packet not actually necessarily well formatted
+            -- according to TCP standards because of compression
+            -- if ihl_val > 5 then
+            --     local options_len = ihl_val - ((ihl_val - 5) * 4)
+            --     agent_header_subtree:add(ip_options, buffer(17, options_len))
+            --     -- pass ip options to an options dissector here (I could not find an existing IP options dissector)
+            -- else
+            --     -- Should really be passed to a custom compressed TCP packet dissector
+            --     -- Perhaps forwarding to the TCP dissector should be commented out for the demo, as it will
+            --     -- not show accurate information about the packets. 
+            --     Dissector.get("tcp"):call(buffer(17, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
+            -- end
 
         elseif v4_v6 == 6 then
-            local tc_value = get_middle_eight(buffer(10, 2):uint())
+            -- still use hardcoded values here because since the values are bitpacked, if something was changed 
+            -- within this section, these lines would need to be changed anyway
+            local tc_value = get_middle_eight(buffer(curr_pos, 2):uint())
             agent_header_subtree:add(tc, tc_value)
-            local fl_value = get_back_twelve(buffer(11, 3):uint())
+            curr_pos = curr_pos + 1
+            local fl_value = get_back_twelve(buffer(curr_pos, 3):uint())
             agent_header_subtree:add(fl, fl_value)
-            agent_header_subtree:add(hop_limit, buffer(14, 1))
-            Dissector.get("tcp"):call(buffer(15, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
+            curr_pos = curr_pos + 2
+            agent_header_subtree:add(hop_limit, buffer(curr_pos, HOP_LIMIT))
+            -- Dissector.get("tcp"):call(buffer(15, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
         end
     elseif type <= 127 then 
-        -- Stream-oriented Management Message
-        zdp_header_subtree:add(stream_id, buffer(5, 4))
-        if real_len > STREAM_MGMT_NON_AGENT_DATA then
-            zdp_header_subtree:add(management_packet, buffer(9, real_len - STREAM_MGMT_NON_AGENT_DATA))
-            decode_management(type, buffer(9, real_len - STREAM_MGMT_NON_AGENT_DATA), tree)
+        -- Per-Flow Management Message
+        zdp_header_subtree:add(stream_id, buffer(curr_pos, STREAM_ID))
+        curr_pos = curr_pos + STREAM_ID
+        if real_len > PER_FLOW_NON_AGENT_DATA then
+            zdp_header_subtree:add(management_packet, buffer(curr_pos, real_len - PER_FLOW_NON_AGENT_DATA))
+            decode_management(type, buffer(curr_pos, real_len - PER_FLOW_NON_AGENT_DATA), tree)
         end
+        -- I believe that both the Pad and the MAC are removed before the packets are captured
         -- zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
-        zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
+        -- zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
     else 
         -- Other Management Message
-        if real_len > MGMT_NON_AGENT_DATA then
-            zdp_header_subtree:add(management_packet, buffer(5, real_len - MGMT_NON_AGENT_DATA))
-            decode_management(type, buffer(5, real_len - MGMT_NON_AGENT_DATA), tree)
+        if real_len > NON_FLOW_NON_AGENT_DATA then
+            zdp_header_subtree:add(management_packet, buffer(curr_pos, real_len - NON_FLOW_NON_AGENT_DATA))
+            decode_management(type, buffer(curr_pos, real_len - NON_FLOW_NON_AGENT_DATA), tree)
         end
         -- zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
-        zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
+        -- zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
 
     end
 end
+
 -- Idiomatic way of doing this may be to actually create a whole new dissector, although that might be challenging
 -- becuase we couldn't just forward the managament packet, the type would also have to be forwarded, meaning we would either
 -- have to forward basically the whole packet, or create a new tvb with the type and the management packet and forward that
@@ -147,70 +207,123 @@ function decode_management(type, buffer, tree)
 end
 
 -- Function definitions must come before table
-function handle_echo_request(buffer, management_subtree)
-    management_subtree:add(mbz, buffer(0, 2))
-    management_subtree:add(adl, buffer(2, 2))
-    local add_data_len = buffer(2, 2):uint()
-    management_subtree:add(aditional_data, buffer(4, add_data_len))
+function handle_echo(buffer, management_subtree)
+    local curr_pos = 0
+    if TRANS_ID > 0 then
+        management_subtree:add(trans_id, buffer(curr_pos, TRANS_ID))
+        curr_pos = curr_pos + TRANS_ID
+    end
+    management_subtree:add(adl, buffer(curr_pos, ADL))
+    local add_data_len = buffer(curr_pos, ADL):uint()
+    curr_pos = curr_pos + ADL
+    if add_data_len > 0 then 
+        management_subtree:add(aditional_data, buffer(curr_pos, add_data_len))
+    end
 end
 
-function handle_echo_response(buffer, management_subtree)
-    management_subtree:add(req_seq_num, buffer(0, 2))
-    management_subtree:add(adl, buffer(2, 2))
-    local add_data_len = buffer(2, 2):uint()
-    if add_data_len > 0 then
-        management_subtree:add(aditional_data, buffer(4, add_data_len))
-    end                                                           
+function handle_terminate_ind_req(buffer, management_subtree)
+    local curr_pos = 0
+    if TRANS_ID > 0 then
+        management_subtree:add(trans_id, buffer(curr_pos, TRANS_ID))
+        curr_pos = curr_pos + TRANS_ID
+    end
+    local reason_val = buffer(curr_pos, REASON_CODE):uint()
+    management_subtree:add(reason_code, buffer(curr_pos, REASON_CODE)):append_text(" (" .. terminate_reason_table[reason_val] .. ")")
+    curr_pos = curr_pos + REASON_CODE
+    management_subtree:add(data_length, buffer(curr_pos, DL))
+    local data_len = buffer(curr_pos, DL):uint()
+    curr_pos = curr_pos + DL
+    if data_len > 0 then 
+        management_subtree:add(aditional_data, buffer(curr_pos, data_len))
+    end
 end
 
-function handle_bind_agent_addr_request(buffer, management_subtree)
-    local version = buffer(0, 1):uint()
-    management_subtree:add(ip_version, buffer(0, 1))
-    local ip_proto_present = get_first_bit(buffer(1, 1):uint())
-    management_subtree:add(ip_protocol_present, ip_proto_present):append_text(" (" .. presence_value[ip_proto_present] .. ")")
-    local source_present = get_second_bit(buffer(1, 1):uint())
-    management_subtree:add(source_port_present, source_present):append_text(" (" .. presence_value[source_present] .. ")")
-    local dest_present = get_third_bit(buffer(1, 1):uint())
-    management_subtree:add(destination_port_present, dest_present):append_text(" (" .. presence_value[dest_present] .. ")")
+function handle_terminate_res(buffer, management_subtree)
+    local curr_pos = 0
+    if TRANS_ID > 0 then
+        management_subtree:add(trans_id, buffer(curr_pos, TRANS_ID))
+        curr_pos = curr_pos + TRANS_ID
+    end
+    local response_val = buffer(curr_pos, RESPONSE_CODE):uint()
+    management_subtree:add(response_code, buffer(curr_pos, RESPONSE_CODE)):append_text(" (" .. response_code_table[response_val] .. ")")
+    curr_pos = curr_pos + RESPONSE_CODE
+    management_subtree:add(data_length, buffer(curr_pos, DL))
+    local data_len = buffer(curr_pos, DL):uint()
+    curr_pos = curr_pos + DL
+    if data_len > 0 then 
+        management_subtree:add(aditional_data, buffer(curr_pos, data_len))
+    end
+end
+
+function handle_hello_req(buffer, management_subtree)
+end
+
+function handle_hello_res(buffer, management_subtree)
+    local response_val = buffer(curr_pos, RESPONSE_CODE):uint()
+    management_subtree:add(reason_code, buffer(0, RESPONSE_CODE)):append_text(" (" .. response_code_table[response_val] .. ")")
+    -- TODO handle TLVs
+end
+
+-- function handle_bind_agent_addr_request(buffer, management_subtree)
+--     local version = buffer(0, 1):uint()
+--     management_subtree:add(ip_version, buffer(0, 1))
+--     local ip_proto_present = get_first_bit(buffer(1, 1):uint())
+--     management_subtree:add(ip_protocol_present, ip_proto_present):append_text(" (" .. presence_value[ip_proto_present] .. ")")
+--     local source_present = get_second_bit(buffer(1, 1):uint())
+--     management_subtree:add(source_port_present, source_present):append_text(" (" .. presence_value[source_present] .. ")")
+--     local dest_present = get_third_bit(buffer(1, 1):uint())
+--     management_subtree:add(destination_port_present, dest_present):append_text(" (" .. presence_value[dest_present] .. ")")
     
-    local addr_len = 4
-    if version == 6 then addr_len = 16 end
+--     local addr_len = 4
+--     if version == 6 then addr_len = 16 end
 
-    management_subtree:add(source_addr, buffer(2, addr_len))
-    management_subtree:add(dest_addr, buffer(2 + addr_len, addr_len))
+--     management_subtree:add(source_addr, buffer(2, addr_len))
+--     management_subtree:add(dest_addr, buffer(2 + addr_len, addr_len))
 
-    local bytes_used = 2 + (2 * addr_len)
-    if ip_proto_present == 1 then 
-        management_subtree:add(ip_protocol, buffer(bytes_used, 1))
-        bytes_used = bytes_used + 1
-    end
+--     local bytes_used = 2 + (2 * addr_len)
+--     if ip_proto_present == 1 then 
+--         management_subtree:add(ip_protocol, buffer(bytes_used, 1))
+--         bytes_used = bytes_used + 1
+--     end
      
-    if source_present == 1 then 
-        management_subtree:add(source_info, buffer(bytes_used, 2))
-        bytes_used = bytes_used + 2
-    end
+--     if source_present == 1 then 
+--         management_subtree:add(source_info, buffer(bytes_used, 2))
+--         bytes_used = bytes_used + 2
+--     end
 
-    if dest_present == 1 then 
-        management_subtree:add(dest_info, buffer(bytes_used, 2))
-    end
-end
+--     if dest_present == 1 then 
+--         management_subtree:add(dest_info, buffer(bytes_used, 2))
+--     end
+-- end
 
-function handle_bind_agent_addr_response(buffer, management_subtree)
-    management_subtree:add(req_seq_num, buffer(0, 2))
-    management_subtree:add(status_code, buffer(2, 1))
-    management_subtree:add(info_len, buffer(3, 1))
-    local add_info_len = buffer(3, 1):uint()
-    if add_info_len > 1 then
-        management_subtree:add(status_info, buffer(4, add_info_len)) 
-    end                                                          
-end
+-- function handle_bind_agent_addr_response(buffer, management_subtree)
+--     management_subtree:add(req_seq_num, buffer(0, 2))
+--     management_subtree:add(status_code, buffer(2, 1))
+--     management_subtree:add(info_len, buffer(3, 1))
+--     local add_info_len = buffer(3, 1):uint()
+--     if add_info_len > 1 then
+--         management_subtree:add(status_info, buffer(4, add_info_len)) 
+--     end                                                          
+-- end
+
+-- TODO
+-- more management handler functions
+-- cleanup existing code
+-- functions for commonly dont actions (ie adding to tree and incrementing value)
+
+
 
 management_table = 
 {
     [11] = handle_bind_agent_addr_request,
     [12] = handle_bind_agent_addr_response,
-    [131] = handle_echo_request,
-    [132] = handle_echo_response,
+    [131] = handle_echo,
+    [132] = handle_echo,
+    [133] = handle_terminate_ind_req,
+    [134] = handle_terminate_res,
+    [135] = handle_terminate_ind_req,
+    [136] = handle_hello_req,
+    [137] = handle_hello_res,
 }
 
 presence_value = 
@@ -240,19 +353,20 @@ type_name_table =
     [2] = "Destination Unreachable",
     [3] = "Visa Herald Request",
     [4] = "Visa Herald Response",
-    [5] = "Visa Update Request",
-    [6] = "Visa Update Response",
+    [5] = "Unused",
+    [6] = "Unused",
     [7] = "Visa Retract Request",
     [8] = "Visa Retract Response",
-    [9] = "Visa Deaccept Indication",
-    [10] = "Visa Deaccept ACK",
-    [11] = "Bind Agent Address Request",
-    [12] = "Bind Agent Address Response",
-    [13] = "Unbind Agent Address Request",
-    [14] = "Unbind Agent Address Response",
+    [9] = "Stream ID Withdrawl Request",
+    [10] = "Stream ID Withdrawl Response",
+    [11] = "Bind Endpoint Address Request",
+    [12] = "Bind Endpoint Address Response",
+    [13] = "Unbind Endpoint Address Request",
+    [14] = "Unbind Endpoint Address Response",
     [15] = "Authentication Request",
-    [16] = "Set Path MTU",
-    [17] = "Authentication Response",
+    [16] = "Authentication Response",
+    [17] = "Set Path MTU Request",
+    [18] = "Set Path MTU Response",
     [127] = "Reserved, Discard",
     [128] = "ZPR ARP",
     [129] = "Key Management",
@@ -266,13 +380,32 @@ type_name_table =
     [137] = "Hello Response",
     [138] = "Configuration Request",
     [139] = "Configuration Response",
-    [140] = "Register Agent Address Request",
-    [141] = "Not Specified", -- Not specified in RFC
-    [142] = "Register Agent Address Response",
-    [143] = "Unregister Agent Address Request",
-    [144] = "Unregister Agent Address Response",
+    [140] = "Acquire ZPR Address Request",
+    [141] = "Unused",
+    [142] = "Acquire ZPR Address Response",
+    [143] = "Unused",
+    [144] = "Unused",
     [145] = "Report",
+    [146] = "Init Authentication Request",
+    [147] = "Init Authentication Response",
+    [148] = "Grant ZPR Address Request",
+    [149] = "Grant ZPR Address Response",
     [255] = "Reserved, must not be used",
+}
+
+terminate_reason_table =
+{
+    [0] = "Other",
+    [1] = "Unused1",
+    [2] = "Request Timed Out",
+    [3] = "Reset",
+    [4] = "Shutdown",
+}
+
+response_code_table = 
+{
+    [0] = "Success",
+    [1] = "Other",
 }
 
 -- Bit un-packing funcs
