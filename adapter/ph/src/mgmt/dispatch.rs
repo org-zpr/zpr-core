@@ -94,7 +94,7 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
 
             // expand sequence number and store in packet metadata
             let mut receiver = peer_state.zdpr_recv.lock().unwrap();
-            let seq_num = receiver.reify_seq_num(mgmt_hdr.sequence_number.get());
+            let seq_num = mgmt_hdr.sequence_number.get();
             pkt.metadata_mut().seq_num = seq_num;
 
             // determine packet disposition per ZDPR mechanism
@@ -132,7 +132,7 @@ fn handle_acknowledgement(asm: &Assembly, pkt: &mut Packet) {
         return;
     };
 
-    let sn = mgmt_hdr.sequence_number.get();
+    let seq_num = mgmt_hdr.sequence_number.get();
     let ingress_link_id = pkt.metadata().ingress_link_id;
 
     let Some(peer_state) = asm.peer_table.get(ingress_link_id) else {
@@ -141,7 +141,6 @@ fn handle_acknowledgement(asm: &Assembly, pkt: &mut Packet) {
     };
     let mut sender = peer_state.zdpr_send.lock().unwrap();
 
-    let seq_num = sender.reify_seq_num(sn);
     sender.process_ack(seq_num);
 
     // If at this point (after processing the ACK) we should not have our

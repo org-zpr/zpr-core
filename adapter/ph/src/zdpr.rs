@@ -16,28 +16,6 @@ use std::collections::VecDeque;
 use std::task::{ready, Context, Poll, Waker};
 use zpr::SeqNum;
 
-/// Reify the truncated sequence number relative to the reference sequence
-/// number, under the assumption that it is within a window centered on the
-/// highest seen value thus far.
-fn reify_seq_num(reference: SeqNum, sn: u16) -> SeqNum {
-    // We operate under the assumption that the difference between the
-    // true sequence number and `reference` is in the range [-2^15, 2^15).
-
-    // Under that assumption, we can subtract the truncated versions
-    // of both to produce a 16-bit 2s-complement value representing
-    // this difference.
-    let diff = sn.wrapping_sub(reference as u16);
-
-    // Convert the 16-bit 2s-complement value into a 64-bit signed value
-    // and add back to the reference.
-    reference.wrapping_add_signed((diff as i16) as i64)
-}
-
-/// Truncate a sequence number to 16 bits for sending over the ether.
-pub fn truncate_seq_num(sn: SeqNum) -> u16 {
-    (sn & 0xFFFF) as u16
-}
-
 /// ID of a packet which was queued for sending (but maybe not yet sent).
 pub type QueuedPacketId = u64;
 
@@ -345,12 +323,6 @@ impl<Pkt> Sender<Pkt> {
         Some(pkt)
     }
 
-    /// Expand a truncated sequence number to a full sequence number,
-    /// with reference to the most recently sent packet.
-    pub fn reify_seq_num(&self, sn: u16) -> SeqNum {
-        reify_seq_num(self.last_sent, sn)
-    }
-
     /// Lookup the sequence number of a packet which had been queued
     /// and has now been sent.
     ///
@@ -632,11 +604,6 @@ impl Receiver {
         }
     }
 
-    /// Reify the truncated sequence number into a full sequence number.
-    pub fn reify_seq_num(&self, sn: u16) -> SeqNum {
-        reify_seq_num(self.highest_seen, sn)
-    }
-
     fn oldest_unrecvd_offset(&self) -> i64 {
         -(WindowBitset::BITS as i64) + (self.recvd.leading_ones() as i64) + 1
     }
@@ -687,34 +654,6 @@ impl Receiver {
 
     pub fn window_size(&self) -> usize {
         self.window_size
-    }
-}
-
-#[cfg(test)]
-mod global_tests {
-    use super::reify_seq_num;
-
-    #[test]
-    fn test_reify() {
-        assert_eq!(reify_seq_num(0x12342000, 0x2000), 0x12342000);
-        assert_eq!(reify_seq_num(0x12342000, 0x2001), 0x12342001);
-        assert_eq!(reify_seq_num(0x12342000, 0x1FFF), 0x12341FFF);
-        assert_eq!(reify_seq_num(0x12342000, 0x3000), 0x12343000);
-        assert_eq!(reify_seq_num(0x12342000, 0x1000), 0x12341000);
-        assert_eq!(reify_seq_num(0x12342000, 0x9000), 0x12349000);
-        assert_eq!(reify_seq_num(0x12342000, 0xF000), 0x1233F000);
-        assert_eq!(reify_seq_num(0x12342000, 0xB000), 0x1233B000);
-        assert_eq!(reify_seq_num(0x12342000, 0xA000), 0x1233A000);
-
-        assert_eq!(reify_seq_num(0x1234E000, 0xE000), 0x1234E000);
-        assert_eq!(reify_seq_num(0x1234E000, 0xDFFF), 0x1234DFFF);
-        assert_eq!(reify_seq_num(0x1234E000, 0xE001), 0x1234E001);
-        assert_eq!(reify_seq_num(0x1234E000, 0xD000), 0x1234D000);
-        assert_eq!(reify_seq_num(0x1234E000, 0xF000), 0x1234F000);
-        assert_eq!(reify_seq_num(0x1234E000, 0x7000), 0x12347000);
-        assert_eq!(reify_seq_num(0x1234E000, 0x1000), 0x12351000);
-        assert_eq!(reify_seq_num(0x1234E000, 0x5000), 0x12355000);
-        assert_eq!(reify_seq_num(0x1234E000, 0x6000), 0x12346000);
     }
 }
 

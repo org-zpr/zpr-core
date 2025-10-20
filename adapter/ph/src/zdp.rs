@@ -107,7 +107,7 @@ pub struct ZdpBaseHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpMgmtHeader {
-    pub sequence_number: U16,
+    pub sequence_number: U64,
 }
 
 /// Offset into ZDP packet where [ZdpBaseHeader] starts.
@@ -291,5 +291,5 @@ pub const ZDP_A2A_MAC_SIZE: usize = 8;
 pub const ZDP_PACKET_MAC_SIZE: usize = 8;
 
 const _: () = assert!(core::mem::size_of::<ZdpBaseHeader>() == 2);
-const _: () = assert!(core::mem::size_of::<ZdpMgmtHeader>() == 2);
+const _: () = assert!(core::mem::size_of::<ZdpMgmtHeader>() == 8);
 const _: () = assert!(core::mem::size_of::<ZdpPerFlowHeader>() == 4);

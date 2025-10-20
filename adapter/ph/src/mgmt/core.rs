@@ -99,7 +99,7 @@ pub fn send_acknowledgement(asm: &Assembly, link_id: zpr::LinkId, sequence_numbe
     packet.metadata_mut().flags |= packet::flags::CONFIRM;
 
     let mgmt_hdr = packet.alloc_zeroed_header::<zdp::ZdpMgmtHeader>();
-    mgmt_hdr.sequence_number = zdpr::truncate_seq_num(sequence_number).into();
+    mgmt_hdr.sequence_number = sequence_number.into();
 
     let base_hdr = packet.alloc_zeroed_header::<zdp::ZdpBaseHeader>();
     base_hdr.packet_type = zdp::ZdpPacketType::Acknowledgement;
@@ -389,7 +389,7 @@ pub fn build_and_egress_packets<'a>(
             &mut packet.body_mut()[std::mem::size_of::<zdp::ZdpBaseHeader>()..],
         )
         .unwrap();
-        mgmt_hdr.sequence_number = zdpr::truncate_seq_num(seq_num).into();
+        mgmt_hdr.sequence_number = seq_num.into();
 
         // It's possible (but unlikely) the MgmtSubstrateEgress queue fills up.
         // In that case, just ignore the error; act as if the packet was dropped
