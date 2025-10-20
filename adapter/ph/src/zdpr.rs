@@ -221,7 +221,7 @@ impl<Pkt> Sender<Pkt> {
             None => panic!("poll of cancelled packet"),
 
             Some((_, ref mut waker)) => {
-                *waker = cx.waker().clone();
+                waker.clone_from(cx.waker());
                 Poll::Pending
             }
         }
@@ -242,7 +242,7 @@ impl<Pkt> Sender<Pkt> {
             None => Poll::Ready(()),
 
             Some((_, ref mut waker)) => {
-                *waker = cx.waker().clone();
+                waker.clone_from(cx.waker());
                 Poll::Pending
             }
         }
