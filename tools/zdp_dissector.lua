@@ -6,7 +6,7 @@ zdp_proto = Proto("zdp", "ZDP Header Dissector")
 zpi_val = ProtoField.uint8("zdp.zpi", "ZPI", base.DEC)
 zdp_type = ProtoField.uint8("zdp.type", "Type", base.DEC)
 excess_len = ProtoField.uint8("zdp.excess_len", "Excess Length", base.DEC)
-seq_num = ProtoField.uint16("zdp.seq_num", "Sequence Number", base.DEC)
+seq_num = ProtoField.uint64("zdp.seq_num", "Sequence Number", base.DEC)
 stream_id = ProtoField.uint32("zdp.streamid", "Stream ID", base.DEC)
 pad = ProtoField.bytes("zdp.pad", "Pad")
 hmac = ProtoField.bytes("zdp.mac", "MAC")
@@ -59,7 +59,7 @@ ZPI = 1
 TYPE = 1
 EXCESS_LEN = 1
 EXCESS_LEN_START = ZPI + TYPE
-SEQ_NUM = 2
+SEQ_NUM = 8
 STREAM_ID = 4
 KEY_NOISE_PAD = 0
 HMAC = 0
@@ -98,7 +98,6 @@ function zdp_proto.dissector(buffer, pinfo, tree)
     pinfo.cols.info = type_name
 
     zdp_header:add_field(excess_len, EXCESS_LEN)
-    zdp_header:add_field(seq_num, SEQ_NUM)
 
     local real_len = length - buffer(EXCESS_LEN_START, EXCESS_LEN):uint() 
     -- Perform different dissections depending on type of packet
@@ -160,8 +159,9 @@ function zdp_proto.dissector(buffer, pinfo, tree)
             agent_header_subtree:add(hop_limit, buffer(curr_pos, HOP_LIMIT))
             -- Dissector.get("tcp"):call(buffer(15, real_len - IP_NON_AGENT_DATA):tvb(), pinfo, tree)
         end
-    elseif type <= 127 then 
-        -- Per-Flow Management Message
+    elseif type <= 127 then -- Per-Flow Management Message
+        zdp_header:add_field(seq_num, SEQ_NUM)
+
         zdp_header:add_field(stream_id, STREAM_ID)
         if real_len > PER_FLOW_NON_AGENT_DATA then
             local mgmt_start = zdp_header:get_pos()
@@ -169,8 +169,12 @@ function zdp_proto.dissector(buffer, pinfo, tree)
             decode_management(type, buffer(mgmt_start, real_len - PER_FLOW_NON_AGENT_DATA), tree)
         end
         -- NOTE I believe that both the Pad and the MAC are removed before the packets are captured
-    else 
-        -- Other Management Message
+    else -- Non-per-flow management message
+        -- ARP and Key Mgmt messages do not have a Sequence number
+        if type ~= 128 and type ~= 129 then
+            zdp_header:add_field(seq_num, SEQ_NUM)
+        end
+
         if real_len > NON_FLOW_NON_AGENT_DATA then
             local mgmt_start = zdp_header:get_pos()
             zdp_header:add_field(management_packet, real_len - NON_FLOW_NON_AGENT_DATA)
@@ -350,9 +354,9 @@ function get_type_name(type)
     local type_name = type_name_table[type]
 
     if type_name ~= nil then return type_name
-    elseif type >= 18 and type <= 95 then type_name = "Reserved/Unknown" -- This range is not specified in the RFC
-    elseif type >= 95 and type <= 126 then type_name = "Reserved for private use and experimentation"
-    elseif type >= 146 and type <= 223 then type_name = "Reserved/Unknown" -- Not specified in RFC
+    elseif type >= 19 and type <= 95 then type_name = "Unallocated"
+    elseif type >= 96 and type <= 126 then type_name = "Reserved for private use and experimentation"
+    elseif type >= 150 and type <= 223 then type_name = "Unallocated"
     elseif type >= 224 and type <= 254 then type_name = "Experimental and Private Use" end
 
     return type_name
