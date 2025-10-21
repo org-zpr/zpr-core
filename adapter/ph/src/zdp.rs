@@ -76,7 +76,7 @@ impl ZdpPacketType {
     ///
     /// "Management" packets are everything except transit, ARP, and KM packets.
     pub fn is_mgmt(self) -> bool {
-        matches!(
+        !matches!(
             self,
             Self::TransitPacket | Self::ZprArp | Self::KeyManagement
         )
