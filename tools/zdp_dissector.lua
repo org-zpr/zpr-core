@@ -10,9 +10,9 @@ seq_num = ProtoField.uint16("zdp.seq_num", "Sequence Number", base.DEC)
 stream_id = ProtoField.uint32("zdp.streamid", "Stream ID", base.DEC)
 pad = ProtoField.bytes("zdp.pad", "Pad")
 hmac = ProtoField.bytes("zdp.mac", "MAC")
-a2a_said = ProtoField.uint8("zdp.a2a_said", "A2A SAID", base.DEC)
+a2a_said = ProtoField.uint8("zdp.a2a_said", "A2A SAID", base.HEX)
 agent_packet = ProtoField.bytes("zdp.agent_packet", "Agent Packet")
-a2a_mac = ProtoField.uint64("zdp.a2a_mac", "A2A MAC", base.DEC)
+a2a_mac = ProtoField.uint64("zdp.a2a_mac", "A2A MAC", base.HEX)
 management_packet = ProtoField.bytes("zdp.management", "Management Packet")
 
 -- Agent Packet Headers
@@ -33,7 +33,7 @@ adl = ProtoField.uint16("zdp.adl", "Additional Data Length", base.DEC)
 reason_code = ProtoField.uint8("zdp.reason_code", "Reason Code", base.DEC)
 response_code = ProtoField.uint8("zdp.response_code", "Response Code", base.DEC)
 data_length = ProtoField.uint8("zdp.data_length", "Data Length", base.DEC)
-aditional_data = ProtoField.bytes("zdp.additional", "Optional Additional Data")
+additional_data = ProtoField.bytes("zdp.additional", "Optional Additional Data")
 req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
 ip_protocol_present = ProtoField.uint8("zdp.protocol_present", "IP Protocol Present", base.DEC)
 source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
@@ -50,7 +50,7 @@ status_info = ProtoField.bytes("zdp.status_info", "Optional Additional Status In
 zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
                      hmac, a2a_said, agent_packet, a2a_mac, management_packet, ip_version,
                      ihl, dscp, frag_id, frag_offset, ttl, tc, fl, hop_limit, ip_options, trans_id,
-                     adl, aditional_data, req_seq_num, ip_protocol_present, source_port_present, 
+                     adl, additional_data, req_seq_num, ip_protocol_present, source_port_present, 
                      destination_port_present, source_addr, dest_addr, ip_protocol, source_info, 
                      dest_info, status_code, info_len, status_info, reason_code, response_code, data_length }
 
@@ -83,69 +83,58 @@ DL = 1
 function zdp_proto.dissector(buffer, pinfo, tree)
     length = buffer:len()
     if length == 0 then return end
-    
-    local curr_pos = 0
 
     pinfo.cols.protocol = zdp_proto.name
-    -- TODO look into adding to a subtree from a function, this "main" function 
-    -- is rather long, and is doing many things    
+
+    -- TODO shorten main    
     local zdp_header_subtree = tree:add(zdp_proto, buffer(), "ZDP Header Data")
-    zdp_header_subtree:add(zpi_val, buffer(curr_pos, ZPI))
-    curr_pos = curr_pos + ZPI
 
-    local type = buffer(curr_pos, TYPE):uint()
+    local zdp_header = Dissector(zdp_header_subtree, buffer)
+    zdp_header:add_field(zpi_val, ZPI)
+
+    local type = zdp_header:get_curr_buffer_section(TYPE):uint()
     local type_name = get_type_name(type)
-    zdp_header_subtree:add(zdp_type, buffer(curr_pos, TYPE)):append_text(" (" .. type_name .. ")")
+    zdp_header:add_field(zdp_type, TYPE, type_name)
     pinfo.cols.info = type_name
-    curr_pos = curr_pos + TYPE
 
-    zdp_header_subtree:add(excess_len, buffer(curr_pos, EXCESS_LEN))
-    curr_pos = curr_pos + EXCESS_LEN
-    zdp_header_subtree:add(seq_num, buffer(curr_pos, SEQ_NUM))
-    curr_pos = curr_pos + SEQ_NUM
+    zdp_header:add_field(excess_len, EXCESS_LEN)
+    zdp_header:add_field(seq_num, SEQ_NUM)
 
     local real_len = length - buffer(EXCESS_LEN_START, EXCESS_LEN):uint() 
     -- Perform different dissections depending on type of packet
     if type == 0 then 
         -- Transit Packet
-        zdp_header_subtree:add(stream_id, buffer(curr_pos, STREAM_ID))
-        curr_pos = curr_pos + STREAM_ID
-        if KEY_NOISE_PAD ~= 0 then     
-            zdp_header_subtree:add(pad, buffer(curr_pos, KEY_NOISE_PAD))
-            curr_pos = curr_pos + KEY_NOISE_PAD
+        zdp_header:add_field(stream_id, STREAM_ID)
+        if KEY_NOISE_PAD ~= 0 then  
+            zdp_header:add_field(pad, KEY_NOISE_PAD)   
         end
         if HMAC ~= 0 then 
-            zdp_header_subtree:add(hmac, buffer(curr_pos, HMAC))
-            curr_pos = curr_pos + HMAC
+            zdp_header:add_field(hmac, HMAC)
         end
-        zdp_header_subtree:add(a2a_said, buffer(curr_pos, A2A_SAID))
-        curr_pos = curr_pos + A2A_SAID
-        zdp_header_subtree:add(agent_packet, buffer(curr_pos, real_len - TRANSIT_NON_AGENT_DATA))
+        zdp_header:add_field(a2a_said, A2A_SAID)
+        zdp_header:add_field(agent_packet, real_len - TRANSIT_NON_AGENT_DATA)
+        zdp_header:set_pos(real_len - A2A_MAC)
+        zdp_header:add_field(a2a_mac, A2A_MAC)
         -- zdp_header_subtree:add(compressed_pkt, buffer(curr_pos, 5))
-        zdp_header_subtree:add(a2a_mac, buffer(real_len - A2A_MAC, A2A_MAC))
 
         local agent_header_subtree = tree:add(zdp_proto, buffer(), "Compressed Agent Packet Header Data")
+        
         local v4_v6 = get_first_four(buffer(PKT_START, 1):uint())
         agent_header_subtree:add(ip_version, v4_v6)
-        
-        curr_pos = PKT_START
-        -- No updates to this section RE size/position of values, assuming they stayed the same for now
+        local agent_header = Dissector(agent_header_subtree, buffer)
+        agent_header:set_pos(PKT_START)
+
+        -- NOTE No updates to this section RE size/position of values, assuming they stayed the same for now
         -- Just want to get this somewhat working first
         if v4_v6 == 4 then
             -- TODO since the curr_pos always has to get incremented, perhaps make a func that both adds to tree and increments curr_pos
             local ihl_val = get_back_four(buffer(PKT_START, 1):uint())
             agent_header_subtree:add(ihl, ihl_val)
-            curr_pos = curr_pos + 1
-            agent_header_subtree:add(dscp, buffer(curr_pos, DSCP))
-            curr_pos = curr_pos + DSCP
-            agent_header_subtree:add(frag_id, buffer(curr_pos, FRAG_ID))
-            curr_pos = curr_pos + FRAG_ID
-            agent_header_subtree:add(frag_offset, buffer(curr_pos, FRAG_OFFSET))
-            curr_pos = curr_pos + FRAG_OFFSET
-            agent_header_subtree:add(ttl, buffer(curr_pos, TTL))
-            curr_pos = curr_pos + TTL
-
-            -- Commented this out due to comment below - TCP packet not actually necessarily well formatted
+            agent_header:increase_pos(1)
+            agent_header:add_field(frag_id, FRAG_ID)
+            agent_header:add_field(frag_offset, FRAG_OFFSET)
+            agent_header:add_field(ttl, TTL)
+            -- NOTE Commented this out due to comment below - TCP packet not actually necessarily well formatted
             -- according to TCP standards because of compression
             -- if ihl_val > 5 then
             --     local options_len = ihl_val - ((ihl_val - 5) * 4)
@@ -159,6 +148,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
             -- end
 
         elseif v4_v6 == 6 then
+            local curr_pos = PKT_START
             -- still use hardcoded values here because since the values are bitpacked, if something was changed 
             -- within this section, these lines would need to be changed anyway
             local tc_value = get_middle_eight(buffer(curr_pos, 2):uint())
@@ -172,24 +162,20 @@ function zdp_proto.dissector(buffer, pinfo, tree)
         end
     elseif type <= 127 then 
         -- Per-Flow Management Message
-        zdp_header_subtree:add(stream_id, buffer(curr_pos, STREAM_ID))
-        curr_pos = curr_pos + STREAM_ID
+        zdp_header:add_field(stream_id, STREAM_ID)
         if real_len > PER_FLOW_NON_AGENT_DATA then
-            zdp_header_subtree:add(management_packet, buffer(curr_pos, real_len - PER_FLOW_NON_AGENT_DATA))
-            decode_management(type, buffer(curr_pos, real_len - PER_FLOW_NON_AGENT_DATA), tree)
+            local mgmt_start = zdp_header:get_pos()
+            zdp_header:add_field(management_packet, real_len - PER_FLOW_NON_AGENT_DATA)
+            decode_management(type, buffer(mgmt_start, real_len - PER_FLOW_NON_AGENT_DATA), tree)
         end
-        -- I believe that both the Pad and the MAC are removed before the packets are captured
-        -- zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
-        -- zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
+        -- NOTE I believe that both the Pad and the MAC are removed before the packets are captured
     else 
         -- Other Management Message
         if real_len > NON_FLOW_NON_AGENT_DATA then
-            zdp_header_subtree:add(management_packet, buffer(curr_pos, real_len - NON_FLOW_NON_AGENT_DATA))
-            decode_management(type, buffer(curr_pos, real_len - NON_FLOW_NON_AGENT_DATA), tree)
+            local mgmt_start = zdp_header:get_pos()
+            zdp_header:add_field(management_packet, real_len - NON_FLOW_NON_AGENT_DATA)
+            decode_management(type, buffer(mgmt_start, real_len - NON_FLOW_NON_AGENT_DATA), tree)
         end
-        -- zdp_header_subtree:add(pad, buffer(real_len - 12, 8))
-        -- zdp_header_subtree:add(mac_addr, buffer(real_len - 2, 2))
-
     end
 end
 
@@ -198,70 +184,96 @@ end
 -- have to forward basically the whole packet, or create a new tvb with the type and the management packet and forward that
 function decode_management(type, buffer, tree)
     local management_subtree = tree:add(zdp_proto, buffer(), "Management Packet Data")
+    local management = Dissector(management_subtree, buffer)
     local func = management_table[type]
     if(func) then
-        func(buffer, management_subtree)
+        func(management)
     else
         management_subtree:add(management_packet, buffer(0))
     end
 end
 
 -- Function definitions must come before table
-function handle_echo(buffer, management_subtree)
-    local curr_pos = 0
+function handle_echo(management)
     if TRANS_ID > 0 then
-        management_subtree:add(trans_id, buffer(curr_pos, TRANS_ID))
-        curr_pos = curr_pos + TRANS_ID
+        management:add_field(trans_id, TRANS_ID)
     end
-    management_subtree:add(adl, buffer(curr_pos, ADL))
-    local add_data_len = buffer(curr_pos, ADL):uint()
-    curr_pos = curr_pos + ADL
+    local add_data_len = management:get_curr_buffer_section(ADL):uint()
+    management:add_field(adl, ADL)
     if add_data_len > 0 then 
-        management_subtree:add(aditional_data, buffer(curr_pos, add_data_len))
+        management:add_field(additional_data, add_data_len)
     end
 end
 
-function handle_terminate_ind_req(buffer, management_subtree)
-    local curr_pos = 0
+function handle_terminate_ind_req(management)
     if TRANS_ID > 0 then
-        management_subtree:add(trans_id, buffer(curr_pos, TRANS_ID))
-        curr_pos = curr_pos + TRANS_ID
+        management:add_field(trans_id, TRANS_ID)
     end
-    local reason_val = buffer(curr_pos, REASON_CODE):uint()
-    management_subtree:add(reason_code, buffer(curr_pos, REASON_CODE)):append_text(" (" .. terminate_reason_table[reason_val] .. ")")
-    curr_pos = curr_pos + REASON_CODE
-    management_subtree:add(data_length, buffer(curr_pos, DL))
-    local data_len = buffer(curr_pos, DL):uint()
-    curr_pos = curr_pos + DL
+    management:add_field_with_text_table(reason_code, REASON_CODE, terminate_reason_table)
+    local data_len = management:get_curr_buffer_section(DL):uint()
+    management:add_field(data_length, DL)
     if data_len > 0 then 
-        management_subtree:add(aditional_data, buffer(curr_pos, data_len))
+        management:add_field(additional_data, data_len)
     end
 end
 
-function handle_terminate_res(buffer, management_subtree)
-    local curr_pos = 0
+function handle_terminate_res(management)
     if TRANS_ID > 0 then
-        management_subtree:add(trans_id, buffer(curr_pos, TRANS_ID))
-        curr_pos = curr_pos + TRANS_ID
+        management:add_field(trans_id, TRANS_ID)
     end
-    local response_val = buffer(curr_pos, RESPONSE_CODE):uint()
-    management_subtree:add(response_code, buffer(curr_pos, RESPONSE_CODE)):append_text(" (" .. response_code_table[response_val] .. ")")
-    curr_pos = curr_pos + RESPONSE_CODE
-    management_subtree:add(data_length, buffer(curr_pos, DL))
-    local data_len = buffer(curr_pos, DL):uint()
-    curr_pos = curr_pos + DL
+    management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
+    local data_len = management:get_curr_buffer_section(DL):uint()
+    management:add_field(data_length, DL)
     if data_len > 0 then 
-        management_subtree:add(aditional_data, buffer(curr_pos, data_len))
+        management:add_field(additional_data, data_len)
     end
 end
 
-function handle_hello_req(buffer, management_subtree)
+function handle_hello_req(management)
 end
 
-function handle_hello_res(buffer, management_subtree)
-    local response_val = buffer(curr_pos, RESPONSE_CODE):uint()
-    management_subtree:add(reason_code, buffer(0, RESPONSE_CODE)):append_text(" (" .. response_code_table[response_val] .. ")")
+function handle_hello_res(management)
+    management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
     -- TODO handle TLVs
+end
+
+-- "Class" that contains the tree, buffer, and current position
+function Dissector(init_tree, init_buffer) 
+    local dissector = { tree = init_tree, buffer = init_buffer, pos = 0 }
+
+    local methods = {
+        add_field = function(self, field, len)
+            self.tree:add(field, self.buffer(self.pos, len))
+            self.pos = self.pos + len
+        end,
+        add_field_with_text_table = function(self, field, len, table)
+            local key = self.buffer(self.pos, len):uint()
+            self.tree:add(field, self.buffer(self.pos, len)):append_text(" (" .. table[key] .. ")")
+            self.pos = self.pos + len
+        end,
+        add_field_with_text = function(self, field, len, text)
+            self.tree:add(field, self.buffer(self.pos, len)):append_text(" (" .. text .. ")")
+            self.pos = self.pos + len
+        end,
+        set_pos = function(self, val)
+            self.pos = val
+        end,
+        increase_pos = function(self, val)
+            self.pos = self.pos + val
+        end,
+        get_pos = function(self)
+            return self.pos
+        end,
+        get_curr_buffer_section = function(self, len)
+            return self.buffer(self.pos, len)
+        end,
+        get_buffer_section = function(self, start, len)
+            return self.buffer(start, len)
+        end
+    }
+
+    setmetatable(dissector, {__index = methods })
+    return dissector
 end
 
 -- function handle_bind_agent_addr_request(buffer, management_subtree)
