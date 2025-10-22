@@ -32,27 +32,47 @@ trans_id = ProtoField.uint16("zdp.trans_id", "Transaction ID", base.DEC)
 adl = ProtoField.uint16("zdp.adl", "Additional Data Length", base.DEC)
 reason_code = ProtoField.uint8("zdp.reason_code", "Reason Code", base.DEC)
 response_code = ProtoField.uint8("zdp.response_code", "Response Code", base.DEC)
-data_length = ProtoField.uint8("zdp.data_length", "Data Length", base.DEC)
+data_length_u8 = ProtoField.uint8("zdp.data_len_t", "Data Length", base.DEC)
+data_length_u16 = ProtoField.uint16("zdp.data_len_i", "Data Length", base.DEC)
 additional_data = ProtoField.bytes("zdp.additional", "Optional Additional Data")
 req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
 ip_protocol_present = ProtoField.uint8("zdp.protocol_present", "IP Protocol Present", base.DEC)
 source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
-destination_port_present = ProtoField.uint8("zdp.destination_port_present", "Destination Port Information Present", base.DEC)
-source_addr = ProtoField.bytes("zdp.source_addr", "Source IP Address") -- TODO change from bytes to two functions one with type ProtoField.ipv4 and one with ipv6
-dest_addr = ProtoField.bytes("zdp.dest_addr", "Destination IP Address")
+dest_port_present = ProtoField.uint8("zdp.dest_port_present", "Destination Port Information Present", base.DEC)
+source_addr_v4 = ProtoField.ipv4("zdp.source_addr_v4", "Source IP Address")
+dest_addr_v4 = ProtoField.ipv4("zdp.dest_addr_v4", "Destination IP Address")
+source_addr_v6 = ProtoField.ipv6("zdp.source_addr_v6", "Source IP Address")
+ipv4_addr = ProtoField.ipv4("zdp.ipv4", "IP Address")
+ipv6_addr = ProtoField.ipv6("zdp.ipv6", "IP Address")
+dest_addr_v6 = ProtoField.ipv6("zdp.dest_addr_v6", "Destination IP Address")
 ip_protocol = ProtoField.uint8("zdp.ip_protocol", "IP Protocol", base.DEC)
 source_info = ProtoField.uint16("zdp.source_info", "Source Port Information", base.DEC)
 dest_info = ProtoField.uint16("zdp.dest_info", "Destination Port Information", base.DEC)
 status_code = ProtoField.uint8("zdp.status_code", "Status Code", base.DEC)
 info_len = ProtoField.uint8("zdp.info_len", "Information Length", base.DEC)
 status_info = ProtoField.bytes("zdp.status_info", "Optional Additional Status Information")
+comp_mode = ProtoField.uint8("zdp.comp_mode", "Compression Mode", base.HEX)
+tlv_type = ProtoField.uint8("zdp.tlv_type", "TLV Type", base.DEC)
+tlv_len = ProtoField.uint8("zdp.tlv_length", "TLV Length", base.DEC)
+tlv_val_u16 = ProtoField.uint16("zdp.tlv_u16", "TLV Value", base.DEC)
+tlv_val_i64 = ProtoField.int64("zdp.tlv_u64", "TLV Value", base.DEC)
+tlv_val_str = ProtoField.string("zdp.tlv_string", "TLV Value", base.ASCII)
+tlv_val_ipv4 = ProtoField.ipv4("zdp.tlv_ipv4", "TLV Value", base.DEC)
+tlv_val_ipv6 = ProtoField.ipv6("zdp.tlv_ipv6", "TLV Value", base.DEC)
+tlv_val_bytes = ProtoField.bytes("zdp.tlv_bytes", "TLV Value")
+bootstrap_support = ProtoField.uint8("zdp.bootstrap", "Bootstrap Support Flag")
+blob_len = ProtoField.uint16("zdp.blob_len", "Blob Length", base.DEC)
+addr_count = ProtoField.uint8("zdp.addr_count", "Address Count", base.DEC)
+blob = ProtoField.bytes("zdp.blob", "Blob")
 
 zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
                      hmac, a2a_said, agent_packet, a2a_mac, management_packet, ip_version,
                      ihl, dscp, frag_id, frag_offset, ttl, tc, fl, hop_limit, ip_options, trans_id,
                      adl, additional_data, req_seq_num, ip_protocol_present, source_port_present, 
-                     destination_port_present, source_addr, dest_addr, ip_protocol, source_info, 
-                     dest_info, status_code, info_len, status_info, reason_code, response_code, data_length }
+                     dest_port_present, source_addr_v4, source_addr_v6, dest_addr_v4, dest_addr_v6, ip_protocol, source_info, 
+                     dest_info, status_code, info_len, status_info, reason_code, response_code, data_length_u8, data_length_u16,
+                     comp_mode, tlv_type, tlv_len, tlv_val_u16, tlv_val_i64, tlv_val_str, tlv_val_ipv4, 
+                     tlv_val_ipv6, tlv_val_bytes, bootstrap_support, blob_len, addr_count, blob, ipv4_addr, ipv6_addr }
 
 -- Lengths of fields when using Noise Encryption
 ZPI = 1
@@ -75,10 +95,24 @@ HOP_LIMIT = 1
 PER_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID
 NON_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM
 TRANS_ID = 0
+BIND_TRANS_ID = 2
 ADL = 2
 RESPONSE_CODE = 1
 REASON_CODE = 1
-DL = 1
+DL_TERMINATE = 1
+DL_INIT = 2
+IP_VERSION = 1
+COMP_MODE = 1
+IPV4_LEN = 4
+IPV6_LEN = 16
+INFO_LEN = 1
+TLV_TYPE = 1
+TLV_LEN = 1
+FLAGS = 1
+BOOTSTRAP = 1
+DL_REPORT = 1
+BLOB_LEN = 2
+ADDR_COUNT = 1
 
 function zdp_proto.dissector(buffer, pinfo, tree)
     length = buffer:len()
@@ -94,7 +128,7 @@ function zdp_proto.dissector(buffer, pinfo, tree)
 
     local type = zdp_header:get_curr_buffer_section(TYPE):uint()
     local type_name = get_type_name(type)
-    zdp_header:add_field(zdp_type, TYPE, type_name)
+    zdp_header:add_field_with_text(zdp_type, TYPE, type_name)
     pinfo.cols.info = type_name
 
     zdp_header:add_field(excess_len, EXCESS_LEN)
@@ -215,7 +249,7 @@ function handle_terminate_ind_req(management)
     end
     management:add_field_with_text_table(reason_code, REASON_CODE, terminate_reason_table)
     local data_len = management:get_curr_buffer_section(DL):uint()
-    management:add_field(data_length, DL)
+    management:add_field(data_length_u8, DL_TERMINATE)
     if data_len > 0 then 
         management:add_field(additional_data, data_len)
     end
@@ -227,23 +261,158 @@ function handle_terminate_res(management)
     end
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
     local data_len = management:get_curr_buffer_section(DL):uint()
-    management:add_field(data_length, DL)
+    management:add_field(data_length_u8, DL_TERMINATE)
     if data_len > 0 then 
         management:add_field(additional_data, data_len)
     end
 end
 
 function handle_hello_req(management)
+    handle_tlvs(management)
 end
 
 function handle_hello_res(management)
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
-    -- TODO handle TLVs
+    handle_tlvs(management)
+end
+
+function handle_tlvs(management) 
+    while management:get_pos() < management:get_buffer_len() do
+        local type = management:get_curr_buffer_section(TLV_TYPE):uint()
+        management:add_field_with_text_table(tlv_type, TLV_TYPE, tlv_type_table)
+        
+        if type == 0 then
+            goto continue
+        end
+
+        local len = management:get_curr_buffer_section(TLV_LEN):uint()
+        management:add_field(tlv_len, TLV_LEN)
+        
+        management:add_field(get_tlv_val_type(type, len), len)
+
+        ::continue::
+    end
+end
+
+function get_tlv_val_type(type, len) 
+    if type == 1 then 
+        return tlv_val_i64
+    elseif type == 2 then 
+        return tlv_val_str
+    elseif type == 3 then 
+        if len == IPV4_LEN then
+            return tlv_val_ipv4
+        elseif len == IPV6_LEN then 
+            return tlv_val_ipv6
+        end
+    elseif type == 4 then 
+        if len == IPV4_LEN then
+            return tlv_val_ipv4
+        elseif len == IPV6_LEN then 
+            return tlv_val_ipv6
+        end
+    elseif type == 5 then 
+        return tlv_val_bytes
+    elseif type == 6 then
+        return tlv_val_u16
+    end
+
+    return tlv_val_bytes
+end
+
+function handle_bind_agent_addr_req(management)
+    management:add_field(trans_id, BIND_TRANS_ID)
+    local version = management:get_curr_buffer_section(IP_VERSION):uint()
+    management:add_field(ip_version, IP_VERSION)
+    local compression_mode = management:get_curr_buffer_section(1):uint()
+    management:add_field(comp_mode, COMP_MODE)
+
+    local source_present = get_second_bit(compression_mode)
+    local dest_present = get_third_bit(compression_mode)
+    management:add_field_with_text_no_buffer(source_port_present, source_present, presence_value[source_present])
+    management:add_field_with_text_no_buffer(dest_port_present, dest_present, presence_value[dest_present])
+
+    -- TODO Here we just dissect the src addr and dest addr, do we want other parts of the IP header?
+    if version == 4 then
+        management:increase_pos(12)
+        management:add_field(source_addr_v4, IPV4_LEN)
+        management:add_field(dest_addr_v4, IPV4_LEN)
+    elseif version == 6 then
+        management:increase_pos(8)
+        management:add_field(source_addr_v6, IPV6_LEN)
+        management:add_field(dest_addr_v6, IPV6_LEN)
+    end
+    
+    if source_present == 1 then
+        management:add_field(source_info, PORT_LEN)
+    end
+
+    if dest_present == 1 then 
+        management:add_field(source_info, PORT_LEN)
+    end
+end
+
+function handle_bind_agent_addr_res(management)
+    management:add_field(trans_id, BIND_TRANS_ID)
+    management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
+    local info = management:get_curr_buffer_section(INFO_LEN):uint()
+    management:add_field(info_len, INFO_LEN)
+    if info > 0 then 
+        management:add_field(status_info, info)
+    end
+end
+
+function handle_init_authentication_req(management) 
+    local flags = management:get_curr_buffer_section(FLAGS):uint()
+    local bootstrap = get_last_bit(flags)
+    management:add_field_with_text(bootstrap_support, BOOTSTRAP, presence_value[bootstrap])
+    management:add_field(data_length_u16, DL_INIT)
+    -- unsure what comes after this, zdp.rs says it should be challenge payload, but can't find
+    -- any challenge payloads
+end
+
+function handle_report(management)
+    management:add_field(data_length_u16, DL_REPORT)
+end
+
+function handle_acquire_zpr_addr_req(management)
+    -- TODO function that adds value AND returns it
+    local len = management:get_curr_buffer_section(BLOB_LEN):uint()
+    management:add_field(blob_len, BLOB_LEN)
+    local version = management:get_curr_buffer_section(IP_VERSION):uint()
+    management:add_field(ip_version, IP_VERSION)
+    local count = management:get_curr_buffer_section(ADDR_COUNT):uint()
+    management:add_field(addr_count, ADDR_COUNT)
+    management:add_field(blob, len)
+
+    while management:get_pos() < management:get_buffer_len() do 
+        if version == 4 then
+            management:add_field(ipv4_addr, IPV4_LEN)
+        elseif version == 6 then
+            management:add_field(ipv6_addr, IPV6_LEN)
+        end
+    end
+end
+
+function handle_grant_zpr_addr_req(management)
+    management:add_field_with_text_table(status_code, RESPONSE_CODE, response_code_table)
+    local version = management:get_curr_buffer_section(IP_VERSION):uint()
+    management:add_field(ip_version, IP_VERSION)
+    local count = management:get_curr_buffer_section(ADDR_COUNT):uint()
+    management:add_field(addr_count, ADDR_COUNT)
+
+    while management:get_pos() < management:get_buffer_len() do 
+        if version == 4 then
+            management:add_field(ipv4_addr, IPV4_LEN)
+        elseif version == 6 then
+            management:add_field(ipv6_addr, IPV6_LEN)
+        end
+    end
 end
 
 -- "Class" that contains the tree, buffer, and current position
 function Dissector(init_tree, init_buffer) 
-    local dissector = { tree = init_tree, buffer = init_buffer, pos = 0 }
+    local dissector = { tree = init_tree, buffer = init_buffer, pos = 0, real_len = 0 }
 
     local methods = {
         add_field = function(self, field, len)
@@ -259,6 +428,9 @@ function Dissector(init_tree, init_buffer)
             self.tree:add(field, self.buffer(self.pos, len)):append_text(" (" .. text .. ")")
             self.pos = self.pos + len
         end,
+        add_field_with_text_no_buffer = function(self, field, val, text)
+            self.tree:add(field, val):append_text(" (" .. text .. ")")
+        end,
         set_pos = function(self, val)
             self.pos = val
         end,
@@ -273,6 +445,9 @@ function Dissector(init_tree, init_buffer)
         end,
         get_buffer_section = function(self, start, len)
             return self.buffer(start, len)
+        end,
+        get_buffer_len = function(self) 
+            return self.buffer:len()
         end
     }
 
@@ -280,47 +455,7 @@ function Dissector(init_tree, init_buffer)
     return dissector
 end
 
--- function handle_bind_agent_addr_request(buffer, management_subtree)
---     local version = buffer(0, 1):uint()
---     management_subtree:add(ip_version, buffer(0, 1))
---     local ip_proto_present = get_first_bit(buffer(1, 1):uint())
---     management_subtree:add(ip_protocol_present, ip_proto_present):append_text(" (" .. presence_value[ip_proto_present] .. ")")
---     local source_present = get_second_bit(buffer(1, 1):uint())
---     management_subtree:add(source_port_present, source_present):append_text(" (" .. presence_value[source_present] .. ")")
---     local dest_present = get_third_bit(buffer(1, 1):uint())
---     management_subtree:add(destination_port_present, dest_present):append_text(" (" .. presence_value[dest_present] .. ")")
-    
---     local addr_len = 4
---     if version == 6 then addr_len = 16 end
 
---     management_subtree:add(source_addr, buffer(2, addr_len))
---     management_subtree:add(dest_addr, buffer(2 + addr_len, addr_len))
-
---     local bytes_used = 2 + (2 * addr_len)
---     if ip_proto_present == 1 then 
---         management_subtree:add(ip_protocol, buffer(bytes_used, 1))
---         bytes_used = bytes_used + 1
---     end
-     
---     if source_present == 1 then 
---         management_subtree:add(source_info, buffer(bytes_used, 2))
---         bytes_used = bytes_used + 2
---     end
-
---     if dest_present == 1 then 
---         management_subtree:add(dest_info, buffer(bytes_used, 2))
---     end
--- end
-
--- function handle_bind_agent_addr_response(buffer, management_subtree)
---     management_subtree:add(req_seq_num, buffer(0, 2))
---     management_subtree:add(status_code, buffer(2, 1))
---     management_subtree:add(info_len, buffer(3, 1))
---     local add_info_len = buffer(3, 1):uint()
---     if add_info_len > 1 then
---         management_subtree:add(status_info, buffer(4, add_info_len)) 
---     end                                                          
--- end
 
 -- TODO
 -- more management handler functions
@@ -331,15 +466,18 @@ end
 
 management_table = 
 {
-    [11] = handle_bind_agent_addr_request,
-    [12] = handle_bind_agent_addr_response,
+    [11] = handle_bind_agent_addr_req,
+    [12] = handle_bind_agent_addr_res,
     [131] = handle_echo,
-    [132] = handle_echo,
     [133] = handle_terminate_ind_req,
     [134] = handle_terminate_res,
     [135] = handle_terminate_ind_req,
     [136] = handle_hello_req,
     [137] = handle_hello_res,
+    [140] = handle_acquire_zpr_addr_req,
+    [145] = handle_report,
+    [146] = handle_init_authentication_req,
+    [148] = handle_grant_zpr_addr_req,
 }
 
 presence_value = 
@@ -369,44 +507,44 @@ type_name_table =
     [2] = "Destination Unreachable",
     [3] = "Visa Herald Request",
     [4] = "Visa Herald Response",
-    [5] = "Unused",
-    [6] = "Unused",
+    [5] = "Visa Update Request", -- not in rfc
+    [6] = "Visa Update Response", -- not in rfc
     [7] = "Visa Retract Request",
     [8] = "Visa Retract Response",
-    [9] = "Stream ID Withdrawl Request",
-    [10] = "Stream ID Withdrawl Response",
-    [11] = "Bind Endpoint Address Request",
-    [12] = "Bind Endpoint Address Response",
-    [13] = "Unbind Endpoint Address Request",
-    [14] = "Unbind Endpoint Address Response",
-    [15] = "Authentication Request",
-    [16] = "Authentication Response",
-    [17] = "Set Path MTU Request",
-    [18] = "Set Path MTU Response",
-    [127] = "Reserved, Discard",
+    [9] = "Visa Deaccept Indication", -- differs from rfc
+    [10] = "Visa Deaccept Acknowledgement", -- differs from rfc
+    [11] = "Bind Actor Address Request",
+    [12] = "Bind Actor Address Response",
+    [13] = "Unbind Actor Address Request",
+    [14] = "Unbind Actor Address Response",
+    [15] = "Authentication Request", -- deprecated
+    [16] = "Set Path MTU", -- differs from rfc
+    [17] = "Set Path MTU Request", -- not in zdp.rs
+    [18] = "Set Path MTU Response", -- not in zdp.rs
+    [127] = "Reserved, Discard", -- not in zdp.rs
     [128] = "ZPR ARP",
     [129] = "Key Management",
     [130] = "Discard",
     [131] = "Echo Request",
-    [132] = "Echo Response",
-    [133] = "Terminate Link or Docking Session Request",
-    [134] = "Terminate Link or Docking Session Response",
-    [135] = "Terminate Link or Docking Session Indication",
+    [132] = "Unused", -- not in rfc
+    [133] = "Terminate Link Request", -- rfcs also include docking in terminate
+    [134] = "Terminate Link Response",
+    [135] = "Terminate Link Indication",
     [136] = "Hello Request",
     [137] = "Hello Response",
     [138] = "Configuration Request",
     [139] = "Configuration Response",
     [140] = "Acquire ZPR Address Request",
     [141] = "Unused",
-    [142] = "Acquire ZPR Address Response",
-    [143] = "Unused",
-    [144] = "Unused",
+    [142] = "Unused", -- differs from rfc
+    [143] = "Unregister Actor Address Request", -- differs from rfc
+    [144] = "Unregister Actor Address Response", -- differs from rfc
     [145] = "Report",
     [146] = "Init Authentication Request",
-    [147] = "Init Authentication Response",
+    [147] = "Unused", -- differs from rfc
     [148] = "Grant ZPR Address Request",
-    [149] = "Grant ZPR Address Response",
-    [255] = "Reserved, must not be used",
+    [149] = "Unused", -- differs from rfc
+    [255] = "Acknowledgement",
 }
 
 terminate_reason_table =
@@ -422,6 +560,17 @@ response_code_table =
 {
     [0] = "Success",
     [1] = "Other",
+}
+
+tlv_type_table = 
+{
+    [0] = "NULL",
+    [1] = "Policy ID",
+    [2] = "Version",
+    [3] = "AAA",
+    [4] = "ASA",
+    [5] = "Static Addr",
+    [6] = "Window Size"
 }
 
 -- Bit un-packing funcs
@@ -454,6 +603,10 @@ end
 function get_third_bit(one_byte)
     local masked = bit.band(one_byte, 0x20)
     return bit.rshift(masked, 5)
+end
+
+function get_last_bit(one_byte)
+    return bit.band(one_byte, 0x01)
 end
 
 local udp_port = DissectorTable.get("udp.port")
