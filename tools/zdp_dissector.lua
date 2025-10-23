@@ -115,8 +115,8 @@ KEY_NOISE_PAD = 0
 TRANS_ID = 0
 
 EXCESS_LEN_START = ZPI + TYPE
-PKT_START = TRANSIT_NON_AGENT_DATA - A2A_MAC
 TRANSIT_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID + KEY_NOISE_PAD + HMAC + A2A_SAID + A2A_MAC
+PKT_START = TRANSIT_NON_AGENT_DATA - A2A_MAC
 PER_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID
 NON_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM
 
@@ -242,8 +242,7 @@ function handle_echo(management)
     if TRANS_ID > 0 then
         management:add_field(trans_id, TRANS_ID)
     end
-    local add_data_len = management:get_curr_buffer_section(ADL):uint()
-    management:add_field(adl, ADL)
+    local add_data_len = management:add_field_and_return(adl, ADL)
     if add_data_len > 0 then 
         management:add_field(additional_data, add_data_len)
     end
@@ -254,8 +253,7 @@ function handle_terminate_ind_req(management)
         management:add_field(trans_id, TRANS_ID)
     end
     management:add_field_with_text_table(reason_code, REASON_CODE, terminate_reason_table)
-    local data_len = management:get_curr_buffer_section(DL):uint()
-    management:add_field(data_length_u8, DL_TERMINATE)
+    local data_len = management:add_field_and_return(data_length_u8, DL_TERMINATE)
     if data_len > 0 then 
         management:add_field(additional_data, data_len)
     end
@@ -266,8 +264,7 @@ function handle_terminate_res(management)
         management:add_field(trans_id, TRANS_ID)
     end
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
-    local data_len = management:get_curr_buffer_section(DL):uint()
-    management:add_field(data_length_u8, DL_TERMINATE)
+    local data_len = management:add_field_and_return(data_length_u8, DL_TERMINATE)
     if data_len > 0 then 
         management:add_field(additional_data, data_len)
     end
@@ -328,10 +325,8 @@ end
 
 function handle_bind_agent_addr_req(management)
     management:add_field(trans_id, BIND_TRANS_ID)
-    local version = management:get_curr_buffer_section(IP_VERSION):uint()
-    management:add_field(ip_version, IP_VERSION)
-    local compression_mode = management:get_curr_buffer_section(1):uint()
-    management:add_field(comp_mode, COMP_MODE)
+    local version = management:add_field_and_return(ip_version, IP_VERSION)
+    local compression_mode = management:add_field_and_return(comp_mode, COMP_MODE)
 
     local source_present = get_second_bit(compression_mode)
     local dest_present = get_third_bit(compression_mode)
@@ -361,8 +356,7 @@ end
 function handle_bind_agent_addr_res(management)
     management:add_field(trans_id, BIND_TRANS_ID)
     management:add_field_with_text_table(response_code, RESPONSE_CODE, response_code_table)
-    local info = management:get_curr_buffer_section(INFO_LEN):uint()
-    management:add_field(info_len, INFO_LEN)
+    local info = management:add_field_and_return(info_len, INFO_LEN)
     if info > 0 then 
         management:add_field(status_info, info)
     end
@@ -383,12 +377,9 @@ end
 
 function handle_acquire_zpr_addr_req(management)
     -- TODO function that adds value AND returns it
-    local len = management:get_curr_buffer_section(BLOB_LEN):uint()
-    management:add_field(blob_len, BLOB_LEN)
-    local version = management:get_curr_buffer_section(IP_VERSION):uint()
-    management:add_field(ip_version, IP_VERSION)
-    local count = management:get_curr_buffer_section(ADDR_COUNT):uint()
-    management:add_field(addr_count, ADDR_COUNT)
+    local len = management:add_field_and_return(blob_len, BLOB_LEN)
+    local version = management:add_field_and_return(ip_version, IP_VERSION)
+    local count = management:add_field_and_return(addr_count, ADDR_COUNT)
     management:add_field(blob, len)
 
     while management:get_pos() < management:get_buffer_len() do 
@@ -402,10 +393,8 @@ end
 
 function handle_grant_zpr_addr_req(management)
     management:add_field_with_text_table(status_code, RESPONSE_CODE, response_code_table)
-    local version = management:get_curr_buffer_section(IP_VERSION):uint()
-    management:add_field(ip_version, IP_VERSION)
-    local count = management:get_curr_buffer_section(ADDR_COUNT):uint()
-    management:add_field(addr_count, ADDR_COUNT)
+    local version = management:add_field_and_return(ip_version, IP_VERSION)
+    local count = management:add_field_and_return(addr_count, ADDR_COUNT)
 
     while management:get_pos() < management:get_buffer_len() do 
         if version == 4 then
@@ -424,6 +413,12 @@ function Dissector(init_tree, init_buffer)
         add_field = function(self, field, len)
             self.tree:add(field, self.buffer(self.pos, len))
             self.pos = self.pos + len
+        end,
+        add_field_and_return = function(self, field, len)
+            local val = self.buffer(self.pos, len)
+            self.tree:add(field, val)
+            self.pos = self.pos + len
+            return val:uint()
         end,
         add_field_with_text_table = function(self, field, len, table)
             local key = self.buffer(self.pos, len):uint()
