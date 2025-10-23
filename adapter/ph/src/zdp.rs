@@ -173,7 +173,7 @@ pub mod init_authentication_flags {
 pub struct ZdpInitAuthenticationRequestHeader {
     pub flags: u8,
     pub data_len: U16,
-    // Followed by challenge payload, eg ZdpInitAuthenticationPayload below.
+    // Followed by challenge payload, eg ZdpInitAuthenticationPayload in auth.rs.
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]

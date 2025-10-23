@@ -9,7 +9,7 @@ excess_len = ProtoField.uint8("zdp.excess_len", "Excess Length", base.DEC)
 seq_num = ProtoField.uint64("zdp.seq_num", "Sequence Number", base.DEC)
 stream_id = ProtoField.uint32("zdp.streamid", "Stream ID", base.DEC)
 pad = ProtoField.bytes("zdp.pad", "Pad")
-hmac = ProtoField.bytes("zdp.mac", "MAC")
+hmac = ProtoField.bytes("zdp.mac", "HMAC")
 a2a_said = ProtoField.uint8("zdp.a2a_said", "A2A SAID", base.HEX)
 agent_packet = ProtoField.bytes("zdp.agent_packet", "Agent Packet")
 a2a_mac = ProtoField.uint64("zdp.a2a_mac", "A2A MAC", base.HEX)
@@ -61,6 +61,8 @@ bootstrap_support = ProtoField.uint8("zdp.bootstrap", "Bootstrap Support Flag")
 blob_len = ProtoField.uint16("zdp.blob_len", "Blob Length", base.DEC)
 addr_count = ProtoField.uint8("zdp.addr_count", "Address Count", base.DEC)
 blob = ProtoField.bytes("zdp.blob", "Blob")
+nonce = ProtoField.uint64("zdp.nonce", "Nonce", base.HEX)
+ctime = ProtoField.uint64("zdp.ctime", "CTime", base.DEC)
 -- ip_protocol = ProtoField.uint8("zdp.ip_protocol", "IP Protocol", base.DEC)
 -- req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
 -- ip_protocol_present = ProtoField.uint8("zdp.protocol_present", "IP Protocol Present", base.DEC)
@@ -68,7 +70,7 @@ blob = ProtoField.bytes("zdp.blob", "Blob")
 zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
                      hmac, a2a_said, agent_packet, a2a_mac, management_packet, ip_version,
                      ihl, frag_id, frag_offset, ttl, tc, fl, hop_limit, trans_id,
-                     adl, additional_data, source_port_present, 
+                     adl, additional_data, source_port_present, nonce, ctime,
                      dest_port_present, source_addr_v4, source_addr_v6, dest_addr_v4, dest_addr_v6, source_info, 
                      dest_info, status_code, info_len, status_info, reason_code, response_code, data_length_u8, data_length_u16,
                      comp_mode, tlv_type, tlv_len, tlv_val_u16, tlv_val_i64, tlv_val_str, tlv_val_ipv4, 
@@ -106,9 +108,13 @@ IPV4_LEN = 4
 STREAM_ID = 4
 
 A2A_MAC = 8 -- Not sure what the MAC-algorithm-specified-size is (RFC17.2 § 4.2.6.1), but believe zdp.rs 262 specified
+CTIME = 8
+NONCE = 8
 SEQ_NUM = 8
 
 IPV6_LEN = 16
+
+INIT_AUTH_HMAC = 32
 
 HMAC = 0
 KEY_NOISE_PAD = 0
@@ -367,8 +373,9 @@ function handle_init_authentication_req(management)
     local bootstrap = get_last_bit(flags)
     management:add_field_with_text(bootstrap_support, BOOTSTRAP, presence_value[bootstrap])
     management:add_field(data_length_u16, DL_INIT)
-    -- unsure what comes after this, zdp.rs says it should be challenge payload, but can't find
-    -- any challenge payloads
+    management:add_field(nonce, NONCE)
+    management:add_field(ctime, CTIME)
+    management:add_field(hmac, INIT_AUTH_HMAC)
 end
 
 function handle_report(management)
