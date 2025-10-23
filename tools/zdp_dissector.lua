@@ -18,14 +18,14 @@ management_packet = ProtoField.bytes("zdp.management", "Management Packet")
 -- Agent Packet Headers
 ip_version = ProtoField.uint8("zdp.ip_version", "IP Version", base.DEC)
 ihl = ProtoField.uint8("zdp.ihl", "Internet Header Length", base.DEC)
-dscp = ProtoField.uint8("zdp.dscp", "Differentiated Services Code Point", base.DEC)
 frag_id = ProtoField.uint16("zdp.frag_id", "Fragment ID", base.DEC)
 frag_offset = ProtoField.uint16("zdp.frag_offset", "Fragment Offset", base.DEC)
 ttl = ProtoField.uint8("zdp.ttl", "Time to Live", base.DEC)
 tc = ProtoField.uint8("zdp.tc", "Traffic Class", base.DEC)
 fl = ProtoField.uint32("zdp.fl", "Flow Label", base.DEC)
 hop_limit = ProtoField.uint8("zdp.hop_limit", "Hop Limit", base.DEC)
-ip_options = ProtoField.bytes("zdp.ip_options", "IP Options")
+-- dscp = ProtoField.uint8("zdp.dscp", "Differentiated Services Code Point", base.DEC)
+-- ip_options = ProtoField.bytes("zdp.ip_options", "IP Options")
 
 -- Management Data
 trans_id = ProtoField.uint16("zdp.trans_id", "Transaction ID", base.DEC)
@@ -35,17 +35,14 @@ response_code = ProtoField.uint8("zdp.response_code", "Response Code", base.DEC)
 data_length_u8 = ProtoField.uint8("zdp.data_len_t", "Data Length", base.DEC)
 data_length_u16 = ProtoField.uint16("zdp.data_len_i", "Data Length", base.DEC)
 additional_data = ProtoField.bytes("zdp.additional", "Optional Additional Data")
-req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
-ip_protocol_present = ProtoField.uint8("zdp.protocol_present", "IP Protocol Present", base.DEC)
 source_port_present = ProtoField.uint8("zdp.source_port_present", "Source Port Information Present", base.DEC)
 dest_port_present = ProtoField.uint8("zdp.dest_port_present", "Destination Port Information Present", base.DEC)
 source_addr_v4 = ProtoField.ipv4("zdp.source_addr_v4", "Source IP Address")
 dest_addr_v4 = ProtoField.ipv4("zdp.dest_addr_v4", "Destination IP Address")
 source_addr_v6 = ProtoField.ipv6("zdp.source_addr_v6", "Source IP Address")
+dest_addr_v6 = ProtoField.ipv6("zdp.dest_addr_v6", "Destination IP Address")
 ipv4_addr = ProtoField.ipv4("zdp.ipv4", "IP Address")
 ipv6_addr = ProtoField.ipv6("zdp.ipv6", "IP Address")
-dest_addr_v6 = ProtoField.ipv6("zdp.dest_addr_v6", "Destination IP Address")
-ip_protocol = ProtoField.uint8("zdp.ip_protocol", "IP Protocol", base.DEC)
 source_info = ProtoField.uint16("zdp.source_info", "Source Port Information", base.DEC)
 dest_info = ProtoField.uint16("zdp.dest_info", "Destination Port Information", base.DEC)
 status_code = ProtoField.uint8("zdp.status_code", "Status Code", base.DEC)
@@ -64,55 +61,64 @@ bootstrap_support = ProtoField.uint8("zdp.bootstrap", "Bootstrap Support Flag")
 blob_len = ProtoField.uint16("zdp.blob_len", "Blob Length", base.DEC)
 addr_count = ProtoField.uint8("zdp.addr_count", "Address Count", base.DEC)
 blob = ProtoField.bytes("zdp.blob", "Blob")
+-- ip_protocol = ProtoField.uint8("zdp.ip_protocol", "IP Protocol", base.DEC)
+-- req_seq_num = ProtoField.uint16("zdp.req_seq_num", "Request Sequence Number", base.DEC)
+-- ip_protocol_present = ProtoField.uint8("zdp.protocol_present", "IP Protocol Present", base.DEC)
 
 zdp_proto.fields = { zpi_val, zdp_type, excess_len, seq_num, stream_id, pad, 
                      hmac, a2a_said, agent_packet, a2a_mac, management_packet, ip_version,
-                     ihl, dscp, frag_id, frag_offset, ttl, tc, fl, hop_limit, ip_options, trans_id,
-                     adl, additional_data, req_seq_num, ip_protocol_present, source_port_present, 
-                     dest_port_present, source_addr_v4, source_addr_v6, dest_addr_v4, dest_addr_v6, ip_protocol, source_info, 
+                     ihl, frag_id, frag_offset, ttl, tc, fl, hop_limit, trans_id,
+                     adl, additional_data, source_port_present, 
+                     dest_port_present, source_addr_v4, source_addr_v6, dest_addr_v4, dest_addr_v6, source_info, 
                      dest_info, status_code, info_len, status_info, reason_code, response_code, data_length_u8, data_length_u16,
                      comp_mode, tlv_type, tlv_len, tlv_val_u16, tlv_val_i64, tlv_val_str, tlv_val_ipv4, 
-                     tlv_val_ipv6, tlv_val_bytes, bootstrap_support, blob_len, addr_count, blob, ipv4_addr, ipv6_addr }
+                     tlv_val_ipv6, tlv_val_bytes, bootstrap_support, blob_len, addr_count, blob, ipv4_addr, ipv6_addr, }
+                     --  dscp, ip_options, req_seq_num, ip_protocol_present, ip_protocol
 
 -- Lengths of fields when using Noise Encryption
-ZPI = 1
-TYPE = 1
-EXCESS_LEN = 1
-EXCESS_LEN_START = ZPI + TYPE
-SEQ_NUM = 8
-STREAM_ID = 4
-KEY_NOISE_PAD = 0
-HMAC = 0
 A2A_SAID = 1
-A2A_MAC = 8 -- Not sure what the MAC-algorithm-specified-size is (RFC17.2 § 4.2.6.1), but believe zdp.rs 262 specifies
-TRANSIT_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID + KEY_NOISE_PAD + HMAC + A2A_SAID + A2A_MAC
-PKT_START = TRANSIT_NON_AGENT_DATA - A2A_MAC
-DSCP = 1
+ADDR_COUNT = 1
+BOOTSTRAP = 1
+COMP_MODE = 1
+DL_REPORT = 1
+DL_TERMINATE = 1
+EXCESS_LEN = 1
+FLAGS = 1
+HOP_LIMIT = 1
+IP_VERSION = 1
+INFO_LEN = 1
+REASON_CODE = 1
+RESPONSE_CODE = 1
+TLV_LEN = 1
+TLV_TYPE = 1
+TTL = 1
+TYPE = 1
+ZPI = 1
+
+ADL = 2
+BIND_TRANS_ID = 2
+BLOB_LEN = 2
+DL_INIT = 2
 FRAG_ID = 2
 FRAG_OFFSET = 2
-TTL = 1
-HOP_LIMIT = 1
+
+IPV4_LEN = 4
+STREAM_ID = 4
+
+A2A_MAC = 8 -- Not sure what the MAC-algorithm-specified-size is (RFC17.2 § 4.2.6.1), but believe zdp.rs 262 specified
+SEQ_NUM = 8
+
+IPV6_LEN = 16
+
+HMAC = 0
+KEY_NOISE_PAD = 0
+TRANS_ID = 0
+
+EXCESS_LEN_START = ZPI + TYPE
+PKT_START = TRANSIT_NON_AGENT_DATA - A2A_MAC
+TRANSIT_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID + KEY_NOISE_PAD + HMAC + A2A_SAID + A2A_MAC
 PER_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM + STREAM_ID
 NON_FLOW_NON_AGENT_DATA = ZPI + TYPE + EXCESS_LEN + SEQ_NUM
-TRANS_ID = 0
-BIND_TRANS_ID = 2
-ADL = 2
-RESPONSE_CODE = 1
-REASON_CODE = 1
-DL_TERMINATE = 1
-DL_INIT = 2
-IP_VERSION = 1
-COMP_MODE = 1
-IPV4_LEN = 4
-IPV6_LEN = 16
-INFO_LEN = 1
-TLV_TYPE = 1
-TLV_LEN = 1
-FLAGS = 1
-BOOTSTRAP = 1
-DL_REPORT = 1
-BLOB_LEN = 2
-ADDR_COUNT = 1
 
 function zdp_proto.dissector(buffer, pinfo, tree)
     length = buffer:len()
@@ -348,7 +354,7 @@ function handle_bind_agent_addr_req(management)
     end
 
     if dest_present == 1 then 
-        management:add_field(source_info, PORT_LEN)
+        management:add_field(dest_info, PORT_LEN)
     end
 end
 
@@ -458,11 +464,7 @@ end
 
 
 -- TODO
--- more management handler functions
 -- cleanup existing code
--- functions for commonly dont actions (ie adding to tree and incrementing value)
-
-
 
 management_table = 
 {
