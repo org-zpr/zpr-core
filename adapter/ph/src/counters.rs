@@ -124,7 +124,7 @@ pub enum ManagementCounterType {
     InternalRoutingError, // a packet ended up somewhere it shouldn't have due to a coding error
 
     BadMgmtResponse,
-    UnexpectedMgmtResponse,
+    UnknownTransaction,
     OutOfOrderPacket, // out-of-order management packet detected (and processed)
     ResentPacket,
 
@@ -210,7 +210,7 @@ impl ManagementCounterType {
 
             // Management packets
             Self::BadMgmtResponse => "Bad Management Response",
-            Self::UnexpectedMgmtResponse => "Unexpected Management Response",
+            Self::UnknownTransaction => "Unknown Transaction",
             Self::OutOfOrderPacket => "Out Of Order Packet",
             Self::ResentPacket => "Resent Packet",
 
@@ -433,7 +433,7 @@ mod tests {
         counters.fastpaths.lock().unwrap()[0][FastpathCounterType::UnknownZpi].increase_by(4);
         counters.fastpaths.lock().unwrap()[0][FastpathCounterType::TtlExpired].increase_by(2);
         counters.management[ManagementCounterType::QueueBackpressure].increase_by(432);
-        counters.management[ManagementCounterType::UnexpectedMgmtResponse].increase_by(54);
+        counters.management[ManagementCounterType::UnknownTransaction].increase_by(54);
 
         assert_eq!(
             counters.fastpaths.lock().unwrap()[0][FastpathCounterType::InPacksRec].get_count(),
@@ -462,7 +462,7 @@ mod tests {
             432
         );
         assert_eq!(
-            counters.management[ManagementCounterType::UnexpectedMgmtResponse].get_count(),
+            counters.management[ManagementCounterType::UnknownTransaction].get_count(),
             54
         );
 
@@ -535,7 +535,7 @@ mod tests {
             432
         );
         assert_eq!(
-            counters.management[ManagementCounterType::UnexpectedMgmtResponse].get_count(),
+            counters.management[ManagementCounterType::UnknownTransaction].get_count(),
             54
         );
         assert_eq!(

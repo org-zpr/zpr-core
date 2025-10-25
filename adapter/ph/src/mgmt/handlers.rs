@@ -36,6 +36,9 @@ pub enum HandleMgmtError {
     #[error("bad packet structure")]
     BadStructure,
 
+    #[error("unknown transaction: {0}")]
+    UnknownTransaction(super::txn_mgr::TxnId),
+
     #[error("link closed")]
     LinkClosed,
 }
@@ -46,6 +49,7 @@ impl From<HandleMgmtError> for counters::ManagementCounterType {
             HandleMgmtError::UnknownType(_type) => Self::UnknownType,
             HandleMgmtError::BadStructure => Self::BadStructure,
             HandleMgmtError::MessageNotPermitted => Self::OtherError,
+            HandleMgmtError::UnknownTransaction(_id) => Self::UnknownTransaction,
             HandleMgmtError::LinkClosed => Self::OtherError,
         }
     }
@@ -949,7 +953,7 @@ pub async fn handle_bind_actor_address_request(
     }
 
     // respond to requestor
-    super::core::send_per_flow_mgmt_response(
+    super::core::send_per_flow_txn_mgmt(
         asm,
         ingress_link_id.get(),
         zdp::ZdpPacketType::BindActorAddressResponse,
@@ -958,6 +962,30 @@ pub async fn handle_bind_actor_address_request(
         rsp_pkt,
     )
     .await?;
+
+    Ok(())
+}
+
+pub async fn handle_bind_actor_address_response(
+    asm: &Arc<Assembly>,
+    txn_id: u16,
+    pkt: Packet,
+) -> HandleMgmtResult {
+    let link_id = pkt.metadata().ingress_link_id;
+
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        return Err(HandleMgmtError::LinkClosed);
+    };
+
+    let Some(txn) = peer_state.txn_mgr.get(txn_id) else {
+        return Err(HandleMgmtError::UnknownTransaction(txn_id));
+    };
+
+    let Some(sender) = peer_state.bind_req_state.lock().unwrap().remove(&txn) else {
+        return Err(HandleMgmtError::UnknownTransaction(txn_id));
+    };
+
+    let _ = sender.send(pkt);
 
     Ok(())
 }

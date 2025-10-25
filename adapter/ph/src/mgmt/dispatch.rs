@@ -82,15 +82,13 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
             handle_acknowledgement(asm, pkt)
         }
 
-        Ok((base_hdr, rest)) => {
+        Ok((_base_hdr, rest)) => {
             let (mgmt_hdr, _) = zdp::ZdpMgmtHeader::ref_from_prefix(rest).unwrap();
 
             let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
                 core::count_event(asm, ManagementCounterType::PeerRemoved);
                 return;
             };
-
-            let is_response = base_hdr.packet_type.is_response();
 
             // expand sequence number and store in packet metadata
             let mut receiver = peer_state.zdpr_recv.lock().unwrap();
@@ -107,16 +105,12 @@ pub fn dispatch_mgmt_packet_with_link(asm: &Arc<Assembly>, pkt: &mut Packet) {
             }
 
             if disp.should_process() {
-                if is_response {
-                    handle_response(asm, pkt)
-                } else {
-                    let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
-                    match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
-                        Ok(()) => (),
-                        Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {
-                            core::count_event(asm, ManagementCounterType::QueueBackpressure);
-                            return;
-                        }
+                let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
+                match peer_state.mgmt_processor.try_enqueue_packet(mgmt_pkt) {
+                    Ok(()) => (),
+                    Err(queues::TryEnqueueError::Full(_mgmt_pkt)) => {
+                        core::count_event(asm, ManagementCounterType::QueueBackpressure);
+                        return;
                     }
                 }
             }
@@ -159,50 +153,6 @@ fn handle_acknowledgement(asm: &Assembly, pkt: &mut Packet) {
     if sender.retry_needed() && !old_retry_needed {
         // We should activate / restart our retry timer.
         peer_state.zdpr_retry_timer_reset.notify_one();
-    }
-}
-
-fn handle_response(asm: &Assembly, pkt: &mut Packet) {
-    let Ok(base_hdr) = zdp::ZdpBaseHeader::read_from_buf(pkt) else {
-        core::count_event(asm, ManagementCounterType::BadStructure);
-        return;
-    };
-
-    let packet_type = base_hdr.packet_type;
-
-    let Ok(_mgmt_hdr) = zdp::ZdpMgmtHeader::read_from_buf(pkt) else {
-        core::count_event(asm, ManagementCounterType::BadStructure);
-        return;
-    };
-
-    let Ok(txn_hdr) = zdp::ZdpTransactionHeader::read_from_buf(pkt) else {
-        core::count_event(asm, ManagementCounterType::BadStructure);
-        return;
-    };
-    let txn_id = txn_hdr.transaction_id.get();
-
-    assert!(
-        packet_type.is_response(),
-        "stray mgmt request in handle_response()"
-    );
-
-    // Gets the designated sender, attempts to send the response, if not drops
-    // the packet and increments corresponding counter
-    let Some(peer_state) = asm.peer_table.get(pkt.metadata().ingress_link_id) else {
-        core::count_event(asm, ManagementCounterType::UnexpectedMgmtResponse);
-        return;
-    };
-
-    let mgmt_pkt = Packet::new_with_existing_metadata(pkt.buffer().clone());
-    match peer_state
-        .sync_req_state
-        .forward_response(txn_id, (packet_type, mgmt_pkt))
-    {
-        Ok(()) => (),
-        Err(_mgmt_pkt) => {
-            core::count_event(asm, ManagementCounterType::UnexpectedMgmtResponse);
-            return;
-        }
     }
 }
 

@@ -4,23 +4,23 @@ use crate::config;
 use crate::forwarding_tables::PeerForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
+use crate::mgmt::txn_mgr;
 use crate::net_defs::ScopedIpAddr;
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::special_peers::*;
-use crate::sync_req;
 use crate::zdpr;
 use bytes::Bytes;
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
 use enum_map::EnumMap;
 use openssl::rand::rand_bytes;
+use std::collections::hash_map::HashMap;
 use std::default::Default;
 use std::future::Future;
 use std::num::NonZero;
 use std::sync::atomic::{self, Ordering};
-use std::sync::Mutex;
-use std::sync::MutexGuard;
+use std::sync::{Arc, Mutex, MutexGuard};
 use thiserror::Error;
 use tokio::sync::{mpsc, Notify};
 use tokio::task;
@@ -34,7 +34,6 @@ pub struct PeerState {
     pub substrate_addr: SubstrateAddr,
     pub interface_addr: ScopedIpAddr,
     pub link_state_machine: LinkStateWrapper,
-    pub sync_req_state: sync_req::SyncReqState,
     pub pft: PeerForwardingTable,
     pub mgmt_processor: queues::MgmtProcessor,
     pub mgmt_processor_worker: task::JoinHandle<()>,
@@ -42,6 +41,10 @@ pub struct PeerState {
     pub zdpr_send: Mutex<zdpr::Sender<crate::packet::Packet>>,
     pub zdpr_recv: Mutex<zdpr::Receiver>,
     pub zdpr_retry_timer_reset: Notify,
+    pub txn_mgr: Arc<txn_mgr::TxnMgr>,
+    /// temporary pending #906
+    pub bind_req_state:
+        Mutex<HashMap<txn_mgr::TxnHandle, tokio::sync::oneshot::Sender<crate::packet::Packet>>>,
     km_state: PeerKmState,
 }
 
@@ -99,7 +102,6 @@ impl PeerState {
             interface_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
             pft: PeerForwardingTable::new(),
-            sync_req_state: sync_req::SyncReqState::new(),
             mgmt_processor,
             mgmt_processor_worker,
             auth_key: key,
@@ -108,6 +110,8 @@ impl PeerState {
                 config::DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE,
             )),
             zdpr_retry_timer_reset: Notify::new(),
+            txn_mgr: Arc::new(txn_mgr::TxnMgr::new()),
+            bind_req_state: Mutex::new(HashMap::new()),
             km_state: PeerKmState::new(),
         }
     }
@@ -425,7 +429,6 @@ pub mod test {
             interface_addr,
             link_state_machine: LinkStateWrapper::new(link_id.get(), link_type),
             pft: PeerForwardingTable::new(),
-            sync_req_state: sync_req::SyncReqState::new(),
             mgmt_processor,
             mgmt_processor_worker: task::spawn(async {}),
             auth_key: [42u8; AUTH_KEY_SIZE_BYTES],
@@ -434,6 +437,8 @@ pub mod test {
                 config::DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE,
             )),
             zdpr_retry_timer_reset: Notify::new(),
+            txn_mgr: Arc::new(txn_mgr::TxnMgr::new()),
+            bind_req_state: Mutex::new(HashMap::new()),
             km_state: PeerKmState::new(),
         }
     }

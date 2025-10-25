@@ -62,16 +62,6 @@ impl ZdpPacketType {
         self.0 & ZDP_PACKET_TYPE_NON_FLOW_FLAG == 0
     }
 
-    pub fn is_response(self) -> bool {
-        // CTP: I have a pending ask to Frank to group together responses
-        // so this logic becomes a simple range check
-
-        match self {
-            Self::BindActorAddressResponse => true,
-            _ => false,
-        }
-    }
-
     /// Only "management" packets have a `ZdpMgmtHeader`.
     ///
     /// "Management" packets are everything except transit, ARP, and KM packets.

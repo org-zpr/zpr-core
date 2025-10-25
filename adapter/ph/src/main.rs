@@ -57,7 +57,6 @@ mod sample_ring;
 mod set_capture_file_worker;
 mod signal_worker;
 mod special_peers;
-mod sync_req;
 mod sys;
 mod test_packet;
 mod tlv;
