@@ -548,7 +548,8 @@ type_name_table =
     [147] = "Unused", -- differs from rfc
     [148] = "Grant ZPR Address Request",
     [149] = "Unused", -- differs from rfc
-    [255] = "Acknowledgement",
+    [254] = "Acknowledgement",
+    [255] = "Reserved, must not be used",
 }
 
 terminate_reason_table =

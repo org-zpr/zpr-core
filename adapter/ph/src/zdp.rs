@@ -52,7 +52,8 @@ pub enum ZdpPacketType {
     GrantZprAddressRequest = 148, // TODO: add to RFC 6
     Unused149 = 149,
 
-    Acknowledgement = 255,
+    Acknowledgement = 254,
+    Reserved255 = 255,
 }
 
 pub const ZDP_PACKET_TYPE_NON_FLOW_FLAG: u8 = 0x80;
