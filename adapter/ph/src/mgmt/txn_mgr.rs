@@ -56,6 +56,12 @@ impl Clone for TxnHandle {
     }
 }
 
+impl std::fmt::Debug for TxnHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.id)
+    }
+}
+
 impl Drop for TxnHandle {
     fn drop(&mut self) {
         if let Some(mgr) = self.mgr.upgrade() {
@@ -229,5 +235,141 @@ impl TxnMgr {
             // since we currently hand out IDs strictly sequentially).
             self.notify.notify_waiters();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TxnId, TxnMgr};
+    use futures::future::FutureExt;
+    use std::future::Future;
+    use std::pin::pin;
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Waker};
+
+    fn is_pending(f: &mut (impl Future + Unpin)) -> bool {
+        matches!(
+            pin!(f).poll(&mut Context::from_waker(Waker::noop())),
+            Poll::Pending
+        )
+    }
+
+    #[test]
+    fn test_different_txn_ids() {
+        let mgr = Arc::new(TxnMgr::new());
+
+        let txn_a = mgr.open().now_or_never().unwrap();
+        let txn_b = mgr.open().now_or_never().unwrap();
+        let txn_c = mgr.open().now_or_never().unwrap();
+
+        assert_ne!(txn_a.id(), txn_b.id());
+        assert_ne!(txn_a.id(), txn_c.id());
+        assert_ne!(txn_b.id(), txn_c.id());
+    }
+
+    #[test]
+    fn test_txn_clone_get_identity() {
+        let mgr = Arc::new(TxnMgr::new());
+
+        let txn_a = mgr.open().now_or_never().unwrap();
+        let txn_b = mgr.open().now_or_never().unwrap();
+        let txn_a_clone = txn_a.clone();
+        let txn_a_get = mgr.get(txn_a.id()).unwrap();
+
+        assert_ne!(txn_a, txn_b);
+        assert_ne!(txn_a_clone, txn_b);
+        assert_ne!(txn_a_get, txn_b);
+        assert_eq!(txn_a, txn_a);
+        assert_eq!(txn_a, txn_a_clone);
+        assert_eq!(txn_a, txn_a_get);
+        assert_eq!(txn_a_clone, txn_a_get);
+    }
+
+    #[test]
+    fn test_txn_get() {
+        let mgr = Arc::new(TxnMgr::new());
+
+        let txn_a = mgr.open().now_or_never().unwrap();
+        let txn_b = mgr.open().now_or_never().unwrap();
+        let txn_a_get = mgr.get(txn_a.id()).expect("couldn't find txn_a");
+        let txn_b_get = mgr.get(txn_b.id()).expect("couldn't find txn_b");
+        assert!(mgr.get(123).is_none(), "found non-existent transaction");
+
+        assert_eq!(txn_a, txn_a_get);
+        assert_eq!(txn_b, txn_b_get);
+        assert_ne!(txn_a_get, txn_b_get);
+    }
+
+    #[test]
+    fn test_txn_drop() {
+        let mgr = Arc::new(TxnMgr::new());
+
+        let txn_a = mgr.open().now_or_never().unwrap();
+        let txn_b = mgr.open().now_or_never().unwrap();
+        let txn_b_clone = txn_b.clone();
+        let txn_b_get = mgr.get(txn_b.id()).expect("couldn't find txn_a");
+
+        let txn_a_id = txn_a.id();
+        let txn_b_id = txn_b.id();
+
+        drop(txn_a);
+        assert!(mgr.get(txn_a_id).is_none());
+        assert!(mgr.get(txn_b_id).is_some());
+
+        drop(txn_b);
+        assert!(mgr.get(txn_b_id).is_some());
+
+        drop(txn_b_clone);
+        assert!(mgr.get(txn_b_id).is_some());
+
+        drop(txn_b_get);
+        assert!(mgr.get(txn_b_id).is_none());
+    }
+
+    #[test]
+    fn test_blocking() {
+        let mgr = Arc::new(TxnMgr::new());
+
+        // burn a few first to test wrapping
+        for _i in 0..3 {
+            let _ = mgr.open().now_or_never().unwrap();
+        }
+
+        // we should be able to open the full space of txn IDs no problem
+        let mut txns = Vec::new();
+        for _i in 0..=TxnId::MAX {
+            txns.push(mgr.open().now_or_never().unwrap());
+        }
+
+        // these should now block
+        let mut should_block0 = Box::pin(mgr.open());
+        let mut should_block1 = Box::pin(mgr.open());
+        let mut should_block2 = Box::pin(mgr.open());
+        assert!(is_pending(&mut should_block0));
+        assert!(is_pending(&mut should_block1));
+        assert!(is_pending(&mut should_block2));
+
+        // close the oldest transactions to elicit different unblocking behaviors
+        drop(txns.swap_remove(2));
+        assert!(is_pending(&mut should_block0));
+        assert!(is_pending(&mut should_block1));
+        assert!(is_pending(&mut should_block2));
+
+        drop(txns.swap_remove(0));
+        should_block0
+            .now_or_never()
+            .expect("0 should have been unblocked");
+        assert!(is_pending(&mut should_block1));
+        assert!(is_pending(&mut should_block2));
+
+        drop(txns.swap_remove(1));
+        should_block1
+            .now_or_never()
+            .expect("1 should have been unblocked");
+        should_block2
+            .now_or_never()
+            .expect("2 should have been unblocked");
+
+        drop(txns);
     }
 }
