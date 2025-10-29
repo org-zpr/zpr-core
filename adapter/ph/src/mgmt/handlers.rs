@@ -909,46 +909,8 @@ pub async fn handle_bind_actor_address_request(
         }
 
         PhMode::Adapter => {
-            // form PEP
-            let pep = adapter_tables::DltPep {
-                compression_mode,
-                five_tuple,
-            };
-
-            // TODO: reverse path
-
-            // attempt to insert into DLT
-            match asm.dlt.insert(pep) {
-                Ok(tid) => {
-                    // success; respond with tether ID
-                    // TODO: maybe tick a counter somewhere?
-                    zdp::ZdpBindActorAddressResponseHeader {
-                        status_code: zdp::ResponseCode::Success,
-                        info_len: 0,
-                    }
-                    .write_to_buf(&mut rsp_pkt)
-                    .unwrap();
-
-                    ingress_tether_id = tid;
-                }
-
-                Err(()) => {
-                    // DLT full; respond with error message
-                    // TODO: maybe tick a counter somewhere?
-                    let message = "DLT full";
-
-                    zdp::ZdpBindActorAddressResponseHeader {
-                        status_code: zdp::ResponseCode::Other,
-                        info_len: message.len() as u8,
-                    }
-                    .write_to_buf(&mut rsp_pkt)
-                    .unwrap();
-
-                    rsp_pkt.put(message.as_bytes());
-
-                    ingress_tether_id = 0;
-                }
-            }
+            error!(target: ZDP, "Link {ingress_link_id}: received BindActorAddress message on adapter");
+            return Err(HandleMgmtError::MessageNotPermitted);
         }
     }
 
@@ -995,8 +957,6 @@ pub async fn handle_bind_egress_stream_request(
 
     let five_tuple = *pkt.metadata().five_tuple();
 
-    let packet_body: Vec<u8> = pkt.body().to_vec(); // copy to send to visa service
-
     let compression_mode = hdr.compression_mode;
 
     let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
@@ -1017,121 +977,8 @@ pub async fn handle_bind_egress_stream_request(
 
     match asm.ph_mode {
         PhMode::Node => {
-            // TODO: errors need more consideration here
-            match super::dock::bind_actor_address(
-                asm,
-                ingress_link_id,
-                compression_mode,
-                five_tuple,
-                packet_body,
-            )
-            .await
-            {
-                Ok(ingress_tid) => {
-                    // success; respond with ingress tether ID
-                    zdp::ZdpBindEgressStreamResponseHeader {
-                        status_code: zdp::ResponseCode::Success,
-                        info_len: 0,
-                    }
-                    .write_to_buf(&mut rsp_pkt)
-                    .unwrap();
-
-                    ingress_tether_id = ingress_tid;
-                }
-
-                Err(super::dock::BindActorAddressError::PolicyError) => {
-                    // send error to requestor
-                    let message = "policy error";
-
-                    zdp::ZdpBindEgressStreamResponseHeader {
-                        status_code: zdp::ResponseCode::Other,
-                        info_len: message.len() as u8,
-                    }
-                    .write_to_buf(&mut rsp_pkt)
-                    .unwrap();
-
-                    rsp_pkt.put(message.as_bytes());
-
-                    ingress_tether_id = 0;
-                }
-
-                Err(super::dock::BindActorAddressError::ParseError(error)) => {
-                    // send error to requestor
-                    zdp::ZdpBindEgressStreamResponseHeader {
-                        status_code: zdp::ResponseCode::Other,
-                        info_len: error.len() as u8,
-                    }
-                    .write_to_buf(&mut rsp_pkt)
-                    .unwrap();
-
-                    rsp_pkt.put(error.as_bytes());
-
-                    ingress_tether_id = 0;
-                }
-
-                Err(super::dock::BindActorAddressError::AddRouteError(
-                    assembly::AddRouteError::PftFull,
-                )) => {
-                    // PFT full; respond with error message
-                    // TODO: maybe tick a counter somewhere?
-                    let message = "PFT full";
-
-                    zdp::ZdpBindEgressStreamResponseHeader {
-                        status_code: zdp::ResponseCode::Other,
-                        info_len: message.len() as u8,
-                    }
-                    .write_to_buf(&mut rsp_pkt)
-                    .unwrap();
-
-                    rsp_pkt.put(message.as_bytes());
-
-                    ingress_tether_id = 0;
-                }
-
-                Err(super::dock::BindActorAddressError::AddRouteError(
-                    assembly::AddRouteError::PeerGone,
-                )) => {
-                    // peer went away; don't bother responding
-                    return Ok(());
-                }
-
-                Err(super::dock::BindActorAddressError::AddRouteError(
-                    assembly::AddRouteError::VisaGone,
-                )) => {
-                    // send error to requestor
-                    let message = "policy error";
-
-                    zdp::ZdpBindEgressStreamResponseHeader {
-                        status_code: zdp::ResponseCode::Other,
-                        info_len: message.len() as u8,
-                    }
-                    .write_to_buf(&mut rsp_pkt)
-                    .unwrap();
-
-                    rsp_pkt.put(message.as_bytes());
-
-                    ingress_tether_id = 0;
-                }
-
-                Err(super::dock::BindActorAddressError::AddRouteError(
-                    assembly::AddRouteError::BindFailed(err),
-                )) => {
-                    // unable to bind next-hop; respond with error message
-                    // TODO: maybe tick a counter somewhere?
-                    let message = format!("unable to bind next-hop: {}", err);
-
-                    zdp::ZdpBindEgressStreamResponseHeader {
-                        status_code: zdp::ResponseCode::Other,
-                        info_len: message.len() as u8,
-                    }
-                    .write_to_buf(&mut rsp_pkt)
-                    .unwrap();
-
-                    rsp_pkt.put(message.as_bytes());
-
-                    ingress_tether_id = 0;
-                }
-            }
+            error!(target: ZDP, "Link {ingress_link_id}: received BindEgressStream message on node");
+            return Err(HandleMgmtError::MessageNotPermitted);
         }
 
         PhMode::Adapter => {
