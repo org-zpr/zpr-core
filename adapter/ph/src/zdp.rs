@@ -28,6 +28,8 @@ pub enum ZdpPacketType {
     //AuthenticationRequest = 15,  // unused/deprecated
     SetPathMtu = 16,
     //AuthenticationResponse = 17,  // unused/deprecated
+    BindEgressStreamRequest = 19,  // TODO: add to RFC 17
+    BindEgressStreamResponse = 20, // TODO: add to RFC 17
 
     // Not flow-based
     ZprArp = 128,
@@ -238,6 +240,23 @@ pub struct ZdpBindActorAddressRequestHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBindActorAddressResponseHeader {
+    pub status_code: ResponseCode,
+    pub info_len: u8,
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpBindEgressStreamRequestHeader {
+    pub ip_version: zpr::L3Type,
+    pub compression_mode: zpr::CompressionMode,
+    // Followed in memory by:
+    // - <PACKET BODY starting with IP header>
+    // (source/dest addresses and layer4 protocol must be extracted from the IP header in the packet)
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpBindEgressStreamResponseHeader {
     pub status_code: ResponseCode,
     pub info_len: u8,
 }

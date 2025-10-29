@@ -426,7 +426,7 @@ impl Assembly {
                     )
                 })?;
         } else {
-            egress_tether_id = mgmt::requests::send_bind_actor_address_request(
+            egress_tether_id = mgmt::requests::send_bind_egress_stream_request(
                 self,
                 egress_link_id.get(),
                 compression_mode,
