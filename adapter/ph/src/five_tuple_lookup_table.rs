@@ -1,3 +1,4 @@
+use crate::defs::FiveTuple;
 use crate::net_defs::{IpAddress, IpProtocol};
 use crate::rcu::RcuBox;
 use crate::visa_table::Visa;
@@ -5,9 +6,11 @@ use crate::visa_table::Visa;
 use ip_network_table_deps_treebitmap::IpLookupTable;
 use range_set_blaze::RangeMapBlaze;
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use zpr::{L3Type, VisaId};
 
+// TODO wrap inner structures in Arcs, will make re-creation more efficient
+// TODO perhaps change final vec from a vec of tuples to a vec of structs, easier to understand resulting code
 pub type FiveTupleLookup = HashMap<
     IpAddress,
     IpLookupTable<Ipv6Addr, RangeMapBlaze<u16, RangeMapBlaze<u16, Vec<(IpProtocol, VisaId)>>>>,
@@ -66,6 +69,7 @@ impl FiveTupleLookupTable {
                 _ => None,
             };
 
+            // TODO This is quite inefficient, improve
             // Try to add to hash table, if there is a collision, combine the tables, then add the combined table
             match hash_table.insert(five_tuple.dst_address, ip_table) {
                 None => (),
@@ -131,12 +135,36 @@ impl FiveTupleLookupTable {
             table: RcuBox::new(hash_table),
         }
     }
+
+    pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
+        match self.table.get().get(&ft.dst_address) {
+            None => return None,
+            Some(src_addr_table) => {
+                return match src_addr_table.longest_match(Ipv6Addr::from(ft.src_address)) {
+                    None => None,
+                    Some(dst_port_table) => match dst_port_table.2.get(ft.dst_port) {
+                        None => None,
+                        Some(src_port_table) => match src_port_table.get(ft.src_port) {
+                            None => None,
+                            Some(proto_vec) => {
+                                for elem in proto_vec {
+                                    if elem.0 == ft.l4_protocol {
+                                        return Some(elem.1);
+                                    }
+                                }
+                                return None;
+                            }
+                        },
+                    },
+                };
+            }
+        };
+    }
 }
 
 mod tests {
     use super::*;
 
-    use crate::defs::FiveTuple;
     use crate::net_defs::ip_number;
     use libnode::vsapi;
 
@@ -882,5 +910,345 @@ mod tests {
             un_rcu_table.get(&IpAddress::from(dst_addr2)).unwrap().len(),
             1
         );
+    }
+
+    #[test]
+    fn test_exact_match_visa() {
+        let src_addr = [1u8; 16];
+        let dst_addr = [2u8; 16];
+
+        let l4proto = vsapi::PEPIndex::TCP;
+        let src_port = 10;
+        let dst_port = 11;
+        let src_dst =
+            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
+        let visa: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto,
+            src_dst,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let v = Visa::new(visa);
+
+        let ft = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
+        // assert_eq!(Visa::extract_five_tuple(&v.visa.unwrap()), ft);
+
+        let mut hash: HashMap<VisaId, Visa> = HashMap::new();
+        hash.insert(12, v);
+
+        let table = FiveTupleLookupTable::new(hash);
+
+        assert_eq!(table.find_match(ft), Some(12))
+    }
+
+    #[test]
+    fn test_no_visa_match_multiple_visas() {
+        let src_addr = [1u8; 16];
+        let dst_addr = [2u8; 16];
+
+        let l4proto = vsapi::PEPIndex::TCP;
+        let src_port = 10;
+        let dst_port = 11;
+        let src_dst =
+            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
+        
+        let ft = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
+
+        let l4proto_diff = vsapi::PEPIndex::UDP;
+        let src_port_diff = 13;
+        let src_diff_dst = vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port_diff, dst_port, None, None);
+        let dst_port_diff = 14;
+        let src_dst_diff = vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port_diff, None, None);
+        let src_addr_diff = [3u8; 16];
+        let dst_addr_diff = [4u8; 16];
+        
+        let visa_diff_proto: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto_diff,
+            src_dst.clone(),
+            None,
+            None,
+            None,
+            None,
+        );
+        let v_diff_proto = Visa::new(visa_diff_proto);
+
+        let visa_diff_src_port: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto,
+            src_diff_dst,
+            None,
+            None,
+            None,
+            None,
+        );
+        let v_diff_src_port = Visa::new(visa_diff_src_port);
+
+        let visa_diff_dst_port: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto,
+            src_dst_diff,
+            None,
+            None,
+            None,
+            None,
+        );
+        let v_diff_dst_port = Visa::new(visa_diff_dst_port);
+
+        let visa_diff_src_addr: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr_diff.to_vec(),
+            dst_addr.to_vec(),
+            l4proto,
+            src_dst.clone(),
+            None,
+            None,
+            None,
+            None,
+        );
+        let v_diff_src_addr = Visa::new(visa_diff_src_addr);
+
+        let visa_diff_dst_addr: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr_diff.to_vec(),
+            l4proto,
+            src_dst.clone(),
+            None,
+            None,
+            None,
+            None,
+        );
+        let v_diff_dst_addr = Visa::new(visa_diff_dst_addr);
+
+
+        // assert_eq!(Visa::extract_five_tuple(&v.visa.unwrap()), ft);
+
+        let mut hash: HashMap<VisaId, Visa> = HashMap::new();
+        hash.insert(15, v_diff_proto);
+        hash.insert(16, v_diff_src_port);
+        hash.insert(17, v_diff_dst_port);
+        hash.insert(18, v_diff_src_addr);
+        hash.insert(19, v_diff_dst_addr);
+
+        let table = FiveTupleLookupTable::new(hash);
+
+        assert_eq!(table.find_match(ft), None);
+    }
+
+    #[test]
+    fn test_no_visa_match_multiple_fts() {
+        let src_addr = [1u8; 16];
+        let dst_addr = [2u8; 16];
+
+        let l4proto = vsapi::PEPIndex::TCP;
+        let src_port = 10;
+        let dst_port = 11;
+        let src_dst =
+            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
+        let visa: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto,
+            src_dst,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let v = Visa::new(visa);
+
+        let mut hash: HashMap<VisaId, Visa> = HashMap::new();
+        hash.insert(15, v);
+        let table = FiveTupleLookupTable::new(hash);
+
+        let src_port_diff = 13;
+        let dst_port_diff = 14;
+        let src_addr_diff = [3u8; 16];
+        let dst_addr_diff = [4u8; 16];
+
+        let ft_diff_proto = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::UDP, src_port as u16, dst_port as u16);
+        let ft_diff_src_port = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port_diff as u16, dst_port as u16);
+        let ft_diff_dst_port = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port_diff as u16);
+        let ft_diff_src_addr = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr_diff), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
+        let ft_diff_dst_addr = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr_diff), ip_number::TCP, src_port as u16, dst_port as u16);
+
+        assert_eq!(table.find_match(ft_diff_proto), None);
+        assert_eq!(table.find_match(ft_diff_src_port), None);
+        assert_eq!(table.find_match(ft_diff_dst_port), None);
+        assert_eq!(table.find_match(ft_diff_src_addr), None);
+        assert_eq!(table.find_match(ft_diff_dst_addr), None);
+    }
+
+    #[test]
+    fn test_match_correct_visa() {
+        let src_addr = [1u8; 16];
+        let dst_addr = [2u8; 16];
+
+        let l4proto = vsapi::PEPIndex::TCP;
+        let src_port = 10;
+        let dst_port = 11;
+        let src_dst =
+            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
+        
+        let ft = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
+
+        let l4proto_diff = vsapi::PEPIndex::UDP;
+        let src_port_diff = 13;
+        let src_diff_dst = vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port_diff, dst_port, None, None);
+        let dst_port_diff = 14;
+        let src_dst_diff = vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port_diff, None, None);
+        let src_addr_diff = [3u8; 16];
+        let dst_addr_diff = [4u8; 16];
+        
+        let visa_diff_proto: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto_diff,
+            src_dst.clone(),
+            None,
+            None,
+            None,
+            None,
+        );
+        let v_diff_proto = Visa::new(visa_diff_proto);
+
+        let visa_diff_src_port: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto,
+            src_diff_dst,
+            None,
+            None,
+            None,
+            None,
+        );
+        let v_diff_src_port = Visa::new(visa_diff_src_port);
+
+        let visa_diff_dst_port: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto,
+            src_dst_diff,
+            None,
+            None,
+            None,
+            None,
+        );
+        let v_diff_dst_port = Visa::new(visa_diff_dst_port);
+
+        let visa_diff_src_addr: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr_diff.to_vec(),
+            dst_addr.to_vec(),
+            l4proto,
+            src_dst.clone(),
+            None,
+            None,
+            None,
+            None,
+        );
+        let v_diff_src_addr = Visa::new(visa_diff_src_addr);
+
+        let visa_diff_dst_addr: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr_diff.to_vec(),
+            l4proto,
+            src_dst.clone(),
+            None,
+            None,
+            None,
+            None,
+        );
+        let v_diff_dst_addr = Visa::new(visa_diff_dst_addr);
+
+        let mut hash: HashMap<VisaId, Visa> = HashMap::new();
+        hash.insert(15, v_diff_proto);
+        hash.insert(16, v_diff_src_port);
+        hash.insert(17, v_diff_dst_port);
+        hash.insert(18, v_diff_src_addr);
+        hash.insert(19, v_diff_dst_addr);
+
+        let table = FiveTupleLookupTable::new(hash);
+
+        let ft_diff_proto = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::UDP, src_port as u16, dst_port as u16);
+        let ft_diff_src_port = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port_diff as u16, dst_port as u16);
+        let ft_diff_dst_port = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port_diff as u16);
+        let ft_diff_src_addr = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr_diff), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
+        let ft_diff_dst_addr = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr_diff), ip_number::TCP, src_port as u16, dst_port as u16);
+    
+        assert_eq!(table.find_match(ft_diff_proto), Some(15));
+        assert_eq!(table.find_match(ft_diff_src_port), Some(16));
+        assert_eq!(table.find_match(ft_diff_dst_port), Some(17));
+        assert_eq!(table.find_match(ft_diff_src_addr), Some(18));
+        assert_eq!(table.find_match(ft_diff_dst_addr), Some(19));
+        assert_eq!(table.find_match(ft), None);
+
     }
 }
