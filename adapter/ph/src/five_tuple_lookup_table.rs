@@ -1345,4 +1345,228 @@ mod tests {
         assert_eq!(table.find_match(ft_diff_dst_addr), Some(19));
         assert_eq!(table.find_match(ft), None);
     }
+
+    #[test]
+    fn test_wildcarded_src_ports() {
+        let src_addr = [1u8; 16];
+        let dst_addr = [2u8; 16];
+
+        let l4proto = vsapi::PEPIndex::TCP;
+        let src_port = 0;
+        let dst_port = 11;
+        let src_dst =
+            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
+        let visa: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto,
+            src_dst,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let v = Visa::new(visa);
+
+        // let ft = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
+        // assert_eq!(Visa::extract_five_tuple(&v.visa.unwrap()), ft);
+
+        let mut hash: HashMap<VisaId, Visa> = HashMap::new();
+        hash.insert(12, v);
+
+        let table = FiveTupleLookupTable::new(&hash);
+
+        let ft1 = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            3423,
+            dst_port as u16,
+        );
+        let ft2 = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            1,
+            dst_port as u16,
+        );
+        let ft3 = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            65535,
+            dst_port as u16,
+        );
+        let ft4 = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            43211,
+            dst_port as u16,
+        );
+        assert_eq!(table.find_match(ft1), Some(12));
+        assert_eq!(table.find_match(ft2), Some(12));
+        assert_eq!(table.find_match(ft3), Some(12));
+        assert_eq!(table.find_match(ft4), Some(12));
+        let un_rcu_table = table.table.get();
+        assert_eq!(
+            un_rcu_table
+                .get(&IpAddress::from(dst_addr))
+                .unwrap()
+                .exact_match(
+                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    128
+                )
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            un_rcu_table
+                .get(&IpAddress::from(dst_addr))
+                .unwrap()
+                .exact_match(
+                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    128
+                )
+                .unwrap()
+                .get(dst_port as u16)
+                .unwrap()
+                .len(),
+            65536
+        );
+        assert_eq!(
+            un_rcu_table
+                .get(&IpAddress::from(dst_addr))
+                .unwrap()
+                .exact_match(
+                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    128
+                )
+                .unwrap()
+                .get(dst_port as u16)
+                .unwrap()
+                .get(5411).unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_wildcarded_dst_ports() {
+        let src_addr = [1u8; 16];
+        let dst_addr = [2u8; 16];
+
+        let l4proto = vsapi::PEPIndex::TCP;
+        let src_port = 10;
+        let dst_port = 0;
+        let src_dst =
+            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
+        let visa: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto,
+            src_dst,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let v = Visa::new(visa);
+
+        // let ft = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
+        // assert_eq!(Visa::extract_five_tuple(&v.visa.unwrap()), ft);
+
+        let mut hash: HashMap<VisaId, Visa> = HashMap::new();
+        hash.insert(12, v);
+
+        let table = FiveTupleLookupTable::new(&hash);
+
+        let ft1 = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            src_port as u16,
+            3423,
+        );
+        let ft2 = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            src_port as u16,
+            1,
+        );
+        let ft3 = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            src_port as u16,
+            65535,
+        );
+        let ft4 = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            src_port as u16,
+            43211,
+        );
+        assert_eq!(table.find_match(ft1), Some(12));
+        assert_eq!(table.find_match(ft2), Some(12));
+        assert_eq!(table.find_match(ft3), Some(12));
+        assert_eq!(table.find_match(ft4), Some(12));
+        let un_rcu_table = table.table.get();
+        assert_eq!(
+            un_rcu_table
+                .get(&IpAddress::from(dst_addr))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            un_rcu_table
+                .get(&IpAddress::from(dst_addr))
+                .unwrap()
+                .exact_match(
+                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    128
+                )
+                .unwrap()
+                .len(),
+            65536
+        );
+        assert_eq!(
+            un_rcu_table
+                .get(&IpAddress::from(dst_addr))
+                .unwrap()
+                .exact_match(
+                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    128
+                )
+                .unwrap()
+                .get(4321)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
 }
