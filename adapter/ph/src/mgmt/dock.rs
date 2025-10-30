@@ -45,10 +45,7 @@ pub async fn bind_actor_address(
 
     if let Some(matched) = asm.visa_table.read().await.match_traffic(&five_tuple) {
         // We matched a visa we already have.
-        if matched.len() > 1 {
-            warn!(target: FLOW_MGMT, "multiple visas matched for {five_tuple}, using the first one ({matched:?})");
-        }
-        let matched_visa_id = matched[0];
+        let matched_visa_id = matched;
         let egress_link_id_query = visa_mgmt::get_egress_link_for_visa(asm, matched_visa_id).await;
         match egress_link_id_query {
             Ok(link_id) => {

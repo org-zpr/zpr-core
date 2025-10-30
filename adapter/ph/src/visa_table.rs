@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 use crate::defs::FiveTuple;
+use crate::five_tuple_lookup_table::FiveTupleLookupTable;
 use crate::logging::targets::VISA_MGMT;
 use crate::net_defs::{ip_number, IpAddress};
 use crate::peer_table;
@@ -39,6 +40,7 @@ pub enum VisaTableError {
 /// Struct that holds an instance of a visa local to a Node
 #[derive(Default)]
 pub struct Visa {
+    // TODO add methods so that these don't have to be made pub
     pub visa: Option<vsapi::Visa>,
     streams: Vec<ForwardingEntry>,
     pub ftuple: Option<FiveTuple>,
@@ -211,7 +213,7 @@ impl Visa {
 pub struct VisaTable {
     pub table: HashMap<VisaId, Visa>,
     pub timeout_queue: BinaryHeap<VisaTimeout>,
-    // pub lookup_table: FiveTupleLookupTable,
+    pub lookup_table: FiveTupleLookupTable,
 }
 
 impl VisaTable {
@@ -219,7 +221,7 @@ impl VisaTable {
         Self {
             table: HashMap::new(),
             timeout_queue: BinaryHeap::new(),
-            // lookup_table: FiveTupleLookupTable::new(HashMap::new()),
+            lookup_table: FiveTupleLookupTable::new(&HashMap::new()),
         }
     }
 
@@ -277,6 +279,8 @@ impl VisaTable {
             .insert_visa(vs2node)
             .expect("Failed to insert visa->node visa into table");
 
+        visa_table.lookup_table = FiveTupleLookupTable::new(&visa_table.table);
+
         visa_table
     }
 
@@ -293,6 +297,8 @@ impl VisaTable {
         };
         let _ = self.table.insert(visa_id, visa);
         self.timeout_queue.push(timeout);
+
+        self.lookup_table = FiveTupleLookupTable::new(&self.table);
     }
 
     /// Insert a visa from the Visa Service into the Visa Table
@@ -319,24 +325,28 @@ impl VisaTable {
         };
         let _ = self.table.insert(visa_id, visa);
         self.timeout_queue.push(timeout);
+
+        self.lookup_table = FiveTupleLookupTable::new(&self.table);
+
         Ok(visa_id)
     }
 
     /// Match traffic to a visa. Returns all matching visa IDs.
     ///
     /// TODO: This is linear search through all our visas -- we should create an index.
-    pub fn match_traffic(&self, five_tuple: &FiveTuple) -> Option<Vec<VisaId>> {
-        let mut matching_visas = Vec::new();
-        for (visa_id, visa) in self.table.iter() {
-            if visa.match_traffic(five_tuple) {
-                matching_visas.push(*visa_id);
-            }
-        }
-        if matching_visas.is_empty() {
-            None
-        } else {
-            Some(matching_visas)
-        }
+    pub fn match_traffic(&self, five_tuple: &FiveTuple) -> Option<VisaId> {
+        // let mut matching_visas = Vec::new();
+        // for (visa_id, visa) in self.table.iter() {
+        //     if visa.match_traffic(five_tuple) {
+        //         matching_visas.push(*visa_id);
+        //     }
+        // }
+        // if matching_visas.is_empty() {
+        //     None
+        // } else {
+        //     Some(matching_visas)
+        // }
+        self.lookup_table.find_match(*five_tuple)
     }
 
     /// Link a forwarding entry to a given visa
@@ -365,6 +375,8 @@ impl VisaTable {
         };
         visa.remove_forwarding_entries(peer_table);
         info!(target: VISA_MGMT, "Revoked visa {visa_id}");
+        self.lookup_table = FiveTupleLookupTable::new(&self.table);
+
         Ok(())
     }
 
@@ -380,6 +392,7 @@ impl VisaTable {
             // Ignore if the visa was not found, since it might have been previously revoked
             let _ = self.revoke(peer_table, timeout_entry.id);
         }
+        self.lookup_table = FiveTupleLookupTable::new(&self.table);
     }
 
     /// Given a visa ID, look up the visa and return the destination address.
@@ -593,6 +606,6 @@ mod tests {
         };
         let matched = visa_table.match_traffic(&traffic);
         assert!(matched.is_some());
-        assert_eq!(matched.unwrap(), vec![1000]);
+        assert_eq!(matched.unwrap(), 1000);
     }
 }
