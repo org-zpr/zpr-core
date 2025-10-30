@@ -1456,7 +1456,8 @@ mod tests {
                 .unwrap()
                 .get(dst_port as u16)
                 .unwrap()
-                .get(5411).unwrap()
+                .get(5411)
+                .unwrap()
                 .len(),
             1
         );
@@ -1536,10 +1537,7 @@ mod tests {
         assert_eq!(table.find_match(ft4), Some(12));
         let un_rcu_table = table.table.get();
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .len(),
+            un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
             1
         );
         assert_eq!(
