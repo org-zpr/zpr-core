@@ -31,6 +31,7 @@ mod defs;
 mod fastpath;
 mod fastpath_io;
 mod fastpath_worker;
+mod five_tuple_lookup_table;
 mod flow_control;
 mod forwarding_tables;
 mod km;

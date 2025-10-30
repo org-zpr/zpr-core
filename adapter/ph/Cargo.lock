@@ -821,6 +821,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "gen_ops"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "304de19db7028420975a296ab0fcbbc8e69438c4ed254a1e41e2a7f37d5f0e0a"
+
+[[package]]
 name = "generator"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1225,6 +1231,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ip_network_table-deps-treebitmap"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e537132deb99c0eb4b752f0346b6a836200eaaa3516dd7e5514b63930a09e5d"
+
+[[package]]
 name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1437,6 +1449,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-integer"
+version = "0.1.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1603,6 +1624,7 @@ dependencies = [
  "futures",
  "hdrhistogram",
  "io-uring",
+ "ip_network_table-deps-treebitmap",
  "itertools",
  "libc",
  "libnode",
@@ -1611,6 +1633,7 @@ dependencies = [
  "openssl",
  "openssl-sys",
  "rand",
+ "range-set-blaze",
  "reqwest",
  "serde",
  "serde_json",
@@ -1742,6 +1765,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.15",
+]
+
+[[package]]
+name = "range-set-blaze"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "953906b1d974976f882aea72a511bd37c5f633ef17839fd3bf2bd2d18cc101be"
+dependencies = [
+ "gen_ops",
+ "itertools",
+ "num-integer",
+ "num-traits",
 ]
 
 [[package]]

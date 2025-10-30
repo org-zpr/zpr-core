@@ -1,4 +1,4 @@
 build/
 cactl/cmd/cactl/cactl
 target/
-
+*.pcap

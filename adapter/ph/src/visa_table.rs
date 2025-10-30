@@ -39,9 +39,9 @@ pub enum VisaTableError {
 /// Struct that holds an instance of a visa local to a Node
 #[derive(Default)]
 pub struct Visa {
-    visa: Option<vsapi::Visa>,
+    pub visa: Option<vsapi::Visa>,
     streams: Vec<ForwardingEntry>,
-    ftuple: Option<FiveTuple>,
+    pub ftuple: Option<FiveTuple>,
 }
 
 /// Struct for the visa timeout queue
@@ -209,8 +209,9 @@ impl Visa {
 }
 
 pub struct VisaTable {
-    table: HashMap<VisaId, Visa>,
-    timeout_queue: BinaryHeap<VisaTimeout>,
+    pub table: HashMap<VisaId, Visa>,
+    pub timeout_queue: BinaryHeap<VisaTimeout>,
+    // pub lookup_table: FiveTupleLookupTable,
 }
 
 impl VisaTable {
@@ -218,6 +219,7 @@ impl VisaTable {
         Self {
             table: HashMap::new(),
             timeout_queue: BinaryHeap::new(),
+            // lookup_table: FiveTupleLookupTable::new(HashMap::new()),
         }
     }
 
