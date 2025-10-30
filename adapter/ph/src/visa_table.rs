@@ -332,20 +332,7 @@ impl VisaTable {
     }
 
     /// Match traffic to a visa. Returns all matching visa IDs.
-    ///
-    /// TODO: This is linear search through all our visas -- we should create an index.
     pub fn match_traffic(&self, five_tuple: &FiveTuple) -> Option<VisaId> {
-        // let mut matching_visas = Vec::new();
-        // for (visa_id, visa) in self.table.iter() {
-        //     if visa.match_traffic(five_tuple) {
-        //         matching_visas.push(*visa_id);
-        //     }
-        // }
-        // if matching_visas.is_empty() {
-        //     None
-        // } else {
-        //     Some(matching_visas)
-        // }
         self.lookup_table.find_match(*five_tuple)
     }
 
