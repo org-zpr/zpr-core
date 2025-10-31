@@ -11,14 +11,25 @@ use zpr::{L3Type, VisaId};
 
 // TODO wrap inner structures in Arcs, will make re-creation more efficient
 // TODO perhaps change final vec from a vec of tuples to a vec of structs, easier to understand resulting code
-pub type FiveTupleLookup = HashMap<
-    IpAddress,
-    IpLookupTable<Ipv6Addr, RangeMapBlaze<u16, RangeMapBlaze<u16, Vec<(IpProtocol, VisaId)>>>>,
->;
+pub type FiveTupleLookup = HashMap<IpAddress, IpLookupTable<Ipv6Addr, DstPortLevel>>;
 
 pub struct FiveTupleLookupTable {
     table: RcuBox<FiveTupleLookup>,
 }
+
+#[derive(Clone)]
+pub enum DstPortLevel {
+    Wildcard(RangeMapBlaze<u16, Vec<(IpProtocol, VisaId)>>),
+    MultiVal(RangeMapBlaze<u16, RangeMapBlaze<u16, Vec<(IpProtocol, VisaId)>>>),
+    SingleVal((u16, RangeMapBlaze<u16, Vec<(IpProtocol, VisaId)>>)),
+}
+
+// TODO add into DsrPortLevel
+// enum SrcPortLevel {
+//     Wildcard(Vec<(IpProtocol, VisaId)>),
+//     MultiVal(RangeMapBlaze<u16, Vec<(IpProtocol, VisaId)>>),
+//     SingleVal((u16, Vec<(IpProtocol, VisaId)>))
+// }
 
 impl FiveTupleLookupTable {
     // TODO change how construction is done once visas move away from being based on a FiveTuples
@@ -43,13 +54,11 @@ impl FiveTupleLookupTable {
                 src_map.insert(five_tuple.src_port, arr);
             }
 
-            // Create map for dst ports, add map of source ports
-            let mut dst_map = RangeMapBlaze::new();
-            if five_tuple.dst_port == 0 {
-                dst_map.ranges_insert(0..=65535, src_map);
-            } else {
-                dst_map.insert(five_tuple.dst_port, src_map);
-            }
+            // Determine which enum to use for dst level
+            let dst_level = match five_tuple.dst_port {
+                0 => DstPortLevel::Wildcard(src_map),
+                val => DstPortLevel::SingleVal((val, src_map)),
+            };
 
             // Create table of src addresses, add map of destination ports
             // NOTE how large do we expect each IpLookupTable to be? I.E. how many src addresses for each dst address, typically?
@@ -61,10 +70,10 @@ impl FiveTupleLookupTable {
                         .unwrap()
                         .to_ipv6_compatible(),
                     128,
-                    dst_map,
+                    dst_level,
                 ),
                 L3Type::Ipv6 => {
-                    ip_table.insert(Ipv6Addr::from(five_tuple.src_address), 128, dst_map)
+                    ip_table.insert(Ipv6Addr::from(five_tuple.src_address), 128, dst_level)
                 }
                 _ => None,
             };
@@ -83,54 +92,134 @@ impl FiveTupleLookupTable {
                             og_dst_ports.clone(),
                         ) {
                             None => (),
-                            Some(removed_dst_ports) => {
+                            Some(mut removed_dst_ports) => {
                                 let in_table_dst_ports = in_table_src_addrs
                                     .exact_match_mut(og_src_addr, og_mask_len)
                                     .unwrap();
-                                // could probably have more efficiency here if we take advantage of some of the other iterators that RangeMapBlaze provides,
-                                // perhaps try initially to iterate over the ranges
-                                for (og_dst_port, og_src_ports) in removed_dst_ports.iter() {
-                                    // Try to add a dst port, If the dst port is already being used as a key, combine its src port tables
-                                    match in_table_dst_ports
-                                        .insert(og_dst_port, og_src_ports.clone())
-                                    {
-                                        None => (),
-                                        Some(mut removed_src_ports) => {
-                                            let in_table_src_ports =
-                                                in_table_dst_ports.get(og_dst_port).unwrap();
-                                            // have to change the way we have been inserting because RangeMapBlaze does not have a get_mut function
-                                            for (new_src_port, new_protocols) in
-                                                in_table_src_ports.iter()
+                                let new_dst_level =
+                                    // TODO typing here is bad, both of these being mut references leads to lots of cloning,
+                                    // should be better when everything is in an Arc, becuase cloning wil not be a problem
+                                    match (&mut removed_dst_ports, in_table_dst_ports) {
+                                        (
+                                            DstPortLevel::Wildcard(src_port_level1),
+                                            DstPortLevel::Wildcard(src_port_level2),
+                                        ) => DstPortLevel::Wildcard(Self::combine_src_levels(
+                                            src_port_level1,
+                                            src_port_level2,
+                                        )),
+                                        (
+                                            DstPortLevel::Wildcard(src_port_level_wild),
+                                            DstPortLevel::SingleVal((
+                                                dst_port,
+                                                src_port_level_single,
+                                            )),
+                                        )
+                                        | (
+                                            DstPortLevel::SingleVal((
+                                                dst_port,
+                                                src_port_level_single,
+                                            )),
+                                            DstPortLevel::Wildcard(src_port_level_wild),
+                                        ) => {
+                                            let mut dst_level = RangeMapBlaze::new();
+                                            dst_level.ranges_insert(
+                                                0..=65535,
+                                                src_port_level_wild.clone(),
+                                            );
+                                            let intersection = Self::combine_src_levels(
+                                                src_port_level_wild,
+                                                src_port_level_single,
+                                            );
+                                            dst_level.insert(*dst_port, intersection);
+                                            DstPortLevel::MultiVal(dst_level)
+                                        }
+                                        (
+                                            DstPortLevel::Wildcard(src_port_level),
+                                            DstPortLevel::MultiVal(dst_port_level),
+                                        )
+                                        | (
+                                            DstPortLevel::MultiVal(dst_port_level),
+                                            DstPortLevel::Wildcard(src_port_level),
+                                        ) => {
+                                            let mut dst_level = RangeMapBlaze::new();
+                                            dst_level
+                                                .ranges_insert(0..=65535, src_port_level.clone());
+                                            for (port, src_level) in dst_port_level.iter() {
+                                                // We know there will be a collision, so we pre-emptively make the intersection and then insert it
+                                                let intersection = Self::combine_src_levels(
+                                                    src_port_level,
+                                                    &mut src_level.clone(),
+                                                );
+                                                dst_level.insert(port, intersection);
+                                            }
+                                            DstPortLevel::MultiVal(dst_level)
+                                        }
+                                        (
+                                            DstPortLevel::SingleVal((dst_port1, src_port_level1)),
+                                            DstPortLevel::SingleVal((dst_port2, src_port_level2)),
+                                        ) => {
+                                            if dst_port1 == dst_port2 {
+                                                DstPortLevel::SingleVal((
+                                                    *dst_port1,
+                                                    Self::combine_src_levels(
+                                                        src_port_level1,
+                                                        src_port_level2,
+                                                    ),
+                                                ))
+                                            } else {
+                                                let mut dst_level = RangeMapBlaze::new();
+                                                dst_level
+                                                    .insert(*dst_port1, src_port_level1.clone());
+                                                dst_level
+                                                    .insert(*dst_port2, src_port_level2.clone());
+                                                DstPortLevel::MultiVal(dst_level)
+                                            }
+                                        }
+                                        (
+                                            DstPortLevel::SingleVal((dst_port, src_port_level)),
+                                            DstPortLevel::MultiVal(dst_port_level),
+                                        )
+                                        | (
+                                            DstPortLevel::MultiVal(dst_port_level),
+                                            DstPortLevel::SingleVal((dst_port, src_port_level)),
+                                        ) => {
+                                            match dst_port_level
+                                                .insert(*dst_port, src_port_level.clone())
                                             {
-                                                // Try to add a src port, If the src port is already being used as a key, combine its protocol tables
-                                                match removed_src_ports
-                                                    .insert(new_src_port, new_protocols.clone())
+                                                None => (),
+                                                Some(mut removed_src_level) => {
+                                                    let intersection = Self::combine_src_levels(
+                                                        src_port_level,
+                                                        &mut removed_src_level,
+                                                    );
+                                                    dst_port_level.insert(*dst_port, intersection);
+                                                }
+                                            };
+                                            DstPortLevel::MultiVal(dst_port_level.clone())
+                                        }
+                                        (
+                                            DstPortLevel::MultiVal(dst_port_level1),
+                                            DstPortLevel::MultiVal(dst_port_level2),
+                                        ) => {
+                                            for (port, src_level1) in dst_port_level1.iter() {
+                                                match dst_port_level2
+                                                    .insert(port, src_level1.clone())
                                                 {
                                                     None => (),
-                                                    Some(mut proto_arr) => {
-                                                        for new_proto in new_protocols.iter() {
-                                                            let mut exists = false;
-                                                            for old_proto in proto_arr.iter() {
-                                                                if old_proto.0 == new_proto.0 {
-                                                                    exists = true
-                                                                }
-                                                            }
-                                                            if !exists {
-                                                                proto_arr.push(*new_proto)
-                                                            }
-                                                        }
-                                                        removed_src_ports
-                                                            .insert(new_src_port, proto_arr);
+                                                    Some(mut src_level2) => {
+                                                        let intersection = Self::combine_src_levels(
+                                                            &mut src_level1.clone(),
+                                                            &mut src_level2,
+                                                        );
+                                                        dst_port_level2.insert(port, intersection);
                                                     }
                                                 }
                                             }
-                                            // original_src_ports now contains the values from original_src_ports and new_src_ports
-                                            // we don't care about the return value because we know it will be Some(new_src_ports)
-                                            in_table_dst_ports
-                                                .insert(og_dst_port, removed_src_ports.clone());
+                                            DstPortLevel::MultiVal(dst_port_level2.clone())
                                         }
-                                    }
-                                }
+                                    };
+
+                                in_table_src_addrs.insert(og_src_addr, og_mask_len, new_dst_level);
                             }
                         }
                     }
@@ -142,15 +231,45 @@ impl FiveTupleLookupTable {
         }
     }
 
+    fn combine_src_levels(
+        src_level_one: &mut RangeMapBlaze<u16, Vec<(IpProtocol, VisaId)>>,
+        src_level_two: &mut RangeMapBlaze<u16, Vec<(IpProtocol, VisaId)>>,
+    ) -> RangeMapBlaze<u16, Vec<(IpProtocol, VisaId)>> {
+        for (new_src_port, new_protocols) in src_level_two.iter() {
+            // Try to add a src port, If the src port is already being used as a key, combine its protocol tables
+            match src_level_one.insert(new_src_port, new_protocols.clone()) {
+                None => (),
+                Some(mut proto_arr) => {
+                    for new_proto in new_protocols.iter() {
+                        let mut exists = false;
+                        for old_proto in proto_arr.iter() {
+                            if old_proto.0 == new_proto.0 {
+                                exists = true
+                            }
+                        }
+                        if !exists {
+                            proto_arr.push(*new_proto)
+                        }
+                    }
+                    src_level_one.insert(new_src_port, proto_arr);
+                }
+            }
+        }
+
+        src_level_one.clone()
+    }
+
     pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
+        // NOTE I didn't make a subfunction for finding the match for the src_level, even though it is essentially repeated three times
+        // becuase I know this func is all about speed and sometimes passing to another function can cause minor slowdown, not sure
+        // how the rust compiler handles such things or if it is significiant enough to matter, if not I will make a helper func
         match self.table.get().get(&ft.dst_address) {
             None => return None,
             Some(src_addr_table) => {
                 return match src_addr_table.longest_match(Ipv6Addr::from(ft.src_address)) {
                     None => None,
-                    Some(dst_port_table) => match dst_port_table.2.get(ft.dst_port) {
-                        None => None,
-                        Some(src_port_table) => match src_port_table.get(ft.src_port) {
+                    Some(dst_port_table) => match dst_port_table.2 {
+                        DstPortLevel::Wildcard(src_level) => match src_level.get(ft.src_port) {
                             None => None,
                             Some(proto_vec) => {
                                 for elem in proto_vec {
@@ -160,6 +279,34 @@ impl FiveTupleLookupTable {
                                 }
                                 return None;
                             }
+                        },
+                        DstPortLevel::SingleVal((port, src_level)) => match *port == ft.dst_port {
+                            false => None,
+                            true => match src_level.get(ft.src_port) {
+                                None => None,
+                                Some(proto_vec) => {
+                                    for elem in proto_vec {
+                                        if elem.0 == ft.l4_protocol {
+                                            return Some(elem.1);
+                                        }
+                                    }
+                                    return None;
+                                }
+                            },
+                        },
+                        DstPortLevel::MultiVal(dst_level) => match dst_level.get(ft.dst_port) {
+                            None => None,
+                            Some(src_port_table) => match src_port_table.get(ft.src_port) {
+                                None => None,
+                                Some(proto_vec) => {
+                                    for elem in proto_vec {
+                                        if elem.0 == ft.l4_protocol {
+                                            return Some(elem.1);
+                                        }
+                                    }
+                                    return None;
+                                }
+                            },
                         },
                     },
                 };
@@ -213,36 +360,30 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        let src_port_level;
+        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+            .get(&IpAddress::from(dst_addr))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            assert_eq!(*dst, dst_port as u16);
+            src_port_level = Some(src_level)
+        } else {
+            src_port_level = None
+        }
+        assert!(src_port_level.is_some());
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port as u16)
-                .unwrap()[0]
-                .1,
+            src_port_level.unwrap().get(src_port as u16).unwrap()[0].1,
             12
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port as u16)
-                .unwrap()[0]
-                .0,
+            src_port_level.unwrap().get(src_port as u16).unwrap()[0].0,
             ip_number::TCP
         );
     }
@@ -301,7 +442,8 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
-        let proto_vec = un_rcu_table
+        let src_port_level;
+        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -311,10 +453,15 @@ mod tests {
                 128,
             )
             .unwrap()
-            .get(dst_port as u16)
-            .unwrap()
-            .get(src_port as u16)
-            .unwrap();
+        {
+            assert_eq!(*dst, dst_port as u16);
+            src_port_level = Some(src_level)
+        } else {
+            src_port_level = None
+        }
+        assert!(src_port_level.is_some());
+
+        let proto_vec = src_port_level.unwrap().get(src_port as u16).unwrap();
 
         assert_eq!(proto_vec.len(), 2);
 
@@ -391,112 +538,46 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        let src_port_level;
+        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+            .get(&IpAddress::from(dst_addr))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            assert_eq!(*dst, dst_port as u16);
+            src_port_level = Some(src_level)
+        } else {
+            src_port_level = None
+        }
+        assert!(src_port_level.is_some());
+
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port1 as u16)
-                .unwrap()[0]
-                .1,
+            src_port_level.unwrap().get(src_port1 as u16).unwrap()[0].1,
             12
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port1 as u16)
-                .unwrap()[0]
-                .0,
+            src_port_level.unwrap().get(src_port1 as u16).unwrap()[0].0,
             ip_number::TCP
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port2 as u16)
-                .unwrap()[0]
-                .1,
+            src_port_level.unwrap().get(src_port2 as u16).unwrap()[0].1,
             13
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port2 as u16)
-                .unwrap()[0]
-                .0,
+            src_port_level.unwrap().get(src_port2 as u16).unwrap()[0].0,
             ip_number::TCP
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port2 as u16)
-                .unwrap()
-                .len(),
+            src_port_level.unwrap().get(src_port2 as u16).unwrap().len(),
             1
         );
-        assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .len(),
-            2
-        );
-        assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .len(),
-            1
-        );
+        assert_eq!(src_port_level.unwrap().len(), 2);
     }
 
     #[test]
@@ -556,14 +637,26 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        let dst_port_level;
+        if let DstPortLevel::MultiVal(dst_level) = un_rcu_table
+            .get(&IpAddress::from(dst_addr))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            dst_port_level = Some(dst_level)
+        } else {
+            dst_port_level = None
+        }
+        assert!(dst_port_level.is_some());
+
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
+            dst_port_level
                 .unwrap()
                 .get(dst_port1 as u16)
                 .unwrap()
@@ -573,13 +666,7 @@ mod tests {
             12
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
+            dst_port_level
                 .unwrap()
                 .get(dst_port1 as u16)
                 .unwrap()
@@ -589,13 +676,7 @@ mod tests {
             ip_number::TCP
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
+            dst_port_level
                 .unwrap()
                 .get(dst_port2 as u16)
                 .unwrap()
@@ -605,13 +686,7 @@ mod tests {
             13
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
+            dst_port_level
                 .unwrap()
                 .get(dst_port2 as u16)
                 .unwrap()
@@ -621,13 +696,7 @@ mod tests {
             ip_number::TCP
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
+            dst_port_level
                 .unwrap()
                 .get(dst_port1 as u16)
                 .unwrap()
@@ -637,31 +706,10 @@ mod tests {
             1
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port1 as u16)
-                .unwrap()
-                .len(),
+            dst_port_level.unwrap().get(dst_port1 as u16).unwrap().len(),
             1
         );
-        assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .len(),
-            2
-        );
+        assert_eq!(dst_port_level.unwrap().len(), 2);
         assert_eq!(
             un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
             1
@@ -723,68 +771,58 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        let src_port_level1;
+        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+            .get(&IpAddress::from(dst_addr))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            assert_eq!(*dst, dst_port as u16);
+            src_port_level1 = Some(src_level)
+        } else {
+            src_port_level1 = None
+        }
+        assert!(src_port_level1.is_some());
+
+        let src_port_level2;
+        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+            .get(&IpAddress::from(dst_addr))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            assert_eq!(*dst, dst_port as u16);
+            src_port_level2 = Some(src_level)
+        } else {
+            src_port_level2 = None
+        }
+        assert!(src_port_level2.is_some());
+
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port as u16)
-                .unwrap()[0]
-                .1,
+            src_port_level1.unwrap().get(src_port as u16).unwrap()[0].1,
             12
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port as u16)
-                .unwrap()[0]
-                .0,
+            src_port_level1.unwrap().get(src_port as u16).unwrap()[0].0,
             ip_number::TCP
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port as u16)
-                .unwrap()[0]
-                .1,
+            src_port_level2.unwrap().get(src_port as u16).unwrap()[0].1,
             13
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port as u16)
-                .unwrap()[0]
-                .0,
+            src_port_level2.unwrap().get(src_port as u16).unwrap()[0].0,
             ip_number::TCP
         );
         assert_eq!(
@@ -848,68 +886,58 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        let src_port_level1;
+        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+            .get(&IpAddress::from(dst_addr1))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            assert_eq!(*dst, dst_port as u16);
+            src_port_level1 = Some(src_level)
+        } else {
+            src_port_level1 = None
+        }
+        assert!(src_port_level1.is_some());
+
+        let src_port_level2;
+        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+            .get(&IpAddress::from(dst_addr2))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            assert_eq!(*dst, dst_port as u16);
+            src_port_level2 = Some(src_level)
+        } else {
+            src_port_level2 = None
+        }
+        assert!(src_port_level2.is_some());
+
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr1))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port as u16)
-                .unwrap()[0]
-                .1,
+            src_port_level1.unwrap().get(src_port as u16).unwrap()[0].1,
             12
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr1))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port as u16)
-                .unwrap()[0]
-                .0,
+            src_port_level1.unwrap().get(src_port as u16).unwrap()[0].0,
             ip_number::TCP
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr2))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port as u16)
-                .unwrap()[0]
-                .1,
+            src_port_level2.unwrap().get(src_port as u16).unwrap()[0].1,
             13
         );
         assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr2))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(src_port as u16)
-                .unwrap()[0]
-                .0,
+            src_port_level2.unwrap().get(src_port as u16).unwrap()[0].0,
             ip_number::TCP
         );
         assert_eq!(un_rcu_table.len(), 2);
@@ -1425,48 +1453,28 @@ mod tests {
         assert_eq!(table.find_match(ft3), Some(12));
         assert_eq!(table.find_match(ft4), Some(12));
         let un_rcu_table = table.table.get();
-        assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .len(),
-            1
-        );
-        assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .len(),
-            65536
-        );
-        assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(dst_port as u16)
-                .unwrap()
-                .get(5411)
-                .unwrap()
-                .len(),
-            1
-        );
+
+        let src_port_level;
+        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+            .get(&IpAddress::from(dst_addr))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            assert_eq!(*dst, dst_port as u16);
+            src_port_level = Some(src_level)
+        } else {
+            src_port_level = None
+        }
+        assert!(src_port_level.is_some());
+
+        assert_eq!(src_port_level.unwrap().len(), 65536);
+        assert_eq!(src_port_level.unwrap().get(5411).unwrap().len(), 1);
     }
 
     #[test]
@@ -1542,35 +1550,30 @@ mod tests {
         assert_eq!(table.find_match(ft3), Some(12));
         assert_eq!(table.find_match(ft4), Some(12));
         let un_rcu_table = table.table.get();
+
+        let src_port_level;
+        if let DstPortLevel::Wildcard(src_level) = un_rcu_table
+            .get(&IpAddress::from(dst_addr))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            src_port_level = Some(src_level)
+        } else {
+            src_port_level = None
+        }
+        assert!(src_port_level.is_some());
+
         assert_eq!(
             un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
             1
         );
-        assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .len(),
-            65536
-        );
-        assert_eq!(
-            un_rcu_table
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
-                    128
-                )
-                .unwrap()
-                .get(4321)
-                .unwrap()
-                .len(),
-            1
-        );
+
+        assert_eq!(src_port_level.unwrap().len(), 1);
     }
 }
