@@ -20,5 +20,5 @@ pub enum RpcCommands {
     StartLink,
     StopLink,
     ResetLink,
-    SetLogging
+    SetLogging,
 }

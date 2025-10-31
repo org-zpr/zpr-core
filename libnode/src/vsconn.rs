@@ -416,7 +416,7 @@ s5JVZ48=
                 .unwrap()
                 .as_millis();
             let dir = env::temp_dir();
-            let num: u32 = rng.gen();
+            let num: u32 = rng.r#gen();
             let path = dir.join(format!("org_zpr_node_vs_test_{}_{}.pem", num, tstamp));
             fs::write(&path, contents).expect("Unable to write file");
             TempFile {
