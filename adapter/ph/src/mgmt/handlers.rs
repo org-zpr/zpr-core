@@ -10,6 +10,7 @@ use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::IpAddress;
 use crate::packet::Packet;
+use crate::tc;
 use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
 use bytes::{Buf, BufMut};
@@ -937,27 +938,14 @@ pub async fn handle_bind_egress_stream_request(
         return Err(HandleMgmtError::BadStructure);
     };
 
-    let classification = match classifier::classify(&mut pkt) {
-        Ok(cls) => cls,
-        Err(_why) => {
-            return Err(HandleMgmtError::BadStructure);
-        }
-    };
-
-    match classification {
-        classifier::ClassifierResult::OK => (),
-        classifier::ClassifierResult::UnclassifiedL4 => {
-            warn!(target: ZDP, "Link {}: unsupported IP protocol {}", pkt.metadata().ingress_link_id, pkt.metadata().get_l4_protocol());
-            return Err(HandleMgmtError::BadStructure);
-        }
-        _ => {
-            return Err(HandleMgmtError::BadStructure);
-        }
+    if hdr.tcst != zpr::Tcst::Ip5Tuple {
+        warn!(target: ZDP, "Link {}: unsupported TCST {}", pkt.metadata().ingress_link_id, hdr.tcst.0);
+        return Err(HandleMgmtError::BadStructure);
     }
 
-    let five_tuple = *pkt.metadata().five_tuple();
-
-    let compression_mode = hdr.compression_mode;
+    let Ok(tc) = tc::Ip5TupleTc::deserialize(&mut pkt) else {
+        return Err(HandleMgmtError::BadStructure);
+    };
 
     let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
         // who sent this??
@@ -967,7 +955,8 @@ pub async fn handle_bind_egress_stream_request(
 
     debug!(
         target: ZDP,
-        "Link {}: handlers.handle_bind_egress_stream_request -- five_tuple {five_tuple}", ingress_link_id.get(),
+        "Link {}: handlers.handle_bind_egress_stream_request -- five_tuple {}",
+        ingress_link_id.get(), tc.five_tuple()
     );
 
     // recycle request buffer for response
@@ -984,8 +973,8 @@ pub async fn handle_bind_egress_stream_request(
         PhMode::Adapter => {
             // form PEP
             let pep = adapter_tables::DltPep {
-                compression_mode,
-                five_tuple,
+                compression_mode: tc.compression_mode(),
+                five_tuple: *tc.five_tuple(),
             };
 
             // TODO: reverse path

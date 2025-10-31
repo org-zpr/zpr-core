@@ -8,6 +8,7 @@ use super::core::{self, Sent};
 use crate::counters::ManagementCounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
+use crate::tc;
 use crate::zdp;
 use crate::{assembly::Assembly, auth};
 
@@ -353,9 +354,10 @@ pub async fn send_bind_egress_stream_request(
     link_id: zpr::LinkId,
     compression_mode: zpr::CompressionMode,
     five_tuple: FiveTuple,
-    packet_body: Vec<u8>,
 ) -> Result<zpr::StreamId, BindActorAddressError> {
-    info!(target: ZDP, "Link {link_id}: sending BindEgressStreamRequest for {five_tuple} with compression mode {compression_mode} packet_body size {}", packet_body.len());
+    info!(target: ZDP, "Link {link_id}: sending BindEgressStreamRequest for {five_tuple} with compression mode {compression_mode}");
+
+    let tc = tc::Ip5TupleTc::new_with_compression_mode(compression_mode, five_tuple);
 
     let (sender, receiver) = tokio::sync::oneshot::channel();
 
@@ -375,11 +377,8 @@ pub async fn send_bind_egress_stream_request(
 
     let mut req = core::new_heap_packet();
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindEgressStreamRequestHeader>();
-    bind_req_hdr.ip_version = five_tuple.l3_type;
-    bind_req_hdr.compression_mode = compression_mode;
-
-    // No longer append source/dest addresses or layer4 protocol; just append the packet body
-    req.put_slice(&packet_body);
+    bind_req_hdr.tcst = zpr::Tcst::Ip5Tuple;
+    tc.serialize(&mut req);
 
     core::send_per_flow_txn_mgmt(
         asm,

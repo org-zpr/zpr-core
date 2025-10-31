@@ -9,7 +9,7 @@ aarc = { version = "0.3", optional = true }
 arrayref = { version = "0.3.7" }
 base64 = "0.22.1"
 blake3 = { version = "1.5.4" }
-bytes = { version = "1.7.1" }
+bytes = { version = "1.10" }
 cbpf-rs = { path = "../../cbpf-rs" }
 chrono = "0.4.39"
 clap = { version = "4.5.7", features = ["derive", "env"] }

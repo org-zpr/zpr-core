@@ -58,6 +58,7 @@ mod set_capture_file_worker;
 mod signal_worker;
 mod special_peers;
 mod sys;
+mod tc;
 mod test_packet;
 mod tlv;
 mod tun_ctl;
