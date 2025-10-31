@@ -73,31 +73,37 @@ impl FiveTupleLookupTable {
             // Try to add to hash table, if there is a collision, combine the tables, then add the combined table
             match hash_table.insert(five_tuple.dst_address, ip_table) {
                 None => (),
-                Some(original_src_addrs) => {
-                    let new_src_addrs = hash_table.get_mut(&five_tuple.dst_address).unwrap();
-                    for (og_src_addr, og_mask_len, og_dst_ports) in original_src_addrs.iter() {
+                Some(removed_src_addrs) => {
+                    let in_table_src_addrs = hash_table.get_mut(&five_tuple.dst_address).unwrap();
+                    for (og_src_addr, og_mask_len, og_dst_ports) in removed_src_addrs.iter() {
                         // Try to add a source addresses, If the src address is already being used as a key, combine its dst port tables
-                        match new_src_addrs.insert(og_src_addr, og_mask_len, og_dst_ports.clone()) {
+                        match in_table_src_addrs.insert(
+                            og_src_addr,
+                            og_mask_len,
+                            og_dst_ports.clone(),
+                        ) {
                             None => (),
-                            Some(original_dst_ports) => {
-                                let new_dst_ports = new_src_addrs
+                            Some(removed_dst_ports) => {
+                                let in_table_dst_ports = in_table_src_addrs
                                     .exact_match_mut(og_src_addr, og_mask_len)
                                     .unwrap();
                                 // could probably have more efficiency here if we take advantage of some of the other iterators that RangeMapBlaze provides,
                                 // perhaps try initially to iterate over the ranges
-                                for (og_dst_port, og_src_ports) in original_dst_ports.iter() {
+                                for (og_dst_port, og_src_ports) in removed_dst_ports.iter() {
                                     // Try to add a dst port, If the dst port is already being used as a key, combine its src port tables
-                                    match new_dst_ports.insert(og_dst_port, og_src_ports.clone()) {
+                                    match in_table_dst_ports
+                                        .insert(og_dst_port, og_src_ports.clone())
+                                    {
                                         None => (),
-                                        Some(mut original_src_ports) => {
-                                            let new_src_ports =
-                                                new_dst_ports.get(og_dst_port).unwrap();
+                                        Some(mut removed_src_ports) => {
+                                            let in_table_src_ports =
+                                                in_table_dst_ports.get(og_dst_port).unwrap();
                                             // have to change the way we have been inserting because RangeMapBlaze does not have a get_mut function
                                             for (new_src_port, new_protocols) in
-                                                new_src_ports.iter()
+                                                in_table_src_ports.iter()
                                             {
                                                 // Try to add a src port, If the src port is already being used as a key, combine its protocol tables
-                                                match original_src_ports
+                                                match removed_src_ports
                                                     .insert(new_src_port, new_protocols.clone())
                                                 {
                                                     None => (),
@@ -113,15 +119,15 @@ impl FiveTupleLookupTable {
                                                                 proto_arr.push(*new_proto)
                                                             }
                                                         }
-                                                        original_src_ports
+                                                        removed_src_ports
                                                             .insert(new_src_port, proto_arr);
                                                     }
                                                 }
                                             }
                                             // original_src_ports now contains the values from original_src_ports and new_src_ports
                                             // we don't care about the return value because we know it will be Some(new_src_ports)
-                                            new_dst_ports
-                                                .insert(og_dst_port, original_src_ports.clone());
+                                            in_table_dst_ports
+                                                .insert(og_dst_port, removed_src_ports.clone());
                                         }
                                     }
                                 }
