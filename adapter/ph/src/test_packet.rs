@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::time::{Duration, Instant};
-use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::sync::oneshot::{Receiver, Sender, channel};
 
 #[derive(Debug)]
 pub struct TestPacket {

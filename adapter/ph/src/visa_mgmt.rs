@@ -2,7 +2,7 @@ use crate::assembly::Assembly;
 use crate::counters::ManagementCounterType;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::VISA_MGMT;
-use crate::net_defs::{IpAddress, IPV6_ADDRESS_SIZE};
+use crate::net_defs::{IPV6_ADDRESS_SIZE, IpAddress};
 use crate::visa_table;
 use crate::vs_types;
 use libnode::{claims, vsapi};

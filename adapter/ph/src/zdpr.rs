@@ -13,7 +13,7 @@
 
 use enum_map::{Enum, EnumMap};
 use std::collections::VecDeque;
-use std::task::{ready, Context, Poll, Waker};
+use std::task::{Context, Poll, Waker, ready};
 use zpr::SeqNum;
 
 /// ID of a packet which was queued for sending (but maybe not yet sent).
@@ -452,7 +452,7 @@ impl<Pkt> Sender<Pkt> {
         self.destruct_internal()
     }
 
-    fn destruct_internal(&mut self) -> impl Iterator<Item = Pkt> {
+    fn destruct_internal(&mut self) -> impl Iterator<Item = Pkt> + use<Pkt> {
         let unacked = std::mem::take(&mut self.unacked);
         let blocked = std::mem::take(&mut self.blocked);
 
@@ -660,7 +660,7 @@ impl Receiver {
 #[cfg(test)]
 mod sender_tests {
     use super::{EnqueueResult::*, QueuedPacketId, Sender};
-    use std::sync::{atomic, Arc};
+    use std::sync::{Arc, atomic};
     use std::task::{Context, Wake};
 
     struct TestWaker {

@@ -13,7 +13,7 @@
 //! is dropped.  This may cause opening a transaction to block if the next ID
 //! is still in use.
 
-use std::collections::{btree_map, BTreeMap};
+use std::collections::{BTreeMap, btree_map};
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::Notify;
 

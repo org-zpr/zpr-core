@@ -34,8 +34,8 @@ impl CaptureWorker {
 
     pub async fn flush_capture_file(&self) -> Result<(), io::Error> {
         let savefile = &mut self.inner.lock().await.savefile;
-        match savefile {
-            Some(ref mut savefile) => savefile.flush().await,
+        match savefile.as_mut() {
+            Some(savefile) => savefile.flush().await,
             None => Ok(()),
         }
     }
@@ -69,27 +69,23 @@ pub async fn launch(_config: Config, asm: Arc<Assembly>, queue: UnixDatagram) {
     while let Ok(size) = queue.recv(&mut buf).await {
         let mut state = asm.capture_worker.inner.lock().await;
 
-        match &mut state.savefile {
-            Some(ref mut savefile) => {
-                // Write the packets out.  If the queue is empty, force a flush
-                // to make sure these packets get written out in timely fashion.
-                // TODO: use poll to determine queue emptiness
-                match savefile_write_batch(savefile, &[&buf[..size]], true).await {
-                    Ok(()) => (),
+        if let Some(savefile) = state.savefile.as_mut() {
+            // Write the packets out.  If the queue is empty, force a flush
+            // to make sure these packets get written out in timely fashion.
+            // TODO: use poll to determine queue emptiness
+            match savefile_write_batch(savefile, &[&buf[..size]], true).await {
+                Ok(()) => (),
 
-                    Err(err) => {
-                        error!(target: CAPTURE, "Error writing to capture file, ending capture: {}", err);
-                        match state.savefile.take().unwrap().close().await {
-                            Ok(_file) => (),
-                            Err(err) => {
-                                error!(target: CAPTURE, "Error closing capture file: {}", err)
-                            }
+                Err(err) => {
+                    error!(target: CAPTURE, "Error writing to capture file, ending capture: {}", err);
+                    match state.savefile.take().unwrap().close().await {
+                        Ok(_file) => (),
+                        Err(err) => {
+                            error!(target: CAPTURE, "Error closing capture file: {}", err)
                         }
                     }
                 }
             }
-
-            None => (),
         }
     }
 }

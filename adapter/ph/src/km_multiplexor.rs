@@ -343,7 +343,7 @@ pub fn handle_inbound_km_msg(
 mod test {
     use super::*;
 
-    use crate::assembly::test::{create_assembly, TestAssemblyBuilder};
+    use crate::assembly::test::{TestAssemblyBuilder, create_assembly};
     use crate::km::KmLinkMsg;
     use crate::km_testdata::test::*;
     use crate::link_state::LinkType;
@@ -452,9 +452,10 @@ mod test {
 
                 // Check that initially, our state is not established.
                 {
-                    assert!(!asm
-                        .peer_table
-                        .is_security_association_established(adapter_link_id))
+                    assert!(
+                        !asm.peer_table
+                            .is_security_association_established(adapter_link_id)
+                    )
                 }
 
                 // Pretend to be a node and send back a valid reply.
@@ -495,9 +496,10 @@ mod test {
                 // It will send two signals - SaIdChange followed by SaEstablished.  Both signals
                 // are picked up by our multiplexor worker.  The second one triggers a state update.
                 {
-                    assert!(asm
-                        .peer_table
-                        .is_security_association_established(adapter_link_id))
+                    assert!(
+                        asm.peer_table
+                            .is_security_association_established(adapter_link_id)
+                    )
                 }
 
                 drop_link(&asm, adapter_link_id).await;

@@ -16,10 +16,10 @@ use openssl::rsa::Padding;
 use openssl::sign::Signer;
 use openssl::x509::X509;
 
+use reqwest::StatusCode;
 use reqwest::header;
 use reqwest::redirect::Policy;
 use reqwest::tls::Certificate;
-use reqwest::StatusCode;
 
 use base64::prelude::*;
 use thiserror::Error;

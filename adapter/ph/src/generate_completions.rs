@@ -8,8 +8,8 @@ mod pki;
 
 use clap::{CommandFactory, Parser};
 use clap_complete::{generate, shells::Shell};
-use std::fs::create_dir_all;
 use std::fs::File;
+use std::fs::create_dir_all;
 use std::io::BufWriter;
 
 #[derive(Parser, Debug)]

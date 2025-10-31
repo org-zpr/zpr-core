@@ -1,5 +1,5 @@
 use crate::assembly::Assembly;
-use crate::auth::{self, DecodedBlob, ZdpAuthCodeBlob, ZdpSelfSignedBlob, AUTH_KEY_SIZE_BYTES};
+use crate::auth::{self, AUTH_KEY_SIZE_BYTES, DecodedBlob, ZdpAuthCodeBlob, ZdpSelfSignedBlob};
 use crate::config;
 use crate::counters::ManagementCounterType;
 use crate::km::{PeerCertificate, ZPIPair};
@@ -545,13 +545,13 @@ impl LinkStateWrapper {
                         LinkType::AdapterToNode => {
                             return Err(LinkStateError::InvalidOperation(
                                 "adapter received unverified certificate from node".to_string(),
-                            ))
+                            ));
                         }
                         LinkType::NodeToAdapter => (), // OK
                         LinkType::NodeToNode => {
                             return Err(LinkStateError::InvalidOperation(
                                 "node received unverified certificate from peer node".to_string(),
-                            ))
+                            ));
                         }
                         _ => (),
                     }
@@ -757,7 +757,7 @@ impl LinkStateWrapper {
             (_, _) => {
                 return Err(LinkStateError::InvalidOperation(
                     "Discarded unsolicited acquire ZPR address request".to_string(),
-                ))
+                ));
             }
         }
 
@@ -991,7 +991,7 @@ impl LinkStateWrapper {
             (_, _) => {
                 return Err(LinkStateError::InvalidOperation(
                     "Discarded unsolicited authorize response".to_string(),
-                ))
+                ));
             }
         }
 

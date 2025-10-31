@@ -12,7 +12,7 @@ use std::os::fd::{AsFd, BorrowedFd};
 use std::sync::Arc;
 
 #[allow(unused_imports)]
-use crate::packet::{self, flags, Packet};
+use crate::packet::{self, Packet, flags};
 
 pub struct FastpathIo {
     batch_io: BatchIo,

@@ -35,8 +35,8 @@ use tokio::time::interval;
 use tokio_util::compat::*;
 use tracing::error;
 use tracing::*;
-use zpr::rpc_commands::RpcCommands;
 use zpr::LinkId;
+use zpr::rpc_commands::RpcCommands;
 use zpr_ext::std::os::unix::net::{AncillaryData, SocketAncillary};
 use zpr_ext::tokio::net::*;
 
@@ -556,7 +556,22 @@ fn values_from_hist(hist_name: &str, units: &str, hist: &Histogram<u64>) -> Stri
     let ninety: u64 = hist.value_at_quantile(0.90);
     let mean: f64 = hist.mean();
 
-    let mut values = format!("{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}, Mean: {}{}\n\n", hist_name, ten, units, twenty_five, units, fifty, units, seventy_five, units, ninety, units, mean, units);
+    let mut values = format!(
+        "{} values at - 10th Quantile: {}{}, 25th Quantile: {}{},\n50th Quantile: {}{}, 75th Quantile: {}{}, 90th Quantile: {}{}, Mean: {}{}\n\n",
+        hist_name,
+        ten,
+        units,
+        twenty_five,
+        units,
+        fifty,
+        units,
+        seventy_five,
+        units,
+        ninety,
+        units,
+        mean,
+        units
+    );
 
     let mut iter = hist.iter_log(1, SQRT_2);
 

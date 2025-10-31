@@ -1,5 +1,5 @@
 use enum_map::Enum;
-use enumset::{enum_set, EnumSet, EnumSetType};
+use enumset::{EnumSet, EnumSetType, enum_set};
 
 /// Some peers are "special", e.g. the visa service adapter attached to the initial node.
 /// These names let us identify them.

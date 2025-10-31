@@ -117,10 +117,10 @@ trait BatchIoImpl {
 mod io_uring {
     //! io_uring(7)-based implementation.  Only available for Linux.
 
-    use super::{sockaddr_to_socket_addr, BatchIoImpl, ReceivedPacket};
+    use super::{BatchIoImpl, ReceivedPacket, sockaddr_to_socket_addr};
     use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
     use bytes::BufMut;
-    use io_uring::{cqueue, opcode, squeue, types, IoUring, Probe};
+    use io_uring::{IoUring, Probe, cqueue, opcode, squeue, types};
     use libc;
     use nix::sys::socket::{SockaddrLike, SockaddrStorage};
     use std::io::Result;
@@ -184,11 +184,7 @@ mod io_uring {
 
     // std::cmp::max() is not const
     const fn const_u32_max(x: u32, y: u32) -> u32 {
-        if x > y {
-            x
-        } else {
-            y
-        }
+        if x > y { x } else { y }
     }
 
     const PKTINFO_CMSG_SPACE_NEEDED: usize = const_u32_max(
@@ -852,7 +848,7 @@ mod posix_unbatched {
     use bytes::BufMut;
     use nix::cmsg_space;
     use nix::sys::socket::{
-        self, sockaddr_storage, ControlMessageOwned, MsgFlags, SockaddrStorage,
+        self, ControlMessageOwned, MsgFlags, SockaddrStorage, sockaddr_storage,
     };
     use nix::unistd;
     use std::io::{IoSlice, IoSliceMut, Result};

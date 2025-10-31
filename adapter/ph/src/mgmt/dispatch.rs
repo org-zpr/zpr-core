@@ -225,7 +225,7 @@ fn count_zdpr_receiver_stats(mgmt_counters: &ManagementCounters, receiver: &mut 
 mod test {
 
     use super::*;
-    use crate::assembly::test::{create_assembly, TestAssemblyBuilder};
+    use crate::assembly::test::{TestAssemblyBuilder, create_assembly};
     use crate::config::PACKET_BUFFER_SIZE;
     use crate::km_cert_exchange::KmCertExchange;
     use crate::km_noise::NoiseKeypair;

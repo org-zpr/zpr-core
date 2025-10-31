@@ -4,7 +4,7 @@ use crate::assembly::Assembly;
 use crate::counters::*;
 use crate::logging::targets::STARTUP;
 use std::sync::Arc;
-use tokio::signal::unix::{signal, SignalKind};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::task::spawn_local;
 use tracing::*;
 

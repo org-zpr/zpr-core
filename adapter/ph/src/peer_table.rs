@@ -22,11 +22,11 @@ use std::num::NonZero;
 use std::sync::atomic::{self, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use thiserror::Error;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{Notify, mpsc};
 use tokio::task;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use zpr::{self, LinkId, SubstrateAddr, LINK_ID_UNKNOWN};
+use zpr::{self, LINK_ID_UNKNOWN, LinkId, SubstrateAddr};
 
 const PEER_TABLE_SIZE: usize = config::MAX_ACTIVE_LINKS;
 

@@ -2,8 +2,8 @@
 
 use enum_map::{Enum, EnumMap};
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 // Counters used in the fastpath
 pub type FastpathCounters = EnumMap<FastpathCounterType, Counter>;

@@ -14,7 +14,7 @@ use crate::assembly::PhMode;
 use crate::auth::{OAuthRsa, RsaBootstrapAuth};
 use crate::batch_io;
 use crate::pki;
-use crate::pki::{load_cert, load_noise_private_key, NOISE_KEY_LEN};
+use crate::pki::{NOISE_KEY_LEN, load_cert, load_noise_private_key};
 
 use crate::main_args::{ArgsError, CommonArgs};
 
@@ -158,7 +158,7 @@ impl Config {
                 Err(e) => {
                     return Err(ArgsError::ParseError(format!(
                         "failed to decode base64 noise key: {e:?}"
-                    )))
+                    )));
                 }
             };
             return Ok(Some(key_data));
@@ -532,7 +532,7 @@ impl Config {
             oth => {
                 return Err(ArgsError::ParseError(format!(
                     "Unknown key management implementation: {oth}"
-                )))
+                )));
             }
         };
 
