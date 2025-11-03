@@ -254,12 +254,20 @@ pub fn send_terminate_indication<'a, 'pktbuf>(
 
 #[derive(Debug, Error)]
 pub enum BindActorAddressError {
-    #[error("{0}")]
-    SyncReqError(core::SyncReqError),
     #[error("bad structure")]
     BadStructure,
     #[error("{0}")]
     BindActorAddressError(Box<str>),
+    #[error("link closed")]
+    LinkClosed,
+}
+
+impl From<core::MgmtSendError> for BindActorAddressError {
+    fn from(err: core::MgmtSendError) -> Self {
+        match err {
+            core::MgmtSendError::LinkClosed => Self::LinkClosed,
+        }
+    }
 }
 
 /// send a Bind Actor Address Request and wait for the Response (RFC 6.5 § 6.3.11)
@@ -271,59 +279,72 @@ pub async fn send_bind_actor_address_request(
     packet_body: Vec<u8>,
 ) -> Result<zpr::StreamId, BindActorAddressError> {
     info!(target: ZDP, "Link {link_id}: sending BindActorAddressRequest for {five_tuple} with compression mode {compression_mode} packet_body size {}", packet_body.len());
-    let response = core::send_sync_per_flow_req(
+
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        return Err(BindActorAddressError::LinkClosed);
+    };
+
+    let txn = peer_state.txn_mgr.open().await;
+    let txn_id = txn.id();
+    peer_state
+        .bind_req_state
+        .lock()
+        .unwrap()
+        .insert(txn, sender);
+
+    drop(peer_state);
+
+    let mut req = core::new_heap_packet();
+    let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindActorAddressRequestHeader>();
+    bind_req_hdr.ip_version = five_tuple.l3_type;
+    bind_req_hdr.compression_mode = compression_mode;
+
+    // No longer append source/dest addresses or layer4 protocol; just append the packet body
+    req.put_slice(&packet_body);
+
+    core::send_per_flow_txn_mgmt(
         asm,
         link_id,
         zdp::ZdpPacketType::BindActorAddressRequest,
-        zdp::ZdpPacketType::BindActorAddressResponse,
         0,
-        move |mut req| {
-            zdp::ZdpBindActorAddressRequestHeader {
-                ip_version: five_tuple.l3_type,
-                compression_mode,
-            }
-            .write_to_buf(&mut req)
-            .unwrap();
-
-            // No longer append source/dest addresses or layer4 protocol; just append the packet body
-            req.put_slice(&packet_body);
-        },
+        txn_id,
+        req,
     )
-    .await;
+    .await?;
 
-    match response {
-        Ok((tether_id, mut resp)) => {
-            let Ok(hdr) = zdp::ZdpBindActorAddressResponseHeader::read_from_buf(&mut resp) else {
+    let Ok(mut resp) = receiver.await else {
+        return Err(BindActorAddressError::LinkClosed);
+    };
+
+    let Ok(hdr) = zdp::ZdpBindActorAddressResponseHeader::read_from_buf(&mut resp) else {
+        core::count_event(asm, ManagementCounterType::BadStructure);
+        return Err(BindActorAddressError::BadStructure);
+    };
+
+    match hdr.status_code {
+        zdp::ResponseCode::Success => Ok(resp.metadata().ingress_stream_id),
+
+        zdp::ResponseCode::Other => {
+            if hdr.info_len as usize > resp.remaining() {
+                core::count_event(asm, ManagementCounterType::BadStructure);
+                return Err(BindActorAddressError::BadStructure);
+            }
+
+            let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
                 core::count_event(asm, ManagementCounterType::BadStructure);
                 return Err(BindActorAddressError::BadStructure);
             };
+            let msg: Box<str> = msg.into();
 
-            match hdr.status_code {
-                zdp::ResponseCode::Success => Ok(tether_id),
-
-                zdp::ResponseCode::Other => {
-                    if hdr.info_len as usize > resp.remaining() {
-                        core::count_event(asm, ManagementCounterType::BadStructure);
-                        return Err(BindActorAddressError::BadStructure);
-                    }
-
-                    let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
-                        core::count_event(asm, ManagementCounterType::BadStructure);
-                        return Err(BindActorAddressError::BadStructure);
-                    };
-                    let msg: Box<str> = msg.into();
-
-                    Err(BindActorAddressError::BindActorAddressError(msg))
-                }
-
-                _ => {
-                    core::count_event(asm, ManagementCounterType::BadStructure);
-                    Err(BindActorAddressError::BadStructure)
-                }
-            }
+            Err(BindActorAddressError::BindActorAddressError(msg))
         }
 
-        Err(err) => Err(BindActorAddressError::SyncReqError(err)),
+        _ => {
+            core::count_event(asm, ManagementCounterType::BadStructure);
+            Err(BindActorAddressError::BadStructure)
+        }
     }
 }
 

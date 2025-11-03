@@ -179,7 +179,7 @@ mod test {
                 .unwrap()
                 .as_millis();
             let dir = env::temp_dir();
-            let num: u32 = rng.gen();
+            let num: u32 = rng.r#gen();
             let path = dir.join(format!("org_zpr_ph_test_main_{}_{}.toml", num, tstamp));
             fs::write(&path, contents).expect("Unable to write file");
             TempFile {
@@ -768,9 +768,13 @@ mod test {
         let args = vec!["ph", "adapter", "-c", tmpfile.get_path().to_str().unwrap()];
 
         let noise_key = "GExPGh5RE/nKo8WoN8EqknDDNIEjWBL6PZm08Uhvn0w=";
-        env::set_var("NOISE_PRIVATE_KEY", noise_key);
+        unsafe {
+            // SAFETY: this test is executed serially
+            env::set_var("NOISE_PRIVATE_KEY", noise_key);
+        }
         let presult = argparse(Some(args));
         unsafe {
+            // SAFETY: this test is executed serially
             env::remove_var("NOISE_PRIVATE_KEY");
         }
 

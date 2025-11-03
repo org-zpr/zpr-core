@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use tracing::Level;
 use tracing_subscriber::filter::targets::Targets;
-use tracing_subscriber::{filter, fmt, prelude::*, reload, Registry};
+use tracing_subscriber::{Registry, filter, fmt, prelude::*, reload};
 
 /// Target of a log message, for filtering.
 pub mod targets {

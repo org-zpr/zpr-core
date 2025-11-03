@@ -108,6 +108,10 @@ fn classify_l3(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
 ) -> Result<ClassifierResult, &'static str> {
+    if body.is_empty() {
+        return Err("Packet length error");
+    }
+
     let ip_version = get_ip_version(body);
 
     match ip_version {
@@ -367,6 +371,13 @@ mod tests {
     use bytes::BufMut;
     use std::net::Ipv6Addr;
     use zerocopy::FromZeros;
+
+    #[test]
+    fn test_empty_l3() {
+        let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
+        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        assert!(classify(&mut packet).is_err());
+    }
 
     #[test]
     fn test_non_ip() {

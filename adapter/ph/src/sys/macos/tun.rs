@@ -1,5 +1,5 @@
 use crate::zprtun::DEFAULT_TUN_MTU;
-use nix::fcntl::{fcntl, FcntlArg, OFlag};
+use nix::fcntl::{FcntlArg, OFlag, fcntl};
 use nix::{ioctl_readwrite, ioctl_write_ptr};
 use std::ffi::CStr;
 use std::mem;
@@ -13,9 +13,9 @@ use thiserror::Error;
 const DEFAULT_PREFIX_LEN: u8 = 32;
 
 use libc::{
-    self, c_char, c_int, c_uint, c_void, ctl_info, ifreq, sockaddr, sockaddr_in, sockaddr_in6,
-    socklen_t, AF_INET, AF_INET6, AF_SYSTEM, AF_SYS_CONTROL, IFNAMSIZ, PF_SYSTEM, SOCK_DGRAM,
-    SYSPROTO_CONTROL, UTUN_OPT_IFNAME,
+    self, AF_INET, AF_INET6, AF_SYS_CONTROL, AF_SYSTEM, IFNAMSIZ, PF_SYSTEM, SOCK_DGRAM,
+    SYSPROTO_CONTROL, UTUN_OPT_IFNAME, c_char, c_int, c_uint, c_void, ctl_info, ifreq, sockaddr,
+    sockaddr_in, sockaddr_in6, socklen_t,
 };
 
 // Not in libc. Copied from netinet6/in6_var.h

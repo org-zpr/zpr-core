@@ -58,7 +58,6 @@ mod sample_ring;
 mod set_capture_file_worker;
 mod signal_worker;
 mod special_peers;
-mod sync_req;
 mod sys;
 mod test_packet;
 mod tlv;
@@ -193,7 +192,7 @@ fn main() -> ExitCode {
     // If we have a signed certificate, use that.  Otherwise we create a self-signed cert
     // and insert our CN (`name` from config) and our self_noise_keypair public key.
 
-    let self_cert = match &config.certificate_file {
+    let self_cert = match config.certificate_file.as_ref() {
         None => match generate_self_signed_noise_cert(&config.name, &self_noise_keypair) {
             Ok(cert) => cert,
             Err(e) => {
@@ -201,7 +200,7 @@ fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         },
-        Some(ref cert_path) => match load_cert(cert_path) {
+        Some(cert_path) => match load_cert(cert_path) {
             Ok(cert) => cert,
             Err(e) => {
                 error!(target: STARTUP, "failed to load certificate from {:?}: {e:?}", cert_path);
@@ -712,17 +711,19 @@ fn main() -> ExitCode {
         // although it is an async method, it calls blocking functions (namely Thrift functions)...
         // once we switch to async Thrift we can simplify this
         let rt_handle = runtime.handle().clone();
-        js.spawn_blocking(move || loop {
-            let res = rt_handle.block_on(
-                vsconn
-                    .as_mut()
-                    .unwrap()
-                    .run(tokio_util::sync::CancellationToken::new()),
-            );
+        js.spawn_blocking(move || {
+            loop {
+                let res = rt_handle.block_on(
+                    vsconn
+                        .as_mut()
+                        .unwrap()
+                        .run(tokio_util::sync::CancellationToken::new()),
+                );
 
-            error!(target: STARTUP, "visa service connection manager terminated: {res:?}");
+                error!(target: STARTUP, "visa service connection manager terminated: {res:?}");
 
-            std::thread::sleep(std::time::Duration::from_secs(1));
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
         });
 
         js.spawn_local(vss_worker::launch(asm.clone(), vss_outq));

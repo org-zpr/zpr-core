@@ -35,7 +35,7 @@ use thiserror::Error;
 use tracing::*;
 use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
-use tracing_subscriber::{filter, fmt, reload, Layer, Registry};
+use tracing_subscriber::{Layer, Registry, filter, fmt, reload};
 use zpr::{self, LinkId, SubstrateAddr, VisaId};
 
 #[derive(Clone, Copy, Debug, PartialEq)]

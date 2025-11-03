@@ -4,7 +4,7 @@ pub mod traffic_parser;
 pub mod vsclient;
 mod vssd;
 
-use crate::traffic_parser::{parse_traffic, Protocol};
+use crate::traffic_parser::{Protocol, parse_traffic};
 
 const DEFAULT_SERVICE: &str = "[fd5a:5052::1]:5002";
 const DEFAULT_VSS_PORT: u16 = 8183;
@@ -234,9 +234,13 @@ fn main() {
             println!();
             println!("   - IPv6 addresses should be enclosed in square brackets.");
             println!("   - Flags are optional, and can be 'S' for SYN, 'A' for ACK, or both.");
-            println!("   - Source port is optional, and if omitted a high number port is randomly chosen.");
+            println!(
+                "   - Source port is optional, and if omitted a high number port is randomly chosen."
+            );
             println!();
-            println!("   Note that the protocol is set by using the --tcp or --udp arg in the requestvisa command.");
+            println!(
+                "   Note that the protocol is set by using the --tcp or --udp arg in the requestvisa command."
+            );
             println!();
             println!("   Examples:");
             println!();

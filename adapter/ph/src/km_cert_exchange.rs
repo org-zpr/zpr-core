@@ -196,9 +196,9 @@ impl KmCertExchange {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::km_noise::{derive_public_key, NoiseKeypair};
+    use crate::km_noise::{NoiseKeypair, derive_public_key};
     use crate::km_testdata::test::*;
-    use crate::pki::{generate_self_signed_noise_cert, NOISE_KEY_LEN};
+    use crate::pki::{NOISE_KEY_LEN, generate_self_signed_noise_cert};
     use base64::prelude::*;
     use bytes::BytesMut;
 

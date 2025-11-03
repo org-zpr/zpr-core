@@ -10,11 +10,9 @@ use crate::packet::{self, Packet};
 use crate::zdp;
 use crate::zdpr;
 use std::task::{Context, Poll};
-use thiserror::Error;
 use tracing::*;
 use zerocopy::FromBytes;
 use zpr;
-use zpr_ext::zerocopy::FromBytesExt;
 
 /// Helper to allocate a new Packet with default parameters from the heap.
 /// The packet is sized to fit most outbound management traffic, but
@@ -73,7 +71,7 @@ pub fn send_per_flow_mgmt(
     send_mgmt_helper(asm, link_id, packet_type, Some(stream_id), None, packet)
 }
 
-pub fn send_per_flow_mgmt_response(
+pub fn send_per_flow_txn_mgmt(
     asm: &Assembly,
     link_id: zpr::LinkId,
     packet_type: zdp::ZdpPacketType,
@@ -318,14 +316,14 @@ fn send_mgmt_helper(
 
     debug_assert_eq!(stream_id.is_some(), packet_type.is_per_flow());
 
-    if let Some(stream_id) = stream_id {
-        let per_flow_hdr = packet.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
-        per_flow_hdr.stream_id = stream_id.into();
-    }
-
     if let Some(txn_id) = txn_id {
         let txn_hdr = packet.alloc_zeroed_header::<zdp::ZdpTransactionHeader>();
         txn_hdr.transaction_id = txn_id.into();
+    }
+
+    if let Some(stream_id) = stream_id {
+        let per_flow_hdr = packet.alloc_zeroed_header::<zdp::ZdpPerFlowHeader>();
+        per_flow_hdr.stream_id = stream_id.into();
     }
 
     let _mgmt_hdr = packet.alloc_zeroed_header::<zdp::ZdpMgmtHeader>();
@@ -407,122 +405,4 @@ pub fn build_and_egress_packets<'a>(
         ManagementCounterType::QueueBackpressure,
         dropped_backpressure,
     );
-}
-
-/// Sender function for per flow request management packet.
-/// Requires the type of ZDP packet being sent as well as the type of the
-/// expected response packet. Also requires stream_id of the packet.
-/// pkt_fn allows the function to create the proper body of the ZDP packet to send
-/// Returns the received packet without any ZdpHeader (just management response body) or an error
-pub async fn send_sync_per_flow_req(
-    asm: &Assembly,
-    link_id: zpr::LinkId,
-    zdp_request_type: zdp::ZdpPacketType,
-    zdp_response_type: zdp::ZdpPacketType,
-    stream_id: zpr::StreamId,
-    pkt_fn: impl Fn(&mut Packet) + Send + 'static,
-) -> Result<(zpr::StreamId, Packet), SyncReqError> {
-    match send_sync_req_helper(
-        asm,
-        link_id,
-        zdp_request_type,
-        zdp_response_type,
-        Some(stream_id),
-        pkt_fn,
-    )
-    .await
-    {
-        Ok(mut pkt) => {
-            let per_flow_hdr =
-                zdp::ZdpPerFlowHeader::read_from_buf(&mut pkt).expect("too-short inbound packet"); // FIXME, return failure instead
-            Ok((per_flow_hdr.stream_id.into(), pkt))
-        }
-        Err(err) => Err(err),
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum SyncReqError {
-    #[error("link closed")]
-    LinkClosed,
-    #[error("protocol error")]
-    ProtocolError,
-    #[allow(dead_code)]
-    #[error("timeout")]
-    Timeout,
-}
-
-impl From<super::core::MgmtSendError> for SyncReqError {
-    fn from(err: super::core::MgmtSendError) -> Self {
-        match err {
-            super::core::MgmtSendError::LinkClosed => SyncReqError::LinkClosed,
-        }
-    }
-}
-
-/// Helper for send management request function
-/// Requires the type of ZDP packet being sent as well as the type of the
-/// expected response packet. The Option determines whether the function is helping the per-flow or
-/// non-per flow sender.
-/// pkt_fn allows the function to create the proper body of the ZDP packet to send
-/// Returns the received packet without the ZdpBaseHeader or ZdpMgmtHeader, but still any other
-/// Zdp header information not included in these headers, or an error
-async fn send_sync_req_helper(
-    asm: &Assembly,
-    link_id: zpr::LinkId,
-    zdp_request_type: zdp::ZdpPacketType,
-    zdp_response_type: zdp::ZdpPacketType,
-    stream_id: Option<zpr::StreamId>,
-    pkt_fn: impl Fn(&mut Packet) + 'static,
-) -> Result<Packet, SyncReqError> {
-    // acquire a permit to send a manamgement message
-    let Some(peer_state) = asm.peer_table.get(link_id) else {
-        return Err(SyncReqError::LinkClosed);
-    };
-    // CTP FIXME: we don't need permits anymore
-    let permit = peer_state.sync_req_state.acquire_permit().await;
-    let response_future = peer_state.sync_req_state.install_response_listener(&permit);
-
-    let mut packet = new_heap_packet();
-    pkt_fn(&mut packet);
-
-    send_mgmt_helper(
-        asm,
-        link_id,
-        zdp_request_type,
-        stream_id,
-        Some(permit.seq_num() as u16),
-        packet,
-    )
-    .await?;
-
-    let response = response_future.await;
-    drop(permit);
-    return match_received(
-        asm,
-        response.ok(),
-        SyncReqError::LinkClosed,
-        zdp_response_type,
-    );
-}
-
-/// Determines whether the message received in response to the request is
-/// a) a packet and not an error, and b) the expected packet type
-// TODO: rename/move this
-fn match_received(
-    asm: &Assembly,
-    response: Option<(zdp::ZdpPacketType, Packet)>,
-    err_type: SyncReqError,
-    zdp_response_type: zdp::ZdpPacketType,
-) -> Result<Packet, SyncReqError> {
-    match response {
-        Some((pkt_type, pkt)) => {
-            if pkt_type != zdp_response_type {
-                count_event(asm, ManagementCounterType::BadMgmtResponse);
-                return Err(SyncReqError::ProtocolError);
-            }
-            return Ok(pkt);
-        }
-        None => return Err(err_type),
-    }
 }

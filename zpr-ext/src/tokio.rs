@@ -1,6 +1,6 @@
 pub mod net {
     use crate::std::os::unix::net::{
-        uds_recv_vectored_with_ancillary, uds_send_vectored_with_ancillary, SocketAncillary,
+        SocketAncillary, uds_recv_vectored_with_ancillary, uds_send_vectored_with_ancillary,
     };
     use std::io::{self, IoSlice, IoSliceMut};
     use std::os::fd::AsFd;

@@ -5,7 +5,7 @@
 use crate::defs::FiveTuple;
 use crate::five_tuple_lookup_table::FiveTupleLookupTable;
 use crate::logging::targets::VISA_MGMT;
-use crate::net_defs::{ip_number, IpAddress};
+use crate::net_defs::{IpAddress, ip_number};
 use crate::peer_table;
 
 use chrono::{DateTime, Utc};
@@ -442,7 +442,7 @@ fn make_tcp_visa(
 mod tests {
     use super::*;
 
-    use crate::assembly::test::{create_assembly, TestAssemblyBuilder};
+    use crate::assembly::test::{TestAssemblyBuilder, create_assembly};
     use crate::forwarding_tables::PftPep;
     use crate::link_state::LinkType;
     use crate::net_defs;
@@ -541,12 +541,16 @@ mod tests {
         let mut visa_table = asm.visa_table.write().await;
         visa_table.insert_id(visa1, DateTime::<Utc>::MAX_UTC); // An element that won't timeout
         visa_table.insert_id(visa2, Utc::now() + one_second); // An element that will time out in a second
-        assert!(visa_table
-            .link_forwarding_entry(visa1, zpr::ForwardingEntry(link_id, tether_id1))
-            .is_ok());
-        assert!(visa_table
-            .link_forwarding_entry(visa2, zpr::ForwardingEntry(link_id, tether_id2))
-            .is_ok());
+        assert!(
+            visa_table
+                .link_forwarding_entry(visa1, zpr::ForwardingEntry(link_id, tether_id1))
+                .is_ok()
+        );
+        assert!(
+            visa_table
+                .link_forwarding_entry(visa2, zpr::ForwardingEntry(link_id, tether_id2))
+                .is_ok()
+        );
 
         std::thread::sleep(one_second);
 

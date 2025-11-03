@@ -8,7 +8,7 @@ use openssl::bn::{BigNum, MsbOption};
 use openssl::hash::MessageDigest;
 use openssl::pkey::{Id, PKey};
 use openssl::rsa::Rsa;
-use openssl::x509::{extension::KeyUsage, X509Name, X509};
+use openssl::x509::{X509, X509Name, extension::KeyUsage};
 
 use thiserror::Error;
 use tracing::error;

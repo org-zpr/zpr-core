@@ -14,8 +14,8 @@ use std::mem::ManuallyDrop;
 #[cfg(not(loom))]
 use std::sync;
 use sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc, Mutex, MutexGuard,
+    atomic::{AtomicUsize, Ordering},
 };
 
 // DESIGN NOTES
@@ -318,7 +318,7 @@ impl<T> CslabReader<T> {
     /// that an item is present at this index, and `finalize_remove()`
     /// has not been called on this index in the interim.
     pub unsafe fn get_unchecked(&self, idx: usize) -> &T {
-        get_unchecked_impl(&*self.0, idx)
+        unsafe { get_unchecked_impl(&*self.0, idx) }
     }
 }
 
@@ -499,7 +499,7 @@ impl<T> Cslab<T> {
 
         // drop item
         // SAFETY: we know only we can access this item from our safety requirement
-        let entry = &mut *self.storage.table()[idx].get();
+        let entry = unsafe { &mut *self.storage.table()[idx].get() };
         // SAFETY: we know there is an item from our safety requirement
         let item = unsafe { ManuallyDrop::take(&mut entry.item) } /* [Ri] */;
 
@@ -799,7 +799,7 @@ pub struct RcuCslabReader<T> {
     // a reference to the generation we were created in; we don't actually
     // use the value, but keeping this reference is necessary to prevent
     // finalization of the generation
-    gen: Arc<RcuCslabGen<T>>,
+    r#gen: Arc<RcuCslabGen<T>>,
 }
 
 impl<T> RcuCslabReader<T> {
@@ -845,7 +845,7 @@ impl<T> Clone for RcuCslabReader<T> {
     fn clone(&self) -> Self {
         Self {
             reader: self.reader.clone(),
-            gen: self.gen.clone(),
+            r#gen: self.r#gen.clone(),
         }
     }
 }
@@ -975,7 +975,7 @@ impl<T> RcuCslab<T> {
     pub fn reader(&self) -> RcuCslabReader<T> {
         RcuCslabReader {
             reader: self.reader.clone(),
-            gen: self.cur_gen.clone(),
+            r#gen: self.cur_gen.clone(),
         }
     }
 

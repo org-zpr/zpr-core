@@ -98,7 +98,7 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<TrafficDesc, std::io
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Invalid source address",
-            ))
+            ));
         }
     };
     let dst_addr = match capts.get(3).unwrap().as_str().parse::<IpAddr>() {
@@ -107,7 +107,7 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<TrafficDesc, std::io
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Invalid destination address",
-            ))
+            ));
         }
     };
 
@@ -127,10 +127,10 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<TrafficDesc, std::io
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     "Invalid source port",
-                ))
+                ));
             }
         },
-        None => rng.gen(),
+        None => rng.r#gen(),
     };
 
     let dst_port: u16 = match capts.get(4).unwrap().as_str().parse::<u16>() {
@@ -139,7 +139,7 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<TrafficDesc, std::io
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
                 "Invalid destination port",
-            ))
+            ));
         }
     };
 
@@ -154,7 +154,7 @@ pub fn parse_traffic(input: &str, prot: Protocol) -> Result<TrafficDesc, std::io
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::Other,
                         "Invalid flags",
-                    ))
+                    ));
                 }
             }
         }
@@ -281,7 +281,10 @@ mod test {
         for input in questionable_input {
             let res = parse_traffic(input, Protocol::TCP);
             if res.is_err() {
-                println!("parse has been improved!  Hazzah! Now patch this test!  used to succeed on ==> '{}', Error: {:?}", input, res);
+                println!(
+                    "parse has been improved!  Hazzah! Now patch this test!  used to succeed on ==> '{}', Error: {:?}",
+                    input, res
+                );
                 assert!(false)
             }
         }

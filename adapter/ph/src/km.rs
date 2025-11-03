@@ -13,7 +13,7 @@ use crate::logging::targets::KEY_MGMT;
 use crate::packet::Packet;
 use crate::zdp::{ZdpBaseHeader, ZdpPacketType, ZdpZpiHeader};
 use bytes::{BufMut, Bytes};
-use openssl::x509::{X509NameRef, X509};
+use openssl::x509::{X509, X509NameRef};
 use std::fmt;
 use std::fmt::Debug;
 use std::future::Future;
@@ -212,7 +212,12 @@ impl fmt::Debug for KmTransportSA {
         write!(
             f,
             "KMTransportSA {{ sa_id: {}, send_zpis: {}, recv_zpis: {}, send_hmac_key: {:02x?}, recv_hmac_key: {:02x?}, peer_cert: {}}}",
-            self.sa_id, self.send_zpis, self.recv_zpis, self.send_hmac_key, self.recv_hmac_key, cert_str
+            self.sa_id,
+            self.send_zpis,
+            self.recv_zpis,
+            self.send_hmac_key,
+            self.recv_hmac_key,
+            cert_str
         )
     }
 }

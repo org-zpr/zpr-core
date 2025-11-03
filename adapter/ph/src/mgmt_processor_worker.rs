@@ -100,6 +100,18 @@ async fn handle_packet(asm: &Arc<Assembly>, mut pkt: Packet) -> HandleMgmtResult
                     .await
             }
 
+            ZdpPacketType::BindActorAddressResponse => {
+                let Ok(txn_hdr) = ZdpTransactionHeader::read_from_buf(&mut pkt) else {
+                    return Err(HandleMgmtError::BadStructure);
+                };
+                handlers::handle_bind_actor_address_response(
+                    asm,
+                    txn_hdr.transaction_id.into(),
+                    pkt,
+                )
+                .await
+            }
+
             packet_type => Err(HandleMgmtError::UnknownType(packet_type.0)),
         }
     } else {
