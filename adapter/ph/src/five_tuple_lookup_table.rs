@@ -315,7 +315,6 @@ impl FiveTupleLookupTable {
                         DstPortLevel::MultiVal(dst_level) => match dst_level.get(ft.dst_port) {
                             None => None,
                             Some(src_level) => {
-                                println!("In get dst port\n");
                                 Self::find_src_level_match(src_level.clone(), ft)
                             }
                         },
@@ -328,7 +327,6 @@ impl FiveTupleLookupTable {
     fn find_src_level_match(src_level: SrcPortLevel, ft: FiveTuple) -> Option<VisaId> {
         match src_level {
             SrcPortLevel::Wildcard(protos) => {
-                println!("In get src port wild\n");
                 for elem in protos {
                     if elem.0 == ft.l4_protocol {
                         return Some(elem.1);
@@ -339,7 +337,6 @@ impl FiveTupleLookupTable {
             SrcPortLevel::SingleVal((port, protos)) => match port == ft.src_port {
                 false => None,
                 true => {
-                    println!("In get src port sing\n");
                     for elem in protos {
                         if elem.0 == ft.l4_protocol {
                             return Some(elem.1);
@@ -351,7 +348,6 @@ impl FiveTupleLookupTable {
             SrcPortLevel::MultiVal(src_level_map) => match src_level_map.get(ft.src_port) {
                 None => None,
                 Some(protos) => {
-                    println!("In get src port mult\n");
                     for elem in protos {
                         if elem.0 == ft.l4_protocol {
                             return Some(elem.1);
@@ -1459,9 +1455,6 @@ mod tests {
 
         let v = Visa::new(visa);
 
-        // let ft = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
-        // assert_eq!(Visa::extract_five_tuple(&v.visa.unwrap()), ft);
-
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v);
 
@@ -1564,9 +1557,6 @@ mod tests {
 
         let v = Visa::new(visa);
 
-        // let ft = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
-        // assert_eq!(Visa::extract_five_tuple(&v.visa.unwrap()), ft);
-
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v);
 
@@ -1642,5 +1632,229 @@ mod tests {
             proto_level = None
         }
         assert!(proto_level.is_some());
+    }
+
+    #[test]
+    fn test_wildcard_insertion_wildcard_second() {
+        let src_addr = [1u8; 16];
+        let dst_addr = [2u8; 16];
+
+        let l4proto1 = vsapi::PEPIndex::UDP;
+        let l4proto2 = vsapi::PEPIndex::TCP;
+        let src_port = 10;
+        let src_port_wild = 0;
+        let dst_port = 11;
+        let src_dst =
+            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
+        let src_dst_wild =
+            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port_wild, dst_port, None, None);
+
+        let visa1: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto1,
+            src_dst,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let visa2: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto2,
+            src_dst_wild,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let v1 = Visa::new(visa1);
+        let v2 = Visa::new(visa2);
+
+        let mut hash: HashMap<VisaId, Visa> = HashMap::new();
+        hash.insert(12, v1);
+        hash.insert(13, v2);
+
+        let table = FiveTupleLookupTable::new(&hash);
+
+        let un_rcu_table = table.table.get();
+
+
+        let src_port_level;
+        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+            .get(&IpAddress::from(dst_addr))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            assert_eq!(*dst, dst_port as u16);
+            src_port_level = Some(src_level)
+        } else {
+            src_port_level = None
+        }
+        assert!(src_port_level.is_some());
+
+        // Get proto level
+        let src_level;
+        if let SrcPortLevel::MultiVal(src_map) = src_port_level.unwrap() {
+            src_level = Some(src_map)
+        } else {
+            src_level = None
+        }
+        assert!(src_level.is_some());
+
+        assert_eq!(src_level.unwrap().len(), 65536);
+
+        let specified_src_ft = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::UDP,
+            src_port as u16,
+            dst_port as u16,
+        );
+        let random_src_ft = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            4323u16,
+            dst_port as u16,
+        );
+        
+        assert_eq!(table.find_match(specified_src_ft), Some(12));
+        assert_eq!(table.find_match(random_src_ft), Some(13));
+
+
+    }
+
+    #[test]
+    fn test_wildcard_insertion_wildcard_first() {
+        let src_addr = [1u8; 16];
+        let dst_addr = [2u8; 16];
+
+        let l4proto1 = vsapi::PEPIndex::UDP;
+        let l4proto2 = vsapi::PEPIndex::TCP;
+        let src_port = 10;
+        let src_port_wild = 0;
+        let dst_port = 11;
+        let src_dst =
+            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
+        let src_dst_wild =
+            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port_wild, dst_port, None, None);
+
+        let visa1: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto1,
+            src_dst,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let visa2: vsapi::Visa = vsapi::Visa::new(
+            0,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            src_addr.to_vec(),
+            dst_addr.to_vec(),
+            l4proto2,
+            src_dst_wild,
+            None,
+            None,
+            None,
+            None,
+        );
+
+        let v1 = Visa::new(visa1);
+        let v2 = Visa::new(visa2);
+
+        let mut hash: HashMap<VisaId, Visa> = HashMap::new();
+        hash.insert(13, v2);
+        hash.insert(12, v1);
+
+        let table = FiveTupleLookupTable::new(&hash);
+
+        let un_rcu_table = table.table.get();
+
+
+        let src_port_level;
+        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+            .get(&IpAddress::from(dst_addr))
+            .unwrap()
+            .exact_match(
+                Ipv6Addr::new(
+                    0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101,
+                ),
+                128,
+            )
+            .unwrap()
+        {
+            assert_eq!(*dst, dst_port as u16);
+            src_port_level = Some(src_level)
+        } else {
+            src_port_level = None
+        }
+        assert!(src_port_level.is_some());
+
+        // Get proto level
+        let src_level;
+        if let SrcPortLevel::MultiVal(src_map) = src_port_level.unwrap() {
+            src_level = Some(src_map)
+        } else {
+            src_level = None
+        }
+        assert!(src_level.is_some());
+
+        assert_eq!(src_level.unwrap().len(), 65536);
+
+        let specified_src_ft = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::UDP,
+            src_port as u16,
+            dst_port as u16,
+        );
+        let random_src_ft = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            4323u16,
+            dst_port as u16,
+        );
+        
+        assert_eq!(table.find_match(specified_src_ft), Some(12));
+        assert_eq!(table.find_match(random_src_ft), Some(13));
+
+
     }
 }
