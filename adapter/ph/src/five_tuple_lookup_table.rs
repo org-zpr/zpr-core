@@ -314,9 +314,7 @@ impl FiveTupleLookupTable {
                         },
                         DstPortLevel::MultiVal(dst_level) => match dst_level.get(ft.dst_port) {
                             None => None,
-                            Some(src_level) => {
-                                Self::find_src_level_match(src_level.clone(), ft)
-                            }
+                            Some(src_level) => Self::find_src_level_match(src_level.clone(), ft),
                         },
                     },
                 };
@@ -367,14 +365,13 @@ mod tests {
     use crate::net_defs::ip_number;
     use libnode::vsapi;
 
-    #[test]
-    fn test_construction_one_visa() {
-        let src_addr = [1u8; 16];
-        let dst_addr = [2u8; 16];
-
-        let l4proto = vsapi::PEPIndex::TCP;
-        let src_port = 10;
-        let dst_port = 11;
+    fn make_visa(
+        src_addr: [u8; 16],
+        dst_addr: [u8; 16],
+        l4proto: vsapi::PEPIndex,
+        src_port: i32,
+        dst_port: i32,
+    ) -> Visa {
         let src_dst =
             vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
         let visa: vsapi::Visa = vsapi::Visa::new(
@@ -393,7 +390,19 @@ mod tests {
             None,
         );
 
-        let v = Visa::new(visa);
+        Visa::new(visa)
+    }
+
+    #[test]
+    fn test_construction_one_visa() {
+        let src_addr = [1u8; 16];
+        let dst_addr = [2u8; 16];
+
+        let l4proto = vsapi::PEPIndex::TCP;
+        let src_port = 10;
+        let dst_port = 11;
+
+        let v = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port);
 
         // let ft = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
         // assert_eq!(Visa::extract_five_tuple(&v.visa.unwrap()), ft);
@@ -448,42 +457,9 @@ mod tests {
         let l4proto2 = vsapi::PEPIndex::UDP;
         let src_port = 10;
         let dst_port = 11;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
-        let visa1: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto1,
-            src_dst.clone(),
-            None,
-            None,
-            None,
-            None,
-        );
 
-        let visa2: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto2,
-            src_dst,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let v1 = Visa::new(visa1);
-        let v2 = Visa::new(visa2);
+        let v1 = make_visa(src_addr, dst_addr, l4proto1, src_port, dst_port);
+        let v2 = make_visa(src_addr, dst_addr, l4proto2, src_port, dst_port);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v1);
@@ -549,45 +525,9 @@ mod tests {
         let src_port1 = 10;
         let src_port2 = 14;
         let dst_port = 11;
-        let src_dst1 =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port1, dst_port, None, None);
-        let src_dst2 =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port2, dst_port, None, None);
 
-        let visa1: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst1,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let visa2: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst2,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let v1 = Visa::new(visa1);
-        let v2 = Visa::new(visa2);
+        let v1 = make_visa(src_addr, dst_addr, l4proto, src_port1, dst_port);
+        let v2 = make_visa(src_addr, dst_addr, l4proto, src_port2, dst_port);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v1);
@@ -648,45 +588,9 @@ mod tests {
         let src_port = 10;
         let dst_port1 = 11;
         let dst_port2 = 14;
-        let src_dst1 =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port1, None, None);
-        let src_dst2 =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port2, None, None);
 
-        let visa1: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst1,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let visa2: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst2,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let v1 = Visa::new(visa1);
-        let v2 = Visa::new(visa2);
+        let v1 = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port1);
+        let v2 = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port2);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v1);
@@ -759,42 +663,9 @@ mod tests {
         let l4proto = vsapi::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
-        let visa1: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr1.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst.clone(),
-            None,
-            None,
-            None,
-            None,
-        );
 
-        let visa2: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr2.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let v1 = Visa::new(visa1);
-        let v2 = Visa::new(visa2);
+        let v1 = make_visa(src_addr1, dst_addr, l4proto, src_port, dst_port);
+        let v2 = make_visa(src_addr2, dst_addr, l4proto, src_port, dst_port);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v1);
@@ -880,45 +751,11 @@ mod tests {
         let l4proto = vsapi::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
 
-        let visa1: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr1.to_vec(),
-            l4proto,
-            src_dst.clone(),
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let visa2: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr2.to_vec(),
-            l4proto,
-            src_dst,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let v1 = Visa::new(visa1);
-        let v2 = Visa::new(visa2);
-
+        let v1 = make_visa(src_addr, dst_addr1, l4proto, src_port, dst_port);
+        let v2 = make_visa(src_addr, dst_addr2, l4proto, src_port, dst_port);
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
+
         hash.insert(12, v1);
         hash.insert(13, v2);
 
@@ -1002,25 +839,8 @@ mod tests {
         let l4proto = vsapi::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
-        let visa: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst,
-            None,
-            None,
-            None,
-            None,
-        );
 
-        let v = Visa::new(visa);
+        let v = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port);
 
         let ft = FiveTuple::new(
             L3Type::Ipv6,
@@ -1048,8 +868,6 @@ mod tests {
         let l4proto = vsapi::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
 
         let ft = FiveTuple::new(
             L3Type::Ipv6,
@@ -1062,100 +880,15 @@ mod tests {
 
         let l4proto_diff = vsapi::PEPIndex::UDP;
         let src_port_diff = 13;
-        let src_diff_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port_diff, dst_port, None, None);
         let dst_port_diff = 14;
-        let src_dst_diff =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port_diff, None, None);
         let src_addr_diff = [3u8; 16];
         let dst_addr_diff = [4u8; 16];
 
-        let visa_diff_proto: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto_diff,
-            src_dst.clone(),
-            None,
-            None,
-            None,
-            None,
-        );
-        let v_diff_proto = Visa::new(visa_diff_proto);
-
-        let visa_diff_src_port: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_diff_dst,
-            None,
-            None,
-            None,
-            None,
-        );
-        let v_diff_src_port = Visa::new(visa_diff_src_port);
-
-        let visa_diff_dst_port: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst_diff,
-            None,
-            None,
-            None,
-            None,
-        );
-        let v_diff_dst_port = Visa::new(visa_diff_dst_port);
-
-        let visa_diff_src_addr: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr_diff.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst.clone(),
-            None,
-            None,
-            None,
-            None,
-        );
-        let v_diff_src_addr = Visa::new(visa_diff_src_addr);
-
-        let visa_diff_dst_addr: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr_diff.to_vec(),
-            l4proto,
-            src_dst.clone(),
-            None,
-            None,
-            None,
-            None,
-        );
-        let v_diff_dst_addr = Visa::new(visa_diff_dst_addr);
-
-        // assert_eq!(Visa::extract_five_tuple(&v.visa.unwrap()), ft);
+        let v_diff_proto = make_visa(src_addr, dst_addr, l4proto_diff, src_port, dst_port);
+        let v_diff_src_port = make_visa(src_addr, dst_addr, l4proto, src_port_diff, dst_port);
+        let v_diff_dst_port = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port_diff);
+        let v_diff_src_addr = make_visa(src_addr_diff, dst_addr, l4proto, src_port, dst_port);
+        let v_diff_dst_addr = make_visa(src_addr, dst_addr_diff, l4proto, src_port, dst_port);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(15, v_diff_proto);
@@ -1177,25 +910,8 @@ mod tests {
         let l4proto = vsapi::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
-        let visa: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst,
-            None,
-            None,
-            None,
-            None,
-        );
 
-        let v = Visa::new(visa);
+        let v = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(15, v);
@@ -1262,8 +978,6 @@ mod tests {
         let l4proto = vsapi::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 11;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
 
         let ft = FiveTuple::new(
             L3Type::Ipv6,
@@ -1276,98 +990,15 @@ mod tests {
 
         let l4proto_diff = vsapi::PEPIndex::UDP;
         let src_port_diff = 13;
-        let src_diff_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port_diff, dst_port, None, None);
         let dst_port_diff = 14;
-        let src_dst_diff =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port_diff, None, None);
         let src_addr_diff = [3u8; 16];
         let dst_addr_diff = [4u8; 16];
 
-        let visa_diff_proto: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto_diff,
-            src_dst.clone(),
-            None,
-            None,
-            None,
-            None,
-        );
-        let v_diff_proto = Visa::new(visa_diff_proto);
-
-        let visa_diff_src_port: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_diff_dst,
-            None,
-            None,
-            None,
-            None,
-        );
-        let v_diff_src_port = Visa::new(visa_diff_src_port);
-
-        let visa_diff_dst_port: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst_diff,
-            None,
-            None,
-            None,
-            None,
-        );
-        let v_diff_dst_port = Visa::new(visa_diff_dst_port);
-
-        let visa_diff_src_addr: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr_diff.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst.clone(),
-            None,
-            None,
-            None,
-            None,
-        );
-        let v_diff_src_addr = Visa::new(visa_diff_src_addr);
-
-        let visa_diff_dst_addr: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr_diff.to_vec(),
-            l4proto,
-            src_dst.clone(),
-            None,
-            None,
-            None,
-            None,
-        );
-        let v_diff_dst_addr = Visa::new(visa_diff_dst_addr);
+        let v_diff_proto = make_visa(src_addr, dst_addr, l4proto_diff, src_port, dst_port);
+        let v_diff_src_port = make_visa(src_addr, dst_addr, l4proto, src_port_diff, dst_port);
+        let v_diff_dst_port = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port_diff);
+        let v_diff_src_addr = make_visa(src_addr_diff, dst_addr, l4proto, src_port, dst_port);
+        let v_diff_dst_addr = make_visa(src_addr, dst_addr_diff, l4proto, src_port, dst_port);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(15, v_diff_proto);
@@ -1435,25 +1066,8 @@ mod tests {
         let l4proto = vsapi::PEPIndex::TCP;
         let src_port = 0;
         let dst_port = 11;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
-        let visa: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst,
-            None,
-            None,
-            None,
-            None,
-        );
 
-        let v = Visa::new(visa);
+        let v = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v);
@@ -1537,25 +1151,8 @@ mod tests {
         let l4proto = vsapi::PEPIndex::TCP;
         let src_port = 10;
         let dst_port = 0;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
-        let visa: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto,
-            src_dst,
-            None,
-            None,
-            None,
-            None,
-        );
 
-        let v = Visa::new(visa);
+        let v = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v);
@@ -1641,48 +1238,12 @@ mod tests {
 
         let l4proto1 = vsapi::PEPIndex::UDP;
         let l4proto2 = vsapi::PEPIndex::TCP;
-        let src_port = 10;
+        let src_port_specified = 10;
         let src_port_wild = 0;
         let dst_port = 11;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
-        let src_dst_wild =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port_wild, dst_port, None, None);
 
-        let visa1: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto1,
-            src_dst,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let visa2: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto2,
-            src_dst_wild,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let v1 = Visa::new(visa1);
-        let v2 = Visa::new(visa2);
+        let v1 = make_visa(src_addr, dst_addr, l4proto1, src_port_specified, dst_port);
+        let v2 = make_visa(src_addr, dst_addr, l4proto2, src_port_wild, dst_port);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v1);
@@ -1691,7 +1252,6 @@ mod tests {
         let table = FiveTupleLookupTable::new(&hash);
 
         let un_rcu_table = table.table.get();
-
 
         let src_port_level;
         if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
@@ -1728,7 +1288,7 @@ mod tests {
             IpAddress::from(src_addr),
             IpAddress::from(dst_addr),
             ip_number::UDP,
-            src_port as u16,
+            src_port_specified as u16,
             dst_port as u16,
         );
         let random_src_ft = FiveTuple::new(
@@ -1739,11 +1299,9 @@ mod tests {
             4323u16,
             dst_port as u16,
         );
-        
+
         assert_eq!(table.find_match(specified_src_ft), Some(12));
         assert_eq!(table.find_match(random_src_ft), Some(13));
-
-
     }
 
     #[test]
@@ -1753,48 +1311,12 @@ mod tests {
 
         let l4proto1 = vsapi::PEPIndex::UDP;
         let l4proto2 = vsapi::PEPIndex::TCP;
-        let src_port = 10;
+        let src_port_specified = 10;
         let src_port_wild = 0;
         let dst_port = 11;
-        let src_dst =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port, dst_port, None, None);
-        let src_dst_wild =
-            vsapi::PEPArgsTCPUDP::new(Vec::new(), Vec::new(), src_port_wild, dst_port, None, None);
 
-        let visa1: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto1,
-            src_dst,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let visa2: vsapi::Visa = vsapi::Visa::new(
-            0,
-            0,
-            0,
-            Vec::new(),
-            Vec::new(),
-            src_addr.to_vec(),
-            dst_addr.to_vec(),
-            l4proto2,
-            src_dst_wild,
-            None,
-            None,
-            None,
-            None,
-        );
-
-        let v1 = Visa::new(visa1);
-        let v2 = Visa::new(visa2);
+        let v1 = make_visa(src_addr, dst_addr, l4proto1, src_port_specified, dst_port);
+        let v2 = make_visa(src_addr, dst_addr, l4proto2, src_port_wild, dst_port);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(13, v2);
@@ -1803,7 +1325,6 @@ mod tests {
         let table = FiveTupleLookupTable::new(&hash);
 
         let un_rcu_table = table.table.get();
-
 
         let src_port_level;
         if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
@@ -1840,7 +1361,7 @@ mod tests {
             IpAddress::from(src_addr),
             IpAddress::from(dst_addr),
             ip_number::UDP,
-            src_port as u16,
+            src_port_specified as u16,
             dst_port as u16,
         );
         let random_src_ft = FiveTuple::new(
@@ -1851,10 +1372,8 @@ mod tests {
             4323u16,
             dst_port as u16,
         );
-        
+
         assert_eq!(table.find_match(specified_src_ft), Some(12));
         assert_eq!(table.find_match(random_src_ft), Some(13));
-
-
     }
 }
