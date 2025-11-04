@@ -113,6 +113,8 @@ impl FiveTupleLookupTable {
         }
     }
 
+    // TODO combine_dst_levels and combine_src_levels are essentially the same except which function they call to combine
+    // the levels, if we generalize enums with generic variables, we could combine them and pass the function in at the func call
     fn combine_dst_levels(
         dst_level_one: DstPortLevel,
         dst_level_two: DstPortLevel,
@@ -404,9 +406,6 @@ mod tests {
 
         let v = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port);
 
-        // let ft = FiveTuple::new(L3Type::Ipv6, IpAddress::from(src_addr), IpAddress::from(dst_addr), ip_number::TCP, src_port as u16, dst_port as u16);
-        // assert_eq!(Visa::extract_five_tuple(&v.visa.unwrap()), ft);
-
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v);
 
@@ -414,7 +413,7 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
-        // Get src port level
+        // Get src port level enum from from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
@@ -434,7 +433,7 @@ mod tests {
         }
         assert!(src_port_level.is_some());
 
-        // Get proto level
+        // Get proto level from src port level enum
         let proto_level;
         if let SrcPortLevel::SingleVal((src, protos)) = src_port_level.unwrap() {
             assert_eq!(*src, src_port as u16);
@@ -469,6 +468,7 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        // Get src port level enum from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
@@ -488,7 +488,7 @@ mod tests {
         }
         assert!(src_port_level.is_some());
 
-        // Get proto level
+        // Get proto level from src port level enum
         let proto_level;
         if let SrcPortLevel::SingleVal((src, protos)) = src_port_level.unwrap() {
             assert_eq!(*src, src_port as u16);
@@ -537,6 +537,7 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        // Get src port level enum from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
@@ -556,7 +557,7 @@ mod tests {
         }
         assert!(src_port_level.is_some());
 
-        // get proto levels
+        // Get src port map from src port level enum
         let src_ports;
         if let SrcPortLevel::MultiVal(src_level) = src_port_level.unwrap() {
             src_ports = Some(src_level)
@@ -600,6 +601,7 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        // Get dst port map from dst port level enum
         let dst_port_level;
         if let DstPortLevel::MultiVal(dst_level) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
@@ -618,34 +620,35 @@ mod tests {
         }
         assert!(dst_port_level.is_some());
 
-        let src_port_level1;
+        // Get get protos from dst port level map and src port level enum
+        let proto_level1;
         if let SrcPortLevel::SingleVal((src, src_level)) =
             dst_port_level.unwrap().get(dst_port1 as u16).unwrap()
         {
             assert_eq!(*src, src_port as u16);
-            src_port_level1 = Some(src_level)
+            proto_level1 = Some(src_level)
         } else {
-            src_port_level1 = None
+            proto_level1 = None
         }
-        assert!(src_port_level1.is_some());
+        assert!(proto_level1.is_some());
 
-        let src_port_level2;
+        let proto_level2;
         if let SrcPortLevel::SingleVal((src, src_level)) =
             dst_port_level.unwrap().get(dst_port2 as u16).unwrap()
         {
             assert_eq!(*src, src_port as u16);
-            src_port_level2 = Some(src_level)
+            proto_level2 = Some(src_level)
         } else {
-            src_port_level2 = None
+            proto_level2 = None
         }
-        assert!(src_port_level2.is_some());
+        assert!(proto_level2.is_some());
 
-        assert_eq!(src_port_level1.unwrap()[0].1, 12);
-        assert_eq!(src_port_level1.unwrap()[0].0, ip_number::TCP);
-        assert_eq!(src_port_level2.unwrap()[0].1, 13);
-        assert_eq!(src_port_level2.unwrap()[0].0, ip_number::TCP);
-        assert_eq!(src_port_level1.unwrap().len(), 1);
-        assert_eq!(src_port_level2.unwrap().len(), 1);
+        assert_eq!(proto_level1.unwrap()[0].1, 12);
+        assert_eq!(proto_level1.unwrap()[0].0, ip_number::TCP);
+        assert_eq!(proto_level2.unwrap()[0].1, 13);
+        assert_eq!(proto_level2.unwrap()[0].0, ip_number::TCP);
+        assert_eq!(proto_level1.unwrap().len(), 1);
+        assert_eq!(proto_level2.unwrap().len(), 1);
         assert_eq!(dst_port_level.unwrap().len(), 2);
         assert_eq!(
             un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
@@ -675,6 +678,7 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        // Get src port levels enum from dst port level enum
         let src_port_level1;
         if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
@@ -713,7 +717,7 @@ mod tests {
         }
         assert!(src_port_level2.is_some());
 
-        // Get proto level
+        // Get proto levels from src port level enums
         let proto_level1;
         if let SrcPortLevel::SingleVal((src, protos)) = src_port_level1.unwrap() {
             assert_eq!(*src, src_port as u16);
@@ -763,6 +767,7 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        // Get src port level enum from dst port level enum
         let src_port_level1;
         if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
             .get(&IpAddress::from(dst_addr1))
@@ -801,7 +806,7 @@ mod tests {
         }
         assert!(src_port_level2.is_some());
 
-        // Get proto level
+        // Get proto levels from src port level enums
         let proto_level1;
         if let SrcPortLevel::SingleVal((src, protos)) = src_port_level1.unwrap() {
             assert_eq!(*src, src_port as u16);
@@ -850,7 +855,6 @@ mod tests {
             src_port as u16,
             dst_port as u16,
         );
-        // assert_eq!(Visa::extract_five_tuple(&v.visa.unwrap()), ft);
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v);
@@ -1112,6 +1116,7 @@ mod tests {
         assert_eq!(table.find_match(ft4), Some(12));
         let un_rcu_table = table.table.get();
 
+        // Get src port level enum from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
@@ -1131,7 +1136,7 @@ mod tests {
         }
         assert!(src_port_level.is_some());
 
-        // Get proto level
+        // Get proto level from src port level enum
         let proto_level;
         if let SrcPortLevel::Wildcard(protos) = src_port_level.unwrap() {
             proto_level = Some(protos)
@@ -1197,6 +1202,7 @@ mod tests {
         assert_eq!(table.find_match(ft4), Some(12));
         let un_rcu_table = table.table.get();
 
+        //Get src port level enum from dst port level enum
         let src_port_level;
         if let DstPortLevel::Wildcard(src_level) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
@@ -1220,7 +1226,7 @@ mod tests {
             1
         );
 
-        // Get proto level
+        // Get proto level from src port level enum
         let proto_level;
         if let SrcPortLevel::SingleVal((src, protos)) = src_port_level.unwrap() {
             assert_eq!(*src, src_port as u16);
@@ -1253,6 +1259,7 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        // Get src port level enum from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
@@ -1272,7 +1279,7 @@ mod tests {
         }
         assert!(src_port_level.is_some());
 
-        // Get proto level
+        // Get src port level map from src port level enum
         let src_level;
         if let SrcPortLevel::MultiVal(src_map) = src_port_level.unwrap() {
             src_level = Some(src_map)
@@ -1326,6 +1333,7 @@ mod tests {
 
         let un_rcu_table = table.table.get();
 
+        // Get src port level enum from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
@@ -1345,7 +1353,7 @@ mod tests {
         }
         assert!(src_port_level.is_some());
 
-        // Get proto level
+        // Get src port level map from src port level ennum
         let src_level;
         if let SrcPortLevel::MultiVal(src_map) = src_port_level.unwrap() {
             src_level = Some(src_map)
