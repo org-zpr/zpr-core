@@ -218,7 +218,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -234,7 +236,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -396,7 +400,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -412,7 +418,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -428,7 +436,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -444,7 +454,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -460,7 +472,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -476,7 +490,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -490,7 +506,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -561,7 +579,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -577,7 +597,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -593,7 +615,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -609,7 +633,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -625,7 +651,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -641,7 +669,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -655,7 +685,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -728,7 +760,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -744,7 +778,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -760,7 +796,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303),
+                    Ipv6Addr::new(
+                        0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303
+                    ),
                     128
                 )
                 .unwrap()
@@ -776,7 +814,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303),
+                    Ipv6Addr::new(
+                        0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303, 0x0303
+                    ),
                     128
                 )
                 .unwrap()
@@ -853,7 +893,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr1))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -869,7 +911,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr1))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -885,7 +929,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr2))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -901,7 +947,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr2))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -1430,7 +1478,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -1442,7 +1492,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -1456,7 +1508,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -1551,7 +1605,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()
@@ -1563,7 +1619,9 @@ mod tests {
                 .get(&IpAddress::from(dst_addr))
                 .unwrap()
                 .exact_match(
-                    Ipv6Addr::new(0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101),
+                    Ipv6Addr::new(
+                        0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101, 0x0101
+                    ),
                     128
                 )
                 .unwrap()

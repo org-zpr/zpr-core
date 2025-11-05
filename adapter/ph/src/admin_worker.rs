@@ -23,6 +23,7 @@ use std::fmt::Write;
 use std::io::Error;
 use std::io::IoSliceMut;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -78,20 +79,20 @@ struct AdminServiceImpl {
 
 impl svc::Server for AdminServiceImpl {
     async fn echo(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         _: svc::EchoParams,
         _: svc::EchoResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         debug!(target: RPC, "Echo procedure initiated");
 
         Ok(())
     }
 
     async fn reset_counters(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         _: svc::ResetCountersParams,
         _: svc::ResetCountersResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Reset counters procedure initiated");
         for value in self.asm.counters.management.values() {
             value.reset();
@@ -107,10 +108,10 @@ impl svc::Server for AdminServiceImpl {
     }
 
     async fn counters(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         _: svc::CountersParams,
         mut results: svc::CountersResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         debug!(target: RPC, "Counters procedure initiated");
         let mut results_builder = results.get().init_counts();
 
@@ -153,21 +154,21 @@ impl svc::Server for AdminServiceImpl {
         Ok(())
     }
 
-    fn set_capture_file(
-        self: ::capnp::capability::Rc<Self>,
+    async fn set_capture_file(
+        self: Rc<Self>,
         _: svc::SetCaptureFileParams,
         _: svc::SetCaptureFileResults,
-    ) -> impl ::core::future::Future<Output = Result<(), ::capnp::Error>> + 'static {
-        ::core::future::ready(Err(::capnp::Error::unimplemented(
+    ) -> Result<(), capnp::Error> {
+        Err(capnp::Error::unimplemented(
             "method cmd_line_inter::Server::set_capture_file not implemented".to_string(),
-        )))
+        ))
     }
 
     async fn close_capture_file(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         _: svc::CloseCaptureFileParams,
         _: svc::CloseCaptureFileResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         let _ = self.asm.capture_worker.close_capture_file().await;
         self.asm.flow_control.delete_program();
 
@@ -175,10 +176,10 @@ impl svc::Server for AdminServiceImpl {
     }
 
     async fn flush_capture_file(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         _: svc::FlushCaptureFileParams,
         _: svc::FlushCaptureFileResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Flush capture file procedure initiated");
         let _ = self.asm.capture_worker.flush_capture_file().await;
 
@@ -186,10 +187,10 @@ impl svc::Server for AdminServiceImpl {
     }
 
     async fn set_capture_program(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         params: svc::SetCaptureProgramParams,
         mut results: svc::SetCaptureProgramResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Set capture program procedure initiated");
         let programs = params.get()?.get_program()?.get_bpf_prog()?;
 
@@ -231,20 +232,20 @@ impl svc::Server for AdminServiceImpl {
     }
 
     async fn delete_capture_program(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         _: svc::DeleteCaptureProgramParams,
         _: svc::DeleteCaptureProgramResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Delete capture program procedure initiated");
         self.asm.flow_control.delete_program();
         Ok(())
     }
 
     async fn perf_sample(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         _: svc::PerfSampleParams,
         mut results: svc::PerfSampleResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Perf sample procedure initiated");
         let mut results_builder = results.get();
         results_builder.set_result("Not currently supported");
@@ -252,10 +253,10 @@ impl svc::Server for AdminServiceImpl {
     }
 
     async fn show_link_summary(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         _: svc::ShowLinkSummaryParams,
         mut results: svc::ShowLinkSummaryResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Show link summary procedure initiated");
         {
             let peer_ids = self.asm.peer_ids.lock().unwrap();
@@ -273,10 +274,10 @@ impl svc::Server for AdminServiceImpl {
     }
 
     async fn show_link(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         params: svc::ShowLinkParams,
         mut results: svc::ShowLinkResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Show link procedure initiated");
         let id = params.get()?.get_id();
         debug!(target: RPC, "Show link id {id} requested");
@@ -300,19 +301,19 @@ impl svc::Server for AdminServiceImpl {
     }
 
     async fn configure_link(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         _: svc::ConfigureLinkParams,
         _: svc::ConfigureLinkResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Configure link procedure initiated");
         Ok(())
     }
 
     async fn start_link(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         params: svc::StartLinkParams,
         mut results: svc::StartLinkResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Start link procedure initiated");
         let id = params.get()?.get_id();
         debug!(target: RPC, "Start link id {id} requested");
@@ -333,39 +334,37 @@ impl svc::Server for AdminServiceImpl {
         Ok(())
     }
 
-    fn stop_link(
-        self: ::capnp::capability::Rc<Self>,
+    async fn stop_link(
+        self: Rc<Self>,
         params: svc::StopLinkParams,
         mut results: svc::StopLinkResults,
-    ) -> impl ::core::future::Future<Output = Result<(), ::capnp::Error>> + 'static {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Stop link procedure initiated");
         let task_asm = self.asm.clone();
-        capnp::capability::Promise::from_future(async move {
-            let id = params.get()?.get_id();
-            debug!(target: RPC, "Stop link id {id} requested");
+        let id = params.get()?.get_id();
+        debug!(target: RPC, "Stop link id {id} requested");
 
-            let results_builder = results.get().init_result();
+        let results_builder = results.get().init_result();
 
-            match task_asm.process_link_state_event(id, LinkEvent::Close(TerminateReason::Other)) {
-                Ok(_) => {
-                    let mut success_builder = results_builder.init_success();
-                    success_builder.set_none(());
-                }
-                Err(e) => {
-                    let resp = format!("Failed to stop link {}: {:?}\n", id, e);
-                    let mut error_builder = results_builder.init_error();
-                    error_builder.set_txt(resp);
-                }
+        match task_asm.process_link_state_event(id, LinkEvent::Close(TerminateReason::Other)) {
+            Ok(_) => {
+                let mut success_builder = results_builder.init_success();
+                success_builder.set_none(());
             }
-            Ok(())
-        })
+            Err(e) => {
+                let resp = format!("Failed to stop link {}: {:?}\n", id, e);
+                let mut error_builder = results_builder.init_error();
+                error_builder.set_txt(resp);
+            }
+        }
+        Ok(())
     }
 
     async fn reset_link(
-        self: ::capnp::capability::Rc<Self>,
+        self: Rc<Self>,
         params: svc::ResetLinkParams,
         _: svc::ResetLinkResults,
-    ) -> Result<(), ::capnp::Error> {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Reset link procedure initiated");
         let id = params.get()?.get_id();
         debug!(target: RPC, "Reset link id {id} requested");
@@ -374,49 +373,47 @@ impl svc::Server for AdminServiceImpl {
         Ok(())
     }
 
-    fn change_logging(
-        self: ::capnp::capability::Rc<Self>,
+    async fn change_logging(
+        self: Rc<Self>,
         params: svc::ChangeLoggingParams,
         mut results: svc::ChangeLoggingResults,
-    ) -> impl ::core::future::Future<Output = Result<(), ::capnp::Error>> + 'static {
+    ) -> Result<(), capnp::Error> {
         info!(target: RPC, "Change logging procedure initiated");
         let task_asm = self.asm.clone();
-        capnp::capability::Promise::from_future(async move {
-            let log_state = params.get()?.get_logs()?;
-            // let log_vec: Vec<&str> = log_state.split_whitespace().collect();
-            let mut applied: Vec<String> = Vec::new();
-            let mut ignored: Vec<String> = Vec::new();
-            for log in log_state.iter() {
-                let target = log.get_level()?.to_str()?;
-                let level = log.get_target()?.to_str()?;
-                if targets::ALL_TARGETS.contains(&target)
-                    && levels::ALL_LEVELS.contains(&level.to_uppercase().as_str())
-                {
-                    task_asm
-                        .logging
-                        .lock()
-                        .unwrap()
-                        .insert(target.to_string(), level.to_uppercase());
-                    applied.push(format!("{}={}", target, level));
-                    debug!(target: RPC, "Logging pair: {target}={level} applied");
-                } else {
-                    ignored.push(format!("{}={}", target, level));
-                    debug!(target: RPC, "Logging pair: {target}={level} ignored");
-                }
+        let log_state = params.get()?.get_logs()?;
+        // let log_vec: Vec<&str> = log_state.split_whitespace().collect();
+        let mut applied: Vec<String> = Vec::new();
+        let mut ignored: Vec<String> = Vec::new();
+        for log in log_state.iter() {
+            let target = log.get_level()?.to_str()?;
+            let level = log.get_target()?.to_str()?;
+            if targets::ALL_TARGETS.contains(&target)
+                && levels::ALL_LEVELS.contains(&level.to_uppercase().as_str())
+            {
+                task_asm
+                    .logging
+                    .lock()
+                    .unwrap()
+                    .insert(target.to_string(), level.to_uppercase());
+                applied.push(format!("{}={}", target, level));
+                debug!(target: RPC, "Logging pair: {target}={level} applied");
+            } else {
+                ignored.push(format!("{}={}", target, level));
+                debug!(target: RPC, "Logging pair: {target}={level} ignored");
             }
+        }
 
-            logging::reload_filter(&task_asm.reload_handle, &task_asm.logging.lock().unwrap());
+        logging::reload_filter(&task_asm.reload_handle, &task_asm.logging.lock().unwrap());
 
-            let mut results_builder = results.get().init_result();
-            if applied.len() > 0 {
-                let _ = results_builder.set_applied(applied.as_slice());
-            }
-            if ignored.len() > 0 {
-                let _ = results_builder.set_ignored(ignored.as_slice());
-            }
+        let mut results_builder = results.get().init_result();
+        if applied.len() > 0 {
+            let _ = results_builder.set_applied(applied.as_slice());
+        }
+        if ignored.len() > 0 {
+            let _ = results_builder.set_ignored(ignored.as_slice());
+        }
 
-            Ok(())
-        })
+        Ok(())
     }
 }
 
