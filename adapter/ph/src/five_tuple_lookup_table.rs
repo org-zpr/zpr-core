@@ -7,7 +7,7 @@ use ip_network_table_deps_treebitmap::IpLookupTable;
 use range_set_blaze::RangeMapBlaze;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use zpr::{L3Type, VisaId};
 
 // TODO wrap inner structures in Arcs, will make re-creation more efficient
@@ -23,49 +23,29 @@ pub struct FiveTupleLookupTable {
 #[derive(Clone)]
 pub enum DstPortLevel {
     Wildcard(SrcPortLevel),
-    MultiVal(RangeMapBlaze<u16, SrcPortLevel>),
-    SingleVal((u16, SrcPortLevel)),
+    MultiVal(Arc<RangeMapBlaze<u16, SrcPortLevel>>),
+    SingleVal(Arc<(u16, SrcPortLevel)>), // TODO (same as below) do I need an RwLock here too? - likely will when implement editing
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum SrcPortLevel {
-    Wildcard(ProtoVec),
-    MultiVal(Arc<RwLock<RangeMapBlaze<u16, ProtoVec>>>),
-    SingleVal(Arc<(u16, ProtoVec)>),
+    Wildcard(Arc<Vec<(IpProtocol, VisaId)>>),
+    MultiVal(Arc<RangeMapBlaze<u16, Arc<Vec<(IpProtocol, VisaId)>>>>),
+    SingleVal(Arc<(u16, Arc<Vec<(IpProtocol, VisaId)>>)>), // TODO do I need an RwLock here too? - likely will when implement editing
 }
 
-// Had to make into its own struct so that I could implement equal for the RwLock-ed Vec, which is required
-// for RangeMapBlaze
-#[derive(Clone)]
-pub struct ProtoVec {
-    protos: Arc<RwLock<Vec<(IpProtocol, VisaId)>>>,
-}
+// impl PartialEq for SrcPortLevel {
+//     fn eq(&self, other: &Self) -> bool {
+//         match (self, other) {
+//             (Self::Wildcard(v1), Self::Wildcard(v2)) => v1 == v2,
+//             (Self::MultiVal(v1), Self::MultiVal(v2)) => v1 == v2,
+//             (Self::SingleVal(v1), Self::SingleVal(v2)) => v1.0 == v2.0 && v1.1 == v2.1,
+//             _ => false,
+//         }
+//     }
+// }
 
-impl PartialEq for ProtoVec {
-    fn eq(&self, other: &Self) -> bool {
-        *self.protos.read().unwrap() == *other.protos.read().unwrap()
-    }
-}
-
-impl Eq for ProtoVec {}
-
-// Not sure if this is correct, this is not PartialEq, it will only return true if it is exactly equal
-impl PartialEq for SrcPortLevel {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Wildcard(v1), Self::Wildcard(v2)) => {
-                *v1.protos.read().unwrap() == *v2.protos.read().unwrap()
-            }
-            (Self::MultiVal(v1), Self::MultiVal(v2)) => *v1.read().unwrap() == *v2.read().unwrap(),
-            (Self::SingleVal(v1), Self::SingleVal(v2)) => {
-                v1.0 == v2.0 && *v1.1.protos.read().unwrap() == *v2.1.protos.read().unwrap()
-            }
-            _ => false,
-        }
-    }
-}
-
-impl Eq for SrcPortLevel {}
+// impl Eq for SrcPortLevel {}
 
 impl FiveTupleLookupTable {
     // TODO change how construction is done once visas move away from being based on a FiveTuples
@@ -82,20 +62,16 @@ impl FiveTupleLookupTable {
             let mut arr = Vec::new();
             arr.push((five_tuple.l4_protocol, *visa_id));
 
-            let protos = ProtoVec {
-                protos: Arc::new(RwLock::new(arr)),
-            };
-
             // Determine which enum to use for src level
             let src_level = match five_tuple.src_port {
-                0 => SrcPortLevel::Wildcard(protos),
-                val => SrcPortLevel::SingleVal(Arc::new((val, protos))),
+                0 => SrcPortLevel::Wildcard(Arc::new(arr)),
+                val => SrcPortLevel::SingleVal(Arc::new((val, Arc::new(arr)))),
             };
 
             // Determine which enum to use for dst level
             let dst_level = match five_tuple.dst_port {
                 0 => DstPortLevel::Wildcard(src_level),
-                val => DstPortLevel::SingleVal((val, src_level)),
+                val => DstPortLevel::SingleVal(Arc::new((val, src_level))),
             };
 
             // Create table of src addresses, add map of destination ports
@@ -160,20 +136,16 @@ impl FiveTupleLookupTable {
             (DstPortLevel::Wildcard(src_port_level1), DstPortLevel::Wildcard(src_port_level2)) => {
                 DstPortLevel::Wildcard(Self::combine_src_levels(src_port_level1, src_port_level2))
             }
-            (
-                DstPortLevel::Wildcard(src_port_level_wild),
-                DstPortLevel::SingleVal((dst_port, src_port_level_single)),
-            )
-            | (
-                DstPortLevel::SingleVal((dst_port, src_port_level_single)),
-                DstPortLevel::Wildcard(src_port_level_wild),
-            ) => {
+            (DstPortLevel::Wildcard(src_port_level_wild), DstPortLevel::SingleVal(tuple_val))
+            | (DstPortLevel::SingleVal(tuple_val), DstPortLevel::Wildcard(src_port_level_wild)) => {
+                let dst_port = tuple_val.0;
+                let src_port_level_single = tuple_val.1.clone();
                 let mut dst_level = RangeMapBlaze::new();
                 dst_level.ranges_insert(0..=65535, src_port_level_wild.clone());
                 let intersection =
                     Self::combine_src_levels(src_port_level_wild, src_port_level_single);
                 dst_level.insert(dst_port, intersection);
-                DstPortLevel::MultiVal(dst_level)
+                DstPortLevel::MultiVal(Arc::new(dst_level))
             }
             (DstPortLevel::Wildcard(src_port_level), DstPortLevel::MultiVal(dst_port_level))
             | (DstPortLevel::MultiVal(dst_port_level), DstPortLevel::Wildcard(src_port_level)) => {
@@ -185,33 +157,34 @@ impl FiveTupleLookupTable {
                         Self::combine_src_levels(src_port_level.clone(), src_level.clone());
                     dst_level.insert(port, intersection);
                 }
-                DstPortLevel::MultiVal(dst_level)
+                DstPortLevel::MultiVal(Arc::new(dst_level))
             }
-            (
-                DstPortLevel::SingleVal((dst_port1, src_port_level1)),
-                DstPortLevel::SingleVal((dst_port2, src_port_level2)),
-            ) => {
+            (DstPortLevel::SingleVal(tuple_val1), DstPortLevel::SingleVal(tuple_val2)) => {
+                let dst_port1 = tuple_val1.0;
+                let src_port_level1 = tuple_val1.1.clone();
+                let dst_port2 = tuple_val2.0;
+                let src_port_level2 = tuple_val2.1.clone();
+
                 if dst_port1 == dst_port2 {
-                    DstPortLevel::SingleVal((
+                    DstPortLevel::SingleVal(Arc::new((
                         dst_port1,
                         Self::combine_src_levels(src_port_level1, src_port_level2),
-                    ))
+                    )))
                 } else {
                     let mut dst_level = RangeMapBlaze::new();
                     dst_level.insert(dst_port1, src_port_level1);
                     dst_level.insert(dst_port2, src_port_level2);
-                    DstPortLevel::MultiVal(dst_level)
+                    DstPortLevel::MultiVal(Arc::new(dst_level))
                 }
             }
-            (
-                DstPortLevel::SingleVal((dst_port, src_port_level)),
-                DstPortLevel::MultiVal(dst_port_level),
-            )
-            | (
-                DstPortLevel::MultiVal(dst_port_level),
-                DstPortLevel::SingleVal((dst_port, src_port_level)),
-            ) => {
-                let mut dst_level = dst_port_level.clone();
+            (DstPortLevel::SingleVal(tuple_val), DstPortLevel::MultiVal(dst_port_level))
+            | (DstPortLevel::MultiVal(dst_port_level), DstPortLevel::SingleVal(tuple_val)) => {
+                let dst_port = tuple_val.0;
+                let src_port_level = tuple_val.1.clone();
+                let mut dst_level = RangeMapBlaze::new();
+                for (key, val) in dst_port_level.iter() {
+                    dst_level.insert(key, val.clone());
+                }
                 match dst_level.insert(dst_port, src_port_level.clone()) {
                     None => (),
                     Some(removed_src_level) => {
@@ -220,10 +193,13 @@ impl FiveTupleLookupTable {
                         dst_level.insert(dst_port, intersection);
                     }
                 };
-                DstPortLevel::MultiVal(dst_level)
+                DstPortLevel::MultiVal(Arc::new(dst_level))
             }
             (DstPortLevel::MultiVal(dst_port_level1), DstPortLevel::MultiVal(dst_port_level2)) => {
-                let mut dst_level = dst_port_level1.clone();
+                let mut dst_level = RangeMapBlaze::new();
+                for (key, val) in dst_port_level1.iter() {
+                    dst_level.insert(key, val.clone());
+                }
                 for (port, src_level2) in dst_port_level2.iter() {
                     match dst_level.insert(port, src_level2.clone()) {
                         None => (),
@@ -234,7 +210,7 @@ impl FiveTupleLookupTable {
                         }
                     }
                 }
-                DstPortLevel::MultiVal(dst_level)
+                DstPortLevel::MultiVal(Arc::new(dst_level))
             }
         }
     }
@@ -255,7 +231,7 @@ impl FiveTupleLookupTable {
                 src_level.ranges_insert(0..=65535, proto_vec_wild.clone());
                 let intersection = Self::combine_protos(proto_vec_single, proto_vec_wild);
                 src_level.insert(port, intersection);
-                SrcPortLevel::MultiVal(Arc::new(RwLock::new(src_level)))
+                SrcPortLevel::MultiVal(Arc::new(src_level))
             }
             (SrcPortLevel::Wildcard(proto_vec), SrcPortLevel::MultiVal(src_ports))
             | (SrcPortLevel::MultiVal(src_ports), SrcPortLevel::Wildcard(proto_vec)) => {
@@ -263,11 +239,11 @@ impl FiveTupleLookupTable {
                 // rangemapblaze, but may be slower
                 let mut src_level = RangeMapBlaze::new();
                 src_level.ranges_insert(0..=65535, proto_vec.clone());
-                for (port, protos) in src_ports.read().unwrap().iter() {
+                for (port, protos) in src_ports.iter() {
                     let intersection = Self::combine_protos(proto_vec.clone(), protos.clone());
                     src_level.insert(port, intersection);
                 }
-                SrcPortLevel::MultiVal(Arc::new(RwLock::new(src_level)))
+                SrcPortLevel::MultiVal(Arc::new(src_level))
             }
             (SrcPortLevel::SingleVal(tuple_val1), SrcPortLevel::SingleVal(tuple_val2)) => {
                 let port1 = tuple_val1.0;
@@ -281,56 +257,68 @@ impl FiveTupleLookupTable {
                     let mut src_level = RangeMapBlaze::new();
                     src_level.insert(port1, proto_vec1);
                     src_level.insert(port2, proto_vec2);
-                    SrcPortLevel::MultiVal(Arc::new(RwLock::new(src_level)))
+                    SrcPortLevel::MultiVal(Arc::new(src_level))
                 }
             }
             (SrcPortLevel::SingleVal(tuple_val), SrcPortLevel::MultiVal(src_ports))
             | (SrcPortLevel::MultiVal(src_ports), SrcPortLevel::SingleVal(tuple_val)) => {
                 let port = tuple_val.0;
                 let proto_vec = tuple_val.1.clone();
-
-                let src_level = src_ports.clone();
-                match src_level.write().unwrap().insert(port, proto_vec.clone()) {
+                let mut src_level = RangeMapBlaze::new();
+                for (key, val) in src_ports.iter() {
+                    src_level.insert(key, val.clone());
+                }
+                match src_level.insert(port, proto_vec.clone()) {
                     None => (),
                     Some(protos) => {
                         let intersection = Self::combine_protos(proto_vec, protos);
-                        src_level.write().unwrap().insert(port, intersection);
+                        src_level.insert(port, intersection);
                     }
                 }
-                SrcPortLevel::MultiVal(src_level)
+                SrcPortLevel::MultiVal(Arc::new(src_level))
             }
             (SrcPortLevel::MultiVal(src_ports1), SrcPortLevel::MultiVal(src_ports2)) => {
-                let src_level = src_ports1.clone();
-                for (port, protos2) in src_ports2.read().unwrap().iter() {
-                    match src_level.write().unwrap().insert(port, protos2.clone()) {
+                let mut src_level = RangeMapBlaze::new();
+                for (key, val) in src_ports1.iter() {
+                    src_level.insert(key, val.clone());
+                }
+                for (port, protos2) in src_ports2.iter() {
+                    match src_level.insert(port, protos2.clone()) {
                         None => (),
                         Some(protos1) => {
                             let intersection = Self::combine_protos(protos1, protos2.clone());
-                            src_level.write().unwrap().insert(port, intersection);
+                            src_level.insert(port, intersection);
                         }
                     }
                 }
-                SrcPortLevel::MultiVal(src_level)
+                SrcPortLevel::MultiVal(Arc::new(src_level))
             }
         }
     }
 
-    fn combine_protos(proto_vec_one: ProtoVec, proto_vec_two: ProtoVec) -> ProtoVec {
-        let intersection = proto_vec_two.clone();
+    fn combine_protos(
+        proto_vec_one: Arc<Vec<(IpProtocol, VisaId)>>,
+        proto_vec_two: Arc<Vec<(IpProtocol, VisaId)>>,
+    ) -> Arc<Vec<(IpProtocol, VisaId)>> {
+        // let intersection = proto_vec_two.clone();
+        let mut intersection: Vec<(u8, i32)> = Vec::new();
+        for elem in proto_vec_two.iter() {
+            intersection.push(elem.clone());
+        }
 
-        for proto_one in proto_vec_one.protos.read().unwrap().iter() {
+        for proto_one in proto_vec_one.iter() {
             let mut exists = false;
-            for proto_two in intersection.protos.read().unwrap().iter() {
+            for proto_two in intersection.iter() {
                 if proto_one.0 == proto_two.0 {
                     exists = true
                 }
             }
             if !exists {
-                intersection.protos.write().unwrap().push(*proto_one)
+                intersection.push(*proto_one)
             }
         }
 
-        intersection
+        Arc::new(intersection)
     }
 
     pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
@@ -346,10 +334,14 @@ impl FiveTupleLookupTable {
                         DstPortLevel::Wildcard(src_level) => {
                             Self::find_src_level_match(src_level.clone(), ft)
                         }
-                        DstPortLevel::SingleVal((port, src_level)) => match *port == ft.dst_port {
-                            false => None,
-                            true => Self::find_src_level_match(src_level.clone(), ft),
-                        },
+                        DstPortLevel::SingleVal(tuple_val) => {
+                            let port = tuple_val.0;
+                            let src_level = tuple_val.1.clone();
+                            match port == ft.dst_port {
+                                false => return None,
+                                true => return Self::find_src_level_match(src_level.clone(), ft),
+                            };
+                        }
                         DstPortLevel::MultiVal(dst_level) => match dst_level.get(ft.dst_port) {
                             None => None,
                             Some(src_level) => Self::find_src_level_match(src_level.clone(), ft),
@@ -363,7 +355,7 @@ impl FiveTupleLookupTable {
     fn find_src_level_match(src_level: SrcPortLevel, ft: FiveTuple) -> Option<VisaId> {
         match src_level {
             SrcPortLevel::Wildcard(protos) => {
-                for elem in protos.protos.read().unwrap().iter() {
+                for elem in protos.iter() {
                     if elem.0 == ft.l4_protocol {
                         return Some(elem.1);
                     }
@@ -372,7 +364,7 @@ impl FiveTupleLookupTable {
             }
             SrcPortLevel::SingleVal(tuple_val) => {
                 let port = tuple_val.0;
-                let protos = tuple_val.1.protos.read().unwrap();
+                let protos = tuple_val.1.clone();
 
                 match port == ft.src_port {
                     false => None,
@@ -386,19 +378,17 @@ impl FiveTupleLookupTable {
                     }
                 }
             }
-            SrcPortLevel::MultiVal(src_level_map) => {
-                match src_level_map.read().unwrap().get(ft.src_port) {
-                    None => None,
-                    Some(protos) => {
-                        for elem in protos.protos.read().unwrap().iter() {
-                            if elem.0 == ft.l4_protocol {
-                                return Some(elem.1);
-                            }
+            SrcPortLevel::MultiVal(src_level_map) => match src_level_map.get(ft.src_port) {
+                None => None,
+                Some(protos) => {
+                    for elem in protos.iter() {
+                        if elem.0 == ft.l4_protocol {
+                            return Some(elem.1);
                         }
-                        return None;
                     }
+                    return None;
                 }
-            }
+            },
         }
     }
 }
@@ -458,7 +448,7 @@ mod tests {
 
         // Get src port level enum from from dst port level enum
         let src_port_level;
-        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -469,7 +459,9 @@ mod tests {
             )
             .unwrap()
         {
-            assert_eq!(*dst, dst_port as u16);
+            let dst = tuple_val.0;
+            let src_level = tuple_val.1.clone();
+            assert_eq!(dst, dst_port as u16);
             src_port_level = Some(src_level)
         } else {
             src_port_level = None
@@ -488,14 +480,8 @@ mod tests {
         }
         assert!(proto_level.is_some());
 
-        assert_eq!(
-            proto_level.as_ref().unwrap().protos.read().unwrap()[0].1,
-            12
-        );
-        assert_eq!(
-            proto_level.unwrap().protos.read().unwrap()[0].0,
-            ip_number::TCP
-        );
+        assert_eq!(proto_level.as_ref().unwrap()[0].1, 12);
+        assert_eq!(proto_level.unwrap()[0].0, ip_number::TCP);
     }
 
     #[test]
@@ -521,7 +507,7 @@ mod tests {
 
         // Get src port level enum from dst port level enum
         let src_port_level;
-        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -532,7 +518,9 @@ mod tests {
             )
             .unwrap()
         {
-            assert_eq!(*dst, dst_port as u16);
+            let dst = tuple_val.0;
+            let src_level = tuple_val.1.clone();
+            assert_eq!(dst, dst_port as u16);
             src_port_level = Some(src_level)
         } else {
             src_port_level = None
@@ -551,34 +539,22 @@ mod tests {
         }
         assert!(proto_level.is_some());
 
-        assert_eq!(
-            proto_level.as_ref().unwrap().protos.read().unwrap().len(),
-            2
-        );
+        assert_eq!(proto_level.as_ref().unwrap().len(), 2);
 
         let mut tcp_idx = 0;
         let mut udp_idx = 0;
 
         // protovec is not deterministic in terms of ordering, have to figure out which visa is where
-        if proto_level.as_ref().unwrap().protos.read().unwrap()[0].0 == ip_number::TCP {
+        if proto_level.as_ref().unwrap()[0].0 == ip_number::TCP {
             udp_idx = 1;
         } else {
             tcp_idx = 1;
         }
 
-        assert_eq!(
-            proto_level.as_ref().unwrap().protos.read().unwrap()[tcp_idx].0,
-            ip_number::TCP
-        );
-        assert_eq!(
-            proto_level.as_ref().unwrap().protos.read().unwrap()[tcp_idx].1,
-            12
-        );
-        assert_eq!(
-            proto_level.as_ref().unwrap().protos.read().unwrap()[udp_idx].0,
-            ip_number::UDP
-        );
-        assert_eq!(proto_level.unwrap().protos.read().unwrap()[udp_idx].1, 13);
+        assert_eq!(proto_level.as_ref().unwrap()[tcp_idx].0, ip_number::TCP);
+        assert_eq!(proto_level.as_ref().unwrap()[tcp_idx].1, 12);
+        assert_eq!(proto_level.as_ref().unwrap()[udp_idx].0, ip_number::UDP);
+        assert_eq!(proto_level.unwrap()[udp_idx].1, 13);
     }
 
     #[test]
@@ -604,7 +580,7 @@ mod tests {
 
         // Get src port level enum from dst port level enum
         let src_port_level;
-        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -615,7 +591,9 @@ mod tests {
             )
             .unwrap()
         {
-            assert_eq!(*dst, dst_port as u16);
+            let dst = tuple_val.0;
+            let src_level = tuple_val.1.clone();
+            assert_eq!(dst, dst_port as u16);
             src_port_level = Some(src_level)
         } else {
             src_port_level = None
@@ -632,71 +610,31 @@ mod tests {
         assert!(src_ports.is_some());
 
         assert_eq!(
-            src_ports
-                .unwrap()
-                .read()
-                .unwrap()
-                .get(src_port1 as u16)
-                .unwrap()
-                .protos
-                .read()
-                .unwrap()[0]
-                .1,
+            src_ports.as_ref().unwrap().get(src_port1 as u16).unwrap()[0].1,
             12
         );
         assert_eq!(
-            src_ports
-                .unwrap()
-                .read()
-                .unwrap()
-                .get(src_port1 as u16)
-                .unwrap()
-                .protos
-                .read()
-                .unwrap()[0]
-                .0,
+            src_ports.as_ref().unwrap().get(src_port1 as u16).unwrap()[0].0,
             ip_number::TCP
         );
         assert_eq!(
-            src_ports
-                .unwrap()
-                .read()
-                .unwrap()
-                .get(src_port2 as u16)
-                .unwrap()
-                .protos
-                .read()
-                .unwrap()[0]
-                .1,
+            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap()[0].1,
             13
         );
         assert_eq!(
-            src_ports
-                .unwrap()
-                .read()
-                .unwrap()
-                .get(src_port2 as u16)
-                .unwrap()
-                .protos
-                .read()
-                .unwrap()[0]
-                .0,
+            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap()[0].0,
             ip_number::TCP
         );
         assert_eq!(
             src_ports
-                .unwrap()
-                .read()
+                .as_ref()
                 .unwrap()
                 .get(src_port2 as u16)
-                .unwrap()
-                .protos
-                .read()
                 .unwrap()
                 .len(),
             1
         );
-        assert_eq!(src_ports.unwrap().read().unwrap().len(), 2);
+        assert_eq!(src_ports.unwrap().len(), 2);
     }
 
     #[test]
@@ -766,24 +704,12 @@ mod tests {
         }
         assert!(proto_level2.is_some());
 
-        assert_eq!(
-            proto_level1.as_ref().unwrap().protos.read().unwrap()[0].1,
-            12
-        );
-        assert_eq!(
-            proto_level1.as_ref().unwrap().protos.read().unwrap()[0].0,
-            ip_number::TCP
-        );
-        assert_eq!(
-            proto_level2.as_ref().unwrap().protos.read().unwrap()[0].1,
-            13
-        );
-        assert_eq!(
-            proto_level2.as_ref().unwrap().protos.read().unwrap()[0].0,
-            ip_number::TCP
-        );
-        assert_eq!(proto_level1.unwrap().protos.read().unwrap().len(), 1);
-        assert_eq!(proto_level2.unwrap().protos.read().unwrap().len(), 1);
+        assert_eq!(proto_level1.as_ref().unwrap()[0].1, 12);
+        assert_eq!(proto_level1.as_ref().unwrap()[0].0, ip_number::TCP);
+        assert_eq!(proto_level2.as_ref().unwrap()[0].1, 13);
+        assert_eq!(proto_level2.as_ref().unwrap()[0].0, ip_number::TCP);
+        assert_eq!(proto_level1.unwrap().len(), 1);
+        assert_eq!(proto_level2.unwrap().len(), 1);
         assert_eq!(dst_port_level.unwrap().len(), 2);
         assert_eq!(
             un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
@@ -815,7 +741,7 @@ mod tests {
 
         // Get src port levels enum from dst port level enum
         let src_port_level1;
-        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -826,7 +752,9 @@ mod tests {
             )
             .unwrap()
         {
-            assert_eq!(*dst, dst_port as u16);
+            let dst = tuple_val.0;
+            let src_level = tuple_val.1.clone();
+            assert_eq!(dst, dst_port as u16);
             src_port_level1 = Some(src_level)
         } else {
             src_port_level1 = None
@@ -834,7 +762,7 @@ mod tests {
         assert!(src_port_level1.is_some());
 
         let src_port_level2;
-        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -845,7 +773,9 @@ mod tests {
             )
             .unwrap()
         {
-            assert_eq!(*dst, dst_port as u16);
+            let dst = tuple_val.0;
+            let src_level = tuple_val.1.clone();
+            assert_eq!(dst, dst_port as u16);
             src_port_level2 = Some(src_level)
         } else {
             src_port_level2 = None
@@ -877,22 +807,10 @@ mod tests {
         }
         assert!(proto_level2.as_ref().is_some());
 
-        assert_eq!(
-            proto_level1.as_ref().unwrap().protos.read().unwrap()[0].1,
-            12
-        );
-        assert_eq!(
-            proto_level1.unwrap().protos.read().unwrap()[0].0,
-            ip_number::TCP
-        );
-        assert_eq!(
-            proto_level2.as_ref().unwrap().protos.read().unwrap()[0].1,
-            13
-        );
-        assert_eq!(
-            proto_level2.unwrap().protos.read().unwrap()[0].0,
-            ip_number::TCP
-        );
+        assert_eq!(proto_level1.as_ref().unwrap()[0].1, 12);
+        assert_eq!(proto_level1.unwrap()[0].0, ip_number::TCP);
+        assert_eq!(proto_level2.as_ref().unwrap()[0].1, 13);
+        assert_eq!(proto_level2.unwrap()[0].0, ip_number::TCP);
         assert_eq!(
             un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
             2
@@ -922,7 +840,7 @@ mod tests {
 
         // Get src port level enum from dst port level enum
         let src_port_level1;
-        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr1))
             .unwrap()
             .exact_match(
@@ -933,7 +851,9 @@ mod tests {
             )
             .unwrap()
         {
-            assert_eq!(*dst, dst_port as u16);
+            let dst = tuple_val.0;
+            let src_level = tuple_val.1.clone();
+            assert_eq!(dst, dst_port as u16);
             src_port_level1 = Some(src_level)
         } else {
             src_port_level1 = None
@@ -941,7 +861,7 @@ mod tests {
         assert!(src_port_level1.is_some());
 
         let src_port_level2;
-        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr2))
             .unwrap()
             .exact_match(
@@ -952,7 +872,9 @@ mod tests {
             )
             .unwrap()
         {
-            assert_eq!(*dst, dst_port as u16);
+            let dst = tuple_val.0;
+            let src_level = tuple_val.1.clone();
+            assert_eq!(dst, dst_port as u16);
             src_port_level2 = Some(src_level)
         } else {
             src_port_level2 = None
@@ -982,22 +904,10 @@ mod tests {
         }
         assert!(proto_level2.as_ref().is_some());
 
-        assert_eq!(
-            proto_level1.as_ref().unwrap().protos.read().unwrap()[0].1,
-            12
-        );
-        assert_eq!(
-            proto_level1.unwrap().protos.read().unwrap()[0].0,
-            ip_number::TCP
-        );
-        assert_eq!(
-            proto_level2.as_ref().unwrap().protos.read().unwrap()[0].1,
-            13
-        );
-        assert_eq!(
-            proto_level2.unwrap().protos.read().unwrap()[0].0,
-            ip_number::TCP
-        );
+        assert_eq!(proto_level1.as_ref().unwrap()[0].1, 12);
+        assert_eq!(proto_level1.unwrap()[0].0, ip_number::TCP);
+        assert_eq!(proto_level2.as_ref().unwrap()[0].1, 13);
+        assert_eq!(proto_level2.unwrap()[0].0, ip_number::TCP);
         assert_eq!(un_rcu_table.len(), 2);
         assert_eq!(
             un_rcu_table.get(&IpAddress::from(dst_addr2)).unwrap().len(),
@@ -1287,7 +1197,7 @@ mod tests {
 
         // Get src port level enum from dst port level enum
         let src_port_level;
-        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -1298,7 +1208,9 @@ mod tests {
             )
             .unwrap()
         {
-            assert_eq!(*dst, dst_port as u16);
+            let dst = tuple_val.0;
+            let src_level = tuple_val.1.clone();
+            assert_eq!(dst, dst_port as u16);
             src_port_level = Some(src_level)
         } else {
             src_port_level = None
@@ -1314,7 +1226,7 @@ mod tests {
         }
         assert!(proto_level.is_some());
 
-        assert_eq!(proto_level.unwrap().protos.read().unwrap().len(), 1);
+        assert_eq!(proto_level.unwrap().len(), 1);
     }
 
     #[test]
@@ -1432,7 +1344,7 @@ mod tests {
 
         // Get src port level enum from dst port level enum
         let src_port_level;
-        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -1443,7 +1355,9 @@ mod tests {
             )
             .unwrap()
         {
-            assert_eq!(*dst, dst_port as u16);
+            let dst = tuple_val.0;
+            let src_level = tuple_val.1.clone();
+            assert_eq!(dst, dst_port as u16);
             src_port_level = Some(src_level)
         } else {
             src_port_level = None
@@ -1459,7 +1373,7 @@ mod tests {
         }
         assert!(src_level.is_some());
 
-        assert_eq!(src_level.unwrap().read().unwrap().len(), 65536);
+        assert_eq!(src_level.unwrap().len(), 65536);
 
         let specified_src_ft = FiveTuple::new(
             L3Type::Ipv6,
@@ -1506,7 +1420,7 @@ mod tests {
 
         // Get src port level enum from dst port level enum
         let src_port_level;
-        if let DstPortLevel::SingleVal((dst, src_level)) = un_rcu_table
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -1517,7 +1431,9 @@ mod tests {
             )
             .unwrap()
         {
-            assert_eq!(*dst, dst_port as u16);
+            let dst = tuple_val.0;
+            let src_level = tuple_val.1.clone();
+            assert_eq!(dst, dst_port as u16);
             src_port_level = Some(src_level)
         } else {
             src_port_level = None
@@ -1533,7 +1449,7 @@ mod tests {
         }
         assert!(src_level.is_some());
 
-        assert_eq!(src_level.unwrap().read().unwrap().len(), 65536);
+        assert_eq!(src_level.unwrap().len(), 65536);
 
         let specified_src_ft = FiveTuple::new(
             L3Type::Ipv6,
