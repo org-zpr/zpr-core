@@ -28,7 +28,6 @@ use km_noise::NoiseKeypair;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::num::NonZero;
-use std::panic;
 use std::result::Result;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -137,10 +136,12 @@ impl Assembly {
 
     // The node quickly sends Terminate Indications
     async fn shutdown_node(self: &Arc<Self>) {
-        // Probably not worth blocking for this
-        let peer_ids = self.peer_ids.lock().unwrap().clone();
+        if matches!(self.ph_mode, PhMode::Node) {
+            let mut join_set = tokio::task::JoinSet::new();
 
-        if self.ph_mode == PhMode::Node {
+            // Probably not worth blocking for this
+            let peer_ids = self.peer_ids.lock().unwrap().clone();
+
             let vs_peer = self
                 .peer_table
                 .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
@@ -148,9 +149,13 @@ impl Assembly {
                 if vs_peer.is_none() || peer_id != vs_peer.unwrap().get() {
                     // This should be a short block and must be blocked on,
                     // otherwise the messages won't get sent
-                    self.reset_peer(peer_id).await;
+                    let spawn_self = self.clone();
+                    join_set.spawn_local(async move { spawn_self.reset_peer(peer_id).await });
                 }
             }
+
+            join_set.join_all().await;
+
             if let Some(vs_peer) = vs_peer {
                 self.reset_peer(vs_peer.get()).await;
             }
@@ -172,30 +177,22 @@ impl Assembly {
                 {
                     error!(target: PEER_MGMT, "Failed to nicely close peer {peer_id}: {e}");
                     // So try harder...
-                    self.reset_peer(peer_id).await;
+                    let spawn_self = self.clone();
+                    join_set.spawn_local(async move { spawn_self.reset_peer(peer_id).await });
                 }
             }
         }
-        let spawn_self = self.clone();
-        join_set.spawn_local(async move {
-            let mut peer_ids = spawn_self.peer_ids.lock().unwrap().clone();
-            info!(
-                "Waiting for {} peer{} to disconnect...",
-                peer_ids.len(),
-                if peer_ids.len() == 1 { "" } else { "s" }
-            );
-            while !peer_ids.is_empty() {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                peer_ids = spawn_self.peer_ids.lock().unwrap().clone();
-            }
-        });
+        join_set.join_all().await;
 
-        while let Some(res) = join_set.join_next().await {
-            match res {
-                Ok(_) => (),
-                Err(err) if err.is_panic() => panic::resume_unwind(err.into_panic()),
-                Err(e) => error!("unexpected error during shutdown: {e}"),
-            }
+        let mut peer_ids = self.peer_ids.lock().unwrap().clone();
+        info!(
+            "Waiting for {} peer{} to disconnect...",
+            peer_ids.len(),
+            if peer_ids.len() == 1 { "" } else { "s" }
+        );
+        while !peer_ids.is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            peer_ids = self.peer_ids.lock().unwrap().clone();
         }
     }
 
