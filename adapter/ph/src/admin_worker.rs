@@ -77,20 +77,21 @@ struct AdminServiceImpl {
 }
 
 impl svc::Server for AdminServiceImpl {
-    fn echo(
-        &mut self,
+    async fn echo(
+        self: ::capnp::capability::Rc<Self>,
         _: svc::EchoParams,
         _: svc::EchoResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         debug!(target: RPC, "Echo procedure initiated");
-        capnp::capability::Promise::ok(())
+
+        Ok(())
     }
 
-    fn reset_counters(
-        &mut self,
+    async fn reset_counters(
+        self: ::capnp::capability::Rc<Self>,
         _: svc::ResetCountersParams,
         _: svc::ResetCountersResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         info!(target: RPC, "Reset counters procedure initiated");
         for value in self.asm.counters.management.values() {
             value.reset();
@@ -102,14 +103,14 @@ impl svc::Server for AdminServiceImpl {
             }
         }
 
-        capnp::capability::Promise::ok(())
+        Ok(())
     }
 
-    fn counters(
-        &mut self,
+    async fn counters(
+        self: ::capnp::capability::Rc<Self>,
         _: svc::CountersParams,
         mut results: svc::CountersResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         debug!(target: RPC, "Counters procedure initiated");
         let mut results_builder = results.get().init_counts();
 
@@ -149,123 +150,112 @@ impl svc::Server for AdminServiceImpl {
         results_builder.set_uptime_sec(self.asm.get_uptime().as_secs());
         results_builder.set_uptime_subsec_ms(self.asm.get_uptime().subsec_millis());
 
-        capnp::capability::Promise::ok(())
+        Ok(())
     }
 
     fn set_capture_file(
-        &mut self,
+        self: ::capnp::capability::Rc<Self>,
         _: svc::SetCaptureFileParams,
         _: svc::SetCaptureFileResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        info!(target: RPC, "Set capture file procedure initiated");
-        ::capnp::capability::Promise::err(::capnp::Error::unimplemented(
+    ) -> impl ::core::future::Future<Output = Result<(), ::capnp::Error>> + 'static {
+        ::core::future::ready(Err(::capnp::Error::unimplemented(
             "method cmd_line_inter::Server::set_capture_file not implemented".to_string(),
-        ))
+        )))
     }
 
-    fn close_capture_file(
-        &mut self,
+    async fn close_capture_file(
+        self: ::capnp::capability::Rc<Self>,
         _: svc::CloseCaptureFileParams,
         _: svc::CloseCaptureFileResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
-        info!(target: RPC, "Close capture file procedure initiated");
-        let task_asm = self.asm.clone();
-        capnp::capability::Promise::from_future(async move {
-            let _ = task_asm.capture_worker.close_capture_file().await;
-            task_asm.flow_control.delete_program();
+    ) -> Result<(), ::capnp::Error> {
+        let _ = self.asm.capture_worker.close_capture_file().await;
+        self.asm.flow_control.delete_program();
 
-            Ok(())
-        })
+        Ok(())
     }
 
-    fn flush_capture_file(
-        &mut self,
+    async fn flush_capture_file(
+        self: ::capnp::capability::Rc<Self>,
         _: svc::FlushCaptureFileParams,
         _: svc::FlushCaptureFileResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         info!(target: RPC, "Flush capture file procedure initiated");
-        let task_asm = self.asm.clone();
-        capnp::capability::Promise::from_future(async move {
-            let _ = task_asm.capture_worker.flush_capture_file().await;
+        let _ = self.asm.capture_worker.flush_capture_file().await;
 
-            Ok(())
-        })
+        Ok(())
     }
 
-    fn set_capture_program(
-        &mut self,
+    async fn set_capture_program(
+        self: ::capnp::capability::Rc<Self>,
         params: svc::SetCaptureProgramParams,
         mut results: svc::SetCaptureProgramResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         info!(target: RPC, "Set capture program procedure initiated");
-        let task_asm = self.asm.clone();
-        capnp::capability::Promise::from_future(async move {
-            let programs = params.get()?.get_program()?.get_bpf_prog()?;
+        let programs = params.get()?.get_program()?.get_bpf_prog()?;
 
-            let mut insn_vec = Vec::new();
+        let mut insn_vec = Vec::new();
 
-            for program in programs.iter() {
-                debug!(
-                    target: RPC,
-                    "Capture program values: code: {}, jt: {}, jf: {}, k: {}",
-                    program.get_code(),
-                    program.get_jt(),
-                    program.get_jf(),
-                    program.get_k()
-                );
-                let bpf_insn = cbpf_rs::BpfInsn {
-                    code: program.get_code(),
-                    jt: program.get_jt(),
-                    jf: program.get_jf(),
-                    k: program.get_k(),
-                };
-                insn_vec.push(bpf_insn);
+        for program in programs.iter() {
+            debug!(
+                target: RPC,
+                "Capture program values: code: {}, jt: {}, jf: {}, k: {}",
+                program.get_code(),
+                program.get_jt(),
+                program.get_jf(),
+                program.get_k()
+            );
+            let bpf_insn = cbpf_rs::BpfInsn {
+                code: program.get_code(),
+                jt: program.get_jt(),
+                jf: program.get_jf(),
+                k: program.get_k(),
+            };
+            insn_vec.push(bpf_insn);
+        }
+
+        let results_builder = results.get().init_result();
+
+        match cbpf_rs::BpfProgram::validate(&insn_vec) {
+            Ok(final_program) => {
+                self.asm.flow_control.set_program(final_program);
+                let mut success_builder = results_builder.init_success();
+                success_builder.set_none(());
             }
-
-            let results_builder = results.get().init_result();
-
-            match cbpf_rs::BpfProgram::validate(&insn_vec) {
-                Ok(final_program) => {
-                    task_asm.flow_control.set_program(final_program);
-                    let mut success_builder = results_builder.init_success();
-                    success_builder.set_none(());
-                }
-                _ => {
-                    let mut error_builder = results_builder.init_error();
-                    error_builder.set_txt("Invalid program")
-                }
+            _ => {
+                let mut error_builder = results_builder.init_error();
+                error_builder.set_txt("Invalid program")
             }
+        }
 
-            Ok(())
-        })
+        Ok(())
     }
 
-    fn delete_capture_program(
-        &mut self,
+    async fn delete_capture_program(
+        self: ::capnp::capability::Rc<Self>,
         _: svc::DeleteCaptureProgramParams,
         _: svc::DeleteCaptureProgramResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         info!(target: RPC, "Delete capture program procedure initiated");
         self.asm.flow_control.delete_program();
-        capnp::capability::Promise::ok(())
+        Ok(())
     }
 
-    fn perf_sample(
-        &mut self,
+    async fn perf_sample(
+        self: ::capnp::capability::Rc<Self>,
         _: svc::PerfSampleParams,
         mut results: svc::PerfSampleResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         info!(target: RPC, "Perf sample procedure initiated");
         let mut results_builder = results.get();
         results_builder.set_result("Not currently supported");
-        capnp::capability::Promise::ok(())
+        Ok(())
     }
 
-    fn show_link_summary(
-        &mut self,
+    async fn show_link_summary(
+        self: ::capnp::capability::Rc<Self>,
         _: svc::ShowLinkSummaryParams,
         mut results: svc::ShowLinkSummaryResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         info!(target: RPC, "Show link summary procedure initiated");
         {
             let peer_ids = self.asm.peer_ids.lock().unwrap();
@@ -279,81 +269,75 @@ impl svc::Server for AdminServiceImpl {
             }
         }
 
-        capnp::capability::Promise::ok(())
+        Ok(())
     }
 
-    fn show_link(
-        &mut self,
+    async fn show_link(
+        self: ::capnp::capability::Rc<Self>,
         params: svc::ShowLinkParams,
         mut results: svc::ShowLinkResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         info!(target: RPC, "Show link procedure initiated");
-        let task_asm = self.asm.clone();
-        capnp::capability::Promise::from_future(async move {
-            let id = params.get()?.get_id();
-            debug!(target: RPC, "Show link id {id} requested");
+        let id = params.get()?.get_id();
+        debug!(target: RPC, "Show link id {id} requested");
 
-            let mut results_builder = results.get();
-            let response = match task_asm.peer_table.get(id) {
-                Some(peer) => {
-                    let lsm = &peer.link_state_machine;
+        let mut results_builder = results.get();
+        let response = match self.asm.peer_table.get(id) {
+            Some(peer) => {
+                let lsm = &peer.link_state_machine;
 
-                    format!(
-                        "Link {id} info:\nSubstrate Address: {}\n{}",
-                        peer.substrate_addr, lsm,
-                    )
-                }
-                None => format!("No such link {id}\n"),
-            };
+                format!(
+                    "Link {id} info:\nSubstrate Address: {}\n{}",
+                    peer.substrate_addr, lsm,
+                )
+            }
+            None => format!("No such link {id}\n"),
+        };
 
-            results_builder.set_result(response);
+        results_builder.set_result(response);
 
-            Ok(())
-        })
+        Ok(())
     }
 
-    fn configure_link(
-        &mut self,
+    async fn configure_link(
+        self: ::capnp::capability::Rc<Self>,
         _: svc::ConfigureLinkParams,
         _: svc::ConfigureLinkResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         info!(target: RPC, "Configure link procedure initiated");
-        capnp::capability::Promise::ok(())
+        Ok(())
     }
 
-    fn start_link(
-        &mut self,
+    async fn start_link(
+        self: ::capnp::capability::Rc<Self>,
         params: svc::StartLinkParams,
         mut results: svc::StartLinkResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         info!(target: RPC, "Start link procedure initiated");
-        let task_asm = self.asm.clone();
-        capnp::capability::Promise::from_future(async move {
-            let id = params.get()?.get_id();
-            debug!(target: RPC, "Start link id {id} requested");
+        let id = params.get()?.get_id();
+        debug!(target: RPC, "Start link id {id} requested");
 
-            let results_builder = results.get().init_result();
+        let results_builder = results.get().init_result();
 
-            match task_asm.process_link_state_event(id, LinkEvent::Start) {
-                Ok(_) => {
-                    let mut success_builder = results_builder.init_success();
-                    success_builder.set_none(());
-                }
-                Err(e) => {
-                    let resp = format!("Failed to start link {}: {:?}\n", id, e);
-                    let mut error_builder = results_builder.init_error();
-                    error_builder.set_txt(resp);
-                }
+        match self.asm.process_link_state_event(id, LinkEvent::Start) {
+            Ok(_) => {
+                let mut success_builder = results_builder.init_success();
+                success_builder.set_none(());
             }
-            Ok(())
-        })
+            Err(e) => {
+                let resp = format!("Failed to start link {}: {:?}\n", id, e);
+                let mut error_builder = results_builder.init_error();
+                error_builder.set_txt(resp);
+            }
+        }
+        Ok(())
     }
 
     fn stop_link(
-        &mut self,
+        self: ::capnp::capability::Rc<Self>,
         params: svc::StopLinkParams,
         mut results: svc::StopLinkResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> impl ::core::future::Future<Output = Result<(), ::capnp::Error>> + 'static {
         info!(target: RPC, "Stop link procedure initiated");
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {
@@ -377,27 +361,24 @@ impl svc::Server for AdminServiceImpl {
         })
     }
 
-    fn reset_link(
-        &mut self,
+    async fn reset_link(
+        self: ::capnp::capability::Rc<Self>,
         params: svc::ResetLinkParams,
         _: svc::ResetLinkResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> Result<(), ::capnp::Error> {
         info!(target: RPC, "Reset link procedure initiated");
-        let task_asm = self.asm.clone();
-        capnp::capability::Promise::from_future(async move {
-            let id = params.get()?.get_id();
-            debug!(target: RPC, "Reset link id {id} requested");
+        let id = params.get()?.get_id();
+        debug!(target: RPC, "Reset link id {id} requested");
 
-            task_asm.reset_peer(id).await;
-            Ok(())
-        })
+        self.asm.reset_peer(id).await;
+        Ok(())
     }
 
     fn change_logging(
-        &mut self,
+        self: ::capnp::capability::Rc<Self>,
         params: svc::ChangeLoggingParams,
         mut results: svc::ChangeLoggingResults,
-    ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
+    ) -> impl ::core::future::Future<Output = Result<(), ::capnp::Error>> + 'static {
         info!(target: RPC, "Change logging procedure initiated");
         let task_asm = self.asm.clone();
         capnp::capability::Promise::from_future(async move {

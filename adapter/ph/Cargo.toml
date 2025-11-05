@@ -44,9 +44,9 @@ zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "ze
 serde_json = "1.0.140"
 url = "2.5.4"
 clap_complete = { version = "4.5.57", optional = true}
-cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.2.0" }
-capnp = { version = "0.21" }
-capnp-rpc = { version = "0.21" }
+cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.3.0" }
+capnp = { version = "0.23" }
+capnp-rpc = { version = "0.23" }
 ip_network_table-deps-treebitmap = { version = "0.5.0" }
 range-set-blaze = {version = "0.4.1" }
 
