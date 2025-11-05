@@ -255,6 +255,30 @@ impl PeerTable {
             .get_guarded((link_id as usize).wrapping_sub(1))
     }
 
+    /// Apply the given function to all peers.
+    pub fn for_each(&self, mut f: impl FnMut((NonZero<LinkId>, &PeerState))) {
+        self.peer_slab_reader.inspect(|r| {
+            r.iter()
+                .for_each(|(idx, peer)| f((NonZero::new((idx + 1) as LinkId).unwrap(), peer)))
+        })
+    }
+
+    /// Find and return the first peer matching the given predicate, if any.
+    pub fn find(
+        &self,
+        mut predicate: impl FnMut((NonZero<LinkId>, &PeerState)) -> bool,
+    ) -> Option<(NonZero<LinkId>, PeerTableEntryGuard<'_>)> {
+        let (idx, guard) = self.peer_slab_reader.find_guarded(|(idx, peer)| {
+            predicate((NonZero::new((idx + 1) as LinkId).unwrap(), peer))
+        })?;
+        Some((NonZero::new((idx + 1) as LinkId).unwrap(), guard))
+    }
+
+    /// Gets the number of peers; synchronizes with insert/remove.
+    pub fn len(&self) -> usize {
+        self.peer_slab.lock().unwrap().len()
+    }
+
     /// Sets an established security association on the link.
     pub fn set_security_association(
         &self,

@@ -416,6 +416,15 @@ impl<T> RcuBox<cslab::RcuCslabReader<T>> {
             None
         }
     }
+
+    pub fn find_guarded(
+        &self,
+        predicate: impl FnMut(&(usize, &T)) -> bool,
+    ) -> Option<(usize, RcuCslabEntryGuard<'_, T>)> {
+        let guard = self.get();
+        let key = guard.iter().find(predicate)?.0;
+        Some((key, RcuCslabEntryGuard { guard, key }))
+    }
 }
 
 #[cfg(test)]

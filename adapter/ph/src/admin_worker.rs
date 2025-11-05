@@ -268,7 +268,13 @@ impl svc::Server for AdminServiceImpl {
     ) -> ::capnp::capability::Promise<(), ::capnp::Error> {
         info!(target: RPC, "Show link summary procedure initiated");
         {
-            let peer_ids = self.asm.peer_ids.lock().unwrap();
+            let mut peer_ids = Vec::new();
+            self.asm.peer_table.for_each(|(id, _)| {
+                if id.get() != zpr::LOCAL_ACTOR_LINK_ID {
+                    peer_ids.push(id.get())
+                }
+            });
+
             let mut results_builder = results.get().init_summary(peer_ids.len() as u32);
 
             for (i, id) in peer_ids.iter().enumerate() {
