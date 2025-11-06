@@ -19,7 +19,7 @@ capnp = { version = "0.23" }
 capnp-rpc = { version = "0.23" }
 tokio = { version = "1.37.0", features = ["macros", "rt", "io-util", "time"] }
 tokio-util = { version = "0.7.11", features = ["compat"] }
-cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.3.0" }
+cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.6.0" }
 thiserror = { version = "2.0.17" }
 
 [features]

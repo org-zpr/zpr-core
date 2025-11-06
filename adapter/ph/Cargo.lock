@@ -397,7 +397,7 @@ checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 [[package]]
 name = "cli-proto"
 version = "0.6.0"
-source = "git+https://github.com/org-zpr/zpr-admin-api-rs.git?tag=v0.3.0#a9b30901ed921765fa525e0fb9d4487bdc2d420e"
+source = "git+https://github.com/org-zpr/zpr-admin-api-rs.git?tag=v0.6.0#a9b30901ed921765fa525e0fb9d4487bdc2d420e"
 dependencies = [
  "capnp",
 ]
