@@ -5,6 +5,7 @@ use crate::logging::targets::FLOW_MGMT;
 use crate::mgmt;
 use crate::packet::{Packet, PacketBuffer};
 use crate::queues::{AdapterManagerMessage, TryEnqueueError};
+use crate::tc;
 use crate::two_way_queue;
 use std::num::NonZero;
 use std::sync::Arc;
@@ -62,14 +63,11 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
         return;
     }
 
-    let packet_body: Vec<u8> = pkt.body().into();
+    let packet_body = pkt.body().to_owned();
 
     // mark ALT entry as pending to attempt to (i.e. racily) prevent
     // fastpath from issuing multiple requests
     asm.alt.insert(five_tuple, AltEntry::Pending(pkt));
-
-    // compress only IP addresses for now
-    let compression_mode: zpr::CompressionMode = 0;
 
     debug!(target: FLOW_MGMT, "link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
 
@@ -78,9 +76,8 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
             mgmt::requests::send_bind_actor_address_request(
                 asm,
                 dock_link_id,
-                compression_mode,
-                five_tuple,
-                packet_body,
+                &five_tuple,
+                &packet_body,
             )
             .await
         }
@@ -88,9 +85,8 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
         PhMode::Node => mgmt::dock::bind_actor_address(
             asm,
             NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap(),
-            compression_mode,
-            five_tuple,
-            packet_body,
+            &five_tuple,
+            &packet_body,
         )
         .await
         .map_err(|err| {
@@ -99,7 +95,18 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
     };
 
     match bind_result {
-        Ok(tether_id) => {
+        Ok((tether_id, tc)) => {
+            // Confirm this TC matches our initial packet.
+            // TODO: use the TC itself to do this, once we have that code in place.
+            if tc.five_tuple()
+                != tc::Ip5TupleTc::new_with_compression_mode(tc.compression_mode(), five_tuple)
+                    .five_tuple()
+            {
+                error!(target: FLOW_MGMT, "Bind of {five_tuple} falied: node supplied TC incompatible with initial packet: {tc}");
+                asm.alt.remove(&five_tuple);
+                return;
+            }
+
             // Bind succeeded; add to ALT.
             debug!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id}");
 
@@ -114,7 +121,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
                     std::mem::replace(
                         entry,
                         AltEntry::Active(AltPep {
-                            compression_mode,
+                            compression_mode: tc.compression_mode(),
                             tether_id,
                         }),
                     )

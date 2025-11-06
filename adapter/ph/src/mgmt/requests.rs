@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 use super::core::{self, Sent};
+use crate::config;
 use crate::counters::ManagementCounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
@@ -275,11 +276,10 @@ impl From<core::MgmtSendError> for BindActorAddressError {
 pub async fn send_bind_actor_address_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
-    compression_mode: zpr::CompressionMode,
-    five_tuple: FiveTuple,
-    packet_body: Vec<u8>,
-) -> Result<zpr::StreamId, BindActorAddressError> {
-    info!(target: ZDP, "Link {link_id}: sending BindActorAddressRequest for {five_tuple} with compression mode {compression_mode} packet_body size {}", packet_body.len());
+    five_tuple: &FiveTuple,
+    packet_body: &[u8],
+) -> Result<(zpr::StreamId, tc::Ip5TupleTc), BindActorAddressError> {
+    info!(target: ZDP, "Link {link_id}: sending BindActorAddressRequest for {five_tuple} with packet_body size {}", packet_body.len());
 
     let (sender, receiver) = tokio::sync::oneshot::channel();
 
@@ -299,11 +299,12 @@ pub async fn send_bind_actor_address_request(
 
     let mut req = core::new_heap_packet();
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindActorAddressRequestHeader>();
-    bind_req_hdr.ip_version = five_tuple.l3_type;
-    bind_req_hdr.compression_mode = compression_mode;
-
-    // No longer append source/dest addresses or layer4 protocol; just append the packet body
-    req.put_slice(&packet_body);
+    let endpoint_packet_length =
+        std::cmp::min(config::BIND_REQUEST_MAX_PAYLOAD_LENGTH, packet_body.len());
+    bind_req_hdr
+        .endpoint_packet_length
+        .set(endpoint_packet_length as u16);
+    req.put_slice(&packet_body[..endpoint_packet_length]);
 
     core::send_per_flow_txn_mgmt(
         asm,
@@ -325,7 +326,24 @@ pub async fn send_bind_actor_address_request(
     };
 
     match hdr.status_code {
-        zdp::ResponseCode::Success => Ok(resp.metadata().ingress_stream_id),
+        zdp::ResponseCode::Success => {
+            let stream_id = resp.metadata().ingress_stream_id;
+
+            let Ok(tcst) = zpr::Tcst::read_from_buf(&mut resp) else {
+                return Err(BindActorAddressError::BadStructure);
+            };
+
+            if !matches!(tcst, zpr::Tcst::Ip5Tuple) {
+                warn!(target: ZDP, "Link {}: unsupported TCST {}", resp.metadata().ingress_link_id, tcst.0);
+                return Err(BindActorAddressError::BadStructure);
+            }
+
+            let Ok(tc) = tc::Ip5TupleTc::deserialize(&mut resp) else {
+                return Err(BindActorAddressError::BadStructure);
+            };
+
+            return Ok((stream_id, tc));
+        }
 
         zdp::ResponseCode::Other => {
             if hdr.info_len as usize > resp.remaining() {
@@ -352,12 +370,9 @@ pub async fn send_bind_actor_address_request(
 pub async fn send_bind_egress_stream_request(
     asm: &Assembly,
     link_id: zpr::LinkId,
-    compression_mode: zpr::CompressionMode,
-    five_tuple: FiveTuple,
+    tc: tc::Ip5TupleTc,
 ) -> Result<zpr::StreamId, BindActorAddressError> {
-    info!(target: ZDP, "Link {link_id}: sending BindEgressStreamRequest for {five_tuple} with compression mode {compression_mode}");
-
-    let tc = tc::Ip5TupleTc::new_with_compression_mode(compression_mode, five_tuple);
+    info!(target: ZDP, "Link {link_id}: sending BindEgressStreamRequest for {tc}");
 
     let (sender, receiver) = tokio::sync::oneshot::channel();
 

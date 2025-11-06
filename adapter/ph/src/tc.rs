@@ -11,7 +11,10 @@ use bytes::{Buf, BufMut};
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 /// IP 5-Tuple Traffic Classifier
+#[derive(Clone)]
 pub struct Ip5TupleTc(defs::FiveTuple);
+
+// TODO: actually add traffic classification code here
 
 impl Ip5TupleTc {
     #[allow(dead_code)]
@@ -155,6 +158,12 @@ impl Ip5TupleTc {
             src_port,
             dst_port,
         }));
+    }
+}
+
+impl std::fmt::Display for Ip5TupleTc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.0)
     }
 }
 

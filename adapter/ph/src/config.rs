@@ -74,6 +74,13 @@ pub const DEFAULT_KEEP_ALIVE_TIMEOUT: std::time::Duration = std::time::Duration:
 
 pub const DEFAULT_LINK_RESTART_HOLDDOWN: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Maximum length of payload to include in a Bind Request.
+///
+/// 256 octects is more than enough to capture the longest common headers
+/// (e.g. QUIC, which is over 64) without bumping up against IPv4 min-max
+/// length of 576.
+pub const BIND_REQUEST_MAX_PAYLOAD_LENGTH: usize = 256;
+
 // Little trait to make creating "missing argument" errors easier.
 trait ArgError {
     fn arg_missing(&self) -> ArgsError;

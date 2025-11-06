@@ -2,6 +2,7 @@ use crate::assembly::{AddRouteError, Assembly};
 use crate::counters::ManagementCounterType;
 use crate::defs::FiveTuple;
 use crate::logging::targets::FLOW_MGMT;
+use crate::tc;
 use crate::visa_mgmt;
 use crate::visa_table::VisaTableError;
 
@@ -19,7 +20,7 @@ pub enum BindActorAddressError {
     #[error("parse error: {0}")]
     ParseError(&'static str),
     #[error("adding route failed: {0}")]
-    AddRouteError(AddRouteError),
+    AddRouteError(#[from] AddRouteError),
 }
 
 pub struct ForwardingDecision {
@@ -32,10 +33,9 @@ pub struct ForwardingDecision {
 pub async fn bind_actor_address(
     asm: &Arc<Assembly>,
     ingress_link_id: NonZero<LinkId>,
-    compression_mode: zpr::CompressionMode,
-    five_tuple: FiveTuple,
-    packet_body: Vec<u8>,
-) -> Result<StreamId, BindActorAddressError> {
+    five_tuple: &FiveTuple,
+    packet_body: &[u8],
+) -> Result<(StreamId, tc::Ip5TupleTc), BindActorAddressError> {
     let mut forwarding_decision: Option<ForwardingDecision> = None;
 
     debug!(
@@ -93,7 +93,7 @@ pub async fn bind_actor_address(
         let visa_req = vsconn::VisaRequest {
             source_tether_addr: five_tuple.src_address.into(),
             l3_type: five_tuple.l3_type,
-            packet: packet_body.clone(),
+            packet: packet_body.to_vec(),
         };
 
         asm.counters.management[ManagementCounterType::VisaRequested].increment();
@@ -142,6 +142,9 @@ pub async fn bind_actor_address(
         }
     }
 
+    // TODO: get this from the Visa Service
+    let tc = tc::Ip5TupleTc::new_with_compression_mode(0, *five_tuple);
+
     // Now way to get here without forwarding_decision being set.
     let decision = forwarding_decision.unwrap();
     debug!(target: FLOW_MGMT, "now routing {five_tuple} from {ingress_link_id} to {}",
@@ -151,14 +154,15 @@ pub async fn bind_actor_address(
         .add_route(
             ingress_link_id,
             decision.visa_id,
-            five_tuple,
+            tc.clone(),
             decision.egress_link_id,
-            compression_mode,
         )
         .await;
 
     // TODO: reverse ingress TID needs to be sent to next-hop;
     // this is blocked on switching to new-style bind requests
 
-    route_result.map_err(BindActorAddressError::AddRouteError)
+    let ingress_stream_id = route_result?;
+
+    Ok((ingress_stream_id, tc))
 }
