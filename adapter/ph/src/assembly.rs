@@ -28,7 +28,6 @@ use km_noise::NoiseKeypair;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::num::NonZero;
-use std::panic;
 use std::result::Result;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -84,7 +83,6 @@ pub struct Assembly {
     pub tun_ctl: Box<dyn TunCtl + Send>,
 
     pub peer_table: peer_table::PeerTable,
-    pub peer_ids: std::sync::Mutex<Vec<zpr::LinkId>>, // HACK until peer_table is enumerable
 
     // Adapter tables
     pub alt: adapter_tables::ActorLookupTable,
@@ -137,20 +135,24 @@ impl Assembly {
 
     // The node quickly sends Terminate Indications
     async fn shutdown_node(self: &Arc<Self>) {
-        // Probably not worth blocking for this
-        let peer_ids = self.peer_ids.lock().unwrap().clone();
+        if matches!(self.ph_mode, PhMode::Node) {
+            let mut join_set = tokio::task::JoinSet::new();
 
-        if self.ph_mode == PhMode::Node {
             let vs_peer = self
                 .peer_table
                 .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
-            for peer_id in peer_ids {
-                if vs_peer.is_none() || peer_id != vs_peer.unwrap().get() {
+
+            self.peer_table.for_each(|(peer_id, _)| {
+                if Some(peer_id) != vs_peer && peer_id.get() != zpr::LOCAL_ACTOR_LINK_ID {
                     // This should be a short block and must be blocked on,
                     // otherwise the messages won't get sent
-                    self.reset_peer(peer_id).await;
+                    let spawn_self = self.clone();
+                    join_set.spawn_local(async move { spawn_self.reset_peer(peer_id.get()).await });
                 }
-            }
+            });
+
+            join_set.join_all().await;
+
             if let Some(vs_peer) = vs_peer {
                 self.reset_peer(vs_peer.get()).await;
             }
@@ -161,41 +163,33 @@ impl Assembly {
     async fn shutdown_adapter(self: &Arc<Self>) {
         let mut join_set = tokio::task::JoinSet::new();
 
-        // Probably not worth blocking for this
-        let peer_ids = self.peer_ids.lock().unwrap().clone();
-
-        for peer_id in peer_ids {
-            if let Some(peer) = self.peer_table.get(peer_id) {
-                if let Err(e) = peer
-                    .link_state_machine
-                    .process_event(self, LinkEvent::Close(TerminateReason::Shutdown))
-                {
-                    error!(target: PEER_MGMT, "Failed to nicely close peer {peer_id}: {e}");
-                    // So try harder...
-                    self.reset_peer(peer_id).await;
-                }
+        self.peer_table.for_each(|(peer_id, peer)| {
+            if peer_id.get() == zpr::LOCAL_ACTOR_LINK_ID {
+                return;
             }
-        }
-        let spawn_self = self.clone();
-        join_set.spawn_local(async move {
-            let mut peer_ids = spawn_self.peer_ids.lock().unwrap().clone();
-            info!(
-                "Waiting for {} peer{} to disconnect...",
-                peer_ids.len(),
-                if peer_ids.len() == 1 { "" } else { "s" }
-            );
-            while !peer_ids.is_empty() {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                peer_ids = spawn_self.peer_ids.lock().unwrap().clone();
+
+            if let Err(e) = peer
+                .link_state_machine
+                .process_event(self, LinkEvent::Close(TerminateReason::Shutdown))
+            {
+                error!(target: PEER_MGMT, "Failed to nicely close peer {peer_id}: {e}");
+                // So try harder...
+                let spawn_self = self.clone();
+                join_set.spawn_local(async move { spawn_self.reset_peer(peer_id.get()).await });
             }
         });
+        join_set.join_all().await;
 
-        while let Some(res) = join_set.join_next().await {
-            match res {
-                Ok(_) => (),
-                Err(err) if err.is_panic() => panic::resume_unwind(err.into_panic()),
-                Err(e) => error!("unexpected error during shutdown: {e}"),
-            }
+        let mut npeers = self.peer_table.len() - 1; // - 1 accounts for local actor
+        info!(
+            target: PEER_MGMT,
+            "Waiting for {} peer{} to disconnect...",
+            npeers,
+            if npeers == 1 { "" } else { "s" }
+        );
+        while npeers > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            npeers = self.peer_table.len() - 1; // - 1 accounts for local actor
         }
     }
 
@@ -313,7 +307,6 @@ impl Assembly {
             debug!(target: PEER_MGMT, "Removing peer {link_id}");
         }
         self.peer_table.remove(link_id);
-        self.peer_ids.lock().unwrap().retain(|id| *id != link_id);
         info!(target: PEER_MGMT, "Removed peer {link_id}");
     }
 
@@ -352,7 +345,6 @@ impl Assembly {
         assert!(link_type != LinkType::NodeToNode);
         debug!(target: PEER_MGMT, "Starting tether with {adapter_addr} connected to {interface_addr}");
         let peer_id = self.add_peer(link_type, adapter_addr, interface_addr)?;
-        self.peer_ids.lock().unwrap().push(peer_id.get());
 
         let Some(peer) = self.peer_table.get(peer_id.get()) else {
             // Peer is gone already
@@ -378,27 +370,25 @@ impl Assembly {
     /// Temporary? function to find a link based on the actor address
     pub fn find_egress_link(&self, actor_addr: IpAddress) -> Option<NonZero<LinkId>> {
         // First check the local actor addresses to see if it's a locally-destined packet
-        for addr in self.config.get().zpr_addr.iter() {
-            if actor_addr == (*addr).into() {
-                return Some(NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap());
-            }
+        if self
+            .config
+            .get()
+            .zpr_addr
+            .iter()
+            .any(|addr| IpAddress::new_from_std(addr) == actor_addr)
+        {
+            return Some(NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap());
         }
-
-        let ids = self.peer_ids.lock().unwrap().clone();
 
         // Check peer actor addresses to see if one of them matches
-        for id in ids.iter() {
-            let peer = self
-                .peer_table
-                .get(*id)
-                .expect("Peer IDs out of sync with peer table");
-            for addr in peer.link_state_machine.get_actor_addresses() {
-                if addr == actor_addr {
-                    return Some(NonZero::new(*id).unwrap());
-                }
-            }
-        }
-        None
+        self.peer_table
+            .find(|(_id, peer)| {
+                peer.link_state_machine
+                    .get_actor_addresses()
+                    .iter()
+                    .any(|addr| *addr == actor_addr)
+            })
+            .map(|(id, _peer)| id)
     }
 
     pub async fn add_route(
@@ -408,7 +398,6 @@ impl Assembly {
         five_tuple: defs::FiveTuple,
         egress_link_id: NonZero<LinkId>,
         compression_mode: zpr::CompressionMode,
-        packet_body: Vec<u8>,
     ) -> Result<zpr::StreamId, AddRouteError> {
         let egress_tether_id;
         if egress_link_id.get() == zpr::LOCAL_ACTOR_LINK_ID {
@@ -426,12 +415,11 @@ impl Assembly {
                     )
                 })?;
         } else {
-            egress_tether_id = mgmt::requests::send_bind_actor_address_request(
+            egress_tether_id = mgmt::requests::send_bind_egress_stream_request(
                 self,
                 egress_link_id.get(),
                 compression_mode,
                 five_tuple,
-                packet_body,
             )
             .await
             .map_err(|e| AddRouteError::BindFailed(e))?;
@@ -497,7 +485,6 @@ pub mod test {
         pub counters: Option<Counters>,
         pub tun_ctl: Option<Box<dyn TunCtl + Send>>,
         pub peer_table: Option<peer_table::PeerTable>,
-        pub peer_ids: Option<Vec<zpr::LinkId>>,
         pub alt: Option<adapter_tables::ActorLookupTable>,
         pub dlt: Option<adapter_tables::DockLookupTable>,
         pub mgmt_dispatch_factory: Option<MgmtDispatchFactory>,
@@ -559,7 +546,6 @@ pub mod test {
         let peer_table = builder
             .peer_table
             .unwrap_or_else(|| peer_table::PeerTable::new());
-        let peer_ids = std::sync::Mutex::new(builder.peer_ids.unwrap_or_default());
         let alt = builder
             .alt
             .unwrap_or_else(|| adapter_tables::ActorLookupTable::new());
@@ -606,7 +592,6 @@ pub mod test {
             counters,
             tun_ctl,
             peer_table,
-            peer_ids,
             alt,
             dlt,
             mgmt_dispatch_factory,

@@ -123,6 +123,27 @@ use sync::{
 // remove [R] operations to readers.  The `Cslab` data structure does not
 // provide this.  Instead, the `RcuCslab` data structure builds upon `Cslab`
 // to provide this functionality.  It is described below.
+//
+// Finally, iteration [S] is performed simply by scanning the bitmap
+// in-order.  However, this would naively force us to scan a potentially
+// very large table even if it was never used.  So to optimize this, we also
+// track the maximum index which was ever marked in the bitmap (the
+// "frontier").  This is updated (increased) [Im] on insert [I] prior to
+// marking the entry in the bitmap [Ib], so that if a get [G] ever succeeds,
+// the ordering of [Ib] ⇒ [Gb] ensures that a subsequent load of the
+// maximum index [Sm] will also see this item.
+//
+// It is also possible to decrease the frontier on remove [R], though we
+// don't currently, since it's questionable whether this actually is a
+// performance help: indexes aren't guaranteed to be released in order, so
+// we often simply _can't_ decrease it, and the zero-pages are already
+// physically manifested and almost certain nonzero so we can't even return
+// them to the OS.  However, if we did want to perform this operation, then
+// we would update (decrease) [Rm] this value with release ordering after
+// clearing the index in the bitmap [Rb], and [Sm] should be modified to have
+// acquire ordering, so that [Rm] ⇒ [Sm] ensures that any get [G] which occurs
+// after having seen the item hidden by the decreased frontier also sees
+// the item actually marked for removal.
 
 union Entry<T> {
     next_free: isize, // offset to next empty; neighbor is 0 so zero-alloced array is initialized
@@ -132,10 +153,14 @@ union Entry<T> {
 type CslabTable<T> = [UnsafeCell<Entry<T>>];
 type CslabBitmap = [AtomicUsize];
 
-// `CslabStorage` "glues together" the table and bitmap allocations into one.
-// This allows us to write a `Drop` implementation which uses both of them.
+/// `CslabStorage` "glues together" the table and bitmap allocations into one.
+/// This allows us to write a `Drop` implementation which uses both of them.
 struct CslabStorage<T> {
+    /// total number of indexes
     size: usize,
+    /// maximum used index (marked in bitmap) plus 1
+    /// (used to decouple performance of scanning from size of table)
+    frontier: AtomicUsize,
     ptr: *mut u8,
     bitmap_offset: usize,
     phantom: std::marker::PhantomData<T>,
@@ -182,6 +207,7 @@ impl<T> CslabStorage<T> {
 
         Self {
             size,
+            frontier: AtomicUsize::new(0),
             ptr,
             bitmap_offset,
             phantom: std::marker::PhantomData,
@@ -190,6 +216,10 @@ impl<T> CslabStorage<T> {
 
     pub fn len(&self) -> usize {
         self.size
+    }
+
+    pub fn frontier(&self) -> &AtomicUsize {
+        &self.frontier
     }
 
     pub fn table(&self) -> &CslabTable<T> {
@@ -207,6 +237,7 @@ impl<T> CslabStorage<T> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn parts_mut(&mut self) -> (&mut CslabTable<T>, &mut CslabBitmap) {
         // SAFETY: we've correctly allocated memory
         (
@@ -223,27 +254,12 @@ impl<T> CslabStorage<T> {
 
 impl<T> Drop for CslabStorage<T> {
     fn drop(&mut self) {
-        // FIXME: this is inefficient for very large tables
-        // NOTE: we can (a) use bitscanning, and (b) keep a count of how many values remaining
-
-        let size = self.size;
-        let (table, bitmap) = self.parts_mut();
-
-        for (i, bme) in bitmap.iter().enumerate() {
-            let x = bme.load(Ordering::Relaxed);
-            for j in 0..usize::BITS as usize {
-                let idx = (i * usize::BITS as usize) + j;
-                if idx >= size {
-                    break;
-                }
-                if (x >> j) & 1 != 0 {
-                    // SAFETY: we know an element is present from the bit being set
-                    // and our requirement that `finalize_remove()` be called
-                    // for every `mark_removed()`
-                    unsafe { ManuallyDrop::drop(&mut (*table[idx].get()).item) }
-                }
-            }
-        }
+        Iter::new(self).for_each(|(_, item)|
+            // SAFETY: we know an element is present from the bit being set
+            // and our requirement that `finalize_remove()` be called
+            // for every `mark_removed()`
+            // SAFETY: we know we have exclusive access to this item
+            unsafe { std::ptr::drop_in_place((item as *const T) as *mut T) });
 
         let (layout, _) = Self::storage_layout(self.size);
         // SAFETY: we are dropping; no-one else has a pointer to this
@@ -287,6 +303,160 @@ unsafe fn get_unchecked_impl<T>(storage: &CslabStorage<T>, idx: usize) -> &T {
     unsafe { &(*storage.table()[idx].get()).item } /* [Gi] */
 }
 
+/// Iterator over a `CslabReader`.
+pub struct Iter<'a, T> {
+    storage: &'a CslabStorage<T>,
+    head: usize, // inclusive
+    tail: usize, // exclusive
+}
+
+impl<'a, T> Iter<'a, T> {
+    fn new(storage: &'a CslabStorage<T>) -> Self {
+        let frontier = storage.frontier().load(Ordering::Relaxed) /* [Sm] */;
+        debug_assert!(frontier <= storage.size);
+
+        Self {
+            storage,
+            head: 0,
+            tail: frontier,
+        }
+    }
+}
+
+impl<'a, T> Iterator for Iter<'a, T> {
+    type Item = (usize, &'a T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // needed to avoid possibly loading past the end
+        if self.head >= self.tail {
+            return None;
+        }
+
+        loop {
+            let bme = self.storage.bitmap()[self.head / usize::BITS as usize].load(Ordering::Acquire) /* [Gb] */
+                    >> (self.head % usize::BITS as usize);
+
+            // compute distance from head to next item, or next bitmap entry
+            let d;
+            if bme == 0 {
+                d = usize::BITS as usize - (self.head % usize::BITS as usize);
+            } else {
+                d = bme.trailing_zeros() as usize;
+            }
+
+            if d >= self.tail - self.head {
+                // if we've reached the end, finish
+                self.head = self.tail;
+                return None;
+            }
+
+            // move to next item, or next bitmap entry
+            self.head += d;
+
+            if bme != 0 {
+                // if we did find an item, return it!
+                let idx = self.head;
+                self.head += 1;
+                // SAFETY: the bitmap has told us there is an item
+                return Some((idx, unsafe { get_unchecked_impl(self.storage, idx) }));
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(self.tail - self.head))
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        // needed to avoid possibly loading past the beginning
+        if self.tail <= self.head {
+            return None;
+        }
+
+        loop {
+            let bme = self.storage.bitmap()[(self.tail - 1) / usize::BITS as usize].load(Ordering::Acquire) /* [Gb] */
+                    << (usize::BITS as usize - (((self.tail - 1) % usize::BITS as usize) + 1));
+
+            // compute distance from tail to previous item, or previous bitmap entry
+            let d;
+            if bme == 0 {
+                d = ((self.tail - 1) % usize::BITS as usize) + 1;
+            } else {
+                d = bme.leading_zeros() as usize;
+            }
+
+            if d >= self.tail - self.head {
+                // if we've reached the beginning, finish
+                self.tail = self.head;
+                return None;
+            }
+
+            // move to previous item, or previous bitmap entry
+            self.tail -= d;
+
+            if bme != 0 {
+                // if we did find an item, return it!
+                self.tail -= 1;
+                // SAFETY: the bitmap has told us there is an item
+                return Some((self.tail, unsafe {
+                    get_unchecked_impl(self.storage, self.tail)
+                }));
+            }
+        }
+    }
+}
+
+impl<'a, T> std::iter::FusedIterator for Iter<'a, T> {}
+
+/// Iterator over a `Cslab`.
+pub struct ExclIter<'a, T> {
+    iter: Iter<'a, T>,
+    in_use: usize,
+}
+
+impl<'a, T> ExclIter<'a, T> {
+    fn new(storage: &'a CslabStorage<T>, in_use: usize) -> Self {
+        Self {
+            iter: Iter::new(storage),
+            in_use,
+        }
+    }
+}
+
+impl<'a, T> Iterator for ExclIter<'a, T> {
+    type Item = <Iter<'a, T> as Iterator>::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.in_use, Some(self.in_use))
+    }
+
+    fn count(self) -> usize {
+        self.in_use
+    }
+}
+
+impl<'a, T> DoubleEndedIterator for ExclIter<'a, T> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.iter.next_back()
+    }
+}
+
+impl<'a, T> ExactSizeIterator for ExclIter<'a, T> {}
+
+impl<'a, T> std::iter::FusedIterator for ExclIter<'a, T> {}
+
+impl<'a, T> From<ExclIter<'a, T>> for Iter<'a, T> {
+    fn from(value: ExclIter<'a, T>) -> Self {
+        value.iter
+    }
+}
+
 /// Cloneable read-only handle to a `Cslab`.
 pub struct CslabReader<T>(Arc<CslabStorage<T>>);
 
@@ -301,12 +471,12 @@ impl<T> CslabReader<T> {
     /// have been marked for removal by the writer thread.  (The item
     /// returned is however still valid.)
     pub fn get(&self, idx: usize) -> Option<&T> {
-        get_impl(&*self.0, idx)
+        get_impl(&self.0, idx)
     }
 
     /// Like `get()`, but simply returns whether an item is present or not.
     pub fn contains_key(&self, idx: usize) -> bool {
-        contains_key_impl(&*self.0, idx)
+        contains_key_impl(&self.0, idx)
     }
 
     /// Gets an item known not to have been finalized.  (I.e., the item must be
@@ -318,7 +488,14 @@ impl<T> CslabReader<T> {
     /// that an item is present at this index, and `finalize_remove()`
     /// has not been called on this index in the interim.
     pub unsafe fn get_unchecked(&self, idx: usize) -> &T {
-        unsafe { get_unchecked_impl(&*self.0, idx) }
+        unsafe { get_unchecked_impl(&self.0, idx) }
+    }
+
+    /// Returns an iterator over the slab.
+    ///
+    /// Items added during the iterator's lifetime may or may not be visible.
+    pub fn iter(&self) -> Iter<'_, T> {
+        Iter::new(&self.0)
     }
 }
 
@@ -383,7 +560,15 @@ impl<T> Cslab<T> {
     /// Unlike `CslabReader::get()`, it is _not_ possible for this method to
     /// return items which have been marked for removal.
     pub fn get(&self, idx: usize) -> Option<&T> {
-        get_impl(&*self.storage, idx)
+        get_impl(&self.storage, idx)
+    }
+
+    /// Returns an iterator over the slab.
+    ///
+    /// Unlike `CslabReader::iter()`, it is not possible for items to be
+    /// concurrently added (and therefore be nondeterministically visible).
+    pub fn iter(&self) -> ExclIter<'_, T> {
+        ExclIter::new(&self.storage, self.in_use)
     }
 
     /// Return a clonable read-only handle to the slab.
@@ -414,6 +599,13 @@ impl<T> Cslab<T> {
         // store item
         // SAFETY: any index in the freelist has no item
         unsafe { (*self.storage.table()[idx].get()).item = ManuallyDrop::new(item) } /* [Ii] */;
+
+        // update highest-used index
+        // note, we are the only writer, so we don't need to use `fetch_max`
+        let old_frontier = self.storage.frontier().load(Ordering::Relaxed);
+        if idx >= old_frontier {
+            self.storage.frontier().store(idx + 1, Ordering::Relaxed) /* [Im] */;
+        }
 
         // mark in bitmap
         let mask = self.storage.bitmap()[idx / usize::BITS as usize].load(Ordering::Relaxed);
@@ -641,6 +833,83 @@ mod tests {
         std::mem::drop(slab);
         assert!(j_dropped.get());
     }
+
+    #[test]
+    fn iter_test() {
+        let mut slab = Cslab::with_fixed_capacity(4);
+        assert_eq!(slab.iter().len(), 0);
+        assert!(slab.iter().collect::<Vec::<_>>().is_empty());
+
+        let i = slab.insert(123).unwrap();
+        let j = slab.insert(456).unwrap();
+        let k = slab.insert(789).unwrap();
+        assert_eq!(slab.iter().len(), 3);
+        assert_eq!(
+            slab.iter().collect::<Vec::<_>>(),
+            vec![(i, &123), (j, &456), (k, &789)]
+        );
+        assert_eq!(
+            slab.iter().rev().collect::<Vec::<_>>(),
+            vec![(k, &789), (j, &456), (i, &123)]
+        );
+
+        unsafe {
+            slab.mark_removed(j);
+        }
+
+        assert_eq!(slab.iter().len(), 2);
+        assert_eq!(
+            slab.iter().collect::<Vec::<_>>(),
+            vec![(i, &123), (k, &789)]
+        );
+        assert_eq!(
+            slab.iter().rev().collect::<Vec::<_>>(),
+            vec![(k, &789), (i, &123)]
+        );
+    }
+
+    #[test]
+    fn iter_bidi_test() {
+        let mut slab = Cslab::with_fixed_capacity(4);
+
+        let i = slab.insert(123).unwrap();
+        let j = slab.insert(456).unwrap();
+        let k = slab.insert(789).unwrap();
+
+        let mut it = slab.iter();
+        assert_eq!(it.next(), Some((i, &123)));
+        assert_eq!(it.next_back(), Some((k, &789)));
+        assert_eq!(it.next(), Some((j, &456)));
+        assert_eq!(it.next(), None);
+        assert_eq!(it.next_back(), None);
+
+        // test fusing also
+        assert_eq!(it.next(), None);
+        assert_eq!(it.next_back(), None);
+    }
+
+    #[test]
+    fn iter_large_test() {
+        let mut slab = Cslab::with_fixed_capacity(128);
+
+        let mut items = Vec::new();
+
+        for i in 0..128 {
+            items.push(slab.insert(100 + i).unwrap());
+        }
+
+        let mut it = slab.iter();
+        for i in 0..128 {
+            assert_eq!(it.next(), Some((items[i], &(100 + i))));
+        }
+        assert!(it.next().is_none());
+
+        let mut it = slab.iter();
+        for i in 0..128 {
+            assert_eq!(it.next_back(), Some((items[127 - i], &(100 + (127 - i)))));
+        }
+        assert!(it.next_back().is_none());
+    }
 }
 
 #[cfg(all(test, loom))]
@@ -839,6 +1108,13 @@ impl<T> RcuCslabReader<T> {
         // which prevents any removal of this item from being finalized
         unsafe { self.reader.get_unchecked(idx) }
     }
+
+    /// Returns an iterator over the slab.
+    ///
+    /// Items added during the iterator's lifetime may or may not be visible.
+    pub fn iter(&self) -> Iter<'_, T> {
+        self.reader.iter()
+    }
 }
 
 impl<T> Clone for RcuCslabReader<T> {
@@ -869,10 +1145,10 @@ impl<T> Clone for RcuCslabReader<T> {
 ///
 ///   for idx in 0..10 {
 ///     let reader = reader_reader_box.lock().unwrap().clone();
-///      match reader.get(idx) {
-///        Some(value) => (),
-///        None => (),
-///      }
+///     match reader.get(idx) {
+///       Some(value) => (),
+///       None => (),
+///     }
 ///   }
 /// );
 ///
@@ -962,6 +1238,14 @@ impl<T> RcuCslab<T> {
     /// return items which have been marked for removal.
     pub fn get(&self, idx: usize) -> Option<&T> {
         self.reader.get(idx)
+    }
+
+    /// Returns an iterator over the slab.
+    ///
+    /// Unlike `RcuCslabReader::iter()`, it is not possible for items to be
+    /// concurrently added (and therefore be nondeterministically visible).
+    pub fn iter(&self) -> ExclIter<'_, T> {
+        ExclIter::new(&self.reader.0, self.len())
     }
 
     /// Return a clonable read-only handle to the slab, associated with the

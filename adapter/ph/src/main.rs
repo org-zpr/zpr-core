@@ -59,6 +59,7 @@ mod set_capture_file_worker;
 mod signal_worker;
 mod special_peers;
 mod sys;
+mod tc;
 mod test_packet;
 mod tlv;
 mod tun_ctl;
@@ -554,7 +555,6 @@ fn main() -> ExitCode {
         counters: Default::default(),
         tun_ctl,
         peer_table: peer_table::PeerTable::new(),
-        peer_ids: Default::default(),
         alt: adapter_tables::ActorLookupTable::new(),
         dlt: adapter_tables::DockLookupTable::new(),
         mgmt_dispatch_factory: MgmtDispatchFactory::new(md_inq_factory),

@@ -9,7 +9,7 @@ aarc = { version = "0.3", optional = true }
 arrayref = { version = "0.3.7" }
 base64 = "0.22.1"
 blake3 = { version = "1.5.4" }
-bytes = { version = "1.7.1" }
+bytes = { version = "1.10" }
 cbpf-rs = { path = "../../cbpf-rs" }
 chrono = "0.4.39"
 clap = { version = "4.5.7", features = ["derive", "env"] }
@@ -44,9 +44,9 @@ zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "ze
 serde_json = "1.0.140"
 url = "2.5.4"
 clap_complete = { version = "4.5.57", optional = true}
-cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.2.0" }
-capnp = { version = "0.21" }
-capnp-rpc = { version = "0.21" }
+cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.6.0" }
+capnp = { version = "0.23" }
+capnp-rpc = { version = "0.23" }
 ip_network_table-deps-treebitmap = { version = "0.5.0" }
 range-set-blaze = {version = "0.4.1" }
 
