@@ -10,7 +10,6 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use zpr::{L3Type, VisaId};
 
-// TODO wrap inner structures in Arcs, will make re-creation more efficient
 // TODO perhaps change final vec from a vec of tuples to a vec of structs, easier to understand resulting code
 pub type FiveTupleLookup = HashMap<IpAddress, Arc<IpLookupTable<Ipv6Addr, DstPortLevel>>>;
 
@@ -24,28 +23,15 @@ pub struct FiveTupleLookupTable {
 pub enum DstPortLevel {
     Wildcard(SrcPortLevel),
     MultiVal(Arc<RangeMapBlaze<u16, SrcPortLevel>>),
-    SingleVal(Arc<(u16, SrcPortLevel)>), // TODO (same as below) do I need an RwLock here too? - likely will when implement editing
+    SingleVal(Arc<(u16, SrcPortLevel)>),
 }
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum SrcPortLevel {
     Wildcard(Arc<Vec<(IpProtocol, VisaId)>>),
     MultiVal(Arc<RangeMapBlaze<u16, Arc<Vec<(IpProtocol, VisaId)>>>>),
-    SingleVal(Arc<(u16, Arc<Vec<(IpProtocol, VisaId)>>)>), // TO DO do I need an RwLock here too? - likely will when implement editing
+    SingleVal(Arc<(u16, Arc<Vec<(IpProtocol, VisaId)>>)>),
 }
-
-// impl PartialEq for SrcPortLevel {
-//     fn eq(&self, other: &Self) -> bool {
-//         match (self, other) {
-//             (Self::Wildcard(v1), Self::Wildcard(v2)) => v1 == v2,
-//             (Self::MultiVal(v1), Self::MultiVal(v2)) => v1 == v2,
-//             (Self::SingleVal(v1), Self::SingleVal(v2)) => v1.0 == v2.0 && v1.1 == v2.1,
-//             _ => false,
-//         }
-//     }
-// }
-
-// impl Eq for SrcPortLevel {}
 
 impl FiveTupleLookupTable {
     // TODO change how construction is done once visas move away from being based on a FiveTuples
@@ -75,8 +61,6 @@ impl FiveTupleLookupTable {
         Self::add_one_visa(visa_id, &visa, &mut table);
         self.table.write(Arc::new(table))
     }
-
-    // pub fn remove_visa_from_table(visa: VisaId) {}
 
     pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
         match self.table.get().get(&ft.dst_address) {
@@ -112,7 +96,6 @@ impl FiveTupleLookupTable {
             None => return,
         };
         // Create array for protocol
-        // 10 elements in the array because there are max 10 ip protocols that the visa could allow
         let mut arr = Vec::new();
         arr.push((five_tuple.l4_protocol, visa_id));
 
@@ -351,7 +334,6 @@ impl FiveTupleLookupTable {
         proto_vec_one: Arc<Vec<(IpProtocol, VisaId)>>,
         proto_vec_two: Arc<Vec<(IpProtocol, VisaId)>>,
     ) -> Arc<Vec<(IpProtocol, VisaId)>> {
-        // let intersection = proto_vec_two.clone();
         let mut intersection: Vec<(u8, i32)> = Vec::new();
         for elem in proto_vec_two.iter() {
             intersection.push(elem.clone());

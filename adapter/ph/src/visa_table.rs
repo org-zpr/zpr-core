@@ -360,11 +360,7 @@ impl VisaTable {
         peer_table: &peer_table::PeerTable,
         visa_id: VisaId,
     ) -> Result<(), VisaTableError> {
-        let Some(mut visa) = self.table.remove(&visa_id) else {
-            return Err(VisaTableError::NotFound(visa_id));
-        };
-        visa.remove_forwarding_entries(peer_table);
-        info!(target: VISA_MGMT, "Revoked visa {visa_id}");
+        self.revoke_no_rebuild(peer_table, visa_id)?;
         self.lookup_table = FiveTupleLookupTable::new();
         self.lookup_table.build_table_from_hash(&self.table);
 
@@ -381,12 +377,24 @@ impl VisaTable {
         {
             let timeout_entry = self.timeout_queue.pop().unwrap();
             // Ignore if the visa was not found, since it might have been previously revoked
-            let _ = self.revoke(peer_table, timeout_entry.id);
+            let _ = self.revoke_no_rebuild(peer_table, timeout_entry.id);
         }
         self.lookup_table = FiveTupleLookupTable::new();
         self.lookup_table.build_table_from_hash(&self.table);
     }
 
+    fn revoke_no_rebuild(
+        &mut self,
+        peer_table: &peer_table::PeerTable,
+        visa_id: VisaId,
+    ) -> Result<(), VisaTableError> {
+        let Some(mut visa) = self.table.remove(&visa_id) else {
+            return Err(VisaTableError::NotFound(visa_id));
+        };
+        visa.remove_forwarding_entries(peer_table);
+        info!(target: VISA_MGMT, "Revoked visa {visa_id}");
+        Ok(())
+    }
     /// Given a visa ID, look up the visa and return the destination address.
     /// If visa is not found or does not have a destination address, return an error.
     pub fn get_visa_dest_addr(&self, visa_id: VisaId) -> Result<IpAddress, VisaTableError> {
