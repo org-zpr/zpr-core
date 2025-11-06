@@ -297,18 +297,20 @@ mod rcu_impl {
             }
         }
 
-        pub fn write(&self, new_value: T) {
+        fn write_nonlocked(&self, new_value: T) {
             // NOTE: it's not clear from aarc docs in which threads GC is allowed;
             // if in `load()` threads, this would be a deal-breaker
             self.0.store(Some(&aarc::Arc::new(new_value)))
         }
 
+        pub fn write(&self, new_value: T) {
+            let _guard = self.1.lock().unwrap();
+            self.write_nonlocked(new_value);
+        }
+
         pub fn update(&self, f: impl Fn(&T) -> Option<T>) -> Result<(), ()> {
             let _guard = self.1.lock().unwrap();
-            let Some(new_value) = self.inspect(f) else {
-                return Err(());
-            };
-            self.write(new_value);
+            self.write_nonlocked(self.inspect(f).ok_or(())?);
             Ok(())
         }
     }
