@@ -14,7 +14,9 @@ pub enum Direction {
 }
 
 /// IP 5-tuple used for hashing.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, FromBytes, IntoBytes, Immutable, KnownLayout)]
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, Hash, FromBytes, IntoBytes, Immutable, KnownLayout,
+)]
 #[repr(C)]
 pub struct FiveTuple {
     pub src_address: net_defs::IpAddress,

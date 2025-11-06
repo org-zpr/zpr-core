@@ -10,6 +10,7 @@ use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::{FLOW_MGMT, REPORTING, ZDP};
 use crate::net_defs::IpAddress;
 use crate::packet::Packet;
+use crate::tc;
 use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
 use bytes::{Buf, BufMut};
@@ -909,10 +910,71 @@ pub async fn handle_bind_actor_address_request(
         }
 
         PhMode::Adapter => {
+            error!(target: ZDP, "Link {ingress_link_id}: received BindActorAddress message on adapter");
+            return Err(HandleMgmtError::MessageNotPermitted);
+        }
+    }
+
+    // respond to requestor
+    super::core::send_per_flow_txn_mgmt(
+        asm,
+        ingress_link_id.get(),
+        zdp::ZdpPacketType::BindActorAddressResponse,
+        ingress_tether_id,
+        txn_id,
+        rsp_pkt,
+    )
+    .await?;
+
+    Ok(())
+}
+
+pub async fn handle_bind_egress_stream_request(
+    asm: &Arc<Assembly>,
+    txn_id: u16,
+    mut pkt: Packet,
+) -> HandleMgmtResult {
+    let Ok(hdr) = zdp::ZdpBindEgressStreamRequestHeader::read_from_buf(&mut pkt) else {
+        return Err(HandleMgmtError::BadStructure);
+    };
+
+    if hdr.tcst != zpr::Tcst::Ip5Tuple {
+        warn!(target: ZDP, "Link {}: unsupported TCST {}", pkt.metadata().ingress_link_id, hdr.tcst.0);
+        return Err(HandleMgmtError::BadStructure);
+    }
+
+    let Ok(tc) = tc::Ip5TupleTc::deserialize(&mut pkt) else {
+        return Err(HandleMgmtError::BadStructure);
+    };
+
+    let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
+        // who sent this??
+        error!(target: FLOW_MGMT, "coding error: stray packet from unknown source; dropping");
+        return Ok(());
+    };
+
+    debug!(
+        target: ZDP,
+        "Link {}: handlers.handle_bind_egress_stream_request -- five_tuple {}",
+        ingress_link_id.get(), tc.five_tuple()
+    );
+
+    // recycle request buffer for response
+    let mut rsp_pkt = Packet::new(pkt.destroy(), config::DEFAULT_MESSAGE_HEADROOM);
+
+    let ingress_tether_id;
+
+    match asm.ph_mode {
+        PhMode::Node => {
+            error!(target: ZDP, "Link {ingress_link_id}: received BindEgressStream message on node");
+            return Err(HandleMgmtError::MessageNotPermitted);
+        }
+
+        PhMode::Adapter => {
             // form PEP
             let pep = adapter_tables::DltPep {
-                compression_mode,
-                five_tuple,
+                compression_mode: tc.compression_mode(),
+                five_tuple: *tc.five_tuple(),
             };
 
             // TODO: reverse path
@@ -922,7 +984,7 @@ pub async fn handle_bind_actor_address_request(
                 Ok(tid) => {
                     // success; respond with tether ID
                     // TODO: maybe tick a counter somewhere?
-                    zdp::ZdpBindActorAddressResponseHeader {
+                    zdp::ZdpBindEgressStreamResponseHeader {
                         status_code: zdp::ResponseCode::Success,
                         info_len: 0,
                     }
@@ -937,7 +999,7 @@ pub async fn handle_bind_actor_address_request(
                     // TODO: maybe tick a counter somewhere?
                     let message = "DLT full";
 
-                    zdp::ZdpBindActorAddressResponseHeader {
+                    zdp::ZdpBindEgressStreamResponseHeader {
                         status_code: zdp::ResponseCode::Other,
                         info_len: message.len() as u8,
                     }
@@ -956,7 +1018,7 @@ pub async fn handle_bind_actor_address_request(
     super::core::send_per_flow_txn_mgmt(
         asm,
         ingress_link_id.get(),
-        zdp::ZdpPacketType::BindActorAddressResponse,
+        zdp::ZdpPacketType::BindEgressStreamResponse,
         ingress_tether_id,
         txn_id,
         rsp_pkt,
@@ -967,6 +1029,30 @@ pub async fn handle_bind_actor_address_request(
 }
 
 pub async fn handle_bind_actor_address_response(
+    asm: &Arc<Assembly>,
+    txn_id: u16,
+    pkt: Packet,
+) -> HandleMgmtResult {
+    let link_id = pkt.metadata().ingress_link_id;
+
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        return Err(HandleMgmtError::LinkClosed);
+    };
+
+    let Some(txn) = peer_state.txn_mgr.get(txn_id) else {
+        return Err(HandleMgmtError::UnknownTransaction(txn_id));
+    };
+
+    let Some(sender) = peer_state.bind_req_state.lock().unwrap().remove(&txn) else {
+        return Err(HandleMgmtError::UnknownTransaction(txn_id));
+    };
+
+    let _ = sender.send(pkt);
+
+    Ok(())
+}
+
+pub async fn handle_bind_egress_stream_response(
     asm: &Arc<Assembly>,
     txn_id: u16,
     pkt: Packet,

@@ -8,6 +8,7 @@ use super::core::{self, Sent};
 use crate::counters::ManagementCounterType;
 use crate::defs::*;
 use crate::logging::targets::ZDP;
+use crate::tc;
 use crate::zdp;
 use crate::{assembly::Assembly, auth};
 
@@ -319,6 +320,81 @@ pub async fn send_bind_actor_address_request(
     };
 
     let Ok(hdr) = zdp::ZdpBindActorAddressResponseHeader::read_from_buf(&mut resp) else {
+        core::count_event(asm, ManagementCounterType::BadStructure);
+        return Err(BindActorAddressError::BadStructure);
+    };
+
+    match hdr.status_code {
+        zdp::ResponseCode::Success => Ok(resp.metadata().ingress_stream_id),
+
+        zdp::ResponseCode::Other => {
+            if hdr.info_len as usize > resp.remaining() {
+                core::count_event(asm, ManagementCounterType::BadStructure);
+                return Err(BindActorAddressError::BadStructure);
+            }
+
+            let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
+                core::count_event(asm, ManagementCounterType::BadStructure);
+                return Err(BindActorAddressError::BadStructure);
+            };
+            let msg: Box<str> = msg.into();
+
+            Err(BindActorAddressError::BindActorAddressError(msg))
+        }
+
+        _ => {
+            core::count_event(asm, ManagementCounterType::BadStructure);
+            Err(BindActorAddressError::BadStructure)
+        }
+    }
+}
+
+pub async fn send_bind_egress_stream_request(
+    asm: &Assembly,
+    link_id: zpr::LinkId,
+    compression_mode: zpr::CompressionMode,
+    five_tuple: FiveTuple,
+) -> Result<zpr::StreamId, BindActorAddressError> {
+    info!(target: ZDP, "Link {link_id}: sending BindEgressStreamRequest for {five_tuple} with compression mode {compression_mode}");
+
+    let tc = tc::Ip5TupleTc::new_with_compression_mode(compression_mode, five_tuple);
+
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+
+    let Some(peer_state) = asm.peer_table.get(link_id) else {
+        return Err(BindActorAddressError::LinkClosed);
+    };
+
+    let txn = peer_state.txn_mgr.open().await;
+    let txn_id = txn.id();
+    peer_state
+        .bind_req_state
+        .lock()
+        .unwrap()
+        .insert(txn, sender);
+
+    drop(peer_state);
+
+    let mut req = core::new_heap_packet();
+    let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindEgressStreamRequestHeader>();
+    bind_req_hdr.tcst = zpr::Tcst::Ip5Tuple;
+    tc.serialize(&mut req);
+
+    core::send_per_flow_txn_mgmt(
+        asm,
+        link_id,
+        zdp::ZdpPacketType::BindEgressStreamRequest,
+        0,
+        txn_id,
+        req,
+    )
+    .await?;
+
+    let Ok(mut resp) = receiver.await else {
+        return Err(BindActorAddressError::LinkClosed);
+    };
+
+    let Ok(hdr) = zdp::ZdpBindEgressStreamResponseHeader::read_from_buf(&mut resp) else {
         core::count_event(asm, ManagementCounterType::BadStructure);
         return Err(BindActorAddressError::BadStructure);
     };

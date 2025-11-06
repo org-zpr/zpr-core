@@ -154,7 +154,6 @@ pub async fn bind_actor_address(
             five_tuple,
             decision.egress_link_id,
             compression_mode,
-            packet_body,
         )
         .await;
 

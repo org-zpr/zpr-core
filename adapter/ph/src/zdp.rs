@@ -28,6 +28,8 @@ pub enum ZdpPacketType {
     //AuthenticationRequest = 15,  // unused/deprecated
     SetPathMtu = 16,
     //AuthenticationResponse = 17,  // unused/deprecated
+    BindEgressStreamRequest = 19,  // TODO: add to RFC 17
+    BindEgressStreamResponse = 20, // TODO: add to RFC 17
 
     // Not flow-based
     ZprArp = 128,
@@ -244,6 +246,20 @@ pub struct ZdpBindActorAddressResponseHeader {
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
+pub struct ZdpBindEgressStreamRequestHeader {
+    pub tcst: zpr::Tcst,
+    // followed by traffic classifier
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpBindEgressStreamResponseHeader {
+    pub status_code: ResponseCode,
+    pub info_len: u8,
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
 pub struct ZdpKeyManagementHeader {
     pub message_type: U16,
     pub message_length: U16,
@@ -272,6 +288,22 @@ impl ZdpKeyManagementHeader {
 #[repr(packed)]
 pub struct ZdpA2aHeader {
     pub a2a_said: zpr::A2aSaid,
+}
+
+#[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[repr(packed)]
+pub struct ZdpTrafficClassifierHeader {
+    pub flags: u8,
+    pub ip_protocol: u8,
+    // Followed by source and destination addresses,
+    // then optional source and destination ports.
+}
+
+/// Bitflags for the [ZdpTrafficClassifierHeader] flags field.
+pub mod traffic_classifier_flags {
+    pub const DESTINATION_PORT_PRESENT: u8 = 0x01;
+    pub const SOURCE_PORT_PRESENT: u8 = 0x02;
+    pub const IPV4: u8 = 0x04;
 }
 
 /// Config-specified size of A2A MAC.  Algorithm-specified MAC may be smaller (but not larger).

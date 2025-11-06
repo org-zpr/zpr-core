@@ -77,7 +77,9 @@ pub const KM_ID_NULL: KmId = 0;
 
 /// ZPR actor packet L3 type (RFC 6.5 § 6.3.11)
 #[open_enum]
-#[derive(Copy, Clone, Debug, FromBytes, Hash, IntoBytes, Immutable, KnownLayout, Unaligned)]
+#[derive(
+    Copy, Clone, Debug, Default, FromBytes, Hash, IntoBytes, Immutable, KnownLayout, Unaligned,
+)]
 #[repr(u8)]
 pub enum L3Type {
     Ipv4 = 4,
@@ -120,6 +122,25 @@ pub mod compression_mode {
     pub const DESTINATION_PORT_PRESENT: CompressionMode = 0x20;
     pub const SOURCE_PORT_PRESENT: CompressionMode = 0x40;
     //pub const IP_PROTOCOL_PRESENT: CompressionMode = 0x80; // FIXME: this seems unused; I have a Q out to Frank about it
+}
+
+/// Traffic classification specification type.
+#[open_enum]
+#[derive(
+    Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned,
+)]
+#[repr(u8)]
+pub enum Tcst {
+    Ip5Tuple = 0,
+}
+
+impl std::fmt::Display for Tcst {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match *self {
+            Self::Ip5Tuple => write!(f, "IP 5-Tuple"),
+            other => write!(f, "[unknown TCST {}]", other.0),
+        }
+    }
 }
 
 // Well-known DNs.
