@@ -43,10 +43,10 @@ pub async fn bind_actor_address(
         "DOCK.bind_actor_address called with five_tuple {five_tuple} from ingress_link_id {ingress_link_id}",
     );
 
-    if let Some(matched) = asm.visa_table.read().await.match_traffic(&five_tuple) {
+    if let Some(matched) = asm.visa_table.read().unwrap().match_traffic(&five_tuple) {
         // We matched a visa we already have.
         let matched_visa_id = matched;
-        let egress_link_id_query = visa_mgmt::get_egress_link_for_visa(asm, matched_visa_id).await;
+        let egress_link_id_query = visa_mgmt::get_egress_link_for_visa(asm, matched_visa_id);
         match egress_link_id_query {
             Ok(link_id) => {
                 forwarding_decision = Some(ForwardingDecision {
@@ -109,14 +109,12 @@ pub async fn bind_actor_address(
                     return Err(BindActorAddressError::ParseError("Could not parse visa"));
                 };
                 let (visa_id, egress_link_id) =
-                    visa_mgmt::parse_visa(asm, visa)
-                        .await
-                        .map_err(|e| match e {
-                            VisaTableError::ParseError(field) => {
-                                BindActorAddressError::ParseError(field)
-                            }
-                            e => panic!("Got unexpected error type {e}"),
-                        })?;
+                    visa_mgmt::parse_visa(asm, visa).map_err(|e| match e {
+                        VisaTableError::ParseError(field) => {
+                            BindActorAddressError::ParseError(field)
+                        }
+                        e => panic!("Got unexpected error type {e}"),
+                    })?;
                 forwarding_decision = Some(ForwardingDecision {
                     egress_link_id,
                     visa_id,

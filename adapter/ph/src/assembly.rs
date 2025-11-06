@@ -71,7 +71,7 @@ pub struct Assembly {
     pub vsconn: Option<libnode::vsconn::VSConnHandle>, // present only on nodes
     pub vs_auth_services: std::sync::RwLock<AuthServicesList>, // present only on nodes, may be empty, managed by visa service
 
-    pub visa_table: tokio::sync::RwLock<visa_table::VisaTable>, // Only for nodes
+    pub visa_table: std::sync::RwLock<visa_table::VisaTable>, // Only for nodes
 
     // Used to intercept packets that are unencrypted but still have ZDP headers
     pub capture_queue: Capture,
@@ -438,7 +438,7 @@ impl Assembly {
         if self
             .visa_table
             .write()
-            .await
+            .unwrap()
             .link_forwarding_entry(
                 visa_id,
                 zpr::ForwardingEntry(ingress_link_id.get(), ingress_tether_id),
@@ -523,7 +523,7 @@ pub mod test {
             .actor_output_requeue
             .unwrap_or_else(|| ActorOutputRequeue::new(Vec::new()));
         let vsconn = builder.vsconn.unwrap_or(None);
-        let visa_table = tokio::sync::RwLock::new(
+        let visa_table = std::sync::RwLock::new(
             builder
                 .visa_table
                 .unwrap_or_else(|| visa_table::VisaTable::new()),
