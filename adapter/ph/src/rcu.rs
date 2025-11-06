@@ -18,18 +18,20 @@
 #![allow(dead_code)]
 
 #[cfg(all(
-    feature = "rcu-rwlock",
-    feature = "rcu-mutex-arc",
+    feature = "rcu-aarc",
+    feature = "rcu-arc-swap",
     feature = "rcu-crossbeam-epoch",
-    feature = "rcu-aarc"
+    feature = "rcu-mutex-arc",
+    feature = "rcu-rwlock",
 ))]
 compile_error!("exactly one rcu-* feature must be selected");
 
 #[cfg(not(any(
-    feature = "rcu-rwlock",
-    feature = "rcu-mutex-arc",
+    feature = "rcu-aarc",
+    feature = "rcu-arc-swap",
     feature = "rcu-crossbeam-epoch",
-    feature = "rcu-aarc"
+    feature = "rcu-mutex-arc",
+    feature = "rcu-rwlock",
 )))]
 compile_error!("exactly one rcu-* feature must be selected");
 
@@ -309,6 +311,63 @@ mod rcu_impl {
         }
 
         pub fn update(&self, f: impl Fn(&T) -> Option<T>) -> Result<(), ()> {
+            let _guard = self.1.lock().unwrap();
+            self.write_nonlocked(self.inspect(f).ok_or(())?);
+            Ok(())
+        }
+    }
+}
+
+#[cfg(all(feature = "rcu-arc-swap", not(doc)))]
+mod rcu_impl {
+    use std::sync::{Arc, Mutex};
+
+    pub struct RcuBox<T: 'static>(arc_swap::ArcSwapAny<Arc<T>>, Mutex<()>);
+
+    pub struct RcuGuard<'a, T: 'static> {
+        guard: arc_swap::Guard<Arc<T>>,
+        phantom: std::marker::PhantomData<&'a T>,
+    }
+
+    impl<T> std::ops::Deref for RcuGuard<'_, T> {
+        type Target = T;
+
+        fn deref(&self) -> &Self::Target {
+            self.guard.deref()
+        }
+    }
+
+    impl<T> RcuBox<T> {
+        pub fn new(value: T) -> Self {
+            Self(arc_swap::ArcSwap::new(Arc::new(value)), Mutex::new(()))
+        }
+
+        pub fn inspect<U>(&self, f: impl FnOnce(&T) -> U) -> U {
+            f(&self.0.load())
+        }
+
+        pub fn get(&self) -> RcuGuard<'_, T> {
+            RcuGuard {
+                guard: self.0.load(),
+                phantom: std::marker::PhantomData,
+            }
+        }
+
+        fn write_nonlocked(&self, new_value: T) {
+            self.0.store(Arc::new(new_value))
+        }
+
+        pub fn write(&self, new_value: T) {
+            let _guard = self.1.lock().unwrap();
+            self.write_nonlocked(new_value);
+        }
+
+        pub fn update(&self, f: impl Fn(&T) -> Option<T>) -> Result<(), ()> {
+            // Despite that ArcSwap::rcu() is very nearly this function,
+            // (modulo giving `f` the option to bail out of a write),
+            // we prefer to use a locking technique to serialize updates
+            // since (a) they're not performance sensitive and (b)
+            // it ensures fairness.
             let _guard = self.1.lock().unwrap();
             self.write_nonlocked(self.inspect(f).ok_or(())?);
             Ok(())
