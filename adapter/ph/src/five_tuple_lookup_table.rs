@@ -7,7 +7,7 @@ use ip_network_table_deps_treebitmap::IpLookupTable;
 use range_set_blaze::RangeMapBlaze;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use zpr::{L3Type, VisaId};
 
 // TODO wrap inner structures in Arcs, will make re-creation more efficient
@@ -15,7 +15,7 @@ use zpr::{L3Type, VisaId};
 pub type FiveTupleLookup = HashMap<IpAddress, Arc<IpLookupTable<Ipv6Addr, DstPortLevel>>>;
 
 pub struct FiveTupleLookupTable {
-    table: RcuBox<Arc<RwLock<FiveTupleLookup>>>,
+    table: RcuBox<Arc<FiveTupleLookup>>,
 }
 
 // TODO could probably combine DstPortLevel and SrcPortLevel with some sort of
@@ -49,83 +49,132 @@ pub enum SrcPortLevel {
 
 impl FiveTupleLookupTable {
     // TODO change how construction is done once visas move away from being based on a FiveTuples
-    pub fn new(visa_table: &HashMap<VisaId, Visa>) -> Self {
-        let mut hash_table: FiveTupleLookup = HashMap::new();
+    pub fn new() -> Self {
+        let hash_table: FiveTupleLookup = HashMap::new();
+        Self {
+            table: RcuBox::new(Arc::new(hash_table)),
+        }
+    }
+
+    pub fn build_table_from_hash(&self, visa_table: &HashMap<VisaId, Visa>) {
+        let mut dst_addr_intersection: FiveTupleLookup = HashMap::new();
+        for (key, val) in self.table.get().iter() {
+            dst_addr_intersection.insert(*key, val.clone());
+        }
         for (visa_id, visa) in visa_table.iter() {
-            let five_tuple = match visa.ftuple {
-                Some(ft) => ft,
-                None => continue,
-            };
+            Self::add_one_visa(*visa_id, visa, &mut dst_addr_intersection);
+        }
+        self.table.write(Arc::new(dst_addr_intersection))
+    }
 
-            // Create array for protocol
-            // 10 elements in the array because there are max 10 ip protocols that the visa could allow
-            let mut arr = Vec::new();
-            arr.push((five_tuple.l4_protocol, *visa_id));
+    pub fn insert_visa(&self, visa_id: VisaId, visa: Visa) {
+        let mut table: FiveTupleLookup = HashMap::new();
+        for (key, val) in self.table.get().iter() {
+            table.insert(*key, val.clone());
+        }
+        Self::add_one_visa(visa_id, &visa, &mut table);
+        self.table.write(Arc::new(table))
+    }
 
-            // Determine which enum to use for src level
-            let src_level = match five_tuple.src_port {
-                0 => SrcPortLevel::Wildcard(Arc::new(arr)),
-                val => SrcPortLevel::SingleVal(Arc::new((val, Arc::new(arr)))),
-            };
+    // pub fn remove_visa_from_table(visa: VisaId) {}
 
-            // Determine which enum to use for dst level
-            let dst_level = match five_tuple.dst_port {
-                0 => DstPortLevel::Wildcard(src_level),
-                val => DstPortLevel::SingleVal(Arc::new((val, src_level))),
-            };
+    pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
+        match self.table.get().get(&ft.dst_address) {
+            None => return None,
+            Some(src_addr_table) => {
+                return match src_addr_table.longest_match(Ipv6Addr::from(ft.src_address)) {
+                    None => None,
+                    Some(dst_port_table) => match dst_port_table.2 {
+                        DstPortLevel::Wildcard(src_level) => {
+                            Self::find_src_level_match(src_level.clone(), ft)
+                        }
+                        DstPortLevel::SingleVal(tuple_val) => {
+                            let port = tuple_val.0;
+                            let src_level = tuple_val.1.clone();
+                            match port == ft.dst_port {
+                                false => return None,
+                                true => return Self::find_src_level_match(src_level.clone(), ft),
+                            };
+                        }
+                        DstPortLevel::MultiVal(dst_level) => match dst_level.get(ft.dst_port) {
+                            None => None,
+                            Some(src_level) => Self::find_src_level_match(src_level.clone(), ft),
+                        },
+                    },
+                };
+            }
+        };
+    }
 
-            // Create table of src addresses, add map of destination ports
-            // NOTE how large do we expect each IpLookupTable to be? I.E. how many src addresses for each dst address, typically?
-            let mut ip_table = IpLookupTable::new();
-            match five_tuple.l3_type {
-                // converting v4 to v6 is temporary until a more elegant solution can be determined, currently fine but a waste of space if using ipv4
-                L3Type::Ipv4 => ip_table.insert(
-                    Ipv4Addr::try_from(five_tuple.src_address)
-                        .unwrap()
-                        .to_ipv6_compatible(),
-                    128,
-                    dst_level,
-                ),
-                L3Type::Ipv6 => {
-                    ip_table.insert(Ipv6Addr::from(five_tuple.src_address), 128, dst_level)
+    fn add_one_visa(visa_id: VisaId, visa: &Visa, table: &mut FiveTupleLookup) {
+        let five_tuple = match visa.ftuple {
+            Some(ft) => ft,
+            None => return,
+        };
+        // Create array for protocol
+        // 10 elements in the array because there are max 10 ip protocols that the visa could allow
+        let mut arr = Vec::new();
+        arr.push((five_tuple.l4_protocol, visa_id));
+
+        // Determine which enum to use for src level
+        let src_level = match five_tuple.src_port {
+            0 => SrcPortLevel::Wildcard(Arc::new(arr)),
+            val => SrcPortLevel::SingleVal(Arc::new((val, Arc::new(arr)))),
+        };
+
+        // Determine which enum to use for dst level
+        let dst_level = match five_tuple.dst_port {
+            0 => DstPortLevel::Wildcard(src_level),
+            val => DstPortLevel::SingleVal(Arc::new((val, src_level))),
+        };
+
+        // Create table of src addresses, add map of destination ports
+        // NOTE how large do we expect each IpLookupTable to be? I.E. how many src addresses for each dst address, typically?
+        let mut ip_table = IpLookupTable::new();
+        match five_tuple.l3_type {
+            // converting v4 to v6 is temporary until a more elegant solution can be determined, currently fine but a waste of space if using ipv4
+            L3Type::Ipv4 => ip_table.insert(
+                Ipv4Addr::try_from(five_tuple.src_address)
+                    .unwrap()
+                    .to_ipv6_compatible(),
+                128,
+                dst_level,
+            ),
+            L3Type::Ipv6 => ip_table.insert(Ipv6Addr::from(five_tuple.src_address), 128, dst_level),
+            _ => None,
+        };
+
+        // TODO This is quite inefficient, improve
+        // Try to add to hash table, if there is a collision, combine the tables, then add the combined table
+        match table.insert(five_tuple.dst_address, Arc::new(ip_table)) {
+            None => (),
+            Some(removed_src_addrs) => {
+                let in_table_src_addrs = table.get(&five_tuple.dst_address).unwrap();
+                // Create intersection that has the dst port levels from both the src addrs currently in the table and those that were removed
+                let mut intersection = IpLookupTable::new();
+                for (addr, mask_len, val) in in_table_src_addrs.iter() {
+                    intersection.insert(addr, mask_len, val.clone());
                 }
-                _ => None,
-            };
-
-            // TODO This is quite inefficient, improve
-            // Try to add to hash table, if there is a collision, combine the tables, then add the combined table
-            match hash_table.insert(five_tuple.dst_address, Arc::new(ip_table)) {
-                None => (),
-                Some(removed_src_addrs) => {
-                    let in_table_src_addrs = hash_table.get(&five_tuple.dst_address).unwrap();
-                    // Create intersection that has the dst port levels from both the src addrs currently in the table and those that were removed
-                    let mut intersection = IpLookupTable::new();
-                    for (addr, mask_len, val) in in_table_src_addrs.iter() {
-                        intersection.insert(addr, mask_len, val.clone());
-                    }
-                    for (og_src_addr, og_mask_len, og_dst_ports) in removed_src_addrs.iter() {
-                        // Try to add a source addresses, If the src address is already being used as a key, combine its dst port tables
-                        match intersection.insert(og_src_addr, og_mask_len, og_dst_ports.clone()) {
-                            None => (),
-                            Some(removed_dst_ports) => {
-                                let in_table_dst_ports =
-                                    intersection.exact_match(og_src_addr, og_mask_len).unwrap();
-                                let new_dst_level = Self::combine_dst_levels(
-                                    removed_dst_ports,
-                                    in_table_dst_ports.clone(),
-                                );
-                                intersection.insert(og_src_addr, og_mask_len, new_dst_level);
-                            }
+                for (og_src_addr, og_mask_len, og_dst_ports) in removed_src_addrs.iter() {
+                    // Try to add a source addresses, If the src address is already being used as a key, combine its dst port tables
+                    match intersection.insert(og_src_addr, og_mask_len, og_dst_ports.clone()) {
+                        None => (),
+                        Some(removed_dst_ports) => {
+                            let in_table_dst_ports =
+                                intersection.exact_match(og_src_addr, og_mask_len).unwrap();
+                            let new_dst_level = Self::combine_dst_levels(
+                                removed_dst_ports,
+                                in_table_dst_ports.clone(),
+                            );
+                            intersection.insert(og_src_addr, og_mask_len, new_dst_level);
                         }
                     }
-                    // Add the intersection to the bucket of the proper dst address
-                    hash_table.insert(five_tuple.dst_address, Arc::new(intersection));
                 }
+                // Add the intersection to the bucket of the proper dst address
+                table.insert(five_tuple.dst_address, Arc::new(intersection));
             }
         }
-        Self {
-            table: RcuBox::new(Arc::new(RwLock::new(hash_table))),
-        }
+        // table
     }
 
     // TODO combine_dst_levels and combine_src_levels are essentially the same except which function they call to combine
@@ -323,34 +372,6 @@ impl FiveTupleLookupTable {
         Arc::new(intersection)
     }
 
-    pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
-        match self.table.get().read().unwrap().get(&ft.dst_address) {
-            None => return None,
-            Some(src_addr_table) => {
-                return match src_addr_table.longest_match(Ipv6Addr::from(ft.src_address)) {
-                    None => None,
-                    Some(dst_port_table) => match dst_port_table.2 {
-                        DstPortLevel::Wildcard(src_level) => {
-                            Self::find_src_level_match(src_level.clone(), ft)
-                        }
-                        DstPortLevel::SingleVal(tuple_val) => {
-                            let port = tuple_val.0;
-                            let src_level = tuple_val.1.clone();
-                            match port == ft.dst_port {
-                                false => return None,
-                                true => return Self::find_src_level_match(src_level.clone(), ft),
-                            };
-                        }
-                        DstPortLevel::MultiVal(dst_level) => match dst_level.get(ft.dst_port) {
-                            None => None,
-                            Some(src_level) => Self::find_src_level_match(src_level.clone(), ft),
-                        },
-                    },
-                };
-            }
-        };
-    }
-
     fn find_src_level_match(src_level: SrcPortLevel, ft: FiveTuple) -> Option<VisaId> {
         match src_level {
             SrcPortLevel::Wildcard(protos) => {
@@ -441,15 +462,14 @@ mod tests {
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let un_rcu_table = table.table.get();
 
         // Get src port level enum from from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
-            .read()
-            .unwrap()
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -502,15 +522,14 @@ mod tests {
         hash.insert(12, v1);
         hash.insert(13, v2);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let un_rcu_table = table.table.get();
 
         // Get src port level enum from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
-            .read()
-            .unwrap()
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -577,15 +596,14 @@ mod tests {
         hash.insert(12, v1);
         hash.insert(13, v2);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let un_rcu_table = table.table.get();
 
         // Get src port level enum from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
-            .read()
-            .unwrap()
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -659,14 +677,14 @@ mod tests {
         hash.insert(12, v1);
         hash.insert(13, v2);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let un_rcu_table = table.table.get();
-        let binding = un_rcu_table.read().unwrap();
 
         // Get dst port map from dst port level enum
         let dst_port_level;
-        if let DstPortLevel::MultiVal(dst_level) = binding
+        if let DstPortLevel::MultiVal(dst_level) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -718,15 +736,10 @@ mod tests {
         assert_eq!(proto_level2.unwrap().len(), 1);
         assert_eq!(dst_port_level.unwrap().len(), 2);
         assert_eq!(
-            un_rcu_table
-                .read()
-                .unwrap()
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .len(),
+            un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
             1
         );
-        assert_eq!(un_rcu_table.read().unwrap().len(), 1);
+        assert_eq!(un_rcu_table.len(), 1);
     }
 
     #[test]
@@ -746,15 +759,14 @@ mod tests {
         hash.insert(12, v1);
         hash.insert(13, v2);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let un_rcu_table = table.table.get();
 
         // Get src port levels enum from dst port level enum
         let src_port_level1;
         if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
-            .read()
-            .unwrap()
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -776,8 +788,6 @@ mod tests {
 
         let src_port_level2;
         if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
-            .read()
-            .unwrap()
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -827,12 +837,7 @@ mod tests {
         assert_eq!(proto_level2.as_ref().unwrap()[0].1, 13);
         assert_eq!(proto_level2.unwrap()[0].0, ip_number::TCP);
         assert_eq!(
-            un_rcu_table
-                .read()
-                .unwrap()
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .len(),
+            un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
             2
         );
     }
@@ -854,15 +859,14 @@ mod tests {
         hash.insert(12, v1);
         hash.insert(13, v2);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let un_rcu_table = table.table.get();
 
         // Get src port level enum from dst port level enum
         let src_port_level1;
         if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
-            .read()
-            .unwrap()
             .get(&IpAddress::from(dst_addr1))
             .unwrap()
             .exact_match(
@@ -884,8 +888,6 @@ mod tests {
 
         let src_port_level2;
         if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
-            .read()
-            .unwrap()
             .get(&IpAddress::from(dst_addr2))
             .unwrap()
             .exact_match(
@@ -932,14 +934,9 @@ mod tests {
         assert_eq!(proto_level1.unwrap()[0].0, ip_number::TCP);
         assert_eq!(proto_level2.as_ref().unwrap()[0].1, 13);
         assert_eq!(proto_level2.unwrap()[0].0, ip_number::TCP);
-        assert_eq!(un_rcu_table.read().unwrap().len(), 2);
+        assert_eq!(un_rcu_table.len(), 2);
         assert_eq!(
-            un_rcu_table
-                .read()
-                .unwrap()
-                .get(&IpAddress::from(dst_addr2))
-                .unwrap()
-                .len(),
+            un_rcu_table.get(&IpAddress::from(dst_addr2)).unwrap().len(),
             1
         );
     }
@@ -967,7 +964,8 @@ mod tests {
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         assert_eq!(table.find_match(ft), Some(12))
     }
@@ -1009,7 +1007,8 @@ mod tests {
         hash.insert(18, v_diff_src_addr);
         hash.insert(19, v_diff_dst_addr);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         assert_eq!(table.find_match(ft), None);
     }
@@ -1027,7 +1026,8 @@ mod tests {
 
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(15, v);
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let src_port_diff = 13;
         let dst_port_diff = 14;
@@ -1119,7 +1119,8 @@ mod tests {
         hash.insert(18, v_diff_src_addr);
         hash.insert(19, v_diff_dst_addr);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let ft_diff_proto = FiveTuple::new(
             L3Type::Ipv6,
@@ -1184,7 +1185,8 @@ mod tests {
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let ft1 = FiveTuple::new(
             L3Type::Ipv6,
@@ -1227,8 +1229,6 @@ mod tests {
         // Get src port level enum from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
-            .read()
-            .unwrap()
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -1274,7 +1274,8 @@ mod tests {
         let mut hash: HashMap<VisaId, Visa> = HashMap::new();
         hash.insert(12, v);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let ft1 = FiveTuple::new(
             L3Type::Ipv6,
@@ -1314,11 +1315,10 @@ mod tests {
         assert_eq!(table.find_match(ft4), Some(12));
 
         let un_rcu_table = table.table.get();
-        let binding = un_rcu_table.read().unwrap();
 
         //Get src port level enum from dst port level enum
         let src_port_level;
-        if let DstPortLevel::Wildcard(src_level) = binding
+        if let DstPortLevel::Wildcard(src_level) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -1336,12 +1336,7 @@ mod tests {
         assert!(src_port_level.is_some());
 
         assert_eq!(
-            un_rcu_table
-                .read()
-                .unwrap()
-                .get(&IpAddress::from(dst_addr))
-                .unwrap()
-                .len(),
+            un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
             1
         );
 
@@ -1376,14 +1371,14 @@ mod tests {
         hash.insert(12, v1);
         hash.insert(13, v2);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let un_rcu_table = table.table.get();
-        let binding = un_rcu_table.read().unwrap();
 
         // Get src port level enum from dst port level enum
         let src_port_level;
-        if let DstPortLevel::SingleVal(tuple_val) = binding
+        if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -1453,15 +1448,14 @@ mod tests {
         hash.insert(13, v2);
         hash.insert(12, v1);
 
-        let table = FiveTupleLookupTable::new(&hash);
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
 
         let un_rcu_table = table.table.get();
 
         // Get src port level enum from dst port level enum
         let src_port_level;
         if let DstPortLevel::SingleVal(tuple_val) = un_rcu_table
-            .read()
-            .unwrap()
             .get(&IpAddress::from(dst_addr))
             .unwrap()
             .exact_match(
@@ -1511,5 +1505,95 @@ mod tests {
 
         assert_eq!(table.find_match(specified_src_ft), Some(12));
         assert_eq!(table.find_match(random_src_ft), Some(13));
+    }
+
+    #[test]
+    fn test_match_correct_visa_with_insert() {
+        let src_addr = [1u8; 16];
+        let dst_addr = [2u8; 16];
+
+        let l4proto = vsapi::PEPIndex::TCP;
+        let src_port = 10;
+        let dst_port = 11;
+
+        let ft = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            src_port as u16,
+            dst_port as u16,
+        );
+
+        let l4proto_diff = vsapi::PEPIndex::UDP;
+        let src_port_diff = 13;
+        let dst_port_diff = 14;
+        let src_addr_diff = [3u8; 16];
+        let dst_addr_diff = [4u8; 16];
+
+        let v_diff_proto = make_visa(src_addr, dst_addr, l4proto_diff, src_port, dst_port);
+        let v_diff_src_port = make_visa(src_addr, dst_addr, l4proto, src_port_diff, dst_port);
+        let v_diff_dst_port = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port_diff);
+        let v_diff_src_addr = make_visa(src_addr_diff, dst_addr, l4proto, src_port, dst_port);
+        let v_diff_dst_addr = make_visa(src_addr, dst_addr_diff, l4proto, src_port, dst_port);
+
+        let mut hash: HashMap<VisaId, Visa> = HashMap::new();
+        hash.insert(15, v_diff_proto);
+        hash.insert(16, v_diff_src_port);
+
+        let table = FiveTupleLookupTable::new();
+        table.build_table_from_hash(&hash);
+
+        table.insert_visa(17, v_diff_dst_port);
+        table.insert_visa(18, v_diff_src_addr);
+        table.insert_visa(19, v_diff_dst_addr);
+
+        let ft_diff_proto = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::UDP,
+            src_port as u16,
+            dst_port as u16,
+        );
+        let ft_diff_src_port = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            src_port_diff as u16,
+            dst_port as u16,
+        );
+        let ft_diff_dst_port = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            src_port as u16,
+            dst_port_diff as u16,
+        );
+        let ft_diff_src_addr = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr_diff),
+            IpAddress::from(dst_addr),
+            ip_number::TCP,
+            src_port as u16,
+            dst_port as u16,
+        );
+        let ft_diff_dst_addr = FiveTuple::new(
+            L3Type::Ipv6,
+            IpAddress::from(src_addr),
+            IpAddress::from(dst_addr_diff),
+            ip_number::TCP,
+            src_port as u16,
+            dst_port as u16,
+        );
+
+        assert_eq!(table.find_match(ft_diff_proto), Some(15));
+        assert_eq!(table.find_match(ft_diff_src_port), Some(16));
+        assert_eq!(table.find_match(ft_diff_dst_port), Some(17));
+        assert_eq!(table.find_match(ft_diff_src_addr), Some(18));
+        assert_eq!(table.find_match(ft_diff_dst_addr), Some(19));
+        assert_eq!(table.find_match(ft), None);
     }
 }
