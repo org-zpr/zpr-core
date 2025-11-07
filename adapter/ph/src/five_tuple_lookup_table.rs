@@ -12,20 +12,15 @@ use zpr::{L3Type, VisaId};
 
 // TODO perhaps change final vec from a vec of tuples to a vec of structs, easier to understand resulting code
 pub type FiveTupleLookup = HashMap<IpAddress, Arc<IpLookupTable<Ipv6Addr, DstLevel>>>;
+pub type DstLevel = PortLevel<SrcLevel>;
+pub type SrcLevel = PortLevel<ProtoLevel>;
 
 pub struct FiveTupleLookupTable {
     table: RcuBox<Arc<FiveTupleLookup>>,
 }
 
-pub type DstLevel = PortLevel<SrcLevel>;
-pub type SrcLevel = PortLevel<ProtoLevel>;
-
 #[derive(Clone, Eq, PartialEq)]
 pub struct ProtoLevel(Arc<Vec<(IpProtocol, VisaId)>>);
-
-// pub trait Combinable {
-//     fn combine(&self, other: &Self) -> Self;
-// }
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum PortLevel<T: Clone + Eq + PartialEq> {
@@ -34,32 +29,9 @@ pub enum PortLevel<T: Clone + Eq + PartialEq> {
     SingleVal(Arc<(u16, T)>),
 }
 
-// impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLevel<T> {
-//     fn combine(&self, other: &Self) -> Self {}
-// }
-
-// impl Combinable for ProtoLevel {
-//     fn combine(&self, other: &Self) -> Self {}
-// }
-
-impl ProtoLevel {
-    pub fn new(v: Vec<(IpProtocol, VisaId)>) -> Self {
-        Self(Arc::new(v))
-    }
+pub trait Combinable {
+    fn combine(&self, other: &Self) -> Self;
 }
-
-// pub type FiveTupleLookup = HashMap<IpAddress, Arc<IpLookupTable<Ipv6Addr, PortLevel<PortLevel<Arc<Vec<(IpProtocol, VisaId)>>>>>>>;
-
-// pub struct FiveTupleLookupTable {
-//     table: RcuBox<Arc<FiveTupleLookup>>,
-// }
-
-// #[derive(Clone, Eq, PartialEq)]
-// pub enum PortLevel<T: Clone + Eq + PartialEq> {
-//     Wildcard(T),
-//     MultiVal(Arc<RangeMapBlaze<u16, T>>),
-//     SingleVal(Arc<(u16, T)>),
-// }
 
 impl FiveTupleLookupTable {
     // TODO change how construction is done once visas move away from being based on a FiveTuples
@@ -172,9 +144,8 @@ impl FiveTupleLookupTable {
                         Some(removed_dst_ports) => {
                             let in_table_dst_ports =
                                 intersection.exact_match(og_src_addr, og_mask_len).unwrap();
-                            let new_dst_level = Self::combine_dst_levels(
-                                removed_dst_ports,
-                                in_table_dst_ports.clone(),
+                            let new_dst_level = removed_dst_ports.combine(
+                                &in_table_dst_ports,
                             );
                             intersection.insert(og_src_addr, og_mask_len, new_dst_level);
                         }
@@ -185,197 +156,6 @@ impl FiveTupleLookupTable {
             }
         }
         // table
-    }
-
-    // TODO combine_dst_levels and combine_src_levels are essentially the same except which function they call to combine
-    // the levels, if we generalize enums with generic variables, we could combine them and pass the function in at the func call
-    fn combine_dst_levels(
-        dst_level_one: PortLevel<SrcLevel>,
-        dst_level_two: PortLevel<SrcLevel>,
-    ) -> PortLevel<SrcLevel> {
-        match (dst_level_one, dst_level_two.clone()) {
-            (PortLevel::Wildcard(src_port_level1), PortLevel::Wildcard(src_port_level2)) => {
-                PortLevel::Wildcard(Self::combine_src_levels(src_port_level1, src_port_level2))
-            }
-            (PortLevel::Wildcard(src_port_level_wild), PortLevel::SingleVal(tuple_val))
-            | (PortLevel::SingleVal(tuple_val), PortLevel::Wildcard(src_port_level_wild)) => {
-                let dst_port = tuple_val.0;
-                let src_port_level_single = tuple_val.1.clone();
-                let mut dst_level = RangeMapBlaze::new();
-                dst_level.ranges_insert(0..=65535, src_port_level_wild.clone());
-                let intersection =
-                    Self::combine_src_levels(src_port_level_wild, src_port_level_single);
-                dst_level.insert(dst_port, intersection);
-                PortLevel::MultiVal(Arc::new(dst_level))
-            }
-            (PortLevel::Wildcard(src_port_level), PortLevel::MultiVal(dst_port_level))
-            | (PortLevel::MultiVal(dst_port_level), PortLevel::Wildcard(src_port_level)) => {
-                let mut dst_level = RangeMapBlaze::new();
-                dst_level.ranges_insert(0..=65535, src_port_level.clone());
-                for (port, src_level) in dst_port_level.iter() {
-                    // We know there will be a collision, so we pre-emptively make the intersection and then insert it
-                    let intersection =
-                        Self::combine_src_levels(src_port_level.clone(), src_level.clone());
-                    dst_level.insert(port, intersection);
-                }
-                PortLevel::MultiVal(Arc::new(dst_level))
-            }
-            (PortLevel::SingleVal(tuple_val1), PortLevel::SingleVal(tuple_val2)) => {
-                let dst_port1 = tuple_val1.0;
-                let src_port_level1 = tuple_val1.1.clone();
-                let dst_port2 = tuple_val2.0;
-                let src_port_level2 = tuple_val2.1.clone();
-
-                if dst_port1 == dst_port2 {
-                    PortLevel::SingleVal(Arc::new((
-                        dst_port1,
-                        Self::combine_src_levels(src_port_level1, src_port_level2),
-                    )))
-                } else {
-                    let mut dst_level = RangeMapBlaze::new();
-                    dst_level.insert(dst_port1, src_port_level1);
-                    dst_level.insert(dst_port2, src_port_level2);
-                    PortLevel::MultiVal(Arc::new(dst_level))
-                }
-            }
-            (PortLevel::SingleVal(tuple_val), PortLevel::MultiVal(dst_port_level))
-            | (PortLevel::MultiVal(dst_port_level), PortLevel::SingleVal(tuple_val)) => {
-                let dst_port = tuple_val.0;
-                let src_port_level = tuple_val.1.clone();
-                let mut dst_level = RangeMapBlaze::new();
-                for (key, val) in dst_port_level.iter() {
-                    dst_level.insert(key, val.clone());
-                }
-                match dst_level.insert(dst_port, src_port_level.clone()) {
-                    None => (),
-                    Some(removed_src_level) => {
-                        let intersection =
-                            Self::combine_src_levels(src_port_level, removed_src_level);
-                        dst_level.insert(dst_port, intersection);
-                    }
-                };
-                PortLevel::MultiVal(Arc::new(dst_level))
-            }
-            (PortLevel::MultiVal(dst_port_level1), PortLevel::MultiVal(dst_port_level2)) => {
-                let mut dst_level = RangeMapBlaze::new();
-                for (key, val) in dst_port_level1.iter() {
-                    dst_level.insert(key, val.clone());
-                }
-                for (port, src_level2) in dst_port_level2.iter() {
-                    match dst_level.insert(port, src_level2.clone()) {
-                        None => (),
-                        Some(src_level1) => {
-                            let intersection =
-                                Self::combine_src_levels(src_level1, src_level2.clone());
-                            dst_level.insert(port, intersection);
-                        }
-                    }
-                }
-                PortLevel::MultiVal(Arc::new(dst_level))
-            }
-        }
-    }
-
-    fn combine_src_levels(
-        src_level_one: SrcLevel,
-        src_level_two: SrcLevel,
-    ) -> PortLevel<ProtoLevel> {
-        match (src_level_one, src_level_two) {
-            (PortLevel::Wildcard(proto_vec1), PortLevel::Wildcard(proto_vec2)) => {
-                PortLevel::Wildcard(Self::combine_protos(proto_vec1, proto_vec2))
-            }
-            (PortLevel::Wildcard(proto_vec_wild), PortLevel::SingleVal(tuple_val))
-            | (PortLevel::SingleVal(tuple_val), PortLevel::Wildcard(proto_vec_wild)) => {
-                let port = tuple_val.0;
-                let proto_vec_single = tuple_val.1.clone();
-                let mut src_level = RangeMapBlaze::new();
-                src_level.ranges_insert(0..=65535, proto_vec_wild.clone());
-                let intersection = Self::combine_protos(proto_vec_single, proto_vec_wild);
-                src_level.insert(port, intersection);
-                PortLevel::MultiVal(Arc::new(src_level))
-            }
-            (PortLevel::Wildcard(proto_vec), PortLevel::MultiVal(src_ports))
-            | (PortLevel::MultiVal(src_ports), PortLevel::Wildcard(proto_vec)) => {
-                // TODO maybe change order so wildcard gets inserted into existing multival, could prevent excess creation of additional
-                // rangemapblaze, but may be slower
-                let mut src_level = RangeMapBlaze::new();
-                src_level.ranges_insert(0..=65535, proto_vec.clone());
-                for (port, protos) in src_ports.iter() {
-                    let intersection = Self::combine_protos(proto_vec.clone(), protos.clone());
-                    src_level.insert(port, intersection);
-                }
-                PortLevel::MultiVal(Arc::new(src_level))
-            }
-            (PortLevel::SingleVal(tuple_val1), PortLevel::SingleVal(tuple_val2)) => {
-                let port1 = tuple_val1.0;
-                let proto_vec1 = tuple_val1.1.clone();
-                let port2 = tuple_val2.0;
-                let proto_vec2 = tuple_val2.1.clone();
-                if port1 == port2 {
-                    let intersection = Self::combine_protos(proto_vec1, proto_vec2);
-                    PortLevel::SingleVal(Arc::new((port1, intersection)))
-                } else {
-                    let mut src_level = RangeMapBlaze::new();
-                    src_level.insert(port1, proto_vec1);
-                    src_level.insert(port2, proto_vec2);
-                    PortLevel::MultiVal(Arc::new(src_level))
-                }
-            }
-            (PortLevel::SingleVal(tuple_val), PortLevel::MultiVal(src_ports))
-            | (PortLevel::MultiVal(src_ports), PortLevel::SingleVal(tuple_val)) => {
-                let port = tuple_val.0;
-                let proto_vec = tuple_val.1.clone();
-                let mut src_level = RangeMapBlaze::new();
-                for (key, val) in src_ports.iter() {
-                    src_level.insert(key, val.clone());
-                }
-                match src_level.insert(port, proto_vec.clone()) {
-                    None => (),
-                    Some(protos) => {
-                        let intersection = Self::combine_protos(proto_vec, protos);
-                        src_level.insert(port, intersection);
-                    }
-                }
-                PortLevel::MultiVal(Arc::new(src_level))
-            }
-            (PortLevel::MultiVal(src_ports1), PortLevel::MultiVal(src_ports2)) => {
-                let mut src_level = RangeMapBlaze::new();
-                for (key, val) in src_ports1.iter() {
-                    src_level.insert(key, val.clone());
-                }
-                for (port, protos2) in src_ports2.iter() {
-                    match src_level.insert(port, protos2.clone()) {
-                        None => (),
-                        Some(protos1) => {
-                            let intersection = Self::combine_protos(protos1, protos2.clone());
-                            src_level.insert(port, intersection);
-                        }
-                    }
-                }
-                PortLevel::MultiVal(Arc::new(src_level))
-            }
-        }
-    }
-
-    fn combine_protos(proto_vec_one: ProtoLevel, proto_vec_two: ProtoLevel) -> ProtoLevel {
-        let mut intersection: Vec<(u8, i32)> = Vec::new();
-        for elem in proto_vec_two.0.iter() {
-            intersection.push(elem.clone());
-        }
-
-        for proto_one in proto_vec_one.0.iter() {
-            let mut exists = false;
-            for proto_two in intersection.iter() {
-                if proto_one.0 == proto_two.0 {
-                    exists = true
-                }
-            }
-            if !exists {
-                intersection.push(*proto_one)
-            }
-        }
-
-        ProtoLevel::new(intersection)
     }
 
     fn find_src_level_match(src_level: SrcLevel, ft: FiveTuple) -> Option<VisaId> {
@@ -416,6 +196,121 @@ impl FiveTupleLookupTable {
                 }
             },
         }
+    }
+}
+
+impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLevel<T> {
+    fn combine(&self, other: &Self) -> Self {
+        match (self, other) {
+            (PortLevel::Wildcard(level_below1), PortLevel::Wildcard(level_below2)) => {
+                PortLevel::Wildcard(level_below1.combine(level_below2))
+            }
+            (PortLevel::Wildcard(level_below_wild), PortLevel::SingleVal(tuple_val))
+            | (PortLevel::SingleVal(tuple_val), PortLevel::Wildcard(level_below_wild)) => {
+                let port = tuple_val.0;
+                let level_below_single = tuple_val.1.clone();
+                let mut curr_level_intersection = RangeMapBlaze::new();
+                curr_level_intersection.ranges_insert(0..=65535, level_below_wild.clone());
+                let intersection =
+                    level_below_wild.combine(&level_below_single);
+                curr_level_intersection.insert(port, intersection);
+                PortLevel::MultiVal(Arc::new(curr_level_intersection))
+            }
+            (PortLevel::Wildcard(level_below), PortLevel::MultiVal(curr_level))
+            | (PortLevel::MultiVal(curr_level), PortLevel::Wildcard(level_below)) => {
+                let mut curr_level_intersection = RangeMapBlaze::new();
+                curr_level_intersection.ranges_insert(0..=65535, level_below.clone());
+                for (port, lvl_below) in curr_level.iter() {
+                    // We know there will be a collision, so we pre-emptively make the intersection and then insert it
+                    let level_below_intersection =
+                        level_below.combine(lvl_below);
+                    curr_level_intersection.insert(port, level_below_intersection);
+                }
+                PortLevel::MultiVal(Arc::new(curr_level_intersection))
+            }
+            (PortLevel::SingleVal(tuple_val1), PortLevel::SingleVal(tuple_val2)) => {
+                let port1 = tuple_val1.0;
+                let level_below1 = tuple_val1.1.clone();
+                let port2 = tuple_val2.0;
+                let level_below2 = tuple_val2.1.clone();
+
+                if port1 == port2 {
+                    PortLevel::SingleVal(Arc::new((
+                        port1,
+                        level_below1.combine(&level_below2),
+                    )))
+                } else {
+                    let mut curr_level_intersection = RangeMapBlaze::new();
+                    curr_level_intersection.insert(port1, level_below1);
+                    curr_level_intersection.insert(port2, level_below2);
+                    PortLevel::MultiVal(Arc::new(curr_level_intersection))
+                }
+            }
+            (PortLevel::SingleVal(tuple_val), PortLevel::MultiVal(curr_level))
+            | (PortLevel::MultiVal(curr_level), PortLevel::SingleVal(tuple_val)) => {
+                let port = tuple_val.0;
+                let level_below = tuple_val.1.clone();
+                let mut curr_level_intersection = RangeMapBlaze::new();
+                for (key, val) in curr_level.iter() {
+                    curr_level_intersection.insert(key, val.clone());
+                }
+                match curr_level_intersection.insert(port, level_below.clone()) {
+                    None => (),
+                    Some(removed_level_below) => {
+                        let intersection =
+                            level_below.combine(&removed_level_below);
+                        curr_level_intersection.insert(port, intersection);
+                    }
+                };
+                PortLevel::MultiVal(Arc::new(curr_level_intersection))
+            }
+            (PortLevel::MultiVal(curr_level1), PortLevel::MultiVal(curr_level2)) => {
+                let mut curr_level_intersection = RangeMapBlaze::new();
+                for (key, val) in curr_level1.iter() {
+                    curr_level_intersection.insert(key, val.clone());
+                }
+                for (port, level_below2) in curr_level2.iter() {
+                    match curr_level_intersection.insert(port, level_below2.clone()) {
+                        None => (),
+                        Some(level_below1) => {
+                            let level_below_intersection =
+                                level_below1.combine(&level_below2);
+                            curr_level_intersection.insert(port, level_below_intersection);
+                        }
+                    }
+                }
+                PortLevel::MultiVal(Arc::new(curr_level_intersection))
+            }
+        }
+    }
+}
+
+impl ProtoLevel {
+    pub fn new(v: Vec<(IpProtocol, VisaId)>) -> Self {
+        Self(Arc::new(v))
+    }
+}
+
+impl Combinable for ProtoLevel {
+    fn combine(&self, other: &Self) -> Self {
+        let mut intersection: Vec<(u8, i32)> = Vec::new();
+        for elem in other.0.iter() {
+            intersection.push(elem.clone());
+        }
+
+        for proto_one in self.0.iter() {
+            let mut exists = false;
+            for proto_two in intersection.iter() {
+                if proto_one.0 == proto_two.0 {
+                    exists = true
+                }
+            }
+            if !exists {
+                intersection.push(*proto_one)
+            }
+        }
+
+        ProtoLevel::new(intersection)
     }
 }
 
