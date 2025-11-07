@@ -274,7 +274,9 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLevel<T> {
 
 impl ProtoLevel {
     pub fn new(v: Vec<ProtoAndId>) -> Self {
-        Self{proto_vec: Arc::new(v)}
+        Self {
+            proto_vec: Arc::new(v),
+        }
     }
 }
 
@@ -303,10 +305,7 @@ impl Combinable for ProtoLevel {
 
 impl ProtoAndId {
     pub fn new(proto: IpProtocol, id: VisaId) -> Self {
-        Self {
-            proto,
-            id,
-        }
+        Self { proto, id }
     }
 }
 
@@ -470,9 +469,15 @@ mod tests {
             tcp_idx = 1;
         }
 
-        assert_eq!(proto_level.as_ref().unwrap().proto_vec[tcp_idx].proto, ip_number::TCP);
+        assert_eq!(
+            proto_level.as_ref().unwrap().proto_vec[tcp_idx].proto,
+            ip_number::TCP
+        );
         assert_eq!(proto_level.as_ref().unwrap().proto_vec[tcp_idx].id, 12);
-        assert_eq!(proto_level.as_ref().unwrap().proto_vec[udp_idx].proto, ip_number::UDP);
+        assert_eq!(
+            proto_level.as_ref().unwrap().proto_vec[udp_idx].proto,
+            ip_number::UDP
+        );
         assert_eq!(proto_level.unwrap().proto_vec[udp_idx].id, 13);
     }
 
@@ -530,23 +535,53 @@ mod tests {
         assert!(src_ports.is_some());
 
         assert_eq!(
-            src_ports.as_ref().unwrap().get(src_port1 as u16).unwrap().proto_vec[0].id,
+            src_ports
+                .as_ref()
+                .unwrap()
+                .get(src_port1 as u16)
+                .unwrap()
+                .proto_vec[0]
+                .id,
             12
         );
         assert_eq!(
-            src_ports.as_ref().unwrap().get(src_port1 as u16).unwrap().proto_vec[0].proto,
+            src_ports
+                .as_ref()
+                .unwrap()
+                .get(src_port1 as u16)
+                .unwrap()
+                .proto_vec[0]
+                .proto,
             ip_number::TCP
         );
         assert_eq!(
-            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap().proto_vec[0].id,
+            src_ports
+                .as_ref()
+                .unwrap()
+                .get(src_port2 as u16)
+                .unwrap()
+                .proto_vec[0]
+                .id,
             13
         );
         assert_eq!(
-            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap().proto_vec[0].id,
+            src_ports
+                .as_ref()
+                .unwrap()
+                .get(src_port2 as u16)
+                .unwrap()
+                .proto_vec[0]
+                .id,
             13
         );
         assert_eq!(
-            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap().proto_vec[0].proto,
+            src_ports
+                .as_ref()
+                .unwrap()
+                .get(src_port2 as u16)
+                .unwrap()
+                .proto_vec[0]
+                .proto,
             ip_number::TCP
         );
         assert_eq!(
@@ -631,9 +666,15 @@ mod tests {
         assert!(proto_level2.is_some());
 
         assert_eq!(proto_level1.as_ref().unwrap().proto_vec[0].id, 12);
-        assert_eq!(proto_level1.as_ref().unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(
+            proto_level1.as_ref().unwrap().proto_vec[0].proto,
+            ip_number::TCP
+        );
         assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].id, 13);
-        assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(
+            proto_level2.as_ref().unwrap().proto_vec[0].proto,
+            ip_number::TCP
+        );
         assert_eq!(proto_level1.unwrap().proto_vec.len(), 1);
         assert_eq!(proto_level2.unwrap().proto_vec.len(), 1);
         assert_eq!(dst_port_level.unwrap().len(), 2);
