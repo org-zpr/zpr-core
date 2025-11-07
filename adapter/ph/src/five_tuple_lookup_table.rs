@@ -63,9 +63,6 @@ impl FiveTupleLookupTable {
     }
 
     pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
-        // NOTE I didn't make a subfunction for finding the match for the src_level, even though it is essentially repeated three times
-        // becuase I know this func is all about speed and sometimes passing to another function can cause minor slowdown, not sure
-        // how the rust compiler handles such things or if it is significiant enough to matter, if not I will make a helper func
         match self.table.get().get(&ft.dst_address) {
             None => return None,
             Some(src_addr_table) => {
@@ -130,7 +127,6 @@ impl FiveTupleLookupTable {
             _ => None,
         };
 
-        // TODO This is quite inefficient, improve
         // Try to add to hash table, if there is a collision, combine the tables, then add the combined table
         match table.insert(five_tuple.dst_address, Arc::new(ip_table)) {
             None => (),
