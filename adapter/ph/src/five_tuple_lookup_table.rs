@@ -621,7 +621,10 @@ mod tests {
             src_ports.as_ref().unwrap().get(src_port1 as u16).unwrap()[0].0,
             ip_number::TCP
         );
-        assert_eq!(src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap()[0].1, 13);
+        assert_eq!(
+            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap()[0].1,
+            13
+        );
         assert_eq!(
             src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap()[0].1,
             13
