@@ -20,7 +20,15 @@ pub struct FiveTupleLookupTable {
 }
 
 #[derive(Clone, Eq, PartialEq)]
-pub struct ProtoLevel(Arc<Vec<(IpProtocol, VisaId)>>);
+pub struct ProtoLevel {
+    proto_vec: Arc<Vec<ProtoAndId>>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct ProtoAndId {
+    proto: IpProtocol,
+    id: VisaId,
+}
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum PortLevel<T: Clone + Eq + PartialEq> {
@@ -70,7 +78,7 @@ impl FiveTupleLookupTable {
         };
         // Create array for protocol
         let mut arr = Vec::new();
-        arr.push((five_tuple.l4_protocol, visa_id));
+        arr.push(ProtoAndId::new(five_tuple.l4_protocol, visa_id));
 
         // Determine which enum to use for src level
         let src_level: SrcLevel = match five_tuple.src_port {
@@ -158,33 +166,27 @@ impl FiveTupleLookupTable {
 
     fn find_src_level_match(src_level: SrcLevel, ft: FiveTuple) -> Option<VisaId> {
         match src_level {
-            PortLevel::Wildcard(protos) => {
-                Self::find_proto_level_match(&protos, ft.l4_protocol)
-            }
+            PortLevel::Wildcard(protos) => Self::find_proto_level_match(&protos, ft.l4_protocol),
             PortLevel::SingleVal(tuple_val) => {
                 let port = tuple_val.0;
                 let protos = tuple_val.1.clone();
 
                 match port == ft.src_port {
                     false => None,
-                    true => {
-                        Self::find_proto_level_match(&protos, ft.l4_protocol)
-                    }
+                    true => Self::find_proto_level_match(&protos, ft.l4_protocol),
                 }
             }
             PortLevel::MultiVal(src_level_map) => match src_level_map.get(ft.src_port) {
                 None => None,
-                Some(protos) => {
-                    Self::find_proto_level_match(protos, ft.l4_protocol)
-                }
+                Some(protos) => Self::find_proto_level_match(protos, ft.l4_protocol),
             },
         }
     }
 
     fn find_proto_level_match(protos: &ProtoLevel, proto: IpProtocol) -> Option<VisaId> {
-        for elem in protos.0.iter() {
-            if elem.0 == proto {
-                return Some(elem.1);
+        for elem in protos.proto_vec.iter() {
+            if elem.proto == proto {
+                return Some(elem.id);
             }
         }
         return None;
@@ -271,31 +273,40 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLevel<T> {
 }
 
 impl ProtoLevel {
-    pub fn new(v: Vec<(IpProtocol, VisaId)>) -> Self {
-        Self(Arc::new(v))
+    pub fn new(v: Vec<ProtoAndId>) -> Self {
+        Self{proto_vec: Arc::new(v)}
     }
 }
 
 impl Combinable for ProtoLevel {
     fn combine(&self, other: &Self) -> Self {
-        let mut intersection: Vec<(u8, i32)> = Vec::new();
-        for elem in other.0.iter() {
+        let mut intersection = Vec::new();
+        for elem in other.proto_vec.iter() {
             intersection.push(elem.clone());
         }
 
-        for proto_one in self.0.iter() {
+        for proto_one in self.proto_vec.iter() {
             let mut exists = false;
             for proto_two in intersection.iter() {
-                if proto_one.0 == proto_two.0 {
+                if proto_one.proto == proto_two.proto {
                     exists = true
                 }
             }
             if !exists {
-                intersection.push(*proto_one)
+                intersection.push(proto_one.clone())
             }
         }
 
         ProtoLevel::new(intersection)
+    }
+}
+
+impl ProtoAndId {
+    pub fn new(proto: IpProtocol, id: VisaId) -> Self {
+        Self {
+            proto,
+            id,
+        }
     }
 }
 
@@ -387,8 +398,8 @@ mod tests {
         }
         assert!(proto_level.is_some());
 
-        assert_eq!(proto_level.as_ref().unwrap().0[0].1, 12);
-        assert_eq!(proto_level.unwrap().0[0].0, ip_number::TCP);
+        assert_eq!(proto_level.as_ref().unwrap().proto_vec[0].id, 12);
+        assert_eq!(proto_level.unwrap().proto_vec[0].proto, ip_number::TCP);
     }
 
     #[test]
@@ -447,22 +458,22 @@ mod tests {
         }
         assert!(proto_level.is_some());
 
-        assert_eq!(proto_level.as_ref().unwrap().0.len(), 2);
+        assert_eq!(proto_level.as_ref().unwrap().proto_vec.len(), 2);
 
         let mut tcp_idx = 0;
         let mut udp_idx = 0;
 
         // protovec is not deterministic in terms of ordering, have to figure out which visa is where
-        if proto_level.as_ref().unwrap().0[0].0 == ip_number::TCP {
+        if proto_level.as_ref().unwrap().proto_vec[0].proto == ip_number::TCP {
             udp_idx = 1;
         } else {
             tcp_idx = 1;
         }
 
-        assert_eq!(proto_level.as_ref().unwrap().0[tcp_idx].0, ip_number::TCP);
-        assert_eq!(proto_level.as_ref().unwrap().0[tcp_idx].1, 12);
-        assert_eq!(proto_level.as_ref().unwrap().0[udp_idx].0, ip_number::UDP);
-        assert_eq!(proto_level.unwrap().0[udp_idx].1, 13);
+        assert_eq!(proto_level.as_ref().unwrap().proto_vec[tcp_idx].proto, ip_number::TCP);
+        assert_eq!(proto_level.as_ref().unwrap().proto_vec[tcp_idx].id, 12);
+        assert_eq!(proto_level.as_ref().unwrap().proto_vec[udp_idx].proto, ip_number::UDP);
+        assert_eq!(proto_level.unwrap().proto_vec[udp_idx].id, 13);
     }
 
     #[test]
@@ -519,23 +530,23 @@ mod tests {
         assert!(src_ports.is_some());
 
         assert_eq!(
-            src_ports.as_ref().unwrap().get(src_port1 as u16).unwrap().0[0].1,
+            src_ports.as_ref().unwrap().get(src_port1 as u16).unwrap().proto_vec[0].id,
             12
         );
         assert_eq!(
-            src_ports.as_ref().unwrap().get(src_port1 as u16).unwrap().0[0].0,
+            src_ports.as_ref().unwrap().get(src_port1 as u16).unwrap().proto_vec[0].proto,
             ip_number::TCP
         );
         assert_eq!(
-            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap().0[0].1,
+            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap().proto_vec[0].id,
             13
         );
         assert_eq!(
-            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap().0[0].1,
+            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap().proto_vec[0].id,
             13
         );
         assert_eq!(
-            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap().0[0].0,
+            src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap().proto_vec[0].proto,
             ip_number::TCP
         );
         assert_eq!(
@@ -544,7 +555,7 @@ mod tests {
                 .unwrap()
                 .get(src_port2 as u16)
                 .unwrap()
-                .0
+                .proto_vec
                 .len(),
             1
         );
@@ -619,12 +630,12 @@ mod tests {
         }
         assert!(proto_level2.is_some());
 
-        assert_eq!(proto_level1.as_ref().unwrap().0[0].1, 12);
-        assert_eq!(proto_level1.as_ref().unwrap().0[0].0, ip_number::TCP);
-        assert_eq!(proto_level2.as_ref().unwrap().0[0].1, 13);
-        assert_eq!(proto_level2.as_ref().unwrap().0[0].0, ip_number::TCP);
-        assert_eq!(proto_level1.unwrap().0.len(), 1);
-        assert_eq!(proto_level2.unwrap().0.len(), 1);
+        assert_eq!(proto_level1.as_ref().unwrap().proto_vec[0].id, 12);
+        assert_eq!(proto_level1.as_ref().unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].id, 13);
+        assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(proto_level1.unwrap().proto_vec.len(), 1);
+        assert_eq!(proto_level2.unwrap().proto_vec.len(), 1);
         assert_eq!(dst_port_level.unwrap().len(), 2);
         assert_eq!(
             un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
@@ -723,10 +734,10 @@ mod tests {
         }
         assert!(proto_level2.as_ref().is_some());
 
-        assert_eq!(proto_level1.as_ref().unwrap().0[0].1, 12);
-        assert_eq!(proto_level1.unwrap().0[0].0, ip_number::TCP);
-        assert_eq!(proto_level2.as_ref().unwrap().0[0].1, 13);
-        assert_eq!(proto_level2.unwrap().0[0].0, ip_number::TCP);
+        assert_eq!(proto_level1.as_ref().unwrap().proto_vec[0].id, 12);
+        assert_eq!(proto_level1.unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].id, 13);
+        assert_eq!(proto_level2.unwrap().proto_vec[0].proto, ip_number::TCP);
         assert_eq!(
             un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
             2
@@ -821,10 +832,10 @@ mod tests {
         }
         assert!(proto_level2.as_ref().is_some());
 
-        assert_eq!(proto_level1.as_ref().unwrap().0[0].1, 12);
-        assert_eq!(proto_level1.unwrap().0[0].0, ip_number::TCP);
-        assert_eq!(proto_level2.as_ref().unwrap().0[0].1, 13);
-        assert_eq!(proto_level2.unwrap().0[0].0, ip_number::TCP);
+        assert_eq!(proto_level1.as_ref().unwrap().proto_vec[0].id, 12);
+        assert_eq!(proto_level1.unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].id, 13);
+        assert_eq!(proto_level2.unwrap().proto_vec[0].proto, ip_number::TCP);
         assert_eq!(un_rcu_table.len(), 2);
         assert_eq!(
             un_rcu_table.get(&IpAddress::from(dst_addr2)).unwrap().len(),
@@ -1148,7 +1159,7 @@ mod tests {
         }
         assert!(proto_level.is_some());
 
-        assert_eq!(proto_level.unwrap().0.len(), 1);
+        assert_eq!(proto_level.unwrap().proto_vec.len(), 1);
     }
 
     #[test]
