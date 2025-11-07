@@ -29,6 +29,7 @@ pub enum PortLevel<T: Clone + Eq + PartialEq> {
     SingleVal(Arc<(u16, T)>),
 }
 
+// Used to combine two src port levels, two dst port levels, or two proto levels
 pub trait Combinable {
     fn combine(&self, other: &Self) -> Self;
 }
@@ -60,34 +61,6 @@ impl FiveTupleLookupTable {
         }
         Self::add_one_visa(visa_id, &visa, &mut table);
         self.table.write(Arc::new(table))
-    }
-
-    pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
-        match self.table.get().get(&ft.dst_address) {
-            None => return None,
-            Some(src_addr_table) => {
-                return match src_addr_table.longest_match(Ipv6Addr::from(ft.src_address)) {
-                    None => None,
-                    Some(dst_port_table) => match dst_port_table.2 {
-                        PortLevel::Wildcard(src_level) => {
-                            Self::find_src_level_match(src_level.clone(), ft)
-                        }
-                        PortLevel::SingleVal(tuple_val) => {
-                            let port = tuple_val.0;
-                            let src_level = tuple_val.1.clone();
-                            match port == ft.dst_port {
-                                false => return None,
-                                true => return Self::find_src_level_match(src_level.clone(), ft),
-                            };
-                        }
-                        PortLevel::MultiVal(dst_level) => match dst_level.get(ft.dst_port) {
-                            None => None,
-                            Some(src_level) => Self::find_src_level_match(src_level.clone(), ft),
-                        },
-                    },
-                };
-            }
-        };
     }
 
     fn add_one_visa(visa_id: VisaId, visa: &Visa, table: &mut FiveTupleLookup) {
@@ -144,29 +117,49 @@ impl FiveTupleLookupTable {
                         Some(removed_dst_ports) => {
                             let in_table_dst_ports =
                                 intersection.exact_match(og_src_addr, og_mask_len).unwrap();
-                            let new_dst_level = removed_dst_ports.combine(
-                                &in_table_dst_ports,
-                            );
+                            let new_dst_level = removed_dst_ports.combine(&in_table_dst_ports);
                             intersection.insert(og_src_addr, og_mask_len, new_dst_level);
                         }
                     }
                 }
-                // Add the intersection to the bucket of the proper dst address
+                // Add the intersection of source addresses to the bucket of the proper dst address
                 table.insert(five_tuple.dst_address, Arc::new(intersection));
             }
         }
-        // table
+    }
+
+    pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
+        match self.table.get().get(&ft.dst_address) {
+            None => return None,
+            Some(src_addr_table) => {
+                return match src_addr_table.longest_match(Ipv6Addr::from(ft.src_address)) {
+                    None => None,
+                    Some(dst_port_table) => match dst_port_table.2 {
+                        PortLevel::Wildcard(src_level) => {
+                            Self::find_src_level_match(src_level.clone(), ft)
+                        }
+                        PortLevel::SingleVal(tuple_val) => {
+                            let port = tuple_val.0;
+                            let src_level = tuple_val.1.clone();
+                            match port == ft.dst_port {
+                                false => return None,
+                                true => return Self::find_src_level_match(src_level.clone(), ft),
+                            };
+                        }
+                        PortLevel::MultiVal(dst_level) => match dst_level.get(ft.dst_port) {
+                            None => None,
+                            Some(src_level) => Self::find_src_level_match(src_level.clone(), ft),
+                        },
+                    },
+                };
+            }
+        };
     }
 
     fn find_src_level_match(src_level: SrcLevel, ft: FiveTuple) -> Option<VisaId> {
         match src_level {
             PortLevel::Wildcard(protos) => {
-                for elem in protos.0.iter() {
-                    if elem.0 == ft.l4_protocol {
-                        return Some(elem.1);
-                    }
-                }
-                return None;
+                Self::find_proto_level_match(&protos, ft.l4_protocol)
             }
             PortLevel::SingleVal(tuple_val) => {
                 let port = tuple_val.0;
@@ -175,27 +168,26 @@ impl FiveTupleLookupTable {
                 match port == ft.src_port {
                     false => None,
                     true => {
-                        for elem in protos.0.iter() {
-                            if elem.0 == ft.l4_protocol {
-                                return Some(elem.1);
-                            }
-                        }
-                        return None;
+                        Self::find_proto_level_match(&protos, ft.l4_protocol)
                     }
                 }
             }
             PortLevel::MultiVal(src_level_map) => match src_level_map.get(ft.src_port) {
                 None => None,
                 Some(protos) => {
-                    for elem in protos.0.iter() {
-                        if elem.0 == ft.l4_protocol {
-                            return Some(elem.1);
-                        }
-                    }
-                    return None;
+                    Self::find_proto_level_match(protos, ft.l4_protocol)
                 }
             },
         }
+    }
+
+    fn find_proto_level_match(protos: &ProtoLevel, proto: IpProtocol) -> Option<VisaId> {
+        for elem in protos.0.iter() {
+            if elem.0 == proto {
+                return Some(elem.1);
+            }
+        }
+        return None;
     }
 }
 
@@ -211,8 +203,7 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLevel<T> {
                 let level_below_single = tuple_val.1.clone();
                 let mut curr_level_intersection = RangeMapBlaze::new();
                 curr_level_intersection.ranges_insert(0..=65535, level_below_wild.clone());
-                let intersection =
-                    level_below_wild.combine(&level_below_single);
+                let intersection = level_below_wild.combine(&level_below_single);
                 curr_level_intersection.insert(port, intersection);
                 PortLevel::MultiVal(Arc::new(curr_level_intersection))
             }
@@ -222,8 +213,7 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLevel<T> {
                 curr_level_intersection.ranges_insert(0..=65535, level_below.clone());
                 for (port, lvl_below) in curr_level.iter() {
                     // We know there will be a collision, so we pre-emptively make the intersection and then insert it
-                    let level_below_intersection =
-                        level_below.combine(lvl_below);
+                    let level_below_intersection = level_below.combine(lvl_below);
                     curr_level_intersection.insert(port, level_below_intersection);
                 }
                 PortLevel::MultiVal(Arc::new(curr_level_intersection))
@@ -235,10 +225,7 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLevel<T> {
                 let level_below2 = tuple_val2.1.clone();
 
                 if port1 == port2 {
-                    PortLevel::SingleVal(Arc::new((
-                        port1,
-                        level_below1.combine(&level_below2),
-                    )))
+                    PortLevel::SingleVal(Arc::new((port1, level_below1.combine(&level_below2))))
                 } else {
                     let mut curr_level_intersection = RangeMapBlaze::new();
                     curr_level_intersection.insert(port1, level_below1);
@@ -257,8 +244,7 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLevel<T> {
                 match curr_level_intersection.insert(port, level_below.clone()) {
                     None => (),
                     Some(removed_level_below) => {
-                        let intersection =
-                            level_below.combine(&removed_level_below);
+                        let intersection = level_below.combine(&removed_level_below);
                         curr_level_intersection.insert(port, intersection);
                     }
                 };
@@ -273,8 +259,7 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLevel<T> {
                     match curr_level_intersection.insert(port, level_below2.clone()) {
                         None => (),
                         Some(level_below1) => {
-                            let level_below_intersection =
-                                level_below1.combine(&level_below2);
+                            let level_below_intersection = level_below1.combine(&level_below2);
                             curr_level_intersection.insert(port, level_below_intersection);
                         }
                     }
