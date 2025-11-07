@@ -1,123 +1,198 @@
-use std::collections::BTreeMap;
-use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
-use std::time::SystemTime;
+use vsapi::vs_capnp as vsapi2;
+
+use core::time;
+use std::net::IpAddr;
+use std::net::SocketAddr;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use openssl::hash::MessageDigest;
+use openssl::pkey::{PKey, Private};
+use openssl::sign::Signer;
 use tokio::sync::{mpsc, oneshot};
-use tokio_util::sync::CancellationToken;
+use tokio_util::compat::*;
 use tracing::*;
 
-use crate::claims;
-use crate::errors::{VSClientError, VSError};
+use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 
-use crate::vsapi_compat as vsapi; // TODO: remove
-
 #[derive(Debug)]
-pub struct VisaRequest {
-    pub source_tether_addr: IpAddr,
-    pub l3_type: zpr::L3Type,
-    pub packet: Vec<u8>,
+pub struct VSConnectRequest {
+    pub cn: String,
+    pub node_zpr_addr: IpAddr,
+    pub node_private_rsa_key: PKey<Private>,
+    pub aaa_prefix: String,
 }
-type VisaRequestResponse = Result<vsapi::VisaResponse, VSClientError>;
-type AuthorizeConnectResponse = Result<vsapi::ConnectResponse, VSClientError>;
-type DisconnectStatus = Result<(), VSClientError>;
-type RequestServicesResponse = Result<vsapi::ServicesResponse, VSClientError>;
+
+/// Returns no error if call to VSAPI authenticate was successful.
+type VSConnectResponse = Result<(), VSApiError>;
 
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
-#[allow(dead_code)]
-enum VSCommand {
-    Stop(bool), // Stop the run loop, optionally de-register from the visa service first.
-    RequestVisa(VisaRequest, oneshot::Sender<VisaRequestResponse>),
-    AuthorizeConnect(
-        vsapi::ConnectRequest,
-        oneshot::Sender<AuthorizeConnectResponse>,
-    ),
-    ActorDisconnect(IpAddr, oneshot::Sender<DisconnectStatus>), // takes a ZPR address assigned to the actor
-    RequestServices(oneshot::Sender<RequestServicesResponse>),
-}
+enum VS2Command {
+    /// Stop the local vs-api run loop, optionally de-register from the visa service first.
+    Stop(bool),
 
-#[derive(Debug)]
-pub enum VSOutput {
-    PingSuccess(u64, u64), // (CONFIG_ID, POLICY_VERSION)
+    /// Run through the connect sequence. If connect succeeds the VSHandle is kept internally.
+    Connect(VSConnectRequest, oneshot::Sender<VSConnectResponse>),
 }
 
 pub struct VSConn {
-    //service_addr: String, // visa service address, format "HOST:PORT"
-    //node_cert_pem_data: String,
-    cmd_tx: mpsc::Sender<VSCommand>,
-    //cmd_rx: mpsc::Receiver<VSCommand>,
-    //output_tx: mpsc::Sender<VSOutput>,
-    //client_fac: vscli::VSClientFactory,
-    //vss_service_addr: SocketAddr, // visa support service listen address
-    //actor: vsapi::Actor,
+    cmd_tx: mpsc::Sender<VS2Command>,
+    cmd_rx: mpsc::Receiver<VS2Command>,
+    vs_addr: SocketAddr,
+    node_cn: String,
+    node_private_key: PKey<Private>,
 }
 
 #[derive(Clone)]
 pub struct VSConnHandle {
-    cmd_tx: mpsc::Sender<VSCommand>,
-}
-
-/// Helper function to create a basic node actor. Probably only useful for early versions
-/// of the node.  In the future the node will create it's own actor datastructure and
-/// had it to [VSConn::new].
-pub fn new_node_actor(node_addr: IpAddr, claims: &BTreeMap<String, String>) -> vsapi::Actor {
-    // In prototype, the node zpr address is the same as its tether address. May not be true going forward.
-    let zaddr_bytes = match node_addr {
-        IpAddr::V4(a) => a.octets().to_vec(),
-        IpAddr::V6(a) => a.octets().to_vec(),
-    };
-    let taddr_bytes = zaddr_bytes.clone();
-
-    let timestamp = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let mut augmented_claims = BTreeMap::new();
-    for (k, v) in claims {
-        augmented_claims.insert(k.clone(), v.clone());
-    }
-    augmented_claims.insert(claims::KATTR_EPID.into(), node_addr.to_string());
-
-    vsapi::Actor {
-        actor_type: Some(vsapi::ActorType::NODE),
-        attrs: Some(augmented_claims),
-        auth_expires: Some((timestamp + 60 * 60) as i64),
-        zpr_addr: Some(zaddr_bytes),
-        tether_addr: Some(taddr_bytes),
-        ident: Some(String::from("ident-not-generated")), // TODO
-        provides: None,
-    }
+    cmd_tx: mpsc::Sender<VS2Command>,
 }
 
 impl VSConn {
-    /// Create a new Visa Service Connection manager.
-    ///
-    /// - `node_actor` is the node's Actor representation.  See [new_node_actor] for a helper function to create this.
-    /// - `output_tx` is the channel to send output messages to the node. The only message left is PING_SUCCESS.
-    /// - `service_addr` is ADDR:PORT of the visa service (ADDR should be a ZPR address)
-    /// - `node_cert_file` is the path to the node's signed (for now) EC certificate file
-    /// - `node_zpr_addr` node ZPR address (not substrate address) as set by network admin
-    /// - `vss_service_addr` optionally override the default listen address for the visa
-    ///   support service. If not set, then we will advertise `<NODE_ZPR_ADDR>:<DEFAULT_VSS_PORT>`.
-    //
     pub fn new(
-        _node_actor: vsapi::Actor,
-        _output_tx: mpsc::Sender<VSOutput>,
-        _service_addr: &str,
-        _node_cert_file: &Path,
-        _node_zpr_addr: IpAddr,
-        _vss_service_addr: Option<SocketAddr>,
-    ) -> Result<VSConn, VSError> {
-        Err(VSError::NotImplemented)
+        buffer_size: usize,
+        vs_addr: SocketAddr,
+        node_cn: String,
+        node_private_key: PKey<Private>,
+    ) -> Self {
+        let (cmd_tx, cmd_rx) = mpsc::channel(buffer_size);
+        VSConn {
+            cmd_tx,
+            cmd_rx,
+            vs_addr,
+            node_cn,
+            node_private_key,
+        }
     }
 
-    pub async fn run(&mut self, ctok: CancellationToken) -> Result<(), VSError> {
-        Err(VSError::NotImplemented)
+    pub async fn run(&mut self) -> Result<(), VSApiError> {
+        // First spin up a connection to the Capn Proto service on the VS.
+        info!(target: VS_RPC, "VS RPC service connecting to {} (capnp)", self.vs_addr);
+
+        let sock = tokio::net::TcpStream::connect(self.vs_addr).await?;
+        sock.set_nodelay(true)?;
+
+        let (reader, writer) = sock.into_split();
+
+        let network = capnp_rpc::twoparty::VatNetwork::new(
+            tokio::io::BufReader::new(reader).compat(),
+            tokio::io::BufWriter::new(writer).compat_write(),
+            capnp_rpc::rpc_twoparty_capnp::Side::Client,
+            capnp::message::ReaderOptions::new(),
+        );
+
+        let mut rpc_system = capnp_rpc::RpcSystem::new(Box::new(network), None);
+
+        let vs_service: vsapi2::visa_service::Client =
+            rpc_system.bootstrap(capnp_rpc::rpc_twoparty_capnp::Side::Server);
+
+        tokio::task::LocalSet::new()
+            .run_until(async move {
+                tokio::task::spawn_local(rpc_system);
+
+                let mut vs_handle = None;
+
+                // Then loop over commands.
+                while let Some(cmd) = self.cmd_rx.recv().await {
+                    match cmd {
+                        VS2Command::Stop(deregister) => {}
+
+                        VS2Command::Connect(req, resp_tx) => {
+                            // Not sure what to do if we already have a handle. For now we error out.
+                            if vs_handle.is_some() {
+                                let cerr = VSApiError::CommandFailed(
+                                    "connect called but already connected to VS-API".to_string(),
+                                );
+                                resp_tx.send(Err(cerr))?;
+                                continue;
+                            }
+
+                            let mut vs_request = vs_service.connect_request();
+
+                            let vscr_bldr = vs_request.get().init_req();
+                            vscr_bldr.set_cn(&self.node_cn);
+                            vscr_bldr.set_ctype(vsapi2::VSConnT::Reset);
+                            // TODO: Set the params: (aaa-prefix, zpr-addr)
+
+                            let vs_request_response = vs_request.send().promise.await?;
+
+                            let gate_or_error = vs_request_response.get()?.get_resp()?;
+
+                            let vs_gate_svc: vsapi2::v_s_gate::Client =
+                                match gate_or_error.which()? {
+                                    vsapi2::result::Which::Ok(vs_gate_obj) => vs_gate_obj?,
+                                    vsapi2::result::Which::Error(err_obj) => {
+                                        let err_code: u16 = err_obj?.get_code()?.into();
+                                        let err_msg = err_obj?.get_message()?.to_string()?;
+                                        let retry = err_obj?.get_retry_in();
+
+                                        let cerr = VSApiError::CodedError(err_code, err_msg, retry);
+                                        resp_tx.send(Err(cerr))?; // <-- error handling?
+                                        continue;
+                                    }
+                                };
+
+                            // Now we have a gate we can request a challenge.
+                            let gate_request = vs_gate_svc.challenge_request();
+                            let gate_response = gate_request.send().promise.await?;
+                            let challenge = gate_response.get()?.get_challenge()?;
+
+                            let chal_data = challenge.get_bytes()?;
+                            let timestamp = unix_ts();
+
+                            let signed_payload = {
+                                let alg = challenge.get_alg()?;
+                                // TODO: check the alg is as expected.
+
+                                sign_payload(
+                                    timestamp,
+                                    self.node_cn,
+                                    chal_data,
+                                    self.node_private_key,
+                                )
+                            };
+
+                            // Now authenticate with the gate.
+                            let mut gate_request = vs_gate_svc.authenticate_request();
+                            let auth_bldr = gate_request.get().init_cresp();
+                            auth_bldr.set_challenge(chal_data);
+                            auth_bldr.set_timestamp(timestamp);
+                            auth_bldr.set_bytes(&signed_payload);
+
+                            let gate_response = gate_request.send().promise.await?;
+                            let handle_or_error = gate_response.get()?.get_res()?;
+
+                            let vs_handle_svc: vsapi2::v_s_handle::Client =
+                                match handle_or_error.which()? {
+                                    vsapi2::result::Which::Ok(handle_obj) => handle_obj?,
+                                    vsapi2::result::Which::Error(err_obj) => {
+                                        let err_code: u16 = err_obj?.get_code()?.into();
+                                        let err_msg = err_obj?.get_message()?.to_string()?;
+                                        let retry = err_obj?.get_retry_in();
+
+                                        let cerr = VSApiError::CodedError(err_code, err_msg, retry);
+                                        resp_tx.send(Err(cerr))?; // <-- error handling?
+                                        continue;
+                                    }
+                                };
+
+                            // Ok we now have an authenticated handle to the VS.
+                            vs_handle = Some(vs_handle_svc);
+
+                            if let Err(e) = resp_tx.send(Ok(())) {
+                                error!(target: VS_RPC, "failed to send connect response: {:?}", e);
+                            }
+                        }
+                    }
+                }
+
+                Ok(())
+            })
+            .await;
+        Ok(())
     }
 
-    /// Creates a handle which can be used to issue commands to this connection.
     pub fn handle(&self) -> VSConnHandle {
         VSConnHandle {
             cmd_tx: self.cmd_tx.clone(),
@@ -125,58 +200,46 @@ impl VSConn {
     }
 }
 
+fn unix_ts() -> u64 {
+    let now = SystemTime::now();
+    now.duration_since(UNIX_EPOCH).unwrap().as_secs()
+}
+
+fn sign_payload(
+    timestamp: u64,
+    cn: String,
+    challenge_data: &[u8],
+    private_key: PKey<Private>,
+) -> Vec<u8> {
+    let mut data = Vec::new();
+    data.extend_from_slice(&timestamp.to_be_bytes());
+    data.extend_from_slice(cn.as_bytes());
+    data.extend_from_slice(challenge_data);
+
+    let mut signer = Signer::new(MessageDigest::sha256(), &private_key).unwrap();
+    signer.update(&data).unwrap();
+    let signature = signer.sign_to_vec().unwrap();
+    signature
+}
+
 impl VSConnHandle {
-    /// Attempt to enqueue an async command to the runloop.
-    /// Returns an error if the command could not be enqueued.
-    async fn send_command(&self, cmd: VSCommand) -> Result<(), VSClientError> {
-        if let Err(e) = self.cmd_tx.send(cmd).await {
-            error!(target: VS_RPC, "VSConn::send_command failed to queue: {e}");
-            return Err(VSClientError::ConnClosed);
-        }
-        Ok(())
+    // Push a command onto the command channel.
+    async fn send_command(&self, cmd: VS2Command) -> Result<(), VSApiError> {
+        self.cmd_tx
+            .send(cmd)
+            .await
+            .map_err(|_| VSApiError::ConnClosed)
     }
 
-    /// Perform an async visa request.
-    ///
-    /// ## Errors
-    /// - [VSError::EnqueueError] if the request could not be enqueued.
-    pub async fn request_visa(&self, req: VisaRequest) -> VisaRequestResponse {
-        let (tx, rx) = oneshot::channel();
-        self.send_command(VSCommand::RequestVisa(req, tx)).await?;
-        rx.await.map_err(|_| VSClientError::ConnClosed)?
+    pub async fn connect(&self, req: VSConnectRequest) -> Result<(), VSApiError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let cmd = VS2Command::Connect(req, resp_tx);
+        self.send_command(cmd).await?;
+        resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
     }
 
-    /// Perform an async authorize_connect.
-    ///
-    /// ## Errors
-    /// - [VSError::EnqueueError] if the request could not be enqueued.
-    pub async fn authorize_connect(&self, req: vsapi::ConnectRequest) -> AuthorizeConnectResponse {
-        let (tx, rx) = oneshot::channel();
-        self.send_command(VSCommand::AuthorizeConnect(req, tx))
-            .await?;
-        rx.await.map_err(|_| VSClientError::ConnClosed)?
-    }
-
-    /// Async message to visa service noting that an actor has disconnected.
-    ///
-    /// ## Errors
-    /// - [VSError::EnqueueError] if the request could not be enqueued.
-    pub async fn actor_disconnect(&self, zpr_addr: IpAddr) -> DisconnectStatus {
-        let (tx, rx) = oneshot::channel();
-        self.send_command(VSCommand::ActorDisconnect(zpr_addr, tx))
-            .await?;
-        rx.await.map_err(|_| VSClientError::ConnClosed)?
-    }
-
-    /// Perform async RequestServices request on the VS API.
-    pub async fn request_services(&self) -> RequestServicesResponse {
-        let (tx, rx) = oneshot::channel();
-        self.send_command(VSCommand::RequestServices(tx)).await?;
-        rx.await.map_err(|_| VSClientError::ConnClosed)?
-    }
-
-    /// Stop the VSConn run loop, optionally try to send a deregister message first.
-    pub async fn stop(&self, and_deregister: bool) -> Result<(), VSClientError> {
-        self.send_command(VSCommand::Stop(and_deregister)).await
+    pub async fn stop(&self, deregister: bool) -> Result<(), VSApiError> {
+        let cmd = VS2Command::Stop(deregister);
+        self.send_command(cmd).await
     }
 }
