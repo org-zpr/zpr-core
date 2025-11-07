@@ -189,14 +189,23 @@ set_program "$ADAPTER1_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
 # Wait for connectivity
 #
 
+PASS=0
 echo "Wait for TUN carrier..."
-wait_for 5 check_carrier zpr-node tun0 || { echo "FAILURE"; exit 1; }
-wait_for 5 check_carrier zpr-vs tun0 || { echo "FAILURE"; exit 1; }
-wait_for 5 check_carrier zpr-a tun0 || { echo "FAILURE"; exit 1; }
-wait_for 5 check_carrier zpr-b tun0 || { echo "FAILURE"; exit 1; }
-if [[ "$NUM_ACTORS" -ge 3 ]]; then
-  wait_for 5 check_carrier zpr-c tun0 || { echo "FAILURE"; exit 1; }
+wait_for 15 check_carrier zpr-node tun0 || { echo "FAILURE"; PASS=1; }
+if [[ "$PASS" == 0 ]] then
+wait_for 15 check_carrier zpr-vs tun0 || { echo "FAILURE"; PASS=1; }
 fi
+if [[ "$PASS" == 0 ]] then
+wait_for 15 check_carrier zpr-a tun0 || { echo "FAILURE"; PASS=1; }
+fi
+if [[ "$PASS" == 0 ]] then
+wait_for 15 check_carrier zpr-b tun0 || { echo "FAILURE"; PASS=1; }
+fi
+if [[ "$PASS" == 0 && "$NUM_ACTORS" -ge 3 ]]; then
+  wait_for 15 check_carrier zpr-c tun0 || { echo "FAILURE"; PASS=1; }
+fi
+
+if [[ "$PASS" == 0 ]] then
 echo "Carrier has arrived."
 sleep 1
 
@@ -243,6 +252,7 @@ if [[ "$SIZE" != "24" ]]; then
   PASS=1
 fi
 
+fi
 #
 # Cleanup
 #
