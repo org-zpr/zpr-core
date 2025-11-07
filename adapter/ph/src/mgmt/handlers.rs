@@ -750,9 +750,21 @@ pub async fn handle_bind_actor_address_request(
         return Err(HandleMgmtError::BadStructure);
     };
 
-    let classification = match classifier::classify(&mut pkt) {
+    let endpoint_packet_length = hdr.endpoint_packet_length.get() as usize;
+    if endpoint_packet_length > pkt.len() {
+        return Err(HandleMgmtError::BadStructure);
+    }
+
+    // drop any garbage after the packet body
+    pkt.shrink_by(pkt.len() - endpoint_packet_length);
+
+    // CTP TODO: this should be done by Visa Service
+    let classifier_options =
+        classifier::ClassifierOptions::default().ignore_truncated_packets(true);
+    let classification = match classifier::classify_with_options(&mut pkt, &classifier_options) {
         Ok(cls) => cls,
         Err(_why) => {
+            warn!(target: ZDP, "Link {}: bind request: could not parse initial packet", pkt.metadata().ingress_link_id);
             return Err(HandleMgmtError::BadStructure);
         }
     };
@@ -760,7 +772,7 @@ pub async fn handle_bind_actor_address_request(
     match classification {
         classifier::ClassifierResult::OK => (),
         classifier::ClassifierResult::UnclassifiedL4 => {
-            warn!(target: ZDP, "Link {}: unsupported IP protocol {}", pkt.metadata().ingress_link_id, pkt.metadata().get_l4_protocol());
+            warn!(target: ZDP, "Link {}: bind request: unsupported IP protocol {}", pkt.metadata().ingress_link_id, pkt.metadata().get_l4_protocol());
             return Err(HandleMgmtError::BadStructure);
         }
         _ => {
@@ -771,8 +783,6 @@ pub async fn handle_bind_actor_address_request(
     let five_tuple = *pkt.metadata().five_tuple();
 
     let packet_body: Vec<u8> = pkt.body().to_vec(); // copy to send to visa service
-
-    let compression_mode = hdr.compression_mode;
 
     let Some(ingress_link_id) = NonZero::new(pkt.metadata().ingress_link_id) else {
         // who sent this??
@@ -793,16 +803,10 @@ pub async fn handle_bind_actor_address_request(
     match asm.ph_mode {
         PhMode::Node => {
             // TODO: errors need more consideration here
-            match super::dock::bind_actor_address(
-                asm,
-                ingress_link_id,
-                compression_mode,
-                five_tuple,
-                packet_body,
-            )
-            .await
+            match super::dock::bind_actor_address(asm, ingress_link_id, &five_tuple, &packet_body)
+                .await
             {
-                Ok(ingress_tid) => {
+                Ok((ingress_tid, tc)) => {
                     // success; respond with ingress tether ID
                     zdp::ZdpBindActorAddressResponseHeader {
                         status_code: zdp::ResponseCode::Success,
@@ -810,6 +814,9 @@ pub async fn handle_bind_actor_address_request(
                     }
                     .write_to_buf(&mut rsp_pkt)
                     .unwrap();
+
+                    zpr::Tcst::Ip5Tuple.write_to_buf(&mut rsp_pkt).unwrap();
+                    tc.serialize(&mut rsp_pkt);
 
                     ingress_tether_id = ingress_tid;
                 }
@@ -938,7 +945,7 @@ pub async fn handle_bind_egress_stream_request(
         return Err(HandleMgmtError::BadStructure);
     };
 
-    if hdr.tcst != zpr::Tcst::Ip5Tuple {
+    if !matches!(hdr.tcst, zpr::Tcst::Ip5Tuple) {
         warn!(target: ZDP, "Link {}: unsupported TCST {}", pkt.metadata().ingress_link_id, hdr.tcst.0);
         return Err(HandleMgmtError::BadStructure);
     }

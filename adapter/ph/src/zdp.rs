@@ -229,8 +229,7 @@ pub struct ZdpTerminateLinkResponseHeader {
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(packed)]
 pub struct ZdpBindActorAddressRequestHeader {
-    pub ip_version: zpr::L3Type,
-    pub compression_mode: zpr::CompressionMode,
+    pub endpoint_packet_length: U16,
     // Followed in memory by:
     // - <PACKET BODY starting with IP header>
     // (source/dest addresses and layer4 protocol must be extracted from the IP header in the packet)
@@ -242,6 +241,9 @@ pub struct ZdpBindActorAddressRequestHeader {
 pub struct ZdpBindActorAddressResponseHeader {
     pub status_code: ResponseCode,
     pub info_len: u8,
+    // followed by `info_len` octets of Optional Additional Status Information
+    // followed by 8-bit TCST
+    // followed by traffic classifier
 }
 
 #[derive(FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]

@@ -63,6 +63,9 @@ impl FiveTupleLookupTable {
     }
 
     pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
+        // NOTE I didn't make a subfunction for finding the match for the src_level, even though it is essentially repeated three times
+        // becuase I know this func is all about speed and sometimes passing to another function can cause minor slowdown, not sure
+        // how the rust compiler handles such things or if it is significiant enough to matter, if not I will make a helper func
         match self.table.get().get(&ft.dst_address) {
             None => return None,
             Some(src_addr_table) => {
@@ -622,6 +625,7 @@ mod tests {
             src_ports.as_ref().unwrap().get(src_port1 as u16).unwrap()[0].0,
             ip_number::TCP
         );
+        assert_eq!(src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap()[0].1, 13);
         assert_eq!(
             src_ports.as_ref().unwrap().get(src_port2 as u16).unwrap()[0].1,
             13

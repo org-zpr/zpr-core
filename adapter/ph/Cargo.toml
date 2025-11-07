@@ -6,6 +6,7 @@ license = "Apache-2.0"
 
 [dependencies]
 aarc = { version = "0.3", optional = true }
+arc-swap = { version = "1.7", optional = true }
 arrayref = { version = "0.3.7" }
 base64 = "0.22.1"
 blake3 = { version = "1.5.4" }
@@ -63,10 +64,11 @@ tokio = { version = "1.37.0", features = ["test-util"] }
 [features]
 default = ["io-uring", "rcu-crossbeam-epoch"]
 ci = []
-rcu-rwlock = []
-rcu-mutex-arc = []
-rcu-crossbeam-epoch = ["dep:crossbeam-epoch"]
 rcu-aarc = ["dep:aarc"]
+rcu-arc-swap = ["dep:arc-swap"]
+rcu-crossbeam-epoch = ["dep:crossbeam-epoch"]
+rcu-mutex-arc = []
+rcu-rwlock = []
 complete = ["clap_complete"]
 
 [profile.dev]

@@ -3,7 +3,6 @@ use crate::address_pool::AddressPool;
 use crate::capture_worker::CaptureWorker;
 use crate::config;
 use crate::counters::*;
-use crate::defs;
 use crate::flow_control::FlowControl;
 use crate::forwarding_tables;
 use crate::km_cert_exchange::KmCertExchange;
@@ -19,6 +18,7 @@ use crate::peer_table::PeerInsertError;
 use crate::queues::*;
 use crate::rcu;
 use crate::special_peers::SpecialPeerName;
+use crate::tc;
 use crate::tun_ctl::TunCtl;
 use crate::visa_table;
 use crate::vs_types::AuthServicesList;
@@ -110,7 +110,7 @@ pub struct Assembly {
 #[derive(Debug, Error)]
 pub enum AddRouteError {
     #[error("bind failed: {0}")]
-    BindFailed(mgmt::requests::BindActorAddressError),
+    BindFailed(#[from] mgmt::requests::BindActorAddressError),
     #[error("peer gone")]
     PeerGone,
     #[error("PFT full")]
@@ -391,21 +391,21 @@ impl Assembly {
             .map(|(id, _peer)| id)
     }
 
+    // CTP TODO: so much to fix here as we properly implement classification & forwarding
     pub async fn add_route(
         &self,
         ingress_link_id: NonZero<LinkId>,
         visa_id: VisaId,
-        five_tuple: defs::FiveTuple,
+        tc: tc::Ip5TupleTc,
         egress_link_id: NonZero<LinkId>,
-        compression_mode: zpr::CompressionMode,
     ) -> Result<zpr::StreamId, AddRouteError> {
         let egress_tether_id;
         if egress_link_id.get() == zpr::LOCAL_ACTOR_LINK_ID {
             egress_tether_id = self
                 .dlt
                 .insert(adapter_tables::DltPep {
-                    compression_mode,
-                    five_tuple,
+                    compression_mode: tc.compression_mode(),
+                    five_tuple: *tc.five_tuple(),
                 })
                 .map_err(|()| {
                     AddRouteError::BindFailed(
@@ -415,14 +415,9 @@ impl Assembly {
                     )
                 })?;
         } else {
-            egress_tether_id = mgmt::requests::send_bind_egress_stream_request(
-                self,
-                egress_link_id.get(),
-                compression_mode,
-                five_tuple,
-            )
-            .await
-            .map_err(|e| AddRouteError::BindFailed(e))?;
+            egress_tether_id =
+                mgmt::requests::send_bind_egress_stream_request(self, egress_link_id.get(), tc)
+                    .await?;
         }
 
         // form PEP
