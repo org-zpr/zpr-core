@@ -218,6 +218,7 @@ dependencies = [
  "capnp-rpc",
  "openssl",
  "thiserror",
+ "thrift",
  "tokio",
  "tokio-util",
  "tracing",
