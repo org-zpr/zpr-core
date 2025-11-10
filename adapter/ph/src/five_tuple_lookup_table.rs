@@ -10,7 +10,6 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use zpr::{L3Type, VisaId};
 
-// TODO perhaps change final vec from a vec of tuples to a vec of structs, easier to understand resulting code
 pub type FiveTupleLookup = HashMap<IpAddress, Arc<IpLookupTable<Ipv6Addr, DstLevel>>>;
 pub type DstLevel = PortLevel<SrcLevel>;
 pub type SrcLevel = PortLevel<ProtoLevel>;
