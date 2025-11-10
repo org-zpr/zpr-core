@@ -125,6 +125,10 @@ pub struct Config {
     /// For a node, one of either `private_key_file` or `private_key_data` must be specified.
     pub private_key_data: Option<String>,
 
+    /// The RSA private key used by a node to authenticate with the visa service.
+    /// TODO: Optional for now but will be required with libnode2.
+    pub auth_private_key: Option<PathBuf>,
+
     /// Optionally specify the name of the TUN interface to use. In most cases this
     /// should be left as None so that the kernal can pick a free one.
     pub tun_if: Option<String>,
@@ -211,9 +215,23 @@ impl Config {
 
     pub fn new_for_node(
         config_file: Option<NodeConfig>,
+        auth_private_key: Option<PathBuf>,
         common: &CommonArgs,
     ) -> Result<Self, ArgsError> {
         let mut config = Config::default();
+        if let Some(pkey_file) = auth_private_key {
+            if pkey_file.is_relative() {
+                let pkey_file = fs::canonicalize(pkey_file).or_else(|e| {
+                    Err(ArgsError::PathError(format!(
+                        "path error for auth_private_key: {:?}",
+                        e
+                    )))
+                })?;
+                config.auth_private_key = Some(pkey_file);
+            } else {
+                config.auth_private_key = Some(pkey_file);
+            }
+        }
         config.set_from_common(common)?;
         if let Some(config_file) = config_file {
             let base_dir = config_file.config_path.parent().unwrap();
@@ -436,6 +454,14 @@ impl Config {
                 })?;
                 self.rsaoauth = Some(OAuthRsa::new(&self.get_noise_cn()?, priv_key));
             }
+            if let Some(auth_private_key) = &config.auth_private_key {
+                let keyfile = if auth_private_key.is_relative() {
+                    base_dir.join(auth_private_key)
+                } else {
+                    auth_private_key.clone()
+                };
+                self.auth_private_key = Some(keyfile);
+            }
         }
         Ok(())
     }
@@ -558,6 +584,7 @@ impl Default for Config {
             certificate_file: None,
             private_key_file: None,
             private_key_data: None,
+            auth_private_key: None,
             tun_if: None,
             logging: Vec::new(),
             node_addr: None,
@@ -620,6 +647,7 @@ pub struct AdapterConfigSection {
 pub struct AuthenticationConfigSection {
     // TODO move this here: pub bootstrap_key: Option<PathBuf>,
     bas_key: Option<PathBuf>,
+    auth_private_key: Option<PathBuf>,
 }
 
 /// Configuration of data path & control plane topology.
