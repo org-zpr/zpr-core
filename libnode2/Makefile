@@ -5,6 +5,7 @@ all: build
 
 build:
 	cargo build --all-targets
+	cargo build --features build-ln2
 
 test:
 	cargo test --verbose
