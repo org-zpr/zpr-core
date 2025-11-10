@@ -94,9 +94,16 @@ impl VSConn {
                 // Then loop over commands.
                 while let Some(cmd) = self.cmd_rx.recv().await {
                     match cmd {
-                        VS2Command::Stop(_deregister) => {}
+                        VS2Command::Stop(deregister) => {
+                            debug!(target: VS_RPC, "VSConn: stop");
+                            if deregister {
+                                info!(target: VS_RPC, "TODO: deregister node from visa service");
+                            }
+                            break;
+                        }
 
                         VS2Command::Connect(req, resp_tx) => {
+                            debug!(target: VS_RPC, "VSConn: connect");
                             let resp = if vs_handle.is_some() {
                                 Err(VSApiError::CommandFailed(
                                     "connect called but already connected to VS-API".to_string(),
@@ -123,7 +130,7 @@ impl VSConn {
                         }
                     }
                 }
-
+                info!(target: VS_RPC, "VSConn: exiting run loop");
                 Ok::<(), VSApiError>(())
             })
             .await

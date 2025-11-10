@@ -15,4 +15,15 @@ zpr = { path = "../zpr" }
 tokio-util = { version = "0.7.17", features = ["rt", "compat"] }
 openssl = "0.10.74"
 thrift = { version = "0.17.0" }
+clap = { version = "4.5.23", features = ["derive"], optional = true } # ln2
+tracing-subscriber = { version = "0.3.20", optional = true } # ln2
+
+[features]
+build-ln2 = ["clap", "tracing-subscriber"]
+
+[[bin]]
+name = "ln2"
+path = "src/bin/ln2.rs"
+required-features = ["build-ln2"]
+
 
