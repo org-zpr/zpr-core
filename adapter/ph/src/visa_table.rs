@@ -451,8 +451,8 @@ mod tests {
     use std::num::NonZero;
     use std::sync::Arc;
 
-    #[tokio::test]
-    async fn test_timeouts() {
+    #[test]
+    fn test_timeouts() {
         let mut builder = TestAssemblyBuilder::new();
         builder.visa_table = Some(VisaTable::new());
         let asm = Arc::new(create_assembly(builder));
@@ -461,7 +461,7 @@ mod tests {
         let visa1 = 12345;
         let visa2 = 67890;
         let visa3 = 234;
-        let mut visa_table = asm.visa_table.write().await;
+        let mut visa_table = asm.visa_table.write().unwrap();
         visa_table.insert_id(visa1, DateTime::<Utc>::MIN_UTC); // An element that will timeout immediately
         visa_table.insert_id(visa2, DateTime::<Utc>::MAX_UTC); // An element that won't timeout
         visa_table.insert_id(visa3, Utc::now() + one_second); // An element that will time out in a second
@@ -499,7 +499,7 @@ mod tests {
         assert_eq!(false, visa_table.table.contains_key(&visa3));
     }
 
-    #[tokio::test]
+    #[tokio::test] // must be tokio::test because we create a dummy task in create_dummy_peer_state()
     async fn test_remove_forwarding_entries() {
         let mut builder = TestAssemblyBuilder::new();
         builder.visa_table = Some(VisaTable::new());
@@ -538,7 +538,7 @@ mod tests {
         let tether_id2 = peer_state.pft.insert(pep2).expect("Failed to insert PEP");
         assert_eq!(2, peer_state.pft.len());
 
-        let mut visa_table = asm.visa_table.write().await;
+        let mut visa_table = asm.visa_table.write().unwrap();
         visa_table.insert_id(visa1, DateTime::<Utc>::MAX_UTC); // An element that won't timeout
         visa_table.insert_id(visa2, Utc::now() + one_second); // An element that will time out in a second
         assert!(
@@ -561,13 +561,13 @@ mod tests {
         assert_eq!(0, peer_state.pft.len());
     }
 
-    #[tokio::test]
-    async fn test_match_traffic() {
+    #[test]
+    fn test_match_traffic() {
         let mut builder = TestAssemblyBuilder::new();
         builder.visa_table = Some(VisaTable::new());
         let asm = Arc::new(create_assembly(builder));
 
-        let mut visa_table = asm.visa_table.write().await;
+        let mut visa_table = asm.visa_table.write().unwrap();
 
         let client1_addr: Ipv6Addr = "fd5a:5052:8::1".parse().unwrap();
         let client2_addr: Ipv6Addr = "fd5a:5052:8::2".parse().unwrap();

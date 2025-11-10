@@ -545,7 +545,7 @@ fn main() -> ExitCode {
         mgmt_substrate_egress: MgmtSubstrateEgress::new(mgmt_substrate_inq),
         actor_output_requeue: ActorOutputRequeue::new(actor_requeue_inqs),
         vsconn: vsconn.as_ref().map(|c| c.handle()),
-        visa_table: tokio::sync::RwLock::new(visa_table::VisaTable::new_with_vs_visas(
+        visa_table: std::sync::RwLock::new(visa_table::VisaTable::new_with_vs_visas(
             &node_zpr_addr,
         )),
         vs_auth_services: std::sync::RwLock::new(AuthServicesList::default()),

@@ -178,7 +178,7 @@ pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
 }
 
 /// Figure out egress link and insert visa into table.
-pub async fn parse_visa(
+pub fn parse_visa(
     asm: &Arc<Assembly>,
     visa: vsapi::VisaHop,
 ) -> Result<(VisaId, NonZero<LinkId>), visa_table::VisaTableError> {
@@ -205,24 +205,24 @@ pub async fn parse_visa(
         asm.counters.management[ManagementCounterType::VisaRequestError].increment();
         return Err(visa_table::VisaTableError::DestNotFound(addr));
     };
-    let visa_id = asm.visa_table.write().await.insert_visa(visa)?;
+    let visa_id = asm.visa_table.write().unwrap().insert_visa(visa)?;
     Ok((visa_id, link_id))
 }
 
 /// Given a visa ID, look up the visa in our table to find the destination address
 /// then use that to find an egress link.
-pub async fn get_egress_link_for_visa(
+pub fn get_egress_link_for_visa(
     asm: &Arc<Assembly>,
     visa_id: VisaId,
 ) -> Result<NonZero<LinkId>, visa_table::VisaTableError> {
-    let addr = asm.visa_table.read().await.get_visa_dest_addr(visa_id)?;
+    let addr = asm.visa_table.read().unwrap().get_visa_dest_addr(visa_id)?;
     let Some(link_id) = asm.find_egress_link(addr) else {
         return Err(visa_table::VisaTableError::DestNotFound(addr));
     };
     Ok(link_id)
 }
 
-pub async fn handle_revocation(
+pub fn handle_revocation(
     asm: &Arc<Assembly>,
     revocation: vsapi::VisaRevocation,
 ) -> Result<(), visa_table::VisaTableError> {
@@ -233,11 +233,11 @@ pub async fn handle_revocation(
 
     asm.visa_table
         .write()
-        .await
+        .unwrap()
         .revoke(&asm.peer_table, visa_id)
 }
 
-pub async fn handle_services_update(
+pub fn handle_services_update(
     asm: &Arc<Assembly>,
     services: vsapi::ServicesList,
 ) -> Result<(), visa_table::VisaTableError> {

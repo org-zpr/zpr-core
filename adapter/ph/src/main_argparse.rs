@@ -98,6 +98,7 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
 
         Command::Node {
             config_file,
+            auth_private_key,
             common,
         } => {
             ph_mode = PhMode::Node;
@@ -113,7 +114,7 @@ pub fn argparse(args: Option<Vec<&str>>) -> std::result::Result<(PhMode, Config)
                 },
                 None => None,
             };
-            config = Config::new_for_node(config_file, &common)?;
+            config = Config::new_for_node(config_file, auth_private_key, &common)?;
         }
     }
     if let Err(e) = config.check_valid(ph_mode) {

@@ -12,21 +12,18 @@ pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMsg>) {
             VSSMsg::PushedVisa(visa) => {
                 let visa_id = visa.issuer_id.unwrap_or_default();
                 debug!(target: VISA_MGMT, "Received pushed visa, id={visa_id}");
-                let result = visa_mgmt::parse_visa(&asm, visa);
-                if let Err(e) = result.await {
+                if let Err(e) = visa_mgmt::parse_visa(&asm, visa) {
                     error!(target: VISA_MGMT, "Error inserting visa {visa_id}: {e}");
                 }
             }
             VSSMsg::PushedRevocation(revocation) => {
                 debug!(target: VISA_MGMT, "Received pushed revocation, id={}", revocation.issuer_id.unwrap());
-                let result = visa_mgmt::handle_revocation(&asm, revocation);
-                if let Err(e) = result.await {
+                if let Err(e) = visa_mgmt::handle_revocation(&asm, revocation) {
                     error!(target: VISA_MGMT, "Error revoking visa: {e}");
                 }
             }
             VSSMsg::PushedServices(services) => {
-                let result = visa_mgmt::handle_services_update(&asm, services);
-                if let Err(e) = result.await {
+                if let Err(e) = visa_mgmt::handle_services_update(&asm, services) {
                     error!(target: VISA_MGMT, "Error processing services update: {e}");
                 }
             }

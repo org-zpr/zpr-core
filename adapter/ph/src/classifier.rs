@@ -88,25 +88,46 @@ struct ICMPHeader {
     pub checksum: [u8; 2],
 }
 
+#[derive(Clone, Default)]
+pub struct ClassifierOptions {
+    ignore_truncated_packets: bool,
+}
+
+impl ClassifierOptions {
+    pub fn ignore_truncated_packets(mut self, value: bool) -> Self {
+        self.ignore_truncated_packets = value;
+        self
+    }
+}
+
 pub fn get_ip_version(body: &[u8]) -> u8 {
     (body[0] & IP_VERSION_MASK) >> 4
 }
 
 pub fn classify(packet: &mut packet::Packet) -> Result<ClassifierResult, &'static str> {
+    classify_with_options(packet, &ClassifierOptions::default())
+}
+
+pub fn classify_with_options(
+    packet: &mut packet::Packet,
+    options: &ClassifierOptions,
+) -> Result<ClassifierResult, &'static str> {
     let (metadata, body) = packet.metadata_mut_and_body_mut();
-    classify_zdp(metadata, body)
+    classify_zdp(metadata, body, options)
 }
 
 fn classify_zdp(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
+    options: &ClassifierOptions,
 ) -> Result<ClassifierResult, &'static str> {
-    classify_l3(metadata, body)
+    classify_l3(metadata, body, options)
 }
 
 fn classify_l3(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
+    options: &ClassifierOptions,
 ) -> Result<ClassifierResult, &'static str> {
     if body.is_empty() {
         return Err("Packet length error");
@@ -115,8 +136,8 @@ fn classify_l3(
     let ip_version = get_ip_version(body);
 
     match ip_version {
-        4 => classify_ipv4(metadata, body),
-        6 => classify_ipv6(metadata, body),
+        4 => classify_ipv4(metadata, body, options),
+        6 => classify_ipv6(metadata, body, options),
         _ => return Ok(ClassifierResult::NonIP),
     }
 }
@@ -124,6 +145,7 @@ fn classify_l3(
 fn classify_ipv4(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
+    options: &ClassifierOptions,
 ) -> Result<ClassifierResult, &'static str> {
     metadata.set_l3_type(L3Type::Ipv4);
 
@@ -137,9 +159,10 @@ fn classify_ipv4(
 
     let header_length = ipv4_header.vhl & IPV4_HEADER_LENGTH_MASK;
     let total_length = ipv4_header.total_length.get();
-    if total_length as usize != body.len()
+    if (!options.ignore_truncated_packets && body.len() < total_length as usize)
+        || body.len() > total_length as usize
         || header_length < 5
-        || u16::from(header_length * 4) > total_length
+        || (header_length as usize) * 4 > body.len()
     {
         return Err("Packet length error");
     }
@@ -170,6 +193,7 @@ fn classify_ipv4(
 fn classify_ipv6(
     metadata: &mut packet::PacketMetadata,
     body: &[u8],
+    options: &ClassifierOptions,
 ) -> Result<ClassifierResult, &'static str> {
     metadata.set_l3_type(L3Type::Ipv6);
 
@@ -196,7 +220,10 @@ fn classify_ipv6(
         // RFC 2675 § 3
         return Err("IPv6 jumbograms not supported");
     }
-    if payload_length as usize != body.len() - size_of::<IPv6Header>() {
+    if (!options.ignore_truncated_packets
+        && body.len() - size_of::<IPv6Header>() < payload_length as usize)
+        || body.len() - size_of::<IPv6Header>() > payload_length as usize
+    {
         return Err("Packet length error");
     }
 

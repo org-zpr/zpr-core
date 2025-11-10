@@ -157,6 +157,10 @@ pub enum Command {
         #[arg(long, short = 'c', value_name = "PATH")]
         config_file: Option<PathBuf>,
 
+        /// RSA private key used for authentication with the visa service.
+        #[arg(long, value_name = "PATH")]
+        auth_private_key: Option<PathBuf>,
+
         #[command(flatten)]
         common: CommonArgs,
     },
