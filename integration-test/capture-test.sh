@@ -191,18 +191,18 @@ set_program "$ADAPTER1_SOCK" "$TMPDIR/cap_test1.pcap" 'link[0] == 1'
 
 PASS=0
 echo "Wait for TUN carrier..."
-wait_for 15 check_carrier zpr-node tun0 || { echo "FAILURE"; PASS=1; }
+wait_for 15 check_carrier zpr-node tun0 || { PASS=1; }
 if [[ "$PASS" == 0 ]] then
-wait_for 15 check_carrier zpr-vs tun0 || { echo "FAILURE"; PASS=1; }
+wait_for 15 check_carrier zpr-vs tun0 || { PASS=1; }
 fi
 if [[ "$PASS" == 0 ]] then
-wait_for 15 check_carrier zpr-a tun0 || { echo "FAILURE"; PASS=1; }
+wait_for 15 check_carrier zpr-a tun0 || { PASS=1; }
 fi
 if [[ "$PASS" == 0 ]] then
-wait_for 15 check_carrier zpr-b tun0 || { echo "FAILURE"; PASS=1; }
+wait_for 15 check_carrier zpr-b tun0 || { PASS=1; }
 fi
 if [[ "$PASS" == 0 && "$NUM_ACTORS" -ge 3 ]]; then
-  wait_for 15 check_carrier zpr-c tun0 || { echo "FAILURE"; PASS=1; }
+  wait_for 15 check_carrier zpr-c tun0 || { PASS=1; }
 fi
 
 if [[ "$PASS" == 0 ]] then
