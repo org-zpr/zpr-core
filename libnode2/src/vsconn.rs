@@ -1,6 +1,5 @@
 use vsapi::vs_capnp as vsapi2;
 
-use core::time;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -17,9 +16,8 @@ use crate::logging::targets::VS_RPC;
 
 #[derive(Debug)]
 pub struct VSConnectRequest {
-    pub cn: String,
-    pub node_zpr_addr: IpAddr,
-    pub node_private_rsa_key: PKey<Private>,
+    /// Connect will fail if this does not match policy.
+    pub zpr_addr: IpAddr,
     pub aaa_prefix: String,
 }
 
@@ -96,101 +94,39 @@ impl VSConn {
                 // Then loop over commands.
                 while let Some(cmd) = self.cmd_rx.recv().await {
                     match cmd {
-                        VS2Command::Stop(deregister) => {}
+                        VS2Command::Stop(_deregister) => {}
 
                         VS2Command::Connect(req, resp_tx) => {
-                            // Not sure what to do if we already have a handle. For now we error out.
-                            if vs_handle.is_some() {
-                                let cerr = VSApiError::CommandFailed(
+                            let resp = if vs_handle.is_some() {
+                                Err(VSApiError::CommandFailed(
                                     "connect called but already connected to VS-API".to_string(),
-                                );
-                                resp_tx.send(Err(cerr))?;
-                                continue;
-                            }
-
-                            let mut vs_request = vs_service.connect_request();
-
-                            let vscr_bldr = vs_request.get().init_req();
-                            vscr_bldr.set_cn(&self.node_cn);
-                            vscr_bldr.set_ctype(vsapi2::VSConnT::Reset);
-                            // TODO: Set the params: (aaa-prefix, zpr-addr)
-
-                            let vs_request_response = vs_request.send().promise.await?;
-
-                            let gate_or_error = vs_request_response.get()?.get_resp()?;
-
-                            let vs_gate_svc: vsapi2::v_s_gate::Client =
-                                match gate_or_error.which()? {
-                                    vsapi2::result::Which::Ok(vs_gate_obj) => vs_gate_obj?,
-                                    vsapi2::result::Which::Error(err_obj) => {
-                                        let err_code: u16 = err_obj?.get_code()?.into();
-                                        let err_msg = err_obj?.get_message()?.to_string()?;
-                                        let retry = err_obj?.get_retry_in();
-
-                                        let cerr = VSApiError::CodedError(err_code, err_msg, retry);
-                                        resp_tx.send(Err(cerr))?; // <-- error handling?
-                                        continue;
-                                    }
-                                };
-
-                            // Now we have a gate we can request a challenge.
-                            let gate_request = vs_gate_svc.challenge_request();
-                            let gate_response = gate_request.send().promise.await?;
-                            let challenge = gate_response.get()?.get_challenge()?;
-
-                            let chal_data = challenge.get_bytes()?;
-                            let timestamp = unix_ts();
-
-                            let signed_payload = {
-                                let alg = challenge.get_alg()?;
-                                // TODO: check the alg is as expected.
-
-                                sign_payload(
-                                    timestamp,
-                                    self.node_cn,
-                                    chal_data,
-                                    self.node_private_key,
-                                )
+                                ))
+                            } else {
+                                self.do_connect(&vs_service, req).await
                             };
 
-                            // Now authenticate with the gate.
-                            let mut gate_request = vs_gate_svc.authenticate_request();
-                            let auth_bldr = gate_request.get().init_cresp();
-                            auth_bldr.set_challenge(chal_data);
-                            auth_bldr.set_timestamp(timestamp);
-                            auth_bldr.set_bytes(&signed_payload);
+                            let retval = match resp {
+                                Ok(handle) => {
+                                    info!(target: VS_RPC, "VS API connect succeeded");
+                                    vs_handle = Some(handle);
+                                    Ok(())
+                                }
+                                Err(e) => {
+                                    error!(target: VS_RPC, "VS API connect failed: {:?}", e);
+                                    Err(e)
+                                }
+                            };
 
-                            let gate_response = gate_request.send().promise.await?;
-                            let handle_or_error = gate_response.get()?.get_res()?;
-
-                            let vs_handle_svc: vsapi2::v_s_handle::Client =
-                                match handle_or_error.which()? {
-                                    vsapi2::result::Which::Ok(handle_obj) => handle_obj?,
-                                    vsapi2::result::Which::Error(err_obj) => {
-                                        let err_code: u16 = err_obj?.get_code()?.into();
-                                        let err_msg = err_obj?.get_message()?.to_string()?;
-                                        let retry = err_obj?.get_retry_in();
-
-                                        let cerr = VSApiError::CodedError(err_code, err_msg, retry);
-                                        resp_tx.send(Err(cerr))?; // <-- error handling?
-                                        continue;
-                                    }
-                                };
-
-                            // Ok we now have an authenticated handle to the VS.
-                            vs_handle = Some(vs_handle_svc);
-
-                            if let Err(e) = resp_tx.send(Ok(())) {
+                            if let Err(e) = resp_tx.send(retval) {
                                 error!(target: VS_RPC, "failed to send connect response: {:?}", e);
                             }
                         }
                     }
                 }
 
-                Ok(())
+                Ok::<(), VSApiError>(())
             })
-            .await;
-        Ok(())
+            .await
     }
 
     pub fn handle(&self) -> VSConnHandle {
@@ -198,28 +134,78 @@ impl VSConn {
             cmd_tx: self.cmd_tx.clone(),
         }
     }
-}
 
-fn unix_ts() -> u64 {
-    let now = SystemTime::now();
-    now.duration_since(UNIX_EPOCH).unwrap().as_secs()
-}
+    async fn do_connect(
+        &self,
+        vs_service: &vsapi2::visa_service::Client,
+        req: VSConnectRequest,
+    ) -> Result<vsapi2::v_s_handle::Client, VSApiError> {
+        // Not sure what to do if we already have a handle. For now we error out.
 
-fn sign_payload(
-    timestamp: u64,
-    cn: String,
-    challenge_data: &[u8],
-    private_key: PKey<Private>,
-) -> Vec<u8> {
-    let mut data = Vec::new();
-    data.extend_from_slice(&timestamp.to_be_bytes());
-    data.extend_from_slice(cn.as_bytes());
-    data.extend_from_slice(challenge_data);
+        let mut vs_request = vs_service.connect_request();
 
-    let mut signer = Signer::new(MessageDigest::sha256(), &private_key).unwrap();
-    signer.update(&data).unwrap();
-    let signature = signer.sign_to_vec().unwrap();
-    signature
+        let mut vscr_bldr = vs_request.get().init_req();
+        vscr_bldr.set_cn(&self.node_cn);
+        vscr_bldr.set_ctype(vsapi2::VSConnT::Reset);
+        // TODO: Set the params: (aaa-prefix, zpr-addr) from the VSConnectRequest.
+
+        debug!(target: VS_RPC, "VS-API -> connect");
+
+        let vs_request_response = vs_request.send().promise.await?;
+        let gate_or_error = vs_request_response.get()?.get_resp()?;
+
+        let vs_gate_svc: vsapi2::v_s_gate::Client = match gate_or_error.which()? {
+            vsapi2::result::Which::Ok(vs_gate_obj) => vs_gate_obj?,
+            vsapi2::result::Which::Error(err_obj) => {
+                let err_obj = err_obj?;
+                return Err(new_coded_error(err_obj));
+            }
+        };
+
+        // Now we have a gate we can request a challenge.
+        let gate_request = vs_gate_svc.challenge_request();
+
+        debug!(target: VS_RPC, "VS-API -> challenge");
+        let gate_response = gate_request.send().promise.await?;
+        let challenge = gate_response.get()?.get_challenge()?;
+
+        let chal_data = challenge.get_bytes()?;
+        let timestamp = unix_ts();
+
+        let signed_payload = {
+            let alg = challenge.get_alg()?;
+            // TODO: check the alg is as expected.
+
+            sign_payload(
+                timestamp,
+                &self.node_cn,
+                chal_data,
+                self.node_private_key.clone(),
+            )
+        };
+
+        // Now authenticate with the gate.
+        let mut gate_request = vs_gate_svc.authenticate_request();
+        let mut auth_bldr = gate_request.get().init_cresp();
+        auth_bldr.set_challenge(chal_data);
+        auth_bldr.set_timestamp(timestamp);
+        auth_bldr.set_bytes(&signed_payload);
+
+        debug!(target: VS_RPC, "VS-API -> authenticate");
+        let gate_response = gate_request.send().promise.await?;
+        let handle_or_error = gate_response.get()?.get_res()?;
+
+        let vs_handle_svc: vsapi2::v_s_handle::Client = match handle_or_error.which()? {
+            vsapi2::result::Which::Ok(handle_obj) => handle_obj?,
+            vsapi2::result::Which::Error(err_obj) => {
+                let err_obj = err_obj?;
+                return Err(new_coded_error(err_obj));
+            }
+        };
+
+        // Ok we now have an authenticated handle to the VS.
+        Ok(vs_handle_svc)
+    }
 }
 
 impl VSConnHandle {
@@ -242,4 +228,42 @@ impl VSConnHandle {
         let cmd = VS2Command::Stop(deregister);
         self.send_command(cmd).await
     }
+}
+
+/// Get a unix timestamp in seconds.
+fn unix_ts() -> u64 {
+    let now = SystemTime::now();
+    now.duration_since(UNIX_EPOCH).unwrap().as_secs()
+}
+
+/// Perform our node sign operation.
+fn sign_payload(
+    timestamp: u64,
+    cn: &str,
+    challenge_data: &[u8],
+    private_key: PKey<Private>,
+) -> Vec<u8> {
+    let mut data = Vec::new();
+    data.extend_from_slice(&timestamp.to_be_bytes());
+    data.extend_from_slice(cn.as_bytes());
+    data.extend_from_slice(challenge_data);
+
+    let mut signer = Signer::new(MessageDigest::sha256(), &private_key).unwrap();
+    signer.update(&data).unwrap();
+    let signature = signer.sign_to_vec().unwrap();
+    signature
+}
+
+/// Create a VSApiError::CodedError from a capn proto vsapi2::error::Reader.
+fn new_coded_error(rdr: vsapi2::error::Reader) -> VSApiError {
+    let err_code: u16 = match rdr.get_code() {
+        Ok(c) => c.into(),
+        Err(_) => u16::MAX,
+    };
+    let err_msg = match rdr.get_message() {
+        Ok(m) => m.to_string().unwrap(),
+        Err(_) => String::from("(no message)"),
+    };
+    let retry = rdr.get_retry_in();
+    VSApiError::CodedError(err_code, err_msg, retry)
 }

@@ -16,4 +16,13 @@ pub enum VSApiError {
 
     #[error("VS API error code {0}: {1} (retry in {2} seconds)")]
     CodedError(u16, String, u32),
+
+    #[error("capn proto error: {0}")]
+    Capnp(#[from] capnp::Error),
+
+    #[error("capn proto not in schema: {0}")]
+    CapnpNotInSchema(#[from] capnp::NotInSchema),
+
+    #[error("string conversion error: {0}")]
+    StringConversion(#[from] std::str::Utf8Error),
 }
