@@ -761,7 +761,10 @@ pub async fn handle_bind_actor_address_request(
     // CTP TODO: this should be done by Visa Service
     let classifier_options =
         classifier::ClassifierOptions::default().ignore_truncated_packets(true);
-    let classification = match classifier::classify_with_options(&mut pkt, &classifier_options) {
+    let (classification, ft_optional) = match classifier::classify_with_options(
+        pkt.body(),
+        &classifier_options,
+    ) {
         Ok(cls) => cls,
         Err(_why) => {
             warn!(target: ZDP, "Link {}: bind request: could not parse initial packet", pkt.metadata().ingress_link_id);
@@ -779,6 +782,7 @@ pub async fn handle_bind_actor_address_request(
             return Err(HandleMgmtError::BadStructure);
         }
     }
+    pkt.metadata_mut().insert_ft_optional(ft_optional);
 
     let five_tuple = *pkt.metadata().five_tuple();
 

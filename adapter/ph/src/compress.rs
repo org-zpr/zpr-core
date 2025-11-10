@@ -204,11 +204,13 @@ mod tests {
             let mut pkt = Packet::new(buf, 256);
             pkt.put(body);
 
-            let cls_res = classifier::classify(&mut pkt).unwrap();
+            let (cls_res, ft_optional) = classifier::classify(pkt.body()).unwrap();
             assert!(
                 cls_res == classifier::ClassifierResult::OK
                     || cls_res == classifier::ClassifierResult::UnclassifiedL4
             );
+            pkt.metadata_mut().insert_ft_optional(ft_optional);
+
             let ft = *pkt.metadata().five_tuple();
 
             let compression_mode: CompressionMode = 0; // TODO: iterate through compression modes
