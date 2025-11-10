@@ -25,9 +25,7 @@ pub enum ZdpPacketType {
     BindActorAddressResponse = 12,
     UnbindActorAddressRequest = 13,
     UnbindActorAddressResponse = 14,
-    //AuthenticationRequest = 15,  // unused/deprecated
-    SetPathMtu = 16,
-    //AuthenticationResponse = 17,  // unused/deprecated
+    SetPathMtu = 17,
     BindEgressStreamRequest = 19,  // TODO: add to RFC 17
     BindEgressStreamResponse = 20, // TODO: add to RFC 17
 
