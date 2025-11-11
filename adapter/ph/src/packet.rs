@@ -6,7 +6,7 @@
 //!
 //! For usage examples see the [Packet] documentation.
 
-use crate::classifier::FiveTupleOptional;
+use crate::defs::FiveTupleOptional;
 use crate::defs::*;
 use crate::net_defs::*;
 use bytes::buf;

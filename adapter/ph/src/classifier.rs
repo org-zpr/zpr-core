@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use crate::defs::FiveTupleOptional;
 use crate::net_defs::*;
 use arrayref::array_ref;
 use std::mem::size_of;
@@ -92,16 +93,6 @@ pub struct ClassifierOptions {
     ignore_truncated_packets: bool,
 }
 
-#[derive(Default, Debug)]
-pub struct FiveTupleOptional {
-    pub src_address: Option<IpAddress>,
-    pub dst_address: Option<IpAddress>,
-    pub l3_type: Option<zpr::L3Type>,
-    pub l4_protocol: Option<IpProtocol>,
-    pub src_port: Option<u16>,
-    pub dst_port: Option<u16>,
-}
-
 impl ClassifierOptions {
     pub fn ignore_truncated_packets(mut self, value: bool) -> Self {
         self.ignore_truncated_packets = value;
@@ -156,7 +147,7 @@ fn classify_ipv4(
     options: &ClassifierOptions,
 ) -> Result<(ClassifierResult, FiveTupleOptional), (&'static str, FiveTupleOptional)> {
     let mut ft_optional = FiveTupleOptional::default();
-    ft_optional.l3_type = Some(L3Type::Ipv4);
+    ft_optional.set_l3_type(L3Type::Ipv4);
 
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<IPv4Header>() > body.len() {
@@ -176,14 +167,14 @@ fn classify_ipv4(
         return Err(("Packet length error", ft_optional));
     }
 
-    ft_optional.src_address = Some(IpAddress::new_from_v4(ipv4_header.src_address));
-    ft_optional.dst_address = Some(IpAddress::new_from_v4(ipv4_header.dst_address));
+    ft_optional.set_src_address(IpAddress::new_from_v4(ipv4_header.src_address));
+    ft_optional.set_dst_address(IpAddress::new_from_v4(ipv4_header.dst_address));
 
     const FRAGMENT_OFFSET_MASK: u16 = 0x1FFF;
     const MORE_FRAGMENTS_MASK: u16 = 0x2000;
     let frag_offset = ipv4_header.frag_offset.get();
     if frag_offset & FRAGMENT_OFFSET_MASK != 0 {
-        ft_optional.l4_protocol = Some(ipv4_header.proto);
+        ft_optional.set_l4_protocol(ipv4_header.proto);
         return Ok((ClassifierResult::SubsequentFragment, ft_optional));
     }
 
@@ -207,7 +198,7 @@ fn classify_ipv6(
     options: &ClassifierOptions,
 ) -> Result<(ClassifierResult, FiveTupleOptional), (&'static str, FiveTupleOptional)> {
     let mut ft_optional = FiveTupleOptional::default();
-    ft_optional.l3_type = Some(L3Type::Ipv6);
+    ft_optional.set_l3_type(L3Type::Ipv6);
 
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<IPv6Header>() > body.len() {
@@ -223,8 +214,8 @@ fn classify_ipv6(
         return Err(("IPv4-mapped IPv6 addresses not allowed", ft_optional));
     }
 
-    ft_optional.src_address = Some(ipv6_header.src_address);
-    ft_optional.dst_address = Some(ipv6_header.dst_address);
+    ft_optional.set_src_address(ipv6_header.src_address);
+    ft_optional.set_dst_address(ipv6_header.dst_address);
 
     let payload_length = ipv6_header.payload_length.get();
     if payload_length == 0 && ipv6_header.next_header == 0
@@ -259,7 +250,7 @@ fn classify_next_header(
     body: &[u8],
     protocol: IpProtocol,
 ) -> Result<ClassifierResult, &'static str> {
-    ft_optional.l4_protocol = Some(protocol);
+    ft_optional.set_l4_protocol(protocol);
     // NOTE: this code does not make any attempt to reject packets which
     // carry a payload which is "unsupported" for the IP version, e.g.
     // ICMPv4 over IPv6, or IPv6 options over IPv4
@@ -346,8 +337,8 @@ fn classify_icmp(
 ) -> Result<ClassifierResult, &'static str> {
     let icmp_bytes = &body[..size_of::<ICMPHeader>()];
     let icmp_header = ICMPHeader::ref_from_bytes(icmp_bytes).unwrap();
-    ft_optional.src_port = Some(icmp_header.icmp_type as u16);
-    ft_optional.dst_port = Some(icmp_header.icmp_code as u16);
+    ft_optional.set_src_port(icmp_header.icmp_type as u16);
+    ft_optional.set_dst_port(icmp_header.icmp_code as u16);
     Ok(ClassifierResult::OK)
 }
 
@@ -357,8 +348,8 @@ fn classify_icmpv6(
 ) -> Result<ClassifierResult, &'static str> {
     let icmp_bytes = &body[..size_of::<ICMPv6Header>()];
     let icmp_header = ICMPv6Header::ref_from_bytes(icmp_bytes).unwrap();
-    ft_optional.src_port = Some(icmp_header.icmp_type as u16);
-    ft_optional.dst_port = Some(icmp_header.icmp_code as u16);
+    ft_optional.set_src_port(icmp_header.icmp_type as u16);
+    ft_optional.set_dst_port(icmp_header.icmp_code as u16);
     Ok(ClassifierResult::OK)
 }
 
@@ -379,8 +370,8 @@ fn classify_tcp(
         return Err("Packet length error");
     }
 
-    ft_optional.src_port = Some(tcp_header.src_port.get());
-    ft_optional.dst_port = Some(tcp_header.dst_port.get());
+    ft_optional.set_src_port(tcp_header.src_port.get());
+    ft_optional.set_dst_port(tcp_header.dst_port.get());
 
     Ok(ClassifierResult::OK)
 }
@@ -396,8 +387,8 @@ fn classify_udp(
     let header_bytes = &body[..size_of::<UDPHeader>()];
     let udp_header = UDPHeader::ref_from_bytes(header_bytes).unwrap();
 
-    ft_optional.src_port = Some(udp_header.src_port.get());
-    ft_optional.dst_port = Some(udp_header.dst_port.get());
+    ft_optional.set_src_port(udp_header.src_port.get());
+    ft_optional.set_dst_port(udp_header.dst_port.get());
 
     Ok(ClassifierResult::OK)
 }
@@ -405,8 +396,8 @@ fn classify_udp(
 fn classify_unclassified(
     ft_optional: &mut FiveTupleOptional,
 ) -> Result<ClassifierResult, &'static str> {
-    ft_optional.src_port = Some(0);
-    ft_optional.dst_port = Some(0);
+    ft_optional.set_src_port(0);
+    ft_optional.set_dst_port(0);
     Ok(ClassifierResult::UnclassifiedL4)
 }
 
