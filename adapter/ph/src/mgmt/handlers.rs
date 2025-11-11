@@ -782,7 +782,7 @@ pub async fn handle_bind_actor_address_request(
             return Err(HandleMgmtError::BadStructure);
         }
     }
-    pkt.metadata_mut().insert_ft_optional(ft_optional);
+    pkt.metadata_mut().write_ft_optional(ft_optional);
 
     let five_tuple = *pkt.metadata().five_tuple();
 

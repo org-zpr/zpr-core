@@ -248,7 +248,7 @@ impl PacketMetadata {
         &self.five_tuple
     }
 
-    pub fn insert_ft_optional(&mut self, ft: FiveTupleOptional) {
+    pub fn write_ft_optional(&mut self, ft: FiveTupleOptional) {
         if let Some(src_port) = ft.src_port {
             self.set_src_port(src_port);
         }

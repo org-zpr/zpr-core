@@ -427,7 +427,7 @@ mod tests {
         packet.body_mut().copy_from_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::NonIP, res);
 
@@ -458,7 +458,7 @@ mod tests {
         packet.body_mut().copy_from_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::OK, res);
 
@@ -493,7 +493,7 @@ mod tests {
         packet.body_mut().copy_from_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::FirstFragment, res);
 
@@ -529,7 +529,7 @@ mod tests {
         packet.body_mut().copy_from_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::SubsequentFragment, res);
 
@@ -566,7 +566,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
@@ -597,7 +597,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -629,7 +629,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -663,7 +663,7 @@ mod tests {
         packet.body_mut().copy_from_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::OK, res);
 
@@ -718,7 +718,7 @@ mod tests {
         packet.body_mut().copy_from_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::FirstFragment, res);
 
@@ -766,7 +766,7 @@ mod tests {
         packet.body_mut().copy_from_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::SubsequentFragment, res);
 
@@ -824,7 +824,7 @@ mod tests {
         packet.body_mut().copy_from_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::UnclassifiedL4, res);
 
@@ -881,7 +881,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -921,7 +921,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1002,7 +1002,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1049,7 +1049,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1097,7 +1097,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1144,7 +1144,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1192,7 +1192,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1229,7 +1229,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1266,7 +1266,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1304,7 +1304,7 @@ mod tests {
         assert!(result.is_err());
 
         let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1344,7 +1344,7 @@ mod tests {
         packet.put_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::OK, res);
 
@@ -1379,7 +1379,7 @@ mod tests {
         packet.put_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::OK, res);
 
@@ -1423,7 +1423,7 @@ mod tests {
         packet.put_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::OK, res);
 
@@ -1464,7 +1464,7 @@ mod tests {
         packet.put_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::OK, res);
 
@@ -1508,7 +1508,7 @@ mod tests {
         packet.put_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::OK, res);
 
@@ -1544,7 +1544,7 @@ mod tests {
         packet.put_slice(&packet_data);
 
         let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().insert_ft_optional(ft);
+        packet.metadata_mut().write_ft_optional(ft);
 
         assert_eq!(ClassifierResult::OK, res);
 

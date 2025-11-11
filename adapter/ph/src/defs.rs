@@ -104,6 +104,7 @@ impl FiveTupleOptional {
     pub fn set_dst_port(&mut self, dst_port: u16) {
         self.dst_port = Some(dst_port);
     }
+    #[allow(dead_code)]
     pub fn set_vals(
         &mut self,
         l3_type: zpr::L3Type,

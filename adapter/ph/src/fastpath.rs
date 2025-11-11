@@ -277,7 +277,7 @@ impl FastpathWorker {
             }
         }
 
-        pkt.metadata_mut().insert_ft_optional(ft_optional);
+        pkt.metadata_mut().write_ft_optional(ft_optional);
 
         let ttl_expired = decrement_ttl(&mut pkt);
         if ttl_expired == true {

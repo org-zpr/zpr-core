@@ -209,7 +209,7 @@ mod tests {
                 cls_res == classifier::ClassifierResult::OK
                     || cls_res == classifier::ClassifierResult::UnclassifiedL4
             );
-            pkt.metadata_mut().insert_ft_optional(ft_optional);
+            pkt.metadata_mut().write_ft_optional(ft_optional);
 
             let ft = *pkt.metadata().five_tuple();
 
