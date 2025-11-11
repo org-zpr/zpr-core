@@ -23,7 +23,7 @@ Example run:
 
 ```bash
 ./target/degug/ln2 -a \[::1\]:5002 -n node.test.zpr \
-  -p test-data/rsa-node.test.zpr-priave.pem
+  -p test-data/rsa-node.test.zpr-private.pem
 ```
 
 

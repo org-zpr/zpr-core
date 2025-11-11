@@ -178,8 +178,6 @@ impl VSConn {
         vs_service: &vsapi2::visa_service::Client,
         req: VSConnectRequest,
     ) -> Result<vsapi2::v_s_handle::Client, VSApiError> {
-        // Not sure what to do if we already have a handle. For now we error out.
-
         let mut vs_request = vs_service.connect_request();
 
         let mut vscr_bldr = vs_request.get().init_req();
