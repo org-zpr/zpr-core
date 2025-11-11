@@ -17,6 +17,7 @@ openssl = "0.10.74"
 thrift = { version = "0.17.0" }
 clap = { version = "4.5.23", features = ["derive"], optional = true } # ln2
 tracing-subscriber = { version = "0.3.20", optional = true } # ln2
+ipnet = "2.11.0"
 
 [features]
 build-ln2 = ["clap", "tracing-subscriber"]

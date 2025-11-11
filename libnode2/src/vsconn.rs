@@ -1,5 +1,6 @@
 use vsapi::vs_capnp as vsapi2;
 
+use ipnet::IpNet;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -14,11 +15,14 @@ use tracing::*;
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
 
+const PARAM_ZPR_ADDR: &str = "zpr_addr";
+const PARAM_AAA_PREFIX: &str = "aaa_prefix";
+
 #[derive(Debug)]
 pub struct VSConnectRequest {
     /// Connect will fail if this does not match policy.
     pub zpr_addr: IpAddr,
-    pub aaa_prefix: String,
+    pub aaa_prefix: IpNet,
 }
 
 /// Returns no error if call to VSAPI authenticate was successful.
@@ -89,16 +93,43 @@ impl VSConn {
             .run_until(async move {
                 tokio::task::spawn_local(rpc_system);
 
-                let mut vs_handle = None;
+                let mut vs_handle: Option<vsapi2::v_s_handle::Client> = None;
 
                 // Then loop over commands.
                 while let Some(cmd) = self.cmd_rx.recv().await {
                     match cmd {
                         VS2Command::Stop(deregister) => {
                             debug!(target: VS_RPC, "VSConn: stop");
-                            if deregister {
-                                info!(target: VS_RPC, "TODO: deregister node from visa service");
+                            if deregister && let Some(ref handle) = vs_handle {
+                                let mut disconnect_request = handle.notify_disconnect_request();
+                                let mut dnotice_bldr = disconnect_request.get().init_req();
+
+                                // We are disconnecting "self" so we do not set a ZPR addr.
+
+                                dnotice_bldr
+                                    .set_reason_code(vsapi2::DisconnectReason::NodeShutdown);
+
+                                debug!(target: VS_RPC, "VS-API -> notify_disconnect");
+                                let disconnect_request_response =
+                                    disconnect_request.send().promise.await?;
+                                let ok_or_err = disconnect_request_response.get()?.get_res()?;
+                                match ok_or_err.which()? {
+                                    vsapi2::ok_or_error::Which::Ok(_) => {
+                                        info!(target: VS_RPC, "VS API notify_disconnect succeeded");
+                                    }
+                                    vsapi2::ok_or_error::Which::Error(err_obj) => {
+                                        let err_obj = err_obj?;
+                                        let err = new_coded_error(err_obj);
+
+                                        // There is no back channel for the Stop command so we just log the error.
+                                        error!(
+                                            target: VS_RPC,
+                                            "VS API notify_disconnect failed: {:?}", err
+                                        );
+                                    }
+                                }
                             }
+
                             break;
                         }
 
@@ -154,7 +185,29 @@ impl VSConn {
         let mut vscr_bldr = vs_request.get().init_req();
         vscr_bldr.set_cn(&self.node_cn);
         vscr_bldr.set_ctype(vsapi2::VSConnT::Reset);
-        // TODO: Set the params: (aaa-prefix, zpr-addr) from the VSConnectRequest.
+
+        // We set two params: the zpr_address for the node and the aaa-prefix.
+        let mut params_bldr = vscr_bldr.init_params(2);
+        {
+            let mut param0 = params_bldr.reborrow().get(0);
+            param0.set_name(PARAM_ZPR_ADDR);
+            match req.zpr_addr {
+                IpAddr::V4(av4) => {
+                    param0.set_ptype(vsapi2::ParamT::Ipv4);
+                    param0.set_value(&av4.octets());
+                }
+                IpAddr::V6(av6) => {
+                    param0.set_ptype(vsapi2::ParamT::Ipv6);
+                    param0.set_value(&av6.octets());
+                }
+            }
+        }
+        {
+            let mut param1 = params_bldr.reborrow().get(1);
+            param1.set_ptype(vsapi2::ParamT::String);
+            param1.set_name(PARAM_AAA_PREFIX);
+            param1.set_value(&req.aaa_prefix.to_string().as_bytes());
+        }
 
         debug!(target: VS_RPC, "VS-API -> connect");
 
@@ -181,8 +234,12 @@ impl VSConn {
 
         let signed_payload = {
             let alg = challenge.get_alg()?;
-            // TODO: check the alg is as expected.
-
+            if alg != vsapi2::ChallengeAlg::RsaSha256Pkcs1v15 {
+                return Err(VSApiError::CommandFailed(format!(
+                    "unsupported challenge alg: {:?}",
+                    alg
+                )));
+            }
             sign_payload(
                 timestamp,
                 &self.node_cn,

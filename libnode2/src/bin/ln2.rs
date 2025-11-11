@@ -1,4 +1,5 @@
 use clap::Parser;
+use ipnet::IpNet;
 use openssl::pkey::{PKey, Private};
 use openssl::rsa::Rsa;
 use std::fs;
@@ -36,7 +37,7 @@ struct Args {
     self_addr: String,
 
     /// Node AAA prefix to present to the visa service.
-    #[arg(long, default_value = "fd5a:505s:90de:0:3000::/64")]
+    #[arg(long, default_value = "fd5a:5052:90de:0::/64")]
     aaa_prefix: String,
 }
 
@@ -47,6 +48,7 @@ async fn main() {
 
     let vs_sa: SocketAddr = args.vs_addr.parse().expect("failed to parse vs-addr");
     let node_zpr_addr: IpAddr = args.self_addr.parse().expect("failed to parse self_addr");
+    let node_aaa_prefix: IpNet = args.aaa_prefix.parse().expect("failed to parse aaa_prefix");
 
     let mut vsc = VSConn::new(
         8,
@@ -76,7 +78,7 @@ async fn main() {
 
         let request = VSConnectRequest {
             zpr_addr: node_zpr_addr,
-            aaa_prefix: args.aaa_prefix,
+            aaa_prefix: node_aaa_prefix,
         };
 
         info!("requesting a connect");
