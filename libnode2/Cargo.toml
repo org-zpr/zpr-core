@@ -11,10 +11,8 @@ vsapi = { git = "https://github.com/org-zpr/zpr-vsapi-rs.git", tag = "v0.6.0", f
 thiserror = "2.0.17"
 tracing = "0.1.41"
 tokio = { version = "1.48.0", features = ["full"] }
-zpr = { path = "../zpr" }
 tokio-util = { version = "0.7.17", features = ["rt", "compat"] }
 openssl = "0.10.74"
-thrift = { version = "0.17.0" }
 clap = { version = "4.5.23", features = ["derive"], optional = true } # ln2
 tracing-subscriber = { version = "0.3.20", optional = true } # ln2
 ipnet = "2.11.0"

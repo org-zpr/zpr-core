@@ -2,7 +2,6 @@ use openssl::x509::X509;
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
-use tracing::error;
 
 const PEM_BEGIN_CERTIFICATE: &str = "-----BEGIN CERTIFICATE-----";
 const PEM_END_CERTIFICATE: &str = "-----END CERTIFICATE-----";
