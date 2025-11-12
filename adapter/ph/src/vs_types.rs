@@ -1,5 +1,4 @@
-use crate::net_defs::IpAddress;
-
+use libnode::net_defs::IpAddress;
 use libnode::vsapi;
 
 use std::convert::TryFrom;

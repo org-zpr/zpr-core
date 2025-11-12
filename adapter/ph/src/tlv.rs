@@ -1,10 +1,9 @@
 use bytes::Buf;
+use libnode::net_defs::IpAddress;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use thiserror::Error;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
-
-use crate::net_defs::IpAddress;
 
 const SOCKADDR_LEN_V4: u8 = 6; // 4 bytes for IPv4 + 2 bytes for port
 const SOCKADDR_LEN_V6: u8 = 18; // 16 bytes for IPv6 + 2 bytes for port

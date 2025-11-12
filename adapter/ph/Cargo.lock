@@ -1304,6 +1304,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "vsapi",
+ "zerocopy 0.8.9",
  "zpr",
 ]
 

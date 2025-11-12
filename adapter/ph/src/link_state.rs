@@ -6,13 +6,13 @@ use crate::km::{PeerCertificate, ZPIPair};
 use crate::km_multiplexor;
 use crate::logging::targets::LINK_STATE;
 use crate::mgmt;
-use crate::net_defs::IpAddress;
 use crate::sample_ring::SampleRing;
 use crate::special_peers;
 use crate::special_peers::SpecialPeerName;
 use crate::visa_mgmt;
 use crate::zdp::{self, ResponseCode, TerminateReason};
 
+use libnode::net_defs::IpAddress;
 use openssl::x509::X509;
 use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, SocketAddr};

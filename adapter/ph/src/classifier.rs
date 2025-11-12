@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use crate::net_defs::*;
+use libnode::net_defs::*;
 use crate::packet;
 use arrayref::array_ref;
 use std::mem::size_of;

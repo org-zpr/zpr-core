@@ -1,6 +1,6 @@
 //! Common definitions that have no more specific place to live.
 
-use crate::net_defs;
+use libnode::net_defs;
 use zerocopy::*;
 use zpr;
 

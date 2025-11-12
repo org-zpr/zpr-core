@@ -1,9 +1,9 @@
 use crate::defs::FiveTuple;
-use crate::net_defs::{IpAddress, IpProtocol};
 use crate::rcu::RcuBox;
 use crate::visa_table::Visa;
 
 use ip_network_table_deps_treebitmap::IpLookupTable;
+use libnode::net_defs::{IpAddress, IpProtocol};
 use range_set_blaze::RangeMapBlaze;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -364,7 +364,7 @@ impl FiveTupleLookupTable {
 mod tests {
     use super::*;
 
-    use crate::net_defs::ip_number;
+    use libnode::net_defs::ip_number;
     use libnode::vsapi;
 
     fn make_visa(

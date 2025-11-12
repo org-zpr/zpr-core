@@ -5,9 +5,9 @@
 use crate::defs::FiveTuple;
 use crate::five_tuple_lookup_table::FiveTupleLookupTable;
 use crate::logging::targets::VISA_MGMT;
-use crate::net_defs::{IpAddress, ip_number};
 use crate::peer_table;
 
+use libnode::net_defs::{IpAddress, ip_number};
 use chrono::{DateTime, Utc};
 use libnode::vsapi;
 use std::cmp::Ordering;
