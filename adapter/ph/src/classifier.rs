@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use crate::defs::FiveTupleOptional;
+use crate::defs::FiveTuple;
 use crate::net_defs::*;
 use arrayref::array_ref;
 use std::mem::size_of;
@@ -104,54 +104,54 @@ pub fn get_ip_version(body: &[u8]) -> u8 {
     (body[0] & IP_VERSION_MASK) >> 4
 }
 
-pub fn classify(
-    body: &[u8],
-) -> Result<(ClassifierResult, FiveTupleOptional), (&'static str, FiveTupleOptional)> {
-    classify_with_options(body, &ClassifierOptions::default())
+pub fn classify(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
+    classify_with_options(ft, body, &ClassifierOptions::default())
 }
 
 pub fn classify_with_options(
-    pkt_body: &[u8],
+    ft: &mut FiveTuple,
+    body: &[u8],
     options: &ClassifierOptions,
-) -> Result<(ClassifierResult, FiveTupleOptional), (&'static str, FiveTupleOptional)> {
-    // let (metadata, body) = packet.metadata_mut_and_body_mut();
-    classify_zdp(pkt_body, options)
+) -> Result<ClassifierResult, &'static str> {
+    classify_zdp(ft, body, options)
 }
 
 fn classify_zdp(
+    ft: &mut FiveTuple,
     body: &[u8],
     options: &ClassifierOptions,
-) -> Result<(ClassifierResult, FiveTupleOptional), (&'static str, FiveTupleOptional)> {
-    classify_l3(body, options)
+) -> Result<ClassifierResult, &'static str> {
+    classify_l3(ft, body, options)
 }
 
 fn classify_l3(
+    ft: &mut FiveTuple,
     body: &[u8],
     options: &ClassifierOptions,
-) -> Result<(ClassifierResult, FiveTupleOptional), (&'static str, FiveTupleOptional)> {
+) -> Result<ClassifierResult, &'static str> {
     if body.is_empty() {
-        return Err(("Packet length error", FiveTupleOptional::default()));
+        return Err("Packet length error");
     }
 
     let ip_version = get_ip_version(body);
 
     match ip_version {
-        4 => classify_ipv4(body, options),
-        6 => classify_ipv6(body, options),
-        _ => return Ok((ClassifierResult::NonIP, FiveTupleOptional::default())),
+        4 => classify_ipv4(ft, body, options),
+        6 => classify_ipv6(ft, body, options),
+        _ => return Ok(ClassifierResult::NonIP),
     }
 }
 
 fn classify_ipv4(
+    ft: &mut FiveTuple,
     body: &[u8],
     options: &ClassifierOptions,
-) -> Result<(ClassifierResult, FiveTupleOptional), (&'static str, FiveTupleOptional)> {
-    let mut ft_optional = FiveTupleOptional::default();
-    ft_optional.set_l3_type(L3Type::Ipv4);
+) -> Result<ClassifierResult, &'static str> {
+    ft.set_l3_type(L3Type::Ipv4);
 
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<IPv4Header>() > body.len() {
-        return Err(("Packet length error", ft_optional));
+        return Err("Packet length error");
     }
 
     let header_bytes = &body[..size_of::<IPv4Header>()];
@@ -164,45 +164,40 @@ fn classify_ipv4(
         || header_length < 5
         || (header_length as usize) * 4 > body.len()
     {
-        return Err(("Packet length error", ft_optional));
+        return Err("Packet length error");
     }
 
-    ft_optional.set_src_address(IpAddress::new_from_v4(ipv4_header.src_address));
-    ft_optional.set_dst_address(IpAddress::new_from_v4(ipv4_header.dst_address));
+    ft.set_src_address(IpAddress::new_from_v4(ipv4_header.src_address));
+    ft.set_dst_address(IpAddress::new_from_v4(ipv4_header.dst_address));
 
     const FRAGMENT_OFFSET_MASK: u16 = 0x1FFF;
     const MORE_FRAGMENTS_MASK: u16 = 0x2000;
     let frag_offset = ipv4_header.frag_offset.get();
     if frag_offset & FRAGMENT_OFFSET_MASK != 0 {
-        ft_optional.set_l4_protocol(ipv4_header.proto);
-        return Ok((ClassifierResult::SubsequentFragment, ft_optional));
+        ft.set_l4_protocol(ipv4_header.proto);
+        return Ok(ClassifierResult::SubsequentFragment);
     }
 
     let offset = usize::from(header_length * 4);
-    let ret_code = classify_next_header(&mut ft_optional, &body[offset..], ipv4_header.proto);
+    let ret_code = classify_next_header(ft, &body[offset..], ipv4_header.proto);
 
-    match ret_code {
-        Err(err_code) => return Err((err_code, ft_optional)),
-        Ok(classifier_res) => {
-            if frag_offset & MORE_FRAGMENTS_MASK != 0 {
-                return Ok((ClassifierResult::FirstFragment, ft_optional));
-            }
-
-            return Ok((classifier_res, ft_optional));
-        }
+    if frag_offset & MORE_FRAGMENTS_MASK != 0 {
+        return Ok(ClassifierResult::FirstFragment);
     }
+
+    ret_code
 }
 
 fn classify_ipv6(
+    ft: &mut FiveTuple,
     body: &[u8],
     options: &ClassifierOptions,
-) -> Result<(ClassifierResult, FiveTupleOptional), (&'static str, FiveTupleOptional)> {
-    let mut ft_optional = FiveTupleOptional::default();
-    ft_optional.set_l3_type(L3Type::Ipv6);
+) -> Result<ClassifierResult, &'static str> {
+    ft.set_l3_type(L3Type::Ipv6);
 
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<IPv6Header>() > body.len() {
-        return Err(("Packet length error", ft_optional));
+        return Err("Packet length error");
     }
 
     let header_bytes = &body[..size_of::<IPv6Header>()];
@@ -211,61 +206,54 @@ fn classify_ipv6(
     // reject IPv4-mapped IPv6 addresses (i.e. ::ffff/96) as we use this
     // range internally as the only means of distinguishing v6 from v4
     if ipv6_header.src_address.is_v4() || ipv6_header.dst_address.is_v4() {
-        return Err(("IPv4-mapped IPv6 addresses not allowed", ft_optional));
+        return Err("IPv4-mapped IPv6 addresses not allowed");
     }
 
-    ft_optional.set_src_address(ipv6_header.src_address);
-    ft_optional.set_dst_address(ipv6_header.dst_address);
+    ft.set_src_address(ipv6_header.src_address);
+    ft.set_dst_address(ipv6_header.dst_address);
 
     let payload_length = ipv6_header.payload_length.get();
     if payload_length == 0 && ipv6_header.next_header == 0
     /* hop-by-hop */
     {
         // RFC 2675 § 3
-        return Err(("IPv6 jumbograms not supported", ft_optional));
+        return Err("IPv6 jumbograms not supported");
     }
     if (!options.ignore_truncated_packets
         && body.len() - size_of::<IPv6Header>() < payload_length as usize)
         || body.len() - size_of::<IPv6Header>() > payload_length as usize
     {
-        return Err(("Packet length error", ft_optional));
+        return Err("Packet length error");
     }
 
-    let ret_code = classify_next_header(
-        &mut ft_optional,
+    classify_next_header(
+        ft,
         &body[size_of::<IPv6Header>()..],
         ipv6_header.next_header,
-    );
-
-    match ret_code {
-        Err(err_code) => return Err((err_code, ft_optional)),
-        Ok(classifier_res) => {
-            return Ok((classifier_res, ft_optional));
-        }
-    }
+    )
 }
 
 fn classify_next_header(
-    ft_optional: &mut FiveTupleOptional,
+    ft: &mut FiveTuple,
     body: &[u8],
     protocol: IpProtocol,
 ) -> Result<ClassifierResult, &'static str> {
-    ft_optional.set_l4_protocol(protocol);
+    ft.set_l4_protocol(protocol);
     // NOTE: this code does not make any attempt to reject packets which
     // carry a payload which is "unsupported" for the IP version, e.g.
     // ICMPv4 over IPv6, or IPv6 options over IPv4
     match protocol {
-        ip_number::HOPOPT => skip_v6_option(ft_optional, body),
-        ip_number::ICMP => classify_icmp(ft_optional, body),
-        ip_number::IPINIP => classify_unclassified(ft_optional),
-        ip_number::TCP => classify_tcp(ft_optional, body),
-        ip_number::UDP => classify_udp(ft_optional, body),
-        ip_number::IPV6_ROUTE => skip_v6_option(ft_optional, body),
-        ip_number::IPV6_FRAG => classify_frag(ft_optional, body),
-        ip_number::AH => skip_auth_header(ft_optional, body),
-        ip_number::IPV6_ICMP => classify_icmpv6(ft_optional, body),
-        ip_number::IPV6_OPTS => skip_v6_option(ft_optional, body),
-        _ => classify_unclassified(ft_optional),
+        ip_number::HOPOPT => skip_v6_option(ft, body),
+        ip_number::ICMP => classify_icmp(ft, body),
+        ip_number::IPINIP => classify_unclassified(ft),
+        ip_number::TCP => classify_tcp(ft, body),
+        ip_number::UDP => classify_udp(ft, body),
+        ip_number::IPV6_ROUTE => skip_v6_option(ft, body),
+        ip_number::IPV6_FRAG => classify_frag(ft, body),
+        ip_number::AH => skip_auth_header(ft, body),
+        ip_number::IPV6_ICMP => classify_icmpv6(ft, body),
+        ip_number::IPV6_OPTS => skip_v6_option(ft, body),
+        _ => classify_unclassified(ft),
     }
 }
 
@@ -274,10 +262,7 @@ fn is_option_length_error(remaining_len: usize, next_header: u8, option_length: 
         || (next_header != NO_NEXT_HEADER && option_length + 8 > remaining_len)
 }
 
-fn skip_v6_option(
-    ft_optional: &mut FiveTupleOptional,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn skip_v6_option(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     // Almost all Ipv6 options start with protocol and length
     let next_header = body[0];
     // The length for these options is in muliples of 8 bytes, not including the first 8
@@ -290,13 +275,10 @@ fn skip_v6_option(
         return Err("Packet length error");
     }
 
-    classify_next_header(ft_optional, &body[option_length..], next_header)
+    classify_next_header(ft, &body[option_length..], next_header)
 }
 
-fn skip_auth_header(
-    ft_optional: &mut FiveTupleOptional,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn skip_auth_header(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     let next_header = body[0];
     // AH header is legacy v4 and therefore uses 4 octet multiples instead
     let option_length = (usize::from(body[1]) + 2) * 4;
@@ -305,13 +287,10 @@ fn skip_auth_header(
         return Err("Packet length error");
     }
 
-    classify_next_header(ft_optional, &body[option_length..], next_header)
+    classify_next_header(ft, &body[option_length..], next_header)
 }
 
-fn classify_frag(
-    ft_optional: &mut FiveTupleOptional,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn classify_frag(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     // Frag options have no length field and are always 8 bytes
     let next_header = body[0];
     let option_length: usize = 8;
@@ -327,36 +306,27 @@ fn classify_frag(
         return Ok(ClassifierResult::SubsequentFragment);
     }
 
-    classify_next_header(ft_optional, &body[option_length..], next_header)?;
+    classify_next_header(ft, &body[option_length..], next_header)?;
     return Ok(ClassifierResult::FirstFragment);
 }
 
-fn classify_icmp(
-    ft_optional: &mut FiveTupleOptional,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn classify_icmp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     let icmp_bytes = &body[..size_of::<ICMPHeader>()];
     let icmp_header = ICMPHeader::ref_from_bytes(icmp_bytes).unwrap();
-    ft_optional.set_src_port(icmp_header.icmp_type as u16);
-    ft_optional.set_dst_port(icmp_header.icmp_code as u16);
+    ft.set_src_port(icmp_header.icmp_type as u16);
+    ft.set_dst_port(icmp_header.icmp_code as u16);
     Ok(ClassifierResult::OK)
 }
 
-fn classify_icmpv6(
-    ft_optional: &mut FiveTupleOptional,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn classify_icmpv6(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     let icmp_bytes = &body[..size_of::<ICMPv6Header>()];
     let icmp_header = ICMPv6Header::ref_from_bytes(icmp_bytes).unwrap();
-    ft_optional.set_src_port(icmp_header.icmp_type as u16);
-    ft_optional.set_dst_port(icmp_header.icmp_code as u16);
+    ft.set_src_port(icmp_header.icmp_type as u16);
+    ft.set_dst_port(icmp_header.icmp_code as u16);
     Ok(ClassifierResult::OK)
 }
 
-fn classify_tcp(
-    ft_optional: &mut FiveTupleOptional,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn classify_tcp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<TCPHeader>() > body.len() {
         return Err("Packet length error");
@@ -370,16 +340,13 @@ fn classify_tcp(
         return Err("Packet length error");
     }
 
-    ft_optional.set_src_port(tcp_header.src_port.get());
-    ft_optional.set_dst_port(tcp_header.dst_port.get());
+    ft.set_src_port(tcp_header.src_port.get());
+    ft.set_dst_port(tcp_header.dst_port.get());
 
     Ok(ClassifierResult::OK)
 }
 
-fn classify_udp(
-    ft_optional: &mut FiveTupleOptional,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn classify_udp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     if size_of::<UDPHeader>() > body.len() {
         return Err("Packet length error");
     }
@@ -387,17 +354,15 @@ fn classify_udp(
     let header_bytes = &body[..size_of::<UDPHeader>()];
     let udp_header = UDPHeader::ref_from_bytes(header_bytes).unwrap();
 
-    ft_optional.set_src_port(udp_header.src_port.get());
-    ft_optional.set_dst_port(udp_header.dst_port.get());
+    ft.set_src_port(udp_header.src_port.get());
+    ft.set_dst_port(udp_header.dst_port.get());
 
     Ok(ClassifierResult::OK)
 }
 
-fn classify_unclassified(
-    ft_optional: &mut FiveTupleOptional,
-) -> Result<ClassifierResult, &'static str> {
-    ft_optional.set_src_port(0);
-    ft_optional.set_dst_port(0);
+fn classify_unclassified(ft: &mut FiveTuple) -> Result<ClassifierResult, &'static str> {
+    ft.set_src_port(0);
+    ft.set_dst_port(0);
     Ok(ClassifierResult::UnclassifiedL4)
 }
 
@@ -415,7 +380,8 @@ mod tests {
     fn test_empty_l3() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
         let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
-        assert!(classify(packet.body_mut()).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
     }
 
     #[test]
@@ -426,10 +392,12 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::NonIP, res);
+        assert_eq!(
+            ClassifierResult::NonIP,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
@@ -457,10 +425,12 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::OK, res);
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -492,10 +462,12 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::FirstFragment, res);
+        assert_eq!(
+            ClassifierResult::FirstFragment,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -528,10 +500,12 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::SubsequentFragment, res);
+        assert_eq!(
+            ClassifierResult::SubsequentFragment,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -561,12 +535,9 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
@@ -592,12 +563,9 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -624,12 +592,9 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -662,10 +627,12 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::OK, res);
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -717,10 +684,12 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::FirstFragment, res);
+        assert_eq!(
+            ClassifierResult::FirstFragment,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -765,10 +734,12 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::SubsequentFragment, res);
+        assert_eq!(
+            ClassifierResult::SubsequentFragment,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -823,10 +794,12 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::UnclassifiedL4, res);
+        assert_eq!(
+            ClassifierResult::UnclassifiedL4,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -876,12 +849,9 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -916,12 +886,9 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -937,22 +904,24 @@ mod tests {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
         let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
-            let packet_data = [
-                0x60, 0x0d, 0x68, 0x4a, 0x00, 0x28, 0x06, 0x40,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0xff, 0xff, 0x01, 0x02, 0x03, 0x04,
-                0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-                0xa9, 0xa0, 0x1f, 0x90, 0x02, 0x1b, 0x63, 0x8c,
-                0x00, 0x00, 0x00, 0x00, 0xa0, 0x02, 0x67, 0x5c,
-                0x8e, 0xb9, 0x00, 0x00, 0x02, 0x04, 0x0b, 0x7c,
-                0x04, 0x02, 0x08, 0x0a, 0x80, 0x1d, 0xa5, 0x22,
-                0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0x03, 0x07
-            ];
+        let packet_data = [
+            0x60, 0x0d, 0x68, 0x4a, 0x00, 0x28, 0x06, 0x40,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0xff, 0xff, 0x01, 0x02, 0x03, 0x04,
+            0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0xa9, 0xa0, 0x1f, 0x90, 0x02, 0x1b, 0x63, 0x8c,
+            0x00, 0x00, 0x00, 0x00, 0xa0, 0x02, 0x67, 0x5c,
+            0x8e, 0xb9, 0x00, 0x00, 0x02, 0x04, 0x0b, 0x7c,
+            0x04, 0x02, 0x08, 0x0a, 0x80, 0x1d, 0xa5, 0x22,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0x03, 0x07
+        ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(packet.body()).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
     }
 
     #[test]
@@ -960,22 +929,24 @@ mod tests {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
         let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
-            let packet_data = [
-                0x60, 0x0d, 0x68, 0x4a, 0x00, 0x28, 0x06, 0x40,
-                0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0xff, 0xff, 0x05, 0x06, 0x07, 0x08,
-                0xa9, 0xa0, 0x1f, 0x90, 0x02, 0x1b, 0x63, 0x8c,
-                0x00, 0x00, 0x00, 0x00, 0xa0, 0x02, 0x67, 0x5c,
-                0x8e, 0xb9, 0x00, 0x00, 0x02, 0x04, 0x0b, 0x7c,
-                0x04, 0x02, 0x08, 0x0a, 0x80, 0x1d, 0xa5, 0x22,
-                0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0x03, 0x07
-            ];
+        let packet_data = [
+            0x60, 0x0d, 0x68, 0x4a, 0x00, 0x28, 0x06, 0x40,
+            0xfc, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0xff, 0xff, 0x05, 0x06, 0x07, 0x08,
+            0xa9, 0xa0, 0x1f, 0x90, 0x02, 0x1b, 0x63, 0x8c,
+            0x00, 0x00, 0x00, 0x00, 0xa0, 0x02, 0x67, 0x5c,
+            0x8e, 0xb9, 0x00, 0x00, 0x02, 0x04, 0x0b, 0x7c,
+            0x04, 0x02, 0x08, 0x0a, 0x80, 0x1d, 0xa5, 0x22,
+            0x00, 0x00, 0x00, 0x00, 0x01, 0x03, 0x03, 0x07
+        ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(packet.body()).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
     }
 
     #[test]
@@ -997,12 +968,9 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1044,12 +1012,9 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1092,12 +1057,9 @@ mod tests {
         packet.put_slice(&packet_data);
         packet.put_bytes(0, 256);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1139,12 +1101,9 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1179,20 +1138,17 @@ mod tests {
         let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
-                0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
-                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
-                0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            ];
+            0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
+            0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+            0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1215,21 +1171,18 @@ mod tests {
         let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
-                0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00,
-                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
-                0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x30, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
-            ];
+            0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00,
+            0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+            0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x30, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
+        ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1252,21 +1205,18 @@ mod tests {
         let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
-                0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00,
-                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
-                0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x30, 0x02, 0x30, 0x00, 0x85, 0x75, 0x00, 0x00,
-            ];
+            0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00,
+            0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+            0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x30, 0x02, 0x30, 0x00, 0x85, 0x75, 0x00, 0x00,
+        ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1291,20 +1241,17 @@ mod tests {
         let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
-                0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
-                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
-                0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            ];
+            0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
+            0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+            0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        let result = classify(packet.body());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert!(result.is_err());
-
-        let (_, ft) = result.unwrap_err();
-        packet.metadata_mut().write_ft_optional(ft);
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1343,10 +1290,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::OK, res);
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1378,10 +1327,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::OK, res);
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1422,10 +1373,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::OK, res);
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1463,10 +1416,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::OK, res);
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1507,10 +1462,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::OK, res);
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1543,10 +1500,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        let (res, ft) = classify(packet.body()).unwrap();
-        packet.metadata_mut().write_ft_optional(ft);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
 
-        assert_eq!(ClassifierResult::OK, res);
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());

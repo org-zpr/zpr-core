@@ -253,7 +253,8 @@ impl FastpathWorker {
         pkt.metadata_mut().ingress_lane_id = self.worker_index as u8;
 
         // determine five tuple
-        let (classification, ft_optional) = match classifier::classify(pkt.body()) {
+        let (metadata, body) = pkt.metadata_mut_and_body_mut();
+        let classification = match classifier::classify(metadata.five_tuple_mut(), body) {
             Ok(cls) => cls,
             Err(_why) => {
                 self.drop_and_count(pkt, FastpathCounterType::InPacksDrop);
@@ -276,8 +277,6 @@ impl FastpathWorker {
                 return;
             }
         }
-
-        pkt.metadata_mut().write_ft_optional(ft_optional);
 
         let ttl_expired = decrement_ttl(&mut pkt);
         if ttl_expired == true {

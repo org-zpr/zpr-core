@@ -6,7 +6,6 @@
 //!
 //! For usage examples see the [Packet] documentation.
 
-use crate::defs::FiveTupleOptional;
 use crate::defs::*;
 use crate::net_defs::*;
 use bytes::buf;
@@ -248,24 +247,8 @@ impl PacketMetadata {
         &self.five_tuple
     }
 
-    pub fn write_ft_optional(&mut self, ft: FiveTupleOptional) {
-        if let Some(src_port) = ft.src_port {
-            self.set_src_port(src_port);
-        }
-        if let Some(dst_port) = ft.dst_port {
-            self.set_dst_port(dst_port);
-        }
-        if let Some(l3_type) = ft.l3_type {
-            self.set_l3_type(l3_type);
-        }
-        if let Some(l4_protocol) = ft.l4_protocol {
-            self.set_l4_protocol(l4_protocol);
-        }
-        if let Some(src_address) = ft.src_address
-            && let Some(dst_address) = ft.dst_address
-        {
-            self.set_addresses(src_address, dst_address);
-        }
+    pub fn five_tuple_mut(&mut self) -> &mut FiveTuple {
+        &mut self.five_tuple
     }
 }
 

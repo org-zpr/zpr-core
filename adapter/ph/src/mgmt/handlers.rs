@@ -761,8 +761,11 @@ pub async fn handle_bind_actor_address_request(
     // CTP TODO: this should be done by Visa Service
     let classifier_options =
         classifier::ClassifierOptions::default().ignore_truncated_packets(true);
-    let (classification, ft_optional) = match classifier::classify_with_options(
-        pkt.body(),
+
+    let (metadata, body) = pkt.metadata_mut_and_body_mut();
+    let classification = match classifier::classify_with_options(
+        metadata.five_tuple_mut(),
+        body,
         &classifier_options,
     ) {
         Ok(cls) => cls,
@@ -782,7 +785,6 @@ pub async fn handle_bind_actor_address_request(
             return Err(HandleMgmtError::BadStructure);
         }
     }
-    pkt.metadata_mut().write_ft_optional(ft_optional);
 
     let five_tuple = *pkt.metadata().five_tuple();
 
