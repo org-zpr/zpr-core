@@ -92,6 +92,21 @@ struct TxnMgrInner {
     open: BTreeMap<TxnId, usize>,
 }
 
+impl TxnMgrInner {
+    fn try_open_raw(&mut self) -> Option<TxnId> {
+        let next_free = self.next_free;
+        // If the ID we want is not in use,
+        if let btree_map::Entry::Vacant(entry) = self.open.entry(next_free) {
+            // mark it as in-use and return it
+            entry.insert(0);
+            self.next_free = self.next_free.wrapping_add(1);
+            return Some(next_free);
+        }
+
+        None
+    }
+}
+
 /// ZDP transaction manager.
 ///
 /// See module-level documentation for theory of use.
@@ -130,6 +145,18 @@ impl TxnMgr {
         }
     }
 
+    /// Try to open a new transaction.
+    ///
+    /// Returns a handle to the transaction if one was available;
+    /// `None` if there are no free transactions.
+    pub fn try_open(self: &Arc<Self>) -> Option<TxnHandle> {
+        let id = self.try_open_raw()?;
+        Some(TxnHandle {
+            mgr: Arc::downgrade(self),
+            id,
+        })
+    }
+
     /// Get a handle to an existing transaction.
     ///
     /// This is primarily useful when looking up the transaction
@@ -150,13 +177,9 @@ impl TxnMgr {
             // grab the lock
             let mut inner = self.inner.lock().unwrap();
 
-            let next_free = inner.next_free;
-            // If the ID we want is not in use,
-            if let btree_map::Entry::Vacant(entry) = inner.open.entry(next_free) {
-                // mark it as in-use and return it
-                entry.insert(0);
-                inner.next_free = inner.next_free.wrapping_add(1);
-                return next_free;
+            // try to open a new transaction, return it if successful
+            if let Some(id) = inner.try_open_raw() {
+                return id;
             }
 
             // else, register to receive a notification when this changes
@@ -179,6 +202,11 @@ impl TxnMgr {
             // repeatedly lose the contention race yet more so, so we don't
             // worry about this)
         }
+    }
+
+    /// Try to open a new transaction, returning the raw ID.
+    fn try_open_raw(&self) -> Option<TxnId> {
+        self.inner.lock().unwrap().try_open_raw()
     }
 
     /// Increment the refcount of an open transaction.
