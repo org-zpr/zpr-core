@@ -1,14 +1,98 @@
 use crate::net_defs::{IpAddress, IpProtocol, ip_number};
-use std::time::{SystemTime, Duration, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use vsapi;
 
-// TODO figure out which of these need to stay once we switch to
+pub enum VisaResponse {
+    Allow(Visa),
+    Deny(Denied),
+    Error(Error),
+}
+
+pub struct Denied {
+    pub code: DenyCode,
+    pub reason: String,
+}
+
+// Will be more useful once we transition to capnp, right now we only use Fail
+pub enum DenyCode {
+    Fail,
+    NoReason,
+    NoMatch,
+    Denied,
+    SourceNotFound,
+    DestNotFound,
+    SourceAuthEreror,
+    QuotaExceeded,
+}
+
+pub struct Error {
+    pub code: ErrorCode,
+    pub message: String,
+    pub retry_in: u32,
+}
+
+pub enum ErrorCode {
+    Internal,
+    AuthRequired,
+    InvalidOperation,
+    OutOfSync,
+    NotFound,
+    InvalidSignature,
+    QuotaExceeded,
+    TemporatilyUnavailable,
+    AuthError,
+    UnknownStatusCode,
+}
+
+impl From<vsapi::VisaResponse> for VisaResponse {
+    fn from(thrift_visa_response: vsapi::VisaResponse) -> Self {
+        match thrift_visa_response.status {
+            Some(code) => match code {
+                vsapi::StatusCode::SUCCESS => {
+                    Self::Allow(Visa::from(thrift_visa_response.visa.unwrap().visa.unwrap()))
+                }
+                vsapi::StatusCode::FAIL => match thrift_visa_response.reason {
+                    Some(reason) => Self::Deny(Denied::new(DenyCode::Fail, reason)),
+                    None => Self::Deny(Denied::new(DenyCode::Fail, String::new())),
+                },
+                val => Self::Error(Error::new(
+                    ErrorCode::UnknownStatusCode,
+                    format!("Status code: {val:?}"),
+                    0,
+                )),
+            },
+            None => Self::Error(Error::new(
+                ErrorCode::UnknownStatusCode,
+                "No status code".to_string(),
+                0,
+            )),
+        }
+    }
+}
+
+impl Denied {
+    pub fn new(code: DenyCode, reason: String) -> Self {
+        Self { code, reason }
+    }
+}
+
+impl Error {
+    pub fn new(code: ErrorCode, message: String, retry_in: u32) -> Self {
+        Self {
+            code,
+            message,
+            retry_in,
+        }
+    }
+}
+
+// TODO figure out which of these need to stay once we switch to capnp
 pub struct Visa {
     pub issuer_id: u64, // i32 in thrift, u64 in capnp
     pub config: i64,
     pub expires: SystemTime,
     // pub source: Vec<u8>,
-    // pub dst: Vec<u8>,
+    pub dest: IpAddress,
     pub src_addr: IpAddress,
     pub dst_addr: IpAddress,
     pub dock_pep: IpProtocol,
@@ -79,7 +163,7 @@ pub enum EndpointT {
 // Could also implement a TryFrom instead of picking arbitarty values
 impl From<vsapi::Visa> for Visa {
     fn from(thrift_visa: vsapi::Visa) -> Self {
-        let issuer_id  = match thrift_visa.issuer_id {
+        let issuer_id = match thrift_visa.issuer_id {
             Some(val) => val as u64,
             None => 0,
         };
@@ -91,24 +175,27 @@ impl From<vsapi::Visa> for Visa {
             Some(val) => {
                 let dur = Duration::from_millis(val as u64);
                 UNIX_EPOCH + dur
-            },
+            }
             None => SystemTime::now(),
         };
+        let dest = match thrift_visa.dest {
+            Some(val) => match IpAddress::try_from(val) {
+                Ok(addr) => addr,
+                Err(_) => IpAddress::UNSPECIFIED,
+            },
+            None => IpAddress::UNSPECIFIED,
+        };
         let src_addr = match thrift_visa.source_contact {
-            Some(val) => {
-                match IpAddress::try_from(val) {
-                    Ok(addr) => addr,
-                    Err(_) => IpAddress::UNSPECIFIED,
-                }
+            Some(val) => match IpAddress::try_from(val) {
+                Ok(addr) => addr,
+                Err(_) => IpAddress::UNSPECIFIED,
             },
             None => IpAddress::UNSPECIFIED,
         };
         let dst_addr = match thrift_visa.dest_contact {
-            Some(val) => {
-                match IpAddress::try_from(val) {
-                    Ok(addr) => addr,
-                    Err(_) => IpAddress::UNSPECIFIED,
-                }
+            Some(val) => match IpAddress::try_from(val) {
+                Ok(addr) => addr,
+                Err(_) => IpAddress::UNSPECIFIED,
             },
             None => IpAddress::UNSPECIFIED,
         };
@@ -120,7 +207,7 @@ impl From<vsapi::Visa> for Visa {
                     vsapi::PEPIndex::ICMP => ip_number::ICMP,
                     _ => ip_number::UDP, // Not sure what default here should be, perhaps we want to make a UNSET ip number
                 }
-            },
+            }
             None => ip_number::UDP, // Not sure what default here should be
         };
         let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
@@ -143,13 +230,14 @@ impl From<vsapi::Visa> for Visa {
             issuer_id,
             config,
             expires,
+            dest,
             src_addr,
             dst_addr,
             dock_pep,
             tcp_udp_pep,
             icmp_pep,
             session_key,
-            cons
+            cons,
         }
     }
 }
@@ -160,7 +248,7 @@ impl From<vsapi::PEPArgsTCPUDP> for TcpUdpPep {
             Some(val) => val as u16,
             None => 0,
         };
-                let dest_port = match thrift_tcp_udp_pep.dest_port {
+        let dest_port = match thrift_tcp_udp_pep.dest_port {
             Some(val) => val as u16,
             None => 0,
         };
@@ -179,9 +267,7 @@ impl From<vsapi::PEPArgsICMP> for IcmpPep {
             None => 0,
         };
 
-        Self {
-            icmp_type_code,
-        }
+        Self { icmp_type_code }
     }
 }
 
