@@ -1,4 +1,4 @@
-use crate::adapter_tables::{AltEntry, AltPep};
+use crate::adapter_tables::{self, AltPep};
 use crate::assembly::{Assembly, PhMode};
 use crate::counters::ManagementCounterType;
 use crate::logging::targets::FLOW_MGMT;
@@ -33,28 +33,10 @@ pub async fn launch(
 
 // RFC 6.5 § 6.3.11
 async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
-    let five_tuple = pkt.metadata().five_tuple();
-
-    // if there's already an entry, this is a duplicate request
-    // (NOTE: we should be the only ones modifying this table!)
-    if asm.alt.get(five_tuple).is_some() {
-        mgmt::core::count_event(asm, ManagementCounterType::DroppedAwaitingBind);
-        return;
-    }
+    let dock_link_id = zpr::DOCK_LINK_ID;
 
     // copy out five tuple so we can give away packet
-    let five_tuple = *five_tuple;
-
-    let dock_link_id = match asm.ph_mode {
-        PhMode::Adapter => zpr::DOCK_LINK_ID,
-        PhMode::Node => zpr::LINK_ID_UNKNOWN,
-    };
-
-    if dock_link_id != zpr::LINK_ID_UNKNOWN && !asm.is_link_ready(dock_link_id) {
-        debug!(target: FLOW_MGMT, "Link {dock_link_id} is not ready to receive traffic yet");
-        mgmt::core::count_event(asm, ManagementCounterType::DroppedNoSA);
-        return;
-    }
+    let five_tuple = *pkt.metadata().five_tuple();
 
     if five_tuple.dst_address.is_v6_unicast_link_local()
         || five_tuple.src_address.is_v6_unicast_link_local()
@@ -63,11 +45,42 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
         return;
     }
 
+    let Some(peer_state) = asm.peer_table.get(dock_link_id) else {
+        // Link was dropped
+        return;
+    };
+
+    if !peer_state.link_state_machine.is_ready() {
+        debug!(target: FLOW_MGMT, "Link {dock_link_id} is not ready to receive traffic yet");
+        mgmt::core::count_event(asm, ManagementCounterType::DroppedNoSA);
+        return;
+    }
+
+    // try open a transaction on the link; if we can't due to backpressure, don't wait, just give up
+    let Some(txn) = peer_state.txn_mgr.try_open() else {
+        debug!(target: FLOW_MGMT, "link {dock_link_id}: backpressure on link prevents issuing bind request for {five_tuple}");
+        mgmt::core::count_event(asm, ManagementCounterType::QueueBackpressure);
+        return;
+    };
+
+    // copy out packet body
     let packet_body = pkt.body().to_owned();
 
     // mark ALT entry as pending to attempt to (i.e. racily) prevent
     // fastpath from issuing multiple requests
-    asm.alt.insert(five_tuple, AltEntry::Pending(pkt));
+    match asm.alt.insert_pending(five_tuple, pkt, &txn) {
+        Ok(()) => (),
+
+        Err(adapter_tables::InsertPendingError::AlreadyPending(_pkt)) => {
+            // there's already an entry; this is a duplicate request
+            mgmt::core::count_event(asm, ManagementCounterType::DroppedAwaitingBind);
+            return;
+        }
+
+        Err(adapter_tables::InsertPendingError::DuplicateTransaction(_pkt)) => {
+            panic!("duplicate transaction")
+        }
+    }
 
     debug!(target: FLOW_MGMT, "link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
 
@@ -103,33 +116,19 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
                     .five_tuple()
             {
                 error!(target: FLOW_MGMT, "Bind of {five_tuple} falied: node supplied TC incompatible with initial packet: {tc}");
-                asm.alt.remove(&five_tuple);
+                asm.alt.remove(&five_tuple).unwrap();
                 return;
             }
 
             // Bind succeeded; add to ALT.
             debug!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id}");
 
-            let AltEntry::Pending(initial_packet) = asm
-                .alt
-                .alter(&five_tuple, |entry| {
-                    assert!(
-                        matches!(entry, AltEntry::Pending(_)),
-                        "coding error: race to activate pending ALT entry"
-                    );
-
-                    std::mem::replace(
-                        entry,
-                        AltEntry::Active(AltPep {
-                            compression_mode: tc.compression_mode(),
-                            tether_id,
-                        }),
-                    )
-                })
-                .unwrap()
-            else {
-                unreachable!();
+            let pep = AltPep {
+                compression_mode: tc.compression_mode(),
+                tether_id,
             };
+
+            let initial_packet = asm.alt.set_active(&five_tuple, pep).unwrap();
 
             // now send out initial packet
             match asm.actor_output_requeue.try_enqueue_packet(initial_packet) {
@@ -144,7 +143,7 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
         Err(err) => {
             // Bind failed; remove pending entry from ALT.
             debug!(target: FLOW_MGMT, "Bind of {five_tuple} failed: {err}");
-            asm.alt.remove(&five_tuple);
+            asm.alt.remove(&five_tuple).unwrap();
         }
     }
 }
