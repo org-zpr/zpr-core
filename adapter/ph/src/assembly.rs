@@ -12,7 +12,7 @@ use crate::link_state::{LinkEvent, LinkStateError, LinkType};
 use crate::logging::targets::PEER_MGMT;
 use crate::mgmt;
 use crate::mgmt_processor_worker;
-use crate::net_defs::{self, IpAddress, ScopedIpAddr};
+use crate::net_defs::{IpAddress, ScopedIpAddr};
 use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
@@ -126,10 +126,9 @@ impl Assembly {
 
     /// Graceful shutdown routine.  Not guaranteed to be called
     pub async fn shutdown(self: &Arc<Self>) {
-        if self.ph_mode == PhMode::Node {
-            self.shutdown_node().await
-        } else {
-            self.shutdown_adapter().await
+        match self.ph_mode {
+            PhMode::Node => self.shutdown_node().await,
+            PhMode::Adapter => self.shutdown_adapter().await,
         }
     }
 
@@ -142,8 +141,8 @@ impl Assembly {
                 .peer_table
                 .lookup_special_peer(SpecialPeerName::VisaServiceAdapter);
 
-            self.peer_table.for_each(|(peer_id, _)| {
-                if Some(peer_id) != vs_peer && peer_id.get() != zpr::LOCAL_ACTOR_LINK_ID {
+            self.peer_table.for_each(|(peer_id, peer)| {
+                if Some(peer_id) != vs_peer && !peer.is_internal() {
                     // This should be a short block and must be blocked on,
                     // otherwise the messages won't get sent
                     let spawn_self = self.clone();
@@ -164,7 +163,7 @@ impl Assembly {
         let mut join_set = tokio::task::JoinSet::new();
 
         self.peer_table.for_each(|(peer_id, peer)| {
-            if peer_id.get() == zpr::LOCAL_ACTOR_LINK_ID {
+            if peer.is_internal() {
                 return;
             }
 
@@ -250,26 +249,6 @@ impl Assembly {
             return Err(LinkStateError::NotFound(id));
         };
         peer.link_state_machine.process_event(self, event)
-    }
-
-    /// Populates the Peer Table with the "fake" internal peer used to hold
-    /// state relating to the local actor / internal dock.
-    ///
-    /// Must be called prior to adding any other peers; panics otherwise.
-    pub fn add_local_actor_peer(&self) {
-        let entry = self.peer_table.vacant_entry().unwrap();
-
-        assert_eq!(entry.key().get(), zpr::LOCAL_ACTOR_LINK_ID);
-
-        let peer_state = peer_table::PeerState::new(
-            entry.key(),
-            LinkType::Internal,
-            std::net::SocketAddrV6::new(std::net::Ipv6Addr::from_bits(0), 0, 0, 0).into(),
-            net_defs::ScopedIpv6Addr::new(std::net::Ipv6Addr::from_bits(0), 0).into(),
-            |_| std::future::pending(),
-        );
-
-        entry.insert(peer_state);
     }
 
     fn add_peer(

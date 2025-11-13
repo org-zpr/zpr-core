@@ -461,7 +461,6 @@ mod tests {
     use crate::net_defs;
     use crate::peer_table::test::create_dummy_peer_state;
     use std::net::{IpAddr, Ipv4Addr};
-    use std::num::NonZero;
     use std::sync::Arc;
 
     #[test]
@@ -517,15 +516,15 @@ mod tests {
         let mut builder = TestAssemblyBuilder::new();
         builder.visa_table = Some(VisaTable::new());
         let asm = Arc::new(create_assembly(builder));
-        let link_id = asm
-            .peer_table
+        let entry = asm.peer_table.vacant_entry().unwrap();
+        let entry_key = entry.key();
+        let link_id = entry
             .insert(create_dummy_peer_state(
-                NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap(),
+                entry_key,
                 LinkType::Internal,
                 zpr::SubstrateAddr::new(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 443),
                 net_defs::ScopedIpAddr::V4(Ipv4Addr::new(1, 2, 3, 5)),
             ))
-            .unwrap()
             .get();
 
         let one_second = std::time::Duration::from_secs(1);

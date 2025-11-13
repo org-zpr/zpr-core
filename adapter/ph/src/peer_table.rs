@@ -5,7 +5,7 @@ use crate::forwarding_tables::PeerForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
 use crate::mgmt::txn_mgr;
-use crate::net_defs::ScopedIpAddr;
+use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::special_peers::*;
@@ -122,6 +122,21 @@ impl PeerState {
     ) -> Option<RcuOptionGuard<'_, KmTransportSA>> {
         self.km_state.transport_sa.get().into()
     }
+
+    /// Creates a "dummy" peer for referencing internal links.
+    pub fn new_internal_peer(link_id: NonZero<LinkId>) -> Self {
+        PeerState::new(
+            link_id,
+            LinkType::Internal,
+            std::net::SocketAddrV6::new(std::net::Ipv6Addr::from_bits(0), 0, 0, 0).into(),
+            ScopedIpv6Addr::new(std::net::Ipv6Addr::from_bits(0), 0).into(),
+            |_| std::future::pending(),
+        )
+    }
+
+    pub fn is_internal(&self) -> bool {
+        self.link_state_machine.is_internal()
+    }
 }
 
 type AtomicLinkId = atomic::AtomicU32;
@@ -162,8 +177,14 @@ impl PeerTable {
         }
     }
 
-    pub fn insert(&self, peer_state: PeerState) -> Result<NonZero<LinkId>, PeerInsertError> {
-        Ok(self.vacant_entry()?.insert(peer_state))
+    /// Adds a "dummy" peer with the expected link ID for referencing internal links.
+    ///
+    /// Panics if there is no room in the table.  (This is intended to only be invoked
+    /// at startup, before dynamic entries have been added.)
+    pub fn insert_internal_peer(&self) -> NonZero<LinkId> {
+        let entry = self.vacant_entry().unwrap();
+        let peer = PeerState::new_internal_peer(entry.key());
+        entry.insert(peer)
     }
 
     pub fn vacant_entry(&self) -> Result<VacantPeerTableEntry<'_>, PeerInsertError> {
@@ -418,14 +439,16 @@ impl VacantPeerTableEntry<'_> {
         // the "reverse" table with Acquire ordering
         atomic::fence(Ordering::Release);
 
-        if let Some(other) = self.sa_to_link_ref.insert(
-            (peer_state_ref.substrate_addr, peer_state_ref.interface_addr),
-            link_id,
-        ) {
-            panic!(
-                "duplicate peer substrate address: {link_id} and {other} share {} on dock {}",
-                peer_state_ref.substrate_addr, peer_state_ref.interface_addr,
-            );
+        if !peer_state_ref.substrate_addr.ip().is_unspecified() {
+            if let Some(other) = self.sa_to_link_ref.insert(
+                (peer_state_ref.substrate_addr, peer_state_ref.interface_addr),
+                link_id,
+            ) {
+                panic!(
+                    "duplicate peer substrate address: {link_id} and {other} share {} on dock {}",
+                    peer_state_ref.substrate_addr, peer_state_ref.interface_addr,
+                );
+            }
         }
 
         link_id

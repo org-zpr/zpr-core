@@ -38,7 +38,8 @@ pub const LINK_ID_UNKNOWN: LinkId = 0;
 /// Link ID used to refer to a node or adapter's local actor.
 pub const LOCAL_ACTOR_LINK_ID: LinkId = 1;
 
-/// Link ID used on an adapter to refer to the dock to which it's connected.
+/// Link ID used on an adapter to refer to the dock to which it's connected,
+/// or on a node to refer to the node's internal dock.
 pub const DOCK_LINK_ID: LinkId = 2;
 
 /// Stream ID
@@ -127,9 +128,7 @@ pub mod compression_mode {
 
 /// Traffic classification specification type.
 #[open_enum]
-#[derive(
-    Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned,
-)]
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(u8)]
 pub enum Tcst {
     Ip5Tuple = 0,
