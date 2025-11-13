@@ -1,6 +1,6 @@
 use crate::net_defs::{IpAddress, IpProtocol, ip_number};
 use std::time::{SystemTime, Duration, UNIX_EPOCH};
-// use vsapi;
+use vsapi;
 
 // TODO figure out which of these need to stay once we switch to
 pub struct Visa {
@@ -76,8 +76,9 @@ pub enum EndpointT {
     Client,
 }
 
-impl Visa {
-    pub fn new_from_thrift(thrift_visa: vsapi::Visa) -> Self {
+// Could also implement a TryFrom instead of picking arbitarty values
+impl From<vsapi::Visa> for Visa {
+    fn from(thrift_visa: vsapi::Visa) -> Self {
         let issuer_id  = match thrift_visa.issuer_id {
             Some(val) => val as u64,
             None => 0,
@@ -123,19 +124,19 @@ impl Visa {
             None => ip_number::UDP, // Not sure what default here should be
         };
         let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
-            Some(val) => Some(TcpUdpPep::new_from_thrift(val)),
+            Some(val) => Some(TcpUdpPep::from(val)),
             None => None,
         };
         let icmp_pep = match thrift_visa.icmp_pep_args {
-            Some(val) => Some(IcmpPep::new_from_thrift(val)),
+            Some(val) => Some(IcmpPep::from(val)),
             None => None,
         };
         let session_key = match thrift_visa.session_key {
-            Some(val) => KeySet::new_from_thrift(val),
+            Some(val) => KeySet::from(val),
             None => KeySet::default(),
         };
         let cons = match thrift_visa.cons {
-            Some(val) => Constraints::new_from_thrift(val),
+            Some(val) => Constraints::from(val),
             None => Constraints::default(),
         };
         Self {
@@ -153,8 +154,8 @@ impl Visa {
     }
 }
 
-impl TcpUdpPep {
-    pub fn new_from_thrift(thrift_tcp_udp_pep: vsapi::PEPArgsTCPUDP) -> Self {
+impl From<vsapi::PEPArgsTCPUDP> for TcpUdpPep {
+    fn from(thrift_tcp_udp_pep: vsapi::PEPArgsTCPUDP) -> Self {
         let source_port = match thrift_tcp_udp_pep.source_port {
             Some(val) => val as u16,
             None => 0,
@@ -171,8 +172,8 @@ impl TcpUdpPep {
     }
 }
 
-impl IcmpPep {
-    pub fn new_from_thrift(thrift_icmp_pep: vsapi::PEPArgsICMP) -> Self {
+impl From<vsapi::PEPArgsICMP> for IcmpPep {
+    fn from(thrift_icmp_pep: vsapi::PEPArgsICMP) -> Self {
         let icmp_type_code = match thrift_icmp_pep.icmp_type_code {
             Some(val) => val as u16,
             None => 0,
@@ -184,8 +185,8 @@ impl IcmpPep {
     }
 }
 
-impl KeySet {
-    pub fn new_from_thrift(thrift_key_set: vsapi::KeySet) -> Self {
+impl From<vsapi::KeySet> for KeySet {
+    fn from(thrift_key_set: vsapi::KeySet) -> Self {
         let format = match thrift_key_set.format {
             Some(val) => val,
             None => 0,
@@ -207,8 +208,8 @@ impl KeySet {
     }
 }
 
-impl Constraints {
-    pub fn new_from_thrift(thrift_cons: vsapi::Constraints) -> Self {
+impl From<vsapi::Constraints> for Constraints {
+    fn from(thrift_cons: vsapi::Constraints) -> Self {
         let bw = match thrift_cons.bw {
             Some(val) => val,
             None => false,
