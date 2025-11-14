@@ -38,7 +38,7 @@ pub enum VisaTableError {
 }
 
 /// Struct that holds an instance of a visa local to a Node
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Visa {
     // TODO add methods so that these don't have to be made pub
     pub visa: Option<visa::Visa>,
@@ -190,7 +190,7 @@ impl VisaTable {
         Self {
             table: HashMap::new(),
             timeout_queue: BinaryHeap::new(),
-            lookup_table: FiveTupleLookupTable::new(&HashMap::new()),
+            lookup_table: FiveTupleLookupTable::new(),
         }
     }
 
@@ -248,7 +248,10 @@ impl VisaTable {
             .insert_visa(vs2node)
             .expect("Failed to insert visa->node visa into table");
 
-        visa_table.lookup_table = FiveTupleLookupTable::new(&visa_table.table);
+        visa_table.lookup_table = FiveTupleLookupTable::new();
+        visa_table
+            .lookup_table
+            .build_table_from_hash(&visa_table.table);
 
         visa_table
     }
@@ -264,10 +267,10 @@ impl VisaTable {
             id: visa_id,
             expiration: expiration,
         };
-        let _ = self.table.insert(visa_id, visa);
+        let _ = self.table.insert(visa_id, visa.clone());
         self.timeout_queue.push(timeout);
 
-        self.lookup_table = FiveTupleLookupTable::new(&self.table);
+        self.lookup_table.insert_visa(visa_id, visa);
     }
 
     /// Insert a visa from the Visa Service into the Visa Table
@@ -286,10 +289,10 @@ impl VisaTable {
             id: visa_id,
             expiration: expiration,
         };
-        let _ = self.table.insert(visa_id, visa);
+        let _ = self.table.insert(visa_id, visa.clone());
         self.timeout_queue.push(timeout);
 
-        self.lookup_table = FiveTupleLookupTable::new(&self.table);
+        self.lookup_table.insert_visa(visa_id, visa);
 
         Ok(visa_id)
     }
@@ -320,12 +323,9 @@ impl VisaTable {
         peer_table: &peer_table::PeerTable,
         visa_id: VisaId,
     ) -> Result<(), VisaTableError> {
-        let Some(mut visa) = self.table.remove(&visa_id) else {
-            return Err(VisaTableError::NotFound(visa_id));
-        };
-        visa.remove_forwarding_entries(peer_table);
-        info!(target: VISA_MGMT, "Revoked visa {visa_id}");
-        self.lookup_table = FiveTupleLookupTable::new(&self.table);
+        self.revoke_no_rebuild(peer_table, visa_id)?;
+        self.lookup_table = FiveTupleLookupTable::new();
+        self.lookup_table.build_table_from_hash(&self.table);
 
         Ok(())
     }
@@ -340,11 +340,24 @@ impl VisaTable {
         {
             let timeout_entry = self.timeout_queue.pop().unwrap();
             // Ignore if the visa was not found, since it might have been previously revoked
-            let _ = self.revoke(peer_table, timeout_entry.id);
+            let _ = self.revoke_no_rebuild(peer_table, timeout_entry.id);
         }
-        self.lookup_table = FiveTupleLookupTable::new(&self.table);
+        self.lookup_table = FiveTupleLookupTable::new();
+        self.lookup_table.build_table_from_hash(&self.table);
     }
 
+    fn revoke_no_rebuild(
+        &mut self,
+        peer_table: &peer_table::PeerTable,
+        visa_id: VisaId,
+    ) -> Result<(), VisaTableError> {
+        let Some(mut visa) = self.table.remove(&visa_id) else {
+            return Err(VisaTableError::NotFound(visa_id));
+        };
+        visa.remove_forwarding_entries(peer_table);
+        info!(target: VISA_MGMT, "Revoked visa {visa_id}");
+        Ok(())
+    }
     /// Given a visa ID, look up the visa and return the destination address.
     /// If visa is not found or does not have a destination address, return an error.
     pub fn get_visa_dest_addr(&self, visa_id: VisaId) -> Result<IpAddress, VisaTableError> {

@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use crate::packet;
+use crate::defs::FiveTuple;
 use arrayref::array_ref;
 use libnode::net_defs::*;
 use std::mem::size_of;
@@ -104,28 +105,28 @@ pub fn get_ip_version(body: &[u8]) -> u8 {
     (body[0] & IP_VERSION_MASK) >> 4
 }
 
-pub fn classify(packet: &mut packet::Packet) -> Result<ClassifierResult, &'static str> {
-    classify_with_options(packet, &ClassifierOptions::default())
+pub fn classify(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
+    classify_with_options(ft, body, &ClassifierOptions::default())
 }
 
 pub fn classify_with_options(
-    packet: &mut packet::Packet,
-    options: &ClassifierOptions,
-) -> Result<ClassifierResult, &'static str> {
-    let (metadata, body) = packet.metadata_mut_and_body_mut();
-    classify_zdp(metadata, body, options)
-}
-
-fn classify_zdp(
-    metadata: &mut packet::PacketMetadata,
+    ft: &mut FiveTuple,
     body: &[u8],
     options: &ClassifierOptions,
 ) -> Result<ClassifierResult, &'static str> {
-    classify_l3(metadata, body, options)
+    classify_zdp(ft, body, options)
+}
+
+fn classify_zdp(
+    ft: &mut FiveTuple,
+    body: &[u8],
+    options: &ClassifierOptions,
+) -> Result<ClassifierResult, &'static str> {
+    classify_l3(ft, body, options)
 }
 
 fn classify_l3(
-    metadata: &mut packet::PacketMetadata,
+    ft: &mut FiveTuple,
     body: &[u8],
     options: &ClassifierOptions,
 ) -> Result<ClassifierResult, &'static str> {
@@ -136,18 +137,18 @@ fn classify_l3(
     let ip_version = get_ip_version(body);
 
     match ip_version {
-        4 => classify_ipv4(metadata, body, options),
-        6 => classify_ipv6(metadata, body, options),
+        4 => classify_ipv4(ft, body, options),
+        6 => classify_ipv6(ft, body, options),
         _ => return Ok(ClassifierResult::NonIP),
     }
 }
 
 fn classify_ipv4(
-    metadata: &mut packet::PacketMetadata,
+    ft: &mut FiveTuple,
     body: &[u8],
     options: &ClassifierOptions,
 ) -> Result<ClassifierResult, &'static str> {
-    metadata.set_l3_type(L3Type::Ipv4);
+    ft.set_l3_type(L3Type::Ipv4);
 
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<IPv4Header>() > body.len() {
@@ -167,35 +168,33 @@ fn classify_ipv4(
         return Err("Packet length error");
     }
 
-    metadata.set_addresses(
-        IpAddress::new_from_v4(ipv4_header.src_address),
-        IpAddress::new_from_v4(ipv4_header.dst_address),
-    );
+    ft.set_src_address(IpAddress::new_from_v4(ipv4_header.src_address));
+    ft.set_dst_address(IpAddress::new_from_v4(ipv4_header.dst_address));
 
     const FRAGMENT_OFFSET_MASK: u16 = 0x1FFF;
     const MORE_FRAGMENTS_MASK: u16 = 0x2000;
     let frag_offset = ipv4_header.frag_offset.get();
     if frag_offset & FRAGMENT_OFFSET_MASK != 0 {
-        metadata.set_l4_protocol(ipv4_header.proto);
+        ft.set_l4_protocol(ipv4_header.proto);
         return Ok(ClassifierResult::SubsequentFragment);
     }
 
     let offset = usize::from(header_length * 4);
-    let ret_code = classify_next_header(metadata, &body[offset..], ipv4_header.proto);
+    let ret_code = classify_next_header(ft, &body[offset..], ipv4_header.proto);
 
     if frag_offset & MORE_FRAGMENTS_MASK != 0 {
         return Ok(ClassifierResult::FirstFragment);
     }
 
-    return ret_code;
+    ret_code
 }
 
 fn classify_ipv6(
-    metadata: &mut packet::PacketMetadata,
+    ft: &mut FiveTuple,
     body: &[u8],
     options: &ClassifierOptions,
 ) -> Result<ClassifierResult, &'static str> {
-    metadata.set_l3_type(L3Type::Ipv6);
+    ft.set_l3_type(L3Type::Ipv6);
 
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<IPv6Header>() > body.len() {
@@ -211,7 +210,8 @@ fn classify_ipv6(
         return Err("IPv4-mapped IPv6 addresses not allowed");
     }
 
-    metadata.set_addresses(ipv6_header.src_address, ipv6_header.dst_address);
+    ft.set_src_address(ipv6_header.src_address);
+    ft.set_dst_address(ipv6_header.dst_address);
 
     let payload_length = ipv6_header.payload_length.get();
     if payload_length == 0 && ipv6_header.next_header == 0
@@ -228,33 +228,33 @@ fn classify_ipv6(
     }
 
     classify_next_header(
-        metadata,
+        ft,
         &body[size_of::<IPv6Header>()..],
         ipv6_header.next_header,
     )
 }
 
 fn classify_next_header(
-    metadata: &mut packet::PacketMetadata,
+    ft: &mut FiveTuple,
     body: &[u8],
     protocol: IpProtocol,
 ) -> Result<ClassifierResult, &'static str> {
-    metadata.set_l4_protocol(protocol);
+    ft.set_l4_protocol(protocol);
     // NOTE: this code does not make any attempt to reject packets which
     // carry a payload which is "unsupported" for the IP version, e.g.
     // ICMPv4 over IPv6, or IPv6 options over IPv4
     match protocol {
-        ip_number::HOPOPT => skip_v6_option(metadata, body),
-        ip_number::ICMP => classify_icmp(metadata, body),
-        ip_number::IPINIP => classify_unclassified(metadata),
-        ip_number::TCP => classify_tcp(metadata, body),
-        ip_number::UDP => classify_udp(metadata, body),
-        ip_number::IPV6_ROUTE => skip_v6_option(metadata, body),
-        ip_number::IPV6_FRAG => classify_frag(metadata, body),
-        ip_number::AH => skip_auth_header(metadata, body),
-        ip_number::IPV6_ICMP => classify_icmpv6(metadata, body),
-        ip_number::IPV6_OPTS => skip_v6_option(metadata, body),
-        _ => classify_unclassified(metadata),
+        ip_number::HOPOPT => skip_v6_option(ft, body),
+        ip_number::ICMP => classify_icmp(ft, body),
+        ip_number::IPINIP => classify_unclassified(ft),
+        ip_number::TCP => classify_tcp(ft, body),
+        ip_number::UDP => classify_udp(ft, body),
+        ip_number::IPV6_ROUTE => skip_v6_option(ft, body),
+        ip_number::IPV6_FRAG => classify_frag(ft, body),
+        ip_number::AH => skip_auth_header(ft, body),
+        ip_number::IPV6_ICMP => classify_icmpv6(ft, body),
+        ip_number::IPV6_OPTS => skip_v6_option(ft, body),
+        _ => classify_unclassified(ft),
     }
 }
 
@@ -263,10 +263,7 @@ fn is_option_length_error(remaining_len: usize, next_header: u8, option_length: 
         || (next_header != NO_NEXT_HEADER && option_length + 8 > remaining_len)
 }
 
-fn skip_v6_option(
-    metadata: &mut packet::PacketMetadata,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn skip_v6_option(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     // Almost all Ipv6 options start with protocol and length
     let next_header = body[0];
     // The length for these options is in muliples of 8 bytes, not including the first 8
@@ -279,13 +276,10 @@ fn skip_v6_option(
         return Err("Packet length error");
     }
 
-    classify_next_header(metadata, &body[option_length..], next_header)
+    classify_next_header(ft, &body[option_length..], next_header)
 }
 
-fn skip_auth_header(
-    metadata: &mut packet::PacketMetadata,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn skip_auth_header(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     let next_header = body[0];
     // AH header is legacy v4 and therefore uses 4 octet multiples instead
     let option_length = (usize::from(body[1]) + 2) * 4;
@@ -294,13 +288,10 @@ fn skip_auth_header(
         return Err("Packet length error");
     }
 
-    classify_next_header(metadata, &body[option_length..], next_header)
+    classify_next_header(ft, &body[option_length..], next_header)
 }
 
-fn classify_frag(
-    metadata: &mut packet::PacketMetadata,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn classify_frag(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     // Frag options have no length field and are always 8 bytes
     let next_header = body[0];
     let option_length: usize = 8;
@@ -316,36 +307,27 @@ fn classify_frag(
         return Ok(ClassifierResult::SubsequentFragment);
     }
 
-    classify_next_header(metadata, &body[option_length..], next_header)?;
+    classify_next_header(ft, &body[option_length..], next_header)?;
     return Ok(ClassifierResult::FirstFragment);
 }
 
-fn classify_icmp(
-    metadata: &mut packet::PacketMetadata,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn classify_icmp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     let icmp_bytes = &body[..size_of::<ICMPHeader>()];
     let icmp_header = ICMPHeader::ref_from_bytes(icmp_bytes).unwrap();
-    metadata.set_src_port(icmp_header.icmp_type as u16);
-    metadata.set_dst_port(icmp_header.icmp_code as u16);
+    ft.set_src_port(icmp_header.icmp_type as u16);
+    ft.set_dst_port(icmp_header.icmp_code as u16);
     Ok(ClassifierResult::OK)
 }
 
-fn classify_icmpv6(
-    metadata: &mut packet::PacketMetadata,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn classify_icmpv6(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     let icmp_bytes = &body[..size_of::<ICMPv6Header>()];
     let icmp_header = ICMPv6Header::ref_from_bytes(icmp_bytes).unwrap();
-    metadata.set_src_port(icmp_header.icmp_type as u16);
-    metadata.set_dst_port(icmp_header.icmp_code as u16);
+    ft.set_src_port(icmp_header.icmp_type as u16);
+    ft.set_dst_port(icmp_header.icmp_code as u16);
     Ok(ClassifierResult::OK)
 }
 
-fn classify_tcp(
-    metadata: &mut packet::PacketMetadata,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn classify_tcp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     // Check that there's enough room in the packet data for the base header (no options)
     if size_of::<TCPHeader>() > body.len() {
         return Err("Packet length error");
@@ -359,16 +341,13 @@ fn classify_tcp(
         return Err("Packet length error");
     }
 
-    metadata.set_src_port(tcp_header.src_port.get());
-    metadata.set_dst_port(tcp_header.dst_port.get());
+    ft.set_src_port(tcp_header.src_port.get());
+    ft.set_dst_port(tcp_header.dst_port.get());
 
     Ok(ClassifierResult::OK)
 }
 
-fn classify_udp(
-    metadata: &mut packet::PacketMetadata,
-    body: &[u8],
-) -> Result<ClassifierResult, &'static str> {
+fn classify_udp(ft: &mut FiveTuple, body: &[u8]) -> Result<ClassifierResult, &'static str> {
     if size_of::<UDPHeader>() > body.len() {
         return Err("Packet length error");
     }
@@ -376,17 +355,15 @@ fn classify_udp(
     let header_bytes = &body[..size_of::<UDPHeader>()];
     let udp_header = UDPHeader::ref_from_bytes(header_bytes).unwrap();
 
-    metadata.set_src_port(udp_header.src_port.get());
-    metadata.set_dst_port(udp_header.dst_port.get());
+    ft.set_src_port(udp_header.src_port.get());
+    ft.set_dst_port(udp_header.dst_port.get());
 
     Ok(ClassifierResult::OK)
 }
 
-fn classify_unclassified(
-    metadata: &mut packet::PacketMetadata,
-) -> Result<ClassifierResult, &'static str> {
-    metadata.set_src_port(0);
-    metadata.set_dst_port(0);
+fn classify_unclassified(ft: &mut FiveTuple) -> Result<ClassifierResult, &'static str> {
+    ft.set_src_port(0);
+    ft.set_dst_port(0);
     Ok(ClassifierResult::UnclassifiedL4)
 }
 
@@ -395,6 +372,7 @@ mod tests {
     use super::*;
     use crate::config;
     use crate::packet::Packet;
+
     use bytes::BufMut;
     use std::net::Ipv6Addr;
     use zerocopy::FromZeros;
@@ -402,19 +380,25 @@ mod tests {
     #[test]
     fn test_empty_l3() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
-        assert!(classify(&mut packet).is_err());
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
     }
 
     #[test]
     fn test_non_ip() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         let packet_data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::NonIP, classify(&mut packet).unwrap());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert_eq!(
+            ClassifierResult::NonIP,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
@@ -429,7 +413,7 @@ mod tests {
     #[test]
     fn test_v4_tcp_success() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -442,7 +426,12 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(
@@ -461,7 +450,7 @@ mod tests {
     #[test]
     fn test_v4_tcp_first_frag() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -474,9 +463,11 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
         assert_eq!(
             ClassifierResult::FirstFragment,
-            classify(&mut packet).unwrap()
+            classify(metadata.five_tuple_mut(), body).unwrap()
         );
 
         let metadata = packet.metadata();
@@ -497,7 +488,7 @@ mod tests {
     #[test]
     fn test_v4_tcp_subsequent_frag() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -510,9 +501,11 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
         assert_eq!(
             ClassifierResult::SubsequentFragment,
-            classify(&mut packet).unwrap()
+            classify(metadata.five_tuple_mut(), body).unwrap()
         );
 
         let metadata = packet.metadata();
@@ -533,7 +526,7 @@ mod tests {
     #[test]
     fn test_v4_truncated_l3() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -543,7 +536,9 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(IpAddress::new_zeroed(), metadata.get_src_address());
@@ -556,7 +551,7 @@ mod tests {
     #[test]
     fn test_v4_ihl_too_small() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -569,7 +564,9 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -583,7 +580,7 @@ mod tests {
     #[test]
     fn test_v4_ihl_too_big() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data =
             [
@@ -596,7 +593,9 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -612,7 +611,7 @@ mod tests {
     #[test]
     fn test_v6_tcp_success() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x28, 0x06, 0x40,
@@ -629,7 +628,12 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -659,7 +663,7 @@ mod tests {
     #[test]
     fn test_v6_first_fragment() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x02, 0x12, 0x89, 0x00, 0x50, 0x2c, 0x40,
@@ -681,9 +685,11 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
         assert_eq!(
             ClassifierResult::FirstFragment,
-            classify(&mut packet).unwrap()
+            classify(metadata.five_tuple_mut(), body).unwrap()
         );
 
         let metadata = packet.metadata();
@@ -714,7 +720,7 @@ mod tests {
     #[test]
     fn test_v6_subsequent_fragment() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x02, 0x12, 0x89, 0x00, 0x18, 0x2c, 0x40,
@@ -729,9 +735,11 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
         assert_eq!(
             ClassifierResult::SubsequentFragment,
-            classify(&mut packet).unwrap()
+            classify(metadata.five_tuple_mut(), body).unwrap()
         );
 
         let metadata = packet.metadata();
@@ -763,7 +771,7 @@ mod tests {
     fn test_v6_with_routing_option() {
         // This packet presents an interesting problem of the inner IP being the "correct" one
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0f, 0xbb, 0x74, 0x00, 0x60, 0x2b, 0x3f,
@@ -787,9 +795,11 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
         assert_eq!(
             ClassifierResult::UnclassifiedL4,
-            classify(&mut packet).unwrap()
+            classify(metadata.five_tuple_mut(), body).unwrap()
         );
 
         let metadata = packet.metadata();
@@ -821,7 +831,7 @@ mod tests {
     fn test_option_length_error_v6() {
         // This packet presents an interesting problem of the inner IP being the "correct" one
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 128);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0f, 0xbb, 0x74, 0x00, 0x38, 0x2b, 0x3f,
@@ -840,7 +850,9 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -870,12 +882,14 @@ mod tests {
     #[test]
     fn test_header_length_error_v6() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         let packet_data = [0x60u8, 5u8, 4u8, 3u8, 2u8, 1u8, 0u8];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -889,7 +903,7 @@ mod tests {
     #[test]
     fn test_ipv4_mapped_src_error_v6() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x28, 0x06, 0x40,
@@ -906,13 +920,15 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
     }
 
     #[test]
     fn test_ipv4_mapped_dst_error_v6() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x28, 0x06, 0x40,
@@ -929,13 +945,15 @@ mod tests {
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
     }
 
     #[test]
     fn test_payload_length_error_v6() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x01, 0x28, 0x06, 0x40,
@@ -951,7 +969,9 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -981,7 +1001,7 @@ mod tests {
     #[test]
     fn test_jumbo_reject_v6() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x00, 0x00, 0x40,
@@ -993,7 +1013,9 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1023,7 +1045,7 @@ mod tests {
     #[test]
     fn test_smalljumbo_reject_v6() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x00, 0x00, 0x40,
@@ -1036,7 +1058,9 @@ mod tests {
         packet.put_slice(&packet_data);
         packet.put_bytes(0, 256);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1066,7 +1090,7 @@ mod tests {
     #[test]
     fn test_empty_packet_v6() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x0d, 0x68, 0x4a, 0x00, 0x00, 0xFE, 0x40,
@@ -1078,7 +1102,9 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1105,23 +1131,25 @@ mod tests {
         assert_eq!(0u8, metadata.get_l4_protocol());
     }
 
-    // Begin TCP tests
+    //     // Begin TCP tests
 
     #[test]
     fn test_tcp_truncated() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
-                0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
-                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
-                0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            ];
+            0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
+            0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+            0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1141,19 +1169,21 @@ mod tests {
     #[test]
     fn test_tcp_data_offset_too_small() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
-                0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00,
-                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
-                0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x30, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
-            ];
+            0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00,
+            0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+            0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x30, 0x02, 0x20, 0x00, 0x85, 0x75, 0x00, 0x00,
+        ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1173,19 +1203,21 @@ mod tests {
     #[test]
     fn test_tcp_data_offset_too_big() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
-                0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00,
-                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
-                0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x30, 0x02, 0x30, 0x00, 0x85, 0x75, 0x00, 0x00,
-            ];
+            0x45, 0x00, 0x00, 0x28, 0x00, 0x01, 0x00, 0x00,
+            0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+            0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x30, 0x02, 0x30, 0x00, 0x85, 0x75, 0x00, 0x00,
+        ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1202,23 +1234,25 @@ mod tests {
         assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
-    // Begin UDP tests
+    //     // Begin UDP tests
 
     #[test]
     fn test_udp_truncated() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET + 64);
         #[rustfmt::skip]
         let packet_data = [
-                0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
-                0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
-                0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            ];
+            0x45, 0x00, 0x00, 0x20, 0x00, 0x01, 0x00, 0x00,
+            0x40, 0x06, 0x70, 0xC6, 0x01, 0x02, 0x03, 0x04,
+            0x04, 0x03, 0x02, 0x01, 0x00, 0x14, 0x00, 0x50,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
         packet.alloc_zeroed_headroom(packet_data.len());
         packet.body_mut().copy_from_slice(&packet_data);
 
-        assert!(classify(&mut packet).is_err());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert!(classify(metadata.five_tuple_mut(), body).is_err());
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1235,12 +1269,12 @@ mod tests {
         assert_eq!(6u8, metadata.get_l4_protocol());
     }
 
-    // Begin ICMP tests
+    //     // Begin ICMP tests
 
     #[test]
     fn test_icmp() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x45, 0x00, 0x00, 0x54, 0x22, 0x7C, 0x40, 0x00,
@@ -1257,7 +1291,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1274,7 +1313,7 @@ mod tests {
     #[test]
     fn test_icmpv6() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
         #[rustfmt::skip]
         let packet_data = [
             0x60, 0x00, 0x00, 0x00, 0x00, 0x20, 0x3A, 0xFF,
@@ -1289,7 +1328,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1315,7 +1359,7 @@ mod tests {
     #[test]
     fn test_icmpv6_extracts_type() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
 
         // echo request ::1 -> ::1
         #[rustfmt::skip]
@@ -1330,7 +1374,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1352,7 +1401,7 @@ mod tests {
     #[test]
     fn test_icmpv6_extracts_type_code() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
 
         // hand doctored ICMP ::1 -> ::1 (checksum not valid)
         // TYPE 4 CODE 2
@@ -1368,7 +1417,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv6, metadata.get_l3_type());
@@ -1390,7 +1444,7 @@ mod tests {
     #[test]
     fn test_icmp_extracts_type() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
 
         // echo request 127.0.0.1 -> 127.0.0.1
         #[rustfmt::skip]
@@ -1409,7 +1463,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());
@@ -1422,7 +1481,7 @@ mod tests {
     #[test]
     fn test_icmp_extracts_type_code() {
         let buf = Box::new([0u8; config::PACKET_BUFFER_SIZE]);
-        let mut packet = packet::Packet::new(buf, Packet::MIN_BODY_OFFSET);
+        let mut packet = Packet::new(buf, Packet::MIN_BODY_OFFSET);
 
         // Hand doctored ICMP packet. 127.0.0.1 -> 127.0.0.1 (checksum invalid)
         // TYPE: 3, CODE: 11
@@ -1442,7 +1501,12 @@ mod tests {
         ];
         packet.put_slice(&packet_data);
 
-        assert_eq!(ClassifierResult::OK, classify(&mut packet).unwrap());
+        let (metadata, body) = packet.metadata_mut_and_body_mut();
+
+        assert_eq!(
+            ClassifierResult::OK,
+            classify(metadata.five_tuple_mut(), body).unwrap()
+        );
 
         let metadata = packet.metadata();
         assert_eq!(L3Type::Ipv4, metadata.get_l3_type());

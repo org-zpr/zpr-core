@@ -58,6 +58,25 @@ impl FiveTuple {
             dst_port: self.src_port,
         }
     }
+
+    pub fn set_src_address(&mut self, src_address: net_defs::IpAddress) {
+        self.src_address = src_address;
+    }
+    pub fn set_dst_address(&mut self, dst_address: net_defs::IpAddress) {
+        self.dst_address = dst_address;
+    }
+    pub fn set_l3_type(&mut self, l3_type: zpr::L3Type) {
+        self.l3_type = l3_type;
+    }
+    pub fn set_l4_protocol(&mut self, l4_protocol: net_defs::IpProtocol) {
+        self.l4_protocol = l4_protocol;
+    }
+    pub fn set_src_port(&mut self, src_port: u16) {
+        self.src_port = src_port;
+    }
+    pub fn set_dst_port(&mut self, dst_port: u16) {
+        self.dst_port = dst_port;
+    }
 }
 
 impl std::fmt::Display for FiveTuple {

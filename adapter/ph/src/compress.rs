@@ -205,7 +205,8 @@ mod tests {
             let mut pkt = Packet::new(buf, 256);
             pkt.put(body);
 
-            let cls_res = classifier::classify(&mut pkt).unwrap();
+            let (metadata, pkt_body) = pkt.metadata_mut_and_body_mut();
+            let cls_res = classifier::classify(metadata.five_tuple_mut(), pkt_body).unwrap();
             assert!(
                 cls_res == classifier::ClassifierResult::OK
                     || cls_res == classifier::ClassifierResult::UnclassifiedL4

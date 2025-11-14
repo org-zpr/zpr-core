@@ -246,6 +246,10 @@ impl PacketMetadata {
     pub fn five_tuple(&self) -> &FiveTuple {
         &self.five_tuple
     }
+
+    pub fn five_tuple_mut(&mut self) -> &mut FiveTuple {
+        &mut self.five_tuple
+    }
 }
 
 impl std::fmt::Debug for PacketMetadata {

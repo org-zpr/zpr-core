@@ -45,6 +45,7 @@ pub const DOCK_LINK_ID: LinkId = 2;
 pub type StreamId = u32;
 
 /// Forwarding entry used both for forwarding next-hops and looking up forwarding next-hops
+#[derive(Clone)]
 pub struct ForwardingEntry(pub LinkId, pub StreamId);
 
 /// Visa ID
