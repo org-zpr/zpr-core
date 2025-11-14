@@ -1,19 +1,27 @@
+//! Our internal visa type
+//!
+//! Currently based on a mix of the thrift and capnp protocols, will likely evolve as we move
+//! away from thrift exclusively to capnp.
+
 use crate::net_defs::{IpAddress, IpProtocol, ip_number};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use vsapi;
 
+#[derive(Debug)]
 pub enum VisaResponse {
     Allow(Visa),
     Deny(Denied),
     Error(Error),
 }
 
+#[derive(Debug)]
 pub struct Denied {
     pub code: DenyCode,
-    pub reason: String,
+    pub reason: Option<String>,
 }
 
 // Will be more useful once we transition to capnp, right now we only use Fail
+#[derive(Debug, Eq, PartialEq)]
 pub enum DenyCode {
     Fail,
     NoReason,
@@ -25,12 +33,14 @@ pub enum DenyCode {
     QuotaExceeded,
 }
 
+#[derive(Debug)]
 pub struct Error {
     pub code: ErrorCode,
     pub message: String,
     pub retry_in: u32,
 }
 
+#[derive(Debug)]
 pub enum ErrorCode {
     Internal,
     AuthRequired,
@@ -51,10 +61,9 @@ impl From<vsapi::VisaResponse> for VisaResponse {
                 vsapi::StatusCode::SUCCESS => {
                     Self::Allow(Visa::from(thrift_visa_response.visa.unwrap().visa.unwrap()))
                 }
-                vsapi::StatusCode::FAIL => match thrift_visa_response.reason {
-                    Some(reason) => Self::Deny(Denied::new(DenyCode::Fail, reason)),
-                    None => Self::Deny(Denied::new(DenyCode::Fail, String::new())),
-                },
+                vsapi::StatusCode::FAIL => {
+                    Self::Deny(Denied::new(DenyCode::Fail, thrift_visa_response.reason))
+                }
                 val => Self::Error(Error::new(
                     ErrorCode::UnknownStatusCode,
                     format!("Status code: {val:?}"),
@@ -71,7 +80,7 @@ impl From<vsapi::VisaResponse> for VisaResponse {
 }
 
 impl Denied {
-    pub fn new(code: DenyCode, reason: String) -> Self {
+    pub fn new(code: DenyCode, reason: Option<String>) -> Self {
         Self { code, reason }
     }
 }
@@ -87,6 +96,7 @@ impl Error {
 }
 
 // TODO figure out which of these need to stay once we switch to capnp
+#[derive(Debug)]
 pub struct Visa {
     pub issuer_id: u64, // i32 in thrift, u64 in capnp
     pub config: i64,
@@ -103,6 +113,7 @@ pub struct Visa {
     // pub sig: Signature, // not in capnp
 }
 
+#[derive(Debug)]
 pub struct TcpUdpPep {
     // pub source_contact_addr: Vec<u8>,
     // pub dest_contact_addr: Vec<u8>,
@@ -115,6 +126,7 @@ pub struct TcpUdpPep {
     // pub endpoint: EndpointT, // not in thrift
 }
 
+#[derive(Debug)]
 pub struct IcmpPep {
     // pub source_contact_addr: Vec<u8>,
     // pub dest_contact_addr: Vec<u8>,
@@ -128,7 +140,7 @@ pub struct IcmpPep {
     // pub one_shot: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct KeySet {
     pub format: i32,
     /// session key encrypted for ingress node to read
@@ -137,7 +149,7 @@ pub struct KeySet {
     pub egress_key: Vec<u8>,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Constraints {
     /// not set or none means no bandwidth constraint
     pub bw: bool,
@@ -147,11 +159,6 @@ pub struct Constraints {
     pub data_cap_bytes: i64,
     /// tether address of service actor
     pub data_cap_affinity_addr: Vec<u8>,
-}
-
-pub struct Signature {
-    pub ty: i32,
-    pub signature: Vec<u8>,
 }
 
 pub enum EndpointT {
@@ -326,3 +333,9 @@ impl From<vsapi::Constraints> for Constraints {
         }
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+
+// }

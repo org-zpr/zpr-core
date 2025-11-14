@@ -9,6 +9,7 @@ use tracing::*;
 use crate::errors::VSClientError;
 use crate::logging::targets::VS_RPC;
 use crate::m2;
+use crate::visa::VisaResponse;
 use vsapi::{self, TVisaServiceSyncClient, VisaServiceSyncClient};
 use zpr;
 
@@ -46,7 +47,7 @@ pub trait VSClientI: Send {
         source_tether_addr: IpAddr,
         l3_type: zpr::L3Type,
         packet: Vec<u8>,
-    ) -> Result<vsapi::VisaResponse, VSClientError>;
+    ) -> Result<VisaResponse, VSClientError>;
     fn authorize_connect(
         &mut self,
         req: vsapi::ConnectRequest,
@@ -169,7 +170,7 @@ impl VSClientI for VSClient {
         source_tether_addr: IpAddr,
         l3_type: zpr::L3Type,
         packet: Vec<u8>,
-    ) -> Result<vsapi::VisaResponse, VSClientError> {
+    ) -> Result<VisaResponse, VSClientError> {
         if self.key.is_none() {
             return Err(VSClientError::NoAPIKey);
         }
@@ -188,7 +189,7 @@ impl VSClientI for VSClient {
 
         debug!(target: VS_RPC, "sending VISA_REQUEST to {}", self.service);
         match self.cli.request_visa(key.clone(), addr_bytes, l3t, packet) {
-            Ok(result) => Ok(result),
+            Ok(result) => Ok(VisaResponse::from(result)),
             Err(e) => Err(e.into()),
         }
     }

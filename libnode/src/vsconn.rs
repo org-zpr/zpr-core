@@ -18,6 +18,7 @@ use tracing::{debug, error, info};
 use crate::claims;
 use crate::errors::{VSClientError, VSError};
 use crate::logging::targets::VS_RPC;
+use crate::visa::VisaResponse;
 use crate::vscli::{self, VSClientI};
 use crate::vss::DEFAULT_VSS_PORT;
 
@@ -34,7 +35,7 @@ pub struct VisaRequest {
     pub packet: Vec<u8>,
 }
 
-type VisaRequestResponse = Result<vsapi::VisaResponse, VSClientError>;
+type VisaRequestResponse = Result<VisaResponse, VSClientError>;
 type AuthorizeConnectResponse = Result<vsapi::ConnectResponse, VSClientError>;
 type DisconnectStatus = Result<(), VSClientError>;
 type RequestServicesResponse = Result<vsapi::ServicesResponse, VSClientError>;
@@ -382,6 +383,8 @@ mod test {
     use std::sync::Mutex;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+    use crate::visa::DenyCode;
+
     const CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
 MIICETCB+qADAgECAhRmhbwsq9blyxg3Xv5jTvvsJu9/GzANBgkqhkiG9w0BAQsF
 ADAYMRYwFAYDVQQDDA1hdXRob3JpdHkuenByMB4XDTI0MTAwMzE5NTQxN1oXDTI1
@@ -546,7 +549,7 @@ s5JVZ48=
             source_tether_addr: IpAddr,
             l3_type: zpr::L3Type,
             _packet: Vec<u8>,
-        ) -> Result<vsapi::VisaResponse, VSClientError> {
+        ) -> Result<VisaResponse, VSClientError> {
             if let Some(e) = take_next_error() {
                 return Err(e);
             }
@@ -555,7 +558,8 @@ s5JVZ48=
                 visa: None,
                 reason: Some(format!("addr: {}, type: {}", source_tether_addr, l3_type)),
             };
-            Ok(vrr)
+            let v = VisaResponse::from(vrr);
+            Ok(v)
         }
 
         fn authorize_connect(
@@ -823,11 +827,16 @@ s5JVZ48=
         match timeout(Duration::from_millis(100), resp).await {
             Ok(resp) => {
                 let vr = resp.unwrap();
-                assert_eq!(vr.status, Some(vsapi::StatusCode::FAIL));
-                assert!(vr.reason.is_some());
-                let reason = vr.reason.unwrap();
-                assert!(reason.contains(&node_addr.to_string()));
-                assert!(reason.contains(format!("type: {}", zpr::L3Type::Ipv4).as_str()));
+
+                if let VisaResponse::Deny(denied) = vr {
+                    assert_eq!(denied.code, DenyCode::Fail);
+                    assert!(denied.reason.is_some());
+                    let reason = denied.reason.unwrap();
+                    assert!(reason.contains(&node_addr.to_string()));
+                    assert!(reason.contains(format!("type: {}", zpr::L3Type::Ipv4).as_str()));
+                } else {
+                    assert!(false);
+                }
             }
             _ => {
                 panic!("expected visa-response message, but got nothing (timeout)");
