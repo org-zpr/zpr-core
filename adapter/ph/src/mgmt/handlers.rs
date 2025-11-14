@@ -1,5 +1,6 @@
 //! Handlers for management requests.
 
+use super::adapter;
 use crate::adapter_tables;
 use crate::assembly::{self, Assembly, PhMode, VERSION};
 use crate::auth;
@@ -1044,7 +1045,7 @@ pub async fn handle_bind_egress_stream_request(
 pub async fn handle_bind_actor_address_response(
     asm: &Arc<Assembly>,
     txn_id: u16,
-    pkt: Packet,
+    mut pkt: Packet,
 ) -> HandleMgmtResult {
     let link_id = pkt.metadata().ingress_link_id;
 
@@ -1056,13 +1057,54 @@ pub async fn handle_bind_actor_address_response(
         return Err(HandleMgmtError::UnknownTransaction(txn_id));
     };
 
-    let Some(sender) = peer_state.bind_req_state.lock().unwrap().remove(&txn) else {
-        return Err(HandleMgmtError::UnknownTransaction(txn_id));
+    let Ok(hdr) = zdp::ZdpBindActorAddressResponseHeader::read_from_buf(&mut pkt) else {
+        return Err(HandleMgmtError::BadStructure);
     };
 
-    let _ = sender.send(pkt);
+    match hdr.status_code {
+        zdp::ResponseCode::Success => {
+            let stream_id = pkt.metadata().ingress_stream_id;
 
-    Ok(())
+            let Ok(tcst) = zpr::Tcst::read_from_buf(&mut pkt) else {
+                return Err(HandleMgmtError::BadStructure);
+            };
+
+            if !matches!(tcst, zpr::Tcst::Ip5Tuple) {
+                warn!(target: ZDP, "Link {}: unsupported TCST {}", pkt.metadata().ingress_link_id, tcst.0);
+                return Err(HandleMgmtError::BadStructure);
+            }
+
+            let Ok(tc) = tc::Ip5TupleTc::deserialize(&mut pkt) else {
+                return Err(HandleMgmtError::BadStructure);
+            };
+
+            let txn_id = txn.id();
+
+            adapter::install_tether(&asm, &txn, stream_id, tc).map_err(
+                |adapter::InstallTetherError::NoSuchTransaction| {
+                    HandleMgmtError::UnknownTransaction(txn_id)
+                },
+            )
+        }
+
+        zdp::ResponseCode::Other => {
+            if hdr.info_len as usize > pkt.remaining() {
+                return Err(HandleMgmtError::BadStructure);
+            }
+
+            let Ok(msg) = std::str::from_utf8(&pkt.body()[..hdr.info_len as usize]) else {
+                return Err(HandleMgmtError::BadStructure);
+            };
+
+            adapter::deny_tether(&asm, &txn, msg).map_err(
+                |adapter::InstallTetherError::NoSuchTransaction| {
+                    HandleMgmtError::UnknownTransaction(txn_id)
+                },
+            )
+        }
+
+        _ => Err(HandleMgmtError::BadStructure),
+    }
 }
 
 pub async fn handle_bind_egress_stream_response(

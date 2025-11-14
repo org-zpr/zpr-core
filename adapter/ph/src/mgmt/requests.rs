@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 use super::core::{self, Sent};
+use super::txn_mgr::TxnId;
 use crate::config;
 use crate::counters::ManagementCounterType;
 use crate::defs::*;
@@ -259,7 +260,7 @@ pub enum BindActorAddressError {
     #[error("bad structure")]
     BadStructure,
     #[error("{0}")]
-    BindActorAddressError(Box<str>),
+    BindActorAddressError(String),
     #[error("link closed")]
     LinkClosed,
 }
@@ -273,29 +274,14 @@ impl From<core::MgmtSendError> for BindActorAddressError {
 }
 
 /// send a Bind Actor Address Request and wait for the Response (RFC 6.5 § 6.3.11)
-pub async fn send_bind_actor_address_request(
-    asm: &Assembly,
+pub fn send_bind_actor_address_request<'a>(
+    asm: &'a Assembly,
     link_id: zpr::LinkId,
+    txn_id: TxnId,
     five_tuple: &FiveTuple,
     packet_body: &[u8],
-) -> Result<(zpr::StreamId, tc::Ip5TupleTc), BindActorAddressError> {
+) -> Sent<'a> {
     info!(target: ZDP, "Link {link_id}: sending BindActorAddressRequest for {five_tuple} with packet_body size {}", packet_body.len());
-
-    let (sender, receiver) = tokio::sync::oneshot::channel();
-
-    let Some(peer_state) = asm.peer_table.get(link_id) else {
-        return Err(BindActorAddressError::LinkClosed);
-    };
-
-    let txn = peer_state.txn_mgr.open().await;
-    let txn_id = txn.id();
-    peer_state
-        .bind_req_state
-        .lock()
-        .unwrap()
-        .insert(txn, sender);
-
-    drop(peer_state);
 
     let mut req = core::new_heap_packet();
     let bind_req_hdr = req.alloc_zeroed_header::<zdp::ZdpBindActorAddressRequestHeader>();
@@ -314,57 +300,6 @@ pub async fn send_bind_actor_address_request(
         txn_id,
         req,
     )
-    .await?;
-
-    let Ok(mut resp) = receiver.await else {
-        return Err(BindActorAddressError::LinkClosed);
-    };
-
-    let Ok(hdr) = zdp::ZdpBindActorAddressResponseHeader::read_from_buf(&mut resp) else {
-        core::count_event(asm, ManagementCounterType::BadStructure);
-        return Err(BindActorAddressError::BadStructure);
-    };
-
-    match hdr.status_code {
-        zdp::ResponseCode::Success => {
-            let stream_id = resp.metadata().ingress_stream_id;
-
-            let Ok(tcst) = zpr::Tcst::read_from_buf(&mut resp) else {
-                return Err(BindActorAddressError::BadStructure);
-            };
-
-            if !matches!(tcst, zpr::Tcst::Ip5Tuple) {
-                warn!(target: ZDP, "Link {}: unsupported TCST {}", resp.metadata().ingress_link_id, tcst.0);
-                return Err(BindActorAddressError::BadStructure);
-            }
-
-            let Ok(tc) = tc::Ip5TupleTc::deserialize(&mut resp) else {
-                return Err(BindActorAddressError::BadStructure);
-            };
-
-            return Ok((stream_id, tc));
-        }
-
-        zdp::ResponseCode::Other => {
-            if hdr.info_len as usize > resp.remaining() {
-                core::count_event(asm, ManagementCounterType::BadStructure);
-                return Err(BindActorAddressError::BadStructure);
-            }
-
-            let Ok(msg) = std::str::from_utf8(&resp.body()[..hdr.info_len as usize]) else {
-                core::count_event(asm, ManagementCounterType::BadStructure);
-                return Err(BindActorAddressError::BadStructure);
-            };
-            let msg: Box<str> = msg.into();
-
-            Err(BindActorAddressError::BindActorAddressError(msg))
-        }
-
-        _ => {
-            core::count_event(asm, ManagementCounterType::BadStructure);
-            Err(BindActorAddressError::BadStructure)
-        }
-    }
 }
 
 pub async fn send_bind_egress_stream_request(
@@ -427,9 +362,8 @@ pub async fn send_bind_egress_stream_request(
                 core::count_event(asm, ManagementCounterType::BadStructure);
                 return Err(BindActorAddressError::BadStructure);
             };
-            let msg: Box<str> = msg.into();
 
-            Err(BindActorAddressError::BindActorAddressError(msg))
+            Err(BindActorAddressError::BindActorAddressError(msg.to_owned()))
         }
 
         _ => {

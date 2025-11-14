@@ -1,11 +1,10 @@
-use crate::adapter_tables::{self, AltPep};
+use crate::adapter_tables;
 use crate::assembly::{Assembly, PhMode};
 use crate::counters::ManagementCounterType;
 use crate::logging::targets::FLOW_MGMT;
 use crate::mgmt;
 use crate::packet::{Packet, PacketBuffer};
-use crate::queues::{AdapterManagerMessage, TryEnqueueError};
-use crate::tc;
+use crate::queues::AdapterManagerMessage;
 use crate::two_way_queue;
 use std::num::NonZero;
 use std::sync::Arc;
@@ -66,6 +65,8 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
     // copy out packet body
     let packet_body = pkt.body().to_owned();
 
+    let txn_id = txn.id();
+
     // mark ALT entry as pending to attempt to (i.e. racily) prevent
     // fastpath from issuing multiple requests
     match asm.alt.insert_pending(five_tuple, pkt, &txn) {
@@ -84,66 +85,38 @@ async fn do_request_tether_id(asm: &Arc<Assembly>, pkt: Packet) {
 
     debug!(target: FLOW_MGMT, "link {dock_link_id}: Issuing bind request for {five_tuple} (is now set PENDING)");
 
-    let bind_result = match asm.ph_mode {
+    match asm.ph_mode {
         PhMode::Adapter => {
             mgmt::requests::send_bind_actor_address_request(
                 asm,
                 dock_link_id,
+                txn_id,
                 &five_tuple,
                 &packet_body,
             )
-            .await
+            .enqueue();
         }
 
-        PhMode::Node => mgmt::dock::bind_actor_address(
-            asm,
-            NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap(),
-            &five_tuple,
-            &packet_body,
-        )
-        .await
-        .map_err(|err| {
-            mgmt::requests::BindActorAddressError::BindActorAddressError(err.to_string().into())
-        }),
-    };
+        PhMode::Node => {
+            let bind_result = mgmt::dock::bind_actor_address(
+                asm,
+                NonZero::new(zpr::LOCAL_ACTOR_LINK_ID).unwrap(),
+                &five_tuple,
+                &packet_body,
+            )
+            .await;
 
-    match bind_result {
-        Ok((tether_id, tc)) => {
-            // Confirm this TC matches our initial packet.
-            // TODO: use the TC itself to do this, once we have that code in place.
-            if tc.five_tuple()
-                != tc::Ip5TupleTc::new_with_compression_mode(tc.compression_mode(), five_tuple)
-                    .five_tuple()
-            {
-                error!(target: FLOW_MGMT, "Bind of {five_tuple} falied: node supplied TC incompatible with initial packet: {tc}");
-                asm.alt.remove(&five_tuple).unwrap();
-                return;
-            }
+            match bind_result {
+                Ok((tether_id, tc)) => {
+                    mgmt::adapter::install_tether(asm, &txn, tether_id, tc).unwrap()
+                }
 
-            // Bind succeeded; add to ALT.
-            debug!(target: FLOW_MGMT, "Bind of {five_tuple} succeeded: {tether_id}");
-
-            let pep = AltPep {
-                compression_mode: tc.compression_mode(),
-                tether_id,
-            };
-
-            let initial_packet = asm.alt.set_active(&five_tuple, pep).unwrap();
-
-            // now send out initial packet
-            match asm.actor_output_requeue.try_enqueue_packet(initial_packet) {
-                Ok(()) => (),
-                Err(TryEnqueueError::Full(_pkt)) => {
-                    debug!(target: FLOW_MGMT, "Requeue backpressure on bind of {five_tuple}, dropping initial packet");
-                    asm.counters.management[ManagementCounterType::QueueBackpressure].increment();
+                Err(err) => {
+                    // Bind failed; remove pending entry from ALT.
+                    debug!(target: FLOW_MGMT, "Bind of {five_tuple} failed: {err}");
+                    asm.alt.remove(&five_tuple).unwrap();
                 }
             }
-        }
-
-        Err(err) => {
-            // Bind failed; remove pending entry from ALT.
-            debug!(target: FLOW_MGMT, "Bind of {five_tuple} failed: {err}");
-            asm.alt.remove(&five_tuple).unwrap();
         }
     }
 }
