@@ -5,7 +5,7 @@ use crate::logging::targets::VISA_MGMT;
 use crate::visa_table;
 use crate::vs_types;
 use libnode::net_defs::{IPV6_ADDRESS_SIZE, IpAddress};
-use libnode::{claims, vsapi};
+use libnode::{claims, visa, vsapi};
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::num::NonZero;
@@ -180,27 +180,9 @@ pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
 /// Figure out egress link and insert visa into table.
 pub fn parse_visa(
     asm: &Arc<Assembly>,
-    visa: vsapi::VisaHop,
+    visa: visa::Visa,
 ) -> Result<(VisaId, NonZero<LinkId>), visa_table::VisaTableError> {
-    let Some(visa) = visa.visa else {
-        asm.counters.management[ManagementCounterType::VisaRequestError].increment();
-        error!(target: VISA_MGMT, "visa request error: Could not parse visa");
-        return Err(visa_table::VisaTableError::ParseError("all".into()));
-    };
-    // for now, just pull the destination address tether to set up forwarding
-    let Some(octets) = visa.dest.clone() else {
-        asm.counters.management[ManagementCounterType::VisaRequestError].increment();
-        error!(target: VISA_MGMT, "visa request error: Could not parse visa");
-        return Err(visa_table::VisaTableError::ParseError(
-            "destination address".into(),
-        ));
-    };
-    let Ok(addr) = IpAddress::try_from(octets) else {
-        asm.counters.management[ManagementCounterType::VisaRequestError].increment();
-        return Err(visa_table::VisaTableError::ParseError(
-            "destination address".into(),
-        ));
-    };
+    let addr = visa.dest.clone();
     let Some(link_id) = asm.find_egress_link(addr) else {
         asm.counters.management[ManagementCounterType::VisaRequestError].increment();
         return Err(visa_table::VisaTableError::DestNotFound(addr));

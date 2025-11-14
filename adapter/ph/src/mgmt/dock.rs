@@ -6,7 +6,7 @@ use crate::tc;
 use crate::visa_mgmt;
 use crate::visa_table::VisaTableError;
 
-use libnode::{vsapi, vsconn};
+use libnode::{visa, vsconn};
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
@@ -98,39 +98,37 @@ pub async fn bind_actor_address(
 
         asm.counters.management[ManagementCounterType::VisaRequested].increment();
         match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
-            Ok(vsapi::VisaResponse {
-                status: Some(vsapi::StatusCode::SUCCESS),
-                visa,
-                ..
-            }) => {
-                let Some(visa) = visa else {
-                    asm.counters.management[ManagementCounterType::VisaRequestError].increment();
-                    error!(target: FLOW_MGMT, "visa request error: Could not parse visa");
-                    return Err(BindActorAddressError::ParseError("Could not parse visa"));
-                };
-                let (visa_id, egress_link_id) =
-                    visa_mgmt::parse_visa(asm, visa).map_err(|e| match e {
-                        VisaTableError::ParseError(field) => {
-                            BindActorAddressError::ParseError(field)
-                        }
-                        e => panic!("Got unexpected error type {e}"),
-                    })?;
-                forwarding_decision = Some(ForwardingDecision {
-                    egress_link_id,
-                    visa_id,
-                });
-                asm.counters.management[ManagementCounterType::VisaRequestSuccess].increment();
-                debug!(
-                    target: FLOW_MGMT,
-                    "visa request succeeds, egress_link_id = {egress_link_id}"
-                );
-            }
-
-            Ok(resp) => {
-                asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
-                debug!(target: FLOW_MGMT, "visa request rejected: {resp:?}");
-                return Err(BindActorAddressError::PolicyError);
-            }
+            Ok(visa_response) => match visa_response {
+                visa::VisaResponse::Allow(visa) => {
+                    let (visa_id, egress_link_id) =
+                        visa_mgmt::parse_visa(asm, visa).map_err(|e| match e {
+                            VisaTableError::ParseError(field) => {
+                                BindActorAddressError::ParseError(field)
+                            }
+                            e => panic!("Got unexpected error type {e}"),
+                        })?;
+                    forwarding_decision = Some(ForwardingDecision {
+                        egress_link_id,
+                        visa_id,
+                    });
+                    asm.counters.management[ManagementCounterType::VisaRequestSuccess].increment();
+                    debug!(
+                        target: FLOW_MGMT,
+                        "visa request succeeds, egress_link_id = {egress_link_id}"
+                    );
+                }
+                visa::VisaResponse::Deny(denied) => {
+                    asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
+                    debug!(target: FLOW_MGMT, "visa request denied: {:?}", denied.reason);
+                    return Err(BindActorAddressError::PolicyError);
+                }
+                // Not implemented as part of thrift visas
+                visa::VisaResponse::Error(error) => {
+                    asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
+                    debug!(target: FLOW_MGMT, "visa request error with code: {:?} and message: {:?}", error.code, error.message);
+                    return Err(BindActorAddressError::PolicyError);
+                }
+            },
 
             Err(err) => {
                 asm.counters.management[ManagementCounterType::VisaRequestError].increment();

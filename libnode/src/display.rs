@@ -1,7 +1,9 @@
 use std::fmt::{self, Formatter};
 use std::net::IpAddr;
 
+use crate::visa;
 use crate::vss::VSSMsg;
+use crate::net_defs::ip_number;
 
 /// Human readable version of the MSSMsg which includes some interior details of the visa.
 impl fmt::Display for VSSMsg {
@@ -9,9 +11,9 @@ impl fmt::Display for VSSMsg {
         match self {
             VSSMsg::PolicyInstall(pi) => write!(f, "PolicyInstall(policy_id: {:?})", pi.policy_id),
             VSSMsg::PushedRevocation(r) => write!(f, "Revocation(issuer_id: {:?})", r.issuer_id),
-            VSSMsg::PushedVisa(vh) => {
+            VSSMsg::PushedVisa(v) => {
                 write!(f, "PushedVisa(")?;
-                summarize_visa_hop(f, vh)?;
+                summarize_visa(f, v)?;
                 write!(f, ")")
             }
             VSSMsg::PushedServices(services) => match services.services {
@@ -41,6 +43,7 @@ impl fmt::Display for VSSMsg {
     }
 }
 
+#[allow(dead_code)]
 /// Human readable version of the MSSMsg which includes some interior details of the visa.
 fn summarize_visa_hop(f: &mut Formatter<'_>, vh: &vsapi::VisaHop) -> fmt::Result {
     write!(
@@ -50,13 +53,80 @@ fn summarize_visa_hop(f: &mut Formatter<'_>, vh: &vsapi::VisaHop) -> fmt::Result
         to_string_or(&vh.hop_count, "(none)")
     )?;
     match vh.visa {
-        Some(ref v) => summarize_visa(f, v),
+        Some(ref v) => summarize_vsapi_visa(f, v),
         None => write!(f, "(none)"),
     }
 }
 
 /// Attempt to surface the most critical bits of a visa.
-fn summarize_visa(f: &mut Formatter<'_>, v: &vsapi::Visa) -> fmt::Result {
+fn summarize_visa(f: &mut Formatter<'_>, v: &visa::Visa) -> fmt::Result {
+    let mut icmp = false;
+    let proto: String;
+    let sport: String;
+    let dport: String;
+
+    match v.dock_pep {
+        ip_number::UDP | ip_number::TCP => {
+            match &v.tcp_udp_pep {
+                Some(args) => {
+                    sport = args.source_port.to_string();
+                    dport = args.dest_port.to_string();
+                }
+                None => {
+                    sport = "(none)".to_string();
+                    dport = "(none)".to_string();
+                }
+            }
+            if v.dock_pep == ip_number::UDP {
+                proto = "UDP".to_string();
+            } else {
+                proto = "TCP".to_string();
+            }
+        }
+        ip_number::ICMP => {
+            icmp = true;
+            proto = "ICMP".to_string();
+            match &v.icmp_pep {
+                Some(args) => {
+                    sport = args.icmp_type_code.to_string();
+                    dport = "".to_string();
+                }
+                None => {
+                    sport = "(none)".to_string();
+                    dport = "(none)".to_string();
+                }
+            }
+        }
+        _ => {
+            proto = "(invalid)".to_string();
+            sport = "(?)".to_string();
+            dport = "(?)".to_string();
+        }
+    };
+
+    if icmp {
+        write!(
+            f,
+            "{}<{}>/->[{}]",
+            proto,
+            sport,
+            v.dest,
+        )
+    } else {
+        write!(
+            f,
+            "{}/[{}]->[{}]:{}",
+            proto,
+            sport,
+            v.dest,
+            dport,
+        )
+    }
+}
+
+#[allow(dead_code)]
+/// Attempt to surface the most critical bits of a visa.
+fn summarize_vsapi_visa(f: &mut Formatter<'_>, v: &vsapi::Visa) -> fmt::Result {
     let mut icmp = false;
     let proto: String;
     let sport: String;
@@ -130,6 +200,7 @@ fn summarize_visa(f: &mut Formatter<'_>, v: &vsapi::Visa) -> fmt::Result {
     }
 }
 
+#[allow(dead_code)]
 /// Return string form of an optional IP address.
 fn opt_ip_to_str(ipa: &Option<Vec<u8>>) -> String {
     match ipa {
@@ -149,6 +220,7 @@ fn opt_ip_to_str(ipa: &Option<Vec<u8>>) -> String {
     }
 }
 
+#[allow(dead_code)]
 /// Get a string representation of an optional value or a default `none_str` as provided.
 fn to_string_or<T>(opt: &Option<T>, none_str: &str) -> String
 where

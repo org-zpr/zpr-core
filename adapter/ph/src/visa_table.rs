@@ -9,7 +9,7 @@ use crate::peer_table;
 
 use chrono::{DateTime, Utc};
 use libnode::net_defs::{IpAddress, ip_number};
-use libnode::vsapi;
+use libnode::{visa, vsapi};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::net::{IpAddr, Ipv6Addr};
@@ -41,7 +41,7 @@ pub enum VisaTableError {
 #[derive(Default)]
 pub struct Visa {
     // TODO add methods so that these don't have to be made pub
-    pub visa: Option<vsapi::Visa>,
+    pub visa: Option<visa::Visa>,
     streams: Vec<ForwardingEntry>,
     pub ftuple: Option<FiveTuple>,
 }
@@ -77,7 +77,7 @@ impl PartialEq for VisaTimeout {
 impl Eq for VisaTimeout {}
 
 impl Visa {
-    pub fn new(visa: vsapi::Visa) -> Self {
+    pub fn new(visa: visa::Visa) -> Self {
         let ftuple = Self::extract_five_tuple(&visa);
         Self {
             visa: Some(visa),
@@ -98,22 +98,9 @@ impl Visa {
         self.streams.push(forwarding_entry);
     }
 
-    pub fn extract_five_tuple(visa: &vsapi::Visa) -> FiveTuple {
-        let src_addr = match &visa.source_contact {
-            Some(src) => match IpAddress::try_from(src.clone()) {
-                Ok(addr) => addr,
-                Err(_) => IpAddress::UNSPECIFIED,
-            },
-            None => IpAddress::UNSPECIFIED,
-        };
-
-        let dst_addr = match &visa.dest_contact {
-            Some(dst) => match IpAddress::try_from(dst.clone()) {
-                Ok(addr) => addr,
-                Err(_) => IpAddress::UNSPECIFIED,
-            },
-            None => IpAddress::UNSPECIFIED,
-        };
+    pub fn extract_five_tuple(visa: &visa::Visa) -> FiveTuple {
+        let src_addr = visa.src_addr;
+        let dst_addr = visa.dst_addr;
 
         let l3_protocol = if src_addr.is_v4() {
             L3Type::Ipv4
@@ -121,45 +108,27 @@ impl Visa {
             L3Type::Ipv6
         };
 
-        let l4_protocol = match visa.dock_pep {
-            Some(pep) => match pep {
-                vsapi::PEPIndex::TCP => ip_number::TCP,
-                vsapi::PEPIndex::UDP => ip_number::UDP,
-                vsapi::PEPIndex::ICMP => {
-                    if l3_protocol == zpr::L3Type::Ipv4 {
-                        ip_number::ICMP
-                    } else {
-                        ip_number::IPV6_ICMP
-                    }
-                }
-                _ => 0,
-            },
-            None => 0,
-        };
+        let mut l4_protocol = visa.dock_pep;
+        if l4_protocol == ip_number::ICMP && l3_protocol == zpr::L3Type::Ipv6 {
+            l4_protocol = ip_number::IPV6_ICMP;
+        }
 
         let (src_port, dst_port) = match visa.dock_pep {
-            Some(pep) if pep == vsapi::PEPIndex::TCP || pep == vsapi::PEPIndex::UDP => {
-                if let Some(pargs) = &visa.tcpudp_pep_args {
-                    (
-                        pargs.source_port.unwrap_or_default() as u16,
-                        pargs.dest_port.unwrap_or_default() as u16,
-                    )
+            pep if pep == ip_number::TCP || pep == ip_number::UDP => {
+                if let Some(pargs) = &visa.tcp_udp_pep {
+                    (pargs.source_port, pargs.dest_port)
                 } else {
                     (0, 0)
                 }
             }
-            Some(pep) if pep == vsapi::PEPIndex::ICMP => {
-                if let Some(pargs) = &visa.icmp_pep_args {
-                    (
-                        pargs.icmp_type_code.unwrap_or_default() as u16,
-                        pargs.icmp_antecedent.unwrap_or_default() as u16,
-                    )
+            pep if pep == ip_number::ICMP => {
+                if let Some(pargs) = &visa.icmp_pep {
+                    (pargs.icmp_type_code, pargs.icmp_antecedent)
                 } else {
                     (0, 0)
                 }
             }
-            Some(_) => (0, 0),
-            None => (0, 0),
+            _ => (0, 0),
         };
 
         return FiveTuple {
@@ -302,16 +271,10 @@ impl VisaTable {
     }
 
     /// Insert a visa from the Visa Service into the Visa Table
-    pub fn insert_visa(&mut self, visa: vsapi::Visa) -> Result<VisaId, VisaTableError> {
-        let Some(visa_id) = visa.issuer_id else {
-            return Err(VisaTableError::ParseError("issuer_id"));
-        };
-        let Some(timestamp) = visa.expires else {
-            return Err(VisaTableError::ParseError("expiration"));
-        };
-        let Some(expiration) = DateTime::from_timestamp_millis(timestamp) else {
-            return Err(VisaTableError::ParseError("expiration"));
-        };
+    pub fn insert_visa(&mut self, visa: visa::Visa) -> Result<VisaId, VisaTableError> {
+        let visa_id = visa.issuer_id as i32;
+
+        let expiration = DateTime::from(visa.expires);
 
         info!(target: VISA_MGMT,
             "Visa inserted into VisaTable ID: {visa_id}, Expiration: {}",
@@ -412,7 +375,7 @@ fn make_tcp_visa(
     dest_port: u16,
     configuration: i64,
     expiration_ms: i64,
-) -> vsapi::Visa {
+) -> visa::Visa {
     let pepargs = vsapi::PEPArgsTCPUDP {
         source_contact_addr: Some(source.octets().to_vec()),
         dest_contact_addr: Some(dest.octets().to_vec()),
@@ -421,7 +384,7 @@ fn make_tcp_visa(
         server: Some(true),
         icmp_allowed: None,
     };
-    vsapi::Visa {
+    visa::Visa::from(vsapi::Visa {
         issuer_id: Some(visa_id),
         configuration: Some(configuration),
         expires: Some(expiration_ms),
@@ -435,7 +398,7 @@ fn make_tcp_visa(
         session_key: None,
         cons: None,
         sig: None,
-    }
+    })
 }
 
 #[cfg(test)]

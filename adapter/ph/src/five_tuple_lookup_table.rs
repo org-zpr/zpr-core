@@ -365,7 +365,7 @@ mod tests {
     use super::*;
 
     use libnode::net_defs::ip_number;
-    use libnode::vsapi;
+    use libnode::{visa, vsapi};
 
     fn make_visa(
         src_addr: [u8; 16],
@@ -392,7 +392,7 @@ mod tests {
             None,
         );
 
-        Visa::new(visa)
+        Visa::new(visa::Visa::from(visa))
     }
 
     #[test]

@@ -130,10 +130,10 @@ pub struct TcpUdpPep {
 pub struct IcmpPep {
     // pub source_contact_addr: Vec<u8>,
     // pub dest_contact_addr: Vec<u8>,
-    // /// the allowed ICMP type and code (in lower 16 bits)
+    /// the allowed ICMP type and code (in lower 16 bits)
     pub icmp_type_code: u16,
-    // /// use 0xFF for none
-    // pub icmp_antecedent: i32,
+    /// use 0xFF for none
+    pub icmp_antecedent: u16,
     // /// timeout for state in milliseconds
     // pub state_timeout_ms: i32,
     // /// If we allow only one reply to a request
@@ -165,6 +165,17 @@ pub enum EndpointT {
     Any,
     Server,
     Client,
+}
+
+impl TryFrom<vsapi::VisaHop> for Visa {
+    type Error = &'static str;
+
+    fn try_from(hop: vsapi::VisaHop) -> Result<Self, Self::Error> {
+        match hop.visa {
+            Some(visa) => Ok(Visa::from(visa)),
+            None => Err("No visa"),
+        }
+    }
 }
 
 // Could also implement a TryFrom instead of picking arbitarty values
@@ -273,8 +284,15 @@ impl From<vsapi::PEPArgsICMP> for IcmpPep {
             Some(val) => val as u16,
             None => 0,
         };
+        let icmp_antecedent = match thrift_icmp_pep.icmp_antecedent {
+            Some(val) => val as u16,
+            None => 0,
+        };
 
-        Self { icmp_type_code }
+        Self {
+            icmp_type_code,
+            icmp_antecedent,
+        }
     }
 }
 
