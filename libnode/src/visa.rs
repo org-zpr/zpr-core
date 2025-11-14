@@ -96,7 +96,7 @@ impl Error {
 }
 
 // TODO figure out which of these need to stay once we switch to capnp
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Visa {
     pub issuer_id: u64, // i32 in thrift, u64 in capnp
     pub config: i64,
@@ -113,7 +113,7 @@ pub struct Visa {
     // pub sig: Signature, // not in capnp
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TcpUdpPep {
     // pub source_contact_addr: Vec<u8>,
     // pub dest_contact_addr: Vec<u8>,
@@ -126,7 +126,7 @@ pub struct TcpUdpPep {
     // pub endpoint: EndpointT, // not in thrift
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct IcmpPep {
     // pub source_contact_addr: Vec<u8>,
     // pub dest_contact_addr: Vec<u8>,
@@ -140,7 +140,7 @@ pub struct IcmpPep {
     // pub one_shot: bool,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct KeySet {
     pub format: i32,
     /// session key encrypted for ingress node to read
@@ -149,7 +149,7 @@ pub struct KeySet {
     pub egress_key: Vec<u8>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Constraints {
     /// not set or none means no bandwidth constraint
     pub bw: bool,

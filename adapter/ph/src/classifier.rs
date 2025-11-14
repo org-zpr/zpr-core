@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use crate::packet;
 use crate::defs::FiveTuple;
 use arrayref::array_ref;
 use libnode::net_defs::*;
