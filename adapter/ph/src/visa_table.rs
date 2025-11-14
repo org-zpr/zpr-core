@@ -7,8 +7,8 @@ use crate::five_tuple_lookup_table::FiveTupleLookupTable;
 use crate::logging::targets::VISA_MGMT;
 use crate::peer_table;
 
-use libnode::net_defs::{IpAddress, ip_number};
 use chrono::{DateTime, Utc};
+use libnode::net_defs::{IpAddress, ip_number};
 use libnode::vsapi;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};

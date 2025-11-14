@@ -1,7 +1,7 @@
 #![allow(dead_code)]
-use libnode::net_defs::*;
 use crate::packet;
 use arrayref::array_ref;
+use libnode::net_defs::*;
 use std::mem::size_of;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};

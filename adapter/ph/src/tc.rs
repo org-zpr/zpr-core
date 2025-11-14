@@ -5,9 +5,9 @@
 //! For now, it's all here together.
 
 use crate::defs;
-use libnode::net_defs;
 use crate::zdp;
 use bytes::{Buf, BufMut};
+use libnode::net_defs;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
 
 /// IP 5-Tuple Traffic Classifier

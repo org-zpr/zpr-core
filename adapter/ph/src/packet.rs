@@ -7,8 +7,8 @@
 //! For usage examples see the [Packet] documentation.
 
 use crate::defs::*;
-use libnode::net_defs::*;
 use bytes::buf;
+use libnode::net_defs::*;
 extern crate libc;
 use std::mem::size_of;
 use zerocopy::*;

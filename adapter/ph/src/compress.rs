@@ -2,10 +2,10 @@
 
 use crate::classifier;
 use crate::defs::FiveTuple;
-use libnode::net_defs as libnode_net_defs;
 use crate::net_defs;
 use crate::packet::Packet;
 use bytes::Buf;
+use libnode::net_defs as libnode_net_defs;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use zerocopy::*;
 use zpr::{CompressionMode, L3Type};
