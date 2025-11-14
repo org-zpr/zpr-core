@@ -1,9 +1,9 @@
 use std::fmt::{self, Formatter};
 use std::net::IpAddr;
 
+use crate::net_defs::ip_number;
 use crate::visa;
 use crate::vss::VSSMsg;
-use crate::net_defs::ip_number;
 
 /// Human readable version of the MSSMsg which includes some interior details of the visa.
 impl fmt::Display for VSSMsg {
@@ -105,22 +105,9 @@ fn summarize_visa(f: &mut Formatter<'_>, v: &visa::Visa) -> fmt::Result {
     };
 
     if icmp {
-        write!(
-            f,
-            "{}<{}>/->[{}]",
-            proto,
-            sport,
-            v.dest,
-        )
+        write!(f, "{}<{}>/->[{}]", proto, sport, v.dest,)
     } else {
-        write!(
-            f,
-            "{}/[{}]->[{}]:{}",
-            proto,
-            sport,
-            v.dest,
-            dport,
-        )
+        write!(f, "{}/[{}]->[{}]:{}", proto, sport, v.dest, dport,)
     }
 }
 
