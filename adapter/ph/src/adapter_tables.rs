@@ -1,5 +1,7 @@
 //! Adapter lookup tables
 //!
+//! These tables hold the state of all tethers on an adapter, outbound (ALT) or inbound (DLT).
+//!
 //! RFC 6.5 § 5.1
 
 #![allow(dead_code)]
@@ -24,10 +26,16 @@ pub struct AltPep {
 }
 
 pub enum AltEntry {
+    /// We've requested a tether ID for this flow, but haven't received one yet.
     Pending(Packet, TxnHandle),
+    /// There is currently a tether allocated for this flow.
     Active(AltPep),
 }
 
+/// The Actor Lookup Table (ALT) holds all state of outbound tethers.
+///
+/// It is used to map five-tuples (from the endpoint) to compression
+/// specifications and tether IDs (for the dock).
 pub struct ActorLookupTable {
     table: DashMap<FiveTuple, AltEntry>,
     pending: DashMap<TxnHandle, FiveTuple>,
@@ -173,6 +181,10 @@ pub struct DltPep {
     pub five_tuple: FiveTuple,
 }
 
+/// The Dock Lookup Table (DLT) holds all state of inbound tethers.
+///
+/// It is used to map tether IDs (from the dock) to decompression
+/// specifications and five-tuples (for the endpoint).
 pub struct DockLookupTable {
     table: Mutex<RcuCslab<DltPep>>,
     reader: RcuBox<RcuCslabReader<DltPep>>,

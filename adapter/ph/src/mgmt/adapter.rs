@@ -48,6 +48,15 @@ pub fn install_tether(
     };
 
     let Ok(initial_packet) = asm.alt.set_active(&five_tuple, pep) else {
+        // The only way for a transaction to have exited pending (i.e.,
+        // either error from set_active()) at this point (after our earlier
+        // lookup of the 5t) is because we got some other response to this
+        // same transaction which caused this code to be run twice
+        // concurrently.  So from a serialization perspective, the first
+        // response ended the transaction, and now this 2nd response is for
+        // a non-existent transaction.  For logging, we infer that a duplicate
+        // response must be the cause.
+
         warn!(target: FLOW_MGMT, "Duplicate bind response for {five_tuple}, ignoring");
         return Err(InstallTetherError::NoSuchTransaction);
     };
