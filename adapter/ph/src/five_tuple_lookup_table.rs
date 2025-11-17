@@ -329,7 +329,7 @@ mod tests {
             0,
             0,
             Vec::new(),
-            Vec::new(),
+            [0u8; 16].to_vec(),
             src_addr.to_vec(),
             dst_addr.to_vec(),
             l4proto,
@@ -340,7 +340,7 @@ mod tests {
             None,
         );
 
-        Visa::new(visa::Visa::from(visa))
+        Visa::new(visa::Visa::try_from(visa).unwrap())
     }
 
     #[test]

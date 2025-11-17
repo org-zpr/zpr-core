@@ -397,7 +397,7 @@ fn make_tcp_visa(
         server: Some(true),
         icmp_allowed: None,
     };
-    visa::Visa::from(vsapi::Visa {
+    visa::Visa::try_from(vsapi::Visa {
         issuer_id: Some(visa_id),
         configuration: Some(configuration),
         expires: Some(expiration_ms),
@@ -412,6 +412,7 @@ fn make_tcp_visa(
         cons: None,
         sig: None,
     })
+    .unwrap()
 }
 
 #[cfg(test)]

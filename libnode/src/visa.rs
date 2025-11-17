@@ -3,15 +3,26 @@
 //! Currently based on a mix of the thrift and capnp protocols, will likely evolve as we move
 //! away from thrift exclusively to capnp.
 
+use crate::logging::targets::{V_STRUCTURE, VH_STRUCTURE, VR_STRUCTURE};
 use crate::net_defs::{IpAddress, IpProtocol, ip_number};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use thiserror::Error;
+use tracing::error;
 use vsapi;
+
+#[derive(Debug, Error)]
+pub enum VisaError {
+    #[error("Problem parsing visa with issuer id {0}: {1}")]
+    VisaParseError(u64, &'static str),
+    #[error("{0}")]
+    VisaHopError(&'static str),
+}
 
 #[derive(Debug)]
 pub enum VisaResponse {
     Allow(Visa),
     Deny(Denied),
-    Error(Error),
+    Error(VisaResponseError),
 }
 
 #[derive(Debug)]
@@ -34,7 +45,7 @@ pub enum DenyCode {
 }
 
 #[derive(Debug)]
-pub struct Error {
+pub struct VisaResponseError {
     pub code: ErrorCode,
     pub message: String,
     pub retry_in: u32,
@@ -52,6 +63,7 @@ pub enum ErrorCode {
     TemporatilyUnavailable,
     AuthError,
     UnknownStatusCode,
+    VisaStructureError(VisaError),
 }
 
 impl From<vsapi::VisaResponse> for VisaResponse {
@@ -59,22 +71,32 @@ impl From<vsapi::VisaResponse> for VisaResponse {
         match thrift_visa_response.status {
             Some(code) => match code {
                 vsapi::StatusCode::SUCCESS => {
-                    Self::Allow(Visa::from(thrift_visa_response.visa.unwrap().visa.unwrap()))
+                    match Visa::try_from(thrift_visa_response.visa.unwrap().visa.unwrap()) {
+                        Ok(v) => Self::Allow(v),
+                        Err(e) => Self::Error(VisaResponseError::new(
+                            ErrorCode::VisaStructureError(e),
+                            "No status code".to_string(),
+                            0,
+                        )),
+                    }
                 }
                 vsapi::StatusCode::FAIL => {
                     Self::Deny(Denied::new(DenyCode::Fail, thrift_visa_response.reason))
                 }
-                val => Self::Error(Error::new(
+                val => Self::Error(VisaResponseError::new(
                     ErrorCode::UnknownStatusCode,
                     format!("Status code: {val:?}"),
                     0,
                 )),
             },
-            None => Self::Error(Error::new(
-                ErrorCode::UnknownStatusCode,
-                "No status code".to_string(),
-                0,
-            )),
+            None => {
+                error!(target: VR_STRUCTURE, "No code in VisaResponse");
+                Self::Error(VisaResponseError::new(
+                    ErrorCode::UnknownStatusCode,
+                    "No status code".to_string(),
+                    0,
+                ))
+            }
         }
     }
 }
@@ -85,7 +107,7 @@ impl Denied {
     }
 }
 
-impl Error {
+impl VisaResponseError {
     pub fn new(code: ErrorCode, message: String, retry_in: u32) -> Self {
         Self {
             code,
@@ -168,22 +190,30 @@ pub enum EndpointT {
 }
 
 impl TryFrom<vsapi::VisaHop> for Visa {
-    type Error = &'static str;
+    type Error = VisaError;
 
     fn try_from(hop: vsapi::VisaHop) -> Result<Self, Self::Error> {
         match hop.visa {
-            Some(visa) => Ok(Visa::from(visa)),
-            None => Err("No visa"),
+            Some(visa) => Visa::try_from(visa),
+            None => {
+                error!(target: VH_STRUCTURE, "No visa in VisaHop");
+                Err(VisaError::VisaHopError("No visa"))
+            }
         }
     }
 }
 
 // Could also implement a TryFrom instead of picking arbitarty values
-impl From<vsapi::Visa> for Visa {
-    fn from(thrift_visa: vsapi::Visa) -> Self {
+impl TryFrom<vsapi::Visa> for Visa {
+    type Error = VisaError;
+
+    fn try_from(thrift_visa: vsapi::Visa) -> Result<Self, Self::Error> {
         let issuer_id = match thrift_visa.issuer_id {
             Some(val) => val as u64,
-            None => 0,
+            None => {
+                error!(target: V_STRUCTURE, "No issuer id");
+                return Err(VisaError::VisaParseError(0, "No issuer id"));
+            }
         };
         let config = match thrift_visa.configuration {
             Some(val) => val,
@@ -194,14 +224,23 @@ impl From<vsapi::Visa> for Visa {
                 let dur = Duration::from_millis(val as u64);
                 UNIX_EPOCH + dur
             }
-            None => SystemTime::now(),
+            None => {
+                error!(target: V_STRUCTURE, "no expiration in visa with issuer id {issuer_id}");
+                return Err(VisaError::VisaParseError(issuer_id, "No expiration"));
+            }
         };
         let dest = match thrift_visa.dest {
             Some(val) => match IpAddress::try_from(val) {
                 Ok(addr) => addr,
-                Err(_) => IpAddress::UNSPECIFIED,
+                Err(_) => {
+                    error!(target: V_STRUCTURE, "dest not properly formatted in visa with issuer id {issuer_id}");
+                    return Err(VisaError::VisaParseError(issuer_id, "Improper dest"));
+                }
             },
-            None => IpAddress::UNSPECIFIED,
+            None => {
+                error!(target: V_STRUCTURE, "No dest in visa with issuer id {issuer_id}");
+                return Err(VisaError::VisaParseError(issuer_id, "No dest"));
+            }
         };
         let src_addr = match thrift_visa.source_contact {
             Some(val) => match IpAddress::try_from(val) {
@@ -244,7 +283,7 @@ impl From<vsapi::Visa> for Visa {
             Some(val) => Constraints::from(val),
             None => Constraints::default(),
         };
-        Self {
+        Ok(Self {
             issuer_id,
             config,
             expires,
@@ -256,7 +295,7 @@ impl From<vsapi::Visa> for Visa {
             icmp_pep,
             session_key,
             cons,
-        }
+        })
     }
 }
 
