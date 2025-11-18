@@ -1,6 +1,10 @@
 //! ZPR concepts, excluding the ZDP protocol.
 
 pub mod rpc_commands;
+capnp::generated_code!(pub mod vs_capnp);
+pub mod vsapi {
+    pub use super::vs_capnp as v1;
+}
 
 use open_enum::open_enum;
 use std::net::{IpAddr, Ipv6Addr};

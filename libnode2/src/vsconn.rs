@@ -1,4 +1,4 @@
-use vsapi::vs_capnp as vsapi2;
+use zpr::vsapi::v1 as vsapi2;
 
 use ipnet::IpNet;
 use std::net::IpAddr;

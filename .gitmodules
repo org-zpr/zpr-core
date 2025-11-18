@@ -1,0 +1,3 @@
+[submodule "zpr-vsapi"]
+	path = zpr/zpr-vsapi
+	url = https://github.com/org-zpr/zpr-vsapi.git
