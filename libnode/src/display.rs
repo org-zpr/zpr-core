@@ -10,7 +10,10 @@ impl fmt::Display for VSSMsg {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             VSSMsg::PolicyInstall(pi) => write!(f, "PolicyInstall(policy_id: {:?})", pi.policy_id),
-            VSSMsg::PushedRevocation(r) => write!(f, "Revocation(issuer_id: {:?})", r.issuer_id),
+            VSSMsg::PushedRevocation(r) => match r {
+                visa::VisaOp::RevokeVisaId(id) => write!(f, "Revocation(issuer_id: {})", id),
+                _ => write!(f, "Revocation bad format, non RevokeVisaId"),
+            },
             VSSMsg::PushedVisa(v) => {
                 write!(f, "PushedVisa(")?;
                 summarize_visa(f, v)?;

@@ -204,19 +204,11 @@ pub fn get_egress_link_for_visa(
     Ok(link_id)
 }
 
-pub fn handle_revocation(
-    asm: &Arc<Assembly>,
-    revocation: vsapi::VisaRevocation,
-) -> Result<(), visa_table::VisaTableError> {
-    let Some(visa_id) = revocation.issuer_id else {
-        error!(target: VISA_MGMT, "Visa revocation with no ID");
-        return Err(visa_table::VisaTableError::ParseError("issuer_id".into()));
-    };
-
+pub fn handle_revocation(asm: &Arc<Assembly>, id: u64) -> Result<(), visa_table::VisaTableError> {
     asm.visa_table
         .write()
         .unwrap()
-        .revoke(&asm.peer_table, visa_id)
+        .revoke(&asm.peer_table, id as i32)
 }
 
 pub fn handle_services_update(

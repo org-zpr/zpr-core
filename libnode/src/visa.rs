@@ -5,6 +5,7 @@
 
 use crate::logging::targets::{V_STRUCTURE, VH_STRUCTURE, VR_STRUCTURE};
 use crate::net_defs::{IpAddress, IpProtocol, ip_number};
+// use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::error;
@@ -16,6 +17,8 @@ pub enum VisaError {
     VisaParseError(u64, &'static str),
     #[error("{0}")]
     VisaHopError(&'static str),
+    #[error("{0}")]
+    VisaRevocationError(&'static str),
 }
 
 #[derive(Debug)]
@@ -391,8 +394,29 @@ impl From<vsapi::Constraints> for Constraints {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-
+// pub struct ConnectRequest {
+//   pub connection_id: i32,
+//   /// dock ZPR address
+//   pub dock_addr: Vec<u8>,
+//   pub claims: BTreeMap<String, String>,
+//   /// assume this is old protocol buffer challenge-request
+//   pub challenge: Vec<u8>,
+//   /// assume this is old protocol buffer challenge-response
+//   pub challenge_responses: Vec<Vec<u8>>,
 // }
+
+pub enum VisaOp {
+    Grant(Visa),
+    RevokeVisaId(u64),
+}
+
+impl TryFrom<vsapi::VisaRevocation> for VisaOp {
+    type Error = VisaError;
+
+    fn try_from(revoke: vsapi::VisaRevocation) -> Result<Self, Self::Error> {
+        match revoke.issuer_id {
+            Some(id) => Ok(Self::RevokeVisaId(id as u64)),
+            None => Err(VisaError::VisaRevocationError("No issuer id")),
+        }
+    }
+}

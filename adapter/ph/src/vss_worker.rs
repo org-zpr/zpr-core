@@ -1,6 +1,7 @@
 use crate::assembly::Assembly;
 use crate::logging::targets::VISA_MGMT;
 use crate::visa_mgmt;
+use libnode::visa;
 use libnode::vss::VSSMsg;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -16,8 +17,8 @@ pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMsg>) {
                     error!(target: VISA_MGMT, "Error inserting visa {visa_id}: {e}");
                 }
             }
-            VSSMsg::PushedRevocation(revocation) => {
-                debug!(target: VISA_MGMT, "Received pushed revocation, id={}", revocation.issuer_id.unwrap());
+            VSSMsg::PushedRevocation(visa::VisaOp::RevokeVisaId(revocation)) => {
+                debug!(target: VISA_MGMT, "Received pushed revocation, id={}", revocation);
                 if let Err(e) = visa_mgmt::handle_revocation(&asm, revocation) {
                     error!(target: VISA_MGMT, "Error revoking visa: {e}");
                 }
