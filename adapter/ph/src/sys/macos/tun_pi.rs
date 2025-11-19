@@ -1,6 +1,6 @@
-use zpr_utils::net_defs::ethertype;
 use crate::sys::TunPi;
 use libc::{AF_INET, AF_INET6};
+use zpr_utils::net_defs::ethertype;
 
 // TODO: I have not confirmed that the packet info FLAGS field is the same as linux.
 // Assuming it is for now.
