@@ -7,8 +7,7 @@ mod main_args;
 use crate::main_args::{CaptureCommands, CliCommand, CmdlineArgs, Commands, LinkCommands};
 use cbpf_rs;
 use clap::Parser;
-use cli_proto::cli_capnp as cli;
-use cli_proto::cli_capnp::cmd_line_inter as svc;
+use cli::cmd_line_inter as svc;
 use pcap::{Capture, Linktype};
 use std::borrow::Borrow;
 use std::fs::OpenOptions;
@@ -20,6 +19,7 @@ use std::os::unix::net::UnixStream;
 use thiserror::Error;
 use tokio::time::{Duration, sleep};
 use tokio_util::compat::*;
+use zpr::admin_api::v1 as cli;
 use zpr::rpc_commands::RpcCommands;
 use zpr_ext::std::os::unix::net::{SocketAncillary, UnixStreamExt};
 
@@ -265,10 +265,10 @@ async fn set_capture_file_task(_service: svc::Client, _file_path: String) -> Res
     // let response = request.send().promise.await?;
     // let results = response.get()?;
     // match results.get_result()?.which()? {
-    //     cli_proto::cli_capnp::success_or_error::Which::Success(_) => {
+    //     cli::success_or_error::Which::Success(_) => {
     //         println!("Capture file set")
     //     }
-    //     cli_proto::cli_capnp::success_or_error::Which::Error(e) => {
+    //     cli::success_or_error::Which::Error(e) => {
     //         let result = e.unwrap().get_txt()?.to_string()?;
     //         return Err(capnp::Error::failed(result));
     //     }
@@ -328,10 +328,10 @@ async fn set_capture_program_task(
             let response = request.send().promise.await?;
             let results = response.get()?;
             match results.get_result()?.which()? {
-                cli_proto::cli_capnp::success_or_error::Which::Success(_) => {
+                cli::success_or_error::Which::Success(_) => {
                     println!("Capture program set")
                 }
-                cli_proto::cli_capnp::success_or_error::Which::Error(e) => {
+                cli::success_or_error::Which::Error(e) => {
                     let result = e.unwrap().get_txt()?.to_string()?;
                     println!("{result}");
                     return Err(CliError::RpcError(result));
@@ -487,10 +487,10 @@ async fn start_link_task(service: svc::Client, id: u32) -> Result<(), CliError> 
     let response = request.send().promise.await?;
     let results = response.get()?;
     match results.get_result()?.which()? {
-        cli_proto::cli_capnp::success_or_error::Which::Success(_) => {
+        cli::success_or_error::Which::Success(_) => {
             println!("Link {id} started")
         }
-        cli_proto::cli_capnp::success_or_error::Which::Error(e) => {
+        cli::success_or_error::Which::Error(e) => {
             let result = e.unwrap().get_txt()?.to_string()?;
             println!("{result}");
             return Err(CliError::RpcError(result));
@@ -507,10 +507,10 @@ async fn stop_link_task(service: svc::Client, id: u32) -> Result<(), CliError> {
     let response = request.send().promise.await?;
     let results = response.get()?;
     match results.get_result()?.which()? {
-        cli_proto::cli_capnp::success_or_error::Which::Success(_) => {
+        cli::success_or_error::Which::Success(_) => {
             println!("CLink {id} stopped")
         }
-        cli_proto::cli_capnp::success_or_error::Which::Error(e) => {
+        cli::success_or_error::Which::Error(e) => {
             let result = e.unwrap().get_txt()?.to_string()?;
             println!("{result}");
             return Err(CliError::RpcError(result));

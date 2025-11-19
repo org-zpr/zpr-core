@@ -36,45 +36,49 @@ jobs:
   # Build and upload ph
   build-ph:
     name: PH
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.1
     with:
       name: 'ph'
       path: './adapter/ph'
       package: true
+      needs-capnp: true
     secrets: inherit
 
   # Build and upload ph-cli
   build-ph-cli:
     name: PH CLI
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-build-test.yml@v1.1
     with:
       name: 'ph-cli'
       path: './adapter/cli'
       package: true
       runs-on: "['ubuntu-latest']"
       needs-libpcap: true
+      needs-capnp: true
     secrets: inherit
 
   # Test ph, check for warnings, and check formatting
   test-ph:
     name: PH
     needs: [build-ph]
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.1
     with:
       name: 'ph'
       path: './adapter/ph'
+      needs-capnp: true
     secrets: inherit
 
   # Test ph-cli, check for warnings, and check formatting
   test-ph-cli:
     name: PH CLI
     needs: [build-ph-cli]
-    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1
+    uses: org-zpr/zpr-dev-tools/.github/workflows/rust-test.yml@v1.1
     with:
       name: 'ph-cli'
       path: './adapter/cli'
       runs-on: "['ubuntu-latest']"
       needs-libpcap: true
+      needs-capnp: true
     secrets: inherit
 
   # Integration tests
