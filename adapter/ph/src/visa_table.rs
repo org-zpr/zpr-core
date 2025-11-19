@@ -8,13 +8,14 @@ use crate::logging::targets::VISA_MGMT;
 use crate::peer_table;
 
 use chrono::{DateTime, Utc};
-use libnode::{visa, vsapi};
+use libnode::vsapi;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::net::{IpAddr, Ipv6Addr};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::*;
+use zpr::vsapi_types;
 use zpr::{ForwardingEntry, L3Type, VisaId};
 use zpr_utils::net_defs::{IpAddress, ip_number};
 
@@ -41,7 +42,7 @@ pub enum VisaTableError {
 #[derive(Default, Clone)]
 pub struct Visa {
     // TODO add methods so that these don't have to be made pub
-    pub visa: Option<visa::Visa>,
+    pub visa: Option<vsapi_types::Visa>,
     streams: Vec<ForwardingEntry>,
     pub ftuple: Option<FiveTuple>,
 }
@@ -77,7 +78,7 @@ impl PartialEq for VisaTimeout {
 impl Eq for VisaTimeout {}
 
 impl Visa {
-    pub fn new(visa: visa::Visa) -> Self {
+    pub fn new(visa: vsapi_types::Visa) -> Self {
         let ftuple = Self::extract_five_tuple(&visa);
         Self {
             visa: Some(visa),
@@ -98,7 +99,7 @@ impl Visa {
         self.streams.push(forwarding_entry);
     }
 
-    pub fn extract_five_tuple(visa: &visa::Visa) -> FiveTuple {
+    pub fn extract_five_tuple(visa: &vsapi_types::Visa) -> FiveTuple {
         let src_addr = visa.src_addr;
         let dst_addr = visa.dst_addr;
 
@@ -274,7 +275,7 @@ impl VisaTable {
     }
 
     /// Insert a visa from the Visa Service into the Visa Table
-    pub fn insert_visa(&mut self, visa: visa::Visa) -> Result<VisaId, VisaTableError> {
+    pub fn insert_visa(&mut self, visa: vsapi_types::Visa) -> Result<VisaId, VisaTableError> {
         let visa_id = visa.issuer_id as i32;
 
         let expiration = DateTime::from(visa.expires);
@@ -388,7 +389,7 @@ fn make_tcp_visa(
     dest_port: u16,
     configuration: i64,
     expiration_ms: i64,
-) -> visa::Visa {
+) -> vsapi_types::Visa {
     let pepargs = vsapi::PEPArgsTCPUDP {
         source_contact_addr: Some(source.octets().to_vec()),
         dest_contact_addr: Some(dest.octets().to_vec()),
@@ -397,7 +398,7 @@ fn make_tcp_visa(
         server: Some(true),
         icmp_allowed: None,
     };
-    visa::Visa::try_from(vsapi::Visa {
+    vsapi_types::Visa::try_from(vsapi::Visa {
         issuer_id: Some(visa_id),
         configuration: Some(configuration),
         expires: Some(expiration_ms),

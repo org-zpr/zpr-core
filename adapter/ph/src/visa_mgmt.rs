@@ -4,13 +4,14 @@ use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::VISA_MGMT;
 use crate::visa_table;
 use crate::vs_types;
-use libnode::{claims, visa, vsapi};
+use libnode::{claims, vsapi};
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::num::NonZero;
 use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use tracing::*;
+use zpr::vsapi_types;
 use zpr::{LinkId, VisaId};
 use zpr_utils::net_defs::{IPV6_ADDRESS_SIZE, IpAddress};
 
@@ -180,7 +181,7 @@ pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
 /// Figure out egress link and insert visa into table.
 pub fn parse_visa(
     asm: &Arc<Assembly>,
-    visa: visa::Visa,
+    visa: vsapi_types::Visa,
 ) -> Result<(VisaId, NonZero<LinkId>), visa_table::VisaTableError> {
     let addr = visa.dest.clone();
     let Some(link_id) = asm.find_egress_link(addr) else {

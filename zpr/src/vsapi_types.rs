@@ -3,10 +3,10 @@
 //! Currently based on a mix of the thrift and capnp protocols, will likely evolve as we move
 //! away from thrift exclusively to capnp.
 
-use zpr_utils::net_defs::{IpAddress, IpProtocol, ip_number};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use vsapi;
+use zpr_utils::net_defs::{IpAddress, IpProtocol, ip_number};
 
 #[derive(Debug, Error)]
 pub enum VisaError {
@@ -15,7 +15,7 @@ pub enum VisaError {
     #[error("{0}")]
     VisaHopError(&'static str),
     #[error("Keyset Parse Error")]
-    KeySetParseError
+    KeySetParseError,
 }
 
 #[derive(Debug)]
@@ -89,13 +89,11 @@ impl From<vsapi::VisaResponse> for VisaResponse {
                     0,
                 )),
             },
-            None => {
-                Self::VSApiError(VisaResponseError::new(
-                    ErrorCode::UnknownStatusCode,
-                    "No status code".to_string(),
-                    0,
-                ))
-            }
+            None => Self::VSApiError(VisaResponseError::new(
+                ErrorCode::UnknownStatusCode,
+                "No status code".to_string(),
+                0,
+            )),
         }
     }
 }
@@ -194,9 +192,7 @@ impl TryFrom<vsapi::VisaHop> for Visa {
     fn try_from(hop: vsapi::VisaHop) -> Result<Self, Self::Error> {
         match hop.visa {
             Some(visa) => Visa::try_from(visa),
-            None => {
-                Err(VisaError::VisaHopError("No visa"))
-            }
+            None => Err(VisaError::VisaHopError("No visa")),
         }
     }
 }
@@ -239,26 +235,34 @@ impl TryFrom<vsapi::Visa> for Visa {
         let src_addr = match thrift_visa.source_contact {
             Some(val) => match IpAddress::try_from(val) {
                 Ok(addr) => addr,
-                Err(_) => return Err(VisaError::VisaParseError(issuer_id, "Bad format in src address")),
+                Err(_) => {
+                    return Err(VisaError::VisaParseError(
+                        issuer_id,
+                        "Bad format in src address",
+                    ));
+                }
             },
             None => return Err(VisaError::VisaParseError(issuer_id, "No src address")),
         };
         let dst_addr = match thrift_visa.dest_contact {
             Some(val) => match IpAddress::try_from(val) {
                 Ok(addr) => addr,
-                Err(_) => return Err(VisaError::VisaParseError(issuer_id, "Bad format in dst address")),
+                Err(_) => {
+                    return Err(VisaError::VisaParseError(
+                        issuer_id,
+                        "Bad format in dst address",
+                    ));
+                }
             },
             None => return Err(VisaError::VisaParseError(issuer_id, "No dst address")),
         };
         let dock_pep = match thrift_visa.dock_pep {
-            Some(val) => {
-                match val {
-                    vsapi::PEPIndex::UDP => ip_number::UDP,
-                    vsapi::PEPIndex::TCP => ip_number::TCP,
-                    vsapi::PEPIndex::ICMP => ip_number::ICMP,
-                    _ => return Err(VisaError::VisaParseError(issuer_id, "Unknown PEP")),
-                }
-            }
+            Some(val) => match val {
+                vsapi::PEPIndex::UDP => ip_number::UDP,
+                vsapi::PEPIndex::TCP => ip_number::TCP,
+                vsapi::PEPIndex::ICMP => ip_number::ICMP,
+                _ => return Err(VisaError::VisaParseError(issuer_id, "Unknown PEP")),
+            },
             None => ip_number::UDP, // Not sure what default here should be
         };
         let mut tcp_udp_pep = None;
@@ -276,7 +280,7 @@ impl TryFrom<vsapi::Visa> for Visa {
                 None => return Err(VisaError::VisaParseError(issuer_id, "No ICMP PEP Args")),
             };
         }
-        
+
         let session_key = match thrift_visa.session_key {
             Some(val) => KeySet::try_from(val)?,
             None => KeySet::default(),

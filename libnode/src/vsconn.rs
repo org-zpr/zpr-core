@@ -18,9 +18,9 @@ use tracing::{debug, error, info};
 use crate::claims;
 use crate::errors::{VSClientError, VSError};
 use crate::logging::targets::VS_RPC;
-use crate::visa::VisaResponse;
 use crate::vscli::{self, VSClientI};
 use crate::vss::DEFAULT_VSS_PORT;
+use zpr::vsapi_types::VisaResponse;
 
 use vsapi;
 use zpr;
@@ -383,7 +383,7 @@ mod test {
     use std::sync::Mutex;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-    use crate::visa::DenyCode;
+    use zpr::vsapi_types::DenyCode;
 
     const CERT_DATA: &str = r#"-----BEGIN CERTIFICATE-----
 MIICETCB+qADAgECAhRmhbwsq9blyxg3Xv5jTvvsJu9/GzANBgkqhkiG9w0BAQsF

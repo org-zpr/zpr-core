@@ -2,8 +2,8 @@ use std::fmt::{self, Formatter};
 use std::net::IpAddr;
 use zpr_utils::net_defs::ip_number;
 
-use crate::visa;
 use crate::vss::VSSMsg;
+use zpr::vsapi_types;
 
 /// Human readable version of the MSSMsg which includes some interior details of the visa.
 impl fmt::Display for VSSMsg {
@@ -59,7 +59,7 @@ fn summarize_visa_hop(f: &mut Formatter<'_>, vh: &vsapi::VisaHop) -> fmt::Result
 }
 
 /// Attempt to surface the most critical bits of a visa.
-fn summarize_visa(f: &mut Formatter<'_>, v: &visa::Visa) -> fmt::Result {
+fn summarize_visa(f: &mut Formatter<'_>, v: &vsapi_types::Visa) -> fmt::Result {
     let mut icmp = false;
     let proto: String;
     let sport: String;

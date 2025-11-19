@@ -3159,7 +3159,10 @@ version = "0.1.2"
 dependencies = [
  "open-enum",
  "strum 0.26.3",
+ "thiserror",
+ "vsapi",
  "zerocopy 0.8.9",
+ "zpr-utils",
 ]
 
 [[package]]

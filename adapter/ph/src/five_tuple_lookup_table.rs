@@ -312,7 +312,8 @@ impl ProtoAndId {
 mod tests {
     use super::*;
 
-    use libnode::{visa, vsapi};
+    use libnode::vsapi;
+    use zpr::vsapi_types;
     use zpr_utils::net_defs::ip_number;
 
     fn make_visa(
@@ -340,7 +341,7 @@ mod tests {
             None,
         );
 
-        Visa::new(visa::Visa::try_from(visa).unwrap())
+        Visa::new(vsapi_types::Visa::try_from(visa).unwrap())
     }
 
     #[test]

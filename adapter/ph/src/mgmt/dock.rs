@@ -6,11 +6,12 @@ use crate::tc;
 use crate::visa_mgmt;
 use crate::visa_table::VisaTableError;
 
-use libnode::{visa, vsconn};
+use libnode::vsconn;
 use std::num::NonZero;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::*;
+use zpr::vsapi_types;
 use zpr::{self, LinkId, StreamId};
 
 #[derive(Debug, Error)]
@@ -99,7 +100,7 @@ pub async fn bind_actor_address(
         asm.counters.management[ManagementCounterType::VisaRequested].increment();
         match asm.vsconn.as_ref().unwrap().request_visa(visa_req).await {
             Ok(visa_response) => match visa_response {
-                visa::VisaResponse::Allow(visa) => {
+                vsapi_types::VisaResponse::Allow(visa) => {
                     let (visa_id, egress_link_id) =
                         visa_mgmt::parse_visa(asm, visa).map_err(|e| match e {
                             VisaTableError::ParseError(field) => {
@@ -117,13 +118,13 @@ pub async fn bind_actor_address(
                         "visa request succeeds, egress_link_id = {egress_link_id}"
                     );
                 }
-                visa::VisaResponse::Deny(denied) => {
+                vsapi_types::VisaResponse::Deny(denied) => {
                     asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
                     debug!(target: FLOW_MGMT, "visa request denied: {:?}", denied.reason);
                     return Err(BindActorAddressError::PolicyError);
                 }
                 // Not implemented as part of thrift visas
-                visa::VisaResponse::VSApiError(error) => {
+                vsapi_types::VisaResponse::VSApiError(error) => {
                     asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
                     debug!(target: FLOW_MGMT, "visa request error with code: {:?} and message: {:?}", error.code, error.message);
                     return Err(BindActorAddressError::PolicyError);

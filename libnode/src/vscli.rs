@@ -9,9 +9,9 @@ use tracing::*;
 use crate::errors::VSClientError;
 use crate::logging::targets::VS_RPC;
 use crate::m2;
-use crate::visa::VisaResponse;
 use vsapi::{self, TVisaServiceSyncClient, VisaServiceSyncClient};
 use zpr;
+use zpr::vsapi_types::VisaResponse;
 
 /// Timeout for connecting to the visa service.
 const VS_CONNECT_TIMEOUT: Duration = Duration::from_secs(60);

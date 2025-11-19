@@ -1,6 +1,7 @@
 //! ZPR concepts, excluding the ZDP protocol.
 
 pub mod rpc_commands;
+pub mod vsapi_types;
 
 use open_enum::open_enum;
 use std::net::{IpAddr, Ipv6Addr};
@@ -127,9 +128,7 @@ pub mod compression_mode {
 
 /// Traffic classification specification type.
 #[open_enum]
-#[derive(
-    Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned,
-)]
+#[derive(Copy, Clone, Debug, FromBytes, IntoBytes, Immutable, KnownLayout, Unaligned)]
 #[repr(u8)]
 pub enum Tcst {
     Ip5Tuple = 0,

@@ -8,3 +8,6 @@ license = "Apache-2.0"
 open-enum = { version = "0.5" }
 strum = { version = "0.26", features = ["derive"] }
 zerocopy = { version = "0.8", features = ["derive"] }
+zpr-utils = { path = "../zpr-utils" }
+thiserror = "1.0.65"
+vsapi = { git = "https://github.com/org-zpr/zpr-vsapi-rs.git", tag = "v0.4.1" }

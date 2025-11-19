@@ -3,7 +3,6 @@ mod auth;
 mod batch_io;
 mod logging;
 mod main_args;
-mod net_defs;
 mod pki;
 
 use clap::{CommandFactory, Parser};

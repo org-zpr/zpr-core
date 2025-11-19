@@ -13,11 +13,11 @@ use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info};
 
 use crate::logging::targets::VSS_RPC;
-use crate::visa::Visa;
 use vsapi::{
     self, PolicyInfo, ServicesList, VisaRevocation, VisaSupportSyncHandler,
     VisaSupportSyncProcessor,
 };
+use zpr::vsapi_types::Visa;
 
 /// Default port for the visa support service. Note that the visa support service
 /// should only listen on the ZPR interface (not substrate interface!).
