@@ -580,23 +580,34 @@ fn main() -> ExitCode {
     // instantiate the "fake" local actor link
     //
 
-    asm.add_local_actor_peer();
+    assert_eq!(
+        asm.peer_table.insert_internal_peer().get(),
+        zpr::LOCAL_ACTOR_LINK_ID
+    );
 
     //
-    // instantiate tether if we're an adapter
+    // instantiate tether if we're an adapter,
+    // or "fake" internal dock link if we're a node
     // NOTE: must occur before we start any other workers!
     //
 
-    if ph_mode == PhMode::Adapter {
-        let dsid = asm
-            .start_tether(
-                asm.config.get().node_addr.as_ref().unwrap(),
-                &asm.config.get().self_addr.scoped_ip(),
-                link_state::LinkType::AdapterToNode,
-            )
-            .unwrap();
+    match ph_mode {
+        PhMode::Adapter => {
+            let dsid = asm
+                .start_tether(
+                    asm.config.get().node_addr.as_ref().unwrap(),
+                    &asm.config.get().self_addr.scoped_ip(),
+                    link_state::LinkType::AdapterToNode,
+                )
+                .unwrap();
 
-        assert_eq!(dsid.get(), zpr::DOCK_LINK_ID);
+            assert_eq!(dsid.get(), zpr::DOCK_LINK_ID);
+        }
+
+        PhMode::Node => assert_eq!(
+            asm.peer_table.insert_internal_peer().get(),
+            zpr::DOCK_LINK_ID
+        ),
     }
 
     //

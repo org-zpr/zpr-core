@@ -1,5 +1,6 @@
 //! Management packet functions.
 
+pub mod adapter;
 pub mod core;
 pub mod dispatch;
 pub mod dock;

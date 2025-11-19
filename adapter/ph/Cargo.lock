@@ -278,6 +278,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "capnpc"
+version = "0.23.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f1cd4f042d6725da6245bde08c9e7c74f6fcb2d8bd5e0378e57991be8d711d8"
+dependencies = [
+ "capnp",
+]
+
+[[package]]
 name = "cbpf-rs"
 version = "0.2.0"
 
@@ -3155,8 +3164,10 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
+ "capnp",
+ "capnpc",
  "open-enum",
  "strum 0.26.3",
  "thiserror",

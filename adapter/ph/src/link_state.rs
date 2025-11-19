@@ -319,12 +319,24 @@ pub struct LinkStateWrapper {
 
 impl LinkStateWrapper {
     pub fn new(new_id: LinkId, new_link_type: LinkType) -> Self {
+        let mut lsm = LinkStateMachine::new(new_id);
+
+        if matches!(new_link_type, LinkType::Internal) {
+            // Internal links are always up and active, that is, `is_ready()`.
+            lsm.state = LinkState::Active;
+            lsm.status = LinkStatus::Up;
+        }
+
         Self {
             id: new_id,
             link_type: new_link_type,
-            locked_fsm: Mutex::new(LinkStateMachine::new(new_id)),
+            locked_fsm: Mutex::new(lsm),
             locked_data: Mutex::new(LinkData::new()),
         }
+    }
+
+    pub fn is_internal(&self) -> bool {
+        matches!(self.link_type, LinkType::Internal)
     }
 
     /// Get the link's current state

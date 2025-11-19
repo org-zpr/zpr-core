@@ -42,6 +42,8 @@ test:
 
 deps: cbpf cslab zpr-ext
 
+submodules:
+	git submodule update --init --recursive
 
 libnode:
 	$(MAKE) -C libnode
@@ -65,6 +67,6 @@ zpr-ext:
 	cd zpr-ext && cargo build
 
 
-.PHONY: it-so it-gone test deps libnode ph ph-cli diagrams cbpf cslab zpr-ext
+.PHONY: it-so it-gone test deps submodules libnode ph ph-cli diagrams cbpf cslab zpr-ext
 
 .DEFAULT_GOAL := info

@@ -260,8 +260,8 @@ impl svc::Server for AdminServiceImpl {
         info!(target: RPC, "Show link summary procedure initiated");
         {
             let mut peer_ids = Vec::new();
-            self.asm.peer_table.for_each(|(id, _)| {
-                if id.get() != zpr::LOCAL_ACTOR_LINK_ID {
+            self.asm.peer_table.for_each(|(id, peer)| {
+                if !peer.is_internal() {
                     peer_ids.push(id.get())
                 }
             });

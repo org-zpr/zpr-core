@@ -347,7 +347,7 @@ impl FastpathWorker {
                     true
                 }
 
-                AltEntry::Pending(_) => {
+                AltEntry::Pending(..) => {
                     // do not forward
                     false
                 }

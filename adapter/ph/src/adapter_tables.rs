@@ -1,14 +1,18 @@
 //! Adapter lookup tables
 //!
+//! These tables hold the state of all tethers on an adapter, outbound (ALT) or inbound (DLT).
+//!
 //! RFC 6.5 § 5.1
 
 #![allow(dead_code)]
 
 use crate::defs::FiveTuple;
+use crate::mgmt::txn_mgr::TxnHandle;
 use crate::packet::Packet;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
 use cslab::{RcuCslab, RcuCslabReader};
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry as DashMapEntry;
 use dashmap::mapref::one::Ref as DashMapRef;
 use std::sync::Mutex;
 use zpr::{CompressionMode, StreamId};
@@ -22,12 +26,19 @@ pub struct AltPep {
 }
 
 pub enum AltEntry {
+    /// We've requested a tether ID for this flow, but haven't received one yet.
+    Pending(Packet, TxnHandle),
+    /// There is currently a tether allocated for this flow.
     Active(AltPep),
-    Pending(Packet),
 }
 
+/// The Actor Lookup Table (ALT) holds all state of outbound tethers.
+///
+/// It is used to map five-tuples (from the endpoint) to compression
+/// specifications and tether IDs (for the dock).
 pub struct ActorLookupTable {
     table: DashMap<FiveTuple, AltEntry>,
+    pending: DashMap<TxnHandle, FiveTuple>,
 }
 
 pub struct AltEntryGuard<'a>(DashMapRef<'a, FiveTuple, AltEntry>);
@@ -40,11 +51,101 @@ impl std::ops::Deref for AltEntryGuard<'_> {
     }
 }
 
+pub enum InsertPendingError {
+    AlreadyPending(Packet),
+    DuplicateTransaction(Packet),
+}
+
+impl std::fmt::Debug for InsertPendingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::AlreadyPending(_) => write!(f, "AlreadyPending"),
+            Self::DuplicateTransaction(_) => write!(f, "DuplicateTransaction"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum LookupPendingError {
+    NotFound,
+    NotPending,
+}
+
+#[derive(Debug)]
+pub enum RemoveError {
+    NotFound,
+}
+
+pub enum SetActiveError {
+    NotFound(AltPep),
+    NotPending(AltPep),
+}
+
+impl std::fmt::Debug for SetActiveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            Self::NotFound(_) => write!(f, "NotFound"),
+            Self::NotPending(_) => write!(f, "NotPending"),
+        }
+    }
+}
+
 impl ActorLookupTable {
     pub fn new() -> Self {
         Self {
             table: DashMap::new(),
+            pending: DashMap::new(),
         }
+    }
+
+    pub fn insert_pending(
+        &self,
+        five_tuple: FiveTuple,
+        init_packet: Packet,
+        txn: &TxnHandle,
+    ) -> Result<(), InsertPendingError> {
+        match self.table.entry(five_tuple) {
+            DashMapEntry::Occupied(_) => Err(InsertPendingError::AlreadyPending(init_packet)),
+
+            DashMapEntry::Vacant(entry) => {
+                if self.pending.insert(txn.clone(), five_tuple).is_some() {
+                    return Err(InsertPendingError::DuplicateTransaction(init_packet));
+                }
+                entry.insert(AltEntry::Pending(init_packet, txn.clone()));
+                Ok(())
+            }
+        }
+    }
+
+    pub fn lookup_pending(&self, txn: &TxnHandle) -> Result<FiveTuple, LookupPendingError> {
+        Ok(*self.pending.get(txn).ok_or(LookupPendingError::NotFound)?)
+    }
+
+    pub fn set_active(
+        &self,
+        five_tuple: &FiveTuple,
+        pep: AltPep,
+    ) -> Result<Packet, SetActiveError> {
+        let Some(mut entry) = self.table.get_mut(five_tuple) else {
+            return Err(SetActiveError::NotFound(pep));
+        };
+
+        if !matches!(entry.value(), AltEntry::Pending(..)) {
+            return Err(SetActiveError::NotPending(pep));
+        }
+
+        let AltEntry::Pending(packet, txn) =
+            std::mem::replace(entry.value_mut(), AltEntry::Active(pep))
+        else {
+            unreachable!();
+        };
+
+        assert!(
+            matches!(self.pending.remove(&txn), Some((_txn, ft)) if &ft == five_tuple),
+            "ALT consistency error"
+        );
+
+        Ok(packet)
     }
 
     // TODO: figure out whether we want to perform partial matching
@@ -60,29 +161,18 @@ impl ActorLookupTable {
         self.table.get(five_tuple).map(AltEntryGuard)
     }
 
-    // FIXME: ideally we want `try_insert()` but dashmap doesn't support that…
-    pub fn insert(&self, five_tuple: FiveTuple, entry: AltEntry) {
-        self.table.insert(five_tuple, entry);
-    }
+    pub fn remove(&self, five_tuple: &FiveTuple) -> Result<AltEntry, RemoveError> {
+        let (_, entry) = self.table.remove(five_tuple).ok_or(RemoveError::NotFound)?;
 
-    /// Alter an ALT entry according to the provided function.
-    ///
-    /// If the entry exists, returns the alterer function's result.
-    ///
-    /// If the entry doesn't exist, returns `Err`.
-    pub fn alter<T>(
-        &self,
-        five_tuple: &FiveTuple,
-        alterer: impl FnOnce(&mut AltEntry) -> T,
-    ) -> Result<T, ()> {
-        match self.table.get_mut(five_tuple) {
-            Some(mut ref_) => Ok(alterer(ref_.value_mut())),
-            None => Err(()),
+        match &entry {
+            AltEntry::Pending(_, txn) => assert!(
+                matches!(self.pending.remove(&txn), Some((_txn, ft)) if &ft == five_tuple),
+                "ALT consistency error"
+            ),
+            AltEntry::Active(_) => (),
         }
-    }
 
-    pub fn remove(&self, five_tuple: &FiveTuple) {
-        self.table.remove(five_tuple);
+        Ok(entry)
     }
 }
 
@@ -91,6 +181,10 @@ pub struct DltPep {
     pub five_tuple: FiveTuple,
 }
 
+/// The Dock Lookup Table (DLT) holds all state of inbound tethers.
+///
+/// It is used to map tether IDs (from the dock) to decompression
+/// specifications and five-tuples (for the endpoint).
 pub struct DockLookupTable {
     table: Mutex<RcuCslab<DltPep>>,
     reader: RcuBox<RcuCslabReader<DltPep>>,
