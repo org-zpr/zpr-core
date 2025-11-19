@@ -4,3 +4,6 @@
 [submodule "zpr/zpr-admin-api"]
 	path = zpr/zpr-admin-api
 	url = https://github.com/org-zpr/zpr-admin-api.git
+[submodule "zpr/zpr-policy"]
+	path = zpr/zpr-policy
+	url = https://github.com/org-zpr/zpr-policy.git
