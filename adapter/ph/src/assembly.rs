@@ -35,7 +35,7 @@ use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
 use tracing_subscriber::{Layer, Registry, filter, fmt, reload};
 use zpr::{self, LinkId, SubstrateAddr, VisaId};
-use zpr_utils::net_defs::{self, IpAddress, ScopedIpAddr};
+use zpr_utils::net_defs::{IpAddress, ScopedIpAddr};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {

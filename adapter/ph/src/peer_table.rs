@@ -26,7 +26,7 @@ use tokio::task;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use zpr::{self, LINK_ID_UNKNOWN, LinkId, SubstrateAddr};
-use zpr_utils::net_defs::ScopedIpAddr;
+use zpr_utils::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 
 const PEER_TABLE_SIZE: usize = config::MAX_ACTIVE_LINKS;
 
