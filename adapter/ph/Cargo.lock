@@ -278,6 +278,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "capnpc"
+version = "0.23.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f1cd4f042d6725da6245bde08c9e7c74f6fcb2d8bd5e0378e57991be8d711d8"
+dependencies = [
+ "capnp",
+]
+
+[[package]]
 name = "cbpf-rs"
 version = "0.2.0"
 
@@ -399,14 +408,6 @@ name = "clap_lex"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
-
-[[package]]
-name = "cli-proto"
-version = "0.6.0"
-source = "git+https://github.com/org-zpr/zpr-admin-api-rs.git?tag=v0.6.0#a9b30901ed921765fa525e0fb9d4487bdc2d420e"
-dependencies = [
- "capnp",
-]
 
 [[package]]
 name = "colorchoice"
@@ -1621,7 +1622,6 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete",
- "cli-proto",
  "crossbeam-epoch",
  "cslab",
  "curve25519-dalek",
@@ -3152,8 +3152,10 @@ dependencies = [
 
 [[package]]
 name = "zpr"
-version = "0.1.2"
+version = "0.1.4"
 dependencies = [
+ "capnp",
+ "capnpc",
  "open-enum",
  "strum 0.26.3",
  "zerocopy 0.8.9",

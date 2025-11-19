@@ -11,8 +11,11 @@ arrayref = { version = "0.3.7" }
 base64 = "0.22.1"
 blake3 = { version = "1.5.4" }
 bytes = { version = "1.10" }
+capnp-rpc = { version = "0.23" }
+capnp = { version = "0.23" }
 cbpf-rs = { path = "../../cbpf-rs" }
 chrono = "0.4.39"
+clap_complete = { version = "4.5.57", optional = true}
 clap = { version = "4.5.7", features = ["derive", "env"] }
 crossbeam-epoch = { version = "0.9.18", optional = true }
 cslab = { path = "../../cslab" }
@@ -21,39 +24,35 @@ dashmap = { version = "6.0.1" }
 enum-map = { version = "2.7.3" }
 enumset = "1.1.5"
 hdrhistogram = { version = "7.5.4" }
+ip_network_table-deps-treebitmap = { version = "0.5.0" }
+itertools = "0.14"
 libc = { version = "0.2.175" }
 libnode = { path = "../../libnode" }
-itertools = "0.14"
 nix = { version = "0.29.0", features = ["fs", "ioctl", "net", "poll", "uio"] }
 open-enum = { version = "0.5.1" }
-openssl = { version = "0.10.70" }
 openssl-sys = { version = "0.9.102" }
+openssl = { version = "0.10.70" }
+range-set-blaze = {version = "0.4.1" }
 reqwest = { version="0.12.15", features = ["json"] }
+serde_json = "1.0.140"
 serde = { version = "1.0.214", features = ["derive"] }
 snow = "0.9.6"
 socket2 = { version = "0.5.7" }
 strum = { version = "0.27.1", features = ["derive"] }
 thiserror = "1.0.65"
-tokio = { version = "1.37.0", features = ["full"] }
 tokio-util = { version = "0.7.11", features = ["rt", "compat"] }
+tokio = { version = "1.37.0", features = ["full"] }
 toml = "0.8.19"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
-zerocopy = { version = "0.8.3", features = ["derive", "std"] }
-zpr = { path = "../../zpr" }
-zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "zerocopy"] }
-serde_json = "1.0.140"
 url = "2.5.4"
-clap_complete = { version = "4.5.57", optional = true}
-cli-proto = { git = "https://github.com/org-zpr/zpr-admin-api-rs.git", tag = "v0.6.0" }
-capnp = { version = "0.23" }
-capnp-rpc = { version = "0.23" }
-ip_network_table-deps-treebitmap = { version = "0.5.0" }
-range-set-blaze = {version = "0.4.1" }
+zerocopy = { version = "0.8.3", features = ["derive", "std"] }
+zpr-ext = { path = "../../zpr-ext", features = ["bytes", "tokio", "socket2", "zerocopy"] }
+zpr = { path = "../../zpr" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-tokio-tun = { version = "0.11.5" }
 io-uring = { version = "0.7.4", optional = true }
+tokio-tun = { version = "0.11.5" }
 
 [dev-dependencies]
 futures = "0.3.31"
