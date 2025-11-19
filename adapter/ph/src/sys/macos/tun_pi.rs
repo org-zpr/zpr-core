@@ -1,4 +1,4 @@
-use crate::net_defs::ethertype;
+use zpr_utils::net_defs::ethertype;
 use crate::sys::TunPi;
 use libc::{AF_INET, AF_INET6};
 
