@@ -6,7 +6,6 @@ use crate::counters::{ManagementCounterType, ManagementCounters};
 use crate::km_multiplexor;
 use crate::link_state::LinkType;
 use crate::logging::targets::{KEY_MGMT, ZDP};
-use crate::net_defs;
 use crate::packet::Packet;
 use crate::queues;
 use crate::zdp;
@@ -19,6 +18,7 @@ use zerocopy::FromBytes;
 use zpr;
 use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::FromBytesExt;
+use zpr_utils::net_defs;
 
 /// Dispatch a management packet for a link that hasn't been established yet
 ///

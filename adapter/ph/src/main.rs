@@ -45,7 +45,6 @@ mod main_args;
 mod mgmt;
 mod mgmt_dispatch_worker;
 mod mgmt_processor_worker;
-mod net_defs;
 mod packet;
 mod packet_queue;
 mod packet_steering;
@@ -87,12 +86,12 @@ use km_multiplexor::KmState;
 use km_noise::NoiseKeypair;
 use libnode::claims;
 use logging::targets::STARTUP;
-use net_defs::SocketAddrExt;
 use pki::{generate_self_signed_noise_cert, load_cert, load_noise_public_key};
 use queues::*;
 use sys::ZprTun;
 use tun_ctl::TunCtl;
 use zpr_ext::socket2::SockAddrExt;
+use zpr_utils::net_defs::SocketAddrExt;
 
 use crate::vs_types::AuthServicesList;
 

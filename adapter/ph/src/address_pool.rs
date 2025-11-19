@@ -1,8 +1,8 @@
-use libnode::net_defs::IpAddress;
 use openssl::rand::rand_bytes;
 use std::collections::HashSet;
 use std::net::Ipv6Addr;
 use thiserror::Error;
+use zpr_utils::net_defs::IpAddress;
 
 use crate::config;
 

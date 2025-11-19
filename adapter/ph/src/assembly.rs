@@ -12,7 +12,6 @@ use crate::link_state::{LinkEvent, LinkStateError, LinkType};
 use crate::logging::targets::PEER_MGMT;
 use crate::mgmt;
 use crate::mgmt_processor_worker;
-use crate::net_defs::{self, ScopedIpAddr};
 use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
@@ -25,7 +24,6 @@ use crate::vs_types::AuthServicesList;
 use crate::zdp::TerminateReason;
 use crate::zdpr_worker;
 use km_noise::NoiseKeypair;
-use libnode::net_defs::IpAddress;
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::num::NonZero;
@@ -37,6 +35,7 @@ use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
 use tracing_subscriber::{Layer, Registry, filter, fmt, reload};
 use zpr::{self, LinkId, SubstrateAddr, VisaId};
+use zpr_utils::net_defs::{self, IpAddress, ScopedIpAddr};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PhMode {

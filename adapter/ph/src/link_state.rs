@@ -12,7 +12,6 @@ use crate::special_peers::SpecialPeerName;
 use crate::visa_mgmt;
 use crate::zdp::{self, ResponseCode, TerminateReason};
 
-use libnode::net_defs::IpAddress;
 use openssl::x509::X509;
 use std::fmt::{Display, Formatter};
 use std::net::{IpAddr, SocketAddr};
@@ -23,6 +22,7 @@ use thiserror::Error;
 use tokio::time::MissedTickBehavior;
 use tracing::*;
 use zpr::{LinkId, ZPI_ENCRYPTED_HEADER_FLAG};
+use zpr_utils::net_defs::IpAddress;
 
 /// State machine for links and docking sessions
 

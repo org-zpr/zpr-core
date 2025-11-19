@@ -2,7 +2,6 @@ use crate::batch_io::{self, BatchIo};
 use crate::config;
 use crate::counters::*;
 use crate::fastpath::{FastpathWorker, FastpathWorkerConfig};
-use crate::net_defs;
 use crate::packet_queue;
 use crate::sys::{TunPi, ZprTun};
 use crate::zprtun;
@@ -10,6 +9,7 @@ use std::io::{ErrorKind, Result};
 use std::net::{SocketAddr, UdpSocket};
 use std::os::fd::{AsFd, BorrowedFd};
 use std::sync::Arc;
+use zpr_utils::net_defs;
 
 #[allow(unused_imports)]
 use crate::packet::{self, Packet, flags};

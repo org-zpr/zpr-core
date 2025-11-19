@@ -123,7 +123,7 @@ pub async fn bind_actor_address(
                     return Err(BindActorAddressError::PolicyError);
                 }
                 // Not implemented as part of thrift visas
-                visa::VisaResponse::Error(error) => {
+                visa::VisaResponse::VSApiError(error) => {
                     asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
                     debug!(target: FLOW_MGMT, "visa request error with code: {:?} and message: {:?}", error.code, error.message);
                     return Err(BindActorAddressError::PolicyError);

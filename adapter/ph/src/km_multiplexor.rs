@@ -348,13 +348,13 @@ mod test {
     use crate::km_testdata::test::*;
     use crate::link_state::LinkType;
     use crate::mgmt_processor_worker;
-    use crate::net_defs;
     use crate::peer_table;
     use base64::prelude::*;
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::Duration;
     use tokio::task::{self, yield_now};
     use tokio::time::timeout;
+    use zpr_utils::net_defs;
 
     #[tokio::test]
     async fn test_km_multiplexor_updates_assembly_state() {

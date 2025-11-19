@@ -102,8 +102,8 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
         for v in vh {
             let visa = match Visa::try_from(v) {
                 Ok(visa) => visa,
-                Err(_) => {
-                    error!(target: VSS_RPC, "No visa found");
+                Err(e) => {
+                    error!(target: VSS_RPC, "Visa could not be created: {e}");
                     return Err(thrift::Error::from("enqueue failed"));
                 }
             };

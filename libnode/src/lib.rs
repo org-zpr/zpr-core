@@ -5,7 +5,6 @@ pub mod m2;
 mod vscli;
 pub use vsapi;
 pub mod display;
-pub mod net_defs;
 pub mod visa;
 pub mod vsconn;
 pub mod vss;

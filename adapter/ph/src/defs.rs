@@ -1,8 +1,8 @@
 //! Common definitions that have no more specific place to live.
 
-use libnode::net_defs;
 use zerocopy::*;
 use zpr;
+use zpr_utils::net_defs;
 
 /// Packet direction with respect to an interface.
 /// Primary use is for constructing libpcap link-layer header.

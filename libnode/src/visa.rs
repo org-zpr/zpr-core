@@ -3,11 +3,9 @@
 //! Currently based on a mix of the thrift and capnp protocols, will likely evolve as we move
 //! away from thrift exclusively to capnp.
 
-use crate::logging::targets::{V_STRUCTURE, VH_STRUCTURE, VR_STRUCTURE};
-use crate::net_defs::{IpAddress, IpProtocol, ip_number};
+use zpr_utils::net_defs::{IpAddress, IpProtocol, ip_number};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
-use tracing::error;
 use vsapi;
 
 #[derive(Debug, Error)]
@@ -16,13 +14,15 @@ pub enum VisaError {
     VisaParseError(u64, &'static str),
     #[error("{0}")]
     VisaHopError(&'static str),
+    #[error("Keyset Parse Error")]
+    KeySetParseError
 }
 
 #[derive(Debug)]
 pub enum VisaResponse {
     Allow(Visa),
     Deny(Denied),
-    Error(VisaResponseError),
+    VSApiError(VisaResponseError),
 }
 
 #[derive(Debug)]
@@ -73,7 +73,7 @@ impl From<vsapi::VisaResponse> for VisaResponse {
                 vsapi::StatusCode::SUCCESS => {
                     match Visa::try_from(thrift_visa_response.visa.unwrap().visa.unwrap()) {
                         Ok(v) => Self::Allow(v),
-                        Err(e) => Self::Error(VisaResponseError::new(
+                        Err(e) => Self::VSApiError(VisaResponseError::new(
                             ErrorCode::VisaStructureError(e),
                             "No status code".to_string(),
                             0,
@@ -83,15 +83,14 @@ impl From<vsapi::VisaResponse> for VisaResponse {
                 vsapi::StatusCode::FAIL => {
                     Self::Deny(Denied::new(DenyCode::Fail, thrift_visa_response.reason))
                 }
-                val => Self::Error(VisaResponseError::new(
+                val => Self::VSApiError(VisaResponseError::new(
                     ErrorCode::UnknownStatusCode,
                     format!("Status code: {val:?}"),
                     0,
                 )),
             },
             None => {
-                error!(target: VR_STRUCTURE, "No code in VisaResponse");
-                Self::Error(VisaResponseError::new(
+                Self::VSApiError(VisaResponseError::new(
                     ErrorCode::UnknownStatusCode,
                     "No status code".to_string(),
                     0,
@@ -196,7 +195,6 @@ impl TryFrom<vsapi::VisaHop> for Visa {
         match hop.visa {
             Some(visa) => Visa::try_from(visa),
             None => {
-                error!(target: VH_STRUCTURE, "No visa in VisaHop");
                 Err(VisaError::VisaHopError("No visa"))
             }
         }
@@ -211,7 +209,6 @@ impl TryFrom<vsapi::Visa> for Visa {
         let issuer_id = match thrift_visa.issuer_id {
             Some(val) => val as u64,
             None => {
-                error!(target: V_STRUCTURE, "No issuer id");
                 return Err(VisaError::VisaParseError(0, "No issuer id"));
             }
         };
@@ -225,7 +222,6 @@ impl TryFrom<vsapi::Visa> for Visa {
                 UNIX_EPOCH + dur
             }
             None => {
-                error!(target: V_STRUCTURE, "no expiration in visa with issuer id {issuer_id}");
                 return Err(VisaError::VisaParseError(issuer_id, "No expiration"));
             }
         };
@@ -233,28 +229,26 @@ impl TryFrom<vsapi::Visa> for Visa {
             Some(val) => match IpAddress::try_from(val) {
                 Ok(addr) => addr,
                 Err(_) => {
-                    error!(target: V_STRUCTURE, "dest not properly formatted in visa with issuer id {issuer_id}");
                     return Err(VisaError::VisaParseError(issuer_id, "Improper dest"));
                 }
             },
             None => {
-                error!(target: V_STRUCTURE, "No dest in visa with issuer id {issuer_id}");
                 return Err(VisaError::VisaParseError(issuer_id, "No dest"));
             }
         };
         let src_addr = match thrift_visa.source_contact {
             Some(val) => match IpAddress::try_from(val) {
                 Ok(addr) => addr,
-                Err(_) => IpAddress::UNSPECIFIED,
+                Err(_) => return Err(VisaError::VisaParseError(issuer_id, "Bad format in src address")),
             },
-            None => IpAddress::UNSPECIFIED,
+            None => return Err(VisaError::VisaParseError(issuer_id, "No src address")),
         };
         let dst_addr = match thrift_visa.dest_contact {
             Some(val) => match IpAddress::try_from(val) {
                 Ok(addr) => addr,
-                Err(_) => IpAddress::UNSPECIFIED,
+                Err(_) => return Err(VisaError::VisaParseError(issuer_id, "Bad format in dst address")),
             },
-            None => IpAddress::UNSPECIFIED,
+            None => return Err(VisaError::VisaParseError(issuer_id, "No dst address")),
         };
         let dock_pep = match thrift_visa.dock_pep {
             Some(val) => {
@@ -262,21 +256,29 @@ impl TryFrom<vsapi::Visa> for Visa {
                     vsapi::PEPIndex::UDP => ip_number::UDP,
                     vsapi::PEPIndex::TCP => ip_number::TCP,
                     vsapi::PEPIndex::ICMP => ip_number::ICMP,
-                    _ => ip_number::UDP, // Not sure what default here should be, perhaps we want to make a UNSET ip number
+                    _ => return Err(VisaError::VisaParseError(issuer_id, "Unknown PEP")),
                 }
             }
             None => ip_number::UDP, // Not sure what default here should be
         };
-        let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
-            Some(val) => Some(TcpUdpPep::from(val)),
-            None => None,
-        };
-        let icmp_pep = match thrift_visa.icmp_pep_args {
-            Some(val) => Some(IcmpPep::from(val)),
-            None => None,
-        };
+        let mut tcp_udp_pep = None;
+        if dock_pep == ip_number::UDP || dock_pep == ip_number::TCP {
+            tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
+                Some(val) => Some(TcpUdpPep::from(val)),
+                None => return Err(VisaError::VisaParseError(issuer_id, "No TCP/UDP PEP Args")),
+            };
+        }
+
+        let mut icmp_pep = None;
+        if dock_pep == ip_number::ICMP {
+            icmp_pep = match thrift_visa.icmp_pep_args {
+                Some(val) => Some(IcmpPep::from(val)),
+                None => return Err(VisaError::VisaParseError(issuer_id, "No ICMP PEP Args")),
+            };
+        }
+        
         let session_key = match thrift_visa.session_key {
-            Some(val) => KeySet::from(val),
+            Some(val) => KeySet::try_from(val)?,
             None => KeySet::default(),
         };
         let cons = match thrift_visa.cons {
@@ -335,11 +337,13 @@ impl From<vsapi::PEPArgsICMP> for IcmpPep {
     }
 }
 
-impl From<vsapi::KeySet> for KeySet {
-    fn from(thrift_key_set: vsapi::KeySet) -> Self {
+impl TryFrom<vsapi::KeySet> for KeySet {
+    type Error = VisaError;
+
+    fn try_from(thrift_key_set: vsapi::KeySet) -> Result<Self, Self::Error> {
         let format = match thrift_key_set.format {
             Some(val) => val,
-            None => 0,
+            None => return Err(VisaError::KeySetParseError),
         };
         let ingress_key = match thrift_key_set.ingress_key {
             Some(val) => val,
@@ -350,11 +354,11 @@ impl From<vsapi::KeySet> for KeySet {
             None => Vec::new(),
         };
 
-        Self {
+        Ok(Self {
             format,
             ingress_key,
             egress_key,
-        }
+        })
     }
 }
 

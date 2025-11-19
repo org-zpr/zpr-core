@@ -1,7 +1,6 @@
 //! Queues (i.e., frontend interface) for each stage of the system.
 
 use crate::config;
-use crate::net_defs;
 use crate::packet::{self, Packet, PacketBuffer};
 use crate::packet_queue;
 use crate::test_packet::*;
@@ -16,6 +15,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::oneshot::error::RecvError;
 use zpr;
+use zpr_utils::net_defs;
 
 pub enum TryEnqueueError<T = ()> {
     Full(T),

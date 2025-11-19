@@ -13,7 +13,6 @@ use crate::tc;
 use crate::tlv::{self, TlvEncoding};
 use crate::zdp;
 use bytes::{Buf, BufMut};
-use libnode::net_defs::IpAddress;
 use std::net::SocketAddr;
 use std::num::NonZero;
 use std::sync::Arc;
@@ -21,6 +20,7 @@ use thiserror::Error;
 use tracing::*;
 use zpr;
 use zpr_ext::zerocopy::{FromBytesExt, IntoBytesExt};
+use zpr_utils::net_defs::IpAddress;
 
 /// Indicates whether the mgmt message was handled successfully.
 /// (It may be the case that the mgmt message itself indicates

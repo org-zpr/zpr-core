@@ -1,7 +1,7 @@
 use std::fmt::{self, Formatter};
 use std::net::IpAddr;
+use zpr_utils::net_defs::ip_number;
 
-use crate::net_defs::ip_number;
 use crate::visa;
 use crate::vss::VSSMsg;
 

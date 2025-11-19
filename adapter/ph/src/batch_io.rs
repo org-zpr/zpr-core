@@ -5,13 +5,13 @@
 //! All these operations assume a file descriptor which has been set
 //! non-blocking, and they perform non-blocking I/O operations.
 
-use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 use bytes::BufMut;
 use libc;
 use nix::sys::socket::{self, AddressFamily, SockaddrLike, SockaddrStorage};
 use std::io::Result;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
+use zpr_utils::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 
 pub struct ReceivedPacket {
     #[allow(dead_code)]
@@ -118,7 +118,6 @@ mod io_uring {
     //! io_uring(7)-based implementation.  Only available for Linux.
 
     use super::{BatchIoImpl, ReceivedPacket, sockaddr_to_socket_addr};
-    use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
     use bytes::BufMut;
     use io_uring::{IoUring, Probe, cqueue, opcode, squeue, types};
     use libc;
@@ -128,6 +127,7 @@ mod io_uring {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::fd::{AsRawFd, BorrowedFd};
     use std::ptr::NonNull;
+    use zpr_utils::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 
     const MAX_ENTRIES: usize = 1024;
 
@@ -844,7 +844,6 @@ mod posix_unbatched {
     //! Unbatched implementation using POSIX primitives.
 
     use super::*;
-    use crate::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
     use bytes::BufMut;
     use nix::cmsg_space;
     use nix::sys::socket::{
@@ -855,6 +854,7 @@ mod posix_unbatched {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::os::fd::{AsRawFd, BorrowedFd};
     use zpr_ext::std::mem::slice_assume_init_mut;
+    use zpr_utils::net_defs::{ScopedIpAddr, ScopedIpv6Addr};
 
     pub struct BatchIo {
         cmsg_buffer: Vec<u8>,
@@ -866,12 +866,12 @@ mod posix_unbatched {
             let in6_pktinfo;
             let $cmsg_id;
             match $addr {
-                $crate::net_defs::ScopedIpAddr::V4(addr) => {
+                zpr_utils::net_defs::ScopedIpAddr::V4(addr) => {
                     in_pktinfo = super::pktinfo_from_ipv4addr(addr);
                     $cmsg_id = nix::sys::socket::ControlMessage::Ipv4PacketInfo(&in_pktinfo);
                 },
 
-                $crate::net_defs::ScopedIpAddr::V6(addr) => {
+                zpr_utils::net_defs::ScopedIpAddr::V6(addr) => {
                     in6_pktinfo = super::pktinfo_from_scoped_ipv6addr(addr);
                     $cmsg_id = nix::sys::socket::ControlMessage::Ipv6PacketInfo(&in6_pktinfo);
                 },

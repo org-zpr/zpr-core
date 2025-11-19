@@ -8,7 +8,6 @@ use crate::logging::targets::VISA_MGMT;
 use crate::peer_table;
 
 use chrono::{DateTime, Utc};
-use libnode::net_defs::{IpAddress, ip_number};
 use libnode::{visa, vsapi};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
@@ -17,6 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::*;
 use zpr::{ForwardingEntry, L3Type, VisaId};
+use zpr_utils::net_defs::{IpAddress, ip_number};
 
 // TODO: Figure out correct value for this visa expiration
 const VS_VISAS_DURATION: Duration = Duration::from_secs(60 * 60 * 24); // 24 hours
@@ -422,11 +422,11 @@ mod tests {
     use crate::assembly::test::{TestAssemblyBuilder, create_assembly};
     use crate::forwarding_tables::PftPep;
     use crate::link_state::LinkType;
-    use crate::net_defs;
     use crate::peer_table::test::create_dummy_peer_state;
     use std::net::{IpAddr, Ipv4Addr};
     use std::num::NonZero;
     use std::sync::Arc;
+    use zpr_utils::net_defs;
 
     #[test]
     fn test_timeouts() {

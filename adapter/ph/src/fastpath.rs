@@ -13,7 +13,6 @@ use crate::defs::Direction;
 use crate::km::{Codec, KmTransportSA};
 use crate::km_noise::NOISE_PADLEN;
 use crate::logging::targets::DATAPATH;
-use crate::net_defs;
 use crate::packet::{Packet, PacketBuffer};
 use crate::queues::{AdapterManager, MgmtDispatch, TryEnqueueError};
 use crate::two_way_queue;
@@ -32,6 +31,7 @@ use zpr;
 use zpr::L3Type;
 use zpr_ext::std::num::NonZeroExt;
 use zpr_ext::zerocopy::*;
+use zpr_utils::net_defs;
 
 /// Simple function used on an adapter to forward actor packets to the the tether and vice-versa.
 const fn adapter_next_hop_link(ingress_link_id: zpr::LinkId) -> zpr::LinkId {

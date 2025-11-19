@@ -4,7 +4,6 @@ use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::VISA_MGMT;
 use crate::visa_table;
 use crate::vs_types;
-use libnode::net_defs::{IPV6_ADDRESS_SIZE, IpAddress};
 use libnode::{claims, visa, vsapi};
 use std::collections::BTreeMap;
 use std::net::IpAddr;
@@ -13,6 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 use tracing::*;
 use zpr::{LinkId, VisaId};
+use zpr_utils::net_defs::{IPV6_ADDRESS_SIZE, IpAddress};
 
 pub fn authorize_connect(
     asm: &Arc<Assembly>,

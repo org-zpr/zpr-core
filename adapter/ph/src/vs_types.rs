@@ -1,5 +1,5 @@
-use libnode::net_defs::IpAddress;
 use libnode::vsapi;
+use zpr_utils::net_defs::IpAddress;
 
 use std::convert::TryFrom;
 use std::time::SystemTime;

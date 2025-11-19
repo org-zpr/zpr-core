@@ -191,6 +191,7 @@ dependencies = [
  "vsapi",
  "zerocopy 0.8.3",
  "zpr",
+ "zpr-utils",
 ]
 
 [[package]]
@@ -807,5 +808,12 @@ version = "0.1.2"
 dependencies = [
  "open-enum",
  "strum",
+ "zerocopy 0.8.3",
+]
+
+[[package]]
+name = "zpr-utils"
+version = "0.1.0"
+dependencies = [
  "zerocopy 0.8.3",
 ]

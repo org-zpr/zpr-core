@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 use crate::defs::FiveTuple;
 use arrayref::array_ref;
-use libnode::net_defs::*;
 use std::mem::size_of;
 use zerocopy::byteorder::network_endian::*;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
 use zpr::L3Type;
+use zpr_utils::net_defs::*;
 
 #[derive(Debug, PartialEq)]
 pub enum ClassifierResult {

@@ -3,12 +3,12 @@ use crate::rcu::RcuBox;
 use crate::visa_table::Visa;
 
 use ip_network_table_deps_treebitmap::IpLookupTable;
-use libnode::net_defs::{IpAddress, IpProtocol};
 use range_set_blaze::RangeMapBlaze;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use zpr::{L3Type, VisaId};
+use zpr_utils::net_defs::{IpAddress, IpProtocol};
 
 pub type FiveTupleLookup = HashMap<IpAddress, Arc<IpLookupTable<Ipv6Addr, DstPortLookup>>>;
 pub type DstPortLookup = PortLookup<SrcPortLookup>;
@@ -312,8 +312,8 @@ impl ProtoAndId {
 mod tests {
     use super::*;
 
-    use libnode::net_defs::ip_number;
     use libnode::{visa, vsapi};
+    use zpr_utils::net_defs::ip_number;
 
     fn make_visa(
         src_addr: [u8; 16],

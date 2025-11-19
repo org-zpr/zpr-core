@@ -2,14 +2,13 @@
 
 use crate::classifier;
 use crate::defs::FiveTuple;
-use crate::net_defs;
 use crate::packet::Packet;
 use bytes::Buf;
-use libnode::net_defs as libnode_net_defs;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use zerocopy::*;
 use zpr::{CompressionMode, L3Type};
 use zpr_ext::bytes::BufExt;
+use zpr_utils::net_defs;
 
 const ZDP_V4_FRAG_INFO_PRESENT: u8 = 0b00001000;
 
@@ -140,10 +139,10 @@ fn expand_addrs_v6(
     hdr.payload_length = (body_len as u16).into(); // NOTE: we do not allow jumbo payloads
     hdr.next_header = next_header;
     hdr.hop_limit = hop_limit;
-    hdr.src_address = libnode_net_defs::IpAddress {
+    hdr.src_address = net_defs::IpAddress {
         v6: src_address.octets(),
     };
-    hdr.dst_address = libnode_net_defs::IpAddress {
+    hdr.dst_address = net_defs::IpAddress {
         v6: dst_address.octets(),
     };
 }
@@ -152,7 +151,7 @@ fn expand_addrs_v6(
 pub fn compress(
     compression_mode: CompressionMode,
     l3_type: L3Type,
-    _l4_protocol: libnode_net_defs::IpProtocol,
+    _l4_protocol: net_defs::IpProtocol,
     pkt: &mut Packet,
 ) {
     match l3_type {

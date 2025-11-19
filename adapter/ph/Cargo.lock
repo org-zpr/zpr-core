@@ -1306,6 +1306,7 @@ dependencies = [
  "vsapi",
  "zerocopy 0.8.9",
  "zpr",
+ "zpr-utils",
 ]
 
 [[package]]
@@ -1660,6 +1661,7 @@ dependencies = [
  "zerocopy 0.8.9",
  "zpr",
  "zpr-ext",
+ "zpr-utils",
 ]
 
 [[package]]
@@ -3169,5 +3171,12 @@ dependencies = [
  "nix",
  "socket2",
  "tokio",
+ "zerocopy 0.8.9",
+]
+
+[[package]]
+name = "zpr-utils"
+version = "0.1.0"
+dependencies = [
  "zerocopy 0.8.9",
 ]

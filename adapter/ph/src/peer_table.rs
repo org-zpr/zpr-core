@@ -5,7 +5,6 @@ use crate::forwarding_tables::PeerForwardingTable;
 use crate::km::{KeyManager, KmTransportSA};
 use crate::link_state::{LinkStateWrapper, LinkType};
 use crate::mgmt::txn_mgr;
-use crate::net_defs::ScopedIpAddr;
 use crate::queues;
 use crate::rcu::{RcuBox, RcuCslabEntryGuard, RcuOptionGuard};
 use crate::special_peers::*;
@@ -27,6 +26,7 @@ use tokio::task;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use zpr::{self, LINK_ID_UNKNOWN, LinkId, SubstrateAddr};
+use zpr_utils::net_defs::ScopedIpAddr;
 
 const PEER_TABLE_SIZE: usize = config::MAX_ACTIVE_LINKS;
 
