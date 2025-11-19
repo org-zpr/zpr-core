@@ -192,11 +192,11 @@ impl VSConn {
             match req.zpr_addr {
                 IpAddr::V4(av4) => {
                     param0.set_ptype(vsapi2::ParamT::Ipv4);
-                    param0.set_value(&av4.octets());
+                    param0.set_value_data(&av4.octets());
                 }
                 IpAddr::V6(av6) => {
                     param0.set_ptype(vsapi2::ParamT::Ipv6);
-                    param0.set_value(&av6.octets());
+                    param0.set_value_data(&av6.octets());
                 }
             }
         }
@@ -204,7 +204,7 @@ impl VSConn {
             let mut param1 = params_bldr.reborrow().get(1);
             param1.set_ptype(vsapi2::ParamT::String);
             param1.set_name(PARAM_AAA_PREFIX);
-            param1.set_value(&req.aaa_prefix.to_string().as_bytes());
+            param1.set_value_text(&req.aaa_prefix.to_string());
         }
 
         debug!(target: VS_RPC, "VS-API -> connect");
