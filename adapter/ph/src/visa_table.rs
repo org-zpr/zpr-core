@@ -15,6 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::*;
 use zpr::vsapi_types;
+use zpr::vsapi_types::VsapiFiveTuple;
 use zpr::{ForwardingEntry, VisaId};
 use zpr_utils::net_defs::{IpAddress, ip_number};
 
@@ -43,7 +44,7 @@ pub struct Visa {
     // TODO add methods so that these don't have to be made pub
     pub visa: Option<vsapi_types::Visa>,
     streams: Vec<ForwardingEntry>,
-    pub ftuple: Option<FiveTuple>,
+    pub ftuple: Option<VsapiFiveTuple>,
 }
 
 /// Struct for the visa timeout queue
@@ -78,7 +79,7 @@ impl Eq for VisaTimeout {}
 
 impl Visa {
     pub fn new(visa: vsapi_types::Visa) -> Self {
-        let ftuple = FiveTuple::from(visa.get_five_tuple());
+        let ftuple = visa.get_five_tuple();
         Self {
             visa: Some(visa),
             streams: Vec::new(),
@@ -109,14 +110,10 @@ impl Visa {
         }
 
         let visa_tuple = self.ftuple.as_ref().unwrap();
-        if visa_tuple.src_address != IpAddress::UNSPECIFIED
-            && visa_tuple.src_address != five_tuple.src_address
-        {
+        if visa_tuple.src_address != IpAddr::from(five_tuple.src_address) {
             return false;
         }
-        if visa_tuple.dst_address != IpAddress::UNSPECIFIED
-            && visa_tuple.dst_address != five_tuple.dst_address
-        {
+        if visa_tuple.dst_address != IpAddr::from(five_tuple.dst_address) {
             return false;
         }
         // TODO: Explicitly set this (l3_type) in visa and also allow it to be set to 0?
@@ -256,7 +253,8 @@ impl VisaTable {
 
     /// Match traffic to a visa. Returns all matching visa IDs.
     pub fn match_traffic(&self, five_tuple: &FiveTuple) -> Option<VisaId> {
-        self.lookup_table.find_match(*five_tuple)
+        self.lookup_table
+            .find_match(VsapiFiveTuple::from(*five_tuple))
     }
 
     /// Link a forwarding entry to a given visa
@@ -325,7 +323,7 @@ impl VisaTable {
         match visa_query {
             Ok(visa) => {
                 if let Some(ftuple) = &visa.ftuple {
-                    Ok(ftuple.dst_address.clone())
+                    Ok(IpAddress::from(ftuple.dst_address.clone()))
                 } else {
                     Err(VisaTableError::ParseError(
                         "visa missing destination address",
@@ -356,8 +354,8 @@ fn make_tcp_visa(
         issuer_id: visa_id as u64,
         config: configuration,
         expires: UNIX_EPOCH + dur,
-        src_addr: IpAddress::from(*source),
-        dst_addr: IpAddress::from(*dest),
+        src_addr: (*source).into(),
+        dst_addr: (*dest).into(),
         dock_pep: ip_number::TCP,
         tcp_udp_pep: Some(pepargs),
         icmp_pep: None,

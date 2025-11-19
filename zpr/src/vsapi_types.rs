@@ -4,10 +4,11 @@
 //! away from thrift exclusively to capnp.
 
 use super::L3Type;
+use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use vsapi;
-use zpr_utils::net_defs::{IpAddress, IpProtocol, ip_number};
+use zpr_utils::net_defs::{IpProtocol, ip_number};
 
 #[derive(Debug, Error)]
 pub enum VisaError {
@@ -121,8 +122,8 @@ pub struct Visa {
     pub issuer_id: u64, // i32 in thrift, u64 in capnp
     pub config: i64,
     pub expires: SystemTime,
-    pub src_addr: IpAddress,
-    pub dst_addr: IpAddress,
+    pub src_addr: IpAddr,
+    pub dst_addr: IpAddr,
     pub dock_pep: IpProtocol,
     pub tcp_udp_pep: Option<TcpUdpPep>,
     pub icmp_pep: Option<IcmpPep>,
@@ -165,13 +166,34 @@ pub struct Constraints {
     pub data_cap_affinity_addr: Vec<u8>,
 }
 
+#[derive(Copy, Clone)]
 pub struct VsapiFiveTuple {
-    pub src_address: IpAddress,
-    pub dst_address: IpAddress,
+    pub src_address: IpAddr,
+    pub dst_address: IpAddr,
     pub l3_type: L3Type,
     pub l4_protocol: IpProtocol,
     pub src_port: u16,
     pub dst_port: u16,
+}
+
+impl VsapiFiveTuple {
+    pub fn new(
+        l3_type: L3Type,
+        src_address: IpAddr,
+        dst_address: IpAddr,
+        l4_protocol: IpProtocol,
+        src_port: u16,
+        dst_port: u16,
+    ) -> Self {
+        Self {
+            src_address,
+            dst_address,
+            l3_type,
+            l4_protocol,
+            src_port,
+            dst_port,
+        }
+    }
 }
 
 impl Visa {
@@ -179,7 +201,7 @@ impl Visa {
         let src_addr = self.src_addr;
         let dst_addr = self.dst_addr;
 
-        let l3_protocol = if src_addr.is_v4() {
+        let l3_protocol = if src_addr.is_ipv4() {
             L3Type::Ipv4
         } else {
             L3Type::Ipv6
@@ -255,7 +277,7 @@ impl TryFrom<vsapi::Visa> for Visa {
             }
         };
         let src_addr = match thrift_visa.source_contact {
-            Some(val) => match IpAddress::try_from(val) {
+            Some(val) => match ip_addr_from_vec(val) {
                 Ok(addr) => addr,
                 Err(_) => {
                     return Err(VisaError::VisaParseError(
@@ -267,7 +289,7 @@ impl TryFrom<vsapi::Visa> for Visa {
             None => return Err(VisaError::VisaParseError(issuer_id, "No src address")),
         };
         let dst_addr = match thrift_visa.dest_contact {
-            Some(val) => match IpAddress::try_from(val) {
+            Some(val) => match ip_addr_from_vec(val) {
                 Ok(addr) => addr,
                 Err(_) => {
                     return Err(VisaError::VisaParseError(
@@ -323,6 +345,18 @@ impl TryFrom<vsapi::Visa> for Visa {
             session_key,
             cons,
         })
+    }
+}
+
+pub fn ip_addr_from_vec(v: Vec<u8>) -> Result<IpAddr, Vec<u8>> {
+    match v.len() {
+        4 => Ok(IpAddr::from(
+            <[u8; 4]>::try_from(v.as_slice()).expect("Bad IP length"),
+        )),
+        16 => Ok(IpAddr::from(
+            <[u8; 16]>::try_from(v.as_slice()).expect("Bad IP length"),
+        )),
+        _ => Err(v),
     }
 }
 

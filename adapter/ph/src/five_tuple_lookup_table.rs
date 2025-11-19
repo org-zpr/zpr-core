@@ -1,16 +1,16 @@
-use crate::defs::FiveTuple;
 use crate::rcu::RcuBox;
 use crate::visa_table::Visa;
 
 use ip_network_table_deps_treebitmap::IpLookupTable;
 use range_set_blaze::RangeMapBlaze;
 use std::collections::HashMap;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
-use zpr::{L3Type, VisaId};
-use zpr_utils::net_defs::{IpAddress, IpProtocol};
+use zpr::VisaId;
+use zpr::vsapi_types::VsapiFiveTuple;
+use zpr_utils::net_defs::IpProtocol;
 
-pub type FiveTupleLookup = HashMap<IpAddress, Arc<IpLookupTable<Ipv6Addr, DstPortLookup>>>;
+pub type FiveTupleLookup = HashMap<IpAddr, Arc<IpLookupTable<Ipv6Addr, DstPortLookup>>>;
 pub type DstPortLookup = PortLookup<SrcPortLookup>;
 pub type SrcPortLookup = PortLookup<ProtoLookup>;
 
@@ -94,17 +94,9 @@ impl FiveTupleLookupTable {
         // Create table of src addresses, add map of destination ports
         // NOTE how large do we expect each IpLookupTable to be? I.E. how many src addresses for each dst address, typically?
         let mut ip_table = IpLookupTable::new();
-        match five_tuple.l3_type {
-            // converting v4 to v6 is temporary until a more elegant solution can be determined, currently fine but a waste of space if using ipv4
-            L3Type::Ipv4 => ip_table.insert(
-                Ipv4Addr::try_from(five_tuple.src_address)
-                    .unwrap()
-                    .to_ipv6_compatible(),
-                128,
-                dst_level,
-            ),
-            L3Type::Ipv6 => ip_table.insert(Ipv6Addr::from(five_tuple.src_address), 128, dst_level),
-            _ => None,
+        match five_tuple.src_address {
+            IpAddr::V4(addr) => ip_table.insert(addr.to_ipv6_mapped(), 128, dst_level),
+            IpAddr::V6(addr) => ip_table.insert(addr, 128, dst_level),
         };
 
         // Try to add to hash table, if there is a collision, combine the tables, then add the combined table
@@ -135,11 +127,16 @@ impl FiveTupleLookupTable {
         }
     }
 
-    pub fn find_match(&self, ft: FiveTuple) -> Option<VisaId> {
+    pub fn find_match(&self, ft: VsapiFiveTuple) -> Option<VisaId> {
         match self.table.get().get(&ft.dst_address) {
             None => return None,
             Some(src_addr_table) => {
-                return match src_addr_table.longest_match(Ipv6Addr::from(ft.src_address)) {
+                let src_addr = match ft.src_address {
+                    IpAddr::V4(addr) => addr.to_ipv6_mapped(),
+
+                    IpAddr::V6(addr) => addr,
+                };
+                return match src_addr_table.longest_match(src_addr) {
                     None => None,
                     Some(dst_port_table) => match dst_port_table.2 {
                         PortLookup::Wildcard(src_level) => {
@@ -163,7 +160,7 @@ impl FiveTupleLookupTable {
         };
     }
 
-    fn find_src_level_match(src_level: SrcPortLookup, ft: FiveTuple) -> Option<VisaId> {
+    fn find_src_level_match(src_level: SrcPortLookup, ft: VsapiFiveTuple) -> Option<VisaId> {
         match src_level {
             PortLookup::Wildcard(protos) => Self::find_proto_level_match(&protos, ft.l4_protocol),
             PortLookup::SingleVal(tuple_val) => {
@@ -313,6 +310,7 @@ mod tests {
     use super::*;
 
     use libnode::vsapi;
+    use zpr::L3Type;
     use zpr::vsapi_types;
     use zpr_utils::net_defs::ip_number;
 
@@ -366,7 +364,7 @@ mod tests {
         // Get src port level enum from from dst port level enum
         let src_port_level;
         if let PortLookup::SingleVal(tuple_val) = un_rcu_table
-            .get(&IpAddress::from(dst_addr))
+            .get(&IpAddr::from(dst_addr))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -426,7 +424,7 @@ mod tests {
         // Get src port level enum from dst port level enum
         let src_port_level;
         if let PortLookup::SingleVal(tuple_val) = un_rcu_table
-            .get(&IpAddress::from(dst_addr))
+            .get(&IpAddr::from(dst_addr))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -506,7 +504,7 @@ mod tests {
         // Get src port level enum from dst port level enum
         let src_port_level;
         if let PortLookup::SingleVal(tuple_val) = un_rcu_table
-            .get(&IpAddress::from(dst_addr))
+            .get(&IpAddr::from(dst_addr))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -622,7 +620,7 @@ mod tests {
         // Get dst port map from dst port level enum
         let dst_port_level;
         if let PortLookup::MultiVal(dst_level) = un_rcu_table
-            .get(&IpAddress::from(dst_addr))
+            .get(&IpAddr::from(dst_addr))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -678,10 +676,7 @@ mod tests {
         assert_eq!(proto_level1.unwrap().proto_vec.len(), 1);
         assert_eq!(proto_level2.unwrap().proto_vec.len(), 1);
         assert_eq!(dst_port_level.unwrap().len(), 2);
-        assert_eq!(
-            un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
-            1
-        );
+        assert_eq!(un_rcu_table.get(&IpAddr::from(dst_addr)).unwrap().len(), 1);
         assert_eq!(un_rcu_table.len(), 1);
     }
 
@@ -710,7 +705,7 @@ mod tests {
         // Get src port levels enum from dst port level enum
         let src_port_level1;
         if let PortLookup::SingleVal(tuple_val) = un_rcu_table
-            .get(&IpAddress::from(dst_addr))
+            .get(&IpAddr::from(dst_addr))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -731,7 +726,7 @@ mod tests {
 
         let src_port_level2;
         if let PortLookup::SingleVal(tuple_val) = un_rcu_table
-            .get(&IpAddress::from(dst_addr))
+            .get(&IpAddr::from(dst_addr))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -779,10 +774,7 @@ mod tests {
         assert_eq!(proto_level1.unwrap().proto_vec[0].proto, ip_number::TCP);
         assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].id, 13);
         assert_eq!(proto_level2.unwrap().proto_vec[0].proto, ip_number::TCP);
-        assert_eq!(
-            un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
-            2
-        );
+        assert_eq!(un_rcu_table.get(&IpAddr::from(dst_addr)).unwrap().len(), 2);
     }
 
     #[test]
@@ -810,7 +802,7 @@ mod tests {
         // Get src port level enum from dst port level enum
         let src_port_level1;
         if let PortLookup::SingleVal(tuple_val) = un_rcu_table
-            .get(&IpAddress::from(dst_addr1))
+            .get(&IpAddr::from(dst_addr1))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -831,7 +823,7 @@ mod tests {
 
         let src_port_level2;
         if let PortLookup::SingleVal(tuple_val) = un_rcu_table
-            .get(&IpAddress::from(dst_addr2))
+            .get(&IpAddr::from(dst_addr2))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -878,10 +870,7 @@ mod tests {
         assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].id, 13);
         assert_eq!(proto_level2.unwrap().proto_vec[0].proto, ip_number::TCP);
         assert_eq!(un_rcu_table.len(), 2);
-        assert_eq!(
-            un_rcu_table.get(&IpAddress::from(dst_addr2)).unwrap().len(),
-            1
-        );
+        assert_eq!(un_rcu_table.get(&IpAddr::from(dst_addr2)).unwrap().len(), 1);
     }
 
     #[test]
@@ -895,10 +884,10 @@ mod tests {
 
         let v = make_visa(src_addr, dst_addr, l4proto, src_port, dst_port);
 
-        let ft = FiveTuple::new(
+        let ft = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             dst_port as u16,
@@ -922,10 +911,10 @@ mod tests {
         let src_port = 10;
         let dst_port = 11;
 
-        let ft = FiveTuple::new(
+        let ft = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             dst_port as u16,
@@ -977,42 +966,42 @@ mod tests {
         let src_addr_diff = [3u8; 16];
         let dst_addr_diff = [4u8; 16];
 
-        let ft_diff_proto = FiveTuple::new(
+        let ft_diff_proto = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::UDP,
             src_port as u16,
             dst_port as u16,
         );
-        let ft_diff_src_port = FiveTuple::new(
+        let ft_diff_src_port = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port_diff as u16,
             dst_port as u16,
         );
-        let ft_diff_dst_port = FiveTuple::new(
+        let ft_diff_dst_port = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             dst_port_diff as u16,
         );
-        let ft_diff_src_addr = FiveTuple::new(
+        let ft_diff_src_addr = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr_diff),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr_diff),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
-        let ft_diff_dst_addr = FiveTuple::new(
+        let ft_diff_dst_addr = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr_diff),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr_diff),
             ip_number::TCP,
             src_port as u16,
             dst_port as u16,
@@ -1034,10 +1023,10 @@ mod tests {
         let src_port = 10;
         let dst_port = 11;
 
-        let ft = FiveTuple::new(
+        let ft = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             dst_port as u16,
@@ -1065,42 +1054,42 @@ mod tests {
         let table = FiveTupleLookupTable::new();
         table.build_table_from_hash(&hash);
 
-        let ft_diff_proto = FiveTuple::new(
+        let ft_diff_proto = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::UDP,
             src_port as u16,
             dst_port as u16,
         );
-        let ft_diff_src_port = FiveTuple::new(
+        let ft_diff_src_port = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port_diff as u16,
             dst_port as u16,
         );
-        let ft_diff_dst_port = FiveTuple::new(
+        let ft_diff_dst_port = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             dst_port_diff as u16,
         );
-        let ft_diff_src_addr = FiveTuple::new(
+        let ft_diff_src_addr = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr_diff),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr_diff),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
-        let ft_diff_dst_addr = FiveTuple::new(
+        let ft_diff_dst_addr = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr_diff),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr_diff),
             ip_number::TCP,
             src_port as u16,
             dst_port as u16,
@@ -1131,34 +1120,34 @@ mod tests {
         let table = FiveTupleLookupTable::new();
         table.build_table_from_hash(&hash);
 
-        let ft1 = FiveTuple::new(
+        let ft1 = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             3423,
             dst_port as u16,
         );
-        let ft2 = FiveTuple::new(
+        let ft2 = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             1,
             dst_port as u16,
         );
-        let ft3 = FiveTuple::new(
+        let ft3 = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             65535,
             dst_port as u16,
         );
-        let ft4 = FiveTuple::new(
+        let ft4 = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             43211,
             dst_port as u16,
@@ -1172,7 +1161,7 @@ mod tests {
         // Get src port level enum from dst port level enum
         let src_port_level;
         if let PortLookup::SingleVal(tuple_val) = un_rcu_table
-            .get(&IpAddress::from(dst_addr))
+            .get(&IpAddr::from(dst_addr))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -1220,34 +1209,34 @@ mod tests {
         let table = FiveTupleLookupTable::new();
         table.build_table_from_hash(&hash);
 
-        let ft1 = FiveTuple::new(
+        let ft1 = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             3423,
         );
-        let ft2 = FiveTuple::new(
+        let ft2 = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             1,
         );
-        let ft3 = FiveTuple::new(
+        let ft3 = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             65535,
         );
-        let ft4 = FiveTuple::new(
+        let ft4 = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             43211,
@@ -1262,7 +1251,7 @@ mod tests {
         //Get src port level enum from dst port level enum
         let src_port_level;
         if let PortLookup::Wildcard(src_level) = un_rcu_table
-            .get(&IpAddress::from(dst_addr))
+            .get(&IpAddr::from(dst_addr))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -1278,10 +1267,7 @@ mod tests {
         }
         assert!(src_port_level.is_some());
 
-        assert_eq!(
-            un_rcu_table.get(&IpAddress::from(dst_addr)).unwrap().len(),
-            1
-        );
+        assert_eq!(un_rcu_table.get(&IpAddr::from(dst_addr)).unwrap().len(), 1);
 
         // Get proto level from src port level enum
         let proto_level;
@@ -1322,7 +1308,7 @@ mod tests {
         // Get src port level enum from dst port level enum
         let src_port_level;
         if let PortLookup::SingleVal(tuple_val) = un_rcu_table
-            .get(&IpAddress::from(dst_addr))
+            .get(&IpAddr::from(dst_addr))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -1352,18 +1338,18 @@ mod tests {
 
         assert_eq!(src_level.unwrap().len(), 65536);
 
-        let specified_src_ft = FiveTuple::new(
+        let specified_src_ft = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::UDP,
             src_port_specified as u16,
             dst_port as u16,
         );
-        let random_src_ft = FiveTuple::new(
+        let random_src_ft = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             4323u16,
             dst_port as u16,
@@ -1399,7 +1385,7 @@ mod tests {
         // Get src port level enum from dst port level enum
         let src_port_level;
         if let PortLookup::SingleVal(tuple_val) = un_rcu_table
-            .get(&IpAddress::from(dst_addr))
+            .get(&IpAddr::from(dst_addr))
             .unwrap()
             .exact_match(
                 Ipv6Addr::new(
@@ -1429,18 +1415,18 @@ mod tests {
 
         assert_eq!(src_level.unwrap().len(), 65536);
 
-        let specified_src_ft = FiveTuple::new(
+        let specified_src_ft = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::UDP,
             src_port_specified as u16,
             dst_port as u16,
         );
-        let random_src_ft = FiveTuple::new(
+        let random_src_ft = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             4323u16,
             dst_port as u16,
@@ -1459,10 +1445,10 @@ mod tests {
         let src_port = 10;
         let dst_port = 11;
 
-        let ft = FiveTuple::new(
+        let ft = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             dst_port as u16,
@@ -1491,42 +1477,42 @@ mod tests {
         table.insert_visa(18, v_diff_src_addr);
         table.insert_visa(19, v_diff_dst_addr);
 
-        let ft_diff_proto = FiveTuple::new(
+        let ft_diff_proto = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::UDP,
             src_port as u16,
             dst_port as u16,
         );
-        let ft_diff_src_port = FiveTuple::new(
+        let ft_diff_src_port = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port_diff as u16,
             dst_port as u16,
         );
-        let ft_diff_dst_port = FiveTuple::new(
+        let ft_diff_dst_port = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             dst_port_diff as u16,
         );
-        let ft_diff_src_addr = FiveTuple::new(
+        let ft_diff_src_addr = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr_diff),
-            IpAddress::from(dst_addr),
+            IpAddr::from(src_addr_diff),
+            IpAddr::from(dst_addr),
             ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
-        let ft_diff_dst_addr = FiveTuple::new(
+        let ft_diff_dst_addr = VsapiFiveTuple::new(
             L3Type::Ipv6,
-            IpAddress::from(src_addr),
-            IpAddress::from(dst_addr_diff),
+            IpAddr::from(src_addr),
+            IpAddr::from(dst_addr_diff),
             ip_number::TCP,
             src_port as u16,
             dst_port as u16,
