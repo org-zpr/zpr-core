@@ -102,7 +102,7 @@ pub async fn bind_actor_address(
             Ok(visa_response) => match visa_response {
                 vsapi_types::VisaResponse::Allow(visa) => {
                     let (visa_id, egress_link_id) =
-                        visa_mgmt::parse_visa(asm, visa).map_err(|e| match e {
+                        visa_mgmt::insert_visa(asm, visa).map_err(|e| match e {
                             VisaTableError::ParseError(field) => {
                                 BindActorAddressError::ParseError(field)
                             }
@@ -125,7 +125,7 @@ pub async fn bind_actor_address(
                 }
                 // Not implemented as part of thrift visas
                 vsapi_types::VisaResponse::VSApiError(error) => {
-                    asm.counters.management[ManagementCounterType::VisaRequestDenied].increment();
+                    asm.counters.management[ManagementCounterType::VisaRequestError].increment();
                     debug!(target: FLOW_MGMT, "visa request error with code: {:?} and message: {:?}", error.code, error.message);
                     return Err(BindActorAddressError::PolicyError);
                 }

@@ -179,11 +179,11 @@ pub async fn actor_disconnect(asm: Arc<Assembly>, addr: IpAddress) {
 }
 
 /// Figure out egress link and insert visa into table.
-pub fn parse_visa(
+pub fn insert_visa(
     asm: &Arc<Assembly>,
     visa: vsapi_types::Visa,
 ) -> Result<(VisaId, NonZero<LinkId>), visa_table::VisaTableError> {
-    let addr = visa.dest.clone();
+    let addr = visa.dst_addr.clone();
     let Some(link_id) = asm.find_egress_link(addr) else {
         asm.counters.management[ManagementCounterType::VisaRequestError].increment();
         return Err(visa_table::VisaTableError::DestNotFound(addr));

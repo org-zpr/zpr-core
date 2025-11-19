@@ -12,7 +12,7 @@ pub async fn launch(asm: Arc<Assembly>, mut queue: mpsc::Receiver<VSSMsg>) {
             VSSMsg::PushedVisa(visa) => {
                 let visa_id = visa.issuer_id;
                 debug!(target: VISA_MGMT, "Received pushed visa, id={visa_id}");
-                if let Err(e) = visa_mgmt::parse_visa(&asm, visa) {
+                if let Err(e) = visa_mgmt::insert_visa(&asm, visa) {
                     error!(target: VISA_MGMT, "Error inserting visa {visa_id}: {e}");
                 }
             }

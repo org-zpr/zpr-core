@@ -8,7 +8,6 @@ use crate::logging::targets::VISA_MGMT;
 use crate::peer_table;
 
 use chrono::{DateTime, Utc};
-use libnode::vsapi;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::net::{IpAddr, Ipv6Addr};
@@ -16,7 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::*;
 use zpr::vsapi_types;
-use zpr::{ForwardingEntry, L3Type, VisaId};
+use zpr::{ForwardingEntry, VisaId};
 use zpr_utils::net_defs::{IpAddress, ip_number};
 
 // TODO: Figure out correct value for this visa expiration
@@ -79,7 +78,7 @@ impl Eq for VisaTimeout {}
 
 impl Visa {
     pub fn new(visa: vsapi_types::Visa) -> Self {
-        let ftuple = Self::extract_five_tuple(&visa);
+        let ftuple = FiveTuple::from(visa.get_five_tuple());
         Self {
             visa: Some(visa),
             streams: Vec::new(),
@@ -97,49 +96,6 @@ impl Visa {
     /// Link a forwarding entry to this visa
     pub fn link_forwarding_entry(&mut self, forwarding_entry: ForwardingEntry) {
         self.streams.push(forwarding_entry);
-    }
-
-    pub fn extract_five_tuple(visa: &vsapi_types::Visa) -> FiveTuple {
-        let src_addr = visa.src_addr;
-        let dst_addr = visa.dst_addr;
-
-        let l3_protocol = if src_addr.is_v4() {
-            L3Type::Ipv4
-        } else {
-            L3Type::Ipv6
-        };
-
-        let mut l4_protocol = visa.dock_pep;
-        if l4_protocol == ip_number::ICMP && l3_protocol == zpr::L3Type::Ipv6 {
-            l4_protocol = ip_number::IPV6_ICMP;
-        }
-
-        let (src_port, dst_port) = match visa.dock_pep {
-            pep if pep == ip_number::TCP || pep == ip_number::UDP => {
-                if let Some(pargs) = &visa.tcp_udp_pep {
-                    (pargs.source_port, pargs.dest_port)
-                } else {
-                    (0, 0)
-                }
-            }
-            pep if pep == ip_number::ICMP => {
-                if let Some(pargs) = &visa.icmp_pep {
-                    (pargs.icmp_type_code, pargs.icmp_antecedent)
-                } else {
-                    (0, 0)
-                }
-            }
-            _ => (0, 0),
-        };
-
-        return FiveTuple {
-            src_address: src_addr,
-            dst_address: dst_addr,
-            l3_type: l3_protocol,
-            l4_protocol,
-            src_port,
-            dst_port,
-        };
     }
 
     // Return true if the visa matches the given traffic description (given in the
@@ -390,30 +346,24 @@ fn make_tcp_visa(
     configuration: i64,
     expiration_ms: i64,
 ) -> vsapi_types::Visa {
-    let pepargs = vsapi::PEPArgsTCPUDP {
-        source_contact_addr: Some(source.octets().to_vec()),
-        dest_contact_addr: Some(dest.octets().to_vec()),
-        source_port: Some(source_port as i32),
-        dest_port: Some(dest_port as i32),
-        server: Some(true),
-        icmp_allowed: None,
+    let pepargs = vsapi_types::TcpUdpPep {
+        source_port: source_port,
+        dest_port: dest_port,
     };
-    vsapi_types::Visa::try_from(vsapi::Visa {
-        issuer_id: Some(visa_id),
-        configuration: Some(configuration),
-        expires: Some(expiration_ms),
-        source: Some(source.octets().to_vec()),
-        dest: Some(dest.octets().to_vec()),
-        source_contact: Some(source.octets().to_vec()),
-        dest_contact: Some(dest.octets().to_vec()),
-        dock_pep: Some(vsapi::PEPIndex::TCP),
-        tcpudp_pep_args: Some(pepargs),
-        icmp_pep_args: None,
-        session_key: None,
-        cons: None,
-        sig: None,
-    })
-    .unwrap()
+    let dur = Duration::from_millis(expiration_ms as u64);
+
+    vsapi_types::Visa {
+        issuer_id: visa_id as u64,
+        config: configuration,
+        expires: UNIX_EPOCH + dur,
+        src_addr: IpAddress::from(*source),
+        dst_addr: IpAddress::from(*dest),
+        dock_pep: ip_number::TCP,
+        tcp_udp_pep: Some(pepargs),
+        icmp_pep: None,
+        session_key: vsapi_types::KeySet::default(),
+        cons: vsapi_types::Constraints::default(),
+    }
 }
 
 #[cfg(test)]

@@ -79,6 +79,19 @@ impl FiveTuple {
     }
 }
 
+impl From<zpr::vsapi_types::VsapiFiveTuple> for FiveTuple {
+    fn from(other: zpr::vsapi_types::VsapiFiveTuple) -> Self {
+        Self {
+            src_address: other.src_address,
+            dst_address: other.dst_address,
+            l3_type: other.l3_type,
+            l4_protocol: other.l4_protocol,
+            src_port: other.src_port,
+            dst_port: other.dst_port,
+        }
+    }
+}
+
 impl std::fmt::Display for FiveTuple {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(

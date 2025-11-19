@@ -3,6 +3,7 @@
 //! Currently based on a mix of the thrift and capnp protocols, will likely evolve as we move
 //! away from thrift exclusively to capnp.
 
+use super::L3Type;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use vsapi;
@@ -120,8 +121,6 @@ pub struct Visa {
     pub issuer_id: u64, // i32 in thrift, u64 in capnp
     pub config: i64,
     pub expires: SystemTime,
-    // pub source: Vec<u8>,
-    pub dest: IpAddress,
     pub src_addr: IpAddress,
     pub dst_addr: IpAddress,
     pub dock_pep: IpProtocol,
@@ -129,34 +128,20 @@ pub struct Visa {
     pub icmp_pep: Option<IcmpPep>,
     pub session_key: KeySet,
     pub cons: Constraints,
-    // pub sig: Signature, // not in capnp
 }
 
 #[derive(Debug, Clone)]
 pub struct TcpUdpPep {
-    // pub source_contact_addr: Vec<u8>,
-    // pub dest_contact_addr: Vec<u8>,
     pub source_port: u16,
     pub dest_port: u16,
-    // /// If this visa is for dock on server side.
-    // pub server: bool,
-    // /// list of allowed ICMP types
-    // pub icmp_allowed: Vec<i32>,
-    // pub endpoint: EndpointT, // not in thrift
 }
 
 #[derive(Debug, Clone)]
 pub struct IcmpPep {
-    // pub source_contact_addr: Vec<u8>,
-    // pub dest_contact_addr: Vec<u8>,
     /// the allowed ICMP type and code (in lower 16 bits)
     pub icmp_type_code: u16,
     /// use 0xFF for none
     pub icmp_antecedent: u16,
-    // /// timeout for state in milliseconds
-    // pub state_timeout_ms: i32,
-    // /// If we allow only one reply to a request
-    // pub one_shot: bool,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -180,10 +165,58 @@ pub struct Constraints {
     pub data_cap_affinity_addr: Vec<u8>,
 }
 
-pub enum EndpointT {
-    Any,
-    Server,
-    Client,
+pub struct VsapiFiveTuple {
+    pub src_address: IpAddress,
+    pub dst_address: IpAddress,
+    pub l3_type: L3Type,
+    pub l4_protocol: IpProtocol,
+    pub src_port: u16,
+    pub dst_port: u16,
+}
+
+impl Visa {
+    pub fn get_five_tuple(&self) -> VsapiFiveTuple {
+        let src_addr = self.src_addr;
+        let dst_addr = self.dst_addr;
+
+        let l3_protocol = if src_addr.is_v4() {
+            L3Type::Ipv4
+        } else {
+            L3Type::Ipv6
+        };
+
+        let mut l4_protocol = self.dock_pep;
+        if l4_protocol == ip_number::ICMP && l3_protocol == L3Type::Ipv6 {
+            l4_protocol = ip_number::IPV6_ICMP;
+        }
+
+        let (src_port, dst_port) = match self.dock_pep {
+            pep if pep == ip_number::TCP || pep == ip_number::UDP => {
+                if let Some(pargs) = &self.tcp_udp_pep {
+                    (pargs.source_port, pargs.dest_port)
+                } else {
+                    (0, 0)
+                }
+            }
+            pep if pep == ip_number::ICMP => {
+                if let Some(pargs) = &self.icmp_pep {
+                    (pargs.icmp_type_code, pargs.icmp_antecedent)
+                } else {
+                    (0, 0)
+                }
+            }
+            _ => (0, 0),
+        };
+
+        return VsapiFiveTuple {
+            src_address: src_addr,
+            dst_address: dst_addr,
+            l3_type: l3_protocol,
+            l4_protocol,
+            src_port,
+            dst_port,
+        };
+    }
 }
 
 impl TryFrom<vsapi::VisaHop> for Visa {
@@ -219,17 +252,6 @@ impl TryFrom<vsapi::Visa> for Visa {
             }
             None => {
                 return Err(VisaError::VisaParseError(issuer_id, "No expiration"));
-            }
-        };
-        let dest = match thrift_visa.dest {
-            Some(val) => match IpAddress::try_from(val) {
-                Ok(addr) => addr,
-                Err(_) => {
-                    return Err(VisaError::VisaParseError(issuer_id, "Improper dest"));
-                }
-            },
-            None => {
-                return Err(VisaError::VisaParseError(issuer_id, "No dest"));
             }
         };
         let src_addr = match thrift_visa.source_contact {
@@ -293,7 +315,6 @@ impl TryFrom<vsapi::Visa> for Visa {
             issuer_id,
             config,
             expires,
-            dest,
             src_addr,
             dst_addr,
             dock_pep,
