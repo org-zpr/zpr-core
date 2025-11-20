@@ -558,7 +558,7 @@ s5JVZ48=
                 visa: None,
                 reason: Some(format!("addr: {}, type: {}", source_tether_addr, l3_type)),
             };
-            let v = VisaResponse::from(vrr);
+            let v = VisaResponse::try_from(vrr)?;
             Ok(v)
         }
 

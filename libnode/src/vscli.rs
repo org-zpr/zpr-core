@@ -189,7 +189,7 @@ impl VSClientI for VSClient {
 
         debug!(target: VS_RPC, "sending VISA_REQUEST to {}", self.service);
         match self.cli.request_visa(key.clone(), addr_bytes, l3t, packet) {
-            Ok(result) => Ok(VisaResponse::from(result)),
+            Ok(result) => Ok(VisaResponse::try_from(result)?),
             Err(e) => Err(e.into()),
         }
     }
