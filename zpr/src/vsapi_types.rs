@@ -4,6 +4,7 @@
 //! away from thrift exclusively to capnp.
 
 use super::L3Type;
+use crate::vsapi::v1;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -17,6 +18,10 @@ pub enum VisaError {
     VisaHopError(&'static str),
     #[error("Keyset Parse Error")]
     KeySetParseError,
+    #[error("Cap'n Proto error: {0}")]
+    Capnp(#[from] capnp::Error),
+    #[error("Cap'n Proto error: {0}")]
+    NotInSchema(#[from] capnp::NotInSchema),
 }
 
 #[derive(Debug)]
@@ -123,17 +128,30 @@ pub struct Visa {
     pub expires: SystemTime,
     pub src_addr: IpAddr,
     pub dst_addr: IpAddr,
-    pub dock_pep: VsapiIpProtocol,
-    pub tcp_udp_pep: Option<TcpUdpPep>,
-    pub icmp_pep: Option<IcmpPep>,
+    pub dock_pep: DockPep,
     pub session_key: KeySet,
     pub cons: Constraints,
+}
+
+#[derive(Debug, Clone)]
+pub enum DockPep {
+    TCP(TcpUdpPep),
+    UDP(TcpUdpPep),
+    ICMP(IcmpPep),
 }
 
 #[derive(Debug, Clone)]
 pub struct TcpUdpPep {
     pub source_port: u16,
     pub dest_port: u16,
+    pub endpoint: Option<EndpointT>,
+}
+
+#[derive(Debug, Clone)]
+pub enum EndpointT {
+    Any,
+    Server,
+    Client,
 }
 
 #[derive(Debug, Clone)]
@@ -223,27 +241,32 @@ impl Visa {
             L3Type::Ipv6
         };
 
-        let mut l4_protocol = self.dock_pep;
-        if l4_protocol == vsapi_ip_number::ICMP && l3_protocol == L3Type::Ipv6 {
-            l4_protocol = vsapi_ip_number::IPV6_ICMP;
-        }
-
-        let (src_port, dst_port) = match self.dock_pep {
-            pep if pep == vsapi_ip_number::TCP || pep == vsapi_ip_number::UDP => {
-                if let Some(pargs) = &self.tcp_udp_pep {
-                    (pargs.source_port, pargs.dest_port)
+        let (l4_protocol, src_port, dst_port) = match &self.dock_pep {
+            DockPep::ICMP(icmp_pep) => {
+                if l3_protocol == L3Type::Ipv6 {
+                    (
+                        vsapi_ip_number::IPV6_ICMP,
+                        icmp_pep.icmp_type_code,
+                        icmp_pep.icmp_antecedent,
+                    )
                 } else {
-                    (0, 0)
+                    (
+                        vsapi_ip_number::ICMP,
+                        icmp_pep.icmp_type_code,
+                        icmp_pep.icmp_antecedent,
+                    )
                 }
             }
-            pep if pep == vsapi_ip_number::ICMP => {
-                if let Some(pargs) = &self.icmp_pep {
-                    (pargs.icmp_type_code, pargs.icmp_antecedent)
-                } else {
-                    (0, 0)
-                }
-            }
-            _ => (0, 0),
+            DockPep::UDP(tcp_udp_pep) => (
+                vsapi_ip_number::UDP,
+                tcp_udp_pep.source_port,
+                tcp_udp_pep.dest_port,
+            ),
+            DockPep::TCP(tcp_udp_pep) => (
+                vsapi_ip_number::TCP,
+                tcp_udp_pep.source_port,
+                tcp_udp_pep.dest_port,
+            ),
         };
 
         return VsapiFiveTuple {
@@ -254,6 +277,83 @@ impl Visa {
             src_port,
             dst_port,
         };
+    }
+}
+
+impl TryFrom<v1::visa::Reader<'_>> for Visa {
+    type Error = VisaError;
+
+    fn try_from(reader: v1::visa::Reader) -> Result<Self, Self::Error> {
+        let issuer_id = reader.get_issuer_id();
+        let config = 0i64;
+        let expires = UNIX_EPOCH + Duration::from_millis(reader.get_expiration());
+        let src_addr = match reader.get_source_addr()?.which()? {
+            v1::ip_addr::Which::V4(data) => {
+                IpAddr::from(<[u8; 4]>::try_from(data.unwrap()).unwrap())
+            }
+            v1::ip_addr::Which::V6(data) => {
+                IpAddr::from(<[u8; 16]>::try_from(data.unwrap()).unwrap())
+            }
+        };
+        let dst_addr = match reader.get_dest_addr()?.which()? {
+            v1::ip_addr::Which::V4(data) => {
+                IpAddr::from(<[u8; 4]>::try_from(data.unwrap()).unwrap())
+            }
+            v1::ip_addr::Which::V6(data) => {
+                IpAddr::from(<[u8; 16]>::try_from(data.unwrap()).unwrap())
+            }
+        };
+
+        let dock_pep = match reader.get_dock_pep()?.which()? {
+            v1::dock_pep::Which::Tcp(tcp_udp_pep_result) => {
+                let tcp_udp_pep_reader = tcp_udp_pep_result?;
+                let source_port = tcp_udp_pep_reader.get_source_port();
+                let dest_port = tcp_udp_pep_reader.get_dest_port();
+                let enpoint = match tcp_udp_pep_reader.get_enpoint()? {
+                    v1::EndpointT::Any => EndpointT::Any,
+                    v1::EndpointT::Server => EndpointT::Server,
+                    v1::EndpointT::Client => EndpointT::Client,
+                };
+                let tcp_udp_pep = TcpUdpPep::new(source_port, dest_port, enpoint);
+                DockPep::TCP(tcp_udp_pep)
+            }
+            v1::dock_pep::Which::Udp(tcp_udp_pep_result) => {
+                let tcp_udp_pep_reader = tcp_udp_pep_result?;
+                let source_port = tcp_udp_pep_reader.get_source_port();
+                let dest_port = tcp_udp_pep_reader.get_dest_port();
+                let enpoint = match tcp_udp_pep_reader.get_enpoint()? {
+                    v1::EndpointT::Any => EndpointT::Any,
+                    v1::EndpointT::Server => EndpointT::Server,
+                    v1::EndpointT::Client => EndpointT::Client,
+                };
+                let tcp_udp_pep = TcpUdpPep::new(source_port, dest_port, enpoint);
+                DockPep::UDP(tcp_udp_pep)
+            }
+            v1::dock_pep::Which::Icmp(icmp_pep_result) => {
+                let icmp_pep_reader = icmp_pep_result?;
+                let type_code = icmp_pep_reader.get_icmp_type_code();
+                let icmp_pep = IcmpPep::new(type_code, 0xFF);
+                DockPep::ICMP(icmp_pep)
+            }
+        };
+
+        let session_key = KeySet::new_no_format(
+            reader.get_session_key()?.get_ingress_key()?.to_vec(),
+            reader.get_session_key()?.get_egress_key()?.to_vec(),
+        );
+
+        let cons = Constraints::default();
+
+        Ok(Self {
+            issuer_id,
+            config,
+            expires,
+            src_addr,
+            dst_addr,
+            dock_pep,
+            session_key,
+            cons,
+        })
     }
 }
 
@@ -318,28 +418,43 @@ impl TryFrom<vsapi::Visa> for Visa {
         };
         let dock_pep = match thrift_visa.dock_pep {
             Some(val) => match val {
-                vsapi::PEPIndex::UDP => vsapi_ip_number::UDP,
-                vsapi::PEPIndex::TCP => vsapi_ip_number::TCP,
-                vsapi::PEPIndex::ICMP => vsapi_ip_number::ICMP,
-                _ => return Err(VisaError::VisaParseError(issuer_id, "Unknown PEP")),
+                vsapi::PEPIndex::UDP => {
+                    let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
+                        Some(val) => TcpUdpPep::from(val),
+                        None => {
+                            return Err(VisaError::VisaParseError(
+                                issuer_id,
+                                "No TCP/UDP PEP Args",
+                            ));
+                        }
+                    };
+                    DockPep::UDP(tcp_udp_pep)
+                }
+                vsapi::PEPIndex::TCP => {
+                    let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
+                        Some(val) => TcpUdpPep::from(val),
+                        None => {
+                            return Err(VisaError::VisaParseError(
+                                issuer_id,
+                                "No TCP/UDP PEP Args",
+                            ));
+                        }
+                    };
+                    DockPep::TCP(tcp_udp_pep)
+                }
+                vsapi::PEPIndex::ICMP => {
+                    let icmp_pep = match thrift_visa.icmp_pep_args {
+                        Some(val) => IcmpPep::from(val),
+                        None => {
+                            return Err(VisaError::VisaParseError(issuer_id, "No ICMP PEP Args"));
+                        }
+                    };
+                    DockPep::ICMP(icmp_pep)
+                }
+                _ => return Err(VisaError::VisaParseError(issuer_id, "Unknown Dock Pep")),
             },
-            None => vsapi_ip_number::UDP, // Not sure what default here should be
+            None => return Err(VisaError::VisaParseError(issuer_id, "No Dock Pep")),
         };
-        let mut tcp_udp_pep = None;
-        if dock_pep == vsapi_ip_number::UDP || dock_pep == vsapi_ip_number::TCP {
-            tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
-                Some(val) => Some(TcpUdpPep::from(val)),
-                None => return Err(VisaError::VisaParseError(issuer_id, "No TCP/UDP PEP Args")),
-            };
-        }
-
-        let mut icmp_pep = None;
-        if dock_pep == vsapi_ip_number::ICMP {
-            icmp_pep = match thrift_visa.icmp_pep_args {
-                Some(val) => Some(IcmpPep::from(val)),
-                None => return Err(VisaError::VisaParseError(issuer_id, "No ICMP PEP Args")),
-            };
-        }
 
         let session_key = match thrift_visa.session_key {
             Some(val) => KeySet::try_from(val)?,
@@ -356,8 +471,6 @@ impl TryFrom<vsapi::Visa> for Visa {
             src_addr,
             dst_addr,
             dock_pep,
-            tcp_udp_pep,
-            icmp_pep,
             session_key,
             cons,
         })
@@ -376,6 +489,16 @@ pub fn ip_addr_from_vec(v: Vec<u8>) -> Result<IpAddr, Vec<u8>> {
     }
 }
 
+impl TcpUdpPep {
+    pub fn new(src: u16, dst: u16, endpt: EndpointT) -> Self {
+        Self {
+            source_port: src,
+            dest_port: dst,
+            endpoint: Some(endpt),
+        }
+    }
+}
+
 impl From<vsapi::PEPArgsTCPUDP> for TcpUdpPep {
     fn from(thrift_tcp_udp_pep: vsapi::PEPArgsTCPUDP) -> Self {
         let source_port = match thrift_tcp_udp_pep.source_port {
@@ -390,6 +513,16 @@ impl From<vsapi::PEPArgsTCPUDP> for TcpUdpPep {
         Self {
             source_port,
             dest_port,
+            endpoint: None,
+        }
+    }
+}
+
+impl IcmpPep {
+    pub fn new(src: u16, ant: u16) -> Self {
+        Self {
+            icmp_type_code: src,
+            icmp_antecedent: ant,
         }
     }
 }
@@ -434,6 +567,16 @@ impl TryFrom<vsapi::KeySet> for KeySet {
             ingress_key,
             egress_key,
         })
+    }
+}
+
+impl KeySet {
+    pub fn new_no_format(ingress_key: Vec<u8>, egress_key: Vec<u8>) -> Self {
+        Self {
+            format: 0,
+            ingress_key,
+            egress_key,
+        }
     }
 }
 

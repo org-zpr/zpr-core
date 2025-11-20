@@ -1,8 +1,6 @@
+use crate::vss::VSSMsg;
 use std::fmt::{self, Formatter};
 use std::net::IpAddr;
-use zpr_utils::net_defs::ip_number;
-
-use crate::vss::VSSMsg;
 use zpr::vsapi_types;
 
 /// Human readable version of the MSSMsg which includes some interior details of the visa.
@@ -65,42 +63,23 @@ fn summarize_visa(f: &mut Formatter<'_>, v: &vsapi_types::Visa) -> fmt::Result {
     let sport: String;
     let dport: String;
 
-    match v.dock_pep {
-        ip_number::UDP | ip_number::TCP => {
-            match &v.tcp_udp_pep {
-                Some(args) => {
-                    sport = args.source_port.to_string();
-                    dport = args.dest_port.to_string();
-                }
-                None => {
-                    sport = "(none)".to_string();
-                    dport = "(none)".to_string();
-                }
-            }
-            if v.dock_pep == ip_number::UDP {
-                proto = "UDP".to_string();
-            } else {
-                proto = "TCP".to_string();
-            }
+    match &v.dock_pep {
+        vsapi_types::DockPep::TCP(args) => {
+            sport = args.source_port.to_string();
+            dport = args.dest_port.to_string();
+            proto = "TCP".to_string();
         }
-        ip_number::ICMP => {
+        vsapi_types::DockPep::UDP(args) => {
+            sport = args.source_port.to_string();
+            dport = args.dest_port.to_string();
+            proto = "UDP".to_string();
+        }
+        vsapi_types::DockPep::ICMP(args) => {
             icmp = true;
             proto = "ICMP".to_string();
-            match &v.icmp_pep {
-                Some(args) => {
-                    sport = args.icmp_type_code.to_string();
-                    dport = "".to_string();
-                }
-                None => {
-                    sport = "(none)".to_string();
-                    dport = "(none)".to_string();
-                }
-            }
-        }
-        _ => {
-            proto = "(invalid)".to_string();
-            sport = "(?)".to_string();
-            dport = "(?)".to_string();
+
+            sport = args.icmp_type_code.to_string();
+            dport = "".to_string();
         }
     };
 
