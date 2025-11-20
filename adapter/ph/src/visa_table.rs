@@ -15,9 +15,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tracing::*;
 use zpr::vsapi_types;
-use zpr::vsapi_types::VsapiFiveTuple;
+use zpr::vsapi_types::{DockPep, VsapiFiveTuple};
 use zpr::{ForwardingEntry, VisaId};
-use zpr_utils::net_defs::{IpAddress, ip_number};
+use zpr_utils::net_defs::IpAddress;
 
 // TODO: Figure out correct value for this visa expiration
 const VS_VISAS_DURATION: Duration = Duration::from_secs(60 * 60 * 24); // 24 hours
@@ -347,6 +347,7 @@ fn make_tcp_visa(
     let pepargs = vsapi_types::TcpUdpPep {
         source_port: source_port,
         dest_port: dest_port,
+        endpoint: None,
     };
     let dur = Duration::from_millis(expiration_ms as u64);
 
@@ -356,9 +357,7 @@ fn make_tcp_visa(
         expires: UNIX_EPOCH + dur,
         src_addr: (*source).into(),
         dst_addr: (*dest).into(),
-        dock_pep: ip_number::TCP,
-        tcp_udp_pep: Some(pepargs),
-        icmp_pep: None,
+        dock_pep: DockPep::TCP(pepargs),
         session_key: vsapi_types::KeySet::default(),
         cons: vsapi_types::Constraints::default(),
     }
@@ -375,6 +374,7 @@ mod tests {
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
     use zpr_utils::net_defs;
+    use zpr_utils::net_defs::ip_number;
 
     #[test]
     fn test_timeouts() {
