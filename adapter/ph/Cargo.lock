@@ -3164,7 +3164,6 @@ dependencies = [
  "thiserror",
  "vsapi",
  "zerocopy 0.8.9",
- "zpr-utils",
 ]
 
 [[package]]
@@ -3184,4 +3183,5 @@ name = "zpr-utils"
 version = "0.1.0"
 dependencies = [
  "zerocopy 0.8.9",
+ "zpr",
 ]

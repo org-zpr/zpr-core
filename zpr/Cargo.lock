@@ -260,12 +260,4 @@ dependencies = [
  "thiserror",
  "vsapi",
  "zerocopy",
- "zpr-utils",
-]
-
-[[package]]
-name = "zpr-utils"
-version = "0.1.0"
-dependencies = [
- "zerocopy",
 ]

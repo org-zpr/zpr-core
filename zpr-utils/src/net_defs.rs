@@ -2,6 +2,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout, Unaligned};
+use zpr::vsapi_types::{VsapiIpProtocol, vsapi_ip_number};
 
 pub mod ethertype {
     //! Ethertype / IEEE 802 numbers
@@ -359,6 +360,22 @@ pub mod ip_number {
     pub const AH: IpProtocol = 51;
     pub const IPV6_ICMP: IpProtocol = 58;
     pub const IPV6_OPTS: IpProtocol = 60;
+}
+
+pub fn vsapi_ip_to_defs_ip(vsapi_proto: VsapiIpProtocol) -> Result<IpProtocol, &'static str> {
+    match vsapi_proto {
+        vsapi_ip_number::HOPOPT => Ok(ip_number::HOPOPT),
+        vsapi_ip_number::ICMP => Ok(ip_number::ICMP),
+        vsapi_ip_number::IPINIP => Ok(ip_number::IPINIP),
+        vsapi_ip_number::TCP => Ok(ip_number::TCP),
+        vsapi_ip_number::UDP => Ok(ip_number::UDP),
+        vsapi_ip_number::IPV6_ROUTE => Ok(ip_number::IPV6_ROUTE),
+        vsapi_ip_number::IPV6_FRAG => Ok(ip_number::IPV6_FRAG),
+        vsapi_ip_number::AH => Ok(ip_number::AH),
+        vsapi_ip_number::IPV6_ICMP => Ok(ip_number::IPV6_ICMP),
+        vsapi_ip_number::IPV6_OPTS => Ok(ip_number::IPV6_OPTS),
+        _ => Err("Unknown protocol"),
+    }
 }
 
 /// RFC 1071 Internet Checksum.  The input data must be non-empty, and

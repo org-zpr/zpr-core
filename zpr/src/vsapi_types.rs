@@ -8,7 +8,6 @@ use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use vsapi;
-use zpr_utils::net_defs::{IpProtocol, ip_number};
 
 #[derive(Debug, Error)]
 pub enum VisaError {
@@ -124,7 +123,7 @@ pub struct Visa {
     pub expires: SystemTime,
     pub src_addr: IpAddr,
     pub dst_addr: IpAddr,
-    pub dock_pep: IpProtocol,
+    pub dock_pep: VsapiIpProtocol,
     pub tcp_udp_pep: Option<TcpUdpPep>,
     pub icmp_pep: Option<IcmpPep>,
     pub session_key: KeySet,
@@ -171,7 +170,7 @@ pub struct VsapiFiveTuple {
     pub src_address: IpAddr,
     pub dst_address: IpAddr,
     pub l3_type: L3Type,
-    pub l4_protocol: IpProtocol,
+    pub l4_protocol: VsapiIpProtocol,
     pub src_port: u16,
     pub dst_port: u16,
 }
@@ -181,7 +180,7 @@ impl VsapiFiveTuple {
         l3_type: L3Type,
         src_address: IpAddr,
         dst_address: IpAddr,
-        l4_protocol: IpProtocol,
+        l4_protocol: VsapiIpProtocol,
         src_port: u16,
         dst_port: u16,
     ) -> Self {
@@ -196,6 +195,23 @@ impl VsapiFiveTuple {
     }
 }
 
+pub type VsapiIpProtocol = u8;
+
+pub mod vsapi_ip_number {
+    use super::VsapiIpProtocol;
+
+    pub const HOPOPT: VsapiIpProtocol = 0;
+    pub const ICMP: VsapiIpProtocol = 1;
+    pub const IPINIP: VsapiIpProtocol = 4;
+    pub const TCP: VsapiIpProtocol = 6;
+    pub const UDP: VsapiIpProtocol = 17;
+    pub const IPV6_ROUTE: VsapiIpProtocol = 43;
+    pub const IPV6_FRAG: VsapiIpProtocol = 44;
+    pub const AH: VsapiIpProtocol = 51;
+    pub const IPV6_ICMP: VsapiIpProtocol = 58;
+    pub const IPV6_OPTS: VsapiIpProtocol = 60;
+}
+
 impl Visa {
     pub fn get_five_tuple(&self) -> VsapiFiveTuple {
         let src_addr = self.src_addr;
@@ -208,19 +224,19 @@ impl Visa {
         };
 
         let mut l4_protocol = self.dock_pep;
-        if l4_protocol == ip_number::ICMP && l3_protocol == L3Type::Ipv6 {
-            l4_protocol = ip_number::IPV6_ICMP;
+        if l4_protocol == vsapi_ip_number::ICMP && l3_protocol == L3Type::Ipv6 {
+            l4_protocol = vsapi_ip_number::IPV6_ICMP;
         }
 
         let (src_port, dst_port) = match self.dock_pep {
-            pep if pep == ip_number::TCP || pep == ip_number::UDP => {
+            pep if pep == vsapi_ip_number::TCP || pep == vsapi_ip_number::UDP => {
                 if let Some(pargs) = &self.tcp_udp_pep {
                     (pargs.source_port, pargs.dest_port)
                 } else {
                     (0, 0)
                 }
             }
-            pep if pep == ip_number::ICMP => {
+            pep if pep == vsapi_ip_number::ICMP => {
                 if let Some(pargs) = &self.icmp_pep {
                     (pargs.icmp_type_code, pargs.icmp_antecedent)
                 } else {
@@ -302,15 +318,15 @@ impl TryFrom<vsapi::Visa> for Visa {
         };
         let dock_pep = match thrift_visa.dock_pep {
             Some(val) => match val {
-                vsapi::PEPIndex::UDP => ip_number::UDP,
-                vsapi::PEPIndex::TCP => ip_number::TCP,
-                vsapi::PEPIndex::ICMP => ip_number::ICMP,
+                vsapi::PEPIndex::UDP => vsapi_ip_number::UDP,
+                vsapi::PEPIndex::TCP => vsapi_ip_number::TCP,
+                vsapi::PEPIndex::ICMP => vsapi_ip_number::ICMP,
                 _ => return Err(VisaError::VisaParseError(issuer_id, "Unknown PEP")),
             },
-            None => ip_number::UDP, // Not sure what default here should be
+            None => vsapi_ip_number::UDP, // Not sure what default here should be
         };
         let mut tcp_udp_pep = None;
-        if dock_pep == ip_number::UDP || dock_pep == ip_number::TCP {
+        if dock_pep == vsapi_ip_number::UDP || dock_pep == vsapi_ip_number::TCP {
             tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
                 Some(val) => Some(TcpUdpPep::from(val)),
                 None => return Err(VisaError::VisaParseError(issuer_id, "No TCP/UDP PEP Args")),
@@ -318,7 +334,7 @@ impl TryFrom<vsapi::Visa> for Visa {
         }
 
         let mut icmp_pep = None;
-        if dock_pep == ip_number::ICMP {
+        if dock_pep == vsapi_ip_number::ICMP {
             icmp_pep = match thrift_visa.icmp_pep_args {
                 Some(val) => Some(IcmpPep::from(val)),
                 None => return Err(VisaError::VisaParseError(issuer_id, "No ICMP PEP Args")),

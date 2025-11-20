@@ -85,7 +85,7 @@ impl From<zpr::vsapi_types::VsapiFiveTuple> for FiveTuple {
             src_address: other.src_address.into(),
             dst_address: other.dst_address.into(),
             l3_type: other.l3_type,
-            l4_protocol: other.l4_protocol,
+            l4_protocol: net_defs::vsapi_ip_to_defs_ip(other.l4_protocol).unwrap(),
             src_port: other.src_port,
             dst_port: other.dst_port,
         }

@@ -7,8 +7,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use zpr::VisaId;
-use zpr::vsapi_types::VsapiFiveTuple;
-use zpr_utils::net_defs::IpProtocol;
+use zpr::vsapi_types::{VsapiFiveTuple, VsapiIpProtocol};
 
 pub type FiveTupleLookup = HashMap<IpAddr, Arc<IpLookupTable<Ipv6Addr, DstPortLookup>>>;
 pub type DstPortLookup = PortLookup<SrcPortLookup>;
@@ -25,7 +24,7 @@ pub struct ProtoLookup {
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct ProtoAndId {
-    proto: IpProtocol,
+    proto: VsapiIpProtocol,
     id: VisaId,
 }
 
@@ -179,7 +178,7 @@ impl FiveTupleLookupTable {
         }
     }
 
-    fn find_proto_level_match(protos: &ProtoLookup, proto: IpProtocol) -> Option<VisaId> {
+    fn find_proto_level_match(protos: &ProtoLookup, proto: VsapiIpProtocol) -> Option<VisaId> {
         for elem in protos.proto_vec.iter() {
             if elem.proto == proto {
                 return Some(elem.id);
@@ -300,7 +299,7 @@ impl Combinable for ProtoLookup {
 }
 
 impl ProtoAndId {
-    pub fn new(proto: IpProtocol, id: VisaId) -> Self {
+    pub fn new(proto: VsapiIpProtocol, id: VisaId) -> Self {
         Self { proto, id }
     }
 }
@@ -312,7 +311,7 @@ mod tests {
     use libnode::vsapi;
     use zpr::L3Type;
     use zpr::vsapi_types;
-    use zpr_utils::net_defs::ip_number;
+    use zpr::vsapi_types::vsapi_ip_number;
 
     fn make_visa(
         src_addr: [u8; 16],
@@ -396,7 +395,10 @@ mod tests {
         assert!(proto_level.is_some());
 
         assert_eq!(proto_level.as_ref().unwrap().proto_vec[0].id, 12);
-        assert_eq!(proto_level.unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(
+            proto_level.unwrap().proto_vec[0].proto,
+            vsapi_ip_number::TCP
+        );
     }
 
     #[test]
@@ -461,7 +463,7 @@ mod tests {
         let mut udp_idx = 0;
 
         // protovec is not deterministic in terms of ordering, have to figure out which visa is where
-        if proto_level.as_ref().unwrap().proto_vec[0].proto == ip_number::TCP {
+        if proto_level.as_ref().unwrap().proto_vec[0].proto == vsapi_ip_number::TCP {
             udp_idx = 1;
         } else {
             tcp_idx = 1;
@@ -469,12 +471,12 @@ mod tests {
 
         assert_eq!(
             proto_level.as_ref().unwrap().proto_vec[tcp_idx].proto,
-            ip_number::TCP
+            vsapi_ip_number::TCP
         );
         assert_eq!(proto_level.as_ref().unwrap().proto_vec[tcp_idx].id, 12);
         assert_eq!(
             proto_level.as_ref().unwrap().proto_vec[udp_idx].proto,
-            ip_number::UDP
+            vsapi_ip_number::UDP
         );
         assert_eq!(proto_level.unwrap().proto_vec[udp_idx].id, 13);
     }
@@ -550,7 +552,7 @@ mod tests {
                 .unwrap()
                 .proto_vec[0]
                 .proto,
-            ip_number::TCP
+            vsapi_ip_number::TCP
         );
         assert_eq!(
             src_ports
@@ -580,7 +582,7 @@ mod tests {
                 .unwrap()
                 .proto_vec[0]
                 .proto,
-            ip_number::TCP
+            vsapi_ip_number::TCP
         );
         assert_eq!(
             src_ports
@@ -666,12 +668,12 @@ mod tests {
         assert_eq!(proto_level1.as_ref().unwrap().proto_vec[0].id, 12);
         assert_eq!(
             proto_level1.as_ref().unwrap().proto_vec[0].proto,
-            ip_number::TCP
+            vsapi_ip_number::TCP
         );
         assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].id, 13);
         assert_eq!(
             proto_level2.as_ref().unwrap().proto_vec[0].proto,
-            ip_number::TCP
+            vsapi_ip_number::TCP
         );
         assert_eq!(proto_level1.unwrap().proto_vec.len(), 1);
         assert_eq!(proto_level2.unwrap().proto_vec.len(), 1);
@@ -771,9 +773,15 @@ mod tests {
         assert!(proto_level2.as_ref().is_some());
 
         assert_eq!(proto_level1.as_ref().unwrap().proto_vec[0].id, 12);
-        assert_eq!(proto_level1.unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(
+            proto_level1.unwrap().proto_vec[0].proto,
+            vsapi_ip_number::TCP
+        );
         assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].id, 13);
-        assert_eq!(proto_level2.unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(
+            proto_level2.unwrap().proto_vec[0].proto,
+            vsapi_ip_number::TCP
+        );
         assert_eq!(un_rcu_table.get(&IpAddr::from(dst_addr)).unwrap().len(), 2);
     }
 
@@ -866,9 +874,15 @@ mod tests {
         assert!(proto_level2.as_ref().is_some());
 
         assert_eq!(proto_level1.as_ref().unwrap().proto_vec[0].id, 12);
-        assert_eq!(proto_level1.unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(
+            proto_level1.unwrap().proto_vec[0].proto,
+            vsapi_ip_number::TCP
+        );
         assert_eq!(proto_level2.as_ref().unwrap().proto_vec[0].id, 13);
-        assert_eq!(proto_level2.unwrap().proto_vec[0].proto, ip_number::TCP);
+        assert_eq!(
+            proto_level2.unwrap().proto_vec[0].proto,
+            vsapi_ip_number::TCP
+        );
         assert_eq!(un_rcu_table.len(), 2);
         assert_eq!(un_rcu_table.get(&IpAddr::from(dst_addr2)).unwrap().len(), 1);
     }
@@ -888,7 +902,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
@@ -915,7 +929,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
@@ -970,7 +984,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::UDP,
+            vsapi_ip_number::UDP,
             src_port as u16,
             dst_port as u16,
         );
@@ -978,7 +992,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port_diff as u16,
             dst_port as u16,
         );
@@ -986,7 +1000,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port_diff as u16,
         );
@@ -994,7 +1008,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr_diff),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
@@ -1002,7 +1016,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr_diff),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
@@ -1027,7 +1041,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
@@ -1058,7 +1072,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::UDP,
+            vsapi_ip_number::UDP,
             src_port as u16,
             dst_port as u16,
         );
@@ -1066,7 +1080,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port_diff as u16,
             dst_port as u16,
         );
@@ -1074,7 +1088,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port_diff as u16,
         );
@@ -1082,7 +1096,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr_diff),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
@@ -1090,7 +1104,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr_diff),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
@@ -1124,7 +1138,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             3423,
             dst_port as u16,
         );
@@ -1132,7 +1146,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             1,
             dst_port as u16,
         );
@@ -1140,7 +1154,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             65535,
             dst_port as u16,
         );
@@ -1148,7 +1162,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             43211,
             dst_port as u16,
         );
@@ -1213,7 +1227,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             3423,
         );
@@ -1221,7 +1235,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             1,
         );
@@ -1229,7 +1243,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             65535,
         );
@@ -1237,7 +1251,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             43211,
         );
@@ -1342,7 +1356,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::UDP,
+            vsapi_ip_number::UDP,
             src_port_specified as u16,
             dst_port as u16,
         );
@@ -1350,7 +1364,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             4323u16,
             dst_port as u16,
         );
@@ -1419,7 +1433,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::UDP,
+            vsapi_ip_number::UDP,
             src_port_specified as u16,
             dst_port as u16,
         );
@@ -1427,7 +1441,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             4323u16,
             dst_port as u16,
         );
@@ -1449,7 +1463,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
@@ -1481,7 +1495,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::UDP,
+            vsapi_ip_number::UDP,
             src_port as u16,
             dst_port as u16,
         );
@@ -1489,7 +1503,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port_diff as u16,
             dst_port as u16,
         );
@@ -1497,7 +1511,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port_diff as u16,
         );
@@ -1505,7 +1519,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr_diff),
             IpAddr::from(dst_addr),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
@@ -1513,7 +1527,7 @@ mod tests {
             L3Type::Ipv6,
             IpAddr::from(src_addr),
             IpAddr::from(dst_addr_diff),
-            ip_number::TCP,
+            vsapi_ip_number::TCP,
             src_port as u16,
             dst_port as u16,
         );
