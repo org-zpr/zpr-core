@@ -14,7 +14,9 @@ use vsapi;
 pub enum VisaError {
     #[error("Problem parsing visa with issuer id {0}: {1}")]
     VisaParseError(u64, &'static str),
-    #[error("{0}")]
+    #[error("Problem in VisaResponse: {0}")]
+    VisaResponseError(&'static str),
+    #[error("Problem in VisaHop: {0}")]
     VisaHopError(&'static str),
     #[error("Keyset Parse Error")]
     KeySetParseError,
@@ -22,6 +24,8 @@ pub enum VisaError {
     Capnp(#[from] capnp::Error),
     #[error("Cap'n Proto error: {0}")]
     NotInSchema(#[from] capnp::NotInSchema),
+    #[error("Cap'n Proto error: {0}")]
+    Utf8Error(#[from] core::str::Utf8Error),
 }
 
 #[derive(Debug)]
@@ -46,7 +50,8 @@ pub enum DenyCode {
     Denied,
     SourceNotFound,
     DestNotFound,
-    SourceAuthEreror,
+    SourceAuthError,
+    DestAuthError,
     QuotaExceeded,
 }
 
@@ -66,39 +71,84 @@ pub enum ErrorCode {
     NotFound,
     InvalidSignature,
     QuotaExceeded,
-    TemporatilyUnavailable,
+    TemporarilyUnavailable,
     AuthError,
+    ParamError,
     UnknownStatusCode,
     VisaStructureError(VisaError),
 }
 
-impl From<vsapi::VisaResponse> for VisaResponse {
-    fn from(thrift_visa_response: vsapi::VisaResponse) -> Self {
+impl TryFrom<v1::visa_response::Reader<'_>> for VisaResponse {
+    type Error = VisaError;
+
+    fn try_from(capnp_visa_response: v1::visa_response::Reader) -> Result<Self, Self::Error> {
+        match capnp_visa_response.which()? {
+            v1::visa_response::Which::Allow(v) => {
+                let visa = v?;
+                Ok(Self::Allow(visa.try_into()?))
+            }
+            v1::visa_response::Which::Deny(c) => {
+                let code = c?;
+                let deny_code = match code {
+                    v1::VisaDenyCode::NoReason => DenyCode::NoReason,
+                    v1::VisaDenyCode::NoMatch => DenyCode::NoMatch,
+                    v1::VisaDenyCode::Denied => DenyCode::Denied,
+                    v1::VisaDenyCode::SourceNotFound => DenyCode::SourceNotFound,
+                    v1::VisaDenyCode::DestNotFound => DenyCode::DestNotFound,
+                    v1::VisaDenyCode::SourceAuthError => DenyCode::SourceAuthError,
+                    v1::VisaDenyCode::DestAuthError => DenyCode::DestAuthError,
+                    v1::VisaDenyCode::QuotaExceeded => DenyCode::QuotaExceeded,
+                };
+                Ok(Self::Deny(Denied::new(deny_code, None)))
+            }
+            v1::visa_response::Which::Error(e) => {
+                let error = e?;
+                let code = match error.get_code()? {
+                    v1::ErrorCode::Internal => ErrorCode::Internal,
+                    v1::ErrorCode::AuthRequired => ErrorCode::AuthRequired,
+                    v1::ErrorCode::InvalidOperation => ErrorCode::InvalidOperation,
+                    v1::ErrorCode::OutOfSync => ErrorCode::OutOfSync,
+                    v1::ErrorCode::NotFound => ErrorCode::NotFound,
+                    v1::ErrorCode::InvalidSignature => ErrorCode::InvalidSignature,
+                    v1::ErrorCode::QuotaExceeded => ErrorCode::QuotaExceeded,
+                    v1::ErrorCode::TemporarilyUnavailable => ErrorCode::TemporarilyUnavailable,
+                    v1::ErrorCode::AuthError => ErrorCode::AuthError,
+                    v1::ErrorCode::ParamError => ErrorCode::ParamError,
+                };
+                let message = error.get_message()?.to_string()?;
+                let retry_in = error.get_retry_in();
+                Ok(Self::VSApiError(VisaResponseError::new(
+                    code, message, retry_in,
+                )))
+            }
+        }
+    }
+}
+
+impl TryFrom<vsapi::VisaResponse> for VisaResponse {
+    type Error = VisaError;
+
+    fn try_from(thrift_visa_response: vsapi::VisaResponse) -> Result<Self, Self::Error> {
         match thrift_visa_response.status {
             Some(code) => match code {
                 vsapi::StatusCode::SUCCESS => {
-                    match Visa::try_from(thrift_visa_response.visa.unwrap().visa.unwrap()) {
-                        Ok(v) => Self::Allow(v),
-                        Err(e) => Self::VSApiError(VisaResponseError::new(
-                            ErrorCode::VisaStructureError(e),
-                            "No status code".to_string(),
-                            0,
-                        )),
+                    if let Some(thrift_visa_hop) = thrift_visa_response.visa {
+                        let visa = Visa::try_from(thrift_visa_hop)?;
+                        Ok(Self::Allow(visa))
+                    } else {
+                        Err(VisaError::VisaResponseError("No VisaHop in VisaResponse"))
                     }
                 }
-                vsapi::StatusCode::FAIL => {
-                    Self::Deny(Denied::new(DenyCode::Fail, thrift_visa_response.reason))
+                vsapi::StatusCode::FAIL => Ok(Self::Deny(Denied::new(
+                    DenyCode::Fail,
+                    thrift_visa_response.reason,
+                ))),
+                _ => {
+                    return Err(VisaError::VisaResponseError("Unknown status code"));
                 }
-                val => Self::VSApiError(VisaResponseError::new(
-                    ErrorCode::UnknownStatusCode,
-                    format!("Status code: {val:?}"),
-                    0,
-                )),
             },
-            None => Self::VSApiError(VisaResponseError::new(
-                ErrorCode::UnknownStatusCode,
-                "No status code".to_string(),
-                0,
+            None => Err(VisaError::VisaResponseError(
+                "No code, required in Thrift visa",
             )),
         }
     }
