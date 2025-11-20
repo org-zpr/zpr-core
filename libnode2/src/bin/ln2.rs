@@ -2,15 +2,18 @@ use clap::Parser;
 use ipnet::IpNet;
 use openssl::pkey::{PKey, Private};
 use openssl::rsa::Rsa;
+use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
 use std::fs;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tracing::Level;
 use tracing::{error, info};
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
-use libnode2::vsconn::{VSConn, VSConnectRequest};
+use libnode2::vsconn::{CommT, VSConn, VSConnectRequest, VSVisaRequest};
 
 /// ln2: test tool for libnode2
 ///
@@ -39,6 +42,62 @@ struct Args {
     /// Node AAA prefix to present to the visa service.
     #[arg(long, default_value = "fd5a:5052:90de:0::/64")]
     aaa_prefix: String,
+}
+
+enum Cmd {
+    Disconnect,
+    VisaRequest(FiveTuple),
+}
+
+struct FiveTuple {
+    src_ip: IpAddr,
+    dst_ip: IpAddr,
+    src_port: u16,
+    dst_port: u16,
+    protocol: u8,
+}
+
+fn parse_ipaddr_and_port(input: &str) -> Result<(IpAddr, u16), String> {
+    let sockaddr: SocketAddr = input
+        .parse()
+        .map_err(|e| format!("invalid socket address '{}': {}", input, e))?;
+    Ok((sockaddr.ip(), sockaddr.port()))
+}
+
+fn parse_command(input: &str) -> Result<Cmd, String> {
+    let parts: Vec<&str> = input.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err("does not compte".into());
+    }
+    match parts[0] {
+        // TODO: parse quit here too
+        "visa_request" => {
+            if parts.len() != 4 {
+                return Err(
+                    "usage: visa_request (TCP|UDP|ICMP6) <src_ip>:<src_port> <dst_ip>:<dst_port>"
+                        .to_string(),
+                );
+            }
+            let protocol = match parts[1].trim() {
+                "TCP" | "tcp" => 6,
+                "UDP" | "udp" => 17,
+                "ICMP6" | "icmp6" => 58,
+                _ => return Err("protocol must be TCP, UDP, or ICMP6".to_string()),
+            };
+
+            let (src_ip, src_port) = parse_ipaddr_and_port(parts[2])?;
+            let (dst_ip, dst_port) = parse_ipaddr_and_port(parts[3])?;
+
+            Ok(Cmd::VisaRequest(FiveTuple {
+                src_ip,
+                dst_ip,
+                src_port,
+                dst_port,
+                protocol,
+            }))
+        }
+        _ => Err("does not compute".into()),
+    }
 }
 
 #[tokio::main]
@@ -71,6 +130,8 @@ async fn main() {
         })
     });
 
+    let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<Cmd>();
+
     js.spawn(async move {
         // Pause briefly to allow VSConn to start up.
         info!("allowing VSConn to start up...");
@@ -82,28 +143,117 @@ async fn main() {
         };
 
         info!("requesting a connect");
+        let mut connected = false;
         match handle.connect(request).await {
             Ok(resp) => {
                 info!("Connection response: {:?}", resp);
+                println!("connected");
+                connected = true;
             }
             Err(e) => {
-                error!("Connection failed: {:?}", e);
+                error!("connection failed: {:?}", e);
+                println!("connection failed: {:?}", e);
             }
         }
 
-        info!("pausing before shutdown");
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        if connected {
+            loop {
+                tokio::select! {
+                    Some(cmd) = cmd_rx.recv() => {
+                        match cmd {
+                            Cmd::Disconnect => break,
+                            Cmd::VisaRequest(five_tuple) => {
+                                let req = VSVisaRequest {
+                                    source_addr: five_tuple.src_ip,
+                                    dest_addr: five_tuple.dst_ip,
+                                    source_port: five_tuple.src_port,
+                                    dest_port: five_tuple.dst_port,
+                                    protocol: five_tuple.protocol,
+                                    comm_type: CommT::Bidirectional, // TODO
+                                    previous_id: None, // TODO
+                                };
+                                let reply = handle.visa_request(req).await;
+                                match reply {
+                                    Ok(decision) => {
+                                        println!("visa_request decision: {:?}", decision);
+                                    }
+                                    Err(e) => {
+                                        println!("visa_request failed: {:?}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         info!("requesting a stop");
         match handle.stop(true).await {
             Ok(_) => {
                 info!("stopped VSConn");
+                println!("stopped vsconn");
             }
             Err(e) => {
                 error!("failed to stop VSConn: {:?}", e);
+                println!("failed to stop VSConn: {:?}", e);
             }
         }
 
+        Ok(())
+    });
+
+    js.spawn(async move {
+        let mut rl = DefaultEditor::new().unwrap();
+        let mut do_disconnect = false;
+        loop {
+            let readline = rl.readline("ln2> ");
+            match readline {
+                Ok(line) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    rl.add_history_entry(trimmed).unwrap();
+                    match trimmed {
+                        "exit" | "quit" | "q" => {
+                            do_disconnect = true;
+                        }
+                        s => match parse_command(s) {
+                            Ok(cmd) => match cmd {
+                                Cmd::VisaRequest(five_tuple) => {
+                                    println!("visa_request command not implemented yet");
+                                }
+                                Cmd::Disconnect => {
+                                    do_disconnect = true;
+                                }
+                            },
+                            Err(e) => {
+                                println!("{e}");
+                            }
+                        },
+                    }
+                }
+                Err(ReadlineError::Interrupted) => {
+                    // ^C
+                    do_disconnect = true;
+                }
+                Err(ReadlineError::Eof) => {
+                    // ^D
+                    do_disconnect = true;
+                }
+                Err(err) => {
+                    println!("error: {:?}", err);
+                    do_disconnect = true;
+                }
+            }
+            if do_disconnect {
+                if let Err(e) = cmd_tx.send(Cmd::Disconnect) {
+                    println!("failed to send disconnect command: {:?}", e);
+                }
+                break;
+            }
+        }
         Ok(())
     });
 

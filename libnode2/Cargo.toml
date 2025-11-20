@@ -16,6 +16,7 @@ clap = { version = "4.5.23", features = ["derive"], optional = true } # ln2
 tracing-subscriber = { version = "0.3.20", optional = true } # ln2
 ipnet = "2.11.0"
 zpr = { path = "../zpr" }
+rustyline = "17.0.2"
 
 [features]
 build-ln2 = ["clap", "tracing-subscriber"]

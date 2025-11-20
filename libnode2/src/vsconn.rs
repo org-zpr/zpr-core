@@ -25,8 +25,48 @@ pub struct VSConnectRequest {
     pub aaa_prefix: IpNet,
 }
 
+#[derive(Debug)]
+pub struct VSVisaRequest {
+    pub protocol: u8,
+    pub source_addr: IpAddr,
+    pub dest_addr: IpAddr,
+    pub source_port: u16,
+    pub dest_port: u16,
+    pub comm_type: CommT,
+    pub previous_id: Option<u64>,
+}
+
+#[derive(Debug)]
+pub struct Visa {}
+
+#[derive(Debug)]
+pub enum VSVisaDecision {
+    Allowed(Visa),
+    Denied(DenyCode),
+}
+
+#[derive(Debug)]
+pub enum CommT {
+    Bidirectional,
+    Unidirectional,
+    Rerequest,
+}
+
+#[derive(Debug)]
+pub enum DenyCode {
+    NoReason,
+    NoMatch,
+    Denied,
+    SourceNotFound,
+    DestNotFound,
+    SourceAuthError,
+    DestAuthError,
+    QuotaExceeded,
+}
+
 /// Returns no error if call to VSAPI authenticate was successful.
 type VSConnectResponse = Result<(), VSApiError>;
+type VSVisaResponse = Result<VSVisaDecision, VSApiError>;
 
 // The async "commands" that can be sent into the running visa service client.
 #[derive(Debug)]
@@ -36,6 +76,9 @@ enum VS2Command {
 
     /// Run through the connect sequence. If connect succeeds the VSHandle is kept internally.
     Connect(VSConnectRequest, oneshot::Sender<VSConnectResponse>),
+
+    // TODO: rest of the vsapi commands
+    VisaRequest(VSVisaRequest, oneshot::Sender<VSVisaResponse>),
 }
 
 pub struct VSConn {
@@ -159,6 +202,20 @@ impl VSConn {
                                 error!(target: VS_RPC, "failed to send connect response: {:?}", e);
                             }
                         }
+
+                        VS2Command::VisaRequest(req, resp_tx) => {
+                            debug!(target: VS_RPC, "VSConn: visa_request");
+                            let resp = if vs_handle.is_none() {
+                                Err(VSApiError::CommandFailed(
+                                    "not connected to VS-API".to_string(),
+                                ))
+                            } else {
+                                self.do_visa_request(&vs_service, req).await
+                            };
+                            if let Err(e) = resp_tx.send(resp) {
+                                error!(target: VS_RPC, "failed to send visa_request response: {:?}", e);
+                            }
+                        }
                     }
                 }
                 info!(target: VS_RPC, "VSConn: exiting run loop");
@@ -268,6 +325,16 @@ impl VSConn {
         // Ok we now have an authenticated handle to the VS.
         Ok(vs_handle_svc)
     }
+
+    async fn do_visa_request(
+        &self,
+        vs_service: &vsapi2::visa_service::Client,
+        req: VSVisaRequest,
+    ) -> Result<VSVisaDecision, VSApiError> {
+        Err(VSApiError::CommandFailed(
+            "visa_request not implemented yet".to_string(),
+        ))
+    }
 }
 
 impl VSConnHandle {
@@ -289,6 +356,13 @@ impl VSConnHandle {
     pub async fn stop(&self, deregister: bool) -> Result<(), VSApiError> {
         let cmd = VS2Command::Stop(deregister);
         self.send_command(cmd).await
+    }
+
+    pub async fn visa_request(&self, req: VSVisaRequest) -> Result<VSVisaDecision, VSApiError> {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let cmd = VS2Command::VisaRequest(req, resp_tx);
+        self.send_command(cmd).await?;
+        resp_rx.await.map_err(|_| VSApiError::ConnClosed)?
     }
 }
 
