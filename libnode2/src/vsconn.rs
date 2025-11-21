@@ -210,7 +210,7 @@ impl VSConn {
                                     "not connected to VS-API".to_string(),
                                 ))
                             } else {
-                                self.do_visa_request(&vs_service, req).await
+                                self.do_visa_request(vs_handle.as_ref().unwrap(), req).await
                             };
                             if let Err(e) = resp_tx.send(resp) {
                                 error!(target: VS_RPC, "failed to send visa_request response: {:?}", e);
@@ -328,11 +328,21 @@ impl VSConn {
 
     async fn do_visa_request(
         &self,
-        vs_service: &vsapi2::visa_service::Client,
-        req: VSVisaRequest,
+        vs_h: &vsapi2::v_s_handle::Client,
+        req: VSVisaRequest, // TODO: VSVisaRequest should use a PacketDesc from vs-dt, then implement write_to on it.
     ) -> Result<VSVisaDecision, VSApiError> {
+        let mut vr_request = vs_h.visa_request_request();
+        let mut vrr_bldr = vr_request.get().init_req();
+        vrr_bldr.set_previous_id(0);
+        let pd_bldr = vrr_bldr.init_packet();
+
+        // Ok th pd_bldr is a PacketDesc so I should be passing our PacketDesc type
+        // and using a write_to function from vs-dt.
+
+        // TODO
+
         Err(VSApiError::CommandFailed(
-            "visa_request not implemented yet".to_string(),
+            "VSConn: visa_request not implemented yet".to_string(),
         ))
     }
 }

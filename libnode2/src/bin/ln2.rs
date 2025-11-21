@@ -70,6 +70,8 @@ fn parse_command(input: &str) -> Result<Cmd, String> {
         return Err("does not compte".into());
     }
     match parts[0] {
+        "exit" | "quit" | "q" => Ok(Cmd::Disconnect),
+
         // TODO: parse quit here too
         "visa_request" => {
             if parts.len() != 4 {
@@ -135,7 +137,7 @@ async fn main() {
     js.spawn(async move {
         // Pause briefly to allow VSConn to start up.
         info!("allowing VSConn to start up...");
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
         let request = VSConnectRequest {
             zpr_addr: node_zpr_addr,
@@ -203,7 +205,8 @@ async fn main() {
         Ok(())
     });
 
-    js.spawn(async move {
+    // The readline loop is blocking.
+    js.spawn_blocking(move || {
         let mut rl = DefaultEditor::new().unwrap();
         let mut do_disconnect = false;
         loop {
@@ -215,23 +218,21 @@ async fn main() {
                         continue;
                     }
                     rl.add_history_entry(trimmed).unwrap();
-                    match trimmed {
-                        "exit" | "quit" | "q" => {
-                            do_disconnect = true;
-                        }
-                        s => match parse_command(s) {
-                            Ok(cmd) => match cmd {
-                                Cmd::VisaRequest(five_tuple) => {
-                                    println!("visa_request command not implemented yet");
-                                }
-                                Cmd::Disconnect => {
+                    match parse_command(trimmed) {
+                        Ok(cmd) => match cmd {
+                            Cmd::Disconnect => {
+                                do_disconnect = true;
+                            }
+                            _ => {
+                                if let Err(e) = cmd_tx.send(cmd) {
+                                    println!("failed to send command: {:?}", e);
                                     do_disconnect = true;
                                 }
-                            },
-                            Err(e) => {
-                                println!("{e}");
                             }
                         },
+                        Err(e) => {
+                            println!("{e}");
+                        }
                     }
                 }
                 Err(ReadlineError::Interrupted) => {
