@@ -13,11 +13,8 @@ use tokio::sync::mpsc::Sender;
 use tracing::{debug, error, info};
 
 use crate::logging::targets::VSS_RPC;
-use vsapi::{
-    self, PolicyInfo, ServicesList, VisaRevocation, VisaSupportSyncHandler,
-    VisaSupportSyncProcessor,
-};
-use zpr::vsapi_types::Visa;
+use vsapi::{self, PolicyInfo, ServicesList, VisaSupportSyncHandler, VisaSupportSyncProcessor};
+use zpr::vsapi_types::{Visa, VisaError, VisaOp};
 
 /// Default port for the visa support service. Note that the visa support service
 /// should only listen on the ZPR interface (not substrate interface!).
@@ -34,7 +31,7 @@ pub enum VSSMsg {
     PushedVisa(Visa),
 
     /// Pushed visa revokcations from the visa service.
-    PushedRevocation(VisaRevocation),
+    PushedRevocation(VisaOp),
 
     /// Pushed list of services. For now will be just Actor Authentication services.
     PushedServices(ServicesList),
@@ -122,8 +119,18 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
     fn handle_revoke_visas(&self, vr: Vec<vsapi::VisaRevocation>) -> thrift::Result<()> {
         debug!(target: VSS_RPC, "handle_revoke_visas, count={}", vr.len());
         for r in vr {
+            let vo = VisaOp::try_from(r);
+            let op = match vo {
+                Ok(op) => op,
+                Err(VisaError::DeserializationError(e)) => return Err(thrift::Error::from(e)),
+                _ => {
+                    return Err(thrift::Error::from(
+                        "Incorrect error type in visa revocation",
+                    ));
+                }
+            };
             self.msg_chan_out
-                .blocking_send(VSSMsg::PushedRevocation(r))
+                .blocking_send(VSSMsg::PushedRevocation(op))
                 .or_else(|e| {
                     error!(target: VSS_RPC, "failed to enque visa revocation to node: {}", e);
                     Err(thrift::Error::from("enqueue failed"))

@@ -670,3 +670,19 @@ impl From<vsapi::Constraints> for Constraints {
         }
     }
 }
+
+pub enum VisaOp {
+    Grant(Visa),
+    RevokeVisaId(u64),
+}
+
+impl TryFrom<vsapi::VisaRevocation> for VisaOp {
+    type Error = VisaError;
+
+    fn try_from(revoke: vsapi::VisaRevocation) -> Result<Self, Self::Error> {
+        match revoke.issuer_id {
+            Some(id) => Ok(Self::RevokeVisaId(id as u64)),
+            None => Err(VisaError::DeserializationError("No issuer id")),
+        }
+    }
+}
