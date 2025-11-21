@@ -5,6 +5,7 @@
 
 use super::L3Type;
 use crate::vsapi::v1;
+use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -26,7 +27,6 @@ pub enum VisaError {
     CodedError(ErrorCode),
     #[error("IP address conversion error: {0}")]
     TryFromSliceError(#[from] std::array::TryFromSliceError),
-    
 }
 
 #[derive(Debug)]
@@ -351,12 +351,8 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
         let config = 0i64;
         let expires = UNIX_EPOCH + Duration::from_millis(reader.get_expiration());
         let src_addr = match reader.get_source_addr()?.which()? {
-            v1::ip_addr::Which::V4(data) => {
-                IpAddr::from(<[u8; 4]>::try_from(data?)?)
-            }
-            v1::ip_addr::Which::V6(data) => {
-                IpAddr::from(<[u8; 16]>::try_from(data?)?)
-            }
+            v1::ip_addr::Which::V4(data) => IpAddr::from(<[u8; 4]>::try_from(data?)?),
+            v1::ip_addr::Which::V6(data) => IpAddr::from(<[u8; 16]>::try_from(data?)?),
         };
         let dst_addr = match reader.get_dest_addr()?.which()? {
             v1::ip_addr::Which::V4(data) => {
@@ -684,5 +680,133 @@ impl TryFrom<vsapi::VisaRevocation> for VisaOp {
             Some(id) => Ok(Self::RevokeVisaId(id as u64)),
             None => Err(VisaError::DeserializationError("No issuer id")),
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct ConnectRequest {
+    pub blobs: Vec<AuthBlob>,
+    pub claims: Vec<Claim>,
+    pub substrate_addr: IpAddr,
+    pub dock_interface: u8,
+}
+
+#[derive(Debug)]
+pub struct Claim {
+    pub key: String,
+    pub value: String,
+}
+
+impl Claim {
+    pub fn new(key: String, value: String) -> Self {
+        Self { key, value }
+    }
+}
+
+#[derive(Debug)]
+pub enum AuthBlob {
+    SS(ZprSelfSignedBlob),
+    AC(AuthCodeBlob),
+}
+
+#[derive(Debug, Default)]
+pub struct ZprSelfSignedBlob {
+    pub alg: ChallengeAlg,
+    pub challenge: Vec<u8>,
+    pub cn: String,
+    pub timestamp: u64,
+    pub signature: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub struct AuthCodeBlob {
+    pub asa_addr: IpAddr,
+    pub code: String,
+    pub pkce: String,
+    pub client_id: String,
+}
+
+#[derive(Debug, Default)]
+pub enum ChallengeAlg {
+    #[default]
+    RsaSha256Pkcs1v15,
+}
+
+impl TryFrom<vsapi::ConnectRequest> for ConnectRequest {
+    type Error = VisaError;
+
+    fn try_from(thrift_req: vsapi::ConnectRequest) -> Result<Self, Self::Error> {
+        let substrate_addr = match thrift_req.dock_addr {
+            Some(val) => match ip_addr_from_vec(val) {
+                Ok(addr) => addr,
+                Err(_) => {
+                    return Err(VisaError::DeserializationError(
+                        "Bad format in dock address",
+                    ));
+                }
+            },
+            None => return Err(VisaError::DeserializationError("No dock address")),
+        };
+        let claims = match thrift_req.claims {
+            Some(claims) => {
+                let mut v = Vec::new();
+                for (key, val) in claims.iter() {
+                    v.push(Claim::new(key.clone(), val.clone()));
+                }
+                v
+            }
+            None => return Err(VisaError::DeserializationError("No claims")),
+        };
+        let blobs = match thrift_req.challenge_responses {
+            Some(cr) => {
+                let mut b = Vec::new();
+                for r in cr {
+                    let mut ss = ZprSelfSignedBlob::default();
+                    ss.challenge = r;
+                    b.push(AuthBlob::SS(ss))
+                }
+                b
+            }
+            None => return Err(VisaError::DeserializationError("No challenge responses")),
+        };
+        Ok(Self {
+            blobs,
+            claims,
+            substrate_addr,
+            dock_interface: 0,
+        })
+    }
+}
+
+impl TryFrom<ConnectRequest> for vsapi::ConnectRequest {
+    type Error = VisaError;
+
+    fn try_from(req: ConnectRequest) -> Result<Self, Self::Error> {
+        let mut claims = BTreeMap::new();
+        for claim in req.claims {
+            claims.insert(claim.key, claim.value);
+        }
+
+        let mut challenge_responses = Vec::new();
+        for blob in req.blobs {
+            match blob {
+                AuthBlob::SS(ss) => challenge_responses.push(ss.challenge),
+                AuthBlob::AC(_) => {
+                    return Err(VisaError::DeserializationError("Incorrect blob type"));
+                }
+            }
+        }
+
+        let dock_addr = match req.substrate_addr {
+            IpAddr::V4(addr) => addr.octets().to_vec(),
+            IpAddr::V6(addr) => addr.octets().to_vec(),
+        };
+        Ok(Self {
+            connection_id: Some(0),
+            dock_addr: Some(dock_addr),
+            claims: Some(claims),
+            challenge: None,
+            challenge_responses: Some(challenge_responses),
+        })
     }
 }

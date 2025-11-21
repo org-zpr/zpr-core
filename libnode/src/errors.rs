@@ -15,6 +15,8 @@ pub enum VSError {
     EnqueueError,
     #[error("Disconnect")]
     Disconnect,
+    #[error("Cap'n Proto error: {0}")]
+    VisaError(#[from] zpr::vsapi_types::VisaError),
 }
 
 #[derive(Debug, Error)]

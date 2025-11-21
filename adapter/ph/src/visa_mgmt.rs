@@ -5,7 +5,6 @@ use crate::logging::targets::VISA_MGMT;
 use crate::visa_table;
 use crate::vs_types;
 use libnode::{claims, vsapi};
-use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::num::NonZero;
 use std::sync::Arc;
@@ -18,7 +17,7 @@ use zpr_utils::net_defs::{IPV6_ADDRESS_SIZE, IpAddress};
 pub fn authorize_connect(
     asm: &Arc<Assembly>,
     link_id: LinkId,
-    connect_req: libnode::vsapi::ConnectRequest,
+    connect_req: vsapi_types::ConnectRequest,
 ) {
     let task_asm = asm.clone();
     tokio::task::spawn_local(async move {
@@ -101,7 +100,7 @@ pub fn build_connect_request(
     id: LinkId,
     addr: IpAddress,
     blob: &str,
-) -> Result<Option<libnode::vsapi::ConnectRequest>, LinkStateError> {
+) -> Result<Option<vsapi_types::ConnectRequest>, LinkStateError> {
     let cn = get_common_name(asm, id)?;
 
     if cn == zpr::VISA_SERVICE_CN {
@@ -109,25 +108,28 @@ pub fn build_connect_request(
     }
 
     // The visa service expects to find the BLOBs in the challenge response buffers.
-    let crbufs: Vec<Vec<u8>> = vec![blob.as_bytes().to_vec()];
+    let mut ss = vsapi_types::ZprSelfSignedBlob::default();
+    ss.challenge = blob.as_bytes().to_vec();
+    let crbufs: Vec<vsapi_types::AuthBlob> = vec![vsapi_types::AuthBlob::SS(ss)];
 
-    let mut claims = BTreeMap::new();
+    let mut claims = Vec::new();
     if addr != IpAddress::UNSPECIFIED {
-        claims.insert(claims::KATTR_EPID.into(), addr.to_string());
+        claims.push(vsapi_types::Claim {
+            key: claims::KATTR_EPID.into(),
+            value: addr.to_string(),
+        });
     }
-    claims.insert(claims::KATTR_CN.into(), cn);
+    claims.push(vsapi_types::Claim {
+        key: claims::KATTR_CN.into(),
+        value: cn,
+    });
 
     // issue an Authorize Connect Request to the visa service for this adapter
-    let connect_req = libnode::vsapi::ConnectRequest {
-        connection_id: Some(123), // unused
-        dock_addr: Some(
-            IpAddress::new_from_std(&asm.get_local_dock_addr())
-                .v6
-                .to_vec(),
-        ),
-        claims: Some(claims),
-        challenge: None, // unused
-        challenge_responses: Some(crbufs),
+    let connect_req = vsapi_types::ConnectRequest {
+        substrate_addr: asm.get_local_dock_addr(),
+        claims: claims,
+        blobs: crbufs,
+        dock_interface: 0,
     };
     Ok(Some(connect_req))
 }
