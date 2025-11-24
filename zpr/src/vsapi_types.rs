@@ -9,10 +9,11 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
+use url::Url;
 use vsapi;
 
 #[derive(Debug, Error)]
-pub enum VisaError {
+pub enum VsapiTypeError {
     #[error("Serialization error {0}")]
     SerializationError(&'static str),
     #[error("Deserialization error: {0:?}")]
@@ -79,7 +80,7 @@ pub enum ErrorCode {
 }
 
 impl TryFrom<v1::visa_response::Reader<'_>> for VisaResponse {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(capnp_visa_response: v1::visa_response::Reader) -> Result<Self, Self::Error> {
         match capnp_visa_response.which()? {
@@ -93,7 +94,7 @@ impl TryFrom<v1::visa_response::Reader<'_>> for VisaResponse {
             }
             v1::visa_response::Which::Error(e) => {
                 let code = ErrorCode::from(e?.get_code()?);
-                Err(VisaError::CodedError(code))
+                Err(VsapiTypeError::CodedError(code))
             }
         }
     }
@@ -132,7 +133,7 @@ impl From<v1::ErrorCode> for ErrorCode {
 }
 
 impl TryFrom<vsapi::VisaResponse> for VisaResponse {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(thrift_visa_response: vsapi::VisaResponse) -> Result<Self, Self::Error> {
         match thrift_visa_response.status {
@@ -142,7 +143,7 @@ impl TryFrom<vsapi::VisaResponse> for VisaResponse {
                         let visa = Visa::try_from(thrift_visa_hop)?;
                         Ok(Self::Allow(visa))
                     } else {
-                        Err(VisaError::DeserializationError(
+                        Err(VsapiTypeError::DeserializationError(
                             "No VisaHop in VisaResponse",
                         ))
                     }
@@ -152,10 +153,10 @@ impl TryFrom<vsapi::VisaResponse> for VisaResponse {
                     thrift_visa_response.reason,
                 ))),
                 _ => {
-                    return Err(VisaError::DeserializationError("Unknown status code"));
+                    return Err(VsapiTypeError::DeserializationError("Unknown status code"));
                 }
             },
-            None => Err(VisaError::DeserializationError(
+            None => Err(VsapiTypeError::DeserializationError(
                 "No code, required in Thrift visa",
             )),
         }
@@ -344,7 +345,7 @@ impl Visa {
 }
 
 impl TryFrom<v1::visa::Reader<'_>> for Visa {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(reader: v1::visa::Reader) -> Result<Self, Self::Error> {
         let issuer_id = reader.get_issuer_id();
@@ -381,25 +382,25 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
 }
 
 impl TryFrom<vsapi::VisaHop> for Visa {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(hop: vsapi::VisaHop) -> Result<Self, Self::Error> {
         match hop.visa {
             Some(visa) => Visa::try_from(visa),
-            None => Err(VisaError::DeserializationError("No visa")),
+            None => Err(VsapiTypeError::DeserializationError("No visa")),
         }
     }
 }
 
 // Could also implement a TryFrom instead of picking arbitarty values
 impl TryFrom<vsapi::Visa> for Visa {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(thrift_visa: vsapi::Visa) -> Result<Self, Self::Error> {
         let issuer_id = match thrift_visa.issuer_id {
             Some(val) => val as u64,
             None => {
-                return Err(VisaError::DeserializationError("No issuer id"));
+                return Err(VsapiTypeError::DeserializationError("No issuer id"));
             }
         };
         let config = match thrift_visa.configuration {
@@ -412,26 +413,16 @@ impl TryFrom<vsapi::Visa> for Visa {
                 UNIX_EPOCH + dur
             }
             None => {
-                return Err(VisaError::DeserializationError("No expiration"));
+                return Err(VsapiTypeError::DeserializationError("No expiration"));
             }
         };
         let src_addr = match thrift_visa.source_contact {
-            Some(val) => match ip_addr_from_vec(val) {
-                Ok(addr) => addr,
-                Err(_) => {
-                    return Err(VisaError::DeserializationError("Bad format in src address"));
-                }
-            },
-            None => return Err(VisaError::DeserializationError("No src address")),
+            Some(val) => ip_addr_from_vec(val)?,
+            None => return Err(VsapiTypeError::DeserializationError("No src address")),
         };
         let dst_addr = match thrift_visa.dest_contact {
-            Some(val) => match ip_addr_from_vec(val) {
-                Ok(addr) => addr,
-                Err(_) => {
-                    return Err(VisaError::DeserializationError("Bad format in dst address"));
-                }
-            },
-            None => return Err(VisaError::DeserializationError("No dst address")),
+            Some(val) => ip_addr_from_vec(val)?,
+            None => return Err(VsapiTypeError::DeserializationError("No dst address")),
         };
         let dock_pep = match thrift_visa.dock_pep {
             Some(val) => match val {
@@ -439,7 +430,7 @@ impl TryFrom<vsapi::Visa> for Visa {
                     let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
                         Some(val) => TcpUdpPep::from(val),
                         None => {
-                            return Err(VisaError::DeserializationError("No TCP/UDP PEP Args"));
+                            return Err(VsapiTypeError::DeserializationError("No TCP/UDP PEP Args"));
                         }
                     };
                     DockPep::UDP(tcp_udp_pep)
@@ -448,7 +439,7 @@ impl TryFrom<vsapi::Visa> for Visa {
                     let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
                         Some(val) => TcpUdpPep::from(val),
                         None => {
-                            return Err(VisaError::DeserializationError("No TCP/UDP PEP Args"));
+                            return Err(VsapiTypeError::DeserializationError("No TCP/UDP PEP Args"));
                         }
                     };
                     DockPep::TCP(tcp_udp_pep)
@@ -457,14 +448,14 @@ impl TryFrom<vsapi::Visa> for Visa {
                     let icmp_pep = match thrift_visa.icmp_pep_args {
                         Some(val) => IcmpPep::from(val),
                         None => {
-                            return Err(VisaError::DeserializationError("No ICMP PEP Args"));
+                            return Err(VsapiTypeError::DeserializationError("No ICMP PEP Args"));
                         }
                     };
                     DockPep::ICMP(icmp_pep)
                 }
-                _ => return Err(VisaError::DeserializationError("Unknown Dock Pep")),
+                _ => return Err(VsapiTypeError::DeserializationError("Unknown Dock Pep")),
             },
-            None => return Err(VisaError::DeserializationError("No Dock Pep")),
+            None => return Err(VsapiTypeError::DeserializationError("No Dock Pep")),
         };
 
         let session_key = match thrift_visa.session_key {
@@ -488,7 +479,7 @@ impl TryFrom<vsapi::Visa> for Visa {
     }
 }
 
-pub fn ip_addr_from_vec(v: Vec<u8>) -> Result<IpAddr, Vec<u8>> {
+pub fn ip_addr_from_vec(v: Vec<u8>) -> Result<IpAddr, VsapiTypeError> {
     match v.len() {
         4 => Ok(IpAddr::from(
             <[u8; 4]>::try_from(v.as_slice()).expect("Bad IP length"),
@@ -496,12 +487,12 @@ pub fn ip_addr_from_vec(v: Vec<u8>) -> Result<IpAddr, Vec<u8>> {
         16 => Ok(IpAddr::from(
             <[u8; 16]>::try_from(v.as_slice()).expect("Bad IP length"),
         )),
-        _ => Err(v),
+        _ => Err(VsapiTypeError::DeserializationError("Bad IP Address format")),
     }
 }
 
 impl TryFrom<v1::dock_pep::Reader<'_>> for DockPep {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(reader: v1::dock_pep::Reader) -> Result<Self, Self::Error> {
         match reader.which()? {
@@ -592,7 +583,7 @@ impl From<vsapi::PEPArgsICMP> for IcmpPep {
 }
 
 impl TryFrom<v1::key_set::Reader<'_>> for KeySet {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(reader: v1::key_set::Reader) -> Result<Self, Self::Error> {
         let format = match reader.get_format()? {
@@ -610,12 +601,12 @@ impl TryFrom<v1::key_set::Reader<'_>> for KeySet {
 }
 
 impl TryFrom<vsapi::KeySet> for KeySet {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(thrift_key_set: vsapi::KeySet) -> Result<Self, Self::Error> {
         let format = match thrift_key_set.format {
             Some(_) => KeyFormat::ZprKF01,
-            None => return Err(VisaError::DeserializationError("No format")),
+            None => return Err(VsapiTypeError::DeserializationError("No format")),
         };
         let ingress_key = match thrift_key_set.ingress_key {
             Some(val) => val,
@@ -673,12 +664,12 @@ pub enum VisaOp {
 }
 
 impl TryFrom<vsapi::VisaRevocation> for VisaOp {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(revoke: vsapi::VisaRevocation) -> Result<Self, Self::Error> {
         match revoke.issuer_id {
             Some(id) => Ok(Self::RevokeVisaId(id as u64)),
-            None => Err(VisaError::DeserializationError("No issuer id")),
+            None => Err(VsapiTypeError::DeserializationError("No issuer id")),
         }
     }
 }
@@ -733,19 +724,19 @@ pub enum ChallengeAlg {
 }
 
 impl TryFrom<vsapi::ConnectRequest> for ConnectRequest {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(thrift_req: vsapi::ConnectRequest) -> Result<Self, Self::Error> {
         let substrate_addr = match thrift_req.dock_addr {
             Some(val) => match ip_addr_from_vec(val) {
                 Ok(addr) => addr,
                 Err(_) => {
-                    return Err(VisaError::DeserializationError(
+                    return Err(VsapiTypeError::DeserializationError(
                         "Bad format in dock address",
                     ));
                 }
             },
-            None => return Err(VisaError::DeserializationError("No dock address")),
+            None => return Err(VsapiTypeError::DeserializationError("No dock address")),
         };
         let claims = match thrift_req.claims {
             Some(claims) => {
@@ -755,7 +746,7 @@ impl TryFrom<vsapi::ConnectRequest> for ConnectRequest {
                 }
                 v
             }
-            None => return Err(VisaError::DeserializationError("No claims")),
+            None => return Err(VsapiTypeError::DeserializationError("No claims")),
         };
         let blobs = match thrift_req.challenge_responses {
             Some(cr) => {
@@ -767,7 +758,7 @@ impl TryFrom<vsapi::ConnectRequest> for ConnectRequest {
                 }
                 b
             }
-            None => return Err(VisaError::DeserializationError("No challenge responses")),
+            None => return Err(VsapiTypeError::DeserializationError("No challenge responses")),
         };
         Ok(Self {
             blobs,
@@ -779,7 +770,7 @@ impl TryFrom<vsapi::ConnectRequest> for ConnectRequest {
 }
 
 impl TryFrom<ConnectRequest> for vsapi::ConnectRequest {
-    type Error = VisaError;
+    type Error = VsapiTypeError;
 
     fn try_from(req: ConnectRequest) -> Result<Self, Self::Error> {
         let mut claims = BTreeMap::new();
@@ -792,7 +783,7 @@ impl TryFrom<ConnectRequest> for vsapi::ConnectRequest {
             match blob {
                 AuthBlob::SS(ss) => challenge_responses.push(ss.challenge),
                 AuthBlob::AC(_) => {
-                    return Err(VisaError::DeserializationError("Incorrect blob type"));
+                    return Err(VsapiTypeError::DeserializationError("Incorrect blob type"));
                 }
             }
         }
@@ -808,5 +799,326 @@ impl TryFrom<ConnectRequest> for vsapi::ConnectRequest {
             challenge: None,
             challenge_responses: Some(challenge_responses),
         })
+    }
+}
+
+// pub struct ServicesList {
+//     pub expiration: i64,
+//     pub services: Vec<ServiceDescriptor>,
+// }
+
+// pub struct ServiceDescriptor {
+//     pub ty: ServiceType,
+//     pub service_id: String,
+//     pub uri: String,
+
+// }
+
+// pub enum ServiceType {
+//     ActorAuthentication = 1
+// }
+
+/// A parsed [vsapi::ServicesList].  Note that all the services in here will be of
+/// type [vsapi::ServiceType::ACTOR_AUTHENTICATION].
+#[derive(Debug, Clone)]
+pub struct AuthServicesList {
+    pub expiration: Option<SystemTime>, // 0 value means "no expiration"
+    pub services: Vec<ServiceDescriptor>,
+}
+
+impl Default for AuthServicesList {
+    fn default() -> Self {
+        AuthServicesList {
+            expiration: Some(SystemTime::UNIX_EPOCH),
+            services: Vec::new(),
+        }
+    }
+}
+
+impl AuthServicesList {
+    pub fn update(&mut self, expiration: Option<SystemTime>, services: Vec<ServiceDescriptor>) {
+        self.expiration = expiration;
+        self.services = services;
+    }
+
+    pub fn is_expired(&self) -> bool {
+        if let Some(exp) = self.expiration {
+            SystemTime::now() >= exp
+        } else {
+            false
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.services.is_empty()
+    }
+
+    /// The list is "valid" it is non-empty and not expired.
+    pub fn is_valid(&self) -> bool {
+        !self.is_empty() && !self.is_expired()
+    }
+}
+
+impl TryFrom<vsapi::ServicesList> for AuthServicesList {
+    type Error = VsapiTypeError;
+
+    fn try_from(services_list: vsapi::ServicesList) -> Result<Self, Self::Error> {
+        let mut expiration = None;
+        if services_list.expiration.is_some() {
+            expiration =
+                Some(UNIX_EPOCH + Duration::from_secs(services_list.expiration.unwrap() as u64));
+        }
+        let mut services = Vec::new();
+        if services_list.services.is_some() {
+            for svc in services_list.services.unwrap() {
+                services.push(ServiceDescriptor::try_from(svc)?);
+            }
+        }
+        Ok(Self {
+            expiration,
+            services,
+        })
+    }
+}
+
+/// A parsed [vsapi::ServiceDescriptor] that we use to keep ASA records.
+#[derive(Debug, Clone)]
+pub struct ServiceDescriptor {
+    pub service_id: String,
+    pub service_uri: String,
+    pub zpr_address: IpAddr,
+}
+
+impl TryFrom<vsapi::ServiceDescriptor> for ServiceDescriptor {
+    type Error = VsapiTypeError;
+
+    fn try_from(value: vsapi::ServiceDescriptor) -> Result<Self, Self::Error> {
+        if value.type_ != vsapi::ServiceType::ACTOR_AUTHENTICATION {
+            return Err(VsapiTypeError::DeserializationError(
+                "vsapi::ServiceDescriptor is not of type ACTOR_AUTHENTICATION",
+            ));
+        }
+        if value.address.is_none() {
+            return Err(VsapiTypeError::DeserializationError(
+                "vsapi::ServiceDescriptor address is empty",
+            ));
+        }
+        let zpraddr = ip_addr_from_vec(value.address.unwrap())?;
+
+        Ok(ServiceDescriptor {
+            service_id: value.service_id.unwrap_or_default(),
+            service_uri: value.uri.unwrap_or_default(),
+            zpr_address: zpraddr,
+        })
+    }
+}
+
+impl ServiceDescriptor {
+    /// Gently try to extract a SocketAddr from this ServiceDescriptor.
+    /// If there are any problems, None is returned.
+    pub fn get_socket_addr(&self) -> Option<std::net::SocketAddr> {
+        // To create a socket address we need a port, which is on the URI.
+        let uri = match Url::parse(&self.service_uri) {
+            Ok(u) => u,
+            Err(_) => return None, // Invalid URI
+        };
+        let port = match uri.port() {
+            Some(p) => p,
+            None => return None, // No port in URI, so no SocketAddr for you
+        };
+        Some(std::net::SocketAddr::new(self.zpr_address.into(), port))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::time::Duration;
+
+    // Helper function to create a test ServiceDescriptor
+    fn create_test_service_descriptor() -> ServiceDescriptor {
+        ServiceDescriptor {
+            service_id: "test-service-123".to_string(),
+            service_uri: "https://auth.example.com:8443/auth".to_string(),
+            zpr_address: IpAddr::from([192, 168, 1, 100]),
+        }
+    }
+
+    // Helper function to create a test ServiceDescriptor with IPv6
+    fn create_test_service_descriptor_v6() -> ServiceDescriptor {
+        let ipv6_addr: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        ServiceDescriptor {
+            service_id: "test-service-ipv6".to_string(),
+            service_uri: "https://auth.example.com:9443/auth".to_string(),
+            zpr_address: IpAddr::from(ipv6_addr),
+        }
+    }
+
+    #[test]
+    fn test_auth_services_list_update() {
+        let mut list = AuthServicesList::default();
+        let future_time = Some(SystemTime::now() + Duration::from_secs(3600));
+        let services = vec![create_test_service_descriptor()];
+
+        list.update(future_time, services.clone());
+
+        assert_eq!(list.expiration, future_time);
+        assert_eq!(list.services.len(), 1);
+        assert_eq!(list.services[0].service_id, "test-service-123");
+    }
+
+    #[test]
+    fn test_auth_services_list_is_expired() {
+        let mut list = AuthServicesList::default();
+
+        // Test with past time
+        let past_time = Some(SystemTime::now() - Duration::from_secs(3600));
+        list.expiration = past_time;
+        assert!(list.is_expired());
+
+        // Test with future time
+        let future_time = Some(SystemTime::now() + Duration::from_secs(3600));
+        list.expiration = future_time;
+        assert!(!list.is_expired());
+    }
+
+    #[test]
+    fn test_auth_services_list_is_empty() {
+        let mut list = AuthServicesList::default();
+        assert!(list.is_empty());
+
+        list.services.push(create_test_service_descriptor());
+        assert!(!list.is_empty());
+    }
+
+    #[test]
+    fn test_auth_services_list_is_valid() {
+        let mut list = AuthServicesList::default();
+
+        // Empty and expired
+        assert!(!list.is_valid());
+
+        // Non-empty but expired
+        list.services.push(create_test_service_descriptor());
+        assert!(!list.is_valid());
+
+        // Non-empty and not expired
+        list.expiration = Some(SystemTime::now() + Duration::from_secs(3600));
+        assert!(list.is_valid());
+
+        // Empty but not expired
+        list.services.clear();
+        assert!(!list.is_valid());
+    }
+
+    #[test]
+    fn test_service_descriptor_try_from_valid() {
+        let vsapi_descriptor = vsapi::ServiceDescriptor {
+            type_: vsapi::ServiceType::ACTOR_AUTHENTICATION,
+            service_id: Some("test-service".to_string()),
+            uri: Some("https://example.com:8443/auth".to_string()),
+            address: Some(vec![192, 168, 1, 100]),
+        };
+
+        let result = ServiceDescriptor::try_from(vsapi_descriptor);
+        assert!(result.is_ok());
+
+        let descriptor = result.unwrap();
+        assert_eq!(descriptor.service_id, "test-service");
+        assert_eq!(descriptor.service_uri, "https://example.com:8443/auth");
+        assert_eq!(descriptor.zpr_address, IpAddr::from([192, 168, 1, 100]));
+    }
+
+    #[test]
+    fn test_service_descriptor_try_from_no_address() {
+        let vsapi_descriptor = vsapi::ServiceDescriptor {
+            type_: vsapi::ServiceType::ACTOR_AUTHENTICATION,
+            service_id: Some("test-service".to_string()),
+            uri: Some("https://example.com:8443/auth".to_string()),
+            address: None,
+        };
+
+        let result = ServiceDescriptor::try_from(vsapi_descriptor);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_service_descriptor_try_from_defaults() {
+        let vsapi_descriptor = vsapi::ServiceDescriptor {
+            type_: vsapi::ServiceType::ACTOR_AUTHENTICATION,
+            service_id: None, // Should use default (empty string)
+            uri: None,        // Should use default (empty string)
+            address: Some(vec![10, 0, 0, 1]),
+        };
+
+        let result = ServiceDescriptor::try_from(vsapi_descriptor);
+        assert!(result.is_ok());
+
+        let descriptor = result.unwrap();
+        assert_eq!(descriptor.service_id, "");
+        assert_eq!(descriptor.service_uri, "");
+    }
+
+    #[test]
+    fn test_service_descriptor_to_socket_addr_ipv4() {
+        let descriptor = create_test_service_descriptor();
+        let socket_addr = descriptor.get_socket_addr();
+
+        assert!(socket_addr.is_some());
+        let addr = socket_addr.unwrap();
+        assert_eq!(addr.port(), 8443);
+        assert!(addr.ip().is_ipv4());
+        assert_eq!(addr.ip(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)));
+    }
+
+    #[test]
+    fn test_service_descriptor_to_socket_addr_ipv6() {
+        let descriptor = create_test_service_descriptor_v6();
+        let socket_addr = descriptor.get_socket_addr();
+
+        assert!(socket_addr.is_some());
+        let addr = socket_addr.unwrap();
+        assert_eq!(addr.port(), 9443);
+        assert!(addr.ip().is_ipv6());
+        assert_eq!(addr.ip(), IpAddr::V6("2001:db8::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_service_descriptor_to_socket_addr_invalid_uri() {
+        let mut descriptor = create_test_service_descriptor();
+        descriptor.service_uri = "not-a-valid-uri".to_string();
+
+        let socket_addr = descriptor.get_socket_addr();
+        assert!(socket_addr.is_none());
+    }
+
+    #[test]
+    fn test_service_descriptor_to_socket_addr_no_port() {
+        let mut descriptor = create_test_service_descriptor();
+        descriptor.service_uri = "https://example.com/auth".to_string(); // No port
+
+        let socket_addr = descriptor.get_socket_addr();
+        assert!(socket_addr.is_none());
+    }
+
+    #[test]
+    fn test_service_descriptor_to_socket_addr_default_port() {
+        let mut descriptor = create_test_service_descriptor();
+        descriptor.service_uri = "http://example.com/auth".to_string(); // HTTP default port
+
+        let socket_addr = descriptor.get_socket_addr();
+        // This should return None because url.port() returns None for default ports
+        assert!(socket_addr.is_none());
+    }
+
+    #[test]
+    fn test_service_descriptor_to_socket_addr_explicit_port() {
+        let mut descriptor = create_test_service_descriptor();
+        descriptor.service_uri = "http://example.com:8080/auth".to_string();
+
+        let socket_addr = descriptor.get_socket_addr();
+        assert!(socket_addr.is_some());
+        assert_eq!(socket_addr.unwrap().port(), 8080);
     }
 }

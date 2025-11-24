@@ -3162,6 +3162,7 @@ dependencies = [
  "open-enum",
  "strum 0.26.3",
  "thiserror",
+ "url",
  "vsapi",
  "zerocopy 0.8.9",
 ]

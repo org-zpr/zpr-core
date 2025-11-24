@@ -65,7 +65,6 @@ mod tun_ctl;
 mod two_way_queue;
 mod visa_mgmt;
 mod visa_table;
-mod vs_types;
 mod vs_worker;
 mod vss_worker;
 mod zdp;
@@ -93,7 +92,7 @@ use tun_ctl::TunCtl;
 use zpr_ext::socket2::SockAddrExt;
 use zpr_utils::net_defs::SocketAddrExt;
 
-use crate::vs_types::AuthServicesList;
+use zpr::vsapi_types::AuthServicesList;
 
 /// Creates a nonblocking local socket pair suitable for transferring
 /// PACKET_BUFFER_SIZE-sized messages.

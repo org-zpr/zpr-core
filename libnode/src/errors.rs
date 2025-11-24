@@ -16,7 +16,7 @@ pub enum VSError {
     #[error("Disconnect")]
     Disconnect,
     #[error("Cap'n Proto error: {0}")]
-    VisaError(#[from] zpr::vsapi_types::VisaError),
+    VisaError(#[from] zpr::vsapi_types::VsapiTypeError),
 }
 
 #[derive(Debug, Error)]
@@ -33,8 +33,8 @@ pub enum VSClientError {
     AddressError(String),
     #[error("IOError: {0}")]
     IOError(#[from] std::io::Error),
-    #[error("Vsapi Type error: {0}")]
-    VisaError(#[from] zpr::vsapi_types::VisaError),
+    #[error("Vsapi Type Error: {0}")]
+    VisaError(#[from] zpr::vsapi_types::VsapiTypeError),
 }
 
 impl From<thrift::Error> for VSClientError {

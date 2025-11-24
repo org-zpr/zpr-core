@@ -17,29 +17,17 @@ impl fmt::Display for VSSMsg {
                 summarize_visa(f, v)?;
                 write!(f, ")")
             }
-            VSSMsg::PushedServices(services) => match services.services {
-                Some(ref s) => {
-                    write!(f, "PushedServices(services: [")?;
-                    for (i, service) in s.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(
-                            f,
-                            "{}",
-                            service.uri.as_ref().unwrap_or(&"NO_URI".to_string())
-                        )?;
-                        write!(
-                            f,
-                            "/id={}",
-                            service.service_id.as_ref().unwrap_or(&"NO_ID".to_string())
-                        )?;
-                        write!(f, "/type={:?}", service.type_)?;
+            VSSMsg::PushedServices(services) => {
+                write!(f, "PushedServices(services: [")?;
+                for (i, service) in services.services.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
                     }
-                    write!(f, "])")
+                    write!(f, "{}", service.service_uri)?;
+                    write!(f, "/id={}", service.service_id)?;
                 }
-                None => write!(f, "PushedServices(services: (none))"),
-            },
+                write!(f, "])")
+            }
         }
     }
 }

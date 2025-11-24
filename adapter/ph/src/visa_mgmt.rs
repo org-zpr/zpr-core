@@ -3,14 +3,13 @@ use crate::counters::ManagementCounterType;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::VISA_MGMT;
 use crate::visa_table;
-use crate::vs_types;
 use libnode::{claims, vsapi};
 use std::net::IpAddr;
 use std::num::NonZero;
 use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use tracing::*;
-use zpr::vsapi_types;
+use zpr::vsapi_types::{self, AuthServicesList};
 use zpr::{LinkId, VisaId};
 use zpr_utils::net_defs::{IPV6_ADDRESS_SIZE, IpAddress};
 
@@ -219,45 +218,22 @@ pub fn handle_revocation(
 
 pub fn handle_services_update(
     asm: &Arc<Assembly>,
-    services: vsapi::ServicesList,
+    services: AuthServicesList,
 ) -> Result<(), visa_table::VisaTableError> {
-    let expiration = if let Some(unixts) = services.expiration {
-        if unixts == 0 {
-            // 0 is a special case, meaning "no expiration"
-            None
-        } else {
-            Some(UNIX_EPOCH + Duration::from_secs(unixts as u64))
+    let expiration = match services.expiration {
+        Some(exp) => Some(exp),
+        None => {
+            error!(target: VISA_MGMT, "visa service sends services list with no expiration set");
+            Some(UNIX_EPOCH)
         }
-    } else {
-        error!(target: VISA_MGMT, "visa service sends services list with no expiration set");
-        Some(UNIX_EPOCH) // not present? Already expired then.
     };
 
     let mut vs_auth_services = Vec::new();
 
-    if let Some(services) = services.services {
-        debug!(target: VISA_MGMT, "received services update with {} entries", services.len());
-        for service in services {
-            if service.type_ != vsapi::ServiceType::ACTOR_AUTHENTICATION {
-                continue;
-            }
-            if service.address.is_none() {
-                error!(target: VISA_MGMT, "service descriptor with no address (id={})", service.service_id.unwrap_or_default());
-                continue;
-            }
-            match vs_types::ServiceDescriptor::try_from(service) {
-                Ok(sd) => {
-                    vs_auth_services.push(sd);
-                }
-                Err(e) => {
-                    error!(target: VISA_MGMT, "failed to parse vsapi service descriptor: {e}");
-                    continue;
-                }
-            }
-        }
-    } else {
-        // Got update with nothing.
-        debug!(target: VISA_MGMT, "received empty services update, clearing vs_auth_services");
+    let services = services.services;
+    debug!(target: VISA_MGMT, "received services update with {} entries", services.len());
+    for service in services {
+        vs_auth_services.push(service);
     }
     debug!(target: VISA_MGMT, "updating auth services with {} entries, expires at {expiration:?}", vs_auth_services.len());
     // The update is always a complete replacement of the list of services, and may be empty.

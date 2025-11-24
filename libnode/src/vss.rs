@@ -14,7 +14,7 @@ use tracing::{debug, error, info};
 
 use crate::logging::targets::VSS_RPC;
 use vsapi::{self, PolicyInfo, ServicesList, VisaSupportSyncHandler, VisaSupportSyncProcessor};
-use zpr::vsapi_types::{Visa, VisaError, VisaOp};
+use zpr::vsapi_types::{AuthServicesList, Visa, VisaOp, VsapiTypeError};
 
 /// Default port for the visa support service. Note that the visa support service
 /// should only listen on the ZPR interface (not substrate interface!).
@@ -34,7 +34,7 @@ pub enum VSSMsg {
     PushedRevocation(VisaOp),
 
     /// Pushed list of services. For now will be just Actor Authentication services.
-    PushedServices(ServicesList),
+    PushedServices(AuthServicesList),
 }
 
 /// The VisaSupportHandlerImpl is a light wrapper around the thrift
@@ -122,7 +122,7 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
             let vo = VisaOp::try_from(r);
             let op = match vo {
                 Ok(op) => op,
-                Err(VisaError::DeserializationError(e)) => return Err(thrift::Error::from(e)),
+                Err(VsapiTypeError::DeserializationError(e)) => return Err(thrift::Error::from(e)),
                 _ => {
                     return Err(thrift::Error::from(
                         "Incorrect error type in visa revocation",
@@ -143,8 +143,15 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
     /// message.
     fn handle_services_update(&self, services: ServicesList) -> thrift::Result<()> {
         debug!(target: VSS_RPC, "handle_services_update");
+        let svc_list = match AuthServicesList::try_from(services) {
+            Ok(svc_list) => svc_list,
+            Err(VsapiTypeError::VisaRevocationError(e)) => return Err(thrift::Error::from(e)),
+            _ => {
+                return Err(thrift::Error::from("Incorrect error type in services list"));
+            }
+        };
         self.msg_chan_out
-            .blocking_send(VSSMsg::PushedServices(services))
+            .blocking_send(VSSMsg::PushedServices(svc_list))
             .or_else(|e| {
                 error!(target: VSS_RPC, "failed to enqueue services message to node: {e}");
                 Err(thrift::Error::from("enqueue failed"))

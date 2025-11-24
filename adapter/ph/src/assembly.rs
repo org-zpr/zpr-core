@@ -20,7 +20,6 @@ use crate::special_peers::SpecialPeerName;
 use crate::tc;
 use crate::tun_ctl::TunCtl;
 use crate::visa_table;
-use crate::vs_types::AuthServicesList;
 use crate::zdp::TerminateReason;
 use crate::zdpr_worker;
 use km_noise::NoiseKeypair;
@@ -34,6 +33,7 @@ use tracing::*;
 use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
 use tracing_subscriber::{Layer, Registry, filter, fmt, reload};
+use zpr::vsapi_types::AuthServicesList;
 use zpr::{self, LinkId, SubstrateAddr, VisaId};
 use zpr_utils::net_defs::{IpAddress, ScopedIpAddr};
 
