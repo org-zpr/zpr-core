@@ -25,4 +25,19 @@ pub enum VSApiError {
 
     #[error("string conversion error: {0}")]
     StringConversion(#[from] std::str::Utf8Error),
+
+    #[error("serialization error: {0}")]
+    DTError(#[from] DTError),
+}
+
+#[derive(Debug, Error)]
+pub enum DTError {
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
+
+    #[error("Cap'n Proto error: {0}")]
+    Capnp(#[from] capnp::Error),
+
+    #[error("capn proto not in schema: {0}")]
+    CapnpNotInSchema(#[from] capnp::NotInSchema),
 }

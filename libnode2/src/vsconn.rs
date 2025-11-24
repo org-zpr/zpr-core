@@ -14,6 +14,7 @@ use tracing::*;
 
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
+use crate::vsapi_types::{PacketDesc, Visa, VisaDenialReason};
 
 const PARAM_ZPR_ADDR: &str = "zpr_addr";
 const PARAM_AAA_PREFIX: &str = "aaa_prefix";
@@ -27,41 +28,14 @@ pub struct VSConnectRequest {
 
 #[derive(Debug)]
 pub struct VSVisaRequest {
-    pub protocol: u8,
-    pub source_addr: IpAddr,
-    pub dest_addr: IpAddr,
-    pub source_port: u16,
-    pub dest_port: u16,
-    pub comm_type: CommT,
+    pub pdesc: PacketDesc,
     pub previous_id: Option<u64>,
 }
 
 #[derive(Debug)]
-pub struct Visa {}
-
-#[derive(Debug)]
 pub enum VSVisaDecision {
     Allowed(Visa),
-    Denied(DenyCode),
-}
-
-#[derive(Debug)]
-pub enum CommT {
-    Bidirectional,
-    Unidirectional,
-    Rerequest,
-}
-
-#[derive(Debug)]
-pub enum DenyCode {
-    NoReason,
-    NoMatch,
-    Denied,
-    SourceNotFound,
-    DestNotFound,
-    SourceAuthError,
-    DestAuthError,
-    QuotaExceeded,
+    Denied(VisaDenialReason),
 }
 
 /// Returns no error if call to VSAPI authenticate was successful.
@@ -334,16 +308,27 @@ impl VSConn {
         let mut vr_request = vs_h.visa_request_request();
         let mut vrr_bldr = vr_request.get().init_req();
         vrr_bldr.set_previous_id(0);
-        let pd_bldr = vrr_bldr.init_packet();
+        let mut pd_bldr = vrr_bldr.init_packet();
+        req.pdesc.write_to(&mut pd_bldr);
+        let vr_response = vr_request.send().promise.await?;
+        let allow_deny_error = vr_response.get()?.get_resp()?;
 
-        // Ok th pd_bldr is a PacketDesc so I should be passing our PacketDesc type
-        // and using a write_to function from vs-dt.
-
-        // TODO
-
-        Err(VSApiError::CommandFailed(
-            "VSConn: visa_request not implemented yet".to_string(),
-        ))
+        match allow_deny_error.which()? {
+            vsapi2::visa_response::Which::Allow(v) => {
+                let cp_visa = v?;
+                let visa = Visa::try_from(cp_visa)?;
+                Ok(VSVisaDecision::Allowed(visa))
+            }
+            vsapi2::visa_response::Which::Deny(dcode) => {
+                let dcode = dcode?;
+                let deny_code = VisaDenialReason::from(dcode);
+                Ok(VSVisaDecision::Denied(deny_code))
+            }
+            vsapi2::visa_response::Which::Error(err_obj) => {
+                let err_obj = err_obj?;
+                Err(new_coded_error(err_obj))
+            }
+        }
     }
 }
 

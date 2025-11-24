@@ -13,7 +13,8 @@ use tracing::Level;
 use tracing::{error, info};
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
-use libnode2::vsconn::{CommT, VSConn, VSConnectRequest, VSVisaRequest};
+use libnode2::vsapi_types::{CommFlag, PacketDesc};
+use libnode2::vsconn::{VSConn, VSConnectRequest, VSVisaRequest};
 
 /// ln2: test tool for libnode2
 ///
@@ -165,13 +166,16 @@ async fn main() {
                         match cmd {
                             Cmd::Disconnect => break,
                             Cmd::VisaRequest(five_tuple) => {
-                                let req = VSVisaRequest {
+                                let pdesc = PacketDesc {
                                     source_addr: five_tuple.src_ip,
                                     dest_addr: five_tuple.dst_ip,
                                     source_port: five_tuple.src_port,
                                     dest_port: five_tuple.dst_port,
                                     protocol: five_tuple.protocol,
-                                    comm_type: CommT::Bidirectional, // TODO
+                                    comm_flags: CommFlag::BiDirectional, // TODO
+                                };
+                                let req = VSVisaRequest {
+                                    pdesc,
                                     previous_id: None, // TODO
                                 };
                                 let reply = handle.visa_request(req).await;
