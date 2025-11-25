@@ -1,7 +1,6 @@
 //! VSAPI types - this is placeholder until we have this in centralized location.
 //! This copies code from zpr-visaservice/vs-dt
 
-use capnp::traits::SetterInput;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use zpr::vsapi::v1 as vsapi;
 
