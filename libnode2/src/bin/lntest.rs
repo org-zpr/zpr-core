@@ -16,12 +16,12 @@ use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 use libnode2::vsapi_types::{CommFlag, PacketDesc};
 use libnode2::vsconn::{VSConn, VSConnectRequest, VSVisaRequest};
 
-/// ln2: test tool for libnode2
+/// lntest: test tool for libnode2
 ///
 /// This will attempt to register as a node to the visa service.
 ///
 #[derive(Parser, Debug)]
-#[command(name = "ln2")]
+#[command(name = "lntest")]
 #[command(version, verbatim_doc_comment)]
 struct Args {
     /// Address of the visa service VS-API endpoint in 'HOST:PORT' format.
@@ -214,7 +214,7 @@ async fn main() {
         let mut rl = DefaultEditor::new().unwrap();
         let mut do_disconnect = false;
         loop {
-            let readline = rl.readline("ln2> ");
+            let readline = rl.readline("lntest> ");
             match readline {
                 Ok(line) => {
                     let trimmed = line.trim();
