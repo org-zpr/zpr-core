@@ -145,7 +145,7 @@ impl VisaSupportSyncHandler for VisaSupportHandlerImpl {
         debug!(target: VSS_RPC, "handle_services_update");
         let svc_list = match AuthServicesList::try_from(services) {
             Ok(svc_list) => svc_list,
-            Err(VsapiTypeError::VisaRevocationError(e)) => return Err(thrift::Error::from(e)),
+            Err(VsapiTypeError::DeserializationError(e)) => return Err(thrift::Error::from(e)),
             _ => {
                 return Err(thrift::Error::from("Incorrect error type in services list"));
             }

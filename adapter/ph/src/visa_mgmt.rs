@@ -3,7 +3,7 @@ use crate::counters::ManagementCounterType;
 use crate::link_state::{LinkEvent, LinkStateError};
 use crate::logging::targets::VISA_MGMT;
 use crate::visa_table;
-use libnode::{claims, vsapi};
+use libnode::claims;
 use std::net::IpAddr;
 use std::num::NonZero;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use std::time::UNIX_EPOCH;
 use tracing::*;
 use zpr::vsapi_types::{self, AuthServicesList};
 use zpr::{LinkId, VisaId};
-use zpr_utils::net_defs::{IPV6_ADDRESS_SIZE, IpAddress};
+use zpr_utils::net_defs::IpAddress;
 
 pub fn authorize_connect(
     asm: &Arc<Assembly>,
@@ -27,59 +27,25 @@ pub fn authorize_connect(
             .authorize_connect(connect_req)
             .await
         {
-            Ok(cr) => match cr.status {
-                Some(vsapi::StatusCode::SUCCESS) => {
-                    if let Some(actor) = cr.actor {
-                        info!(target: VISA_MGMT, "link {link_id}: VS authorize_connect returns SUCCESS");
-                        if actor.zpr_addr.is_none() {
-                            // Really this is a bug in visa service I think.
-                            error!(target: VISA_MGMT, "link {link_id} authorized, but no zpr address present in actor");
-                            let _ignore_error =
-                                task_asm.process_link_state_event(link_id, LinkEvent::Error);
-                            return;
-                        }
-                        let addr_bytes = actor.zpr_addr.unwrap();
-                        if addr_bytes.len() != IPV6_ADDRESS_SIZE {
-                            // Our ZPR addresses should be IPv6 -- at least for now.
-                            error!(target: VISA_MGMT, "link {link_id} authorized, but zpr address is not 16 bytes long: {} bytes", addr_bytes.len());
-                            let _ignore_error =
-                                task_asm.process_link_state_event(link_id, LinkEvent::Error);
-                            return;
-                        }
-                        let addr_buf: [u8; IPV6_ADDRESS_SIZE] = addr_bytes
-                            .try_into()
-                            .expect("actor.zpr_addr should be exactly 16 bytes");
-                        let zpr_addr = IpAddress::new_from_std(&IpAddr::from(addr_buf));
+            Ok(cr) => {
+                info!(target: VISA_MGMT, "link {link_id}: VS authorize_connect returned successfully");
+                match cr.zpr_addr {
+                    IpAddr::V4(_) => {
+                        // Our ZPR addresses should be IPv6 -- at least for now.
+                        error!(target: VISA_MGMT, "link {link_id} authorized, but zpr address is not IPv6");
+                        let _ignore_error =
+                            task_asm.process_link_state_event(link_id, LinkEvent::Error);
+                        return;
+                    }
+                    IpAddr::V6(_) => {
+                        let zpr_addr = IpAddress::new_from_std(&cr.zpr_addr);
                         let _ignore_error = task_asm.process_link_state_event(
                             link_id,
                             LinkEvent::ReceivedAuthorizeResponse(zpr_addr),
                         );
-                    } else {
-                        // This is also a bug in visa service. It must set an access if status == success.
-                        error!(target: VISA_MGMT, "link {link_id} authorized, but no actor present");
-                        let _ignore_error =
-                            task_asm.process_link_state_event(link_id, LinkEvent::Error);
                     }
                 }
-                Some(vsapi::StatusCode::FAIL) => {
-                    warn!(
-                        target: VISA_MGMT,
-                        "link {link_id}: VS authorize_connect FAILED: {}",
-                        cr.reason.unwrap_or("(no reason given)".to_owned())
-                    );
-                    let _ignore_error =
-                        task_asm.process_link_state_event(link_id, LinkEvent::Error);
-                }
-                _ => {
-                    warn!(
-                        target: VISA_MGMT,
-                        "link {link_id}: VS authorize_connect failed with unexpected status: {:?}",
-                        cr.status
-                    );
-                    let _ignore_error =
-                        task_asm.process_link_state_event(link_id, LinkEvent::Error);
-                }
-            },
+            }
 
             Err(err) => {
                 warn!(target: VISA_MGMT, "link {link_id}: VS authorize_connect failed with error: {err}");
