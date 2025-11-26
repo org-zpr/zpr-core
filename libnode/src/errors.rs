@@ -33,10 +33,8 @@ pub enum VSClientError {
     AddressError(String),
     #[error("IOError: {0}")]
     IOError(#[from] std::io::Error),
-    #[error("Vsapi Type Error: {0}")]
-    VisaError(#[from] zpr::vsapi_types::VsapiTypeError),
-    #[error("Status fail")]
-    Fail,
+    #[error("Vsapi Type error: {0}")]
+    VsapiTypeError(#[from] zpr::vsapi_types::VsapiTypeError),
 }
 
 impl From<thrift::Error> for VSClientError {

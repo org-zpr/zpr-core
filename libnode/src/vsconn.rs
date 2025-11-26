@@ -278,14 +278,6 @@ impl VSConn {
     ) -> AuthorizeConnectResponse {
         match client.authorize_connect(cr) {
             Ok(acr) => {
-                if acr.status.is_none() {
-                    return Err(VSClientError::VisaError(
-                        VsapiTypeError::DeserializationError("No status code"),
-                    ));
-                }
-                if acr.status.unwrap() == vsapi::StatusCode::FAIL {
-                    return Err(VSClientError::Fail);
-                }
                 let connection = Connection::try_from(acr)?;
                 Ok(connection)
             }
