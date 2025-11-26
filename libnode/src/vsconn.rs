@@ -20,7 +20,7 @@ use crate::errors::{VSClientError, VSError};
 use crate::logging::targets::VS_RPC;
 use crate::vscli::{self, VSClientI};
 use crate::vss::DEFAULT_VSS_PORT;
-use zpr::vsapi_types::{ConnectRequest, Connection, VisaResponse, VsapiTypeError};
+use zpr::vsapi_types::{ConnectRequest, Connection, VisaResponse};
 
 use vsapi;
 use zpr;

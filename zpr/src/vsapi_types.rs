@@ -431,7 +431,9 @@ impl TryFrom<vsapi::Visa> for Visa {
                     let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
                         Some(val) => TcpUdpPep::from(val),
                         None => {
-                            return Err(VsapiTypeError::DeserializationError("No TCP/UDP PEP Args"));
+                            return Err(VsapiTypeError::DeserializationError(
+                                "No TCP/UDP PEP Args",
+                            ));
                         }
                     };
                     DockPep::UDP(tcp_udp_pep)
@@ -440,7 +442,9 @@ impl TryFrom<vsapi::Visa> for Visa {
                     let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
                         Some(val) => TcpUdpPep::from(val),
                         None => {
-                            return Err(VsapiTypeError::DeserializationError("No TCP/UDP PEP Args"));
+                            return Err(VsapiTypeError::DeserializationError(
+                                "No TCP/UDP PEP Args",
+                            ));
                         }
                     };
                     DockPep::TCP(tcp_udp_pep)
@@ -488,7 +492,9 @@ pub fn ip_addr_from_vec(v: Vec<u8>) -> Result<IpAddr, VsapiTypeError> {
         16 => Ok(IpAddr::from(
             <[u8; 16]>::try_from(v.as_slice()).expect("Bad IP length"),
         )),
-        _ => Err(VsapiTypeError::DeserializationError("Bad IP Address format")),
+        _ => Err(VsapiTypeError::DeserializationError(
+            "Bad IP Address format",
+        )),
     }
 }
 
@@ -958,9 +964,10 @@ impl TryFrom<vsapi::ConnectResponse> for Connection {
                 }
                 None => return Err(VsapiTypeError::DeserializationError("No actor")),
             },
-            _ => Err(VsapiTypeError::DeserializationError("No matching status code")),
+            _ => Err(VsapiTypeError::DeserializationError(
+                "No matching status code",
+            )),
         }
-        
     }
 }
 
