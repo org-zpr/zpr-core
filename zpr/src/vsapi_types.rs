@@ -24,7 +24,6 @@ pub enum VisaError {
     Utf8Error(#[from] core::str::Utf8Error),
     #[error("Error code: {0:?}")]
     CodedError(ErrorCode),
-
 }
 
 #[derive(Debug)]
@@ -130,7 +129,9 @@ impl TryFrom<vsapi::VisaResponse> for VisaResponse {
                         let visa = Visa::try_from(thrift_visa_hop)?;
                         Ok(Self::Allow(visa))
                     } else {
-                        Err(VisaError::DeserializationError("No VisaHop in VisaResponse"))
+                        Err(VisaError::DeserializationError(
+                            "No VisaHop in VisaResponse",
+                        ))
                     }
                 }
                 vsapi::StatusCode::FAIL => Ok(Self::Deny(Denied::new(
@@ -439,9 +440,7 @@ impl TryFrom<vsapi::Visa> for Visa {
             Some(val) => match ip_addr_from_vec(val) {
                 Ok(addr) => addr,
                 Err(_) => {
-                    return Err(VisaError::DeserializationError(
-                        "Bad format in src address",
-                    ));
+                    return Err(VisaError::DeserializationError("Bad format in src address"));
                 }
             },
             None => return Err(VisaError::DeserializationError("No src address")),
@@ -450,9 +449,7 @@ impl TryFrom<vsapi::Visa> for Visa {
             Some(val) => match ip_addr_from_vec(val) {
                 Ok(addr) => addr,
                 Err(_) => {
-                    return Err(VisaError::DeserializationError(
-                        "Bad format in dst address",
-                    ));
+                    return Err(VisaError::DeserializationError("Bad format in dst address"));
                 }
             },
             None => return Err(VisaError::DeserializationError("No dst address")),
@@ -463,8 +460,7 @@ impl TryFrom<vsapi::Visa> for Visa {
                     let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
                         Some(val) => TcpUdpPep::from(val),
                         None => {
-                            return Err(VisaError::DeserializationError("No TCP/UDP PEP Args"
-                            ));
+                            return Err(VisaError::DeserializationError("No TCP/UDP PEP Args"));
                         }
                     };
                     DockPep::UDP(tcp_udp_pep)
@@ -473,9 +469,7 @@ impl TryFrom<vsapi::Visa> for Visa {
                     let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
                         Some(val) => TcpUdpPep::from(val),
                         None => {
-                            return Err(VisaError::DeserializationError(
-                                "No TCP/UDP PEP Args",
-                            ));
+                            return Err(VisaError::DeserializationError("No TCP/UDP PEP Args"));
                         }
                     };
                     DockPep::TCP(tcp_udp_pep)

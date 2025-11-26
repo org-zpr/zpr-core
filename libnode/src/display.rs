@@ -78,8 +78,8 @@ fn summarize_visa(f: &mut Formatter<'_>, v: &vsapi_types::Visa) -> fmt::Result {
             icmp = true;
             proto = "ICMP".to_string();
 
-            sport = args.icmp_type_code.to_string();
-            dport = "".to_string();
+            sport = args.icmp_type.to_string();
+            dport = args.icmp_code.to_string();
         }
     };
 
