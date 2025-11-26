@@ -31,7 +31,7 @@ pub enum VSClientError {
     AddressError(String),
     #[error("IOError: {0}")]
     IOError(#[from] std::io::Error),
-    #[error("Cap'n Proto error: {0}")]
+    #[error("Vsapi Type error: {0}")]
     VisaError(#[from] zpr::vsapi_types::VisaError),
 }
 

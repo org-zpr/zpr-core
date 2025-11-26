@@ -12,20 +12,19 @@ use vsapi;
 
 #[derive(Debug, Error)]
 pub enum VisaError {
-    #[error("Problem parsing visa with issuer id {0}: {1}")]
-    VisaParseError(u64, &'static str),
-    #[error("Problem in VisaResponse: {0}")]
-    VisaResponseError(&'static str),
-    #[error("Problem in VisaHop: {0}")]
-    VisaHopError(&'static str),
-    #[error("Keyset Parse Error")]
-    KeySetParseError,
+    #[error("Serialization error {0}")]
+    SerializationError(&'static str),
+    #[error("Deserialization error: {0:?}")]
+    DeserializationError(&'static str),
     #[error("Cap'n Proto error: {0}")]
     Capnp(#[from] capnp::Error),
     #[error("Cap'n Proto error: {0}")]
     NotInSchema(#[from] capnp::NotInSchema),
     #[error("Cap'n Proto error: {0}")]
     Utf8Error(#[from] core::str::Utf8Error),
+    #[error("Error code: {0:?}")]
+    CodedError(ErrorCode),
+
 }
 
 #[derive(Debug)]
@@ -75,7 +74,6 @@ pub enum ErrorCode {
     AuthError,
     ParamError,
     UnknownStatusCode,
-    VisaStructureError(VisaError),
 }
 
 impl TryFrom<v1::visa_response::Reader<'_>> for VisaResponse {
@@ -115,11 +113,7 @@ impl TryFrom<v1::visa_response::Reader<'_>> for VisaResponse {
                     v1::ErrorCode::AuthError => ErrorCode::AuthError,
                     v1::ErrorCode::ParamError => ErrorCode::ParamError,
                 };
-                let message = error.get_message()?.to_string()?;
-                let retry_in = error.get_retry_in();
-                Ok(Self::VSApiError(VisaResponseError::new(
-                    code, message, retry_in,
-                )))
+                Err(VisaError::CodedError(code))
             }
         }
     }
@@ -136,7 +130,7 @@ impl TryFrom<vsapi::VisaResponse> for VisaResponse {
                         let visa = Visa::try_from(thrift_visa_hop)?;
                         Ok(Self::Allow(visa))
                     } else {
-                        Err(VisaError::VisaResponseError("No VisaHop in VisaResponse"))
+                        Err(VisaError::DeserializationError("No VisaHop in VisaResponse"))
                     }
                 }
                 vsapi::StatusCode::FAIL => Ok(Self::Deny(Denied::new(
@@ -144,10 +138,10 @@ impl TryFrom<vsapi::VisaResponse> for VisaResponse {
                     thrift_visa_response.reason,
                 ))),
                 _ => {
-                    return Err(VisaError::VisaResponseError("Unknown status code"));
+                    return Err(VisaError::DeserializationError("Unknown status code"));
                 }
             },
-            None => Err(VisaError::VisaResponseError(
+            None => Err(VisaError::DeserializationError(
                 "No code, required in Thrift visa",
             )),
         }
@@ -207,9 +201,8 @@ pub enum EndpointT {
 #[derive(Debug, Clone)]
 pub struct IcmpPep {
     /// the allowed ICMP type and code (in lower 16 bits)
-    pub icmp_type_code: u16,
-    /// use 0xFF for none
-    pub icmp_antecedent: u16,
+    pub icmp_type: u8,
+    pub icmp_code: u8,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -296,14 +289,14 @@ impl Visa {
                 if l3_protocol == L3Type::Ipv6 {
                     (
                         vsapi_ip_number::IPV6_ICMP,
-                        icmp_pep.icmp_type_code,
-                        icmp_pep.icmp_antecedent,
+                        icmp_pep.icmp_type as u16,
+                        icmp_pep.icmp_code as u16,
                     )
                 } else {
                     (
                         vsapi_ip_number::ICMP,
-                        icmp_pep.icmp_type_code,
-                        icmp_pep.icmp_antecedent,
+                        icmp_pep.icmp_type as u16,
+                        icmp_pep.icmp_code as u16,
                     )
                 }
             }
@@ -382,7 +375,7 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
             v1::dock_pep::Which::Icmp(icmp_pep_result) => {
                 let icmp_pep_reader = icmp_pep_result?;
                 let type_code = icmp_pep_reader.get_icmp_type_code();
-                let icmp_pep = IcmpPep::new(type_code, 0xFF);
+                let icmp_pep = IcmpPep::new(type_code as u8, 0);
                 DockPep::ICMP(icmp_pep)
             }
         };
@@ -413,7 +406,7 @@ impl TryFrom<vsapi::VisaHop> for Visa {
     fn try_from(hop: vsapi::VisaHop) -> Result<Self, Self::Error> {
         match hop.visa {
             Some(visa) => Visa::try_from(visa),
-            None => Err(VisaError::VisaHopError("No visa")),
+            None => Err(VisaError::DeserializationError("No visa")),
         }
     }
 }
@@ -426,7 +419,7 @@ impl TryFrom<vsapi::Visa> for Visa {
         let issuer_id = match thrift_visa.issuer_id {
             Some(val) => val as u64,
             None => {
-                return Err(VisaError::VisaParseError(0, "No issuer id"));
+                return Err(VisaError::DeserializationError("No issuer id"));
             }
         };
         let config = match thrift_visa.configuration {
@@ -439,32 +432,30 @@ impl TryFrom<vsapi::Visa> for Visa {
                 UNIX_EPOCH + dur
             }
             None => {
-                return Err(VisaError::VisaParseError(issuer_id, "No expiration"));
+                return Err(VisaError::DeserializationError("No expiration"));
             }
         };
         let src_addr = match thrift_visa.source_contact {
             Some(val) => match ip_addr_from_vec(val) {
                 Ok(addr) => addr,
                 Err(_) => {
-                    return Err(VisaError::VisaParseError(
-                        issuer_id,
+                    return Err(VisaError::DeserializationError(
                         "Bad format in src address",
                     ));
                 }
             },
-            None => return Err(VisaError::VisaParseError(issuer_id, "No src address")),
+            None => return Err(VisaError::DeserializationError("No src address")),
         };
         let dst_addr = match thrift_visa.dest_contact {
             Some(val) => match ip_addr_from_vec(val) {
                 Ok(addr) => addr,
                 Err(_) => {
-                    return Err(VisaError::VisaParseError(
-                        issuer_id,
+                    return Err(VisaError::DeserializationError(
                         "Bad format in dst address",
                     ));
                 }
             },
-            None => return Err(VisaError::VisaParseError(issuer_id, "No dst address")),
+            None => return Err(VisaError::DeserializationError("No dst address")),
         };
         let dock_pep = match thrift_visa.dock_pep {
             Some(val) => match val {
@@ -472,9 +463,7 @@ impl TryFrom<vsapi::Visa> for Visa {
                     let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
                         Some(val) => TcpUdpPep::from(val),
                         None => {
-                            return Err(VisaError::VisaParseError(
-                                issuer_id,
-                                "No TCP/UDP PEP Args",
+                            return Err(VisaError::DeserializationError("No TCP/UDP PEP Args"
                             ));
                         }
                     };
@@ -484,8 +473,7 @@ impl TryFrom<vsapi::Visa> for Visa {
                     let tcp_udp_pep = match thrift_visa.tcpudp_pep_args {
                         Some(val) => TcpUdpPep::from(val),
                         None => {
-                            return Err(VisaError::VisaParseError(
-                                issuer_id,
+                            return Err(VisaError::DeserializationError(
                                 "No TCP/UDP PEP Args",
                             ));
                         }
@@ -496,14 +484,14 @@ impl TryFrom<vsapi::Visa> for Visa {
                     let icmp_pep = match thrift_visa.icmp_pep_args {
                         Some(val) => IcmpPep::from(val),
                         None => {
-                            return Err(VisaError::VisaParseError(issuer_id, "No ICMP PEP Args"));
+                            return Err(VisaError::DeserializationError("No ICMP PEP Args"));
                         }
                     };
                     DockPep::ICMP(icmp_pep)
                 }
-                _ => return Err(VisaError::VisaParseError(issuer_id, "Unknown Dock Pep")),
+                _ => return Err(VisaError::DeserializationError("Unknown Dock Pep")),
             },
-            None => return Err(VisaError::VisaParseError(issuer_id, "No Dock Pep")),
+            None => return Err(VisaError::DeserializationError("No Dock Pep")),
         };
 
         let session_key = match thrift_visa.session_key {
@@ -569,10 +557,10 @@ impl From<vsapi::PEPArgsTCPUDP> for TcpUdpPep {
 }
 
 impl IcmpPep {
-    pub fn new(src: u16, ant: u16) -> Self {
+    pub fn new(icmp_type: u8, icmp_code: u8) -> Self {
         Self {
-            icmp_type_code: src,
-            icmp_antecedent: ant,
+            icmp_type,
+            icmp_code,
         }
     }
 }
@@ -583,14 +571,10 @@ impl From<vsapi::PEPArgsICMP> for IcmpPep {
             Some(val) => val as u16,
             None => 0,
         };
-        let icmp_antecedent = match thrift_icmp_pep.icmp_antecedent {
-            Some(val) => val as u16,
-            None => 0,
-        };
 
         Self {
-            icmp_type_code,
-            icmp_antecedent,
+            icmp_type: icmp_type_code as u8,
+            icmp_code: 0,
         }
     }
 }
@@ -601,7 +585,7 @@ impl TryFrom<vsapi::KeySet> for KeySet {
     fn try_from(thrift_key_set: vsapi::KeySet) -> Result<Self, Self::Error> {
         let format = match thrift_key_set.format {
             Some(val) => val,
-            None => return Err(VisaError::KeySetParseError),
+            None => return Err(VisaError::DeserializationError("No format")),
         };
         let ingress_key = match thrift_key_set.ingress_key {
             Some(val) => val,
@@ -623,7 +607,7 @@ impl TryFrom<vsapi::KeySet> for KeySet {
 impl KeySet {
     pub fn new_no_format(ingress_key: Vec<u8>, egress_key: Vec<u8>) -> Self {
         Self {
-            format: 0,
+            format: 1, // Currently only used since capnp does not yet have format
             ingress_key,
             egress_key,
         }
