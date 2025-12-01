@@ -765,7 +765,11 @@ impl TryFrom<vsapi::ConnectRequest> for ConnectRequest {
                 }
                 b
             }
-            None => return Err(VsapiTypeError::DeserializationError("No challenge responses")),
+            None => {
+                return Err(VsapiTypeError::DeserializationError(
+                    "No challenge responses",
+                ));
+            }
         };
         Ok(Self {
             blobs,
@@ -809,24 +813,6 @@ impl TryFrom<ConnectRequest> for vsapi::ConnectRequest {
     }
 }
 
-// pub struct ServicesList {
-//     pub expiration: i64,
-//     pub services: Vec<ServiceDescriptor>,
-// }
-
-// pub struct ServiceDescriptor {
-//     pub ty: ServiceType,
-//     pub service_id: String,
-//     pub uri: String,
-
-// }
-
-// pub enum ServiceType {
-//     ActorAuthentication = 1
-// }
-
-/// A parsed [vsapi::ServicesList].  Note that all the services in here will be of
-/// type [vsapi::ServiceType::ACTOR_AUTHENTICATION].
 #[derive(Debug, Clone)]
 pub struct AuthServicesList {
     pub expiration: Option<SystemTime>, // 0 value means "no expiration"
