@@ -24,6 +24,9 @@ pub enum VisaError {
     Utf8Error(#[from] core::str::Utf8Error),
     #[error("Error code: {0:?}")]
     CodedError(ErrorCode),
+    #[error("IP address conversion error: {0}")]
+    TryFromSliceError(#[from] std::array::TryFromSliceError),
+    
 }
 
 #[derive(Debug)]
@@ -85,35 +88,45 @@ impl TryFrom<v1::visa_response::Reader<'_>> for VisaResponse {
                 Ok(Self::Allow(visa.try_into()?))
             }
             v1::visa_response::Which::Deny(c) => {
-                let code = c?;
-                let deny_code = match code {
-                    v1::VisaDenyCode::NoReason => DenyCode::NoReason,
-                    v1::VisaDenyCode::NoMatch => DenyCode::NoMatch,
-                    v1::VisaDenyCode::Denied => DenyCode::Denied,
-                    v1::VisaDenyCode::SourceNotFound => DenyCode::SourceNotFound,
-                    v1::VisaDenyCode::DestNotFound => DenyCode::DestNotFound,
-                    v1::VisaDenyCode::SourceAuthError => DenyCode::SourceAuthError,
-                    v1::VisaDenyCode::DestAuthError => DenyCode::DestAuthError,
-                    v1::VisaDenyCode::QuotaExceeded => DenyCode::QuotaExceeded,
-                };
+                let deny_code = DenyCode::from(c?);
                 Ok(Self::Deny(Denied::new(deny_code, None)))
             }
             v1::visa_response::Which::Error(e) => {
-                let error = e?;
-                let code = match error.get_code()? {
-                    v1::ErrorCode::Internal => ErrorCode::Internal,
-                    v1::ErrorCode::AuthRequired => ErrorCode::AuthRequired,
-                    v1::ErrorCode::InvalidOperation => ErrorCode::InvalidOperation,
-                    v1::ErrorCode::OutOfSync => ErrorCode::OutOfSync,
-                    v1::ErrorCode::NotFound => ErrorCode::NotFound,
-                    v1::ErrorCode::InvalidSignature => ErrorCode::InvalidSignature,
-                    v1::ErrorCode::QuotaExceeded => ErrorCode::QuotaExceeded,
-                    v1::ErrorCode::TemporarilyUnavailable => ErrorCode::TemporarilyUnavailable,
-                    v1::ErrorCode::AuthError => ErrorCode::AuthError,
-                    v1::ErrorCode::ParamError => ErrorCode::ParamError,
-                };
+                let code = ErrorCode::from(e?.get_code()?);
                 Err(VisaError::CodedError(code))
             }
+        }
+    }
+}
+
+impl From<v1::VisaDenyCode> for DenyCode {
+    fn from(code: v1::VisaDenyCode) -> Self {
+        match code {
+            v1::VisaDenyCode::NoReason => DenyCode::NoReason,
+            v1::VisaDenyCode::NoMatch => DenyCode::NoMatch,
+            v1::VisaDenyCode::Denied => DenyCode::Denied,
+            v1::VisaDenyCode::SourceNotFound => DenyCode::SourceNotFound,
+            v1::VisaDenyCode::DestNotFound => DenyCode::DestNotFound,
+            v1::VisaDenyCode::SourceAuthError => DenyCode::SourceAuthError,
+            v1::VisaDenyCode::DestAuthError => DenyCode::DestAuthError,
+            v1::VisaDenyCode::QuotaExceeded => DenyCode::QuotaExceeded,
+        }
+    }
+}
+
+impl From<v1::ErrorCode> for ErrorCode {
+    fn from(code: v1::ErrorCode) -> Self {
+        match code {
+            v1::ErrorCode::Internal => ErrorCode::Internal,
+            v1::ErrorCode::AuthRequired => ErrorCode::AuthRequired,
+            v1::ErrorCode::InvalidOperation => ErrorCode::InvalidOperation,
+            v1::ErrorCode::OutOfSync => ErrorCode::OutOfSync,
+            v1::ErrorCode::NotFound => ErrorCode::NotFound,
+            v1::ErrorCode::InvalidSignature => ErrorCode::InvalidSignature,
+            v1::ErrorCode::QuotaExceeded => ErrorCode::QuotaExceeded,
+            v1::ErrorCode::TemporarilyUnavailable => ErrorCode::TemporarilyUnavailable,
+            v1::ErrorCode::AuthError => ErrorCode::AuthError,
+            v1::ErrorCode::ParamError => ErrorCode::ParamError,
         }
     }
 }
@@ -208,11 +221,17 @@ pub struct IcmpPep {
 
 #[derive(Default, Debug, Clone)]
 pub struct KeySet {
-    pub format: i32,
+    pub format: KeyFormat,
     /// session key encrypted for ingress node to read
     pub ingress_key: Vec<u8>,
     /// session key encrypted for egress node to read
     pub egress_key: Vec<u8>,
+}
+
+#[derive(Default, Debug, Clone)]
+pub enum KeyFormat {
+    #[default]
+    ZprKF01,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -333,10 +352,10 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
         let expires = UNIX_EPOCH + Duration::from_millis(reader.get_expiration());
         let src_addr = match reader.get_source_addr()?.which()? {
             v1::ip_addr::Which::V4(data) => {
-                IpAddr::from(<[u8; 4]>::try_from(data.unwrap()).unwrap())
+                IpAddr::from(<[u8; 4]>::try_from(data?)?)
             }
             v1::ip_addr::Which::V6(data) => {
-                IpAddr::from(<[u8; 16]>::try_from(data.unwrap()).unwrap())
+                IpAddr::from(<[u8; 16]>::try_from(data?)?)
             }
         };
         let dst_addr = match reader.get_dest_addr()?.which()? {
@@ -348,44 +367,8 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
             }
         };
 
-        let dock_pep = match reader.get_dock_pep()?.which()? {
-            v1::dock_pep::Which::Tcp(tcp_udp_pep_result) => {
-                let tcp_udp_pep_reader = tcp_udp_pep_result?;
-                let source_port = tcp_udp_pep_reader.get_source_port();
-                let dest_port = tcp_udp_pep_reader.get_dest_port();
-                let enpoint = match tcp_udp_pep_reader.get_enpoint()? {
-                    v1::EndpointT::Any => EndpointT::Any,
-                    v1::EndpointT::Server => EndpointT::Server,
-                    v1::EndpointT::Client => EndpointT::Client,
-                };
-                let tcp_udp_pep = TcpUdpPep::new(source_port, dest_port, enpoint);
-                DockPep::TCP(tcp_udp_pep)
-            }
-            v1::dock_pep::Which::Udp(tcp_udp_pep_result) => {
-                let tcp_udp_pep_reader = tcp_udp_pep_result?;
-                let source_port = tcp_udp_pep_reader.get_source_port();
-                let dest_port = tcp_udp_pep_reader.get_dest_port();
-                let enpoint = match tcp_udp_pep_reader.get_enpoint()? {
-                    v1::EndpointT::Any => EndpointT::Any,
-                    v1::EndpointT::Server => EndpointT::Server,
-                    v1::EndpointT::Client => EndpointT::Client,
-                };
-                let tcp_udp_pep = TcpUdpPep::new(source_port, dest_port, enpoint);
-                DockPep::UDP(tcp_udp_pep)
-            }
-            v1::dock_pep::Which::Icmp(icmp_pep_result) => {
-                let icmp_pep_reader = icmp_pep_result?;
-                let type_code = icmp_pep_reader.get_icmp_type_code();
-                let icmp_pep = IcmpPep::new(type_code as u8, 0);
-                DockPep::ICMP(icmp_pep)
-            }
-        };
-
-        let session_key = KeySet::new_no_format(
-            reader.get_session_key()?.get_ingress_key()?.to_vec(),
-            reader.get_session_key()?.get_egress_key()?.to_vec(),
-        );
-
+        let dock_pep = DockPep::try_from(reader.get_dock_pep()?)?;
+        let session_key = KeySet::try_from(reader.get_session_key()?)?;
         let cons = Constraints::default();
 
         Ok(Self {
@@ -521,6 +504,45 @@ pub fn ip_addr_from_vec(v: Vec<u8>) -> Result<IpAddr, Vec<u8>> {
     }
 }
 
+impl TryFrom<v1::dock_pep::Reader<'_>> for DockPep {
+    type Error = VisaError;
+
+    fn try_from(reader: v1::dock_pep::Reader) -> Result<Self, Self::Error> {
+        match reader.which()? {
+            v1::dock_pep::Which::Tcp(tcp_udp_pep_result) => {
+                let tcp_udp_pep_reader = tcp_udp_pep_result?;
+                let source_port = tcp_udp_pep_reader.get_source_port();
+                let dest_port = tcp_udp_pep_reader.get_dest_port();
+                let enpoint = match tcp_udp_pep_reader.get_enpoint()? {
+                    v1::EndpointT::Any => EndpointT::Any,
+                    v1::EndpointT::Server => EndpointT::Server,
+                    v1::EndpointT::Client => EndpointT::Client,
+                };
+                let tcp_udp_pep = TcpUdpPep::new(source_port, dest_port, enpoint);
+                Ok(DockPep::TCP(tcp_udp_pep))
+            }
+            v1::dock_pep::Which::Udp(tcp_udp_pep_result) => {
+                let tcp_udp_pep_reader = tcp_udp_pep_result?;
+                let source_port = tcp_udp_pep_reader.get_source_port();
+                let dest_port = tcp_udp_pep_reader.get_dest_port();
+                let enpoint = match tcp_udp_pep_reader.get_enpoint()? {
+                    v1::EndpointT::Any => EndpointT::Any,
+                    v1::EndpointT::Server => EndpointT::Server,
+                    v1::EndpointT::Client => EndpointT::Client,
+                };
+                let tcp_udp_pep = TcpUdpPep::new(source_port, dest_port, enpoint);
+                Ok(DockPep::UDP(tcp_udp_pep))
+            }
+            v1::dock_pep::Which::Icmp(icmp_pep_result) => {
+                let icmp_pep_reader = icmp_pep_result?;
+                let type_code = icmp_pep_reader.get_icmp_type_code();
+                let icmp_pep = IcmpPep::new(type_code as u8, 0);
+                Ok(DockPep::ICMP(icmp_pep))
+            }
+        }
+    }
+}
+
 impl TcpUdpPep {
     pub fn new(src: u16, dst: u16, endpt: EndpointT) -> Self {
         Self {
@@ -573,12 +595,30 @@ impl From<vsapi::PEPArgsICMP> for IcmpPep {
     }
 }
 
+impl TryFrom<v1::key_set::Reader<'_>> for KeySet {
+    type Error = VisaError;
+
+    fn try_from(reader: v1::key_set::Reader) -> Result<Self, Self::Error> {
+        let format = match reader.get_format()? {
+            v1::KeyFormat::ZprKF01 => KeyFormat::ZprKF01,
+        };
+        let ingress_key = reader.get_ingress_key()?.to_vec();
+        let egress_key = reader.get_egress_key()?.to_vec();
+
+        Ok(Self {
+            format,
+            ingress_key,
+            egress_key,
+        })
+    }
+}
+
 impl TryFrom<vsapi::KeySet> for KeySet {
     type Error = VisaError;
 
     fn try_from(thrift_key_set: vsapi::KeySet) -> Result<Self, Self::Error> {
         let format = match thrift_key_set.format {
-            Some(val) => val,
+            Some(_) => KeyFormat::ZprKF01,
             None => return Err(VisaError::DeserializationError("No format")),
         };
         let ingress_key = match thrift_key_set.ingress_key {
@@ -595,16 +635,6 @@ impl TryFrom<vsapi::KeySet> for KeySet {
             ingress_key,
             egress_key,
         })
-    }
-}
-
-impl KeySet {
-    pub fn new_no_format(ingress_key: Vec<u8>, egress_key: Vec<u8>) -> Self {
-        Self {
-            format: 1, // Currently only used since capnp does not yet have format
-            ingress_key,
-            egress_key,
-        }
     }
 }
 
@@ -640,9 +670,3 @@ impl From<vsapi::Constraints> for Constraints {
         }
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-
-// }
