@@ -347,7 +347,7 @@ fn make_tcp_visa(
     let pepargs = vsapi_types::TcpUdpPep {
         source_port: source_port,
         dest_port: dest_port,
-        endpoint: None,
+        endpoint: vsapi_types::EndpointT::Any,
     };
     let dur = Duration::from_millis(expiration_ms as u64);
 
@@ -359,7 +359,7 @@ fn make_tcp_visa(
         dst_addr: (*dest).into(),
         dock_pep: DockPep::TCP(pepargs),
         session_key: vsapi_types::KeySet::default(),
-        cons: vsapi_types::Constraints::default(),
+        cons: None,
     }
 }
 
