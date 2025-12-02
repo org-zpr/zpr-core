@@ -14,7 +14,8 @@ use tracing::*;
 
 use crate::error::VSApiError;
 use crate::logging::targets::VS_RPC;
-use crate::vsapi_types::{PacketDesc, Visa, VisaDenialReason};
+use zpr::vsapi_types::{DenyCode, PacketDesc, Visa};
+use zpr::vsapi_types_writers::WriteTo;
 
 const PARAM_ZPR_ADDR: &str = "zpr_addr";
 const PARAM_AAA_PREFIX: &str = "aaa_prefix";
@@ -35,7 +36,7 @@ pub struct VSVisaRequest {
 #[derive(Debug)]
 pub enum VSVisaDecision {
     Allowed(Visa),
-    Denied(VisaDenialReason),
+    Denied(DenyCode),
 }
 
 /// Returns no error if call to VSAPI authenticate was successful.
@@ -321,7 +322,7 @@ impl VSConn {
             }
             vsapi2::visa_response::Which::Deny(dcode) => {
                 let dcode = dcode?;
-                let deny_code = VisaDenialReason::from(dcode);
+                let deny_code = DenyCode::from(dcode);
                 Ok(VSVisaDecision::Denied(deny_code))
             }
             vsapi2::visa_response::Which::Error(err_obj) => {

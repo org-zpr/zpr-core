@@ -13,8 +13,9 @@ use tracing::Level;
 use tracing::{error, info};
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
-use libnode2::vsapi_types::{CommFlag, PacketDesc};
 use libnode2::vsconn::{VSConn, VSConnectRequest, VSVisaRequest};
+use zpr::l3type_of_addr;
+use zpr::vsapi_types::{CommFlag, PacketDesc, VsapiFiveTuple};
 
 /// lntest: test tool for libnode2
 ///
@@ -47,15 +48,7 @@ struct Args {
 
 enum Cmd {
     Disconnect,
-    VisaRequest(FiveTuple),
-}
-
-struct FiveTuple {
-    src_ip: IpAddr,
-    dst_ip: IpAddr,
-    src_port: u16,
-    dst_port: u16,
-    protocol: u8,
+    VisaRequest(VsapiFiveTuple),
 }
 
 fn parse_ipaddr_and_port(input: &str) -> Result<(IpAddr, u16), String> {
@@ -91,13 +84,14 @@ fn parse_command(input: &str) -> Result<Cmd, String> {
             let (src_ip, src_port) = parse_ipaddr_and_port(parts[2])?;
             let (dst_ip, dst_port) = parse_ipaddr_and_port(parts[3])?;
 
-            Ok(Cmd::VisaRequest(FiveTuple {
+            Ok(Cmd::VisaRequest(VsapiFiveTuple::new(
+                l3type_of_addr(&src_ip),
                 src_ip,
                 dst_ip,
+                protocol,
                 src_port,
                 dst_port,
-                protocol,
-            }))
+            )))
         }
         _ => Err("does not compute".into()),
     }
@@ -167,11 +161,7 @@ async fn main() {
                             Cmd::Disconnect => break,
                             Cmd::VisaRequest(five_tuple) => {
                                 let pdesc = PacketDesc {
-                                    source_addr: five_tuple.src_ip,
-                                    dest_addr: five_tuple.dst_ip,
-                                    source_port: five_tuple.src_port,
-                                    dest_port: five_tuple.dst_port,
-                                    protocol: five_tuple.protocol,
+                                    five_tuple,
                                     comm_flags: CommFlag::BiDirectional, // TODO
                                 };
                                 let req = VSVisaRequest {
