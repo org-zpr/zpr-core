@@ -184,30 +184,22 @@ impl TryFrom<v1::packet_desc::Reader<'_>> for PacketDesc {
         let src_ip = reader.get_source_addr()?;
         let source = match src_ip.which().unwrap() {
             v1::ip_addr::V4(ipv4) => {
-                let octets: [u8; 4] = ipv4?
-                    .try_into()
-                    .map_err(|_| VsapiTypeError::SerializationError("invalid src_ip"))?;
+                let octets: [u8; 4] = ipv4?.try_into()?;
                 IpAddr::V4(Ipv4Addr::from(octets))
             }
             v1::ip_addr::V6(ipv6) => {
-                let octets: [u8; 16] = ipv6?
-                    .try_into()
-                    .map_err(|_| VsapiTypeError::SerializationError("invalid src_ip"))?;
+                let octets: [u8; 16] = ipv6?.try_into()?;
                 IpAddr::V6(Ipv6Addr::from(octets))
             }
         };
         let dest_ip = reader.get_dest_addr()?;
         let dest = match dest_ip.which().unwrap() {
             v1::ip_addr::V4(ipv4) => {
-                let octets: [u8; 4] = ipv4?
-                    .try_into()
-                    .map_err(|_| VsapiTypeError::SerializationError("invalid dest_ip"))?;
+                let octets: [u8; 4] = ipv4?.try_into()?;
                 IpAddr::V4(Ipv4Addr::from(octets))
             }
             v1::ip_addr::V6(ipv6) => {
-                let octets: [u8; 16] = ipv6?
-                    .try_into()
-                    .map_err(|_| VsapiTypeError::SerializationError("invalid dest_ip"))?;
+                let octets: [u8; 16] = ipv6?.try_into()?;
                 IpAddr::V6(Ipv6Addr::from(octets))
             }
         };
@@ -533,6 +525,7 @@ impl Visa {
     }
 }
 
+/// Convert a visa expiration timestamp (milliseconds since UNIX epoch) to SystemTime.
 pub fn visa_expiration_timestamp_to_system_time(timestamp: u64) -> SystemTime {
     UNIX_EPOCH + Duration::from_millis(timestamp)
 }
@@ -543,7 +536,7 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
     fn try_from(reader: v1::visa::Reader) -> Result<Self, Self::Error> {
         let issuer_id = reader.get_issuer_id();
         let config = 0i64;
-        let expires = UNIX_EPOCH + Duration::from_millis(reader.get_expiration());
+        let expires = visa_expiration_timestamp_to_system_time(reader.get_expiration());
         let src_addr = match reader.get_source_addr()?.which()? {
             v1::ip_addr::Which::V4(data) => IpAddr::from(<[u8; 4]>::try_from(data?)?),
             v1::ip_addr::Which::V6(data) => IpAddr::from(<[u8; 16]>::try_from(data?)?),
@@ -560,7 +553,7 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
         let dock_pep = DockPep::try_from(reader.get_dock_pep()?)?;
         let session_key = KeySet::try_from(reader.get_session_key()?)?;
 
-        // TODO: constaints not yet implemented.
+        // TODO: constraints not yet implemented.
         let cons = None;
 
         Ok(Self {
@@ -603,10 +596,7 @@ impl TryFrom<vsapi::Visa> for Visa {
             None => 0,
         };
         let expires = match thrift_visa.expires {
-            Some(val) => {
-                let dur = Duration::from_millis(val as u64);
-                UNIX_EPOCH + dur
-            }
+            Some(val) => visa_expiration_timestamp_to_system_time(val as u64),
             None => {
                 return Err(VsapiTypeError::DeserializationError("No expiration"));
             }
