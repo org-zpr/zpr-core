@@ -2,6 +2,7 @@
 
 pub mod rpc_commands;
 pub mod vsapi_types;
+pub mod vsapi_types_writers;
 
 capnp::generated_code!(pub mod cli_capnp);
 pub mod admin_api {
@@ -102,6 +103,13 @@ pub const KM_ID_NULL: KmId = 0;
 pub enum L3Type {
     Ipv4 = 4,
     Ipv6 = 6,
+}
+
+pub fn l3type_of_addr(addr: &IpAddr) -> L3Type {
+    match addr {
+        IpAddr::V4(_) => L3Type::Ipv4,
+        IpAddr::V6(_) => L3Type::Ipv6,
+    }
 }
 
 impl std::fmt::Display for L3Type {
