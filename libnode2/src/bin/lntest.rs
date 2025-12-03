@@ -14,7 +14,7 @@ use tracing::{error, info};
 use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 
 use libnode2::vsconn::{VSConn, VSConnectRequest, VSVisaRequest};
-use zpr::l3type_of_addr;
+use zpr::L3Type;
 use zpr::vsapi_types::{CommFlag, PacketDesc, VsapiFiveTuple};
 
 /// lntest: test tool for libnode2
@@ -85,7 +85,7 @@ fn parse_command(input: &str) -> Result<Cmd, String> {
             let (dst_ip, dst_port) = parse_ipaddr_and_port(parts[3])?;
 
             Ok(Cmd::VisaRequest(VsapiFiveTuple::new(
-                l3type_of_addr(&src_ip),
+                L3Type::new_from_addr(&src_ip),
                 src_ip,
                 dst_ip,
                 protocol,

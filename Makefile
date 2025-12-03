@@ -66,7 +66,12 @@ cslab:
 zpr-ext:
 	cd zpr-ext && cargo build
 
+zpr-crate-related:
+	$(MAKE) -C libnode
+	$(MAKE) -C libnode2
+	$(MAKE) -C adapter/ph
 
-.PHONY: it-so it-gone test deps submodules libnode ph ph-cli diagrams cbpf cslab zpr-ext
+
+.PHONY: it-so it-gone test deps submodules libnode ph ph-cli diagrams cbpf cslab zpr-ext zpr-crate-related
 
 .DEFAULT_GOAL := info
