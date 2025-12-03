@@ -11,6 +11,14 @@ pub struct AuthServicesList {
     pub services: Vec<ServiceDescriptor>,
 }
 
+/// A parsed [vsapi::ServiceDescriptor] that we use to keep ASA records.
+#[derive(Debug, Clone)]
+pub struct ServiceDescriptor {
+    pub service_id: String,
+    pub service_uri: String,
+    pub zpr_address: IpAddr,
+}
+
 impl Default for AuthServicesList {
     fn default() -> Self {
         AuthServicesList {
@@ -44,6 +52,23 @@ impl AuthServicesList {
     }
 }
 
+impl ServiceDescriptor {
+    /// Gently try to extract a SocketAddr from this ServiceDescriptor.
+    /// If there are any problems, None is returned.
+    pub fn get_socket_addr(&self) -> Option<std::net::SocketAddr> {
+        // To create a socket address we need a port, which is on the URI.
+        let uri = match Url::parse(&self.service_uri) {
+            Ok(u) => u,
+            Err(_) => return None, // Invalid URI
+        };
+        let port = match uri.port() {
+            Some(p) => p,
+            None => return None, // No port in URI, so no SocketAddr for you
+        };
+        Some(std::net::SocketAddr::new(self.zpr_address.into(), port))
+    }
+}
+
 impl TryFrom<vsapi::ServicesList> for AuthServicesList {
     type Error = VsapiTypeError;
 
@@ -64,14 +89,6 @@ impl TryFrom<vsapi::ServicesList> for AuthServicesList {
             services,
         })
     }
-}
-
-/// A parsed [vsapi::ServiceDescriptor] that we use to keep ASA records.
-#[derive(Debug, Clone)]
-pub struct ServiceDescriptor {
-    pub service_id: String,
-    pub service_uri: String,
-    pub zpr_address: IpAddr,
 }
 
 impl TryFrom<vsapi::ServiceDescriptor> for ServiceDescriptor {
@@ -95,22 +112,5 @@ impl TryFrom<vsapi::ServiceDescriptor> for ServiceDescriptor {
             service_uri: value.uri.unwrap_or_default(),
             zpr_address: zpraddr,
         })
-    }
-}
-
-impl ServiceDescriptor {
-    /// Gently try to extract a SocketAddr from this ServiceDescriptor.
-    /// If there are any problems, None is returned.
-    pub fn get_socket_addr(&self) -> Option<std::net::SocketAddr> {
-        // To create a socket address we need a port, which is on the URI.
-        let uri = match Url::parse(&self.service_uri) {
-            Ok(u) => u,
-            Err(_) => return None, // Invalid URI
-        };
-        let port = match uri.port() {
-            Some(p) => p,
-            None => return None, // No port in URI, so no SocketAddr for you
-        };
-        Some(std::net::SocketAddr::new(self.zpr_address.into(), port))
     }
 }

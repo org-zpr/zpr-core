@@ -51,6 +51,22 @@ pub enum ErrorCode {
     Fail,
 }
 
+impl Denied {
+    pub fn new(code: DenyCode, reason: Option<String>) -> Self {
+        Self { code, reason }
+    }
+}
+
+impl VisaResponseError {
+    pub fn new(code: ErrorCode, message: String, retry_in: u32) -> Self {
+        Self {
+            code,
+            message,
+            retry_in,
+        }
+    }
+}
+
 impl TryFrom<v1::visa_response::Reader<'_>> for VisaResponse {
     type Error = VsapiTypeError;
 
@@ -103,24 +119,6 @@ impl From<DenyCode> for v1::VisaDenyCode {
     }
 }
 
-/*
-impl Into<v1::VisaDenyCode> for DenyCode {
-    fn into(self) -> v1::VisaDenyCode {
-        match self {
-            DenyCode::Fail => v1::VisaDenyCode::NoReason, // No direct mapping (TODO: remove Fail)
-            DenyCode::NoReason => v1::VisaDenyCode::NoReason,
-            DenyCode::NoMatch => v1::VisaDenyCode::NoMatch,
-            DenyCode::Denied => v1::VisaDenyCode::Denied,
-            DenyCode::SourceNotFound => v1::VisaDenyCode::SourceNotFound,
-            DenyCode::DestNotFound => v1::VisaDenyCode::DestNotFound,
-            DenyCode::SourceAuthError => v1::VisaDenyCode::SourceAuthError,
-            DenyCode::DestAuthError => v1::VisaDenyCode::DestAuthError,
-            DenyCode::QuotaExceeded => v1::VisaDenyCode::QuotaExceeded,
-        }
-    }
-}
-    */
-
 impl From<v1::ErrorCode> for ErrorCode {
     fn from(code: v1::ErrorCode) -> Self {
         match code {
@@ -165,22 +163,6 @@ impl TryFrom<vsapi::VisaResponse> for VisaResponse {
             None => Err(VsapiTypeError::DeserializationError(
                 "No code, required in Thrift visa",
             )),
-        }
-    }
-}
-
-impl Denied {
-    pub fn new(code: DenyCode, reason: Option<String>) -> Self {
-        Self { code, reason }
-    }
-}
-
-impl VisaResponseError {
-    pub fn new(code: ErrorCode, message: String, retry_in: u32) -> Self {
-        Self {
-            code,
-            message,
-            retry_in,
         }
     }
 }

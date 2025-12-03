@@ -1,8 +1,8 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+use crate::L3Type;
 use crate::vsapi::v1;
 use crate::vsapi_types::VsapiTypeError;
-use crate::{L3Type, l3type_of_addr};
 
 /// A description of a packet between a sender and reciever.
 #[derive(Debug)]
@@ -76,7 +76,7 @@ impl PacketDesc {
         let saddr: IpAddr = source_addr.parse().unwrap();
         PacketDesc {
             five_tuple: VsapiFiveTuple::new(
-                l3type_of_addr(&saddr),
+                L3Type::new_from_addr(&saddr),
                 saddr,
                 dest_addr.parse().unwrap(),
                 vsapi_ip_number::TCP,
@@ -92,7 +92,7 @@ impl PacketDesc {
         let saddr: IpAddr = source_addr.parse().unwrap();
         PacketDesc {
             five_tuple: VsapiFiveTuple::new(
-                l3type_of_addr(&saddr),
+                L3Type::new_from_addr(&saddr),
                 saddr,
                 dest_addr.parse().unwrap(),
                 vsapi_ip_number::UDP,
@@ -108,7 +108,7 @@ impl PacketDesc {
         let saddr: IpAddr = source_addr.parse().unwrap();
         PacketDesc {
             five_tuple: VsapiFiveTuple::new(
-                l3type_of_addr(&saddr),
+                L3Type::new_from_addr(&saddr),
                 saddr,
                 dest_addr.parse().unwrap(),
                 if saddr.is_ipv4() {
@@ -186,7 +186,7 @@ impl TryFrom<v1::packet_desc::Reader<'_>> for PacketDesc {
 
         Ok(PacketDesc {
             five_tuple: VsapiFiveTuple::new(
-                l3type_of_addr(&source),
+                L3Type::new_from_addr(&source),
                 source,
                 dest,
                 protocol,

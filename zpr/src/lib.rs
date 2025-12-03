@@ -105,10 +105,12 @@ pub enum L3Type {
     Ipv6 = 6,
 }
 
-pub fn l3type_of_addr(addr: &IpAddr) -> L3Type {
-    match addr {
-        IpAddr::V4(_) => L3Type::Ipv4,
-        IpAddr::V6(_) => L3Type::Ipv6,
+impl L3Type {
+    pub fn new_from_addr(addr: &IpAddr) -> Self {
+        match addr {
+            IpAddr::V4(_) => L3Type::Ipv4,
+            IpAddr::V6(_) => L3Type::Ipv6,
+        }
     }
 }
 

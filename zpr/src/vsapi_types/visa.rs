@@ -65,14 +65,9 @@ pub enum KeyFormat {
     ZprKF01,
 }
 
-impl KeySet {
-    pub fn new(ingress: &[u8], egress: &[u8]) -> Self {
-        KeySet {
-            ingress_key: ingress.to_vec(),
-            egress_key: egress.to_vec(),
-            format: KeyFormat::default(),
-        }
-    }
+pub enum VisaOp {
+    Grant(Visa),
+    RevokeVisaId(u64),
 }
 
 #[derive(Default, Debug, Clone)]
@@ -85,6 +80,16 @@ pub struct Constraints {
     pub data_cap_bytes: i64,
     /// tether address of service actor
     pub data_cap_affinity_addr: Vec<u8>,
+}
+
+impl KeySet {
+    pub fn new(ingress: &[u8], egress: &[u8]) -> Self {
+        KeySet {
+            ingress_key: ingress.to_vec(),
+            egress_key: egress.to_vec(),
+            format: KeyFormat::default(),
+        }
+    }
 }
 
 impl Visa {
@@ -141,6 +146,25 @@ impl Visa {
         match self.expires.duration_since(UNIX_EPOCH) {
             Ok(dur) => dur.as_millis() as u64,
             Err(_) => 0,
+        }
+    }
+}
+
+impl TcpUdpPep {
+    pub fn new(source_port: u16, dest_port: u16, endpoint: EndpointT) -> Self {
+        Self {
+            source_port,
+            dest_port,
+            endpoint,
+        }
+    }
+}
+
+impl IcmpPep {
+    pub fn new(icmp_type: u8, icmp_code: u8) -> Self {
+        Self {
+            icmp_type,
+            icmp_code,
         }
     }
 }
@@ -298,7 +322,7 @@ impl TryFrom<v1::dock_pep::Reader<'_>> for DockPep {
                     v1::EndpointT::Server => EndpointT::Server,
                     v1::EndpointT::Client => EndpointT::Client,
                 };
-                let tcp_udp_pep = TcpUdpPep::new(source_port, dest_port, enpoint);
+                let tcp_udp_pep = TcpUdpPep::new(source_port, dest_port, endpoint);
                 Ok(DockPep::TCP(tcp_udp_pep))
             }
             v1::dock_pep::Which::Udp(tcp_udp_pep_result) => {
@@ -310,7 +334,7 @@ impl TryFrom<v1::dock_pep::Reader<'_>> for DockPep {
                     v1::EndpointT::Server => EndpointT::Server,
                     v1::EndpointT::Client => EndpointT::Client,
                 };
-                let tcp_udp_pep = TcpUdpPep::new(source_port, dest_port, enpoint);
+                let tcp_udp_pep = TcpUdpPep::new(source_port, dest_port, endpoint);
                 Ok(DockPep::UDP(tcp_udp_pep))
             }
             v1::dock_pep::Which::Icmp(icmp_pep_result) => {
@@ -319,16 +343,6 @@ impl TryFrom<v1::dock_pep::Reader<'_>> for DockPep {
                 let icmp_pep = IcmpPep::new(type_code as u8, 0);
                 Ok(DockPep::ICMP(icmp_pep))
             }
-        }
-    }
-}
-
-impl TcpUdpPep {
-    pub fn new(source_port: u16, dest_port: u16, endpoint: EndpointT) -> Self {
-        Self {
-            source_port,
-            dest_port,
-            endpoint,
         }
     }
 }
@@ -352,15 +366,6 @@ impl From<vsapi::PEPArgsTCPUDP> for TcpUdpPep {
                 Some(false) => EndpointT::Client,
                 None => EndpointT::Any,
             },
-        }
-    }
-}
-
-impl IcmpPep {
-    pub fn new(icmp_type: u8, icmp_code: u8) -> Self {
-        Self {
-            icmp_type,
-            icmp_code,
         }
     }
 }
@@ -453,11 +458,6 @@ impl From<vsapi::Constraints> for Constraints {
             data_cap_affinity_addr,
         }
     }
-}
-
-pub enum VisaOp {
-    Grant(Visa),
-    RevokeVisaId(u64),
 }
 
 impl TryFrom<vsapi::VisaRevocation> for VisaOp {
