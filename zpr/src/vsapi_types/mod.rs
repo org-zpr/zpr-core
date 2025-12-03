@@ -6,7 +6,6 @@
 //!
 
 mod auth;
-mod connection;
 mod error;
 mod packet;
 mod request;
@@ -15,13 +14,12 @@ mod services;
 mod util;
 mod visa;
 
-/// PUBLIC API EXPORTS
+// PUBLIC API EXPORTS
 pub use auth::{AuthBlob, AuthCodeBlob, ChallengeAlg, ZprSelfSignedBlob};
-pub use connection::Connection;
 pub use error::VsapiTypeError;
 pub use packet::{CommFlag, PacketDesc, VsapiFiveTuple, VsapiIpProtocol, vsapi_ip_number};
 pub use request::{Claim, ConnectRequest};
-pub use response::{Denied, DenyCode, ErrorCode, VisaResponse, VisaResponseError};
+pub use response::{Connection, Denied, DenyCode, ErrorCode, VisaResponse, VisaResponseError};
 pub use services::{AuthServicesList, ServiceDescriptor};
 pub use util::ip::ip_addr_from_vec;
 pub use util::time::visa_expiration_timestamp_to_system_time;
