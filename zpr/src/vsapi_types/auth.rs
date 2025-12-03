@@ -1,5 +1,6 @@
 use std::net::IpAddr;
 
+/// Blob passed with a ConnectRequest
 #[derive(Debug)]
 pub enum AuthBlob {
     SS(ZprSelfSignedBlob),

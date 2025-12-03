@@ -4,12 +4,14 @@ use crate::vsapi::v1;
 use crate::vsapi_types::util::ip::ip_addr_from_vec;
 use crate::vsapi_types::{Visa, VsapiTypeError};
 
+/// Info recieved from VS in response to ConnectRequest
 #[derive(Debug)]
 pub struct Connection {
     pub zpr_addr: IpAddr,
     pub auth_expires: u64,
 }
 
+/// Response to a visa request
 #[derive(Debug)]
 pub enum VisaResponse {
     Allow(Visa),
@@ -17,13 +19,14 @@ pub enum VisaResponse {
     VSApiError(VisaResponseError),
 }
 
+/// Denial information
 #[derive(Debug)]
 pub struct Denied {
     pub code: DenyCode,
     pub reason: Option<String>,
 }
 
-// Will be more useful once we transition to capnp, right now we only use Fail
+/// Denial code, match the codes in vs.capnp, except for Fail
 #[derive(Debug, Eq, PartialEq)]
 pub enum DenyCode {
     Fail,
@@ -37,6 +40,7 @@ pub enum DenyCode {
     QuotaExceeded,
 }
 
+/// Error information
 #[derive(Debug)]
 pub struct VisaResponseError {
     pub code: ErrorCode,
@@ -44,6 +48,7 @@ pub struct VisaResponseError {
     pub retry_in: u32,
 }
 
+/// Denial code, match the codes in vs.capnp, except for Fail and UnknownStatusCode
 #[derive(Debug)]
 pub enum ErrorCode {
     Internal,
@@ -79,6 +84,7 @@ impl VisaResponseError {
 impl TryFrom<vsapi::ConnectResponse> for Connection {
     type Error = VsapiTypeError;
 
+    /// Returns err if StatusCode is FAIL, unrecognized, or not set. Also err if there is no actor, zpr addr, or auth expires
     fn try_from(resp: vsapi::ConnectResponse) -> Result<Self, Self::Error> {
         match resp.status {
             Some(vsapi::StatusCode::FAIL) => Err(VsapiTypeError::CodedError(ErrorCode::Fail)),
@@ -107,6 +113,7 @@ impl TryFrom<vsapi::ConnectResponse> for Connection {
 impl TryFrom<v1::visa_response::Reader<'_>> for VisaResponse {
     type Error = VsapiTypeError;
 
+    /// Returns err if visa_response is Error, if Visa is poorly format, if DenyCode or ErrorCode are unrecognized
     fn try_from(capnp_visa_response: v1::visa_response::Reader) -> Result<Self, Self::Error> {
         match capnp_visa_response.which()? {
             v1::visa_response::Which::Allow(v) => {
@@ -176,6 +183,7 @@ impl From<v1::ErrorCode> for ErrorCode {
 impl TryFrom<vsapi::VisaResponse> for VisaResponse {
     type Error = VsapiTypeError;
 
+    /// Returns err if required values are unset or StatusCode is unknown
     fn try_from(thrift_visa_response: vsapi::VisaResponse) -> Result<Self, Self::Error> {
         match thrift_visa_response.status {
             Some(code) => match code {

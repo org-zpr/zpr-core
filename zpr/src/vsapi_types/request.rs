@@ -6,6 +6,7 @@ use crate::vsapi_types::VsapiTypeError;
 use crate::vsapi_types::ZprSelfSignedBlob;
 use crate::vsapi_types::util::ip::ip_addr_from_vec;
 
+/// Request to connect to VS
 #[derive(Debug)]
 pub struct ConnectRequest {
     pub blobs: Vec<AuthBlob>,
@@ -29,6 +30,7 @@ impl Claim {
 impl TryFrom<vsapi::ConnectRequest> for ConnectRequest {
     type Error = VsapiTypeError;
 
+    /// Returns error if all fields are not set
     fn try_from(thrift_req: vsapi::ConnectRequest) -> Result<Self, Self::Error> {
         let substrate_addr = match thrift_req.dock_addr {
             Some(val) => ip_addr_from_vec(val)?,
@@ -72,6 +74,7 @@ impl TryFrom<vsapi::ConnectRequest> for ConnectRequest {
 impl TryFrom<ConnectRequest> for vsapi::ConnectRequest {
     type Error = VsapiTypeError;
 
+    /// Returns an error if blob type is incorrect
     fn try_from(req: ConnectRequest) -> Result<Self, Self::Error> {
         let mut claims = BTreeMap::new();
         for claim in req.claims {

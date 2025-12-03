@@ -5,6 +5,7 @@ use url::Url;
 use crate::vsapi_types::VsapiTypeError;
 use crate::vsapi_types::util::ip::ip_addr_from_vec;
 
+/// Capnp does not have a separate AuthServicesList structure, instead just uses List(ServiceDescriptor)
 #[derive(Debug, Clone)]
 pub struct AuthServicesList {
     pub expiration: Option<SystemTime>, // 0 value means "no expiration"
@@ -72,6 +73,7 @@ impl ServiceDescriptor {
 impl TryFrom<vsapi::ServicesList> for AuthServicesList {
     type Error = VsapiTypeError;
 
+    /// Returns err if a ServiceDescriptor is badly formatted
     fn try_from(services_list: vsapi::ServicesList) -> Result<Self, Self::Error> {
         let mut expiration = None;
         if services_list.expiration.is_some() {
@@ -94,6 +96,7 @@ impl TryFrom<vsapi::ServicesList> for AuthServicesList {
 impl TryFrom<vsapi::ServiceDescriptor> for ServiceDescriptor {
     type Error = VsapiTypeError;
 
+    /// Returns err if required values are not set
     fn try_from(value: vsapi::ServiceDescriptor) -> Result<Self, Self::Error> {
         if value.type_ != vsapi::ServiceType::ACTOR_AUTHENTICATION {
             return Err(VsapiTypeError::DeserializationError(

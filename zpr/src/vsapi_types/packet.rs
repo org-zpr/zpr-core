@@ -23,6 +23,7 @@ pub enum CommFlag {
     ReRequest(u64),
 }
 
+/// FiveTuple representation
 #[derive(Copy, Clone, Debug)]
 pub struct VsapiFiveTuple {
     pub src_address: IpAddr,
@@ -33,8 +34,10 @@ pub struct VsapiFiveTuple {
     pub dst_port: u16,
 }
 
+/// In conjunction with vsapi_ip_number, represents the protocol the traffic is running on
 pub type VsapiIpProtocol = u8;
 
+/// In conjunction with VsapiIpProtocol, represents the protocol the traffic is running on
 pub mod vsapi_ip_number {
     use super::VsapiIpProtocol;
 
@@ -152,6 +155,8 @@ impl PacketDesc {
 
 impl TryFrom<v1::packet_desc::Reader<'_>> for PacketDesc {
     type Error = VsapiTypeError;
+
+    /// Returns error if fields are not set or if IP addresses are badly formatted
     fn try_from(reader: v1::packet_desc::Reader<'_>) -> Result<Self, Self::Error> {
         let src_ip = reader.get_source_addr()?;
         let source = match src_ip.which().unwrap() {

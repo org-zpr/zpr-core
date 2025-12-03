@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+/// Error type
 #[derive(Debug, Error)]
 pub enum VsapiTypeError {
     #[error("Serialization error {0}")]

@@ -9,6 +9,7 @@ use crate::vsapi_types::util::ip::ip_addr_from_vec;
 use crate::vsapi_types::util::time::visa_expiration_timestamp_to_system_time;
 use crate::vsapi_types::vsapi_ip_number;
 
+/// Structure representing the Visa
 // TODO figure out which of these need to stay once we switch to capnp
 #[derive(Debug, Clone)]
 pub struct Visa {
@@ -93,6 +94,7 @@ impl KeySet {
 }
 
 impl Visa {
+    /// Get the FiveTuple from a Visa
     pub fn get_five_tuple(&self) -> VsapiFiveTuple {
         let src_addr = self.src_addr;
         let dst_addr = self.dst_addr;
@@ -172,6 +174,7 @@ impl IcmpPep {
 impl TryFrom<v1::visa::Reader<'_>> for Visa {
     type Error = VsapiTypeError;
 
+    /// Returns err if required values are not set or if values are badly formatted
     fn try_from(reader: v1::visa::Reader) -> Result<Self, Self::Error> {
         let issuer_id = reader.get_issuer_id();
         let config = 0i64;
@@ -211,6 +214,7 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
 impl TryFrom<vsapi::VisaHop> for Visa {
     type Error = VsapiTypeError;
 
+    /// Returns err if there is no visa in the VisaHop or if the visa is badly formatted
     fn try_from(hop: vsapi::VisaHop) -> Result<Self, Self::Error> {
         match hop.visa {
             Some(visa) => Visa::try_from(visa),
@@ -219,10 +223,10 @@ impl TryFrom<vsapi::VisaHop> for Visa {
     }
 }
 
-// Could also implement a TryFrom instead of picking arbitarty values
 impl TryFrom<vsapi::Visa> for Visa {
     type Error = VsapiTypeError;
 
+    /// Returns err if required values are not set
     fn try_from(thrift_visa: vsapi::Visa) -> Result<Self, Self::Error> {
         let issuer_id = match thrift_visa.issuer_id {
             Some(val) => val as u64,
@@ -311,6 +315,7 @@ impl TryFrom<vsapi::Visa> for Visa {
 impl TryFrom<v1::dock_pep::Reader<'_>> for DockPep {
     type Error = VsapiTypeError;
 
+    /// Returns err if required values are not set
     fn try_from(reader: v1::dock_pep::Reader) -> Result<Self, Self::Error> {
         match reader.which()? {
             v1::dock_pep::Which::Tcp(tcp_udp_pep_result) => {
@@ -348,6 +353,7 @@ impl TryFrom<v1::dock_pep::Reader<'_>> for DockPep {
 }
 
 impl From<vsapi::PEPArgsTCPUDP> for TcpUdpPep {
+    /// Sets source_port and dest_port to 0 if they are not set
     fn from(thrift_tcp_udp_pep: vsapi::PEPArgsTCPUDP) -> Self {
         let source_port = match thrift_tcp_udp_pep.source_port {
             Some(val) => val as u16,
@@ -371,6 +377,7 @@ impl From<vsapi::PEPArgsTCPUDP> for TcpUdpPep {
 }
 
 impl From<vsapi::PEPArgsICMP> for IcmpPep {
+    /// Sets icmp_type 0 if it it is not set, always sets icmp_code to 0 because it is not used by the Thrift VS
     fn from(thrift_icmp_pep: vsapi::PEPArgsICMP) -> Self {
         let icmp_type_code = match thrift_icmp_pep.icmp_type_code {
             Some(val) => val as u16,
@@ -387,6 +394,7 @@ impl From<vsapi::PEPArgsICMP> for IcmpPep {
 impl TryFrom<v1::key_set::Reader<'_>> for KeySet {
     type Error = VsapiTypeError;
 
+    /// Returns err if required values are not set
     fn try_from(reader: v1::key_set::Reader) -> Result<Self, Self::Error> {
         let format = match reader.get_format()? {
             v1::KeyFormat::ZprKF01 => KeyFormat::ZprKF01,
@@ -405,6 +413,7 @@ impl TryFrom<v1::key_set::Reader<'_>> for KeySet {
 impl TryFrom<vsapi::KeySet> for KeySet {
     type Error = VsapiTypeError;
 
+    /// Returns err if KeyFormat is not set
     fn try_from(thrift_key_set: vsapi::KeySet) -> Result<Self, Self::Error> {
         let format = match thrift_key_set.format {
             Some(_) => KeyFormat::ZprKF01,
@@ -428,6 +437,7 @@ impl TryFrom<vsapi::KeySet> for KeySet {
 }
 
 impl From<vsapi::Constraints> for Constraints {
+    /// Sets default values if values are not set
     fn from(thrift_cons: vsapi::Constraints) -> Self {
         let bw = match thrift_cons.bw {
             Some(val) => val,
@@ -463,6 +473,7 @@ impl From<vsapi::Constraints> for Constraints {
 impl TryFrom<vsapi::VisaRevocation> for VisaOp {
     type Error = VsapiTypeError;
 
+    /// Returns err if there is no issuer id
     fn try_from(revoke: vsapi::VisaRevocation) -> Result<Self, Self::Error> {
         match revoke.issuer_id {
             Some(id) => Ok(Self::RevokeVisaId(id as u64)),
