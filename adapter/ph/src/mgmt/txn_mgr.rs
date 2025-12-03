@@ -27,6 +27,8 @@ pub type TxnId = u16;
 ///
 /// Handles implement `Eq` and `Hash` and thus may be used as
 /// keys in hash tables.
+///
+/// Handles should be used only by requesters, not responders.
 pub struct TxnHandle {
     mgr: Weak<TxnMgr>,
     id: TxnId,
@@ -137,6 +139,7 @@ impl TxnMgr {
     /// The transaction will remain open until the handle is dropped.
     ///
     /// Blocks until a suitable transaction ID is available.
+    #[allow(dead_code)]
     pub async fn open(self: &Arc<Self>) -> TxnHandle {
         let id = self.open_raw().await;
         TxnHandle {

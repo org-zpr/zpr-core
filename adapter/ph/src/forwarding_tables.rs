@@ -6,7 +6,7 @@
 
 use crate::rcu::{RcuBox, RcuCslabEntryGuard};
 use cslab::{RcuCslab, RcuCslabReader};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use zpr::packet_info::{ForwardingEntry, StreamId, VisaId};
 
 const PEER_FORWARDING_TABLE_SIZE: usize = 1 << 20; // 1 million
@@ -16,6 +16,7 @@ const PEER_FORWARDING_TABLE_SIZE: usize = 1 << 20; // 1 million
 // and recompress
 // (necessary since (a) adapter can choose compression level, and (b)
 // visas may be more narrowly scoped than what can be compressed out)
+#[derive(Clone)]
 pub struct PftPep {
     pub next_hop: ForwardingEntry,
     pub visa_id: VisaId,
@@ -56,8 +57,18 @@ impl PeerForwardingTable {
             .get_guarded((tether_id as usize).wrapping_sub(1))
     }
 
+    pub fn vacant_entry(&self) -> Result<VacantPeerForwardingTableEntry<'_>, ()> {
+        let table_guard = self.table.lock().unwrap();
+
+        if matches!(table_guard.vacant_key(), Err(_)) {
+            return Err(());
+        };
+
+        Ok(VacantPeerForwardingTableEntry { table_guard })
+    }
+
     pub fn insert(&self, pep: PftPep) -> Result<StreamId, ()> {
-        Ok((self.table.lock().unwrap().insert(pep)? + 1) as StreamId)
+        Ok(self.vacant_entry()?.insert(pep))
     }
 
     pub fn remove(&self, tether_id: StreamId) {
@@ -73,5 +84,19 @@ impl PeerForwardingTable {
 
     pub fn clear(&self) {
         // TODO
+    }
+}
+
+pub struct VacantPeerForwardingTableEntry<'a> {
+    table_guard: MutexGuard<'a, RcuCslab<PftPep>>,
+}
+
+impl VacantPeerForwardingTableEntry<'_> {
+    pub fn key(&self) -> StreamId {
+        (self.table_guard.vacant_key().unwrap() + 1) as StreamId
+    }
+
+    pub fn insert(mut self, pep: PftPep) -> StreamId {
+        (self.table_guard.insert(pep).unwrap() + 1) as StreamId
     }
 }

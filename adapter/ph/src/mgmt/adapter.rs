@@ -1,12 +1,124 @@
-use super::txn_mgr;
-use crate::adapter_tables::EltPep;
-use crate::assembly::Assembly;
+//! Adapter API.
+//!
+//! These functions operate on the local adapter state at a high level.
+//!
+//! They are meant to be invoked either from [super::handlers] by an
+//! adapter in response to a message from a node, or directly by a node
+//! managing its local adapter.
+
+use super::{dock, txn_mgr};
+use crate::adapter_tables::{DltPep, EltPep};
+use crate::assembly::{Assembly, PhMode};
 use crate::counters::ManagementCounterType;
 use crate::logging::targets::FLOW_MGMT;
 use crate::queues;
 use crate::tc;
+use std::num::NonZero;
+use std::sync::Arc;
 use tracing::*;
-use zpr::packet_info::StreamId;
+use zpr::packet_info::{LOCAL_ACTOR_LINK_ID, LinkId, StreamId};
+
+/// Request to bind a stream which egresses from the local adapter.
+///
+/// `dock_link_id` identifies the link of the dock making this request.
+/// (This is currently always [zpr::packet_info::DOCK_LINK_ID]; on adapters,
+/// this represents the remote dock; on nodes, this represents the internal
+/// dock.)
+///
+/// `txn_id` is used when issuing responses to the dock to link them to
+/// this request.
+///
+/// `tc` is the traffic classifier for which the request is being made.
+///
+/// The bind is performed simply by inserting a PEP corresponding to the
+/// given TC into the DLT, generating a tether ID.
+///
+/// A success response (containing the tether ID) or error response (in
+/// the event that the DLT is full) is then issued to the dock, where these
+/// responses are handled by [`dock::install_tether()`] and [`dock::deny_tether()`]
+/// respectively.
+pub fn bind_egress_stream(
+    asm: &Arc<Assembly>,
+    dock_link_id: NonZero<LinkId>,
+    txn_id: txn_mgr::TxnId,
+    tc: tc::Ip5TupleTc,
+) {
+    debug!(
+        target: FLOW_MGMT,
+        "bind_egress_stream(dock_link_id={dock_link_id}, txn_id={txn_id}, tc={tc})");
+
+    // form PEP
+    let pep = DltPep {
+        compression_mode: tc.compression_mode(),
+        five_tuple: *tc.five_tuple(),
+    };
+
+    // TODO: reverse path
+
+    // attempt to insert into DLT and respond to requestor
+    match asm.dlt.insert(pep) {
+        Ok(tid) => {
+            // TODO: maybe tick a counter somewhere?
+            match asm.ph_mode {
+                PhMode::Node => {
+                    // we're a node operating on our internal adapter; "respond" directly to local dock
+                    let dock_peer_state = asm.peer_table.get(LOCAL_ACTOR_LINK_ID).unwrap();
+                    let Some(txn) = dock_peer_state.txn_mgr.get(txn_id) else {
+                        // adapter no longer has this transaction; ignore
+                        return;
+                    };
+
+                    let _ = dock::install_tether(
+                        asm,
+                        NonZero::new(LOCAL_ACTOR_LINK_ID).unwrap(),
+                        &txn,
+                        tid,
+                    ); // ignore missing transaction
+                }
+
+                PhMode::Adapter => super::requests::send_bind_egress_stream_success_response(
+                    asm,
+                    dock_link_id.get(),
+                    txn_id,
+                    tid,
+                )
+                .enqueue(),
+            }
+        }
+
+        Err(()) => {
+            // DLT full; respond with error message
+            let msg = "DLT full";
+            // TODO: maybe tick a counter somewhere?
+
+            match asm.ph_mode {
+                PhMode::Node => {
+                    // we're a node operating on our internal adapter; "respond" directly to local dock
+                    let dock_peer_state = asm.peer_table.get(LOCAL_ACTOR_LINK_ID).unwrap();
+                    let Some(txn) = dock_peer_state.txn_mgr.get(txn_id) else {
+                        // adapter no longer has this transaction; ignore
+                        return;
+                    };
+
+                    let _ = dock::deny_tether(
+                        asm,
+                        NonZero::new(LOCAL_ACTOR_LINK_ID).unwrap(),
+                        &txn,
+                        msg,
+                    ); // ignore missing transaction
+                }
+
+                PhMode::Adapter => super::requests::send_bind_egress_stream_error_response(
+                    asm,
+                    dock_link_id.get(),
+                    txn_id,
+                    msg,
+                )
+                .enqueue(),
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum InstallTetherError {
@@ -14,6 +126,15 @@ pub enum InstallTetherError {
 }
 
 /// Install the given tether into the ELT.
+///
+/// `txn` must refer to an active transaction on the dock link
+/// which had previously requested a tether (e.g.  via BindActorAddress).
+///
+/// `tether_id` is the ID to be used to refer to this tether.
+///
+/// `tc` is the traffic classifier to use to match traffic for this tether.
+///
+/// On success, the queued initial packet is then forwarded on the new tether.
 ///
 /// Completes the indicated transaction.
 ///
@@ -73,9 +194,16 @@ pub fn install_tether(
     Ok(())
 }
 
-/// Deny the given tether request.
+/// Deny the given tether request, removing it from the ALT.
+///
+/// `txn` must refer to an active transaction on the dock link
+/// which had previously requested a tether.
+///
+/// `reason` is a human-readable reason why the tether was denied.
 ///
 /// Completes the indicated transaction.
+///
+/// Returns an error only if the transaction is invalid.
 pub fn deny_tether(
     asm: &Assembly,
     txn: &txn_mgr::TxnHandle,

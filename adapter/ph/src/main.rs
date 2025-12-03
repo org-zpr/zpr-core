@@ -588,6 +588,20 @@ fn main() -> ExitCode {
         LOCAL_ACTOR_LINK_ID
     );
 
+    if matches!(ph_mode, PhMode::Node) {
+        // Nodes use this link as the source of bind requests from the
+        // internal adapter, which require that the originator has a valid
+        // actor address (which matches the requested source address).
+
+        for addr in &asm.config.get().zpr_addr {
+            asm.peer_table
+                .get(LOCAL_ACTOR_LINK_ID)
+                .unwrap()
+                .link_state_machine
+                .add_internal_actor_address(addr.into());
+        }
+    }
+
     //
     // instantiate tether if we're an adapter,
     // or "fake" internal dock link if we're a node

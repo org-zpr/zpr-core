@@ -395,6 +395,26 @@ impl LinkStateWrapper {
         addr_list
     }
 
+    /// Returns true if the specified address matches any of this link's assigned actor addresses.
+    pub fn has_actor_address(&self, addr: &IpAddress) -> bool {
+        self.locked_fsm
+            .lock()
+            .unwrap()
+            .actor_addresses
+            .iter()
+            .any(|a| a == addr)
+            || self.locked_data.lock().unwrap().aaa_address.as_ref() == Some(addr)
+    }
+
+    /// Sets the actor address of an internal link.
+    pub fn add_internal_actor_address(&self, addr: IpAddress) {
+        assert!(
+            self.is_internal(),
+            "attempt to directly set actor address of non-internal link"
+        );
+        self.locked_fsm.lock().unwrap().actor_addresses.push(addr);
+    }
+
     /// Tell the VS that this actor has disconnected.
     /// Used in a NODE context only.
     fn deregister_actor_addresses(&self, asm: &Arc<Assembly>) -> tokio::task::JoinSet<()> {

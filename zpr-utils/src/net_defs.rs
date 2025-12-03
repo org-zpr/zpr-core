@@ -120,6 +120,12 @@ impl From<Ipv4Addr> for IpAddress {
     }
 }
 
+impl From<&Ipv4Addr> for IpAddress {
+    fn from(addr: &Ipv4Addr) -> Self {
+        Self::new_from_std_v4(addr)
+    }
+}
+
 impl From<[u8; 4]> for IpAddress {
     fn from(addr: [u8; 4]) -> Self {
         Self::new_from_v4(addr)
@@ -132,6 +138,12 @@ impl From<Ipv6Addr> for IpAddress {
     }
 }
 
+impl From<&Ipv6Addr> for IpAddress {
+    fn from(addr: &Ipv6Addr) -> Self {
+        Self::new_from_std_v6(addr)
+    }
+}
+
 impl From<[u8; 16]> for IpAddress {
     fn from(addr: [u8; 16]) -> Self {
         Self { v6: addr }
@@ -141,6 +153,12 @@ impl From<[u8; 16]> for IpAddress {
 impl From<IpAddr> for IpAddress {
     fn from(addr: IpAddr) -> Self {
         Self::new_from_std(&addr)
+    }
+}
+
+impl From<&IpAddr> for IpAddress {
+    fn from(addr: &IpAddr) -> Self {
+        Self::new_from_std(addr)
     }
 }
 

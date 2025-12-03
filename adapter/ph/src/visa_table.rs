@@ -6,6 +6,7 @@ use crate::defs::FiveTuple;
 use crate::five_tuple_lookup_table::FiveTupleLookupTable;
 use crate::logging::targets::VISA_MGMT;
 use crate::peer_table;
+use crate::tc;
 
 use chrono::{DateTime, Utc};
 use std::cmp::Ordering;
@@ -127,6 +128,10 @@ impl Visa {
             return false;
         }
         return true;
+    }
+
+    pub fn get_tc(&self) -> tc::Ip5TupleTc {
+        tc::Ip5TupleTc::new_with_compression_mode(0, self.visa.get_five_tuple().into())
     }
 }
 

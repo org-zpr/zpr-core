@@ -4,20 +4,17 @@ use crate::capture_worker::CaptureWorker;
 use crate::config;
 use crate::counters::*;
 use crate::flow_control::FlowControl;
-use crate::forwarding_tables;
 use crate::km_cert_exchange::KmCertExchange;
 use crate::km_multiplexor::KmState;
 use crate::km_noise;
 use crate::link_state::{LinkEvent, LinkStateError, LinkType};
 use crate::logging::targets::PEER_MGMT;
-use crate::mgmt;
 use crate::mgmt_processor_worker;
 use crate::peer_table;
 use crate::peer_table::PeerInsertError;
 use crate::queues::*;
 use crate::rcu;
 use crate::special_peers::SpecialPeerName;
-use crate::tc;
 use crate::tun_ctl::TunCtl;
 use crate::visa_table;
 use crate::zdp::TerminateReason;
@@ -28,14 +25,11 @@ use std::net::IpAddr;
 use std::num::NonZero;
 use std::result::Result;
 use std::sync::{Arc, Mutex};
-use thiserror::Error;
 use tracing::*;
 use tracing_subscriber::filter::targets::Targets;
 #[allow(unused_imports)]
 use tracing_subscriber::{Layer, Registry, filter, fmt, reload};
-use zpr::packet_info::{
-    ForwardingEntry, LOCAL_ACTOR_LINK_ID, LinkId, StreamId, SubstrateAddr, VisaId,
-};
+use zpr::packet_info::{LOCAL_ACTOR_LINK_ID, LinkId, SubstrateAddr};
 use zpr::vsapi_types::AuthServicesList;
 use zpr_utils::net_defs::{IpAddress, ScopedIpAddr};
 
@@ -107,18 +101,6 @@ pub struct Assembly {
     pub logging: Mutex<HashMap<String, String>>,
     pub reload_handle:
         reload::Handle<filter::Filtered<fmt::Layer<Registry>, Targets, Registry>, Registry>,
-}
-
-#[derive(Debug, Error)]
-pub enum AddRouteError {
-    #[error("bind failed: {0}")]
-    BindFailed(#[from] mgmt::requests::BindActorAddressError),
-    #[error("peer gone")]
-    PeerGone,
-    #[error("PFT full")]
-    PftFull,
-    #[error("Visa gone")]
-    VisaGone,
 }
 
 impl Assembly {
@@ -370,69 +352,6 @@ impl Assembly {
                     .any(|addr| *addr == actor_addr)
             })
             .map(|(id, _peer)| id)
-    }
-
-    // CTP TODO: so much to fix here as we properly implement classification & forwarding
-    pub async fn add_route(
-        &self,
-        ingress_link_id: NonZero<LinkId>,
-        visa_id: VisaId,
-        tc: tc::Ip5TupleTc,
-        egress_link_id: NonZero<LinkId>,
-    ) -> Result<StreamId, AddRouteError> {
-        let egress_tether_id;
-        if egress_link_id.get() == LOCAL_ACTOR_LINK_ID {
-            egress_tether_id = self
-                .dlt
-                .insert(adapter_tables::DltPep {
-                    compression_mode: tc.compression_mode(),
-                    five_tuple: *tc.five_tuple(),
-                })
-                .map_err(|()| {
-                    AddRouteError::BindFailed(
-                        mgmt::requests::BindActorAddressError::BindActorAddressError(
-                            "DLT full".into(),
-                        ),
-                    )
-                })?;
-        } else {
-            egress_tether_id =
-                mgmt::requests::send_bind_egress_stream_request(self, egress_link_id.get(), tc)
-                    .await?;
-        }
-
-        // form PEP
-        let pep = forwarding_tables::PftPep {
-            next_hop: ForwardingEntry(egress_link_id.get(), egress_tether_id),
-            visa_id: visa_id,
-        };
-
-        let Some(ingress_peer_state) = self.peer_table.get(ingress_link_id.get()) else {
-            return Err(AddRouteError::PeerGone);
-        };
-
-        let ingress_tether_id = ingress_peer_state
-            .pft
-            .insert(pep)
-            .map_err(|()| AddRouteError::PftFull)?;
-
-        if self
-            .visa_table
-            .write()
-            .unwrap()
-            .link_forwarding_entry(
-                visa_id,
-                ForwardingEntry(ingress_link_id.get(), ingress_tether_id),
-            )
-            .is_err()
-        {
-            // Visa was either never granted or has already been removed
-            // Route is no longer valid
-            ingress_peer_state.pft.remove(ingress_tether_id);
-            return Err(AddRouteError::VisaGone);
-        }
-
-        Ok(ingress_tether_id)
     }
 }
 
