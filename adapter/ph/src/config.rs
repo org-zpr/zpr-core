@@ -40,7 +40,7 @@ pub const TINY_MESSAGE_HEADROOM: usize = 64;
 
 pub const DEFAULT_ZDPR_RECEIVE_WINDOW_SIZE: usize = 32;
 
-pub const DEFAULT_ZDPR_RETRY_TIMER: std::time::Duration = std::time::Duration::from_millis(400);
+pub const DEFAULT_ZDPR_RETRY_TIMER: std::time::Duration = std::time::Duration::from_millis(600);
 
 pub const DEFAULT_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 pub const DEFAULT_TERMINATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
