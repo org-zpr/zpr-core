@@ -19,7 +19,7 @@ pub struct FiveTupleLookupTable {
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct ProtoLookup {
-    proto_vec: Arc<Vec<ProtoAndId>>,
+    proto_vec: Arc<Vec<Arc<ProtoAndId>>>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -76,7 +76,7 @@ impl FiveTupleLookupTable {
         };
         // Create array for protocol
         let mut arr = Vec::new();
-        arr.push(ProtoAndId::new(five_tuple.l4_protocol, visa_id));
+        arr.push(Arc::new(ProtoAndId::new(five_tuple.l4_protocol, visa_id)));
 
         // Determine which enum to use for src level
         let src_level: SrcPortLookup = match five_tuple.src_port {
@@ -208,10 +208,10 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLookup<T> {
             | (PortLookup::MultiVal(curr_level), PortLookup::Wildcard(level_below)) => {
                 let mut curr_level_intersection = RangeMapBlaze::new();
                 curr_level_intersection.ranges_insert(0..=65535, level_below.clone());
-                for (port, lvl_below) in curr_level.iter() {
+                for (range, lvl_below) in curr_level.range_values() {
                     // We know there will be a collision, so we pre-emptively make the intersection and then insert it
                     let level_below_intersection = level_below.combine(lvl_below);
-                    curr_level_intersection.insert(port, level_below_intersection);
+                    curr_level_intersection.ranges_insert(range, level_below_intersection);
                 }
                 PortLookup::MultiVal(Arc::new(curr_level_intersection))
             }
@@ -235,8 +235,8 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLookup<T> {
                 let port = tuple_val.0;
                 let level_below = tuple_val.1.clone();
                 let mut curr_level_intersection = RangeMapBlaze::new();
-                for (key, val) in curr_level.iter() {
-                    curr_level_intersection.insert(key, val.clone());
+                for (key, val) in curr_level.range_values() {
+                    curr_level_intersection.ranges_insert(key, val.clone());
                 }
                 match curr_level_intersection.insert(port, level_below.clone()) {
                     None => (),
@@ -249,8 +249,8 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLookup<T> {
             }
             (PortLookup::MultiVal(curr_level1), PortLookup::MultiVal(curr_level2)) => {
                 let mut curr_level_intersection = RangeMapBlaze::new();
-                for (key, val) in curr_level1.iter() {
-                    curr_level_intersection.insert(key, val.clone());
+                for (key, val) in curr_level1.range_values() {
+                    curr_level_intersection.ranges_insert(key, val.clone());
                 }
                 for (port, level_below2) in curr_level2.iter() {
                     match curr_level_intersection.insert(port, level_below2.clone()) {
@@ -268,7 +268,7 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLookup<T> {
 }
 
 impl ProtoLookup {
-    pub fn new(v: Vec<ProtoAndId>) -> Self {
+    pub fn new(v: Vec<Arc<ProtoAndId>>) -> Self {
         Self {
             proto_vec: Arc::new(v),
         }
