@@ -16,8 +16,8 @@ pub struct Visa {
     pub issuer_id: u64, // i32 in thrift, u64 in capnp
     pub config: i64,
     pub expires: SystemTime,
-    pub src_addr: IpAddr,
-    pub dst_addr: IpAddr,
+    pub source_addr: IpAddr,
+    pub dest_addr: IpAddr,
     pub dock_pep: DockPep,
     pub session_key: KeySet,
     pub cons: Option<Constraints>,
@@ -79,7 +79,7 @@ pub struct Constraints {
     /// empty/None means no data cap
     pub data_cap_id: String,
     pub data_cap_bytes: i64,
-    /// tether address of service actor
+    /// tether addr of service actor
     pub data_cap_affinity_addr: Vec<u8>,
 }
 
@@ -96,16 +96,16 @@ impl KeySet {
 impl Visa {
     /// Get the FiveTuple from a Visa
     pub fn get_five_tuple(&self) -> VsapiFiveTuple {
-        let src_addr = self.src_addr;
-        let dst_addr = self.dst_addr;
+        let source_addr = self.source_addr;
+        let dest_addr = self.dest_addr;
 
-        let l3_protocol = if src_addr.is_ipv4() {
+        let l3_protocol = if source_addr.is_ipv4() {
             L3Type::Ipv4
         } else {
             L3Type::Ipv6
         };
 
-        let (l4_protocol, src_port, dst_port) = match &self.dock_pep {
+        let (l4_protocol, source_port, dest_port) = match &self.dock_pep {
             DockPep::ICMP(icmp_pep) => {
                 if l3_protocol == L3Type::Ipv6 {
                     (
@@ -134,12 +134,12 @@ impl Visa {
         };
 
         return VsapiFiveTuple {
-            src_address: src_addr,
-            dst_address: dst_addr,
+            source_addr,
+            dest_addr,
             l3_type: l3_protocol,
             l4_protocol,
-            src_port,
-            dst_port,
+            source_port,
+            dest_port,
         };
     }
 
@@ -179,11 +179,11 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
         let issuer_id = reader.get_issuer_id();
         let config = 0i64;
         let expires = visa_expiration_timestamp_to_system_time(reader.get_expiration());
-        let src_addr = match reader.get_source_addr()?.which()? {
+        let source_addr = match reader.get_source_addr()?.which()? {
             v1::ip_addr::Which::V4(data) => IpAddr::from(<[u8; 4]>::try_from(data?)?),
             v1::ip_addr::Which::V6(data) => IpAddr::from(<[u8; 16]>::try_from(data?)?),
         };
-        let dst_addr = match reader.get_dest_addr()?.which()? {
+        let dest_addr = match reader.get_dest_addr()?.which()? {
             v1::ip_addr::Which::V4(data) => {
                 IpAddr::from(<[u8; 4]>::try_from(data.unwrap()).unwrap())
             }
@@ -202,8 +202,8 @@ impl TryFrom<v1::visa::Reader<'_>> for Visa {
             issuer_id,
             config,
             expires,
-            src_addr,
-            dst_addr,
+            source_addr,
+            dest_addr,
             dock_pep,
             session_key,
             cons,
@@ -244,13 +244,13 @@ impl TryFrom<vsapi::Visa> for Visa {
                 return Err(VsapiTypeError::DeserializationError("No expiration"));
             }
         };
-        let src_addr = match thrift_visa.source_contact {
+        let source_addr = match thrift_visa.source_contact {
             Some(val) => ip_addr_from_vec(val)?,
-            None => return Err(VsapiTypeError::DeserializationError("No src address")),
+            None => return Err(VsapiTypeError::DeserializationError("No source addr")),
         };
-        let dst_addr = match thrift_visa.dest_contact {
+        let dest_addr = match thrift_visa.dest_contact {
             Some(val) => ip_addr_from_vec(val)?,
-            None => return Err(VsapiTypeError::DeserializationError("No dst address")),
+            None => return Err(VsapiTypeError::DeserializationError("No dest addr")),
         };
         let dock_pep = match thrift_visa.dock_pep {
             Some(val) => match val {
@@ -303,8 +303,8 @@ impl TryFrom<vsapi::Visa> for Visa {
             issuer_id,
             config,
             expires,
-            src_addr,
-            dst_addr,
+            source_addr,
+            dest_addr,
             dock_pep,
             session_key,
             cons,

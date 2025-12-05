@@ -38,7 +38,7 @@ mod tests {
         ServiceDescriptor {
             service_id: "test-service-123".to_string(),
             service_uri: "https://auth.example.com:8443/auth".to_string(),
-            zpr_address: IpAddr::from([192, 168, 1, 100]),
+            zpr_addr: IpAddr::from([192, 168, 1, 100]),
         }
     }
 
@@ -48,7 +48,7 @@ mod tests {
         ServiceDescriptor {
             service_id: "test-service-ipv6".to_string(),
             service_uri: "https://auth.example.com:9443/auth".to_string(),
-            zpr_address: IpAddr::from(ipv6_addr),
+            zpr_addr: IpAddr::from(ipv6_addr),
         }
     }
 
@@ -124,7 +124,7 @@ mod tests {
         let descriptor = result.unwrap();
         assert_eq!(descriptor.service_id, "test-service");
         assert_eq!(descriptor.service_uri, "https://example.com:8443/auth");
-        assert_eq!(descriptor.zpr_address, IpAddr::from([192, 168, 1, 100]));
+        assert_eq!(descriptor.zpr_addr, IpAddr::from([192, 168, 1, 100]));
     }
 
     #[test]

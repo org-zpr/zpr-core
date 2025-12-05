@@ -26,12 +26,12 @@ pub enum CommFlag {
 /// FiveTuple representation
 #[derive(Copy, Clone, Debug)]
 pub struct VsapiFiveTuple {
-    pub src_address: IpAddr,
-    pub dst_address: IpAddr,
+    pub source_addr: IpAddr,
+    pub dest_addr: IpAddr,
     pub l3_type: L3Type,
     pub l4_protocol: VsapiIpProtocol,
-    pub src_port: u16,
-    pub dst_port: u16,
+    pub source_port: u16,
+    pub dest_port: u16,
 }
 
 /// In conjunction with vsapi_ip_number, represents the protocol the traffic is running on
@@ -56,19 +56,19 @@ pub mod vsapi_ip_number {
 impl VsapiFiveTuple {
     pub fn new(
         l3_type: L3Type,
-        src_address: IpAddr,
-        dst_address: IpAddr,
+        source_addr: IpAddr,
+        dest_addr: IpAddr,
         l4_protocol: VsapiIpProtocol,
-        src_port: u16,
-        dst_port: u16,
+        source_port: u16,
+        dest_port: u16,
     ) -> Self {
         Self {
-            src_address,
-            dst_address,
+            source_addr,
+            dest_addr,
             l3_type,
             l4_protocol,
-            src_port,
-            dst_port,
+            source_port,
+            dest_port,
         }
     }
 }
@@ -131,21 +131,21 @@ impl PacketDesc {
             || self.five_tuple.l4_protocol == vsapi_ip_number::UDP
     }
 
-    /// Get a reference to the five_tuple source address.
+    /// Get a reference to the five_tuple source addr.
     pub fn source_addr(&self) -> &IpAddr {
-        &self.five_tuple.src_address
+        &self.five_tuple.source_addr
     }
-    /// Get a reference to the five_tuple destination address.
+    /// Get a reference to the five_tuple destination addr.
     pub fn dest_addr(&self) -> &IpAddr {
-        &self.five_tuple.dst_address
+        &self.five_tuple.dest_addr
     }
     /// Get the source port (or icmp TYPE)
     pub fn source_port(&self) -> u16 {
-        self.five_tuple.src_port
+        self.five_tuple.source_port
     }
     /// Get the destination port (or icmp CODE)
     pub fn dest_port(&self) -> u16 {
-        self.five_tuple.dst_port
+        self.five_tuple.dest_port
     }
     /// Get the L4 protocol number.
     pub fn protocol(&self) -> VsapiIpProtocol {
@@ -156,10 +156,10 @@ impl PacketDesc {
 impl TryFrom<v1::packet_desc::Reader<'_>> for PacketDesc {
     type Error = VsapiTypeError;
 
-    /// Returns error if fields are not set or if IP addresses are badly formatted
+    /// Returns error if fields are not set or if IP addres are badly formatted
     fn try_from(reader: v1::packet_desc::Reader<'_>) -> Result<Self, Self::Error> {
-        let src_ip = reader.get_source_addr()?;
-        let source = match src_ip.which().unwrap() {
+        let source_ip = reader.get_source_addr()?;
+        let source = match source_ip.which().unwrap() {
             v1::ip_addr::V4(ipv4) => {
                 let octets: [u8; 4] = ipv4?.try_into()?;
                 IpAddr::V4(Ipv4Addr::from(octets))

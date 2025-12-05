@@ -34,7 +34,7 @@ impl TryFrom<vsapi::ConnectRequest> for ConnectRequest {
     fn try_from(thrift_req: vsapi::ConnectRequest) -> Result<Self, Self::Error> {
         let substrate_addr = match thrift_req.dock_addr {
             Some(val) => ip_addr_from_vec(val)?,
-            None => return Err(VsapiTypeError::DeserializationError("No dock address")),
+            None => return Err(VsapiTypeError::DeserializationError("No dock addr")),
         };
         let claims = match thrift_req.claims {
             Some(claims) => {

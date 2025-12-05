@@ -17,7 +17,7 @@ pub struct AuthServicesList {
 pub struct ServiceDescriptor {
     pub service_id: String,
     pub service_uri: String,
-    pub zpr_address: IpAddr,
+    pub zpr_addr: IpAddr,
 }
 
 impl Default for AuthServicesList {
@@ -57,7 +57,7 @@ impl ServiceDescriptor {
     /// Gently try to extract a SocketAddr from this ServiceDescriptor.
     /// If there are any problems, None is returned.
     pub fn get_socket_addr(&self) -> Option<std::net::SocketAddr> {
-        // To create a socket address we need a port, which is on the URI.
+        // To create a socket addr we need a port, which is on the URI.
         let uri = match Url::parse(&self.service_uri) {
             Ok(u) => u,
             Err(_) => return None, // Invalid URI
@@ -66,7 +66,7 @@ impl ServiceDescriptor {
             Some(p) => p,
             None => return None, // No port in URI, so no SocketAddr for you
         };
-        Some(std::net::SocketAddr::new(self.zpr_address.into(), port))
+        Some(std::net::SocketAddr::new(self.zpr_addr.into(), port))
     }
 }
 
@@ -105,7 +105,7 @@ impl TryFrom<vsapi::ServiceDescriptor> for ServiceDescriptor {
         }
         if value.address.is_none() {
             return Err(VsapiTypeError::DeserializationError(
-                "vsapi::ServiceDescriptor address is empty",
+                "vsapi::ServiceDescriptor addr is empty",
             ));
         }
         let zpraddr = ip_addr_from_vec(value.address.unwrap())?;
@@ -113,7 +113,7 @@ impl TryFrom<vsapi::ServiceDescriptor> for ServiceDescriptor {
         Ok(ServiceDescriptor {
             service_id: value.service_id.unwrap_or_default(),
             service_uri: value.uri.unwrap_or_default(),
-            zpr_address: zpraddr,
+            zpr_addr: zpraddr,
         })
     }
 }

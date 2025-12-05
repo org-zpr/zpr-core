@@ -31,9 +31,9 @@ impl WriteTo<v1::visa::Builder<'_>> for Visa {
         bldr.set_issuer_id(self.issuer_id);
         bldr.set_expiration(self.get_expiration_timestamp());
         let mut ip_bldr = bldr.reborrow().init_dest_addr();
-        self.dst_addr.write_to(&mut ip_bldr);
+        self.dest_addr.write_to(&mut ip_bldr);
         let mut ip_bldr = bldr.reborrow().init_source_addr();
-        self.src_addr.write_to(&mut ip_bldr);
+        self.source_addr.write_to(&mut ip_bldr);
         match &self.dock_pep {
             DockPep::TCP(pep) => {
                 let pep_bldr = bldr.reborrow().init_dock_pep();
