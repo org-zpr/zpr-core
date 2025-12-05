@@ -5,6 +5,7 @@ use ip_network_table_deps_treebitmap::IpLookupTable;
 use range_set_blaze::RangeMapBlaze;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
+use std::ops::RangeInclusive;
 use std::sync::Arc;
 use zpr::VisaId;
 use zpr::vsapi_types::{VsapiFiveTuple, VsapiIpProtocol};
@@ -252,15 +253,50 @@ impl<T: Combinable + Clone + Eq + PartialEq> Combinable for PortLookup<T> {
                 for (key, val) in curr_level1.range_values() {
                     curr_level_intersection.ranges_insert(key, val.clone());
                 }
-                for (port, level_below2) in curr_level2.iter() {
-                    match curr_level_intersection.insert(port, level_below2.clone()) {
-                        None => (),
-                        Some(level_below1) => {
-                            let level_below_intersection = level_below1.combine(&level_below2);
-                            curr_level_intersection.insert(port, level_below_intersection);
+                let mut existing_ranges = curr_level1.ranges();
+                let mut curr_existing_range = existing_ranges.next();
+                let mut inserting_iterator = curr_level2.range_values();
+                let mut curr_inserting_range = inserting_iterator.next();
+                while curr_inserting_range.is_some() {
+                    let (inserting_range, level_below2) = curr_inserting_range.clone().unwrap();
+                    if let Some(ref curr) = curr_existing_range {
+                        // check if the ranges overlap, if they do, insert element by element
+                        if overlap(&curr, &inserting_range) {
+                            for port in inserting_range.into_iter() {
+                                match curr_level_intersection.insert(port, level_below2.clone()) {
+                                    None => (),
+                                    Some(level_below1) => {
+                                        let level_below_intersection =
+                                            level_below1.combine(&level_below2);
+                                        curr_level_intersection
+                                            .insert(port, level_below_intersection);
+                                    }
+                                }
+                            }
+                            // We only increment the inserting value becuase it is possible that the next inserting range
+                            // also overlaps the same existing range
+                            curr_inserting_range = inserting_iterator.next();
+                        } else {
+                            // Don't overlap and the inserting range comes before the first existing range, meaning it
+                            // couldn't overlap with a later already existing range
+                            if inserting_range.end() < curr.end() {
+                                // Don't need to look at return value, know there will be no overlap
+                                curr_level_intersection
+                                    .ranges_insert(inserting_range, level_below2.clone());
+                                // Since the inserted range somes entirely before the current existing range, we only increment the inserting range
+                                curr_inserting_range = inserting_iterator.next();
+                            }
+                            // If there was no overlap and the inserting range comes after the existing range, we need to make sure there is
+                            // not a later existing range that would overlap the inserting range, so we increase only the existing range
+                            curr_existing_range = existing_ranges.next();
                         }
+                    } else {
+                        // If the existing range is none, we have passed the end of the existing values and we know we will have no more overlap
+                        curr_level_intersection
+                            .ranges_insert(inserting_range, level_below2.clone());
                     }
                 }
+
                 PortLookup::MultiVal(Arc::new(curr_level_intersection))
             }
         }
@@ -273,6 +309,10 @@ impl ProtoLookup {
             proto_vec: Arc::new(v),
         }
     }
+}
+
+pub fn overlap<T: PartialOrd>(range1: &RangeInclusive<T>, range2: &RangeInclusive<T>) -> bool {
+    range1.start() <= range2.end() && range1.end() >= range2.start()
 }
 
 impl Combinable for ProtoLookup {
