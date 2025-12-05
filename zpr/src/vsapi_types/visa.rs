@@ -322,7 +322,7 @@ impl TryFrom<v1::dock_pep::Reader<'_>> for DockPep {
                 let tcp_udp_pep_reader = tcp_udp_pep_result?;
                 let source_port = tcp_udp_pep_reader.get_source_port();
                 let dest_port = tcp_udp_pep_reader.get_dest_port();
-                let endpoint = match tcp_udp_pep_reader.get_enpoint()? {
+                let endpoint = match tcp_udp_pep_reader.get_endpoint()? {
                     v1::EndpointT::Any => EndpointT::Any,
                     v1::EndpointT::Server => EndpointT::Server,
                     v1::EndpointT::Client => EndpointT::Client,
@@ -334,7 +334,7 @@ impl TryFrom<v1::dock_pep::Reader<'_>> for DockPep {
                 let tcp_udp_pep_reader = tcp_udp_pep_result?;
                 let source_port = tcp_udp_pep_reader.get_source_port();
                 let dest_port = tcp_udp_pep_reader.get_dest_port();
-                let endpoint = match tcp_udp_pep_reader.get_enpoint()? {
+                let endpoint = match tcp_udp_pep_reader.get_endpoint()? {
                     v1::EndpointT::Any => EndpointT::Any,
                     v1::EndpointT::Server => EndpointT::Server,
                     v1::EndpointT::Client => EndpointT::Client,

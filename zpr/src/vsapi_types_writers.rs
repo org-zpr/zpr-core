@@ -64,9 +64,9 @@ impl WriteTo<v1::dock_pep_tcp_udp::Builder<'_>> for TcpUdpPep {
         bldr.set_source_port(self.source_port);
         bldr.set_dest_port(self.dest_port);
         match self.endpoint {
-            EndpointT::Any => bldr.set_enpoint(v1::EndpointT::Any),
-            EndpointT::Server => bldr.set_enpoint(v1::EndpointT::Server),
-            EndpointT::Client => bldr.set_enpoint(v1::EndpointT::Client),
+            EndpointT::Any => bldr.set_endpoint(v1::EndpointT::Any),
+            EndpointT::Server => bldr.set_endpoint(v1::EndpointT::Server),
+            EndpointT::Client => bldr.set_endpoint(v1::EndpointT::Client),
         }
     }
 }
